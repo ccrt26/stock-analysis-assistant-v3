@@ -26,7 +26,7 @@ def update_focus_watchlist(
             output.append(old.model_copy(update={"state": ActionLabel.CONTINUE_OBSERVATION}))
 
     for rec in recommendations:
-        if rec.ts_code in by_code or rec.score < enter_threshold:
+        if rec.ts_code in by_code or rec.ts_code in invalidated_codes or rec.score < enter_threshold:
             continue
         output.append(
             FocusState(
@@ -39,4 +39,3 @@ def update_focus_watchlist(
             )
         )
     return output
-

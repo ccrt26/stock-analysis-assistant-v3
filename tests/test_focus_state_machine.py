@@ -61,3 +61,20 @@ def test_existing_focus_exits_when_invalidated():
     assert result[0].state == ActionLabel.EXIT_OBSERVATION
     assert result[0].exit_reason == "触发预设失效条件"
 
+
+def test_invalidated_recommendation_does_not_reenter_focus():
+    result = update_focus_watchlist(
+        existing=[],
+        recommendations=[rec("600000.SH", 99)],
+        invalidated_codes={"600000.SH"},
+    )
+    assert result == []
+
+
+def test_low_score_recommendation_does_not_enter_focus():
+    result = update_focus_watchlist(
+        existing=[],
+        recommendations=[rec("600000.SH", 79.9)],
+        invalidated_codes=set(),
+    )
+    assert result == []
