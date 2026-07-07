@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>股票观察报告</title>
+</head>
+<body>
+  <main>
+    <h1>股票观察报告</h1>
+
+    <section>
+      <h2>今日推荐</h2>
+      {% for item in recommendations %}
+      <article>
+        <h3>{{ item.name }} {{ item.ts_code }}</h3>
+        <p>{{ item.action.value }}，评分 {{ item.score }}</p>
+        <p>理由：{{ "；".join(item.reasons) }}</p>
+        <p>风险：{{ "；".join(item.risks) }}</p>
+      </article>
+      {% else %}
+      <p>今日没有符合标准的推荐。</p>
+      {% endfor %}
+    </section>
+
+    <section>
+      <h2>重点关注</h2>
+      {% for item in focus_states %}
+      <article>
+        <h3>{{ item.ts_code }}</h3>
+        <p>{{ item.state.value }}</p>
+      </article>
+      {% else %}
+      <p>当前没有重点关注股票。</p>
+      {% endfor %}
+    </section>
+  </main>
+</body>
+</html>
