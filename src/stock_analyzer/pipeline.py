@@ -101,6 +101,7 @@ def run_daily_pipeline(
     dry_run: bool = False,
     repository: Optional[AnalysisRepository] = None,
     existing_focus_states: Optional[list[FocusState]] = None,
+    persist: bool = True,
 ) -> DailyRunResult:
     repository = repository or InMemoryAnalysisRepository()
     stocks, stock_names, feature_profiles = _sample_market(trade_date)
@@ -133,10 +134,11 @@ def run_daily_pipeline(
         for task in create_evaluation_tasks(package)
     ]
 
-    repository.save_recommendations(recommendations)
-    repository.save_focus_states(focus_states)
-    repository.save_evidence_packages(evidence_packages)
-    repository.save_evaluation_tasks(evaluation_tasks)
+    if persist:
+        repository.save_recommendations(recommendations)
+        repository.save_focus_states(focus_states)
+        repository.save_evidence_packages(evidence_packages)
+        repository.save_evaluation_tasks(evaluation_tasks)
 
     if not dry_run:
         render_reports(output_dir, recommendations, focus_states, trade_date=trade_date)

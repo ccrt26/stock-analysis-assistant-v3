@@ -57,6 +57,7 @@ def render_report(
         target_dir,
         dry_run=False,
         repository=_analysis_repository(config),
+        persist=False,
     )
     typer.echo(f"report rendered for {result.trade_date.isoformat()}")
 

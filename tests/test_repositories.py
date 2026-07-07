@@ -158,6 +158,55 @@ def test_supabase_repository_maps_rows_without_network():
     assert client.insert_calls[1][1][0]["due_date"] == "2026-07-12"
 
 
+def test_supabase_repository_loads_latest_active_focus_state_per_stock():
+    client = FakeSupabaseClient()
+    client.table_data["focus_watchlist_state"] = [
+        {
+            "trade_date": "2026-07-05",
+            "ts_code": "600000.SH",
+            "state": "进入观察",
+            "entry_date": "2026-07-05",
+            "entry_reason": "原始证据成立",
+            "invalidation_conditions": ["跌破关键支撑"],
+            "exit_reason": None,
+        },
+        {
+            "trade_date": "2026-07-06",
+            "ts_code": "600000.SH",
+            "state": "继续观察",
+            "entry_date": "2026-07-05",
+            "entry_reason": "原始证据成立",
+            "invalidation_conditions": ["跌破关键支撑"],
+            "exit_reason": None,
+        },
+        {
+            "trade_date": "2026-07-04",
+            "ts_code": "600519.SH",
+            "state": "进入观察",
+            "entry_date": "2026-07-04",
+            "entry_reason": "原始证据成立",
+            "invalidation_conditions": ["跌破关键支撑"],
+            "exit_reason": None,
+        },
+        {
+            "trade_date": "2026-07-07",
+            "ts_code": "600519.SH",
+            "state": "剔除观察",
+            "entry_date": "2026-07-04",
+            "entry_reason": "原始证据成立",
+            "invalidation_conditions": ["跌破关键支撑"],
+            "exit_reason": "触发预设失效条件",
+        },
+    ]
+    repo = SupabaseAnalysisRepository(client)
+
+    loaded = repo.load_focus_states()
+
+    assert [state.ts_code for state in loaded] == ["600000.SH"]
+    assert loaded[0].trade_date == date(2026, 7, 6)
+    assert loaded[0].state == ActionLabel.CONTINUE_OBSERVATION
+
+
 @pytest.mark.parametrize(
     "env",
     [

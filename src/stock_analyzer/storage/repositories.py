@@ -36,7 +36,7 @@ class InMemoryAnalysisRepository:
         self.evaluation_tasks = list(evaluation_tasks or [])
 
     def load_focus_states(self) -> List[FocusState]:
-        return list(self.focus_states)
+        return _latest_active_focus_states(self.focus_states)
 
     def save_recommendations(self, recommendations: List[Recommendation]) -> None:
         self.recommendations.extend(recommendations)
@@ -57,7 +57,8 @@ class SupabaseAnalysisRepository:
 
     def load_focus_states(self) -> List[FocusState]:
         result = self.client.table("focus_watchlist_state").select("*").execute()
-        return [_focus_state_from_row(row) for row in result.data or []]
+        states = [_focus_state_from_row(row) for row in result.data or []]
+        return _latest_active_focus_states(states)
 
     def save_recommendations(self, recommendations: List[Recommendation]) -> None:
         if not recommendations:
@@ -136,6 +137,20 @@ def _focus_state_from_row(row: dict) -> FocusState:
         invalidation_conditions=list(row.get("invalidation_conditions") or []),
         exit_reason=row.get("exit_reason"),
     )
+
+
+def _latest_active_focus_states(states: List[FocusState]) -> List[FocusState]:
+    latest_by_code: dict[str, FocusState] = {}
+    for state in states:
+        current = latest_by_code.get(state.ts_code)
+        if current is None or state.trade_date >= current.trade_date:
+            latest_by_code[state.ts_code] = state
+    return [
+        state
+        for state in sorted(latest_by_code.values(), key=lambda item: item.ts_code)
+        if state.state
+        not in {ActionLabel.EXIT_OBSERVATION, ActionLabel.INSUFFICIENT_DATA}
+    ]
 
 
 def _default_evidence_id(item: Recommendation) -> str:
