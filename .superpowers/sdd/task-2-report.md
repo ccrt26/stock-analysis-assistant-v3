@@ -27,3 +27,10 @@
 - `run_health_checks()` 输出 4 类别（`credential`, `network`, `api_response`, `field_consumability`），状态值限定为 `ok/warn/fail`。
 - `health-check` 命令改为读取 `AppConfig.load()` 并按 `HealthReport.as_lines()` 打印健康状态。
 - `run-daily --dry-run --trade-date YYYY-MM-DD` 的输出仍保持不变为 `daily run dry-run completed for YYYY-MM-DD`。
+
+### 修复补充（复审问题修复）
+- `HealthReport.as_lines()` 已改为 `item.status.value`，例如：`credential: ok - checked local token path`，避免出现 `HealthStatus.OK/WARN/FAIL`。
+- 新增测试 `test_health_report_as_lines_renders_status_values`，断言：
+  - 生成文本为 `ok/warn/fail` 值；
+  - 每行均不包含 `HealthStatus.`。
+- 覆盖验证：`python3 -m pytest tests/test_config_health.py tests/test_cli.py -v`，结果 `5 passed`。

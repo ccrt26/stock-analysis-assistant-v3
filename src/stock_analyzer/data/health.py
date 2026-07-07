@@ -23,7 +23,7 @@ class HealthReport(BaseModel):
     items: list[HealthItem]
 
     def as_lines(self) -> list[str]:
-        return [f"{item.category}: {item.status} - {item.message}" for item in self.items]
+        return [f"{item.category}: {item.status.value} - {item.message}" for item in self.items]
 
 
 def run_health_checks(config: AppConfig) -> HealthReport:
