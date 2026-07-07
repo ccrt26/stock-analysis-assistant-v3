@@ -519,6 +519,17 @@ Recommended deployment:
 - A small Cloudflare Pages Function can enforce a simple shared access password and session cookie.
 - No custom domain is required initially.
 
+## 16. Stage 1 Operational Acceptance
+
+Stage 1 is considered ready when the local runbook and the generated report surface meet all of the following:
+
+- `python -m stock_analyzer health-check` reports four health categories.
+- `python -m stock_analyzer run-daily --trade-date 2026-07-07` generates `reports/index.html`.
+- Daily recommendations stay at or below 10 names.
+- The focus watchlist remains separate from daily recommendations.
+- Each recommendation produces a frozen evidence package and at least one evaluation task.
+- Published report artifacts do not leak `TUSHARE_TOKEN`, `SUPABASE_SERVICE_ROLE_KEY`, `DEEPSEEK_API_KEY`, or `BIYING_LICENCE`.
+
 The public report site may show:
 
 - Latest daily report.
