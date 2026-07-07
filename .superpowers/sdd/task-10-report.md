@@ -25,3 +25,16 @@
   - 有 `jinja2` 时使用模板引擎渲染；
   - 无 `jinja2` 时使用等价的本地安全回退渲染；
   - 不影响现有功能约束与测试结论。
+
+## REVIEW-FIX
+
+### 变更
+- 关键测试增强：`tests/test_report_generation.py` 现在同时断言 `index.html` 和 `data/latest.json` 均不包含 `SUPABASE_SERVICE_ROLE_KEY`、`TUSHARE_TOKEN`。
+- `src/stock_analyzer/reports/generator.py` 去掉了 `ModuleNotFoundError` fallback，改为单一路径 Jinja2 渲染，保留固定 `index.html` 与 `data/latest.json` 输出。
+
+### 测试
+- `python3 -m pytest /Users/ccrt/股票分析助手/.worktrees/codex/v3-mvp/tests/test_report_generation.py -v`：BLOCKED（环境缺失 `jinja2`，`ModuleNotFoundError: No module named 'jinja2'`）
+- `python3 -m pytest -v`：BLOCKED（同上，`test_report_generation.py` 导入期失败）
+
+### 备注
+- 如补齐依赖（`pip install jinja2>=3.1`）后，可验证报告生成与密钥掩码通过。

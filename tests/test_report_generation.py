@@ -25,5 +25,7 @@ def test_render_reports_creates_fixed_entry_and_hides_secrets(tmp_path):
     assert "浦发银行" in html
     assert "进入观察" in html
     assert "SUPABASE_SERVICE_ROLE_KEY" not in html
+    assert "SUPABASE_SERVICE_ROLE_KEY" not in json_text
     assert "TUSHARE_TOKEN" not in html
+    assert "TUSHARE_TOKEN" not in json_text
     assert "浦发银行" in json_text
