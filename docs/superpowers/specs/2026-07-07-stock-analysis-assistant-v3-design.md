@@ -2,7 +2,7 @@
 
 Date: 2026-07-07
 Status: Approved design for implementation planning
-Project root: `/Users/ccrt/Documents/股票分析助手`
+Project root: `/Users/ccrt/股票分析助手`
 
 ## 1. Purpose
 
@@ -424,7 +424,121 @@ Each stock report shows:
 
 The page must not look like a pipeline dashboard.
 
-## 13. Runtime Boundaries
+## 13. Data Storage Architecture
+
+V3 uses Supabase as the primary system of record. Local files are only for source code, migrations, report templates, temporary development cache, and explicit export artifacts.
+
+The storage boundary is:
+
+- Git repository: code, tests, schema migrations, knowledge-rule definitions, report templates, and documentation.
+- Supabase Postgres: normalized analysis facts, daily feature snapshots, recommendation records, focus-watchlist state, rule matches, evaluation records, and data-quality status.
+- Supabase Storage: evidence packages, generated report snapshots, selected raw API snapshots, and larger archived artifacts.
+- Cloudflare Pages: published static report site and small access-control function only.
+
+Secrets must never be committed. Existing local tokens such as Tushare and model API credentials should be reused from the user's home-directory secret files or environment variables during local runs, then later mirrored into the deployment secret manager only when remote automation is added.
+
+The public report frontend must not receive service-role keys, raw API credentials, internal logs, or unrestricted database access. If browser-side Supabase access is introduced later, exposed tables must use Row Level Security and narrow read-only policies. In Stage 1, the safer default is to generate report HTML/JSON server-side and publish only the report artifacts.
+
+Recommended initial Postgres areas:
+
+- `market_calendar` and `trading_days`
+- `stock_master` and `stock_status_daily`
+- `daily_feature_snapshot`
+- `recommendation_daily`
+- `focus_watchlist_state`
+- `evidence_package_index`
+- `knowledge_rule`
+- `knowledge_rule_match`
+- `evaluation_task`
+- `evaluation_result`
+- `data_source_run`
+
+## 14. Historical Data Retention for Evaluation
+
+Historical storage exists to make post-evaluation scientific, not to hoard every raw response forever.
+
+The system stores three evidence levels.
+
+### 14.1 Full-Market Lightweight Snapshots
+
+Every trading-day run stores a lightweight full-market snapshot in Supabase Postgres after cleaning.
+
+This snapshot should include:
+
+- Trading eligibility and exclusion flags.
+- Core factor values used by the screening model.
+- Market regime and industry/style context.
+- Data-quality flags.
+- Rule-hit summaries.
+- Source timestamps or hashes where useful.
+
+This is required because evaluation must compare selected stocks against non-selected alternatives, benchmarks, industries, and market regimes. Without this layer, the system can only explain why chosen stocks moved, which is too easy to overfit.
+
+### 14.2 Detailed Evidence Packages
+
+The system stores detailed evidence packages for:
+
+- Daily final recommendations.
+- Focus-watchlist entries and state changes.
+- Internal near-miss candidates that almost passed the filter.
+- Major failures or disputed cases discovered during evaluation.
+
+Near-miss candidates are internal evaluation material. They are not shown as user-facing recommendations, but they help answer whether the method was too strict, too loose, or directionally wrong.
+
+Each evidence package must freeze the original thesis, data version, matched knowledge rules, counter-evidence, confidence level, invalidation conditions, and expected confirmation path. Past reasoning must not be rewritten after outcomes are known.
+
+### 14.3 Raw API Snapshot Retention
+
+Raw API data is stored selectively:
+
+- Keep short all-market raw cache for operational debugging, initially 7-30 days.
+- Keep longer raw snapshots for recommendations, focus stocks, major failures, rule disputes, and data-source anomalies.
+- Store large raw payloads in Supabase Storage, with metadata and hashes indexed in Postgres.
+
+This gives enough auditability for serious mistakes without recreating Version 2's heavy storage burden.
+
+### 14.4 Evaluation Use
+
+Historical records must support three evaluation questions:
+
+- Result: did the original observation thesis validate against benchmarks and invalidation rules?
+- Method: did the analysis method work out of sample, or did it overfit a pattern?
+- Knowledge: should a matched knowledge rule be kept, narrowed, downgraded, split, or deprecated?
+
+The system should evaluate 5, 20, and 40 trading-day checkpoints, but those dates are checkpoints rather than the definition of success. Manual repeated reviews from Version 2, such as the 600114 review habit, can be imported as evaluation notes and counterexample records when they preserve the original reasoning and later outcome separately.
+
+## 15. Web Publishing and Access Boundary
+
+The report website is a product surface for family viewing. It must expose only report content.
+
+Recommended deployment:
+
+- Cloudflare Pages hosts the report site on the default `*.pages.dev` URL first.
+- The Cloudflare dashboard is only the management console; it is not the report URL shown to family.
+- Stage 1 publishes static HTML/JSON report artifacts generated from Supabase-backed analysis data.
+- A small Cloudflare Pages Function can enforce a simple shared access password and session cookie.
+- No custom domain is required initially.
+
+The public report site may show:
+
+- Latest daily report.
+- Date-filtered reports.
+- Stock-filtered reports.
+- Current focus watchlist.
+- Recommendation history and evaluation summaries.
+- Compact data-credibility status.
+
+The public report site must not show:
+
+- Tokens or secret status.
+- Raw API payloads.
+- Internal logs.
+- Scheduler controls.
+- Rule-editing interfaces.
+- Database administration pages.
+- Internal near-miss candidates unless later promoted into an explicit evaluation report.
+
+## 16. Runtime Boundaries
 
 Stage 1 explicitly does not do:
 
@@ -435,6 +549,7 @@ Stage 1 explicitly does not do:
 - Full multi-role runtime workflow
 - Full migration of old modules
 - Direct LLM analysis over raw full-market tables
+- Public browser access to internal database tables
 
 Stage 1 must do:
 
@@ -446,8 +561,10 @@ Stage 1 must do:
 - Evidence and knowledge traceability for each conclusion
 - Evaluation task creation for each recommendation
 - Fixed report entry generation
+- Supabase-backed state and evaluation history
+- Cloudflare-publishable report artifacts
 
-## 14. Testing and Verification
+## 17. Testing and Verification
 
 The first implementation stage must include tests for:
 
@@ -460,15 +577,20 @@ The first implementation stage must include tests for:
 - LLM input boundary: no raw full-market table input.
 - Report generation: fixed entry exists and stock pages exist.
 - Evaluation records: every recommendation has reviewable records.
+- Supabase schema migrations and basic read/write paths.
+- Historical snapshot creation without raw-data leakage.
+- Report publishing artifact contains no internal secrets or logs.
+- Password-gated report access behavior.
 
 Acceptance criterion:
 
 > In one trading-day run, the system can complete data acquisition, cleaning, analysis, state updates, evidence generation, report generation, and evaluation registration, producing a small number of evidence-backed, counter-evidence-aware, follow-up-ready stock reports.
 
-## 15. Source References
+## 18. Source References
 
 Local project references:
 
+- `/Users/ccrt/股票分析助手`
 - `/Users/ccrt/ccrt`
 - `/Users/ccrt/股票分析系统`
 - `/Users/ccrt/股票分析系统/21_角色与知识库`
@@ -482,18 +604,29 @@ External methodological and regulatory references consulted during design:
 - State Council capital market quality guidance: https://www.gov.cn/zhengce/content/202404/content_6944877.htm
 - SEC investor publication on analyst recommendations: https://www.sec.gov/investor/pubs/analysts.htm
 - Testing the performance of technical trading rules in the Chinese market: https://arxiv.org/abs/1504.06397
+- Supabase database overview: https://supabase.com/docs/guides/database/overview
+- Supabase Row Level Security: https://supabase.com/docs/guides/database/postgres/row-level-security
+- Supabase Storage: https://supabase.com/docs/guides/storage
+- Supabase local development and migrations: https://supabase.com/docs/guides/local-development/overview
+- Cloudflare Pages: https://developers.cloudflare.com/pages/
+- Cloudflare Pages Functions: https://developers.cloudflare.com/pages/functions/
+- Cloudflare Workers static assets: https://developers.cloudflare.com/workers/static-assets/
 
-## 16. Open Implementation Decisions
+## 19. Open Implementation Decisions
 
 These are not open product questions; they are implementation-plan decisions:
 
 - Exact package layout and module names.
-- Whether reports are static-only in Stage 1 or served by a tiny local server.
 - Which subset of Version 2 knowledge assets are migrated first.
 - Which free data-source connectors are implemented in the first runnable slice.
 - Exact score formulas and thresholds, which must start simple and be evaluation-ready.
+- Exact Supabase table schema, indexes, and migration naming.
+- Exact Cloudflare Pages project name.
+- Exact shared-password mechanism and cookie lifetime.
+- Exact raw-cache retention window within the initial 7-30 day range.
+- Whether local development uses Supabase local stack immediately or starts with migrations against the hosted project.
 
-## 17. Approval
+## 20. Approval
 
 The user approved:
 
@@ -508,3 +641,8 @@ The user approved:
 - Three-depth analysis architecture.
 - Formal distinction between daily recommendations and focus watchlist.
 - One-command first-stage runtime boundary.
+- Supabase as the primary database.
+- Cloudflare Pages default URL for report publishing.
+- Simple password-gated family report access.
+- Static report generation from Supabase-backed data for Stage 1.
+- Historical storage that preserves lightweight full-market snapshots, detailed evidence packages, and selective raw snapshots for scientific evaluation.
