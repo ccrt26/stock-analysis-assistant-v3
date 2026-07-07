@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 
@@ -21,3 +22,26 @@ def test_initial_schema_contains_required_tables_and_rls():
     ]:
         assert f"create table if not exists public.{table}" in sql.lower()
         assert f"alter table public.{table} enable row level security" in sql.lower()
+
+
+def test_initial_schema_constrains_action_labels_and_service_role_policies():
+    sql = Path(
+        "/Users/ccrt/股票分析助手/.worktrees/codex/v3-mvp/supabase/migrations/202607070001_init_core.sql"
+    ).read_text().lower()
+    compact_sql = re.sub(r"\s+", " ", sql)
+
+    for label in [
+        "进入观察",
+        "继续观察",
+        "高风险观察",
+        "降级观察",
+        "剔除观察",
+        "数据不足，不形成结论",
+    ]:
+        assert label in compact_sql
+
+    assert re.search(r"check\s*\(\s*action\s+in\s*\(", compact_sql)
+    assert re.search(r"check\s*\(\s*state\s+in\s*\(", compact_sql)
+
+    assert "to service_role" in compact_sql
+    assert "to anon" not in compact_sql

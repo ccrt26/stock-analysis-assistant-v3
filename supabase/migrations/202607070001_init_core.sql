@@ -124,3 +124,101 @@ alter table public.knowledge_rule_match enable row level security;
 alter table public.evaluation_task enable row level security;
 alter table public.evaluation_result enable row level security;
 alter table public.data_source_run enable row level security;
+
+alter table public.recommendation_daily
+  add constraint recommendation_daily_action_check
+  check (
+    action in (
+      '进入观察',
+      '继续观察',
+      '高风险观察',
+      '降级观察',
+      '剔除观察',
+      '数据不足，不形成结论'
+    )
+  );
+
+alter table public.focus_watchlist_state
+  add constraint focus_watchlist_state_state_check
+  check (
+    state in (
+      '进入观察',
+      '继续观察',
+      '高风险观察',
+      '降级观察',
+      '剔除观察',
+      '数据不足，不形成结论'
+    )
+  );
+
+create policy recommendation_daily_service_role_all on public.recommendation_daily
+  for all
+  to service_role
+  using (true)
+  with check (true);
+
+create policy focus_watchlist_state_service_role_all on public.focus_watchlist_state
+  for all
+  to service_role
+  using (true)
+  with check (true);
+
+create policy market_calendar_service_role_all on public.market_calendar
+  for all
+  to service_role
+  using (true)
+  with check (true);
+
+create policy stock_master_service_role_all on public.stock_master
+  for all
+  to service_role
+  using (true)
+  with check (true);
+
+create policy stock_status_daily_service_role_all on public.stock_status_daily
+  for all
+  to service_role
+  using (true)
+  with check (true);
+
+create policy daily_feature_snapshot_service_role_all on public.daily_feature_snapshot
+  for all
+  to service_role
+  using (true)
+  with check (true);
+
+create policy evidence_package_index_service_role_all on public.evidence_package_index
+  for all
+  to service_role
+  using (true)
+  with check (true);
+
+create policy knowledge_rule_service_role_all on public.knowledge_rule
+  for all
+  to service_role
+  using (true)
+  with check (true);
+
+create policy knowledge_rule_match_service_role_all on public.knowledge_rule_match
+  for all
+  to service_role
+  using (true)
+  with check (true);
+
+create policy evaluation_task_service_role_all on public.evaluation_task
+  for all
+  to service_role
+  using (true)
+  with check (true);
+
+create policy evaluation_result_service_role_all on public.evaluation_result
+  for all
+  to service_role
+  using (true)
+  with check (true);
+
+create policy data_source_run_service_role_all on public.data_source_run
+  for all
+  to service_role
+  using (true)
+  with check (true);
