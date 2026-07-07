@@ -18,6 +18,7 @@ def generate_recommendations(
     threshold: float = 70.0,
     near_miss_threshold: float = 60.0,
 ) -> RecommendationResult:
+    effective_limit = max(min(limit, 10), 0)
     scored = sorted(
         ((score_feature(item), item) for item in features if item.data_quality == "ok"),
         reverse=True,
@@ -35,7 +36,7 @@ def generate_recommendations(
             reasons=["20 日与 60 日趋势改善", "相对强度和流动性满足观察要求"],
             risks=["需要后续确认趋势不是一日噪声"],
         )
-        if score >= threshold and len(recommendations) < limit:
+        if score >= threshold and len(recommendations) < effective_limit:
             recommendations.append(rec)
         elif score >= near_miss_threshold:
             near_misses.append(rec)
