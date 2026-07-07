@@ -1,5 +1,8 @@
 from datetime import date
 
+import pytest
+
+from stock_analyzer.config import AppConfig
 from stock_analyzer.domain.models import (
     ActionLabel,
     EvaluationTask,
@@ -7,6 +10,7 @@ from stock_analyzer.domain.models import (
     FocusState,
     Recommendation,
 )
+from stock_analyzer.storage.supabase_client import create_supabase_client
 from stock_analyzer.storage.repositories import InMemoryAnalysisRepository
 
 
@@ -55,3 +59,19 @@ def test_in_memory_repository_saves_daily_outputs():
     assert len(repo.focus_states) == 1
     assert len(repo.evidence_packages) == 1
     assert len(repo.evaluation_tasks) == 1
+
+
+@pytest.mark.parametrize(
+    "env",
+    [
+        {},
+        {"SUPABASE_SERVICE_ROLE_KEY": "svc_dummy"},
+        {"SUPABASE_URL": "https://example.supabase.co"},
+    ],
+)
+def test_create_supabase_client_requires_url_and_service_role_key(env):
+    config = AppConfig.load(env=env)
+    with pytest.raises(ValueError) as excinfo:
+        create_supabase_client(config)
+    assert "SUPABASE_URL" in str(excinfo.value)
+    assert "SUPABASE_SERVICE_ROLE_KEY" in str(excinfo.value)
