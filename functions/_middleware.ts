@@ -1,9 +1,23 @@
+const getCookieValue = (cookieHeader: string, name: string): string | null => {
+  for (const piece of cookieHeader.split(";")) {
+    const [rawName, ...rawValue] = piece.trim().split("=");
+    if (rawName === name) {
+      const value = rawValue.join("=");
+      return value.startsWith("\"") && value.endsWith("\"")
+        ? value.slice(1, -1)
+        : value;
+    }
+  }
+  return null;
+};
+
 export const onRequest: PagesFunction<{ REPORT_PASSWORD: string }> = async (context) => {
   const request = context.request;
   const url = new URL(request.url);
   const cookie = request.headers.get("Cookie") || "";
+  const session = getCookieValue(cookie, "report_session");
 
-  if (cookie.includes("report_session=ok")) {
+  if (session === "ok") {
     return context.next();
   }
 
