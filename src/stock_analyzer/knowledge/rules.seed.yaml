@@ -1,0 +1,44 @@
+rules:
+  - rule_id: OFFICIAL_ST_EXCLUDE
+    source_reference: "沪深交易所风险警示与退市相关规则"
+    source_grade: S
+    rule_type: hard_constraint
+    applicable_scenarios: ["股票被标记 ST 或 *ST"]
+    forbidden_scenarios: ["仅因短期波动被市场讨论"]
+    data_requirements: ["stock_status_daily.is_st"]
+    report_phrasing: "该股票触发风险警示硬约束，系统不形成积极观察结论。"
+    evaluation_method: "检查被排除股票是否出现高波动诱导信号，评估硬约束是否阻止了高风险误报。"
+    downgrade_conditions: ["官方规则口径变化", "数据源 ST 标识长期错误"]
+  - rule_id: OFFICIAL_DELISTING_RISK_EXCLUDE
+    source_reference: "沪深交易所退市与重大风险提示相关规则"
+    source_grade: S
+    rule_type: hard_constraint
+    applicable_scenarios: ["存在退市风险或重大官方风险事件"]
+    forbidden_scenarios: ["普通业绩波动但没有官方风险标识"]
+    data_requirements: ["stock_status_daily.has_delisting_risk", "stock_status_daily.official_risk_events"]
+    report_phrasing: "该股票存在官方重大风险边界，系统剔除观察。"
+    evaluation_method: "复盘被剔除标的后续风险扩散情况，验证硬约束覆盖率。"
+    downgrade_conditions: ["风险事件字段误判率超过 20%", "官方规则口径变化"]
+  - rule_id: RESEARCH_TREND_CONFIRMATION
+    source_reference: "技术交易规则在中国市场表现研究"
+    source_grade: A
+    rule_type: explanation
+    applicable_scenarios: ["20 日趋势与 60 日趋势同向", "相对强度高于市场中位数"]
+    forbidden_scenarios: ["涨停后一日孤立冲高", "成交额低于流动性阈值"]
+    data_requirements:
+      - "daily_feature_snapshot.features.trend_20d"
+      - "daily_feature_snapshot.features.trend_60d"
+      - "daily_feature_snapshot.features.relative_strength"
+    report_phrasing: "趋势证据支持继续观察，但不能单独构成推荐。"
+    evaluation_method: "按市场 regime 分组评估趋势信号在 5/20/40 日的相对收益和失效率。"
+    downgrade_conditions: ["连续两个市场 regime 中假突破率高于 60%"]
+  - rule_id: COUNTER_LOW_LIQUIDITY_NOISE
+    source_reference: "成交量与流动性风险研究"
+    source_grade: A
+    rule_type: counter_evidence
+    applicable_scenarios: ["成交额偏低", "换手率极低", "价格信号来自少量成交"]
+    forbidden_scenarios: ["成交额连续高于阈值且盘口稳定"]
+    data_requirements: ["stock_status_daily.turnover_rate", "stock_status_daily.amount"]
+    report_phrasing: "流动性不足削弱价格信号可信度。"
+    evaluation_method: "比较低流动性候选与正常流动性候选的假信号率。"
+    downgrade_conditions: ["低流动性过滤导致稳定错过高质量机会且跨样本成立"]
