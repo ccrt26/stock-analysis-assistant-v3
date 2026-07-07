@@ -43,5 +43,5 @@ def test_initial_schema_constrains_action_labels_and_service_role_policies():
     assert re.search(r"check\s*\(\s*action\s+in\s*\(", compact_sql)
     assert re.search(r"check\s*\(\s*state\s+in\s*\(", compact_sql)
 
-    assert "to service_role" in compact_sql
-    assert "to anon" not in compact_sql
+    policy_roles = set(re.findall(r"create policy .*? to ([a-z_][a-z0-9_]*) ", compact_sql))
+    assert policy_roles == {"service_role"}
