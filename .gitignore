@@ -1,0 +1,12 @@
+.DS_Store
+.worktrees/
+__pycache__/
+.pytest_cache/
+.venv/
+.env
+.env.*
+!.env.example
+reports/
+data/cache/
+data/raw/
+*.pyc
