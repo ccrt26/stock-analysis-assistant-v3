@@ -11,7 +11,7 @@ from stock_analyzer.data.health import (
 
 def test_config_uses_home_tushare_token_path_when_env_missing():
     config = AppConfig.load(env={})
-    assert config.tushare_token_path == Path("/Users/ccrt/.tushare_token")
+    assert config.tushare_token_path == Path.home() / ".tushare_token"
     assert config.supabase_url is None
     assert config.supabase_service_role_key is None
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date
 from pathlib import Path
+from typing import Optional
 
 from pydantic import BaseModel
 
@@ -18,7 +19,7 @@ from stock_analyzer.domain.models import (
 )
 from stock_analyzer.evaluation.tasks import create_evaluation_tasks
 from stock_analyzer.reports.generator import render_reports
-from stock_analyzer.storage.repositories import InMemoryAnalysisRepository
+from stock_analyzer.storage.repositories import AnalysisRepository, InMemoryAnalysisRepository
 
 
 class DailyRunResult(BaseModel):
@@ -98,17 +99,26 @@ def run_daily_pipeline(
     trade_date: date,
     output_dir: Path,
     dry_run: bool = False,
+    repository: Optional[AnalysisRepository] = None,
+    existing_focus_states: Optional[list[FocusState]] = None,
 ) -> DailyRunResult:
+    repository = repository or InMemoryAnalysisRepository()
     stocks, stock_names, feature_profiles = _sample_market(trade_date)
     included_stocks, _ = clean_stock_pool(stocks)
     features = [feature_profiles[stock.ts_code] for stock in included_stocks if stock.ts_code in feature_profiles]
 
     recommendation_result = generate_recommendations(features, stock_names)
     recommendations = recommendation_result.recommendations
+    existing = (
+        existing_focus_states
+        if existing_focus_states is not None
+        else repository.load_focus_states()
+    )
     focus_states = update_focus_watchlist(
-        existing=[],
+        existing=existing,
         recommendations=recommendations,
         invalidated_codes=set(),
+        trade_date=trade_date,
     )
     evidence_packages = [
         build_evidence_package(
@@ -123,14 +133,13 @@ def run_daily_pipeline(
         for task in create_evaluation_tasks(package)
     ]
 
-    repository = InMemoryAnalysisRepository()
     repository.save_recommendations(recommendations)
     repository.save_focus_states(focus_states)
     repository.save_evidence_packages(evidence_packages)
     repository.save_evaluation_tasks(evaluation_tasks)
 
     if not dry_run:
-        render_reports(output_dir, recommendations, focus_states)
+        render_reports(output_dir, recommendations, focus_states, trade_date=trade_date)
 
     return DailyRunResult(
         trade_date=trade_date,

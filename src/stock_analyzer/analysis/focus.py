@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from datetime import date
+from typing import Optional
+
 from stock_analyzer.domain.models import ActionLabel, FocusState, Recommendation
 
 
@@ -8,6 +11,7 @@ def update_focus_watchlist(
     recommendations: list[Recommendation],
     invalidated_codes: set[str],
     enter_threshold: float = 80.0,
+    trade_date: Optional[date] = None,
 ) -> list[FocusState]:
     by_code = {item.ts_code: item for item in existing}
     output: list[FocusState] = []
@@ -17,13 +21,21 @@ def update_focus_watchlist(
             output.append(
                 old.model_copy(
                     update={
+                        "trade_date": trade_date or old.trade_date,
                         "state": ActionLabel.EXIT_OBSERVATION,
                         "exit_reason": "触发预设失效条件",
                     }
                 )
             )
         else:
-            output.append(old.model_copy(update={"state": ActionLabel.CONTINUE_OBSERVATION}))
+            output.append(
+                old.model_copy(
+                    update={
+                        "trade_date": trade_date or old.trade_date,
+                        "state": ActionLabel.CONTINUE_OBSERVATION,
+                    }
+                )
+            )
 
     for rec in recommendations:
         if rec.ts_code in by_code or rec.ts_code in invalidated_codes or rec.score < enter_threshold:

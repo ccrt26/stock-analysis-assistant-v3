@@ -18,3 +18,21 @@ def test_run_daily_dry_run_completes():
     )
     assert result.exit_code == 0
     assert "daily run dry-run completed for 2026-07-07" in result.stdout
+
+
+def test_render_report_command_writes_requested_output_dir(tmp_path):
+    result = CliRunner().invoke(
+        app,
+        [
+            "render-report",
+            "--trade-date",
+            "2026-07-07",
+            "--output-dir",
+            str(tmp_path),
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "report rendered for 2026-07-07" in result.stdout
+    assert (tmp_path / "index.html").exists()
+    assert (tmp_path / "daily" / "2026-07-07" / "index.html").exists()

@@ -21,6 +21,8 @@ def test_evidence_package_freezes_original_reasoning():
     assert package.support == ["趋势改善"]
     assert package.counter_evidence == ["银行板块弹性有限"]
     assert package.matched_rules == ["RESEARCH_TREND_CONFIRMATION"]
+    assert package.confidence_level
+    assert package.expected_confirmation_path
 
 
 def test_create_evaluation_tasks_has_three_layers_and_three_windows():
@@ -44,4 +46,13 @@ def test_create_evaluation_tasks_has_three_layers_and_three_windows():
         (20, "method"),
         (40, "method"),
         (40, "knowledge"),
+    }
+    assert {task.due_date for task in tasks if task.checkpoint_days == 5} == {
+        date(2026, 7, 12)
+    }
+    assert {task.due_date for task in tasks if task.checkpoint_days == 20} == {
+        date(2026, 7, 27)
+    }
+    assert {task.due_date for task in tasks if task.checkpoint_days == 40} == {
+        date(2026, 8, 16)
     }

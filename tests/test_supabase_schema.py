@@ -2,10 +2,16 @@ import re
 from pathlib import Path
 
 
+SCHEMA_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "supabase"
+    / "migrations"
+    / "202607070001_init_core.sql"
+)
+
+
 def test_initial_schema_contains_required_tables_and_rls():
-    sql = Path(
-        "/Users/ccrt/股票分析助手/.worktrees/codex/v3-mvp/supabase/migrations/202607070001_init_core.sql"
-    ).read_text()
+    sql = SCHEMA_PATH.read_text()
     for table in [
         "market_calendar",
         "stock_master",
@@ -25,9 +31,7 @@ def test_initial_schema_contains_required_tables_and_rls():
 
 
 def test_initial_schema_constrains_action_labels_and_service_role_policies():
-    sql = Path(
-        "/Users/ccrt/股票分析助手/.worktrees/codex/v3-mvp/supabase/migrations/202607070001_init_core.sql"
-    ).read_text().lower()
+    sql = SCHEMA_PATH.read_text().lower()
     compact_sql = re.sub(r"\s+", " ", sql)
 
     for label in [

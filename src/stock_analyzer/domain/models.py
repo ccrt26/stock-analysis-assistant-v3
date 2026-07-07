@@ -88,6 +88,8 @@ class EvidencePackage(BaseModel):
     support: List[str]
     counter_evidence: List[str]
     matched_rules: List[str]
+    confidence_level: str
+    expected_confirmation_path: List[str]
     invalidation_conditions: List[str]
     source_versions: Dict[str, str]
 
@@ -97,4 +99,5 @@ class EvaluationTask(BaseModel):
     ts_code: str
     evidence_id: str
     checkpoint_days: int
+    due_date: date
     evaluation_layer: str

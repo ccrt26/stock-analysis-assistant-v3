@@ -19,10 +19,18 @@ def test_render_reports_creates_fixed_entry_and_hides_secrets(tmp_path):
         ts_code="600000.SH",
         state=ActionLabel.ENTER_OBSERVATION,
     )
-    render_reports(tmp_path, [rec], [focus])
+    render_reports(tmp_path, [rec], [focus], trade_date=date(2026, 7, 7))
     html = (tmp_path / "index.html").read_text(encoding="utf-8")
     json_text = (tmp_path / "data" / "latest.json").read_text(encoding="utf-8")
+    daily_html = (tmp_path / "daily" / "2026-07-07" / "index.html").read_text(
+        encoding="utf-8"
+    )
+    stock_html = (
+        tmp_path / "daily" / "2026-07-07" / "stocks" / "600000.SH.html"
+    ).read_text(encoding="utf-8")
     assert "浦发银行" in html
+    assert "浦发银行" in daily_html
+    assert "浦发银行" in stock_html
     assert "进入观察" in html
     assert "SUPABASE_SERVICE_ROLE_KEY" not in html
     assert "SUPABASE_SERVICE_ROLE_KEY" not in json_text
