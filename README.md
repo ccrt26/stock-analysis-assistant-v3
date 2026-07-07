@@ -4,15 +4,22 @@
 
 ## 本地运行
 
+推荐路径：创建虚拟环境并安装 editable package 后运行。
+
 ```bash
-python -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
-pip install -e ".[dev,data]"
-python -m stock_analyzer health-check
-python -m stock_analyzer run-daily --trade-date 2026-07-07
+python3 -m pip install -e ".[dev,data]"
+python3 -m stock_analyzer health-check
+python3 -m stock_analyzer run-daily --trade-date 2026-07-07
 ```
 
-如果本机没有 `python` 命令，可改用 `python3`。
+未安装 editable package 的开发路径：使用 `PYTHONPATH=src` 直接运行源码。这是当前 smoke 已验证命令路径。
+
+```bash
+PYTHONPATH=src python3 -m stock_analyzer health-check
+PYTHONPATH=src python3 -m stock_analyzer run-daily --trade-date 2026-07-07
+```
 
 ## 密钥
 
@@ -30,8 +37,8 @@ Cloudflare Pages 只发布报告成品，不发布原始数据、日志、规则
 
 ## 第一阶段验收
 
-- `python -m stock_analyzer health-check` 能输出四类健康状态。
-- `python -m stock_analyzer run-daily --trade-date 2026-07-07` 能生成 `reports/index.html`。
+- 安装 editable package 后，`python3 -m stock_analyzer health-check` 能输出四类健康状态。
+- 未安装 editable package 时，`PYTHONPATH=src python3 -m stock_analyzer run-daily --trade-date 2026-07-07` 能生成 `reports/index.html`。
 - 每日推荐数量不超过 10 只。
 - 重点关注状态和推荐状态分离。
 - 每条推荐生成证据包和评估任务。

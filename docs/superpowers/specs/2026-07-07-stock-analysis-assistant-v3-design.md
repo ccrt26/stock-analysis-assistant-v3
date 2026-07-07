@@ -124,7 +124,13 @@ The goal is future transferability, not a beautiful explanation of the past.
 Daily execution should run through one main command:
 
 ```bash
-python -m stock_analyzer run-daily
+python3 -m stock_analyzer run-daily --trade-date YYYY-MM-DD
+```
+
+During source-tree development before editable installation, use:
+
+```bash
+PYTHONPATH=src python3 -m stock_analyzer run-daily --trade-date YYYY-MM-DD
 ```
 
 The command performs:
@@ -523,8 +529,8 @@ Recommended deployment:
 
 Stage 1 is considered ready when the local runbook and the generated report surface meet all of the following:
 
-- `python -m stock_analyzer health-check` reports four health categories.
-- `python -m stock_analyzer run-daily --trade-date 2026-07-07` generates `reports/index.html`.
+- After editable installation, `python3 -m stock_analyzer health-check` reports four health categories.
+- Without editable installation, `PYTHONPATH=src python3 -m stock_analyzer run-daily --trade-date 2026-07-07` generates `reports/index.html`.
 - Daily recommendations stay at or below 10 names.
 - The focus watchlist remains separate from daily recommendations.
 - Each recommendation produces a frozen evidence package and at least one evaluation task.
