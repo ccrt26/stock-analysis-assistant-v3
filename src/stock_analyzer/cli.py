@@ -2,15 +2,18 @@ from datetime import date
 
 import typer
 
+from stock_analyzer.config import AppConfig
+from stock_analyzer.data.health import run_health_checks
+
+
 app = typer.Typer(no_args_is_help=True)
 
 
 @app.command("health-check")
 def health_check() -> None:
-    typer.echo("credential: unchecked")
-    typer.echo("network: unchecked")
-    typer.echo("api_response: unchecked")
-    typer.echo("field_consumability: unchecked")
+    report = run_health_checks(AppConfig.load())
+    for line in report.as_lines():
+        typer.echo(line)
 
 
 @app.command("run-daily")
