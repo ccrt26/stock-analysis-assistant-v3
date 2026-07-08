@@ -235,6 +235,8 @@ def run_daily_pipeline(
             trade_date=trade_date,
             fixture_mode=fixture_mode,
         )
+        if local_archive is not None and not fixture_mode:
+            local_archive.archive_report_tree(output_dir, trade_date)
 
     return DailyRunResult(
         trade_date=trade_date,

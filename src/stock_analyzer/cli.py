@@ -17,6 +17,7 @@ from stock_analyzer.pipeline import (
     run_daily_pipeline,
 )
 from stock_analyzer.storage.capacity_guard import SupabaseCapacityGuard
+from stock_analyzer.storage.local_archive import LocalArchive
 from stock_analyzer.storage.local_warehouse import LocalWarehouse
 from stock_analyzer.storage.repositories import (
     InMemoryAnalysisRepository,
@@ -93,6 +94,11 @@ def run_daily(
             market_data_provider=market_data_provider,
             local_warehouse=(
                 LocalWarehouse(config.local_warehouse_dir)
+                if not dry_run and not effective_fixture_mode
+                else None
+            ),
+            local_archive=(
+                LocalArchive(config.local_archive_dir)
                 if not dry_run and not effective_fixture_mode
                 else None
             ),

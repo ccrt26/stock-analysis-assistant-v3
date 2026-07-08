@@ -393,18 +393,24 @@ def test_run_daily_with_supabase_config_calls_production_provider(tmp_path, monk
     assert save_payloads["data_source_runs"]
 
 
-def test_run_daily_with_supabase_config_passes_configured_local_warehouse(
+def test_run_daily_with_supabase_config_passes_configured_local_storage(
     tmp_path,
     monkeypatch,
 ):
     repo = RecordingRepository()
     captured = {}
     warehouse_instances = []
+    archive_instances = []
 
     class FakeWarehouse:
         def __init__(self, root):
             self.root = root
             warehouse_instances.append(self)
+
+    class FakeArchive:
+        def __init__(self, root):
+            self.root = root
+            archive_instances.append(self)
 
     def fake_run_daily_pipeline(trade_date, output_dir, **kwargs):
         captured.update(kwargs)
@@ -418,6 +424,7 @@ def test_run_daily_with_supabase_config_passes_configured_local_warehouse(
     monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "fake-service-role-key")
     monkeypatch.setenv("TUSHARE_TOKEN", "fake-tushare-token")
     monkeypatch.setenv("LOCAL_WAREHOUSE_DIR", str(tmp_path / "warehouse"))
+    monkeypatch.setenv("LOCAL_ARCHIVE_DIR", str(tmp_path / "archive"))
     monkeypatch.delenv("STOCK_ANALYZER_FIXTURE_MODE", raising=False)
     monkeypatch.setattr(
         "stock_analyzer.cli._analysis_repository",
@@ -428,6 +435,7 @@ def test_run_daily_with_supabase_config_passes_configured_local_warehouse(
         lambda config: FakeProductionProvider(),
     )
     monkeypatch.setattr("stock_analyzer.cli.LocalWarehouse", FakeWarehouse, raising=False)
+    monkeypatch.setattr("stock_analyzer.cli.LocalArchive", FakeArchive, raising=False)
     monkeypatch.setattr("stock_analyzer.cli.run_daily_pipeline", fake_run_daily_pipeline)
 
     result = CliRunner().invoke(
@@ -437,7 +445,9 @@ def test_run_daily_with_supabase_config_passes_configured_local_warehouse(
 
     assert result.exit_code == 0
     assert captured["local_warehouse"] is warehouse_instances[0]
+    assert captured["local_archive"] is archive_instances[0]
     assert warehouse_instances[0].root == tmp_path / "warehouse"
+    assert archive_instances[0].root == tmp_path / "archive"
 
 
 def test_run_daily_fixture_mode_writes_local_sample_report(tmp_path, monkeypatch):

@@ -127,6 +127,14 @@ class RecordingWarehouse:
         self.saved_bundles.append(bundle)
 
 
+class RecordingArchive:
+    def __init__(self):
+        self.calls = []
+
+    def archive_report_tree(self, reports_dir, trade_date):
+        self.calls.append((reports_dir, trade_date))
+
+
 def _raw_daily_bars(trade_date, ts_code="600000.SH", days=1, close_base=10.0):
     start = trade_date - timedelta(days=days - 1)
     return [
@@ -551,6 +559,24 @@ def test_production_pipeline_writes_full_bundle_to_warehouse_and_selected_window
     assert "000004.SZ" not in {row.ts_code for row in repo.daily_basic_indicators}
     assert "000004.SZ" not in {stock.ts_code for stock in repo.stock_statuses}
     assert "000004.SZ" not in {feature.ts_code for feature in repo.feature_snapshots}
+
+
+def test_production_pipeline_archives_report_after_render(tmp_path):
+    repo = InMemoryAnalysisRepository()
+    warehouse = RecordingWarehouse()
+    archive = RecordingArchive()
+
+    run_daily_pipeline(
+        date(2026, 7, 7),
+        tmp_path,
+        repository=repo,
+        fixture_mode=False,
+        market_data_provider=ProviderWithExtraRawCode(),
+        local_warehouse=warehouse,
+        local_archive=archive,
+    )
+
+    assert archive.calls == [(tmp_path, date(2026, 7, 7))]
 
 
 def test_production_pipeline_saves_full_stock_master_once_without_status_downgrade(tmp_path):
