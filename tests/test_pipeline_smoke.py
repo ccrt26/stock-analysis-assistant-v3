@@ -75,13 +75,13 @@ class FailingSaveRepository(InMemoryAnalysisRepository):
         raise AssertionError("dry-run must not save data source runs")
 
 
-def _raw_daily_bars(trade_date, ts_code="600000.SH", days=1):
+def _raw_daily_bars(trade_date, ts_code="600000.SH", days=1, close_base=10.0):
     start = trade_date - timedelta(days=days - 1)
     return [
         DailyBar(
             trade_date=start + timedelta(days=offset),
             ts_code=ts_code,
-            close=10.0 + offset * 0.1,
+            close=close_base + offset * 0.1,
             amount=200000000.0 + offset,
             source_name="fake-live",
             source_grade=SourceGrade.PRIMARY,
@@ -182,41 +182,55 @@ class RawOnlyProductionProvider:
 
 
 class FakeTushareSource:
-    def __init__(self, trade_date):
+    def __init__(self, trade_date, *, history_days=61, include_current=True):
         self.trade_date = trade_date
+        self.fetch_daily_calls = []
+        end_date = trade_date if include_current else trade_date - timedelta(days=1)
+        self.available_dates = {
+            end_date - timedelta(days=offset) for offset in range(history_days)
+        }
+        self.oldest_date = min(self.available_dates)
 
     def fetch_stock_basic(self):
         return _raw_stock_basic()
 
     def fetch_daily(self, trade_date):
-        return _raw_daily_bars(trade_date, days=61)
+        self.fetch_daily_calls.append(trade_date)
+        if trade_date not in self.available_dates:
+            return []
+        close_base = 10.0 + (trade_date - self.oldest_date).days * 0.1
+        return _raw_daily_bars(trade_date, close_base=close_base)
 
     def fetch_daily_basic(self, trade_date):
         return _raw_daily_basic(trade_date)
 
 
 class StaleFakeTushareSource(FakeTushareSource):
-    def fetch_daily(self, trade_date):
-        return _raw_daily_bars(trade_date - timedelta(days=1), days=61)
+    def __init__(self, trade_date):
+        super().__init__(trade_date, include_current=False)
 
 
 class SparseFakeTushareSource(FakeTushareSource):
-    def fetch_daily(self, trade_date):
-        return _raw_daily_bars(trade_date)
+    def __init__(self, trade_date):
+        super().__init__(trade_date, history_days=1)
 
 
 def test_tushare_provider_builds_decision_ready_bundle_from_fetched_rows():
     trade_date = date(2026, 7, 7)
+    source = FakeTushareSource(trade_date)
 
-    bundle = TushareProvider(FakeTushareSource(trade_date)).load(trade_date)
+    bundle = TushareProvider(source).load(trade_date)
 
     assert bundle.can_generate_decisions
     assert bundle.stocks
     assert bundle.stock_names["600000.SH"] == "浦发银行"
     assert bundle.feature_profiles["600000.SH"].trend_60d > 0
+    assert len(bundle.daily_bars) >= 61
     assert bundle.daily_bars
     assert bundle.daily_basic
     assert bundle.source_runs
+    assert trade_date in source.fetch_daily_calls
+    assert len(source.fetch_daily_calls) > 1
 
 
 def test_tushare_provider_translates_insufficient_feature_coverage():

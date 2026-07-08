@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from typing import Protocol
 
 from stock_analyzer.config import AppConfig
@@ -9,6 +9,7 @@ from stock_analyzer.data.feature_builder import (
     build_market_bundle,
 )
 from stock_analyzer.data.models import (
+    DailyBar,
     DataStatus,
     MarketDataBundle,
     SourceGrade,
@@ -16,6 +17,9 @@ from stock_analyzer.data.models import (
     SourceStatus,
 )
 from stock_analyzer.data.tushare_source import TushareMarketDataSource
+
+
+_DAILY_HISTORY_LOOKBACK_DAYS = 120
 
 
 class CurrentLiveDataUnavailable(RuntimeError):
@@ -32,10 +36,12 @@ class TushareProvider:
 
     def load(self, trade_date: date) -> MarketDataBundle:
         stock_basic = self.source.fetch_stock_basic()
-        daily_bars = self.source.fetch_daily(trade_date)
-        if not daily_bars:
+        daily_bars = _fetch_daily_history(self.source, trade_date)
+        current_daily_bars = [bar for bar in daily_bars if bar.trade_date == trade_date]
+        if not current_daily_bars:
             raise CurrentLiveDataUnavailable(
-                f"Tushare returned no current daily bars for {trade_date.isoformat()}"
+                "Tushare returned no current trade date daily bars for "
+                f"{trade_date.isoformat()}"
             )
         daily_basic = self.source.fetch_daily_basic(trade_date)
         source_runs = [
@@ -69,6 +75,16 @@ class TushareProvider:
                 f"{trade_date.isoformat()}"
             )
         return bundle
+
+
+def _fetch_daily_history(
+    source: TushareMarketDataSource,
+    trade_date: date,
+) -> list[DailyBar]:
+    daily_bars = []
+    for offset in range(_DAILY_HISTORY_LOOKBACK_DAYS, -1, -1):
+        daily_bars.extend(source.fetch_daily(trade_date - timedelta(days=offset)))
+    return daily_bars
 
 
 def build_production_market_data_provider(config: AppConfig) -> MarketDataProvider:
