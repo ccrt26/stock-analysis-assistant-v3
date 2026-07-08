@@ -69,6 +69,21 @@ def test_health_report_accepts_env_tushare_token_without_exposing_value(tmp_path
     assert "env-token-456" not in rendered
 
 
+def test_health_check_masks_tushare_token_without_resolving(monkeypatch):
+    monkeypatch.setenv("TUSHARE_TOKEN", "secret-token-value")
+
+    def forbidden_resolve(self):
+        raise AssertionError("default health checks must not resolve the Tushare token")
+
+    monkeypatch.setattr(AppConfig, "resolve_tushare_token", forbidden_resolve)
+
+    report = run_health_checks(AppConfig.load())
+    lines = "\n".join(report.as_lines())
+
+    assert "tushare_token: present:env" in lines
+    assert "secret-token-value" not in lines
+
+
 def test_health_report_as_lines_renders_status_values():
     report = HealthReport(
         items=[

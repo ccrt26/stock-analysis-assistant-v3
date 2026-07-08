@@ -161,13 +161,74 @@ class FakeProductionProvider:
         )
 
 
-def test_health_check_command_prints_status():
+def test_health_check_command_prints_status(monkeypatch, tmp_path):
+    monkeypatch.delenv("TUSHARE_TOKEN", raising=False)
+    monkeypatch.setenv("TUSHARE_TOKEN_PATH", str(tmp_path / "missing-token"))
+
     result = CliRunner().invoke(app, ["health-check"])
     assert result.exit_code == 0
     assert "credential" in result.stdout
+    assert "tushare_token: missing" in result.stdout
     assert "network" in result.stdout
     assert "api_response" in result.stdout
     assert "field_consumability" in result.stdout
+
+
+def test_health_check_default_does_not_run_live_tushare_smoke(monkeypatch):
+    monkeypatch.setenv("TUSHARE_TOKEN", "fake-live-token")
+
+    def fail_if_called(token):
+        raise AssertionError("default health-check must not run live Tushare smoke")
+
+    monkeypatch.setattr(
+        "stock_analyzer.cli._build_tushare_source",
+        fail_if_called,
+        raising=False,
+    )
+
+    result = CliRunner().invoke(app, ["health-check"])
+
+    assert result.exit_code == 0
+    assert "live_tushare_smoke" not in result.stdout
+    assert "fake-live-token" not in result.output
+
+
+def test_health_check_live_tushare_smoke_requires_token(monkeypatch, tmp_path):
+    monkeypatch.delenv("TUSHARE_TOKEN", raising=False)
+    monkeypatch.setenv("TUSHARE_TOKEN_PATH", str(tmp_path / "missing-token"))
+
+    result = CliRunner().invoke(app, ["health-check", "--live-tushare-smoke"])
+
+    assert result.exit_code != 0
+    assert "Tushare token missing" in result.output
+
+
+def test_health_check_live_tushare_smoke_uses_fake_source_without_leaking_token(
+    monkeypatch,
+):
+    monkeypatch.setenv("TUSHARE_TOKEN", "fake-live-token")
+    smoke_calls = []
+
+    class FakeTushareSmokeSource:
+        def __init__(self, token):
+            self.token = token
+
+        def fetch_daily(self, trade_date):
+            smoke_calls.append((self.token, trade_date))
+            return [object(), object()]
+
+    monkeypatch.setattr(
+        "stock_analyzer.cli._build_tushare_source",
+        lambda token: FakeTushareSmokeSource(token),
+        raising=False,
+    )
+
+    result = CliRunner().invoke(app, ["health-check", "--live-tushare-smoke"])
+
+    assert result.exit_code == 0
+    assert "live_tushare_smoke: rows=2" in result.stdout
+    assert "fake-live-token" not in result.output
+    assert smoke_calls == [("fake-live-token", date(2026, 7, 8))]
 
 
 def test_run_daily_dry_run_completes():

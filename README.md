@@ -14,7 +14,8 @@ python3 -m stock_analyzer health-check
 python3 -m stock_analyzer run-daily --fixture-mode --trade-date 2026-07-07
 ```
 
-生产 `run-daily` 在真实行情接入实现前会明确失败，不会把内置样例数据写入 Supabase。
+默认 `health-check` 只做本地配置和凭据状态检查，不访问外部网络。生产 `run-daily` 使用真实行情接入；
+如果 Supabase 配置、Tushare token、依赖或真实数据不可用，命令会明确失败，不会把内置样例数据写入 Supabase。
 
 未安装 editable package 的开发路径：使用 `PYTHONPATH=src` 直接运行源码。这是当前 smoke 已验证命令路径。
 
@@ -24,12 +25,18 @@ PYTHONPATH=src python3 -m stock_analyzer run-daily --dry-run --trade-date 2026-0
 PYTHONPATH=src python3 -m stock_analyzer run-daily --fixture-mode --trade-date 2026-07-07
 ```
 
+真实 Tushare smoke 必须显式选择，并且只应在本地已安装 `tushare` 且配置了非提交的 token 后运行：
+
+```bash
+PYTHONPATH=src python3 -m stock_analyzer health-check --live-tushare-smoke
+```
+
 ## 密钥
 
 - Tushare token 默认读取 `/Users/ccrt/.tushare_token`。
 - 也可以通过 `TUSHARE_TOKEN_PATH` 指定本地 token 文件。
 - 生产报告渲染必须设置 `SUPABASE_URL` 和 `SUPABASE_SERVICE_ROLE_KEY`。`SUPABASE_SERVICE_ROLE_KEY` 只用于服务端/本地受控脚本访问 Supabase，不能写入报告产物、前端代码或 Git。
-- 生产 `run-daily` 还需要真实行情接入；当前 MVP 未实现接入时会失败，不会持久化样例推荐。
+- 生产 `run-daily` 还需要真实行情接入、Tushare token 和数据依赖；缺失时会失败，不会持久化样例推荐。
 - 本地样例报告必须显式使用 `--fixture-mode`，或设置 `STOCK_ANALYZER_FIXTURE_MODE=1`。
 - Cloudflare Pages 报告访问需要同时配置 `REPORT_PASSWORD` 和 `REPORT_SESSION_SECRET`。`REPORT_PASSWORD` 是访问报告时输入的共享密码；`REPORT_SESSION_SECRET` 用于 HMAC 签名 `report_session` Cookie，缺失时中间件会返回 `503`，避免发布无会话保护的报告站点。
 - 可用 `openssl rand -base64 32` 生成 `REPORT_SESSION_SECRET`，把输出作为 Cloudflare Pages 的环境变量/Secret 配置，不要提交到仓库。
@@ -55,12 +62,14 @@ Cloudflare Pages 只发布报告成品，不发布原始数据、日志、规则
 ## 验证边界
 
 - `python3 -m pytest` 使用本地 fake Supabase client 和内存仓库，不证明真实 Supabase 项目已连通。
-- 真实 Supabase smoke 在生产行情接入完成前应验证非 `--dry-run` 的 `run-daily` 清晰失败且不写样例数据。
+- 默认 `health-check` 不访问网络；`--live-tushare-smoke` 是显式 opt-in 的真实 Tushare 访问路径。
+- 真实 Supabase smoke 应验证非 `--dry-run` 的 `run-daily` 使用真实行情源，且在配置或行情不可用时清晰失败、不写样例数据。
 - `--dry-run` 可以不设置 Supabase，且不会持久化分析状态。
 
 ## 第一阶段验收
 
 - 安装 editable package 后，`python3 -m stock_analyzer health-check` 能输出四类健康状态。
+- `health-check` 输出 token 状态（例如 `tushare_token: present:env`），不输出 token 值。
 - 未安装 editable package 时，`PYTHONPATH=src python3 -m stock_analyzer run-daily --dry-run --trade-date 2026-07-07` 能完成不持久化 smoke。
 - 本地样例报告需显式执行 `PYTHONPATH=src python3 -m stock_analyzer run-daily --fixture-mode --trade-date 2026-07-07`。
 - 每日推荐数量不超过 10 只。

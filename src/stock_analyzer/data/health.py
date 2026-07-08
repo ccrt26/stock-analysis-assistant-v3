@@ -28,13 +28,29 @@ class HealthReport(BaseModel):
 
 def run_health_checks(config: AppConfig) -> HealthReport:
     token_status = config.tushare_token_status()
-    credential_status = HealthStatus.OK if config.resolve_tushare_token() else HealthStatus.FAIL
+    credential_status = HealthStatus.OK if token_status != "missing" else HealthStatus.FAIL
     supabase_status = HealthStatus.OK if config.has_supabase_config else HealthStatus.WARN
     return HealthReport(
         items=[
-            HealthItem(category="credential", status=credential_status, message=f"tushare token {token_status}"),
-            HealthItem(category="network", status=HealthStatus.WARN, message="network probe not executed in unit mode"),
-            HealthItem(category="api_response", status=supabase_status, message="supabase env checked"),
-            HealthItem(category="field_consumability", status=HealthStatus.WARN, message="no live schema sample loaded"),
+            HealthItem(
+                category="credential",
+                status=credential_status,
+                message=f"tushare_token: {token_status}",
+            ),
+            HealthItem(
+                category="network",
+                status=HealthStatus.WARN,
+                message="network probe not executed in unit mode",
+            ),
+            HealthItem(
+                category="api_response",
+                status=supabase_status,
+                message="supabase env checked",
+            ),
+            HealthItem(
+                category="field_consumability",
+                status=HealthStatus.WARN,
+                message="no live schema sample loaded",
+            ),
         ]
     )

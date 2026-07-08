@@ -33,10 +33,23 @@ MISSING_SUPABASE_CONFIG_MESSAGE = (
 
 
 @app.command("health-check")
-def health_check() -> None:
-    report = run_health_checks(AppConfig.load())
+def health_check(
+    live_tushare_smoke: bool = typer.Option(False, "--live-tushare-smoke"),
+) -> None:
+    config = AppConfig.load()
+    report = run_health_checks(config)
     for line in report.as_lines():
         typer.echo(line)
+    if live_tushare_smoke:
+        token = config.resolve_tushare_token()
+        if not token:
+            _fail("Tushare token missing; set TUSHARE_TOKEN or TUSHARE_TOKEN_PATH")
+        try:
+            source = _build_tushare_source(token)
+            rows = source.fetch_daily(date(2026, 7, 8))
+        except Exception as exc:
+            _fail(f"live Tushare smoke failed: {_mask_secret(str(exc), token)}")
+        typer.echo(f"live_tushare_smoke: rows={len(rows)}")
 
 
 @app.command("run-daily")
@@ -142,6 +155,16 @@ def _analysis_repository(
     if config.has_supabase_config:
         return SupabaseAnalysisRepository(create_supabase_client(config))
     raise MissingSupabaseConfig(MISSING_SUPABASE_CONFIG_MESSAGE)
+
+
+def _build_tushare_source(token: str):
+    from stock_analyzer.data.tushare_source import TushareMarketDataSource
+
+    return TushareMarketDataSource(token=token)
+
+
+def _mask_secret(message: str, secret: str) -> str:
+    return message.replace(secret, "[masked]") if secret else message
 
 
 def _fail(message: str) -> None:
