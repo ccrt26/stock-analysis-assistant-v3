@@ -2,21 +2,54 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 打通真实 Tushare 主源、有限实时备用源、Supabase 入库、每日候选分析和静态报告发布链路，让生产 `run-daily` 可以基于真实 A 股数据运行，同时禁止样例数据或缓存数据冒充今日决策数据。
+**Goal:** 打通真实 Tushare 主源、有限实时备用源、本地 DuckDB + Parquet 全市场分析库、Supabase 决策账本、每日候选分析和静态报告发布链路，让生产 `run-daily` 可以基于真实 A 股数据运行，同时禁止样例数据或缓存数据冒充今日决策数据。
 
-**Architecture:** 保持现有 MVP 的小模块结构，在 `stock_analyzer.data` 新增真实 ingestion 层，产出统一的 `MarketDataBundle` 后再交给已有 pool、recommendation、focus、evidence、evaluation、reports 流程。Tushare 是主源，AkShare/Sina/Tencent 只做当前交易日行情备用；历史缓存只用于过往窗口、断点续跑和审计，不参与当前交易日新推荐或关注变更。
+**Architecture:** 保持现有 MVP 的小模块结构，在 `stock_analyzer.data` 新增真实 ingestion 层，产出统一的 `MarketDataBundle` 后再交给已有 pool、recommendation、focus、evidence、evaluation、reports 流程。Tushare 是主源，AkShare/Sina/Tencent 只做当前交易日行情备用；历史缓存只用于过往窗口、断点续跑和审计，不参与当前交易日新推荐或关注变更。2026-07-08 存储治理修订后，全市场原始数据和粗分析先进入本地 DuckDB + Parquet；Supabase 只保存决策账本、结构化后评估、报告索引和推荐/关注/对照组的有限行情窗口。
 
-**Tech Stack:** Python 3.11+、Typer、Pydantic、Pandas、NumPy、Jinja2、Supabase Python client、pytest、Tushare optional dependency、AkShare optional dependency、HTTPX。
+**Tech Stack:** Python 3.11+、Typer、Pydantic、Pandas、NumPy、DuckDB、PyArrow/Parquet、Jinja2、Supabase Python client、pytest、Tushare optional dependency、AkShare optional dependency、HTTPX。
+
+## 2026-07-08 Storage Governance Continuation Amendment
+
+本计划已经部分执行，并在真实生产链路调试时暂停。暂停原因不是 Tushare V1 目标错误，而是原 Task 8/9 的写入策略会把全市场行情和基础指标写入 Supabase，和 Free Plan 容量边界冲突。
+
+本修订不是独立补丁。它把新增的存储治理正式并入 Tushare V1 主线，并规定后续执行方式：
+
+- Tasks 1-8 中已经验证出的真实数据问题继续保留为主线输入，不作为零散热修复处理。
+- Task 9 暂停；不得继续执行旧的“生产全市场写 Supabase 后检查当日行情表正数”的步骤。
+- 下一步先补齐本地 warehouse、选择性 Supabase 写入、容量保护、local archive/manifest，再恢复生产 `run-daily`。
+- 恢复生产运行时，Supabase 只能写最终推荐、重点关注、后台对照、结构化证据、后评估、报告索引、数据源摘要和这些小集合的 120 交易日行情窗口。
+- 本地 warehouse 承担全市场 raw/coarse-analysis 存储，180 天滚动。
+
+暂停前真实运行发现必须融合进后续实现：
+
+- Tushare `daily.amount` 必须从千元换算为元。
+- 少量当前交易日 bar 缺失可被覆盖率门槛容忍，覆盖率不足则停止推荐。
+- 写入或计算前必须按 Tushare `stock_basic` 当前可信股票名单过滤历史行情。
+- Supabase 写入必须小批量、可重试；但新设计下禁止全市场行情写 Supabase。
+- `stock_master` 必须从 Tushare `stock_basic` 更新，不能只由推荐结果反推。
+
+继续执行前必须新增一个后续实施计划，覆盖：
+
+1. `local_warehouse` DuckDB + Parquet 读写契约。
+2. 全市场 raw/coarse-analysis 从 Supabase 改到本地 warehouse。
+3. Supabase 选择性持久化和 350 MB/400 MB 容量保护。
+4. `local_archive`、报告归档、长文本归档和 manifest。
+5. 小规模 smoke 通过后，再执行一次受控生产 `run-daily`。
 
 ## Global Constraints
 
 - 项目根目录固定为 `/Users/ccrt/股票分析助手`；当前开发工作区通过 `/Users/ccrt/Documents/股票分析助手` 访问。
+- 本地全市场分析库固定为 `/Users/ccrt/股票分析助手/local_warehouse/`，使用 DuckDB + Parquet，不提交 Git。
+- 本地归档库固定为 `/Users/ccrt/股票分析助手/local_archive/`，保存完整 HTML、长篇证据/复盘文本、manifest、月度 exports，不提交 Git。
 - 本机日常主命令固定为 `set -a; . ./.env.local; set +a; PYTHONPATH=src .venv/bin/python -m stock_analyzer run-daily --trade-date YYYY-MM-DD`。
 - Fixture 模式只能通过 `--fixture-mode` 或 `STOCK_ANALYZER_FIXTURE_MODE=1` 显式启用。
 - 生产模式必须读取 `SUPABASE_URL`、`SUPABASE_SERVICE_ROLE_KEY`，不得在聊天、日志、报告、异常中输出 service key。
 - Tushare token 读取顺序：先 `TUSHARE_TOKEN`，再 `TUSHARE_TOKEN_PATH`，默认 `/Users/ccrt/.tushare_token`；不得打印 token 原文。
 - Tushare 为 V1 主源；AkShare/Sina/Tencent 只能作为当前交易日价格、成交量、成交额备用源。
 - 缓存不是备用源；缓存只允许用于历史窗口、断点续跑、后评估审计、数据不可用状态说明。
+- Supabase 不是全市场数据仓库；任何代码路径不得把全市场行情、全市场基础指标、全市场粗筛特征或全市场候选池直接写入 Supabase。
+- Supabase 只允许保存决策账本、结构化后评估、报告索引、数据源摘要、股票基础名单，以及推荐/重点关注/后台对照组的有限 120 交易日行情窗口。
+- Supabase 容量达到 350 MB 必须预警；达到或超过 400 MB 必须停止行情窗口、批量候选、长文本、报告体等较大写入。
 - 当前交易日没有实时主源或实时备用源时，不生成新推荐、不升级重点关注、不输出正常股票分析报告。
 - 每日推荐最多 10 只；不足 10 只时不得降低标准凑数。
 - 重点关注池可以为空，也可以少于 10 只。
@@ -28,8 +61,9 @@
 - 本地执行必须使用项目 `.venv` 中的 Python 3.12：`.venv/bin/python`。
 - 当前 `.venv` 只允许保留 Supabase 调试最小依赖；每个任务只能安装本任务明确需要的最小依赖，不得一次性安装 `.[dev,data]`。
 - `tushare`、`akshare` 只能在到达真实数据源任务或 live smoke 任务时按需安装；调试 Supabase 或纯 fake-client 单元测试时不得安装它们。
+- `duckdb`、`pyarrow` 只能在执行本地 warehouse 任务时按需安装，并必须写明用途。
 - `.env.local` 只用于本机运行，必须继续被 Git 忽略；不得读取、打印、提交、复制 `SUPABASE_SERVICE_ROLE_KEY` 或 Tushare token 原文。
-- 任何数据库写入、外网 smoke、Cloudflare 操作都必须在单元测试和 reviewer gate 通过后执行。
+- 任何数据库写入、外网 smoke、Cloudflare 操作、真实清理或归档保留策略变更，都必须在单元测试和 reviewer gate 通过后执行。
 
 ---
 
@@ -45,11 +79,12 @@
 | Task 2 | GPT-5.5 xhigh | GPT-5.5 xhigh | Tushare 字段映射，任何字段错误都会污染全链路 |
 | Task 3 | GPT-5.5 xhigh | GPT-5.5 xhigh | 实时备用源和缓存边界是核心风控规则 |
 | Task 4 | GPT-5.5 xhigh | GPT-5.5 xhigh | 特征计算直接影响候选质量 |
-| Task 5 | GPT-5.5 xhigh | GPT-5.5 xhigh | Supabase schema、RLS、持久化字段必须一次做对 |
-| Task 6 | GPT-5.5 xhigh | GPT-5.5 xhigh | 生产 pipeline 是否允许发布报告的核心 gate |
+| Task 5 | GPT-5.5 xhigh | GPT-5.5 xhigh | Supabase schema、RLS、选择性持久化字段必须一次做对 |
+| Task 6 | GPT-5.5 xhigh | GPT-5.5 xhigh | 生产 pipeline 是否允许发布报告，以及是否错误全市场写 Supabase 的核心 gate |
 | Task 7 | GPT-5.5 xhigh | GPT-5.5 xhigh | 防止缓存-only 伪装成股票分析报告 |
 | Task 8 | GPT-5.5 xhigh | GPT-5.5 xhigh | 真实 smoke、密钥脱敏、生产命令验证 |
-| Task 9 | GPT-5.5 xhigh | GPT-5.5 xhigh | Supabase 真实迁移、GitHub/Cloudflare 发布前检查 |
+| Task 9 | GPT-5.5 xhigh | GPT-5.5 xhigh | Supabase 真实迁移、GitHub/Cloudflare 发布前检查；旧全市场写入验证已暂停 |
+| Storage continuation tasks | GPT-5.5 xhigh | GPT-5.5 xhigh | DuckDB + Parquet、容量保护、选择性入库和归档保留策略直接影响系统可持续运行 |
 | Final whole-branch review | GPT-5.5 xhigh | GPT-5.5 xhigh | 全链路金融决策系统风险审查 |
 
 如果调度工具没有 GPT-5.5 xhigh 选项，controller 必须停止并询问用户是否允许使用最接近的高能力模型。不得默认降级。
@@ -61,7 +96,7 @@
 - Task 2 如需要 DataFrame 测试，只安装 `pandas>=2.2`，不安装 `tushare`。
 - Task 3 的 AkShare/Sina/Tencent 测试必须使用 fake client；不得为了 fake-client 单元测试安装 `akshare`。
 - Task 4 如需要计算依赖，只安装 `pandas>=2.2` 和 `numpy>=1.26`。
-- Task 5 只需要 `supabase`、`pydantic` 和标准库；不得安装数据源包。
+- Task 5 只需要 `supabase`、`pydantic` 和标准库；不得安装数据源包；如执行存储续跑任务，可按任务边界安装 `duckdb`/`pyarrow`。
 - Task 6 生产 provider 单元测试使用 fake provider；不得访问 Tushare 或 AkShare 外网。
 - Task 7 报告边界测试不需要数据源包。
 - Task 8 才允许安装 `tushare>=1.4.19` 执行 live Tushare smoke；只有实现真实 AkShare live smoke 时才允许安装 `akshare>=1.14`。
@@ -71,10 +106,10 @@
 
 - 每个任务必须先写失败测试，记录失败命令和失败原因，再写实现。
 - 每个任务必须生成一次 commit；reviewer 只审该任务从 base commit 到 head commit 的 diff。
-- reviewer 必须同时给出 `Spec compliance` 和 `Code quality` 两个 verdict。
+- reviewer 必须同时给出 `Spec compliance`、`Storage governance compliance` 和 `Code quality` 三个 verdict。
 - 任何 Critical 或 Important finding 必须回到 fixer subagent，修复后 re-review。
 - Minor finding 记录到 `.superpowers/sdd/progress.md`，最终 whole-branch review 前统一复查。
-- 任何任务如果触碰这些边界，reviewer 必须重点审查：样例数据是否进入生产、缓存是否支撑当前日决策、service key/token 是否泄露、报告是否误导为正式结论、Supabase RLS 是否仍开启。
+- 任何任务如果触碰这些边界，reviewer 必须重点审查：样例数据是否进入生产、缓存是否支撑当前日决策、service key/token 是否泄露、报告是否误导为正式结论、Supabase RLS 是否仍开启、全市场数据是否错误进入 Supabase、容量保护是否生效。
 
 ### Stop Conditions
 
@@ -83,6 +118,8 @@ controller 必须停止并向用户说明，不能继续自动执行的情况：
 - 需要从 GPT-5.5 xhigh 降级到 mini 或未知低能力模型。
 - 生产运行需要当前日真实数据但 Tushare token 缺失。
 - Supabase 写入失败且错误不能通过只读 smoke 定位。
+- Supabase 容量已达到 400 MB，而代码仍试图执行行情窗口、批量候选、长文本或报告体写入。
+- 任何实现试图把全市场行情、全市场基础指标或全市场粗筛结果写入 Supabase。
 - 任何 live source 返回空数据，而代码试图生成正常推荐报告。
 - reviewer 发现计划要求和安全/正确性要求冲突。
 
@@ -104,14 +141,20 @@ controller 必须停止并向用户说明，不能继续自动执行的情况：
   从 stock_basic、daily、daily_basic 构建 `StockSnapshot` 和 `FeatureSnapshot`。
 - Create: `/Users/ccrt/股票分析助手/src/stock_analyzer/data/provider.py`
   编排 Tushare 主源、实时备用源、缓存权限、重试、run records，产出 `MarketDataBundle`。
+- Create: `/Users/ccrt/股票分析助手/src/stock_analyzer/storage/local_warehouse.py`
+  DuckDB + Parquet 本地全市场分析库，保存 raw/coarse-analysis、source checkpoints、180 天滚动数据。
+- Create: `/Users/ccrt/股票分析助手/src/stock_analyzer/storage/capacity_guard.py`
+  Supabase 容量检查和 350 MB/400 MB 写入门槛。
+- Create: `/Users/ccrt/股票分析助手/src/stock_analyzer/storage/local_archive.py`
+  完整报告、长篇证据/复盘文本、manifest、月度 exports 的本地归档入口。
 - Modify: `/Users/ccrt/股票分析助手/src/stock_analyzer/pipeline.py`
-  生产模式从 `MarketDataProvider` 取真实数据；fixture 模式继续使用 `_sample_market()`。
+  生产模式从 `MarketDataProvider` 取真实数据，先写本地 warehouse，再选择性写 Supabase；fixture 模式继续使用 `_sample_market()`。
 - Modify: `/Users/ccrt/股票分析助手/src/stock_analyzer/cli.py`
   生产 `run-daily` 构造真实 provider，不再预先用“ingestion 未实现”拦截。
 - Modify: `/Users/ccrt/股票分析助手/src/stock_analyzer/storage/repositories.py`
-  支持 market bars、daily basic indicators、data_source_run 的 upsert 和读取。
+  支持决策账本、有限行情窗口、data_source_run 的 upsert 和读取；不得提供全市场直接写 Supabase 的生产路径。
 - Create: `/Users/ccrt/股票分析助手/supabase/migrations/202607080002_ingestion_v1.sql`
-  新增行情、基础指标表，扩展 `data_source_run`，保持 RLS service_role policy。
+  新增有限行情窗口、基础指标窗口表，扩展 `data_source_run`，保持 RLS service_role policy。表可以存在，但生产代码只能写推荐/关注/对照组窗口。
 - Modify: `/Users/ccrt/股票分析助手/src/stock_analyzer/reports/generator.py`
   支持 live-backup 警示和 data-unavailable notice；禁止缓存-only 正常报告。
 - Modify: `/Users/ccrt/股票分析助手/src/stock_analyzer/reports/templates/index.html.j2`
@@ -127,6 +170,9 @@ controller 必须停止并向用户说明，不能继续自动执行的情况：
 - Modify: `/Users/ccrt/股票分析助手/tests/test_pipeline_smoke.py`
 - Modify: `/Users/ccrt/股票分析助手/tests/test_cli.py`
 - Modify: `/Users/ccrt/股票分析助手/tests/test_report_generation.py`
+- Create: `/Users/ccrt/股票分析助手/tests/test_local_warehouse.py`
+- Create: `/Users/ccrt/股票分析助手/tests/test_capacity_guard.py`
+- Create: `/Users/ccrt/股票分析助手/tests/test_local_archive.py`
 
 ---
 
@@ -972,7 +1018,9 @@ git commit -m "feat: build features from real market data"
 
 ---
 
-### Task 5: Supabase ingestion schema and repository persistence
+### Task 5: Supabase ingestion schema and selective repository persistence
+
+Storage-governance update: this task originally created generic market-data tables and repository methods. The tables may remain, but production code must treat them as limited-window tables for final recommendations, focus stocks, and internal controls only. Full-market raw/coarse-analysis belongs in `local_warehouse`, not in Supabase. Any implementation or review of this task after 2026-07-08 must verify that `save_market_bars` and `save_daily_basic_indicators` are not called with the full A-share universe from production `run-daily`.
 
 **Files:**
 - Create: `/Users/ccrt/股票分析助手/supabase/migrations/202607080002_ingestion_v1.sql`
@@ -986,6 +1034,7 @@ git commit -m "feat: build features from real market data"
   `save_daily_basic_indicators(rows: list[DailyBasicRow]) -> None`,
   `save_data_source_runs(rows: list[SourceRunRecord]) -> None`
 - Keeps existing `AnalysisRepository` methods backward-compatible for current tests.
+- Production constraint: `save_market_bars` and `save_daily_basic_indicators` are low-level limited-window persistence helpers; full-market persistence must use `local_warehouse`.
 
 - [ ] **Step 1: Add failing schema assertions**
 
@@ -1723,10 +1772,10 @@ Expected: PASS. Do not install `akshare` in this step; AkShare is only needed wh
 Run: `PYTHONPATH=src .venv/bin/python -m stock_analyzer health-check --live-tushare-smoke`
 Expected: PASS with `live_tushare_smoke: rows=<positive integer>` or a clear Tushare API error that does not print the token.
 
-- [ ] **Step 9: Run production daily after Supabase env vars are configured locally**
+- [ ] **Step 9: Run production daily after storage-governance continuation is implemented**
 
 Run: `set -a; . ./.env.local; set +a; PYTHONPATH=src .venv/bin/python -m stock_analyzer run-daily --trade-date 2026-07-08`
-Expected: If live data is available, command exits 0, writes Supabase rows, and writes `/Users/ccrt/股票分析助手/reports/index.html`. If live data is unavailable, command exits nonzero and no normal recommendation report is published.
+Expected: Do not run this step until `local_warehouse`, selective Supabase persistence, capacity guard, and `local_archive` are implemented and reviewed. If live data is available, command exits 0, writes full-market raw/coarse-analysis to `/Users/ccrt/股票分析助手/local_warehouse/`, writes only decision-ledger rows and selected 120-trading-day windows to Supabase, writes archived report artifacts under `/Users/ccrt/股票分析助手/local_archive/`, and writes `/Users/ccrt/股票分析助手/reports/index.html`. If live data is unavailable, command exits nonzero and no normal recommendation report is published.
 
 - [ ] **Step 10: Commit**
 
@@ -1738,6 +1787,8 @@ git commit -m "feat: add ingestion health checks and smoke path"
 ---
 
 ### Task 9: Supabase migration, GitHub sync, and report exposure checkpoint
+
+Storage-governance status: Task 9 was paused after the migration table creation succeeded and before any successful full-market production write. Do not continue old Step 3 row-count checks. Before this task resumes, complete the storage-governance continuation plan: local warehouse, selective Supabase persistence, capacity guard, local archive, and small-scale smoke.
 
 **Files:**
 - Modify only if verification finds a concrete code defect in files touched by Tasks 1-8.
@@ -1757,19 +1808,19 @@ Expected: migration succeeds; existing `202607070001_init_core.sql` tables remai
 Run Supabase database lints/security advisor for project `npklfuknflckilxehiob`.
 Expected: no critical RLS or exposed service key findings caused by V1 migration.
 
-- [ ] **Step 3: Verify production rows**
+- [ ] **Step 3: Verify selective production rows**
 
 After a successful live run, query row counts for:
 
 ```sql
-select count(*) from public.market_price_daily where trade_date = '2026-07-08';
-select count(*) from public.daily_basic_indicator where trade_date = '2026-07-08';
 select count(*) from public.recommendation_daily where trade_date = '2026-07-08';
 select count(*) from public.evidence_package_index where trade_date = '2026-07-08';
 select count(*) from public.evaluation_task where trade_date = '2026-07-08';
+select count(*) from public.market_price_daily where trade_date = '2026-07-08';
+select count(*) from public.daily_basic_indicator where trade_date = '2026-07-08';
 ```
 
-Expected: market rows are positive; recommendation rows are between 0 and 10; evidence and evaluation rows match any recommendations created.
+Expected: recommendation rows are between 0 and 10; evidence and evaluation rows match any recommendations created; market/basic rows are limited to recommendation, focus, and internal-control windows, not the full A-share universe. A count near the full A-share universe for the current trade date is a failure under the storage-governance design.
 
 - [ ] **Step 4: Verify no fake data leaked into production**
 
@@ -1794,7 +1845,7 @@ Expected: working tree clean before push; GitHub repository `https://github.com/
 
 ## Self-Review Checklist
 
-- Spec coverage: Tushare token, Tushare datasets, realtime backup, cache non-decision rule, Supabase persistence, report behavior, max 10 recommendations, no sample production data, and live smoke all map to tasks.
+- Spec coverage: Tushare token, Tushare datasets, realtime backup, cache non-decision rule, local warehouse, selective Supabase persistence, capacity guard, local archive, report behavior, max 10 recommendations, no sample production data, and live smoke all map to tasks or to the required storage-governance continuation plan.
 - Placeholder scan: plan contains no unspecified task names, no missing paths, all interfaces are defined above, and no instruction generates conclusions from cache.
 - Type consistency: `MarketDataBundle`, `DataStatus`, `SourceGrade`, `SourceRunRecord`, `DailyBar`, and `DailyBasicRow` are defined before downstream tasks consume them.
-- Risk checkpoint: Task 6 and Task 7 require reviewer attention because they decide whether a production run can publish a report.
+- Risk checkpoint: Task 6, Task 7, Task 8, Task 9, and the storage-governance continuation tasks require reviewer attention because they decide whether a production run can publish a report, write to Supabase, or consume Free Plan capacity.

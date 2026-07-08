@@ -4,6 +4,8 @@ Date: 2026-07-08
 Status: Draft approved in conversation, pending implementation plan
 Project root: `/Users/ccrt/股票分析助手`
 
+Storage amendment: this design is amended by `2026-07-08-storage-governance-design.md`. If this document conflicts with that storage-governance design, the storage-governance design wins. Tushare V1 still opens the real production path, but full-market raw data and coarse-analysis data now land in the local DuckDB + Parquet warehouse first; Supabase is limited to the cloud decision ledger and selected 120-trading-day windows.
+
 ## 1. Purpose
 
 Tushare ingestion V1 opens the production `run-daily` path without letting sample data enter Supabase or published reports. It gives the assistant a real full-A-share data base while keeping the V3 MVP small enough to run reliably.
@@ -25,7 +27,8 @@ In scope:
 - Daily price/volume data from Tushare `daily`.
 - Daily basic indicators from Tushare `daily_basic`.
 - Retry, live fallback, historical cache, and resume behavior for those datasets.
-- Supabase writes for stock master, daily status, feature snapshots, recommendations, focus state, evidence packages, evaluation tasks, and data-source run records.
+- Local DuckDB + Parquet writes for full-market raw market data, daily basic indicators, coarse features, candidate pools, and source checkpoints.
+- Supabase writes for stock master, daily status, final recommendations, focus state, structured evidence packages, evaluation tasks, data-source run records, report indexes, and selected 120-trading-day windows for recommendations, focus stocks, and internal controls.
 - Report warnings when a live backup source is used; cache-only current-date runs produce a data-unavailable status notice, not a stock analysis report.
 
 Out of scope for V1:
@@ -89,7 +92,8 @@ Hard failures:
 - Empty full-market universe.
 - Empty daily market data for the target trade date after retry and live fallback.
 - Feature coverage below the minimum threshold.
-- Supabase persistence failure before recommendations, evidence, and evaluation tasks are complete.
+- Supabase decision-ledger persistence failure before recommendations, evidence, report indexes, and evaluation tasks are complete.
+- Local warehouse persistence failure before full-market screening, because the system must not silently continue from unmanaged local files.
 
 Live backup run:
 
@@ -119,8 +123,11 @@ Stages:
 - `trade_cal`
 - `daily`
 - `daily_basic`
+- `local_warehouse`
 - `feature_snapshot`
 - `recommendation`
+- `supabase_decision_ledger`
+- `local_archive`
 - `report`
 
 Retry behavior:
@@ -132,7 +139,8 @@ Retry behavior:
 Resume behavior:
 
 - Re-running `run-daily` for the same trade date resumes from available successful stage outputs.
-- Supabase writes use upsert where possible.
+- Local warehouse writes use deterministic partitions and run metadata so the same trade date can be safely retried.
+- Supabase decision-ledger writes use upsert where possible.
 - A second run must not duplicate recommendations, focus states, evidence packages, or evaluation tasks.
 
 ## 6. Cache Policy
@@ -299,18 +307,20 @@ Unit tests:
 
 Integration-style tests with fake clients:
 
-- successful production run writes all required Supabase rows
+- successful production run writes full-market source data to local warehouse and required decision-ledger rows to Supabase
 - Tushare failure then backup success creates live-backup-labeled evidence/report
 - Tushare and backup failure then fresh cache creates no new recommendations, no focus changes, and only a data-unavailable run-status notice
 - stale cache causes failure without a normal report
 - rerun does not duplicate daily rows
 - production command no longer raises "ingestion not implemented"
 - production command never writes sample data
+- production command never writes full-market raw/coarse-analysis rows to Supabase
 
 Manual smoke:
 
 - Tushare token health check against one known stock.
-- Supabase rollback write check.
+- Supabase decision-ledger rollback write check.
+- Local warehouse small-scale write/read check.
 - Fixture report generation still works and remains visibly labeled.
 
 ## 11. Acceptance Criteria
@@ -319,9 +329,11 @@ V1 is complete when:
 
 - `run-daily` production path uses Tushare primary data, not sample data.
 - Full A-share pool can be fetched from Tushare or a live backup source, or the run refuses to create new recommendations.
+- Full-market raw/coarse-analysis data is stored in the local DuckDB + Parquet warehouse, not in Supabase.
 - At most about 10 recommendations are generated, and fewer are allowed.
 - Reports show production/live-backup status clearly, and cache-only current-date runs never publish normal recommendation reports.
-- Supabase stores complete recommendation, evidence, focus, and evaluation state.
+- Supabase stores complete decision-ledger state: final recommendations, focus state, structured evidence, evaluation tasks/results, report indexes, data-source summaries, and selected 120-trading-day windows.
+- Supabase capacity guard prevents large writes at and above the configured threshold.
 - Re-running the same date is idempotent.
 - Tests and one live Tushare smoke pass.
 - If all live sources fail, no fake production recommendation report is generated.

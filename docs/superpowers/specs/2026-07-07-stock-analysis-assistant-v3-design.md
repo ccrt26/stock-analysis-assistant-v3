@@ -434,13 +434,15 @@ The page must not look like a pipeline dashboard.
 
 ## 13. Data Storage Architecture
 
-V3 uses Supabase as the primary system of record. Local files are only for source code, migrations, report templates, temporary development cache, and explicit export artifacts.
+Storage architecture was amended on 2026-07-08 by `2026-07-08-storage-governance-design.md` after live Supabase capacity review. The original goal of avoiding scattered local files still stands, but Supabase Free must not become a full-market data warehouse.
 
 The storage boundary is:
 
 - Git repository: code, tests, schema migrations, knowledge-rule definitions, report templates, and documentation.
-- Supabase Postgres: normalized analysis facts, daily feature snapshots, recommendation records, focus-watchlist state, rule matches, evaluation records, and data-quality status.
-- Supabase Storage: evidence packages, generated report snapshots, selected raw API snapshots, and larger archived artifacts.
+- Local warehouse (`/Users/ccrt/股票分析助手/local_warehouse/`): DuckDB + Parquet store for full-market raw data, daily basic indicators, coarse features, coarse scores, and 180-day recomputation windows.
+- Supabase Postgres: cloud decision ledger for normalized recommendation facts, focus-watchlist state, rule matches, evaluation records, report indexes, data-quality status, and only limited 120-trading-day market windows for final recommendations, focus stocks, and internal controls.
+- Local archive (`/Users/ccrt/股票分析助手/local_archive/`): complete HTML reports, long-form evidence/review text, manifests, and monthly export bundles.
+- Supabase Storage: not part of the Stage 1 default. It may be reconsidered later if the project upgrades or needs remote artifact storage, but Stage 1 keeps large artifacts local.
 - Cloudflare Pages: published static report site and small access-control function only.
 
 Secrets must never be committed. Existing local tokens such as Tushare and model API credentials should be reused from the user's home-directory secret files or environment variables during local runs, then later mirrored into the deployment secret manager only when remote automation is added.
@@ -469,7 +471,7 @@ The system stores three evidence levels.
 
 ### 14.1 Full-Market Lightweight Snapshots
 
-Every trading-day run stores a lightweight full-market snapshot in Supabase Postgres after cleaning.
+Every trading-day run stores a lightweight full-market snapshot in the local DuckDB + Parquet warehouse after cleaning. Supabase does not store full-market snapshots on the Free plan.
 
 This snapshot should include:
 
@@ -481,6 +483,8 @@ This snapshot should include:
 - Source timestamps or hashes where useful.
 
 This is required because evaluation must compare selected stocks against non-selected alternatives, benchmarks, industries, and market regimes. Without this layer, the system can only explain why chosen stocks moved, which is too easy to overfit.
+
+Supabase stores only the small evaluation set derived from this full-market layer: daily final recommendations, focus stocks, and 15 internal near-miss/control candidates.
 
 ### 14.2 Detailed Evidence Packages
 
@@ -499,9 +503,10 @@ Each evidence package must freeze the original thesis, data version, matched kno
 
 Raw API data is stored selectively:
 
-- Keep short all-market raw cache for operational debugging, initially 7-30 days.
-- Keep longer raw snapshots for recommendations, focus stocks, major failures, rule disputes, and data-source anomalies.
-- Store large raw payloads in Supabase Storage, with metadata and hashes indexed in Postgres.
+- Keep full-market raw/coarse-analysis data in local warehouse for 180 days.
+- Keep longer local archived text/artifacts for recommendations, focus stocks, major failures, rule disputes, and data-source anomalies.
+- Store metadata, hashes, local archive paths, and structured evaluation facts in Supabase Postgres.
+- Do not store large raw payloads in Supabase Storage during Stage 1.
 
 This gives enough auditability for serious mistakes without recreating Version 2's heavy storage burden.
 
@@ -523,7 +528,7 @@ Recommended deployment:
 
 - Cloudflare Pages hosts the report site on the default `*.pages.dev` URL first.
 - The Cloudflare dashboard is only the management console; it is not the report URL shown to family.
-- Stage 1 publishes static HTML/JSON report artifacts generated from Supabase-backed analysis data.
+- Stage 1 publishes static HTML/JSON report artifacts generated from the local warehouse plus Supabase decision-ledger state.
 - A small Cloudflare Pages Function can enforce a simple shared access password and session cookie.
 - No custom domain is required initially.
 
@@ -581,7 +586,8 @@ Stage 1 must do:
 - Evidence and knowledge traceability for each conclusion
 - Evaluation task creation for each recommendation
 - Fixed report entry generation
-- Supabase-backed state and evaluation history
+- Supabase-backed decision state and evaluation history
+- Local DuckDB + Parquet full-market warehouse with managed retention
 - Cloudflare-publishable report artifacts
 
 ## 17. Testing and Verification
@@ -598,7 +604,7 @@ The first implementation stage must include tests for:
 - Report generation: fixed entry exists and stock pages exist.
 - Evaluation records: every recommendation has reviewable records.
 - Supabase schema migrations and basic read/write paths.
-- Historical snapshot creation without raw-data leakage.
+- Historical snapshot creation in local warehouse without raw-data leakage into Supabase.
 - Report publishing artifact contains no internal secrets or logs.
 - Password-gated report access behavior.
 
@@ -643,7 +649,7 @@ These are not open product questions; they are implementation-plan decisions:
 - Exact Supabase table schema, indexes, and migration naming.
 - Exact Cloudflare Pages project name.
 - Exact shared-password mechanism and cookie lifetime.
-- Exact raw-cache retention window within the initial 7-30 day range.
+- Exact implementation details for the 180-day local warehouse retention job.
 - Whether local development uses Supabase local stack immediately or starts with migrations against the hosted project.
 
 ## 20. Approval
@@ -661,8 +667,9 @@ The user approved:
 - Three-depth analysis architecture.
 - Formal distinction between daily recommendations and focus watchlist.
 - One-command first-stage runtime boundary.
-- Supabase as the primary database.
+- Supabase as the cloud decision ledger and structured evaluation database.
+- Local DuckDB + Parquet as the full-market raw/coarse-analysis warehouse.
 - Cloudflare Pages default URL for report publishing.
 - Simple password-gated family report access.
-- Static report generation from Supabase-backed data for Stage 1.
-- Historical storage that preserves lightweight full-market snapshots, detailed evidence packages, and selective raw snapshots for scientific evaluation.
+- Static report generation from local warehouse data plus Supabase decision-ledger state for Stage 1.
+- Historical storage that preserves lightweight full-market snapshots locally, detailed structured evidence in Supabase, and long-form report/evidence artifacts in local archive for scientific evaluation.
