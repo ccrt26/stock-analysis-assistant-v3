@@ -85,3 +85,59 @@ def test_current_trade_date_bar_is_required_for_decisions():
         )
 
     assert "current trade date" in str(excinfo.value)
+
+
+def test_current_trade_date_bar_is_required_for_each_requested_stock():
+    trade_date = date(2026, 6, 9)
+    current_bars = _bars("600000.SH")
+    stale_bars = _bars("000001.SZ")[:-1]
+
+    with pytest.raises(InsufficientFeatureCoverage) as excinfo:
+        build_market_bundle(
+            trade_date=trade_date,
+            stock_basic=[
+                StockBasicRow(ts_code="600000.SH", name="浦发银行", exchange="SSE"),
+                StockBasicRow(ts_code="000001.SZ", name="平安银行", exchange="SZSE"),
+            ],
+            daily_bars=current_bars + stale_bars,
+            daily_basic=[],
+            data_status=DataStatus.COMPLETE_PRIMARY,
+            source_grade=SourceGrade.PRIMARY,
+            source_versions={"tushare": "daily:2026-06-09"},
+            source_runs=[],
+        )
+
+    assert "000001.SZ" in str(excinfo.value)
+    assert "current trade date" in str(excinfo.value)
+
+
+def test_later_dated_bars_do_not_influence_current_trade_date_features():
+    trade_date = date(2026, 6, 9)
+    bars = _bars()
+    current_amount = bars[-1].amount
+    bars.append(
+        DailyBar(
+            trade_date=date(2026, 6, 10),
+            ts_code="600000.SH",
+            close=1.0,
+            amount=999999999.0,
+            source_name="tushare",
+            source_grade=SourceGrade.PRIMARY,
+        )
+    )
+
+    bundle = build_market_bundle(
+        trade_date=trade_date,
+        stock_basic=[StockBasicRow(ts_code="600000.SH", name="浦发银行", exchange="SSE")],
+        daily_bars=bars,
+        daily_basic=[],
+        data_status=DataStatus.COMPLETE_PRIMARY,
+        source_grade=SourceGrade.PRIMARY,
+        source_versions={"tushare": "daily:2026-06-09"},
+        source_runs=[],
+    )
+
+    stocks, _, features = bundle.to_pipeline_inputs()
+
+    assert stocks[0].amount == current_amount
+    assert features["600000.SH"].trend_20d > 0

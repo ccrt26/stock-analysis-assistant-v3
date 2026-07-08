@@ -42,8 +42,13 @@ def build_market_bundle(
         DataStatus.COMPLETE_PRIMARY,
         DataStatus.COMPLETE_LIVE_BACKUP,
     }
-    if not current_codes and can_generate_decisions:
-        raise InsufficientFeatureCoverage("current trade date live bars are required for decisions")
+    requested_codes = {stock.ts_code for stock in stock_basic}
+    missing_current_codes = sorted(requested_codes - current_codes)
+    if missing_current_codes and can_generate_decisions:
+        missing = ", ".join(missing_current_codes)
+        raise InsufficientFeatureCoverage(
+            f"current trade date live bars are required for decisions; missing: {missing}"
+        )
 
     stocks: list[StockSnapshot] = []
     feature_profiles: dict[str, FeatureSnapshot] = {}
@@ -52,9 +57,16 @@ def build_market_bundle(
         stock_names[stock.ts_code] = stock.name
         current_basic = basics_by_code.get(stock.ts_code)
         current_bars = sorted(
-            bars_by_code.get(stock.ts_code, []), key=lambda item: item.trade_date
+            (
+                bar
+                for bar in bars_by_code.get(stock.ts_code, [])
+                if bar.trade_date <= trade_date
+            ),
+            key=lambda item: item.trade_date,
         )
-        if stock.ts_code not in current_codes or len(current_bars) < 61:
+        if not current_bars or current_bars[-1].trade_date != trade_date:
+            continue
+        if len(current_bars) < 61:
             continue
 
         stocks.append(
