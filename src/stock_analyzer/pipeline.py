@@ -10,6 +10,7 @@ from stock_analyzer.analysis.evidence import build_evidence_package
 from stock_analyzer.analysis.focus import update_focus_watchlist
 from stock_analyzer.analysis.pool import clean_stock_pool
 from stock_analyzer.analysis.recommendation import generate_recommendations
+from stock_analyzer.data.provider import MarketDataProvider
 from stock_analyzer.domain.models import (
     EvaluationTask,
     EvidencePackage,
@@ -120,12 +121,26 @@ def run_daily_pipeline(
     existing_focus_states: Optional[list[FocusState]] = None,
     persist: bool = True,
     fixture_mode: bool = False,
+    market_data_provider: Optional[MarketDataProvider] = None,
 ) -> DailyRunResult:
     repository = repository or InMemoryAnalysisRepository()
-    if not dry_run and not fixture_mode:
-        raise ProductionDataSourceUnavailable(PRODUCTION_DATA_SOURCE_UNAVAILABLE_MESSAGE)
     persist = persist and not dry_run
-    stocks, stock_names, feature_profiles = _sample_market(trade_date)
+    if fixture_mode or dry_run:
+        stocks, stock_names, feature_profiles = _sample_market(trade_date)
+    else:
+        if market_data_provider is None:
+            raise ProductionDataSourceUnavailable(PRODUCTION_DATA_SOURCE_UNAVAILABLE_MESSAGE)
+        bundle = market_data_provider.load(trade_date)
+        if not bundle.can_generate_decisions:
+            raise ProductionDataSourceUnavailable(
+                "Current live data is unavailable; no production decisions were generated."
+            )
+        stocks, stock_names, feature_profiles = bundle.to_pipeline_inputs()
+        if persist:
+            repository.save_stock_master(stocks)
+            repository.save_market_bars(bundle.daily_bars)
+            repository.save_daily_basic_indicators(bundle.daily_basic)
+            repository.save_data_source_runs(bundle.source_runs)
     included_stocks, _ = clean_stock_pool(stocks)
     features = [feature_profiles[stock.ts_code] for stock in included_stocks if stock.ts_code in feature_profiles]
 

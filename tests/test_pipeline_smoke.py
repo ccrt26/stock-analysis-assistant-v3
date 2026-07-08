@@ -9,8 +9,10 @@ from stock_analyzer.domain.models import (
     FocusState,
     Recommendation,
 )
+from stock_analyzer.data.models import DataStatus, MarketDataBundle, SourceGrade
 from stock_analyzer.pipeline import (
     StoredAnalysisNotFound,
+    _sample_market,
     render_report_for_date,
     run_daily_pipeline,
 )
@@ -49,6 +51,54 @@ class FailingSaveRepository(InMemoryAnalysisRepository):
     def save_evaluation_tasks(self, tasks):
         self.save_attempts.append("evaluation_tasks")
         raise AssertionError("dry-run must not save evaluation tasks")
+
+    def save_market_bars(self, bars):
+        self.save_attempts.append("market_bars")
+        raise AssertionError("dry-run must not save market bars")
+
+    def save_daily_basic_indicators(self, rows):
+        self.save_attempts.append("daily_basic_indicators")
+        raise AssertionError("dry-run must not save daily basic indicators")
+
+    def save_data_source_runs(self, rows):
+        self.save_attempts.append("data_source_runs")
+        raise AssertionError("dry-run must not save data source runs")
+
+
+class FakeProductionProvider:
+    def load(self, trade_date):
+        stocks, stock_names, feature_profiles = _sample_market(trade_date)
+        return MarketDataBundle(
+            trade_date=trade_date,
+            data_status=DataStatus.COMPLETE_PRIMARY,
+            source_grade=SourceGrade.PRIMARY,
+            source_versions={"fake-live": trade_date.isoformat()},
+            stock_basic=[],
+            daily_bars=[],
+            daily_basic=[],
+            stocks=stocks,
+            stock_names=stock_names,
+            feature_profiles=feature_profiles,
+            source_runs=[],
+        )
+
+
+class InsufficientProductionProvider:
+    def load(self, trade_date):
+        stocks, stock_names, feature_profiles = _sample_market(trade_date)
+        return MarketDataBundle(
+            trade_date=trade_date,
+            data_status=DataStatus.INSUFFICIENT_LIVE_DATA,
+            source_grade=SourceGrade.PRIMARY,
+            source_versions={"fake-live": trade_date.isoformat()},
+            stock_basic=[],
+            daily_bars=[],
+            daily_basic=[],
+            stocks=stocks,
+            stock_names=stock_names,
+            feature_profiles=feature_profiles,
+            source_runs=[],
+        )
 
 
 def test_run_daily_pipeline_creates_report_and_evaluation_tasks(tmp_path):
@@ -95,6 +145,40 @@ def test_run_daily_pipeline_production_without_data_source_fails_before_persisti
 
     assert "real market data ingestion" in str(excinfo.value)
     assert "--fixture-mode" in str(excinfo.value)
+    assert repo.save_attempts == []
+    assert not (tmp_path / "index.html").exists()
+
+
+def test_run_daily_pipeline_production_uses_provider_and_persists_real_bundle(tmp_path):
+    repo = InMemoryAnalysisRepository()
+
+    result = run_daily_pipeline(
+        date(2026, 7, 7),
+        tmp_path,
+        repository=repo,
+        fixture_mode=False,
+        market_data_provider=FakeProductionProvider(),
+    )
+
+    assert result.recommendations
+    assert repo.recommendations
+    assert repo.stock_master
+    assert (tmp_path / "index.html").exists()
+
+
+def test_run_daily_pipeline_production_fails_when_provider_cannot_generate_decisions(tmp_path):
+    repo = FailingSaveRepository()
+
+    with pytest.raises(RuntimeError) as excinfo:
+        run_daily_pipeline(
+            date(2026, 7, 7),
+            tmp_path,
+            repository=repo,
+            fixture_mode=False,
+            market_data_provider=InsufficientProductionProvider(),
+        )
+
+    assert "no production decisions were generated" in str(excinfo.value)
     assert repo.save_attempts == []
     assert not (tmp_path / "index.html").exists()
 

@@ -5,6 +5,7 @@ import json
 from typer.testing import CliRunner
 
 from stock_analyzer.cli import app
+from stock_analyzer.data.models import DataStatus, MarketDataBundle, SourceGrade
 from stock_analyzer.domain.models import (
     ActionLabel,
     EvaluationTask,
@@ -12,6 +13,7 @@ from stock_analyzer.domain.models import (
     FocusState,
     Recommendation,
 )
+from stock_analyzer.pipeline import _sample_market
 
 
 class RecordingRepository:
@@ -73,6 +75,33 @@ class RecordingRepository:
     def save_evaluation_tasks(self, tasks):
         self.save_calls.append(("evaluation_tasks", tasks))
 
+    def save_market_bars(self, bars):
+        self.save_calls.append(("market_bars", bars))
+
+    def save_daily_basic_indicators(self, rows):
+        self.save_calls.append(("daily_basic_indicators", rows))
+
+    def save_data_source_runs(self, rows):
+        self.save_calls.append(("data_source_runs", rows))
+
+
+class FakeProductionProvider:
+    def load(self, trade_date):
+        stocks, stock_names, feature_profiles = _sample_market(trade_date)
+        return MarketDataBundle(
+            trade_date=trade_date,
+            data_status=DataStatus.COMPLETE_PRIMARY,
+            source_grade=SourceGrade.PRIMARY,
+            source_versions={"fake-live": trade_date.isoformat()},
+            stock_basic=[],
+            daily_bars=[],
+            daily_basic=[],
+            stocks=stocks,
+            stock_names=stock_names,
+            feature_profiles=feature_profiles,
+            source_runs=[],
+        )
+
 
 def test_health_check_command_prints_status():
     result = CliRunner().invoke(app, ["health-check"])
@@ -123,10 +152,12 @@ def test_run_daily_requires_supabase_config_without_fixture_mode(monkeypatch):
     assert "--fixture-mode" in result.output
 
 
-def test_run_daily_with_supabase_config_fails_until_production_ingestion_exists(monkeypatch):
+def test_run_daily_with_supabase_config_fails_without_tushare_token(monkeypatch):
     repo = RecordingRepository()
     monkeypatch.setenv("SUPABASE_URL", "https://supabase.example.test")
     monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "fake-service-role-key")
+    monkeypatch.delenv("TUSHARE_TOKEN", raising=False)
+    monkeypatch.setenv("TUSHARE_TOKEN_PATH", "/tmp/stock-analyzer-missing-token")
     monkeypatch.delenv("STOCK_ANALYZER_FIXTURE_MODE", raising=False)
     monkeypatch.setattr(
         "stock_analyzer.cli._analysis_repository",
@@ -139,9 +170,34 @@ def test_run_daily_with_supabase_config_fails_until_production_ingestion_exists(
     )
 
     assert result.exit_code != 0
-    assert "real market data ingestion" in result.output
-    assert "--fixture-mode" in result.output
+    assert "Tushare token is missing" in result.output
     assert repo.save_calls == []
+
+
+def test_run_daily_with_supabase_config_calls_production_provider(monkeypatch):
+    repo = RecordingRepository()
+    monkeypatch.setenv("SUPABASE_URL", "https://supabase.example.test")
+    monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "fake-service-role-key")
+    monkeypatch.setenv("TUSHARE_TOKEN", "fake-tushare-token")
+    monkeypatch.delenv("STOCK_ANALYZER_FIXTURE_MODE", raising=False)
+    monkeypatch.setattr(
+        "stock_analyzer.cli._analysis_repository",
+        lambda config, **kwargs: repo,
+    )
+    monkeypatch.setattr(
+        "stock_analyzer.cli.build_production_market_data_provider",
+        lambda config: FakeProductionProvider(),
+    )
+
+    result = CliRunner().invoke(
+        app,
+        ["run-daily", "--trade-date", "2026-07-07"],
+    )
+
+    assert result.exit_code == 0
+    assert "daily run completed for 2026-07-07" in result.stdout
+    assert "fake-tushare-token" not in result.output
+    assert any(name == "recommendations" for name, _ in repo.save_calls)
 
 
 def test_run_daily_fixture_mode_writes_local_sample_report(tmp_path, monkeypatch):

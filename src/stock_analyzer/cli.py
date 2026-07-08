@@ -6,8 +6,11 @@ import typer
 
 from stock_analyzer.config import AppConfig
 from stock_analyzer.data.health import run_health_checks
+from stock_analyzer.data.provider import (
+    CurrentLiveDataUnavailable,
+    build_production_market_data_provider,
+)
 from stock_analyzer.pipeline import (
-    PRODUCTION_DATA_SOURCE_UNAVAILABLE_MESSAGE,
     ProductionDataSourceUnavailable,
     StoredAnalysisNotFound,
     render_report_for_date,
@@ -48,7 +51,6 @@ def run_daily(
     if not dry_run and not effective_fixture_mode:
         if not config.has_supabase_config:
             _fail(MISSING_SUPABASE_CONFIG_MESSAGE)
-        _fail(PRODUCTION_DATA_SOURCE_UNAVAILABLE_MESSAGE)
     try:
         repository = _analysis_repository(
             config,
@@ -58,6 +60,13 @@ def run_daily(
     except MissingSupabaseConfig as exc:
         _fail(str(exc))
 
+    market_data_provider = None
+    if not effective_fixture_mode and not dry_run:
+        try:
+            market_data_provider = build_production_market_data_provider(config)
+        except CurrentLiveDataUnavailable as exc:
+            _fail(str(exc))
+
     try:
         result = run_daily_pipeline(
             parsed_trade_date,
@@ -66,6 +75,7 @@ def run_daily(
             repository=repository,
             persist=not dry_run,
             fixture_mode=effective_fixture_mode,
+            market_data_provider=market_data_provider,
         )
     except ProductionDataSourceUnavailable as exc:
         _fail(str(exc))
