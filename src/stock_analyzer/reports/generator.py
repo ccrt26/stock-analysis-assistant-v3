@@ -9,12 +9,18 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 from stock_analyzer.domain.models import EvidencePackage, FocusState, Recommendation
 
 
+FIXTURE_REPORT_WARNING = (
+    "Fixture/sample report: generated from local sample data; not production data."
+)
+
+
 def render_reports(
     output_dir: Path,
     recommendations: list[Recommendation],
     focus_states: list[FocusState],
     evidence_packages: Optional[list[EvidencePackage]] = None,
     trade_date: Optional[date] = None,
+    fixture_mode: bool = False,
 ) -> None:
     report_date = _resolve_trade_date(trade_date, recommendations, focus_states)
     evidence_packages = evidence_packages or []
@@ -42,6 +48,9 @@ def render_reports(
 
     payload = {
         "trade_date": report_date.isoformat(),
+        "report_mode": "fixture" if fixture_mode else "production",
+        "is_fixture": fixture_mode,
+        "warning": FIXTURE_REPORT_WARNING if fixture_mode else None,
         "recommendations": [
             item.model_dump(mode="json") for item in recommendations
         ],
@@ -61,6 +70,8 @@ def render_reports(
         trade_date=report_date,
         recommendation_details=recommendation_details,
         focus_states=focus_states,
+        is_fixture=fixture_mode,
+        fixture_warning=FIXTURE_REPORT_WARNING,
     )
     (output_dir / "index.html").write_text(index_html, encoding="utf-8")
 
@@ -70,6 +81,8 @@ def render_reports(
         trade_date=report_date,
         recommendation_details=daily_recommendation_details,
         focus_states=focus_states,
+        is_fixture=fixture_mode,
+        fixture_warning=FIXTURE_REPORT_WARNING,
     )
     (daily_dir / "index.html").write_text(daily_index_html, encoding="utf-8")
 
@@ -83,6 +96,8 @@ def render_reports(
             recommendation=recommendation,
             detail=detail,
             focus_state=_focus_state_for(recommendation.ts_code, focus_states),
+            is_fixture=fixture_mode,
+            fixture_warning=FIXTURE_REPORT_WARNING,
         )
         (stocks_dir / f"{recommendation.ts_code}.html").write_text(
             stock_html,

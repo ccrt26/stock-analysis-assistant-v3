@@ -1,5 +1,7 @@
 from datetime import date
 
+import json
+
 from typer.testing import CliRunner
 
 from stock_analyzer.cli import app
@@ -115,6 +117,27 @@ def test_run_daily_requires_supabase_config_without_fixture_mode(monkeypatch):
     assert "--fixture-mode" in result.output
 
 
+def test_run_daily_with_supabase_config_fails_until_production_ingestion_exists(monkeypatch):
+    repo = RecordingRepository()
+    monkeypatch.setenv("SUPABASE_URL", "https://supabase.example.test")
+    monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "fake-service-role-key")
+    monkeypatch.delenv("STOCK_ANALYZER_FIXTURE_MODE", raising=False)
+    monkeypatch.setattr(
+        "stock_analyzer.cli._analysis_repository",
+        lambda config, **kwargs: repo,
+    )
+
+    result = CliRunner().invoke(
+        app,
+        ["run-daily", "--trade-date", "2026-07-07"],
+    )
+
+    assert result.exit_code != 0
+    assert "real market data ingestion" in result.output
+    assert "--fixture-mode" in result.output
+    assert repo.save_calls == []
+
+
 def test_run_daily_fixture_mode_writes_local_sample_report(tmp_path, monkeypatch):
     monkeypatch.delenv("SUPABASE_URL", raising=False)
     monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
@@ -128,6 +151,42 @@ def test_run_daily_fixture_mode_writes_local_sample_report(tmp_path, monkeypatch
     assert result.exit_code == 0
     assert "fixture" in result.output
     assert (tmp_path / "index.html").exists()
+    latest_payload = json.loads(
+        (tmp_path / "data" / "latest.json").read_text(encoding="utf-8")
+    )
+    root_html = (tmp_path / "index.html").read_text(encoding="utf-8")
+    daily_html = (tmp_path / "daily" / "2026-07-07" / "index.html").read_text(
+        encoding="utf-8"
+    )
+    first_stock = latest_payload["recommendations"][0]["ts_code"]
+    stock_html = (
+        tmp_path / "daily" / "2026-07-07" / "stocks" / f"{first_stock}.html"
+    ).read_text(encoding="utf-8")
+    assert latest_payload["report_mode"] == "fixture"
+    assert latest_payload["is_fixture"] is True
+    assert "fixture" in latest_payload["warning"].lower()
+    for html in (root_html, daily_html, stock_html):
+        assert "Fixture/sample report" in html
+        assert "not production data" in html
+
+
+def test_run_daily_fixture_mode_env_writes_labeled_sample_report(tmp_path, monkeypatch):
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
+    monkeypatch.setenv("STOCK_ANALYZER_FIXTURE_MODE", "1")
+    monkeypatch.setenv("REPORTS_DIR", str(tmp_path))
+
+    result = CliRunner().invoke(
+        app,
+        ["run-daily", "--trade-date", "2026-07-07"],
+    )
+
+    assert result.exit_code == 0
+    latest_payload = json.loads(
+        (tmp_path / "data" / "latest.json").read_text(encoding="utf-8")
+    )
+    assert latest_payload["report_mode"] == "fixture"
+    assert latest_payload["is_fixture"] is True
 
 
 def test_render_report_command_writes_requested_output_dir_in_fixture_mode(tmp_path):

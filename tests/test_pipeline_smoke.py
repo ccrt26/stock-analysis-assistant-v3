@@ -46,7 +46,12 @@ class FailingSaveRepository(InMemoryAnalysisRepository):
 
 
 def test_run_daily_pipeline_creates_report_and_evaluation_tasks(tmp_path):
-    result = run_daily_pipeline(date(2026, 7, 7), tmp_path, dry_run=False)
+    result = run_daily_pipeline(
+        date(2026, 7, 7),
+        tmp_path,
+        dry_run=False,
+        fixture_mode=True,
+    )
 
     assert result.trade_date.isoformat() == "2026-07-07"
     assert len(result.recommendations) <= 10
@@ -71,10 +76,32 @@ def test_run_daily_pipeline_dry_run_does_not_persist_any_analysis_state(tmp_path
     assert not (tmp_path / "index.html").exists()
 
 
+def test_run_daily_pipeline_production_without_data_source_fails_before_persisting(tmp_path):
+    repo = FailingSaveRepository()
+
+    with pytest.raises(RuntimeError) as excinfo:
+        run_daily_pipeline(
+            date(2026, 7, 7),
+            tmp_path,
+            dry_run=False,
+            repository=repo,
+        )
+
+    assert "real market data ingestion" in str(excinfo.value)
+    assert "--fixture-mode" in str(excinfo.value)
+    assert repo.save_attempts == []
+    assert not (tmp_path / "index.html").exists()
+
+
 def test_run_daily_pipeline_assigns_evidence_ids_before_return_and_save(tmp_path):
     repo = InMemoryAnalysisRepository()
 
-    result = run_daily_pipeline(date(2026, 7, 7), tmp_path, repository=repo)
+    result = run_daily_pipeline(
+        date(2026, 7, 7),
+        tmp_path,
+        repository=repo,
+        fixture_mode=True,
+    )
 
     assert {item.evidence_id for item in result.recommendations} == {
         package.evidence_id for package in repo.evidence_packages
@@ -93,7 +120,12 @@ def test_run_daily_pipeline_preserves_existing_focus_from_repository(tmp_path):
     )
     repo = InMemoryAnalysisRepository(focus_states=[existing])
 
-    result = run_daily_pipeline(date(2026, 7, 7), tmp_path, repository=repo)
+    result = run_daily_pipeline(
+        date(2026, 7, 7),
+        tmp_path,
+        repository=repo,
+        fixture_mode=True,
+    )
 
     preserved = [state for state in result.focus_states if state.ts_code == "688001.SH"]
     assert preserved

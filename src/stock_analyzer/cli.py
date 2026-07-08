@@ -7,6 +7,8 @@ import typer
 from stock_analyzer.config import AppConfig
 from stock_analyzer.data.health import run_health_checks
 from stock_analyzer.pipeline import (
+    PRODUCTION_DATA_SOURCE_UNAVAILABLE_MESSAGE,
+    ProductionDataSourceUnavailable,
     StoredAnalysisNotFound,
     render_report_for_date,
     run_daily_pipeline,
@@ -19,6 +21,12 @@ from stock_analyzer.storage.supabase_client import create_supabase_client
 
 
 app = typer.Typer(no_args_is_help=True)
+
+MISSING_SUPABASE_CONFIG_MESSAGE = (
+    "SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required for production "
+    "run-daily/render-report. Use --fixture-mode or set "
+    "STOCK_ANALYZER_FIXTURE_MODE=1 only for local fixture data."
+)
 
 
 @app.command("health-check")
@@ -37,6 +45,10 @@ def run_daily(
     parsed_trade_date = date.fromisoformat(trade_date)
     config = AppConfig.load()
     effective_fixture_mode = fixture_mode or config.fixture_mode
+    if not dry_run and not effective_fixture_mode:
+        if not config.has_supabase_config:
+            _fail(MISSING_SUPABASE_CONFIG_MESSAGE)
+        _fail(PRODUCTION_DATA_SOURCE_UNAVAILABLE_MESSAGE)
     try:
         repository = _analysis_repository(
             config,
@@ -46,16 +58,23 @@ def run_daily(
     except MissingSupabaseConfig as exc:
         _fail(str(exc))
 
-    result = run_daily_pipeline(
-        parsed_trade_date,
-        config.reports_dir,
-        dry_run=dry_run,
-        repository=repository,
-        persist=not dry_run,
-    )
+    try:
+        result = run_daily_pipeline(
+            parsed_trade_date,
+            config.reports_dir,
+            dry_run=dry_run,
+            repository=repository,
+            persist=not dry_run,
+            fixture_mode=effective_fixture_mode,
+        )
+    except ProductionDataSourceUnavailable as exc:
+        _fail(str(exc))
 
     if dry_run:
-        typer.echo(f"daily run dry-run completed for {result.trade_date.isoformat()}")
+        typer.echo(
+            "daily run dry-run completed for "
+            f"{result.trade_date.isoformat()} (local sample data, no persistence)"
+        )
         return
     if effective_fixture_mode:
         typer.echo(f"daily fixture run completed for {result.trade_date.isoformat()}")
@@ -108,15 +127,11 @@ def _analysis_repository(
 ):
     if fixture_mode:
         return InMemoryAnalysisRepository()
-    if config.has_supabase_config:
-        return SupabaseAnalysisRepository(create_supabase_client(config))
     if not require_supabase:
         return InMemoryAnalysisRepository()
-    raise MissingSupabaseConfig(
-        "SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required for production "
-        "run-daily/render-report. Use --fixture-mode or set "
-        "STOCK_ANALYZER_FIXTURE_MODE=1 only for local fixture data."
-    )
+    if config.has_supabase_config:
+        return SupabaseAnalysisRepository(create_supabase_client(config))
+    raise MissingSupabaseConfig(MISSING_SUPABASE_CONFIG_MESSAGE)
 
 
 def _fail(message: str) -> None:

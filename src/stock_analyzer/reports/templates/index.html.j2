@@ -8,6 +8,12 @@
 <body>
   <main>
     <h1>股票观察报告</h1>
+    {% if is_fixture %}
+    <section role="alert">
+      <h2>Fixture/sample report</h2>
+      <p>{{ fixture_warning }}</p>
+    </section>
+    {% endif %}
 
     <section>
       <h2>今日推荐</h2>

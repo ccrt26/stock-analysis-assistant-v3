@@ -290,7 +290,12 @@ def test_supabase_repository_upserts_prerequisites_before_dependent_pipeline_row
     client = FakeSupabaseClient()
     repo = SupabaseAnalysisRepository(client)
 
-    result = run_daily_pipeline(date(2026, 7, 7), tmp_path, repository=repo)
+    result = run_daily_pipeline(
+        date(2026, 7, 7),
+        tmp_path,
+        repository=repo,
+        fixture_mode=True,
+    )
 
     write_tables = [name for name, _, _ in client.write_calls]
     assert write_tables == [
@@ -328,7 +333,12 @@ def test_supabase_repository_upserts_core_daily_rows_with_conflict_targets(tmp_p
     client = FakeSupabaseClient()
     repo = SupabaseAnalysisRepository(client)
 
-    run_daily_pipeline(date(2026, 7, 7), tmp_path, repository=repo)
+    run_daily_pipeline(
+        date(2026, 7, 7),
+        tmp_path,
+        repository=repo,
+        fixture_mode=True,
+    )
 
     assert [name for name, _, _ in client.write_calls] == [
         "stock_master",

@@ -134,3 +134,42 @@ def test_render_reports_daily_archive_links_to_local_stock_pages(tmp_path):
     assert 'href="daily/2026-07-07/stocks/600000.SH.html"' in root_html
     assert 'href="stocks/600000.SH.html"' in daily_html
     assert 'href="daily/2026-07-07/stocks/600000.SH.html"' not in daily_html
+
+
+def test_render_reports_marks_fixture_outputs_in_html_and_json(tmp_path):
+    rec = Recommendation(
+        trade_date=date(2026, 7, 7),
+        ts_code="600000.SH",
+        name="浦发银行",
+        action=ActionLabel.ENTER_OBSERVATION,
+        score=81,
+        reasons=["趋势改善"],
+        risks=["需要确认"],
+        evidence_id="2026-07-07-600000.SH",
+    )
+
+    render_reports(
+        tmp_path,
+        [rec],
+        [],
+        trade_date=date(2026, 7, 7),
+        fixture_mode=True,
+    )
+
+    payload = json.loads((tmp_path / "data" / "latest.json").read_text(encoding="utf-8"))
+    root_html = (tmp_path / "index.html").read_text(encoding="utf-8")
+    daily_html = (tmp_path / "daily" / "2026-07-07" / "index.html").read_text(
+        encoding="utf-8"
+    )
+    stock_html = (
+        tmp_path / "daily" / "2026-07-07" / "stocks" / "600000.SH.html"
+    ).read_text(encoding="utf-8")
+
+    assert payload["report_mode"] == "fixture"
+    assert payload["is_fixture"] is True
+    assert payload["warning"] == (
+        "Fixture/sample report: generated from local sample data; not production data."
+    )
+    for html in (root_html, daily_html, stock_html):
+        assert "Fixture/sample report" in html
+        assert "not production data" in html

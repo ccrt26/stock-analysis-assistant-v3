@@ -34,6 +34,18 @@ class StoredAnalysisNotFound(RuntimeError):
     pass
 
 
+PRODUCTION_DATA_SOURCE_UNAVAILABLE_MESSAGE = (
+    "Production run-daily requires real market data ingestion, but "
+    "production ingestion is not implemented in this MVP. Use "
+    "--fixture-mode or STOCK_ANALYZER_FIXTURE_MODE=1 only for local "
+    "fixture/sample output."
+)
+
+
+class ProductionDataSourceUnavailable(RuntimeError):
+    pass
+
+
 def _sample_market(trade_date: date) -> tuple[list[StockSnapshot], dict[str, str], dict[str, FeatureSnapshot]]:
     stocks = [
         StockSnapshot(
@@ -107,8 +119,11 @@ def run_daily_pipeline(
     repository: Optional[AnalysisRepository] = None,
     existing_focus_states: Optional[list[FocusState]] = None,
     persist: bool = True,
+    fixture_mode: bool = False,
 ) -> DailyRunResult:
     repository = repository or InMemoryAnalysisRepository()
+    if not dry_run and not fixture_mode:
+        raise ProductionDataSourceUnavailable(PRODUCTION_DATA_SOURCE_UNAVAILABLE_MESSAGE)
     persist = persist and not dry_run
     stocks, stock_names, feature_profiles = _sample_market(trade_date)
     included_stocks, _ = clean_stock_pool(stocks)
@@ -157,6 +172,7 @@ def run_daily_pipeline(
             focus_states,
             evidence_packages=evidence_packages,
             trade_date=trade_date,
+            fixture_mode=fixture_mode,
         )
 
     return DailyRunResult(
@@ -205,6 +221,7 @@ def render_report_for_date(
         dry_run=False,
         repository=repository,
         persist=False,
+        fixture_mode=True,
     )
 
 

@@ -8,6 +8,12 @@
 <body>
   <main>
     <h1>{{ stock_name }}</h1>
+    {% if is_fixture %}
+    <section role="alert">
+      <h2>Fixture/sample report</h2>
+      <p>{{ fixture_warning }}</p>
+    </section>
+    {% endif %}
     <p>{{ conclusion }}</p>
 
     <section>
