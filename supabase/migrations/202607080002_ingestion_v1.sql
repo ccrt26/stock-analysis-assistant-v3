@@ -61,4 +61,5 @@ as $$
   select pg_database_size(current_database()) / 1024.0 / 1024.0;
 $$;
 
+revoke execute on function public.database_size_mb() from public, anon, authenticated;
 grant execute on function public.database_size_mb() to service_role;

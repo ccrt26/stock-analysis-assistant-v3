@@ -102,7 +102,15 @@ def test_ingestion_schema_adds_market_data_tables_and_run_columns():
 
 def test_ingestion_schema_adds_capacity_guard_function():
     sql = INGESTION_SCHEMA_PATH.read_text().lower()
+    compact_sql = re.sub(r"\s+", " ", sql)
 
     assert "create or replace function public.database_size_mb()" in sql
     assert "pg_database_size(current_database())" in sql
-    assert "grant execute on function public.database_size_mb() to service_role" in sql
+    revoke_statement = (
+        "revoke execute on function public.database_size_mb() "
+        "from public, anon, authenticated"
+    )
+    grant_statement = "grant execute on function public.database_size_mb() to service_role"
+    assert revoke_statement in compact_sql
+    assert grant_statement in compact_sql
+    assert compact_sql.index(revoke_statement) < compact_sql.index(grant_statement)

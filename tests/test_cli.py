@@ -4,7 +4,8 @@ import json
 
 from typer.testing import CliRunner
 
-from stock_analyzer.cli import app
+from stock_analyzer.cli import _analysis_repository, app
+from stock_analyzer.config import AppConfig
 from stock_analyzer.data.models import (
     DailyBar,
     DailyBasicRow,
@@ -23,6 +24,8 @@ from stock_analyzer.domain.models import (
     Recommendation,
 )
 from stock_analyzer.pipeline import _sample_market
+from stock_analyzer.storage.capacity_guard import SupabaseCapacityGuard
+from stock_analyzer.storage.repositories import SupabaseAnalysisRepository
 
 
 class RecordingRepository:
@@ -290,6 +293,36 @@ def test_run_daily_requires_supabase_config_without_fixture_mode(monkeypatch):
     assert "SUPABASE_URL" in result.output
     assert "SUPABASE_SERVICE_ROLE_KEY" in result.output
     assert "--fixture-mode" in result.output
+
+
+def test_analysis_repository_wires_supabase_capacity_guard_from_config(monkeypatch):
+    fake_client = object()
+    created_with = []
+
+    def fake_create_supabase_client(config):
+        created_with.append(config)
+        return fake_client
+
+    monkeypatch.setattr(
+        "stock_analyzer.cli.create_supabase_client",
+        fake_create_supabase_client,
+    )
+    config = AppConfig(
+        supabase_url="https://supabase.example.test",
+        supabase_service_role_key="fake-service-role-key",
+        supabase_warn_mb=123.5,
+        supabase_stop_mb=456.5,
+    )
+
+    repo = _analysis_repository(config)
+
+    assert isinstance(repo, SupabaseAnalysisRepository)
+    assert created_with == [config]
+    assert repo.client is fake_client
+    assert isinstance(repo.capacity_guard, SupabaseCapacityGuard)
+    assert repo.capacity_guard.client is fake_client
+    assert repo.capacity_guard.warn_mb == 123.5
+    assert repo.capacity_guard.stop_mb == 456.5
 
 
 def test_run_daily_with_supabase_config_fails_without_tushare_token(monkeypatch):

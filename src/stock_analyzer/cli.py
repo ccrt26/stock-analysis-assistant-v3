@@ -16,6 +16,7 @@ from stock_analyzer.pipeline import (
     render_report_for_date,
     run_daily_pipeline,
 )
+from stock_analyzer.storage.capacity_guard import SupabaseCapacityGuard
 from stock_analyzer.storage.repositories import (
     InMemoryAnalysisRepository,
     SupabaseAnalysisRepository,
@@ -153,7 +154,15 @@ def _analysis_repository(
     if not require_supabase:
         return InMemoryAnalysisRepository()
     if config.has_supabase_config:
-        return SupabaseAnalysisRepository(create_supabase_client(config))
+        client = create_supabase_client(config)
+        return SupabaseAnalysisRepository(
+            client,
+            capacity_guard=SupabaseCapacityGuard(
+                client,
+                warn_mb=config.supabase_warn_mb,
+                stop_mb=config.supabase_stop_mb,
+            ),
+        )
     raise MissingSupabaseConfig(MISSING_SUPABASE_CONFIG_MESSAGE)
 
 

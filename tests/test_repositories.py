@@ -97,6 +97,15 @@ class FakeSupabaseClient:
         return FakeSupabaseTable(name, self)
 
 
+class RejectingCapacityGuard:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def ensure_large_writes_allowed(self) -> None:
+        self.calls += 1
+        raise RuntimeError("capacity stopped")
+
+
 def test_in_memory_repository_saves_daily_outputs():
     repo = InMemoryAnalysisRepository()
     recommendation = Recommendation(
@@ -484,6 +493,75 @@ def test_supabase_repository_rejects_oversized_market_window_without_network():
 
     assert "selected market window" in str(market_excinfo.value)
     assert "selected market window" in str(basic_excinfo.value)
+    assert client.write_calls == []
+
+
+@pytest.mark.parametrize(
+    ("method_name", "rows"),
+    [
+        (
+            "save_market_bars",
+            [
+                DailyBar(
+                    trade_date=date(2026, 7, 8),
+                    ts_code="600000.SH",
+                    close=10.0,
+                    source_name="tushare",
+                    source_grade=SourceGrade.PRIMARY,
+                )
+            ],
+        ),
+        (
+            "save_daily_basic_indicators",
+            [
+                DailyBasicRow(
+                    trade_date=date(2026, 7, 8),
+                    ts_code="600000.SH",
+                    turnover_rate=1.2,
+                    source_name="tushare",
+                    source_grade=SourceGrade.PRIMARY,
+                )
+            ],
+        ),
+    ],
+)
+def test_supabase_repository_capacity_rejection_prevents_ingestion_writes(
+    method_name,
+    rows,
+):
+    client = FakeSupabaseClient()
+    guard = RejectingCapacityGuard()
+    repo = SupabaseAnalysisRepository(client, capacity_guard=guard)
+
+    with pytest.raises(RuntimeError, match="capacity stopped"):
+        getattr(repo, method_name)(rows)
+
+    assert guard.calls == 1
+    assert client.write_calls == []
+
+
+def test_supabase_repository_scope_guard_runs_before_capacity_guard_for_wide_writes():
+    client = FakeSupabaseClient()
+    guard = RejectingCapacityGuard()
+    repo = SupabaseAnalysisRepository(client, capacity_guard=guard)
+    trade_date = date(2026, 7, 8)
+
+    with pytest.raises(ValueError, match="selected market window"):
+        repo.save_market_bars(
+            [
+                DailyBar(
+                    trade_date=trade_date,
+                    ts_code=f"600{i:03d}.SH",
+                    close=10.0,
+                    amount=100000000,
+                    source_name="tushare",
+                    source_grade=SourceGrade.PRIMARY,
+                )
+                for i in range(41)
+            ]
+        )
+
+    assert guard.calls == 0
     assert client.write_calls == []
 
 
