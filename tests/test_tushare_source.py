@@ -52,15 +52,23 @@ def test_tushare_maps_stock_daily_and_basic_rows():
     source = TushareMarketDataSource(token="secret", pro=FakeTusharePro())
 
     stock = source.fetch_stock_basic()[0]
+    calendar = source.fetch_trade_calendar(date(2026, 7, 8), date(2026, 7, 9))
     daily = source.fetch_daily(date(2026, 7, 8))[0]
     daily_basic = source.fetch_daily_basic(date(2026, 7, 8))[0]
 
     assert stock.ts_code == "600000.SH"
+    assert stock.name == "浦发银行"
+    assert stock.exchange == "SSE"
     assert stock.list_date == date(1999, 11, 10)
+    assert calendar == {date(2026, 7, 8): True, date(2026, 7, 9): False}
     assert daily.trade_date == date(2026, 7, 8)
+    assert daily.close == 10.2
+    assert daily.amount == 102000.0
     assert daily.source_name == "tushare"
     assert daily.source_grade == SourceGrade.PRIMARY
     assert daily_basic.turnover_rate == 1.1
+    assert daily_basic.source_name == "tushare"
+    assert daily_basic.source_grade == SourceGrade.PRIMARY
 
 
 def test_tushare_missing_required_field_fails_clearly():
