@@ -1823,9 +1823,9 @@ git commit -m "feat: orchestrate daily analysis pipeline"
 - Create: `/Users/ccrt/股票分析助手/tests/test_cloudflare_middleware.py`
 
 **Interfaces:**
-- Produces: Cloudflare Pages middleware requiring `REPORT_PASSWORD`
+- Produces: Cloudflare Pages middleware requiring `REPORT_PASSWORD` and `REPORT_SESSION_SECRET`
 - Allows: `/login` password form
-- Allows: authenticated session cookie `report_session=ok`
+- Allows: authenticated signed session cookie `report_session`
 
 - [ ] **Step 1: Write static middleware safety test**
 
@@ -1837,7 +1837,9 @@ from pathlib import Path
 def test_cloudflare_middleware_uses_password_and_cookie_without_secrets_in_html():
     text = Path("/Users/ccrt/股票分析助手/functions/_middleware.ts").read_text(encoding="utf-8")
     assert "REPORT_PASSWORD" in text
+    assert "REPORT_SESSION_SECRET" in text
     assert "report_session" in text
+    assert "report_session=ok" not in text
     assert "SUPABASE_SERVICE_ROLE_KEY" not in text
     assert "TUSHARE_TOKEN" not in text
 ```
@@ -1851,24 +1853,37 @@ Expected: FAIL because middleware file does not exist.
 
 ```ts
 // /Users/ccrt/股票分析助手/functions/_middleware.ts
-export const onRequest: PagesFunction<{ REPORT_PASSWORD: string }> = async (context) => {
+type Env = {
+  REPORT_PASSWORD?: string;
+  REPORT_SESSION_SECRET?: string;
+};
+
+export const onRequest: PagesFunction<Env> = async (context) => {
   const request = context.request;
   const url = new URL(request.url);
   const cookie = request.headers.get("Cookie") || "";
+  const passwordSecret = context.env.REPORT_PASSWORD;
+  const sessionSecret = context.env.REPORT_SESSION_SECRET;
+  const session = getCookieValue(cookie, "report_session");
 
-  if (cookie.includes("report_session=ok")) {
+  if (!passwordSecret || !sessionSecret) {
+    return new Response("", { status: 503 });
+  }
+
+  if (await isValidSession(session, sessionSecret)) {
     return context.next();
   }
 
   if (url.pathname === "/login" && request.method === "POST") {
     const form = await request.formData();
     const password = String(form.get("password") || "");
-    if (password === context.env.REPORT_PASSWORD) {
+    if (timingSafeEqual(password, passwordSecret)) {
+      const sessionValue = await createSessionValue(sessionSecret);
       return new Response("", {
         status: 302,
         headers: {
           "Location": "/",
-          "Set-Cookie": "report_session=ok; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=604800",
+          "Set-Cookie": `report_session=${sessionValue}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=604800`,
         },
       });
     }
@@ -1924,14 +1939,14 @@ python -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev,data]"
 python -m stock_analyzer health-check
-python -m stock_analyzer run-daily --trade-date 2026-07-07
+python -m stock_analyzer run-daily --fixture-mode --trade-date 2026-07-07
 ```
 
 ## 密钥
 
 - Tushare token 默认读取 `/Users/ccrt/.tushare_token`。
 - Supabase 写入使用 `SUPABASE_URL` 和 `SUPABASE_SERVICE_ROLE_KEY`。
-- Cloudflare 报告密码使用 `REPORT_PASSWORD`。
+- Cloudflare Pages 报告访问使用 `REPORT_PASSWORD` 和 `REPORT_SESSION_SECRET`。
 - 不要把任何 token 写入 Git。
 
 ## 报告
@@ -1941,7 +1956,8 @@ python -m stock_analyzer run-daily --trade-date 2026-07-07
 ## 第一阶段验收
 
 - `python -m stock_analyzer health-check` 能输出四类健康状态。
-- `python -m stock_analyzer run-daily --trade-date 2026-07-07` 能生成 `reports/index.html`。
+- `python -m stock_analyzer run-daily --fixture-mode --trade-date 2026-07-07` 能生成带 fixture 标记的 `reports/index.html`。
+- 不带 `--fixture-mode` 的生产 `run-daily` 在真实行情接入完成前应清晰失败。
 - 每日推荐数量不超过 10 只。
 - 重点关注状态和推荐状态分离。
 - 每条推荐生成证据包和评估任务。
@@ -1955,8 +1971,8 @@ Expected: PASS.
 
 - [ ] **Step 3: Run CLI smoke command**
 
-Run: `python -m stock_analyzer run-daily --trade-date 2026-07-07`  
-Expected: command exits 0 and creates `/Users/ccrt/股票分析助手/reports/index.html`.
+Run: `python -m stock_analyzer run-daily --fixture-mode --trade-date 2026-07-07`
+Expected: command exits 0 and creates a fixture-labeled `/Users/ccrt/股票分析助手/reports/index.html`.
 
 - [ ] **Step 4: Verify report does not leak secrets**
 

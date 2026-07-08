@@ -21,6 +21,7 @@ class AnalysisRepository(Protocol):
     def load_daily_recommendations(self, trade_date: date) -> List[Recommendation]: ...
     def load_focus_states_for_date(self, trade_date: date) -> List[FocusState]: ...
     def load_evidence_packages(self, trade_date: date) -> List[EvidencePackage]: ...
+    def load_evaluation_tasks(self, trade_date: date) -> List[EvaluationTask]: ...
     def save_stock_master(self, stocks: List[StockSnapshot]) -> None: ...
     def save_stock_statuses(self, stocks: List[StockSnapshot]) -> None: ...
     def save_feature_snapshots(self, features: List[FeatureSnapshot]) -> None: ...
@@ -60,6 +61,9 @@ class InMemoryAnalysisRepository:
 
     def load_evidence_packages(self, trade_date: date) -> List[EvidencePackage]:
         return [item for item in self.evidence_packages if item.trade_date == trade_date]
+
+    def load_evaluation_tasks(self, trade_date: date) -> List[EvaluationTask]:
+        return [item for item in self.evaluation_tasks if item.trade_date == trade_date]
 
     def save_stock_master(self, stocks: List[StockSnapshot]) -> None:
         self.stock_master = _upsert_model_list(
@@ -152,6 +156,15 @@ class SupabaseAnalysisRepository:
             .execute()
         )
         return [_evidence_package_from_row(row) for row in result.data or []]
+
+    def load_evaluation_tasks(self, trade_date: date) -> List[EvaluationTask]:
+        result = (
+            self.client.table("evaluation_task")
+            .select("*")
+            .eq("trade_date", trade_date.isoformat())
+            .execute()
+        )
+        return [_evaluation_task_from_row(row) for row in result.data or []]
 
     def save_stock_master(self, stocks: List[StockSnapshot]) -> None:
         rows_by_code = {
@@ -329,6 +342,17 @@ def _evidence_package_from_row(row: dict) -> EvidencePackage:
         expected_confirmation_path=list(row.get("expected_confirmation_path") or []),
         invalidation_conditions=list(row.get("invalidation_conditions") or []),
         source_versions=dict(row.get("source_versions") or {}),
+    )
+
+
+def _evaluation_task_from_row(row: dict) -> EvaluationTask:
+    return EvaluationTask(
+        trade_date=_date_from_row(row["trade_date"]),
+        ts_code=row["ts_code"],
+        evidence_id=row["evidence_id"],
+        checkpoint_days=int(row["checkpoint_days"]),
+        due_date=_date_from_row(row["due_date"]),
+        evaluation_layer=row["evaluation_layer"],
     )
 
 

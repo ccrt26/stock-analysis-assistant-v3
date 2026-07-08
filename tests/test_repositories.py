@@ -168,6 +168,7 @@ def test_in_memory_repository_saves_daily_outputs():
     assert len(repo.stock_statuses) == 1
     assert len(repo.feature_snapshots) == 1
     assert repo.load_focus_states() == [focus]
+    assert repo.load_evaluation_tasks(date(2026, 7, 7)) == [task]
 
 
 def test_in_memory_repository_upserts_core_daily_outputs_by_stable_keys():
@@ -422,16 +423,37 @@ def test_supabase_repository_loads_daily_analysis_rows_for_report_rendering():
             "source_versions": {"recommendation": "2026-07-07-600000.SH"},
         }
     ]
+    client.table_data["evaluation_task"] = [
+        {
+            "trade_date": "2026-07-07",
+            "ts_code": "600000.SH",
+            "evidence_id": "2026-07-07-600000.SH",
+            "checkpoint_days": 5,
+            "due_date": "2026-07-14",
+            "evaluation_layer": "result",
+        },
+        {
+            "trade_date": "2026-07-08",
+            "ts_code": "600519.SH",
+            "evidence_id": "2026-07-08-600519.SH",
+            "checkpoint_days": 5,
+            "due_date": "2026-07-15",
+            "evaluation_layer": "result",
+        },
+    ]
     repo = SupabaseAnalysisRepository(client)
 
     recommendations = repo.load_daily_recommendations(date(2026, 7, 7))
     focus_states = repo.load_focus_states_for_date(date(2026, 7, 7))
     evidence_packages = repo.load_evidence_packages(date(2026, 7, 7))
+    evaluation_tasks = repo.load_evaluation_tasks(date(2026, 7, 7))
 
     assert [item.ts_code for item in recommendations] == ["600000.SH"]
     assert recommendations[0].name == "浦发银行"
     assert [item.ts_code for item in focus_states] == ["600000.SH"]
     assert evidence_packages[0].matched_rules == ["RESEARCH_TREND_CONFIRMATION"]
+    assert [item.evidence_id for item in evaluation_tasks] == ["2026-07-07-600000.SH"]
+    assert evaluation_tasks[0].due_date == date(2026, 7, 14)
 
 
 def test_supabase_repository_loads_latest_active_focus_state_per_stock():

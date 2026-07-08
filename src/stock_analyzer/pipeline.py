@@ -193,7 +193,14 @@ def render_report_for_date(
     recommendations = repository.load_daily_recommendations(trade_date)
     focus_states = repository.load_focus_states_for_date(trade_date)
     evidence_packages = repository.load_evidence_packages(trade_date)
+    evaluation_tasks = repository.load_evaluation_tasks(trade_date)
     if recommendations or focus_states or evidence_packages:
+        _validate_stored_analysis_complete(
+            trade_date,
+            recommendations,
+            evidence_packages,
+            evaluation_tasks,
+        )
         render_reports(
             output_dir,
             recommendations,
@@ -205,7 +212,7 @@ def render_report_for_date(
             trade_date=trade_date,
             recommendations=recommendations,
             focus_states=focus_states,
-            evaluation_tasks=[],
+            evaluation_tasks=evaluation_tasks,
         )
 
     if not allow_fixture_fallback:
@@ -241,3 +248,80 @@ def _assign_evidence_ids(
         )
         for recommendation in recommendations
     ]
+
+
+def _validate_stored_analysis_complete(
+    trade_date: date,
+    recommendations: list[Recommendation],
+    evidence_packages: list[EvidencePackage],
+    evaluation_tasks: list[EvaluationTask],
+) -> None:
+    if not recommendations:
+        return
+
+    evidence_by_id = {package.evidence_id: package for package in evidence_packages}
+    missing_evidence = []
+    mismatched_evidence = []
+    matched_recommendations = []
+    for recommendation in recommendations:
+        evidence_id = recommendation.evidence_id
+        if not evidence_id:
+            missing_evidence.append(f"{recommendation.ts_code} (missing evidence_id)")
+            continue
+        package = evidence_by_id.get(evidence_id)
+        if package is None:
+            missing_evidence.append(f"{recommendation.ts_code} ({evidence_id})")
+            continue
+        if package.ts_code != recommendation.ts_code:
+            mismatched_evidence.append(
+                f"{recommendation.ts_code} ({evidence_id} belongs to {package.ts_code})"
+            )
+            continue
+        matched_recommendations.append(recommendation)
+
+    if missing_evidence or mismatched_evidence:
+        detail = "; ".join(
+            part
+            for part in (
+                _format_incomplete_refs(
+                    "Missing evidence package",
+                    missing_evidence,
+                ),
+                _format_incomplete_refs(
+                    "Mismatched evidence package",
+                    mismatched_evidence,
+                ),
+            )
+            if part
+        )
+        raise StoredAnalysisNotFound(
+            f"Stored analysis for {trade_date.isoformat()} is incomplete: {detail}. "
+            "Production render-report refuses to publish without complete evidence."
+        )
+
+    task_keys = {
+        (task.trade_date, task.ts_code, task.evidence_id)
+        for task in evaluation_tasks
+    }
+    missing_tasks = [
+        f"{recommendation.ts_code} ({recommendation.evidence_id})"
+        for recommendation in matched_recommendations
+        if (
+            recommendation.trade_date,
+            recommendation.ts_code,
+            recommendation.evidence_id,
+        )
+        not in task_keys
+    ]
+    if missing_tasks:
+        raise StoredAnalysisNotFound(
+            f"Stored analysis for {trade_date.isoformat()} is incomplete: "
+            f"{_format_incomplete_refs('Missing evaluation task', missing_tasks)}. "
+            "Production render-report refuses to publish until evaluation tasks are registered."
+        )
+
+
+def _format_incomplete_refs(label: str, refs: list[str]) -> str:
+    if not refs:
+        return ""
+    return f"{label} for recommendation(s): {', '.join(refs)}"

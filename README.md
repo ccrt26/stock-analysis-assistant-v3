@@ -28,10 +28,12 @@ PYTHONPATH=src python3 -m stock_analyzer run-daily --fixture-mode --trade-date 2
 
 - Tushare token 默认读取 `/Users/ccrt/.tushare_token`。
 - 也可以通过 `TUSHARE_TOKEN_PATH` 指定本地 token 文件。
-- 生产报告渲染必须设置 `SUPABASE_URL` 和 `SUPABASE_SERVICE_ROLE_KEY`。
+- 生产报告渲染必须设置 `SUPABASE_URL` 和 `SUPABASE_SERVICE_ROLE_KEY`。`SUPABASE_SERVICE_ROLE_KEY` 只用于服务端/本地受控脚本访问 Supabase，不能写入报告产物、前端代码或 Git。
 - 生产 `run-daily` 还需要真实行情接入；当前 MVP 未实现接入时会失败，不会持久化样例推荐。
 - 本地样例报告必须显式使用 `--fixture-mode`，或设置 `STOCK_ANALYZER_FIXTURE_MODE=1`。
-- Cloudflare 报告密码使用 `REPORT_PASSWORD`。
+- Cloudflare Pages 报告访问需要同时配置 `REPORT_PASSWORD` 和 `REPORT_SESSION_SECRET`。`REPORT_PASSWORD` 是访问报告时输入的共享密码；`REPORT_SESSION_SECRET` 用于 HMAC 签名 `report_session` Cookie，缺失时中间件会返回 `503`，避免发布无会话保护的报告站点。
+- 可用 `openssl rand -base64 32` 生成 `REPORT_SESSION_SECRET`，把输出作为 Cloudflare Pages 的环境变量/Secret 配置，不要提交到仓库。
+- 在 Cloudflare Pages 项目中进入 Settings -> Environment variables，为 Production（需要时也为 Preview）分别配置 `REPORT_PASSWORD` 和 `REPORT_SESSION_SECRET`。
 - 不要把任何 token 写入 Git。
 
 ## 路径
@@ -45,6 +47,8 @@ PYTHONPATH=src python3 -m stock_analyzer run-daily --fixture-mode --trade-date 2
 固定入口是 `reports/index.html`。
 
 `render-report --trade-date YYYY-MM-DD` 默认只渲染 Supabase 中已存储的分析记录；如果没有存储记录会失败并提示先写入生产分析记录。要生成本地样例报告，使用 `render-report --fixture-mode --trade-date YYYY-MM-DD`。
+
+生产 `render-report` 会要求每条存储推荐都有匹配证据包，并且对应评估任务已注册；如果 Supabase 中只有部分推荐、证据或评估任务，命令会失败，不会发布回退到推荐理由的成品报告。
 
 Cloudflare Pages 只发布报告成品，不发布原始数据、日志、规则编辑器、数据库后台或其他内部调试产物。
 

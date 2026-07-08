@@ -133,6 +133,8 @@ During source-tree development before editable installation, use:
 PYTHONPATH=src python3 -m stock_analyzer run-daily --trade-date YYYY-MM-DD
 ```
 
+Current MVP boundary: until real market ingestion exists, the non-fixture command above must fail clearly. Local sample report generation requires explicit `--fixture-mode`.
+
 The command performs:
 
 1. Startup checks: trading day, credentials, source availability, network, last successful run.
@@ -530,7 +532,8 @@ Recommended deployment:
 Stage 1 is considered ready when the local runbook and the generated report surface meet all of the following:
 
 - After editable installation, `python3 -m stock_analyzer health-check` reports four health categories.
-- Without editable installation, `PYTHONPATH=src python3 -m stock_analyzer run-daily --trade-date 2026-07-07` generates `reports/index.html`.
+- Without editable installation, `PYTHONPATH=src python3 -m stock_analyzer run-daily --fixture-mode --trade-date 2026-07-07` generates a clearly labeled fixture report at `reports/index.html`.
+- Without `--fixture-mode`, production `run-daily` fails clearly until real ingestion is implemented, and must not persist or publish sample data.
 - Daily recommendations stay at or below 10 names.
 - The focus watchlist remains separate from daily recommendations.
 - Each recommendation produces a frozen evidence package and at least one evaluation task.

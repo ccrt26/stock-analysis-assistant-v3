@@ -24,6 +24,8 @@ def render_reports(
 ) -> None:
     report_date = _resolve_trade_date(trade_date, recommendations, focus_states)
     evidence_packages = evidence_packages or []
+    if not fixture_mode:
+        _require_matching_evidence(recommendations, evidence_packages)
     recommendation_details = _recommendation_details(
         recommendations,
         report_date,
@@ -153,6 +155,53 @@ def _recommendation_details(
         )
         for recommendation in recommendations
     ]
+
+
+def _require_matching_evidence(
+    recommendations: list[Recommendation],
+    evidence_packages: list[EvidencePackage],
+) -> None:
+    evidence_by_id = {package.evidence_id: package for package in evidence_packages}
+    missing = []
+    mismatched = []
+    for recommendation in recommendations:
+        evidence_id = recommendation.evidence_id
+        if not evidence_id:
+            missing.append(f"{recommendation.ts_code} (missing evidence_id)")
+            continue
+        package = evidence_by_id.get(evidence_id)
+        if package is None:
+            missing.append(f"{recommendation.ts_code} ({evidence_id})")
+            continue
+        if package.ts_code != recommendation.ts_code:
+            mismatched.append(
+                f"{recommendation.ts_code} ({evidence_id} belongs to {package.ts_code})"
+            )
+    if missing or mismatched:
+        details = "; ".join(
+            part
+            for part in (
+                _format_evidence_validation_detail(
+                    "missing matching evidence package",
+                    missing,
+                ),
+                _format_evidence_validation_detail(
+                    "mismatched evidence package",
+                    mismatched,
+                ),
+            )
+            if part
+        )
+        raise ValueError(
+            "Production reports require a matching evidence package for every "
+            f"recommendation: {details}."
+        )
+
+
+def _format_evidence_validation_detail(label: str, refs: list[str]) -> str:
+    if not refs:
+        return ""
+    return f"{label}: {', '.join(refs)}"
 
 
 def _recommendation_detail(

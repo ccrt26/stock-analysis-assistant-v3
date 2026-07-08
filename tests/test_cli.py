@@ -7,6 +7,7 @@ from typer.testing import CliRunner
 from stock_analyzer.cli import app
 from stock_analyzer.domain.models import (
     ActionLabel,
+    EvaluationTask,
     EvidencePackage,
     FocusState,
     Recommendation,
@@ -21,6 +22,7 @@ class RecordingRepository:
         self.daily_recommendations = []
         self.daily_focus_states = []
         self.daily_evidence_packages = []
+        self.daily_evaluation_tasks = []
 
     def load_focus_states(self):
         self.load_calls += 1
@@ -45,6 +47,10 @@ class RecordingRepository:
     def load_evidence_packages(self, trade_date):
         self.render_load_calls.append(("evidence_packages", trade_date))
         return list(self.daily_evidence_packages)
+
+    def load_evaluation_tasks(self, trade_date):
+        self.render_load_calls.append(("evaluation_tasks", trade_date))
+        return list(self.daily_evaluation_tasks)
 
     def save_stock_master(self, stocks):
         self.save_calls.append(("stock_master", stocks))
@@ -237,6 +243,16 @@ def test_render_report_command_uses_stored_repository_data_when_available(tmp_pa
             source_versions={"repository": "stored"},
         )
     ]
+    repo.daily_evaluation_tasks = [
+        EvaluationTask(
+            trade_date=date(2026, 7, 7),
+            ts_code="688999.SH",
+            evidence_id="stored-evidence-688999",
+            checkpoint_days=5,
+            due_date=date(2026, 7, 14),
+            evaluation_layer="result",
+        )
+    ]
     monkeypatch.setattr(
         "stock_analyzer.cli._analysis_repository",
         lambda config, **kwargs: repo,
@@ -261,6 +277,43 @@ def test_render_report_command_uses_stored_repository_data_when_available(tmp_pa
     assert "浦发银行" not in html
     assert repo.load_calls == 0
     assert repo.save_calls == []
+
+
+def test_render_report_command_fails_when_stored_evidence_is_incomplete(tmp_path, monkeypatch):
+    repo = RecordingRepository()
+    repo.daily_recommendations = [
+        Recommendation(
+            trade_date=date(2026, 7, 7),
+            ts_code="688999.SH",
+            name="存量样本",
+            action=ActionLabel.CONTINUE_OBSERVATION,
+            score=88,
+            reasons=["存储证据支持"],
+            risks=["存储反证"],
+            evidence_id="missing-evidence-688999",
+        )
+    ]
+    monkeypatch.setattr(
+        "stock_analyzer.cli._analysis_repository",
+        lambda config, **kwargs: repo,
+    )
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "render-report",
+            "--trade-date",
+            "2026-07-07",
+            "--output-dir",
+            str(tmp_path),
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "Missing evidence package" in result.output
+    assert "missing-evidence-688999" in result.output
+    assert repo.save_calls == []
+    assert not (tmp_path / "index.html").exists()
 
 
 def test_render_report_command_fails_without_stored_data_in_production(tmp_path, monkeypatch):

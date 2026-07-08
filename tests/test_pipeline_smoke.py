@@ -1,8 +1,14 @@
 from datetime import date
 
-from stock_analyzer.domain.models import ActionLabel, FocusState
 import pytest
 
+from stock_analyzer.domain.models import (
+    ActionLabel,
+    EvaluationTask,
+    EvidencePackage,
+    FocusState,
+    Recommendation,
+)
 from stock_analyzer.pipeline import (
     StoredAnalysisNotFound,
     render_report_for_date,
@@ -143,6 +149,115 @@ def test_render_report_for_date_fails_when_repository_has_no_stored_rows(tmp_pat
 
     assert "No stored analysis rows found for 2026-07-07" in str(excinfo.value)
     assert not (tmp_path / "index.html").exists()
+
+
+def test_render_report_for_date_fails_when_recommendation_lacks_matching_evidence(tmp_path):
+    repo = InMemoryAnalysisRepository(
+        recommendations=[
+            Recommendation(
+                trade_date=date(2026, 7, 7),
+                ts_code="600000.SH",
+                name="浦发银行",
+                action=ActionLabel.ENTER_OBSERVATION,
+                score=81,
+                reasons=["趋势改善"],
+                risks=["需要确认"],
+                evidence_id="missing-evidence-600000",
+            )
+        ]
+    )
+
+    with pytest.raises(StoredAnalysisNotFound) as excinfo:
+        render_report_for_date(date(2026, 7, 7), tmp_path, repository=repo)
+
+    assert "Missing evidence package" in str(excinfo.value)
+    assert "missing-evidence-600000" in str(excinfo.value)
+    assert not (tmp_path / "index.html").exists()
+
+
+def test_render_report_for_date_fails_when_evaluation_tasks_are_missing(tmp_path):
+    recommendation = Recommendation(
+        trade_date=date(2026, 7, 7),
+        ts_code="600000.SH",
+        name="浦发银行",
+        action=ActionLabel.ENTER_OBSERVATION,
+        score=81,
+        reasons=["趋势改善"],
+        risks=["需要确认"],
+        evidence_id="2026-07-07-600000.SH",
+    )
+    repo = InMemoryAnalysisRepository(
+        recommendations=[recommendation],
+        evidence_packages=[
+            EvidencePackage(
+                evidence_id="2026-07-07-600000.SH",
+                trade_date=date(2026, 7, 7),
+                ts_code="600000.SH",
+                thesis="浦发银行进入观察，趋势改善",
+                support=["趋势改善"],
+                counter_evidence=["需要确认"],
+                matched_rules=["RESEARCH_TREND_CONFIRMATION"],
+                confidence_level="medium",
+                expected_confirmation_path=["趋势延续"],
+                invalidation_conditions=["趋势证据消失"],
+                source_versions={"recommendation": "2026-07-07-600000.SH"},
+            )
+        ],
+    )
+
+    with pytest.raises(StoredAnalysisNotFound) as excinfo:
+        render_report_for_date(date(2026, 7, 7), tmp_path, repository=repo)
+
+    assert "Missing evaluation task" in str(excinfo.value)
+    assert "2026-07-07-600000.SH" in str(excinfo.value)
+    assert not (tmp_path / "index.html").exists()
+
+
+def test_render_report_for_date_renders_complete_stored_analysis(tmp_path):
+    recommendation = Recommendation(
+        trade_date=date(2026, 7, 7),
+        ts_code="600000.SH",
+        name="浦发银行",
+        action=ActionLabel.ENTER_OBSERVATION,
+        score=81,
+        reasons=["趋势改善"],
+        risks=["需要确认"],
+        evidence_id="2026-07-07-600000.SH",
+    )
+    repo = InMemoryAnalysisRepository(
+        recommendations=[recommendation],
+        evidence_packages=[
+            EvidencePackage(
+                evidence_id="2026-07-07-600000.SH",
+                trade_date=date(2026, 7, 7),
+                ts_code="600000.SH",
+                thesis="浦发银行进入观察，趋势改善",
+                support=["趋势改善"],
+                counter_evidence=["需要确认"],
+                matched_rules=["RESEARCH_TREND_CONFIRMATION"],
+                confidence_level="medium",
+                expected_confirmation_path=["趋势延续"],
+                invalidation_conditions=["趋势证据消失"],
+                source_versions={"recommendation": "2026-07-07-600000.SH"},
+            )
+        ],
+        evaluation_tasks=[
+            EvaluationTask(
+                trade_date=date(2026, 7, 7),
+                ts_code="600000.SH",
+                evidence_id="2026-07-07-600000.SH",
+                checkpoint_days=5,
+                due_date=date(2026, 7, 14),
+                evaluation_layer="result",
+            )
+        ],
+    )
+
+    result = render_report_for_date(date(2026, 7, 7), tmp_path, repository=repo)
+
+    assert result.recommendations == [recommendation]
+    assert len(result.evaluation_tasks) == 1
+    assert (tmp_path / "index.html").exists()
 
 
 def test_render_report_for_date_allows_explicit_fixture_fallback(tmp_path):
