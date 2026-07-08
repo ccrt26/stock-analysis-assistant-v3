@@ -38,12 +38,13 @@ class SupabaseCapacityGuard:
             stop_large_writes=size_mb >= self.stop_mb,
         )
 
-    def ensure_large_writes_allowed(self) -> None:
+    def ensure_large_writes_allowed(self) -> CapacityStatus:
         status = self.check()
         if status.stop_large_writes:
             raise SupabaseCapacityLimitExceeded(
                 f"Supabase database size is {status.size_mb:.1f} MB; large writes stop at {self.stop_mb:.1f} MB"
             )
+        return status
 
 
 def ensure_selected_market_window_scope(rows: Sequence[object]) -> None:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from datetime import date
 from typing import Iterable, List, Optional, Protocol
 
@@ -24,6 +25,7 @@ from stock_analyzer.storage.capacity_guard import ensure_selected_market_window_
 
 
 INGESTION_UPSERT_BATCH_SIZE = 5000
+logger = logging.getLogger(__name__)
 
 
 class AnalysisRepository(Protocol):
@@ -223,8 +225,7 @@ class SupabaseAnalysisRepository:
     ) -> None:
         ensure_selected_market_window_scope(bars)
         ensure_selected_market_window_scope(daily_basic)
-        if self.capacity_guard is not None:
-            self.capacity_guard.ensure_large_writes_allowed()
+        _ensure_capacity_allows_ingestion_write(self.capacity_guard)
 
     def save_stock_master(self, stocks: List[StockSnapshot | StockBasicRow]) -> None:
         rows_by_code = {
@@ -351,8 +352,7 @@ class SupabaseAnalysisRepository:
         if not bars:
             return
         ensure_selected_market_window_scope(bars)
-        if self.capacity_guard is not None:
-            self.capacity_guard.ensure_large_writes_allowed()
+        _ensure_capacity_allows_ingestion_write(self.capacity_guard)
         rows = [
             {
                 "trade_date": item.trade_date.isoformat(),
@@ -380,8 +380,7 @@ class SupabaseAnalysisRepository:
         if not rows:
             return
         ensure_selected_market_window_scope(rows)
-        if self.capacity_guard is not None:
-            self.capacity_guard.ensure_large_writes_allowed()
+        _ensure_capacity_allows_ingestion_write(self.capacity_guard)
         payload = [
             {
                 "trade_date": item.trade_date.isoformat(),
@@ -436,6 +435,20 @@ def _date_to_text(value: Optional[date]) -> Optional[str]:
 def _chunks(items: list[dict], size: int) -> Iterable[list[dict]]:
     for start in range(0, len(items), size):
         yield items[start : start + size]
+
+
+def _ensure_capacity_allows_ingestion_write(capacity_guard) -> None:
+    if capacity_guard is None:
+        return
+
+    status = capacity_guard.ensure_large_writes_allowed()
+    if getattr(status, "warn", False):
+        logger.warning(
+            "Supabase database size is %.1f MB; warning threshold is %.1f MB and large writes stop at %.1f MB",
+            status.size_mb,
+            capacity_guard.warn_mb,
+            capacity_guard.stop_mb,
+        )
 
 
 def _focus_state_from_row(row: dict) -> FocusState:

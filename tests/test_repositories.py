@@ -1,3 +1,4 @@
+import logging
 from datetime import date
 
 import pytest
@@ -26,6 +27,7 @@ from stock_analyzer.storage.repositories import (
     InMemoryAnalysisRepository,
     SupabaseAnalysisRepository,
 )
+from stock_analyzer.storage.capacity_guard import SupabaseCapacityGuard
 from stock_analyzer.storage.supabase_client import create_supabase_client
 
 try:
@@ -106,6 +108,23 @@ class RejectingCapacityGuard:
     def ensure_large_writes_allowed(self) -> None:
         self.calls += 1
         raise RuntimeError("capacity stopped")
+
+
+class FakeRpcResult:
+    def __init__(self, data):
+        self.data = data
+
+
+class FakeCapacityClient:
+    def __init__(self, size_mb):
+        self.size_mb = size_mb
+
+    def rpc(self, name):
+        assert name == "database_size_mb"
+        return self
+
+    def execute(self):
+        return FakeRpcResult(self.size_mb)
 
 
 class RecordingWarehouse:
@@ -605,6 +624,72 @@ def test_supabase_repository_preflight_checks_capacity_without_table_calls():
     assert guard.calls == 1
     assert client.table_calls == []
     assert client.write_calls == []
+
+
+def test_supabase_repository_logs_capacity_warning_without_blocking_preflight(caplog):
+    client = FakeSupabaseClient()
+    guard = SupabaseCapacityGuard(
+        FakeCapacityClient(350),
+        warn_mb=350,
+        stop_mb=400,
+    )
+    repo = SupabaseAnalysisRepository(client, capacity_guard=guard)
+
+    with caplog.at_level(logging.WARNING, logger="stock_analyzer.storage.repositories"):
+        repo.preflight_market_window_writes(
+            [
+                DailyBar(
+                    trade_date=date(2026, 7, 8),
+                    ts_code="600000.SH",
+                    close=10.0,
+                    source_name="tushare",
+                    source_grade=SourceGrade.PRIMARY,
+                )
+            ],
+            [
+                DailyBasicRow(
+                    trade_date=date(2026, 7, 8),
+                    ts_code="600000.SH",
+                    turnover_rate=1.2,
+                    source_name="tushare",
+                    source_grade=SourceGrade.PRIMARY,
+                )
+            ],
+        )
+
+    assert "Supabase database size is 350.0 MB" in caplog.text
+    assert "large writes stop at 400.0 MB" in caplog.text
+    assert client.table_calls == []
+    assert client.write_calls == []
+
+
+def test_supabase_repository_logs_capacity_warning_without_blocking_ingestion_write(
+    caplog,
+):
+    client = FakeSupabaseClient()
+    guard = SupabaseCapacityGuard(
+        FakeCapacityClient(350),
+        warn_mb=350,
+        stop_mb=400,
+    )
+    repo = SupabaseAnalysisRepository(client, capacity_guard=guard)
+
+    with caplog.at_level(logging.WARNING, logger="stock_analyzer.storage.repositories"):
+        repo.save_market_bars(
+            [
+                DailyBar(
+                    trade_date=date(2026, 7, 8),
+                    ts_code="600000.SH",
+                    close=10.0,
+                    source_name="tushare",
+                    source_grade=SourceGrade.PRIMARY,
+                )
+            ],
+        )
+
+    assert "Supabase database size is 350.0 MB" in caplog.text
+    assert "large writes stop at 400.0 MB" in caplog.text
+    assert [name for name, _, _ in client.write_calls] == ["market_price_daily"]
 
 
 def test_supabase_repository_upserts_prerequisites_before_dependent_pipeline_rows(tmp_path):
