@@ -3,10 +3,21 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>股票观察报告</title>
+  <title>{% if data_unavailable_notice %}数据不可用通知{% else %}股票观察报告{% endif %}</title>
 </head>
 <body>
   <main>
+    {% if data_unavailable_notice %}
+    <h1>{{ trade_date.isoformat() }} 数据不可用</h1>
+    <section role="alert">
+      <h2>当日实时数据不可用</h2>
+      <p>不生成新的股票分析结论。</p>
+      <p>原因：{{ data_unavailable_notice.reason }}</p>
+      {% if data_unavailable_notice.last_successful_trade_date %}
+      <p>最近一次成功数据日期：{{ data_unavailable_notice.last_successful_trade_date.isoformat() }}</p>
+      {% endif %}
+    </section>
+    {% else %}
     <h1>股票观察报告</h1>
     {% if is_fixture %}
     <section role="alert">
@@ -83,6 +94,7 @@
       <p>当前没有重点关注股票。</p>
       {% endfor %}
     </section>
+    {% endif %}
   </main>
 </body>
 </html>

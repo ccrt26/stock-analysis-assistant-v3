@@ -4,13 +4,14 @@ import json
 
 import pytest
 
+from stock_analyzer.data.models import DataUnavailableNotice
 from stock_analyzer.domain.models import (
     ActionLabel,
     EvidencePackage,
     FocusState,
     Recommendation,
 )
-from stock_analyzer.reports.generator import render_reports
+from stock_analyzer.reports.generator import render_data_unavailable_notice, render_reports
 
 
 def test_render_reports_creates_fixed_entry_and_hides_secrets(tmp_path):
@@ -209,6 +210,31 @@ def test_render_reports_marks_fixture_outputs_in_html_and_json(tmp_path):
     for html in (root_html, daily_html, stock_html):
         assert "Fixture/sample report" in html
         assert "not production data" in html
+
+
+def test_data_unavailable_notice_does_not_create_stock_analysis_pages(tmp_path):
+    notice = DataUnavailableNotice(
+        trade_date=date(2026, 7, 8),
+        reason="current live data unavailable",
+        last_successful_trade_date=date(2026, 7, 7),
+    )
+
+    render_data_unavailable_notice(tmp_path, notice)
+
+    latest = json.loads((tmp_path / "data" / "latest.json").read_text(encoding="utf-8"))
+    html = (tmp_path / "index.html").read_text(encoding="utf-8")
+
+    assert latest["report_mode"] == "data_unavailable"
+    assert latest["is_fixture"] is False
+    assert latest["recommendations"] == []
+    assert latest["focus_states"] == []
+    assert latest["evidence_packages"] == []
+    assert latest["recommendation_details"] == []
+    assert "不生成新的股票分析结论" in html
+    assert "Fixture/sample report" not in html
+    assert "今日推荐" not in html
+    assert "重点关注" not in html
+    assert not (tmp_path / "daily" / "2026-07-08" / "stocks").exists()
 
 
 def _evidence_package() -> EvidencePackage:

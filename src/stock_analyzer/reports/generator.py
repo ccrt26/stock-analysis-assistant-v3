@@ -2,10 +2,17 @@ from __future__ import annotations
 
 import json
 from datetime import date
+from html import escape
 from pathlib import Path
 from typing import Optional
 
-from jinja2 import Environment, FileSystemLoader, select_autoescape
+try:
+    from jinja2 import Environment, FileSystemLoader, select_autoescape
+except ModuleNotFoundError:  # pragma: no cover - exercised when local deps are absent.
+    Environment = None
+    FileSystemLoader = None
+    select_autoescape = None
+from stock_analyzer.data.models import DataStatus, DataUnavailableNotice
 from stock_analyzer.domain.models import EvidencePackage, FocusState, Recommendation
 
 
@@ -21,9 +28,12 @@ def render_reports(
     evidence_packages: Optional[list[EvidencePackage]] = None,
     trade_date: Optional[date] = None,
     fixture_mode: bool = False,
+    data_status: Optional[DataStatus] = None,
+    source_versions: Optional[dict[str, str]] = None,
 ) -> None:
     report_date = _resolve_trade_date(trade_date, recommendations, focus_states)
     evidence_packages = evidence_packages or []
+    source_versions = source_versions or {}
     if not fixture_mode:
         _require_matching_evidence(recommendations, evidence_packages)
     recommendation_details = _recommendation_details(
@@ -38,12 +48,6 @@ def render_reports(
         evidence_packages,
         stock_page_prefix="stocks",
     )
-    template_dir = Path(__file__).parent / "templates"
-    env = Environment(
-        loader=FileSystemLoader(template_dir),
-        autoescape=select_autoescape(["html"]),
-    )
-
     output_dir.mkdir(parents=True, exist_ok=True)
     data_dir = output_dir / "data"
     data_dir.mkdir(parents=True, exist_ok=True)
@@ -53,6 +57,8 @@ def render_reports(
         "report_mode": "fixture" if fixture_mode else "production",
         "is_fixture": fixture_mode,
         "warning": FIXTURE_REPORT_WARNING if fixture_mode else None,
+        "data_status": data_status.value if data_status else None,
+        "source_versions": source_versions,
         "recommendations": [
             item.model_dump(mode="json") for item in recommendations
         ],
@@ -68,31 +74,32 @@ def render_reports(
         encoding="utf-8",
     )
 
-    index_html = env.get_template("index.html.j2").render(
+    index_html = _render_index_html(
         trade_date=report_date,
         recommendation_details=recommendation_details,
         focus_states=focus_states,
         is_fixture=fixture_mode,
         fixture_warning=FIXTURE_REPORT_WARNING,
+        data_unavailable_notice=None,
     )
     (output_dir / "index.html").write_text(index_html, encoding="utf-8")
 
     daily_dir = output_dir / "daily" / report_date.isoformat()
     daily_dir.mkdir(parents=True, exist_ok=True)
-    daily_index_html = env.get_template("index.html.j2").render(
+    daily_index_html = _render_index_html(
         trade_date=report_date,
         recommendation_details=daily_recommendation_details,
         focus_states=focus_states,
         is_fixture=fixture_mode,
         fixture_warning=FIXTURE_REPORT_WARNING,
+        data_unavailable_notice=None,
     )
     (daily_dir / "index.html").write_text(daily_index_html, encoding="utf-8")
 
     stocks_dir = daily_dir / "stocks"
     stocks_dir.mkdir(parents=True, exist_ok=True)
-    stock_template = env.get_template("stock.html.j2")
     for recommendation, detail in zip(recommendations, recommendation_details):
-        stock_html = stock_template.render(
+        stock_html = _render_stock_html(
             stock_name=f"{recommendation.name} {recommendation.ts_code}",
             conclusion=_stock_conclusion(recommendation),
             recommendation=recommendation,
@@ -107,6 +114,50 @@ def render_reports(
         )
 
 
+def render_data_unavailable_notice(
+    output_dir: Path,
+    notice: DataUnavailableNotice,
+) -> None:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    data_dir = output_dir / "data"
+    data_dir.mkdir(parents=True, exist_ok=True)
+
+    payload = {
+        "trade_date": notice.trade_date.isoformat(),
+        "report_mode": "data_unavailable",
+        "is_fixture": False,
+        "warning": "当日实时数据不可用，不生成新的股票分析结论。",
+        "reason": notice.reason,
+        "last_successful_trade_date": (
+            notice.last_successful_trade_date.isoformat()
+            if notice.last_successful_trade_date
+            else None
+        ),
+        "recommendations": [],
+        "focus_states": [],
+        "evidence_packages": [],
+        "recommendation_details": [],
+    }
+    (data_dir / "latest.json").write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    html = _render_index_html(
+        trade_date=notice.trade_date,
+        recommendation_details=[],
+        focus_states=[],
+        is_fixture=False,
+        fixture_warning=None,
+        data_unavailable_notice=notice,
+    )
+    (output_dir / "index.html").write_text(html, encoding="utf-8")
+
+    daily_dir = output_dir / "daily" / notice.trade_date.isoformat()
+    daily_dir.mkdir(parents=True, exist_ok=True)
+    (daily_dir / "index.html").write_text(html, encoding="utf-8")
+
+
 def _focus_state_for(
     ts_code: str,
     focus_states: list[FocusState],
@@ -115,6 +166,253 @@ def _focus_state_for(
         if state.ts_code == ts_code:
             return state
     return None
+
+
+def _render_index_html(
+    trade_date: date,
+    recommendation_details: list[dict],
+    focus_states: list[FocusState],
+    is_fixture: bool,
+    fixture_warning: Optional[str],
+    data_unavailable_notice: Optional[DataUnavailableNotice],
+) -> str:
+    if Environment is not None:
+        return _template_env().get_template("index.html.j2").render(
+            trade_date=trade_date,
+            recommendation_details=recommendation_details,
+            focus_states=focus_states,
+            is_fixture=is_fixture,
+            fixture_warning=fixture_warning,
+            data_unavailable_notice=data_unavailable_notice,
+        )
+    return _render_index_html_without_jinja(
+        trade_date,
+        recommendation_details,
+        focus_states,
+        is_fixture,
+        fixture_warning,
+        data_unavailable_notice,
+    )
+
+
+def _render_stock_html(
+    stock_name: str,
+    conclusion: str,
+    recommendation: Recommendation,
+    detail: dict,
+    focus_state: Optional[FocusState],
+    is_fixture: bool,
+    fixture_warning: str,
+) -> str:
+    if Environment is not None:
+        return _template_env().get_template("stock.html.j2").render(
+            stock_name=stock_name,
+            conclusion=conclusion,
+            recommendation=recommendation,
+            detail=detail,
+            focus_state=focus_state,
+            is_fixture=is_fixture,
+            fixture_warning=fixture_warning,
+        )
+    return _render_stock_html_without_jinja(
+        stock_name,
+        conclusion,
+        recommendation,
+        detail,
+        focus_state,
+        is_fixture,
+        fixture_warning,
+    )
+
+
+def _template_env() -> Environment:
+    template_dir = Path(__file__).parent / "templates"
+    return Environment(
+        loader=FileSystemLoader(template_dir),
+        autoescape=select_autoescape(["html"]),
+    )
+
+
+def _render_index_html_without_jinja(
+    trade_date: date,
+    recommendation_details: list[dict],
+    focus_states: list[FocusState],
+    is_fixture: bool,
+    fixture_warning: Optional[str],
+    data_unavailable_notice: Optional[DataUnavailableNotice],
+) -> str:
+    if data_unavailable_notice:
+        lines = [
+            f"<h1>{_html(trade_date.isoformat())} 数据不可用</h1>",
+            '<section role="alert">',
+            "<h2>当日实时数据不可用</h2>",
+            "<p>不生成新的股票分析结论。</p>",
+            f"<p>原因：{_html(data_unavailable_notice.reason)}</p>",
+        ]
+        if data_unavailable_notice.last_successful_trade_date:
+            lines.append(
+                "<p>最近一次成功数据日期："
+                f"{_html(data_unavailable_notice.last_successful_trade_date.isoformat())}"
+                "</p>"
+            )
+        lines.append("</section>")
+        return _html_page("数据不可用通知", lines)
+
+    lines = ["<h1>股票观察报告</h1>"]
+    if is_fixture:
+        lines.extend(
+            [
+                '<section role="alert">',
+                "<h2>Fixture/sample report</h2>",
+                f"<p>{_html(fixture_warning)}</p>",
+                "</section>",
+            ]
+        )
+
+    lines.extend(["<section>", "<h2>今日推荐</h2>"])
+    if recommendation_details:
+        for item in recommendation_details:
+            evidence = item["evidence"]
+            lines.extend(
+                [
+                    "<article>",
+                    '<h3><a href="'
+                    f'{_html(item["stock_page"])}">'
+                    f'{_html(item["name"])} {_html(item["ts_code"])}</a></h3>',
+                    f'<p>{_html(item["action"])}，评分 {_html(item["score"])}</p>',
+                    "<h4>发生了什么</h4>",
+                    f'<p>{_html(item["what_happened"])}</p>',
+                    "<h4>支撑证据</h4>",
+                ]
+            )
+            _append_html_list(lines, evidence["support"])
+            lines.append("<h4>反证与风险</h4>")
+            _append_html_list(lines, evidence["counter_evidence"])
+            lines.append("<h4>确认信号</h4>")
+            _append_html_list(lines, evidence["confirmation_signals"])
+            lines.append("<h4>失效信号</h4>")
+            _append_html_list(lines, evidence["invalidation_signals"])
+            lines.append("<h4>观察计划</h4>")
+            _append_html_list(lines, item["observation_plan"])
+            lines.extend(
+                [
+                    "<h4>证据与规则引用</h4>",
+                    f'<p>证据：{_html(evidence["evidence_id"] or "未记录")}</p>',
+                    "<p>规则："
+                    f'{_html("；".join(evidence["rule_references"]) or "未匹配规则")}'
+                    "</p>",
+                    "<h4>数据可信度</h4>",
+                    f'<p>{_html(evidence["data_credibility"])}</p>',
+                    "</article>",
+                ]
+            )
+    else:
+        lines.append("<p>今日没有符合标准的推荐。</p>")
+    lines.append("</section>")
+
+    lines.extend(["<section>", "<h2>重点关注</h2>"])
+    if focus_states:
+        for item in focus_states:
+            lines.extend(
+                [
+                    "<article>",
+                    f"<h3>{_html(item.ts_code)}</h3>",
+                    f"<p>{_html(item.state.value)}</p>",
+                    "</article>",
+                ]
+            )
+    else:
+        lines.append("<p>当前没有重点关注股票。</p>")
+    lines.append("</section>")
+    return _html_page("股票观察报告", lines)
+
+
+def _render_stock_html_without_jinja(
+    stock_name: str,
+    conclusion: str,
+    recommendation: Recommendation,
+    detail: dict,
+    focus_state: Optional[FocusState],
+    is_fixture: bool,
+    fixture_warning: str,
+) -> str:
+    del recommendation, focus_state
+
+    lines = [f"<h1>{_html(stock_name)}</h1>"]
+    if is_fixture:
+        lines.extend(
+            [
+                '<section role="alert">',
+                "<h2>Fixture/sample report</h2>",
+                f"<p>{_html(fixture_warning)}</p>",
+                "</section>",
+            ]
+        )
+    lines.append(f"<p>{_html(conclusion)}</p>")
+    lines.extend(
+        [
+            "<section>",
+            "<h2>发生了什么</h2>",
+            f'<p>{_html(detail["what_happened"])}</p>',
+            "</section>",
+            "<section>",
+            "<h2>支撑证据</h2>",
+        ]
+    )
+    _append_html_list(lines, detail["evidence"]["support"])
+    lines.extend(["</section>", "<section>", "<h2>反证与风险</h2>"])
+    _append_html_list(lines, detail["evidence"]["counter_evidence"])
+    lines.extend(["</section>", "<section>", "<h2>确认信号</h2>"])
+    _append_html_list(lines, detail["evidence"]["confirmation_signals"])
+    lines.extend(["</section>", "<section>", "<h2>失效信号</h2>"])
+    _append_html_list(lines, detail["evidence"]["invalidation_signals"])
+    lines.extend(["</section>", "<section>", "<h2>观察计划</h2>"])
+    _append_html_list(lines, detail["observation_plan"])
+    lines.extend(
+        [
+            "</section>",
+            "<section>",
+            "<h2>证据与规则引用</h2>",
+            f'<p>证据：{_html(detail["evidence"]["evidence_id"] or "未记录")}</p>',
+            "<p>规则："
+            f'{_html("；".join(detail["evidence"]["rule_references"]) or "未匹配规则")}'
+            "</p>",
+            "</section>",
+            "<section>",
+            "<h2>数据可信度</h2>",
+            f'<p>{_html(detail["evidence"]["data_credibility"])}</p>',
+            "</section>",
+        ]
+    )
+    return _html_page(f"{stock_name} 股票报告", lines)
+
+
+def _append_html_list(lines: list[str], items: list[str]) -> None:
+    lines.append("<ul>")
+    for item in items:
+        lines.append(f"<li>{_html(item)}</li>")
+    lines.append("</ul>")
+
+
+def _html_page(title: str, body_lines: list[str]) -> str:
+    lines = [
+        "<!doctype html>",
+        '<html lang="zh-CN">',
+        "<head>",
+        '  <meta charset="utf-8">',
+        '  <meta name="viewport" content="width=device-width, initial-scale=1">',
+        f"  <title>{_html(title)}</title>",
+        "</head>",
+        "<body>",
+        "  <main>",
+    ]
+    lines.extend(f"    {line}" for line in body_lines)
+    lines.extend(["  </main>", "</body>", "</html>", ""])
+    return "\n".join(lines)
+
+
+def _html(value: object) -> str:
+    return escape("" if value is None else str(value), quote=True)
 
 
 def _resolve_trade_date(
