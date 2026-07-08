@@ -364,12 +364,17 @@ class LocalWarehouse:
             )
 ```
 
-- [ ] **Step 4: Run tests**
+- [ ] **Step 4: Install storage dependencies if missing**
+
+Run: `.venv/bin/python -m pip install 'duckdb>=1.0' 'pyarrow>=16'`
+Expected: PASS. Record this dependency install in the subagent report.
+
+- [ ] **Step 5: Run tests**
 
 Run: `.venv/bin/python -m pytest tests/test_local_warehouse.py -v`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add src/stock_analyzer/storage/local_warehouse.py tests/test_local_warehouse.py
@@ -915,19 +920,23 @@ from stock_analyzer.storage.local_archive import LocalArchive
 
 def test_local_archive_copies_report_tree_and_writes_manifest(tmp_path):
     reports_dir = tmp_path / "reports"
+    data_dir = reports_dir / "data"
     daily_dir = reports_dir / "daily" / "2026-07-08"
+    data_dir.mkdir(parents=True)
     daily_dir.mkdir(parents=True)
     (reports_dir / "index.html").write_text("<html>latest</html>", encoding="utf-8")
+    (data_dir / "latest.json").write_text("{}", encoding="utf-8")
     (daily_dir / "index.html").write_text("<html>daily</html>", encoding="utf-8")
 
     archive = LocalArchive(tmp_path / "local_archive")
     manifest_path = archive.archive_report_tree(reports_dir, date(2026, 7, 8))
 
     assert (tmp_path / "local_archive" / "reports" / "2026-07-08" / "index.html").exists()
+    assert (tmp_path / "local_archive" / "reports" / "2026-07-08" / "data" / "latest.json").exists()
     assert manifest_path.exists()
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert manifest["trade_date"] == "2026-07-08"
-    assert manifest["file_count"] == 2
+    assert manifest["file_count"] == 3
     assert all("sha256" in item for item in manifest["files"])
 ```
 
@@ -963,6 +972,9 @@ class LocalArchive:
         daily_dir = reports_dir / "daily" / trade_date.isoformat()
         if daily_dir.exists():
             files_to_copy.extend(path for path in daily_dir.rglob("*") if path.is_file())
+        data_dir = reports_dir / "data"
+        if data_dir.exists():
+            files_to_copy.extend(path for path in data_dir.rglob("*") if path.is_file())
         copied_files = []
         for source in files_to_copy:
             if not source.exists():
@@ -1081,10 +1093,10 @@ git commit -m "feat: archive production reports locally"
 - Consumes: all interfaces from Tasks 1-5.
 - Produces: a reviewed branch ready to resume Tushare V1 Task 9 with storage governance.
 
-- [ ] **Step 1: Install storage dependencies only if missing**
+- [ ] **Step 1: Verify storage dependencies are installed**
 
 Run: `.venv/bin/python -m pip install 'duckdb>=1.0' 'pyarrow>=16'`
-Expected: PASS. Record this dependency install in the subagent report.
+Expected: PASS with packages already satisfied or installed. Record the result in the subagent report.
 
 - [ ] **Step 2: Run focused storage and pipeline tests**
 
