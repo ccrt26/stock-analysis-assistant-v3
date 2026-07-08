@@ -36,6 +36,12 @@ def test_config_supports_project_root_and_reports_dir_overrides(tmp_path):
     assert config.tushare_token_path == tmp_path / "token"
 
 
+def test_config_supports_explicit_fixture_mode_env():
+    config = AppConfig.load(env={"STOCK_ANALYZER_FIXTURE_MODE": "1"})
+
+    assert config.fixture_mode is True
+
+
 def test_health_report_has_four_required_categories():
     config = AppConfig.load(env={})
     report = run_health_checks(config)

@@ -49,3 +49,25 @@ def test_initial_schema_constrains_action_labels_and_service_role_policies():
 
     policy_roles = set(re.findall(r"create policy .*? to ([a-z_][a-z0-9_]*) ", compact_sql))
     assert policy_roles == {"service_role"}
+
+
+def test_initial_schema_has_idempotent_daily_unique_constraints():
+    sql = SCHEMA_PATH.read_text().lower()
+    compact_sql = re.sub(r"\s+", " ", sql)
+
+    assert re.search(
+        r"recommendation_daily.*unique\s*\(\s*trade_date\s*,\s*ts_code\s*\)",
+        compact_sql,
+    )
+    assert re.search(
+        r"focus_watchlist_state.*unique\s*\(\s*trade_date\s*,\s*ts_code\s*\)",
+        compact_sql,
+    )
+    assert "evidence_id text primary key" in compact_sql
+    assert re.search(
+        (
+            r"evaluation_task.*unique\s*\(\s*trade_date\s*,\s*ts_code\s*,"
+            r"\s*evidence_id\s*,\s*checkpoint_days\s*,\s*evaluation_layer\s*\)"
+        ),
+        compact_sql,
+    )

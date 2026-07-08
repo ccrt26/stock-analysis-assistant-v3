@@ -83,16 +83,38 @@ class InMemoryAnalysisRepository:
         )
 
     def save_recommendations(self, recommendations: List[Recommendation]) -> None:
-        self.recommendations.extend(recommendations)
+        self.recommendations = _upsert_model_list(
+            self.recommendations,
+            recommendations,
+            key=lambda item: (item.trade_date, item.ts_code),
+        )
 
     def save_focus_states(self, states: List[FocusState]) -> None:
-        self.focus_states.extend(states)
+        self.focus_states = _upsert_model_list(
+            self.focus_states,
+            states,
+            key=lambda item: (item.trade_date, item.ts_code),
+        )
 
     def save_evidence_packages(self, packages: List[EvidencePackage]) -> None:
-        self.evidence_packages.extend(packages)
+        self.evidence_packages = _upsert_model_list(
+            self.evidence_packages,
+            packages,
+            key=lambda item: item.evidence_id,
+        )
 
     def save_evaluation_tasks(self, tasks: List[EvaluationTask]) -> None:
-        self.evaluation_tasks.extend(tasks)
+        self.evaluation_tasks = _upsert_model_list(
+            self.evaluation_tasks,
+            tasks,
+            key=lambda item: (
+                item.trade_date,
+                item.ts_code,
+                item.evidence_id,
+                item.checkpoint_days,
+                item.evaluation_layer,
+            ),
+        )
 
 
 class SupabaseAnalysisRepository:
@@ -143,7 +165,10 @@ class SupabaseAnalysisRepository:
         }
         rows = list(rows_by_code.values())
         if rows:
-            self.client.table("stock_master").upsert(rows).execute()
+            self.client.table("stock_master").upsert(
+                rows,
+                on_conflict="ts_code",
+            ).execute()
 
     def save_stock_statuses(self, stocks: List[StockSnapshot]) -> None:
         rows = [
@@ -161,7 +186,10 @@ class SupabaseAnalysisRepository:
             for item in stocks
         ]
         if rows:
-            self.client.table("stock_status_daily").upsert(rows).execute()
+            self.client.table("stock_status_daily").upsert(
+                rows,
+                on_conflict="trade_date,ts_code",
+            ).execute()
 
     def save_feature_snapshots(self, features: List[FeatureSnapshot]) -> None:
         rows = [
@@ -178,7 +206,10 @@ class SupabaseAnalysisRepository:
             for item in features
         ]
         if rows:
-            self.client.table("daily_feature_snapshot").upsert(rows).execute()
+            self.client.table("daily_feature_snapshot").upsert(
+                rows,
+                on_conflict="trade_date,ts_code",
+            ).execute()
 
     def save_recommendations(self, recommendations: List[Recommendation]) -> None:
         if not recommendations:
@@ -195,7 +226,10 @@ class SupabaseAnalysisRepository:
             }
             for item in recommendations
         ]
-        self.client.table("recommendation_daily").insert(rows).execute()
+        self.client.table("recommendation_daily").upsert(
+            rows,
+            on_conflict="trade_date,ts_code",
+        ).execute()
 
     def save_focus_states(self, states: List[FocusState]) -> None:
         if not states:
@@ -212,13 +246,19 @@ class SupabaseAnalysisRepository:
             }
             for item in states
         ]
-        self.client.table("focus_watchlist_state").insert(rows).execute()
+        self.client.table("focus_watchlist_state").upsert(
+            rows,
+            on_conflict="trade_date,ts_code",
+        ).execute()
 
     def save_evidence_packages(self, packages: List[EvidencePackage]) -> None:
         if not packages:
             return
         rows = [_evidence_package_to_row(package) for package in packages]
-        self.client.table("evidence_package_index").insert(rows).execute()
+        self.client.table("evidence_package_index").upsert(
+            rows,
+            on_conflict="evidence_id",
+        ).execute()
 
     def save_evaluation_tasks(self, tasks: List[EvaluationTask]) -> None:
         if not tasks:
@@ -234,7 +274,10 @@ class SupabaseAnalysisRepository:
             }
             for item in tasks
         ]
-        self.client.table("evaluation_task").insert(rows).execute()
+        self.client.table("evaluation_task").upsert(
+            rows,
+            on_conflict="trade_date,ts_code,evidence_id,checkpoint_days,evaluation_layer",
+        ).execute()
 
 
 def _date_from_row(value) -> Optional[date]:

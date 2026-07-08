@@ -110,3 +110,27 @@ def test_render_reports_exposes_evidence_backed_sections_and_links(tmp_path):
     ]
     assert detail["evidence"]["rule_references"] == ["RESEARCH_TREND_CONFIRMATION"]
     assert detail["evidence"]["data_credibility"] == "medium"
+
+
+def test_render_reports_daily_archive_links_to_local_stock_pages(tmp_path):
+    rec = Recommendation(
+        trade_date=date(2026, 7, 7),
+        ts_code="600000.SH",
+        name="浦发银行",
+        action=ActionLabel.ENTER_OBSERVATION,
+        score=81,
+        reasons=["趋势改善"],
+        risks=["需要确认"],
+        evidence_id="2026-07-07-600000.SH",
+    )
+
+    render_reports(tmp_path, [rec], [], trade_date=date(2026, 7, 7))
+
+    root_html = (tmp_path / "index.html").read_text(encoding="utf-8")
+    daily_html = (tmp_path / "daily" / "2026-07-07" / "index.html").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'href="daily/2026-07-07/stocks/600000.SH.html"' in root_html
+    assert 'href="stocks/600000.SH.html"' in daily_html
+    assert 'href="daily/2026-07-07/stocks/600000.SH.html"' not in daily_html

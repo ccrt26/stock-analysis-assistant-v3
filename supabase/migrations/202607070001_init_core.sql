@@ -44,7 +44,8 @@ create table if not exists public.recommendation_daily (
   reasons jsonb not null,
   risks jsonb not null,
   evidence_id text not null,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  constraint recommendation_daily_trade_date_ts_code_key unique (trade_date, ts_code)
 );
 
 create table if not exists public.focus_watchlist_state (
@@ -56,7 +57,8 @@ create table if not exists public.focus_watchlist_state (
   entry_reason text,
   invalidation_conditions jsonb not null default '[]'::jsonb,
   exit_reason text,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  constraint focus_watchlist_state_trade_date_ts_code_key unique (trade_date, ts_code)
 );
 
 create table if not exists public.evidence_package_index (
@@ -101,7 +103,14 @@ create table if not exists public.evaluation_task (
   checkpoint_days integer not null,
   evaluation_layer text not null,
   due_date date not null,
-  status text not null default 'pending'
+  status text not null default 'pending',
+  constraint evaluation_task_daily_checkpoint_key unique (
+    trade_date,
+    ts_code,
+    evidence_id,
+    checkpoint_days,
+    evaluation_layer
+  )
 );
 
 create table if not exists public.evaluation_result (

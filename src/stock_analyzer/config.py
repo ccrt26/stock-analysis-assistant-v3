@@ -17,6 +17,7 @@ class AppConfig(BaseModel):
     supabase_url: Optional[str] = None
     supabase_service_role_key: Optional[str] = None
     reports_dir: Path = _default_project_root() / "reports"
+    fixture_mode: bool = False
 
     @classmethod
     def load(
@@ -33,4 +34,13 @@ class AppConfig(BaseModel):
             supabase_url=values.get("SUPABASE_URL"),
             supabase_service_role_key=values.get("SUPABASE_SERVICE_ROLE_KEY"),
             reports_dir=reports_dir,
+            fixture_mode=_env_flag(values, "STOCK_ANALYZER_FIXTURE_MODE"),
         )
+
+    @property
+    def has_supabase_config(self) -> bool:
+        return bool(self.supabase_url and self.supabase_service_role_key)
+
+
+def _env_flag(values: Mapping[str, str], name: str) -> bool:
+    return str(values.get(name, "")).strip().lower() in {"1", "true", "yes", "on"}

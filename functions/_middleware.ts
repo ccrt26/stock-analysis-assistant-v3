@@ -30,12 +30,12 @@ const base64UrlEncode = (buffer: ArrayBuffer): string => {
 };
 
 const timingSafeEqual = (left: string, right: string): boolean => {
-  if (left.length !== right.length) {
-    return false;
-  }
-  let mismatch = 0;
-  for (let index = 0; index < left.length; index += 1) {
-    mismatch |= left.charCodeAt(index) ^ right.charCodeAt(index);
+  const maxLength = Math.max(left.length, right.length);
+  let mismatch = left.length ^ right.length;
+  for (let index = 0; index < maxLength; index += 1) {
+    const leftCode = index < left.length ? left.charCodeAt(index) : 0;
+    const rightCode = index < right.length ? right.charCodeAt(index) : 0;
+    mismatch |= leftCode ^ rightCode;
   }
   return mismatch === 0;
 };
@@ -103,7 +103,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
   if (url.pathname === "/login" && request.method === "POST") {
     const form = await request.formData();
     const password = String(form.get("password") || "");
-    if (password === passwordSecret) {
+    if (timingSafeEqual(password, passwordSecret)) {
       const sessionValue = await createSessionValue(sessionSecret);
       return new Response("", {
         status: 302,

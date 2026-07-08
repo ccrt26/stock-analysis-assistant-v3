@@ -31,6 +31,7 @@ class FakeSupabaseTable:
         self.client = client
         self.operation = ""
         self.payload = None
+        self.options = {}
         self.filters = []
 
     def insert(self, rows):
@@ -38,9 +39,10 @@ class FakeSupabaseTable:
         self.payload = rows
         return self
 
-    def upsert(self, rows):
+    def upsert(self, rows, **options):
         self.operation = "upsert"
         self.payload = rows
+        self.options = options
         return self
 
     def select(self, columns: str):
@@ -55,6 +57,7 @@ class FakeSupabaseTable:
     def execute(self):
         if self.operation in {"insert", "upsert"}:
             self.client.write_calls.append((self.name, self.operation, self.payload))
+            self.client.write_options.append((self.name, self.operation, self.options))
             if self.operation == "insert":
                 self.client.insert_calls.append((self.name, self.payload))
             else:
@@ -69,6 +72,7 @@ class FakeSupabaseTable:
 class FakeSupabaseClient:
     def __init__(self) -> None:
         self.write_calls = []
+        self.write_options = []
         self.insert_calls = []
         self.upsert_calls = []
         self.table_data = {}
@@ -166,6 +170,70 @@ def test_in_memory_repository_saves_daily_outputs():
     assert repo.load_focus_states() == [focus]
 
 
+def test_in_memory_repository_upserts_core_daily_outputs_by_stable_keys():
+    repo = InMemoryAnalysisRepository()
+    original = Recommendation(
+        trade_date=date(2026, 7, 7),
+        ts_code="600000.SH",
+        name="浦发银行",
+        action=ActionLabel.ENTER_OBSERVATION,
+        score=80,
+        reasons=["趋势改善"],
+        risks=["需要确认"],
+        evidence_id="2026-07-07-600000.SH",
+    )
+    updated = original.model_copy(update={"score": 82, "reasons": ["二次运行更新"]})
+    focus = FocusState(
+        trade_date=date(2026, 7, 7),
+        ts_code="600000.SH",
+        state=ActionLabel.ENTER_OBSERVATION,
+    )
+    evidence = EvidencePackage(
+        evidence_id="2026-07-07-600000.SH",
+        trade_date=date(2026, 7, 7),
+        ts_code="600000.SH",
+        thesis="观察",
+        support=["趋势改善"],
+        counter_evidence=["需要确认"],
+        matched_rules=[],
+        confidence_level="medium",
+        expected_confirmation_path=["趋势延续"],
+        invalidation_conditions=[],
+        source_versions={},
+    )
+    task = EvaluationTask(
+        trade_date=date(2026, 7, 7),
+        ts_code="600000.SH",
+        evidence_id=evidence.evidence_id,
+        checkpoint_days=5,
+        due_date=date(2026, 7, 14),
+        evaluation_layer="result",
+    )
+
+    repo.save_recommendations([original])
+    repo.save_recommendations([updated])
+    repo.save_focus_states([focus])
+    repo.save_focus_states(
+        [focus.model_copy(update={"state": ActionLabel.CONTINUE_OBSERVATION})]
+    )
+    repo.save_evidence_packages([evidence])
+    repo.save_evidence_packages([evidence.model_copy(update={"confidence_level": "high"})])
+    repo.save_evaluation_tasks([task])
+    repo.save_evaluation_tasks(
+        [task.model_copy(update={"due_date": date(2026, 7, 15)})]
+    )
+
+    assert len(repo.recommendations) == 1
+    assert repo.recommendations[0].score == 82
+    assert repo.recommendations[0].reasons == ["二次运行更新"]
+    assert len(repo.focus_states) == 1
+    assert repo.focus_states[0].state == ActionLabel.CONTINUE_OBSERVATION
+    assert len(repo.evidence_packages) == 1
+    assert repo.evidence_packages[0].confidence_level == "high"
+    assert len(repo.evaluation_tasks) == 1
+    assert repo.evaluation_tasks[0].due_date == date(2026, 7, 15)
+
+
 def test_supabase_repository_maps_rows_without_network():
     client = FakeSupabaseClient()
     client.table_data["focus_watchlist_state"] = [
@@ -210,12 +278,12 @@ def test_supabase_repository_maps_rows_without_network():
     repo.save_evidence_packages([evidence])
     repo.save_evaluation_tasks([task])
 
-    assert client.insert_calls[0][0] == "evidence_package_index"
-    evidence_row = client.insert_calls[0][1][0]
+    assert client.upsert_calls[0][0] == "evidence_package_index"
+    evidence_row = client.upsert_calls[0][1][0]
     assert evidence_row["confidence_level"] == "medium"
     assert evidence_row["expected_confirmation_path"] == ["趋势延续"]
-    assert client.insert_calls[1][0] == "evaluation_task"
-    assert client.insert_calls[1][1][0]["due_date"] == "2026-07-12"
+    assert client.upsert_calls[1][0] == "evaluation_task"
+    assert client.upsert_calls[1][1][0]["due_date"] == "2026-07-12"
 
 
 def test_supabase_repository_upserts_prerequisites_before_dependent_pipeline_rows(tmp_path):
@@ -254,6 +322,44 @@ def test_supabase_repository_upserts_prerequisites_before_dependent_pipeline_row
     recommendation_rows = client.write_calls[3][2]
     assert all(row["evidence_id"] for row in recommendation_rows)
     assert all(item.evidence_id for item in result.recommendations)
+
+
+def test_supabase_repository_upserts_core_daily_rows_with_conflict_targets(tmp_path):
+    client = FakeSupabaseClient()
+    repo = SupabaseAnalysisRepository(client)
+
+    run_daily_pipeline(date(2026, 7, 7), tmp_path, repository=repo)
+
+    assert [name for name, _, _ in client.write_calls] == [
+        "stock_master",
+        "stock_status_daily",
+        "daily_feature_snapshot",
+        "recommendation_daily",
+        "focus_watchlist_state",
+        "evidence_package_index",
+        "evaluation_task",
+    ]
+    assert [operation for _, operation, _ in client.write_calls] == [
+        "upsert",
+        "upsert",
+        "upsert",
+        "upsert",
+        "upsert",
+        "upsert",
+        "upsert",
+    ]
+    conflict_targets = {
+        name: options.get("on_conflict")
+        for name, operation, options in client.write_options
+        if operation == "upsert"
+    }
+    assert conflict_targets["recommendation_daily"] == "trade_date,ts_code"
+    assert conflict_targets["focus_watchlist_state"] == "trade_date,ts_code"
+    assert conflict_targets["evidence_package_index"] == "evidence_id"
+    assert (
+        conflict_targets["evaluation_task"]
+        == "trade_date,ts_code,evidence_id,checkpoint_days,evaluation_layer"
+    )
 
 
 def test_supabase_repository_loads_daily_analysis_rows_for_report_rendering():

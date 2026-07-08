@@ -20,6 +20,8 @@ def test_cloudflare_middleware_uses_password_and_cookie_without_secrets_in_html(
     assert "SameSite=Lax" in text
     assert "Path=/" in text
     assert "Max-Age=604800" in text
+    assert "timingSafeEqual(password, passwordSecret)" in text
+    assert "password === passwordSecret" not in text
     assert "SUPABASE_SERVICE_ROLE_KEY" not in text
     assert "TUSHARE_TOKEN" not in text
 

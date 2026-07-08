@@ -30,6 +30,10 @@ class DailyRunResult(BaseModel):
     evaluation_tasks: list[EvaluationTask]
 
 
+class StoredAnalysisNotFound(RuntimeError):
+    pass
+
+
 def _sample_market(trade_date: date) -> tuple[list[StockSnapshot], dict[str, str], dict[str, FeatureSnapshot]]:
     stocks = [
         StockSnapshot(
@@ -167,6 +171,7 @@ def render_report_for_date(
     trade_date: date,
     output_dir: Path,
     repository: Optional[AnalysisRepository] = None,
+    allow_fixture_fallback: bool = False,
 ) -> DailyRunResult:
     repository = repository or InMemoryAnalysisRepository()
     recommendations = repository.load_daily_recommendations(trade_date)
@@ -185,6 +190,13 @@ def render_report_for_date(
             recommendations=recommendations,
             focus_states=focus_states,
             evaluation_tasks=[],
+        )
+
+    if not allow_fixture_fallback:
+        raise StoredAnalysisNotFound(
+            f"No stored analysis rows found for {trade_date.isoformat()}. "
+            "Run the daily pipeline with Supabase configured first, or use "
+            "explicit fixture mode for local sample reports."
         )
 
     return run_daily_pipeline(

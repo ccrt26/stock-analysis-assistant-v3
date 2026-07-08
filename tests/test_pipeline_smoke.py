@@ -1,7 +1,13 @@
 from datetime import date
 
 from stock_analyzer.domain.models import ActionLabel, FocusState
-from stock_analyzer.pipeline import run_daily_pipeline
+import pytest
+
+from stock_analyzer.pipeline import (
+    StoredAnalysisNotFound,
+    render_report_for_date,
+    run_daily_pipeline,
+)
 from stock_analyzer.storage.repositories import InMemoryAnalysisRepository
 
 
@@ -95,3 +101,28 @@ def test_run_daily_pipeline_preserves_existing_focus_from_repository(tmp_path):
     assert preserved[0].state == ActionLabel.CONTINUE_OBSERVATION
     assert repo.recommendations
     assert len(repo.focus_states) > 1
+
+
+def test_render_report_for_date_fails_when_repository_has_no_stored_rows(tmp_path):
+    repo = InMemoryAnalysisRepository()
+
+    with pytest.raises(StoredAnalysisNotFound) as excinfo:
+        render_report_for_date(date(2026, 7, 7), tmp_path, repository=repo)
+
+    assert "No stored analysis rows found for 2026-07-07" in str(excinfo.value)
+    assert not (tmp_path / "index.html").exists()
+
+
+def test_render_report_for_date_allows_explicit_fixture_fallback(tmp_path):
+    repo = InMemoryAnalysisRepository()
+
+    result = render_report_for_date(
+        date(2026, 7, 7),
+        tmp_path,
+        repository=repo,
+        allow_fixture_fallback=True,
+    )
+
+    assert result.recommendations
+    assert (tmp_path / "index.html").exists()
+    assert repo.recommendations == []

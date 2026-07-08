@@ -85,7 +85,10 @@ def test_run_daily_dry_run_completes():
 
 def test_run_daily_dry_run_does_not_persist_analysis_state(monkeypatch):
     repo = RecordingRepository()
-    monkeypatch.setattr("stock_analyzer.cli._analysis_repository", lambda config: repo)
+    monkeypatch.setattr(
+        "stock_analyzer.cli._analysis_repository",
+        lambda config, **kwargs: repo,
+    )
 
     result = CliRunner().invoke(
         app, ["run-daily", "--dry-run", "--trade-date", "2026-07-07"]
@@ -96,11 +99,43 @@ def test_run_daily_dry_run_does_not_persist_analysis_state(monkeypatch):
     assert repo.save_calls == []
 
 
-def test_render_report_command_writes_requested_output_dir(tmp_path):
+def test_run_daily_requires_supabase_config_without_fixture_mode(monkeypatch):
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
+    monkeypatch.delenv("STOCK_ANALYZER_FIXTURE_MODE", raising=False)
+
+    result = CliRunner().invoke(
+        app,
+        ["run-daily", "--trade-date", "2026-07-07"],
+    )
+
+    assert result.exit_code != 0
+    assert "SUPABASE_URL" in result.output
+    assert "SUPABASE_SERVICE_ROLE_KEY" in result.output
+    assert "--fixture-mode" in result.output
+
+
+def test_run_daily_fixture_mode_writes_local_sample_report(tmp_path, monkeypatch):
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
+    monkeypatch.setenv("REPORTS_DIR", str(tmp_path))
+
+    result = CliRunner().invoke(
+        app,
+        ["run-daily", "--fixture-mode", "--trade-date", "2026-07-07"],
+    )
+
+    assert result.exit_code == 0
+    assert "fixture" in result.output
+    assert (tmp_path / "index.html").exists()
+
+
+def test_render_report_command_writes_requested_output_dir_in_fixture_mode(tmp_path):
     result = CliRunner().invoke(
         app,
         [
             "render-report",
+            "--fixture-mode",
             "--trade-date",
             "2026-07-07",
             "--output-dir",
@@ -143,7 +178,10 @@ def test_render_report_command_uses_stored_repository_data_when_available(tmp_pa
             source_versions={"repository": "stored"},
         )
     ]
-    monkeypatch.setattr("stock_analyzer.cli._analysis_repository", lambda config: repo)
+    monkeypatch.setattr(
+        "stock_analyzer.cli._analysis_repository",
+        lambda config, **kwargs: repo,
+    )
 
     result = CliRunner().invoke(
         app,
@@ -166,9 +204,12 @@ def test_render_report_command_uses_stored_repository_data_when_available(tmp_pa
     assert repo.save_calls == []
 
 
-def test_render_report_command_does_not_persist_analysis_state(tmp_path, monkeypatch):
+def test_render_report_command_fails_without_stored_data_in_production(tmp_path, monkeypatch):
     repo = RecordingRepository()
-    monkeypatch.setattr("stock_analyzer.cli._analysis_repository", lambda config: repo)
+    monkeypatch.setattr(
+        "stock_analyzer.cli._analysis_repository",
+        lambda config, **kwargs: repo,
+    )
 
     result = CliRunner().invoke(
         app,
@@ -181,7 +222,29 @@ def test_render_report_command_does_not_persist_analysis_state(tmp_path, monkeyp
         ],
     )
 
-    assert result.exit_code == 0
-    assert repo.load_calls == 1
+    assert result.exit_code != 0
+    assert "No stored analysis rows found for 2026-07-07" in result.output
     assert repo.save_calls == []
-    assert (tmp_path / "index.html").exists()
+    assert not (tmp_path / "index.html").exists()
+
+
+def test_render_report_requires_supabase_config_without_fixture_mode(tmp_path, monkeypatch):
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
+    monkeypatch.delenv("STOCK_ANALYZER_FIXTURE_MODE", raising=False)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "render-report",
+            "--trade-date",
+            "2026-07-07",
+            "--output-dir",
+            str(tmp_path),
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "SUPABASE_URL" in result.output
+    assert "SUPABASE_SERVICE_ROLE_KEY" in result.output
+    assert "--fixture-mode" in result.output

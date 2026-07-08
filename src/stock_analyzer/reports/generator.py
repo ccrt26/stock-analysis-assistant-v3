@@ -18,10 +18,18 @@ def render_reports(
 ) -> None:
     report_date = _resolve_trade_date(trade_date, recommendations, focus_states)
     evidence_packages = evidence_packages or []
-    recommendation_details = [
-        _recommendation_detail(recommendation, report_date, evidence_packages)
-        for recommendation in recommendations
-    ]
+    recommendation_details = _recommendation_details(
+        recommendations,
+        report_date,
+        evidence_packages,
+        stock_page_prefix=f"daily/{report_date.isoformat()}/stocks",
+    )
+    daily_recommendation_details = _recommendation_details(
+        recommendations,
+        report_date,
+        evidence_packages,
+        stock_page_prefix="stocks",
+    )
     template_dir = Path(__file__).parent / "templates"
     env = Environment(
         loader=FileSystemLoader(template_dir),
@@ -58,7 +66,12 @@ def render_reports(
 
     daily_dir = output_dir / "daily" / report_date.isoformat()
     daily_dir.mkdir(parents=True, exist_ok=True)
-    (daily_dir / "index.html").write_text(index_html, encoding="utf-8")
+    daily_index_html = env.get_template("index.html.j2").render(
+        trade_date=report_date,
+        recommendation_details=daily_recommendation_details,
+        focus_states=focus_states,
+    )
+    (daily_dir / "index.html").write_text(daily_index_html, encoding="utf-8")
 
     stocks_dir = daily_dir / "stocks"
     stocks_dir.mkdir(parents=True, exist_ok=True)
@@ -110,10 +123,28 @@ def _stock_conclusion(recommendation: Recommendation) -> str:
     )
 
 
+def _recommendation_details(
+    recommendations: list[Recommendation],
+    report_date: date,
+    evidence_packages: list[EvidencePackage],
+    stock_page_prefix: str,
+) -> list[dict]:
+    return [
+        _recommendation_detail(
+            recommendation,
+            report_date,
+            evidence_packages,
+            stock_page=f"{stock_page_prefix}/{recommendation.ts_code}.html",
+        )
+        for recommendation in recommendations
+    ]
+
+
 def _recommendation_detail(
     recommendation: Recommendation,
     report_date: date,
     evidence_packages: list[EvidencePackage],
+    stock_page: str,
 ) -> dict:
     evidence = _evidence_for(recommendation, evidence_packages)
     support = evidence.support if evidence else list(recommendation.reasons)
@@ -143,7 +174,7 @@ def _recommendation_detail(
         "name": recommendation.name,
         "action": recommendation.action.value,
         "score": recommendation.score,
-        "stock_page": f"daily/{report_date.isoformat()}/stocks/{recommendation.ts_code}.html",
+        "stock_page": stock_page,
         "what_happened": what_happened,
         "why_observe": list(recommendation.reasons),
         "biggest_risk": recommendation.risks[0] if recommendation.risks else "暂无明确反证",
