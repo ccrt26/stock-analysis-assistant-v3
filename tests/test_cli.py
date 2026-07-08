@@ -5,7 +5,16 @@ import json
 from typer.testing import CliRunner
 
 from stock_analyzer.cli import app
-from stock_analyzer.data.models import DataStatus, MarketDataBundle, SourceGrade
+from stock_analyzer.data.models import (
+    DailyBar,
+    DailyBasicRow,
+    DataStatus,
+    MarketDataBundle,
+    SourceGrade,
+    SourceRunRecord,
+    SourceStatus,
+    StockBasicRow,
+)
 from stock_analyzer.domain.models import (
     ActionLabel,
     EvaluationTask,
@@ -85,21 +94,70 @@ class RecordingRepository:
         self.save_calls.append(("data_source_runs", rows))
 
 
+def _raw_daily_bars(trade_date):
+    return [
+        DailyBar(
+            trade_date=trade_date,
+            ts_code="600000.SH",
+            close=10.0,
+            amount=200000000.0,
+            source_name="fake-live",
+            source_grade=SourceGrade.PRIMARY,
+        )
+    ]
+
+
+def _raw_daily_basic(trade_date):
+    return [
+        DailyBasicRow(
+            trade_date=trade_date,
+            ts_code="600000.SH",
+            turnover_rate=1.2,
+            total_mv=1000000.0,
+            source_name="fake-live",
+            source_grade=SourceGrade.PRIMARY,
+        )
+    ]
+
+
+def _raw_source_runs(trade_date, count):
+    return [
+        SourceRunRecord(
+            trade_date=trade_date,
+            source_name="fake-live",
+            stage="daily",
+            status=SourceStatus.SUCCESS,
+            message="ok",
+            source_grade=SourceGrade.PRIMARY,
+            data_status=DataStatus.COMPLETE_PRIMARY,
+            record_count=count,
+        )
+    ]
+
+
 class FakeProductionProvider:
     def load(self, trade_date):
         stocks, stock_names, feature_profiles = _sample_market(trade_date)
+        daily_bars = _raw_daily_bars(trade_date)
         return MarketDataBundle(
             trade_date=trade_date,
             data_status=DataStatus.COMPLETE_PRIMARY,
             source_grade=SourceGrade.PRIMARY,
             source_versions={"fake-live": trade_date.isoformat()},
-            stock_basic=[],
-            daily_bars=[],
-            daily_basic=[],
+            stock_basic=[
+                StockBasicRow(
+                    ts_code="600000.SH",
+                    name="浦发银行",
+                    exchange="SSE",
+                    list_date=date(1999, 11, 10),
+                )
+            ],
+            daily_bars=daily_bars,
+            daily_basic=_raw_daily_basic(trade_date),
             stocks=stocks,
             stock_names=stock_names,
             feature_profiles=feature_profiles,
-            source_runs=[],
+            source_runs=_raw_source_runs(trade_date, len(daily_bars)),
         )
 
 
@@ -197,7 +255,11 @@ def test_run_daily_with_supabase_config_calls_production_provider(monkeypatch):
     assert result.exit_code == 0
     assert "daily run completed for 2026-07-07" in result.stdout
     assert "fake-tushare-token" not in result.output
-    assert any(name == "recommendations" for name, _ in repo.save_calls)
+    save_payloads = {name: payload for name, payload in repo.save_calls}
+    assert save_payloads["recommendations"]
+    assert save_payloads["market_bars"]
+    assert save_payloads["daily_basic_indicators"]
+    assert save_payloads["data_source_runs"]
 
 
 def test_run_daily_fixture_mode_writes_local_sample_report(tmp_path, monkeypatch):

@@ -136,6 +136,10 @@ def run_daily_pipeline(
                 "Current live data is unavailable; no production decisions were generated."
             )
         stocks, stock_names, feature_profiles = bundle.to_pipeline_inputs()
+        if not stocks or not feature_profiles:
+            raise ProductionDataSourceUnavailable(
+                "Current live data is unavailable; no production decisions were generated."
+            )
         if persist:
             repository.save_stock_master(stocks)
             repository.save_market_bars(bundle.daily_bars)

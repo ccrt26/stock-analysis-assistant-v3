@@ -1,7 +1,18 @@
-from datetime import date
+from datetime import date, timedelta
 
 import pytest
 
+from stock_analyzer.data.models import (
+    DailyBar,
+    DailyBasicRow,
+    DataStatus,
+    MarketDataBundle,
+    SourceGrade,
+    SourceRunRecord,
+    SourceStatus,
+    StockBasicRow,
+)
+from stock_analyzer.data.provider import CurrentLiveDataUnavailable, TushareProvider
 from stock_analyzer.domain.models import (
     ActionLabel,
     EvaluationTask,
@@ -9,7 +20,6 @@ from stock_analyzer.domain.models import (
     FocusState,
     Recommendation,
 )
-from stock_analyzer.data.models import DataStatus, MarketDataBundle, SourceGrade
 from stock_analyzer.pipeline import (
     StoredAnalysisNotFound,
     _sample_market,
@@ -65,21 +75,76 @@ class FailingSaveRepository(InMemoryAnalysisRepository):
         raise AssertionError("dry-run must not save data source runs")
 
 
+def _raw_daily_bars(trade_date, ts_code="600000.SH", days=1):
+    start = trade_date - timedelta(days=days - 1)
+    return [
+        DailyBar(
+            trade_date=start + timedelta(days=offset),
+            ts_code=ts_code,
+            close=10.0 + offset * 0.1,
+            amount=200000000.0 + offset,
+            source_name="fake-live",
+            source_grade=SourceGrade.PRIMARY,
+        )
+        for offset in range(days)
+    ]
+
+
+def _raw_daily_basic(trade_date, ts_code="600000.SH"):
+    return [
+        DailyBasicRow(
+            trade_date=trade_date,
+            ts_code=ts_code,
+            turnover_rate=1.2,
+            total_mv=1000000.0,
+            source_name="fake-live",
+            source_grade=SourceGrade.PRIMARY,
+        )
+    ]
+
+
+def _raw_source_runs(trade_date, count=1):
+    return [
+        SourceRunRecord(
+            trade_date=trade_date,
+            source_name="fake-live",
+            stage="daily",
+            status=SourceStatus.SUCCESS,
+            message="ok",
+            source_grade=SourceGrade.PRIMARY,
+            data_status=DataStatus.COMPLETE_PRIMARY,
+            record_count=count,
+        )
+    ]
+
+
+def _raw_stock_basic(ts_code="600000.SH", name="浦发银行"):
+    return [
+        StockBasicRow(
+            ts_code=ts_code,
+            name=name,
+            exchange="SSE",
+            list_date=date(1999, 11, 10),
+        )
+    ]
+
+
 class FakeProductionProvider:
     def load(self, trade_date):
         stocks, stock_names, feature_profiles = _sample_market(trade_date)
+        daily_bars = _raw_daily_bars(trade_date)
         return MarketDataBundle(
             trade_date=trade_date,
             data_status=DataStatus.COMPLETE_PRIMARY,
             source_grade=SourceGrade.PRIMARY,
             source_versions={"fake-live": trade_date.isoformat()},
-            stock_basic=[],
-            daily_bars=[],
-            daily_basic=[],
+            stock_basic=_raw_stock_basic(),
+            daily_bars=daily_bars,
+            daily_basic=_raw_daily_basic(trade_date),
             stocks=stocks,
             stock_names=stock_names,
             feature_profiles=feature_profiles,
-            source_runs=[],
+            source_runs=_raw_source_runs(trade_date, len(daily_bars)),
         )
 
 
@@ -99,6 +164,79 @@ class InsufficientProductionProvider:
             feature_profiles=feature_profiles,
             source_runs=[],
         )
+
+
+class RawOnlyProductionProvider:
+    def load(self, trade_date):
+        daily_bars = _raw_daily_bars(trade_date)
+        return MarketDataBundle(
+            trade_date=trade_date,
+            data_status=DataStatus.COMPLETE_PRIMARY,
+            source_grade=SourceGrade.PRIMARY,
+            source_versions={"fake-live": trade_date.isoformat()},
+            stock_basic=_raw_stock_basic(),
+            daily_bars=daily_bars,
+            daily_basic=_raw_daily_basic(trade_date),
+            source_runs=_raw_source_runs(trade_date, len(daily_bars)),
+        )
+
+
+class FakeTushareSource:
+    def __init__(self, trade_date):
+        self.trade_date = trade_date
+
+    def fetch_stock_basic(self):
+        return _raw_stock_basic()
+
+    def fetch_daily(self, trade_date):
+        return _raw_daily_bars(trade_date, days=61)
+
+    def fetch_daily_basic(self, trade_date):
+        return _raw_daily_basic(trade_date)
+
+
+class StaleFakeTushareSource(FakeTushareSource):
+    def fetch_daily(self, trade_date):
+        return _raw_daily_bars(trade_date - timedelta(days=1), days=61)
+
+
+class SparseFakeTushareSource(FakeTushareSource):
+    def fetch_daily(self, trade_date):
+        return _raw_daily_bars(trade_date)
+
+
+def test_tushare_provider_builds_decision_ready_bundle_from_fetched_rows():
+    trade_date = date(2026, 7, 7)
+
+    bundle = TushareProvider(FakeTushareSource(trade_date)).load(trade_date)
+
+    assert bundle.can_generate_decisions
+    assert bundle.stocks
+    assert bundle.stock_names["600000.SH"] == "浦发银行"
+    assert bundle.feature_profiles["600000.SH"].trend_60d > 0
+    assert bundle.daily_bars
+    assert bundle.daily_basic
+    assert bundle.source_runs
+
+
+def test_tushare_provider_translates_insufficient_feature_coverage():
+    trade_date = date(2026, 7, 7)
+
+    with pytest.raises(CurrentLiveDataUnavailable) as excinfo:
+        TushareProvider(StaleFakeTushareSource(trade_date)).load(trade_date)
+
+    assert "current trade date" in str(excinfo.value)
+    assert "token" not in str(excinfo.value).lower()
+
+
+def test_tushare_provider_rejects_rows_without_feature_inputs():
+    trade_date = date(2026, 7, 7)
+
+    with pytest.raises(CurrentLiveDataUnavailable) as excinfo:
+        TushareProvider(SparseFakeTushareSource(trade_date)).load(trade_date)
+
+    assert "feature inputs" in str(excinfo.value)
+    assert "token" not in str(excinfo.value).lower()
 
 
 def test_run_daily_pipeline_creates_report_and_evaluation_tasks(tmp_path):
@@ -163,7 +301,29 @@ def test_run_daily_pipeline_production_uses_provider_and_persists_real_bundle(tm
     assert result.recommendations
     assert repo.recommendations
     assert repo.stock_master
+    assert repo.market_bars
+    assert repo.daily_basic_indicators
+    assert repo.data_source_runs
     assert (tmp_path / "index.html").exists()
+
+
+def test_run_daily_pipeline_production_rejects_raw_only_decision_bundle(tmp_path):
+    repo = InMemoryAnalysisRepository()
+
+    with pytest.raises(RuntimeError) as excinfo:
+        run_daily_pipeline(
+            date(2026, 7, 7),
+            tmp_path,
+            repository=repo,
+            fixture_mode=False,
+            market_data_provider=RawOnlyProductionProvider(),
+        )
+
+    assert "no production decisions were generated" in str(excinfo.value)
+    assert repo.market_bars == []
+    assert repo.daily_basic_indicators == []
+    assert repo.data_source_runs == []
+    assert not (tmp_path / "index.html").exists()
 
 
 def test_run_daily_pipeline_production_fails_when_provider_cannot_generate_decisions(tmp_path):
