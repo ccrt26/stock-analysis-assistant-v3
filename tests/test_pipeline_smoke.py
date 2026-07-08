@@ -203,7 +203,29 @@ class FakeProductionProvider:
 class ProviderWithExtraRawCode:
     def load(self, trade_date):
         stocks, stock_names, feature_profiles = _sample_market(trade_date)
+        stocks = stocks + [
+            stocks[0].model_copy(
+                update={
+                    "ts_code": "000004.SZ",
+                    "name": "国华网安",
+                    "listing_days": 4_000,
+                    "turnover_rate": 0.9,
+                    "amount": 180_000_000,
+                }
+            )
+        ]
         stock_names["000004.SZ"] = "国华网安"
+        feature_profiles["000004.SZ"] = feature_profiles["600000.SH"].model_copy(
+            update={
+                "ts_code": "000004.SZ",
+                "trend_20d": 0.0,
+                "trend_60d": 0.0,
+                "relative_strength": 0.1,
+                "volatility_20d": 0.6,
+                "liquidity_score": 0.1,
+                "quality_score": 0.1,
+            }
+        )
         return MarketDataBundle(
             trade_date=trade_date,
             data_status=DataStatus.COMPLETE_PRIMARY,
@@ -522,7 +544,46 @@ def test_production_pipeline_writes_full_bundle_to_warehouse_and_selected_window
         item.ts_code for item in repo.focus_states
     }
     assert {bar.ts_code for bar in repo.market_bars} <= selected_codes
+    assert {row.ts_code for row in repo.daily_basic_indicators} <= selected_codes
+    assert {stock.ts_code for stock in repo.stock_statuses} <= selected_codes
+    assert {feature.ts_code for feature in repo.feature_snapshots} <= selected_codes
     assert "000004.SZ" not in {bar.ts_code for bar in repo.market_bars}
+    assert "000004.SZ" not in {row.ts_code for row in repo.daily_basic_indicators}
+    assert "000004.SZ" not in {stock.ts_code for stock in repo.stock_statuses}
+    assert "000004.SZ" not in {feature.ts_code for feature in repo.feature_snapshots}
+
+
+def test_production_pipeline_saves_full_stock_master_once_without_status_downgrade(tmp_path):
+    class RecordingStockMasterRepository(InMemoryAnalysisRepository):
+        def __init__(self):
+            super().__init__()
+            self.stock_master_saves = []
+
+        def save_stock_master(self, stocks):
+            self.stock_master_saves.append(list(stocks))
+            super().save_stock_master(stocks)
+
+    repo = RecordingStockMasterRepository()
+    warehouse = RecordingWarehouse()
+
+    run_daily_pipeline(
+        date(2026, 7, 7),
+        tmp_path,
+        repository=repo,
+        fixture_mode=False,
+        market_data_provider=ProviderWithExtraRawCode(),
+        local_warehouse=warehouse,
+    )
+
+    assert len(repo.stock_master_saves) == 1
+    assert {item.ts_code for item in repo.stock_master_saves[0]} == {
+        "600000.SH",
+        "000004.SZ",
+    }
+    stock_master_by_code = {item.ts_code: item for item in repo.stock_master}
+    assert isinstance(stock_master_by_code["600000.SH"], StockBasicRow)
+    assert stock_master_by_code["600000.SH"].exchange == "SSE"
+    assert stock_master_by_code["600000.SH"].list_date == date(1999, 11, 10)
 
 
 def test_production_pipeline_requires_local_warehouse_before_persisting(tmp_path):

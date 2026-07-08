@@ -217,7 +217,8 @@ def run_daily_pipeline(
         else:
             stock_statuses_to_save = stocks
             features_to_save = features
-        repository.save_stock_master(stock_statuses_to_save)
+        if production_bundle is None:
+            repository.save_stock_master(stock_statuses_to_save)
         repository.save_stock_statuses(stock_statuses_to_save)
         repository.save_feature_snapshots(features_to_save)
         repository.save_recommendations(recommendations)
