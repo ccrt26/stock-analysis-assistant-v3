@@ -108,6 +108,14 @@ class RejectingCapacityGuard:
         raise RuntimeError("capacity stopped")
 
 
+class RecordingWarehouse:
+    def __init__(self):
+        self.saved_bundles = []
+
+    def save_bundle(self, bundle):
+        self.saved_bundles.append(bundle)
+
+
 def test_in_memory_repository_saves_daily_outputs():
     repo = InMemoryAnalysisRepository()
     recommendation = Recommendation(
@@ -728,6 +736,7 @@ def test_production_pipeline_writes_full_stock_master_before_market_bars(tmp_pat
 
     client = FakeSupabaseClient()
     repo = SupabaseAnalysisRepository(client)
+    warehouse = RecordingWarehouse()
 
     run_daily_pipeline(
         date(2026, 7, 8),
@@ -735,8 +744,10 @@ def test_production_pipeline_writes_full_stock_master_before_market_bars(tmp_pat
         repository=repo,
         fixture_mode=False,
         market_data_provider=ProviderWithRawBarsBeyondFeatureUniverse(),
+        local_warehouse=warehouse,
     )
 
+    assert len(warehouse.saved_bundles) == 1
     write_tables = [name for name, _, _ in client.write_calls]
     assert write_tables.index("stock_master") < write_tables.index("market_price_daily")
     first_stock_master_rows = client.write_calls[0][2]

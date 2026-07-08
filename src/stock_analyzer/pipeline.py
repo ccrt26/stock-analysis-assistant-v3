@@ -10,8 +10,10 @@ from stock_analyzer.analysis.evidence import build_evidence_package
 from stock_analyzer.analysis.focus import update_focus_watchlist
 from stock_analyzer.analysis.pool import clean_stock_pool
 from stock_analyzer.analysis.recommendation import generate_recommendations
+from stock_analyzer.data.models import DailyBar, DailyBasicRow, MarketDataBundle
 from stock_analyzer.data.provider import MarketDataProvider
 from stock_analyzer.domain.models import (
+    ActionLabel,
     EvaluationTask,
     EvidencePackage,
     FeatureSnapshot,
@@ -122,6 +124,8 @@ def run_daily_pipeline(
     persist: bool = True,
     fixture_mode: bool = False,
     market_data_provider: Optional[MarketDataProvider] = None,
+    local_warehouse=None,
+    local_archive=None,
 ) -> DailyRunResult:
     repository = repository or InMemoryAnalysisRepository()
     persist = persist and not dry_run
@@ -149,20 +153,11 @@ def run_daily_pipeline(
                 "Current live data is unavailable; no production decisions were generated."
             )
         if persist and production_bundle is not None:
-            preflight_market_window_writes = getattr(
-                repository,
-                "preflight_market_window_writes",
-                None,
-            )
-            if preflight_market_window_writes is not None:
-                preflight_market_window_writes(
-                    production_bundle.daily_bars,
-                    production_bundle.daily_basic,
+            if local_warehouse is None:
+                raise ProductionDataSourceUnavailable(
+                    "Production persistence requires local warehouse before Supabase writes."
                 )
-            repository.save_stock_master(production_bundle.stock_basic)
-            repository.save_market_bars(production_bundle.daily_bars)
-            repository.save_daily_basic_indicators(production_bundle.daily_basic)
-            repository.save_data_source_runs(production_bundle.source_runs)
+            local_warehouse.save_bundle(production_bundle)
     features = [feature_profiles[stock.ts_code] for stock in included_stocks if stock.ts_code in feature_profiles]
 
     recommendation_result = generate_recommendations(features, stock_names)
@@ -193,9 +188,38 @@ def run_daily_pipeline(
     ]
 
     if persist:
-        repository.save_stock_master(stocks)
-        repository.save_stock_statuses(stocks)
-        repository.save_feature_snapshots(features)
+        selected_codes = _selected_decision_codes(recommendations, focus_states)
+        if production_bundle is not None:
+            selected_market_bars, selected_daily_basic = _filter_market_window(
+                production_bundle,
+                selected_codes,
+            )
+            preflight_market_window_writes = getattr(
+                repository,
+                "preflight_market_window_writes",
+                None,
+            )
+            if preflight_market_window_writes is not None:
+                preflight_market_window_writes(
+                    selected_market_bars,
+                    selected_daily_basic,
+                )
+            repository.save_stock_master(production_bundle.stock_basic)
+            repository.save_data_source_runs(production_bundle.source_runs)
+            repository.save_market_bars(selected_market_bars)
+            repository.save_daily_basic_indicators(selected_daily_basic)
+            stock_statuses_to_save = [
+                stock for stock in stocks if stock.ts_code in selected_codes
+            ]
+            features_to_save = [
+                feature for feature in features if feature.ts_code in selected_codes
+            ]
+        else:
+            stock_statuses_to_save = stocks
+            features_to_save = features
+        repository.save_stock_master(stock_statuses_to_save)
+        repository.save_stock_statuses(stock_statuses_to_save)
+        repository.save_feature_snapshots(features_to_save)
         repository.save_recommendations(recommendations)
         repository.save_focus_states(focus_states)
         repository.save_evidence_packages(evidence_packages)
@@ -227,6 +251,28 @@ def _has_recommendation_eligible_features(
         (feature := feature_profiles.get(stock.ts_code)) is not None
         and feature.data_quality == "ok"
         for stock in stocks
+    )
+
+
+def _selected_decision_codes(
+    recommendations: list[Recommendation],
+    focus_states: list[FocusState],
+) -> set[str]:
+    excluded_states = {ActionLabel.EXIT_OBSERVATION, ActionLabel.INSUFFICIENT_DATA}
+    return {item.ts_code for item in recommendations} | {
+        item.ts_code for item in focus_states if item.state not in excluded_states
+    }
+
+
+def _filter_market_window(
+    bundle: MarketDataBundle,
+    selected_codes: set[str],
+) -> tuple[list[DailyBar], list[DailyBasicRow]]:
+    if not selected_codes:
+        return [], []
+    return (
+        [bar for bar in bundle.daily_bars if bar.ts_code in selected_codes],
+        [row for row in bundle.daily_basic if row.ts_code in selected_codes],
     )
 
 

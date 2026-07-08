@@ -119,6 +119,14 @@ class PreflightRejectingRepository(InMemoryAnalysisRepository):
         self._reject_write("data_source_runs")
 
 
+class RecordingWarehouse:
+    def __init__(self):
+        self.saved_bundles = []
+
+    def save_bundle(self, bundle):
+        self.saved_bundles.append(bundle)
+
+
 def _raw_daily_bars(trade_date, ts_code="600000.SH", days=1, close_base=10.0):
     start = trade_date - timedelta(days=days - 1)
     return [
@@ -189,6 +197,30 @@ class FakeProductionProvider:
             stock_names=stock_names,
             feature_profiles=feature_profiles,
             source_runs=_raw_source_runs(trade_date, len(daily_bars)),
+        )
+
+
+class ProviderWithExtraRawCode:
+    def load(self, trade_date):
+        stocks, stock_names, feature_profiles = _sample_market(trade_date)
+        stock_names["000004.SZ"] = "国华网安"
+        return MarketDataBundle(
+            trade_date=trade_date,
+            data_status=DataStatus.COMPLETE_PRIMARY,
+            source_grade=SourceGrade.PRIMARY,
+            source_versions={"fake-live": trade_date.isoformat()},
+            stock_basic=_raw_stock_basic()
+            + [StockBasicRow(ts_code="000004.SZ", name="国华网安", exchange="SZSE")],
+            daily_bars=_raw_daily_bars(trade_date, "600000.SH")
+            + _raw_daily_bars(trade_date, "600519.SH")
+            + _raw_daily_bars(trade_date, "000004.SZ"),
+            daily_basic=_raw_daily_basic(trade_date, "600000.SH")
+            + _raw_daily_basic(trade_date, "600519.SH")
+            + _raw_daily_basic(trade_date, "000004.SZ"),
+            stocks=stocks,
+            stock_names=stock_names,
+            feature_profiles=feature_profiles,
+            source_runs=_raw_source_runs(trade_date, 3),
         )
 
 
@@ -446,6 +478,7 @@ def test_run_daily_pipeline_production_without_data_source_fails_before_persisti
 
 def test_run_daily_pipeline_production_uses_provider_and_persists_real_bundle(tmp_path):
     repo = InMemoryAnalysisRepository()
+    warehouse = RecordingWarehouse()
 
     result = run_daily_pipeline(
         date(2026, 7, 7),
@@ -453,9 +486,11 @@ def test_run_daily_pipeline_production_uses_provider_and_persists_real_bundle(tm
         repository=repo,
         fixture_mode=False,
         market_data_provider=FakeProductionProvider(),
+        local_warehouse=warehouse,
     )
 
     assert result.recommendations
+    assert len(warehouse.saved_bundles) == 1
     assert repo.recommendations
     assert repo.stock_master
     assert repo.market_bars
@@ -464,8 +499,86 @@ def test_run_daily_pipeline_production_uses_provider_and_persists_real_bundle(tm
     assert (tmp_path / "index.html").exists()
 
 
+def test_production_pipeline_writes_full_bundle_to_warehouse_and_selected_windows_to_repo(tmp_path):
+    repo = InMemoryAnalysisRepository()
+    warehouse = RecordingWarehouse()
+
+    run_daily_pipeline(
+        date(2026, 7, 7),
+        tmp_path,
+        repository=repo,
+        fixture_mode=False,
+        market_data_provider=ProviderWithExtraRawCode(),
+        local_warehouse=warehouse,
+    )
+
+    assert len(warehouse.saved_bundles) == 1
+    assert {bar.ts_code for bar in warehouse.saved_bundles[0].daily_bars} == {
+        "600000.SH",
+        "600519.SH",
+        "000004.SZ",
+    }
+    selected_codes = {item.ts_code for item in repo.recommendations} | {
+        item.ts_code for item in repo.focus_states
+    }
+    assert {bar.ts_code for bar in repo.market_bars} <= selected_codes
+    assert "000004.SZ" not in {bar.ts_code for bar in repo.market_bars}
+
+
+def test_production_pipeline_requires_local_warehouse_before_persisting(tmp_path):
+    repo = InMemoryAnalysisRepository()
+
+    with pytest.raises(RuntimeError) as excinfo:
+        run_daily_pipeline(
+            date(2026, 7, 7),
+            tmp_path,
+            repository=repo,
+            fixture_mode=False,
+            market_data_provider=ProviderWithExtraRawCode(),
+        )
+
+    assert "local warehouse" in str(excinfo.value).lower()
+    assert repo.recommendations == []
+    assert repo.market_bars == []
+
+
+def test_selected_decision_codes_include_recommendations_and_active_focus_only():
+    from stock_analyzer.pipeline import _selected_decision_codes
+
+    recommendation = Recommendation(
+        trade_date=date(2026, 7, 7),
+        ts_code="600000.SH",
+        name="浦发银行",
+        action=ActionLabel.ENTER_OBSERVATION,
+        score=82,
+        reasons=["趋势改善"],
+        risks=["需要确认"],
+    )
+    active_focus = FocusState(
+        trade_date=date(2026, 7, 7),
+        ts_code="600519.SH",
+        state=ActionLabel.CONTINUE_OBSERVATION,
+    )
+    exited_focus = FocusState(
+        trade_date=date(2026, 7, 7),
+        ts_code="000004.SZ",
+        state=ActionLabel.EXIT_OBSERVATION,
+    )
+    insufficient_focus = FocusState(
+        trade_date=date(2026, 7, 7),
+        ts_code="000005.SZ",
+        state=ActionLabel.INSUFFICIENT_DATA,
+    )
+
+    assert _selected_decision_codes(
+        [recommendation],
+        [active_focus, exited_focus, insufficient_focus],
+    ) == {"600000.SH", "600519.SH"}
+
+
 def test_run_daily_pipeline_production_preflight_failure_prevents_all_repository_writes(tmp_path):
     repo = PreflightRejectingRepository()
+    warehouse = RecordingWarehouse()
 
     with pytest.raises(RuntimeError, match="preflight stopped"):
         run_daily_pipeline(
@@ -474,9 +587,11 @@ def test_run_daily_pipeline_production_preflight_failure_prevents_all_repository
             repository=repo,
             fixture_mode=False,
             market_data_provider=FakeProductionProvider(),
+            local_warehouse=warehouse,
         )
 
     assert repo.calls == [("preflight", 1, 1)]
+    assert len(warehouse.saved_bundles) == 1
     assert not (tmp_path / "index.html").exists()
 
 

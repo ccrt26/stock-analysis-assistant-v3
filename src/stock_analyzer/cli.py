@@ -17,6 +17,7 @@ from stock_analyzer.pipeline import (
     run_daily_pipeline,
 )
 from stock_analyzer.storage.capacity_guard import SupabaseCapacityGuard
+from stock_analyzer.storage.local_warehouse import LocalWarehouse
 from stock_analyzer.storage.repositories import (
     InMemoryAnalysisRepository,
     SupabaseAnalysisRepository,
@@ -90,6 +91,11 @@ def run_daily(
             persist=not dry_run,
             fixture_mode=effective_fixture_mode,
             market_data_provider=market_data_provider,
+            local_warehouse=(
+                LocalWarehouse(config.local_warehouse_dir)
+                if not dry_run and not effective_fixture_mode
+                else None
+            ),
         )
     except ProductionDataSourceUnavailable as exc:
         _fail(str(exc))

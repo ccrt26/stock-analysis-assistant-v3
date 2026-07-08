@@ -1,4 +1,5 @@
 from datetime import date
+from types import SimpleNamespace
 
 import json
 
@@ -347,11 +348,23 @@ def test_run_daily_with_supabase_config_fails_without_tushare_token(monkeypatch)
     assert repo.save_calls == []
 
 
-def test_run_daily_with_supabase_config_calls_production_provider(monkeypatch):
+def test_run_daily_with_supabase_config_calls_production_provider(tmp_path, monkeypatch):
     repo = RecordingRepository()
+    warehouse_instances = []
+
+    class FakeWarehouse:
+        def __init__(self, root):
+            self.root = root
+            self.saved_bundles = []
+            warehouse_instances.append(self)
+
+        def save_bundle(self, bundle):
+            self.saved_bundles.append(bundle)
+
     monkeypatch.setenv("SUPABASE_URL", "https://supabase.example.test")
     monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "fake-service-role-key")
     monkeypatch.setenv("TUSHARE_TOKEN", "fake-tushare-token")
+    monkeypatch.setenv("LOCAL_WAREHOUSE_DIR", str(tmp_path / "warehouse"))
     monkeypatch.delenv("STOCK_ANALYZER_FIXTURE_MODE", raising=False)
     monkeypatch.setattr(
         "stock_analyzer.cli._analysis_repository",
@@ -361,6 +374,7 @@ def test_run_daily_with_supabase_config_calls_production_provider(monkeypatch):
         "stock_analyzer.cli.build_production_market_data_provider",
         lambda config: FakeProductionProvider(),
     )
+    monkeypatch.setattr("stock_analyzer.cli.LocalWarehouse", FakeWarehouse)
 
     result = CliRunner().invoke(
         app,
@@ -370,11 +384,60 @@ def test_run_daily_with_supabase_config_calls_production_provider(monkeypatch):
     assert result.exit_code == 0
     assert "daily run completed for 2026-07-07" in result.stdout
     assert "fake-tushare-token" not in result.output
+    assert warehouse_instances[0].root == tmp_path / "warehouse"
+    assert len(warehouse_instances[0].saved_bundles) == 1
     save_payloads = {name: payload for name, payload in repo.save_calls}
     assert save_payloads["recommendations"]
     assert save_payloads["market_bars"]
     assert save_payloads["daily_basic_indicators"]
     assert save_payloads["data_source_runs"]
+
+
+def test_run_daily_with_supabase_config_passes_configured_local_warehouse(
+    tmp_path,
+    monkeypatch,
+):
+    repo = RecordingRepository()
+    captured = {}
+    warehouse_instances = []
+
+    class FakeWarehouse:
+        def __init__(self, root):
+            self.root = root
+            warehouse_instances.append(self)
+
+    def fake_run_daily_pipeline(trade_date, output_dir, **kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(
+            trade_date=trade_date,
+            recommendations=[],
+            evaluation_tasks=[],
+        )
+
+    monkeypatch.setenv("SUPABASE_URL", "https://supabase.example.test")
+    monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "fake-service-role-key")
+    monkeypatch.setenv("TUSHARE_TOKEN", "fake-tushare-token")
+    monkeypatch.setenv("LOCAL_WAREHOUSE_DIR", str(tmp_path / "warehouse"))
+    monkeypatch.delenv("STOCK_ANALYZER_FIXTURE_MODE", raising=False)
+    monkeypatch.setattr(
+        "stock_analyzer.cli._analysis_repository",
+        lambda config, **kwargs: repo,
+    )
+    monkeypatch.setattr(
+        "stock_analyzer.cli.build_production_market_data_provider",
+        lambda config: FakeProductionProvider(),
+    )
+    monkeypatch.setattr("stock_analyzer.cli.LocalWarehouse", FakeWarehouse, raising=False)
+    monkeypatch.setattr("stock_analyzer.cli.run_daily_pipeline", fake_run_daily_pipeline)
+
+    result = CliRunner().invoke(
+        app,
+        ["run-daily", "--trade-date", "2026-07-07"],
+    )
+
+    assert result.exit_code == 0
+    assert captured["local_warehouse"] is warehouse_instances[0]
+    assert warehouse_instances[0].root == tmp_path / "warehouse"
 
 
 def test_run_daily_fixture_mode_writes_local_sample_report(tmp_path, monkeypatch):
