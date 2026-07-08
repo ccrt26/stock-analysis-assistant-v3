@@ -231,6 +231,27 @@ def test_health_check_live_tushare_smoke_uses_fake_source_without_leaking_token(
     assert smoke_calls == [("fake-live-token", date(2026, 7, 8))]
 
 
+def test_health_check_live_tushare_smoke_masks_token_in_source_errors(monkeypatch):
+    monkeypatch.setenv("TUSHARE_TOKEN", "fake-error-token")
+
+    class FailingTushareSmokeSource:
+        def fetch_daily(self, trade_date):
+            raise RuntimeError(f"Tushare rejected token fake-error-token on {trade_date}")
+
+    monkeypatch.setattr(
+        "stock_analyzer.cli._build_tushare_source",
+        lambda token: FailingTushareSmokeSource(),
+        raising=False,
+    )
+
+    result = CliRunner().invoke(app, ["health-check", "--live-tushare-smoke"])
+
+    assert result.exit_code != 0
+    assert "live Tushare smoke failed" in result.output
+    assert "[masked]" in result.output
+    assert "fake-error-token" not in result.output
+
+
 def test_run_daily_dry_run_completes():
     result = CliRunner().invoke(
         app, ["run-daily", "--dry-run", "--trade-date", "2026-07-07"]

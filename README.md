@@ -9,7 +9,7 @@
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-python3 -m pip install -e ".[dev,data]"
+python3 -m pip install -e ".[dev]"
 python3 -m stock_analyzer health-check
 python3 -m stock_analyzer run-daily --fixture-mode --trade-date 2026-07-07
 ```
@@ -28,6 +28,7 @@ PYTHONPATH=src python3 -m stock_analyzer run-daily --fixture-mode --trade-date 2
 真实 Tushare smoke 必须显式选择，并且只应在本地已安装 `tushare` 且配置了非提交的 token 后运行：
 
 ```bash
+python3 -m pip install "tushare>=1.4.19"
 PYTHONPATH=src python3 -m stock_analyzer health-check --live-tushare-smoke
 ```
 

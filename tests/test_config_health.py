@@ -84,6 +84,26 @@ def test_health_check_masks_tushare_token_without_resolving(monkeypatch):
     assert "secret-token-value" not in lines
 
 
+def test_health_check_reports_token_file_without_reading_secret(monkeypatch, tmp_path):
+    token_path = tmp_path / "token"
+    token_path.write_text("file-secret-token", encoding="utf-8")
+    config = AppConfig.load(env={"TUSHARE_TOKEN_PATH": str(token_path)})
+    original_read_text = Path.read_text
+
+    def forbidden_read_text(self, *args, **kwargs):
+        if self == token_path:
+            raise AssertionError("default health checks must not read the Tushare token file")
+        return original_read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", forbidden_read_text)
+
+    report = run_health_checks(config)
+    lines = "\n".join(report.as_lines())
+
+    assert "tushare_token: present:file" in lines
+    assert "file-secret-token" not in lines
+
+
 def test_health_report_as_lines_renders_status_values():
     report = HealthReport(
         items=[

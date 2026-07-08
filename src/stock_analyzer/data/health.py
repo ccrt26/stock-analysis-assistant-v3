@@ -27,7 +27,7 @@ class HealthReport(BaseModel):
 
 
 def run_health_checks(config: AppConfig) -> HealthReport:
-    token_status = config.tushare_token_status()
+    token_status = _tushare_token_status_without_secret_read(config)
     credential_status = HealthStatus.OK if token_status != "missing" else HealthStatus.FAIL
     supabase_status = HealthStatus.OK if config.has_supabase_config else HealthStatus.WARN
     return HealthReport(
@@ -54,3 +54,15 @@ def run_health_checks(config: AppConfig) -> HealthReport:
             ),
         ]
     )
+
+
+def _tushare_token_status_without_secret_read(config: AppConfig) -> str:
+    if _has_text(config.tushare_token):
+        return "present:env"
+    if config.tushare_token_path.exists():
+        return "present:file"
+    return "missing"
+
+
+def _has_text(value: str | None) -> bool:
+    return bool(value and value.strip())
