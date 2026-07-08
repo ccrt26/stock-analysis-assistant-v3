@@ -11,7 +11,7 @@
 ## Global Constraints
 
 - 项目根目录固定为 `/Users/ccrt/股票分析助手`；当前开发工作区通过 `/Users/ccrt/Documents/股票分析助手` 访问。
-- 日常主命令固定为 `PYTHONPATH=src python3 -m stock_analyzer run-daily --trade-date YYYY-MM-DD`。
+- 本机日常主命令固定为 `set -a; . ./.env.local; set +a; PYTHONPATH=src .venv/bin/python -m stock_analyzer run-daily --trade-date YYYY-MM-DD`。
 - Fixture 模式只能通过 `--fixture-mode` 或 `STOCK_ANALYZER_FIXTURE_MODE=1` 显式启用。
 - 生产模式必须读取 `SUPABASE_URL`、`SUPABASE_SERVICE_ROLE_KEY`，不得在聊天、日志、报告、异常中输出 service key。
 - Tushare token 读取顺序：先 `TUSHARE_TOKEN`，再 `TUSHARE_TOKEN_PATH`，默认 `/Users/ccrt/.tushare_token`；不得打印 token 原文。
@@ -22,39 +22,101 @@
 - 重点关注池可以为空，也可以少于 10 只。
 - 报告必须像股票分析报告，不像系统运行日志；数据源状态只能作为风险披露，不抢占分析主体。
 - 每个任务完成后运行对应测试并提交。
-- 执行方式按用户确认采用 Subagent-Driven；关键数据正确性、缓存边界、生产报告发布前 review 优先使用 GPT-5.5 xhigh。
+- 执行方式按用户确认采用 Subagent-Driven；本计划所有实现和 review 禁止使用 5.4mini。
+- Task 1-9 的 implementer 和 reviewer 默认使用 GPT-5.5 xhigh；如果该模型不可用，必须停止并向用户说明，不得自动降级到 mini。
+- 每个 subagent 报告必须写明实际使用模型、运行的测试命令、测试结果、是否触碰密钥/外网/数据库。
+- 本地执行必须使用项目 `.venv` 中的 Python 3.12：`.venv/bin/python`。
+- 当前 `.venv` 只允许保留 Supabase 调试最小依赖；每个任务只能安装本任务明确需要的最小依赖，不得一次性安装 `.[dev,data]`。
+- `tushare`、`akshare` 只能在到达真实数据源任务或 live smoke 任务时按需安装；调试 Supabase 或纯 fake-client 单元测试时不得安装它们。
+- `.env.local` 只用于本机运行，必须继续被 Git 忽略；不得读取、打印、提交、复制 `SUPABASE_SERVICE_ROLE_KEY` 或 Tushare token 原文。
+- 任何数据库写入、外网 smoke、Cloudflare 操作都必须在单元测试和 reviewer gate 通过后执行。
+
+---
+
+## Execution Guardrails
+
+这些规则覆盖所有任务，优先级高于各任务中较旧的命令示例。
+
+### Model Assignment
+
+| Task | Implementer model | Reviewer model | Reason |
+| --- | --- | --- | --- |
+| Task 1 | GPT-5.5 xhigh | GPT-5.5 xhigh | 数据契约、密钥脱敏、缓存不参与决策的根接口 |
+| Task 2 | GPT-5.5 xhigh | GPT-5.5 xhigh | Tushare 字段映射，任何字段错误都会污染全链路 |
+| Task 3 | GPT-5.5 xhigh | GPT-5.5 xhigh | 实时备用源和缓存边界是核心风控规则 |
+| Task 4 | GPT-5.5 xhigh | GPT-5.5 xhigh | 特征计算直接影响候选质量 |
+| Task 5 | GPT-5.5 xhigh | GPT-5.5 xhigh | Supabase schema、RLS、持久化字段必须一次做对 |
+| Task 6 | GPT-5.5 xhigh | GPT-5.5 xhigh | 生产 pipeline 是否允许发布报告的核心 gate |
+| Task 7 | GPT-5.5 xhigh | GPT-5.5 xhigh | 防止缓存-only 伪装成股票分析报告 |
+| Task 8 | GPT-5.5 xhigh | GPT-5.5 xhigh | 真实 smoke、密钥脱敏、生产命令验证 |
+| Task 9 | GPT-5.5 xhigh | GPT-5.5 xhigh | Supabase 真实迁移、GitHub/Cloudflare 发布前检查 |
+| Final whole-branch review | GPT-5.5 xhigh | GPT-5.5 xhigh | 全链路金融决策系统风险审查 |
+
+如果调度工具没有 GPT-5.5 xhigh 选项，controller 必须停止并询问用户是否允许使用最接近的高能力模型。不得默认降级。
+
+### Environment Policy
+
+- 当前本地 `.venv` 已为 Supabase 调试最小环境：`pydantic` + `supabase`。
+- Task 1 可直接使用当前 `.venv`。
+- Task 2 如需要 DataFrame 测试，只安装 `pandas>=2.2`，不安装 `tushare`。
+- Task 3 的 AkShare/Sina/Tencent 测试必须使用 fake client；不得为了 fake-client 单元测试安装 `akshare`。
+- Task 4 如需要计算依赖，只安装 `pandas>=2.2` 和 `numpy>=1.26`。
+- Task 5 只需要 `supabase`、`pydantic` 和标准库；不得安装数据源包。
+- Task 6 生产 provider 单元测试使用 fake provider；不得访问 Tushare 或 AkShare 外网。
+- Task 7 报告边界测试不需要数据源包。
+- Task 8 才允许安装 `tushare>=1.4.19` 执行 live Tushare smoke；只有实现真实 AkShare live smoke 时才允许安装 `akshare>=1.14`。
+- 所有依赖安装必须写在 subagent 报告中，并说明为什么该任务需要它。
+
+### Quality Gates
+
+- 每个任务必须先写失败测试，记录失败命令和失败原因，再写实现。
+- 每个任务必须生成一次 commit；reviewer 只审该任务从 base commit 到 head commit 的 diff。
+- reviewer 必须同时给出 `Spec compliance` 和 `Code quality` 两个 verdict。
+- 任何 Critical 或 Important finding 必须回到 fixer subagent，修复后 re-review。
+- Minor finding 记录到 `.superpowers/sdd/progress.md`，最终 whole-branch review 前统一复查。
+- 任何任务如果触碰这些边界，reviewer 必须重点审查：样例数据是否进入生产、缓存是否支撑当前日决策、service key/token 是否泄露、报告是否误导为正式结论、Supabase RLS 是否仍开启。
+
+### Stop Conditions
+
+controller 必须停止并向用户说明，不能继续自动执行的情况：
+
+- 需要从 GPT-5.5 xhigh 降级到 mini 或未知低能力模型。
+- 生产运行需要当前日真实数据但 Tushare token 缺失。
+- Supabase 写入失败且错误不能通过只读 smoke 定位。
+- 任何 live source 返回空数据，而代码试图生成正常推荐报告。
+- reviewer 发现计划要求和安全/正确性要求冲突。
 
 ---
 
 ## File Structure
 
-- Modify: `/Users/ccrt/股票分析助手/src/stock_analyzer/config.py`  
+- Modify: `/Users/ccrt/股票分析助手/src/stock_analyzer/config.py`
   增加 Tushare token 解析、可脱敏的凭证状态、生产 ingestion 配置。
-- Create: `/Users/ccrt/股票分析助手/src/stock_analyzer/data/models.py`  
+- Create: `/Users/ccrt/股票分析助手/src/stock_analyzer/data/models.py`
   数据源状态、行情行、基础指标行、统一数据包、数据不可用通知模型。
-- Create: `/Users/ccrt/股票分析助手/src/stock_analyzer/data/tushare_source.py`  
+- Create: `/Users/ccrt/股票分析助手/src/stock_analyzer/data/tushare_source.py`
   Tushare client 包装、DataFrame 字段校验、stock_basic/trade_cal/daily/daily_basic 映射。
-- Create: `/Users/ccrt/股票分析助手/src/stock_analyzer/data/free_sources.py`  
+- Create: `/Users/ccrt/股票分析助手/src/stock_analyzer/data/free_sources.py`
   AkShare/Sina/Tencent 当前交易日行情备用接口，测试用 fake client，不在单元测试访问外网。
-- Create: `/Users/ccrt/股票分析助手/src/stock_analyzer/data/cache.py`  
+- Create: `/Users/ccrt/股票分析助手/src/stock_analyzer/data/cache.py`
   历史缓存权限判断和断点续跑读取边界；明确禁止当前日缓存参与决策。
-- Create: `/Users/ccrt/股票分析助手/src/stock_analyzer/data/feature_builder.py`  
+- Create: `/Users/ccrt/股票分析助手/src/stock_analyzer/data/feature_builder.py`
   从 stock_basic、daily、daily_basic 构建 `StockSnapshot` 和 `FeatureSnapshot`。
-- Create: `/Users/ccrt/股票分析助手/src/stock_analyzer/data/provider.py`  
+- Create: `/Users/ccrt/股票分析助手/src/stock_analyzer/data/provider.py`
   编排 Tushare 主源、实时备用源、缓存权限、重试、run records，产出 `MarketDataBundle`。
-- Modify: `/Users/ccrt/股票分析助手/src/stock_analyzer/pipeline.py`  
+- Modify: `/Users/ccrt/股票分析助手/src/stock_analyzer/pipeline.py`
   生产模式从 `MarketDataProvider` 取真实数据；fixture 模式继续使用 `_sample_market()`。
-- Modify: `/Users/ccrt/股票分析助手/src/stock_analyzer/cli.py`  
+- Modify: `/Users/ccrt/股票分析助手/src/stock_analyzer/cli.py`
   生产 `run-daily` 构造真实 provider，不再预先用“ingestion 未实现”拦截。
-- Modify: `/Users/ccrt/股票分析助手/src/stock_analyzer/storage/repositories.py`  
+- Modify: `/Users/ccrt/股票分析助手/src/stock_analyzer/storage/repositories.py`
   支持 market bars、daily basic indicators、data_source_run 的 upsert 和读取。
-- Create: `/Users/ccrt/股票分析助手/supabase/migrations/202607080002_ingestion_v1.sql`  
+- Create: `/Users/ccrt/股票分析助手/supabase/migrations/202607080002_ingestion_v1.sql`
   新增行情、基础指标表，扩展 `data_source_run`，保持 RLS service_role policy。
-- Modify: `/Users/ccrt/股票分析助手/src/stock_analyzer/reports/generator.py`  
+- Modify: `/Users/ccrt/股票分析助手/src/stock_analyzer/reports/generator.py`
   支持 live-backup 警示和 data-unavailable notice；禁止缓存-only 正常报告。
-- Modify: `/Users/ccrt/股票分析助手/src/stock_analyzer/reports/templates/index.html.j2`  
+- Modify: `/Users/ccrt/股票分析助手/src/stock_analyzer/reports/templates/index.html.j2`
   首页展示生产/实时备用源状态和数据不可用 notice。
-- Modify: `/Users/ccrt/股票分析助手/src/stock_analyzer/reports/templates/stock.html.j2`  
+- Modify: `/Users/ccrt/股票分析助手/src/stock_analyzer/reports/templates/stock.html.j2`
   单股页展示证据来源和备用源风险。
 - Create: `/Users/ccrt/股票分析助手/tests/test_ingestion_contracts.py`
 - Create: `/Users/ccrt/股票分析助手/tests/test_tushare_source.py`
@@ -133,7 +195,7 @@ def test_market_data_bundle_requires_live_current_source_for_decisions():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `python3 -m pytest /Users/ccrt/股票分析助手/tests/test_ingestion_contracts.py -v`  
+Run: `.venv/bin/python -m pytest /Users/ccrt/股票分析助手/tests/test_ingestion_contracts.py -v`
 Expected: FAIL with import errors for `stock_analyzer.data.models` and missing `resolve_tushare_token`.
 
 - [ ] **Step 3: Add data contracts**
@@ -284,7 +346,7 @@ def tushare_token_status(self) -> str:
 
 - [ ] **Step 5: Run tests**
 
-Run: `python3 -m pytest /Users/ccrt/股票分析助手/tests/test_ingestion_contracts.py -v`  
+Run: `.venv/bin/python -m pytest /Users/ccrt/股票分析助手/tests/test_ingestion_contracts.py -v`
 Expected: PASS.
 
 - [ ] **Step 6: Commit**
@@ -394,7 +456,7 @@ def test_tushare_missing_required_field_fails_clearly():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `python3 -m pytest /Users/ccrt/股票分析助手/tests/test_tushare_source.py -v`  
+Run: `.venv/bin/python -m pytest /Users/ccrt/股票分析助手/tests/test_tushare_source.py -v`
 Expected: FAIL because `tushare_source.py` does not exist.
 
 - [ ] **Step 3: Add Tushare source**
@@ -500,7 +562,7 @@ def _create_tushare_pro(token: str):
     try:
         import tushare as ts
     except ImportError as exc:
-        raise TushareUnavailable("tushare package is not installed; install optional data dependencies") from exc
+        raise TushareUnavailable("tushare package is not installed; install tushare before live source access") from exc
     ts.set_token(token)
     return ts.pro_api()
 
@@ -531,7 +593,7 @@ def _optional_float(row, name: str) -> Optional[float]:
 
 - [ ] **Step 4: Run tests**
 
-Run: `python3 -m pytest /Users/ccrt/股票分析助手/tests/test_tushare_source.py -v`  
+Run: `.venv/bin/python -m pytest /Users/ccrt/股票分析助手/tests/test_tushare_source.py -v`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
@@ -605,7 +667,7 @@ def test_live_backup_daily_source_marks_rows_as_live_backup():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `python3 -m pytest /Users/ccrt/股票分析助手/tests/test_cache_policy.py -v`  
+Run: `.venv/bin/python -m pytest /Users/ccrt/股票分析助手/tests/test_cache_policy.py -v`
 Expected: FAIL because `cache.py` and `free_sources.py` do not exist.
 
 - [ ] **Step 3: Add cache policy**
@@ -677,7 +739,7 @@ def _optional_float(row: dict, key: str) -> float | None:
 
 - [ ] **Step 5: Run tests**
 
-Run: `python3 -m pytest /Users/ccrt/股票分析助手/tests/test_cache_policy.py -v`  
+Run: `.venv/bin/python -m pytest /Users/ccrt/股票分析助手/tests/test_cache_policy.py -v`
 Expected: PASS.
 
 - [ ] **Step 6: Commit**
@@ -779,7 +841,7 @@ def test_current_trade_date_bar_is_required_for_decisions():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `python3 -m pytest /Users/ccrt/股票分析助手/tests/test_feature_builder.py -v`  
+Run: `.venv/bin/python -m pytest /Users/ccrt/股票分析助手/tests/test_feature_builder.py -v`
 Expected: FAIL because `feature_builder.py` does not exist.
 
 - [ ] **Step 3: Add feature builder**
@@ -898,7 +960,7 @@ def _liquidity_score(amount: float | None) -> float:
 
 - [ ] **Step 4: Run tests**
 
-Run: `python3 -m pytest /Users/ccrt/股票分析助手/tests/test_feature_builder.py -v`  
+Run: `.venv/bin/python -m pytest /Users/ccrt/股票分析助手/tests/test_feature_builder.py -v`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
@@ -996,7 +1058,7 @@ def test_in_memory_repository_upserts_ingestion_rows():
 
 - [ ] **Step 3: Run tests to verify failure**
 
-Run: `python3 -m pytest /Users/ccrt/股票分析助手/tests/test_supabase_schema.py /Users/ccrt/股票分析助手/tests/test_repositories.py -v`  
+Run: `.venv/bin/python -m pytest /Users/ccrt/股票分析助手/tests/test_supabase_schema.py /Users/ccrt/股票分析助手/tests/test_repositories.py -v`
 Expected: FAIL for missing migration and repository methods.
 
 - [ ] **Step 4: Add migration**
@@ -1163,7 +1225,7 @@ def save_data_source_runs(self, rows: List[SourceRunRecord]) -> None:
 
 - [ ] **Step 7: Run tests**
 
-Run: `python3 -m pytest /Users/ccrt/股票分析助手/tests/test_supabase_schema.py /Users/ccrt/股票分析助手/tests/test_repositories.py -v`  
+Run: `.venv/bin/python -m pytest /Users/ccrt/股票分析助手/tests/test_supabase_schema.py /Users/ccrt/股票分析助手/tests/test_repositories.py -v`
 Expected: PASS.
 
 - [ ] **Step 8: Commit**
@@ -1274,7 +1336,7 @@ def test_run_daily_with_supabase_config_calls_production_provider(monkeypatch):
 
 - [ ] **Step 3: Run tests to verify failure**
 
-Run: `python3 -m pytest /Users/ccrt/股票分析助手/tests/test_pipeline_smoke.py /Users/ccrt/股票分析助手/tests/test_cli.py -v`  
+Run: `.venv/bin/python -m pytest /Users/ccrt/股票分析助手/tests/test_pipeline_smoke.py /Users/ccrt/股票分析助手/tests/test_cli.py -v`
 Expected: FAIL because `market_data_provider` and `build_production_market_data_provider` are missing.
 
 - [ ] **Step 4: Add provider interface**
@@ -1386,7 +1448,7 @@ market_data_provider=market_data_provider,
 
 - [ ] **Step 7: Run tests**
 
-Run: `python3 -m pytest /Users/ccrt/股票分析助手/tests/test_pipeline_smoke.py /Users/ccrt/股票分析助手/tests/test_cli.py -v`  
+Run: `.venv/bin/python -m pytest /Users/ccrt/股票分析助手/tests/test_pipeline_smoke.py /Users/ccrt/股票分析助手/tests/test_cli.py -v`
 Expected: PASS.
 
 - [ ] **Step 8: Commit**
@@ -1439,7 +1501,7 @@ def test_data_unavailable_notice_does_not_create_stock_analysis_pages(tmp_path):
 
 - [ ] **Step 2: Run test to verify failure**
 
-Run: `python3 -m pytest /Users/ccrt/股票分析助手/tests/test_report_generation.py -v`  
+Run: `.venv/bin/python -m pytest /Users/ccrt/股票分析助手/tests/test_report_generation.py -v`
 Expected: FAIL because `render_data_unavailable_notice` does not exist.
 
 - [ ] **Step 3: Add notice renderer**
@@ -1566,7 +1628,7 @@ def render_data_unavailable_notice(output_dir: Path, notice: DataUnavailableNoti
 
 - [ ] **Step 5: Run report tests**
 
-Run: `python3 -m pytest /Users/ccrt/股票分析助手/tests/test_report_generation.py -v`  
+Run: `.venv/bin/python -m pytest /Users/ccrt/股票分析助手/tests/test_report_generation.py -v`
 Expected: PASS.
 
 - [ ] **Step 6: Commit**
@@ -1588,8 +1650,8 @@ git commit -m "feat: render data unavailable notice safely"
 - Modify: `/Users/ccrt/股票分析助手/README.md`
 
 **Interfaces:**
-- Produces CLI: `PYTHONPATH=src python3 -m stock_analyzer health-check`
-- Produces CLI: `PYTHONPATH=src python3 -m stock_analyzer health-check --live-tushare-smoke`
+- Produces CLI: `PYTHONPATH=src .venv/bin/python -m stock_analyzer health-check`
+- Produces CLI: `PYTHONPATH=src .venv/bin/python -m stock_analyzer health-check --live-tushare-smoke`
 - Keeps default health-check offline except credential file existence and config shape.
 
 - [ ] **Step 1: Add failing health test**
@@ -1608,7 +1670,7 @@ def test_health_check_masks_tushare_token(monkeypatch):
 
 - [ ] **Step 2: Run test to verify failure**
 
-Run: `python3 -m pytest /Users/ccrt/股票分析助手/tests/test_config_health.py -v`  
+Run: `.venv/bin/python -m pytest /Users/ccrt/股票分析助手/tests/test_config_health.py -v`
 Expected: FAIL until health check reports masked Tushare credential status.
 
 - [ ] **Step 3: Update health checks**
@@ -1643,25 +1705,30 @@ def health_check(
 
 - [ ] **Step 5: Run unit tests**
 
-Run: `python3 -m pytest /Users/ccrt/股票分析助手/tests/test_config_health.py /Users/ccrt/股票分析助手/tests/test_cli.py -v`  
+Run: `.venv/bin/python -m pytest /Users/ccrt/股票分析助手/tests/test_config_health.py /Users/ccrt/股票分析助手/tests/test_cli.py -v`
 Expected: PASS.
 
 - [ ] **Step 6: Run full local verification**
 
-Run: `python3 -m pytest`  
-Expected: PASS. If local `python3` is still Python 3.9.6, record that tests passed under local interpreter and production install still requires Python 3.11+ because `pyproject.toml` says `requires-python = ">=3.11"`.
+Run: `.venv/bin/python -m pytest`
+Expected: PASS under Python 3.12 from project `.venv`. Do not use the system Python on this machine, because it is Python 3.9.6 and the project requires Python 3.11+.
 
-- [ ] **Step 7: Run live Tushare smoke after optional data dependencies are available**
+- [ ] **Step 7: Install only the live-smoke data dependency**
 
-Run: `PYTHONPATH=src python3 -m stock_analyzer health-check --live-tushare-smoke`  
+Run: `.venv/bin/python -m pip install 'tushare>=1.4.19'`
+Expected: PASS. Do not install `akshare` in this step; AkShare is only needed when implementing or smoke-testing the live backup source.
+
+- [ ] **Step 8: Run live Tushare smoke**
+
+Run: `PYTHONPATH=src .venv/bin/python -m stock_analyzer health-check --live-tushare-smoke`
 Expected: PASS with `live_tushare_smoke: rows=<positive integer>` or a clear Tushare API error that does not print the token.
 
-- [ ] **Step 8: Run production daily after Supabase env vars are configured locally**
+- [ ] **Step 9: Run production daily after Supabase env vars are configured locally**
 
-Run: `PYTHONPATH=src python3 -m stock_analyzer run-daily --trade-date 2026-07-08`  
+Run: `set -a; . ./.env.local; set +a; PYTHONPATH=src .venv/bin/python -m stock_analyzer run-daily --trade-date 2026-07-08`
 Expected: If live data is available, command exits 0, writes Supabase rows, and writes `/Users/ccrt/股票分析助手/reports/index.html`. If live data is unavailable, command exits nonzero and no normal recommendation report is published.
 
-- [ ] **Step 9: Commit**
+- [ ] **Step 10: Commit**
 
 ```bash
 git add src/stock_analyzer/data/health.py src/stock_analyzer/cli.py tests/test_config_health.py tests/test_cli.py README.md
@@ -1682,12 +1749,12 @@ git commit -m "feat: add ingestion health checks and smoke path"
 
 - [ ] **Step 1: Apply Supabase migration**
 
-Run through Supabase connector or CLI against project `npklfuknflckilxehiob`: apply `/Users/ccrt/股票分析助手/supabase/migrations/202607080002_ingestion_v1.sql`.  
+Run through Supabase connector or CLI against project `npklfuknflckilxehiob`: apply `/Users/ccrt/股票分析助手/supabase/migrations/202607080002_ingestion_v1.sql`.
 Expected: migration succeeds; existing `202607070001_init_core.sql` tables remain; RLS stays enabled.
 
 - [ ] **Step 2: Verify Supabase security advisor**
 
-Run Supabase database lints/security advisor for project `npklfuknflckilxehiob`.  
+Run Supabase database lints/security advisor for project `npklfuknflckilxehiob`.
 Expected: no critical RLS or exposed service key findings caused by V1 migration.
 
 - [ ] **Step 3: Verify production rows**
@@ -1706,12 +1773,12 @@ Expected: market rows are positive; recommendation rows are between 0 and 10; ev
 
 - [ ] **Step 4: Verify no fake data leaked into production**
 
-Run: `rg -n "Fixture/sample|local sample data|浦发银行|贵州茅台|_sample_market" /Users/ccrt/股票分析助手/reports /Users/ccrt/股票分析助手/src/stock_analyzer/pipeline.py`  
+Run: `rg -n "Fixture/sample|local sample data|浦发银行|贵州茅台|_sample_market" /Users/ccrt/股票分析助手/reports /Users/ccrt/股票分析助手/src/stock_analyzer/pipeline.py`
 Expected: reports contain no fixture warning and production path in `pipeline.py` only calls `_sample_market()` under `fixture_mode` or `dry_run`.
 
 - [ ] **Step 5: Verify Cloudflare-ready output**
 
-Run: `test -f /Users/ccrt/股票分析助手/reports/index.html`  
+Run: `test -f /Users/ccrt/股票分析助手/reports/index.html`
 Expected: command exits 0 after successful live report generation. Cloudflare Pages can expose only `/reports` static output and password middleware, while Supabase keys stay in local env or Cloudflare secrets.
 
 - [ ] **Step 6: Push**
