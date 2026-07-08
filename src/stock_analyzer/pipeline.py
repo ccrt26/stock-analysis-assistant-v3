@@ -125,6 +125,7 @@ def run_daily_pipeline(
 ) -> DailyRunResult:
     repository = repository or InMemoryAnalysisRepository()
     persist = persist and not dry_run
+    production_bundle = None
     if fixture_mode or dry_run:
         stocks, stock_names, feature_profiles = _sample_market(trade_date)
     else:
@@ -140,16 +141,18 @@ def run_daily_pipeline(
             raise ProductionDataSourceUnavailable(
                 "Current live data is unavailable; no production decisions were generated."
             )
-        if not _has_recommendation_eligible_features(stocks, feature_profiles):
+        production_bundle = bundle
+    included_stocks, _ = clean_stock_pool(stocks)
+    if not fixture_mode and not dry_run:
+        if not _has_recommendation_eligible_features(included_stocks, feature_profiles):
             raise ProductionDataSourceUnavailable(
                 "Current live data is unavailable; no production decisions were generated."
             )
-        if persist:
+        if persist and production_bundle is not None:
             repository.save_stock_master(stocks)
-            repository.save_market_bars(bundle.daily_bars)
-            repository.save_daily_basic_indicators(bundle.daily_basic)
-            repository.save_data_source_runs(bundle.source_runs)
-    included_stocks, _ = clean_stock_pool(stocks)
+            repository.save_market_bars(production_bundle.daily_bars)
+            repository.save_daily_basic_indicators(production_bundle.daily_basic)
+            repository.save_data_source_runs(production_bundle.source_runs)
     features = [feature_profiles[stock.ts_code] for stock in included_stocks if stock.ts_code in feature_profiles]
 
     recommendation_result = generate_recommendations(features, stock_names)

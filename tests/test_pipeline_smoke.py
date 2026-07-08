@@ -204,6 +204,28 @@ class MissingDailyBasicProductionProvider:
         )
 
 
+class HardExcludedProductionProvider:
+    def load(self, trade_date):
+        stocks, stock_names, feature_profiles = _sample_market(trade_date)
+        hard_excluded_stocks = [
+            stock.model_copy(update={"is_st": True}) for stock in stocks
+        ]
+        daily_bars = _raw_daily_bars(trade_date)
+        return MarketDataBundle(
+            trade_date=trade_date,
+            data_status=DataStatus.COMPLETE_PRIMARY,
+            source_grade=SourceGrade.PRIMARY,
+            source_versions={"fake-live": trade_date.isoformat()},
+            stock_basic=_raw_stock_basic(),
+            daily_bars=daily_bars,
+            daily_basic=_raw_daily_basic(trade_date),
+            stocks=hard_excluded_stocks,
+            stock_names=stock_names,
+            feature_profiles=feature_profiles,
+            source_runs=_raw_source_runs(trade_date, len(daily_bars)),
+        )
+
+
 class FakeTushareSource:
     def __init__(self, trade_date, *, history_days=61, include_current=True):
         self.trade_date = trade_date
@@ -388,6 +410,26 @@ def test_run_daily_pipeline_production_rejects_no_recommendation_eligible_featur
             repository=repo,
             fixture_mode=False,
             market_data_provider=MissingDailyBasicProductionProvider(),
+        )
+
+    assert "no production decisions were generated" in str(excinfo.value)
+    assert repo.market_bars == []
+    assert repo.daily_basic_indicators == []
+    assert repo.data_source_runs == []
+    assert repo.recommendations == []
+    assert not (tmp_path / "index.html").exists()
+
+
+def test_run_daily_pipeline_production_rejects_all_hard_excluded_stocks(tmp_path):
+    repo = InMemoryAnalysisRepository()
+
+    with pytest.raises(RuntimeError) as excinfo:
+        run_daily_pipeline(
+            date(2026, 7, 7),
+            tmp_path,
+            repository=repo,
+            fixture_mode=False,
+            market_data_provider=HardExcludedProductionProvider(),
         )
 
     assert "no production decisions were generated" in str(excinfo.value)
