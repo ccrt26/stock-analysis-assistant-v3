@@ -24,9 +24,9 @@ In scope:
 - Trading calendar from Tushare `trade_cal`.
 - Daily price/volume data from Tushare `daily`.
 - Daily basic indicators from Tushare `daily_basic`.
-- Retry, fallback, cache, and resume behavior for those datasets.
+- Retry, live fallback, historical cache, and resume behavior for those datasets.
 - Supabase writes for stock master, daily status, feature snapshots, recommendations, focus state, evidence packages, evaluation tasks, and data-source run records.
-- Report warnings when data is degraded or cached.
+- Report warnings when a live backup source is used; cache-only current-date runs produce a data-unavailable status notice, not a stock analysis report.
 
 Out of scope for V1:
 
@@ -54,11 +54,14 @@ The system must never print token values.
 
 Backup sources are only used after Tushare retry fails.
 
-Allowed V1 backups:
+Allowed V1 live backups:
 
 - AkShare for daily price/volume fallback.
 - Sina or Tencent public quote data for recent price/volume fallback if AkShare is unavailable.
-- Local trusted cache from the last successful ingestion, but only for continuity checks and data-unavailable reporting.
+
+Not a backup source:
+
+- Local trusted cache from previous successful ingestion. It is historical evidence and checkpoint material only.
 
 Backup boundaries:
 
@@ -66,7 +69,7 @@ Backup boundaries:
 - Backup data must carry a lower source grade than Tushare.
 - Backup data must not silently replace official financial, announcement, or hard-risk data.
 - If a recommendation depends on backup data, the evidence package and report must say so.
-- Cache data must not create new daily recommendations, upgrade a stock into the focus watchlist, or increase confidence. It can only maintain existing observation context or explain that current data is insufficient.
+- Cache data is never a live backup for current-date decisions. It must not create new daily recommendations, upgrade a stock into the focus watchlist, downgrade a focus stock because of an inferred current signal, or increase/decrease confidence. It can only preserve historical facts, resume interrupted ingestion, support later evaluation, or explain that current live data is insufficient.
 
 ## 4. Failure Policy
 
@@ -76,27 +79,35 @@ Failure order:
 
 1. Retry Tushare.
 2. Try approved backup source for eligible market data.
-3. Use recent trusted cache only for continuity checks and data-unavailable reporting.
-4. Produce a formal recommendation report only if live primary or live backup data is sufficient and clearly labeled.
-5. Fail without report publication if data is insufficient.
+3. Produce a formal recommendation report only if current trade-date live primary or live backup data is sufficient and clearly labeled.
+4. If current trade-date live data is insufficient, stop the decision pipeline, write a run-status record, and optionally publish a data-unavailable status notice. Cache may explain what was last known, but it cannot support new conclusions.
+5. Fail without normal report publication if data remains insufficient.
 
 Hard failures:
 
-- No Tushare token and no usable backup/cache for the required market data.
+- No Tushare token and no usable live backup for required current trade-date market data.
 - Empty full-market universe.
-- Empty daily market data for the target trade date after retry/fallback/cache.
+- Empty daily market data for the target trade date after retry and live fallback.
 - Feature coverage below the minimum threshold.
 - Supabase persistence failure before recommendations, evidence, and evaluation tasks are complete.
 
-Degraded run:
+Live backup run:
 
-- May publish a report only with visible `数据降级` / `使用缓存` warning.
+- May publish a report only with visible `使用备用实时数据` warning.
 - Must reduce recommendation confidence.
 - Must not create strong recommendation language.
 - May output `数据不足，不形成结论` when uncertainty is high.
-- Must not create new daily recommendations from cache-only data.
-- Must not promote a stock from daily recommendation into the focus watchlist from cache-only data.
-- May keep an existing focus stock in `继续观察` only when the report clearly says the state is carried forward because current live data is unavailable.
+- Must mark which fields came from the backup source and which official fields are missing.
+
+Cache-only current-date run:
+
+- Must not publish a normal stock analysis report.
+- Must not create new daily recommendations.
+- Must not promote a stock from daily recommendation into the focus watchlist.
+- Must not demote, exit, or strengthen a focus stock based on inferred current-date market movement.
+- Must not say `继续看多`, `继续关注`, or similar action-affecting language as an analytical conclusion.
+- May keep existing focus records administratively unchanged, marked `未更新：当日实时数据不可用`.
+- May publish a data-unavailable status notice that says no new conclusion was generated.
 
 ## 5. Retry and Resume
 
@@ -126,7 +137,7 @@ Resume behavior:
 
 ## 6. Cache Policy
 
-Cache is a controlled continuity aid, not a hidden source of truth.
+Cache is a controlled historical and operational aid, not a hidden source of truth and not a live backup source.
 
 Cache records must include:
 
@@ -144,12 +155,26 @@ Freshness limits:
 - `daily`: target trade date only, or latest valid trade date for non-trading-day checks.
 - `daily_basic`: target trade date only.
 
-Cache use in reports:
+Permitted cache uses:
+
+- Historical window building for previous trade dates, when records came from a successful live ingestion and include source metadata.
+- Resume checkpoints for the same trade date, when the checkpoint belongs to the current run or a previously successful stage for the same trade date.
+- Evaluation and audit comparison against evidence frozen at recommendation time.
+- Data-unavailable notices that state what the last successful ingestion date was.
+
+Forbidden cache uses:
+
+- Filling missing current trade-date price/volume/basic data to generate new recommendations.
+- Upgrading a daily recommendation into focus watchlist.
+- Changing focus status based on inferred current market movement.
+- Publishing a normal report that appears equivalent to a live-data report.
+
+Cache use in outputs:
 
 - Report JSON includes `data_status`.
-- HTML displays a visible warning if cache or backup source was used.
+- HTML displays a visible warning if live backup source was used.
 - Evidence packages include `source_versions`.
-- Cache-only runs publish no new formal recommendations. They either maintain existing focus context with a warning, or publish `数据不足，不形成结论`.
+- Cache-only current-date runs publish no stock-analysis report and no new formal recommendations. They may publish only a run-status notice with `数据不足，不形成结论`.
 
 ## 7. Three-Layer Analysis Mapping
 
@@ -246,15 +271,17 @@ If production data is complete, the report is a normal production report.
 If backup data is used, the report must show:
 
 - source status
-- backup/cache warning
+- live backup warning
 - freshness
 - reduced confidence
 - whether recommendations are formal observations or only weak observations
 
-If cache-only data is used, the report must not present new candidates. It must show one of:
+If current trade-date live data is unavailable, the system must not publish a normal stock analysis report. It may publish a run-status notice, and that notice must show:
 
-- existing focus watchlist maintained with `数据不足` warning
-- no formal conclusion because current live data is unavailable
+- current live data is unavailable
+- no new candidates were generated
+- no recommendation, focus upgrade, focus exit, or confidence change was produced
+- last successful ingestion date, if known
 
 If data is insufficient, the system must not publish a normal report.
 
@@ -266,15 +293,15 @@ Unit tests:
 - Tushare client mapping from DataFrame to domain models
 - retry behavior
 - fallback behavior
-- cache freshness decisions
+- cache permission decisions: historical window allowed, current-date decision forbidden
 - feature calculations
 - data-quality exclusion
 
 Integration-style tests with fake clients:
 
 - successful production run writes all required Supabase rows
-- Tushare failure then backup success creates degraded evidence/report
-- Tushare and backup failure then fresh cache creates no new recommendations and only a data-unavailable/focus-maintenance report
+- Tushare failure then backup success creates live-backup-labeled evidence/report
+- Tushare and backup failure then fresh cache creates no new recommendations, no focus changes, and only a data-unavailable run-status notice
 - stale cache causes failure without a normal report
 - rerun does not duplicate daily rows
 - production command no longer raises "ingestion not implemented"
@@ -293,7 +320,7 @@ V1 is complete when:
 - `run-daily` production path uses Tushare primary data, not sample data.
 - Full A-share pool can be fetched from Tushare or a live backup source, or the run refuses to create new recommendations.
 - At most about 10 recommendations are generated, and fewer are allowed.
-- Reports show production/degraded/cache status clearly, and cache-only reports never look like formal recommendation reports.
+- Reports show production/live-backup status clearly, and cache-only current-date runs never publish normal recommendation reports.
 - Supabase stores complete recommendation, evidence, focus, and evaluation state.
 - Re-running the same date is idempotent.
 - Tests and one live Tushare smoke pass.
