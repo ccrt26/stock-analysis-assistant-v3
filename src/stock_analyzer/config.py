@@ -18,6 +18,10 @@ class AppConfig(BaseModel):
     supabase_url: Optional[str] = None
     supabase_service_role_key: Optional[str] = Field(default=None, repr=False)
     reports_dir: Path = _default_project_root() / "reports"
+    local_warehouse_dir: Path = _default_project_root() / "local_warehouse"
+    local_archive_dir: Path = _default_project_root() / "local_archive"
+    supabase_warn_mb: float = 350
+    supabase_stop_mb: float = 400
     fixture_mode: bool = False
 
     @classmethod
@@ -27,6 +31,12 @@ class AppConfig(BaseModel):
         values = os.environ if env is None else env
         project_root = Path(values.get("PROJECT_ROOT", _default_project_root())).expanduser()
         reports_dir = Path(values.get("REPORTS_DIR", project_root / "reports")).expanduser()
+        local_warehouse_dir = Path(
+            values.get("LOCAL_WAREHOUSE_DIR", project_root / "local_warehouse")
+        ).expanduser()
+        local_archive_dir = Path(
+            values.get("LOCAL_ARCHIVE_DIR", project_root / "local_archive")
+        ).expanduser()
         return cls(
             project_root=project_root,
             tushare_token=values.get("TUSHARE_TOKEN"),
@@ -36,6 +46,10 @@ class AppConfig(BaseModel):
             supabase_url=values.get("SUPABASE_URL"),
             supabase_service_role_key=values.get("SUPABASE_SERVICE_ROLE_KEY"),
             reports_dir=reports_dir,
+            local_warehouse_dir=local_warehouse_dir,
+            local_archive_dir=local_archive_dir,
+            supabase_warn_mb=float(values.get("SUPABASE_WARN_MB", 350)),
+            supabase_stop_mb=float(values.get("SUPABASE_STOP_MB", 400)),
             fixture_mode=_env_flag(values, "STOCK_ANALYZER_FIXTURE_MODE"),
         )
 

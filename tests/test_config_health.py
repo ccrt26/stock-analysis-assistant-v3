@@ -36,6 +36,32 @@ def test_config_supports_project_root_and_reports_dir_overrides(tmp_path):
     assert config.tushare_token_path == tmp_path / "token"
 
 
+def test_storage_governance_paths_and_thresholds_default_to_project_root(tmp_path):
+    config = AppConfig.load({"PROJECT_ROOT": str(tmp_path)})
+
+    assert config.local_warehouse_dir == tmp_path / "local_warehouse"
+    assert config.local_archive_dir == tmp_path / "local_archive"
+    assert config.supabase_warn_mb == 350
+    assert config.supabase_stop_mb == 400
+
+
+def test_storage_governance_paths_can_be_overridden(tmp_path):
+    config = AppConfig.load(
+        {
+            "PROJECT_ROOT": str(tmp_path),
+            "LOCAL_WAREHOUSE_DIR": str(tmp_path / "warehouse-custom"),
+            "LOCAL_ARCHIVE_DIR": str(tmp_path / "archive-custom"),
+            "SUPABASE_WARN_MB": "321",
+            "SUPABASE_STOP_MB": "399",
+        }
+    )
+
+    assert config.local_warehouse_dir == tmp_path / "warehouse-custom"
+    assert config.local_archive_dir == tmp_path / "archive-custom"
+    assert config.supabase_warn_mb == 321
+    assert config.supabase_stop_mb == 399
+
+
 def test_config_supports_explicit_fixture_mode_env():
     config = AppConfig.load(env={"STOCK_ANALYZER_FIXTURE_MODE": "1"})
 
