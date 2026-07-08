@@ -98,3 +98,11 @@ def test_ingestion_schema_adds_market_data_tables_and_run_columns():
         "payload",
     ]:
         assert f"add column if not exists {column}" in compact_sql
+
+
+def test_ingestion_schema_adds_capacity_guard_function():
+    sql = INGESTION_SCHEMA_PATH.read_text().lower()
+
+    assert "create or replace function public.database_size_mb()" in sql
+    assert "pg_database_size(current_database())" in sql
+    assert "grant execute on function public.database_size_mb() to service_role" in sql

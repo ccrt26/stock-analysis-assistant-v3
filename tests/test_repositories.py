@@ -7,9 +7,11 @@ from stock_analyzer.data.models import (
     DailyBar,
     DailyBasicRow,
     DataStatus,
+    MarketDataBundle,
     SourceGrade,
     SourceRunRecord,
     SourceStatus,
+    StockBasicRow,
 )
 from stock_analyzer.domain.models import (
     ActionLabel,
@@ -423,6 +425,68 @@ def test_supabase_repository_persists_ingestion_rows_without_network():
     assert run_row["payload"] == {"batch": "20260708"}
 
 
+def test_supabase_repository_rejects_full_market_window_without_network():
+    client = FakeSupabaseClient()
+    repo = SupabaseAnalysisRepository(client)
+    trade_date = date(2026, 7, 8)
+
+    with pytest.raises(ValueError) as excinfo:
+        repo.save_market_bars(
+            [
+                DailyBar(
+                    trade_date=trade_date,
+                    ts_code=f"600{i:03d}.SH",
+                    close=10.0,
+                    amount=100000000,
+                    source_name="tushare",
+                    source_grade=SourceGrade.PRIMARY,
+                )
+                for i in range(41)
+            ]
+        )
+
+    assert "selected market window" in str(excinfo.value)
+    assert client.write_calls == []
+
+
+def test_supabase_repository_rejects_oversized_market_window_without_network():
+    client = FakeSupabaseClient()
+    repo = SupabaseAnalysisRepository(client)
+    trade_date = date(2026, 7, 8)
+
+    with pytest.raises(ValueError) as market_excinfo:
+        repo.save_market_bars(
+            [
+                DailyBar(
+                    trade_date=trade_date,
+                    ts_code=f"600{i % 40:03d}.SH",
+                    close=10.0,
+                    amount=100000000,
+                    source_name="tushare",
+                    source_grade=SourceGrade.PRIMARY,
+                )
+                for i in range(5001)
+            ]
+        )
+    with pytest.raises(ValueError) as basic_excinfo:
+        repo.save_daily_basic_indicators(
+            [
+                DailyBasicRow(
+                    trade_date=trade_date,
+                    ts_code=f"600{i % 40:03d}.SH",
+                    turnover_rate=1.2,
+                    source_name="tushare",
+                    source_grade=SourceGrade.PRIMARY,
+                )
+                for i in range(5001)
+            ]
+        )
+
+    assert "selected market window" in str(market_excinfo.value)
+    assert "selected market window" in str(basic_excinfo.value)
+    assert client.write_calls == []
+
+
 def test_supabase_repository_upserts_prerequisites_before_dependent_pipeline_rows(tmp_path):
     if run_daily_pipeline is None:
         pytest.skip("jinja2 is not installed in this local test environment")
@@ -467,6 +531,109 @@ def test_supabase_repository_upserts_prerequisites_before_dependent_pipeline_row
     recommendation_rows = client.write_calls[3][2]
     assert all(row["evidence_id"] for row in recommendation_rows)
     assert all(item.evidence_id for item in result.recommendations)
+
+
+def test_production_pipeline_writes_full_stock_master_before_market_bars(tmp_path):
+    if run_daily_pipeline is None:
+        pytest.skip("jinja2 is not installed in this local test environment")
+
+    class ProviderWithRawBarsBeyondFeatureUniverse:
+        def load(self, trade_date):
+            stock = StockSnapshot(
+                trade_date=trade_date,
+                ts_code="600000.SH",
+                name="浦发银行",
+                listing_days=9000,
+                turnover_rate=1.2,
+                amount=200000000,
+            )
+            feature = FeatureSnapshot(
+                trade_date=trade_date,
+                ts_code="600000.SH",
+                trend_20d=0.2,
+                trend_60d=0.2,
+                relative_strength=0.2,
+                volatility_20d=0.1,
+                liquidity_score=0.8,
+                quality_score=0.7,
+                market_regime="unknown",
+                data_quality="ok",
+            )
+            return MarketDataBundle(
+                trade_date=trade_date,
+                data_status=DataStatus.COMPLETE_PRIMARY,
+                source_grade=SourceGrade.PRIMARY,
+                source_versions={"fake-live": trade_date.isoformat()},
+                stock_basic=[
+                    StockBasicRow(
+                        ts_code="600000.SH",
+                        name="浦发银行",
+                        exchange="SSE",
+                        list_date=date(1999, 11, 10),
+                    ),
+                    StockBasicRow(
+                        ts_code="000004.SZ",
+                        name="国华网安",
+                        exchange="SZSE",
+                        list_date=date(1991, 1, 14),
+                    ),
+                ],
+                daily_bars=[
+                    DailyBar(
+                        trade_date=trade_date,
+                        ts_code="600000.SH",
+                        close=10.2,
+                        amount=200000000,
+                        source_name="fake-live",
+                        source_grade=SourceGrade.PRIMARY,
+                    ),
+                    DailyBar(
+                        trade_date=trade_date,
+                        ts_code="000004.SZ",
+                        close=12.3,
+                        amount=80000000,
+                        source_name="fake-live",
+                        source_grade=SourceGrade.PRIMARY,
+                    ),
+                ],
+                daily_basic=[
+                    DailyBasicRow(
+                        trade_date=trade_date,
+                        ts_code="600000.SH",
+                        turnover_rate=1.2,
+                        source_name="fake-live",
+                        source_grade=SourceGrade.PRIMARY,
+                    )
+                ],
+                source_runs=[],
+                stocks=[stock],
+                stock_names={
+                    "600000.SH": "浦发银行",
+                    "000004.SZ": "国华网安",
+                },
+                feature_profiles={"600000.SH": feature},
+            )
+
+    client = FakeSupabaseClient()
+    repo = SupabaseAnalysisRepository(client)
+
+    run_daily_pipeline(
+        date(2026, 7, 8),
+        tmp_path,
+        repository=repo,
+        fixture_mode=False,
+        market_data_provider=ProviderWithRawBarsBeyondFeatureUniverse(),
+    )
+
+    write_tables = [name for name, _, _ in client.write_calls]
+    assert write_tables.index("stock_master") < write_tables.index("market_price_daily")
+    first_stock_master_rows = client.write_calls[0][2]
+    assert {
+        "ts_code": "000004.SZ",
+        "name": "国华网安",
+        "exchange": "SZSE",
+        "list_date": "1991-01-14",
+    } in first_stock_master_rows
 
 
 def test_supabase_repository_upserts_core_daily_rows_with_conflict_targets(tmp_path):

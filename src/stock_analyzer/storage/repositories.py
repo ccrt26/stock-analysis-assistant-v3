@@ -3,9 +3,14 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import date
-from typing import List, Optional, Protocol
+from typing import Iterable, List, Optional, Protocol
 
-from stock_analyzer.data.models import DailyBar, DailyBasicRow, SourceRunRecord
+from stock_analyzer.data.models import (
+    DailyBar,
+    DailyBasicRow,
+    SourceRunRecord,
+    StockBasicRow,
+)
 from stock_analyzer.domain.models import (
     ActionLabel,
     EvaluationTask,
@@ -15,6 +20,10 @@ from stock_analyzer.domain.models import (
     Recommendation,
     StockSnapshot,
 )
+from stock_analyzer.storage.capacity_guard import ensure_selected_market_window_scope
+
+
+INGESTION_UPSERT_BATCH_SIZE = 5000
 
 
 class AnalysisRepository(Protocol):
@@ -23,7 +32,7 @@ class AnalysisRepository(Protocol):
     def load_focus_states_for_date(self, trade_date: date) -> List[FocusState]: ...
     def load_evidence_packages(self, trade_date: date) -> List[EvidencePackage]: ...
     def load_evaluation_tasks(self, trade_date: date) -> List[EvaluationTask]: ...
-    def save_stock_master(self, stocks: List[StockSnapshot]) -> None: ...
+    def save_stock_master(self, stocks: List[StockSnapshot | StockBasicRow]) -> None: ...
     def save_stock_statuses(self, stocks: List[StockSnapshot]) -> None: ...
     def save_feature_snapshots(self, features: List[FeatureSnapshot]) -> None: ...
     def save_recommendations(self, recommendations: List[Recommendation]) -> None: ...
@@ -75,7 +84,7 @@ class InMemoryAnalysisRepository:
     def load_evaluation_tasks(self, trade_date: date) -> List[EvaluationTask]:
         return [item for item in self.evaluation_tasks if item.trade_date == trade_date]
 
-    def save_stock_master(self, stocks: List[StockSnapshot]) -> None:
+    def save_stock_master(self, stocks: List[StockSnapshot | StockBasicRow]) -> None:
         self.stock_master = _upsert_model_list(
             self.stock_master,
             stocks,
@@ -149,8 +158,9 @@ class InMemoryAnalysisRepository:
 
 
 class SupabaseAnalysisRepository:
-    def __init__(self, client) -> None:
+    def __init__(self, client, capacity_guard=None) -> None:
         self.client = client
+        self.capacity_guard = capacity_guard
 
     def load_focus_states(self) -> List[FocusState]:
         result = self.client.table("focus_watchlist_state").select("*").execute()
@@ -193,14 +203,9 @@ class SupabaseAnalysisRepository:
         )
         return [_evaluation_task_from_row(row) for row in result.data or []]
 
-    def save_stock_master(self, stocks: List[StockSnapshot]) -> None:
+    def save_stock_master(self, stocks: List[StockSnapshot | StockBasicRow]) -> None:
         rows_by_code = {
-            item.ts_code: {
-                "ts_code": item.ts_code,
-                "name": item.name,
-                "exchange": _exchange_from_ts_code(item.ts_code),
-                "list_date": None,
-            }
+            item.ts_code: _stock_master_row(item)
             for item in stocks
         }
         rows = list(rows_by_code.values())
@@ -320,6 +325,11 @@ class SupabaseAnalysisRepository:
         ).execute()
 
     def save_market_bars(self, bars: List[DailyBar]) -> None:
+        if not bars:
+            return
+        ensure_selected_market_window_scope(bars)
+        if self.capacity_guard is not None:
+            self.capacity_guard.ensure_large_writes_allowed()
         rows = [
             {
                 "trade_date": item.trade_date.isoformat(),
@@ -337,13 +347,18 @@ class SupabaseAnalysisRepository:
             }
             for item in bars
         ]
-        if rows:
+        for batch in _chunks(rows, INGESTION_UPSERT_BATCH_SIZE):
             self.client.table("market_price_daily").upsert(
-                rows,
+                batch,
                 on_conflict="trade_date,ts_code",
             ).execute()
 
     def save_daily_basic_indicators(self, rows: List[DailyBasicRow]) -> None:
+        if not rows:
+            return
+        ensure_selected_market_window_scope(rows)
+        if self.capacity_guard is not None:
+            self.capacity_guard.ensure_large_writes_allowed()
         payload = [
             {
                 "trade_date": item.trade_date.isoformat(),
@@ -358,9 +373,9 @@ class SupabaseAnalysisRepository:
             }
             for item in rows
         ]
-        if payload:
+        for batch in _chunks(payload, INGESTION_UPSERT_BATCH_SIZE):
             self.client.table("daily_basic_indicator").upsert(
-                payload,
+                batch,
                 on_conflict="trade_date,ts_code",
             ).execute()
 
@@ -393,6 +408,11 @@ def _date_from_row(value) -> Optional[date]:
 
 def _date_to_text(value: Optional[date]) -> Optional[str]:
     return value.isoformat() if value else None
+
+
+def _chunks(items: list[dict], size: int) -> Iterable[list[dict]]:
+    for start in range(0, len(items), size):
+        yield items[start : start + size]
 
 
 def _focus_state_from_row(row: dict) -> FocusState:
@@ -470,6 +490,15 @@ def _exchange_from_ts_code(ts_code: str) -> str:
     if "." not in ts_code:
         return ""
     return ts_code.rsplit(".", 1)[1]
+
+
+def _stock_master_row(item: StockSnapshot | StockBasicRow) -> dict:
+    return {
+        "ts_code": item.ts_code,
+        "name": item.name,
+        "exchange": getattr(item, "exchange", None) or _exchange_from_ts_code(item.ts_code),
+        "list_date": _date_to_text(getattr(item, "list_date", None)),
+    }
 
 
 def _upsert_model_list(existing: List, incoming: List, key) -> List:

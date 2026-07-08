@@ -51,3 +51,14 @@ create policy daily_basic_indicator_service_role_all on public.daily_basic_indic
   to service_role
   using (true)
   with check (true);
+
+create or replace function public.database_size_mb()
+returns numeric
+language sql
+security definer
+set search_path = public
+as $$
+  select pg_database_size(current_database()) / 1024.0 / 1024.0;
+$$;
+
+grant execute on function public.database_size_mb() to service_role;
