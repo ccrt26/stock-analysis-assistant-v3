@@ -92,7 +92,7 @@ def test_tushare_maps_stock_daily_and_basic_rows():
     assert calendar == {date(2026, 7, 8): True, date(2026, 7, 9): False}
     assert daily.trade_date == date(2026, 7, 8)
     assert daily.close == 10.2
-    assert daily.amount == 102000.0
+    assert daily.amount == 102000000.0
     assert daily.source_name == "tushare"
     assert daily.source_grade == SourceGrade.PRIMARY
     assert daily_basic.turnover_rate == 1.1

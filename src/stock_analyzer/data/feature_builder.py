@@ -19,6 +19,9 @@ class InsufficientFeatureCoverage(RuntimeError):
     pass
 
 
+MIN_CURRENT_BAR_COVERAGE = 0.95
+
+
 def build_market_bundle(
     *,
     trade_date: date,
@@ -44,10 +47,24 @@ def build_market_bundle(
     }
     requested_codes = {stock.ts_code for stock in stock_basic}
     missing_current_codes = sorted(requested_codes - current_codes)
-    if missing_current_codes and can_generate_decisions:
-        missing = ", ".join(missing_current_codes)
+    if requested_codes and missing_current_codes and can_generate_decisions:
+        current_bar_coverage = len(requested_codes & current_codes) / len(
+            requested_codes
+        )
+        if current_bar_coverage < MIN_CURRENT_BAR_COVERAGE:
+            missing = ", ".join(missing_current_codes[:20])
+            if len(missing_current_codes) > 20:
+                missing = f"{missing}, ..."
+            raise InsufficientFeatureCoverage(
+                "current trade date live bar coverage "
+                f"{current_bar_coverage:.2%} is below minimum "
+                f"{MIN_CURRENT_BAR_COVERAGE:.2%}; missing "
+                f"{len(missing_current_codes)} of {len(requested_codes)}: {missing}"
+            )
+
+    if not current_codes and can_generate_decisions:
         raise InsufficientFeatureCoverage(
-            f"current trade date live bars are required for decisions; missing: {missing}"
+            "current trade date live bars are required for decisions"
         )
 
     stocks: list[StockSnapshot] = []

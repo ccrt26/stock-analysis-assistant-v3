@@ -149,7 +149,17 @@ def run_daily_pipeline(
                 "Current live data is unavailable; no production decisions were generated."
             )
         if persist and production_bundle is not None:
-            repository.save_stock_master(stocks)
+            preflight_market_window_writes = getattr(
+                repository,
+                "preflight_market_window_writes",
+                None,
+            )
+            if preflight_market_window_writes is not None:
+                preflight_market_window_writes(
+                    production_bundle.daily_bars,
+                    production_bundle.daily_basic,
+                )
+            repository.save_stock_master(production_bundle.stock_basic)
             repository.save_market_bars(production_bundle.daily_bars)
             repository.save_daily_basic_indicators(production_bundle.daily_basic)
             repository.save_data_source_runs(production_bundle.source_runs)

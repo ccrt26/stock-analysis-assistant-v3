@@ -91,9 +91,11 @@ class FakeSupabaseClient:
         self.write_options = []
         self.insert_calls = []
         self.upsert_calls = []
+        self.table_calls = []
         self.table_data = {}
 
     def table(self, name: str) -> FakeSupabaseTable:
+        self.table_calls.append(name)
         return FakeSupabaseTable(name, self)
 
 
@@ -562,6 +564,38 @@ def test_supabase_repository_scope_guard_runs_before_capacity_guard_for_wide_wri
         )
 
     assert guard.calls == 0
+    assert client.write_calls == []
+
+
+def test_supabase_repository_preflight_checks_capacity_without_table_calls():
+    client = FakeSupabaseClient()
+    guard = RejectingCapacityGuard()
+    repo = SupabaseAnalysisRepository(client, capacity_guard=guard)
+
+    with pytest.raises(RuntimeError, match="capacity stopped"):
+        repo.preflight_market_window_writes(
+            [
+                DailyBar(
+                    trade_date=date(2026, 7, 8),
+                    ts_code="600000.SH",
+                    close=10.0,
+                    source_name="tushare",
+                    source_grade=SourceGrade.PRIMARY,
+                )
+            ],
+            [
+                DailyBasicRow(
+                    trade_date=date(2026, 7, 8),
+                    ts_code="600000.SH",
+                    turnover_rate=1.2,
+                    source_name="tushare",
+                    source_grade=SourceGrade.PRIMARY,
+                )
+            ],
+        )
+
+    assert guard.calls == 1
+    assert client.table_calls == []
     assert client.write_calls == []
 
 

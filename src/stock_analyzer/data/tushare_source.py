@@ -67,7 +67,7 @@ class TushareMarketDataSource:
                 pre_close=_optional_float(row, "pre_close"),
                 pct_chg=_optional_float(row, "pct_chg"),
                 vol=_optional_float(row, "vol"),
-                amount=_optional_float(row, "amount"),
+                amount=_optional_amount_yuan(row),
                 source_name=self.source_name,
                 source_grade=SourceGrade.PRIMARY,
             )
@@ -123,3 +123,10 @@ def _optional_float(row, name: str) -> Optional[float]:
     if pd.isna(value):
         return None
     return float(value)
+
+
+def _optional_amount_yuan(row) -> Optional[float]:
+    amount_thousand_yuan = _optional_float(row, "amount")
+    if amount_thousand_yuan is None:
+        return None
+    return amount_thousand_yuan * 1000.0

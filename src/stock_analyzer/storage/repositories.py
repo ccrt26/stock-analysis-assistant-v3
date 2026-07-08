@@ -32,6 +32,11 @@ class AnalysisRepository(Protocol):
     def load_focus_states_for_date(self, trade_date: date) -> List[FocusState]: ...
     def load_evidence_packages(self, trade_date: date) -> List[EvidencePackage]: ...
     def load_evaluation_tasks(self, trade_date: date) -> List[EvaluationTask]: ...
+    def preflight_market_window_writes(
+        self,
+        bars: List[DailyBar],
+        daily_basic: List[DailyBasicRow],
+    ) -> None: ...
     def save_stock_master(self, stocks: List[StockSnapshot | StockBasicRow]) -> None: ...
     def save_stock_statuses(self, stocks: List[StockSnapshot]) -> None: ...
     def save_feature_snapshots(self, features: List[FeatureSnapshot]) -> None: ...
@@ -83,6 +88,14 @@ class InMemoryAnalysisRepository:
 
     def load_evaluation_tasks(self, trade_date: date) -> List[EvaluationTask]:
         return [item for item in self.evaluation_tasks if item.trade_date == trade_date]
+
+    def preflight_market_window_writes(
+        self,
+        bars: List[DailyBar],
+        daily_basic: List[DailyBasicRow],
+    ) -> None:
+        ensure_selected_market_window_scope(bars)
+        ensure_selected_market_window_scope(daily_basic)
 
     def save_stock_master(self, stocks: List[StockSnapshot | StockBasicRow]) -> None:
         self.stock_master = _upsert_model_list(
@@ -202,6 +215,16 @@ class SupabaseAnalysisRepository:
             .execute()
         )
         return [_evaluation_task_from_row(row) for row in result.data or []]
+
+    def preflight_market_window_writes(
+        self,
+        bars: List[DailyBar],
+        daily_basic: List[DailyBasicRow],
+    ) -> None:
+        ensure_selected_market_window_scope(bars)
+        ensure_selected_market_window_scope(daily_basic)
+        if self.capacity_guard is not None:
+            self.capacity_guard.ensure_large_writes_allowed()
 
     def save_stock_master(self, stocks: List[StockSnapshot | StockBasicRow]) -> None:
         rows_by_code = {

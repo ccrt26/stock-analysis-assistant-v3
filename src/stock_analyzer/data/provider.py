@@ -37,14 +37,23 @@ class TushareProvider:
 
     def load(self, trade_date: date) -> MarketDataBundle:
         stock_basic = self.source.fetch_stock_basic()
-        daily_bars = _fetch_daily_history(self.source, trade_date)
+        stock_basic_codes = {stock.ts_code for stock in stock_basic}
+        daily_bars = [
+            bar
+            for bar in _fetch_daily_history(self.source, trade_date)
+            if bar.ts_code in stock_basic_codes
+        ]
         current_daily_bars = [bar for bar in daily_bars if bar.trade_date == trade_date]
         if not current_daily_bars:
             raise CurrentLiveDataUnavailable(
                 "Tushare returned no current trade date daily bars for "
                 f"{trade_date.isoformat()}"
             )
-        daily_basic = self.source.fetch_daily_basic(trade_date)
+        daily_basic = [
+            row
+            for row in self.source.fetch_daily_basic(trade_date)
+            if row.ts_code in stock_basic_codes
+        ]
         _require_current_daily_basic(
             trade_date,
             current_daily_bars,

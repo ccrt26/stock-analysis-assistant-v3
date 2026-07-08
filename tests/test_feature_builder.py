@@ -30,6 +30,18 @@ def _bars(ts_code="600000.SH"):
     ]
 
 
+def _stock_rows(count):
+    return [
+        StockBasicRow(
+            ts_code=f"600{i:03d}.SH",
+            name=f"股票{i}",
+            exchange="SSE",
+            list_date=date(2000, 1, 1),
+        )
+        for i in range(count)
+    ]
+
+
 def test_build_market_bundle_creates_stock_and_feature_profiles():
     trade_date = date(2026, 6, 9)
     bundle = build_market_bundle(
@@ -109,6 +121,42 @@ def test_current_trade_date_bar_is_required_for_each_requested_stock():
 
     assert "000001.SZ" in str(excinfo.value)
     assert "current trade date" in str(excinfo.value)
+
+
+def test_sparse_missing_current_bars_are_excluded_when_market_coverage_is_high():
+    trade_date = date(2026, 6, 9)
+    stocks = _stock_rows(20)
+    traded_stocks = stocks[:-1]
+
+    bundle = build_market_bundle(
+        trade_date=trade_date,
+        stock_basic=stocks,
+        daily_bars=[
+            bar for stock in traded_stocks for bar in _bars(stock.ts_code)
+        ],
+        daily_basic=[
+            DailyBasicRow(
+                trade_date=trade_date,
+                ts_code=stock.ts_code,
+                turnover_rate=1.2,
+                total_mv=1000000,
+                source_name="tushare",
+                source_grade=SourceGrade.PRIMARY,
+            )
+            for stock in traded_stocks
+        ],
+        data_status=DataStatus.COMPLETE_PRIMARY,
+        source_grade=SourceGrade.PRIMARY,
+        source_versions={"tushare": "daily:2026-06-09"},
+        source_runs=[],
+    )
+
+    stock_snapshots, _, features = bundle.to_pipeline_inputs()
+
+    assert stocks[-1].ts_code not in {stock.ts_code for stock in stock_snapshots}
+    assert stocks[-1].ts_code not in features
+    assert len(stock_snapshots) == 19
+    assert all(feature.data_quality == "ok" for feature in features.values())
 
 
 def test_later_dated_bars_do_not_influence_current_trade_date_features():

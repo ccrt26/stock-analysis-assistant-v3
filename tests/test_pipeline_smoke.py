@@ -75,6 +75,50 @@ class FailingSaveRepository(InMemoryAnalysisRepository):
         raise AssertionError("dry-run must not save data source runs")
 
 
+class PreflightRejectingRepository(InMemoryAnalysisRepository):
+    def __init__(self):
+        super().__init__()
+        self.calls = []
+
+    def preflight_market_window_writes(self, bars, daily_basic):
+        self.calls.append(("preflight", len(bars), len(daily_basic)))
+        raise RuntimeError("preflight stopped")
+
+    def _reject_write(self, name):
+        self.calls.append(name)
+        raise AssertionError(f"{name} write reached after rejected preflight")
+
+    def save_stock_master(self, stocks):
+        self._reject_write("stock_master")
+
+    def save_stock_statuses(self, stocks):
+        self._reject_write("stock_statuses")
+
+    def save_feature_snapshots(self, features):
+        self._reject_write("feature_snapshots")
+
+    def save_recommendations(self, recommendations):
+        self._reject_write("recommendations")
+
+    def save_focus_states(self, states):
+        self._reject_write("focus_states")
+
+    def save_evidence_packages(self, packages):
+        self._reject_write("evidence_packages")
+
+    def save_evaluation_tasks(self, tasks):
+        self._reject_write("evaluation_tasks")
+
+    def save_market_bars(self, bars):
+        self._reject_write("market_bars")
+
+    def save_daily_basic_indicators(self, rows):
+        self._reject_write("daily_basic_indicators")
+
+    def save_data_source_runs(self, rows):
+        self._reject_write("data_source_runs")
+
+
 def _raw_daily_bars(trade_date, ts_code="600000.SH", days=1, close_base=10.0):
     start = trade_date - timedelta(days=days - 1)
     return [
@@ -265,6 +309,34 @@ class MissingDailyBasicFakeTushareSource(FakeTushareSource):
         return []
 
 
+class ExtraUnknownCodeFakeTushareSource(FakeTushareSource):
+    def fetch_daily(self, trade_date):
+        rows = super().fetch_daily(trade_date)
+        if rows:
+            rows.append(
+                DailyBar(
+                    trade_date=trade_date,
+                    ts_code="000638.SZ",
+                    close=12.3,
+                    amount=100000000,
+                    source_name="fake-live",
+                    source_grade=SourceGrade.PRIMARY,
+                )
+            )
+        return rows
+
+    def fetch_daily_basic(self, trade_date):
+        return super().fetch_daily_basic(trade_date) + [
+            DailyBasicRow(
+                trade_date=trade_date,
+                ts_code="000638.SZ",
+                turnover_rate=1.2,
+                source_name="fake-live",
+                source_grade=SourceGrade.PRIMARY,
+            )
+        ]
+
+
 def test_tushare_provider_builds_decision_ready_bundle_from_fetched_rows():
     trade_date = date(2026, 7, 7)
     source = FakeTushareSource(trade_date)
@@ -281,6 +353,17 @@ def test_tushare_provider_builds_decision_ready_bundle_from_fetched_rows():
     assert bundle.source_runs
     assert trade_date in source.fetch_daily_calls
     assert len(source.fetch_daily_calls) > 1
+
+
+def test_tushare_provider_filters_rows_outside_current_stock_basic():
+    trade_date = date(2026, 7, 7)
+    source = ExtraUnknownCodeFakeTushareSource(trade_date)
+
+    bundle = TushareProvider(source).load(trade_date)
+
+    assert "000638.SZ" not in {bar.ts_code for bar in bundle.daily_bars}
+    assert "000638.SZ" not in {row.ts_code for row in bundle.daily_basic}
+    assert "000638.SZ" not in bundle.stock_names
 
 
 def test_tushare_provider_translates_insufficient_feature_coverage():
@@ -379,6 +462,22 @@ def test_run_daily_pipeline_production_uses_provider_and_persists_real_bundle(tm
     assert repo.daily_basic_indicators
     assert repo.data_source_runs
     assert (tmp_path / "index.html").exists()
+
+
+def test_run_daily_pipeline_production_preflight_failure_prevents_all_repository_writes(tmp_path):
+    repo = PreflightRejectingRepository()
+
+    with pytest.raises(RuntimeError, match="preflight stopped"):
+        run_daily_pipeline(
+            date(2026, 7, 7),
+            tmp_path,
+            repository=repo,
+            fixture_mode=False,
+            market_data_provider=FakeProductionProvider(),
+        )
+
+    assert repo.calls == [("preflight", 1, 1)]
+    assert not (tmp_path / "index.html").exists()
 
 
 def test_run_daily_pipeline_production_rejects_raw_only_decision_bundle(tmp_path):
