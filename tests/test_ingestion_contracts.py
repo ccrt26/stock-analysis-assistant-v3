@@ -19,10 +19,46 @@ def test_tushare_token_prefers_env_and_masks_value(tmp_path):
     assert config.tushare_token_status() == "present:env"
 
 
+def test_config_repr_redacts_secret_values(tmp_path):
+    token_file = tmp_path / "token.txt"
+    config = AppConfig.load(
+        {
+            "TUSHARE_TOKEN": "env-token-456",
+            "TUSHARE_TOKEN_PATH": str(token_file),
+            "SUPABASE_URL": "https://example.supabase.co",
+            "SUPABASE_SERVICE_ROLE_KEY": "service-role-secret-789",
+        }
+    )
+
+    rendered = repr(config)
+    dumped = repr(config.model_dump())
+
+    assert config.resolve_tushare_token() == "env-token-456"
+    assert config.has_supabase_config is True
+    assert "env-token-456" not in rendered
+    assert "service-role-secret-789" not in rendered
+    assert "env-token-456" not in dumped
+    assert "service-role-secret-789" not in dumped
+
+
 def test_tushare_token_falls_back_to_file_without_printing_value(tmp_path):
     token_file = tmp_path / "token.txt"
     token_file.write_text("file-token-123\n", encoding="utf-8")
     config = AppConfig.load({"TUSHARE_TOKEN_PATH": str(token_file)})
+
+    assert config.resolve_tushare_token() == "file-token-123"
+    assert config.tushare_token_status() == "present:file"
+
+
+def test_tushare_token_whitespace_env_falls_back_to_file(tmp_path):
+    token_file = tmp_path / "token.txt"
+    token_file.write_text("file-token-123\n", encoding="utf-8")
+    config = AppConfig.load(
+        {
+            "TUSHARE_TOKEN": "   ",
+            "TUSHARE_TOKEN_PATH": str(token_file),
+        }
+    )
 
     assert config.resolve_tushare_token() == "file-token-123"
     assert config.tushare_token_status() == "present:file"

@@ -27,13 +27,12 @@ class HealthReport(BaseModel):
 
 
 def run_health_checks(config: AppConfig) -> HealthReport:
-    credential_status = HealthStatus.OK if config.tushare_token_path.exists() else HealthStatus.FAIL
-    supabase_status = (
-        HealthStatus.OK if config.supabase_url and config.supabase_service_role_key else HealthStatus.WARN
-    )
+    token_status = config.tushare_token_status()
+    credential_status = HealthStatus.OK if config.resolve_tushare_token() else HealthStatus.FAIL
+    supabase_status = HealthStatus.OK if config.has_supabase_config else HealthStatus.WARN
     return HealthReport(
         items=[
-            HealthItem(category="credential", status=credential_status, message="checked local token path"),
+            HealthItem(category="credential", status=credential_status, message=f"tushare token {token_status}"),
             HealthItem(category="network", status=HealthStatus.WARN, message="network probe not executed in unit mode"),
             HealthItem(category="api_response", status=supabase_status, message="supabase env checked"),
             HealthItem(category="field_consumability", status=HealthStatus.WARN, message="no live schema sample loaded"),

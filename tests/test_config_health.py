@@ -52,6 +52,23 @@ def test_health_report_has_four_required_categories():
     )
 
 
+def test_health_report_accepts_env_tushare_token_without_exposing_value(tmp_path):
+    config = AppConfig.load(
+        env={
+            "TUSHARE_TOKEN": "env-token-456",
+            "TUSHARE_TOKEN_PATH": str(tmp_path / "missing-token"),
+        }
+    )
+
+    report = run_health_checks(config)
+    credential_item = next(item for item in report.items if item.category == "credential")
+    rendered = "\n".join(report.as_lines())
+
+    assert credential_item.status is HealthStatus.OK
+    assert "present:env" in credential_item.message
+    assert "env-token-456" not in rendered
+
+
 def test_health_report_as_lines_renders_status_values():
     report = HealthReport(
         items=[

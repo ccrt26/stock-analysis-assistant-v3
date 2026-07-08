@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 from typing import Mapping, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_serializer
 
 
 def _default_project_root() -> Path:
@@ -13,10 +13,10 @@ def _default_project_root() -> Path:
 
 class AppConfig(BaseModel):
     project_root: Path = _default_project_root()
-    tushare_token: Optional[str] = None
+    tushare_token: Optional[str] = Field(default=None, repr=False)
     tushare_token_path: Path = Path("/Users/ccrt/.tushare_token")
     supabase_url: Optional[str] = None
-    supabase_service_role_key: Optional[str] = None
+    supabase_service_role_key: Optional[str] = Field(default=None, repr=False)
     reports_dir: Path = _default_project_root() / "reports"
     fixture_mode: bool = False
 
@@ -41,18 +41,19 @@ class AppConfig(BaseModel):
 
     @property
     def has_supabase_config(self) -> bool:
-        return bool(self.supabase_url and self.supabase_service_role_key)
+        return bool(self.supabase_url and _clean_secret(self.supabase_service_role_key))
 
     def resolve_tushare_token(self) -> Optional[str]:
-        if self.tushare_token:
-            return self.tushare_token.strip()
+        env_token = _clean_secret(self.tushare_token)
+        if env_token:
+            return env_token
         if self.tushare_token_path.exists():
             token = self.tushare_token_path.read_text(encoding="utf-8").strip()
             return token or None
         return None
 
     def tushare_token_status(self) -> str:
-        if self.tushare_token:
+        if _clean_secret(self.tushare_token):
             return "present:env"
         if self.tushare_token_path.exists() and self.tushare_token_path.read_text(
             encoding="utf-8"
@@ -60,6 +61,17 @@ class AppConfig(BaseModel):
             return "present:file"
         return "missing"
 
+    @field_serializer("tushare_token", "supabase_service_role_key")
+    def _serialize_secret(self, value: Optional[str]) -> Optional[str]:
+        return "**********" if _clean_secret(value) else None
+
 
 def _env_flag(values: Mapping[str, str], name: str) -> bool:
     return str(values.get(name, "")).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _clean_secret(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    cleaned = value.strip()
+    return cleaned or None
