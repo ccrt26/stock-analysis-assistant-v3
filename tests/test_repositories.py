@@ -3,6 +3,14 @@ from datetime import date
 import pytest
 
 from stock_analyzer.config import AppConfig
+from stock_analyzer.data.models import (
+    DailyBar,
+    DailyBasicRow,
+    DataStatus,
+    SourceGrade,
+    SourceRunRecord,
+    SourceStatus,
+)
 from stock_analyzer.domain.models import (
     ActionLabel,
     EvaluationTask,
@@ -12,12 +20,18 @@ from stock_analyzer.domain.models import (
     Recommendation,
     StockSnapshot,
 )
-from stock_analyzer.pipeline import run_daily_pipeline
 from stock_analyzer.storage.repositories import (
     InMemoryAnalysisRepository,
     SupabaseAnalysisRepository,
 )
 from stock_analyzer.storage.supabase_client import create_supabase_client
+
+try:
+    from stock_analyzer.pipeline import run_daily_pipeline
+except ModuleNotFoundError as exc:
+    if exc.name != "jinja2":
+        raise
+    run_daily_pipeline = None
 
 
 class FakeSupabaseResult:
@@ -235,6 +249,47 @@ def test_in_memory_repository_upserts_core_daily_outputs_by_stable_keys():
     assert repo.evaluation_tasks[0].due_date == date(2026, 7, 15)
 
 
+def test_in_memory_repository_upserts_ingestion_rows():
+    repo = InMemoryAnalysisRepository()
+    bar = DailyBar(
+        trade_date=date(2026, 7, 8),
+        ts_code="600000.SH",
+        close=10.2,
+        amount=100000000,
+        source_name="tushare",
+        source_grade=SourceGrade.PRIMARY,
+    )
+    updated_bar = bar.model_copy(update={"close": 10.4})
+    basic = DailyBasicRow(
+        trade_date=date(2026, 7, 8),
+        ts_code="600000.SH",
+        turnover_rate=1.2,
+        source_name="tushare",
+        source_grade=SourceGrade.PRIMARY,
+    )
+    updated_basic = basic.model_copy(update={"turnover_rate": 1.4})
+    run = SourceRunRecord(
+        trade_date=date(2026, 7, 8),
+        source_name="tushare",
+        stage="daily",
+        status=SourceStatus.SUCCESS,
+        message="ok",
+        source_grade=SourceGrade.PRIMARY,
+        data_status=DataStatus.COMPLETE_PRIMARY,
+        record_count=1,
+    )
+
+    repo.save_market_bars([bar])
+    repo.save_market_bars([updated_bar])
+    repo.save_daily_basic_indicators([basic])
+    repo.save_daily_basic_indicators([updated_basic])
+    repo.save_data_source_runs([run])
+
+    assert repo.market_bars == [updated_bar]
+    assert repo.daily_basic_indicators == [updated_basic]
+    assert repo.data_source_runs == [run]
+
+
 def test_supabase_repository_maps_rows_without_network():
     client = FakeSupabaseClient()
     client.table_data["focus_watchlist_state"] = [
@@ -287,7 +342,91 @@ def test_supabase_repository_maps_rows_without_network():
     assert client.upsert_calls[1][1][0]["due_date"] == "2026-07-12"
 
 
+def test_supabase_repository_persists_ingestion_rows_without_network():
+    client = FakeSupabaseClient()
+    repo = SupabaseAnalysisRepository(client)
+
+    repo.save_market_bars(
+        [
+            DailyBar(
+                trade_date=date(2026, 7, 8),
+                ts_code="600000.SH",
+                open=10.0,
+                high=10.5,
+                low=9.9,
+                close=10.2,
+                pre_close=10.1,
+                pct_chg=0.99,
+                vol=12345,
+                amount=100000000,
+                source_name="tushare",
+                source_grade=SourceGrade.PRIMARY,
+            )
+        ]
+    )
+    repo.save_daily_basic_indicators(
+        [
+            DailyBasicRow(
+                trade_date=date(2026, 7, 8),
+                ts_code="600000.SH",
+                turnover_rate=1.2,
+                total_mv=250000000,
+                circ_mv=200000000,
+                pe_ttm=8.5,
+                pb=0.9,
+                source_name="tushare",
+                source_grade=SourceGrade.PRIMARY,
+            )
+        ]
+    )
+    repo.save_data_source_runs(
+        [
+            SourceRunRecord(
+                trade_date=date(2026, 7, 8),
+                source_name="tushare",
+                stage="daily",
+                status=SourceStatus.SUCCESS,
+                message="ok",
+                attempt=2,
+                source_grade=SourceGrade.PRIMARY,
+                data_status=DataStatus.COMPLETE_PRIMARY,
+                record_count=1,
+                field_coverage={"close": True},
+                payload={"batch": "20260708"},
+            )
+        ]
+    )
+
+    assert [name for name, _, _ in client.write_calls] == [
+        "market_price_daily",
+        "daily_basic_indicator",
+        "data_source_run",
+    ]
+    assert [operation for _, operation, _ in client.write_calls] == [
+        "upsert",
+        "upsert",
+        "insert",
+    ]
+    conflict_targets = {
+        name: options.get("on_conflict")
+        for name, operation, options in client.write_options
+        if operation == "upsert"
+    }
+    assert conflict_targets["market_price_daily"] == "trade_date,ts_code"
+    assert conflict_targets["daily_basic_indicator"] == "trade_date,ts_code"
+    assert client.write_calls[0][2][0]["source_grade"] == "primary"
+    assert client.write_calls[1][2][0]["turnover_rate"] == 1.2
+    run_row = client.write_calls[2][2][0]
+    assert run_row["trade_date"] == "2026-07-08"
+    assert run_row["status"] == "success"
+    assert run_row["field_coverage"] == {"close": True}
+    assert run_row["payload"] == {"batch": "20260708"}
+
+
 def test_supabase_repository_upserts_prerequisites_before_dependent_pipeline_rows(tmp_path):
+    if run_daily_pipeline is None:
+        pytest.skip("jinja2 is not installed in this local test environment")
+
     client = FakeSupabaseClient()
     repo = SupabaseAnalysisRepository(client)
 
@@ -331,6 +470,9 @@ def test_supabase_repository_upserts_prerequisites_before_dependent_pipeline_row
 
 
 def test_supabase_repository_upserts_core_daily_rows_with_conflict_targets(tmp_path):
+    if run_daily_pipeline is None:
+        pytest.skip("jinja2 is not installed in this local test environment")
+
     client = FakeSupabaseClient()
     repo = SupabaseAnalysisRepository(client)
 

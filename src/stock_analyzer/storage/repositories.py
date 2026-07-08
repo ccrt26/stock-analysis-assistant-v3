@@ -5,6 +5,7 @@ import json
 from datetime import date
 from typing import List, Optional, Protocol
 
+from stock_analyzer.data.models import DailyBar, DailyBasicRow, SourceRunRecord
 from stock_analyzer.domain.models import (
     ActionLabel,
     EvaluationTask,
@@ -29,6 +30,9 @@ class AnalysisRepository(Protocol):
     def save_focus_states(self, states: List[FocusState]) -> None: ...
     def save_evidence_packages(self, packages: List[EvidencePackage]) -> None: ...
     def save_evaluation_tasks(self, tasks: List[EvaluationTask]) -> None: ...
+    def save_market_bars(self, bars: List[DailyBar]) -> None: ...
+    def save_daily_basic_indicators(self, rows: List[DailyBasicRow]) -> None: ...
+    def save_data_source_runs(self, rows: List[SourceRunRecord]) -> None: ...
 
 
 class InMemoryAnalysisRepository:
@@ -41,6 +45,9 @@ class InMemoryAnalysisRepository:
         stock_master: Optional[List[StockSnapshot]] = None,
         stock_statuses: Optional[List[StockSnapshot]] = None,
         feature_snapshots: Optional[List[FeatureSnapshot]] = None,
+        market_bars: Optional[List[DailyBar]] = None,
+        daily_basic_indicators: Optional[List[DailyBasicRow]] = None,
+        data_source_runs: Optional[List[SourceRunRecord]] = None,
     ) -> None:
         self.recommendations = list(recommendations or [])
         self.focus_states = list(focus_states or [])
@@ -49,6 +56,9 @@ class InMemoryAnalysisRepository:
         self.stock_master = list(stock_master or [])
         self.stock_statuses = list(stock_statuses or [])
         self.feature_snapshots = list(feature_snapshots or [])
+        self.market_bars = list(market_bars or [])
+        self.daily_basic_indicators = list(daily_basic_indicators or [])
+        self.data_source_runs = list(data_source_runs or [])
 
     def load_focus_states(self) -> List[FocusState]:
         return _latest_active_focus_states(self.focus_states)
@@ -119,6 +129,23 @@ class InMemoryAnalysisRepository:
                 item.evaluation_layer,
             ),
         )
+
+    def save_market_bars(self, bars: List[DailyBar]) -> None:
+        self.market_bars = _upsert_model_list(
+            self.market_bars,
+            bars,
+            key=lambda item: (item.trade_date, item.ts_code),
+        )
+
+    def save_daily_basic_indicators(self, rows: List[DailyBasicRow]) -> None:
+        self.daily_basic_indicators = _upsert_model_list(
+            self.daily_basic_indicators,
+            rows,
+            key=lambda item: (item.trade_date, item.ts_code),
+        )
+
+    def save_data_source_runs(self, rows: List[SourceRunRecord]) -> None:
+        self.data_source_runs.extend(rows)
 
 
 class SupabaseAnalysisRepository:
@@ -291,6 +318,71 @@ class SupabaseAnalysisRepository:
             rows,
             on_conflict="trade_date,ts_code,evidence_id,checkpoint_days,evaluation_layer",
         ).execute()
+
+    def save_market_bars(self, bars: List[DailyBar]) -> None:
+        rows = [
+            {
+                "trade_date": item.trade_date.isoformat(),
+                "ts_code": item.ts_code,
+                "open": item.open,
+                "high": item.high,
+                "low": item.low,
+                "close": item.close,
+                "pre_close": item.pre_close,
+                "pct_chg": item.pct_chg,
+                "vol": item.vol,
+                "amount": item.amount,
+                "source_name": item.source_name,
+                "source_grade": item.source_grade.value,
+            }
+            for item in bars
+        ]
+        if rows:
+            self.client.table("market_price_daily").upsert(
+                rows,
+                on_conflict="trade_date,ts_code",
+            ).execute()
+
+    def save_daily_basic_indicators(self, rows: List[DailyBasicRow]) -> None:
+        payload = [
+            {
+                "trade_date": item.trade_date.isoformat(),
+                "ts_code": item.ts_code,
+                "turnover_rate": item.turnover_rate,
+                "total_mv": item.total_mv,
+                "circ_mv": item.circ_mv,
+                "pe_ttm": item.pe_ttm,
+                "pb": item.pb,
+                "source_name": item.source_name,
+                "source_grade": item.source_grade.value,
+            }
+            for item in rows
+        ]
+        if payload:
+            self.client.table("daily_basic_indicator").upsert(
+                payload,
+                on_conflict="trade_date,ts_code",
+            ).execute()
+
+    def save_data_source_runs(self, rows: List[SourceRunRecord]) -> None:
+        payload = [
+            {
+                "trade_date": item.trade_date.isoformat(),
+                "source_name": item.source_name,
+                "stage": item.stage,
+                "status": item.status.value,
+                "message": item.message,
+                "attempt": item.attempt,
+                "source_grade": item.source_grade.value,
+                "data_status": item.data_status.value,
+                "record_count": item.record_count,
+                "field_coverage": item.field_coverage,
+                "payload": item.payload,
+            }
+            for item in rows
+        ]
+        if payload:
+            self.client.table("data_source_run").insert(payload).execute()
 
 
 def _date_from_row(value) -> Optional[date]:

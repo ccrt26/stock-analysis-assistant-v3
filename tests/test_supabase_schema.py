@@ -8,6 +8,12 @@ SCHEMA_PATH = (
     / "migrations"
     / "202607070001_init_core.sql"
 )
+INGESTION_SCHEMA_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "supabase"
+    / "migrations"
+    / "202607080002_ingestion_v1.sql"
+)
 
 
 def test_initial_schema_contains_required_tables_and_rls():
@@ -71,3 +77,24 @@ def test_initial_schema_has_idempotent_daily_unique_constraints():
         ),
         compact_sql,
     )
+
+
+def test_ingestion_schema_adds_market_data_tables_and_run_columns():
+    sql = INGESTION_SCHEMA_PATH.read_text().lower()
+    compact_sql = re.sub(r"\s+", " ", sql)
+
+    for table in ["market_price_daily", "daily_basic_indicator"]:
+        assert f"create table if not exists public.{table}" in sql
+        assert f"alter table public.{table} enable row level security" in sql
+        assert f"create policy {table}_service_role_all" in sql
+
+    for column in [
+        "stage",
+        "attempt",
+        "source_grade",
+        "data_status",
+        "record_count",
+        "field_coverage",
+        "payload",
+    ]:
+        assert f"add column if not exists {column}" in compact_sql
