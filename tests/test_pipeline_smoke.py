@@ -181,6 +181,29 @@ class RawOnlyProductionProvider:
         )
 
 
+class MissingDailyBasicProductionProvider:
+    def load(self, trade_date):
+        stocks, stock_names, feature_profiles = _sample_market(trade_date)
+        degraded_features = {
+            ts_code: feature.model_copy(update={"data_quality": "missing_daily_basic"})
+            for ts_code, feature in feature_profiles.items()
+        }
+        daily_bars = _raw_daily_bars(trade_date)
+        return MarketDataBundle(
+            trade_date=trade_date,
+            data_status=DataStatus.COMPLETE_PRIMARY,
+            source_grade=SourceGrade.PRIMARY,
+            source_versions={"fake-live": trade_date.isoformat()},
+            stock_basic=_raw_stock_basic(),
+            daily_bars=daily_bars,
+            daily_basic=[],
+            stocks=stocks,
+            stock_names=stock_names,
+            feature_profiles=degraded_features,
+            source_runs=_raw_source_runs(trade_date, len(daily_bars)),
+        )
+
+
 class FakeTushareSource:
     def __init__(self, trade_date, *, history_days=61, include_current=True):
         self.trade_date = trade_date
@@ -213,6 +236,11 @@ class StaleFakeTushareSource(FakeTushareSource):
 class SparseFakeTushareSource(FakeTushareSource):
     def __init__(self, trade_date):
         super().__init__(trade_date, history_days=1)
+
+
+class MissingDailyBasicFakeTushareSource(FakeTushareSource):
+    def fetch_daily_basic(self, trade_date):
+        return []
 
 
 def test_tushare_provider_builds_decision_ready_bundle_from_fetched_rows():
@@ -250,6 +278,16 @@ def test_tushare_provider_rejects_rows_without_feature_inputs():
         TushareProvider(SparseFakeTushareSource(trade_date)).load(trade_date)
 
     assert "feature inputs" in str(excinfo.value)
+    assert "token" not in str(excinfo.value).lower()
+
+
+def test_tushare_provider_rejects_missing_current_daily_basic():
+    trade_date = date(2026, 7, 7)
+
+    with pytest.raises(CurrentLiveDataUnavailable) as excinfo:
+        TushareProvider(MissingDailyBasicFakeTushareSource(trade_date)).load(trade_date)
+
+    assert "daily basic" in str(excinfo.value).lower()
     assert "token" not in str(excinfo.value).lower()
 
 
@@ -337,6 +375,26 @@ def test_run_daily_pipeline_production_rejects_raw_only_decision_bundle(tmp_path
     assert repo.market_bars == []
     assert repo.daily_basic_indicators == []
     assert repo.data_source_runs == []
+    assert not (tmp_path / "index.html").exists()
+
+
+def test_run_daily_pipeline_production_rejects_no_recommendation_eligible_features(tmp_path):
+    repo = InMemoryAnalysisRepository()
+
+    with pytest.raises(RuntimeError) as excinfo:
+        run_daily_pipeline(
+            date(2026, 7, 7),
+            tmp_path,
+            repository=repo,
+            fixture_mode=False,
+            market_data_provider=MissingDailyBasicProductionProvider(),
+        )
+
+    assert "no production decisions were generated" in str(excinfo.value)
+    assert repo.market_bars == []
+    assert repo.daily_basic_indicators == []
+    assert repo.data_source_runs == []
+    assert repo.recommendations == []
     assert not (tmp_path / "index.html").exists()
 
 

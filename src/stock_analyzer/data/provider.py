@@ -10,6 +10,7 @@ from stock_analyzer.data.feature_builder import (
 )
 from stock_analyzer.data.models import (
     DailyBar,
+    DailyBasicRow,
     DataStatus,
     MarketDataBundle,
     SourceGrade,
@@ -44,6 +45,11 @@ class TushareProvider:
                 f"{trade_date.isoformat()}"
             )
         daily_basic = self.source.fetch_daily_basic(trade_date)
+        _require_current_daily_basic(
+            trade_date,
+            current_daily_bars,
+            daily_basic,
+        )
         source_runs = [
             SourceRunRecord(
                 trade_date=trade_date,
@@ -85,6 +91,23 @@ def _fetch_daily_history(
     for offset in range(_DAILY_HISTORY_LOOKBACK_DAYS, -1, -1):
         daily_bars.extend(source.fetch_daily(trade_date - timedelta(days=offset)))
     return daily_bars
+
+
+def _require_current_daily_basic(
+    trade_date: date,
+    current_daily_bars: list[DailyBar],
+    daily_basic: list[DailyBasicRow],
+) -> None:
+    current_codes = {bar.ts_code for bar in current_daily_bars}
+    basic_codes = {
+        row.ts_code for row in daily_basic if row.trade_date == trade_date
+    }
+    missing_codes = sorted(current_codes - basic_codes)
+    if missing_codes:
+        raise CurrentLiveDataUnavailable(
+            "Tushare returned no current daily basic rows for: "
+            + ", ".join(missing_codes)
+        )
 
 
 def build_production_market_data_provider(config: AppConfig) -> MarketDataProvider:

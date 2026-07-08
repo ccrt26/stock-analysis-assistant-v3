@@ -140,6 +140,10 @@ def run_daily_pipeline(
             raise ProductionDataSourceUnavailable(
                 "Current live data is unavailable; no production decisions were generated."
             )
+        if not _has_recommendation_eligible_features(stocks, feature_profiles):
+            raise ProductionDataSourceUnavailable(
+                "Current live data is unavailable; no production decisions were generated."
+            )
         if persist:
             repository.save_stock_master(stocks)
             repository.save_market_bars(bundle.daily_bars)
@@ -199,6 +203,17 @@ def run_daily_pipeline(
         recommendations=recommendations,
         focus_states=focus_states,
         evaluation_tasks=evaluation_tasks,
+    )
+
+
+def _has_recommendation_eligible_features(
+    stocks: list[StockSnapshot],
+    feature_profiles: dict[str, FeatureSnapshot],
+) -> bool:
+    return any(
+        (feature := feature_profiles.get(stock.ts_code)) is not None
+        and feature.data_quality == "ok"
+        for stock in stocks
     )
 
 
