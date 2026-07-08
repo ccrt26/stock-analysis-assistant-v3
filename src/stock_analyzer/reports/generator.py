@@ -6,16 +6,22 @@ from pathlib import Path
 from typing import Optional
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
-from stock_analyzer.domain.models import FocusState, Recommendation
+from stock_analyzer.domain.models import EvidencePackage, FocusState, Recommendation
 
 
 def render_reports(
     output_dir: Path,
     recommendations: list[Recommendation],
     focus_states: list[FocusState],
+    evidence_packages: Optional[list[EvidencePackage]] = None,
     trade_date: Optional[date] = None,
 ) -> None:
     report_date = _resolve_trade_date(trade_date, recommendations, focus_states)
+    evidence_packages = evidence_packages or []
+    recommendation_details = [
+        _recommendation_detail(recommendation, report_date, evidence_packages)
+        for recommendation in recommendations
+    ]
     template_dir = Path(__file__).parent / "templates"
     env = Environment(
         loader=FileSystemLoader(template_dir),
@@ -32,6 +38,10 @@ def render_reports(
             item.model_dump(mode="json") for item in recommendations
         ],
         "focus_states": [item.model_dump(mode="json") for item in focus_states],
+        "evidence_packages": [
+            item.model_dump(mode="json") for item in evidence_packages
+        ],
+        "recommendation_details": recommendation_details,
     }
     latest_path = data_dir / "latest.json"
     latest_path.write_text(
@@ -41,7 +51,7 @@ def render_reports(
 
     index_html = env.get_template("index.html.j2").render(
         trade_date=report_date,
-        recommendations=recommendations,
+        recommendation_details=recommendation_details,
         focus_states=focus_states,
     )
     (output_dir / "index.html").write_text(index_html, encoding="utf-8")
@@ -53,11 +63,12 @@ def render_reports(
     stocks_dir = daily_dir / "stocks"
     stocks_dir.mkdir(parents=True, exist_ok=True)
     stock_template = env.get_template("stock.html.j2")
-    for recommendation in recommendations:
+    for recommendation, detail in zip(recommendations, recommendation_details):
         stock_html = stock_template.render(
             stock_name=f"{recommendation.name} {recommendation.ts_code}",
             conclusion=_stock_conclusion(recommendation),
             recommendation=recommendation,
+            detail=detail,
             focus_state=_focus_state_for(recommendation.ts_code, focus_states),
         )
         (stocks_dir / f"{recommendation.ts_code}.html").write_text(
@@ -97,3 +108,71 @@ def _stock_conclusion(recommendation: Recommendation) -> str:
         f"{recommendation.action.value}，评分 {recommendation.score}。"
         f"主要依据：{reasons}。主要风险：{risks}。"
     )
+
+
+def _recommendation_detail(
+    recommendation: Recommendation,
+    report_date: date,
+    evidence_packages: list[EvidencePackage],
+) -> dict:
+    evidence = _evidence_for(recommendation, evidence_packages)
+    support = evidence.support if evidence else list(recommendation.reasons)
+    counter_evidence = evidence.counter_evidence if evidence else list(recommendation.risks)
+    confirmation_signals = (
+        evidence.expected_confirmation_path
+        if evidence
+        else ["等待趋势、成交量和反证强度在后续交易日继续确认"]
+    )
+    invalidation_signals = (
+        evidence.invalidation_conditions
+        if evidence
+        else list(recommendation.risks)
+    )
+    evidence_id = evidence.evidence_id if evidence else recommendation.evidence_id
+    rule_references = evidence.matched_rules if evidence else []
+    source_versions = evidence.source_versions if evidence else {}
+    data_credibility = evidence.confidence_level if evidence else "unknown"
+    what_happened = (
+        evidence.thesis
+        if evidence
+        else f"{recommendation.name}触发观察评分 {recommendation.score}"
+    )
+    return {
+        "trade_date": report_date.isoformat(),
+        "ts_code": recommendation.ts_code,
+        "name": recommendation.name,
+        "action": recommendation.action.value,
+        "score": recommendation.score,
+        "stock_page": f"daily/{report_date.isoformat()}/stocks/{recommendation.ts_code}.html",
+        "what_happened": what_happened,
+        "why_observe": list(recommendation.reasons),
+        "biggest_risk": recommendation.risks[0] if recommendation.risks else "暂无明确反证",
+        "observation_plan": [
+            "跟踪 5/20/40 个交易日检查点",
+            "确认信号增强时继续观察",
+            "失效信号触发时降级或剔除观察",
+        ],
+        "evidence": {
+            "evidence_id": evidence_id,
+            "support": list(support),
+            "counter_evidence": list(counter_evidence),
+            "confirmation_signals": list(confirmation_signals),
+            "invalidation_signals": list(invalidation_signals),
+            "rule_references": list(rule_references),
+            "source_versions": dict(source_versions),
+            "data_credibility": data_credibility,
+        },
+    }
+
+
+def _evidence_for(
+    recommendation: Recommendation,
+    evidence_packages: list[EvidencePackage],
+) -> Optional[EvidencePackage]:
+    for package in evidence_packages:
+        if recommendation.evidence_id and package.evidence_id == recommendation.evidence_id:
+            return package
+    for package in evidence_packages:
+        if package.ts_code == recommendation.ts_code:
+            return package
+    return None

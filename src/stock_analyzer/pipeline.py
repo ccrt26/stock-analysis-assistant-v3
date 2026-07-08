@@ -12,6 +12,7 @@ from stock_analyzer.analysis.pool import clean_stock_pool
 from stock_analyzer.analysis.recommendation import generate_recommendations
 from stock_analyzer.domain.models import (
     EvaluationTask,
+    EvidencePackage,
     FeatureSnapshot,
     FocusState,
     Recommendation,
@@ -104,6 +105,7 @@ def run_daily_pipeline(
     persist: bool = True,
 ) -> DailyRunResult:
     repository = repository or InMemoryAnalysisRepository()
+    persist = persist and not dry_run
     stocks, stock_names, feature_profiles = _sample_market(trade_date)
     included_stocks, _ = clean_stock_pool(stocks)
     features = [feature_profiles[stock.ts_code] for stock in included_stocks if stock.ts_code in feature_profiles]
@@ -128,6 +130,7 @@ def run_daily_pipeline(
         )
         for recommendation in recommendations
     ]
+    recommendations = _assign_evidence_ids(recommendations, evidence_packages)
     evaluation_tasks = [
         task
         for package in evidence_packages
@@ -135,13 +138,22 @@ def run_daily_pipeline(
     ]
 
     if persist:
+        repository.save_stock_master(stocks)
+        repository.save_stock_statuses(stocks)
+        repository.save_feature_snapshots(features)
         repository.save_recommendations(recommendations)
         repository.save_focus_states(focus_states)
         repository.save_evidence_packages(evidence_packages)
         repository.save_evaluation_tasks(evaluation_tasks)
 
     if not dry_run:
-        render_reports(output_dir, recommendations, focus_states, trade_date=trade_date)
+        render_reports(
+            output_dir,
+            recommendations,
+            focus_states,
+            evidence_packages=evidence_packages,
+            trade_date=trade_date,
+        )
 
     return DailyRunResult(
         trade_date=trade_date,
@@ -149,3 +161,54 @@ def run_daily_pipeline(
         focus_states=focus_states,
         evaluation_tasks=evaluation_tasks,
     )
+
+
+def render_report_for_date(
+    trade_date: date,
+    output_dir: Path,
+    repository: Optional[AnalysisRepository] = None,
+) -> DailyRunResult:
+    repository = repository or InMemoryAnalysisRepository()
+    recommendations = repository.load_daily_recommendations(trade_date)
+    focus_states = repository.load_focus_states_for_date(trade_date)
+    evidence_packages = repository.load_evidence_packages(trade_date)
+    if recommendations or focus_states or evidence_packages:
+        render_reports(
+            output_dir,
+            recommendations,
+            focus_states,
+            evidence_packages=evidence_packages,
+            trade_date=trade_date,
+        )
+        return DailyRunResult(
+            trade_date=trade_date,
+            recommendations=recommendations,
+            focus_states=focus_states,
+            evaluation_tasks=[],
+        )
+
+    return run_daily_pipeline(
+        trade_date,
+        output_dir,
+        dry_run=False,
+        repository=repository,
+        persist=False,
+    )
+
+
+def _assign_evidence_ids(
+    recommendations: list[Recommendation],
+    evidence_packages: list[EvidencePackage],
+) -> list[Recommendation]:
+    evidence_by_code = {package.ts_code: package.evidence_id for package in evidence_packages}
+    return [
+        recommendation.model_copy(
+            update={
+                "evidence_id": evidence_by_code.get(
+                    recommendation.ts_code,
+                    recommendation.evidence_id,
+                )
+            }
+        )
+        for recommendation in recommendations
+    ]

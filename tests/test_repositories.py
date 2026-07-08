@@ -7,9 +7,12 @@ from stock_analyzer.domain.models import (
     ActionLabel,
     EvaluationTask,
     EvidencePackage,
+    FeatureSnapshot,
     FocusState,
     Recommendation,
+    StockSnapshot,
 )
+from stock_analyzer.pipeline import run_daily_pipeline
 from stock_analyzer.storage.repositories import (
     InMemoryAnalysisRepository,
     SupabaseAnalysisRepository,
@@ -28,9 +31,15 @@ class FakeSupabaseTable:
         self.client = client
         self.operation = ""
         self.payload = None
+        self.filters = []
 
     def insert(self, rows):
         self.operation = "insert"
+        self.payload = rows
+        return self
+
+    def upsert(self, rows):
+        self.operation = "upsert"
         self.payload = rows
         return self
 
@@ -39,16 +48,29 @@ class FakeSupabaseTable:
         self.payload = columns
         return self
 
+    def eq(self, column: str, value):
+        self.filters.append((column, value))
+        return self
+
     def execute(self):
-        if self.operation == "insert":
-            self.client.insert_calls.append((self.name, self.payload))
+        if self.operation in {"insert", "upsert"}:
+            self.client.write_calls.append((self.name, self.operation, self.payload))
+            if self.operation == "insert":
+                self.client.insert_calls.append((self.name, self.payload))
+            else:
+                self.client.upsert_calls.append((self.name, self.payload))
             return FakeSupabaseResult(self.payload)
-        return FakeSupabaseResult(self.client.table_data.get(self.name, []))
+        rows = list(self.client.table_data.get(self.name, []))
+        for column, value in self.filters:
+            rows = [row for row in rows if row.get(column) == value]
+        return FakeSupabaseResult(rows)
 
 
 class FakeSupabaseClient:
     def __init__(self) -> None:
+        self.write_calls = []
         self.insert_calls = []
+        self.upsert_calls = []
         self.table_data = {}
 
     def table(self, name: str) -> FakeSupabaseTable:
@@ -98,11 +120,49 @@ def test_in_memory_repository_saves_daily_outputs():
     repo.save_focus_states([focus])
     repo.save_evidence_packages([evidence])
     repo.save_evaluation_tasks([task])
+    repo.save_stock_master(
+        [
+            StockSnapshot(
+                trade_date=date(2026, 7, 7),
+                ts_code="600000.SH",
+                name="浦发银行",
+                listing_days=6000,
+            )
+        ]
+    )
+    repo.save_stock_statuses(
+        [
+            StockSnapshot(
+                trade_date=date(2026, 7, 7),
+                ts_code="600000.SH",
+                name="浦发银行",
+                listing_days=6000,
+            )
+        ]
+    )
+    repo.save_feature_snapshots(
+        [
+            FeatureSnapshot(
+                trade_date=date(2026, 7, 7),
+                ts_code="600000.SH",
+                trend_20d=0.08,
+                trend_60d=0.12,
+                relative_strength=0.75,
+                volatility_20d=0.22,
+                liquidity_score=0.9,
+                quality_score=0.7,
+                market_regime="sideways",
+            )
+        ]
+    )
 
     assert len(repo.recommendations) == 1
     assert len(repo.focus_states) == 1
     assert len(repo.evidence_packages) == 1
     assert len(repo.evaluation_tasks) == 1
+    assert len(repo.stock_master) == 1
+    assert len(repo.stock_statuses) == 1
+    assert len(repo.feature_snapshots) == 1
     assert repo.load_focus_states() == [focus]
 
 
@@ -156,6 +216,106 @@ def test_supabase_repository_maps_rows_without_network():
     assert evidence_row["expected_confirmation_path"] == ["趋势延续"]
     assert client.insert_calls[1][0] == "evaluation_task"
     assert client.insert_calls[1][1][0]["due_date"] == "2026-07-12"
+
+
+def test_supabase_repository_upserts_prerequisites_before_dependent_pipeline_rows(tmp_path):
+    client = FakeSupabaseClient()
+    repo = SupabaseAnalysisRepository(client)
+
+    result = run_daily_pipeline(date(2026, 7, 7), tmp_path, repository=repo)
+
+    write_tables = [name for name, _, _ in client.write_calls]
+    assert write_tables == [
+        "stock_master",
+        "stock_status_daily",
+        "daily_feature_snapshot",
+        "recommendation_daily",
+        "focus_watchlist_state",
+        "evidence_package_index",
+        "evaluation_task",
+    ]
+    assert [operation for _, operation, _ in client.write_calls[:3]] == [
+        "upsert",
+        "upsert",
+        "upsert",
+    ]
+    stock_master_rows = client.write_calls[0][2]
+    assert {
+        "ts_code": "600000.SH",
+        "name": "浦发银行",
+        "exchange": "SH",
+        "list_date": None,
+    } in stock_master_rows
+    status_rows = client.write_calls[1][2]
+    assert status_rows[0]["trade_date"] == "2026-07-07"
+    assert "official_risk_events" in status_rows[0]
+    feature_rows = client.write_calls[2][2]
+    assert feature_rows[0]["features"]["trend_20d"] == 0.08
+    recommendation_rows = client.write_calls[3][2]
+    assert all(row["evidence_id"] for row in recommendation_rows)
+    assert all(item.evidence_id for item in result.recommendations)
+
+
+def test_supabase_repository_loads_daily_analysis_rows_for_report_rendering():
+    client = FakeSupabaseClient()
+    client.table_data["recommendation_daily"] = [
+        {
+            "trade_date": "2026-07-07",
+            "ts_code": "600000.SH",
+            "name": "浦发银行",
+            "action": "进入观察",
+            "score": 88,
+            "reasons": ["趋势改善"],
+            "risks": ["需要确认"],
+            "evidence_id": "2026-07-07-600000.SH",
+        },
+        {
+            "trade_date": "2026-07-08",
+            "ts_code": "600519.SH",
+            "name": "贵州茅台",
+            "action": "进入观察",
+            "score": 84,
+            "reasons": ["趋势改善"],
+            "risks": ["需要确认"],
+            "evidence_id": "2026-07-08-600519.SH",
+        },
+    ]
+    client.table_data["focus_watchlist_state"] = [
+        {
+            "trade_date": "2026-07-07",
+            "ts_code": "600000.SH",
+            "state": "进入观察",
+            "entry_date": "2026-07-07",
+            "entry_reason": "原始证据成立",
+            "invalidation_conditions": ["跌破关键支撑"],
+            "exit_reason": None,
+        }
+    ]
+    client.table_data["evidence_package_index"] = [
+        {
+            "evidence_id": "2026-07-07-600000.SH",
+            "trade_date": "2026-07-07",
+            "ts_code": "600000.SH",
+            "thesis": "观察",
+            "support": ["趋势改善"],
+            "counter_evidence": ["需要确认"],
+            "matched_rules": ["RESEARCH_TREND_CONFIRMATION"],
+            "confidence_level": "medium",
+            "expected_confirmation_path": ["趋势延续"],
+            "invalidation_conditions": ["核心趋势证据消失"],
+            "source_versions": {"recommendation": "2026-07-07-600000.SH"},
+        }
+    ]
+    repo = SupabaseAnalysisRepository(client)
+
+    recommendations = repo.load_daily_recommendations(date(2026, 7, 7))
+    focus_states = repo.load_focus_states_for_date(date(2026, 7, 7))
+    evidence_packages = repo.load_evidence_packages(date(2026, 7, 7))
+
+    assert [item.ts_code for item in recommendations] == ["600000.SH"]
+    assert recommendations[0].name == "浦发银行"
+    assert [item.ts_code for item in focus_states] == ["600000.SH"]
+    assert evidence_packages[0].matched_rules == ["RESEARCH_TREND_CONFIRMATION"]
 
 
 def test_supabase_repository_loads_latest_active_focus_state_per_stock():

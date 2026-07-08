@@ -9,6 +9,67 @@
   <main>
     <h1>{{ stock_name }}</h1>
     <p>{{ conclusion }}</p>
+
+    <section>
+      <h2>发生了什么</h2>
+      <p>{{ detail.what_happened }}</p>
+    </section>
+
+    <section>
+      <h2>支撑证据</h2>
+      <ul>
+        {% for line in detail.evidence.support %}
+        <li>{{ line }}</li>
+        {% endfor %}
+      </ul>
+    </section>
+
+    <section>
+      <h2>反证与风险</h2>
+      <ul>
+        {% for line in detail.evidence.counter_evidence %}
+        <li>{{ line }}</li>
+        {% endfor %}
+      </ul>
+    </section>
+
+    <section>
+      <h2>确认信号</h2>
+      <ul>
+        {% for line in detail.evidence.confirmation_signals %}
+        <li>{{ line }}</li>
+        {% endfor %}
+      </ul>
+    </section>
+
+    <section>
+      <h2>失效信号</h2>
+      <ul>
+        {% for line in detail.evidence.invalidation_signals %}
+        <li>{{ line }}</li>
+        {% endfor %}
+      </ul>
+    </section>
+
+    <section>
+      <h2>观察计划</h2>
+      <ul>
+        {% for line in detail.observation_plan %}
+        <li>{{ line }}</li>
+        {% endfor %}
+      </ul>
+    </section>
+
+    <section>
+      <h2>证据与规则引用</h2>
+      <p>证据：{{ detail.evidence.evidence_id or "未记录" }}</p>
+      <p>规则：{{ "；".join(detail.evidence.rule_references) or "未匹配规则" }}</p>
+    </section>
+
+    <section>
+      <h2>数据可信度</h2>
+      <p>{{ detail.evidence.data_credibility }}</p>
+    </section>
   </main>
 </body>
 </html>

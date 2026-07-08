@@ -1,11 +1,17 @@
 from __future__ import annotations
 
-from datetime import timedelta
-
 from stock_analyzer.domain.models import EvidencePackage, EvaluationTask
+from stock_analyzer.evaluation.trading_calendar import (
+    TradingCalendar,
+    WeekdayTradingCalendar,
+)
 
 
-def create_evaluation_tasks(package: EvidencePackage) -> list[EvaluationTask]:
+def create_evaluation_tasks(
+    package: EvidencePackage,
+    trading_calendar: TradingCalendar | None = None,
+) -> list[EvaluationTask]:
+    calendar = trading_calendar or WeekdayTradingCalendar()
     schedule = [
         (5, "result"),
         (20, "result"),
@@ -20,7 +26,7 @@ def create_evaluation_tasks(package: EvidencePackage) -> list[EvaluationTask]:
             ts_code=package.ts_code,
             evidence_id=package.evidence_id,
             checkpoint_days=days,
-            due_date=package.trade_date + timedelta(days=days),
+            due_date=calendar.add_trading_days(package.trade_date, days),
             evaluation_layer=layer,
         )
         for days, layer in schedule

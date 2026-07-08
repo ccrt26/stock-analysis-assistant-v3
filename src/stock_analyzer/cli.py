@@ -6,7 +6,7 @@ import typer
 
 from stock_analyzer.config import AppConfig
 from stock_analyzer.data.health import run_health_checks
-from stock_analyzer.pipeline import run_daily_pipeline
+from stock_analyzer.pipeline import render_report_for_date, run_daily_pipeline
 from stock_analyzer.storage.repositories import InMemoryAnalysisRepository, SupabaseAnalysisRepository
 from stock_analyzer.storage.supabase_client import create_supabase_client
 
@@ -34,6 +34,7 @@ def run_daily(
         config.reports_dir,
         dry_run=dry_run,
         repository=repository,
+        persist=not dry_run,
     )
 
     if dry_run:
@@ -52,12 +53,10 @@ def render_report(
     parsed_trade_date = date.fromisoformat(trade_date)
     config = AppConfig.load()
     target_dir = output_dir or config.reports_dir
-    result = run_daily_pipeline(
+    result = render_report_for_date(
         parsed_trade_date,
         target_dir,
-        dry_run=False,
         repository=_analysis_repository(config),
-        persist=False,
     )
     typer.echo(f"report rendered for {result.trade_date.isoformat()}")
 

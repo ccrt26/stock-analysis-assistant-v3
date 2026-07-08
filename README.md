@@ -4,7 +4,7 @@
 
 ## 本地运行
 
-推荐路径：创建虚拟环境并安装 editable package 后运行。
+需要 Python 3.11 或更新版本。推荐路径：创建虚拟环境并安装 editable package 后运行。
 
 ```bash
 python3 -m venv .venv
@@ -28,6 +28,12 @@ PYTHONPATH=src python3 -m stock_analyzer run-daily --trade-date 2026-07-07
 - Supabase 写入使用 `SUPABASE_URL` 和 `SUPABASE_SERVICE_ROLE_KEY`。
 - Cloudflare 报告密码使用 `REPORT_PASSWORD`。
 - 不要把任何 token 写入 Git。
+
+## 路径
+
+- 默认项目根目录从当前源码所在仓库推导，worktree 开发时会写入当前 worktree。
+- 可用 `PROJECT_ROOT` 覆盖项目根目录。
+- 可用 `REPORTS_DIR` 覆盖报告输出目录。
 
 ## 报告
 

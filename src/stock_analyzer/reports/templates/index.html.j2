@@ -11,12 +11,55 @@
 
     <section>
       <h2>今日推荐</h2>
-      {% for item in recommendations %}
+      {% for item in recommendation_details %}
       <article>
-        <h3>{{ item.name }} {{ item.ts_code }}</h3>
-        <p>{{ item.action.value }}，评分 {{ item.score }}</p>
-        <p>理由：{{ "；".join(item.reasons) }}</p>
-        <p>风险：{{ "；".join(item.risks) }}</p>
+        <h3><a href="{{ item.stock_page }}">{{ item.name }} {{ item.ts_code }}</a></h3>
+        <p>{{ item.action }}，评分 {{ item.score }}</p>
+
+        <h4>发生了什么</h4>
+        <p>{{ item.what_happened }}</p>
+
+        <h4>支撑证据</h4>
+        <ul>
+          {% for line in item.evidence.support %}
+          <li>{{ line }}</li>
+          {% endfor %}
+        </ul>
+
+        <h4>反证与风险</h4>
+        <ul>
+          {% for line in item.evidence.counter_evidence %}
+          <li>{{ line }}</li>
+          {% endfor %}
+        </ul>
+
+        <h4>确认信号</h4>
+        <ul>
+          {% for line in item.evidence.confirmation_signals %}
+          <li>{{ line }}</li>
+          {% endfor %}
+        </ul>
+
+        <h4>失效信号</h4>
+        <ul>
+          {% for line in item.evidence.invalidation_signals %}
+          <li>{{ line }}</li>
+          {% endfor %}
+        </ul>
+
+        <h4>观察计划</h4>
+        <ul>
+          {% for line in item.observation_plan %}
+          <li>{{ line }}</li>
+          {% endfor %}
+        </ul>
+
+        <h4>证据与规则引用</h4>
+        <p>证据：{{ item.evidence.evidence_id or "未记录" }}</p>
+        <p>规则：{{ "；".join(item.evidence.rule_references) or "未匹配规则" }}</p>
+
+        <h4>数据可信度</h4>
+        <p>{{ item.evidence.data_credibility }}</p>
       </article>
       {% else %}
       <p>今日没有符合标准的推荐。</p>

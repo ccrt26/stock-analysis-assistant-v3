@@ -48,11 +48,35 @@ def test_create_evaluation_tasks_has_three_layers_and_three_windows():
         (40, "knowledge"),
     }
     assert {task.due_date for task in tasks if task.checkpoint_days == 5} == {
-        date(2026, 7, 12)
+        date(2026, 7, 14)
     }
     assert {task.due_date for task in tasks if task.checkpoint_days == 20} == {
-        date(2026, 7, 27)
+        date(2026, 8, 4)
     }
     assert {task.due_date for task in tasks if task.checkpoint_days == 40} == {
-        date(2026, 8, 16)
+        date(2026, 9, 1)
     }
+
+
+def test_five_trading_day_checkpoint_skips_weekends():
+    package = build_evidence_package(
+        Recommendation(
+            trade_date=date(2026, 7, 7),
+            ts_code="600000.SH",
+            name="浦发银行",
+            action=ActionLabel.ENTER_OBSERVATION,
+            score=83,
+            reasons=["趋势改善"],
+            risks=["银行板块弹性有限"],
+        ),
+        matched_rules=["RESEARCH_TREND_CONFIRMATION"],
+    )
+
+    five_day_task = [
+        task
+        for task in create_evaluation_tasks(package)
+        if task.checkpoint_days == 5 and task.evaluation_layer == "result"
+    ][0]
+
+    assert five_day_task.due_date == date(2026, 7, 14)
+    assert five_day_task.due_date.weekday() == 1

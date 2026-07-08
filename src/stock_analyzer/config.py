@@ -7,22 +7,30 @@ from typing import Mapping, Optional
 from pydantic import BaseModel
 
 
+def _default_project_root() -> Path:
+    return Path(__file__).resolve().parents[2]
+
+
 class AppConfig(BaseModel):
-    project_root: Path = Path("/Users/ccrt/股票分析助手")
+    project_root: Path = _default_project_root()
     tushare_token_path: Path = Path("/Users/ccrt/.tushare_token")
     supabase_url: Optional[str] = None
     supabase_service_role_key: Optional[str] = None
-    reports_dir: Path = Path("/Users/ccrt/股票分析助手/reports")
+    reports_dir: Path = _default_project_root() / "reports"
 
     @classmethod
     def load(
         cls, env: Optional[Mapping[str, str]] = None
     ) -> "AppConfig":
         values = os.environ if env is None else env
+        project_root = Path(values.get("PROJECT_ROOT", _default_project_root())).expanduser()
+        reports_dir = Path(values.get("REPORTS_DIR", project_root / "reports")).expanduser()
         return cls(
+            project_root=project_root,
             tushare_token_path=Path(
                 values.get("TUSHARE_TOKEN_PATH", "/Users/ccrt/.tushare_token")
-            ),
+            ).expanduser(),
             supabase_url=values.get("SUPABASE_URL"),
             supabase_service_role_key=values.get("SUPABASE_SERVICE_ROLE_KEY"),
+            reports_dir=reports_dir,
         )
