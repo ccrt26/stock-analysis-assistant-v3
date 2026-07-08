@@ -98,8 +98,7 @@ def _create_tushare_pro(token: str):
         import tushare as ts
     except ImportError as exc:
         raise TushareUnavailable("tushare package is not installed; install tushare before live source access") from exc
-    ts.set_token(token)
-    return ts.pro_api()
+    return ts.pro_api(token)
 
 
 def _require_columns(df: pd.DataFrame, names: Iterable[str], stage: str) -> None:

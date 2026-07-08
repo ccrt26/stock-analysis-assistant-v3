@@ -1,10 +1,16 @@
 from datetime import date
+import sys
+import types
 
 import pandas as pd
 import pytest
 
 from stock_analyzer.data.models import SourceGrade
-from stock_analyzer.data.tushare_source import MissingTushareField, TushareMarketDataSource
+from stock_analyzer.data.tushare_source import (
+    MissingTushareField,
+    TushareMarketDataSource,
+    _create_tushare_pro,
+)
 
 
 class FakeTusharePro:
@@ -46,6 +52,29 @@ class FakeTusharePro:
                 "pb": 0.7,
             }]
         )
+
+
+def test_create_tushare_pro_passes_token_directly_without_cache_write(monkeypatch):
+    fake_pro = object()
+    pro_api_calls = []
+
+    def forbidden_set_token(token):
+        raise AssertionError("set_token writes the local Tushare token cache")
+
+    def fake_pro_api(token="", timeout=30):
+        pro_api_calls.append((token, timeout))
+        return fake_pro
+
+    monkeypatch.setitem(
+        sys.modules,
+        "tushare",
+        types.SimpleNamespace(set_token=forbidden_set_token, pro_api=fake_pro_api),
+    )
+
+    pro = _create_tushare_pro("fake-token")
+
+    assert pro is fake_pro
+    assert pro_api_calls == [("fake-token", 30)]
 
 
 def test_tushare_maps_stock_daily_and_basic_rows():
