@@ -1,0 +1,391 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>V3 Phase 3 Strategy V2 Architecture</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #172026;
+      --muted: #5d6b73;
+      --line: #d7dde1;
+      --panel: #f7f9fa;
+      --accent: #176b87;
+      --accent-2: #8a5a1f;
+      --good: #0f7b4f;
+      --warn: #a86500;
+      --bad: #b42318;
+      --blue: #2457a6;
+    }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      color: var(--ink);
+      background: #ffffff;
+      line-height: 1.55;
+    }
+    header {
+      padding: 32px 36px 24px;
+      border-bottom: 1px solid var(--line);
+      background: #eef5f7;
+    }
+    h1 {
+      margin: 0 0 8px;
+      font-size: 28px;
+      letter-spacing: 0;
+    }
+    h2 {
+      margin: 34px 0 12px;
+      padding-bottom: 6px;
+      border-bottom: 1px solid var(--line);
+      font-size: 21px;
+    }
+    h3 {
+      margin: 22px 0 8px;
+      font-size: 17px;
+    }
+    main {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 26px 28px 60px;
+    }
+    .lead {
+      max-width: 980px;
+      color: var(--muted);
+      font-size: 15px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 12px;
+      margin: 14px 0;
+    }
+    .box {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      padding: 14px 16px;
+    }
+    .box strong {
+      color: var(--accent);
+    }
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+      gap: 10px;
+      margin: 16px 0;
+    }
+    .step {
+      border: 1px solid var(--line);
+      border-left: 4px solid var(--accent);
+      border-radius: 6px;
+      padding: 12px;
+      min-height: 80px;
+      background: #fff;
+    }
+    .tag {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 600;
+      border: 1px solid var(--line);
+      background: #fff;
+      margin: 2px 4px 2px 0;
+    }
+    .used { color: var(--good); border-color: #b8d9cb; background: #eef8f3; }
+    .partial { color: var(--warn); border-color: #e5c994; background: #fff7e6; }
+    .later { color: var(--blue); border-color: #bdcceb; background: #f0f5ff; }
+    .observe { color: var(--muted); border-color: var(--line); background: #f7f9fa; }
+    .hard { color: var(--bad); border-color: #f1b8b2; background: #fff1ef; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 12px 0 24px;
+      font-size: 13px;
+    }
+    th, td {
+      border: 1px solid var(--line);
+      padding: 8px 9px;
+      vertical-align: top;
+    }
+    th {
+      background: #edf2f4;
+      text-align: left;
+    }
+    td:nth-child(1) {
+      width: 210px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+    }
+    .note {
+      border-left: 4px solid var(--accent-2);
+      background: #fff8ef;
+      padding: 10px 12px;
+      color: #4c3a20;
+    }
+    ul {
+      padding-left: 22px;
+    }
+    @media (max-width: 720px) {
+      header { padding: 24px 18px; }
+      main { padding: 18px 14px 42px; }
+      table { font-size: 12px; }
+      th, td { padding: 6px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>V3 Phase 3 Strategy V2 架构说明页</h1>
+    <p class="lead">
+      本页不是每日股票报告，而是 Phase 3 分析框架地图。它说明每日推荐和重点股票分析如何使用本地知识库、数据、规则和 LLM。后续优化时，用它判断哪些知识已使用、哪些还没用、缺什么数据、哪些知识应该补数据、降级或删除。
+    </p>
+  </header>
+
+  <main>
+    <section>
+      <h2>一、总原则</h2>
+      <div class="grid">
+        <div class="box"><strong>知识库先行</strong><br>先用本地知识库和结构化数据生成证据，再让 LLM 表达。</div>
+        <div class="box"><strong>报告只给结果</strong><br>日报和重点报告不堆知识引用，只展示结论、理由、风险、操作建议和失效条件。</div>
+        <div class="box"><strong>HTML 管知识映射</strong><br>本页展示哪些知识被用、没用、缺什么、下一步怎么办。</div>
+        <div class="box"><strong>交易日必产出</strong><br>只要是交易日，就要出每日推荐和重点股票跟踪；数据不足也要明确说明。</div>
+      </div>
+    </section>
+
+    <section>
+      <h2>二、每日推荐流程</h2>
+      <div class="flow">
+        <div class="step"><strong>1. 本地海选</strong><br>使用本地行情、技术、量价、估值、流动性、市场和板块数据宽筛。</div>
+        <div class="step"><strong>2. 硬约束过滤</strong><br>官方 S 级规则剔除 ST、退市、停复牌、重大监管等风险。</div>
+        <div class="step"><strong>3. 机会证据卡</strong><br>解释发生了什么、为什么、代表什么、风险是什么。</div>
+        <div class="step"><strong>4. 进度跟踪</strong><br>记录观察第几天、最近 5 天达标几天、离重点观察还差什么。</div>
+        <div class="step"><strong>5. 输出日报</strong><br>最多 10 只，不显示总分，显示等级和原因。</div>
+      </div>
+    </section>
+
+    <section>
+      <h2>三、重点股票分析流程</h2>
+      <div class="flow">
+        <div class="step"><strong>1. 进入理由</strong><br>形成 2-8 周上行假设，冻结进入证据。</div>
+        <div class="step"><strong>2. 六模块分析</strong><br>公司业务、基本面估值、市场板块、趋势量价、事件催化、风险反证。</div>
+        <div class="step"><strong>3. 每日跟踪</strong><br>区分 1-5 日短期信号和 2-8 周中期逻辑。</div>
+        <div class="step"><strong>4. 操作建议</strong><br>给明确动作、仓位区间、理由、条件和失效点。</div>
+        <div class="step"><strong>5. 复盘优化</strong><br>5/20/40 日验证结论、建议、知识规则和数据缺口。</div>
+      </div>
+    </section>
+
+    <section>
+      <h2>四、六模块与知识库用途</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>模块</th>
+            <th>回答的问题</th>
+            <th>主要知识类型</th>
+            <th>输出给报告的结果</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>公司与业务</td>
+            <td>它是谁，靠什么赚钱，概念是否有真实业务支撑。</td>
+            <td>财报、披露、业务画像、概念映射、会计信息含量。</td>
+            <td>公司画像、业务支撑强弱、概念可信度。</td>
+          </tr>
+          <tr>
+            <td>基本面与估值</td>
+            <td>业绩、财务质量、估值是否支持 2-8 周上行假设。</td>
+            <td>盈利质量、Piotroski、价值/规模/盈利能力、估值框架。</td>
+            <td>基本面支撑、估值压力、数据缺口。</td>
+          </tr>
+          <tr>
+            <td>市场与板块</td>
+            <td>大盘、风格、行业、概念是否配合。</td>
+            <td>市场因子、行业轮动、宏观金融、风险偏好、政策不确定性。</td>
+            <td>市场/板块支持、中性或反证。</td>
+          </tr>
+          <tr>
+            <td>趋势与量价</td>
+            <td>走势是否接近可行动机会，是否过热或假突破。</td>
+            <td>动量、反转、技术分析统计框架、量价关系、涨跌停研究。</td>
+            <td>突破、回踩、追高风险、技术失效位。</td>
+          </tr>
+          <tr>
+            <td>事件与催化</td>
+            <td>公告、政策、行业新闻、概念发酵是否可能驱动行情。</td>
+            <td>事件研究、信息披露、公告后漂移、政策和新闻反应。</td>
+            <td>催化强/中/弱、是否已反映、后续观察点。</td>
+          </tr>
+          <tr>
+            <td>风险与反证</td>
+            <td>什么会证明判断错了，风险是否大于机会。</td>
+            <td>官方风险、流动性风险、尾部风险、过拟合、数据窥探、行为金融。</td>
+            <td>主要风险、反向信号、失效条件。</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>五、知识库使用状态总览</h2>
+      <p class="note">
+        状态含义：<span class="tag used">V1 使用</span> 已进入 Phase 3 第一版框架；
+        <span class="tag partial">部分使用</span> 第一版可用一部分，需补数据后增强；
+        <span class="tag later">后续增强</span> 方向重要但第一版暂不作为核心结论；
+        <span class="tag observe">观察/候选</span> 不支撑第一版结论；
+        <span class="tag hard">硬约束</span> 官方规则或重大风险边界。
+      </p>
+      <table>
+        <thead>
+          <tr>
+            <th>知识 ID</th>
+            <th>标题/内容</th>
+            <th>Phase 3 V1 状态</th>
+            <th>使用模块</th>
+            <th>用途与暂未使用原因</th>
+            <th>下一步</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>src_csrc_law_rules_portal</td><td>中国证监会法律法规数据库</td><td><span class="tag hard">硬约束</span></td><td>风险与反证 / 事件催化</td><td>监管、披露、处罚、重大规则边界。</td><td>接入规则版本和风险事件数据。</td></tr>
+          <tr><td>src_sse_rules_portal</td><td>上海证券交易所业务规则库</td><td><span class="tag hard">硬约束</span></td><td>风险与反证 / 趋势量价</td><td>交易状态、异常波动、退市、停复牌、交易制度。</td><td>映射硬约束字段。</td></tr>
+          <tr><td>src_szse_rules_portal</td><td>深圳证券交易所法律规则库</td><td><span class="tag hard">硬约束</span></td><td>风险与反证 / 趋势量价</td><td>交易状态、异常波动、退市、停复牌、交易制度。</td><td>映射硬约束字段。</td></tr>
+          <tr><td>src_cn_delisting_reform_2024</td><td>关于严格执行退市制度的意见</td><td><span class="tag hard">硬约束</span></td><td>风险与反证</td><td>退市风险、壳价值、重大风险红线。</td><td>补齐退市风险和官方风险字段。</td></tr>
+          <tr><td>src_csrc_disclosure_rules</td><td>上市公司信息披露管理办法</td><td><span class="tag hard">硬约束</span></td><td>事件与催化 / 公司业务</td><td>公告和披露来源可信度边界。</td><td>接入公告源后启用强证据标记。</td></tr>
+          <tr><td>src_cn_share_reduction_rules_2024</td><td>上市公司股东减持股份管理暂行办法</td><td><span class="tag hard">硬约束</span></td><td>事件与催化 / 风险与反证</td><td>减持供给冲击和风险提示。</td><td>补减持公告 API。</td></tr>
+          <tr><td>src_cn_buyback_rules_2023</td><td>上市公司股份回购规则</td><td><span class="tag hard">硬约束</span></td><td>事件与催化</td><td>回购事件解释边界，避免机械当利好。</td><td>补回购公告 API。</td></tr>
+          <tr><td>src_cn_market_value_management_2024</td><td>上市公司监管指引第10号--市值管理</td><td><span class="tag partial">部分使用</span></td><td>事件与催化 / 市场板块</td><td>市值管理、回购分红和政策催化解释；需要公告数据。</td><td>V1 做政策背景，后续补公告结构化。</td></tr>
+          <tr><td>src_cn_program_trading_rules_2025</td><td>证券市场程序化交易管理规定（试行）</td><td><span class="tag partial">部分使用</span></td><td>趋势与量价 / 风险与反证</td><td>异常交易、短线信号边界；第一版缺微观交易数据。</td><td>作为风险解释，后续补微观结构数据。</td></tr>
+          <tr><td>src_cn_stock_pledge_repo_rules</td><td>股票质押式回购交易及登记结算业务办法</td><td><span class="tag later">后续增强</span></td><td>风险与反证</td><td>质押风险重要，但第一版需要质押数据源。</td><td>补质押 API 后提升为核心风险项。</td></tr>
+          <tr><td>src_cn_csrc_penalty_portal</td><td>中国证监会行政处罚与市场禁入信息公开入口</td><td><span class="tag hard">硬约束</span></td><td>风险与反证 / 事件催化</td><td>处罚、市场禁入等官方重大风险。</td><td>补处罚检索或缓存。</td></tr>
+          <tr><td>src_cn_margin_trading_rules_portal</td><td>融资融券交易实施细则与业务规则入口</td><td><span class="tag partial">部分使用</span></td><td>风险与反证 / 趋势量价</td><td>杠杆和标的资格边界；第一版不依赖两融细节做结论。</td><td>补融资融券余额后增强。</td></tr>
+
+          <tr><td>src_fama_french_1992</td><td>The Cross-Section of Expected Stock Returns</td><td><span class="tag used">V1 使用</span></td><td>基本面估值 / 市场板块</td><td>市场、规模、价值因子语言底座。</td><td>映射市值、PB/PE 和风格解释。</td></tr>
+          <tr><td>src_liu_stambaugh_yuan_2019</td><td>Size and Value in China</td><td><span class="tag used">V1 使用</span></td><td>基本面估值 / 市场板块</td><td>A 股规模和价值因子优先底座。</td><td>用于 A 股风格解释和估值反证。</td></tr>
+          <tr><td>src_jegadeesh_titman_1993</td><td>Returns to Buying Winners and Selling Losers</td><td><span class="tag used">V1 使用</span></td><td>趋势与量价</td><td>动量解释基础，支持趋势延续但不能单独推荐。</td><td>映射多周期相对强度。</td></tr>
+          <tr><td>src_cn_timeseries_momentum_2017</td><td>中国股市时间序列动量与反转效应</td><td><span class="tag used">V1 使用</span></td><td>趋势与量价</td><td>A 股短中期动量/反转边界。</td><td>用于短期过热和中期延续判断。</td></tr>
+          <tr><td>src_lo_mamaysky_wang_2000</td><td>Foundations of Technical Analysis</td><td><span class="tag used">V1 使用</span></td><td>趋势与量价 / 方法守卫</td><td>把技术形态转成可计算、可验证信号。</td><td>约束技术指标不能凭图形主观判断。</td></tr>
+          <tr><td>src_brock_lakonishok_lebaron_1992</td><td>Simple Technical Trading Rules</td><td><span class="tag used">V1 使用</span></td><td>趋势与量价 / 方法守卫</td><td>均线和突破规则必须接受样本检验。</td><td>用于 MA、突破、失效位设计。</td></tr>
+          <tr><td>src_campbell_grossman_wang_1993</td><td>Trading Volume and Serial Correlation</td><td><span class="tag used">V1 使用</span></td><td>趋势与量价 / 风险与反证</td><td>量价关系和成交量信号边界。</td><td>映射放量确认、放量滞涨、缩量回踩。</td></tr>
+          <tr><td>src_acharya_pedersen_2005</td><td>Asset pricing with liquidity risk</td><td><span class="tag used">V1 使用</span></td><td>风险与反证 / 趋势量价</td><td>流动性风险和低成交噪音。</td><td>映射成交额、换手、流动性过滤。</td></tr>
+          <tr><td>src_brunnermeier_pedersen_2009</td><td>Market Liquidity and Funding Liquidity</td><td><span class="tag partial">部分使用</span></td><td>市场板块 / 风险与反证</td><td>极端流动性和市场环境风险；第一版缺融资流动性数据。</td><td>V1 用作风险解释，后续补宏观流动性。</td></tr>
+          <tr><td>src_cn_price_limit_hits_2015</td><td>A 股涨跌停命中研究</td><td><span class="tag used">V1 使用</span></td><td>趋势与量价 / 风险与反证</td><td>涨跌停附近信号、过热和流动性风险。</td><td>映射涨跌停和追高风险。</td></tr>
+          <tr><td>src_cn_trading_halts_2014</td><td>中国市场停牌复牌短期反应</td><td><span class="tag partial">部分使用</span></td><td>事件与催化 / 风险与反证</td><td>停复牌事件窗口；需要停复牌结构化数据。</td><td>补交易状态和停复牌数据。</td></tr>
+
+          <tr><td>src_ball_brown_1968</td><td>Accounting Income Numbers</td><td><span class="tag partial">部分使用</span></td><td>基本面估值 / 事件催化</td><td>会计盈余信息含量；第一版需要财报摘要数据。</td><td>补财报和业绩公告后增强。</td></tr>
+          <tr><td>src_dechow_ge_schrand_2010</td><td>Understanding Earnings Quality</td><td><span class="tag partial">部分使用</span></td><td>基本面估值 / 风险与反证</td><td>盈利质量代理变量；第一版缺完整财务质量字段。</td><td>补财务报表摘要。</td></tr>
+          <tr><td>src_sloan_1996</td><td>Accruals and Cash Flows</td><td><span class="tag partial">部分使用</span></td><td>基本面估值 / 风险与反证</td><td>防止只看利润表；需要现金流和应计数据。</td><td>补现金流和利润质量数据。</td></tr>
+          <tr><td>src_piotroski_2000</td><td>Piotroski F-score</td><td><span class="tag later">后续增强</span></td><td>基本面估值</td><td>财务健康评分重要，但需要完整报表字段。</td><td>补齐字段后作为基本面质量模块。</td></tr>
+          <tr><td>src_novy_marx_2013</td><td>Gross profitability premium</td><td><span class="tag later">后续增强</span></td><td>基本面估值</td><td>盈利能力因子；第一版缺毛利和利润率历史。</td><td>补财务指标。</td></tr>
+          <tr><td>src_ohlson_1995</td><td>Earnings, Book Values, and Dividends</td><td><span class="tag later">后续增强</span></td><td>基本面估值</td><td>估值框架；第一版只做简化估值，不做完整模型。</td><td>后续估值深度分析使用。</td></tr>
+          <tr><td>src_cn_fundamental_analysis_2019</td><td>中国财务比率与股价研究</td><td><span class="tag partial">部分使用</span></td><td>基本面估值</td><td>A 股财务指标解释；B 级，不能作为强结论。</td><td>观察层，待回测验证。</td></tr>
+          <tr><td>src_hutton_marcus_tehranian_2009</td><td>Opaque financial reports and crash risk</td><td><span class="tag later">后续增强</span></td><td>风险与反证</td><td>财报不透明和崩盘风险；缺不透明度指标。</td><td>后续财务风险增强。</td></tr>
+
+          <tr><td>src_fama_fisher_jensen_roll_1969</td><td>Adjustment of Stock Prices to New Information</td><td><span class="tag used">V1 使用</span></td><td>事件与催化</td><td>新信息如何进入价格，事件窗口底座。</td><td>用于公告/政策催化解释。</td></tr>
+          <tr><td>src_brown_warner_1985</td><td>Using Daily Stock Returns: Event Studies</td><td><span class="tag used">V1 使用</span></td><td>事件与催化 / 方法守卫</td><td>日频事件研究方法。</td><td>设计事件后 5/20/40 评估。</td></tr>
+          <tr><td>src_mackinlay_1997</td><td>Event Studies in Economics and Finance</td><td><span class="tag used">V1 使用</span></td><td>事件与催化 / 方法守卫</td><td>事件研究综述和事件窗口边界。</td><td>用于催化评估框架。</td></tr>
+          <tr><td>src_bernard_thomas_1989</td><td>Post-Earnings-Announcement Drift</td><td><span class="tag partial">部分使用</span></td><td>事件与催化 / 基本面估值</td><td>业绩公告后漂移；需要业绩公告结构化数据。</td><td>补业绩预告/公告后增强。</td></tr>
+          <tr><td>src_chan_2003</td><td>News and No-news Drift/Reversal</td><td><span class="tag partial">部分使用</span></td><td>事件与催化 / 趋势量价</td><td>区分有新闻和无新闻漂移；需要新闻/公告数据。</td><td>V1 可用于无事件强涨风险提示。</td></tr>
+          <tr><td>src_tetlock_2007</td><td>Media Sentiment and the Market</td><td><span class="tag later">后续增强</span></td><td>事件与催化 / 市场板块</td><td>新闻情绪方向重要，但第一版不接舆情模型。</td><td>后续舆情增强。</td></tr>
+          <tr><td>src_short_disclose_distort_2024</td><td>A Theory of Investors' Disclosure</td><td><span class="tag observe">观察/候选</span></td><td>事件与催化 / 风险与反证</td><td>B 级或边界不清，不支撑第一版结论。</td><td>保留观察，待验证。</td></tr>
+          <tr><td>src_cn_registration_ipo_2023</td><td>注册制对 IPO 定价效率影响</td><td><span class="tag later">后续增强</span></td><td>市场板块 / 事件催化</td><td>制度变化背景；非第一版核心。</td><td>用于次新股/注册制专题。</td></tr>
+          <tr><td>src_cn_chinext_regime_2022</td><td>创业板制度改革与过度反应</td><td><span class="tag later">后续增强</span></td><td>市场板块 / 风险与反证</td><td>创业板制度和过度反应；需要板块/制度专题。</td><td>后续创业板策略增强。</td></tr>
+
+          <tr><td>src_chen_roll_ross_1986</td><td>Economic Forces and the Stock Market</td><td><span class="tag partial">部分使用</span></td><td>市场板块</td><td>宏观变量影响股票收益；第一版宏观数据有限。</td><td>先用市场状态，后补宏观指标。</td></tr>
+          <tr><td>src_fama_french_1989</td><td>Business Conditions and Expected Returns</td><td><span class="tag partial">部分使用</span></td><td>市场板块</td><td>经济周期与预期收益；第一版以市场和风格状态近似。</td><td>补宏观周期数据。</td></tr>
+          <tr><td>src_pbc_statistics_portal</td><td>人民银行统计数据入口</td><td><span class="tag later">后续增强</span></td><td>市场板块</td><td>货币、信贷、社融；第一版暂不设为必备。</td><td>后续宏观数据源。</td></tr>
+          <tr><td>src_nbs_data_portal</td><td>国家统计局数据发布入口</td><td><span class="tag later">后续增强</span></td><td>市场板块</td><td>工业、消费、通胀等宏观数据。</td><td>后续宏观模块。</td></tr>
+          <tr><td>src_cn_pmi_stock_reaction_2018</td><td>PMI 公告与中国股市反应</td><td><span class="tag observe">观察/候选</span></td><td>事件与催化 / 市场板块</td><td>B 级，且需要宏观事件数据。</td><td>暂缓，后续宏观事件模块再评估。</td></tr>
+          <tr><td>src_pastor_veronesi_2012</td><td>Policy Uncertainty and Stock Prices</td><td><span class="tag partial">部分使用</span></td><td>市场板块 / 风险与反证</td><td>政策不确定性解释 A 股主题风险。</td><td>V1 用作政策风险解释，后续补政策事件数据。</td></tr>
+          <tr><td>src_cn_policy_high_quality_2024</td><td>资本市场高质量发展政策</td><td><span class="tag used">V1 使用</span></td><td>市场板块 / 风险与反证 / 事件催化</td><td>A 股政策红线和中长期资金、退市、监管主线。</td><td>用于官方政策背景。</td></tr>
+
+          <tr><td>src_markowitz_1952</td><td>Portfolio Selection</td><td><span class="tag used">V1 使用</span></td><td>风险与反证 / 操作建议</td><td>组合风险和分散化底座。</td><td>用于仓位和集中度解释。</td></tr>
+          <tr><td>src_sharpe_1964</td><td>CAPM</td><td><span class="tag partial">部分使用</span></td><td>风险与反证 / 市场板块</td><td>系统性风险语言；第一版不做完整 beta 模型。</td><td>后续补 beta/指数暴露。</td></tr>
+          <tr><td>src_treynor_black_1973</td><td>Security Analysis and Portfolio Selection</td><td><span class="tag partial">部分使用</span></td><td>操作建议 / 风险与反证</td><td>主动观点转仓位的边界。</td><td>用于仓位建议框架，后续校准。</td></tr>
+          <tr><td>src_black_litterman_1992</td><td>Global Portfolio Optimization</td><td><span class="tag later">后续增强</span></td><td>操作建议</td><td>观点融合和组合优化；第一版太重。</td><td>后续组合管理。</td></tr>
+          <tr><td>src_kahneman_tversky_1979</td><td>Prospect Theory</td><td><span class="tag used">V1 使用</span></td><td>风险与反证 / 操作建议</td><td>亏损厌恶、追涨杀跌和风险偏好提醒。</td><td>用于操作建议中的行为风险。</td></tr>
+          <tr><td>src_barberis_shleifer_vishny_1998</td><td>Investor Sentiment Model</td><td><span class="tag partial">部分使用</span></td><td>趋势量价 / 风险与反证</td><td>过度反应和反应不足解释。</td><td>V1 用作题材过热反证，后续补情绪数据。</td></tr>
+          <tr><td>src_cn_investor_sentiment_liquidity_2022</td><td>中国投资者情绪、流动性与波动</td><td><span class="tag observe">观察/候选</span></td><td>市场板块 / 风险与反证</td><td>B 级且依赖情绪模型，第一版不作为结论。</td><td>后续舆情数据后评估。</td></tr>
+          <tr><td>src_xiong_yu_2011</td><td>Chinese Warrants Bubble</td><td><span class="tag partial">部分使用</span></td><td>风险与反证</td><td>投机约束和泡沫风险提醒。</td><td>用于过热风险解释。</td></tr>
+
+          <tr><td>src_fama_1970</td><td>Efficient Capital Markets</td><td><span class="tag used">V1 使用</span></td><td>方法守卫</td><td>市场有效性基准，防止过度解释。</td><td>方法论背景。</td></tr>
+          <tr><td>src_lo_mackinlay_1990</td><td>Data-Snooping Biases</td><td><span class="tag used">V1 使用</span></td><td>方法守卫 / 复盘优化</td><td>防止因子和回测数据窥探。</td><td>约束策略优化。</td></tr>
+          <tr><td>src_white_2000</td><td>Reality Check for Data Snooping</td><td><span class="tag used">V1 使用</span></td><td>方法守卫 / 复盘优化</td><td>多策略筛选现实检验。</td><td>后续回测检验。</td></tr>
+          <tr><td>src_harvey_liu_zhu_2016</td><td>... and the Cross-Section of Expected Returns</td><td><span class="tag used">V1 使用</span></td><td>方法守卫 / 复盘优化</td><td>因子发现证据门槛。</td><td>防止过度加因子。</td></tr>
+          <tr><td>src_hou_xue_zhang_2020</td><td>Replicating Anomalies</td><td><span class="tag used">V1 使用</span></td><td>方法守卫 / 复盘优化</td><td>异象复现和验证。</td><td>后续知识保留/删除依据。</td></tr>
+          <tr><td>src_cn_return_distribution_reaction_2023</td><td>收益分布反应解释</td><td><span class="tag observe">观察/候选</span></td><td>方法守卫 / 风险与反证</td><td>B 级，需验证厚尾/非正态用途。</td><td>保留观察，待回测。</td></tr>
+
+          <tr><td>src_cn_info_diffusion_2026</td><td>中美投资者信息扩散与联动</td><td><span class="tag later">后续增强</span></td><td>市场板块 / 事件催化</td><td>A 级但发布时间较新，需进一步验证和数据。</td><td>后续联动和资金结构模块。</td></tr>
+          <tr><td>src_cn_capm_ashare_2023</td><td>A 股 CAPM 实证研究</td><td><span class="tag partial">部分使用</span></td><td>市场板块 / 方法守卫</td><td>A 股资产定价背景，第一版不做完整 CAPM。</td><td>后续 beta 和基准比较。</td></tr>
+          <tr><td>src_cn_sse_contagion_mie_2024</td><td>上交所 A 股风险传染和模块演化</td><td><span class="tag later">后续增强</span></td><td>市场板块 / 风险与反证</td><td>风险传染重要，但第一版缺网络/行业传染模型。</td><td>后续板块联动增强。</td></tr>
+          <tr><td>src_cn_contagion_hawkes_2025</td><td>Hawkes 过程分析中国市场传染</td><td><span class="tag later">后续增强</span></td><td>市场板块 / 风险与反证</td><td>方法复杂，第一版暂缓。</td><td>后续风险传染模块。</td></tr>
+
+          <tr><td>src_bernanke_kuttner_2005</td><td>Fed Policy Reaction</td><td><span class="tag later">后续增强</span></td><td>市场板块</td><td>海外货币政策外溢，第一版不设为核心。</td><td>后续宏观外部冲击模块。</td></tr>
+          <tr><td>src_gertler_karadi_2015</td><td>Monetary Policy Surprises</td><td><span class="tag later">后续增强</span></td><td>市场板块</td><td>高频政策冲击识别，数据要求高。</td><td>暂缓。</td></tr>
+          <tr><td>src_nakamura_steinsson_2018</td><td>Information Effect of Monetary Policy</td><td><span class="tag later">后续增强</span></td><td>市场板块 / 方法守卫</td><td>宏观解释精度，第一版暂缓。</td><td>暂缓。</td></tr>
+          <tr><td>src_jarocinski_karadi_2020</td><td>Deconstructing Monetary Policy Surprises</td><td><span class="tag later">后续增强</span></td><td>市场板块 / 方法守卫</td><td>宏观冲击细分，第一版暂缓。</td><td>暂缓。</td></tr>
+          <tr><td>src_miranda_rey_2020</td><td>U.S. Monetary Policy and Global Financial Cycle</td><td><span class="tag later">后续增强</span></td><td>市场板块</td><td>全球金融周期，第一版不设为必备。</td><td>后续宏观增强。</td></tr>
+          <tr><td>src_us_mp_em_spillover_2024</td><td>美国货币政策对新兴市场外溢</td><td><span class="tag later">后续增强</span></td><td>市场板块</td><td>宏观外溢，第一版暂缓。</td><td>后续宏观增强。</td></tr>
+          <tr><td>src_global_mp_spillover_2026</td><td>全球货币政策非对称外溢</td><td><span class="tag later">后续增强</span></td><td>市场板块</td><td>宏观外溢，第一版暂缓。</td><td>后续宏观增强。</td></tr>
+          <tr><td>src_allen_qian_qian_2005</td><td>Law, Finance, and Economic Growth in China</td><td><span class="tag partial">部分使用</span></td><td>方法守卫 / 市场板块</td><td>防止机械套用海外成熟市场结论。</td><td>作为解释边界。</td></tr>
+          <tr><td>src_asbe_accounting_standards</td><td>企业会计准则入口</td><td><span class="tag later">后续增强</span></td><td>基本面估值 / 公司业务</td><td>财务口径权威入口，第一版不解析准则细节。</td><td>后续财务质量模块。</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>六、未用知识的处理规则</h2>
+      <ul>
+        <li>如果知识重要但缺数据，先补数据源，不直接丢弃。</li>
+        <li>如果知识是核心必需项，缺数据会影响分析结论，必须进入数据补齐计划。</li>
+        <li>如果知识只是增强项，缺数据时可以暂缓，但要说明原因。</li>
+        <li>如果知识长期无法验证、也不影响核心分析，应列为删除或降级候选。</li>
+        <li>知识不能因为“看起来高级”就塞进分析；必须服务每日推荐、重点分析、风险反证、操作建议或复盘优化。</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>七、LLM 介入位置</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>阶段</th>
+            <th>LLM 是否参与</th>
+            <th>边界</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>数据采集和清洗</td>
+            <td>否</td>
+            <td>只用结构化代码和数据源。</td>
+          </tr>
+          <tr>
+            <td>因子计算和规则命中</td>
+            <td>否</td>
+            <td>由本地计算和知识规则完成。</td>
+          </tr>
+          <tr>
+            <td>证据包生成</td>
+            <td>有限</td>
+            <td>可整理结构，不可新增事实。</td>
+          </tr>
+          <tr>
+            <td>报告表达</td>
+            <td>是</td>
+            <td>把证据讲成人话：发生什么、为什么、代表什么、怎么操作、哪里失效。</td>
+          </tr>
+          <tr>
+            <td>推荐和仓位决策</td>
+            <td>不能独立决定</td>
+            <td>必须由证据包、规则、持仓状态和风险边界支撑。</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+  </main>
+</body>
+</html>
