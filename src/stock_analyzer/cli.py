@@ -17,6 +17,7 @@ from stock_analyzer.ops.publish import (
     PublishConfig,
     PublishMode,
     PublishStatus,
+    build_publish_capacity_checker,
     publish_report_site,
 )
 from stock_analyzer.ops.smoke import smoke_report_site
@@ -201,6 +202,7 @@ def ops_publish_report_site(
         publish_config,
         mode=PublishMode.MANUAL_ONCE,
         trade_date=parsed_trade_date,
+        capacity_checker=build_publish_capacity_checker(config),
         notify_enabled=notify_mac or config.notify_mac,
     )
     typer.echo(state.summary_for_user)

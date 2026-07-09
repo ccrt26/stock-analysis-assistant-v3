@@ -10,6 +10,7 @@ from typer.testing import CliRunner
 
 from stock_analyzer.cli import app
 from stock_analyzer.config import AppConfig
+from stock_analyzer.ops.artifacts import DeployArtifactError
 from stock_analyzer.ops.publish import (
     PublishCandidate,
     PublishConfig,
@@ -19,6 +20,7 @@ from stock_analyzer.ops.publish import (
     PublishState,
     PublishStatus,
     WranglerResult,
+    _extract_deployment_url,
     is_auto_publish_enabled,
     load_publish_candidate,
     prepare_publish_artifact,
@@ -112,6 +114,31 @@ def test_render_publish_status_page_shows_only_user_summary(tmp_path):
     assert "technical stderr" not in html
     assert "wrangler_deployed" not in html
     assert "/private/path" not in html
+
+
+def test_render_publish_status_page_labels_ready_skipped_as_not_published(tmp_path):
+    state = PublishState(
+        trade_date=date(2026, 7, 11),
+        status=PublishStatus.READY_SKIPPED,
+        mode=PublishMode.AUTO,
+        published_url=None,
+        report_site_url="https://stock-analysis-assistant-v3.pages.dev",
+        recommendations=None,
+        failure_class=PublishFailureClass.NON_TRADING_DAY,
+        rollback_performed=False,
+        auto_publish_enabled=True,
+        last_known_good_path=None,
+        summary_for_user="今天不是交易日，不发布新报告。",
+        user_action_required="今天不是交易日，不发布新报告；线上保留上一版。",
+        error_message_redacted=None,
+        checks=(),
+    )
+
+    output = render_publish_status_page(state, tmp_path / "status.html")
+    html = output.read_text(encoding="utf-8")
+
+    assert "最近一次发布：未发布" in html
+    assert "最近一次发布：需要处理" not in html
 
 
 def _write_job_status(root, payload):
@@ -273,6 +300,27 @@ def test_preflight_requires_local_publish_config_without_printing_secret_names(t
     assert "REPORT_PASSWORD" not in rendered_error
     assert "REPORT_SESSION_SECRET" not in rendered_error
     assert "CLOUDFLARE_API_TOKEN" not in rendered_error
+    assert "CLOUDFLARE_ACCOUNT_ID" not in rendered_error
+
+
+def test_preflight_requires_cloudflare_account_id_without_printing_env_name(tmp_path):
+    trade_date = date(2026, 7, 9)
+    candidate = PublishCandidate(trade_date, 3, tmp_path / "status.json", tmp_path / "reports")
+
+    with pytest.raises(PublishPreflightError) as exc_info:
+        preflight_publish(
+            _publish_config(tmp_path),
+            candidate,
+            env={
+                "REPORT_PASSWORD": "pw",
+                "REPORT_SESSION_SECRET": "session",
+                "CLOUDFLARE_API_TOKEN": "token",
+            },
+        )
+
+    assert exc_info.value.failure_class is PublishFailureClass.CONFIG_MISSING
+    rendered_error = f"{exc_info.value} {exc_info.value.user_action_required}"
+    assert "CLOUDFLARE_ACCOUNT_ID" not in rendered_error
 
 
 def test_preflight_blocks_supabase_capacity_stop(tmp_path):
@@ -378,6 +426,16 @@ def test_run_wrangler_deploy_classifies_auth_failure(tmp_path):
     assert "Authentication error" in result.stderr_redacted
 
 
+def test_extract_deployment_url_prefers_pages_dev_and_ignores_docs_urls():
+    text = (
+        "See https://developers.cloudflare.com/pages for docs\n"
+        "Published https://stock-analysis-assistant-v3.pages.dev"
+    )
+
+    assert _extract_deployment_url(text) == "https://stock-analysis-assistant-v3.pages.dev"
+    assert _extract_deployment_url("See https://developers.cloudflare.com/pages") is None
+
+
 def _successful_smoke(url, password, *, expected_trade_date=None):
     return SmokeResult(
         base_url=url,
@@ -434,6 +492,7 @@ def test_publish_report_site_success_saves_last_known_good_and_enables_auto(tmp_
             "REPORT_PASSWORD": "pw",
             "REPORT_SESSION_SECRET": "session",
             "CLOUDFLARE_API_TOKEN": "token",
+            "CLOUDFLARE_ACCOUNT_ID": "account",
         },
         prepare_artifact=fake_prepare,
         deploy_runner=fake_deploy,
@@ -445,6 +504,158 @@ def test_publish_report_site_success_saves_last_known_good_and_enables_auto(tmp_
     assert is_auto_publish_enabled(config) is True
     assert (config.last_known_good_dir / "index.html").read_text(encoding="utf-8") == "fresh"
     assert config.state_path.exists()
+
+
+@pytest.mark.parametrize(
+    "leaked_content",
+    [
+        "<html>SUPABASE_SERVICE_ROLE_KEY</html>",
+        "<html>Authorization: Bearer fake-token</html>",
+    ],
+)
+def test_publish_report_site_blocks_secret_like_artifact_before_deploy(
+    tmp_path,
+    leaked_content,
+):
+    trade_date = date(2026, 7, 9)
+    _write_report(tmp_path, trade_date)
+    _write_job_status(
+        tmp_path,
+        {
+            "trade_date": trade_date.isoformat(),
+            "status": "success_with_recommendations",
+            "recommendations": 3,
+        },
+    )
+    config = _publish_config(tmp_path)
+    deploy_calls = []
+
+    def fake_prepare(project_root, output_dir):
+        output_dir.mkdir(parents=True, exist_ok=True)
+        (output_dir / "index.html").write_text(leaked_content, encoding="utf-8")
+        return output_dir
+
+    def fake_deploy(config_arg, artifact_dir, *, env=None):
+        deploy_calls.append(artifact_dir)
+        return WranglerResult(0, "ok", "", config.report_site_url)
+
+    state = publish_report_site(
+        config,
+        mode=PublishMode.MANUAL_ONCE,
+        trade_date=trade_date,
+        env={
+            "REPORT_PASSWORD": "pw",
+            "REPORT_SESSION_SECRET": "session",
+            "CLOUDFLARE_API_TOKEN": "token",
+            "CLOUDFLARE_ACCOUNT_ID": "account",
+        },
+        prepare_artifact=fake_prepare,
+        deploy_runner=fake_deploy,
+        smoke_func=_successful_smoke,
+    )
+
+    assert state.status is PublishStatus.FAILED_NEEDS_HUMAN
+    assert state.failure_class is PublishFailureClass.SECRET_LEAK_BLOCKED
+    assert deploy_calls == []
+    assert config.state_path.exists()
+    assert config.status_page_path.exists()
+    state_text = config.state_path.read_text(encoding="utf-8")
+    assert "fake-token" not in state_text
+    assert "SUPABASE_SERVICE_ROLE_KEY" not in state_text
+    assert "凭据" in state.user_action_required
+
+
+def test_publish_report_site_writes_failure_state_for_artifact_preparation_error(tmp_path):
+    trade_date = date(2026, 7, 9)
+    _write_report(tmp_path, trade_date)
+    _write_job_status(
+        tmp_path,
+        {
+            "trade_date": trade_date.isoformat(),
+            "status": "success_with_recommendations",
+            "recommendations": 3,
+        },
+    )
+    config = _publish_config(tmp_path)
+    deploy_calls = []
+
+    def fake_prepare(project_root, output_dir):
+        raise DeployArtifactError("REPORT_PASSWORD=secret-password")
+
+    def fake_deploy(config_arg, artifact_dir, *, env=None):
+        deploy_calls.append(artifact_dir)
+        return WranglerResult(0, "ok", "", config.report_site_url)
+
+    state = publish_report_site(
+        config,
+        mode=PublishMode.MANUAL_ONCE,
+        trade_date=trade_date,
+        env={
+            "REPORT_PASSWORD": "pw",
+            "REPORT_SESSION_SECRET": "session",
+            "CLOUDFLARE_API_TOKEN": "token",
+            "CLOUDFLARE_ACCOUNT_ID": "account",
+        },
+        prepare_artifact=fake_prepare,
+        deploy_runner=fake_deploy,
+        smoke_func=_successful_smoke,
+    )
+
+    assert state.status is PublishStatus.FAILED_NEEDS_HUMAN
+    assert state.failure_class is PublishFailureClass.ARTIFACT_INVALID
+    assert deploy_calls == []
+    assert "secret-password" not in config.state_path.read_text(encoding="utf-8")
+    assert config.status_page_path.exists()
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        "{not valid json",
+        json.dumps(
+            {
+                "trade_date": "2026-99-99",
+                "status": "success_with_recommendations",
+                "recommendations": 3,
+            }
+        ),
+    ],
+)
+def test_publish_report_site_writes_failure_state_for_malformed_status_payload(
+    tmp_path,
+    payload,
+):
+    trade_date = date(2026, 7, 9)
+    _write_report(tmp_path, trade_date)
+    status_path = tmp_path / "logs" / "run-daily" / "latest-status.json"
+    status_path.parent.mkdir(parents=True)
+    status_path.write_text(payload, encoding="utf-8")
+    config = _publish_config(tmp_path)
+    deploy_calls = []
+
+    def fake_deploy(config_arg, artifact_dir, *, env=None):
+        deploy_calls.append(artifact_dir)
+        return WranglerResult(0, "ok", "", config.report_site_url)
+
+    state = publish_report_site(
+        config,
+        mode=PublishMode.AUTO,
+        trade_date=trade_date,
+        env={
+            "REPORT_PASSWORD": "pw",
+            "REPORT_SESSION_SECRET": "session",
+            "CLOUDFLARE_API_TOKEN": "token",
+            "CLOUDFLARE_ACCOUNT_ID": "account",
+        },
+        deploy_runner=fake_deploy,
+        smoke_func=_successful_smoke,
+    )
+
+    assert state.status is PublishStatus.FAILED_NEEDS_HUMAN
+    assert state.failure_class is PublishFailureClass.ARTIFACT_INVALID
+    assert deploy_calls == []
+    assert config.state_path.exists()
+    assert config.status_page_path.exists()
 
 
 def test_publish_report_site_rolls_back_last_known_good_when_smoke_fails(tmp_path):
@@ -487,6 +698,7 @@ def test_publish_report_site_rolls_back_last_known_good_when_smoke_fails(tmp_pat
             "REPORT_PASSWORD": "pw",
             "REPORT_SESSION_SECRET": "session",
             "CLOUDFLARE_API_TOKEN": "token",
+            "CLOUDFLARE_ACCOUNT_ID": "account",
         },
         prepare_artifact=fake_prepare,
         deploy_runner=fake_deploy,
@@ -533,6 +745,7 @@ def test_publish_report_site_retries_wrangler_once_for_temporary_failure(tmp_pat
             "REPORT_PASSWORD": "pw",
             "REPORT_SESSION_SECRET": "session",
             "CLOUDFLARE_API_TOKEN": "token",
+            "CLOUDFLARE_ACCOUNT_ID": "account",
         },
         prepare_artifact=fake_prepare,
         deploy_runner=flaky_deploy,
@@ -553,8 +766,15 @@ def test_ops_publish_report_site_cli_outputs_simple_success(monkeypatch, tmp_pat
         "CLOUDFLARE_PAGES_PROJECT_NAME",
         "stock-analysis-assistant-v3",
     )
+    sentinel_capacity_checker = object()
+    monkeypatch.setattr(
+        "stock_analyzer.cli.build_publish_capacity_checker",
+        lambda config: sentinel_capacity_checker,
+        raising=False,
+    )
 
     def fake_publish(config, *, mode, trade_date=None, notify_enabled=False, **kwargs):
+        assert kwargs["capacity_checker"] is sentinel_capacity_checker
         return PublishState(
             trade_date=date(2026, 7, 9),
             status=PublishStatus.SUCCESS,

@@ -12,6 +12,7 @@ from stock_analyzer.ops.cleanup import CleanupSummary
 from stock_analyzer.ops.job import (
     HumanInterventionJobError,
     RetryableJobError,
+    _default_publish,
     run_daily_job,
 )
 from stock_analyzer.ops.status import FailureClass, JobStatus, RunStatus
@@ -681,6 +682,94 @@ def test_run_daily_job_triggers_auto_publish_after_success(tmp_path):
 
     assert status.status == RunStatus.SUCCESS_WITH_RECOMMENDATIONS
     assert publish_calls == [(tmp_path, trade_date)]
+
+
+def test_run_daily_job_writes_current_success_status_before_auto_publish(tmp_path):
+    current_trade_date = date(2026, 7, 9)
+    stale_trade_date = date(2026, 7, 8)
+    status_path = tmp_path / "logs" / "run-daily" / "latest-status.json"
+    _write_previous_status(
+        status_path,
+        trade_date=stale_trade_date,
+        attempt=1,
+        run_status=RunStatus.SUCCESS_NO_RECOMMENDATIONS,
+    )
+    publish_seen_payloads = []
+
+    def fake_publish(project_root, trade_date_arg):
+        publish_seen_payloads.append(
+            json.loads(
+                (project_root / "logs" / "run-daily" / "latest-status.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+        )
+
+    status = run_daily_job(
+        tmp_path,
+        current_trade_date,
+        "18:30",
+        1,
+        prepare_deploy=False,
+        repository=FakeJobRepository(),
+        calendar_decider=lambda *_args, **_kwargs: TradingDayDecision(
+            status="trading_day",
+            source="supabase",
+            message="market open",
+        ),
+        health_check=lambda *_args: None,
+        run_daily=lambda *_args: None,
+        verifier=lambda *_args: _successful_verification_with_recommendations(
+            current_trade_date
+        ),
+        auto_publish=True,
+        publish_func=fake_publish,
+    )
+
+    assert status.status == RunStatus.SUCCESS_WITH_RECOMMENDATIONS
+    assert publish_seen_payloads == [
+        {
+            **publish_seen_payloads[0],
+            "trade_date": current_trade_date.isoformat(),
+            "status": "success_with_recommendations",
+            "recommendations": 1,
+        }
+    ]
+
+
+def test_default_auto_publish_passes_capacity_checker(monkeypatch, tmp_path):
+    trade_date = date(2026, 7, 9)
+    flag_path = tmp_path / "logs" / "publish" / "auto-publish-enabled.json"
+    flag_path.parent.mkdir(parents=True)
+    flag_path.write_text(json.dumps({"enabled": True}), encoding="utf-8")
+    sentinel_capacity_checker = object()
+    captured_kwargs = []
+
+    monkeypatch.setenv("PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv(
+        "REPORT_SITE_URL",
+        "https://stock-analysis-assistant-v3.pages.dev",
+    )
+    monkeypatch.setenv(
+        "CLOUDFLARE_PAGES_PROJECT_NAME",
+        "stock-analysis-assistant-v3",
+    )
+    monkeypatch.setattr(
+        "stock_analyzer.ops.publish.build_publish_capacity_checker",
+        lambda config: sentinel_capacity_checker,
+        raising=False,
+    )
+
+    def fake_publish(config, *, mode, trade_date=None, notify_enabled=False, **kwargs):
+        captured_kwargs.append(kwargs)
+        return "published"
+
+    monkeypatch.setattr("stock_analyzer.ops.publish.publish_report_site", fake_publish)
+
+    result = _default_publish(tmp_path, trade_date)
+
+    assert result == "published"
+    assert captured_kwargs[0]["capacity_checker"] is sentinel_capacity_checker
 
 
 def test_run_daily_job_does_not_auto_publish_zero_recommendations(tmp_path):

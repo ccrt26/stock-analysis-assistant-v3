@@ -16,7 +16,7 @@ from typing import Any
 from pydantic import BaseModel, Field, field_validator
 
 from stock_analyzer.config import AppConfig
-from stock_analyzer.ops.artifacts import prepare_pages_artifact
+from stock_analyzer.ops.artifacts import DeployArtifactError, prepare_pages_artifact
 from stock_analyzer.ops.notify import notify_mac
 from stock_analyzer.ops.redaction import redact_secrets
 from stock_analyzer.ops.smoke import smoke_report_site
@@ -53,6 +53,30 @@ class PublishFailureClass(str, Enum):
 
 _MAX_PUBLISH_RECOMMENDATIONS = 10
 _URL_PATTERN = re.compile(r"https://[^\s]+")
+_ARTIFACT_SENSITIVE_VARIABLE_NAMES = (
+    "SUPABASE_SERVICE_ROLE_KEY",
+    "TUSHARE_TOKEN",
+    "CLOUDFLARE_API_TOKEN",
+    "DEEPSEEK_API_KEY",
+    "BIYING_LICENCE",
+)
+_ARTIFACT_SECRET_PATTERNS = (
+    *(
+        re.compile(rf"\b{re.escape(name)}\b", re.IGNORECASE)
+        for name in _ARTIFACT_SENSITIVE_VARIABLE_NAMES
+    ),
+    re.compile(r"\bAuthorization\s*:\s*Bearer\s+[^\s<>&;]+", re.IGNORECASE),
+    re.compile(
+        r"\b[A-Z0-9_]*(?:KEY|PASSWORD|SECRET|TOKEN)[A-Z0-9_]*\s*[:=]\s*"
+        r"['\"]?[A-Za-z0-9._~+/=-]{8,}",
+    ),
+    re.compile(r"\bsb_secret_[A-Za-z0-9._~+/=-]{8,}", re.IGNORECASE),
+)
+_PLANNED_SKIP_FAILURE_CLASSES = {
+    PublishFailureClass.NO_PUBLISHABLE_REPORT,
+    PublishFailureClass.ZERO_RECOMMENDATIONS,
+    PublishFailureClass.NON_TRADING_DAY,
+}
 
 
 class PublishPreflightError(RuntimeError):
@@ -66,6 +90,27 @@ class PublishPreflightError(RuntimeError):
         super().__init__(redact_secrets(message))
         self.failure_class = failure_class
         self.user_action_required = redact_secrets(user_action_required)
+
+
+def build_publish_capacity_checker(config: AppConfig) -> Callable[[], CapacityStatus]:
+    def check_capacity() -> CapacityStatus:
+        if not config.has_supabase_config:
+            raise PublishPreflightError(
+                "Supabase capacity configuration is missing.",
+                failure_class=PublishFailureClass.CONFIG_MISSING,
+                user_action_required="发布配置不完整；请检查本机生产存储和发布配置。",
+            )
+        from stock_analyzer.storage.capacity_guard import SupabaseCapacityGuard
+        from stock_analyzer.storage.supabase_client import create_supabase_client
+
+        client = create_supabase_client(config)
+        return SupabaseCapacityGuard(
+            client,
+            warn_mb=config.supabase_warn_mb,
+            stop_mb=config.supabase_stop_mb,
+        ).check()
+
+    return check_capacity
 
 
 class PublishMode(str, Enum):
@@ -120,7 +165,12 @@ def render_publish_status_page(state: PublishState, output_path: Path) -> Path:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     trade_date_text = state.trade_date.isoformat() if state.trade_date else "暂无"
     problem_text = state.user_action_required or "无"
-    status_text = "成功" if state.status == PublishStatus.SUCCESS else "需要处理"
+    if state.status == PublishStatus.SUCCESS:
+        status_text = "成功"
+    elif state.status == PublishStatus.READY_SKIPPED:
+        status_text = "未发布"
+    else:
+        status_text = "需要处理"
     link_html = (
         f'<a href="{escape(state.report_site_url)}">{escape(state.report_site_url)}</a>'
         if state.report_site_url
@@ -205,8 +255,28 @@ def load_publish_candidate(
             user_action_required="今天还没有可发布报告；先等待生产流程成功完成。",
         )
 
-    payload = json.loads(status_path.read_text(encoding="utf-8"))
-    status_trade_date = date.fromisoformat(str(payload.get("trade_date")))
+    try:
+        payload = json.loads(status_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise PublishPreflightError(
+            "Phase 1 production status file is malformed.",
+            failure_class=PublishFailureClass.ARTIFACT_INVALID,
+            user_action_required="生产状态文件无法读取；请先人工检查本机运行状态，暂不发布。",
+        ) from exc
+    if not isinstance(payload, dict):
+        raise PublishPreflightError(
+            "Phase 1 production status payload is not an object.",
+            failure_class=PublishFailureClass.ARTIFACT_INVALID,
+            user_action_required="生产状态文件格式异常；请先人工检查本机运行状态，暂不发布。",
+        )
+    try:
+        status_trade_date = date.fromisoformat(str(payload.get("trade_date")))
+    except (TypeError, ValueError) as exc:
+        raise PublishPreflightError(
+            "Phase 1 production status trade date is malformed.",
+            failure_class=PublishFailureClass.ARTIFACT_INVALID,
+            user_action_required="生产状态日期异常；请先人工检查本机运行状态，暂不发布。",
+        ) from exc
     if trade_date is not None and status_trade_date != trade_date:
         raise PublishPreflightError(
             f"Latest production status is for {status_trade_date}, not {trade_date}.",
@@ -225,6 +295,12 @@ def load_publish_candidate(
 
     recommendations = _parse_recommendation_count(recommendation_value)
     if run_status == "success_no_recommendations":
+        if recommendations is None:
+            raise PublishPreflightError(
+                "Latest production zero-recommendation payload is malformed.",
+                failure_class=PublishFailureClass.ARTIFACT_INVALID,
+                user_action_required="生产状态和推荐数格式异常；请人工检查，先不要发布。",
+            )
         if recommendations == 0:
             raise PublishPreflightError(
                 "Latest production status has zero recommendations.",
@@ -242,13 +318,19 @@ def load_publish_candidate(
             failure_class=PublishFailureClass.NO_PUBLISHABLE_REPORT,
             user_action_required="今天生产流程还没有成功完成，暂不发布。",
         )
+    if recommendations is None:
+        raise PublishPreflightError(
+            "Latest production recommendation count is malformed.",
+            failure_class=PublishFailureClass.ARTIFACT_INVALID,
+            user_action_required="生产状态推荐数格式异常；请人工检查，先不要发布。",
+        )
     if recommendations == 0:
         raise PublishPreflightError(
             "Latest production status has zero recommendations.",
             failure_class=PublishFailureClass.ZERO_RECOMMENDATIONS,
             user_action_required="当天无推荐，不发布新报告；线上保留上一版。",
         )
-    if recommendations is None or not 1 <= recommendations <= _MAX_PUBLISH_RECOMMENDATIONS:
+    if not 1 <= recommendations <= _MAX_PUBLISH_RECOMMENDATIONS:
         raise PublishPreflightError(
             f"Latest production recommendation count is {recommendation_value!r}.",
             failure_class=PublishFailureClass.NO_PUBLISHABLE_REPORT,
@@ -289,6 +371,7 @@ def preflight_publish(
         config.report_password_env,
         config.report_session_secret_env,
         config.cloudflare_token_env,
+        config.cloudflare_account_id_env,
     ):
         if not str(values.get(env_name, "")).strip():
             missing_count += 1
@@ -301,7 +384,16 @@ def preflight_publish(
 
     checks = ["config_present"]
     if capacity_checker is not None:
-        capacity = capacity_checker()
+        try:
+            capacity = capacity_checker()
+        except PublishPreflightError:
+            raise
+        except Exception as exc:
+            raise PublishPreflightError(
+                "Supabase capacity check failed.",
+                failure_class=PublishFailureClass.SUPABASE_CAPACITY_STOP,
+                user_action_required="Supabase 容量检查失败；请人工检查生产数据库连接和容量。",
+            ) from exc
         checks.append(f"supabase_capacity={capacity.size_mb:.1f}MB")
         if capacity.stop_large_writes:
             raise PublishPreflightError(
@@ -324,6 +416,38 @@ def prepare_publish_artifact(
         shutil.rmtree(output_dir)
     prepare_func = prepare_artifact or prepare_pages_artifact
     return prepare_func(config.project_root, output_dir)
+
+
+def validate_publish_artifact_content(artifact_dir: Path) -> None:
+    if not artifact_dir.is_dir():
+        raise PublishPreflightError(
+            "Deploy artifact directory was not created.",
+            failure_class=PublishFailureClass.ARTIFACT_INVALID,
+            user_action_required="发布包没有生成成功；请先重新生成报告发布包。",
+        )
+    for path in sorted(artifact_dir.rglob("*")):
+        if not path.is_file():
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            text = path.read_bytes().decode("utf-8", errors="ignore")
+        except OSError as exc:
+            raise PublishPreflightError(
+                "Deploy artifact could not be scanned.",
+                failure_class=PublishFailureClass.ARTIFACT_INVALID,
+                user_action_required="发布包无法完成本地安全扫描；请先人工检查发布包。",
+            ) from exc
+        for pattern in _ARTIFACT_SECRET_PATTERNS:
+            if pattern.search(text):
+                raise PublishPreflightError(
+                    "Sensitive content detected in deploy artifact.",
+                    failure_class=PublishFailureClass.SECRET_LEAK_BLOCKED,
+                    user_action_required=(
+                        "发布包疑似包含凭据或敏感配置；请重新生成报告并人工检查发布包，"
+                        "确认没有密钥内容后再发布。"
+                    ),
+                )
 
 
 def run_wrangler_deploy(
@@ -399,6 +523,7 @@ def publish_report_site(
     started_at = _utc_now()
     checks: list[str] = []
     values = os.environ if env is None else env
+    candidate: PublishCandidate | None = None
 
     try:
         candidate = load_publish_candidate(config, trade_date=trade_date)
@@ -413,13 +538,31 @@ def publish_report_site(
 
         artifact_dir = prepare_publish_artifact(config, prepare_artifact=prepare_artifact)
         checks.append("artifact_prepared")
+        validate_publish_artifact_content(artifact_dir)
+        checks.append("artifact_secret_scan_passed")
 
-        deploy = _deploy_with_one_retry(
-            config,
-            artifact_dir,
-            env=values,
-            deploy_runner=deploy_runner,
-        )
+        try:
+            deploy = _deploy_with_one_retry(
+                config,
+                artifact_dir,
+                env=values,
+                deploy_runner=deploy_runner,
+            )
+        except Exception as exc:
+            return _write_publish_failure(
+                config,
+                mode,
+                started_at,
+                candidate,
+                PublishFailureClass.WRANGLER_TEMPORARY_FAILURE,
+                "发布失败：Cloudflare 上传过程中出现异常。",
+                "请检查 Cloudflare 配置和本机网络后再重试。",
+                checks,
+                rollback_performed=False,
+                error_message=str(exc),
+                notify_func=notify_func,
+                notify_enabled=notify_enabled,
+            )
         checks.append("wrangler_deployed")
         if deploy.exit_code != 0:
             return _write_publish_failure(
@@ -437,19 +580,40 @@ def publish_report_site(
                 notify_enabled=notify_enabled,
             )
 
-        smoke = (smoke_func or smoke_report_site)(
-            config.report_site_url,
-            values.get(config.report_password_env),
-            expected_trade_date=candidate.trade_date,
-        )
+        try:
+            smoke = (smoke_func or smoke_report_site)(
+                config.report_site_url,
+                values.get(config.report_password_env),
+                expected_trade_date=candidate.trade_date,
+            )
+        except Exception as exc:
+            return _write_publish_failure(
+                config,
+                mode,
+                started_at,
+                candidate,
+                PublishFailureClass.SMOKE_FAILED,
+                "发布后线上检查异常，系统未确认新站点可用。",
+                "请查看本地发布状态页，并人工检查线上报告访问。",
+                checks,
+                rollback_performed=False,
+                error_message=str(exc),
+                notify_func=notify_func,
+                notify_enabled=notify_enabled,
+            )
         checks.extend(smoke.checks)
         if not smoke.passed:
-            rollback_ok = _rollback_last_known_good(
-                config,
-                values,
-                deploy_runner,
-                smoke_func,
-            )
+            rollback_error = None
+            try:
+                rollback_ok = _rollback_last_known_good(
+                    config,
+                    values,
+                    deploy_runner,
+                    smoke_func,
+                )
+            except Exception as exc:
+                rollback_ok = False
+                rollback_error = str(exc)
             summary = (
                 "发布后线上检查失败，系统已回退上一版正常报告。"
                 if rollback_ok
@@ -467,7 +631,7 @@ def publish_report_site(
                 "请查看本地发布状态页，并检查 Cloudflare 密码配置或报告日期。",
                 checks,
                 rollback_performed=rollback_ok,
-                error_message=smoke.fix_suggestion,
+                error_message=rollback_error or smoke.fix_suggestion,
                 notify_func=notify_func,
                 notify_enabled=notify_enabled,
             )
@@ -498,10 +662,26 @@ def publish_report_site(
         state.write_json(config.state_path)
         render_publish_status_page(state, config.status_page_path)
         return state
+    except DeployArtifactError as exc:
+        return _write_publish_failure(
+            config,
+            mode,
+            started_at,
+            candidate,
+            PublishFailureClass.ARTIFACT_INVALID,
+            "发布包生成失败，系统未上传到 Cloudflare。",
+            "请先重新生成报告发布包，并人工确认发布包完整。",
+            checks,
+            rollback_performed=False,
+            error_message=str(exc),
+            notify_func=notify_func,
+            notify_enabled=notify_enabled,
+        )
     except PublishPreflightError as exc:
+        status = _status_for_preflight_failure(exc.failure_class)
         state = PublishState(
             trade_date=trade_date,
-            status=PublishStatus.READY_SKIPPED,
+            status=status,
             mode=mode,
             started_at=started_at,
             finished_at=_utc_now(),
@@ -521,13 +701,19 @@ def publish_report_site(
         )
         state.write_json(config.state_path)
         render_publish_status_page(state, config.status_page_path)
+        if status == PublishStatus.FAILED_NEEDS_HUMAN:
+            _notify_publish_failure_if_enabled(
+                state,
+                notify_func=notify_func,
+                notify_enabled=notify_enabled,
+            )
         return state
 
 
 def _extract_deployment_url(text: str) -> str | None:
     for match in _URL_PATTERN.finditer(text):
         value = match.group(0).rstrip(".,)")
-        if ".pages.dev" in value or value.startswith("https://"):
+        if ".pages.dev" in value:
             return value
     return None
 
@@ -603,6 +789,28 @@ def _write_publish_failure(
     )
     state.write_json(config.state_path)
     render_publish_status_page(state, config.status_page_path)
+    _notify_publish_failure_if_enabled(
+        state,
+        notify_func=notify_func,
+        notify_enabled=notify_enabled,
+    )
+    return state
+
+
+def _status_for_preflight_failure(
+    failure_class: PublishFailureClass,
+) -> PublishStatus:
+    if failure_class in _PLANNED_SKIP_FAILURE_CLASSES:
+        return PublishStatus.READY_SKIPPED
+    return PublishStatus.FAILED_NEEDS_HUMAN
+
+
+def _notify_publish_failure_if_enabled(
+    state: PublishState,
+    *,
+    notify_func: Callable[..., Any] | None,
+    notify_enabled: bool,
+) -> None:
     if notify_enabled:
         try:
             (notify_func or notify_mac)(
@@ -612,7 +820,6 @@ def _write_publish_failure(
             )
         except Exception:
             pass
-    return state
 
 
 def _is_temporary_wrangler_failure(result: WranglerResult) -> bool:
