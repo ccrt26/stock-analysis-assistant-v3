@@ -1,0 +1,114 @@
+from datetime import date
+
+from stock_analyzer.domain.models import (
+    ActionDecision,
+    ActionRecommendation,
+    DataAvailability,
+    DataRequirementLevel,
+    DataRequirementStatus,
+    EvidenceAtom,
+    EvidenceModule,
+    EvidencePolarity,
+    ModuleEvidence,
+    RecommendationCard,
+    StrategyEvidenceSnapshot,
+)
+
+
+def _atom() -> EvidenceAtom:
+    return EvidenceAtom(
+        id="2026-07-10-600000.SH-trend",
+        module=EvidenceModule.TREND_VOLUME,
+        polarity=EvidencePolarity.SUPPORT,
+        headline="20 日趋势改善",
+        detail="收盘价高于 20 日均线且 20 日收益强于市场中位数。",
+        source_grade="A",
+        source_name="local_warehouse.market_daily",
+        source_url=None,
+        data_fields=["trend_20d", "relative_strength"],
+        knowledge_rule_ids=["RESEARCH_TREND_CONFIRMATION"],
+        strength=0.72,
+        as_of_date=date(2026, 7, 10),
+    )
+
+
+def test_strategy_snapshot_serializes_six_module_evidence_and_action():
+    atom = _atom()
+    status = DataRequirementStatus(
+        family="daily_ohlcv",
+        level=DataRequirementLevel.REQUIRED,
+        availability=DataAvailability.AVAILABLE_PRIMARY,
+        primary_source="tushare.daily",
+        backup_source="akshare.stock_zh_a_hist",
+        local_cache_path="local_warehouse/parquet/market_daily/trade_date=2026-07-10/data.parquet",
+        missing_fields=[],
+        recovery_attempts=[],
+        blocks_complete_analysis=False,
+    )
+    module = ModuleEvidence(
+        module=EvidenceModule.TREND_VOLUME,
+        summary="趋势和量价支持观察，但不能单独构成买入依据。",
+        support=[atom],
+        counter=[],
+        data_requirements=[status],
+        conclusion="趋势证据偏积极。",
+    )
+    snapshot = StrategyEvidenceSnapshot(
+        evidence_id="2026-07-10-600000.SH",
+        trade_date=date(2026, 7, 10),
+        ts_code="600000.SH",
+        name="浦发银行",
+        modules=[module],
+        action=ActionRecommendation(
+            decision=ActionDecision.WAIT_FOR_CONFIRMATION,
+            position_min_pct=0.0,
+            position_max_pct=3.0,
+            reasoning=["趋势改善但板块确认不足"],
+            required_confirmation=["板块相对强度继续改善"],
+            invalidation_conditions=["跌破 20 日均线且放量"],
+            risk_if_wrong="若是假突破，短线回撤可能扩大。",
+            staging_plan=["未持有时等待确认后再小仓试探"],
+            holding_adjustment=None,
+        ),
+        thesis="银行板块企稳下的 2-8 周修复观察。",
+        expected_upside_pct=10.0,
+        expected_downside_pct=6.0,
+        risk_reward=1.67,
+        focus_entry_progress="观察第 2/5 个交易日，最近 5 日支持 2 日。",
+        display_rank_bucket="强观察",
+        internal_score=83.25,
+        data_insufficient=False,
+        data_insufficient_reason=None,
+        source_versions={"market_daily": "2026-07-10"},
+    )
+
+    payload = snapshot.model_dump(mode="json")
+
+    assert payload["action"]["decision"] == "等待确认"
+    assert payload["modules"][0]["support"][0]["knowledge_rule_ids"] == [
+        "RESEARCH_TREND_CONFIRMATION"
+    ]
+    assert payload["risk_reward"] == 1.67
+
+
+def test_recommendation_card_has_no_total_numeric_score():
+    card = RecommendationCard(
+        trade_date=date(2026, 7, 10),
+        ts_code="600000.SH",
+        name="浦发银行",
+        display_rank_bucket="强观察",
+        action="等待确认",
+        what_happened="趋势改善且成交额维持。",
+        why_it_may_have_happened="板块企稳带动修复。",
+        what_it_may_mean="进入重点观察候选，但仍需板块确认。",
+        main_risk="银行板块弹性不足。",
+        focus_entry_progress="观察第 2/5 个交易日，最近 5 日支持 2 日。",
+        needed_before_focus_entry=["板块确认", "风险收益确认"],
+        evidence_id="2026-07-10-600000.SH",
+    )
+
+    payload = card.model_dump(mode="json")
+
+    assert "score" not in payload
+    assert "internal_score" not in payload
+    assert payload["display_rank_bucket"] == "强观察"
