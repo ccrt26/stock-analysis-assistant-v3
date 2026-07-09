@@ -12,6 +12,7 @@ from datetime import date, datetime, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -59,12 +60,15 @@ _ARTIFACT_SENSITIVE_VARIABLE_NAMES = (
     "CLOUDFLARE_API_TOKEN",
     "DEEPSEEK_API_KEY",
     "BIYING_LICENCE",
+    "REPORT_PASSWORD",
+    "REPORT_SESSION_SECRET",
 )
 _ARTIFACT_SECRET_PATTERNS = (
     *(
         re.compile(rf"\b{re.escape(name)}\b", re.IGNORECASE)
         for name in _ARTIFACT_SENSITIVE_VARIABLE_NAMES
     ),
+    re.compile(r"(?<![\w.-])\.env(?:\.local)?(?![\w.-])", re.IGNORECASE),
     re.compile(r"\bAuthorization\s*:\s*Bearer\s+[^\s<>&;]+", re.IGNORECASE),
     re.compile(
         r"\b[A-Z0-9_]*(?:KEY|PASSWORD|SECRET|TOKEN)[A-Z0-9_]*\s*[:=]\s*"
@@ -713,7 +717,11 @@ def publish_report_site(
 def _extract_deployment_url(text: str) -> str | None:
     for match in _URL_PATTERN.finditer(text):
         value = match.group(0).rstrip(".,)")
-        if ".pages.dev" in value:
+        parsed = urlparse(value)
+        hostname = (parsed.hostname or "").lower()
+        if parsed.scheme == "https" and (
+            hostname == "pages.dev" or hostname.endswith(".pages.dev")
+        ):
             return value
     return None
 

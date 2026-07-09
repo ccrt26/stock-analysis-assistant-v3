@@ -436,6 +436,23 @@ def test_extract_deployment_url_prefers_pages_dev_and_ignores_docs_urls():
     assert _extract_deployment_url("See https://developers.cloudflare.com/pages") is None
 
 
+def test_extract_deployment_url_requires_pages_dev_hostname():
+    text = (
+        "preview https://example.com/foo.pages.dev\n"
+        "callback https://example.com/callback?next=stock-analysis-assistant-v3.pages.dev\n"
+        "Published https://stock-analysis-assistant-v3.pages.dev"
+    )
+
+    assert _extract_deployment_url(text) == "https://stock-analysis-assistant-v3.pages.dev"
+    assert (
+        _extract_deployment_url(
+            "preview https://example.com/foo.pages.dev "
+            "callback https://example.com/callback?next=stock-analysis-assistant-v3.pages.dev"
+        )
+        is None
+    )
+
+
 def _successful_smoke(url, password, *, expected_trade_date=None):
     return SmokeResult(
         base_url=url,
@@ -563,6 +580,65 @@ def test_publish_report_site_blocks_secret_like_artifact_before_deploy(
     assert "fake-token" not in state_text
     assert "SUPABASE_SERVICE_ROLE_KEY" not in state_text
     assert "凭据" in state.user_action_required
+
+
+@pytest.mark.parametrize(
+    ("artifact_name", "leaked_content"),
+    [
+        ("index.html", "<html>REPORT_PASSWORD</html>"),
+        ("report.json", '{"auth": "REPORT_SESSION_SECRET"}'),
+        ("index.html", "<!-- generated from .env.local -->"),
+        ("report.json", '{"source": ".env"}'),
+    ],
+)
+def test_publish_report_site_blocks_report_auth_and_local_env_markers_before_deploy(
+    tmp_path,
+    artifact_name,
+    leaked_content,
+):
+    trade_date = date(2026, 7, 9)
+    _write_report(tmp_path, trade_date)
+    _write_job_status(
+        tmp_path,
+        {
+            "trade_date": trade_date.isoformat(),
+            "status": "success_with_recommendations",
+            "recommendations": 3,
+        },
+    )
+    config = _publish_config(tmp_path)
+    deploy_calls = []
+
+    def fake_prepare(project_root, output_dir):
+        output_dir.mkdir(parents=True, exist_ok=True)
+        (output_dir / artifact_name).write_text(leaked_content, encoding="utf-8")
+        return output_dir
+
+    def fake_deploy(config_arg, artifact_dir, *, env=None):
+        deploy_calls.append(artifact_dir)
+        return WranglerResult(0, "ok", "", config.report_site_url)
+
+    state = publish_report_site(
+        config,
+        mode=PublishMode.MANUAL_ONCE,
+        trade_date=trade_date,
+        env={
+            "REPORT_PASSWORD": "pw",
+            "REPORT_SESSION_SECRET": "session",
+            "CLOUDFLARE_API_TOKEN": "token",
+            "CLOUDFLARE_ACCOUNT_ID": "account",
+        },
+        prepare_artifact=fake_prepare,
+        deploy_runner=fake_deploy,
+        smoke_func=_successful_smoke,
+    )
+
+    assert state.status is PublishStatus.FAILED_NEEDS_HUMAN
+    assert state.failure_class is PublishFailureClass.SECRET_LEAK_BLOCKED
+    assert deploy_calls == []
+    state_payload = json.loads(config.state_path.read_text(encoding="utf-8"))
+    assert state_payload["status"] == "failed_needs_human"
+    assert state_payload["failure_class"] == "secret_leak_blocked"
 
 
 def test_publish_report_site_writes_failure_state_for_artifact_preparation_error(tmp_path):
