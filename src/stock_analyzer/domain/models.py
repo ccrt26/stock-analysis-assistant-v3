@@ -4,7 +4,7 @@ from datetime import date, datetime
 from enum import Enum
 from typing import Dict, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class ActionLabel(str, Enum):
@@ -104,12 +104,12 @@ class EvaluationTask(BaseModel):
 
 
 class EvidenceModule(str, Enum):
-    TREND_VOLUME = "趋势量价"
-    MARKET_REGIME = "市场环境"
-    INDUSTRY_POLICY = "行业政策"
-    FUNDAMENTAL_QUALITY = "基本面质量"
-    CATALYST_EVENT = "事件催化"
-    RISK_VALUATION = "风险估值"
+    COMPANY_BUSINESS = "company_business"
+    FUNDAMENTALS_VALUATION = "fundamentals_valuation"
+    MARKET_BOARD = "market_board"
+    TREND_VOLUME = "trend_volume"
+    EVENTS_CATALYSTS = "events_catalysts"
+    RISK_COUNTER = "risk_counter"
 
 
 class EvidencePolarity(str, Enum):
@@ -119,9 +119,9 @@ class EvidencePolarity(str, Enum):
 
 
 class DataRequirementLevel(str, Enum):
-    REQUIRED = "必需"
-    RECOMMENDED = "建议"
-    OPTIONAL = "可选"
+    REQUIRED = "required"
+    ENHANCED = "enhanced"
+    OBSERVATION = "observation"
 
 
 class DataAvailability(str, Enum):
@@ -141,6 +141,12 @@ class ActionDecision(str, Enum):
     EXIT = "退出"
     AVOID = "回避"
     INSUFFICIENT_DATA = "数据不足，不形成结论"
+
+
+class OperationalReportState(str, Enum):
+    GENERATED = "generated"
+    DATA_INSUFFICIENT = "data_insufficient"
+    SKIPPED_NON_TRADING_DAY = "skipped_non_trading_day"
 
 
 class DataRecoveryAttempt(BaseModel):
@@ -189,14 +195,39 @@ class ModuleEvidence(BaseModel):
 
 class ActionRecommendation(BaseModel):
     decision: ActionDecision
-    position_min_pct: float
-    position_max_pct: float
-    reasoning: List[str] = Field(default_factory=list)
-    required_confirmation: List[str] = Field(default_factory=list)
-    invalidation_conditions: List[str] = Field(default_factory=list)
-    risk_if_wrong: str
-    staging_plan: List[str] = Field(default_factory=list)
+    position_min_pct: float = Field(ge=0)
+    position_max_pct: float = Field(ge=0)
+    reasoning: List[str] = Field(min_length=1)
+    required_confirmation: List[str] = Field(min_length=1)
+    invalidation_conditions: List[str] = Field(min_length=1)
+    risk_if_wrong: str = Field(min_length=1)
+    staging_plan: List[str] = Field(min_length=1)
     holding_adjustment: Optional[str] = None
+
+    @field_validator(
+        "reasoning",
+        "required_confirmation",
+        "invalidation_conditions",
+        "staging_plan",
+    )
+    @classmethod
+    def _require_non_empty_items(cls, values: List[str]) -> List[str]:
+        if any(not item.strip() for item in values):
+            raise ValueError("must contain only non-empty items")
+        return values
+
+    @field_validator("risk_if_wrong")
+    @classmethod
+    def _require_non_empty_text(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("must be non-empty")
+        return value
+
+    @model_validator(mode="after")
+    def _position_range_is_ordered(self) -> "ActionRecommendation":
+        if self.position_min_pct > self.position_max_pct:
+            raise ValueError("position_min_pct must be less than or equal to position_max_pct")
+        return self
 
 
 class StrategyEvidenceSnapshot(BaseModel):
@@ -288,8 +319,17 @@ class ManualActionRecord(BaseModel):
 
 class OperationalDailyStatus(BaseModel):
     trade_date: date
-    data_requirements: List[DataRequirementStatus] = Field(default_factory=list)
-    recovery_attempts: List[DataRecoveryAttempt] = Field(default_factory=list)
-    blocked_families: List[str] = Field(default_factory=list)
-    warnings: List[str] = Field(default_factory=list)
-    ready_for_analysis: bool
+    recommendation_state: OperationalReportState
+    focus_state: OperationalReportState
+    recommendation_count: int = Field(ge=0)
+    focus_count: int = Field(ge=0)
+    data_recovery_attempts: List[DataRecoveryAttempt] = Field(default_factory=list)
+    blocking_missing_fields: List[str] = Field(default_factory=list)
+    message: str = Field(min_length=1)
+
+    @field_validator("message")
+    @classmethod
+    def _require_message(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("must be non-empty")
+        return value
