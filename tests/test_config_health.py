@@ -180,6 +180,21 @@ def test_operations_docs_capture_phase1_runbook_requirements():
     assert "subagent" in mandatory_next_phases.lower()
 
 
+def test_phase2_cloudflare_automation_docs_are_present():
+    cloudflare_pages = read_project_file("docs/operations/cloudflare-pages.md")
+    mandatory_next_phases = read_project_file("docs/operations/mandatory-next-phases.md")
+    readme = read_project_file("README.md")
+
+    assert "stock-analyzer-publish" in cloudflare_pages
+    assert "第一次发布成功" in cloudflare_pages
+    assert "自动转为全自动" in cloudflare_pages
+    assert "last known good" in cloudflare_pages.lower()
+    assert "不要打印、复制、提交或记录" in cloudflare_pages
+    assert "Phase 3 Strategy V2" in mandatory_next_phases
+    assert "Phase 4 Product UI" in mandatory_next_phases
+    assert "Phase 2 Cloudflare automation" in readme
+
+
 def test_operations_docs_link_from_readme_and_gate_manual_actions():
     readme = read_project_file("README.md")
     runbook = read_project_file("docs/operations/runbook.md")

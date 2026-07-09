@@ -1,4 +1,4 @@
-# Cloudflare Pages Manual Publish and Smoke
+# Cloudflare Pages Publish and Smoke
 
 Phase 1 prepares a Cloudflare Pages artifact at `dist/pages`, but it does not upload it. Manual publish is allowed only after explicit approval and after the local production run has completed successfully.
 
@@ -7,6 +7,34 @@ Phase 1 prepares a Cloudflare Pages artifact at `dist/pages`, but it does not up
 - Do not deploy Cloudflare Pages without explicit approval.
 - Do not run a real production job to create a fresh artifact without explicit approval.
 - Do not print, copy, commit, or log credential values used for Cloudflare Pages or report authentication.
+
+## Phase 2 One-Command Publish
+
+Phase 2 adds a local one-command publish flow. The first real Cloudflare deployment still requires explicit approval. After the first one-command publish succeeds and online smoke passes, the system automatically enables full auto publish for later successful daily production runs.
+
+第一次发布成功并通过 online smoke 后，后续成功的每日生产运行会自动转为全自动发布。
+
+Use the simple entrypoint:
+
+```bash
+stock-analyzer-publish
+```
+
+The command publishes the current trading day's successful report when recommendations are greater than zero. It does not publish non-trading days, failed production runs, or zero-recommendation reports.
+
+The command must:
+
+- rebuild `dist/pages` before upload;
+- deploy with Wrangler;
+- run online smoke;
+- save the successful artifact as last known good;
+- roll back to last known good if the newly deployed site fails smoke;
+- write local publish status and a simple local status page;
+- avoid printing or logging credentials.
+
+Do not print, copy, commit, or log Cloudflare token, report password, report session secret, Supabase service-role key, Tushare token, or `.env.local` contents.
+
+不要打印、复制、提交或记录 Cloudflare token、报告密码、报告会话密钥、Supabase service-role key、Tushare token 或 `.env.local` 内容。
 
 ## Prepare Artifact
 
@@ -20,13 +48,13 @@ The artifact must include the report files and `functions/_middleware.ts`. It mu
 
 ## Manual Publish
 
-Run the manual Cloudflare Pages deploy only after approval:
+Use this lower-level fallback only when the Phase 2 one-command publish flow is unavailable or explicitly bypassed. Run the manual Cloudflare Pages deploy only after approval:
 
 ```bash
 npx wrangler pages deploy dist/pages --project-name stock-analysis-assistant-v3
 ```
 
-This command intentionally uses manual `wrangler pages deploy dist/pages`. Phase 2 will make Cloudflare publish automation mandatory, but Phase 1 must not auto-upload.
+This command intentionally uses manual `wrangler pages deploy dist/pages`. Phase 2 makes `stock-analyzer-publish` the preferred path, while direct Wrangler deploy remains a fallback for approved operator intervention.
 
 ## Online Smoke
 

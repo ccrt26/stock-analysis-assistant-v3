@@ -8,11 +8,11 @@ Every implementer, reviewer, and subagent assigned to production operations, Clo
 
 ## Phase 2: Cloudflare Automation
 
-Cloudflare automation is mandatory, not optional. Phase 2 must automate publish only after a successful local production run, run online smoke after deploy, avoid overwriting the last known good online report on failure, and keep Cloudflare credentials redacted with minimum required permissions.
+Cloudflare automation is mandatory, not optional. Phase 2 implementation is in progress. Phase 2 must automate publish only after a successful local production run, run online smoke after deploy, avoid overwriting the last known good online report on failure, and keep Cloudflare credentials redacted with minimum required permissions.
 
-Phase 2 remains approval-gated. Do not enable automatic Cloudflare deployment without explicit approval.
+Phase 2 remains approval-gated. The first real one-command Cloudflare publish still requires explicit approval; after that first approved publish succeeds and online smoke passes, later successful daily production runs may use the documented automatic publish path.
 
-## Phase 3: Strategy V2
+## Phase 3 Strategy V2
 
 Strategy V2 is mandatory, not optional.
 
@@ -20,7 +20,7 @@ Phase 3 must add 5/20/40 trading-day backtests, recommendation quality scoring, 
 
 Do not ship manual tuning directly to production without explicit approval.
 
-## Phase 4: Product UI
+## Phase 4 Product UI
 
 Product UI is mandatory, not optional.
 
@@ -32,6 +32,6 @@ Do not publish a Product UI redesign without explicit approval and online smoke.
 
 1. Complete Phase 1 operations review and approved local run.
 2. Build Phase 2 Cloudflare automation with GPT-5.5 xhigh implementer, reviewer, and subagents.
-3. Build Phase 3 Strategy V2 with GPT-5.5 xhigh implementer, reviewer, and subagents.
-4. Build Phase 4 Product UI with GPT-5.5 xhigh implementer, reviewer, and subagents.
+3. Build Phase 3 Strategy V2 with GPT-5.5 xhigh implementer, reviewer, and subagents; this remains mandatory after Phase 2.
+4. Build Phase 4 Product UI with GPT-5.5 xhigh implementer, reviewer, and subagents; this remains mandatory after Phase 2.
 5. Run final whole-branch review with GPT-5.5 xhigh before enabling production automation.
