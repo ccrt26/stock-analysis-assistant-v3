@@ -109,6 +109,7 @@ def run_daily_job(
     health_check_func = health_check or _default_health_check
     run_daily_func = run_daily or _default_run_daily
     verify_func = verifier or verify_production_result
+    prepare_deploy_func = prepare_deploy_func or _default_prepare_deploy
 
     try:
         if tushare_calendar_loader is None and calendar_decider is None:
@@ -257,33 +258,30 @@ def run_daily_job(
     deploy_artifact_prepared = False
     publish_skipped_reason = None
     if prepare_deploy:
-        if prepare_deploy_func is None:
-            publish_skipped_reason = "prepare_deploy_not_implemented_until_task_6"
-        else:
-            try:
-                prepare_deploy_func(root)
-                deploy_artifact_prepared = True
-            except Exception as exc:
-                return _failure_status(
-                    status_file,
-                    trade_date=trade_date,
-                    attempt=attempt,
-                    scheduled_slot=scheduled_slot,
-                    started_at=started_at,
-                    stage="prepare_deploy",
-                    exc=RetryableJobError(
-                        str(exc),
-                        failure_class=FailureClass.DEPLOY_ARTIFACT_NOT_READY,
-                        fix_suggestion=(
-                            "Prepare deploy artifacts after confirming report outputs exist."
-                        ),
+        try:
+            prepare_deploy_func(root)
+            deploy_artifact_prepared = True
+        except Exception as exc:
+            return _failure_status(
+                status_file,
+                trade_date=trade_date,
+                attempt=attempt,
+                scheduled_slot=scheduled_slot,
+                started_at=started_at,
+                stage="prepare_deploy",
+                exc=RetryableJobError(
+                    str(exc),
+                    failure_class=FailureClass.DEPLOY_ARTIFACT_NOT_READY,
+                    fix_suggestion=(
+                        "Prepare deploy artifacts after confirming report outputs exist."
                     ),
-                    cleanup_performed=cleanup_performed,
-                    cleanup_summary=cleanup_summary,
-                    recommendations=verification.recommendations,
-                    evidence_packages=verification.evidence_packages,
-                    evaluation_tasks=verification.evaluation_tasks,
-                )
+                ),
+                cleanup_performed=cleanup_performed,
+                cleanup_summary=cleanup_summary,
+                recommendations=verification.recommendations,
+                evidence_packages=verification.evidence_packages,
+                evaluation_tasks=verification.evaluation_tasks,
+            )
     else:
         publish_skipped_reason = "prepare_deploy_flag_not_set"
 
@@ -380,6 +378,13 @@ def _default_run_daily(project_root: Path, repository, trade_date: date) -> None
             failure_class=FailureClass.TUSHARE_DATA_TEMPORARILY_UNAVAILABLE,
             fix_suggestion="Retry after confirming current production data is available.",
         ) from exc
+
+
+def _default_prepare_deploy(project_root: Path) -> Path:
+    from stock_analyzer.ops.artifacts import prepare_pages_artifact
+
+    root = Path(project_root)
+    return prepare_pages_artifact(root, root / "dist" / "pages")
 
 
 def _failure_status(

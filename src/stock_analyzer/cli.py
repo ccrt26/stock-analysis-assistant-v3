@@ -1,4 +1,5 @@
 from datetime import date
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -11,6 +12,8 @@ from stock_analyzer.data.provider import (
     build_production_market_data_provider,
 )
 from stock_analyzer.ops.job import ACTION_REQUIRED_STATUSES, run_daily_job
+from stock_analyzer.ops.artifacts import DeployArtifactError, prepare_pages_artifact
+from stock_analyzer.ops.smoke import smoke_report_site
 from stock_analyzer.pipeline import (
     ProductionDataSourceUnavailable,
     StoredAnalysisNotFound,
@@ -30,6 +33,7 @@ from stock_analyzer.storage.supabase_client import create_supabase_client
 app = typer.Typer(no_args_is_help=True)
 ops_app = typer.Typer(no_args_is_help=True)
 app.add_typer(ops_app, name="ops")
+DEFAULT_REPORT_PASSWORD_ENV = "REPORT_" "PASSWORD"
 
 MISSING_SUPABASE_CONFIG_MESSAGE = (
     "SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required for production "
@@ -173,6 +177,41 @@ def ops_run_daily_job(
     typer.echo(f"{status.status.value} stage={status.stage}")
     if status.status in ACTION_REQUIRED_STATUSES:
         raise typer.Exit(code=2)
+
+
+@ops_app.command("prepare-deploy")
+def ops_prepare_deploy(
+    output_dir: Path = typer.Option(Path("dist/pages"), "--output-dir"),
+) -> None:
+    config = AppConfig.load()
+    target_dir = output_dir if output_dir.is_absolute() else config.project_root / output_dir
+    try:
+        artifact_dir = prepare_pages_artifact(config.project_root, target_dir)
+    except DeployArtifactError as exc:
+        _fail(str(exc))
+    typer.echo(f"deploy artifact prepared: {artifact_dir}")
+
+
+@ops_app.command("smoke-report-site")
+def ops_smoke_report_site(
+    url: str = typer.Option(..., "--url"),
+    password_env: str = typer.Option(DEFAULT_REPORT_PASSWORD_ENV, "--password-env"),
+) -> None:
+    password = os.environ.get(password_env)
+    try:
+        result = smoke_report_site(url, password)
+    except ValueError as exc:
+        _fail(str(exc))
+    if result.passed:
+        typer.echo("smoke-report-site passed")
+        return
+    for failure in result.failures:
+        typer.echo(
+            f"smoke-report-site failed [{failure.code}]: {failure.message}",
+            err=True,
+        )
+        typer.echo(f"fix: {failure.fix_suggestion}", err=True)
+    raise typer.Exit(code=2)
 
 
 class MissingSupabaseConfig(RuntimeError):
