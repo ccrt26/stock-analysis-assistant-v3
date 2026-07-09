@@ -1,4 +1,5 @@
 from datetime import date
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -10,6 +11,10 @@ from stock_analyzer.data.provider import (
     CurrentLiveDataUnavailable,
     build_production_market_data_provider,
 )
+from stock_analyzer.ops.job import ACTION_REQUIRED_STATUSES, run_daily_job
+from stock_analyzer.ops.artifacts import DeployArtifactError, prepare_pages_artifact
+from stock_analyzer.ops.smoke import smoke_report_site
+from stock_analyzer.ops.verify import verify_production_result
 from stock_analyzer.pipeline import (
     ProductionDataSourceUnavailable,
     StoredAnalysisNotFound,
@@ -27,6 +32,9 @@ from stock_analyzer.storage.supabase_client import create_supabase_client
 
 
 app = typer.Typer(no_args_is_help=True)
+ops_app = typer.Typer(no_args_is_help=True)
+app.add_typer(ops_app, name="ops")
+DEFAULT_REPORT_PASSWORD_ENV = "REPORT_" "PASSWORD"
 
 MISSING_SUPABASE_CONFIG_MESSAGE = (
     "SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required for production "
@@ -149,6 +157,107 @@ def render_report(
         typer.echo(f"fixture report rendered for {result.trade_date.isoformat()}")
         return
     typer.echo(f"report rendered for {result.trade_date.isoformat()}")
+
+
+@ops_app.command("run-daily-job")
+def ops_run_daily_job(
+    trade_date: str = typer.Option(..., "--trade-date"),
+    scheduled_slot: str = typer.Option(..., "--scheduled-slot"),
+    attempt: int = typer.Option(..., "--attempt", min=1),
+    prepare_deploy: bool = typer.Option(False, "--prepare-deploy"),
+    notify_mac: bool = typer.Option(False, "--notify-mac"),
+) -> None:
+    parsed_trade_date = date.fromisoformat(trade_date)
+    config = AppConfig.load()
+    status = run_daily_job(
+        project_root=config.project_root,
+        trade_date=parsed_trade_date,
+        scheduled_slot=scheduled_slot,
+        attempt=attempt,
+        prepare_deploy=prepare_deploy,
+        notify_enabled=notify_mac or config.notify_mac,
+    )
+    typer.echo(f"{status.status.value} stage={status.stage}")
+    if status.status in ACTION_REQUIRED_STATUSES:
+        raise typer.Exit(code=2)
+
+
+@ops_app.command("prepare-deploy")
+def ops_prepare_deploy(
+    output_dir: Path = typer.Option(Path("dist/pages"), "--output-dir"),
+) -> None:
+    config = AppConfig.load()
+    target_dir = output_dir if output_dir.is_absolute() else config.project_root / output_dir
+    try:
+        artifact_dir = prepare_pages_artifact(config.project_root, target_dir)
+    except DeployArtifactError as exc:
+        _fail(str(exc))
+    typer.echo(f"deploy artifact prepared: {artifact_dir}")
+
+
+@ops_app.command("smoke-report-site")
+def ops_smoke_report_site(
+    url: str = typer.Option(..., "--url"),
+    password_env: str = typer.Option(DEFAULT_REPORT_PASSWORD_ENV, "--password-env"),
+    expected_trade_date: Optional[str] = typer.Option(
+        None,
+        "--expected-trade-date",
+    ),
+) -> None:
+    password = os.environ.get(password_env)
+    parsed_expected_trade_date = (
+        date.fromisoformat(expected_trade_date) if expected_trade_date else None
+    )
+    try:
+        result = smoke_report_site(
+            url,
+            password,
+            expected_trade_date=parsed_expected_trade_date,
+        )
+    except ValueError as exc:
+        _fail(str(exc))
+    if result.passed:
+        typer.echo("smoke-report-site passed")
+        return
+    for failure in result.failures:
+        typer.echo(
+            f"smoke-report-site failed [{failure.code}]: {failure.message}",
+            err=True,
+        )
+        typer.echo(f"fix: {failure.fix_suggestion}", err=True)
+    raise typer.Exit(code=2)
+
+
+@ops_app.command("verify-production")
+def ops_verify_production(
+    trade_date: str = typer.Option(..., "--trade-date"),
+) -> None:
+    parsed_trade_date = date.fromisoformat(trade_date)
+    config = AppConfig.load()
+    try:
+        repository = _analysis_repository(config, require_supabase=True)
+    except MissingSupabaseConfig as exc:
+        _fail(str(exc))
+    verification = verify_production_result(
+        config.project_root,
+        repository,
+        parsed_trade_date,
+    )
+    typer.echo(
+        f"{verification.status.value} "
+        f"recommendations={verification.recommendations} "
+        f"evidence_packages={verification.evidence_packages} "
+        f"evaluation_tasks={verification.evaluation_tasks}"
+    )
+    if verification.passed:
+        return
+    for failure in verification.failures:
+        typer.echo(
+            f"verify-production failed [{failure.code}]: {failure.message}",
+            err=True,
+        )
+        typer.echo(f"fix: {failure.fix_suggestion}", err=True)
+    raise typer.Exit(code=2)
 
 
 class MissingSupabaseConfig(RuntimeError):

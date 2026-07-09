@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-from datetime import date
+from datetime import date, datetime
 from typing import Iterable, List, Optional, Protocol
 
 from stock_analyzer.data.models import (
@@ -25,10 +25,31 @@ from stock_analyzer.storage.capacity_guard import ensure_selected_market_window_
 
 
 INGESTION_UPSERT_BATCH_SIZE = 5000
+SAME_DAY_CLEANUP_TARGETS = (
+    ("recommendation_daily", "recommendations"),
+    ("focus_watchlist_state", "focus_states"),
+    ("evidence_package_index", "evidence_packages"),
+    ("evaluation_task", "evaluation_tasks"),
+    ("market_price_daily", "market_bars"),
+    ("daily_basic_indicator", "daily_basic_indicators"),
+    ("data_source_run", "data_source_runs"),
+)
+SAME_DAY_CLEANUP_TABLES = tuple(table for table, _ in SAME_DAY_CLEANUP_TARGETS)
 logger = logging.getLogger(__name__)
 
 
 class AnalysisRepository(Protocol):
+    def load_market_calendar_day(
+        self,
+        trade_date: date,
+        market: str = "CN_A",
+    ) -> Optional[bool]: ...
+    def save_market_calendar_day(
+        self,
+        trade_date: date,
+        is_trading_day: bool,
+        market: str = "CN_A",
+    ) -> None: ...
     def load_focus_states(self) -> List[FocusState]: ...
     def load_daily_recommendations(self, trade_date: date) -> List[Recommendation]: ...
     def load_focus_states_for_date(self, trade_date: date) -> List[FocusState]: ...
@@ -49,6 +70,7 @@ class AnalysisRepository(Protocol):
     def save_market_bars(self, bars: List[DailyBar]) -> None: ...
     def save_daily_basic_indicators(self, rows: List[DailyBasicRow]) -> None: ...
     def save_data_source_runs(self, rows: List[SourceRunRecord]) -> None: ...
+    def cleanup_trade_date(self, trade_date: date) -> dict[str, int]: ...
 
 
 class InMemoryAnalysisRepository:
@@ -64,6 +86,7 @@ class InMemoryAnalysisRepository:
         market_bars: Optional[List[DailyBar]] = None,
         daily_basic_indicators: Optional[List[DailyBasicRow]] = None,
         data_source_runs: Optional[List[SourceRunRecord]] = None,
+        market_calendar: Optional[dict[date, bool]] = None,
     ) -> None:
         self.recommendations = list(recommendations or [])
         self.focus_states = list(focus_states or [])
@@ -75,6 +98,22 @@ class InMemoryAnalysisRepository:
         self.market_bars = list(market_bars or [])
         self.daily_basic_indicators = list(daily_basic_indicators or [])
         self.data_source_runs = list(data_source_runs or [])
+        self.market_calendar = dict(market_calendar or {})
+
+    def load_market_calendar_day(
+        self,
+        trade_date: date,
+        market: str = "CN_A",
+    ) -> Optional[bool]:
+        return self.market_calendar.get(trade_date)
+
+    def save_market_calendar_day(
+        self,
+        trade_date: date,
+        is_trading_day: bool,
+        market: str = "CN_A",
+    ) -> None:
+        self.market_calendar[trade_date] = is_trading_day
 
     def load_focus_states(self) -> List[FocusState]:
         return _latest_active_focus_states(self.focus_states)
@@ -171,11 +210,55 @@ class InMemoryAnalysisRepository:
     def save_data_source_runs(self, rows: List[SourceRunRecord]) -> None:
         self.data_source_runs.extend(rows)
 
+    def cleanup_trade_date(self, trade_date: date) -> dict[str, int]:
+        _ensure_cleanup_trade_date(trade_date)
+        deleted_counts: dict[str, int] = {}
+        for table, attribute in SAME_DAY_CLEANUP_TARGETS:
+            items = getattr(self, attribute)
+            remaining = [item for item in items if item.trade_date != trade_date]
+            deleted_counts[table] = len(items) - len(remaining)
+            setattr(self, attribute, remaining)
+        return deleted_counts
+
 
 class SupabaseAnalysisRepository:
     def __init__(self, client, capacity_guard=None) -> None:
         self.client = client
         self.capacity_guard = capacity_guard
+
+    def load_market_calendar_day(
+        self,
+        trade_date: date,
+        market: str = "CN_A",
+    ) -> Optional[bool]:
+        result = (
+            self.client.table("market_calendar")
+            .select("trade_date,is_trading_day,market")
+            .eq("trade_date", trade_date.isoformat())
+            .eq("market", market)
+            .execute()
+        )
+        rows = result.data or []
+        if not rows:
+            return None
+        return _bool_from_row(rows[0]["is_trading_day"])
+
+    def save_market_calendar_day(
+        self,
+        trade_date: date,
+        is_trading_day: bool,
+        market: str = "CN_A",
+    ) -> None:
+        self.client.table("market_calendar").upsert(
+            [
+                {
+                    "trade_date": trade_date.isoformat(),
+                    "is_trading_day": is_trading_day,
+                    "market": market,
+                }
+            ],
+            on_conflict="trade_date",
+        ).execute()
 
     def load_focus_states(self) -> List[FocusState]:
         result = self.client.table("focus_watchlist_state").select("*").execute()
@@ -421,6 +504,20 @@ class SupabaseAnalysisRepository:
         if payload:
             self.client.table("data_source_run").insert(payload).execute()
 
+    def cleanup_trade_date(self, trade_date: date) -> dict[str, int]:
+        _ensure_cleanup_trade_date(trade_date)
+        date_text = trade_date.isoformat()
+        deleted_counts: dict[str, int] = {}
+        for table in SAME_DAY_CLEANUP_TABLES:
+            result = (
+                self.client.table(table)
+                .delete()
+                .eq("trade_date", date_text)
+                .execute()
+            )
+            deleted_counts[table] = len(result.data or [])
+        return deleted_counts
+
 
 def _date_from_row(value) -> Optional[date]:
     if value is None or isinstance(value, date):
@@ -428,8 +525,21 @@ def _date_from_row(value) -> Optional[date]:
     return date.fromisoformat(value)
 
 
+def _ensure_cleanup_trade_date(value: date) -> None:
+    if not isinstance(value, date) or isinstance(value, datetime):
+        raise ValueError("trade_date must be a date instance")
+
+
 def _date_to_text(value: Optional[date]) -> Optional[str]:
     return value.isoformat() if value else None
+
+
+def _bool_from_row(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.lower() in {"true", "t", "1", "yes"}
+    return bool(value)
 
 
 def _chunks(items: list[dict], size: int) -> Iterable[list[dict]]:

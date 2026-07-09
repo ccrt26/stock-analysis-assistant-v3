@@ -9,9 +9,16 @@ from stock_analyzer.data.health import (
 )
 
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+def read_project_file(relative_path: str) -> str:
+    return (PROJECT_ROOT / relative_path).read_text(encoding="utf-8")
+
+
 def test_config_uses_home_tushare_token_path_when_env_missing():
     config = AppConfig.load(env={})
-    expected_project_root = Path(__file__).resolve().parents[1]
+    expected_project_root = PROJECT_ROOT
     assert config.project_root == expected_project_root
     assert config.reports_dir == expected_project_root / "reports"
     assert config.tushare_token_path == Path.home() / ".tushare_token"
@@ -145,3 +152,42 @@ def test_health_report_as_lines_renders_status_values():
         "api_response: fail - supabase env checked",
     ]
     assert all("HealthStatus." not in line for line in lines)
+
+
+def test_generated_operation_artifacts_are_gitignored():
+    gitignore = read_project_file(".gitignore")
+    entries = {line.strip() for line in gitignore.splitlines()}
+
+    assert "logs/" in entries
+    assert "dist/" in entries
+
+
+def test_operations_docs_capture_phase1_runbook_requirements():
+    runbook = read_project_file("docs/operations/runbook.md")
+    cloudflare_pages = read_project_file("docs/operations/cloudflare-pages.md")
+    mandatory_next_phases = read_project_file("docs/operations/mandatory-next-phases.md")
+    combined_docs = "\n".join([runbook, cloudflare_pages, mandatory_next_phases])
+
+    assert "18:30" in combined_docs
+    assert "19:00" in combined_docs
+    assert "19:30" in combined_docs
+    assert "cleanup-before-retry" in combined_docs
+    assert "skipped_non_trading_day" in combined_docs
+    assert "wrangler pages deploy dist/pages" in cloudflare_pages
+    assert "Strategy V2 is mandatory, not optional." in mandatory_next_phases
+    assert "Product UI is mandatory, not optional." in mandatory_next_phases
+    assert "GPT-5.5 xhigh" in combined_docs
+    assert "subagent" in mandatory_next_phases.lower()
+
+
+def test_operations_docs_link_from_readme_and_gate_manual_actions():
+    readme = read_project_file("README.md")
+    runbook = read_project_file("docs/operations/runbook.md")
+    cloudflare_pages = read_project_file("docs/operations/cloudflare-pages.md")
+
+    assert "docs/operations/runbook.md" in readme
+    assert "docs/operations/cloudflare-pages.md" in readme
+    assert "docs/operations/mandatory-next-phases.md" in readme
+    assert "Do not enable launchd without explicit approval." in runbook
+    assert "Do not run a real production job without explicit approval." in runbook
+    assert "Do not deploy Cloudflare Pages without explicit approval." in cloudflare_pages
