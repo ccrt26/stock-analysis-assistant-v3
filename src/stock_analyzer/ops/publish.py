@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import shutil
+import subprocess
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
@@ -12,6 +15,7 @@ from typing import Any
 from pydantic import BaseModel, Field, field_validator
 
 from stock_analyzer.config import AppConfig
+from stock_analyzer.ops.artifacts import prepare_pages_artifact
 from stock_analyzer.ops.redaction import redact_secrets
 from stock_analyzer.storage.capacity_guard import CapacityStatus
 
@@ -45,6 +49,7 @@ class PublishFailureClass(str, Enum):
 
 
 _MAX_PUBLISH_RECOMMENDATIONS = 10
+_URL_PATTERN = re.compile(r"https://[^\s]+")
 
 
 class PublishPreflightError(RuntimeError):
@@ -276,6 +281,62 @@ def preflight_publish(
                 ),
             )
     return tuple(checks)
+
+
+def prepare_publish_artifact(
+    config: PublishConfig,
+    prepare_artifact: Callable[[Path, Path], Path] | None = None,
+) -> Path:
+    output_dir = config.project_root / "dist" / "pages"
+    if output_dir.exists():
+        shutil.rmtree(output_dir)
+    prepare_func = prepare_artifact or prepare_pages_artifact
+    return prepare_func(config.project_root, output_dir)
+
+
+def run_wrangler_deploy(
+    config: PublishConfig,
+    artifact_dir: Path,
+    *,
+    env: Mapping[str, str] | None = None,
+    runner: Callable[..., subprocess.CompletedProcess[str]] | None = None,
+) -> WranglerResult:
+    command = [
+        "npx",
+        "wrangler",
+        "pages",
+        "deploy",
+        str(artifact_dir),
+        "--project-name",
+        config.cloudflare_pages_project_name,
+    ]
+    values = dict(os.environ if env is None else env)
+    run = runner or subprocess.run
+    completed = run(
+        command,
+        cwd=config.project_root,
+        env=values,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    stdout = redact_secrets(completed.stdout or "", explicit_secrets=values.values())
+    stderr = redact_secrets(completed.stderr or "", explicit_secrets=values.values())
+    deployment_url = _extract_deployment_url(f"{stdout}\n{stderr}")
+    return WranglerResult(
+        exit_code=int(completed.returncode),
+        stdout_redacted=stdout,
+        stderr_redacted=stderr,
+        deployment_url=deployment_url,
+    )
+
+
+def _extract_deployment_url(text: str) -> str | None:
+    for match in _URL_PATTERN.finditer(text):
+        value = match.group(0).rstrip(".,)")
+        if ".pages.dev" in value or value.startswith("https://"):
+            return value
+    return None
 
 
 def _redact_payload(value: Any) -> Any:

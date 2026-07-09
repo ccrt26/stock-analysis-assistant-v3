@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from datetime import date, datetime, timezone
 
 import pytest
@@ -15,7 +16,9 @@ from stock_analyzer.ops.publish import (
     PublishState,
     PublishStatus,
     load_publish_candidate,
+    prepare_publish_artifact,
     preflight_publish,
+    run_wrangler_deploy,
 )
 from stock_analyzer.storage.capacity_guard import CapacityStatus
 
@@ -254,3 +257,84 @@ def test_preflight_blocks_supabase_capacity_stop(tmp_path):
 
     assert exc_info.value.failure_class is PublishFailureClass.SUPABASE_CAPACITY_STOP
     assert "401.0 MB" in exc_info.value.user_action_required
+
+
+def test_prepare_publish_artifact_always_rebuilds_dist_pages(tmp_path):
+    config = _publish_config(tmp_path)
+    stale = tmp_path / "dist" / "pages" / "stale.txt"
+    stale.parent.mkdir(parents=True)
+    stale.write_text("stale", encoding="utf-8")
+
+    def fake_prepare(project_root, output_dir):
+        assert project_root == tmp_path
+        assert output_dir == tmp_path / "dist" / "pages"
+        assert not stale.exists()
+        output_dir.mkdir(parents=True, exist_ok=True)
+        (output_dir / "index.html").write_text("fresh", encoding="utf-8")
+        return output_dir
+
+    artifact_dir = prepare_publish_artifact(config, prepare_artifact=fake_prepare)
+
+    assert artifact_dir == tmp_path / "dist" / "pages"
+    assert (artifact_dir / "index.html").read_text(encoding="utf-8") == "fresh"
+
+
+def test_run_wrangler_deploy_invokes_official_command_without_printing_token(tmp_path):
+    config = _publish_config(tmp_path)
+    artifact_dir = tmp_path / "dist" / "pages"
+    artifact_dir.mkdir(parents=True)
+    calls = []
+
+    def fake_runner(command, *, cwd, env, text, capture_output, check):
+        calls.append((command, cwd, env, text, capture_output, check))
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            stdout="Success: https://stock-analysis-assistant-v3.pages.dev",
+            stderr="",
+        )
+
+    result = run_wrangler_deploy(
+        config,
+        artifact_dir,
+        env={"CLOUDFLARE_API_TOKEN": "secret-token"},
+        runner=fake_runner,
+    )
+
+    command, cwd, env, text, capture_output, check = calls[0]
+    assert command == [
+        "npx",
+        "wrangler",
+        "pages",
+        "deploy",
+        str(artifact_dir),
+        "--project-name",
+        "stock-analysis-assistant-v3",
+    ]
+    assert cwd == tmp_path
+    assert env["CLOUDFLARE_API_TOKEN"] == "secret-token"
+    assert text is True
+    assert capture_output is True
+    assert check is False
+    assert result.exit_code == 0
+    assert result.deployment_url == "https://stock-analysis-assistant-v3.pages.dev"
+    assert "secret-token" not in result.stdout_redacted
+
+
+def test_run_wrangler_deploy_classifies_auth_failure(tmp_path):
+    config = _publish_config(tmp_path)
+    artifact_dir = tmp_path / "dist" / "pages"
+    artifact_dir.mkdir(parents=True)
+
+    def fake_runner(command, *, cwd, env, text, capture_output, check):
+        return subprocess.CompletedProcess(command, 1, stdout="", stderr="Authentication error")
+
+    result = run_wrangler_deploy(
+        config,
+        artifact_dir,
+        env={"CLOUDFLARE_API_TOKEN": "secret-token"},
+        runner=fake_runner,
+    )
+
+    assert result.exit_code == 1
+    assert "Authentication error" in result.stderr_redacted
