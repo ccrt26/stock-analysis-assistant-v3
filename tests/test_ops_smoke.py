@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 from urllib.parse import parse_qs
 
 import httpx
@@ -78,6 +79,24 @@ def test_smoke_report_site_fails_when_fixture_or_sample_content_appears():
     assert "Fixture/sample" not in repr(result)
 
 
+def test_smoke_report_site_fails_when_expected_trade_date_is_missing():
+    transport = _report_site_transport(
+        password=_test_password(),
+        home_html="<html>生产报告 2026-07-08</html>",
+    )
+
+    result = smoke_report_site(
+        "https://reports.example",
+        _test_password(),
+        expected_trade_date=date(2026, 7, 9),
+        transport=transport,
+    )
+
+    assert result.passed is False
+    assert "report_date_mismatch" in _failure_codes(result)
+    assert "2026-07-09" in result.failures[0].message
+
+
 def test_smoke_report_site_fails_on_sensitive_variable_names_and_fake_secret_patterns():
     sensitive_variable_name = "_".join(("SUPABASE", "SERVICE", "ROLE", "KEY"))
     fake_key = "-".join(("fake", "service", "role", "key"))
@@ -106,8 +125,9 @@ def test_ops_smoke_report_site_cli_reads_password_env_without_printing_it(monkey
     password = "-".join(("do", "not", "print", "this", "report", "password"))
     captured_passwords: list[str | None] = []
 
-    def fake_smoke_report_site(url, password_arg):
+    def fake_smoke_report_site(url, password_arg, *, expected_trade_date=None):
         captured_passwords.append(password_arg)
+        assert expected_trade_date is None
         return SmokeResult(
             base_url=url,
             passed=False,
@@ -141,6 +161,40 @@ def test_ops_smoke_report_site_cli_reads_password_env_without_printing_it(monkey
     assert captured_passwords == [password]
     assert "fixture_sample_leak" in result.output
     assert password not in result.output
+
+
+def test_ops_smoke_report_site_cli_passes_expected_trade_date(monkeypatch):
+    captured_expected_dates: list[date | None] = []
+
+    def fake_smoke_report_site(url, password_arg, *, expected_trade_date=None):
+        captured_expected_dates.append(expected_trade_date)
+        return SmokeResult(
+            base_url=url,
+            passed=True,
+            checks=("report_date_matches",),
+            failures=(),
+        )
+
+    password_env_name = "_".join(("REPORT", "PASSWORD"))
+    monkeypatch.setenv(password_env_name, _test_password())
+    monkeypatch.setattr("stock_analyzer.cli.smoke_report_site", fake_smoke_report_site)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "ops",
+            "smoke-report-site",
+            "--url",
+            "https://reports.example",
+            "--password-env",
+            password_env_name,
+            "--expected-trade-date",
+            "2026-07-09",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert captured_expected_dates == [date(2026, 7, 9)]
 
 
 class _ReportSiteTransport(httpx.MockTransport):

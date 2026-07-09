@@ -165,6 +165,7 @@ def ops_run_daily_job(
     scheduled_slot: str = typer.Option(..., "--scheduled-slot"),
     attempt: int = typer.Option(..., "--attempt", min=1),
     prepare_deploy: bool = typer.Option(False, "--prepare-deploy"),
+    notify_mac: bool = typer.Option(False, "--notify-mac"),
 ) -> None:
     parsed_trade_date = date.fromisoformat(trade_date)
     config = AppConfig.load()
@@ -174,6 +175,7 @@ def ops_run_daily_job(
         scheduled_slot=scheduled_slot,
         attempt=attempt,
         prepare_deploy=prepare_deploy,
+        notify_enabled=notify_mac or config.notify_mac,
     )
     typer.echo(f"{status.status.value} stage={status.stage}")
     if status.status in ACTION_REQUIRED_STATUSES:
@@ -197,10 +199,21 @@ def ops_prepare_deploy(
 def ops_smoke_report_site(
     url: str = typer.Option(..., "--url"),
     password_env: str = typer.Option(DEFAULT_REPORT_PASSWORD_ENV, "--password-env"),
+    expected_trade_date: Optional[str] = typer.Option(
+        None,
+        "--expected-trade-date",
+    ),
 ) -> None:
     password = os.environ.get(password_env)
+    parsed_expected_trade_date = (
+        date.fromisoformat(expected_trade_date) if expected_trade_date else None
+    )
     try:
-        result = smoke_report_site(url, password)
+        result = smoke_report_site(
+            url,
+            password,
+            expected_trade_date=parsed_expected_trade_date,
+        )
     except ValueError as exc:
         _fail(str(exc))
     if result.passed:

@@ -23,6 +23,7 @@ class AppConfig(BaseModel):
     supabase_warn_mb: float = 350
     supabase_stop_mb: float = 400
     fixture_mode: bool = False
+    notify_mac: bool = False
 
     @classmethod
     def load(
@@ -51,6 +52,7 @@ class AppConfig(BaseModel):
             supabase_warn_mb=float(values.get("SUPABASE_WARN_MB", 350)),
             supabase_stop_mb=float(values.get("SUPABASE_STOP_MB", 400)),
             fixture_mode=_env_flag(values, "STOCK_ANALYZER_FIXTURE_MODE"),
+            notify_mac=_env_flag(values, "STOCK_ANALYZER_NOTIFY_MAC"),
         )
 
     @property

@@ -67,11 +67,51 @@ def test_prepare_pages_artifact_can_use_source_root_for_middleware(
 
     artifact_dir = prepare_pages_artifact(
         production_root,
-        tmp_path / "artifact-pages",
+        tmp_path / "stock-analysis-pages",
     )
 
     assert (artifact_dir / "index.html").exists()
     assert (artifact_dir / "functions" / "_middleware.ts").exists()
+
+
+def test_prepare_pages_artifact_rejects_existing_absolute_dir_outside_safe_roots(
+    monkeypatch,
+    tmp_path,
+):
+    project_root = tmp_path / "project"
+    allowed_temp_root = tmp_path / "allowed-temp"
+    output_dir = tmp_path / "important-existing-dir"
+    output_dir.mkdir()
+    marker = output_dir / "do-not-delete.txt"
+    marker.write_text("keep me", encoding="utf-8")
+    _write_report_tree(project_root)
+    _write_middleware(project_root)
+    monkeypatch.setenv("TMPDIR", str(allowed_temp_root))
+
+    with pytest.raises(DeployArtifactError, match="Output directory"):
+        prepare_pages_artifact(project_root, output_dir)
+
+    assert marker.read_text(encoding="utf-8") == "keep me"
+
+
+def test_prepare_pages_artifact_allows_existing_configured_temp_artifact_dir(
+    monkeypatch,
+    tmp_path,
+):
+    project_root = tmp_path / "project"
+    allowed_temp_root = tmp_path / "allowed-temp"
+    output_dir = allowed_temp_root / "stock-analysis-pages"
+    output_dir.mkdir(parents=True)
+    (output_dir / "stale.txt").write_text("stale", encoding="utf-8")
+    _write_report_tree(project_root)
+    _write_middleware(project_root)
+    monkeypatch.setenv("TMPDIR", str(allowed_temp_root))
+
+    artifact_dir = prepare_pages_artifact(project_root, output_dir)
+
+    assert artifact_dir == output_dir.resolve()
+    assert (artifact_dir / "index.html").exists()
+    assert not (artifact_dir / "stale.txt").exists()
 
 
 def test_run_daily_job_default_prepare_deploy_builds_pages_artifact(tmp_path):

@@ -87,6 +87,11 @@ def _validate_output_dir(
         raise DeployArtifactError("Output directory cannot be inside reports.")
     if target == functions_dir or _is_relative_to(target, functions_dir):
         raise DeployArtifactError("Output directory cannot be inside functions.")
+    if not _is_allowed_output_dir(project_root, target):
+        raise DeployArtifactError(
+            "Output directory must be under project dist/ or an approved temp "
+            "stock-analysis artifact directory."
+        )
 
 
 def _copy_report_tree(reports_dir: Path, target: Path) -> None:
@@ -126,6 +131,38 @@ def _is_forbidden_relative_path(relative_path: Path) -> bool:
         relative_path == prefix or _is_relative_to(relative_path, prefix)
         for prefix in _FORBIDDEN_RELATIVE_PREFIXES
     )
+
+
+def _is_allowed_output_dir(project_root: Path, target: Path) -> bool:
+    dist_dir = (project_root / "dist").resolve()
+    if target == dist_dir or _is_relative_to(target, dist_dir):
+        return True
+    return _is_approved_temp_artifact_dir(target)
+
+
+def _is_approved_temp_artifact_dir(target: Path) -> bool:
+    if not target.name.startswith("stock-analysis"):
+        return False
+    return any(
+        target != temp_root and _is_relative_to(target, temp_root)
+        for temp_root in _temp_roots()
+    )
+
+
+def _temp_roots() -> tuple[Path, ...]:
+    candidates = [
+        os.environ.get("TMPDIR"),
+        "/tmp",
+        "/private/tmp",
+    ]
+    roots: list[Path] = []
+    for candidate in candidates:
+        if not candidate:
+            continue
+        root = Path(candidate).expanduser().resolve()
+        if root not in roots:
+            roots.append(root)
+    return tuple(roots)
 
 
 def _is_relative_to(path: Path, parent: Path) -> bool:

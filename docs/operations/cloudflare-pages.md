@@ -33,7 +33,7 @@ This command intentionally uses manual `wrangler pages deploy dist/pages`. Phase
 After a manual deployment, run the smoke command from the project root. Provide the report password through the approved local secret source and reference its environment variable name with `--password-env`.
 
 ```bash
-PROJECT_ROOT=/Users/ccrt/股票分析助手 PYTHONPATH=src .venv/bin/python -m stock_analyzer ops smoke-report-site --url https://YOUR-PAGES-DOMAIN --password-env REPORT_PASSWORD
+PROJECT_ROOT=/Users/ccrt/股票分析助手 PYTHONPATH=src .venv/bin/python -m stock_analyzer ops smoke-report-site --url https://YOUR-PAGES-DOMAIN --password-env REPORT_PASSWORD --expected-trade-date YYYY-MM-DD
 ```
 
 The smoke check must verify:

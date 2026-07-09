@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from datetime import date
 from urllib.parse import urljoin, urlparse
 
 import httpx
@@ -71,6 +72,7 @@ def smoke_report_site(
     base_url: str,
     password: str | None,
     *,
+    expected_trade_date: date | None = None,
     transport: httpx.BaseTransport | None = None,
     timeout: float = 10.0,
 ) -> SmokeResult:
@@ -149,6 +151,25 @@ def smoke_report_site(
             checks.append("authenticated_home")
 
             content = home_response.text
+            if expected_trade_date is not None:
+                expected_date_text = expected_trade_date.isoformat()
+                if expected_date_text not in content:
+                    failures.append(
+                        _failure(
+                            "report_date_mismatch",
+                            (
+                                "Expected report date "
+                                f"{expected_date_text} was not found in report content."
+                            ),
+                            (
+                                "Deploy the artifact for the expected trade date and "
+                                "rerun smoke."
+                            ),
+                        )
+                    )
+                else:
+                    checks.append("report_date_matches")
+
             if _contains_fixture_sample_marker(content):
                 failures.append(
                     _failure(

@@ -32,6 +32,8 @@ PROJECT_ROOT=/Users/ccrt/股票分析助手 PYTHONPATH=src .venv/bin/python -m s
 
 For approved retries, keep the same `trade_date`, set `--scheduled-slot 19:00 --attempt 2` or `--scheduled-slot 19:30 --attempt 3`, and keep `--prepare-deploy`.
 
+Mac notification is disabled by default. Enable it only when desired with `--notify-mac` or `STOCK_ANALYZER_NOTIFY_MAC=1`; it should fire only when the final status is `failed_needs_human`.
+
 ## Non-Trading-Day Skip Rule
 
 When the calendar gate returns a non-trading day, the job status must be `skipped_non_trading_day`. The job must not run analysis, must not clean same-day outputs, must not prepare a new deploy package, and must not overwrite reports. It should only write the status JSON and job log.
@@ -45,7 +47,7 @@ Cleanup is limited to same-day partial outputs:
 - Supabase rows for the current `trade_date` in the approved operations tables.
 - `reports/daily/YYYY-MM-DD/`.
 - The same-day local archive manifest and report copy.
-- The same-day local warehouse partition or replacement output.
+- The same-day local warehouse partition replacement output. Treat replacement as scoped overwrite for the target `trade_date`, never as deletion of the whole warehouse.
 
 Never delete historical dates, a whole Supabase table, `stock_master`, the whole `local_archive`, or the whole `local_warehouse`.
 

@@ -9,7 +9,11 @@ from typer.testing import CliRunner
 from stock_analyzer.cli import app
 from stock_analyzer.ops.calendar import TradingDayDecision
 from stock_analyzer.ops.cleanup import CleanupSummary
-from stock_analyzer.ops.job import RetryableJobError, run_daily_job
+from stock_analyzer.ops.job import (
+    HumanInterventionJobError,
+    RetryableJobError,
+    run_daily_job,
+)
 from stock_analyzer.ops.status import FailureClass, JobStatus, RunStatus
 from stock_analyzer.data.models import DailyBar, DailyBasicRow, SourceGrade
 from stock_analyzer.domain.models import (
@@ -371,6 +375,13 @@ def test_run_daily_job_default_calendar_loader_failure_writes_redacted_status(
 def test_run_daily_job_attempt_two_cleans_before_rerun(tmp_path):
     trade_date = date(2026, 7, 9)
     events: list[str] = []
+    status_path = tmp_path / "logs" / "run-daily" / "latest-status.json"
+    _write_previous_status(
+        status_path,
+        trade_date=trade_date,
+        attempt=1,
+        run_status=RunStatus.FAILED_RETRYABLE,
+    )
 
     status = run_daily_job(
         tmp_path,
@@ -391,6 +402,7 @@ def test_run_daily_job_attempt_two_cleans_before_rerun(tmp_path):
         health_check=_recording_call(events, "health_check"),
         run_daily=_recording_call(events, "run_daily"),
         verifier=lambda *_args: _successful_verification(trade_date),
+        status_path=status_path,
     )
 
     assert status.status == RunStatus.SUCCESS_NO_RECOMMENDATIONS
@@ -401,9 +413,96 @@ def test_run_daily_job_attempt_two_cleans_before_rerun(tmp_path):
     assert events == ["calendar", "cleanup", "health_check", "run_daily"]
 
 
+def test_run_daily_job_attempt_two_after_success_does_not_cleanup_or_run(tmp_path):
+    trade_date = date(2026, 7, 9)
+    events: list[str] = []
+    status_path = tmp_path / "logs" / "run-daily" / "latest-status.json"
+    _write_previous_status(
+        status_path,
+        trade_date=trade_date,
+        attempt=1,
+        run_status=RunStatus.SUCCESS_NO_RECOMMENDATIONS,
+    )
+
+    status = run_daily_job(
+        tmp_path,
+        trade_date,
+        "19:00",
+        2,
+        prepare_deploy=False,
+        repository=FakeJobRepository(),
+        calendar_decider=_calendar_decider(
+            TradingDayDecision(
+                status="trading_day",
+                source="supabase",
+                message="market open",
+            ),
+            events,
+        ),
+        cleanup=lambda *_args: _cleanup_summary(trade_date, events),
+        health_check=_recording_call(events, "health_check"),
+        run_daily=_recording_call(events, "run_daily"),
+        verifier=lambda *_args: _successful_verification(trade_date),
+        status_path=status_path,
+    )
+
+    assert status.status == RunStatus.FAILED_NEEDS_HUMAN
+    assert status.stage == "retry_preflight"
+    assert status.cleanup_performed is False
+    assert events == []
+
+
+def test_run_daily_job_attempt_two_after_human_failure_does_not_cleanup_or_run(
+    tmp_path,
+):
+    trade_date = date(2026, 7, 9)
+    events: list[str] = []
+    status_path = tmp_path / "logs" / "run-daily" / "latest-status.json"
+    _write_previous_status(
+        status_path,
+        trade_date=trade_date,
+        attempt=1,
+        run_status=RunStatus.FAILED_NEEDS_HUMAN,
+    )
+
+    status = run_daily_job(
+        tmp_path,
+        trade_date,
+        "19:00",
+        2,
+        prepare_deploy=False,
+        repository=FakeJobRepository(),
+        calendar_decider=_calendar_decider(
+            TradingDayDecision(
+                status="trading_day",
+                source="supabase",
+                message="market open",
+            ),
+            events,
+        ),
+        cleanup=lambda *_args: _cleanup_summary(trade_date, events),
+        health_check=_recording_call(events, "health_check"),
+        run_daily=_recording_call(events, "run_daily"),
+        verifier=lambda *_args: _successful_verification(trade_date),
+        status_path=status_path,
+    )
+
+    assert status.status == RunStatus.FAILED_NEEDS_HUMAN
+    assert status.stage == "retry_preflight"
+    assert status.cleanup_performed is False
+    assert events == []
+
+
 def test_run_daily_job_cleanup_failure_returns_failed_needs_human(tmp_path):
     trade_date = date(2026, 7, 9)
     events: list[str] = []
+    status_path = tmp_path / "logs" / "run-daily" / "latest-status.json"
+    _write_previous_status(
+        status_path,
+        trade_date=trade_date,
+        attempt=1,
+        run_status=RunStatus.FAILED_RETRYABLE,
+    )
 
     def fail_cleanup(*_args):
         events.append("cleanup")
@@ -427,6 +526,7 @@ def test_run_daily_job_cleanup_failure_returns_failed_needs_human(tmp_path):
         cleanup=fail_cleanup,
         health_check=_recording_call(events, "health_check"),
         run_daily=_recording_call(events, "run_daily"),
+        status_path=status_path,
     )
 
     assert status.status == RunStatus.FAILED_NEEDS_HUMAN
@@ -438,6 +538,13 @@ def test_run_daily_job_cleanup_failure_returns_failed_needs_human(tmp_path):
 def test_run_daily_job_third_failed_attempt_needs_human(tmp_path):
     trade_date = date(2026, 7, 9)
     events: list[str] = []
+    status_path = tmp_path / "logs" / "run-daily" / "latest-status.json"
+    _write_previous_status(
+        status_path,
+        trade_date=trade_date,
+        attempt=2,
+        run_status=RunStatus.FAILED_RETRYABLE,
+    )
 
     def fail_retryable(*_args):
         events.append("run_daily")
@@ -464,12 +571,48 @@ def test_run_daily_job_third_failed_attempt_needs_human(tmp_path):
         cleanup=lambda *_args: _cleanup_summary(trade_date, events),
         health_check=_recording_call(events, "health_check"),
         run_daily=fail_retryable,
+        status_path=status_path,
     )
 
     assert status.status == RunStatus.FAILED_NEEDS_HUMAN
     assert status.failure_class == FailureClass.MAX_ATTEMPTS_EXCEEDED
     assert status.retryable is False
     assert events == ["calendar", "cleanup", "health_check", "run_daily"]
+
+
+def test_run_daily_job_attempt_above_max_is_rejected_before_calendar_or_cleanup(
+    tmp_path,
+):
+    trade_date = date(2026, 7, 9)
+    events: list[str] = []
+
+    status = run_daily_job(
+        tmp_path,
+        trade_date,
+        "20:00",
+        4,
+        prepare_deploy=True,
+        repository=FakeJobRepository(),
+        calendar_decider=_calendar_decider(
+            TradingDayDecision(
+                status="trading_day",
+                source="supabase",
+                message="market open",
+            ),
+            events,
+        ),
+        cleanup=lambda *_args: _cleanup_summary(trade_date, events),
+        health_check=_recording_call(events, "health_check"),
+        run_daily=_recording_call(events, "run_daily"),
+        verifier=lambda *_args: _successful_verification(trade_date),
+        prepare_deploy_func=_recording_call(events, "prepare_deploy"),
+    )
+
+    assert status.status == RunStatus.FAILED_NEEDS_HUMAN
+    assert status.failure_class == FailureClass.MAX_ATTEMPTS_EXCEEDED
+    assert status.stage == "retry_preflight"
+    assert status.cleanup_performed is False
+    assert events == []
 
 
 def test_run_daily_job_success_with_zero_recommendations_writes_status(tmp_path):
@@ -540,6 +683,130 @@ def test_run_daily_job_redacts_status_json_error_messages(tmp_path):
     assert "[REDACTED]" in status_text
 
 
+def test_run_daily_job_redacts_known_env_secret_value_without_secret_syntax(
+    monkeypatch,
+    tmp_path,
+):
+    trade_date = date(2026, 7, 9)
+    status_path = tmp_path / "logs" / "run-daily" / "latest-status.json"
+    raw_secret = "-".join(("raw", "session", "secret", "without", "syntax"))
+    monkeypatch.setenv("REPORT_SESSION_SECRET", raw_secret)
+
+    def fail_with_raw_secret(*_args):
+        raise RetryableJobError(
+            f"upstream response included {raw_secret}",
+            failure_class=FailureClass.NETWORK_TIMEOUT,
+        )
+
+    run_daily_job(
+        tmp_path,
+        trade_date,
+        "18:30",
+        1,
+        prepare_deploy=False,
+        repository=FakeJobRepository(),
+        calendar_decider=lambda *_args, **_kwargs: TradingDayDecision(
+            status="trading_day",
+            source="supabase",
+            message="market open",
+        ),
+        run_daily=fail_with_raw_secret,
+        status_path=status_path,
+    )
+
+    status_text = status_path.read_text(encoding="utf-8")
+    assert raw_secret not in status_text
+    assert "[REDACTED]" in status_text
+
+
+def test_run_daily_job_notifies_human_failure_only_when_enabled(tmp_path):
+    trade_date = date(2026, 7, 9)
+    notifications: list[tuple[str, str, bool]] = []
+
+    def fail_needs_human(*_args):
+        raise HumanInterventionJobError(
+            "schema mismatch requires intervention",
+            failure_class=FailureClass.SCHEMA_MISMATCH,
+        )
+
+    status = run_daily_job(
+        tmp_path,
+        trade_date,
+        "18:30",
+        1,
+        prepare_deploy=False,
+        repository=FakeJobRepository(),
+        calendar_decider=lambda *_args, **_kwargs: TradingDayDecision(
+            status="trading_day",
+            source="supabase",
+            message="market open",
+        ),
+        run_daily=fail_needs_human,
+        notify_func=lambda title, message, enabled=False: notifications.append(
+            (title, message, enabled)
+        ),
+    )
+
+    assert status.status == RunStatus.FAILED_NEEDS_HUMAN
+    assert notifications == []
+
+    status = run_daily_job(
+        tmp_path,
+        trade_date,
+        "18:30",
+        1,
+        prepare_deploy=False,
+        repository=FakeJobRepository(),
+        calendar_decider=lambda *_args, **_kwargs: TradingDayDecision(
+            status="trading_day",
+            source="supabase",
+            message="market open",
+        ),
+        run_daily=fail_needs_human,
+        notify_enabled=True,
+        notify_func=lambda title, message, enabled=False: notifications.append(
+            (title, message, enabled)
+        ),
+    )
+
+    assert status.status == RunStatus.FAILED_NEEDS_HUMAN
+    assert len(notifications) == 1
+    assert notifications[0][2] is True
+
+
+def test_run_daily_job_does_not_notify_retryable_failure_even_when_enabled(tmp_path):
+    trade_date = date(2026, 7, 9)
+    notifications: list[tuple[str, str, bool]] = []
+
+    def fail_retryable(*_args):
+        raise RetryableJobError(
+            "temporary network timeout",
+            failure_class=FailureClass.NETWORK_TIMEOUT,
+        )
+
+    status = run_daily_job(
+        tmp_path,
+        trade_date,
+        "18:30",
+        1,
+        prepare_deploy=False,
+        repository=FakeJobRepository(),
+        calendar_decider=lambda *_args, **_kwargs: TradingDayDecision(
+            status="trading_day",
+            source="supabase",
+            message="market open",
+        ),
+        run_daily=fail_retryable,
+        notify_enabled=True,
+        notify_func=lambda title, message, enabled=False: notifications.append(
+            (title, message, enabled)
+        ),
+    )
+
+    assert status.status == RunStatus.FAILED_RETRYABLE
+    assert notifications == []
+
+
 @pytest.mark.parametrize(
     "run_status",
     [
@@ -581,6 +848,77 @@ def test_ops_run_daily_job_cli_exits_nonzero_for_action_required_status(
 
     assert result.exit_code != 0
     assert run_status.value in result.output
+
+
+def test_ops_run_daily_job_cli_enables_notification_from_option(monkeypatch, tmp_path):
+    captured_notify_enabled: list[bool] = []
+
+    def fake_run_daily_job(**kwargs):
+        captured_notify_enabled.append(kwargs["notify_enabled"])
+        return JobStatus(
+            trade_date=kwargs["trade_date"],
+            attempt=kwargs["attempt"],
+            scheduled_slot=kwargs["scheduled_slot"],
+            status=RunStatus.SUCCESS_NO_RECOMMENDATIONS,
+            stage="complete",
+        )
+
+    monkeypatch.setenv("PROJECT_ROOT", str(tmp_path))
+    monkeypatch.delenv("STOCK_ANALYZER_NOTIFY_MAC", raising=False)
+    monkeypatch.setattr("stock_analyzer.cli.run_daily_job", fake_run_daily_job)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "ops",
+            "run-daily-job",
+            "--trade-date",
+            "2026-07-09",
+            "--scheduled-slot",
+            "18:30",
+            "--attempt",
+            "1",
+            "--notify-mac",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert captured_notify_enabled == [True]
+
+
+def test_ops_run_daily_job_cli_enables_notification_from_env(monkeypatch, tmp_path):
+    captured_notify_enabled: list[bool] = []
+
+    def fake_run_daily_job(**kwargs):
+        captured_notify_enabled.append(kwargs["notify_enabled"])
+        return JobStatus(
+            trade_date=kwargs["trade_date"],
+            attempt=kwargs["attempt"],
+            scheduled_slot=kwargs["scheduled_slot"],
+            status=RunStatus.SUCCESS_NO_RECOMMENDATIONS,
+            stage="complete",
+        )
+
+    monkeypatch.setenv("PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("STOCK_ANALYZER_NOTIFY_MAC", "1")
+    monkeypatch.setattr("stock_analyzer.cli.run_daily_job", fake_run_daily_job)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "ops",
+            "run-daily-job",
+            "--trade-date",
+            "2026-07-09",
+            "--scheduled-slot",
+            "18:30",
+            "--attempt",
+            "1",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert captured_notify_enabled == [True]
 
 
 def test_ops_verify_production_cli_exits_zero_when_verification_passes(
@@ -698,6 +1036,27 @@ def _cleanup_summary(trade_date: date, events: list[str]) -> CleanupSummary:
         repository_deleted_counts={"recommendation_daily": 1},
         removed_paths=("reports/daily/2026-07-09",),
     )
+
+
+def _write_previous_status(
+    status_path,
+    *,
+    trade_date: date,
+    attempt: int,
+    run_status: RunStatus,
+) -> None:
+    JobStatus(
+        trade_date=trade_date,
+        attempt=attempt,
+        scheduled_slot="18:30" if attempt == 1 else "19:00",
+        status=run_status,
+        stage="run_daily",
+        failure_class=(
+            FailureClass.NETWORK_TIMEOUT
+            if run_status == RunStatus.FAILED_RETRYABLE
+            else None
+        ),
+    ).write_json(status_path)
 
 
 def _successful_verification(trade_date: date) -> ProductionVerification:

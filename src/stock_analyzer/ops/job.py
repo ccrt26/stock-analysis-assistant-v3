@@ -14,6 +14,7 @@ from stock_analyzer.data.provider import (
 )
 from stock_analyzer.ops.calendar import decide_trading_day
 from stock_analyzer.ops.cleanup import cleanup_trade_date
+from stock_analyzer.ops.notify import notify_mac, should_notify
 from stock_analyzer.ops.redaction import redact_secrets
 from stock_analyzer.ops.status import FailureClass, JobStatus, RunStatus
 from stock_analyzer.ops.verify import ProductionVerification, verify_production_result
@@ -81,18 +82,65 @@ def run_daily_job(
     verifier: Callable[[Path, Any, date], ProductionVerification] | None = None,
     prepare_deploy_func: Callable[[Path], Any] | None = None,
     status_path: Path | None = None,
+    notify_enabled: bool = False,
+    notify_func: Callable[..., Any] | None = None,
 ) -> JobStatus:
     root = Path(project_root)
     started_at = _utc_now()
     status_file = status_path or root / "logs" / "run-daily" / "latest-status.json"
     cleanup_summary: dict[str, Any] = {}
     cleanup_performed = False
+    effective_notify_func = notify_func or notify_mac
+
+    def write_status(**kwargs) -> JobStatus:
+        return _maybe_notify(
+            _write_status(status_file, **kwargs),
+            notify_enabled=notify_enabled,
+            notify_func=effective_notify_func,
+        )
+
+    def failure_status(**kwargs) -> JobStatus:
+        return _maybe_notify(
+            _failure_status(status_file, **kwargs),
+            notify_enabled=notify_enabled,
+            notify_func=effective_notify_func,
+        )
+
+    if attempt > MAX_ATTEMPTS:
+        return write_status(
+            trade_date=trade_date,
+            attempt=attempt,
+            scheduled_slot=scheduled_slot,
+            started_at=started_at,
+            status=RunStatus.FAILED_NEEDS_HUMAN,
+            stage="retry_preflight",
+            failure_class=FailureClass.MAX_ATTEMPTS_EXCEEDED,
+            fix_suggestion="Reject attempts above 3; inspect latest-status.json.",
+        )
+
+    if attempt > 1:
+        retry_preflight_error = _retry_preflight_error(
+            status_file,
+            trade_date,
+            attempt,
+        )
+        if retry_preflight_error is not None:
+            return write_status(
+                trade_date=trade_date,
+                attempt=attempt,
+                scheduled_slot=scheduled_slot,
+                started_at=started_at,
+                status=RunStatus.FAILED_NEEDS_HUMAN,
+                stage="retry_preflight",
+                failure_class=FailureClass.RETRY_PREFLIGHT_BLOCKED,
+                fix_suggestion=retry_preflight_error,
+                error_message_redacted=retry_preflight_error,
+            )
 
     try:
         repo = repository if repository is not None else _default_repository()
     except Exception as exc:
-        return _write_status(
-            status_file,
+        return write_status(
             trade_date=trade_date,
             attempt=attempt,
             scheduled_slot=scheduled_slot,
@@ -120,8 +168,7 @@ def run_daily_job(
             tushare_calendar_loader=tushare_calendar_loader,
         )
     except Exception as exc:
-        return _write_status(
-            status_file,
+        return write_status(
             trade_date=trade_date,
             attempt=attempt,
             scheduled_slot=scheduled_slot,
@@ -134,8 +181,7 @@ def run_daily_job(
         )
 
     if calendar_decision.status == "non_trading_day":
-        return _write_status(
-            status_file,
+        return write_status(
             trade_date=trade_date,
             attempt=attempt,
             scheduled_slot=scheduled_slot,
@@ -147,8 +193,7 @@ def run_daily_job(
         )
 
     if calendar_decision.status == "calendar_unknown":
-        return _write_status(
-            status_file,
+        return write_status(
             trade_date=trade_date,
             attempt=attempt,
             scheduled_slot=scheduled_slot,
@@ -166,8 +211,7 @@ def run_daily_job(
             cleanup_summary = _cleanup_summary_to_dict(cleanup_result)
             cleanup_performed = True
         except Exception as exc:
-            return _write_status(
-                status_file,
+            return write_status(
                 trade_date=trade_date,
                 attempt=attempt,
                 scheduled_slot=scheduled_slot,
@@ -186,8 +230,7 @@ def run_daily_job(
     try:
         _invoke(health_check_func, root, repo, trade_date)
     except Exception as exc:
-        return _failure_status(
-            status_file,
+        return failure_status(
             trade_date=trade_date,
             attempt=attempt,
             scheduled_slot=scheduled_slot,
@@ -201,8 +244,7 @@ def run_daily_job(
     try:
         _invoke(run_daily_func, root, repo, trade_date)
     except Exception as exc:
-        return _failure_status(
-            status_file,
+        return failure_status(
             trade_date=trade_date,
             attempt=attempt,
             scheduled_slot=scheduled_slot,
@@ -216,8 +258,7 @@ def run_daily_job(
     try:
         verification = verify_func(root, repo, trade_date)
     except Exception as exc:
-        return _failure_status(
-            status_file,
+        return failure_status(
             trade_date=trade_date,
             attempt=attempt,
             scheduled_slot=scheduled_slot,
@@ -231,8 +272,7 @@ def run_daily_job(
     if not verification.passed:
         failure_class = verification.failure_class or FailureClass.REPORT_ARTIFACT_INVALID
         status = _failed_status_for_failure_class(failure_class, attempt)
-        return _write_status(
-            status_file,
+        return write_status(
             trade_date=trade_date,
             attempt=attempt,
             scheduled_slot=scheduled_slot,
@@ -262,8 +302,7 @@ def run_daily_job(
             prepare_deploy_func(root)
             deploy_artifact_prepared = True
         except Exception as exc:
-            return _failure_status(
-                status_file,
+            return failure_status(
                 trade_date=trade_date,
                 attempt=attempt,
                 scheduled_slot=scheduled_slot,
@@ -285,8 +324,7 @@ def run_daily_job(
     else:
         publish_skipped_reason = "prepare_deploy_flag_not_set"
 
-    return _write_status(
-        status_file,
+    return write_status(
         trade_date=trade_date,
         attempt=attempt,
         scheduled_slot=scheduled_slot,
@@ -385,6 +423,68 @@ def _default_prepare_deploy(project_root: Path) -> Path:
 
     root = Path(project_root)
     return prepare_pages_artifact(root, root / "dist" / "pages")
+
+
+def _retry_preflight_error(
+    status_path: Path,
+    trade_date: date,
+    attempt: int,
+) -> str | None:
+    if not status_path.is_file():
+        return (
+            "Previous latest-status.json is required before retry attempts; "
+            "do not clean or rerun production."
+        )
+    try:
+        previous = JobStatus.model_validate_json(status_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        return redact_secrets(
+            "Previous latest-status.json could not be read before retry: "
+            f"{exc}"
+        )
+    if previous.trade_date != trade_date:
+        return (
+            "Previous latest-status.json is for "
+            f"{previous.trade_date.isoformat()}, not {trade_date.isoformat()}; "
+            "do not clean or rerun production."
+        )
+    if previous.attempt != attempt - 1:
+        return (
+            "Previous latest-status.json attempt must be exactly "
+            f"{attempt - 1} before attempt {attempt}; do not clean or rerun "
+            "production."
+        )
+    if previous.status != RunStatus.FAILED_RETRYABLE:
+        return (
+            "Previous latest-status.json status must be failed_retryable before "
+            "a retry slot can clean or rerun production."
+        )
+    return None
+
+
+def _maybe_notify(
+    status: JobStatus,
+    *,
+    notify_enabled: bool,
+    notify_func: Callable[..., Any],
+) -> JobStatus:
+    if not notify_enabled or not should_notify(status):
+        return status
+    title = redact_secrets("Stock analysis assistant needs attention")
+    detail = (
+        status.fix_suggestion
+        or status.error_message_redacted
+        or "Review logs/run-daily/latest-status.json."
+    )
+    message = redact_secrets(
+        f"{status.trade_date.isoformat()} {status.status.value} "
+        f"at {status.stage}: {detail}"
+    )
+    try:
+        notify_func(title, message, enabled=True)
+    except Exception:
+        return status
+    return status
 
 
 def _failure_status(

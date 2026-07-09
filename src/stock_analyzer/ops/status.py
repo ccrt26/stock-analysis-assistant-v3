@@ -41,6 +41,7 @@ class FailureClass(str, Enum):
     POSSIBLE_FULL_MARKET_WRITE = "possible_full_market_write"
     FIXTURE_SAMPLE_IN_PRODUCTION = "fixture_sample_in_production"
     REPORT_ARTIFACT_INVALID = "report_artifact_invalid"
+    RETRY_PREFLIGHT_BLOCKED = "retry_preflight_blocked"
     MAX_ATTEMPTS_EXCEEDED = "max_attempts_exceeded"
     CALENDAR_UNKNOWN = "calendar_unknown"
 
