@@ -24,6 +24,12 @@ class AppConfig(BaseModel):
     supabase_stop_mb: float = 400
     fixture_mode: bool = False
     notify_mac: bool = False
+    report_site_url: Optional[str] = None
+    cloudflare_pages_project_name: Optional[str] = None
+    report_password_env: str = "REPORT_PASSWORD"
+    report_session_secret_env: str = "REPORT_SESSION_SECRET"
+    cloudflare_token_env: str = "CLOUDFLARE_API_TOKEN"
+    cloudflare_account_id_env: str = "CLOUDFLARE_ACCOUNT_ID"
 
     @classmethod
     def load(
@@ -53,6 +59,18 @@ class AppConfig(BaseModel):
             supabase_stop_mb=float(values.get("SUPABASE_STOP_MB", 400)),
             fixture_mode=_env_flag(values, "STOCK_ANALYZER_FIXTURE_MODE"),
             notify_mac=_env_flag(values, "STOCK_ANALYZER_NOTIFY_MAC"),
+            report_site_url=values.get("REPORT_SITE_URL"),
+            cloudflare_pages_project_name=values.get("CLOUDFLARE_PAGES_PROJECT_NAME"),
+            report_password_env=values.get("REPORT_PASSWORD_ENV", "REPORT_PASSWORD"),
+            report_session_secret_env=values.get(
+                "REPORT_SESSION_SECRET_ENV",
+                "REPORT_SESSION_SECRET",
+            ),
+            cloudflare_token_env=values.get("CLOUDFLARE_TOKEN_ENV", "CLOUDFLARE_API_TOKEN"),
+            cloudflare_account_id_env=values.get(
+                "CLOUDFLARE_ACCOUNT_ID_ENV",
+                "CLOUDFLARE_ACCOUNT_ID",
+            ),
         )
 
     @property
