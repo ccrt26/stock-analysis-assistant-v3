@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from enum import Enum
@@ -11,6 +13,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from stock_analyzer.config import AppConfig
 from stock_analyzer.ops.redaction import redact_secrets
+from stock_analyzer.storage.capacity_guard import CapacityStatus
 
 
 class PublishStatus(str, Enum):
@@ -39,6 +42,19 @@ class PublishFailureClass(str, Enum):
             PublishFailureClass.WRANGLER_TEMPORARY_FAILURE,
             PublishFailureClass.SMOKE_FAILED,
         }
+
+
+class PublishPreflightError(RuntimeError):
+    def __init__(
+        self,
+        message: str,
+        *,
+        failure_class: PublishFailureClass,
+        user_action_required: str,
+    ) -> None:
+        super().__init__(redact_secrets(message))
+        self.failure_class = failure_class
+        self.user_action_required = redact_secrets(user_action_required)
 
 
 class PublishMode(str, Enum):
@@ -135,6 +151,108 @@ class WranglerResult:
     stdout_redacted: str
     stderr_redacted: str
     deployment_url: str | None
+
+
+def load_publish_candidate(
+    config: PublishConfig,
+    trade_date: date | None = None,
+) -> PublishCandidate:
+    status_path = config.project_root / "logs" / "run-daily" / "latest-status.json"
+    if not status_path.is_file():
+        raise PublishPreflightError(
+            "No Phase 1 production status file was found.",
+            failure_class=PublishFailureClass.NO_PUBLISHABLE_REPORT,
+            user_action_required="今天还没有可发布报告；先等待生产流程成功完成。",
+        )
+
+    payload = json.loads(status_path.read_text(encoding="utf-8"))
+    status_trade_date = date.fromisoformat(str(payload.get("trade_date")))
+    if trade_date is not None and status_trade_date != trade_date:
+        raise PublishPreflightError(
+            f"Latest production status is for {status_trade_date}, not {trade_date}.",
+            failure_class=PublishFailureClass.NO_PUBLISHABLE_REPORT,
+            user_action_required="今天还没有可发布报告；如需补发历史日期，请人工指定日期并先确认报告存在。",
+        )
+
+    run_status = str(payload.get("status"))
+    recommendations = int(payload.get("recommendations") or 0)
+    if run_status == "skipped_non_trading_day":
+        raise PublishPreflightError(
+            "Latest production status is non-trading day.",
+            failure_class=PublishFailureClass.NON_TRADING_DAY,
+            user_action_required="今天不是交易日，不发布新报告；线上保留上一版。",
+        )
+    if recommendations == 0:
+        raise PublishPreflightError(
+            "Latest production status has zero recommendations.",
+            failure_class=PublishFailureClass.ZERO_RECOMMENDATIONS,
+            user_action_required="当天无推荐，不发布新报告；线上保留上一版。",
+        )
+    if run_status != "success_with_recommendations":
+        raise PublishPreflightError(
+            f"Latest production status is {run_status}.",
+            failure_class=PublishFailureClass.NO_PUBLISHABLE_REPORT,
+            user_action_required="今天生产流程还没有成功完成，暂不发布。",
+        )
+
+    reports_dir = config.project_root / "reports"
+    daily_index = reports_dir / "daily" / status_trade_date.isoformat() / "index.html"
+    if not (reports_dir / "index.html").is_file() or not daily_index.is_file():
+        raise PublishPreflightError(
+            "Report files are missing.",
+            failure_class=PublishFailureClass.NO_PUBLISHABLE_REPORT,
+            user_action_required="报告文件缺失；请先重新生成当天报告。",
+        )
+
+    return PublishCandidate(
+        trade_date=status_trade_date,
+        recommendations=recommendations,
+        job_status_path=status_path,
+        reports_dir=reports_dir,
+    )
+
+
+def preflight_publish(
+    config: PublishConfig,
+    candidate: PublishCandidate,
+    *,
+    env: Mapping[str, str] | None = None,
+    capacity_checker: Callable[[], CapacityStatus] | None = None,
+) -> tuple[str, ...]:
+    values = os.environ if env is None else env
+    missing_count = 0
+    if not config.report_site_url:
+        missing_count += 1
+    if not config.cloudflare_pages_project_name:
+        missing_count += 1
+    for env_name in (
+        config.report_password_env,
+        config.report_session_secret_env,
+        config.cloudflare_token_env,
+    ):
+        if not str(values.get(env_name, "")).strip():
+            missing_count += 1
+    if missing_count:
+        raise PublishPreflightError(
+            f"Missing publish configuration ({missing_count} item(s)).",
+            failure_class=PublishFailureClass.CONFIG_MISSING,
+            user_action_required="发布配置不完整；请检查本机 .env.local 中的 Cloudflare 和报告密码配置。",
+        )
+
+    checks = ["config_present"]
+    if capacity_checker is not None:
+        capacity = capacity_checker()
+        checks.append(f"supabase_capacity={capacity.size_mb:.1f}MB")
+        if capacity.stop_large_writes:
+            raise PublishPreflightError(
+                f"Supabase capacity stop at {capacity.size_mb:.1f} MB.",
+                failure_class=PublishFailureClass.SUPABASE_CAPACITY_STOP,
+                user_action_required=(
+                    f"Supabase 容量已到 {capacity.size_mb:.1f} MB，停止发布；"
+                    "请先处理容量问题。"
+                ),
+            )
+    return tuple(checks)
 
 
 def _redact_payload(value: Any) -> Any:
