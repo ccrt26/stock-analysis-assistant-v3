@@ -728,8 +728,11 @@ def publish_report_site(
 def _extract_deployment_url(text: str) -> str | None:
     for match in _URL_PATTERN.finditer(text):
         value = match.group(0).rstrip(".,)")
-        parsed = urlparse(value)
-        hostname = (parsed.hostname or "").lower()
+        try:
+            parsed = urlparse(value)
+            hostname = (parsed.hostname or "").lower()
+        except ValueError:
+            continue
         if parsed.scheme == "https" and (
             hostname == "pages.dev" or hostname.endswith(".pages.dev")
         ):

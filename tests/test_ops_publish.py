@@ -470,6 +470,15 @@ def test_extract_deployment_url_requires_pages_dev_hostname():
     )
 
 
+def test_extract_deployment_url_skips_malformed_urls():
+    text = (
+        "diagnostic https://[not-valid\n"
+        "Published https://tl-quant-reports.pages.dev"
+    )
+
+    assert _extract_deployment_url(text) == "https://tl-quant-reports.pages.dev"
+
+
 def _successful_smoke(url, password, *, expected_trade_date=None):
     return SmokeResult(
         base_url=url,
