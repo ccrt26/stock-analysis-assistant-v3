@@ -19,7 +19,7 @@
 - Auto publish runs only after the whole Phase 1 daily production flow eventually succeeds.
 - Do not publish non-trading-day reports.
 - Do not publish zero-recommendation reports.
-- Publish 1-9 recommendation reports; quality is Phase 3 Strategy V2.
+- Publish 1-10 recommendation reports; quality is Phase 3 Strategy V2.
 - Publish status remains local only; do not write Phase 2 publish results to Supabase.
 - Use Wrangler for Phase 2 first version; keep Cloudflare API and GitHub Actions as future directions.
 - Every implementer, reviewer, and subagent for this plan must use GPT-5.5 xhigh. Mini models are forbidden for Phase 2.
