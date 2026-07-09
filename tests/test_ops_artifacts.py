@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from stock_analyzer.ops import artifacts as artifacts_module
 from stock_analyzer.ops.artifacts import DeployArtifactError, prepare_pages_artifact
 from stock_analyzer.ops.calendar import TradingDayDecision
 from stock_analyzer.ops.job import run_daily_job
@@ -52,6 +53,25 @@ def test_prepare_pages_artifact_requires_report_index(tmp_path):
 
     with pytest.raises(DeployArtifactError, match="reports/index.html"):
         prepare_pages_artifact(tmp_path, tmp_path / "dist" / "pages")
+
+
+def test_prepare_pages_artifact_can_use_source_root_for_middleware(
+    monkeypatch,
+    tmp_path,
+):
+    production_root = tmp_path / "production-root"
+    source_root = tmp_path / "source-root"
+    _write_report_tree(production_root)
+    _write_middleware(source_root)
+    monkeypatch.setattr(artifacts_module, "_DEFAULT_SOURCE_ROOT", source_root)
+
+    artifact_dir = prepare_pages_artifact(
+        production_root,
+        tmp_path / "artifact-pages",
+    )
+
+    assert (artifact_dir / "index.html").exists()
+    assert (artifact_dir / "functions" / "_middleware.ts").exists()
 
 
 def test_run_daily_job_default_prepare_deploy_builds_pages_artifact(tmp_path):

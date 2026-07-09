@@ -22,13 +22,20 @@ _FORBIDDEN_RELATIVE_PREFIXES = (
     Path("data/cache"),
     Path("data/raw"),
 )
+_DEFAULT_SOURCE_ROOT = Path(__file__).resolve().parents[3]
 
 
-def prepare_pages_artifact(project_root: Path, output_dir: Path) -> Path:
+def prepare_pages_artifact(
+    project_root: Path,
+    output_dir: Path,
+    *,
+    source_root: Path | None = None,
+) -> Path:
     root = Path(project_root).expanduser().resolve()
+    source = Path(source_root or _DEFAULT_SOURCE_ROOT).expanduser().resolve()
     target = _resolve_output_dir(root, output_dir)
     reports_dir = root / "reports"
-    middleware_path = root / "functions" / "_middleware.ts"
+    middleware_path = _middleware_path(root, source)
 
     _validate_required_inputs(reports_dir, middleware_path)
     _validate_output_dir(root, reports_dir, middleware_path.parent, target)
@@ -43,6 +50,13 @@ def prepare_pages_artifact(project_root: Path, output_dir: Path) -> Path:
     shutil.copy2(middleware_path, middleware_target)
     _assert_forbidden_paths_absent(target)
     return target
+
+
+def _middleware_path(project_root: Path, source_root: Path) -> Path:
+    project_middleware = project_root / "functions" / "_middleware.ts"
+    if project_middleware.is_file():
+        return project_middleware
+    return source_root / "functions" / "_middleware.ts"
 
 
 def _resolve_output_dir(project_root: Path, output_dir: Path) -> Path:
