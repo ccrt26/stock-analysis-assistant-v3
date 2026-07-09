@@ -110,10 +110,9 @@ def run_daily_job(
     run_daily_func = run_daily or _default_run_daily
     verify_func = verifier or verify_production_result
 
-    if tushare_calendar_loader is None and calendar_decider is None:
-        tushare_calendar_loader = _default_tushare_calendar_loader()
-
     try:
+        if tushare_calendar_loader is None and calendar_decider is None:
+            tushare_calendar_loader = _default_tushare_calendar_loader()
         calendar_decision = calendar(
             trade_date,
             repo,

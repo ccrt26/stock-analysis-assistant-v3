@@ -329,6 +329,41 @@ def test_run_daily_job_calendar_unknown_requires_human_intervention(tmp_path):
     assert status.fix_suggestion
 
 
+def test_run_daily_job_default_calendar_loader_failure_writes_redacted_status(
+    monkeypatch,
+    tmp_path,
+):
+    trade_date = date(2026, 7, 9)
+    status_path = tmp_path / "logs" / "run-daily" / "latest-status.json"
+
+    def fail_loader():
+        raise RuntimeError(
+            "Tushare token failed CREDENTIAL_KEY=loader-redaction-sentinel"
+        )
+
+    monkeypatch.setattr(
+        "stock_analyzer.ops.job._default_tushare_calendar_loader",
+        fail_loader,
+    )
+
+    status = run_daily_job(
+        tmp_path,
+        trade_date,
+        "18:30",
+        1,
+        prepare_deploy=False,
+        repository=FakeJobRepository(),
+        status_path=status_path,
+    )
+
+    status_text = status_path.read_text(encoding="utf-8")
+    assert status.status == RunStatus.CALENDAR_UNKNOWN
+    assert status.failure_class == FailureClass.CALENDAR_UNKNOWN
+    assert status.stage == "calendar"
+    assert "loader-redaction-sentinel" not in status_text
+    assert "[REDACTED]" in status_text
+
+
 def test_run_daily_job_attempt_two_cleans_before_rerun(tmp_path):
     trade_date = date(2026, 7, 9)
     events: list[str] = []
