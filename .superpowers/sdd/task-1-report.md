@@ -58,3 +58,28 @@ none
 
 ### Concerns
 none
+
+## Rereview Fix 2026-07-10
+
+### Fixes
+- Locked `EvidencePolarity`, `DataAvailability`, `ActionDecision`, and new `FocusSource` enum values to the shared interface exactly.
+- Added `FocusSource` and typed `FocusEntryThesis.source` with it.
+- Made `OperationalDailyStatus.is_trading_day` a required boolean and included it in serialization coverage.
+- Made `StrategyEvidenceSnapshot.internal_score` a required `float`.
+- Added contract tests for the exact enum value sets, `is_trading_day` serialization, and missing `internal_score` validation.
+
+### Test Commands and Results
+- RED: `.venv/bin/python -m pytest tests/test_strategy_v2_contracts.py -v`
+  - Result: exit 2, expected collection failure.
+  - Evidence: `ImportError: cannot import name 'FocusSource' from 'stock_analyzer.domain.models'`.
+- Focused: `.venv/bin/python -m pytest tests/test_strategy_v2_contracts.py -v`
+  - Result: exit 0.
+  - Summary: `18 passed in 0.08s`.
+- Verification: `.venv/bin/python -m pytest tests/test_strategy_v2_contracts.py tests/test_domain_models.py tests/test_recommendation.py tests/test_focus_state_machine.py -v`
+  - Result: exit 0.
+  - Summary: `30 passed in 0.07s`.
+- Diff check: `git diff --check -- src/stock_analyzer/domain/models.py tests/test_strategy_v2_contracts.py`
+  - Result: exit 0, no whitespace errors.
+
+### Concerns
+none

@@ -14,6 +14,7 @@ from stock_analyzer.domain.models import (
     EvidencePolarity,
     FocusDailyUpdate,
     FocusEntryThesis,
+    FocusSource,
     ManualActionRecord,
     ManualHolding,
     ModuleEvidence,
@@ -76,6 +77,44 @@ def test_data_requirement_levels_use_approved_contract_values_exactly():
     }
 
 
+def test_evidence_polarity_uses_approved_contract_values_exactly():
+    assert {polarity.value for polarity in EvidencePolarity} == {
+        "support",
+        "counter",
+        "neutral",
+    }
+
+
+def test_data_availability_uses_approved_contract_values_exactly():
+    assert {availability.value for availability in DataAvailability} == {
+        "available_primary",
+        "available_backup",
+        "available_local_cache",
+        "unavailable_after_recovery",
+    }
+
+
+def test_action_decision_uses_approved_display_values_exactly():
+    assert {decision.value for decision in ActionDecision} == {
+        "暂不参与",
+        "继续观察",
+        "等待确认",
+        "避免追高",
+        "小仓试探",
+        "提高关注",
+        "确认后考虑提高仓位",
+        "风险上升，降低或避免新增",
+        "建议确认是否移出重点",
+    }
+
+
+def test_focus_source_uses_approved_contract_values_exactly():
+    assert {source.value for source in FocusSource} == {
+        "system",
+        "manual",
+    }
+
+
 def test_strategy_snapshot_serializes_six_module_evidence_and_action():
     atom = _atom()
     status = DataRequirementStatus(
@@ -123,6 +162,23 @@ def test_strategy_snapshot_serializes_six_module_evidence_and_action():
         "RESEARCH_TREND_CONFIRMATION"
     ]
     assert payload["risk_reward"] == 1.67
+
+
+def test_strategy_snapshot_requires_internal_score():
+    with pytest.raises(ValueError):
+        StrategyEvidenceSnapshot(
+            evidence_id="2026-07-10-600000.SH",
+            trade_date=date(2026, 7, 10),
+            ts_code="600000.SH",
+            name="浦发银行",
+            modules=[],
+            action=_action(),
+            thesis="银行板块企稳下的 2-8 周修复观察。",
+            display_rank_bucket="强观察",
+            data_insufficient=False,
+            data_insufficient_reason=None,
+            source_versions={"market_daily": "2026-07-10"},
+        )
 
 
 @pytest.mark.parametrize(
@@ -192,6 +248,7 @@ def test_focus_manual_recovery_and_operational_contracts_serialize():
         trade_date=date(2026, 7, 10),
         ts_code="600000.SH",
         name="浦发银行",
+        source=FocusSource.SYSTEM,
         thesis="银行板块企稳下的 2-8 周修复观察。",
         action=action,
         expected_upside_pct=10.0,
@@ -238,6 +295,7 @@ def test_focus_manual_recovery_and_operational_contracts_serialize():
     )
     operational = OperationalDailyStatus(
         trade_date=date(2026, 7, 10),
+        is_trading_day=True,
         recommendation_state=OperationalReportState.GENERATED,
         focus_state=OperationalReportState.DATA_INSUFFICIENT,
         recommendation_count=5,
@@ -255,6 +313,7 @@ def test_focus_manual_recovery_and_operational_contracts_serialize():
     operational_payload = operational.model_dump(mode="json")
     assert set(operational_payload) == {
         "trade_date",
+        "is_trading_day",
         "recommendation_state",
         "focus_state",
         "recommendation_count",
@@ -263,6 +322,7 @@ def test_focus_manual_recovery_and_operational_contracts_serialize():
         "blocking_missing_fields",
         "message",
     }
+    assert operational_payload["is_trading_day"] is True
     assert operational_payload["recommendation_state"] == "generated"
     assert operational_payload["focus_state"] == "data_insufficient"
     assert operational_payload["recommendation_count"] == 5

@@ -113,9 +113,9 @@ class EvidenceModule(str, Enum):
 
 
 class EvidencePolarity(str, Enum):
-    SUPPORT = "支持"
-    COUNTER = "反证"
-    NEUTRAL = "中性"
+    SUPPORT = "support"
+    COUNTER = "counter"
+    NEUTRAL = "neutral"
 
 
 class DataRequirementLevel(str, Enum):
@@ -125,22 +125,27 @@ class DataRequirementLevel(str, Enum):
 
 
 class DataAvailability(str, Enum):
-    AVAILABLE_PRIMARY = "主源可用"
-    AVAILABLE_BACKUP = "备源可用"
-    AVAILABLE_CACHE = "本地缓存可用"
-    MISSING = "缺失"
-    PARTIAL = "部分可用"
+    AVAILABLE_PRIMARY = "available_primary"
+    AVAILABLE_BACKUP = "available_backup"
+    AVAILABLE_LOCAL_CACHE = "available_local_cache"
+    UNAVAILABLE_AFTER_RECOVERY = "unavailable_after_recovery"
 
 
 class ActionDecision(str, Enum):
-    FOCUS_ENTRY = "进入重点观察"
+    NO_PARTICIPATION = "暂不参与"
+    CONTINUE_WATCHING = "继续观察"
     WAIT_FOR_CONFIRMATION = "等待确认"
-    HOLD = "持有"
-    ADD = "加仓"
-    REDUCE = "减仓"
-    EXIT = "退出"
-    AVOID = "回避"
-    INSUFFICIENT_DATA = "数据不足，不形成结论"
+    AVOID_CHASING = "避免追高"
+    SMALL_EXPLORATORY = "小仓试探"
+    INCREASE_ATTENTION = "提高关注"
+    CONDITIONAL_ADD = "确认后考虑提高仓位"
+    REDUCE_OR_AVOID = "风险上升，降低或避免新增"
+    CONFIRM_REMOVAL = "建议确认是否移出重点"
+
+
+class FocusSource(str, Enum):
+    SYSTEM = "system"
+    MANUAL = "manual"
 
 
 class OperationalReportState(str, Enum):
@@ -243,7 +248,7 @@ class StrategyEvidenceSnapshot(BaseModel):
     risk_reward: Optional[float] = None
     focus_entry_progress: Optional[str] = None
     display_rank_bucket: str
-    internal_score: Optional[float] = None
+    internal_score: float
     data_insufficient: bool = False
     data_insufficient_reason: Optional[str] = None
     source_versions: Dict[str, str] = Field(default_factory=dict)
@@ -269,6 +274,7 @@ class FocusEntryThesis(BaseModel):
     trade_date: date
     ts_code: str
     name: str
+    source: FocusSource
     thesis: str
     action: ActionRecommendation
     expected_upside_pct: Optional[float] = None
@@ -319,6 +325,7 @@ class ManualActionRecord(BaseModel):
 
 class OperationalDailyStatus(BaseModel):
     trade_date: date
+    is_trading_day: bool
     recommendation_state: OperationalReportState
     focus_state: OperationalReportState
     recommendation_count: int = Field(ge=0)
