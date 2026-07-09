@@ -16,7 +16,9 @@ from pydantic import BaseModel, Field, field_validator
 
 from stock_analyzer.config import AppConfig
 from stock_analyzer.ops.artifacts import prepare_pages_artifact
+from stock_analyzer.ops.notify import notify_mac
 from stock_analyzer.ops.redaction import redact_secrets
+from stock_analyzer.ops.smoke import smoke_report_site
 from stock_analyzer.storage.capacity_guard import CapacityStatus
 
 
@@ -331,12 +333,283 @@ def run_wrangler_deploy(
     )
 
 
+def is_auto_publish_enabled(config: PublishConfig) -> bool:
+    if not config.auto_publish_flag_path.is_file():
+        return False
+    try:
+        payload = json.loads(config.auto_publish_flag_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    if not isinstance(payload, dict):
+        return False
+    return bool(payload.get("enabled"))
+
+
+def set_auto_publish_enabled(config: PublishConfig, enabled: bool) -> None:
+    config.auto_publish_flag_path.parent.mkdir(parents=True, exist_ok=True)
+    config.auto_publish_flag_path.write_text(
+        json.dumps({"enabled": enabled}, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
+def publish_report_site(
+    config: PublishConfig,
+    *,
+    mode: PublishMode,
+    trade_date: date | None = None,
+    env: Mapping[str, str] | None = None,
+    capacity_checker: Callable[[], CapacityStatus] | None = None,
+    prepare_artifact: Callable[[Path, Path], Path] | None = None,
+    deploy_runner: Callable[..., WranglerResult] | None = None,
+    smoke_func: Callable[..., Any] | None = None,
+    notify_func: Callable[..., Any] | None = None,
+    notify_enabled: bool = False,
+) -> PublishState:
+    started_at = _utc_now()
+    checks: list[str] = []
+    values = os.environ if env is None else env
+
+    try:
+        candidate = load_publish_candidate(config, trade_date=trade_date)
+        checks.extend(
+            preflight_publish(
+                config,
+                candidate,
+                env=values,
+                capacity_checker=capacity_checker,
+            )
+        )
+
+        artifact_dir = prepare_publish_artifact(config, prepare_artifact=prepare_artifact)
+        checks.append("artifact_prepared")
+
+        deploy = _deploy_with_one_retry(
+            config,
+            artifact_dir,
+            env=values,
+            deploy_runner=deploy_runner,
+        )
+        checks.append("wrangler_deployed")
+        if deploy.exit_code != 0:
+            return _write_publish_failure(
+                config,
+                mode,
+                started_at,
+                candidate,
+                _classify_wrangler_failure(deploy),
+                "发布失败：Cloudflare 上传没有成功。",
+                "请检查 Cloudflare 凭据、项目名和网络连接后再重试。",
+                checks,
+                rollback_performed=False,
+                error_message=deploy.stderr_redacted or deploy.stdout_redacted,
+                notify_func=notify_func,
+                notify_enabled=notify_enabled,
+            )
+
+        smoke = (smoke_func or smoke_report_site)(
+            config.report_site_url,
+            values.get(config.report_password_env),
+            expected_trade_date=candidate.trade_date,
+        )
+        checks.extend(smoke.checks)
+        if not smoke.passed:
+            rollback_ok = _rollback_last_known_good(
+                config,
+                values,
+                deploy_runner,
+                smoke_func,
+            )
+            summary = (
+                "发布后线上检查失败，系统已回退上一版正常报告。"
+                if rollback_ok
+                else "发布后线上检查失败，且自动回退失败。"
+            )
+            return _write_publish_failure(
+                config,
+                mode,
+                started_at,
+                candidate,
+                PublishFailureClass.SMOKE_FAILED
+                if rollback_ok
+                else PublishFailureClass.ROLLBACK_FAILED,
+                summary,
+                "请查看本地发布状态页，并检查 Cloudflare 密码配置或报告日期。",
+                checks,
+                rollback_performed=rollback_ok,
+                error_message=smoke.fix_suggestion,
+                notify_func=notify_func,
+                notify_enabled=notify_enabled,
+            )
+
+        _save_last_known_good(artifact_dir, config.last_known_good_dir)
+        set_auto_publish_enabled(config, True)
+        state = PublishState(
+            trade_date=candidate.trade_date,
+            status=PublishStatus.SUCCESS,
+            mode=mode,
+            started_at=started_at,
+            finished_at=_utc_now(),
+            published_url=deploy.deployment_url or config.report_site_url,
+            report_site_url=config.report_site_url,
+            recommendations=candidate.recommendations,
+            failure_class=None,
+            rollback_performed=False,
+            auto_publish_enabled=True,
+            last_known_good_path=str(config.last_known_good_dir),
+            summary_for_user=(
+                f"发布成功：线上报告 {candidate.trade_date.isoformat()}，"
+                f"链接：{config.report_site_url}"
+            ),
+            user_action_required=None,
+            error_message_redacted=None,
+            checks=tuple(checks),
+        )
+        state.write_json(config.state_path)
+        return state
+    except PublishPreflightError as exc:
+        state = PublishState(
+            trade_date=trade_date,
+            status=PublishStatus.READY_SKIPPED,
+            mode=mode,
+            started_at=started_at,
+            finished_at=_utc_now(),
+            published_url=None,
+            report_site_url=config.report_site_url,
+            recommendations=None,
+            failure_class=exc.failure_class,
+            rollback_performed=False,
+            auto_publish_enabled=is_auto_publish_enabled(config),
+            last_known_good_path=(
+                str(config.last_known_good_dir) if config.last_known_good_dir.exists() else None
+            ),
+            summary_for_user=str(exc),
+            user_action_required=exc.user_action_required,
+            error_message_redacted=str(exc),
+            checks=tuple(checks),
+        )
+        state.write_json(config.state_path)
+        return state
+
+
 def _extract_deployment_url(text: str) -> str | None:
     for match in _URL_PATTERN.finditer(text):
         value = match.group(0).rstrip(".,)")
         if ".pages.dev" in value or value.startswith("https://"):
             return value
     return None
+
+
+def _deploy_with_one_retry(
+    config: PublishConfig,
+    artifact_dir: Path,
+    *,
+    env: Mapping[str, str],
+    deploy_runner: Callable[..., WranglerResult] | None,
+) -> WranglerResult:
+    deploy_func = deploy_runner or run_wrangler_deploy
+    first = deploy_func(config, artifact_dir, env=env)
+    if first.exit_code == 0 or not _is_temporary_wrangler_failure(first):
+        return first
+    return deploy_func(config, artifact_dir, env=env)
+
+
+def _rollback_last_known_good(
+    config: PublishConfig,
+    env: Mapping[str, str],
+    deploy_runner: Callable[..., WranglerResult] | None,
+    smoke_func: Callable[..., Any] | None,
+) -> bool:
+    if not config.last_known_good_dir.is_dir():
+        return False
+    deploy_func = deploy_runner or run_wrangler_deploy
+    deploy = deploy_func(config, config.last_known_good_dir, env=env)
+    if deploy.exit_code != 0:
+        return False
+    smoke = (smoke_func or smoke_report_site)(
+        config.report_site_url,
+        env.get(config.report_password_env),
+        expected_trade_date=None,
+    )
+    return bool(smoke.passed)
+
+
+def _write_publish_failure(
+    config: PublishConfig,
+    mode: PublishMode,
+    started_at: datetime,
+    candidate: PublishCandidate,
+    failure_class: PublishFailureClass,
+    summary: str,
+    user_action_required: str,
+    checks: list[str],
+    *,
+    rollback_performed: bool,
+    error_message: str | None,
+    notify_func: Callable[..., Any] | None,
+    notify_enabled: bool,
+) -> PublishState:
+    state = PublishState(
+        trade_date=candidate.trade_date,
+        status=PublishStatus.FAILED_NEEDS_HUMAN,
+        mode=mode,
+        started_at=started_at,
+        finished_at=_utc_now(),
+        published_url=None,
+        report_site_url=config.report_site_url,
+        recommendations=candidate.recommendations,
+        failure_class=failure_class,
+        rollback_performed=rollback_performed,
+        auto_publish_enabled=is_auto_publish_enabled(config),
+        last_known_good_path=str(config.last_known_good_dir)
+        if config.last_known_good_dir.exists()
+        else None,
+        summary_for_user=summary,
+        user_action_required=user_action_required,
+        error_message_redacted=error_message,
+        checks=tuple(checks),
+    )
+    state.write_json(config.state_path)
+    if notify_enabled:
+        try:
+            (notify_func or notify_mac)(
+                "股票分析助手发布需要处理",
+                state.summary_for_user,
+                enabled=True,
+            )
+        except Exception:
+            pass
+    return state
+
+
+def _is_temporary_wrangler_failure(result: WranglerResult) -> bool:
+    combined = f"{result.stdout_redacted}\n{result.stderr_redacted}".lower()
+    return any(
+        marker in combined
+        for marker in ("timeout", "temporar", "network", "5xx", "econnreset")
+    )
+
+
+def _classify_wrangler_failure(result: WranglerResult) -> PublishFailureClass:
+    combined = f"{result.stdout_redacted}\n{result.stderr_redacted}".lower()
+    if _is_temporary_wrangler_failure(result):
+        return PublishFailureClass.WRANGLER_TEMPORARY_FAILURE
+    if any(marker in combined for marker in ("auth", "unauthorized", "forbidden", "token")):
+        return PublishFailureClass.WRANGLER_AUTH_FAILURE
+    return PublishFailureClass.WRANGLER_TEMPORARY_FAILURE
+
+
+def _replace_tree(source: Path, target: Path) -> None:
+    if source.resolve() == target.resolve():
+        return
+    if target.exists():
+        shutil.rmtree(target)
+    shutil.copytree(source, target)
+
+
+def _save_last_known_good(artifact_dir: Path, target_dir: Path) -> None:
+    target_dir.parent.mkdir(parents=True, exist_ok=True)
+    _replace_tree(artifact_dir, target_dir)
 
 
 def _redact_payload(value: Any) -> Any:

@@ -15,11 +15,16 @@ from stock_analyzer.ops.publish import (
     PublishPreflightError,
     PublishState,
     PublishStatus,
+    WranglerResult,
+    is_auto_publish_enabled,
     load_publish_candidate,
     prepare_publish_artifact,
     preflight_publish,
+    publish_report_site,
     run_wrangler_deploy,
+    set_auto_publish_enabled,
 )
+from stock_analyzer.ops.smoke import SmokeResult
 from stock_analyzer.storage.capacity_guard import CapacityStatus
 
 
@@ -338,3 +343,168 @@ def test_run_wrangler_deploy_classifies_auth_failure(tmp_path):
 
     assert result.exit_code == 1
     assert "Authentication error" in result.stderr_redacted
+
+
+def _successful_smoke(url, password, *, expected_trade_date=None):
+    return SmokeResult(
+        base_url=url,
+        passed=True,
+        checks=("redirect_to_login", "password_login", "report_date_matches"),
+        failures=(),
+    )
+
+
+def test_auto_publish_flag_helpers_default_false_and_persist_enabled(tmp_path):
+    config = _publish_config(tmp_path)
+
+    assert is_auto_publish_enabled(config) is False
+
+    set_auto_publish_enabled(config, True)
+
+    assert is_auto_publish_enabled(config) is True
+    assert json.loads(config.auto_publish_flag_path.read_text(encoding="utf-8")) == {"enabled": True}
+
+
+def test_publish_report_site_success_saves_last_known_good_and_enables_auto(tmp_path):
+    trade_date = date(2026, 7, 9)
+    _write_report(tmp_path, trade_date)
+    _write_job_status(
+        tmp_path,
+        {
+            "trade_date": trade_date.isoformat(),
+            "status": "success_with_recommendations",
+            "recommendations": 3,
+        },
+    )
+    config = _publish_config(tmp_path)
+
+    def fake_prepare(project_root, output_dir):
+        output_dir.mkdir(parents=True, exist_ok=True)
+        (output_dir / "index.html").write_text("fresh", encoding="utf-8")
+        (output_dir / "functions").mkdir()
+        (output_dir / "functions" / "_middleware.ts").write_text("export {}", encoding="utf-8")
+        return output_dir
+
+    def fake_deploy(config_arg, artifact_dir, *, env=None):
+        return WranglerResult(
+            0,
+            "ok https://stock-analysis-assistant-v3.pages.dev",
+            "",
+            "https://stock-analysis-assistant-v3.pages.dev",
+        )
+
+    state = publish_report_site(
+        config,
+        mode=PublishMode.MANUAL_ONCE,
+        trade_date=trade_date,
+        env={
+            "REPORT_PASSWORD": "pw",
+            "REPORT_SESSION_SECRET": "session",
+            "CLOUDFLARE_API_TOKEN": "token",
+        },
+        prepare_artifact=fake_prepare,
+        deploy_runner=fake_deploy,
+        smoke_func=_successful_smoke,
+    )
+
+    assert state.status is PublishStatus.SUCCESS
+    assert state.auto_publish_enabled is True
+    assert is_auto_publish_enabled(config) is True
+    assert (config.last_known_good_dir / "index.html").read_text(encoding="utf-8") == "fresh"
+    assert config.state_path.exists()
+
+
+def test_publish_report_site_rolls_back_last_known_good_when_smoke_fails(tmp_path):
+    trade_date = date(2026, 7, 9)
+    _write_report(tmp_path, trade_date)
+    _write_job_status(
+        tmp_path,
+        {
+            "trade_date": trade_date.isoformat(),
+            "status": "success_with_recommendations",
+            "recommendations": 3,
+        },
+    )
+    config = _publish_config(tmp_path)
+    config.last_known_good_dir.mkdir(parents=True)
+    (config.last_known_good_dir / "index.html").write_text("last good", encoding="utf-8")
+    deploy_calls = []
+    smoke_calls = []
+
+    def fake_prepare(project_root, output_dir):
+        output_dir.mkdir(parents=True, exist_ok=True)
+        (output_dir / "index.html").write_text("new", encoding="utf-8")
+        return output_dir
+
+    def fake_deploy(config_arg, artifact_dir, *, env=None):
+        deploy_calls.append(artifact_dir)
+        return WranglerResult(0, "ok", "", config.report_site_url)
+
+    def fake_smoke(url, password, *, expected_trade_date=None):
+        smoke_calls.append(expected_trade_date)
+        if len(smoke_calls) == 1:
+            return SmokeResult(url, False, ("redirect_to_login",), ())
+        return SmokeResult(url, True, ("redirect_to_login",), ())
+
+    state = publish_report_site(
+        config,
+        mode=PublishMode.AUTO,
+        trade_date=trade_date,
+        env={
+            "REPORT_PASSWORD": "pw",
+            "REPORT_SESSION_SECRET": "session",
+            "CLOUDFLARE_API_TOKEN": "token",
+        },
+        prepare_artifact=fake_prepare,
+        deploy_runner=fake_deploy,
+        smoke_func=fake_smoke,
+    )
+
+    assert state.status is PublishStatus.FAILED_NEEDS_HUMAN
+    assert state.failure_class is PublishFailureClass.SMOKE_FAILED
+    assert state.rollback_performed is True
+    assert deploy_calls[-1] == config.last_known_good_dir
+    assert "已回退" in state.summary_for_user
+
+
+def test_publish_report_site_retries_wrangler_once_for_temporary_failure(tmp_path):
+    trade_date = date(2026, 7, 9)
+    _write_report(tmp_path, trade_date)
+    _write_job_status(
+        tmp_path,
+        {
+            "trade_date": trade_date.isoformat(),
+            "status": "success_with_recommendations",
+            "recommendations": 3,
+        },
+    )
+    config = _publish_config(tmp_path)
+    calls = []
+
+    def fake_prepare(project_root, output_dir):
+        output_dir.mkdir(parents=True, exist_ok=True)
+        (output_dir / "index.html").write_text("fresh", encoding="utf-8")
+        return output_dir
+
+    def flaky_deploy(config_arg, artifact_dir, *, env=None):
+        calls.append(artifact_dir)
+        if len(calls) == 1:
+            return WranglerResult(1, "", "Network timeout", None)
+        return WranglerResult(0, "ok", "", config.report_site_url)
+
+    state = publish_report_site(
+        config,
+        mode=PublishMode.AUTO,
+        trade_date=trade_date,
+        env={
+            "REPORT_PASSWORD": "pw",
+            "REPORT_SESSION_SECRET": "session",
+            "CLOUDFLARE_API_TOKEN": "token",
+        },
+        prepare_artifact=fake_prepare,
+        deploy_runner=flaky_deploy,
+        smoke_func=_successful_smoke,
+    )
+
+    assert len(calls) == 2
+    assert state.status is PublishStatus.SUCCESS
