@@ -14,6 +14,7 @@ from stock_analyzer.data.provider import (
 from stock_analyzer.ops.job import ACTION_REQUIRED_STATUSES, run_daily_job
 from stock_analyzer.ops.artifacts import DeployArtifactError, prepare_pages_artifact
 from stock_analyzer.ops.smoke import smoke_report_site
+from stock_analyzer.ops.verify import verify_production_result
 from stock_analyzer.pipeline import (
     ProductionDataSourceUnavailable,
     StoredAnalysisNotFound,
@@ -208,6 +209,38 @@ def ops_smoke_report_site(
     for failure in result.failures:
         typer.echo(
             f"smoke-report-site failed [{failure.code}]: {failure.message}",
+            err=True,
+        )
+        typer.echo(f"fix: {failure.fix_suggestion}", err=True)
+    raise typer.Exit(code=2)
+
+
+@ops_app.command("verify-production")
+def ops_verify_production(
+    trade_date: str = typer.Option(..., "--trade-date"),
+) -> None:
+    parsed_trade_date = date.fromisoformat(trade_date)
+    config = AppConfig.load()
+    try:
+        repository = _analysis_repository(config, require_supabase=True)
+    except MissingSupabaseConfig as exc:
+        _fail(str(exc))
+    verification = verify_production_result(
+        config.project_root,
+        repository,
+        parsed_trade_date,
+    )
+    typer.echo(
+        f"{verification.status.value} "
+        f"recommendations={verification.recommendations} "
+        f"evidence_packages={verification.evidence_packages} "
+        f"evaluation_tasks={verification.evaluation_tasks}"
+    )
+    if verification.passed:
+        return
+    for failure in verification.failures:
+        typer.echo(
+            f"verify-production failed [{failure.code}]: {failure.message}",
             err=True,
         )
         typer.echo(f"fix: {failure.fix_suggestion}", err=True)

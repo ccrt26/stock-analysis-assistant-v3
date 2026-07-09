@@ -18,7 +18,11 @@ from stock_analyzer.domain.models import (
     EvidencePackage,
     Recommendation,
 )
-from stock_analyzer.ops.verify import ProductionVerification, verify_production_result
+from stock_analyzer.ops.verify import (
+    ProductionVerification,
+    ProductionVerificationFailure,
+    verify_production_result,
+)
 from stock_analyzer.storage.capacity_guard import (
     MAX_SELECTED_WINDOW_CODES,
     MAX_SELECTED_WINDOW_ROWS,
@@ -579,6 +583,90 @@ def test_ops_run_daily_job_cli_exits_nonzero_for_action_required_status(
     assert run_status.value in result.output
 
 
+def test_ops_verify_production_cli_exits_zero_when_verification_passes(
+    monkeypatch,
+    tmp_path,
+):
+    trade_date = date(2026, 7, 8)
+    repository = FakeJobRepository()
+
+    monkeypatch.setenv("PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setattr(
+        "stock_analyzer.cli._analysis_repository",
+        lambda *_args, **_kwargs: repository,
+    )
+    monkeypatch.setattr(
+        "stock_analyzer.cli.verify_production_result",
+        lambda project_root, repo, parsed_trade_date: ProductionVerification(
+            trade_date=parsed_trade_date,
+            status=RunStatus.SUCCESS_NO_RECOMMENDATIONS,
+            passed=True,
+            recommendations=0,
+            evidence_packages=0,
+            evaluation_tasks=0,
+            market_price_daily_current_day_rows=0,
+            daily_basic_indicator_current_day_rows=0,
+            report_index_exists=True,
+            daily_report_index_exists=True,
+            report_json_exists=True,
+            failures=(),
+        ),
+    )
+
+    result = CliRunner().invoke(
+        app,
+        ["ops", "verify-production", "--trade-date", trade_date.isoformat()],
+    )
+
+    assert result.exit_code == 0
+    assert "success_no_recommendations" in result.output
+
+
+def test_ops_verify_production_cli_exits_nonzero_when_verification_fails(
+    monkeypatch,
+    tmp_path,
+):
+    trade_date = date(2026, 7, 8)
+    repository = FakeJobRepository()
+
+    monkeypatch.setenv("PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setattr(
+        "stock_analyzer.cli._analysis_repository",
+        lambda *_args, **_kwargs: repository,
+    )
+    monkeypatch.setattr(
+        "stock_analyzer.cli.verify_production_result",
+        lambda project_root, repo, parsed_trade_date: ProductionVerification(
+            trade_date=parsed_trade_date,
+            status=RunStatus.FAILED_NEEDS_HUMAN,
+            passed=False,
+            recommendations=0,
+            evidence_packages=0,
+            evaluation_tasks=0,
+            market_price_daily_current_day_rows=0,
+            daily_basic_indicator_current_day_rows=0,
+            report_index_exists=False,
+            daily_report_index_exists=False,
+            report_json_exists=False,
+            failures=(
+                _production_failure(
+                    "report_index_missing",
+                    "Rerun report generation.",
+                ),
+            ),
+        ),
+    )
+
+    result = CliRunner().invoke(
+        app,
+        ["ops", "verify-production", "--trade-date", trade_date.isoformat()],
+    )
+
+    assert result.exit_code != 0
+    assert "report_index_missing" in result.output
+    assert "Rerun report generation." in result.output
+
+
 class FakeJobRepository:
     def load_market_calendar_day(self, trade_date):
         return True
@@ -809,3 +897,14 @@ def _daily_basic(trade_date: date, ts_code: str) -> DailyBasicRow:
 
 def _failure(verification, code):
     return next(failure for failure in verification.failures if failure.code == code)
+
+
+def _production_failure(
+    code: str,
+    fix_suggestion: str,
+) -> ProductionVerificationFailure:
+    return ProductionVerificationFailure(
+        code=code,
+        message=f"{code} occurred",
+        fix_suggestion=fix_suggestion,
+    )
