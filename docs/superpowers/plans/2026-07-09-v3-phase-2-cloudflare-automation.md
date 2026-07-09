@@ -45,7 +45,8 @@ No task may be assigned to GPT-5.4, GPT-5 mini, or any low-config model. If suba
 
 - Create `src/stock_analyzer/ops/publish.py` for publish models, preflight, candidate selection, Wrangler runner, publish orchestration, rollback, state persistence, and status-page rendering.
 - Modify `src/stock_analyzer/config.py` to load publish-related environment variable names and safe non-secret configuration.
-- Modify `src/stock_analyzer/cli.py` to add `ops publish-report-site` and pass dependencies into `run_daily_job`.
+- Modify `src/stock_analyzer/cli.py` to add `ops publish-report-site`, add a `stock_analyzer_publish()` console entrypoint, and pass dependencies into `run_daily_job`.
+- Modify `pyproject.toml` to register the fixed user command `stock-analyzer-publish`.
 - Modify `src/stock_analyzer/ops/job.py` to optionally trigger auto publish after successful Phase 1 completion.
 - Modify `src/stock_analyzer/ops/status.py` only if a new failure class is needed for publish integration; prefer Phase 2-specific enums in `publish.py`.
 - Test with `tests/test_ops_publish.py`.
@@ -1353,12 +1354,14 @@ git commit -m "feat: orchestrate cloudflare publishing"
 **Files:**
 - Modify: `src/stock_analyzer/cli.py`
 - Modify: `src/stock_analyzer/ops/job.py`
+- Modify: `pyproject.toml`
 - Test: `tests/test_ops_publish.py`
 - Test: `tests/test_ops_job.py`
 
 **Interfaces:**
 - Consumes: `publish_report_site`, `PublishConfig.from_app_config`, `is_auto_publish_enabled`.
 - Produces CLI: `stock_analyzer ops publish-report-site [--trade-date YYYY-MM-DD] [--notify-mac]`.
+- Produces fixed user command: `stock-analyzer-publish`.
 - Produces `run_daily_job(..., auto_publish: bool = False, publish_func: Callable[..., PublishState] | None = None) -> JobStatus`.
 
 - [ ] **Step 1: Add failing CLI test**
@@ -1367,6 +1370,7 @@ Append to `tests/test_ops_publish.py`:
 
 ```python
 from typer.testing import CliRunner
+from pathlib import Path
 
 from stock_analyzer.cli import app
 
@@ -1402,6 +1406,13 @@ def test_ops_publish_report_site_cli_outputs_simple_success(monkeypatch, tmp_pat
     assert result.exit_code == 0
     assert "发布成功：线上报告 2026-07-09" in result.output
     assert "checks" not in result.output
+
+
+def test_pyproject_registers_stock_analyzer_publish_command():
+    pyproject = Path("pyproject.toml").read_text(encoding="utf-8")
+
+    assert "stock-analyzer-publish" in pyproject
+    assert "stock_analyzer.cli:stock_analyzer_publish" in pyproject
 ```
 
 - [ ] **Step 2: Add failing job auto-publish integration test**
@@ -1529,9 +1540,22 @@ def ops_publish_report_site(
         typer.echo(f"需要你处理：{state.user_action_required}", err=True)
     if state.status != PublishStatus.SUCCESS:
         raise typer.Exit(code=2)
+
+
+def stock_analyzer_publish() -> None:
+    app(args=["ops", "publish-report-site"], prog_name="stock-analyzer-publish")
 ```
 
-- [ ] **Step 5: Extend `run_daily_job` signature and behavior**
+- [ ] **Step 5: Register fixed user command**
+
+In `pyproject.toml`, add:
+
+```toml
+[project.scripts]
+stock-analyzer-publish = "stock_analyzer.cli:stock_analyzer_publish"
+```
+
+- [ ] **Step 6: Extend `run_daily_job` signature and behavior**
 
 In `src/stock_analyzer/ops/job.py`, add parameters:
 
@@ -1579,16 +1603,16 @@ In CLI `ops_run_daily_job`, pass:
 
 The `run_daily_job` helper must internally skip auto publish unless `is_auto_publish_enabled` is true, so enabling the kwarg in the CLI is safe before the first manual publish.
 
-- [ ] **Step 6: Verify tests**
+- [ ] **Step 7: Verify tests**
 
 Run: `.venv/bin/python -m pytest tests/test_ops_publish.py tests/test_ops_job.py tests/test_cli.py -v`
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
-git add src/stock_analyzer/cli.py src/stock_analyzer/ops/job.py tests/test_ops_publish.py tests/test_ops_job.py
+git add src/stock_analyzer/cli.py src/stock_analyzer/ops/job.py pyproject.toml tests/test_ops_publish.py tests/test_ops_job.py
 git commit -m "feat: add report publish command"
 ```
 
