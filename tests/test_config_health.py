@@ -145,3 +145,11 @@ def test_health_report_as_lines_renders_status_values():
         "api_response: fail - supabase env checked",
     ]
     assert all("HealthStatus." not in line for line in lines)
+
+
+def test_generated_operation_artifacts_are_gitignored():
+    gitignore = (Path(__file__).resolve().parents[1] / ".gitignore").read_text(encoding="utf-8")
+    entries = {line.strip() for line in gitignore.splitlines()}
+
+    assert "logs/" in entries
+    assert "dist/" in entries
