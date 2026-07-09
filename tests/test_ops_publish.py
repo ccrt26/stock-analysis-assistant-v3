@@ -24,6 +24,7 @@ from stock_analyzer.ops.publish import (
     prepare_publish_artifact,
     preflight_publish,
     publish_report_site,
+    render_publish_status_page,
     run_wrangler_deploy,
     set_auto_publish_enabled,
 )
@@ -82,6 +83,35 @@ def test_publish_config_from_app_config_uses_local_paths(tmp_path):
     assert publish_config.status_page_path == tmp_path / "logs" / "publish" / "status.html"
     assert publish_config.last_known_good_dir == tmp_path / "local_archive" / "publish" / "last-known-good"
     assert publish_config.auto_publish_flag_path == tmp_path / "logs" / "publish" / "auto-publish-enabled.json"
+
+
+def test_render_publish_status_page_shows_only_user_summary(tmp_path):
+    state = PublishState(
+        trade_date=date(2026, 7, 9),
+        status=PublishStatus.FAILED_NEEDS_HUMAN,
+        mode=PublishMode.AUTO,
+        published_url=None,
+        report_site_url="https://stock-analysis-assistant-v3.pages.dev",
+        recommendations=3,
+        failure_class=PublishFailureClass.WRANGLER_AUTH_FAILURE,
+        rollback_performed=True,
+        auto_publish_enabled=True,
+        last_known_good_path="/private/path/last-good",
+        summary_for_user="发布失败，系统已回退上一版。",
+        user_action_required="请检查 Cloudflare 凭据。",
+        error_message_redacted="technical stderr should stay machine-only",
+        checks=("wrangler_deployed", "smoke_failed"),
+    )
+
+    output = render_publish_status_page(state, tmp_path / "logs" / "publish" / "status.html")
+    html = output.read_text(encoding="utf-8")
+
+    assert "发布失败，系统已回退上一版。" in html
+    assert "请检查 Cloudflare 凭据。" in html
+    assert "https://stock-analysis-assistant-v3.pages.dev" in html
+    assert "technical stderr" not in html
+    assert "wrangler_deployed" not in html
+    assert "/private/path" not in html
 
 
 def _write_job_status(root, payload):

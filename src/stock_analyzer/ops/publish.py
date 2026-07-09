@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from html import escape
 import json
 import os
 import re
@@ -113,6 +114,35 @@ class PublishState(BaseModel):
             json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
         )
+
+
+def render_publish_status_page(state: PublishState, output_path: Path) -> Path:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    trade_date_text = state.trade_date.isoformat() if state.trade_date else "暂无"
+    problem_text = state.user_action_required or "无"
+    status_text = "成功" if state.status == PublishStatus.SUCCESS else "需要处理"
+    link_html = (
+        f'<a href="{escape(state.report_site_url)}">{escape(state.report_site_url)}</a>'
+        if state.report_site_url
+        else "未配置"
+    )
+    html = f"""<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>股票分析助手发布状态</title>
+<body>
+<h1>发布状态</h1>
+<p>当前线上报告日期：{escape(trade_date_text)}</p>
+<p>最近一次发布：{escape(status_text)}</p>
+<p>线上报告链接：{link_html}</p>
+<p>待处理问题：{escape(problem_text)}</p>
+<p>{escape(state.summary_for_user)}</p>
+</body>
+</html>
+"""
+    output_path.write_text(html, encoding="utf-8")
+    return output_path
 
 
 @dataclass(frozen=True)
@@ -466,6 +496,7 @@ def publish_report_site(
             checks=tuple(checks),
         )
         state.write_json(config.state_path)
+        render_publish_status_page(state, config.status_page_path)
         return state
     except PublishPreflightError as exc:
         state = PublishState(
@@ -489,6 +520,7 @@ def publish_report_site(
             checks=tuple(checks),
         )
         state.write_json(config.state_path)
+        render_publish_status_page(state, config.status_page_path)
         return state
 
 
@@ -570,6 +602,7 @@ def _write_publish_failure(
         checks=tuple(checks),
     )
     state.write_json(config.state_path)
+    render_publish_status_page(state, config.status_page_path)
     if notify_enabled:
         try:
             (notify_func or notify_mac)(
