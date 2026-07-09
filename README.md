@@ -60,6 +60,14 @@ PYTHONPATH=src python3 -m stock_analyzer health-check --live-tushare-smoke
 
 Cloudflare Pages 只发布报告成品，不发布原始数据、日志、规则编辑器、数据库后台或其他内部调试产物。
 
+## Operations
+
+- Phase 1 runbook: [docs/operations/runbook.md](docs/operations/runbook.md)
+- Cloudflare Pages manual publish and smoke: [docs/operations/cloudflare-pages.md](docs/operations/cloudflare-pages.md)
+- Mandatory next phases: [docs/operations/mandatory-next-phases.md](docs/operations/mandatory-next-phases.md)
+
+Operations are approval-gated. Do not enable launchd, run a real production job, run production cleanup, or deploy Cloudflare Pages without explicit approval.
+
 ## 验证边界
 
 - `python3 -m pytest` 使用本地 fake Supabase client 和内存仓库，不证明真实 Supabase 项目已连通。
