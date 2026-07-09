@@ -30,6 +30,7 @@ class AppConfig(BaseModel):
     report_session_secret_env: str = "REPORT_SESSION_SECRET"
     cloudflare_token_env: str = "CLOUDFLARE_API_TOKEN"
     cloudflare_account_id_env: str = "CLOUDFLARE_ACCOUNT_ID"
+    cloudflare_pages_branch: str = "main"
 
     @classmethod
     def load(
@@ -71,6 +72,7 @@ class AppConfig(BaseModel):
                 "CLOUDFLARE_ACCOUNT_ID_ENV",
                 "CLOUDFLARE_ACCOUNT_ID",
             ),
+            cloudflare_pages_branch=values.get("CLOUDFLARE_PAGES_BRANCH", "main"),
         )
 
     @property

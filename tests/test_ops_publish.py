@@ -81,10 +81,24 @@ def test_publish_config_from_app_config_uses_local_paths(tmp_path):
     assert publish_config.project_root == tmp_path
     assert publish_config.report_site_url == "https://stock-analysis-assistant-v3.pages.dev"
     assert publish_config.cloudflare_pages_project_name == "stock-analysis-assistant-v3"
+    assert publish_config.cloudflare_pages_branch == "main"
     assert publish_config.state_path == tmp_path / "logs" / "publish" / "latest-status.json"
     assert publish_config.status_page_path == tmp_path / "logs" / "publish" / "status.html"
     assert publish_config.last_known_good_dir == tmp_path / "local_archive" / "publish" / "last-known-good"
     assert publish_config.auto_publish_flag_path == tmp_path / "logs" / "publish" / "auto-publish-enabled.json"
+
+
+def test_publish_config_from_app_config_supports_pages_branch_override(tmp_path):
+    config = AppConfig.load(
+        {
+            "PROJECT_ROOT": str(tmp_path),
+            "CLOUDFLARE_PAGES_BRANCH": "production",
+        }
+    )
+
+    publish_config = PublishConfig.from_app_config(config)
+
+    assert publish_config.cloudflare_pages_branch == "production"
 
 
 def test_render_publish_status_page_shows_only_user_summary(tmp_path):
@@ -167,6 +181,7 @@ def _publish_config(root):
         report_session_secret_env="REPORT_SESSION_SECRET",
         cloudflare_token_env="CLOUDFLARE_API_TOKEN",
         cloudflare_account_id_env="CLOUDFLARE_ACCOUNT_ID",
+        cloudflare_pages_branch="main",
         auto_publish_flag_path=root / "logs" / "publish" / "auto-publish-enabled.json",
         state_path=root / "logs" / "publish" / "latest-status.json",
         status_page_path=root / "logs" / "publish" / "status.html",
@@ -396,6 +411,8 @@ def test_run_wrangler_deploy_invokes_official_command_without_printing_token(tmp
         str(artifact_dir),
         "--project-name",
         "stock-analysis-assistant-v3",
+        "--branch",
+        "main",
     ]
     assert cwd == tmp_path
     assert env["CLOUDFLARE_API_TOKEN"] == "secret-token"

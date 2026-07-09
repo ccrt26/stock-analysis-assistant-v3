@@ -211,6 +211,7 @@ class PublishConfig:
     report_session_secret_env: str
     cloudflare_token_env: str
     cloudflare_account_id_env: str
+    cloudflare_pages_branch: str
     auto_publish_flag_path: Path
     state_path: Path
     status_page_path: Path
@@ -227,6 +228,7 @@ class PublishConfig:
             report_session_secret_env=config.report_session_secret_env,
             cloudflare_token_env=config.cloudflare_token_env,
             cloudflare_account_id_env=config.cloudflare_account_id_env,
+            cloudflare_pages_branch=config.cloudflare_pages_branch,
             auto_publish_flag_path=root / "logs" / "publish" / "auto-publish-enabled.json",
             state_path=root / "logs" / "publish" / "latest-status.json",
             status_page_path=root / "logs" / "publish" / "status.html",
@@ -476,6 +478,8 @@ def run_wrangler_deploy(
         str(artifact_dir),
         "--project-name",
         config.cloudflare_pages_project_name,
+        "--branch",
+        config.cloudflare_pages_branch,
     ]
     values = dict(os.environ if env is None else env)
     run = runner or subprocess.run
