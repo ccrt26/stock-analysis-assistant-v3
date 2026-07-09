@@ -44,6 +44,9 @@ class PublishFailureClass(str, Enum):
         }
 
 
+_MAX_PUBLISH_RECOMMENDATIONS = 10
+
+
 class PublishPreflightError(RuntimeError):
     def __init__(
         self,
@@ -175,12 +178,32 @@ def load_publish_candidate(
         )
 
     run_status = str(payload.get("status"))
-    recommendations = int(payload.get("recommendations") or 0)
+    recommendation_value = payload.get("recommendations")
     if run_status == "skipped_non_trading_day":
         raise PublishPreflightError(
             "Latest production status is non-trading day.",
             failure_class=PublishFailureClass.NON_TRADING_DAY,
             user_action_required="今天不是交易日，不发布新报告；线上保留上一版。",
+        )
+
+    recommendations = _parse_recommendation_count(recommendation_value)
+    if run_status == "success_no_recommendations":
+        if recommendations == 0:
+            raise PublishPreflightError(
+                "Latest production status has zero recommendations.",
+                failure_class=PublishFailureClass.ZERO_RECOMMENDATIONS,
+                user_action_required="当天无推荐，不发布新报告；线上保留上一版。",
+            )
+        raise PublishPreflightError(
+            "Latest production status has an invalid zero-recommendation payload.",
+            failure_class=PublishFailureClass.NO_PUBLISHABLE_REPORT,
+            user_action_required="生产状态和推荐数不一致；请人工检查，先不要发布。",
+        )
+    if run_status != "success_with_recommendations":
+        raise PublishPreflightError(
+            f"Latest production status is {run_status}.",
+            failure_class=PublishFailureClass.NO_PUBLISHABLE_REPORT,
+            user_action_required="今天生产流程还没有成功完成，暂不发布。",
         )
     if recommendations == 0:
         raise PublishPreflightError(
@@ -188,11 +211,11 @@ def load_publish_candidate(
             failure_class=PublishFailureClass.ZERO_RECOMMENDATIONS,
             user_action_required="当天无推荐，不发布新报告；线上保留上一版。",
         )
-    if run_status != "success_with_recommendations":
+    if recommendations is None or not 1 <= recommendations <= _MAX_PUBLISH_RECOMMENDATIONS:
         raise PublishPreflightError(
-            f"Latest production status is {run_status}.",
+            f"Latest production recommendation count is {recommendation_value!r}.",
             failure_class=PublishFailureClass.NO_PUBLISHABLE_REPORT,
-            user_action_required="今天生产流程还没有成功完成，暂不发布。",
+            user_action_required="推荐数异常，超出 1 到 10 的发布范围；请人工检查，先不要发布。",
         )
 
     reports_dir = config.project_root / "reports"
@@ -265,3 +288,10 @@ def _redact_payload(value: Any) -> Any:
     if isinstance(value, dict):
         return {key: _redact_payload(item) for key, item in value.items()}
     return value
+
+
+def _parse_recommendation_count(value: Any) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None

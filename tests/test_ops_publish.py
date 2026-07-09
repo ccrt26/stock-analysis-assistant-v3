@@ -128,6 +128,43 @@ def test_load_publish_candidate_uses_today_success_with_recommendations(tmp_path
     )
 
 
+def test_load_publish_candidate_accepts_ten_recommendations(tmp_path):
+    trade_date = date(2026, 7, 9)
+    _write_report(tmp_path, trade_date)
+    _write_job_status(
+        tmp_path,
+        {
+            "trade_date": trade_date.isoformat(),
+            "status": "success_with_recommendations",
+            "recommendations": 10,
+        },
+    )
+
+    candidate = load_publish_candidate(_publish_config(tmp_path), trade_date=trade_date)
+
+    assert candidate.recommendations == 10
+
+
+def test_load_publish_candidate_rejects_more_than_ten_recommendations(tmp_path):
+    trade_date = date(2026, 7, 9)
+    _write_report(tmp_path, trade_date)
+    _write_job_status(
+        tmp_path,
+        {
+            "trade_date": trade_date.isoformat(),
+            "status": "success_with_recommendations",
+            "recommendations": 11,
+        },
+    )
+
+    with pytest.raises(PublishPreflightError) as exc_info:
+        load_publish_candidate(_publish_config(tmp_path), trade_date=trade_date)
+
+    assert exc_info.value.failure_class is PublishFailureClass.NO_PUBLISHABLE_REPORT
+    assert "推荐数" in exc_info.value.user_action_required
+    assert "不要发布" in exc_info.value.user_action_required
+
+
 def test_load_publish_candidate_rejects_zero_recommendations(tmp_path):
     trade_date = date(2026, 7, 9)
     _write_report(tmp_path, trade_date)
@@ -162,6 +199,24 @@ def test_load_publish_candidate_rejects_non_trading_day(tmp_path):
         load_publish_candidate(_publish_config(tmp_path), trade_date=trade_date)
 
     assert exc_info.value.failure_class is PublishFailureClass.NON_TRADING_DAY
+
+
+def test_load_publish_candidate_rejects_failed_null_recommendations_as_no_publishable_report(tmp_path):
+    trade_date = date(2026, 7, 9)
+    _write_job_status(
+        tmp_path,
+        {
+            "trade_date": trade_date.isoformat(),
+            "status": "failed_needs_human",
+            "recommendations": None,
+        },
+    )
+
+    with pytest.raises(PublishPreflightError) as exc_info:
+        load_publish_candidate(_publish_config(tmp_path), trade_date=trade_date)
+
+    assert exc_info.value.failure_class is PublishFailureClass.NO_PUBLISHABLE_REPORT
+    assert exc_info.value.failure_class is not PublishFailureClass.ZERO_RECOMMENDATIONS
 
 
 def test_preflight_requires_local_publish_config_without_printing_secret_names(tmp_path):
