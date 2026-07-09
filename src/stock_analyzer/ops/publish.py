@@ -63,12 +63,14 @@ _ARTIFACT_SENSITIVE_VARIABLE_NAMES = (
     "REPORT_PASSWORD",
     "REPORT_SESSION_SECRET",
 )
-_ARTIFACT_SECRET_PATTERNS = (
+_ARTIFACT_SENSITIVE_MARKER_PATTERNS = (
     *(
         re.compile(rf"\b{re.escape(name)}\b", re.IGNORECASE)
         for name in _ARTIFACT_SENSITIVE_VARIABLE_NAMES
     ),
     re.compile(r"(?<![\w.-])\.env(?:\.local)?(?![\w.-])", re.IGNORECASE),
+)
+_ARTIFACT_SECRET_VALUE_PATTERNS = (
     re.compile(r"\bAuthorization\s*:\s*Bearer\s+[^\s<>&;]+", re.IGNORECASE),
     re.compile(
         r"\b[A-Z0-9_]*(?:KEY|PASSWORD|SECRET|TOKEN)[A-Z0-9_]*\s*[:=]\s*"
@@ -76,6 +78,7 @@ _ARTIFACT_SECRET_PATTERNS = (
     ),
     re.compile(r"\bsb_secret_[A-Za-z0-9._~+/=-]{8,}", re.IGNORECASE),
 )
+_ARTIFACT_ALLOWED_MARKER_PATHS = {Path("functions/_middleware.ts")}
 _PLANNED_SKIP_FAILURE_CLASSES = {
     PublishFailureClass.NO_PUBLISHABLE_REPORT,
     PublishFailureClass.ZERO_RECOMMENDATIONS,
@@ -442,7 +445,11 @@ def validate_publish_artifact_content(artifact_dir: Path) -> None:
                 failure_class=PublishFailureClass.ARTIFACT_INVALID,
                 user_action_required="发布包无法完成本地安全扫描；请先人工检查发布包。",
             ) from exc
-        for pattern in _ARTIFACT_SECRET_PATTERNS:
+        relative_path = path.relative_to(artifact_dir)
+        patterns = _ARTIFACT_SECRET_VALUE_PATTERNS
+        if relative_path not in _ARTIFACT_ALLOWED_MARKER_PATHS:
+            patterns = (*_ARTIFACT_SENSITIVE_MARKER_PATTERNS, *patterns)
+        for pattern in patterns:
             if pattern.search(text):
                 raise PublishPreflightError(
                     "Sensitive content detected in deploy artifact.",

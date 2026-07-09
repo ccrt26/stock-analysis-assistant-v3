@@ -523,6 +523,54 @@ def test_publish_report_site_success_saves_last_known_good_and_enables_auto(tmp_
     assert config.state_path.exists()
 
 
+def test_publish_report_site_allows_middleware_env_binding_names_before_deploy(tmp_path):
+    trade_date = date(2026, 7, 9)
+    _write_report(tmp_path, trade_date)
+    _write_job_status(
+        tmp_path,
+        {
+            "trade_date": trade_date.isoformat(),
+            "status": "success_with_recommendations",
+            "recommendations": 3,
+        },
+    )
+    config = _publish_config(tmp_path)
+    deploy_calls = []
+
+    def fake_prepare(project_root, output_dir):
+        output_dir.mkdir(parents=True, exist_ok=True)
+        (output_dir / "index.html").write_text("fresh", encoding="utf-8")
+        (output_dir / "functions").mkdir()
+        (output_dir / "functions" / "_middleware.ts").write_text(
+            "const password = context.env.REPORT_PASSWORD;\n"
+            "const sessionSecret = context.env.REPORT_SESSION_SECRET;\n",
+            encoding="utf-8",
+        )
+        return output_dir
+
+    def fake_deploy(config_arg, artifact_dir, *, env=None):
+        deploy_calls.append(artifact_dir)
+        return WranglerResult(0, "ok", "", config.report_site_url)
+
+    state = publish_report_site(
+        config,
+        mode=PublishMode.MANUAL_ONCE,
+        trade_date=trade_date,
+        env={
+            "REPORT_PASSWORD": "pw",
+            "REPORT_SESSION_SECRET": "session",
+            "CLOUDFLARE_API_TOKEN": "token",
+            "CLOUDFLARE_ACCOUNT_ID": "account",
+        },
+        prepare_artifact=fake_prepare,
+        deploy_runner=fake_deploy,
+        smoke_func=_successful_smoke,
+    )
+
+    assert state.status is PublishStatus.SUCCESS
+    assert deploy_calls == [tmp_path / "dist" / "pages"]
+
+
 @pytest.mark.parametrize(
     "leaked_content",
     [
