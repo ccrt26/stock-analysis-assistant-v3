@@ -29,6 +29,17 @@ logger = logging.getLogger(__name__)
 
 
 class AnalysisRepository(Protocol):
+    def load_market_calendar_day(
+        self,
+        trade_date: date,
+        market: str = "CN_A",
+    ) -> Optional[bool]: ...
+    def save_market_calendar_day(
+        self,
+        trade_date: date,
+        is_trading_day: bool,
+        market: str = "CN_A",
+    ) -> None: ...
     def load_focus_states(self) -> List[FocusState]: ...
     def load_daily_recommendations(self, trade_date: date) -> List[Recommendation]: ...
     def load_focus_states_for_date(self, trade_date: date) -> List[FocusState]: ...
@@ -64,6 +75,7 @@ class InMemoryAnalysisRepository:
         market_bars: Optional[List[DailyBar]] = None,
         daily_basic_indicators: Optional[List[DailyBasicRow]] = None,
         data_source_runs: Optional[List[SourceRunRecord]] = None,
+        market_calendar: Optional[dict[date, bool]] = None,
     ) -> None:
         self.recommendations = list(recommendations or [])
         self.focus_states = list(focus_states or [])
@@ -75,6 +87,22 @@ class InMemoryAnalysisRepository:
         self.market_bars = list(market_bars or [])
         self.daily_basic_indicators = list(daily_basic_indicators or [])
         self.data_source_runs = list(data_source_runs or [])
+        self.market_calendar = dict(market_calendar or {})
+
+    def load_market_calendar_day(
+        self,
+        trade_date: date,
+        market: str = "CN_A",
+    ) -> Optional[bool]:
+        return self.market_calendar.get(trade_date)
+
+    def save_market_calendar_day(
+        self,
+        trade_date: date,
+        is_trading_day: bool,
+        market: str = "CN_A",
+    ) -> None:
+        self.market_calendar[trade_date] = is_trading_day
 
     def load_focus_states(self) -> List[FocusState]:
         return _latest_active_focus_states(self.focus_states)
@@ -176,6 +204,40 @@ class SupabaseAnalysisRepository:
     def __init__(self, client, capacity_guard=None) -> None:
         self.client = client
         self.capacity_guard = capacity_guard
+
+    def load_market_calendar_day(
+        self,
+        trade_date: date,
+        market: str = "CN_A",
+    ) -> Optional[bool]:
+        result = (
+            self.client.table("market_calendar")
+            .select("trade_date,is_trading_day,market")
+            .eq("trade_date", trade_date.isoformat())
+            .eq("market", market)
+            .execute()
+        )
+        rows = result.data or []
+        if not rows:
+            return None
+        return _bool_from_row(rows[0]["is_trading_day"])
+
+    def save_market_calendar_day(
+        self,
+        trade_date: date,
+        is_trading_day: bool,
+        market: str = "CN_A",
+    ) -> None:
+        self.client.table("market_calendar").upsert(
+            [
+                {
+                    "trade_date": trade_date.isoformat(),
+                    "is_trading_day": is_trading_day,
+                    "market": market,
+                }
+            ],
+            on_conflict="trade_date",
+        ).execute()
 
     def load_focus_states(self) -> List[FocusState]:
         result = self.client.table("focus_watchlist_state").select("*").execute()
@@ -430,6 +492,14 @@ def _date_from_row(value) -> Optional[date]:
 
 def _date_to_text(value: Optional[date]) -> Optional[str]:
     return value.isoformat() if value else None
+
+
+def _bool_from_row(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.lower() in {"true", "t", "1", "yes"}
+    return bool(value)
 
 
 def _chunks(items: list[dict], size: int) -> Iterable[list[dict]]:
