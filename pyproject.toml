@@ -24,6 +24,9 @@ dependencies = [
 dev = ["pytest>=8.2", "pytest-cov>=5.0"]
 data = ["tushare>=1.4.19", "akshare>=1.14"]
 
+[project.scripts]
+stock-analyzer-publish = "stock_analyzer.cli:stock_analyzer_publish"
+
 [tool.setuptools.packages.find]
 where = ["src"]
 

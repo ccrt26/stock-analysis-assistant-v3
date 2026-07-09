@@ -3,9 +3,12 @@ from __future__ import annotations
 import json
 import subprocess
 from datetime import date, datetime, timezone
+from pathlib import Path
 
 import pytest
+from typer.testing import CliRunner
 
+from stock_analyzer.cli import app
 from stock_analyzer.config import AppConfig
 from stock_analyzer.ops.publish import (
     PublishCandidate,
@@ -508,3 +511,51 @@ def test_publish_report_site_retries_wrangler_once_for_temporary_failure(tmp_pat
 
     assert len(calls) == 2
     assert state.status is PublishStatus.SUCCESS
+
+
+def test_ops_publish_report_site_cli_outputs_simple_success(monkeypatch, tmp_path):
+    monkeypatch.setenv("PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv(
+        "REPORT_SITE_URL",
+        "https://stock-analysis-assistant-v3.pages.dev",
+    )
+    monkeypatch.setenv(
+        "CLOUDFLARE_PAGES_PROJECT_NAME",
+        "stock-analysis-assistant-v3",
+    )
+
+    def fake_publish(config, *, mode, trade_date=None, notify_enabled=False, **kwargs):
+        return PublishState(
+            trade_date=date(2026, 7, 9),
+            status=PublishStatus.SUCCESS,
+            mode=mode,
+            published_url=config.report_site_url,
+            report_site_url=config.report_site_url,
+            recommendations=3,
+            failure_class=None,
+            rollback_performed=False,
+            auto_publish_enabled=True,
+            last_known_good_path=str(config.last_known_good_dir),
+            summary_for_user=(
+                "发布成功：线上报告 2026-07-09，"
+                "链接：https://stock-analysis-assistant-v3.pages.dev"
+            ),
+            user_action_required=None,
+            error_message_redacted=None,
+            checks=("ok",),
+        )
+
+    monkeypatch.setattr("stock_analyzer.cli.publish_report_site", fake_publish)
+
+    result = CliRunner().invoke(app, ["ops", "publish-report-site"])
+
+    assert result.exit_code == 0
+    assert "发布成功：线上报告 2026-07-09" in result.output
+    assert "checks" not in result.output
+
+
+def test_pyproject_registers_stock_analyzer_publish_command():
+    pyproject = Path("pyproject.toml").read_text(encoding="utf-8")
+
+    assert "stock-analyzer-publish" in pyproject
+    assert "stock_analyzer.cli:stock_analyzer_publish" in pyproject

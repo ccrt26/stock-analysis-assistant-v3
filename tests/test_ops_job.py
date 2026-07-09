@@ -651,6 +651,67 @@ def test_run_daily_job_success_with_zero_recommendations_writes_status(tmp_path)
     assert payload["deploy_artifact_prepared"] is True
 
 
+def test_run_daily_job_triggers_auto_publish_after_success(tmp_path):
+    trade_date = date(2026, 7, 9)
+    publish_calls = []
+
+    def fake_publish(project_root, trade_date_arg):
+        publish_calls.append((project_root, trade_date_arg))
+
+    status = run_daily_job(
+        tmp_path,
+        trade_date,
+        "18:30",
+        1,
+        prepare_deploy=False,
+        repository=FakeJobRepository(),
+        calendar_decider=lambda *_args, **_kwargs: TradingDayDecision(
+            status="trading_day",
+            source="supabase",
+            message="market open",
+        ),
+        health_check=lambda *_args: None,
+        run_daily=lambda *_args: None,
+        verifier=lambda *_args: _successful_verification_with_recommendations(
+            trade_date
+        ),
+        auto_publish=True,
+        publish_func=fake_publish,
+    )
+
+    assert status.status == RunStatus.SUCCESS_WITH_RECOMMENDATIONS
+    assert publish_calls == [(tmp_path, trade_date)]
+
+
+def test_run_daily_job_does_not_auto_publish_zero_recommendations(tmp_path):
+    trade_date = date(2026, 7, 9)
+    publish_calls = []
+
+    status = run_daily_job(
+        tmp_path,
+        trade_date,
+        "18:30",
+        1,
+        prepare_deploy=False,
+        repository=FakeJobRepository(),
+        calendar_decider=lambda *_args, **_kwargs: TradingDayDecision(
+            status="trading_day",
+            source="supabase",
+            message="market open",
+        ),
+        health_check=lambda *_args: None,
+        run_daily=lambda *_args: None,
+        verifier=lambda *_args: _successful_verification(trade_date),
+        auto_publish=True,
+        publish_func=lambda project_root, trade_date_arg: publish_calls.append(
+            (project_root, trade_date_arg)
+        ),
+    )
+
+    assert status.status == RunStatus.SUCCESS_NO_RECOMMENDATIONS
+    assert publish_calls == []
+
+
 def test_run_daily_job_redacts_status_json_error_messages(tmp_path):
     trade_date = date(2026, 7, 9)
     status_path = tmp_path / "logs" / "run-daily" / "latest-status.json"
@@ -1069,6 +1130,25 @@ def _successful_verification(trade_date: date) -> ProductionVerification:
         evaluation_tasks=0,
         market_price_daily_current_day_rows=0,
         daily_basic_indicator_current_day_rows=0,
+        report_index_exists=True,
+        daily_report_index_exists=True,
+        report_json_exists=True,
+        failures=(),
+    )
+
+
+def _successful_verification_with_recommendations(
+    trade_date: date,
+) -> ProductionVerification:
+    return ProductionVerification(
+        trade_date=trade_date,
+        status=RunStatus.SUCCESS_WITH_RECOMMENDATIONS,
+        passed=True,
+        recommendations=1,
+        evidence_packages=1,
+        evaluation_tasks=6,
+        market_price_daily_current_day_rows=1,
+        daily_basic_indicator_current_day_rows=1,
         report_index_exists=True,
         daily_report_index_exists=True,
         report_json_exists=True,

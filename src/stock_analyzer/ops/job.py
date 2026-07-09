@@ -84,6 +84,8 @@ def run_daily_job(
     status_path: Path | None = None,
     notify_enabled: bool = False,
     notify_func: Callable[..., Any] | None = None,
+    auto_publish: bool = False,
+    publish_func: Callable[[Path, date], Any] | None = None,
 ) -> JobStatus:
     root = Path(project_root)
     started_at = _utc_now()
@@ -324,6 +326,10 @@ def run_daily_job(
     else:
         publish_skipped_reason = "prepare_deploy_flag_not_set"
 
+    if auto_publish and verification.status == RunStatus.SUCCESS_WITH_RECOMMENDATIONS:
+        effective_publish = publish_func or _default_publish
+        effective_publish(root, trade_date)
+
     return write_status(
         trade_date=trade_date,
         attempt=attempt,
@@ -423,6 +429,26 @@ def _default_prepare_deploy(project_root: Path) -> Path:
 
     root = Path(project_root)
     return prepare_pages_artifact(root, root / "dist" / "pages")
+
+
+def _default_publish(project_root: Path, trade_date: date) -> Any:
+    config = AppConfig.load()
+    from stock_analyzer.ops.publish import (
+        PublishConfig,
+        PublishMode,
+        is_auto_publish_enabled,
+        publish_report_site,
+    )
+
+    publish_config = PublishConfig.from_app_config(config)
+    if not is_auto_publish_enabled(publish_config):
+        return None
+    return publish_report_site(
+        publish_config,
+        mode=PublishMode.AUTO,
+        trade_date=trade_date,
+        notify_enabled=config.notify_mac,
+    )
 
 
 def _retry_preflight_error(

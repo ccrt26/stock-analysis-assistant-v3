@@ -13,6 +13,12 @@ from stock_analyzer.data.provider import (
 )
 from stock_analyzer.ops.job import ACTION_REQUIRED_STATUSES, run_daily_job
 from stock_analyzer.ops.artifacts import DeployArtifactError, prepare_pages_artifact
+from stock_analyzer.ops.publish import (
+    PublishConfig,
+    PublishMode,
+    PublishStatus,
+    publish_report_site,
+)
 from stock_analyzer.ops.smoke import smoke_report_site
 from stock_analyzer.ops.verify import verify_production_result
 from stock_analyzer.pipeline import (
@@ -176,10 +182,36 @@ def ops_run_daily_job(
         attempt=attempt,
         prepare_deploy=prepare_deploy,
         notify_enabled=notify_mac or config.notify_mac,
+        auto_publish=True,
     )
     typer.echo(f"{status.status.value} stage={status.stage}")
     if status.status in ACTION_REQUIRED_STATUSES:
         raise typer.Exit(code=2)
+
+
+@ops_app.command("publish-report-site")
+def ops_publish_report_site(
+    trade_date: Optional[str] = typer.Option(None, "--trade-date"),
+    notify_mac: bool = typer.Option(False, "--notify-mac"),
+) -> None:
+    config = AppConfig.load()
+    publish_config = PublishConfig.from_app_config(config)
+    parsed_trade_date = date.fromisoformat(trade_date) if trade_date else None
+    state = publish_report_site(
+        publish_config,
+        mode=PublishMode.MANUAL_ONCE,
+        trade_date=parsed_trade_date,
+        notify_enabled=notify_mac or config.notify_mac,
+    )
+    typer.echo(state.summary_for_user)
+    if state.user_action_required:
+        typer.echo(f"需要你处理：{state.user_action_required}", err=True)
+    if state.status != PublishStatus.SUCCESS:
+        raise typer.Exit(code=2)
+
+
+def stock_analyzer_publish() -> None:
+    app(args=["ops", "publish-report-site"], prog_name="stock-analyzer-publish")
 
 
 @ops_app.command("prepare-deploy")
