@@ -324,7 +324,10 @@ def _append_report_json_failures(
             )
         )
 
-    if payload.get("is_fixture") is True or payload.get("report_mode") == "fixture":
+    payload_marked_fixture = (
+        payload.get("is_fixture") is True or payload.get("report_mode") == "fixture"
+    )
+    if payload_marked_fixture:
         failures.append(
             ProductionVerificationFailure(
                 code="fixture_sample_leak",
@@ -336,6 +339,23 @@ def _append_report_json_failures(
                 failure_class=FailureClass.FIXTURE_SAMPLE_IN_PRODUCTION,
             )
         )
+    else:
+        marker_path = _find_fixture_sample_json_marker(payload)
+        if marker_path is not None:
+            failures.append(
+                ProductionVerificationFailure(
+                    code="fixture_sample_leak",
+                    message=(
+                        "Fixture/sample marker found in report payload at "
+                        f"{marker_path}."
+                    ),
+                    fix_suggestion=(
+                        "Stop publishing this run and rerun the production pipeline "
+                        "without fixture-mode or sample data inputs."
+                    ),
+                    failure_class=FailureClass.FIXTURE_SAMPLE_IN_PRODUCTION,
+                )
+            )
 
 
 def _verification_status(passed: bool, recommendation_count: int) -> RunStatus:
@@ -394,6 +414,10 @@ def _count_supabase_rows(repository, table_name: str, trade_date: date) -> int |
 
 
 def _current_day_unique_code_count(repository, trade_date: date) -> int | None:
+    method = getattr(repository, "count_selected_market_codes", None)
+    if callable(method):
+        return int(method(trade_date))
+
     codes: set[str] = set()
     saw_rows = False
     for attr_name in ("market_bars", "daily_basic_indicators"):
@@ -407,7 +431,28 @@ def _current_day_unique_code_count(repository, trade_date: date) -> int | None:
             if getattr(item, "trade_date", None) == trade_date
         )
     if not saw_rows:
+        return _count_supabase_unique_codes(repository, trade_date)
+    return len(codes)
+
+
+def _count_supabase_unique_codes(repository, trade_date: date) -> int | None:
+    client = getattr(repository, "client", None)
+    if client is None:
         return None
+
+    codes: set[str] = set()
+    for table_name in ("market_price_daily", "daily_basic_indicator"):
+        result = (
+            client.table(table_name)
+            .select("ts_code")
+            .eq("trade_date", trade_date.isoformat())
+            .execute()
+        )
+        codes.update(
+            row.get("ts_code")
+            for row in getattr(result, "data", None) or []
+            if row.get("ts_code")
+        )
     return len(codes)
 
 
@@ -428,3 +473,28 @@ def _find_fixture_sample_leak(reports_dir: Path) -> str | None:
 
 def _contains_fixture_sample_marker(text: str) -> bool:
     return any(pattern.search(text) for pattern in FIXTURE_SAMPLE_PATTERNS)
+
+
+def _find_fixture_sample_json_marker(value: Any, path: str = "payload") -> str | None:
+    if isinstance(value, str):
+        if _contains_fixture_sample_marker(value):
+            return path
+        return None
+    if isinstance(value, dict):
+        for key, child in value.items():
+            marker_path = _find_fixture_sample_json_marker(
+                child,
+                f"{path}.{key}" if isinstance(key, str) else f"{path}[{key!r}]",
+            )
+            if marker_path is not None:
+                return marker_path
+        return None
+    if isinstance(value, list):
+        for index, child in enumerate(value):
+            marker_path = _find_fixture_sample_json_marker(
+                child,
+                f"{path}[{index}]",
+            )
+            if marker_path is not None:
+                return marker_path
+    return None

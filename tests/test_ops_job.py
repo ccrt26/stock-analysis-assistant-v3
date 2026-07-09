@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import date, timedelta
 
 from stock_analyzer.data.models import DailyBar, DailyBasicRow, SourceGrade
@@ -11,7 +12,10 @@ from stock_analyzer.domain.models import (
 )
 from stock_analyzer.ops.status import RunStatus
 from stock_analyzer.ops.verify import verify_production_result
-from stock_analyzer.storage.capacity_guard import MAX_SELECTED_WINDOW_ROWS
+from stock_analyzer.storage.capacity_guard import (
+    MAX_SELECTED_WINDOW_CODES,
+    MAX_SELECTED_WINDOW_ROWS,
+)
 
 
 def test_verify_accepts_zero_recommendations_as_success_no_recommendations(tmp_path):
@@ -139,6 +143,29 @@ def test_verify_fails_when_selected_market_rows_reach_full_market_scale(tmp_path
     assert _failure(verification, "selected_market_rows_too_large").fix_suggestion
 
 
+def test_verify_fails_when_supabase_selected_market_codes_exceed_limit(tmp_path):
+    trade_date = date(2026, 7, 9)
+    client = FakeVerificationSupabaseClient(
+        {
+            "market_price_daily": [
+                {
+                    "trade_date": trade_date.isoformat(),
+                    "ts_code": f"600{i:03d}.SH",
+                }
+                for i in range(MAX_SELECTED_WINDOW_CODES + 1)
+            ],
+            "daily_basic_indicator": [],
+        }
+    )
+    repository = FakeSupabaseVerificationRepository(client)
+    _write_production_report(tmp_path, trade_date)
+
+    verification = verify_production_result(tmp_path, repository, trade_date)
+
+    assert verification.passed is False
+    assert _failure(verification, "selected_market_codes_too_large").fix_suggestion
+
+
 def test_verify_fails_when_report_date_differs_from_trade_date(tmp_path):
     trade_date = date(2026, 7, 9)
     _write_production_report(tmp_path, date(2026, 7, 8))
@@ -169,6 +196,61 @@ def test_verify_fails_when_fixture_or_sample_strings_leak_into_reports(tmp_path)
 
     assert verification.passed is False
     assert _failure(verification, "fixture_sample_leak").fix_suggestion
+
+
+def test_verify_fails_when_fixture_or_sample_strings_leak_into_report_json(tmp_path):
+    trade_date = date(2026, 7, 9)
+    _write_production_report(
+        tmp_path,
+        trade_date,
+        report_json_payload={
+            "trade_date": trade_date.isoformat(),
+            "report_mode": "production",
+            "is_fixture": False,
+            "sections": [
+                {
+                    "title": "Signals",
+                    "note": "generated from local sample data",
+                }
+            ],
+            "recommendations": [],
+        },
+    )
+
+    verification = verify_production_result(
+        tmp_path,
+        FakeVerificationRepository(),
+        trade_date,
+    )
+
+    assert verification.passed is False
+    assert _failure(verification, "fixture_sample_leak").fix_suggestion
+
+
+def test_verify_ignores_false_fixture_flags_in_report_json(tmp_path):
+    trade_date = date(2026, 7, 9)
+    _write_production_report(
+        tmp_path,
+        trade_date,
+        report_json_payload={
+            "trade_date": trade_date.isoformat(),
+            "report_mode": "production",
+            "is_fixture": False,
+            "quality_flags": {
+                "fixture": False,
+                "sample": False,
+            },
+            "recommendations": [],
+        },
+    )
+
+    verification = verify_production_result(
+        tmp_path,
+        FakeVerificationRepository(),
+        trade_date,
+    )
+
+    assert verification.passed is True
 
 
 def test_verify_fails_when_report_index_is_missing(tmp_path):
@@ -210,12 +292,61 @@ class FakeVerificationRepository:
         return [item for item in self.evaluation_tasks if item.trade_date == trade_date]
 
 
+class FakeSupabaseVerificationRepository:
+    def __init__(self, client) -> None:
+        self.client = client
+
+    def load_daily_recommendations(self, trade_date):
+        return []
+
+    def load_evidence_packages(self, trade_date):
+        return []
+
+    def load_evaluation_tasks(self, trade_date):
+        return []
+
+
+class FakeVerificationSupabaseResult:
+    def __init__(self, data) -> None:
+        self.data = data
+        self.count = len(data)
+
+
+class FakeVerificationSupabaseTable:
+    def __init__(self, name: str, client: "FakeVerificationSupabaseClient") -> None:
+        self.name = name
+        self.client = client
+        self.filters = []
+
+    def select(self, columns: str, **options):
+        return self
+
+    def eq(self, column: str, value):
+        self.filters.append((column, value))
+        return self
+
+    def execute(self):
+        rows = list(self.client.table_data.get(self.name, []))
+        for column, value in self.filters:
+            rows = [row for row in rows if row.get(column) == value]
+        return FakeVerificationSupabaseResult(rows)
+
+
+class FakeVerificationSupabaseClient:
+    def __init__(self, table_data) -> None:
+        self.table_data = table_data
+
+    def table(self, name: str) -> FakeVerificationSupabaseTable:
+        return FakeVerificationSupabaseTable(name, self)
+
+
 def _write_production_report(
     project_root,
     trade_date: date,
     *,
     index_html: str | None = None,
     include_root_index: bool = True,
+    report_json_payload=None,
 ) -> None:
     reports = project_root / "reports"
     daily = reports / "daily" / trade_date.isoformat()
@@ -232,15 +363,14 @@ def _write_production_report(
         f"<html>生产日报 {trade_date.isoformat()}</html>",
         encoding="utf-8",
     )
+    payload = report_json_payload or {
+        "trade_date": trade_date.isoformat(),
+        "report_mode": "production",
+        "is_fixture": False,
+        "recommendations": [],
+    }
     (data / "latest.json").write_text(
-        (
-            "{\n"
-            f'  "trade_date": "{trade_date.isoformat()}",\n'
-            '  "report_mode": "production",\n'
-            '  "is_fixture": false,\n'
-            '  "recommendations": []\n'
-            "}\n"
-        ),
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
 
