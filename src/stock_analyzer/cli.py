@@ -10,6 +10,7 @@ from stock_analyzer.data.provider import (
     CurrentLiveDataUnavailable,
     build_production_market_data_provider,
 )
+from stock_analyzer.ops.job import ACTION_REQUIRED_STATUSES, run_daily_job
 from stock_analyzer.pipeline import (
     ProductionDataSourceUnavailable,
     StoredAnalysisNotFound,
@@ -27,6 +28,8 @@ from stock_analyzer.storage.supabase_client import create_supabase_client
 
 
 app = typer.Typer(no_args_is_help=True)
+ops_app = typer.Typer(no_args_is_help=True)
+app.add_typer(ops_app, name="ops")
 
 MISSING_SUPABASE_CONFIG_MESSAGE = (
     "SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required for production "
@@ -149,6 +152,27 @@ def render_report(
         typer.echo(f"fixture report rendered for {result.trade_date.isoformat()}")
         return
     typer.echo(f"report rendered for {result.trade_date.isoformat()}")
+
+
+@ops_app.command("run-daily-job")
+def ops_run_daily_job(
+    trade_date: str = typer.Option(..., "--trade-date"),
+    scheduled_slot: str = typer.Option(..., "--scheduled-slot"),
+    attempt: int = typer.Option(..., "--attempt", min=1),
+    prepare_deploy: bool = typer.Option(False, "--prepare-deploy"),
+) -> None:
+    parsed_trade_date = date.fromisoformat(trade_date)
+    config = AppConfig.load()
+    status = run_daily_job(
+        project_root=config.project_root,
+        trade_date=parsed_trade_date,
+        scheduled_slot=scheduled_slot,
+        attempt=attempt,
+        prepare_deploy=prepare_deploy,
+    )
+    typer.echo(f"{status.status.value} stage={status.stage}")
+    if status.status in ACTION_REQUIRED_STATUSES:
+        raise typer.Exit(code=2)
 
 
 class MissingSupabaseConfig(RuntimeError):

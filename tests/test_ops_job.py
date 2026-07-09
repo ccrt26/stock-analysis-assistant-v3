@@ -3,6 +3,14 @@ from __future__ import annotations
 import json
 from datetime import date, timedelta
 
+import pytest
+from typer.testing import CliRunner
+
+from stock_analyzer.cli import app
+from stock_analyzer.ops.calendar import TradingDayDecision
+from stock_analyzer.ops.cleanup import CleanupSummary
+from stock_analyzer.ops.job import RetryableJobError, run_daily_job
+from stock_analyzer.ops.status import FailureClass, JobStatus, RunStatus
 from stock_analyzer.data.models import DailyBar, DailyBasicRow, SourceGrade
 from stock_analyzer.domain.models import (
     ActionLabel,
@@ -10,8 +18,7 @@ from stock_analyzer.domain.models import (
     EvidencePackage,
     Recommendation,
 )
-from stock_analyzer.ops.status import RunStatus
-from stock_analyzer.ops.verify import verify_production_result
+from stock_analyzer.ops.verify import ProductionVerification, verify_production_result
 from stock_analyzer.storage.capacity_guard import (
     MAX_SELECTED_WINDOW_CODES,
     MAX_SELECTED_WINDOW_ROWS,
@@ -265,6 +272,326 @@ def test_verify_fails_when_report_index_is_missing(tmp_path):
 
     assert verification.passed is False
     assert _failure(verification, "report_index_missing").fix_suggestion
+
+
+def test_run_daily_job_skips_non_trading_day_without_production_run(tmp_path):
+    trade_date = date(2026, 7, 11)
+    events: list[str] = []
+
+    status = run_daily_job(
+        tmp_path,
+        trade_date,
+        "18:30",
+        1,
+        prepare_deploy=True,
+        repository=FakeJobRepository(),
+        calendar_decider=_calendar_decider(
+            TradingDayDecision(
+                status="non_trading_day",
+                source="supabase",
+                message="market closed",
+            ),
+            events,
+        ),
+        health_check=_recording_call(events, "health_check"),
+        run_daily=_recording_call(events, "run_daily"),
+        verifier=lambda *_args: _successful_verification(trade_date),
+        cleanup=_recording_call(events, "cleanup"),
+        prepare_deploy_func=_recording_call(events, "prepare_deploy"),
+    )
+
+    assert status.status == RunStatus.SKIPPED_NON_TRADING_DAY
+    assert status.publish_skipped_reason == "non_trading_day"
+    assert status.deploy_artifact_prepared is False
+    assert events == ["calendar"]
+
+
+def test_run_daily_job_calendar_unknown_requires_human_intervention(tmp_path):
+    trade_date = date(2026, 7, 9)
+
+    status = run_daily_job(
+        tmp_path,
+        trade_date,
+        "18:30",
+        1,
+        prepare_deploy=False,
+        repository=FakeJobRepository(),
+        calendar_decider=lambda *_args, **_kwargs: TradingDayDecision(
+            status="calendar_unknown",
+            source="unknown",
+            message="calendar lookup failed",
+        ),
+    )
+
+    assert status.status == RunStatus.CALENDAR_UNKNOWN
+    assert status.failure_class == FailureClass.CALENDAR_UNKNOWN
+    assert status.retryable is False
+    assert status.fix_suggestion
+
+
+def test_run_daily_job_attempt_two_cleans_before_rerun(tmp_path):
+    trade_date = date(2026, 7, 9)
+    events: list[str] = []
+
+    status = run_daily_job(
+        tmp_path,
+        trade_date,
+        "19:00",
+        2,
+        prepare_deploy=False,
+        repository=FakeJobRepository(),
+        calendar_decider=_calendar_decider(
+            TradingDayDecision(
+                status="trading_day",
+                source="supabase",
+                message="market open",
+            ),
+            events,
+        ),
+        cleanup=lambda *_args: _cleanup_summary(trade_date, events),
+        health_check=_recording_call(events, "health_check"),
+        run_daily=_recording_call(events, "run_daily"),
+        verifier=lambda *_args: _successful_verification(trade_date),
+    )
+
+    assert status.status == RunStatus.SUCCESS_NO_RECOMMENDATIONS
+    assert status.cleanup_performed is True
+    assert status.cleanup_summary["repository_deleted_counts"] == {
+        "recommendation_daily": 1,
+    }
+    assert events == ["calendar", "cleanup", "health_check", "run_daily"]
+
+
+def test_run_daily_job_cleanup_failure_returns_failed_needs_human(tmp_path):
+    trade_date = date(2026, 7, 9)
+    events: list[str] = []
+
+    def fail_cleanup(*_args):
+        events.append("cleanup")
+        raise RuntimeError("cleanup failed")
+
+    status = run_daily_job(
+        tmp_path,
+        trade_date,
+        "19:00",
+        2,
+        prepare_deploy=False,
+        repository=FakeJobRepository(),
+        calendar_decider=_calendar_decider(
+            TradingDayDecision(
+                status="trading_day",
+                source="supabase",
+                message="market open",
+            ),
+            events,
+        ),
+        cleanup=fail_cleanup,
+        health_check=_recording_call(events, "health_check"),
+        run_daily=_recording_call(events, "run_daily"),
+    )
+
+    assert status.status == RunStatus.FAILED_NEEDS_HUMAN
+    assert status.failure_class == FailureClass.CLEANUP_FAILED
+    assert status.cleanup_performed is False
+    assert events == ["calendar", "cleanup"]
+
+
+def test_run_daily_job_third_failed_attempt_needs_human(tmp_path):
+    trade_date = date(2026, 7, 9)
+    events: list[str] = []
+
+    def fail_retryable(*_args):
+        events.append("run_daily")
+        raise RetryableJobError(
+            "temporary network timeout",
+            failure_class=FailureClass.NETWORK_TIMEOUT,
+        )
+
+    status = run_daily_job(
+        tmp_path,
+        trade_date,
+        "19:30",
+        3,
+        prepare_deploy=False,
+        repository=FakeJobRepository(),
+        calendar_decider=_calendar_decider(
+            TradingDayDecision(
+                status="trading_day",
+                source="supabase",
+                message="market open",
+            ),
+            events,
+        ),
+        cleanup=lambda *_args: _cleanup_summary(trade_date, events),
+        health_check=_recording_call(events, "health_check"),
+        run_daily=fail_retryable,
+    )
+
+    assert status.status == RunStatus.FAILED_NEEDS_HUMAN
+    assert status.failure_class == FailureClass.MAX_ATTEMPTS_EXCEEDED
+    assert status.retryable is False
+    assert events == ["calendar", "cleanup", "health_check", "run_daily"]
+
+
+def test_run_daily_job_success_with_zero_recommendations_writes_status(tmp_path):
+    trade_date = date(2026, 7, 9)
+    status_path = tmp_path / "logs" / "run-daily" / "latest-status.json"
+    prepared_paths: list[str] = []
+
+    status = run_daily_job(
+        tmp_path,
+        trade_date,
+        "18:30",
+        1,
+        prepare_deploy=True,
+        repository=FakeJobRepository(),
+        calendar_decider=lambda *_args, **_kwargs: TradingDayDecision(
+            status="trading_day",
+            source="supabase",
+            message="market open",
+        ),
+        run_daily=lambda *_args: None,
+        verifier=lambda *_args: _successful_verification(trade_date),
+        prepare_deploy_func=lambda project_root: prepared_paths.append(
+            str(project_root / "dist" / "pages")
+        )
+        or (project_root / "dist" / "pages"),
+        status_path=status_path,
+    )
+
+    payload = json.loads(status_path.read_text(encoding="utf-8"))
+    assert status.status == RunStatus.SUCCESS_NO_RECOMMENDATIONS
+    assert status.recommendations == 0
+    assert status.deploy_artifact_prepared is True
+    assert prepared_paths == [str(tmp_path / "dist" / "pages")]
+    assert payload["status"] == "success_no_recommendations"
+    assert payload["recommendations"] == 0
+    assert payload["deploy_artifact_prepared"] is True
+
+
+def test_run_daily_job_redacts_status_json_error_messages(tmp_path):
+    trade_date = date(2026, 7, 9)
+    status_path = tmp_path / "logs" / "run-daily" / "latest-status.json"
+
+    def fail_with_secret(*_args):
+        raise RetryableJobError(
+            "Authorization: Bearer opaque-token CREDENTIAL_KEY=opaque-value",
+            failure_class=FailureClass.NETWORK_TIMEOUT,
+        )
+
+    run_daily_job(
+        tmp_path,
+        trade_date,
+        "18:30",
+        1,
+        prepare_deploy=False,
+        repository=FakeJobRepository(),
+        calendar_decider=lambda *_args, **_kwargs: TradingDayDecision(
+            status="trading_day",
+            source="supabase",
+            message="market open",
+        ),
+        run_daily=fail_with_secret,
+        status_path=status_path,
+    )
+
+    status_text = status_path.read_text(encoding="utf-8")
+    assert "opaque-token" not in status_text
+    assert "opaque-value" not in status_text
+    assert "[REDACTED]" in status_text
+
+
+@pytest.mark.parametrize(
+    "run_status",
+    [
+        RunStatus.FAILED_NEEDS_HUMAN,
+        RunStatus.FAILED_RETRYABLE,
+        RunStatus.CALENDAR_UNKNOWN,
+    ],
+)
+def test_ops_run_daily_job_cli_exits_nonzero_for_action_required_status(
+    monkeypatch,
+    tmp_path,
+    run_status,
+):
+    def fake_run_daily_job(**kwargs):
+        return JobStatus(
+            trade_date=kwargs["trade_date"],
+            attempt=kwargs["attempt"],
+            scheduled_slot=kwargs["scheduled_slot"],
+            status=run_status,
+            stage="run_daily",
+        )
+
+    monkeypatch.setenv("PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setattr("stock_analyzer.cli.run_daily_job", fake_run_daily_job)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "ops",
+            "run-daily-job",
+            "--trade-date",
+            "2026-07-09",
+            "--scheduled-slot",
+            "18:30",
+            "--attempt",
+            "1",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert run_status.value in result.output
+
+
+class FakeJobRepository:
+    def load_market_calendar_day(self, trade_date):
+        return True
+
+    def save_market_calendar_day(self, trade_date, is_trading_day, market="CN_A"):
+        return None
+
+
+def _calendar_decider(decision: TradingDayDecision, events: list[str]):
+    def decide(*_args, **_kwargs):
+        events.append("calendar")
+        return decision
+
+    return decide
+
+
+def _recording_call(events: list[str], name: str):
+    def call(*_args, **_kwargs):
+        events.append(name)
+        return None
+
+    return call
+
+
+def _cleanup_summary(trade_date: date, events: list[str]) -> CleanupSummary:
+    events.append("cleanup")
+    return CleanupSummary(
+        trade_date=trade_date,
+        repository_deleted_counts={"recommendation_daily": 1},
+        removed_paths=("reports/daily/2026-07-09",),
+    )
+
+
+def _successful_verification(trade_date: date) -> ProductionVerification:
+    return ProductionVerification(
+        trade_date=trade_date,
+        status=RunStatus.SUCCESS_NO_RECOMMENDATIONS,
+        passed=True,
+        recommendations=0,
+        evidence_packages=0,
+        evaluation_tasks=0,
+        market_price_daily_current_day_rows=0,
+        daily_basic_indicator_current_day_rows=0,
+        report_index_exists=True,
+        daily_report_index_exists=True,
+        report_json_exists=True,
+        failures=(),
+    )
 
 
 class FakeVerificationRepository:
