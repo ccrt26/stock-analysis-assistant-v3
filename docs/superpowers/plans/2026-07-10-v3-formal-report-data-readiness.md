@@ -27,6 +27,8 @@
 
 - Create `src/stock_analyzer/data/readiness.py`: formal group IDs, route kinds, contracts, payload/version/capability models, shared validation, and July 10 official-session constant.
 - Create `src/stock_analyzer/data/acquisition.py`: route protocol, transient/permanent failure types, atomic primary/backup acquisition, and capability gate.
+- Create `src/stock_analyzer/data/formal_routes.py`: executable normalized endpoint-route adapters and primary/backup route registry for every required acquisition group.
+- Modify `src/stock_analyzer/data/source_registry.py`: replace declaration-only or invalid endpoint names with exact executable route factories and explicit approved single-source policy.
 - Create `src/stock_analyzer/storage/evidence_store.py`: immutable group versions, canonical pointers, run receipts, candidate sets, checkpoints, reconciliation tasks, point-in-time history reads, and redacted blocked status.
 - Create `src/stock_analyzer/ops/formal_run.py`: state transitions, two-stage acquisition, deterministic screen gate, candidate freeze, analysis gate, blocked outcome, and formal run orchestration.
 - Create `src/stock_analyzer/ops/activation.py`: staging verification, pending narrow-ledger protocol, dual activation markers, atomic pointers, idempotent retry, and injected-failure boundaries.
@@ -118,8 +120,12 @@ git commit -m "feat: define formal data readiness contracts"
 
 **Files:**
 - Create: `src/stock_analyzer/data/acquisition.py`
+- Create: `src/stock_analyzer/data/formal_routes.py`
+- Modify: `src/stock_analyzer/data/source_registry.py`
 - Create: `src/stock_analyzer/storage/evidence_store.py`
 - Test: `tests/test_atomic_acquisition.py`
+- Test: `tests/test_formal_routes.py`
+- Modify: `tests/test_strategy_v2_source_registry.py`
 - Test: `tests/test_evidence_store.py`
 
 **Interfaces:**
@@ -127,6 +133,10 @@ git commit -m "feat: define formal data readiness contracts"
 - `TransientRouteFailure` and `PermanentRouteFailure` preserve only redacted messages and `FailureClassification`.
 - `AtomicGroupAcquirer(primary_retry_limit=2).acquire(contract, request, primary, backup) -> AcquisitionResult` where `AcquisitionResult` contains exactly one accepted payload, both attempt records, validation, and `used_backup`.
 - `AcquisitionBlocked(group_id, attempts, reasons)` is raised only after both complete routes are exhausted.
+- `FormalEndpointClient` protocol exposes exact normalized methods `fetch_calendar_universe`, `fetch_market_decision`, `fetch_board_industry`, `fetch_candidate_fundamentals`, `fetch_official_events_risk`, and `fetch_concepts`; each receives only `AcquisitionRequest` and returns records plus publication/unit metadata.
+- `NormalizedEndpointRoute(route_id, kind, group_id, client_method, capability)` calls one exact protocol method and returns a whole `AcquisitionPayload`; it never reads another route's payload or cache.
+- `FormalRoutePair(primary, backup, approved_single_source)` and `build_formal_route_registry(primary_client, backup_client, official_client, holdings_loader) -> dict[AcquisitionGroupId, FormalRoutePair]` provide executable routes for calendar/universe, market decision, board/industry, candidate company/fundamental, official events/risk, conditional concept/theme, and manual holdings.
+- `source_registry.strategy_v2_source_registry()` points to those route factory names; it removes `tushare.announcements`, requires official exchange/regulator event adapters, and represents manual holdings as an approved local single-source dependency whose missing/malformed file blocks personalized output while an explicit valid empty list means no holdings.
 - `LocalEvidenceStore(root)` methods:
   - `save_group_version(payload, validation) -> GroupVersionManifest`
   - `read_group_version(version_id) -> AcquisitionPayload`
@@ -165,7 +175,28 @@ Run: `.venv/bin/python -m pytest tests/test_atomic_acquisition.py -q`
 
 Expected: all atomic acquisition tests pass; attempts show two primary calls only for transient failure and one backup call after rejection.
 
-- [ ] **Step 4: Write evidence-store RED tests**
+- [ ] **Step 4: Write executable-route RED tests**
+
+```python
+def test_every_required_group_has_executable_primary_and_backup_or_approved_single_source(): ...
+def test_each_route_calls_its_exact_endpoint_method_and_normalizes_a_complete_payload(): ...
+def test_market_route_preserves_declared_units_adjustment_basis_and_82_covered_sessions(): ...
+def test_official_event_route_accepts_proven_empty_coverage_but_rejects_endpoint_failure(): ...
+def test_calendar_route_excuses_only_officially_suspended_or_hard_excluded_codes(): ...
+def test_unknown_missing_market_code_is_not_inferred_suspended(): ...
+def test_manual_holdings_route_distinguishes_explicit_empty_missing_and_malformed_files(): ...
+def test_registry_contains_no_unverified_tushare_announcements_name(): ...
+```
+
+Run before implementation: `.venv/bin/python -m pytest tests/test_formal_routes.py tests/test_strategy_v2_source_registry.py -q`
+
+Expected RED: the executable route registry is missing and the old invalid declaration remains.
+
+Implement `formal_routes.py` and update `source_registry.py`, then run the same command.
+
+Expected GREEN: every required group resolves to callable route objects with passing recorded-response capability evidence; no live endpoint is contacted.
+
+- [ ] **Step 5: Write evidence-store RED tests**
 
 ```python
 def test_versions_are_immutable_and_canonical_pointer_is_atomic(): ...
@@ -177,20 +208,20 @@ def test_reconciliation_preserves_frozen_receipt_input_set_and_artifact_hashes()
 def test_look_ahead_financial_or_event_version_is_not_read(): ...
 ```
 
-- [ ] **Step 5: Run store RED, implement store, then run GREEN**
+- [ ] **Step 6: Run store RED, implement store, then run GREEN**
 
 Run before implementation: `.venv/bin/python -m pytest tests/test_evidence_store.py -q`
 
 Expected RED: missing `stock_analyzer.storage.evidence_store`.
 
-Run after implementation: `.venv/bin/python -m pytest tests/test_atomic_acquisition.py tests/test_evidence_store.py -q`
+Run after implementation: `.venv/bin/python -m pytest tests/test_atomic_acquisition.py tests/test_formal_routes.py tests/test_strategy_v2_source_registry.py tests/test_evidence_store.py -q`
 
 Expected GREEN: all tests pass; target-date cache reads return no payload; reconciliation keeps both raw version files.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
-git add src/stock_analyzer/data/acquisition.py src/stock_analyzer/storage/evidence_store.py tests/test_atomic_acquisition.py tests/test_evidence_store.py
+git add src/stock_analyzer/data/acquisition.py src/stock_analyzer/data/formal_routes.py src/stock_analyzer/data/source_registry.py src/stock_analyzer/storage/evidence_store.py tests/test_atomic_acquisition.py tests/test_formal_routes.py tests/test_strategy_v2_source_registry.py tests/test_evidence_store.py
 git commit -m "feat: acquire and version formal evidence atomically"
 ```
 
@@ -534,7 +565,7 @@ Expected: push succeeds without force and updates `origin/codex/v3-mvp` to local
 
 ## Plan Self-Review Record
 
-- Spec coverage: Tasks 1-2 cover contracts, executable routes, 82 sessions, atomic failover, cache, point-in-time rules, and reconciliation; Tasks 3 and 6 cover two readiness gates, frozen candidates, receipts, blocked operation, and manual render; Task 4 covers contiguous focus history; Task 5 covers two-phase activation/narrow ledger; Task 7 covers every July 10 scenario, documentation, final review, full suite, clean tree, and push.
+- Spec coverage: Tasks 1-2 cover contracts, exact executable adapters for every required group, recorded capability evidence, 82 sessions, atomic failover, edge-case coverage, cache, point-in-time rules, and reconciliation; Tasks 3 and 6 cover two readiness gates, frozen candidates, receipts, blocked operation, and manual render; Task 4 covers contiguous focus history; Task 5 covers two-phase activation/narrow ledger; Task 7 covers every July 10 scenario, documentation, final review, full suite, clean tree, and push.
 - Placeholder scan: no placeholder marker, deferred implementation phrase, unnamed error-handling step, unspecified test step, or shell-path substitution remains.
 - Type consistency: `AcquisitionRequest`, `AcquisitionPayload`, `GroupValidation`, `RunReceipt`, `CandidateSet`, `LocalEvidenceStore`, `FormalLedger`, `FormalActivationCoordinator`, `FormalPipelineDependencies`, and `FormalFocusDay` retain the same names and roles across all tasks.
 - Scope control: no Strategy V2 scoring, recommendation logic, action/position rule, LLM content rule, report layout redesign, live provider call, production write, deployment, broker link, or order feature is introduced.
