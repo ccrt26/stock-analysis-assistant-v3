@@ -46,7 +46,7 @@ The absence of approval for steps 3-7 does not permit omission of the code and o
 
 | ID | Capability | Required evidence | Current evidence | Level | Blocking gap |
 | --- | --- | --- | --- | --- | --- |
-| `GOV-001` | One canonical current-state source | Matrix referenced by README, active design, runbook, and future plan; historical documents disclaim current-state authority | README and active runbooks reference this matrix; every historical spec/plan has a lifecycle banner; focused documentation tests pass | `OFFLINE_VERIFIED` | Deprecated compatibility roadmap removal is deferred to the corrective plan so historical test references can be changed atomically |
+| `GOV-001` | One canonical current-state source | Matrix referenced by README, active design, runbook, and future plan; historical documents disclaim current-state authority | README and active runbooks reference this matrix; every historical spec/plan has a lifecycle banner; the deprecated compatibility roadmap has been removed; focused documentation tests pass | `OFFLINE_VERIFIED` | None |
 | `GOV-002` | Requirement-to-code traceability | Every normative requirement maps to a production symbol, default-path test, live/activation evidence, and corrective task | Prior plans map mostly to unit tests and filenames, not to default production construction | `NOT_IMPLEMENTED` | Corrective plan must consume capability IDs and exact acceptance evidence |
 | `GOV-003` | Non-ambiguous completion reporting | Reports state separate implementation, offline, live-read, production-write, and activation levels | Active design, README, runbooks, and this matrix now use separate levels; historical handoffs did not | `IMPLEMENTED_UNVERIFIED` | Corrective plan must add review and handoff checks that reject unqualified phase-wide “complete” claims |
 
@@ -145,7 +145,7 @@ The project may use the following completion statements only when every listed c
 - Files under `docs/superpowers/specs/` are design history unless explicitly named as active normative authority here.
 - Files under `docs/superpowers/plans/` are immutable historical execution records after their execution. They never establish current production readiness.
 - `docs/operations/runbook.md` and `docs/operations/cloudflare-pages.md` describe executable operations and must not claim availability above this matrix.
-- `docs/operations/mandatory-next-phases.md` is deprecated. Its non-duplicated sequencing and boundary content is absorbed here; removal and reference cleanup belong to `GOV-001`.
+- The former mandatory-next-phases compatibility roadmap has been removed. Its current sequencing and safety boundaries are represented by the capability IDs and system-level gates in this file; historical plans retain their original path references only as audit history.
 
 ## 7. Corrective Program Order
 

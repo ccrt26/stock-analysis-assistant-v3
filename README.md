@@ -71,7 +71,6 @@ Cloudflare Pages 只发布报告成品，不发布原始数据、日志、规则
 - Phase 1 runbook: [docs/operations/runbook.md](docs/operations/runbook.md)
 - Cloudflare Pages manual publish and smoke: [docs/operations/cloudflare-pages.md](docs/operations/cloudflare-pages.md)
 - Phase 2 Cloudflare automation: see `docs/operations/cloudflare-pages.md` and `docs/superpowers/specs/2026-07-09-v3-phase-2-cloudflare-automation-design.md`.
-- Deprecated historical phase roadmap (not a current-status source): [docs/operations/mandatory-next-phases.md](docs/operations/mandatory-next-phases.md)
 
 Operations are approval-gated. Do not enable launchd, run a real production job, run production cleanup, or deploy Cloudflare Pages without explicit approval.
 

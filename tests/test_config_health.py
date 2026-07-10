@@ -165,8 +165,8 @@ def test_generated_operation_artifacts_are_gitignored():
 def test_operations_docs_capture_phase1_runbook_requirements():
     runbook = read_project_file("docs/operations/runbook.md")
     cloudflare_pages = read_project_file("docs/operations/cloudflare-pages.md")
-    mandatory_next_phases = read_project_file("docs/operations/mandatory-next-phases.md")
-    combined_docs = "\n".join([runbook, cloudflare_pages, mandatory_next_phases])
+    capability_matrix = read_project_file("docs/operations/production-capability-matrix.md")
+    combined_docs = "\n".join([runbook, cloudflare_pages, capability_matrix])
 
     assert "18:30" in combined_docs
     assert "19:00" in combined_docs
@@ -174,15 +174,13 @@ def test_operations_docs_capture_phase1_runbook_requirements():
     assert "cleanup-before-retry" in combined_docs
     assert "skipped_non_trading_day" in combined_docs
     assert "wrangler pages deploy dist/pages" in cloudflare_pages
-    assert "Strategy V2 is mandatory, not optional." in mandatory_next_phases
-    assert "Product UI is mandatory, not optional." in mandatory_next_phases
-    assert "GPT-5.5 xhigh" in combined_docs
-    assert "subagent" in mandatory_next_phases.lower()
+    assert "`STRAT-001`" in capability_matrix
+    assert "`SAFE-001`" in capability_matrix
 
 
 def test_phase2_cloudflare_automation_docs_are_present():
     cloudflare_pages = read_project_file("docs/operations/cloudflare-pages.md")
-    mandatory_next_phases = read_project_file("docs/operations/mandatory-next-phases.md")
+    capability_matrix = read_project_file("docs/operations/production-capability-matrix.md")
     readme = read_project_file("README.md")
 
     assert "stock-analyzer-publish" in cloudflare_pages
@@ -190,8 +188,8 @@ def test_phase2_cloudflare_automation_docs_are_present():
     assert "自动转为全自动" in cloudflare_pages
     assert "last known good" in cloudflare_pages.lower()
     assert "不要打印、复制、提交或记录" in cloudflare_pages
-    assert "Phase 3 Strategy V2" in mandatory_next_phases
-    assert "Phase 4 Product UI" in mandatory_next_phases
+    assert "`PUB-002`" in capability_matrix
+    assert "`PUB-003`" in capability_matrix
     assert "Phase 2 Cloudflare automation" in readme
 
 
@@ -202,7 +200,24 @@ def test_operations_docs_link_from_readme_and_gate_manual_actions():
 
     assert "docs/operations/runbook.md" in readme
     assert "docs/operations/cloudflare-pages.md" in readme
-    assert "docs/operations/mandatory-next-phases.md" in readme
+    assert "docs/operations/production-capability-matrix.md" in readme
     assert "Do not enable launchd without explicit approval." in runbook
     assert "Do not run a real production job without explicit approval." in runbook
     assert "Do not deploy Cloudflare Pages without explicit approval." in cloudflare_pages
+
+
+def test_readme_links_only_canonical_current_status_and_active_runbooks():
+    readme = read_project_file("README.md")
+
+    assert "docs/operations/production-capability-matrix.md" in readme
+    assert "mandatory-next-phases.md" not in readme
+
+
+def test_historical_specs_and_plans_disclaim_current_status_authority():
+    for directory in ("docs/superpowers/specs", "docs/superpowers/plans"):
+        for path in (PROJECT_ROOT / directory).glob("*.md"):
+            assert "production-capability-matrix.md" in path.read_text(encoding="utf-8")
+
+
+def test_deprecated_mandatory_next_phases_file_is_removed():
+    assert not (PROJECT_ROOT / "docs/operations/mandatory-next-phases.md").exists()
