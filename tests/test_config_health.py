@@ -16,6 +16,13 @@ def read_project_file(relative_path: str) -> str:
     return (PROJECT_ROOT / relative_path).read_text(encoding="utf-8")
 
 
+def capability_level(capability_id: str) -> str:
+    matrix = read_project_file("docs/operations/production-capability-matrix.md")
+    prefix = f"| `{capability_id}` |"
+    row = next(line for line in matrix.splitlines() if line.startswith(prefix))
+    return row.split("|")[5].strip().strip("`")
+
+
 def test_config_uses_home_tushare_token_path_when_env_missing():
     config = AppConfig.load(env={})
     expected_project_root = PROJECT_ROOT
@@ -221,3 +228,57 @@ def test_historical_specs_and_plans_disclaim_current_status_authority():
 
 def test_deprecated_mandatory_next_phases_file_is_removed():
     assert not (PROJECT_ROOT / "docs/operations/mandatory-next-phases.md").exists()
+
+
+def test_active_docs_say_program_offline_ready_but_live_actions_not_executed():
+    readme = read_project_file("README.md")
+    runbook = read_project_file("docs/operations/runbook.md")
+    design = read_project_file(
+        "docs/superpowers/specs/2026-07-10-v3-formal-report-data-readiness-design.md"
+    )
+
+    for document in (readme, runbook, design):
+        assert "正式生产程序已完成实现并通过默认入口离线验证" in document
+        assert "尚未执行真实数据读取" in document
+
+
+def test_matrix_default_factory_and_route_rows_match_verified_evidence():
+    offline_verified = (
+        "GOV-002",
+        "GOV-003",
+        "DATA-001",
+        "DATA-002",
+        "DATA-003",
+        "DATA-004",
+        "DATA-005",
+        "DATA-006",
+        "DATA-007",
+        "DATA-008",
+        "DATA-009",
+        "DATA-010",
+        "PIPE-002",
+        "PIPE-006",
+        "PIPE-007",
+        "PIPE-008",
+        "PIPE-009",
+        "STORE-001",
+        "ACT-001",
+        "REPORT-001",
+        "REPORT-002",
+        "REPORT-003",
+        "OPS-001",
+        "OPS-003",
+    )
+
+    assert {capability_id: capability_level(capability_id) for capability_id in offline_verified} == {
+        capability_id: "OFFLINE_VERIFIED" for capability_id in offline_verified
+    }
+
+
+def test_matrix_does_not_claim_live_read_supabase_write_launchd_or_publish():
+    assert capability_level("DATA-011") == "BLOCKED"
+    assert capability_level("STORE-002") == "IMPLEMENTED_UNVERIFIED"
+    assert capability_level("STORE-003") == "IMPLEMENTED_UNVERIFIED"
+    assert capability_level("OPS-002") == "BLOCKED"
+    assert capability_level("PUB-003") == "BLOCKED"
+    assert capability_level("SAFE-001") == "NOT_APPLICABLE"

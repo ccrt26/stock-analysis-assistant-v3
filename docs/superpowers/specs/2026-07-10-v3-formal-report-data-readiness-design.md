@@ -1,7 +1,7 @@
 # V3 Formal Report Data Readiness Design
 
 **Date:** 2026-07-10  
-**Status:** Active normative design; core safety framework implemented offline, production-route correction required
+**Status:** Active normative design; production program offline-verified, live-read and production activation pending
 
 **Scope:** Repair data acquisition, validation, historical reuse, and formal-report eligibility after Phase 3 Strategy V2  
 **Out of scope:** Strategy scoring, financial decision rules, position sizing, LLM writing style, broker integration, and automated orders
@@ -10,7 +10,9 @@
 
 This design remains the normative authority for formal-report behavior. It does not by itself prove that a production capability is implemented, verified, written to production, or activated. Current status is tracked only in [`docs/operations/production-capability-matrix.md`](../../operations/production-capability-matrix.md).
 
-The implementation completed through commit `8e252ad48296dcc4375c10cacb5b81ff30663709` established contracts, generic route wrappers, atomic failover, immutable evidence, readiness states, focus-history rules, receipt gates, and two-phase activation under recorded or synthetic tests. It did not establish concrete production endpoint clients, production contract instances, durable capability records, production screening/analysis/expression adapters, or a functioning `build_production_formal_dependencies()` factory. Those omissions are unfinished design requirements, not optional activation work.
+The implementation completed through commit `8e252ad48296dcc4375c10cacb5b81ff30663709` established generic route wrappers, atomic failover, immutable evidence, readiness states, focus-history rules, receipt gates, and two-phase activation under recorded or synthetic tests, but it lacked the concrete production program. The correction through default-entry evidence commit `0cd98dd` added the production contracts, Tushare and AKShare clients, durable capability records, screening/analysis/expression adapters, report bindings, Supabase hardening, and a functioning `build_production_formal_dependencies()` factory.
+
+正式生产程序已完成实现并通过默认入口离线验证；尚未执行真实数据读取，包括 2026-03-12 至 2026-07-10 的 82 个正式交易日回填。Supabase 正式迁移和写入、launchd 激活、Cloudflare 发布、经纪商连接和订单操作也均未执行。These unexecuted actions are later approval and environment-verification gates, not missing production-program code.
 
 The following terms are distinct and must not be collapsed into a single “complete” status:
 

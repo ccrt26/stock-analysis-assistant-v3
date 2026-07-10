@@ -1,6 +1,8 @@
 # Phase 1 Operations Runbook
 
-> **Current availability:** The formal production program is not yet runnable. `build_production_formal_dependencies()` is intentionally fail-closed while concrete production routes and adapters remain incomplete. Do not execute the production command below until [`production-capability-matrix.md`](production-capability-matrix.md) reaches `OFFLINE_VERIFIED` for the required program rows and the separately approved live-read/write gates have passed.
+> **Current availability:** The concrete formal production program and default command path are offline-verified with recorded responses at the external transport boundary. It is not live-data-ready or production-write-verified. Do not execute the real production command below until the separately approved live-read, 82-session backfill, and Supabase gates in [`production-capability-matrix.md`](production-capability-matrix.md) pass.
+
+正式生产程序已完成实现并通过默认入口离线验证；尚未执行真实数据读取、82 个正式交易日回填、Supabase 正式迁移或写入、launchd 激活、Cloudflare 发布、经纪商连接或订单操作。
 
 This runbook covers the Phase 1 local Mac production flow for stock-analysis-assistant-v3. Phase 1 can run the local daily job, classify failures, clean same-day partial outputs before approved retries, write machine-readable status, and prepare `dist/pages`. It does not publish Cloudflare Pages automatically.
 
@@ -88,10 +90,14 @@ A complete backup group can support analysis after the identical contract passes
 Run the isolated July 10 acceptance without network or production writes:
 
 ```bash
-.venv/bin/python -m pytest tests/test_july10_formal_readiness_acceptance.py -q
+PYTHONPATH=src .venv/bin/python -m pytest tests/test_default_formal_production_entry.py -q
 ```
 
-Passing this offline rehearsal does not authorize live acquisition, Supabase mutation, Cloudflare deployment, publication, broker access, or order execution. Each real production action remains separately approval-gated.
+This test invokes the real `_default_run_daily()` and `build_production_formal_dependencies()` path. It replaces only Tushare, AKShare, and ledger transport boundaries with recorded/fake external runtimes; it does not patch the production factory or reuse `_sample_market`.
+
+The default live capability-record location is `local_warehouse/formal_evidence/capabilities/formal-v2/latest.json`. A recorded evidence bundle is accepted only by recorded test mode; live mode rejects it before any provider call. An approved live-read verification must create live evidence at that location without exposing credentials.
+
+Passing this offline rehearsal does not authorize live acquisition, Supabase mutation, Cloudflare deployment, publication, broker access, or order execution. Each real production action remains separately approval-gated. The lower-level readiness regression remains available as `PYTHONPATH=src .venv/bin/python -m pytest tests/test_july10_formal_readiness_acceptance.py -q`.
 
 ## Non-Trading-Day Skip Rule
 
@@ -126,4 +132,4 @@ Use status and logs for operations decisions. Do not paste log output into chat,
 
 ## Model Requirement
 
-Every Phase 1 implementer, reviewer, and subagent must use GPT-5.5 xhigh. Do not use mini models for production automation, cleanup, trading calendars, Supabase, Cloudflare, secrets, deployment, or final review.
+For this production-capability correction, the main agent owns implementation, tests, commits, and push. A subagent may be used only for an independent read-only investigation or final review when GPT-5.6 sol, high reasoning, and standard speed can be guaranteed; otherwise do not delegate.
