@@ -22,6 +22,8 @@ This specification restores and strengthens the fail-closed boundary from the Tu
 - A blocked run may write an internal operational status and send a human-intervention notification. That status is not an analysis report and must not be placed in the publishable report tree.
 - Historical cache can support historical windows, replay, audit, and same-run resume. It cannot replace missing current-day facts.
 
+It also supersedes the earlier requirement to show a user-facing warning solely because an approved backup route supplied a complete group. Source route and freshness remain frozen in internal evidence metadata. A backup-supported report is allowed only when the backup group passes the same complete contract; the system does not compare providers or manufacture a source-difference warning.
+
 The following Phase 3 behavior is superseded for production formal-report runs:
 
 - A trading day is no longer required to render a public `data_insufficient` report.
@@ -66,12 +68,19 @@ An acquisition route is a complete recipe for one acquisition group. A route may
 
 Examples:
 
-- The primary market-decision route may call Tushare `stock_basic`, `trade_cal`, `daily`, `daily_basic`, and `index_daily`.
-- The backup market-decision route may call approved AkShare/Eastmoney adapters for the complete stock universe, daily history, current post-close snapshot, valuation/liquidity fields, and index history.
+- The primary calendar/universe route may call Tushare `stock_basic`, `trade_cal`, and `suspend_d`.
+- The primary market-decision route may call Tushare `daily`, `daily_basic`, and `index_daily`.
+- The backup market-decision route may call approved AkShare/Eastmoney adapters for complete daily history, the current post-close snapshot, valuation/liquidity fields, and index history.
 
 The system may not combine a partial primary market route with a partial backup market route and call the result complete.
 
-### 4.3 Canonical Version and Frozen Evidence
+An acquisition group is not formal-report ready until both its primary and approved backup routes have executable capability evidence. If no complete backup route exists, the group is an explicit single-source hard dependency and requires user approval; a primary failure then blocks the run.
+
+### 4.3 Report Cutoff
+
+Each run freezes a `report_cutoff` timestamp in Asia/Shanghai when the post-close production run begins. The cutoff must be after the target market close. All market dates, publication timestamps, financial announcement dates, event timestamps, cache freshness checks, and point-in-time filters compare against that frozen cutoff. A retry for the same run keeps the same cutoff; a new run receives a new run ID and cutoff.
+
+### 4.4 Canonical Version and Frozen Evidence
 
 Raw successful acquisition versions are immutable. A canonical pointer identifies the preferred complete version for future feature calculation and replay.
 
@@ -87,7 +96,22 @@ If a backup route was used and the primary route later recovers:
 
 A recovered primary version must never silently rewrite the facts cited by an already generated report.
 
-### 4.4 Formal Report
+Every backup-sourced canonical version creates a durable reconciliation task. The task remains pending until a later primary health check can fetch and validate the full group, or an operator closes it with a recorded reason. Reconciliation never performs provider-value comparison.
+
+### 4.5 Run Receipt
+
+Every production run creates an immutable run receipt containing:
+
+- run ID, target date, and frozen `report_cutoff`
+- acquisition-contract and screening versions
+- exact acquisition-group version IDs and the resulting `input_set_id`
+- candidate-set ID when screening has occurred
+- state transitions and artifact hashes
+- final activation state
+
+Stored analysis rows alone are never authority to render or publish. The initial renderer must be invoked by the same run while its receipt is in `READY_TO_ANALYZE`; a later manual `render-report` must require a final committed run receipt whose input set and evidence hashes are complete.
+
+### 4.6 Formal Report
 
 A formal report is an analysis artifact generated only after `READY_TO_ANALYZE`. It contains recommendations or focus analysis backed by complete structured evidence. Internal run status, source diagnostics, and human-intervention notifications are not formal reports.
 
@@ -337,10 +361,11 @@ Every cached version records:
 The formal daily run uses two data stages:
 
 1. Acquire and validate calendar, universe, market decision, board/industry, and official hard-risk groups for the screening universe.
-2. Run deterministic screening only to freeze the provisional recommendation set and combine it with active/manual focus codes.
-3. Acquire and validate complete company, fundamental, event, concept-if-used, risk, and holdings groups for that frozen target set.
-4. Apply the final data-readiness gate.
-5. Only then build Strategy V2 structured evidence, recommendations, focus updates, and LLM expression.
+2. Enter `READY_TO_SCREEN` and run deterministic market screening only. This step cannot create a recommendation, action, focus decision, evidence package, report, or LLM text.
+3. Persist an immutable candidate-set artifact before target acquisition. It contains the ordered provisional codes, active/manual focus codes, screening contract/version, upstream `input_set_id`, and content hash. Retry and resume must consume that exact candidate set.
+4. Acquire and validate complete company, fundamental, event, concept-if-used, risk, and holdings groups for that frozen target set.
+5. Apply the final data-readiness gate and enter `READY_TO_ANALYZE`.
+6. Only then build Strategy V2 structured evidence, recommendations, focus updates, and LLM expression.
 
 The system must not skip a provisional candidate because its required data is missing and promote a lower-ranked candidate. That would make data availability an undeclared ranking factor.
 
@@ -350,11 +375,20 @@ The scheduled and manual production paths use these states:
 
 ```text
 PENDING
-  -> ACQUIRING_PRIMARY
-  -> ACQUIRING_BACKUP        # only after primary route rejection
-  -> VALIDATING
+  -> ACQUIRING_SCREENING_PRIMARY
+  -> ACQUIRING_SCREENING_BACKUP   # only after primary route rejection
+  -> VALIDATING_SCREENING
+  -> READY_TO_SCREEN
+  -> SCREENING
+  -> TARGET_SET_FROZEN
+  -> ACQUIRING_TARGET_PRIMARY
+  -> ACQUIRING_TARGET_BACKUP      # only after primary route rejection
+  -> VALIDATING_TARGET
   -> READY_TO_ANALYZE
   -> ANALYZING
+  -> RENDERING
+  -> VERIFYING
+  -> COMMITTING
   -> ANALYSIS_COMPLETE_NO_RECOMMENDATIONS | REPORT_GENERATED
 
 Any exhausted required-group recovery
@@ -363,15 +397,34 @@ Any exhausted required-group recovery
 
 Rules:
 
+- Only `READY_TO_SCREEN` may run provisional deterministic screening.
 - Only `READY_TO_ANALYZE` may call strategy/evidence builders.
 - Only `ANALYZING` may call the LLM expression boundary.
-- Only a complete analysis with publishable recommendations/focus output may render and publish a formal report.
+- The initial render path requires the current run receipt in `READY_TO_ANALYZE` and the exact `input_set_id`. A later manual `render-report` requires a final committed `REPORT_GENERATED` receipt; repository rows alone cannot authorize rendering.
+- Only a complete analysis with publishable recommendations/focus output may enter `RENDERING`.
 - A complete analysis that honestly produces zero recommendations must not force a stock pick. It records `ANALYSIS_COMPLETE_NO_RECOMMENDATIONS` and follows the existing no-publication policy.
 - `BLOCKED_NEEDS_HUMAN` writes internal status only and leaves the prior published report/current pointer unchanged.
 - A blocked run writes no new recommendation, focus state, evidence snapshot, evaluation task, report index, or decision-ledger row.
 - Raw local acquisition diagnostics may be retained outside the publishable report tree.
 
+### 10.1 Two-Phase Formal Activation
+
+Report and decision-ledger activation must be idempotent and fail closed across local files and the narrow ledger:
+
+1. Render into a new immutable staging directory keyed by run ID.
+2. Verify report mode, evidence completeness, secret safety, artifact hashes, and run-receipt linkage.
+3. Write all narrow-ledger rows for the run in one database transaction as pending and invisible to formal consumers.
+4. Verify that staged artifacts and pending ledger rows match the run receipt.
+5. Activate the run through a two-phase commit marker. Report and ledger readers must ignore a run unless both activation markers agree.
+6. Advance local/current and published pointers only after activation; pointer changes are atomic and idempotent.
+
+Any failure before complete activation leaves prior current and published pointers byte-for-byte unchanged. Pending artifacts and ledger rows remain invisible and are cleaned or completed by an idempotent retry. The run records `FAILED_RETRYABLE` or `FAILED_NEEDS_HUMAN`; it never reports `REPORT_GENERATED` with a partial commit.
+
+When a complete run produces no new recommendations but does produce valid focus tracking, its decision rows and final run receipt commit in one transaction without changing a recommendation-report or publication pointer. That committed focus analysis is eligible for the observation window.
+
 ## 11. Human-Intervention Status
+
+Blocked status is written only to `logs/run-daily/<run_id>.json`, with `logs/run-daily/latest-status.json` as the local latest summary, plus the local operator-notification channel. It is excluded from Supabase decision-ledger tables, report trees, report archives, deployment artifacts, and published pages.
 
 The internal blocked status includes:
 
@@ -390,10 +443,11 @@ It contains no recommendation, thesis, position suggestion, LLM narrative, or pu
 
 ## 12. Focus History
 
-- Only snapshots produced by a `REPORT_GENERATED` run count toward the five-trading-day focus observation window.
+- Evaluate the five immediately preceding eligible A-share trading dates, not the last five available snapshots.
+- A blocked, fixture, incomplete, or backfill-only trading date breaks the five-day window and cannot be skipped. Observation resumes from day one after the break.
+- A complete formally committed focus analysis counts even when the run produces zero new recommendations; external publication policy is separate from focus-observation validity.
 - The pipeline must load prior valid Strategy V2 snapshots before evaluating focus entry.
-- At least three of the last five valid trading-day snapshots must support the entry thesis under the existing Strategy V2 rules.
-- Blocked days, fixture runs, incomplete snapshots, and backfill-only acquisitions do not count as live observation days.
+- At least three snapshots from those five immediately preceding eligible trading dates must support the entry thesis under the existing Strategy V2 rules.
 - A primary-source reconciliation can update canonical historical inputs and replay metrics, but cannot retroactively create an observation day or silently change a frozen focus decision.
 - Manual focus entries remain visible internally, but no operation or position recommendation is produced for them until their required target groups pass validation.
 
@@ -414,6 +468,7 @@ Required local datasets include versioned partitions for:
 - official risk events
 - source-run and acquisition-group manifests
 - canonical-version pointers
+- run receipts and immutable candidate sets
 
 Historical bars must not be stored only under the report target-date partition. Each row remains queryable by its actual trade date.
 
@@ -482,6 +537,16 @@ Any required-group failure must assert:
 - no recommendation/focus/evidence/evaluation decision rows were written
 - an internal redacted blocked status was recorded
 
+Additional escape and atomicity tests must prove:
+
+- manual `render-report` rejects missing, blocked, uncommitted, or mismatched run receipts
+- a blocked retry with an existing current report preserves all prior report and publication pointers
+- render, verification, ledger, or pointer failure never exposes a partially committed run
+- retry can idempotently complete or clean pending artifacts and rows
+- target-evidence failure for any frozen provisional candidate blocks the run instead of promoting the next-ranked code
+- retry and resume use the same immutable candidate-set ID
+- provisional screening cannot call final strategy/action builders, LLM expression, report rendering, or decision-ledger persistence
+
 A successful formal run must assert:
 
 - all required group manifests are complete
@@ -499,7 +564,9 @@ Implementation is not complete until an isolated end-to-end rehearsal for 2026-0
 2. Primary failover path: a deliberately partial primary group is discarded, the complete backup route succeeds atomically, and the report uses only the backup group version.
 3. Blocked path: primary and backup both fail completeness; no analysis/report artifacts are created and an internal human-intervention status is recorded.
 4. Reconciliation path: the primary route later succeeds for the backup date, becomes canonical for future replay, and does not rewrite the frozen report.
-5. Focus path: only prior formally generated snapshots count toward the five-day observation rule.
+5. Focus path: only prior formally committed focus snapshots count, and any blocked eligible trading date breaks rather than stretches the five-day window.
+6. Direct-render path: stored rows without a final committed `REPORT_GENERATED` run receipt cannot generate a formal report.
+7. Atomic-failure path: injected render, verify, ledger, and pointer failures leave the prior report and all formal consumers unchanged.
 
 Live data acquisition and any real production write require separate explicit user approval after implementation and offline verification.
 
@@ -513,6 +580,8 @@ This repair is complete when:
 - historical cache is readable, versioned, point-in-time safe, and forbidden for missing current-day facts
 - recovered primary versions replace canonical history without deleting provenance or rewriting frozen reports
 - the pipeline cannot reach analysis or report rendering before data readiness
+- the manual render path cannot bypass the committed run receipt
+- formal report and decision-ledger activation is two-phase, idempotent, and invisible until complete
 - blocked runs produce internal diagnostics and human intervention only
 - prior valid focus history is loaded and incomplete days never count
 - formal report generation is demonstrated offline for July 10
