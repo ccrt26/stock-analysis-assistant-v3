@@ -403,6 +403,38 @@ class FocusDailyUpdate(BaseModel):
     data_insufficient_reason: Optional[str] = None
 
 
+class ActionRecommendationSummary(BaseModel):
+    trade_date: date
+    ts_code: str
+    decision: ActionDecision
+    position_min_pct: float = Field(ge=0)
+    position_max_pct: float = Field(ge=0)
+    invalidation_conditions: List[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _position_range_is_ordered(self) -> "ActionRecommendationSummary":
+        if self.position_min_pct > self.position_max_pct:
+            raise ValueError(
+                "position_min_pct must be less than or equal to position_max_pct"
+            )
+        return self
+
+
+class ManualHoldingSummary(BaseModel):
+    trade_date: date
+    ts_code: str
+    held: bool
+    position_band: str = Field(min_length=1)
+    last_action_state: str = Field(min_length=1)
+
+    @field_validator("position_band", "last_action_state")
+    @classmethod
+    def _require_non_empty_summary_text(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("must be non-empty")
+        return value
+
+
 class ManualHolding(BaseModel):
     ts_code: str
     name: str

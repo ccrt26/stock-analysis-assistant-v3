@@ -14,12 +14,18 @@ from stock_analyzer.data.models import (
 )
 from stock_analyzer.domain.models import (
     ActionLabel,
+    ActionRecommendationSummary,
     EvaluationTask,
     EvidencePackage,
     FeatureSnapshot,
+    FocusDailyUpdate,
+    FocusEntryThesis,
     FocusState,
+    ManualHoldingSummary,
+    OperationalDailyStatus,
     Recommendation,
     StockSnapshot,
+    StrategyEvidenceSnapshot,
 )
 from stock_analyzer.storage.capacity_guard import ensure_selected_market_window_scope
 
@@ -67,6 +73,24 @@ class AnalysisRepository(Protocol):
     def save_focus_states(self, states: List[FocusState]) -> None: ...
     def save_evidence_packages(self, packages: List[EvidencePackage]) -> None: ...
     def save_evaluation_tasks(self, tasks: List[EvaluationTask]) -> None: ...
+    def save_strategy_snapshots(
+        self,
+        snapshots: list[StrategyEvidenceSnapshot],
+    ) -> None: ...
+    def save_focus_entry_theses(self, theses: list[FocusEntryThesis]) -> None: ...
+    def save_focus_daily_updates(self, updates: list[FocusDailyUpdate]) -> None: ...
+    def save_action_recommendations(
+        self,
+        recommendations: list[ActionRecommendationSummary],
+    ) -> None: ...
+    def save_manual_holding_summaries(
+        self,
+        holdings: list[ManualHoldingSummary],
+    ) -> None: ...
+    def save_operational_daily_status(
+        self,
+        status: OperationalDailyStatus,
+    ) -> None: ...
     def save_market_bars(self, bars: List[DailyBar]) -> None: ...
     def save_daily_basic_indicators(self, rows: List[DailyBasicRow]) -> None: ...
     def save_data_source_runs(self, rows: List[SourceRunRecord]) -> None: ...
@@ -83,6 +107,14 @@ class InMemoryAnalysisRepository:
         stock_master: Optional[List[StockSnapshot]] = None,
         stock_statuses: Optional[List[StockSnapshot]] = None,
         feature_snapshots: Optional[List[FeatureSnapshot]] = None,
+        strategy_snapshots: Optional[list[StrategyEvidenceSnapshot]] = None,
+        focus_entry_theses: Optional[list[FocusEntryThesis]] = None,
+        focus_daily_updates: Optional[list[FocusDailyUpdate]] = None,
+        action_recommendation_summaries: Optional[
+            list[ActionRecommendationSummary]
+        ] = None,
+        manual_holding_summaries: Optional[list[ManualHoldingSummary]] = None,
+        operational_daily_statuses: Optional[list[OperationalDailyStatus]] = None,
         market_bars: Optional[List[DailyBar]] = None,
         daily_basic_indicators: Optional[List[DailyBasicRow]] = None,
         data_source_runs: Optional[List[SourceRunRecord]] = None,
@@ -95,6 +127,14 @@ class InMemoryAnalysisRepository:
         self.stock_master = list(stock_master or [])
         self.stock_statuses = list(stock_statuses or [])
         self.feature_snapshots = list(feature_snapshots or [])
+        self.strategy_snapshots = list(strategy_snapshots or [])
+        self.focus_entry_theses = list(focus_entry_theses or [])
+        self.focus_daily_updates = list(focus_daily_updates or [])
+        self.action_recommendation_summaries = list(
+            action_recommendation_summaries or []
+        )
+        self.manual_holding_summaries = list(manual_holding_summaries or [])
+        self.operational_daily_statuses = list(operational_daily_statuses or [])
         self.market_bars = list(market_bars or [])
         self.daily_basic_indicators = list(daily_basic_indicators or [])
         self.data_source_runs = list(data_source_runs or [])
@@ -191,6 +231,60 @@ class InMemoryAnalysisRepository:
                 item.checkpoint_days,
                 item.evaluation_layer,
             ),
+        )
+
+    def save_strategy_snapshots(
+        self,
+        snapshots: list[StrategyEvidenceSnapshot],
+    ) -> None:
+        self.strategy_snapshots = _upsert_model_list(
+            self.strategy_snapshots,
+            snapshots,
+            key=lambda item: item.evidence_id,
+        )
+
+    def save_focus_entry_theses(self, theses: list[FocusEntryThesis]) -> None:
+        self.focus_entry_theses = _upsert_model_list(
+            self.focus_entry_theses,
+            theses,
+            key=lambda item: item.evidence_id,
+        )
+
+    def save_focus_daily_updates(self, updates: list[FocusDailyUpdate]) -> None:
+        self.focus_daily_updates = _upsert_model_list(
+            self.focus_daily_updates,
+            updates,
+            key=lambda item: (item.trade_date, item.ts_code),
+        )
+
+    def save_action_recommendations(
+        self,
+        recommendations: list[ActionRecommendationSummary],
+    ) -> None:
+        self.action_recommendation_summaries = _upsert_model_list(
+            self.action_recommendation_summaries,
+            recommendations,
+            key=lambda item: (item.trade_date, item.ts_code),
+        )
+
+    def save_manual_holding_summaries(
+        self,
+        holdings: list[ManualHoldingSummary],
+    ) -> None:
+        self.manual_holding_summaries = _upsert_model_list(
+            self.manual_holding_summaries,
+            holdings,
+            key=lambda item: (item.trade_date, item.ts_code),
+        )
+
+    def save_operational_daily_status(
+        self,
+        status: OperationalDailyStatus,
+    ) -> None:
+        self.operational_daily_statuses = _upsert_model_list(
+            self.operational_daily_statuses,
+            [status],
+            key=lambda item: item.trade_date,
         )
 
     def save_market_bars(self, bars: List[DailyBar]) -> None:
@@ -431,6 +525,72 @@ class SupabaseAnalysisRepository:
             on_conflict="trade_date,ts_code,evidence_id,checkpoint_days,evaluation_layer",
         ).execute()
 
+    def save_strategy_snapshots(
+        self,
+        snapshots: list[StrategyEvidenceSnapshot],
+    ) -> None:
+        if not snapshots:
+            return
+        rows = [_strategy_snapshot_to_row(snapshot) for snapshot in snapshots]
+        self.client.table("strategy_v2_snapshot").upsert(
+            rows,
+            on_conflict="evidence_id",
+        ).execute()
+
+    def save_focus_entry_theses(self, theses: list[FocusEntryThesis]) -> None:
+        if not theses:
+            return
+        rows = [_focus_entry_thesis_to_row(thesis) for thesis in theses]
+        self.client.table("focus_entry_thesis").upsert(
+            rows,
+            on_conflict="evidence_id",
+        ).execute()
+
+    def save_focus_daily_updates(self, updates: list[FocusDailyUpdate]) -> None:
+        if not updates:
+            return
+        rows = [_focus_daily_update_to_row(update) for update in updates]
+        self.client.table("focus_daily_update").upsert(
+            rows,
+            on_conflict="trade_date,ts_code",
+        ).execute()
+
+    def save_action_recommendations(
+        self,
+        recommendations: list[ActionRecommendationSummary],
+    ) -> None:
+        if not recommendations:
+            return
+        rows = [
+            _action_recommendation_summary_to_row(recommendation)
+            for recommendation in recommendations
+        ]
+        self.client.table("action_recommendation_summary").upsert(
+            rows,
+            on_conflict="trade_date,ts_code",
+        ).execute()
+
+    def save_manual_holding_summaries(
+        self,
+        holdings: list[ManualHoldingSummary],
+    ) -> None:
+        if not holdings:
+            return
+        rows = [_manual_holding_summary_to_row(holding) for holding in holdings]
+        self.client.table("manual_holding_summary").upsert(
+            rows,
+            on_conflict="trade_date,ts_code",
+        ).execute()
+
+    def save_operational_daily_status(
+        self,
+        status: OperationalDailyStatus,
+    ) -> None:
+        self.client.table("operational_daily_status").upsert(
+            [_operational_daily_status_to_row(status)],
+            on_conflict="trade_date",
+        ).execute()
+
     def save_market_bars(self, bars: List[DailyBar]) -> None:
         if not bars:
             return
@@ -517,6 +677,82 @@ class SupabaseAnalysisRepository:
             )
             deleted_counts[table] = len(result.data or [])
         return deleted_counts
+
+
+def _payload_sha256(payload: dict) -> str:
+    payload_text = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    return hashlib.sha256(payload_text.encode("utf-8")).hexdigest()
+
+
+def _strategy_snapshot_to_row(snapshot: StrategyEvidenceSnapshot) -> dict:
+    payload = snapshot.model_dump(mode="json")
+    return {
+        "evidence_id": snapshot.evidence_id,
+        "trade_date": snapshot.trade_date.isoformat(),
+        "ts_code": snapshot.ts_code,
+        "name": snapshot.name,
+        "payload": payload,
+        "action_payload": snapshot.action.model_dump(mode="json"),
+        "data_insufficient": snapshot.data_insufficient,
+        "source_versions": snapshot.source_versions,
+        "sha256": _payload_sha256(payload),
+    }
+
+
+def _focus_entry_thesis_to_row(thesis: FocusEntryThesis) -> dict:
+    return {
+        "evidence_id": thesis.evidence_id,
+        "trade_date": thesis.trade_date.isoformat(),
+        "ts_code": thesis.ts_code,
+        "source": thesis.source.value,
+        "thesis_payload": thesis.model_dump(mode="json"),
+        "action_payload": thesis.action.model_dump(mode="json"),
+    }
+
+
+def _focus_daily_update_to_row(update: FocusDailyUpdate) -> dict:
+    return {
+        "trade_date": update.trade_date.isoformat(),
+        "ts_code": update.ts_code,
+        "update_payload": update.model_dump(mode="json"),
+        "action_payload": update.action.model_dump(mode="json"),
+    }
+
+
+def _action_recommendation_summary_to_row(
+    recommendation: ActionRecommendationSummary,
+) -> dict:
+    return {
+        "trade_date": recommendation.trade_date.isoformat(),
+        "ts_code": recommendation.ts_code,
+        "decision": recommendation.decision.value,
+        "position_min_pct": recommendation.position_min_pct,
+        "position_max_pct": recommendation.position_max_pct,
+        "invalidation_conditions": recommendation.invalidation_conditions,
+    }
+
+
+def _manual_holding_summary_to_row(holding: ManualHoldingSummary) -> dict:
+    return {
+        "trade_date": holding.trade_date.isoformat(),
+        "ts_code": holding.ts_code,
+        "held": holding.held,
+        "position_band": holding.position_band,
+        "last_action_state": holding.last_action_state,
+    }
+
+
+def _operational_daily_status_to_row(status: OperationalDailyStatus) -> dict:
+    return {
+        "trade_date": status.trade_date.isoformat(),
+        "is_trading_day": status.is_trading_day,
+        "recommendation_state": status.recommendation_state.value,
+        "focus_state": status.focus_state.value,
+        "recommendation_count": status.recommendation_count,
+        "focus_count": status.focus_count,
+        "blocking_missing_fields": status.blocking_missing_fields,
+        "message": status.message,
+    }
 
 
 def _date_from_row(value) -> Optional[date]:

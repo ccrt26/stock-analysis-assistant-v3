@@ -14,6 +14,12 @@ INGESTION_SCHEMA_PATH = (
     / "migrations"
     / "202607080002_ingestion_v1.sql"
 )
+STRATEGY_V2_SCHEMA_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "supabase"
+    / "migrations"
+    / "202607100003_strategy_v2_decision_ledger.sql"
+)
 
 
 def test_initial_schema_contains_required_tables_and_rls():
@@ -114,3 +120,48 @@ def test_ingestion_schema_adds_capacity_guard_function():
     assert revoke_statement in compact_sql
     assert grant_statement in compact_sql
     assert compact_sql.index(revoke_statement) < compact_sql.index(grant_statement)
+
+
+def test_strategy_v2_schema_adds_narrow_decision_ledger_tables():
+    sql = STRATEGY_V2_SCHEMA_PATH.read_text().lower()
+    compact_sql = re.sub(r"\s+", " ", sql)
+
+    for table in [
+        "strategy_v2_snapshot",
+        "focus_entry_thesis",
+        "focus_daily_update",
+        "action_recommendation_summary",
+        "manual_holding_summary",
+        "operational_daily_status",
+    ]:
+        assert f"create table if not exists public.{table}" in sql
+        assert f"alter table public.{table} enable row level security" in sql
+        assert f"create policy {table}_service_role_all" in sql
+
+    assert "market_price_daily" not in compact_sql
+    assert "daily_basic_indicator" not in compact_sql
+    assert "unique (trade_date, ts_code)" in compact_sql
+
+
+def test_strategy_v2_schema_contains_required_ledger_columns():
+    sql = STRATEGY_V2_SCHEMA_PATH.read_text().lower()
+    compact_sql = re.sub(r"\s+", " ", sql)
+
+    for column in [
+        "evidence_id text primary key",
+        "payload jsonb not null",
+        "action_payload jsonb not null",
+        "source_versions jsonb not null",
+        "thesis_payload jsonb not null",
+        "update_payload jsonb not null",
+        "decision text not null",
+        "position_min_pct numeric not null",
+        "position_max_pct numeric not null",
+        "held boolean not null",
+        "position_band text not null",
+        "last_action_state text not null",
+        "trade_date date primary key",
+        "blocking_missing_fields jsonb not null",
+        "message text not null",
+    ]:
+        assert column in compact_sql
