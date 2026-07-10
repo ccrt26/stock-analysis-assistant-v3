@@ -86,6 +86,16 @@ class RouteCapabilityEvidence(BaseModel):
         )
 
 
+class RecordTypeContract(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    record_type: str
+    required_fields: tuple[str, ...]
+    legitimate_null_fields: dict[str, str] = Field(default_factory=dict)
+    unique_key_fields: tuple[str, ...]
+    current_fact_fields: tuple[str, ...] = ()
+
+
 class AcquisitionGroupContract(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -98,6 +108,8 @@ class AcquisitionGroupContract(BaseModel):
     minimum_history_sessions: int = Field(default=0, ge=0)
     require_target_date: bool = True
     expected_codes: tuple[str, ...] = ()
+    record_type_field: str = "record_type"
+    record_types: tuple[RecordTypeContract, ...] = ()
 
 
 class AcquisitionRequest(BaseModel):
@@ -203,27 +215,52 @@ def validate_group_payload(
             f"request_contract_mismatch:{request.contract_version}:{contract.contract_version}"
         )
 
-    reason_fields = set(contract.legitimate_null_fields.values())
     keys_seen: set[tuple[str, ...]] = set()
     covered_codes: set[str] = set()
     covered_dates: set[date] = set(payload.covered_dates)
     target_rows: dict[str, dict[str, Any]] = {}
+    typed_target_rows: dict[tuple[str, str], dict[str, Any]] = {}
+    record_contracts = {item.record_type: item for item in contract.record_types}
+    coverage_fields = set(contract.required_fields)
+    for item in contract.record_types:
+        coverage_fields.update(item.required_fields)
 
     for index, record in enumerate(payload.records):
-        for field in contract.required_fields:
+        selected: RecordTypeContract | None = None
+        if record_contracts:
+            record_type = str(record.get(contract.record_type_field))
+            selected = record_contracts.get(record_type)
+            if selected is None:
+                reasons.append(f"unknown_record_type:{record_type}:row={index}")
+                continue
+        required_fields = selected.required_fields if selected else contract.required_fields
+        legitimate_null_fields = (
+            selected.legitimate_null_fields
+            if selected
+            else contract.legitimate_null_fields
+        )
+        unique_key_fields = (
+            selected.unique_key_fields if selected else contract.unique_key_fields
+        )
+        reason_fields = set(legitimate_null_fields.values())
+
+        for field in required_fields:
             if field not in record:
                 reasons.append(f"missing_field:{field}:row={index}")
                 continue
             value = record[field]
             if value is None and field not in reason_fields:
-                null_reason_field = contract.legitimate_null_fields.get(field)
+                null_reason_field = legitimate_null_fields.get(field)
                 if not null_reason_field or not _non_empty(record.get(null_reason_field)):
                     reasons.append(f"unclassified_null:{field}:row={index}")
 
-        key = tuple(_canonical_scalar(record.get(field)) for field in contract.unique_key_fields)
-        if key in keys_seen:
-            reasons.append(f"duplicate_key:{'|'.join(key)}")
-        keys_seen.add(key)
+        if unique_key_fields:
+            key = tuple(
+                _canonical_scalar(record.get(field)) for field in unique_key_fields
+            )
+            if key in keys_seen:
+                reasons.append(f"duplicate_key:{'|'.join(key)}")
+            keys_seen.add(key)
 
         record_date = _as_date(record.get("trade_date"))
         if record_date is not None:
@@ -233,6 +270,8 @@ def validate_group_payload(
             covered_codes.add(code)
             if record_date == request.trade_date:
                 target_rows[code] = record
+                if selected is not None:
+                    typed_target_rows[(selected.record_type, code)] = record
 
         for field, value in record.items():
             if isinstance(value, (int, float)) and not isinstance(value, bool):
@@ -252,7 +291,27 @@ def validate_group_payload(
     expected_codes = tuple(
         dict.fromkeys((*contract.expected_codes, *request.target_codes))
     )
+    required_target_types = tuple(
+        item for item in contract.record_types if item.current_fact_fields
+    )
     for code in expected_codes:
+        if required_target_types:
+            for item in required_target_types:
+                target = typed_target_rows.get((item.record_type, code))
+                if target is None:
+                    reasons.append(
+                        "missing_record_type:"
+                        f"{item.record_type}:{code}:{request.trade_date.isoformat()}"
+                    )
+                    continue
+                _append_current_fact_reasons(
+                    code,
+                    target,
+                    item.current_fact_fields,
+                    reasons,
+                )
+            continue
+
         target = target_rows.get(code)
         if target is None:
             if (
@@ -263,19 +322,18 @@ def validate_group_payload(
                 continue
             reasons.append(f"missing_code:{code}:{request.trade_date.isoformat()}")
             continue
-        for field in contract.current_fact_fields:
-            if field not in target or target[field] is None:
-                reasons.append(f"missing_current_fact:{code}:{field}")
-            elif isinstance(target[field], (int, float)) and not math.isfinite(
-                float(target[field])
-            ):
-                reasons.append(f"invalid_current_fact:{code}:{field}")
+        _append_current_fact_reasons(
+            code,
+            target,
+            contract.current_fact_fields,
+            reasons,
+        )
 
     for identifier, publication_time in payload.publication_times.items():
         if publication_time > request.report_cutoff:
             reasons.append(f"look_ahead:{identifier}")
 
-    for field in contract.required_fields:
+    for field in sorted(coverage_fields):
         if payload.field_coverage.get(field) is not True:
             reasons.append(f"field_coverage_incomplete:{field}")
 
@@ -286,6 +344,21 @@ def validate_group_payload(
         covered_codes=tuple(sorted(covered_codes)),
         covered_dates=tuple(sorted(covered_dates)),
     )
+
+
+def _append_current_fact_reasons(
+    code: str,
+    target: dict[str, Any],
+    fields: tuple[str, ...],
+    reasons: list[str],
+) -> None:
+    for field in fields:
+        if field not in target or target[field] is None:
+            reasons.append(f"missing_current_fact:{code}:{field}")
+        elif isinstance(target[field], (int, float)) and not math.isfinite(
+            float(target[field])
+        ):
+            reasons.append(f"invalid_current_fact:{code}:{field}")
 
 
 def _append_ohlc_reason(
@@ -381,6 +454,7 @@ __all__ = [
     "FormalRunState",
     "GroupValidation",
     "JULY_10_OFFICIAL_SESSIONS",
+    "RecordTypeContract",
     "RouteCapabilityEvidence",
     "RouteKind",
     "validate_group_payload",
