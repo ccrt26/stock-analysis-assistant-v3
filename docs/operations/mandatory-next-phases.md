@@ -16,11 +16,13 @@ Phase 2 remains approval-gated. The first real one-command Cloudflare publish st
 
 Strategy V2 is mandatory, not optional.
 
-Phase 3 Strategy V2 implementation is in progress on the `codex/v3-mvp` branch through the MVP task set, with production use still gated by verification, backtest evidence, design review, and explicit approval.
+Phase 3 Strategy V2 and the formal-report data-readiness boundary are implemented and verified offline on the `codex/v3-mvp` branch. Production use remains gated by live route capability approval, verification, backtest evidence, design review, and explicit approval.
 
 Remaining future work must continue improving 5/20/40 trading-day backtests, recommendation quality calibration, industry, market-cap and liquidity constraints, and daily result review. Strategy changes must pass backtest and design review before they are used in production.
 
 Supabase remains a narrow decision ledger for operational decisions and recommendations. Full market data stays local.
+
+Offline formal-readiness acceptance is not production approval. Live provider acquisition, Supabase mutation, Cloudflare deployment/publication, broker access, and order execution each require separate explicit approval. A blocked required-data run remains local-only and must preserve the prior report and publication pointers.
 
 Do not ship manual tuning directly to production without explicit approval.
 

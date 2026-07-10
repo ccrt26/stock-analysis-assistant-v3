@@ -44,7 +44,52 @@ stock-analyzer run-daily --trade-date YYYY-MM-DD --fixture-mode --strategy-v2
 
 Production Strategy V2 writes require explicit approval before running without fixture mode. Do not print `.env.local`, service-role keys, Tushare tokens, Cloudflare tokens, report passwords, or session secrets. Do not perform unapproved production writes.
 
-On trading days, the job must produce either generated recommendation and focus outputs or an explicit `data_insufficient` report with recovery attempts and missing fields.
+On trading days, a formal run produces analysis only after `READY_TO_SCREEN` and `READY_TO_ANALYZE`. If any required group is incomplete, the run stops as `blocked_needs_human`; it does not call Strategy V2 analysis or the LLM, write decision rows, render a `data_insufficient` page, prepare deploy files, or publish. The previous current and published report remains byte-for-byte unchanged.
+
+## Formal Readiness Inspection
+
+Blocked operational output is local-only. Read the latest redacted status with:
+
+```bash
+python -m json.tool logs/run-daily/latest-status.json
+```
+
+Set the run ID from that status or the command output, then locate its append-only receipt and immutable candidate set:
+
+```bash
+RUN_ID=july10-formal
+RECEIPT_ROOT=local_warehouse/formal_evidence/run_receipts/$RUN_ID
+REVISION=$(jq -r '.revision' "$RECEIPT_ROOT/latest.json")
+RECEIPT_FILE="$RECEIPT_ROOT/$(printf '%06d' "$REVISION").json"
+jq . "$RECEIPT_FILE"
+CANDIDATE_ID=$(jq -r '.candidate_set_id' "$RECEIPT_FILE")
+jq . "local_warehouse/formal_evidence/candidate_sets/$CANDIDATE_ID.json"
+```
+
+Both activation IDs must be non-null and identical, and the local active marker must name the same activation ID:
+
+```bash
+jq '{state,local_activation_id,ledger_activation_id}' "$RECEIPT_FILE"
+jq . "reports/.activation/$RUN_ID.active.json"
+```
+
+For an approved read-only Supabase inspection, query `public.active_formal_run_receipt` for the same `run_id`; absence means the narrow ledger is not active and all formal consumers must ignore the run. Never infer activation from decision rows alone.
+
+List durable backup reconciliation work without changing it:
+
+```bash
+find local_warehouse/formal_evidence/reconciliation -name '*.json' -type f -exec jq '{task_id,group_id,trade_date,status,backup_version_id,primary_version_id}' {} \;
+```
+
+A complete backup group can support analysis after the identical contract passes. Its use creates reconciliation work but no provider-value comparison and no source-difference warning. When the full primary route later passes, it becomes canonical for future replay; the frozen report and its original `input_set_id` remain unchanged.
+
+Run the isolated July 10 acceptance without network or production writes:
+
+```bash
+.venv/bin/python -m pytest tests/test_july10_formal_readiness_acceptance.py -q
+```
+
+Passing this offline rehearsal does not authorize live acquisition, Supabase mutation, Cloudflare deployment, publication, broker access, or order execution. Each real production action remains separately approval-gated.
 
 ## Non-Trading-Day Skip Rule
 
@@ -65,7 +110,7 @@ Never delete historical dates, a whole Supabase table, `stock_master`, the whole
 
 ## Status and Logs
 
-The machine-readable status file is `logs/run-daily/latest-status.json`. The expected statuses include `success_with_recommendations`, `success_no_recommendations`, `skipped_non_trading_day`, `calendar_unknown`, `warning`, `failed_retryable`, and `failed_needs_human`.
+The machine-readable status file is `logs/run-daily/latest-status.json`. The expected statuses include `success_with_recommendations`, `success_no_recommendations`, `skipped_non_trading_day`, `calendar_unknown`, `warning`, `failed_retryable`, `failed_needs_human`, and `blocked_needs_human`.
 
 Use status and logs for operations decisions. Do not paste log output into chat, tickets, or commits until it has been checked for credential values.
 
@@ -74,6 +119,7 @@ Use status and logs for operations decisions. Do not paste log output into chat,
 - `calendar_unknown`: stop and fix the calendar source before any production run.
 - `failed_retryable`: allow the scheduled retry only after cleanup-before-retry succeeds.
 - `failed_needs_human`: stop retries, keep the previous report online, and investigate the redacted `fix_suggestion`.
+- `blocked_needs_human`: stop before analysis, inspect the failed complete acquisition group and both route attempts, preserve the frozen candidate set if screening already completed, and keep the previous report online.
 - Repeated failure through the 19:30 attempt requires human review before another run.
 
 ## Model Requirement
