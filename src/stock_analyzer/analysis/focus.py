@@ -24,6 +24,12 @@ from stock_analyzer.domain.models import (
 SYSTEM_FOCUS_CAP = 5
 SUPPORTIVE_OBSERVATION_WINDOW = 5
 MIN_SUPPORTIVE_OBSERVATIONS = 3
+SYSTEM_ENTRY_DECISIONS = {
+    ActionDecision.CONTINUE_WATCHING,
+    ActionDecision.SMALL_EXPLORATORY,
+    ActionDecision.INCREASE_ATTENTION,
+    ActionDecision.CONDITIONAL_ADD,
+}
 
 
 class FocusUpdateResult(BaseModel):
@@ -97,6 +103,8 @@ def update_focus_watchlist_v2(
     daily_updates: list[FocusDailyUpdate] = []
     emitted_codes: set[str] = set()
     daily_update_codes: set[str] = set()
+    existing_system_count = _existing_system_focus_count(existing, manual_by_code)
+    remaining_system_slots = max(SYSTEM_FOCUS_CAP - existing_system_count, 0)
 
     for old in existing:
         snapshot = latest_by_code.get(old.ts_code)
@@ -118,11 +126,14 @@ def update_focus_watchlist_v2(
         if snapshot:
             daily_updates.append(build_focus_daily_update(snapshot, old))
             daily_update_codes.add(old.ts_code)
+        else:
+            daily_updates.append(_build_missing_snapshot_daily_update(old, trade_date))
+            daily_update_codes.add(old.ts_code)
 
     system_candidates = _system_focus_candidates(snapshots_by_code)
     system_selected_count = 0
     for snapshot in _rank_system_candidates(system_candidates):
-        if system_selected_count >= SYSTEM_FOCUS_CAP:
+        if system_selected_count >= remaining_system_slots:
             break
         if snapshot.ts_code in emitted_codes or snapshot.ts_code in manual_by_code:
             continue
@@ -271,6 +282,8 @@ def _system_focus_candidates(
     candidates: list[StrategyEvidenceSnapshot] = []
     for snapshots in snapshots_by_code.values():
         latest_five = snapshots[-SUPPORTIVE_OBSERVATION_WINDOW:]
+        if len(latest_five) < SUPPORTIVE_OBSERVATION_WINDOW:
+            continue
         supportive_count = sum(1 for item in latest_five if _is_supportive(item))
         latest = snapshots[-1]
         if supportive_count >= MIN_SUPPORTIVE_OBSERVATIONS and _is_supportive(latest):
@@ -285,8 +298,8 @@ def _rank_system_candidates(
         candidates,
         key=lambda snapshot: (
             -snapshot.internal_score,
-            -(snapshot.risk_reward or 0.0),
             -_thesis_quality(snapshot),
+            -_liquidity_quality(snapshot),
             snapshot.ts_code,
         ),
     )
@@ -295,8 +308,12 @@ def _rank_system_candidates(
 def _is_supportive(snapshot: StrategyEvidenceSnapshot) -> bool:
     return (
         not snapshot.data_insufficient
+        and snapshot.action.decision in SYSTEM_ENTRY_DECISIONS
         and (snapshot.expected_upside_pct or 0.0) >= 10.0
         and (snapshot.risk_reward or 0.0) >= 1.5
+        and bool(_supporting_evidence_ids(snapshot))
+        and _liquidity_quality(snapshot) >= 0.6
+        and not _has_blocking_counter_evidence(snapshot)
         and not _risk_dominates(snapshot)
     )
 
@@ -310,10 +327,42 @@ def _risk_dominates(snapshot: StrategyEvidenceSnapshot) -> bool:
 
 
 def _thesis_quality(snapshot: StrategyEvidenceSnapshot) -> float:
-    support = _evidence_atoms(snapshot, EvidencePolarity.SUPPORT)
+    support = [
+        atom
+        for atom in _evidence_atoms(snapshot, EvidencePolarity.SUPPORT)
+        if not _is_liquidity_atom(atom)
+    ]
+    if not support:
+        support = _evidence_atoms(snapshot, EvidencePolarity.SUPPORT)
     if not support:
         return 0.0
     return round(sum(atom.strength for atom in support) / len(support), 4)
+
+
+def _liquidity_quality(snapshot: StrategyEvidenceSnapshot) -> float:
+    liquidity_support = [
+        atom.strength
+        for atom in _evidence_atoms(snapshot, EvidencePolarity.SUPPORT)
+        if _is_liquidity_atom(atom)
+    ]
+    if not liquidity_support:
+        return 0.0
+    return round(max(liquidity_support), 4)
+
+
+def _is_liquidity_atom(atom: EvidenceAtom) -> bool:
+    return "liquidity_score" in atom.data_fields
+
+
+def _has_blocking_counter_evidence(snapshot: StrategyEvidenceSnapshot) -> bool:
+    blocking_suffixes = {
+        "official-risk",
+        "liquidity-risk",
+    }
+    for atom in _evidence_atoms(snapshot, EvidencePolarity.COUNTER):
+        if any(atom.id.endswith(suffix) for suffix in blocking_suffixes):
+            return True
+    return False
 
 
 def _supporting_evidence_ids(snapshot: StrategyEvidenceSnapshot) -> list[str]:
@@ -457,6 +506,66 @@ def _manual_insufficient_action(manual_reason: str) -> ActionRecommendation:
     )
 
 
+def _build_missing_snapshot_daily_update(
+    focus_state: FocusState,
+    trade_date: date,
+) -> FocusDailyUpdate:
+    reason = "数据不足：今日没有 Strategy V2 证据快照，无法验证重点观察 thesis。"
+    action = _missing_snapshot_action(focus_state, reason)
+    return FocusDailyUpdate(
+        trade_date=trade_date,
+        ts_code=focus_state.ts_code,
+        name=focus_state.ts_code,
+        evidence_id=f"{trade_date.isoformat()}-{focus_state.ts_code}-focus-missing",
+        thesis=(
+            f"{focus_state.ts_code}今日数据不足，不能形成正向重点观察结论；"
+            "需要确认是否继续保留或移出重点观察。"
+        ),
+        action=action,
+        focus_entry_progress=(
+            "今日缺少 Strategy V2 快照；原有观察 thesis 未得到当日证据确认。"
+        ),
+        new_support=[],
+        new_counter=[],
+        required_confirmation=list(action.required_confirmation),
+        invalidation_conditions=list(action.invalidation_conditions),
+        data_insufficient=True,
+        data_insufficient_reason=reason,
+    )
+
+
+def _missing_snapshot_action(
+    focus_state: FocusState,
+    reason: str,
+) -> ActionRecommendation:
+    return ActionRecommendation(
+        decision=ActionDecision.CONFIRM_REMOVAL,
+        position_min_pct=0.0,
+        position_max_pct=0.0,
+        reasoning=[
+            reason,
+            "缺少当日证据时不能沿用历史正向判断。",
+        ],
+        required_confirmation=[
+            "补齐今日 Strategy V2 证据快照",
+            "确认支持证据、流动性和动作策略是否仍满足重点观察条件",
+            "若证据无法补齐或反证占优，确认是否移出重点观察",
+        ],
+        invalidation_conditions=_dedupe(
+            [
+                *focus_state.invalidation_conditions,
+                "无法补齐今日 Strategy V2 证据快照",
+                "补齐后支持证据不足或风险反证占优",
+            ]
+        ),
+        risk_if_wrong="数据缺失时继续正向解读，可能延误移出重点观察或风险收缩。",
+        staging_plan=[
+            "当日不新增仓位暴露。",
+            "证据补齐前只保留待确认状态。",
+        ],
+    )
+
+
 def _removal_confirmation_action(
     snapshot: StrategyEvidenceSnapshot,
 ) -> ActionRecommendation:
@@ -519,6 +628,18 @@ def _manual_entries_by_code(manual_entries: list[Any]) -> dict[str, tuple[str, s
         if ts_code:
             entries[ts_code] = (reason, name)
     return entries
+
+
+def _existing_system_focus_count(
+    existing: list[FocusState],
+    manual_by_code: dict[str, tuple[str, str | None]],
+) -> int:
+    return sum(
+        1
+        for item in existing
+        if item.ts_code not in manual_by_code
+        and item.state != ActionLabel.EXIT_OBSERVATION
+    )
 
 
 def _dedupe(items: list[str]) -> list[str]:

@@ -2,7 +2,12 @@ from datetime import date
 
 from stock_analyzer.analysis.focus import update_focus_watchlist, update_focus_watchlist_v2
 from stock_analyzer.analysis.strategy_v2 import generate_strategy_v2_recommendations
-from stock_analyzer.domain.models import ActionLabel, FocusState, Recommendation
+from stock_analyzer.domain.models import (
+    ActionDecision,
+    ActionLabel,
+    FocusState,
+    Recommendation,
+)
 from tests.test_strategy_v2_recommendation import _feature
 
 
@@ -110,4 +115,35 @@ def test_v2_existing_focus_continues_and_receives_daily_update():
     assert result.focus_states[0].entry_date == date(2026, 7, 8)
     assert result.daily_updates[0].ts_code == "600000.SH"
     assert result.daily_updates[0].focus_entry_progress
+    assert result.daily_updates[0].invalidation_conditions
+
+
+def test_v2_existing_focus_without_snapshot_gets_data_insufficient_daily_update():
+    existing = [
+        FocusState(
+            trade_date=date(2026, 7, 9),
+            ts_code="600000.SH",
+            state=ActionLabel.ENTER_OBSERVATION,
+            entry_date=date(2026, 7, 8),
+            entry_reason="原始证据成立",
+            invalidation_conditions=["跌破关键支撑"],
+        )
+    ]
+
+    result = update_focus_watchlist_v2(
+        existing=existing,
+        recommendation_snapshots=[],
+        manual_entries=[],
+        trade_date=date(2026, 7, 10),
+    )
+
+    assert result.focus_states[0].state == ActionLabel.CONTINUE_OBSERVATION
+    assert result.daily_updates[0].trade_date == date(2026, 7, 10)
+    assert result.daily_updates[0].ts_code == "600000.SH"
+    assert result.daily_updates[0].data_insufficient is True
+    assert result.daily_updates[0].new_support == []
+    assert result.daily_updates[0].action.decision == ActionDecision.CONFIRM_REMOVAL
+    assert "数据不足" in result.daily_updates[0].thesis
+    assert "支持 2-8 周观察" not in result.daily_updates[0].thesis
+    assert result.daily_updates[0].required_confirmation
     assert result.daily_updates[0].invalidation_conditions
