@@ -455,25 +455,31 @@ def _append_operational_status_failures(
     if report_mode == "data_insufficient":
         return _append_data_insufficient_failures(failures, operational_status)
 
-    if operational_status.get("is_trading_day") is True:
-        recommendation_state = operational_status.get("recommendation_state")
-        focus_state = operational_status.get("focus_state")
-        if recommendation_state != "generated" or focus_state != "generated":
-            failures.append(
-                ProductionVerificationFailure(
-                    code="trading_day_output_state_invalid",
-                    message=(
-                        "Trading-day production reports must record generated "
-                        "recommendation_state and focus_state."
-                    ),
-                    fix_suggestion=(
-                        "Regenerate the report after Strategy V2 recommendations and "
-                        "focus output are generated, or emit a data_insufficient "
-                        "report with recovery evidence."
-                    ),
-                )
+    if report_mode == "production" and not _has_generated_operational_states(
+        operational_status
+    ):
+        failures.append(
+            ProductionVerificationFailure(
+                code="trading_day_output_state_invalid",
+                message=(
+                    "Trading-day production reports must record generated "
+                    "recommendation_state and focus_state."
+                ),
+                fix_suggestion=(
+                    "Regenerate the report after Strategy V2 recommendations and "
+                    "focus output are generated, or emit a data_insufficient "
+                    "report with recovery evidence."
+                ),
             )
+        )
     return False
+
+
+def _has_generated_operational_states(operational_status: dict[str, Any]) -> bool:
+    return (
+        operational_status.get("recommendation_state") == "generated"
+        and operational_status.get("focus_state") == "generated"
+    )
 
 
 def _append_data_insufficient_failures(
@@ -504,10 +510,7 @@ def _append_data_insufficient_failures(
 
     recovery_attempts = operational_status.get("data_recovery_attempts")
     blocking_fields = operational_status.get("blocking_missing_fields")
-    has_recovery_attempt = (
-        isinstance(recovery_attempts, list)
-        and any(isinstance(item, dict) and item for item in recovery_attempts)
-    )
+    has_recovery_attempt = _has_structured_recovery_attempts(recovery_attempts)
     has_blocking_field = (
         isinstance(blocking_fields, list)
         and any(isinstance(item, str) and item.strip() for item in blocking_fields)
@@ -526,12 +529,30 @@ def _append_data_insufficient_failures(
                     "attempt and at least one blocking missing field."
                 ),
                 fix_suggestion=(
-                    "Record data_recovery_attempts and blocking_missing_fields in "
-                    "latest.json operational_status before accepting the run."
+                    "Record data_recovery_attempts with family, source_name, and "
+                    "status, plus blocking_missing_fields in latest.json "
+                    "operational_status before accepting the run."
                 ),
             )
         )
     return valid
+
+
+def _has_structured_recovery_attempts(value: Any) -> bool:
+    if not isinstance(value, list) or not value:
+        return False
+    return all(_is_structured_recovery_attempt(item) for item in value)
+
+
+def _is_structured_recovery_attempt(value: Any) -> bool:
+    if not isinstance(value, dict):
+        return False
+    required_fields = ("family", "source_name", "status")
+    return all(_is_non_empty_string(value.get(field)) for field in required_fields)
+
+
+def _is_non_empty_string(value: Any) -> bool:
+    return isinstance(value, str) and bool(value.strip())
 
 
 def _operational_status(payload: dict[str, Any] | None) -> dict[str, Any]:

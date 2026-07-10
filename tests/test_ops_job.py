@@ -257,6 +257,11 @@ def test_verify_ignores_false_fixture_flags_in_report_json(tmp_path):
                 "sample": False,
             },
             "recommendations": [],
+            "operational_status": {
+                "is_trading_day": True,
+                "recommendation_state": "generated",
+                "focus_state": "generated",
+            },
         },
     )
 
@@ -298,6 +303,60 @@ def test_verify_strategy_v2_fails_when_score_is_visible_in_production_html(
 
     assert verification.passed is False
     assert _failure(verification, "visible_total_score").fix_suggestion
+
+
+def test_verify_rejects_production_report_without_generated_operational_status(
+    tmp_path,
+):
+    trade_date = date(2026, 7, 10)
+    _write_production_report(
+        tmp_path,
+        trade_date,
+        report_json_payload={
+            "trade_date": trade_date.isoformat(),
+            "report_mode": "production",
+            "is_fixture": False,
+            "recommendations": [],
+        },
+    )
+
+    verification = verify_production_result(
+        tmp_path,
+        FakeVerificationRepository(),
+        trade_date,
+    )
+
+    assert verification.passed is False
+    assert _failure(verification, "trading_day_output_state_invalid").fix_suggestion
+
+
+def test_verify_rejects_production_report_with_incomplete_operational_status(
+    tmp_path,
+):
+    trade_date = date(2026, 7, 10)
+    _write_production_report(
+        tmp_path,
+        trade_date,
+        report_json_payload={
+            "trade_date": trade_date.isoformat(),
+            "report_mode": "production",
+            "is_fixture": False,
+            "recommendations": [],
+            "operational_status": {
+                "is_trading_day": True,
+                "recommendation_state": "generated",
+            },
+        },
+    )
+
+    verification = verify_production_result(
+        tmp_path,
+        FakeVerificationRepository(),
+        trade_date,
+    )
+
+    assert verification.passed is False
+    assert _failure(verification, "trading_day_output_state_invalid").fix_suggestion
 
 
 def test_verify_accepts_explicit_data_insufficient_trading_day_report(tmp_path):
@@ -361,6 +420,42 @@ def test_verify_rejects_data_insufficient_report_without_recovery_evidence(tmp_p
                 "focus_count": 0,
                 "data_recovery_attempts": [],
                 "blocking_missing_fields": [],
+                "message": "核心行情缺失。",
+            },
+        },
+    )
+
+    verification = verify_production_result(
+        tmp_path,
+        FakeVerificationRepository(),
+        trade_date,
+    )
+
+    assert verification.passed is False
+    assert _failure(verification, "data_insufficient_recovery_missing").fix_suggestion
+
+
+def test_verify_rejects_data_insufficient_report_with_malformed_recovery_attempt(
+    tmp_path,
+):
+    trade_date = date(2026, 7, 10)
+    _write_production_report(
+        tmp_path,
+        trade_date,
+        report_json_payload={
+            "trade_date": trade_date.isoformat(),
+            "report_mode": "data_insufficient",
+            "is_fixture": False,
+            "recommendations": [],
+            "operational_status": {
+                "trade_date": trade_date.isoformat(),
+                "is_trading_day": True,
+                "recommendation_state": "data_insufficient",
+                "focus_state": "data_insufficient",
+                "recommendation_count": 0,
+                "focus_count": 0,
+                "data_recovery_attempts": [{"foo": "bar"}],
+                "blocking_missing_fields": ["daily_ohlcv.close"],
                 "message": "核心行情缺失。",
             },
         },
@@ -1555,6 +1650,11 @@ def _write_production_report(
         "report_mode": "production",
         "is_fixture": False,
         "recommendations": [],
+        "operational_status": {
+            "is_trading_day": True,
+            "recommendation_state": "generated",
+            "focus_state": "generated",
+        },
     }
     (data / "latest.json").write_text(
         json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
