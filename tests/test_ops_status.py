@@ -32,6 +32,9 @@ def test_job_status_writes_complete_machine_json(tmp_path):
         recommendations=0,
         evidence_packages=0,
         evaluation_tasks=0,
+        recommendation_state="data_insufficient",
+        focus_state="data_insufficient",
+        blocking_missing_fields=["daily_ohlcv.close"],
         fix_suggestion="No action needed.",
         error_message_redacted=redact_secrets(
             raw_error,
@@ -57,6 +60,9 @@ def test_job_status_writes_complete_machine_json(tmp_path):
         "recommendations",
         "evidence_packages",
         "evaluation_tasks",
+        "recommendation_state",
+        "focus_state",
+        "blocking_missing_fields",
         "market_price_daily_current_day_rows",
         "daily_basic_indicator_current_day_rows",
         "supabase_database_size_mb",
@@ -73,6 +79,9 @@ def test_job_status_writes_complete_machine_json(tmp_path):
     assert payload["scheduled_slot"] == "18:30"
     assert payload["status"] == "success_no_recommendations"
     assert payload["stage"] == "complete"
+    assert payload["recommendation_state"] == "data_insufficient"
+    assert payload["focus_state"] == "data_insufficient"
+    assert payload["blocking_missing_fields"] == ["daily_ohlcv.close"]
     assert payload["fix_suggestion"] == "No action needed."
 
     written_text = output_path.read_text(encoding="utf-8")

@@ -288,6 +288,9 @@ def run_daily_job(
             recommendations=verification.recommendations,
             evidence_packages=verification.evidence_packages,
             evaluation_tasks=verification.evaluation_tasks,
+            recommendation_state=verification.recommendation_state,
+            focus_state=verification.focus_state,
+            blocking_missing_fields=list(verification.blocking_missing_fields),
             market_price_daily_current_day_rows=(
                 verification.market_price_daily_current_day_rows
             ),
@@ -338,6 +341,9 @@ def run_daily_job(
         recommendations=verification.recommendations,
         evidence_packages=verification.evidence_packages,
         evaluation_tasks=verification.evaluation_tasks,
+        recommendation_state=verification.recommendation_state,
+        focus_state=verification.focus_state,
+        blocking_missing_fields=list(verification.blocking_missing_fields),
         market_price_daily_current_day_rows=(
             verification.market_price_daily_current_day_rows
         ),
@@ -647,6 +653,9 @@ def _write_status(
     recommendations: int | None = None,
     evidence_packages: int | None = None,
     evaluation_tasks: int | None = None,
+    recommendation_state: str | None = None,
+    focus_state: str | None = None,
+    blocking_missing_fields: list[str] | None = None,
     market_price_daily_current_day_rows: int | None = None,
     daily_basic_indicator_current_day_rows: int | None = None,
     report_index_exists: bool | None = None,
@@ -669,6 +678,9 @@ def _write_status(
         recommendations=recommendations,
         evidence_packages=evidence_packages,
         evaluation_tasks=evaluation_tasks,
+        recommendation_state=recommendation_state,
+        focus_state=focus_state,
+        blocking_missing_fields=blocking_missing_fields or [],
         market_price_daily_current_day_rows=market_price_daily_current_day_rows,
         daily_basic_indicator_current_day_rows=daily_basic_indicator_current_day_rows,
         report_index_exists=report_index_exists,

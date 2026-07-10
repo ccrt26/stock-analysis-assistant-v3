@@ -269,6 +269,113 @@ def test_verify_ignores_false_fixture_flags_in_report_json(tmp_path):
     assert verification.passed is True
 
 
+def test_verify_strategy_v2_fails_when_score_is_visible_in_production_html(
+    tmp_path,
+):
+    trade_date = date(2026, 7, 10)
+    _write_production_report(
+        tmp_path,
+        trade_date,
+        index_html="<html><body>评分 83.2</body></html>",
+        report_json_payload={
+            "trade_date": trade_date.isoformat(),
+            "report_mode": "production",
+            "is_fixture": False,
+            "recommendation_cards": [{"ts_code": "600000.SH"}],
+            "strategy_snapshots": [{"internal_score": 83.2}],
+            "operational_status": {
+                "recommendation_state": "generated",
+                "focus_state": "generated",
+            },
+        },
+    )
+
+    verification = verify_production_result(
+        tmp_path,
+        FakeVerificationRepository(),
+        trade_date,
+    )
+
+    assert verification.passed is False
+    assert _failure(verification, "visible_total_score").fix_suggestion
+
+
+def test_verify_accepts_explicit_data_insufficient_trading_day_report(tmp_path):
+    trade_date = date(2026, 7, 10)
+    _write_production_report(
+        tmp_path,
+        trade_date,
+        report_json_payload={
+            "trade_date": trade_date.isoformat(),
+            "report_mode": "data_insufficient",
+            "is_fixture": False,
+            "recommendations": [],
+            "operational_status": {
+                "trade_date": trade_date.isoformat(),
+                "is_trading_day": True,
+                "recommendation_state": "data_insufficient",
+                "focus_state": "data_insufficient",
+                "recommendation_count": 0,
+                "focus_count": 0,
+                "data_recovery_attempts": [
+                    {
+                        "family": "daily_ohlcv",
+                        "source_name": "tushare.daily",
+                        "status": "failed",
+                    }
+                ],
+                "blocking_missing_fields": ["daily_ohlcv.close"],
+                "message": "核心行情缺失。",
+            },
+        },
+    )
+
+    verification = verify_production_result(
+        tmp_path,
+        FakeVerificationRepository(),
+        trade_date,
+    )
+
+    assert verification.passed is True
+    assert verification.recommendation_state == "data_insufficient"
+    assert verification.focus_state == "data_insufficient"
+    assert verification.blocking_missing_fields == ("daily_ohlcv.close",)
+
+
+def test_verify_rejects_data_insufficient_report_without_recovery_evidence(tmp_path):
+    trade_date = date(2026, 7, 10)
+    _write_production_report(
+        tmp_path,
+        trade_date,
+        report_json_payload={
+            "trade_date": trade_date.isoformat(),
+            "report_mode": "data_insufficient",
+            "is_fixture": False,
+            "recommendations": [],
+            "operational_status": {
+                "trade_date": trade_date.isoformat(),
+                "is_trading_day": True,
+                "recommendation_state": "data_insufficient",
+                "focus_state": "data_insufficient",
+                "recommendation_count": 0,
+                "focus_count": 0,
+                "data_recovery_attempts": [],
+                "blocking_missing_fields": [],
+                "message": "核心行情缺失。",
+            },
+        },
+    )
+
+    verification = verify_production_result(
+        tmp_path,
+        FakeVerificationRepository(),
+        trade_date,
+    )
+
+    assert verification.passed is False
+    assert _failure(verification, "data_insufficient_recovery_missing").fix_suggestion
+
+
 def test_verify_fails_when_report_index_is_missing(tmp_path):
     trade_date = date(2026, 7, 9)
     _write_production_report(tmp_path, trade_date, include_root_index=False)
@@ -650,6 +757,99 @@ def test_run_daily_job_success_with_zero_recommendations_writes_status(tmp_path)
     assert payload["status"] == "success_no_recommendations"
     assert payload["recommendations"] == 0
     assert payload["deploy_artifact_prepared"] is True
+
+
+def test_run_daily_job_writes_operational_states_from_successful_verification(
+    tmp_path,
+):
+    trade_date = date(2026, 7, 9)
+    status_path = tmp_path / "logs" / "run-daily" / "latest-status.json"
+
+    status = run_daily_job(
+        tmp_path,
+        trade_date,
+        "18:30",
+        1,
+        prepare_deploy=False,
+        repository=FakeJobRepository(),
+        calendar_decider=lambda *_args, **_kwargs: TradingDayDecision(
+            status="trading_day",
+            source="supabase",
+            message="market open",
+        ),
+        health_check=lambda *_args: None,
+        run_daily=lambda *_args: None,
+        verifier=lambda *_args: _successful_verification(
+            trade_date,
+            recommendation_state="data_insufficient",
+            focus_state="data_insufficient",
+            blocking_missing_fields=("daily_ohlcv.close",),
+        ),
+        status_path=status_path,
+    )
+
+    payload = json.loads(status_path.read_text(encoding="utf-8"))
+    assert status.recommendation_state == "data_insufficient"
+    assert status.focus_state == "data_insufficient"
+    assert status.blocking_missing_fields == ["daily_ohlcv.close"]
+    assert payload["recommendation_state"] == "data_insufficient"
+    assert payload["focus_state"] == "data_insufficient"
+    assert payload["blocking_missing_fields"] == ["daily_ohlcv.close"]
+
+
+def test_run_daily_job_writes_operational_states_from_failed_verification(
+    tmp_path,
+):
+    trade_date = date(2026, 7, 9)
+    status_path = tmp_path / "logs" / "run-daily" / "latest-status.json"
+
+    status = run_daily_job(
+        tmp_path,
+        trade_date,
+        "18:30",
+        1,
+        prepare_deploy=False,
+        repository=FakeJobRepository(),
+        calendar_decider=lambda *_args, **_kwargs: TradingDayDecision(
+            status="trading_day",
+            source="supabase",
+            message="market open",
+        ),
+        health_check=lambda *_args: None,
+        run_daily=lambda *_args: None,
+        verifier=lambda *_args: ProductionVerification(
+            trade_date=trade_date,
+            status=RunStatus.FAILED_NEEDS_HUMAN,
+            passed=False,
+            recommendations=0,
+            evidence_packages=0,
+            evaluation_tasks=0,
+            market_price_daily_current_day_rows=0,
+            daily_basic_indicator_current_day_rows=0,
+            report_index_exists=True,
+            daily_report_index_exists=True,
+            report_json_exists=True,
+            failures=(
+                _production_failure(
+                    "data_insufficient_recovery_missing",
+                    "Add recovery evidence.",
+                ),
+            ),
+            recommendation_state="data_insufficient",
+            focus_state="data_insufficient",
+            blocking_missing_fields=("daily_ohlcv.close",),
+        ),
+        status_path=status_path,
+    )
+
+    payload = json.loads(status_path.read_text(encoding="utf-8"))
+    assert status.status == RunStatus.FAILED_NEEDS_HUMAN
+    assert status.recommendation_state == "data_insufficient"
+    assert status.focus_state == "data_insufficient"
+    assert status.blocking_missing_fields == ["daily_ohlcv.close"]
+    assert payload["recommendation_state"] == "data_insufficient"
+    assert payload["focus_state"] == "data_insufficient"
+    assert payload["blocking_missing_fields"] == ["daily_ohlcv.close"]
 
 
 def test_run_daily_job_triggers_auto_publish_after_success(tmp_path):
@@ -1209,7 +1409,13 @@ def _write_previous_status(
     ).write_json(status_path)
 
 
-def _successful_verification(trade_date: date) -> ProductionVerification:
+def _successful_verification(
+    trade_date: date,
+    *,
+    recommendation_state: str | None = None,
+    focus_state: str | None = None,
+    blocking_missing_fields: tuple[str, ...] = (),
+) -> ProductionVerification:
     return ProductionVerification(
         trade_date=trade_date,
         status=RunStatus.SUCCESS_NO_RECOMMENDATIONS,
@@ -1223,6 +1429,9 @@ def _successful_verification(trade_date: date) -> ProductionVerification:
         daily_report_index_exists=True,
         report_json_exists=True,
         failures=(),
+        recommendation_state=recommendation_state,
+        focus_state=focus_state,
+        blocking_missing_fields=blocking_missing_fields,
     )
 
 

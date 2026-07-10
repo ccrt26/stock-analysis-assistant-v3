@@ -82,6 +82,9 @@ class JobStatus(BaseModel):
     recommendations: int | None = None
     evidence_packages: int | None = None
     evaluation_tasks: int | None = None
+    recommendation_state: str | None = None
+    focus_state: str | None = None
+    blocking_missing_fields: list[str] = Field(default_factory=list)
     market_price_daily_current_day_rows: int | None = None
     daily_basic_indicator_current_day_rows: int | None = None
     supabase_database_size_mb: float | None = None
@@ -96,6 +99,8 @@ class JobStatus(BaseModel):
     @field_validator(
         "scheduled_slot",
         "stage",
+        "recommendation_state",
+        "focus_state",
         "publish_skipped_reason",
         "fix_suggestion",
         "error_message_redacted",
