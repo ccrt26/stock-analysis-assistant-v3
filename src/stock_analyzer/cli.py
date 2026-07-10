@@ -74,6 +74,11 @@ def health_check(
 def run_daily(
     dry_run: bool = typer.Option(False, "--dry-run"),
     fixture_mode: bool = typer.Option(False, "--fixture-mode"),
+    strategy_v2: bool = typer.Option(False, "--strategy-v2"),
+    allow_data_insufficient_output: bool = typer.Option(
+        False,
+        "--allow-data-insufficient-output",
+    ),
     trade_date: str = typer.Option(..., "--trade-date"),
 ) -> None:
     parsed_trade_date = date.fromisoformat(trade_date)
@@ -117,6 +122,8 @@ def run_daily(
                 if not dry_run and not effective_fixture_mode
                 else None
             ),
+            strategy_v2=strategy_v2,
+            allow_data_insufficient_output=allow_data_insufficient_output,
         )
     except ProductionDataSourceUnavailable as exc:
         _fail(str(exc))

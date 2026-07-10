@@ -6,23 +6,44 @@ from typing import Optional
 
 from pydantic import BaseModel
 
-from stock_analyzer.analysis.evidence import build_evidence_package
-from stock_analyzer.analysis.focus import update_focus_watchlist
+from stock_analyzer.analysis.evidence import (
+    build_evidence_package,
+    build_evidence_package_from_strategy_snapshot,
+)
+from stock_analyzer.analysis.focus import (
+    update_focus_watchlist,
+    update_focus_watchlist_v2,
+)
 from stock_analyzer.analysis.pool import clean_stock_pool
 from stock_analyzer.analysis.recommendation import generate_recommendations
-from stock_analyzer.data.models import DailyBar, DailyBasicRow, MarketDataBundle
+from stock_analyzer.analysis.strategy_v2 import generate_strategy_v2_recommendations
+from stock_analyzer.data.models import (
+    DailyBar,
+    DailyBasicRow,
+    MarketDataBundle,
+    SourceRunRecord,
+)
 from stock_analyzer.data.provider import MarketDataProvider
 from stock_analyzer.domain.models import (
+    ActionDecision,
     ActionLabel,
+    DataRecoveryAttempt,
     EvaluationTask,
     EvidencePackage,
     FeatureSnapshot,
     FocusState,
+    ManualHolding,
+    OperationalDailyStatus,
+    OperationalReportState,
     Recommendation,
     StockSnapshot,
+    StrategyEvidenceSnapshot,
 )
 from stock_analyzer.evaluation.tasks import create_evaluation_tasks
-from stock_analyzer.reports.generator import render_reports
+from stock_analyzer.reports.generator import (
+    render_data_insufficient_report,
+    render_reports,
+)
 from stock_analyzer.storage.repositories import AnalysisRepository, InMemoryAnalysisRepository
 
 
@@ -31,6 +52,7 @@ class DailyRunResult(BaseModel):
     recommendations: list[Recommendation]
     focus_states: list[FocusState]
     evaluation_tasks: list[EvaluationTask]
+    operational_status: OperationalDailyStatus
 
 
 class StoredAnalysisNotFound(RuntimeError):
@@ -126,6 +148,10 @@ def run_daily_pipeline(
     market_data_provider: Optional[MarketDataProvider] = None,
     local_warehouse=None,
     local_archive=None,
+    strategy_v2: bool = False,
+    allow_data_insufficient_output: bool = False,
+    manual_entries: Optional[list[tuple[str, str | None]]] = None,
+    manual_holdings: Optional[list[ManualHolding]] = None,
 ) -> DailyRunResult:
     repository = repository or InMemoryAnalysisRepository()
     persist = persist and not dry_run
@@ -134,23 +160,53 @@ def run_daily_pipeline(
         stocks, stock_names, feature_profiles = _sample_market(trade_date)
     else:
         if market_data_provider is None:
-            raise ProductionDataSourceUnavailable(PRODUCTION_DATA_SOURCE_UNAVAILABLE_MESSAGE)
+            return _handle_data_insufficient_output_or_raise(
+                trade_date=trade_date,
+                output_dir=output_dir,
+                message=PRODUCTION_DATA_SOURCE_UNAVAILABLE_MESSAGE,
+                allow_data_insufficient_output=allow_data_insufficient_output,
+                bundle=None,
+                local_archive=local_archive,
+                dry_run=dry_run,
+            )
         bundle = market_data_provider.load(trade_date)
         if not bundle.can_generate_decisions:
-            raise ProductionDataSourceUnavailable(
-                "Current live data is unavailable; no production decisions were generated."
+            return _handle_data_insufficient_output_or_raise(
+                trade_date=trade_date,
+                output_dir=output_dir,
+                message="Current live data is unavailable; no production decisions were generated.",
+                allow_data_insufficient_output=allow_data_insufficient_output,
+                bundle=bundle,
+                local_archive=local_archive,
+                dry_run=dry_run,
             )
         stocks, stock_names, feature_profiles = bundle.to_pipeline_inputs()
         if not stocks or not feature_profiles:
-            raise ProductionDataSourceUnavailable(
-                "Current live data is unavailable; no production decisions were generated."
+            return _handle_data_insufficient_output_or_raise(
+                trade_date=trade_date,
+                output_dir=output_dir,
+                message="Current live data is unavailable; no production decisions were generated.",
+                allow_data_insufficient_output=allow_data_insufficient_output,
+                bundle=bundle,
+                local_archive=local_archive,
+                dry_run=dry_run,
             )
         production_bundle = bundle
     included_stocks, _ = clean_stock_pool(stocks)
     if not fixture_mode and not dry_run:
         if not _has_recommendation_eligible_features(included_stocks, feature_profiles):
-            raise ProductionDataSourceUnavailable(
-                "Current live data is unavailable; no production decisions were generated."
+            return _handle_data_insufficient_output_or_raise(
+                trade_date=trade_date,
+                output_dir=output_dir,
+                message="Current live data is unavailable; no production decisions were generated.",
+                allow_data_insufficient_output=allow_data_insufficient_output,
+                bundle=production_bundle,
+                local_archive=local_archive,
+                dry_run=dry_run,
+                extra_blocking_missing_fields=_eligible_feature_blocking_fields(
+                    included_stocks,
+                    feature_profiles,
+                ),
             )
         if persist and production_bundle is not None:
             if local_warehouse is None:
@@ -158,34 +214,70 @@ def run_daily_pipeline(
                     "Production persistence requires local warehouse before Supabase writes."
                 )
             local_warehouse.save_bundle(production_bundle)
-    features = [feature_profiles[stock.ts_code] for stock in included_stocks if stock.ts_code in feature_profiles]
+    features = [
+        feature_profiles[stock.ts_code]
+        for stock in included_stocks
+        if stock.ts_code in feature_profiles
+    ]
 
-    recommendation_result = generate_recommendations(features, stock_names)
-    recommendations = recommendation_result.recommendations
     existing = (
         existing_focus_states
         if existing_focus_states is not None
         else repository.load_focus_states()
     )
-    focus_states = update_focus_watchlist(
-        existing=existing,
-        recommendations=recommendations,
-        invalidated_codes=set(),
-        trade_date=trade_date,
-    )
-    evidence_packages = [
-        build_evidence_package(
-            recommendation,
-            matched_rules=["RESEARCH_TREND_CONFIRMATION"],
+    if strategy_v2:
+        strategy_result = generate_strategy_v2_recommendations(
+            features,
+            stock_names,
+            trade_date=trade_date,
+            current_holdings=_manual_holdings_by_code(manual_holdings or []),
         )
-        for recommendation in recommendations
-    ]
-    recommendations = _assign_evidence_ids(recommendations, evidence_packages)
+        strategy_snapshots = list(strategy_result.snapshots)
+        all_strategy_snapshots = [
+            *strategy_snapshots,
+            *strategy_result.data_insufficient_snapshots,
+        ]
+        recommendations = _recommendations_from_strategy_snapshots(
+            strategy_snapshots,
+        )
+        focus_result = update_focus_watchlist_v2(
+            existing=existing,
+            recommendation_snapshots=all_strategy_snapshots,
+            manual_entries=list(manual_entries or []),
+            trade_date=trade_date,
+        )
+        focus_states = focus_result.focus_states
+        evidence_packages = [
+            build_evidence_package_from_strategy_snapshot(snapshot)
+            for snapshot in strategy_snapshots
+        ]
+    else:
+        recommendation_result = generate_recommendations(features, stock_names)
+        recommendations = recommendation_result.recommendations
+        focus_states = update_focus_watchlist(
+            existing=existing,
+            recommendations=recommendations,
+            invalidated_codes=set(),
+            trade_date=trade_date,
+        )
+        evidence_packages = [
+            build_evidence_package(
+                recommendation,
+                matched_rules=["RESEARCH_TREND_CONFIRMATION"],
+            )
+            for recommendation in recommendations
+        ]
+        recommendations = _assign_evidence_ids(recommendations, evidence_packages)
     evaluation_tasks = [
         task
         for package in evidence_packages
         for task in create_evaluation_tasks(package)
     ]
+    operational_status = _generated_operational_status(
+        trade_date,
+        recommendations,
+        focus_states,
+    )
 
     if persist:
         selected_codes = _selected_decision_codes(recommendations, focus_states)
@@ -234,6 +326,11 @@ def run_daily_pipeline(
             evidence_packages=evidence_packages,
             trade_date=trade_date,
             fixture_mode=fixture_mode,
+            data_status=production_bundle.data_status if production_bundle else None,
+            source_versions=(
+                production_bundle.source_versions if production_bundle else None
+            ),
+            operational_status=operational_status,
         )
         if local_archive is not None and not fixture_mode:
             local_archive.archive_report_tree(output_dir, trade_date)
@@ -243,7 +340,213 @@ def run_daily_pipeline(
         recommendations=recommendations,
         focus_states=focus_states,
         evaluation_tasks=evaluation_tasks,
+        operational_status=operational_status,
     )
+
+
+def _handle_data_insufficient_output_or_raise(
+    *,
+    trade_date: date,
+    output_dir: Path,
+    message: str,
+    allow_data_insufficient_output: bool,
+    bundle: Optional[MarketDataBundle],
+    local_archive,
+    dry_run: bool,
+    extra_blocking_missing_fields: Optional[list[str]] = None,
+) -> DailyRunResult:
+    if not allow_data_insufficient_output:
+        raise ProductionDataSourceUnavailable(message)
+
+    operational_status = _data_insufficient_operational_status(
+        trade_date=trade_date,
+        message=message,
+        bundle=bundle,
+        extra_blocking_missing_fields=extra_blocking_missing_fields,
+    )
+    if not dry_run:
+        render_data_insufficient_report(
+            output_dir,
+            operational_status,
+            source_versions=bundle.source_versions if bundle else None,
+        )
+        if local_archive is not None:
+            local_archive.archive_report_tree(output_dir, trade_date)
+    return DailyRunResult(
+        trade_date=trade_date,
+        recommendations=[],
+        focus_states=[],
+        evaluation_tasks=[],
+        operational_status=operational_status,
+    )
+
+
+def _generated_operational_status(
+    trade_date: date,
+    recommendations: list[Recommendation],
+    focus_states: list[FocusState],
+) -> OperationalDailyStatus:
+    return OperationalDailyStatus(
+        trade_date=trade_date,
+        is_trading_day=True,
+        recommendation_state=OperationalReportState.GENERATED,
+        focus_state=OperationalReportState.GENERATED,
+        recommendation_count=len(recommendations),
+        focus_count=len(focus_states),
+        message="Daily recommendations and focus watchlist generated.",
+    )
+
+
+def _data_insufficient_operational_status(
+    *,
+    trade_date: date,
+    message: str,
+    bundle: Optional[MarketDataBundle],
+    extra_blocking_missing_fields: Optional[list[str]] = None,
+) -> OperationalDailyStatus:
+    blocking_missing_fields = _dedupe(
+        [
+            *_blocking_missing_fields_for_bundle(bundle),
+            *(extra_blocking_missing_fields or []),
+        ]
+    )
+    return OperationalDailyStatus(
+        trade_date=trade_date,
+        is_trading_day=True,
+        recommendation_state=OperationalReportState.DATA_INSUFFICIENT,
+        focus_state=OperationalReportState.DATA_INSUFFICIENT,
+        recommendation_count=0,
+        focus_count=0,
+        data_recovery_attempts=_data_recovery_attempts_from_source_runs(
+            bundle.source_runs if bundle else []
+        ),
+        blocking_missing_fields=blocking_missing_fields,
+        message=message,
+    )
+
+
+def _blocking_missing_fields_for_bundle(
+    bundle: Optional[MarketDataBundle],
+) -> list[str]:
+    if bundle is None:
+        return ["market_data_provider"]
+
+    fields: list[str] = []
+    if not bundle.can_generate_decisions:
+        fields.append(f"data_status.{bundle.data_status.value}")
+    if not bundle.stock_basic:
+        fields.append("stock_basic")
+    if not bundle.daily_bars:
+        fields.append("daily_bars")
+    if not bundle.daily_basic:
+        fields.append("daily_basic")
+    if not bundle.stocks:
+        fields.append("stock_statuses")
+    if not bundle.feature_profiles:
+        fields.append("feature_snapshots")
+    return _dedupe(fields or ["decision_inputs"])
+
+
+def _eligible_feature_blocking_fields(
+    stocks: list[StockSnapshot],
+    feature_profiles: dict[str, FeatureSnapshot],
+) -> list[str]:
+    if not stocks:
+        return ["stock_statuses.eligible_stock_pool"]
+    if any(
+        feature_profiles.get(stock.ts_code) is not None
+        and feature_profiles[stock.ts_code].data_quality != "ok"
+        for stock in stocks
+    ):
+        return ["feature_snapshots.data_quality"]
+    return ["feature_snapshots.recommendation_eligible"]
+
+
+def _data_recovery_attempts_from_source_runs(
+    source_runs: list[SourceRunRecord],
+) -> list[DataRecoveryAttempt]:
+    attempts: list[DataRecoveryAttempt] = []
+    for source_run in source_runs:
+        recovered_fields = [
+            field for field, is_available in source_run.field_coverage.items()
+            if is_available
+        ]
+        attempts.append(
+            DataRecoveryAttempt(
+                source_name=source_run.source_name,
+                family=source_run.stage,
+                status=source_run.status.value,
+                message=source_run.message,
+                trade_date=source_run.trade_date,
+                succeeded=source_run.status.value == "success",
+                recovered_fields=recovered_fields,
+                error=(
+                    source_run.message
+                    if source_run.status.value == "failed"
+                    else None
+                ),
+            )
+        )
+    return attempts
+
+
+def _recommendations_from_strategy_snapshots(
+    snapshots: list[StrategyEvidenceSnapshot],
+) -> list[Recommendation]:
+    return [
+        Recommendation(
+            trade_date=snapshot.trade_date,
+            ts_code=snapshot.ts_code,
+            name=snapshot.name,
+            action=_legacy_action_label_from_strategy_decision(
+                snapshot.action.decision
+            ),
+            score=round(snapshot.internal_score, 4),
+            reasons=_strategy_recommendation_reasons(snapshot),
+            risks=_strategy_recommendation_risks(snapshot),
+            evidence_id=snapshot.evidence_id,
+        )
+        for snapshot in snapshots
+    ]
+
+
+def _legacy_action_label_from_strategy_decision(
+    decision: ActionDecision,
+) -> ActionLabel:
+    if decision in {
+        ActionDecision.CONTINUE_WATCHING,
+        ActionDecision.SMALL_EXPLORATORY,
+        ActionDecision.INCREASE_ATTENTION,
+        ActionDecision.CONDITIONAL_ADD,
+    }:
+        return ActionLabel.ENTER_OBSERVATION
+    if decision in {ActionDecision.WAIT_FOR_CONFIRMATION, ActionDecision.AVOID_CHASING}:
+        return ActionLabel.CONTINUE_OBSERVATION
+    if decision == ActionDecision.CONFIRM_REMOVAL:
+        return ActionLabel.EXIT_OBSERVATION
+    if decision == ActionDecision.REDUCE_OR_AVOID:
+        return ActionLabel.DOWNGRADE_OBSERVATION
+    return ActionLabel.HIGH_RISK_OBSERVATION
+
+
+def _strategy_recommendation_reasons(
+    snapshot: StrategyEvidenceSnapshot,
+) -> list[str]:
+    reasons = [snapshot.thesis, *snapshot.action.reasoning]
+    return _dedupe(reasons)
+
+
+def _strategy_recommendation_risks(
+    snapshot: StrategyEvidenceSnapshot,
+) -> list[str]:
+    risks = [snapshot.action.risk_if_wrong, *snapshot.action.invalidation_conditions]
+    return _dedupe(risks)
+
+
+def _manual_holdings_by_code(
+    manual_holdings: list[ManualHolding],
+) -> dict[str, ManualHolding]:
+    return {holding.ts_code: holding for holding in manual_holdings}
 
 
 def _has_recommendation_eligible_features(
@@ -279,6 +582,17 @@ def _filter_market_window(
     )
 
 
+def _dedupe(items: list[str]) -> list[str]:
+    output: list[str] = []
+    seen: set[str] = set()
+    for item in items:
+        normalized = item.strip()
+        if normalized and normalized not in seen:
+            output.append(normalized)
+            seen.add(normalized)
+    return output
+
+
 def render_report_for_date(
     trade_date: date,
     output_dir: Path,
@@ -291,6 +605,11 @@ def render_report_for_date(
     evidence_packages = repository.load_evidence_packages(trade_date)
     evaluation_tasks = repository.load_evaluation_tasks(trade_date)
     if recommendations or focus_states or evidence_packages:
+        operational_status = _generated_operational_status(
+            trade_date,
+            recommendations,
+            focus_states,
+        )
         _validate_stored_analysis_complete(
             trade_date,
             recommendations,
@@ -303,12 +622,14 @@ def render_report_for_date(
             focus_states,
             evidence_packages=evidence_packages,
             trade_date=trade_date,
+            operational_status=operational_status,
         )
         return DailyRunResult(
             trade_date=trade_date,
             recommendations=recommendations,
             focus_states=focus_states,
             evaluation_tasks=evaluation_tasks,
+            operational_status=operational_status,
         )
 
     if not allow_fixture_fallback:

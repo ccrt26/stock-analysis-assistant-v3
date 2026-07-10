@@ -436,7 +436,10 @@ def test_run_daily_with_supabase_config_passes_configured_local_storage(
     )
     monkeypatch.setattr("stock_analyzer.cli.LocalWarehouse", FakeWarehouse, raising=False)
     monkeypatch.setattr("stock_analyzer.cli.LocalArchive", FakeArchive, raising=False)
-    monkeypatch.setattr("stock_analyzer.cli.run_daily_pipeline", fake_run_daily_pipeline)
+    monkeypatch.setattr(
+        "stock_analyzer.cli.run_daily_pipeline",
+        fake_run_daily_pipeline,
+    )
 
     result = CliRunner().invoke(
         app,
@@ -448,6 +451,36 @@ def test_run_daily_with_supabase_config_passes_configured_local_storage(
     assert captured["local_archive"] is archive_instances[0]
     assert warehouse_instances[0].root == tmp_path / "warehouse"
     assert archive_instances[0].root == tmp_path / "archive"
+
+
+def test_run_daily_forwards_strategy_v2_and_data_insufficient_flags(monkeypatch):
+    captured = {}
+
+    def fake_run_daily_pipeline(trade_date, output_dir, **kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(
+            trade_date=trade_date,
+            recommendations=[],
+            evaluation_tasks=[],
+        )
+
+    monkeypatch.setattr("stock_analyzer.cli.run_daily_pipeline", fake_run_daily_pipeline)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "run-daily",
+            "--dry-run",
+            "--strategy-v2",
+            "--allow-data-insufficient-output",
+            "--trade-date",
+            "2026-07-07",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert captured["strategy_v2"] is True
+    assert captured["allow_data_insufficient_output"] is True
 
 
 def test_run_daily_fixture_mode_writes_local_sample_report(tmp_path, monkeypatch):

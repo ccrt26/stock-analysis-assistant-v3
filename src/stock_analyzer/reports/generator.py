@@ -13,7 +13,12 @@ except ModuleNotFoundError:  # pragma: no cover - exercised when local deps are 
     FileSystemLoader = None
     select_autoescape = None
 from stock_analyzer.data.models import DataStatus, DataUnavailableNotice
-from stock_analyzer.domain.models import EvidencePackage, FocusState, Recommendation
+from stock_analyzer.domain.models import (
+    EvidencePackage,
+    FocusState,
+    OperationalDailyStatus,
+    Recommendation,
+)
 
 
 FIXTURE_REPORT_WARNING = (
@@ -30,6 +35,7 @@ def render_reports(
     fixture_mode: bool = False,
     data_status: Optional[DataStatus] = None,
     source_versions: Optional[dict[str, str]] = None,
+    operational_status: Optional[OperationalDailyStatus] = None,
 ) -> None:
     report_date = _resolve_trade_date(trade_date, recommendations, focus_states)
     evidence_packages = evidence_packages or []
@@ -59,6 +65,9 @@ def render_reports(
         "warning": FIXTURE_REPORT_WARNING if fixture_mode else None,
         "data_status": data_status.value if data_status else None,
         "source_versions": source_versions,
+        "operational_status": (
+            operational_status.model_dump(mode="json") if operational_status else None
+        ),
         "recommendations": [
             item.model_dump(mode="json") for item in recommendations
         ],
@@ -114,9 +123,46 @@ def render_reports(
         )
 
 
+def render_data_insufficient_report(
+    output_dir: Path,
+    operational_status: OperationalDailyStatus,
+    source_versions: Optional[dict[str, str]] = None,
+) -> None:
+    notice = DataUnavailableNotice(
+        trade_date=operational_status.trade_date,
+        reason=operational_status.message,
+    )
+    _render_empty_operational_notice(
+        output_dir=output_dir,
+        notice=notice,
+        report_mode="data_insufficient",
+        warning="当日实时数据不足，不生成新的股票分析结论。",
+        operational_status=operational_status,
+        source_versions=source_versions or {},
+    )
+
+
 def render_data_unavailable_notice(
     output_dir: Path,
     notice: DataUnavailableNotice,
+) -> None:
+    _render_empty_operational_notice(
+        output_dir=output_dir,
+        notice=notice,
+        report_mode="data_unavailable",
+        warning="当日实时数据不可用，不生成新的股票分析结论。",
+        operational_status=None,
+        source_versions={},
+    )
+
+
+def _render_empty_operational_notice(
+    output_dir: Path,
+    notice: DataUnavailableNotice,
+    report_mode: str,
+    warning: str,
+    operational_status: Optional[OperationalDailyStatus],
+    source_versions: dict[str, str],
 ) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     data_dir = output_dir / "data"
@@ -124,14 +170,18 @@ def render_data_unavailable_notice(
 
     payload = {
         "trade_date": notice.trade_date.isoformat(),
-        "report_mode": "data_unavailable",
+        "report_mode": report_mode,
         "is_fixture": False,
-        "warning": "当日实时数据不可用，不生成新的股票分析结论。",
+        "warning": warning,
         "reason": notice.reason,
         "last_successful_trade_date": (
             notice.last_successful_trade_date.isoformat()
             if notice.last_successful_trade_date
             else None
+        ),
+        "source_versions": source_versions,
+        "operational_status": (
+            operational_status.model_dump(mode="json") if operational_status else None
         ),
         "recommendations": [],
         "focus_states": [],

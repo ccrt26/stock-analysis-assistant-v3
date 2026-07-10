@@ -1,3 +1,4 @@
+import json
 from datetime import date, timedelta
 
 import pytest
@@ -756,6 +757,55 @@ def test_run_daily_pipeline_production_fails_when_provider_cannot_generate_decis
     assert "no production decisions were generated" in str(excinfo.value)
     assert repo.save_attempts == []
     assert not (tmp_path / "index.html").exists()
+
+
+def test_trading_day_pipeline_outputs_data_insufficient_report_when_live_data_missing(tmp_path):
+    repo = InMemoryAnalysisRepository()
+
+    result = run_daily_pipeline(
+        date(2026, 7, 10),
+        tmp_path,
+        repository=repo,
+        fixture_mode=False,
+        market_data_provider=InsufficientProductionProvider(),
+        local_warehouse=RecordingWarehouse(),
+        allow_data_insufficient_output=True,
+    )
+
+    assert result.operational_status.recommendation_state.value == "data_insufficient"
+    assert result.operational_status.focus_state.value == "data_insufficient"
+    assert result.recommendations == []
+    assert repo.recommendations == []
+    assert (tmp_path / "index.html").exists()
+    assert (tmp_path / "daily" / "2026-07-10" / "index.html").exists()
+    payload = json.loads(
+        (tmp_path / "data" / "latest.json").read_text(encoding="utf-8")
+    )
+    assert payload["report_mode"] == "data_insufficient"
+    assert payload["operational_status"]["blocking_missing_fields"]
+
+
+def test_strategy_v2_pipeline_persists_operational_status_without_full_market_supabase_write(tmp_path):
+    repo = InMemoryAnalysisRepository()
+    warehouse = RecordingWarehouse()
+
+    result = run_daily_pipeline(
+        date(2026, 7, 10),
+        tmp_path,
+        repository=repo,
+        fixture_mode=False,
+        market_data_provider=ProviderWithExtraRawCode(),
+        local_warehouse=warehouse,
+        strategy_v2=True,
+    )
+
+    assert result.operational_status.recommendation_state.value == "generated"
+    assert result.operational_status.focus_state.value == "generated"
+    assert len(repo.recommendations) <= 10
+    selected_codes = {item.ts_code for item in repo.recommendations} | {
+        item.ts_code for item in repo.focus_states
+    }
+    assert {bar.ts_code for bar in repo.market_bars} <= selected_codes
 
 
 def test_run_daily_pipeline_assigns_evidence_ids_before_return_and_save(tmp_path):
