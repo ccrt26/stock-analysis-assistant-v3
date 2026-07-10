@@ -16,7 +16,7 @@ Phase 2 remains approval-gated. The first real one-command Cloudflare publish st
 
 Strategy V2 is mandatory, not optional.
 
-Phase 3 Strategy V2 is implemented for the `codex/v3-mvp` branch through the MVP task set, with production use still gated by verification, backtest evidence, design review, and explicit approval.
+Phase 3 Strategy V2 implementation is in progress on the `codex/v3-mvp` branch through the MVP task set, with production use still gated by verification, backtest evidence, design review, and explicit approval.
 
 Remaining future work must continue improving 5/20/40 trading-day backtests, recommendation quality calibration, industry, market-cap and liquidity constraints, and daily result review. Strategy changes must pass backtest and design review before they are used in production.
 
