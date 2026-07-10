@@ -126,8 +126,9 @@ def evaluate_strategy_snapshot(
     future_bars: list[DailyBar],
 ) -> EvaluationResultPayload:
     matched_bars, ignored_bar_count = _future_bars_for_snapshot(snapshot, future_bars)
+    horizon_bars = matched_bars[: OUTCOME_CHECKPOINT_DAYS[-1]]
     entry_close, baseline_notes = _entry_close(matched_bars)
-    missing_data_effect = _missing_data_effect(snapshot, matched_bars, ignored_bar_count)
+    missing_data_effect = _missing_data_effect(snapshot, horizon_bars, ignored_bar_count)
     missing_data_effect.notes.extend(baseline_notes)
 
     invalidation_threshold = _invalidation_threshold_pct(snapshot)
@@ -489,6 +490,8 @@ def _observed_alignment(
     max_drawdown_pct: float | None,
 ) -> ObservedAlignment:
     meaningful_drawdown = max_drawdown_pct is not None and max_drawdown_pct <= -5
+    if support_count == 0 and counter_count == 0:
+        return "mixed_unresolved"
     if support_count and not counter_count:
         if invalidation_occurred or meaningful_drawdown:
             return "support_countered"

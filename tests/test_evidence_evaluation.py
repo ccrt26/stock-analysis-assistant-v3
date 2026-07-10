@@ -331,11 +331,11 @@ def test_strategy_v2_replay_does_not_count_neutral_evidence_as_support():
         DailyBar(
             trade_date=date(2026, 7, 13),
             ts_code=ts_code,
-            close=10.1,
+            close=10.6,
             pre_close=10.0,
-            high=10.2,
+            high=10.8,
             low=10.0,
-            pct_chg=1.0,
+            pct_chg=6.0,
             source_name="fixture",
             source_grade=SourceGrade.PRIMARY,
         )
@@ -352,6 +352,40 @@ def test_strategy_v2_replay_does_not_count_neutral_evidence_as_support():
     assert effect.counter_count == 0
     assert effect.neutral_count == 1
     assert effect.neutral_evidence_ids == [neutral_atom.id]
+    assert effect.observed_alignment == "mixed_unresolved"
+
+
+def test_strategy_v2_replay_missing_data_effect_ignores_day_41_ohlc_gaps():
+    snapshot = _strategy_snapshot_with_action(
+        trade_date=date(2026, 7, 10),
+        ts_code="600000.SH",
+        decision=ActionDecision.SMALL_EXPLORATORY,
+        position_min_pct=5.0,
+        position_max_pct=10.0,
+    )
+    future_bars = [
+        DailyBar(
+            trade_date=snapshot.trade_date + timedelta(days=offset),
+            ts_code=snapshot.ts_code,
+            close=10.2,
+            pre_close=None if offset == 41 else 10.0,
+            high=None if offset == 41 else 10.4,
+            low=None if offset == 41 else 9.9,
+            pct_chg=2.0,
+            source_name="fixture",
+            source_grade=SourceGrade.PRIMARY,
+        )
+        for offset in range(1, 42)
+    ]
+
+    result = evaluate_strategy_snapshot(snapshot, future_bars)
+
+    assert result.future_bar_count == 41
+    assert result.outcome_inputs[40].bars_observed == 40
+    assert result.missing_data_effect.bars_observed == 40
+    assert result.missing_data_effect.missing_ohlc_fields == []
+    assert "Missing replay fields" not in "；".join(result.missing_data_effect.notes)
+    assert "Missing replay fields" not in "；".join(result.notes)
 
 
 def test_strategy_v2_replay_reports_snapshot_level_data_insufficiency():
