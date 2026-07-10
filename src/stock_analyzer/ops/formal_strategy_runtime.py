@@ -90,13 +90,10 @@ def analyze_formal_inputs(
     payloads: dict[AcquisitionGroupId, AcquisitionPayload],
     repository: Any,
 ) -> FormalAnalysisOutput:
-    if receipt.state is not FormalRunState.READY_TO_ANALYZE:
-        raise FormalMaterializationError("analysis requires READY_TO_ANALYZE")
+    if receipt.state is not FormalRunState.ANALYZING:
+        raise FormalMaterializationError("analysis callback requires ANALYZING")
     if receipt.input_set_id is None or receipt.candidate_set_id != candidate_set.candidate_set_id:
         raise FormalMaterializationError("analysis receipt and candidate set do not match")
-    if candidate_set.upstream_input_set_id != receipt.input_set_id:
-        raise FormalMaterializationError("candidate set does not match frozen input set")
-
     market = materialize_market_inputs(receipt.target_date, payloads)
     target_codes = tuple(
         dict.fromkeys((*candidate_set.ordered_codes, *candidate_set.active_focus_codes))

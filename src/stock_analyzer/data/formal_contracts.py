@@ -209,7 +209,6 @@ MANUAL_HOLDING = _record_type(
     "manual_holding",
     ("trade_date", "ts_code", "name", "position_pct", "source_name"),
     ("trade_date", "ts_code"),
-    current_fact_fields=("name", "position_pct"),
 )
 
 
@@ -219,6 +218,7 @@ def _group(
     expected_codes: tuple[str, ...],
     *,
     minimum_history_sessions: int = 0,
+    include_request_target_codes: bool = True,
 ) -> AcquisitionGroupContract:
     return AcquisitionGroupContract(
         group_id=group_id,
@@ -228,6 +228,7 @@ def _group(
         minimum_history_sessions=minimum_history_sessions,
         require_target_date=True,
         expected_codes=tuple(dict.fromkeys(expected_codes)),
+        include_request_target_codes=include_request_target_codes,
         record_types=record_types,
     )
 
@@ -279,6 +280,7 @@ def build_target_contracts(
             AcquisitionGroupId.MANUAL_HOLDINGS,
             (MANUAL_HOLDING,),
             (),
+            include_request_target_codes=False,
         ),
     }
     if include_concepts:

@@ -36,7 +36,7 @@ def candidate_set(ordered=(CODES[-1],), active=(CODES[0],)) -> CandidateSet:
 def ready_receipt():
     return receipt().model_copy(
         update={
-            "state": FormalRunState.READY_TO_ANALYZE,
+            "state": FormalRunState.ANALYZING,
             "candidate_set_id": "candidate-set-1",
         }
     )

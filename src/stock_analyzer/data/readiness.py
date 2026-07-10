@@ -120,6 +120,7 @@ class AcquisitionGroupContract(BaseModel):
     minimum_history_sessions: int = Field(default=0, ge=0)
     require_target_date: bool = True
     expected_codes: tuple[str, ...] = ()
+    include_request_target_codes: bool = True
     record_type_field: str = "record_type"
     record_types: tuple[RecordTypeContract, ...] = ()
 
@@ -301,7 +302,12 @@ def validate_group_payload(
         )
 
     expected_codes = tuple(
-        dict.fromkeys((*contract.expected_codes, *request.target_codes))
+        dict.fromkeys(
+            (
+                *contract.expected_codes,
+                *(request.target_codes if contract.include_request_target_codes else ()),
+            )
+        )
     )
     required_target_types = tuple(
         item for item in contract.record_types if item.current_fact_fields
