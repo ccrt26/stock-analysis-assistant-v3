@@ -775,14 +775,129 @@ git commit -m "docs: record corrected formal production gates"
 
 ---
 
-### Task 13: Final Review, Full Verification, Clean Tree, and Push
+### Task 13: Eliminate Operational Hardcoding and Add the Live-Read Bootstrap
+
+**Reason for amendment:** The primary-agent adversarial review found that July 10-specific session lists were still used by both production clients and focus history, and that live capability evidence had a loader but no executable bootstrap. The user explicitly expanded the final scope to a repository-wide operational-hardcoding audit followed by approved real data acquisition, Supabase persistence, formal analysis, and local report generation.
+
+**Files:**
+- Modify: `src/stock_analyzer/data/tushare_formal_client.py`
+- Modify: `src/stock_analyzer/data/akshare_formal_client.py`
+- Modify: `src/stock_analyzer/data/formal_contracts.py`
+- Modify: `src/stock_analyzer/data/formal_routes.py`
+- Modify: `src/stock_analyzer/data/readiness.py`
+- Modify: `src/stock_analyzer/ops/formal_run.py`
+- Modify: `src/stock_analyzer/ops/formal_strategy_runtime.py`
+- Modify: `src/stock_analyzer/ops/job.py`
+- Create: `src/stock_analyzer/ops/formal_live.py`
+- Modify: `src/stock_analyzer/cli.py`
+- Modify: `tests/test_tushare_formal_client.py`
+- Modify: `tests/test_akshare_formal_client.py`
+- Modify: `tests/test_formal_contract_registry.py`
+- Modify: `tests/test_formal_pipeline.py`
+- Modify: `tests/test_formal_strategy_runtime.py`
+- Modify: `tests/test_production_dependencies.py`
+- Modify: `tests/test_default_formal_production_entry.py`
+- Create: `tests/test_formal_live.py`
+- Modify: `tests/test_cli.py`
+- Modify: `tests/test_config_health.py`
+- Modify: `docs/operations/production-capability-matrix.md`
+- Modify: `docs/operations/runbook.md`
+- Modify: `README.md`
+
+**Hardcoding classification:**
+- Approved invariant constants may remain only when they express a named product contract: state enum values, `formal-v2`, schema/table names, route IDs, required benchmark index identifiers, approved Strategy V2 thresholds, the three declared schedule slots, and the July 10 acceptance fixture.
+- Run-varying values may not be embedded in production flow: target dates, history start/end dates, prior focus dates, report cutoff, candidate/security codes, absolute user paths, provider/library versions, capability hashes, credentials, Supabase project identity, Cloudflare project/domain, or activation IDs.
+- A named policy default is configurable or centralized and tested. A duplicated literal that can change independently is rejected even if its present value is correct.
+
+**Interfaces:**
+- Each formal provider client derives the latest 82 official sessions ending at `request.trade_date` from its own validated calendar response. July 10 must still resolve exactly to 2026-03-12 through 2026-07-10.
+- Formal focus dates are the five immediately preceding sessions in the accepted market payload, never a module-level July fixture.
+- Market acquisition derives eligible codes from validated security status and listing dates; suspended, hard-excluded, unverified, or fewer-than-61-session new listings cannot create unexplained history failures.
+- Primary and backup clients reject an older eligible code missing any of the latest 61 required bars; they validate all required benchmark-index dates and at least 21 board sessions before claiming coverage.
+- Legitimate valuation/fundamental nulls require an explicit normalized reason; a missing column or unexplained null remains incomplete.
+- `_default_run_daily()` applies the centralized 18:30 Asia/Shanghai first-attempt cutoff policy and reuses that same cutoff on retries.
+- `verify_and_record_live_capabilities(runtime, trade_date, report_cutoff) -> CapabilityBundle` directly validates both production clients without a pre-existing capability file, writes hashed live evidence, and stores the complete primary calendar/market versions as the initial local backfill. It writes no Supabase rows and invokes no strategy, LLM, renderer, deployment, or publication code.
+- CLI command `stock_analyzer ops verify-formal-capabilities --trade-date YYYY-MM-DD --confirm-live-read` is fail-closed unless the explicit confirmation flag is present.
+- A subsequent default formal run may reuse only a same-date canonical group that passes the current contract and cutoff again; prior-date cache cannot satisfy current facts.
+
+- [ ] **Step 1: Write RED tests for every discovered run-specific literal**
+
+Add tests named:
+
+- `test_tushare_market_uses_provider_calendar_for_next_trading_day_window`
+- `test_akshare_market_uses_provider_calendar_for_next_trading_day_window`
+- `test_market_request_excludes_suspended_hard_excluded_and_too_new_codes`
+- `test_eligible_code_missing_one_of_latest_61_sessions_rejects_whole_route`
+- `test_index_and_board_history_must_cover_declared_windows`
+- `test_formal_focus_sessions_come_from_current_market_payload`
+- `test_default_cutoff_uses_centralized_first_schedule_policy`
+- `test_legitimate_null_requires_explicit_provider_reason`
+- `test_live_capability_bootstrap_uses_real_clients_and_writes_no_ledger_or_report`
+- `test_live_capability_cli_requires_explicit_confirmation`
+- `test_production_source_has_no_july10_or_absolute_user_path_runtime_literal`
+
+The source audit parses Python AST under `src/stock_analyzer` and rejects date/string literals representing `2026-07-10`, `2026-03-12`, `/Users/`, `.worktrees/`, or a candidate stock code outside the named July acceptance constant module and fixture-only CLI examples. It separately scans SQL, shell, plist, and active operations docs for absolute user paths or embedded project identities; examples must use `${PROJECT_ROOT}` or documented placeholders.
+
+- [ ] **Step 2: Run the hardcoding RED gate**
+
+Run:
+
+```bash
+PYTHONPATH=src .venv/bin/python -m pytest \
+  tests/test_tushare_formal_client.py \
+  tests/test_akshare_formal_client.py \
+  tests/test_formal_contract_registry.py \
+  tests/test_formal_pipeline.py \
+  tests/test_formal_strategy_runtime.py \
+  tests/test_production_dependencies.py \
+  tests/test_formal_live.py \
+  tests/test_cli.py \
+  tests/test_config_health.py -q
+```
+
+Expected: fail for July-only client/focus windows, ineligible-code propagation, unexplained legitimate nulls, fixed cutoff, missing bootstrap command, and disallowed runtime literals.
+
+- [ ] **Step 3: Implement dynamic sessions, eligibility, and point-in-time semantics**
+
+Use provider calendars for 82-session windows. Keep the July constant only as a test oracle. Validate last-61 equity coverage per eligible code, full declared index coverage, 21-session board coverage, current daily-basic facts, and point-in-time financial/event timestamps. Use `cashflow.n_cashflow_act` for operating cash flow; never map `fina_indicator.ocf_to_or` into a cash amount. Include `anns_d` disclosures in the Tushare event route and never claim complete empty-event coverage from ST/suspension calls alone.
+
+- [ ] **Step 4: Implement and offline-test the live bootstrap**
+
+The bootstrap validates primary and backup routes independently against the same contracts, hashes normalized responses, records library versions without credentials, saves an immutable version plus `latest.json`, and stores the validated primary screening payloads in `LocalEvidenceStore`. Recorded tests inject provider-shaped clients only at the transport boundary. They assert no repository, ledger, report, publish, launchd, broker, or order method is reachable.
+
+- [ ] **Step 5: Run GREEN and the repository hardcoding scan**
+
+Run the Step 2 command again.
+
+Expected: all pass.
+
+Run:
+
+```bash
+rg -n "2026[-, ]+0?[37][-, ]+|20260710|20260312|/Users/|\.worktrees/|600000\.SH" \
+  src supabase ops functions README.md docs/operations
+```
+
+Expected: every match is either a named initial-backfill acceptance constant, an approved benchmark/route invariant, a parameterized test/example placeholder, or a historical document. No production runtime path depends on a July date, personal absolute path, or candidate code.
+
+- [ ] **Step 6: Commit the review correction**
+
+```bash
+git add src/stock_analyzer tests README.md docs/operations docs/superpowers/plans/2026-07-10-v3-production-capability-correction.md
+git commit -m "fix: eliminate formal runtime hardcoding"
+```
+
+---
+
+### Task 14: Final Review, Approved Live Run, Full Verification, Clean Tree, and Push
 
 **Files:**
 - Modify only when a concrete Critical/Important finding has a failing regression test.
 
 **Interfaces:**
 - Produces a clean `codex/v3-mvp` branch pushed to `origin/codex/v3-mvp`.
-- Produces no live data, Supabase mutation, Cloudflare deployment, launchd change, broker access, or order action.
+- After offline verification, performs the now explicitly approved real read-only capability verification, exact July 10 82-session local acquisition, required Supabase migration/write, formal analysis, and local report generation.
+- Still performs no `.env.local` read/print, Cloudflare deployment, launchd activation, broker access, or order action.
 
 - [ ] **Step 1: Review the exact correction range**
 
@@ -833,18 +948,44 @@ Run: `PYTHONPATH=src .venv/bin/python -m pytest -q`
 
 Expected: all tests pass.
 
-- [ ] **Step 5: Verify no unauthorized external action**
+- [ ] **Step 5: Execute the approved live-read bootstrap**
+
+Run without printing environment or credential values:
+
+```bash
+PYTHONPATH=src .venv/bin/python -m stock_analyzer ops verify-formal-capabilities \
+  --trade-date 2026-07-10 --confirm-live-read
+```
+
+Expected: both route families pass their complete contracts, live capability evidence is written under `local_warehouse/formal_evidence/capabilities/formal-v2/`, and immutable primary calendar/market versions cover exactly 82 sessions. If any route, field, unit, permission, rate limit, timestamp, or coverage check fails, stop before Supabase mutation and add a redacted regression before fixing.
+
+- [ ] **Step 6: Apply and verify the approved Supabase migration**
+
+Run `supabase migration list` first. If the linked project and migration history are consistent, run `supabase db push`; otherwise stop without repair commands that rewrite remote history. Run the service-role-only schema/read-back checks without printing project URL or keys.
+
+Expected: `202607100004_formal_run_readiness.sql` is applied once, formal tables/views/RPC exist with the declared grants/RLS, and no decision row is visible without an active dual-marker receipt.
+
+- [ ] **Step 7: Run the approved formal analysis and local report generation**
+
+Run:
+
+```bash
+PYTHONPATH=src .venv/bin/python -m stock_analyzer run-daily --trade-date 2026-07-10
+PYTHONPATH=src .venv/bin/python -m stock_analyzer ops verify-production --trade-date 2026-07-10
+```
+
+Expected: the run either completes with a committed formal receipt and verified local report, or fails closed with local redacted status and no new public report/active ledger rows. A live contract failure is not bypassed with cache, a sample, a lower-ranked replacement, or a manual render.
+
+- [ ] **Step 8: Verify remaining unauthorized actions were not performed**
 
 Confirm from command history and changed files:
 
 - no `.env.local` or credential file read;
-- no live Tushare/AKShare/HTTP acquisition;
-- no Supabase connection, migration application, RPC, or production write;
 - no Wrangler/Cloudflare command;
 - no launchctl load/bootstrap/change;
 - no broker or order action.
 
-- [ ] **Step 6: Commit final review fixes if any**
+- [ ] **Step 9: Commit live-discovered fixes if any**
 
 ```bash
 git diff --name-only -z | xargs -0 git add --
@@ -853,19 +994,19 @@ git commit -m "fix: address production correction review"
 
 Skip this commit only if no file changed after Task 12.
 
-- [ ] **Step 7: Verify branch state**
+- [ ] **Step 10: Re-run affected offline gates and verify branch state**
 
 Run: `git status --short --branch`
 
 Expected: clean worktree; branch ahead of origin only by the new correction commits.
 
-- [ ] **Step 8: Push without force**
+- [ ] **Step 11: Push without force**
 
 Run: `git push origin codex/v3-mvp`
 
 Expected: push succeeds and updates the remote to local `HEAD`.
 
-- [ ] **Step 9: Verify synchronization**
+- [ ] **Step 12: Verify synchronization**
 
 Run: `git status --short --branch`
 
@@ -874,7 +1015,7 @@ Expected: `## codex/v3-mvp...origin/codex/v3-mvp` with no ahead/behind marker an
 ## Plan Self-Review Record
 
 - **Matrix coverage:** `GOV-001`–`GOV-003` map to Tasks 1 and 12; `DATA-001`–`DATA-010` map to Tasks 2-5 and 9; `DATA-011` code path maps to Task 11 but remains not live-verified; `PIPE-001`–`PIPE-009` map to Tasks 2-9; strategy rows map to Task 7; storage/activation/report rows map to Tasks 7-10; operations/publication status maps to Tasks 9, 11, and 12.
-- **No authorization drift:** live reads and all mutations/activations remain excluded from execution. Code and recorded tests are not omitted because those actions are unapproved.
+- **Authorization boundary amended:** after all offline gates pass, the user explicitly authorized real data acquisition, required Supabase migration/write, formal analysis, persistence, and local report generation. Cloudflare deployment, launchd activation, broker access, and orders remain excluded.
 - **No proxy acceptance:** the final acceptance constructs the real default production dependencies and replaces external provider objects only; it never patches the dependency factory or uses `_sample_market`.
 - **Type consistency:** `formal-v2`, `RecordTypeContract`, `CapabilityEvidenceKind`, `CapabilityBundle`, `LocalCapabilityStore`, `TushareFormalEndpointClient`, `AkshareFormalEndpointClient`, `FormalMarketInputs`, `FormalTargetContext`, `FormalReportPayload`, and `ProductionExternalRuntime` are introduced before use.
 - **Supabase currency:** the plan includes explicit Data API grants, RLS, `security_invoker` views, and service-role-only RPC access in response to current Supabase platform defaults.
