@@ -383,6 +383,8 @@ class FocusEntryThesis(BaseModel):
     required_confirmation: List[str] = Field(default_factory=list)
     invalidation_conditions: List[str] = Field(default_factory=list)
     supporting_evidence_ids: List[str] = Field(default_factory=list)
+    validation_result: str = "待验证"
+    risk_notes: List[str] = Field(default_factory=list)
 
 
 class FocusDailyUpdate(BaseModel):

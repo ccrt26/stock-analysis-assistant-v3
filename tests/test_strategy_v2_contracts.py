@@ -273,6 +273,8 @@ def test_focus_manual_recovery_and_operational_contracts_serialize():
         required_confirmation=["板块确认"],
         invalidation_conditions=["跌破 20 日均线且放量"],
         supporting_evidence_ids=[atom.id],
+        validation_result="通过",
+        risk_notes=["仍需板块确认"],
     )
     update = FocusDailyUpdate(
         trade_date=date(2026, 7, 10),
@@ -321,7 +323,10 @@ def test_focus_manual_recovery_and_operational_contracts_serialize():
         message="日推荐已生成，重点跟踪数据不足。",
     )
 
-    assert thesis.model_dump(mode="json")["action"]["decision"] == "等待确认"
+    thesis_payload = thesis.model_dump(mode="json")
+    assert thesis_payload["action"]["decision"] == "等待确认"
+    assert thesis_payload["validation_result"] == "通过"
+    assert thesis_payload["risk_notes"] == ["仍需板块确认"]
     assert update.model_dump(mode="json")["new_support"][0]["module"] == "trend_volume"
     assert holding.model_dump(mode="json")["entry_date"] == "2026-07-08"
     assert action_record.model_dump(mode="json")["decision"] == "等待确认"

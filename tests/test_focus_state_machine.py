@@ -1,7 +1,9 @@
 from datetime import date
 
-from stock_analyzer.analysis.focus import update_focus_watchlist
+from stock_analyzer.analysis.focus import update_focus_watchlist, update_focus_watchlist_v2
+from stock_analyzer.analysis.strategy_v2 import generate_strategy_v2_recommendations
 from stock_analyzer.domain.models import ActionLabel, FocusState, Recommendation
+from tests.test_strategy_v2_recommendation import _feature
 
 
 def rec(code: str, score: float = 82.0) -> Recommendation:
@@ -78,3 +80,34 @@ def test_low_score_recommendation_does_not_enter_focus():
         invalidated_codes=set(),
     )
     assert result == []
+
+
+def test_v2_existing_focus_continues_and_receives_daily_update():
+    existing = [
+        FocusState(
+            trade_date=date(2026, 7, 9),
+            ts_code="600000.SH",
+            state=ActionLabel.ENTER_OBSERVATION,
+            entry_date=date(2026, 7, 8),
+            entry_reason="原始证据成立",
+            invalidation_conditions=["跌破关键支撑"],
+        )
+    ]
+    snapshot = generate_strategy_v2_recommendations(
+        features=[_feature("600000.SH")],
+        stock_names={"600000.SH": "浦发银行"},
+        trade_date=date(2026, 7, 10),
+    ).snapshots[0]
+
+    result = update_focus_watchlist_v2(
+        existing=existing,
+        recommendation_snapshots=[snapshot],
+        manual_entries=[],
+        trade_date=date(2026, 7, 10),
+    )
+
+    assert result.focus_states[0].state == ActionLabel.CONTINUE_OBSERVATION
+    assert result.focus_states[0].entry_date == date(2026, 7, 8)
+    assert result.daily_updates[0].ts_code == "600000.SH"
+    assert result.daily_updates[0].focus_entry_progress
+    assert result.daily_updates[0].invalidation_conditions
