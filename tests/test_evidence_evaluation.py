@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, timedelta
 
 from stock_analyzer.analysis.evidence import (
     build_evidence_package,
@@ -8,6 +8,9 @@ from stock_analyzer.data.models import DailyBar, SourceGrade
 from stock_analyzer.domain.models import (
     ActionDecision,
     ActionRecommendation,
+    DataAvailability,
+    DataRequirementLevel,
+    DataRequirementStatus,
     ActionLabel,
     EvidenceAtom,
     EvidenceModule,
@@ -259,6 +262,154 @@ def test_strategy_v2_replay_marks_participation_useful_on_favorable_excursion():
         and effect.observed_alignment == "support_aligned"
         for effect in result.knowledge_rule_effect
     )
+
+
+def test_strategy_v2_replay_top_level_verdict_uses_structured_40_day_horizon():
+    snapshot = _strategy_snapshot_with_action(
+        trade_date=date(2026, 7, 10),
+        ts_code="600000.SH",
+        decision=ActionDecision.SMALL_EXPLORATORY,
+        position_min_pct=5.0,
+        position_max_pct=10.0,
+        invalidation="跌破 20 日均线",
+    )
+    future_bars = [
+        DailyBar(
+            trade_date=snapshot.trade_date + timedelta(days=offset),
+            ts_code=snapshot.ts_code,
+            close=9.4 if offset == 41 else 10.2,
+            pre_close=10.0,
+            high=9.6 if offset == 41 else (10.6 if offset == 10 else 10.25),
+            low=9.3 if offset == 41 else 10.0,
+            pct_chg=-6.0 if offset == 41 else 2.0,
+            source_name="fixture",
+            source_grade=SourceGrade.PRIMARY,
+        )
+        for offset in range(1, 42)
+    ]
+
+    result = evaluate_strategy_snapshot(snapshot, future_bars)
+
+    assert result.future_bar_count == 41
+    assert result.outcome_inputs[40].bars_observed == 40
+    assert result.outcome_inputs[40].invalidation_occurred is False
+    assert result.invalidation_occurred is False
+    assert result.action_useful is True
+    assert result.position_aggressiveness == "reasonable"
+
+
+def test_strategy_v2_replay_does_not_count_neutral_evidence_as_support():
+    trade_date = date(2026, 7, 10)
+    ts_code = "600000.SH"
+    neutral_atom = EvidenceAtom(
+        id=f"{trade_date}-{ts_code}-market-neutral",
+        module=EvidenceModule.MARKET_BOARD,
+        polarity=EvidencePolarity.NEUTRAL,
+        headline="板块信息仅作背景",
+        detail="板块热度一般，不形成支持或反证。",
+        source_grade="B",
+        source_name="strategy_v2.market",
+        data_fields=["industry_rank"],
+        knowledge_rule_ids=["RULE_NEUTRAL"],
+        strength=0.4,
+        as_of_date=trade_date,
+    )
+    snapshot = _strategy_snapshot_with_action(
+        trade_date=trade_date,
+        ts_code=ts_code,
+        modules=[
+            ModuleEvidence(
+                module=EvidenceModule.MARKET_BOARD,
+                summary="板块信息中性。",
+                support=[neutral_atom],
+                counter=[],
+                conclusion="仅作为背景信息。",
+            )
+        ],
+    )
+    future_bars = [
+        DailyBar(
+            trade_date=date(2026, 7, 13),
+            ts_code=ts_code,
+            close=10.1,
+            pre_close=10.0,
+            high=10.2,
+            low=10.0,
+            pct_chg=1.0,
+            source_name="fixture",
+            source_grade=SourceGrade.PRIMARY,
+        )
+    ]
+
+    result = evaluate_strategy_snapshot(snapshot, future_bars)
+
+    effect = next(
+        effect
+        for effect in result.knowledge_rule_effect
+        if effect.rule_id == "RULE_NEUTRAL"
+    )
+    assert effect.support_count == 0
+    assert effect.counter_count == 0
+    assert effect.neutral_count == 1
+    assert effect.neutral_evidence_ids == [neutral_atom.id]
+
+
+def test_strategy_v2_replay_reports_snapshot_level_data_insufficiency():
+    requirement = DataRequirementStatus(
+        family="daily_ohlcv",
+        level=DataRequirementLevel.REQUIRED,
+        availability=DataAvailability.UNAVAILABLE_AFTER_RECOVERY,
+        missing_fields=["close", "amount"],
+        blocks_complete_analysis=True,
+    )
+    snapshot = _strategy_snapshot_with_action(
+        trade_date=date(2026, 7, 10),
+        ts_code="600000.SH",
+        modules=[
+            ModuleEvidence(
+                module=EvidenceModule.TREND_VOLUME,
+                summary="行情数据不足。",
+                support=[],
+                counter=[],
+                data_requirements=[requirement],
+                conclusion="数据不足，不形成正向结论。",
+            )
+        ],
+    ).model_copy(
+        update={
+            "data_insufficient": True,
+            "data_insufficient_reason": "行情数据缺失",
+        }
+    )
+    future_bars = [
+        DailyBar(
+            trade_date=date(2026, 7, 13),
+            ts_code=snapshot.ts_code,
+            close=10.1,
+            pre_close=10.0,
+            high=10.2,
+            low=10.0,
+            pct_chg=1.0,
+            source_name="fixture",
+            source_grade=SourceGrade.PRIMARY,
+        )
+    ]
+
+    result = evaluate_strategy_snapshot(snapshot, future_bars)
+
+    assert result.missing_data_effect.snapshot_data_insufficient is True
+    assert (
+        result.missing_data_effect.snapshot_data_insufficient_reason
+        == "行情数据缺失"
+    )
+    assert len(result.missing_data_effect.data_requirement_issues) == 1
+    issue = result.missing_data_effect.data_requirement_issues[0]
+    assert issue.module == EvidenceModule.TREND_VOLUME.value
+    assert issue.family == "daily_ohlcv"
+    assert issue.availability == DataAvailability.UNAVAILABLE_AFTER_RECOVERY.value
+    assert issue.missing_fields == ["close", "amount"]
+    assert issue.blocks_complete_analysis is True
+    assert "行情数据缺失" in "；".join(result.missing_data_effect.notes)
 
 
 def test_strategy_v2_replay_reports_missing_data_effect_and_unchecked_claims():

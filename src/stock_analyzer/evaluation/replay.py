@@ -77,9 +77,20 @@ class KnowledgeRuleEffect(BaseModel):
     module: str
     support_count: int = 0
     counter_count: int = 0
+    neutral_count: int = 0
     support_evidence_ids: list[str] = Field(default_factory=list)
     counter_evidence_ids: list[str] = Field(default_factory=list)
+    neutral_evidence_ids: list[str] = Field(default_factory=list)
     observed_alignment: ObservedAlignment
+
+
+class DataRequirementIssue(BaseModel):
+    module: str
+    family: str
+    level: str
+    availability: str
+    missing_fields: list[str] = Field(default_factory=list)
+    blocks_complete_analysis: bool = False
 
 
 class MissingDataEffect(BaseModel):
@@ -88,6 +99,9 @@ class MissingDataEffect(BaseModel):
     expected_checkpoints: list[int] = Field(default_factory=lambda: list(OUTCOME_CHECKPOINT_DAYS))
     missing_ohlc_fields: list[str] = Field(default_factory=list)
     ignored_bar_count: int = 0
+    snapshot_data_insufficient: bool = False
+    snapshot_data_insufficient_reason: str | None = None
+    data_requirement_issues: list[DataRequirementIssue] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
 
 
@@ -113,7 +127,7 @@ def evaluate_strategy_snapshot(
 ) -> EvaluationResultPayload:
     matched_bars, ignored_bar_count = _future_bars_for_snapshot(snapshot, future_bars)
     entry_close, baseline_notes = _entry_close(matched_bars)
-    missing_data_effect = _missing_data_effect(matched_bars, ignored_bar_count)
+    missing_data_effect = _missing_data_effect(snapshot, matched_bars, ignored_bar_count)
     missing_data_effect.notes.extend(baseline_notes)
 
     invalidation_threshold = _invalidation_threshold_pct(snapshot)
@@ -121,12 +135,7 @@ def evaluate_strategy_snapshot(
         days: _outcome_window(days, matched_bars, entry_close, invalidation_threshold)
         for days in OUTCOME_CHECKPOINT_DAYS
     }
-    full_window = _outcome_window(
-        max(len(matched_bars), OUTCOME_CHECKPOINT_DAYS[-1]),
-        matched_bars,
-        entry_close,
-        invalidation_threshold,
-    )
+    full_window = outcome_inputs[OUTCOME_CHECKPOINT_DAYS[-1]]
     invalidation_occurred = full_window.invalidation_occurred
     successful_favorable_excursion = _successful_favorable_excursion(full_window, snapshot)
 
@@ -203,12 +212,17 @@ def _entry_close(bars: list[DailyBar]) -> tuple[float | None, list[str]]:
     return None, ["First future bar has no usable pre_close or close baseline."]
 
 
-def _missing_data_effect(bars: list[DailyBar], ignored_bar_count: int) -> MissingDataEffect:
+def _missing_data_effect(
+    snapshot: StrategyEvidenceSnapshot,
+    bars: list[DailyBar],
+    ignored_bar_count: int,
+) -> MissingDataEffect:
     missing_fields = [
         field
         for field in ("high", "low", "pre_close")
         if any(getattr(bar, field) is None for bar in bars)
     ]
+    data_requirement_issues = _data_requirement_issues(snapshot)
     notes: list[str] = []
     if len(bars) < OUTCOME_CHECKPOINT_DAYS[0]:
         notes.append("Fewer than 5 future bars; all 5/20/40 outcomes remain partial.")
@@ -218,14 +232,50 @@ def _missing_data_effect(bars: list[DailyBar], ignored_bar_count: int) -> Missin
         notes.append(f"Missing replay fields: {', '.join(missing_fields)}.")
     if ignored_bar_count:
         notes.append(f"Ignored {ignored_bar_count} bar(s) outside the snapshot code/date window.")
+    if snapshot.data_insufficient:
+        reason = snapshot.data_insufficient_reason or "reason not provided"
+        notes.append(f"Snapshot marked data insufficient: {reason}.")
+    if data_requirement_issues:
+        issue_summaries = [
+            f"{issue.module}/{issue.family}={issue.availability}"
+            for issue in data_requirement_issues
+        ]
+        notes.append(f"Snapshot data requirement issues: {', '.join(issue_summaries)}.")
 
     return MissingDataEffect(
         insufficient_future_bars=len(bars) < OUTCOME_CHECKPOINT_DAYS[-1],
         bars_observed=len(bars),
         missing_ohlc_fields=missing_fields,
         ignored_bar_count=ignored_bar_count,
+        snapshot_data_insufficient=snapshot.data_insufficient,
+        snapshot_data_insufficient_reason=snapshot.data_insufficient_reason,
+        data_requirement_issues=data_requirement_issues,
         notes=notes,
     )
+
+
+def _data_requirement_issues(snapshot: StrategyEvidenceSnapshot) -> list[DataRequirementIssue]:
+    issues: list[DataRequirementIssue] = []
+    for module in snapshot.modules:
+        for requirement in module.data_requirements:
+            availability = requirement.availability.value
+            if (
+                not requirement.missing_fields
+                and not requirement.blocks_complete_analysis
+                and "unavailable" not in availability
+            ):
+                continue
+            issues.append(
+                DataRequirementIssue(
+                    module=module.module.value,
+                    family=requirement.family,
+                    level=requirement.level.value,
+                    availability=availability,
+                    missing_fields=list(requirement.missing_fields),
+                    blocks_complete_analysis=requirement.blocks_complete_analysis,
+                )
+            )
+    return issues
 
 
 def _outcome_window(
@@ -392,11 +442,15 @@ def _knowledge_rule_effect(
         rule_ids = atom.knowledge_rule_ids or [None]
         for rule_id in rule_ids:
             key = (rule_id, atom.module.value)
-            bucket = buckets.setdefault(key, {"support": [], "counter": []})
-            if atom.polarity == EvidencePolarity.COUNTER:
-                bucket["counter"].append(atom.id)
-            else:
+            bucket = buckets.setdefault(
+                key, {"support": [], "counter": [], "neutral": []}
+            )
+            if atom.polarity == EvidencePolarity.SUPPORT:
                 bucket["support"].append(atom.id)
+            elif atom.polarity == EvidencePolarity.COUNTER:
+                bucket["counter"].append(atom.id)
+            elif atom.polarity == EvidencePolarity.NEUTRAL:
+                bucket["neutral"].append(atom.id)
 
     effects = []
     for (rule_id, module), bucket in sorted(
@@ -404,14 +458,17 @@ def _knowledge_rule_effect(
     ):
         support_ids = bucket["support"]
         counter_ids = bucket["counter"]
+        neutral_ids = bucket["neutral"]
         effects.append(
             KnowledgeRuleEffect(
                 rule_id=rule_id,
                 module=module,
                 support_count=len(support_ids),
                 counter_count=len(counter_ids),
+                neutral_count=len(neutral_ids),
                 support_evidence_ids=support_ids,
                 counter_evidence_ids=counter_ids,
+                neutral_evidence_ids=neutral_ids,
                 observed_alignment=_observed_alignment(
                     len(support_ids),
                     len(counter_ids),
@@ -522,6 +579,7 @@ def _format_optional_pct(value: float | None) -> str:
 
 
 __all__ = [
+    "DataRequirementIssue",
     "EvaluationResultPayload",
     "KnowledgeRuleEffect",
     "MissingDataEffect",
