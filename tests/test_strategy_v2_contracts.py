@@ -210,12 +210,21 @@ def test_action_recommendation_rejects_invalid_position_ranges(overrides):
 
 
 def test_recommendation_card_has_no_total_numeric_score():
+    action = _action()
     card = RecommendationCard(
         trade_date=date(2026, 7, 10),
         ts_code="600000.SH",
         name="浦发银行",
         display_rank_bucket="强观察",
-        action="等待确认",
+        action=action.decision.value,
+        position_min_pct=action.position_min_pct,
+        position_max_pct=action.position_max_pct,
+        action_reasoning=action.reasoning,
+        required_confirmation=action.required_confirmation,
+        invalidation_conditions=action.invalidation_conditions,
+        risk_if_wrong=action.risk_if_wrong,
+        staging_plan=action.staging_plan,
+        holding_adjustment=action.holding_adjustment,
         what_happened="趋势改善且成交额维持。",
         why_it_may_have_happened="板块企稳带动修复。",
         what_it_may_mean="进入重点观察候选，但仍需板块确认。",
@@ -230,6 +239,13 @@ def test_recommendation_card_has_no_total_numeric_score():
     assert "score" not in payload
     assert "internal_score" not in payload
     assert payload["display_rank_bucket"] == "强观察"
+    assert payload["position_min_pct"] == action.position_min_pct
+    assert payload["position_max_pct"] == action.position_max_pct
+    assert payload["action_reasoning"] == action.reasoning
+    assert payload["required_confirmation"] == action.required_confirmation
+    assert payload["invalidation_conditions"] == action.invalidation_conditions
+    assert payload["risk_if_wrong"] == action.risk_if_wrong
+    assert payload["staging_plan"] == action.staging_plan
 
 
 def test_focus_manual_recovery_and_operational_contracts_serialize():

@@ -155,7 +155,7 @@ def build_strategy_snapshot(
         expected_downside_pct=expected_downside_pct,
         risk_reward=risk_reward,
         focus_entry_progress=_focus_entry_progress(feature),
-        display_rank_bucket=_display_rank_bucket(internal_score, action.decision),
+        display_rank_bucket=_display_rank_bucket(action),
         internal_score=internal_score,
         data_insufficient=False,
         data_insufficient_reason=None,
@@ -220,7 +220,7 @@ def _company_business_module(
                 "公司业务画像可用",
                 f"{name}已有业务画像，可用于解释行业与趋势证据。",
                 ["company_profile"],
-                ["COMPANY_PROFILE_AVAILABLE"],
+                ["src_csrc_disclosure_rules"],
                 0.42,
                 "strategy_v2.company_profile",
             )
@@ -239,7 +239,7 @@ def _company_business_module(
                 "公司业务画像缺失",
                 "缺少公司主营和业务结构信息，不能把题材理解作为正向证据。",
                 ["company_profile"],
-                ["COMPANY_PROFILE_INCOMPLETE"],
+                ["src_csrc_disclosure_rules"],
                 0.38,
                 "strategy_v2.company_profile",
                 source_grade="C",
@@ -280,7 +280,7 @@ def _fundamentals_valuation_module(
             "估值字段未补齐",
             "PE/PB 等估值字段未进入当前特征，风险收益估计需保持保守。",
             ["pe", "pb"],
-            ["VALUATION_DATA_INCOMPLETE"],
+            ["src_fama_french_1992", "src_liu_stambaugh_yuan_2019"],
             0.34,
             "strategy_v2.fundamentals",
             source_grade="C",
@@ -297,7 +297,7 @@ def _fundamentals_valuation_module(
                 "质量评分达到观察要求",
                 f"质量评分 {feature.quality_score:.2f}，可作为基础质量支持。",
                 ["quality_score"],
-                ["QUALITY_SCORE_SUPPORT"],
+                ["src_dechow_ge_schrand_2010"],
                 _clamp(feature.quality_score),
                 "feature_snapshot.quality",
             )
@@ -314,7 +314,7 @@ def _fundamentals_valuation_module(
                 "质量评分偏弱",
                 f"质量评分 {feature.quality_score:.2f}，未达到观察质量阈值。",
                 ["quality_score"],
-                ["QUALITY_SCORE_WEAK"],
+                ["src_dechow_ge_schrand_2010"],
                 0.45,
                 "feature_snapshot.quality",
             )
@@ -362,7 +362,7 @@ def _market_board_module(
                 "市场与行业环境支持观察",
                 f"市场状态 {feature.market_regime}，行业 {industry}；{context}。",
                 ["market_regime", "industry", "relative_strength"],
-                ["MARKET_BOARD_SUPPORT"],
+                ["src_chen_roll_ross_1986", "src_fama_french_1989"],
                 _market_support(feature, board_context),
                 "feature_snapshot.market",
             )
@@ -379,7 +379,7 @@ def _market_board_module(
                 "市场或板块支持不足",
                 f"市场状态 {feature.market_regime}，行业 {industry}，仍需板块确认。",
                 ["market_regime", "industry", "relative_strength"],
-                ["MARKET_BOARD_CONFIRMATION_MISSING"],
+                ["src_chen_roll_ross_1986", "src_fama_french_1989"],
                 0.48,
                 "feature_snapshot.market",
             )
@@ -415,7 +415,7 @@ def _trend_volume_module(feature: FeatureSnapshot, trade_date: date) -> ModuleEv
                 "20 日与 60 日趋势同步改善",
                 f"20 日趋势 {feature.trend_20d:.2%}，60 日趋势 {feature.trend_60d:.2%}。",
                 ["trend_20d", "trend_60d"],
-                ["TREND_MULTI_WINDOW_SUPPORT"],
+                ["RESEARCH_TREND_CONFIRMATION", "src_jegadeesh_titman_1993"],
                 _clamp(0.55 + feature.trend_20d + feature.trend_60d),
                 "feature_snapshot.trend",
             )
@@ -431,7 +431,7 @@ def _trend_volume_module(feature: FeatureSnapshot, trade_date: date) -> ModuleEv
                 "趋势窗口未同步确认",
                 "20 日和 60 日趋势没有同时转正。",
                 ["trend_20d", "trend_60d"],
-                ["TREND_CONFIRMATION_MISSING"],
+                ["RESEARCH_TREND_CONFIRMATION", "src_cn_timeseries_momentum_2017"],
                 0.5,
                 "feature_snapshot.trend",
             )
@@ -447,7 +447,7 @@ def _trend_volume_module(feature: FeatureSnapshot, trade_date: date) -> ModuleEv
                 "相对强度和流动性满足观察要求",
                 f"相对强度 {feature.relative_strength:.2f}，流动性 {feature.liquidity_score:.2f}。",
                 ["relative_strength", "liquidity_score"],
-                ["STRENGTH_LIQUIDITY_SUPPORT"],
+                ["RESEARCH_TREND_CONFIRMATION", "src_acharya_pedersen_2005"],
                 _clamp((feature.relative_strength + feature.liquidity_score) / 2),
                 "feature_snapshot.trend",
             )
@@ -463,7 +463,7 @@ def _trend_volume_module(feature: FeatureSnapshot, trade_date: date) -> ModuleEv
                 "20 日波动率偏高",
                 f"20 日波动率 {feature.volatility_20d:.2f}，不适合追高。",
                 ["volatility_20d"],
-                ["VOLATILITY_OVERHEAT"],
+                ["src_cn_price_limit_hits_2015"],
                 _clamp(feature.volatility_20d),
                 "feature_snapshot.trend",
             )
@@ -479,7 +479,7 @@ def _trend_volume_module(feature: FeatureSnapshot, trade_date: date) -> ModuleEv
                 "短中期涨幅存在过热风险",
                 "趋势扩张较快，需要等待回撤或量能确认。",
                 ["trend_20d", "trend_60d"],
-                ["TREND_EXTENSION_RISK"],
+                ["src_barberis_shleifer_vishny_1998", "src_xiong_yu_2011"],
                 0.5,
                 "feature_snapshot.trend",
             )
@@ -527,7 +527,7 @@ def _events_catalysts_module(
                     "官方风险事件需要优先处理",
                     event,
                     ["official_events"],
-                    ["OFFICIAL_RISK_EVENT"],
+                    ["OFFICIAL_DELISTING_RISK_EXCLUDE", "src_cn_csrc_penalty_portal"],
                     0.9,
                     "official_event_feed",
                     source_grade="A",
@@ -544,7 +544,7 @@ def _events_catalysts_module(
                     "官方催化信息可用",
                     event,
                     ["official_events"],
-                    ["OFFICIAL_CATALYST_SUPPORT"],
+                    ["src_fama_fisher_jensen_roll_1969"],
                     0.7,
                     "official_event_feed",
                     source_grade="A",
@@ -561,7 +561,7 @@ def _events_catalysts_module(
                 "公开信息仅作为观察材料",
                 item,
                 ["public_information"],
-                ["PUBLIC_INFO_OBSERVATION_ONLY"],
+                ["src_tetlock_2007", "src_short_disclose_distort_2024"],
                 0.28,
                 "public_information",
                 source_grade="C",
@@ -578,7 +578,7 @@ def _events_catalysts_module(
                 "缺少新鲜官方催化",
                 "当前没有官方事件作为催化确认，不能把传闻或观察材料作为正向依据。",
                 ["official_events"],
-                ["OFFICIAL_CATALYST_MISSING"],
+                ["src_chan_2003"],
                 0.32,
                 "strategy_v2.events",
                 source_grade="C",
@@ -628,7 +628,7 @@ def _risk_counter_module(
                 "官方风险事件压制观察结论",
                 "存在官方风险事件时，先降低风险暴露优先级。",
                 ["official_events"],
-                ["RISK_OFFICIAL_EVENT"],
+                ["OFFICIAL_DELISTING_RISK_EXCLUDE", "src_cn_csrc_penalty_portal"],
                 0.9,
                 "strategy_v2.risk",
                 source_grade="A",
@@ -645,7 +645,7 @@ def _risk_counter_module(
                 "流动性不足",
                 f"流动性评分 {feature.liquidity_score:.2f}，可能放大冲击成本。",
                 ["liquidity_score"],
-                ["RISK_LIQUIDITY_LOW"],
+                ["COUNTER_LOW_LIQUIDITY_NOISE", "src_acharya_pedersen_2005"],
                 0.6,
                 "feature_snapshot.risk",
             )
@@ -661,7 +661,7 @@ def _risk_counter_module(
                 "波动风险偏高",
                 f"20 日波动率 {feature.volatility_20d:.2f}，仓位上限需要收紧。",
                 ["volatility_20d"],
-                ["RISK_VOLATILITY_HIGH"],
+                ["src_markowitz_1952"],
                 0.58,
                 "feature_snapshot.risk",
             )
@@ -677,7 +677,7 @@ def _risk_counter_module(
                 "趋势延伸后追高风险上升",
                 "趋势扩张过快时，风险收益比可能被压缩。",
                 ["trend_20d", "trend_60d"],
-                ["RISK_TREND_OVEREXTENSION"],
+                ["src_barberis_shleifer_vishny_1998", "src_xiong_yu_2011"],
                 0.55,
                 "feature_snapshot.risk",
             )
@@ -693,7 +693,7 @@ def _risk_counter_module(
                 "催化落空风险",
                 "没有官方催化时，趋势修复需要更多成交和板块确认。",
                 ["official_events"],
-                ["RISK_CATALYST_FAILURE"],
+                ["src_chan_2003"],
                 0.42,
                 "strategy_v2.risk",
                 source_grade="C",
@@ -710,7 +710,7 @@ def _risk_counter_module(
                 "持仓集中度偏高",
                 f"当前持仓 {current_holding.position_pct:.1f}%，不应提高目标上限。",
                 ["manual_holding.position_pct"],
-                ["RISK_HOLDING_CONCENTRATION"],
+                ["src_markowitz_1952", "src_treynor_black_1973"],
                 0.7,
                 "manual_holding",
             )
@@ -726,7 +726,7 @@ def _risk_counter_module(
                 "主要硬风险未触发",
                 "未见官方风险、低流动性、高波动或持仓集中约束。",
                 ["liquidity_score", "volatility_20d", "official_events"],
-                ["RISK_CONTROLS_CLEAR"],
+                ["src_markowitz_1952"],
                 0.55,
                 "strategy_v2.risk",
             )
@@ -766,7 +766,7 @@ def _data_insufficient_modules(
             "数据不足",
             reason,
             ["data_quality"],
-            ["DATA_INSUFFICIENT"],
+            [],
             1.0,
             "feature_snapshot.data_quality",
             source_grade="A",
@@ -809,6 +809,14 @@ def _build_recommendation_card(
         name=snapshot.name,
         display_rank_bucket=snapshot.display_rank_bucket,
         action=snapshot.action.decision.value,
+        position_min_pct=snapshot.action.position_min_pct,
+        position_max_pct=snapshot.action.position_max_pct,
+        action_reasoning=list(snapshot.action.reasoning),
+        required_confirmation=list(snapshot.action.required_confirmation),
+        invalidation_conditions=list(snapshot.action.invalidation_conditions),
+        risk_if_wrong=snapshot.action.risk_if_wrong,
+        staging_plan=list(snapshot.action.staging_plan),
+        holding_adjustment=snapshot.action.holding_adjustment,
         what_happened=trend_module.summary if trend_module else snapshot.thesis,
         why_it_may_have_happened=(
             market_module.summary if market_module else "市场和板块证据仍需确认。"
@@ -984,18 +992,25 @@ def _catalyst_freshness(
     return "none"
 
 
-def _display_rank_bucket(score: float, decision: ActionDecision) -> str:
+def _display_rank_bucket(action: ActionRecommendation) -> str:
+    decision = action.decision
     if decision == ActionDecision.NO_PARTICIPATION:
-        return "风险观察"
+        return "不参与"
+    if decision == ActionDecision.REDUCE_OR_AVOID:
+        return "降低风险"
     if decision == ActionDecision.AVOID_CHASING:
         return "避免追高"
-    if score >= 90:
-        return "重点观察"
-    if score >= 75:
-        return "强观察"
-    if score >= 60:
-        return "观察候选"
-    return "低优先观察"
+    if decision == ActionDecision.SMALL_EXPLORATORY:
+        return "小仓试探"
+    if decision == ActionDecision.CONDITIONAL_ADD:
+        return "确认后加仓"
+    if decision == ActionDecision.CONTINUE_WATCHING:
+        return "继续观察"
+    if decision == ActionDecision.INCREASE_ATTENTION:
+        return "提高关注"
+    if decision == ActionDecision.CONFIRM_REMOVAL:
+        return "确认移出"
+    return "等待确认"
 
 
 def _focus_entry_progress(feature: FeatureSnapshot) -> str:
@@ -1013,9 +1028,29 @@ def _focus_entry_progress(feature: FeatureSnapshot) -> str:
 
 def _thesis(feature: FeatureSnapshot, name: str, action: ActionRecommendation) -> str:
     industry = feature.industry or "未分行业"
+    decision = action.decision
+    if decision in {
+        ActionDecision.NO_PARTICIPATION,
+        ActionDecision.REDUCE_OR_AVOID,
+        ActionDecision.CONFIRM_REMOVAL,
+    }:
+        return (
+            f"{name}处于{industry}，当前风险或反证使数据不支持参与；"
+            f"当前动作策略为{decision.value}。"
+        )
+    if decision == ActionDecision.AVOID_CHASING:
+        return (
+            f"{name}处于{industry}，现有证据只支持谨慎观察，"
+            f"风险收益或波动状态不支持追高；当前动作策略为{decision.value}。"
+        )
+    if decision == ActionDecision.WAIT_FOR_CONFIRMATION:
+        return (
+            f"{name}处于{industry}，数据仅支持等待确认，"
+            f"尚不支持形成参与结论；当前动作策略为{decision.value}。"
+        )
     return (
         f"{name}处于{industry}，趋势、板块和风险证据支持 2-8 周观察；"
-        f"当前动作策略为{action.decision.value}。"
+        f"当前动作策略为{decision.value}。"
     )
 
 

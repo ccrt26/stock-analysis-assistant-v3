@@ -327,6 +327,14 @@ class RecommendationCard(BaseModel):
     name: str
     display_rank_bucket: str
     action: str
+    position_min_pct: float = Field(ge=0)
+    position_max_pct: float = Field(ge=0)
+    action_reasoning: List[str] = Field(min_length=1)
+    required_confirmation: List[str] = Field(min_length=1)
+    invalidation_conditions: List[str] = Field(min_length=1)
+    risk_if_wrong: str = Field(min_length=1)
+    staging_plan: List[str] = Field(min_length=1)
+    holding_adjustment: Optional[str] = None
     what_happened: str
     why_it_may_have_happened: str
     what_it_may_mean: str
@@ -334,6 +342,31 @@ class RecommendationCard(BaseModel):
     focus_entry_progress: Optional[str] = None
     needed_before_focus_entry: List[str] = Field(default_factory=list)
     evidence_id: str
+
+    @field_validator(
+        "action_reasoning",
+        "required_confirmation",
+        "invalidation_conditions",
+        "staging_plan",
+    )
+    @classmethod
+    def _require_non_empty_action_items(cls, values: List[str]) -> List[str]:
+        if any(not item.strip() for item in values):
+            raise ValueError("must contain only non-empty items")
+        return values
+
+    @field_validator("risk_if_wrong")
+    @classmethod
+    def _require_non_empty_action_risk(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("must be non-empty")
+        return value
+
+    @model_validator(mode="after")
+    def _card_position_range_is_ordered(self) -> "RecommendationCard":
+        if self.position_min_pct > self.position_max_pct:
+            raise ValueError("position_min_pct must be less than or equal to position_max_pct")
+        return self
 
 
 class FocusEntryThesis(BaseModel):
