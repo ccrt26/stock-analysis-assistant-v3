@@ -3,7 +3,18 @@ from __future__ import annotations
 from pydantic import BaseModel
 
 from stock_analyzer.analysis.scoring import score_feature
+from stock_analyzer.analysis.strategy_v2 import (
+    StrategyRecommendationResult,
+    generate_strategy_v2_recommendations,
+)
 from stock_analyzer.domain.models import ActionLabel, FeatureSnapshot, Recommendation
+
+__all__ = [
+    "RecommendationResult",
+    "StrategyRecommendationResult",
+    "generate_recommendations",
+    "generate_strategy_v2_recommendations",
+]
 
 
 class RecommendationResult(BaseModel):
