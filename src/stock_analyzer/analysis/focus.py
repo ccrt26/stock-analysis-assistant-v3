@@ -92,9 +92,7 @@ def update_focus_watchlist_v2(
     trade_date: date,
 ) -> FocusUpdateResult:
     snapshots_by_code = _group_snapshots_by_code(recommendation_snapshots)
-    latest_by_code = {
-        ts_code: snapshots[-1] for ts_code, snapshots in snapshots_by_code.items()
-    }
+    current_by_code = _current_snapshots_by_code(snapshots_by_code, trade_date)
     existing_by_code = {item.ts_code: item for item in existing}
     manual_by_code = _manual_entries_by_code(manual_entries)
 
@@ -107,7 +105,7 @@ def update_focus_watchlist_v2(
     remaining_system_slots = max(SYSTEM_FOCUS_CAP - existing_system_count, 0)
 
     for old in existing:
-        snapshot = latest_by_code.get(old.ts_code)
+        snapshot = current_by_code.get(old.ts_code)
         invalidation_conditions = (
             list(snapshot.action.invalidation_conditions)
             if snapshot
@@ -130,7 +128,7 @@ def update_focus_watchlist_v2(
             daily_updates.append(_build_missing_snapshot_daily_update(old, trade_date))
             daily_update_codes.add(old.ts_code)
 
-    system_candidates = _system_focus_candidates(snapshots_by_code)
+    system_candidates = _system_focus_candidates(snapshots_by_code, trade_date)
     system_selected_count = 0
     for snapshot in _rank_system_candidates(system_candidates):
         if system_selected_count >= remaining_system_slots:
@@ -152,7 +150,7 @@ def update_focus_watchlist_v2(
         system_selected_count += 1
 
     for ts_code, (manual_reason, manual_name) in manual_by_code.items():
-        snapshot = latest_by_code.get(ts_code)
+        snapshot = current_by_code.get(ts_code)
         if snapshot:
             thesis = build_focus_entry_thesis(
                 snapshot=snapshot,
@@ -276,8 +274,23 @@ def _group_snapshots_by_code(
     }
 
 
+def _current_snapshots_by_code(
+    snapshots_by_code: dict[str, list[StrategyEvidenceSnapshot]],
+    trade_date: date,
+) -> dict[str, StrategyEvidenceSnapshot]:
+    current: dict[str, StrategyEvidenceSnapshot] = {}
+    for ts_code, snapshots in snapshots_by_code.items():
+        same_date = [
+            snapshot for snapshot in snapshots if snapshot.trade_date == trade_date
+        ]
+        if same_date:
+            current[ts_code] = same_date[-1]
+    return current
+
+
 def _system_focus_candidates(
     snapshots_by_code: dict[str, list[StrategyEvidenceSnapshot]],
+    trade_date: date,
 ) -> list[StrategyEvidenceSnapshot]:
     candidates: list[StrategyEvidenceSnapshot] = []
     for snapshots in snapshots_by_code.values():
@@ -286,6 +299,8 @@ def _system_focus_candidates(
             continue
         supportive_count = sum(1 for item in latest_five if _is_supportive(item))
         latest = snapshots[-1]
+        if latest.trade_date != trade_date:
+            continue
         if supportive_count >= MIN_SUPPORTIVE_OBSERVATIONS and _is_supportive(latest):
             candidates.append(latest)
     return candidates

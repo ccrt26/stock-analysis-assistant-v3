@@ -288,3 +288,27 @@ def test_manual_focus_analysis_does_not_praise_missing_evidence():
     assert thesis.validation_result == "证据不足"
     assert "证据不足" in "；".join(thesis.risk_notes)
     assert "支持 2-8 周观察" not in thesis.thesis
+
+
+def test_existing_focus_with_stale_history_without_today_snapshot_gets_data_insufficient_update():
+    stale_history = _supporting_history("600000.SH", start=date(2026, 7, 5))
+    existing = [_existing_focus("600000.SH", trade_date=date(2026, 7, 9))]
+
+    assert stale_history[-1].trade_date == date(2026, 7, 9)
+    assert stale_history[-1].action.decision != ActionDecision.CONFIRM_REMOVAL
+
+    result = update_focus_watchlist_v2(
+        existing=existing,
+        recommendation_snapshots=stale_history,
+        manual_entries=[],
+        trade_date=date(2026, 7, 10),
+    )
+
+    update = result.daily_updates[0]
+    assert update.trade_date == date(2026, 7, 10)
+    assert update.evidence_id != stale_history[-1].evidence_id
+    assert update.data_insufficient is True
+    assert update.new_support == []
+    assert update.action.decision == ActionDecision.CONFIRM_REMOVAL
+    assert "数据不足" in update.thesis
+    assert "支持 2-8 周观察" not in update.thesis

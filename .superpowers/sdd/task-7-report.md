@@ -91,3 +91,39 @@ DONE
 ### Concerns
 
 - None blocking.
+
+## Review Fix: Require Current Snapshot for Daily Update
+
+### Status
+
+DONE
+
+### Files Changed
+
+- `src/stock_analyzer/analysis/focus.py`
+- `tests/test_focus_strategy_v2.py`
+- `.superpowers/sdd/task-7-report.md`
+
+### RED
+
+- Command: `.venv/bin/python -m pytest tests/test_focus_strategy_v2.py::test_existing_focus_with_stale_history_without_today_snapshot_gets_data_insufficient_update -v`
+- Result before implementation: `1 failed`.
+- Covered failure: stale history through `2026-07-09` was incorrectly emitted as a positive daily update during the requested `2026-07-10` focus update.
+
+### GREEN
+
+- Command: `.venv/bin/python -m pytest tests/test_focus_strategy_v2.py::test_existing_focus_with_stale_history_without_today_snapshot_gets_data_insufficient_update -v`
+- Result after implementation: `1 passed`.
+
+- Command: `.venv/bin/python -m pytest tests/test_focus_strategy_v2.py tests/test_focus_state_machine.py -v`
+- Result after implementation: `16 passed`.
+
+### Implementation Notes
+
+- Existing focus daily updates now resolve the usable Strategy V2 snapshot by matching `snapshot.trade_date` to the requested update `trade_date`.
+- Stale history can still support five-observation qualification context, but a candidate's latest qualifying snapshot must be from the requested `trade_date` before a system focus daily update is emitted.
+- When no current snapshot exists for an existing focus, the update path emits the explicit data-insufficient `CONFIRM_REMOVAL` update for the requested `trade_date`.
+
+### Concerns
+
+- None blocking.
