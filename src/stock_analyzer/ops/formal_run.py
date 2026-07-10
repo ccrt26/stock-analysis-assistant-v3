@@ -190,6 +190,10 @@ ALLOWED_TRANSITIONS: dict[FormalRunState, set[FormalRunState]] = {
         FormalRunState.RENDERING,
         FormalRunState.FAILED_NEEDS_HUMAN,
     },
+    FormalRunState.BLOCKED_NEEDS_HUMAN: {
+        FormalRunState.ACQUIRING_SCREENING_PRIMARY,
+        FormalRunState.TARGET_SET_FROZEN,
+    },
 }
 
 
@@ -300,6 +304,17 @@ class FormalRunController:
             raise InvalidRunTransition("analysis requires READY_TO_ANALYZE")
         return self.transition(FormalRunState.ANALYZING)
 
+    def resume_blocked(self, next_state: FormalRunState) -> RunReceipt:
+        if self.receipt.state != FormalRunState.BLOCKED_NEEDS_HUMAN:
+            raise InvalidRunTransition("only a blocked receipt can resume")
+        if next_state not in ALLOWED_TRANSITIONS[FormalRunState.BLOCKED_NEEDS_HUMAN]:
+            raise InvalidRunTransition("invalid blocked-run resume stage")
+        return self._replace(
+            state=next_state,
+            blocked_group=None,
+            blocked_reasons=(),
+        )
+
     def record_artifact_hashes(self, hashes: dict[str, str]) -> RunReceipt:
         if self.receipt.state != FormalRunState.RENDERING:
             raise InvalidRunTransition("artifact hashes require RENDERING")
@@ -370,40 +385,75 @@ def run_formal_strategy_v2(
     if report_cutoff.tzinfo is None or report_cutoff.utcoffset() is None:
         raise ValueError("report_cutoff must be timezone-aware")
     effective_run_id = run_id or f"formal-{trade_date.isoformat()}-{uuid.uuid4().hex}"
-    controller = FormalRunController.start(
-        dependencies.evidence_store,
-        run_id=effective_run_id,
-        target_date=trade_date,
-        report_cutoff=report_cutoff,
-        acquisition_contract_version=_shared_contract_version(dependencies),
-        screening_version="strategy-v2-screen-v1",
-    )
+    contract_version = _shared_contract_version(dependencies)
+    try:
+        existing_receipt = dependencies.evidence_store.latest_run_receipt(
+            effective_run_id
+        )
+    except FileNotFoundError:
+        existing_receipt = None
+    if existing_receipt is None:
+        controller = FormalRunController.start(
+            dependencies.evidence_store,
+            run_id=effective_run_id,
+            target_date=trade_date,
+            report_cutoff=report_cutoff,
+            acquisition_contract_version=contract_version,
+            screening_version="strategy-v2-screen-v1",
+        )
+    else:
+        if (
+            existing_receipt.target_date != trade_date
+            or existing_receipt.report_cutoff != report_cutoff
+            or existing_receipt.acquisition_contract_version != contract_version
+        ):
+            raise ValueError("formal run resume date, cutoff, or contract mismatch")
+        if existing_receipt.state != FormalRunState.BLOCKED_NEEDS_HUMAN:
+            raise InvalidRunTransition(
+                f"formal run {effective_run_id} cannot resume from {existing_receipt.state.value}"
+            )
+        controller = FormalRunController(
+            dependencies.evidence_store,
+            existing_receipt,
+        )
     candidate_set: CandidateSet | None = None
-    all_payloads: dict[AcquisitionGroupId, AcquisitionPayload] = {}
+    all_payloads = _load_receipt_payloads(controller)
+    resume_target = existing_receipt is not None and existing_receipt.candidate_set_id is not None
+    if resume_target:
+        candidate_set = dependencies.evidence_store.candidate_set(
+            existing_receipt.candidate_set_id
+        )
+        controller.resume_blocked(FormalRunState.TARGET_SET_FROZEN)
+    elif existing_receipt is not None:
+        controller.resume_blocked(FormalRunState.ACQUIRING_SCREENING_PRIMARY)
 
     try:
-        controller.transition(FormalRunState.ACQUIRING_SCREENING_PRIMARY)
-        screening_payloads, screening_used_backup = _acquire_formal_groups(
-            controller,
-            dependencies.screening_routes,
-            target_codes=(),
-        )
-        all_payloads.update(screening_payloads)
-        if screening_used_backup:
-            controller.transition(FormalRunState.ACQUIRING_SCREENING_BACKUP)
-        controller.transition(FormalRunState.VALIDATING_SCREENING)
-        controller.enter_ready_to_screen()
+        if not resume_target:
+            if controller.receipt.state == FormalRunState.PENDING:
+                controller.transition(FormalRunState.ACQUIRING_SCREENING_PRIMARY)
+            screening_payloads, screening_used_backup = _acquire_formal_groups(
+                controller,
+                dependencies.screening_routes,
+                target_codes=(),
+            )
+            all_payloads.update(screening_payloads)
+            if screening_used_backup:
+                controller.transition(FormalRunState.ACQUIRING_SCREENING_BACKUP)
+            controller.transition(FormalRunState.VALIDATING_SCREENING)
+            controller.enter_ready_to_screen()
 
-        screening = dependencies.screen(
-            controller.receipt,
-            dict(screening_payloads),
-        )
-        if not isinstance(screening, FormalScreeningOutput):
-            raise TypeError("screen must return FormalScreeningOutput")
-        candidate_set = controller.freeze_candidates(
-            screening.ordered_codes,
-            screening.active_focus_codes,
-        )
+            screening = dependencies.screen(
+                controller.receipt,
+                dict(screening_payloads),
+            )
+            if not isinstance(screening, FormalScreeningOutput):
+                raise TypeError("screen must return FormalScreeningOutput")
+            candidate_set = controller.freeze_candidates(
+                screening.ordered_codes,
+                screening.active_focus_codes,
+            )
+        if candidate_set is None:
+            raise InvalidRunTransition("target acquisition requires frozen candidates")
         target_codes = tuple(
             dict.fromkeys(
                 (*candidate_set.ordered_codes, *candidate_set.active_focus_codes)
@@ -512,6 +562,22 @@ def _shared_contract_version(dependencies: FormalPipelineDependencies) -> str:
     return versions.pop()
 
 
+def _load_receipt_payloads(
+    controller: FormalRunController,
+) -> dict[AcquisitionGroupId, AcquisitionPayload]:
+    payloads: dict[AcquisitionGroupId, AcquisitionPayload] = {}
+    for group_name, version_id in controller.receipt.group_version_ids.items():
+        group_id = AcquisitionGroupId(group_name)
+        payload = controller.store.read_group_version(
+            version_id,
+            report_cutoff=controller.receipt.report_cutoff,
+        )
+        if payload is None:
+            raise ValueError(f"frozen group version is not point-in-time valid: {version_id}")
+        payloads[group_id] = payload
+    return payloads
+
+
 def _acquire_formal_groups(
     controller: FormalRunController,
     groups: tuple[FormalAcquisitionGroup, ...],
@@ -521,11 +587,45 @@ def _acquire_formal_groups(
     payloads: dict[AcquisitionGroupId, AcquisitionPayload] = {}
     used_backup = False
     for group in groups:
+        frozen_version_id = controller.receipt.group_version_ids.get(
+            group.contract.group_id.value
+        )
+        if frozen_version_id is not None:
+            frozen_payload = controller.store.read_group_version(
+                frozen_version_id,
+                report_cutoff=controller.receipt.report_cutoff,
+            )
+            if frozen_payload is None:
+                raise AcquisitionBlocked(
+                    group.contract.group_id,
+                    (),
+                    (f"frozen_group_invalid:{frozen_version_id}",),
+                )
+            payloads[group.contract.group_id] = frozen_payload
+            continue
+        request_target_codes = target_codes
+        if (
+            group.contract.group_id == AcquisitionGroupId.MARKET_DECISION
+            and not group.contract.expected_codes
+            and not request_target_codes
+        ):
+            universe = payloads.get(AcquisitionGroupId.CALENDAR_UNIVERSE)
+            if (
+                universe is None
+                or not universe.coverage_proven
+                or not universe.coverage_codes
+            ):
+                raise AcquisitionBlocked(
+                    group.contract.group_id,
+                    (),
+                    ("validated_calendar_universe_coverage_required",),
+                )
+            request_target_codes = universe.coverage_codes
         request = AcquisitionRequest(
             run_id=controller.receipt.run_id,
             trade_date=controller.receipt.target_date,
             report_cutoff=controller.receipt.report_cutoff,
-            target_codes=target_codes,
+            target_codes=request_target_codes,
             contract_version=group.contract.contract_version,
         )
         result = _acquire_formal_group(group, request)

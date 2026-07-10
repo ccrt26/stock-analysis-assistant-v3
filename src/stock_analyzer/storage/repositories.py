@@ -386,11 +386,22 @@ class SupabaseAnalysisRepository:
         ).execute()
 
     def load_focus_states(self) -> List[FocusState]:
+        formal_rows = self._load_active_formal_payloads(("focus_state", "focus"))
+        if formal_rows:
+            return _latest_active_focus_states(
+                [FocusState.model_validate(row) for row in formal_rows]
+            )
         result = self.client.table("focus_watchlist_state").select("*").execute()
         states = [_focus_state_from_row(row) for row in result.data or []]
         return _latest_active_focus_states(states)
 
     def load_daily_recommendations(self, trade_date: date) -> List[Recommendation]:
+        formal_rows = self._load_active_formal_payloads(
+            ("recommendation",),
+            trade_date,
+        )
+        if formal_rows or self._has_active_formal_receipt(trade_date):
+            return [Recommendation.model_validate(row) for row in formal_rows]
         result = (
             self.client.table("recommendation_daily")
             .select("*, stock_master(name)")
@@ -400,6 +411,12 @@ class SupabaseAnalysisRepository:
         return [_recommendation_from_row(row) for row in result.data or []]
 
     def load_focus_states_for_date(self, trade_date: date) -> List[FocusState]:
+        formal_rows = self._load_active_formal_payloads(
+            ("focus_state", "focus"),
+            trade_date,
+        )
+        if formal_rows or self._has_active_formal_receipt(trade_date):
+            return [FocusState.model_validate(row) for row in formal_rows]
         result = (
             self.client.table("focus_watchlist_state")
             .select("*")
@@ -409,6 +426,12 @@ class SupabaseAnalysisRepository:
         return [_focus_state_from_row(row) for row in result.data or []]
 
     def load_evidence_packages(self, trade_date: date) -> List[EvidencePackage]:
+        formal_rows = self._load_active_formal_payloads(
+            ("evidence_package", "evidence"),
+            trade_date,
+        )
+        if formal_rows or self._has_active_formal_receipt(trade_date):
+            return [EvidencePackage.model_validate(row) for row in formal_rows]
         result = (
             self.client.table("evidence_package_index")
             .select("*")
@@ -418,6 +441,12 @@ class SupabaseAnalysisRepository:
         return [_evidence_package_from_row(row) for row in result.data or []]
 
     def load_evaluation_tasks(self, trade_date: date) -> List[EvaluationTask]:
+        formal_rows = self._load_active_formal_payloads(
+            ("evaluation_task",),
+            trade_date,
+        )
+        if formal_rows or self._has_active_formal_receipt(trade_date):
+            return [EvaluationTask.model_validate(row) for row in formal_rows]
         result = (
             self.client.table("evaluation_task")
             .select("*")
@@ -432,11 +461,23 @@ class SupabaseAnalysisRepository:
         eligible_dates: list[date],
     ) -> list[StrategyEvidenceSnapshot]:
         eligible = {value for value in eligible_dates if value < before_date}
-        active_result = (
-            self.client.table("active_formal_run_receipt")
-            .select("target_date")
-            .execute()
-        )
+        formal_rows = self._load_active_formal_payloads(("strategy_snapshot",))
+        if formal_rows:
+            return sorted(
+                (
+                    StrategyEvidenceSnapshot.model_validate(row)
+                    for row in formal_rows
+                    if _date_from_row(row.get("trade_date")) in eligible
+                ),
+                key=lambda snapshot: (
+                    snapshot.trade_date,
+                    snapshot.ts_code,
+                    snapshot.evidence_id,
+                ),
+            )
+        active_result = self.client.table("active_formal_run_receipt").select(
+            "target_date"
+        ).execute()
         active_dates = {
             parsed
             for row in active_result.data or []
@@ -459,6 +500,33 @@ class SupabaseAnalysisRepository:
                 snapshot.evidence_id,
             ),
         )
+
+    def _load_active_formal_payloads(
+        self,
+        row_kinds: tuple[str, ...],
+        trade_date: date | None = None,
+    ) -> list[dict]:
+        payloads: list[dict] = []
+        for row_kind in row_kinds:
+            query = self.client.table("active_formal_decision_row").select(
+                "target_date,row_kind,row_payload"
+            ).eq("row_kind", row_kind)
+            if trade_date is not None:
+                query = query.eq("target_date", trade_date.isoformat())
+            for row in query.execute().data or []:
+                payload = row.get("row_payload")
+                if isinstance(payload, dict):
+                    payloads.append(payload)
+        return payloads
+
+    def _has_active_formal_receipt(self, trade_date: date) -> bool:
+        result = (
+            self.client.table("active_formal_run_receipt")
+            .select("run_id")
+            .eq("target_date", trade_date.isoformat())
+            .execute()
+        )
+        return bool(result.data or [])
 
     def prepare_formal_run(
         self,
@@ -492,6 +560,34 @@ class SupabaseAnalysisRepository:
             "rows_hash": rows_hash,
         }
         return pending_id
+
+    def register_formal_receipt(
+        self,
+        receipt,
+        receipt_hash: str,
+        final_state,
+    ) -> None:
+        if receipt.input_set_id is None:
+            raise ValueError("formal receipt input_set_id is required")
+        payload = receipt.model_dump(mode="json")
+        payload["activation_final_state"] = final_state.value
+        row = {
+            "run_id": receipt.run_id,
+            "target_date": receipt.target_date.isoformat(),
+            "report_cutoff": receipt.report_cutoff.isoformat(),
+            "receipt_hash": receipt_hash,
+            "input_set_id": receipt.input_set_id,
+            "candidate_set_id": receipt.candidate_set_id,
+            "state": receipt.state.value,
+            "artifact_hashes": receipt.artifact_hashes,
+            "local_activation_id": None,
+            "ledger_activation_id": None,
+            "receipt_payload": payload,
+        }
+        self.client.table("formal_run_receipt").upsert(
+            [row],
+            on_conflict="run_id",
+        ).execute()
 
     def pending_hash(self, pending_id: str) -> str:
         result = (

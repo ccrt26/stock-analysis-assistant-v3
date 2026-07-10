@@ -28,7 +28,12 @@ from stock_analyzer.ops.formal_run import (
     RunReceipt,
     run_formal_strategy_v2,
 )
-from stock_analyzer.pipeline import StoredAnalysisNotFound, render_report_for_date, run_daily_pipeline
+from stock_analyzer.pipeline import (
+    ProductionDataSourceUnavailable,
+    StoredAnalysisNotFound,
+    render_report_for_date,
+    run_daily_pipeline,
+)
 from stock_analyzer.storage.evidence_store import LocalEvidenceStore
 from stock_analyzer.storage.repositories import InMemoryAnalysisRepository
 
@@ -264,6 +269,47 @@ def test_target_failure_for_frozen_candidate_blocks_without_promotion(tmp_path):
     assert "600001.SH" not in frozen.ordered_codes
 
 
+def test_target_retry_reuses_same_run_and_frozen_candidate_set(tmp_path):
+    calls: list[str] = []
+    blocked_dependencies = _dependencies(
+        tmp_path,
+        calls,
+        target_group=_group(
+            AcquisitionGroupId.CANDIDATE_FUNDAMENTAL,
+            calls,
+            primary_fail=True,
+            backup_fail=True,
+        ),
+    )
+    blocked = run_formal_strategy_v2(
+        TARGET,
+        CUTOFF,
+        blocked_dependencies,
+        run_id="same-run-target-retry",
+    )
+    frozen_id = blocked.receipt.candidate_set_id
+
+    def forbidden_screen(*_args):
+        raise AssertionError("target retry must not rerun screening")
+
+    retry_dependencies = replace(
+        _dependencies(tmp_path, calls),
+        evidence_store=blocked_dependencies.evidence_store,
+        ledger=blocked_dependencies.ledger,
+        screen=forbidden_screen,
+    )
+    completed = run_formal_strategy_v2(
+        TARGET,
+        CUTOFF,
+        retry_dependencies,
+        run_id="same-run-target-retry",
+    )
+
+    assert completed.receipt.state == FormalRunState.REPORT_GENERATED
+    assert completed.receipt.candidate_set_id == frozen_id
+    assert completed.candidate_set.candidate_set_id == frozen_id
+
+
 def test_required_group_failure_calls_no_strategy_llm_report_publish_or_decision_write(tmp_path):
     calls: list[str] = []
     dependencies = _dependencies(
@@ -283,6 +329,48 @@ def test_required_group_failure_calls_no_strategy_llm_report_publish_or_decision
     assert dependencies.ledger.active == {}
     assert dependencies.ledger.pending == {}
     assert not (tmp_path / "reports" / "current.json").exists()
+
+
+def test_market_group_inherits_validated_calendar_universe_coverage(tmp_path):
+    calls: list[str] = []
+    calendar = _group(
+        AcquisitionGroupId.CALENDAR_UNIVERSE,
+        calls,
+        expected_codes=("600000.SH", "600001.SH"),
+    )
+    partial_market = _group(
+        AcquisitionGroupId.MARKET_DECISION,
+        calls,
+        primary_incomplete=True,
+        backup_incomplete=True,
+    )
+    dependencies = replace(
+        _dependencies(tmp_path, calls),
+        screening_routes=(calendar, partial_market),
+        target_routes=(
+            _group(
+                AcquisitionGroupId.CANDIDATE_FUNDAMENTAL,
+                calls,
+                primary_fail=True,
+                backup_fail=True,
+            ),
+        ),
+        screen=lambda receipt, payloads: FormalScreeningOutput(
+            ordered_codes=("600000.SH",),
+        ),
+    )
+
+    result = run_formal_strategy_v2(
+        TARGET,
+        CUTOFF,
+        dependencies,
+        run_id="dynamic-universe-block",
+    )
+
+    assert result.receipt.state == FormalRunState.BLOCKED_NEEDS_HUMAN
+    assert result.receipt.blocked_group == AcquisitionGroupId.MARKET_DECISION
+    assert any("missing_code:600001.SH" in reason for reason in result.receipt.blocked_reasons)
+    assert not any(call.startswith("screen:") for call in calls)
 
 
 def test_complete_run_calls_analysis_only_after_ready_to_analyze(tmp_path):
@@ -398,3 +486,24 @@ def test_manual_render_accepts_only_matching_committed_report_generated_receipt(
 
     assert result.trade_date == TARGET
     assert (tmp_path / "reports" / "data" / "latest.json").is_file()
+
+
+def test_legacy_complete_provider_cannot_bypass_formal_run_receipt(tmp_path):
+    from tests.test_pipeline_smoke import FakeProductionProvider
+
+    repository = InMemoryAnalysisRepository()
+
+    with pytest.raises(
+        ProductionDataSourceUnavailable,
+        match="run_formal_strategy_v2",
+    ):
+        run_daily_pipeline(
+            TARGET,
+            tmp_path / "reports",
+            repository=repository,
+            fixture_mode=False,
+            market_data_provider=FakeProductionProvider(),
+        )
+
+    assert repository.recommendations == []
+    assert not (tmp_path / "reports" / "index.html").exists()

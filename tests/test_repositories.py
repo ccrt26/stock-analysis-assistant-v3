@@ -448,7 +448,8 @@ def test_supabase_repository_loads_snapshots_only_through_active_formal_receipt_
     )
 
     assert [snapshot.trade_date for snapshot in loaded] == [active_date]
-    assert client.table_calls[:2] == [
+    assert client.table_calls[:3] == [
+        "active_formal_decision_row",
         "active_formal_run_receipt",
         "strategy_v2_snapshot",
     ]
@@ -488,6 +489,51 @@ def test_supabase_repository_prepares_pending_formal_rows_and_activates_through_
     ]
 
 
+def test_supabase_repository_registers_formal_receipt_before_pending_batch():
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from stock_analyzer.data.readiness import FormalRunState
+    from stock_analyzer.ops.formal_run import RunReceipt
+
+    client = FakeSupabaseClient()
+    repo = SupabaseAnalysisRepository(client)
+    receipt = RunReceipt(
+        run_id="run-registered",
+        target_date=date(2026, 7, 10),
+        report_cutoff=datetime(
+            2026, 7, 10, 16, 0, tzinfo=ZoneInfo("Asia/Shanghai")
+        ),
+        acquisition_contract_version="formal-v1",
+        screening_version="screen-v1",
+        state=FormalRunState.COMMITTING,
+        group_version_ids={"market_decision": "version-1"},
+        input_set_id="input-1",
+        candidate_set_id="candidate-1",
+        evidence_hashes={"evidence": "hash"},
+        artifact_hashes={"index.html": "hash"},
+    )
+
+    repo.register_formal_receipt(
+        receipt,
+        "receipt-hash",
+        FormalRunState.REPORT_GENERATED,
+    )
+    repo.prepare_formal_run(
+        receipt.run_id,
+        "receipt-hash",
+        ({"kind": "recommendation"},),
+    )
+
+    assert client.write_calls[0][0] == "formal_run_receipt"
+    receipt_row = client.write_calls[0][2][0]
+    assert receipt_row["run_id"] == receipt.run_id
+    assert receipt_row["state"] == "committing"
+    assert receipt_row["input_set_id"] == "input-1"
+    assert receipt_row["receipt_payload"]["activation_final_state"] == "report_generated"
+    assert client.write_calls[1][0] == "formal_run_pending_batch"
+
+
 def test_supabase_repository_active_marker_read_is_fail_closed():
     client = FakeSupabaseClient()
     repo = SupabaseAnalysisRepository(client)
@@ -497,6 +543,71 @@ def test_supabase_repository_active_marker_read_is_fail_closed():
 
     assert repo.is_formal_run_active("run-1", "activation-1") is True
     assert repo.is_formal_run_active("run-1", "other") is False
+
+
+def test_supabase_repository_reads_activated_formal_rows_before_legacy_rows():
+    trade_date = date(2026, 7, 10)
+    formal = Recommendation(
+        trade_date=trade_date,
+        ts_code="600000.SH",
+        name="正式激活推荐",
+        action=ActionLabel.ENTER_OBSERVATION,
+        score=81,
+        reasons=["正式证据"],
+        risks=["正式风险"],
+        evidence_id="formal-evidence",
+    )
+    legacy = formal.model_copy(
+        update={"name": "旧表未激活推荐", "evidence_id": "legacy-evidence"}
+    )
+    client = FakeSupabaseClient()
+    client.table_data["active_formal_decision_row"] = [
+        {
+            "target_date": trade_date.isoformat(),
+            "row_kind": "recommendation",
+            "row_payload": formal.model_dump(mode="json"),
+        }
+    ]
+    client.table_data["recommendation_daily"] = [
+        {
+            **legacy.model_dump(mode="json"),
+            "stock_master": {"name": legacy.name},
+        }
+    ]
+
+    loaded = SupabaseAnalysisRepository(client).load_daily_recommendations(trade_date)
+
+    assert loaded == [formal]
+    assert client.table_calls[0] == "active_formal_decision_row"
+
+
+def test_supabase_repository_does_not_fall_back_to_legacy_rows_for_active_empty_kind():
+    trade_date = date(2026, 7, 10)
+    legacy = Recommendation(
+        trade_date=trade_date,
+        ts_code="600000.SH",
+        name="旧表未激活推荐",
+        action=ActionLabel.ENTER_OBSERVATION,
+        score=81,
+        reasons=["旧证据"],
+        risks=["旧风险"],
+        evidence_id="legacy-evidence",
+    )
+    client = FakeSupabaseClient()
+    client.table_data["active_formal_run_receipt"] = [
+        {"run_id": "active-empty", "target_date": trade_date.isoformat()}
+    ]
+    client.table_data["recommendation_daily"] = [
+        {
+            **legacy.model_dump(mode="json"),
+            "stock_master": {"name": legacy.name},
+        }
+    ]
+
+    loaded = SupabaseAnalysisRepository(client).load_daily_recommendations(trade_date)
+
+    assert loaded == []
+    assert "recommendation_daily" not in client.table_calls
 
 
 def test_in_memory_repository_upserts_core_daily_outputs_by_stable_keys():
@@ -1092,111 +1203,6 @@ def test_supabase_repository_upserts_prerequisites_before_dependent_pipeline_row
     assert all(row["evidence_id"] for row in recommendation_rows)
     assert all(item.evidence_id for item in result.recommendations)
 
-
-def test_production_pipeline_writes_full_stock_master_before_market_bars(tmp_path):
-    if run_daily_pipeline is None:
-        pytest.skip("jinja2 is not installed in this local test environment")
-
-    class ProviderWithRawBarsBeyondFeatureUniverse:
-        def load(self, trade_date):
-            stock = StockSnapshot(
-                trade_date=trade_date,
-                ts_code="600000.SH",
-                name="浦发银行",
-                listing_days=9000,
-                turnover_rate=1.2,
-                amount=200000000,
-            )
-            feature = FeatureSnapshot(
-                trade_date=trade_date,
-                ts_code="600000.SH",
-                trend_20d=0.2,
-                trend_60d=0.2,
-                relative_strength=0.2,
-                volatility_20d=0.1,
-                liquidity_score=0.8,
-                quality_score=0.7,
-                market_regime="unknown",
-                data_quality="ok",
-            )
-            return MarketDataBundle(
-                trade_date=trade_date,
-                data_status=DataStatus.COMPLETE_PRIMARY,
-                source_grade=SourceGrade.PRIMARY,
-                source_versions={"fake-live": trade_date.isoformat()},
-                stock_basic=[
-                    StockBasicRow(
-                        ts_code="600000.SH",
-                        name="浦发银行",
-                        exchange="SSE",
-                        list_date=date(1999, 11, 10),
-                    ),
-                    StockBasicRow(
-                        ts_code="000004.SZ",
-                        name="国华网安",
-                        exchange="SZSE",
-                        list_date=date(1991, 1, 14),
-                    ),
-                ],
-                daily_bars=[
-                    DailyBar(
-                        trade_date=trade_date,
-                        ts_code="600000.SH",
-                        close=10.2,
-                        amount=200000000,
-                        source_name="fake-live",
-                        source_grade=SourceGrade.PRIMARY,
-                    ),
-                    DailyBar(
-                        trade_date=trade_date,
-                        ts_code="000004.SZ",
-                        close=12.3,
-                        amount=80000000,
-                        source_name="fake-live",
-                        source_grade=SourceGrade.PRIMARY,
-                    ),
-                ],
-                daily_basic=[
-                    DailyBasicRow(
-                        trade_date=trade_date,
-                        ts_code="600000.SH",
-                        turnover_rate=1.2,
-                        source_name="fake-live",
-                        source_grade=SourceGrade.PRIMARY,
-                    )
-                ],
-                source_runs=[],
-                stocks=[stock],
-                stock_names={
-                    "600000.SH": "浦发银行",
-                    "000004.SZ": "国华网安",
-                },
-                feature_profiles={"600000.SH": feature},
-            )
-
-    client = FakeSupabaseClient()
-    repo = SupabaseAnalysisRepository(client)
-    warehouse = RecordingWarehouse()
-
-    run_daily_pipeline(
-        date(2026, 7, 8),
-        tmp_path,
-        repository=repo,
-        fixture_mode=False,
-        market_data_provider=ProviderWithRawBarsBeyondFeatureUniverse(),
-        local_warehouse=warehouse,
-    )
-
-    assert len(warehouse.saved_bundles) == 1
-    write_tables = [name for name, _, _ in client.write_calls]
-    assert write_tables.index("stock_master") < write_tables.index("market_price_daily")
-    first_stock_master_rows = client.write_calls[0][2]
-    assert {
-        "ts_code": "000004.SZ",
-        "name": "国华网安",
-        "exchange": "SZSE",
-        "list_date": "1991-01-14",
-    } in first_stock_master_rows
 
 
 def test_supabase_repository_upserts_core_daily_rows_with_conflict_targets(tmp_path):

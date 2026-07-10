@@ -156,6 +156,17 @@ def test_group_validator_requires_target_date_and_expected_code_coverage():
     assert "missing_code:000001.SZ:2026-07-10" in result.reasons
 
 
+def test_group_validator_unions_static_contract_and_frozen_runtime_codes():
+    result = validate_group_payload(
+        _contract(expected_codes=("600000.SH",)),
+        _request(target_codes=("000001.SZ",)),
+        _payload(_record(ts_code="600000.SH")),
+    )
+
+    assert result.complete is False
+    assert "missing_code:000001.SZ:2026-07-10" in result.reasons
+
+
 def test_payload_hash_is_order_stable_and_route_bound():
     second = _record(ts_code="000001.SZ")
     a = _payload(_record(), second)

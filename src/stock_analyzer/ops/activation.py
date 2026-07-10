@@ -22,6 +22,13 @@ class ActivationError(RuntimeError):
 
 
 class FormalLedger(Protocol):
+    def register_formal_receipt(
+        self,
+        receipt: RunReceipt,
+        receipt_hash: str,
+        final_state: FormalRunState,
+    ) -> None: ...
+
     def prepare_formal_run(
         self,
         run_id: str,
@@ -48,6 +55,22 @@ class InMemoryFormalLedger:
         self.pending: dict[str, dict[str, Any]] = {}
         self.active: dict[str, dict[str, str]] = {}
         self.activation_count = 0
+        self.receipts: dict[str, dict[str, Any]] = {}
+
+    def register_formal_receipt(
+        self,
+        receipt: RunReceipt,
+        receipt_hash: str,
+        final_state: FormalRunState,
+    ) -> None:
+        payload = {
+            "receipt_hash": receipt_hash,
+            "final_state": final_state,
+        }
+        existing = self.receipts.get(receipt.run_id)
+        if existing is not None and existing != payload:
+            raise ActivationError("formal receipt registration mismatch")
+        self.receipts[receipt.run_id] = payload
 
     def prepare_formal_run(
         self,
@@ -152,6 +175,8 @@ class FormalActivationCoordinator:
         staging = self.report_root / ".staging" / receipt.run_id
         try:
             controller.transition(FormalRunState.RENDERING)
+            if staging.exists():
+                shutil.rmtree(staging)
             self._inject("render")
             render(staging)
             artifact_hashes = hash_artifact_tree(staging)
@@ -168,6 +193,16 @@ class FormalActivationCoordinator:
             receipt_hash = formal_receipt_hash(controller.receipt)
             expected_pending_hash = hash_ledger_rows(ledger_rows)
             self._inject("ledger_prepare")
+            final_state = (
+                FormalRunState.REPORT_GENERATED
+                if advance_report_pointer
+                else FormalRunState.ANALYSIS_COMPLETE_NO_RECOMMENDATIONS
+            )
+            self.ledger.register_formal_receipt(
+                controller.receipt,
+                receipt_hash,
+                final_state,
+            )
             pending_id = self.ledger.prepare_formal_run(
                 receipt.run_id,
                 receipt_hash,

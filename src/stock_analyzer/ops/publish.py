@@ -7,7 +7,7 @@ import re
 import shutil
 import subprocess
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from enum import Enum
 from pathlib import Path
@@ -22,6 +22,7 @@ from stock_analyzer.ops.notify import notify_mac
 from stock_analyzer.ops.redaction import redact_secrets
 from stock_analyzer.ops.smoke import smoke_report_site
 from stock_analyzer.storage.capacity_guard import CapacityStatus
+from stock_analyzer.storage.evidence_store import LocalEvidenceStore
 
 
 class PublishStatus(str, Enum):
@@ -216,6 +217,7 @@ class PublishConfig:
     state_path: Path
     status_page_path: Path
     last_known_good_dir: Path
+    formal_evidence_root: Path | None = None
 
     @classmethod
     def from_app_config(cls, config: AppConfig) -> "PublishConfig":
@@ -233,6 +235,7 @@ class PublishConfig:
             state_path=root / "logs" / "publish" / "latest-status.json",
             status_page_path=root / "logs" / "publish" / "status.html",
             last_known_good_dir=root / "local_archive" / "publish" / "last-known-good",
+            formal_evidence_root=config.local_warehouse_dir / "formal_evidence",
         )
 
 
@@ -242,6 +245,7 @@ class PublishCandidate:
     recommendations: int
     job_status_path: Path
     reports_dir: Path
+    receipt: Any = field(default=None, compare=False, repr=False)
 
 
 @dataclass(frozen=True)
@@ -355,11 +359,29 @@ def load_publish_candidate(
             user_action_required="报告文件缺失；请先重新生成当天报告。",
         )
 
+    from stock_analyzer.pipeline import latest_committed_report_receipt
+
+    evidence_root = (
+        config.formal_evidence_root
+        or config.project_root / "local_warehouse" / "formal_evidence"
+    )
+    receipt = latest_committed_report_receipt(
+        LocalEvidenceStore(evidence_root),
+        status_trade_date,
+    )
+    if receipt is None:
+        raise PublishPreflightError(
+            "No committed formal run receipt authorizes this report.",
+            failure_class=PublishFailureClass.NO_PUBLISHABLE_REPORT,
+            user_action_required="正式运行凭证缺失或未激活；保留线上上一版，禁止发布。",
+        )
+
     return PublishCandidate(
         trade_date=status_trade_date,
         recommendations=recommendations,
         job_status_path=status_path,
         reports_dir=reports_dir,
+        receipt=receipt,
     )
 
 
@@ -419,12 +441,19 @@ def preflight_publish(
 def prepare_publish_artifact(
     config: PublishConfig,
     prepare_artifact: Callable[[Path, Path], Path] | None = None,
+    *,
+    receipt=None,
 ) -> Path:
     output_dir = config.project_root / "dist" / "pages"
     if output_dir.exists():
         shutil.rmtree(output_dir)
-    prepare_func = prepare_artifact or prepare_pages_artifact
-    return prepare_func(config.project_root, output_dir)
+    if prepare_artifact is not None:
+        return prepare_artifact(config.project_root, output_dir)
+    return prepare_pages_artifact(
+        config.project_root,
+        output_dir,
+        receipt=receipt,
+    )
 
 
 def validate_publish_artifact_content(artifact_dir: Path) -> None:
@@ -551,7 +580,11 @@ def publish_report_site(
             )
         )
 
-        artifact_dir = prepare_publish_artifact(config, prepare_artifact=prepare_artifact)
+        artifact_dir = prepare_publish_artifact(
+            config,
+            prepare_artifact=prepare_artifact,
+            receipt=candidate.receipt,
+        )
         checks.append("artifact_prepared")
         validate_publish_artifact_content(artifact_dir)
         checks.append("artifact_secret_scan_passed")

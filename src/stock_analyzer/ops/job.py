@@ -463,6 +463,7 @@ def _default_run_daily(project_root: Path, repository, trade_date: date):
         trade_date,
         report_cutoff,
         dependencies,
+        run_id=f"formal-{trade_date.isoformat()}",
     )
 
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import os
 import shutil
 from pathlib import Path
@@ -43,6 +44,7 @@ def prepare_pages_artifact(
     middleware_path = _middleware_path(root, source)
 
     _validate_required_inputs(reports_dir, middleware_path)
+    _validate_receipt_artifact_hashes(reports_dir, receipt)
     _validate_output_dir(root, reports_dir, middleware_path.parent, target)
 
     if target.exists():
@@ -75,6 +77,21 @@ def _validate_formal_receipt(receipt) -> None:
         raise DeployArtifactError(
             "Deploy preparation requires an activated REPORT_GENERATED receipt."
         )
+
+
+def _validate_receipt_artifact_hashes(reports_dir: Path, receipt) -> None:
+    for relative_name, expected_hash in receipt.artifact_hashes.items():
+        relative_path = Path(relative_name)
+        if relative_path.is_absolute() or ".." in relative_path.parts:
+            raise DeployArtifactError("Formal receipt contains an unsafe artifact path.")
+        artifact_path = reports_dir / relative_path
+        if (
+            not artifact_path.is_file()
+            or hashlib.sha256(artifact_path.read_bytes()).hexdigest() != expected_hash
+        ):
+            raise DeployArtifactError(
+                f"Formal report artifact hash mismatch: {relative_name}."
+            )
 
 
 def _middleware_path(project_root: Path, source_root: Path) -> Path:

@@ -249,7 +249,9 @@ def validate_group_payload(
             f"insufficient_history:{len(covered_dates)}:{contract.minimum_history_sessions}"
         )
 
-    expected_codes = contract.expected_codes or request.target_codes
+    expected_codes = tuple(
+        dict.fromkeys((*contract.expected_codes, *request.target_codes))
+    )
     for code in expected_codes:
         target = target_rows.get(code)
         if target is None:

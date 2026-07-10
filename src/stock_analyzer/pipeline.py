@@ -158,6 +158,11 @@ def run_daily_pipeline(
     manual_holdings: Optional[list[ManualHolding]] = None,
     eligible_focus_days: Optional[list[FormalFocusDay]] = None,
 ) -> DailyRunResult:
+    if not fixture_mode and not dry_run:
+        raise ProductionDataSourceUnavailable(
+            "Production analysis and report generation must enter through "
+            "run_formal_strategy_v2 with a persisted formal run receipt."
+        )
     repository = repository or InMemoryAnalysisRepository()
     persist = persist and not dry_run
     if not fixture_mode and not dry_run:

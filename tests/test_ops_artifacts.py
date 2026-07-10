@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from datetime import date, datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -29,7 +30,7 @@ def test_prepare_pages_artifact_copies_reports_and_middleware_only(tmp_path):
     artifact_dir = prepare_pages_artifact(
         tmp_path,
         output_dir,
-        receipt=_activated_receipt(date(2026, 7, 9)),
+        receipt=_activated_receipt(tmp_path, date(2026, 7, 9)),
     )
 
     assert artifact_dir == output_dir
@@ -65,7 +66,7 @@ def test_prepare_pages_artifact_requires_report_index(tmp_path):
         prepare_pages_artifact(
             tmp_path,
             tmp_path / "dist" / "pages",
-            receipt=_activated_receipt(date(2026, 7, 9)),
+            receipt=_activated_receipt(tmp_path, date(2026, 7, 9)),
         )
 
 
@@ -82,7 +83,7 @@ def test_prepare_pages_artifact_can_use_source_root_for_middleware(
     artifact_dir = prepare_pages_artifact(
         production_root,
         tmp_path / "stock-analysis-pages",
-        receipt=_activated_receipt(date(2026, 7, 9)),
+        receipt=_activated_receipt(production_root, date(2026, 7, 9)),
     )
 
     assert (artifact_dir / "index.html").exists()
@@ -107,7 +108,7 @@ def test_prepare_pages_artifact_rejects_existing_absolute_dir_outside_safe_roots
         prepare_pages_artifact(
             project_root,
             output_dir,
-            receipt=_activated_receipt(date(2026, 7, 9)),
+            receipt=_activated_receipt(project_root, date(2026, 7, 9)),
         )
 
     assert marker.read_text(encoding="utf-8") == "keep me"
@@ -129,7 +130,7 @@ def test_prepare_pages_artifact_allows_existing_configured_temp_artifact_dir(
     artifact_dir = prepare_pages_artifact(
         project_root,
         output_dir,
-        receipt=_activated_receipt(date(2026, 7, 9)),
+        receipt=_activated_receipt(project_root, date(2026, 7, 9)),
     )
 
     assert artifact_dir == output_dir.resolve()
@@ -156,7 +157,7 @@ def test_run_daily_job_default_prepare_deploy_builds_pages_artifact(tmp_path):
         ),
         health_check=lambda *_args: None,
         run_daily=lambda *_args: SimpleNamespace(
-            receipt=_activated_receipt(trade_date)
+            receipt=_activated_receipt(tmp_path, trade_date)
         ),
         verifier=lambda *_args: _successful_verification(trade_date),
     )
@@ -176,7 +177,32 @@ def test_prepare_pages_artifact_requires_activated_report_generated_receipt(tmp_
         prepare_pages_artifact(tmp_path, tmp_path / "dist" / "pages")
 
 
-def _activated_receipt(trade_date: date) -> RunReceipt:
+def test_prepare_pages_artifact_rejects_report_changed_after_activation(tmp_path):
+    _write_report_tree(tmp_path)
+    _write_middleware(tmp_path)
+    receipt = _activated_receipt(tmp_path, date(2026, 7, 9))
+    (tmp_path / "reports" / "index.html").write_text(
+        "<html>tampered after activation</html>",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(DeployArtifactError, match="artifact hash mismatch"):
+        prepare_pages_artifact(
+            tmp_path,
+            tmp_path / "dist" / "pages",
+            receipt=receipt,
+        )
+
+
+def _activated_receipt(project_root: Path, trade_date: date) -> RunReceipt:
+    reports = project_root / "reports"
+    artifact_hashes = {
+        path.relative_to(reports).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in sorted(reports.rglob("*"))
+        if path.is_file()
+    }
+    if not artifact_hashes:
+        artifact_hashes = {"index.html": hashlib.sha256(b"").hexdigest()}
     return RunReceipt(
         run_id=f"activated-{trade_date.isoformat()}",
         target_date=trade_date,
@@ -194,7 +220,7 @@ def _activated_receipt(trade_date: date) -> RunReceipt:
         input_set_id="input-1",
         candidate_set_id="candidate-1",
         evidence_hashes={"evidence": "hash"},
-        artifact_hashes={"index.html": "hash"},
+        artifact_hashes=artifact_hashes,
         local_activation_id="activation-1",
         ledger_activation_id="activation-1",
     )

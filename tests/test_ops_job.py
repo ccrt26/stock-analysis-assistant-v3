@@ -674,8 +674,8 @@ def test_default_run_daily_uses_formal_strategy_v2_entry(
     )
     monkeypatch.setattr(
         "stock_analyzer.ops.job.run_formal_strategy_v2",
-        lambda trade_date, report_cutoff, dependencies_arg: captured.append(
-            (trade_date, report_cutoff, dependencies_arg)
+        lambda trade_date, report_cutoff, dependencies_arg, run_id=None: captured.append(
+            (trade_date, report_cutoff, dependencies_arg, run_id)
         ) or result,
     )
 
@@ -689,6 +689,7 @@ def test_default_run_daily_uses_formal_strategy_v2_entry(
     assert captured[0][0] == date(2026, 7, 10)
     assert captured[0][1].tzinfo is not None
     assert captured[0][2] is dependencies
+    assert captured[0][3] == "formal-2026-07-10"
 
 
 def test_blocked_job_skips_verify_prepare_deploy_and_publish(tmp_path):

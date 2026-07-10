@@ -151,6 +151,49 @@ def test_retry_is_idempotent_and_does_not_duplicate_rows_or_artifacts(tmp_path):
     assert len(list((reports / ".staging" / "retry-run").rglob("index.html"))) == 1
 
 
+def test_retry_rebuilds_staging_without_stale_partial_render_files(tmp_path):
+    controller = _analyzing_controller(tmp_path, run_id="stale-retry")
+    ledger = InMemoryFormalLedger()
+    reports = tmp_path / "reports"
+
+    def partial_render(staging):
+        staging.mkdir(parents=True, exist_ok=True)
+        (staging / "stale-secret-free-debug.txt").write_text(
+            "partial",
+            encoding="utf-8",
+        )
+        raise ActivationError("partial render failed")
+
+    with pytest.raises(ActivationError, match="partial render failed"):
+        FormalActivationCoordinator(
+            reports,
+            controller.store,
+            ledger,
+        ).activate(
+            controller.receipt,
+            render=partial_render,
+            verify=_verify,
+            ledger_rows=({"kind": "recommendation"},),
+            pointer_payloads={},
+        )
+
+    completed = FormalActivationCoordinator(
+        reports,
+        controller.store,
+        ledger,
+    ).activate(
+        controller.store.latest_run_receipt("stale-retry"),
+        render=_render,
+        verify=_verify,
+        ledger_rows=({"kind": "recommendation"},),
+        pointer_payloads={},
+    )
+
+    assert completed.state == FormalRunState.REPORT_GENERATED
+    assert "stale-secret-free-debug.txt" not in completed.artifact_hashes
+    assert not (reports / "stale-secret-free-debug.txt").exists()
+
+
 def test_artifact_or_pending_hash_mismatch_fails_closed(tmp_path):
     class CorruptingLedger(InMemoryFormalLedger):
         def pending_hash(self, pending_id: str) -> str:

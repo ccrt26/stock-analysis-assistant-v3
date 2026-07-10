@@ -185,6 +185,8 @@ def test_formal_readiness_migration_adds_receipts_pending_batches_markers_and_re
         assert f"alter table public.{table} enable row level security" in sql
         assert f"create policy {table}_service_role_all" in sql
     assert "create or replace view public.active_formal_run_receipt" in sql
+    assert "create or replace view public.active_formal_decision_row" in sql
+    assert "join public.active_formal_run_receipt" in sql
 
 
 def test_activation_rpc_verifies_hashes_and_activates_in_one_transaction():
@@ -199,6 +201,8 @@ def test_activation_rpc_verifies_hashes_and_activates_in_one_transaction():
     assert "pending rows hash mismatch" in compact_sql
     assert "insert into public.formal_run_activation_marker" in compact_sql
     assert "update public.formal_run_receipt" in compact_sql
+    assert "local_activation_id = p_activation_id" in compact_sql
+    assert "state = v_receipt.receipt_payload->>'activation_final_state'" in compact_sql
     assert "grant execute on function public.activate_formal_run_v1" in compact_sql
 
 

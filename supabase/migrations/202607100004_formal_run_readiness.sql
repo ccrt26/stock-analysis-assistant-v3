@@ -87,6 +87,21 @@ where receipt.state in ('report_generated', 'analysis_complete_no_recommendation
   and receipt.local_activation_id = marker.activation_id
   and receipt.ledger_activation_id = marker.activation_id;
 
+create or replace view public.active_formal_decision_row
+with (security_invoker = true)
+as
+select
+    receipt.run_id,
+    receipt.target_date,
+    decision.row_ordinal,
+    decision.row_kind,
+    decision.row_payload,
+    decision.activation_id
+from public.formal_decision_activation_row as decision
+join public.active_formal_run_receipt as receipt
+    on receipt.run_id = decision.run_id
+   and receipt.activation_id = decision.activation_id;
+
 create or replace function public.activate_formal_run_v1(
     p_run_id text,
     p_pending_id text,
@@ -169,7 +184,9 @@ begin
     where pending_id = p_pending_id;
 
     update public.formal_run_receipt
-    set ledger_activation_id = p_activation_id,
+    set state = v_receipt.receipt_payload->>'activation_final_state',
+        local_activation_id = p_activation_id,
+        ledger_activation_id = p_activation_id,
         updated_at = now()
     where run_id = p_run_id;
 end;
