@@ -1,5 +1,7 @@
 # Tushare Ingestion V1 Implementation Plan
 
+> **Lifecycle:** Historical execution record for limited Tushare ingestion. It does not prove current formal Strategy V2 production readiness; see [`docs/operations/production-capability-matrix.md`](../../operations/production-capability-matrix.md).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 打通真实 Tushare 主源、有限实时备用源、本地 DuckDB + Parquet 全市场分析库、Supabase 决策账本、每日候选分析和静态报告发布链路，让生产 `run-daily` 可以基于真实 A 股数据运行，同时禁止样例数据或缓存数据冒充今日决策数据。

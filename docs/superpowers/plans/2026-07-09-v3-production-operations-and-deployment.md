@@ -1,5 +1,7 @@
 # V3 Production Operations and Deployment Implementation Plan
 
+> **Lifecycle:** Historical execution record. It implemented operations scaffolding without activating launchd or proving the later formal production data path. Current status is tracked only in [`docs/operations/production-capability-matrix.md`](../../operations/production-capability-matrix.md).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build Phase 1 of V3 production operations: a local Mac daily automation flow that runs only on trading days, retries safely after cleaning same-day partial results, writes machine-readable status, prepares Cloudflare Pages artifacts, and provides online smoke verification without automatically deploying.

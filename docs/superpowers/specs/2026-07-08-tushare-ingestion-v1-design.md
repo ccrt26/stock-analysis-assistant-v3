@@ -1,7 +1,9 @@
 # Tushare Ingestion V1 Design
 
+> **Lifecycle:** Historical limited-ingestion design. Its production-path claims do not establish formal Strategy V2 readiness. Current capability status is tracked only in [`docs/operations/production-capability-matrix.md`](../../operations/production-capability-matrix.md).
+
 Date: 2026-07-08
-Status: Draft approved in conversation, pending implementation plan
+Status: Historical approved design; limited ingestion implemented, formal production readiness incomplete
 Project root: `/Users/ccrt/股票分析助手`
 
 Storage amendment: this design is amended by `2026-07-08-storage-governance-design.md`. If this document conflicts with that storage-governance design, the storage-governance design wins. Tushare V1 still opens the real production path, but full-market raw data and coarse-analysis data now land in the local DuckDB + Parquet warehouse first; Supabase is limited to the cloud decision ledger and selected 120-trading-day windows.

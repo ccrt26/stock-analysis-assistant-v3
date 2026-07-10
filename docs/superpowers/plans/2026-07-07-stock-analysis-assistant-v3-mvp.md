@@ -1,5 +1,7 @@
 # 股票分析助手 V3 MVP Implementation Plan
 
+> **Lifecycle:** Historical execution record. Current production status is tracked only in [`docs/operations/production-capability-matrix.md`](../../operations/production-capability-matrix.md).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 构建一个可以每日自动运行的中国大陆 A 股分析助手 MVP，完成数据获取、清洗、规则约束、候选推荐、重点关注、证据包、后评估登记、静态报告生成，并为 Supabase 与 Cloudflare Pages 部署打好边界。

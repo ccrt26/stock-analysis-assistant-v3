@@ -1,9 +1,28 @@
 # V3 Formal Report Data Readiness Design
 
 **Date:** 2026-07-10  
-**Status:** Approved design, pending implementation plan  
+**Status:** Active normative design; core safety framework implemented offline, production-route correction required
+
 **Scope:** Repair data acquisition, validation, historical reuse, and formal-report eligibility after Phase 3 Strategy V2  
 **Out of scope:** Strategy scoring, financial decision rules, position sizing, LLM writing style, broker integration, and automated orders
+
+## 0. Correction Governance and Current-State Authority
+
+This design remains the normative authority for formal-report behavior. It does not by itself prove that a production capability is implemented, verified, written to production, or activated. Current status is tracked only in [`docs/operations/production-capability-matrix.md`](../../operations/production-capability-matrix.md).
+
+The implementation completed through commit `8e252ad48296dcc4375c10cacb5b81ff30663709` established contracts, generic route wrappers, atomic failover, immutable evidence, readiness states, focus-history rules, receipt gates, and two-phase activation under recorded or synthetic tests. It did not establish concrete production endpoint clients, production contract instances, durable capability records, production screening/analysis/expression adapters, or a functioning `build_production_formal_dependencies()` factory. Those omissions are unfinished design requirements, not optional activation work.
+
+The following terms are distinct and must not be collapsed into a single “complete” status:
+
+- **Implemented:** concrete production code exists without required empty stubs or unconditional blockers.
+- **Offline verified:** the default production factory and internal call path pass while only external transports are replaced by recorded responses.
+- **Live-read verified:** approved real read-only provider calls prove the route contract and capability evidence.
+- **Production-write verified:** separately approved Supabase migration and narrow writes pass atomic read-back verification.
+- **Activated:** separately approved recurring scheduling or automatic publication is enabled and operationally verified.
+
+Lack of permission for live acquisition, Supabase mutation, Cloudflare deployment, or launchd activation never removes the requirement to implement and offline-test the concrete production program. Tests may replace an HTTP/API transport, but they may not replace the default production dependency factory, production route clients, production contracts, screening adapter, analysis adapter, renderer binding, or ledger binding.
+
+Historical specifications and implementation plans remain audit records. They must not be used as current production-readiness evidence when they conflict with the production capability matrix.
 
 ## 1. Objective
 

@@ -1,5 +1,7 @@
 # Phase 1 Operations Runbook
 
+> **Current availability:** The formal production program is not yet runnable. `build_production_formal_dependencies()` is intentionally fail-closed while concrete production routes and adapters remain incomplete. Do not execute the production command below until [`production-capability-matrix.md`](production-capability-matrix.md) reaches `OFFLINE_VERIFIED` for the required program rows and the separately approved live-read/write gates have passed.
+
 This runbook covers the Phase 1 local Mac production flow for stock-analysis-assistant-v3. Phase 1 can run the local daily job, classify failures, clean same-day partial outputs before approved retries, write machine-readable status, and prepare `dist/pages`. It does not publish Cloudflare Pages automatically.
 
 ## Approval Gates
@@ -22,7 +24,7 @@ The required local schedule is:
 
 The launchd template is `ops/launchd/com.ccrt.stock-analysis-assistant.daily.plist.example`. It is an example only and must remain unloaded until explicitly approved.
 
-## Approved Run Command
+## Production Run Command After Readiness Approval
 
 After approval, run the daily job from `/Users/ccrt/股票分析助手`:
 

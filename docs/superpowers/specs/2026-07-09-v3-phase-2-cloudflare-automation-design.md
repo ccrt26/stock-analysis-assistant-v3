@@ -1,5 +1,7 @@
 # 股票分析助手 V3 Phase 2 Cloudflare 自动发布设计
 
+> **Lifecycle:** Historical publication design and normative publish behavior. It does not prove that upstream production analysis or Cloudflare automation is activated; see [`docs/operations/production-capability-matrix.md`](../../operations/production-capability-matrix.md).
+
 ## 1. 定位
 
 Phase 2 是 Phase 1 生产运营基础之后的连续建设阶段，不是孤立补丁。Phase 1 已经完成本机生产运行、重试清理、状态自检、`dist/pages` 发布包准备、Cloudflare 密码门和线上 smoke 命令。Phase 2 只负责把已经生成好的分析报告安全、简单、自动地发布到 Cloudflare Pages。

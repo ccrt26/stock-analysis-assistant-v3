@@ -1,5 +1,7 @@
 # V3 Formal Report Data Readiness Implementation Plan
 
+> **Lifecycle:** Historical execution record for commits `f22d63b` through `8e252ad`. It completed the offline safety framework but did not complete the concrete production routes or default production dependency factory required by the approved design. Current status is authoritative only in [`docs/operations/production-capability-matrix.md`](../../operations/production-capability-matrix.md). Do not resume this plan or use its self-review as production-readiness evidence.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. This plan must be executed inline by the current primary agent; do not use subagent-driven-development.
 
 **Goal:** Make Strategy V2 formal reports possible only from complete, current, traceable acquisition groups, with atomic primary/backup switching, immutable history, frozen candidates, contiguous focus history, committed run receipts, and fail-closed activation.

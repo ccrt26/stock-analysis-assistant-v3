@@ -1,5 +1,7 @@
 # V3 Phase 2 Cloudflare Automation Implementation Plan
 
+> **Lifecycle:** Historical execution record. Cloudflare code is not equivalent to an approved first deployment or activated automatic publication. Current status is tracked only in [`docs/operations/production-capability-matrix.md`](../../operations/production-capability-matrix.md).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build Phase 2 Cloudflare automation: one local one-command publish, automatic smoke verification, last-known-good rollback, local status page, and automatic publishing after the first successful manual publish.

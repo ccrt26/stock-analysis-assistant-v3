@@ -1,4 +1,6 @@
-# Mandatory Next Phases
+# Historical Phase Roadmap — Deprecated
+
+> This file no longer tracks current work or readiness. Its non-duplicated boundaries and execution order are consolidated into [`production-capability-matrix.md`](production-capability-matrix.md). It remains temporarily as a compatibility target for historical plans and documentation tests and will be removed when those active references are cleaned up under capability `GOV-001`.
 
 Phase 1 is only the local production operations foundation. Phase 2, Phase 3, and Phase 4 are mandatory follow-up phases, not optional polish.
 
@@ -16,7 +18,7 @@ Phase 2 remains approval-gated. The first real one-command Cloudflare publish st
 
 Strategy V2 is mandatory, not optional.
 
-Phase 3 Strategy V2 and the formal-report data-readiness boundary are implemented and verified offline on the `codex/v3-mvp` branch. Production use remains gated by live route capability approval, verification, backtest evidence, design review, and explicit approval.
+Phase 3 deterministic strategy behavior and the formal fail-closed safety framework are verified offline on the `codex/v3-mvp` branch. Concrete formal production clients, contracts, dependency assembly, live route capability evidence, and production activation remain incomplete and are tracked in the production capability matrix.
 
 Remaining future work must continue improving 5/20/40 trading-day backtests, recommendation quality calibration, industry, market-cap and liquidity constraints, and daily result review. Strategy changes must pass backtest and design review before they are used in production.
 

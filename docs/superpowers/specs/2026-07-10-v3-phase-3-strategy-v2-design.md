@@ -2,7 +2,9 @@
 
 Date: 2026-07-10
 
-Status: approved design basis, pending implementation plan
+Status: Historical normative Strategy V2 design; deterministic strategy implemented offline, formal production data path incomplete
+
+> Current implementation, live-read, production-write, and activation status is tracked only in [`docs/operations/production-capability-matrix.md`](../../operations/production-capability-matrix.md). This design remains authoritative for Strategy V2 behavior but does not prove production readiness.
 
 Related artifacts:
 
@@ -528,4 +530,3 @@ The implementation plan must still specify:
 - Exact HTML report page changes.
 - Backtest and replay scope for first validation.
 - Which existing tests are extended and which new tests are required.
-

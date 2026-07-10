@@ -1,5 +1,7 @@
 # Stock Analysis Assistant V3 Design
 
+> **Lifecycle:** Historical product design baseline. Later formal-readiness rules supersede its production behavior where stated. Current capability status is tracked only in [`docs/operations/production-capability-matrix.md`](../../operations/production-capability-matrix.md).
+
 Date: 2026-07-07
 Status: Approved design for implementation planning
 Project root: `/Users/ccrt/股票分析助手`

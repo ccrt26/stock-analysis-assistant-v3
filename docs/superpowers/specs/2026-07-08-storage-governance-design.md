@@ -1,5 +1,7 @@
 # 股票分析助手 V3 存储与执行治理设计
 
+> **Lifecycle:** Historical storage design and still a normative boundary for local-wide/Supabase-narrow storage. It does not state current production readiness; see [`docs/operations/production-capability-matrix.md`](../../operations/production-capability-matrix.md).
+
 ## 1. 目标
 
 第三版系统不能再把所有数据都堆进 Supabase，也不能退回第一版、第二版那种散乱本地文件。目标是建立一套可运行 6-12 个月、容量可控、可后评估、可复盘、可逐步优化的存储体系。

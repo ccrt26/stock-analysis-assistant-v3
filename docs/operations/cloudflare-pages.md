@@ -1,5 +1,7 @@
 # Cloudflare Pages Publish and Smoke
 
+> **Current availability:** Publish automation is implemented and offline-tested but not activated. No first approved formal production report exists, the automatic-publish flag is absent, and Cloudflare deployment must not run until the upstream gates in [`production-capability-matrix.md`](production-capability-matrix.md) pass.
+
 Phase 1 prepares a Cloudflare Pages artifact at `dist/pages`, but it does not upload it. Manual publish is allowed only after explicit approval and after the local production run has completed successfully.
 
 ## Approval Gates

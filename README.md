@@ -2,6 +2,12 @@
 
 这是一个面向中国大陆 A 股的报告优先型分析助手。系统用于生成观察建议、重点关注状态、证据包和后评估任务，不用于自动交易。
 
+## 当前生产状态与文档权威
+
+截至 2026-07-10，Strategy V2 确定性分析逻辑和正式失败关闭框架已经通过离线测试，但正式生产主备客户端、生产数据契约、默认依赖工厂和正式分析适配尚未接通。默认正式任务会安全停止，不会获取完整真实数据或生成正式分析报告。Supabase 正式迁移未应用，launchd 未加载，Cloudflare 首次发布和自动发布未启用。
+
+当前能力、缺口、验证等级和激活状态只以 [`docs/operations/production-capability-matrix.md`](docs/operations/production-capability-matrix.md) 为准。`docs/superpowers/specs/` 保存设计约束，`docs/superpowers/plans/` 保存历史执行记录；历史文档中的“完成”不能替代能力矩阵中的当前证据。
+
 ## 本地运行
 
 需要 Python 3.11 或更新版本。推荐路径：创建虚拟环境并安装 editable package 后运行。
@@ -14,8 +20,7 @@ python3 -m stock_analyzer health-check
 python3 -m stock_analyzer run-daily --fixture-mode --trade-date 2026-07-07
 ```
 
-默认 `health-check` 只做本地配置和凭据状态检查，不访问外部网络。生产 `run-daily` 使用真实行情接入；
-如果 Supabase 配置、Tushare token、依赖或真实数据不可用，命令会明确失败，不会把内置样例数据写入 Supabase。
+默认 `health-check` 只做本地配置和凭据状态检查，不访问外部网络。旧的有限 Tushare provider 不能绕过正式数据门禁；正式生产路线补齐前，非 fixture 生产命令必须失败关闭，也不能把内置样例数据写入 Supabase。
 
 未安装 editable package 的开发路径：使用 `PYTHONPATH=src` 直接运行源码。这是当前 smoke 已验证命令路径。
 
@@ -62,16 +67,18 @@ Cloudflare Pages 只发布报告成品，不发布原始数据、日志、规则
 
 ## Operations
 
+- Current production capability matrix: [docs/operations/production-capability-matrix.md](docs/operations/production-capability-matrix.md)
 - Phase 1 runbook: [docs/operations/runbook.md](docs/operations/runbook.md)
 - Cloudflare Pages manual publish and smoke: [docs/operations/cloudflare-pages.md](docs/operations/cloudflare-pages.md)
 - Phase 2 Cloudflare automation: see `docs/operations/cloudflare-pages.md` and `docs/superpowers/specs/2026-07-09-v3-phase-2-cloudflare-automation-design.md`.
-- Mandatory next phases: [docs/operations/mandatory-next-phases.md](docs/operations/mandatory-next-phases.md)
+- Deprecated historical phase roadmap (not a current-status source): [docs/operations/mandatory-next-phases.md](docs/operations/mandatory-next-phases.md)
 
 Operations are approval-gated. Do not enable launchd, run a real production job, run production cleanup, or deploy Cloudflare Pages without explicit approval.
 
 ## 验证边界
 
 - `python3 -m pytest` 使用本地 fake Supabase client 和内存仓库，不证明真实 Supabase 项目已连通。
+- 录制或合成的正式就绪测试不证明默认生产依赖工厂、真实主备客户端或真实数据链已经接通。
 - 默认 `health-check` 不访问网络；`--live-tushare-smoke` 是显式 opt-in 的真实 Tushare 访问路径。
 - 真实 Supabase smoke 应验证非 `--dry-run` 的 `run-daily` 使用真实行情源，且在配置或行情不可用时清晰失败、不写样例数据。
 - `--dry-run` 可以不设置 Supabase，且不会持久化分析状态。

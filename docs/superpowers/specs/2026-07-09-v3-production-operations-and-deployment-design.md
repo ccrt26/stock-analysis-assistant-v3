@@ -1,5 +1,7 @@
 # 股票分析助手 V3 生产运营与部署设计
 
+> **Lifecycle:** Historical operations design. Scheduler and publication code may exist without being production-data-ready or activated. Current status is tracked only in [`docs/operations/production-capability-matrix.md`](../../operations/production-capability-matrix.md).
+
 ## 1. 定位
 
 本设计是 V3 MVP、Tushare Ingestion V1、Storage Governance Continuation 之后的连续下一章，不是孤立补丁。V3 已经完成真实生产首跑、Supabase 决策账本、本地 `local_warehouse`、本地 `local_archive`、容量保护、选择性写入和 Cloudflare Pages 密码门代码。下一章目标是先把系统变成每天稳定自动运行的本机生产流程，再继续建设线上发布、Strategy V2 和 Product UI。

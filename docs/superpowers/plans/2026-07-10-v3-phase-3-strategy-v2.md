@@ -1,5 +1,7 @@
 # V3 Phase 3 Strategy V2 Implementation Plan
 
+> **Lifecycle:** Historical execution record. It implemented deterministic Strategy V2 behavior and offline reports, while intentionally leaving several production provider methods empty. Current production status is tracked only in [`docs/operations/production-capability-matrix.md`](../../operations/production-capability-matrix.md).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build Phase 3 Strategy V2 so every A-share trading day produces a knowledge-first daily recommendation report, a focus-stock tracking report, structured evidence snapshots, clear action and position suggestions, and explicit data-insufficient outputs when required data cannot be recovered.
