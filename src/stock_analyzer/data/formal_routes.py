@@ -91,12 +91,13 @@ class ManualHoldingsFileRoute:
         self,
         path: Path,
         capability: RouteCapabilityEvidence | None = None,
+        contract_version: str = "formal-v1",
     ) -> None:
         self.path = Path(path)
         self.capability = capability or RouteCapabilityEvidence(
             route_id=self.route_id,
             group_id=self.group_id,
-            contract_version="formal-v1",
+            contract_version=contract_version,
             full_contract_tested=True,
             field_semantics_verified=True,
             full_universe_verified=True,
@@ -131,8 +132,10 @@ class ManualHoldingsFileRoute:
                 )
             records.append(
                 {
-                    "trade_date": request.trade_date,
                     **item,
+                    "record_type": "manual_holding",
+                    "trade_date": request.trade_date,
+                    "source_name": "local.manual_holdings",
                 }
             )
         return AcquisitionPayload(
@@ -146,7 +149,14 @@ class ManualHoldingsFileRoute:
             covered_dates=(request.trade_date,),
             coverage_codes=tuple(sorted(item["ts_code"] for item in records)),
             coverage_proven=True,
-            field_coverage={"trade_date": True, "ts_code": True},
+            field_coverage={
+                "record_type": True,
+                "trade_date": True,
+                "ts_code": True,
+                "name": True,
+                "position_pct": True,
+                "source_name": True,
+            },
             contract_version=request.contract_version,
         )
 
@@ -213,9 +223,13 @@ def build_formal_route_registry(
                 "live capability evidence required for " + ", ".join(recorded_routes)
             )
     registry: dict[AcquisitionGroupId, FormalRoutePair] = {}
+    contract_versions = {item.contract_version for item in capabilities.values()}
+    if len(contract_versions) != 1:
+        raise ValueError("formal route capabilities must share one contract version")
+    contract_version = next(iter(contract_versions))
     for group_id, (primary_id, backup_id, method) in _ROUTE_DEFINITIONS.items():
         primary_owner = official_client if group_id == AcquisitionGroupId.OFFICIAL_EVENTS_RISK else primary_client
-        backup_owner = official_client if group_id == AcquisitionGroupId.CALENDAR_UNIVERSE else backup_client
+        backup_owner = backup_client
         registry[group_id] = FormalRoutePair(
             primary=NormalizedEndpointRoute(
                 route_id=primary_id,
@@ -235,7 +249,10 @@ def build_formal_route_registry(
             ),
         )
     registry[AcquisitionGroupId.MANUAL_HOLDINGS] = FormalRoutePair(
-        primary=ManualHoldingsFileRoute(holdings_path),
+        primary=ManualHoldingsFileRoute(
+            holdings_path,
+            contract_version=contract_version,
+        ),
         backup=None,
         approved_single_source=True,
     )

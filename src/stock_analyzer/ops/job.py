@@ -17,6 +17,10 @@ from stock_analyzer.ops.redaction import redact_secrets
 from stock_analyzer.ops.status import FailureClass, JobStatus, RunStatus
 from stock_analyzer.ops.verify import ProductionVerification, verify_production_result
 from stock_analyzer.ops.formal_run import run_formal_strategy_v2
+from stock_analyzer.ops.production_dependencies import (
+    ProductionExternalRuntime,
+    build_production_formal_dependencies,
+)
 from stock_analyzer.storage.capacity_guard import (
     SupabaseCapacityGuard,
     SupabaseCapacityLimitExceeded,
@@ -434,25 +438,26 @@ def _default_health_check(*_args) -> None:
         )
 
 
-def build_production_formal_dependencies(
+def _default_run_daily(
     project_root: Path,
     repository,
     trade_date: date,
+    *,
+    runtime: ProductionExternalRuntime | None = None,
 ):
-    raise HumanInterventionJobError(
-        "Production formal route clients and recorded capability evidence are not configured. Live acquisition requires separate explicit approval.",
-        failure_class=FailureClass.SCHEMA_MISMATCH,
-        fix_suggestion=(
-            "Configure the approved formal route clients and capability records; do not fall back to the legacy report path."
-        ),
-    )
-
-
-def _default_run_daily(project_root: Path, repository, trade_date: date):
-    dependencies = build_production_formal_dependencies(
-        Path(project_root),
-        repository,
-        trade_date,
+    dependencies = (
+        build_production_formal_dependencies(
+            Path(project_root),
+            repository,
+            trade_date,
+            runtime=runtime,
+        )
+        if runtime is not None
+        else build_production_formal_dependencies(
+            Path(project_root),
+            repository,
+            trade_date,
+        )
     )
     report_cutoff = datetime.combine(
         trade_date,
