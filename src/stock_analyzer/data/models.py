@@ -78,6 +78,65 @@ class DailyBasicRow(BaseModel):
     fetched_at: Optional[datetime] = None
 
 
+class CompanyProfileRow(BaseModel):
+    trade_date: date
+    ts_code: str
+    business_summary: Optional[str] = None
+    main_business_lines: list[str] = Field(default_factory=list)
+    source_name: str
+    source_grade: SourceGrade
+
+
+class FundamentalSummaryRow(BaseModel):
+    trade_date: date
+    ts_code: str
+    revenue_yoy: Optional[float] = None
+    profit_yoy: Optional[float] = None
+    gross_margin: Optional[float] = None
+    operating_cashflow: Optional[float] = None
+    source_name: str
+    source_grade: SourceGrade
+
+
+class BoardContextRow(BaseModel):
+    trade_date: date
+    board_name: str
+    board_type: str
+    relative_strength_20d: Optional[float] = None
+    breadth: Optional[float] = None
+    turnover_change: Optional[float] = None
+    source_name: str
+    source_grade: SourceGrade
+
+
+class ConceptTagRow(BaseModel):
+    trade_date: date
+    ts_code: str
+    concept_name: str
+    source_name: str
+    source_grade: SourceGrade
+
+
+class EventCatalystRow(BaseModel):
+    trade_date: date
+    ts_code: str
+    event_type: str
+    title: str
+    source_reliability: str
+    is_new_information: bool
+    source_name: str
+    source_grade: SourceGrade
+
+
+class OfficialRiskEventRow(BaseModel):
+    trade_date: date
+    ts_code: str
+    risk_type: str
+    description: str
+    source_name: str
+    source_grade: SourceGrade
+
+
 class DataUnavailableNotice(BaseModel):
     trade_date: date
     reason: str

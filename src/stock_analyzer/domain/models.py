@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import date, datetime
 from enum import Enum
 from typing import Dict, List, Optional
@@ -155,11 +156,39 @@ class OperationalReportState(str, Enum):
 
 
 class DataRecoveryAttempt(BaseModel):
-    source: str
+    source: Optional[str] = None
+    family: Optional[str] = None
+    source_name: Optional[str] = None
+    status: Optional[str] = None
+    message: Optional[str] = None
+    trade_date: Optional[date] = None
     attempted_at: Optional[datetime] = None
     succeeded: bool = False
     recovered_fields: List[str] = Field(default_factory=list)
     error: Optional[str] = None
+
+    @field_validator("message", "error")
+    @classmethod
+    def _redact_sensitive_terms(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return value
+        return re.sub(
+            r"(?i)\b(token|secret|password|api[\s_-]?key|authorization|bearer)\b",
+            "[redacted]",
+            value,
+        )
+
+    @model_validator(mode="after")
+    def _backfill_source_contract_fields(self) -> "DataRecoveryAttempt":
+        if self.source is None and self.source_name is not None:
+            self.source = self.source_name
+        if self.source_name is None and self.source is not None:
+            self.source_name = self.source
+        if self.status is None:
+            self.status = "success" if self.succeeded else "failed"
+        if self.message is None and self.error is not None:
+            self.message = self.error
+        return self
 
 
 class DataRequirementStatus(BaseModel):
