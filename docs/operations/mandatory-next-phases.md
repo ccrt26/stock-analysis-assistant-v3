@@ -16,9 +16,15 @@ Phase 2 remains approval-gated. The first real one-command Cloudflare publish st
 
 Strategy V2 is mandatory, not optional.
 
-Phase 3 must add 5/20/40 trading-day backtests, recommendation quality scoring, industry, market-cap and liquidity constraints, and daily result review. Strategy changes must pass backtest and design review before they are used in production.
+Phase 3 Strategy V2 is implemented for the `codex/v3-mvp` branch through the MVP task set, with production use still gated by verification, backtest evidence, design review, and explicit approval.
+
+Remaining future work must continue improving 5/20/40 trading-day backtests, recommendation quality calibration, industry, market-cap and liquidity constraints, and daily result review. Strategy changes must pass backtest and design review before they are used in production.
+
+Supabase remains a narrow decision ledger for operational decisions and recommendations. Full market data stays local.
 
 Do not ship manual tuning directly to production without explicit approval.
+
+broker integration, order placement, and autotrading/自动交易 are out of scope.
 
 ## Phase 4 Product UI
 
@@ -32,6 +38,6 @@ Do not publish a Product UI redesign without explicit approval and online smoke.
 
 1. Complete Phase 1 operations review and approved local run.
 2. Build Phase 2 Cloudflare automation with GPT-5.5 xhigh implementer, reviewer, and subagents.
-3. Build Phase 3 Strategy V2 with GPT-5.5 xhigh implementer, reviewer, and subagents; this remains mandatory after Phase 2.
+3. Keep Phase 3 Strategy V2 on `codex/v3-mvp` under GPT-5.5 xhigh implementer, reviewer, and subagent governance; future calibration and production approval remain mandatory after Phase 2.
 4. Build Phase 4 Product UI with GPT-5.5 xhigh implementer, reviewer, and subagents; this remains mandatory after Phase 2.
 5. Run final whole-branch review with GPT-5.5 xhigh before enabling production automation.

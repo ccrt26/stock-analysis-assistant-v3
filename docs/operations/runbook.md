@@ -34,6 +34,18 @@ For approved retries, keep the same `trade_date`, set `--scheduled-slot 19:00 --
 
 Mac notification is disabled by default. Enable it only when desired with `--notify-mac` or `STOCK_ANALYZER_NOTIFY_MAC=1`; it should fire only when the final status is `failed_needs_human`.
 
+### Strategy V2 daily run
+
+Use fixture or dry-run for local validation:
+
+```bash
+stock-analyzer run-daily --trade-date YYYY-MM-DD --fixture-mode --strategy-v2
+```
+
+Production Strategy V2 writes require explicit approval before running without fixture mode. Do not print `.env.local`, service-role keys, Tushare tokens, Cloudflare tokens, report passwords, or session secrets. Do not perform unapproved production writes.
+
+On trading days, the job must produce either generated recommendation and focus outputs or an explicit `data_insufficient` report with recovery attempts and missing fields.
+
 ## Non-Trading-Day Skip Rule
 
 When the calendar gate returns a non-trading day, the job status must be `skipped_non_trading_day`. The job must not run analysis, must not clean same-day outputs, must not prepare a new deploy package, and must not overwrite reports. It should only write the status JSON and job log.
