@@ -455,6 +455,70 @@ def test_supabase_repository_loads_snapshots_only_through_active_formal_receipt_
     ]
 
 
+def test_supabase_repository_builds_focus_days_only_from_active_receipts():
+    eligible = [date(2026, 7, value) for value in (3, 6, 7, 8, 9)]
+    client = FakeSupabaseClient()
+    client.table_data["active_formal_run_receipt"] = [
+        {
+            "target_date": value.isoformat(),
+            "state": "report_generated",
+            "receipt_payload": {},
+        }
+        for value in eligible
+    ]
+    client.table_data["formal_run_receipt"] = [
+        {"target_date": "2026-07-02", "state": "report_generated"}
+    ]
+
+    days = SupabaseAnalysisRepository(client).load_formal_focus_days(
+        before_date=date(2026, 7, 10),
+        eligible_dates=eligible,
+    )
+
+    assert [item.trade_date for item in days] == eligible
+    assert all(item.formally_committed for item in days)
+    assert all(not item.blocked and not item.fixture and not item.backfill_only for item in days)
+    assert client.table_calls == ["active_formal_run_receipt"]
+
+
+def test_blocked_fixture_or_backfill_receipt_cannot_become_formal_focus_day():
+    eligible = [date(2026, 7, value) for value in (3, 6, 7, 8, 9)]
+    client = FakeSupabaseClient()
+    client.table_data["active_formal_run_receipt"] = [
+        {
+            "target_date": eligible[0].isoformat(),
+            "state": "report_generated",
+            "receipt_payload": {},
+        },
+        {
+            "target_date": eligible[1].isoformat(),
+            "state": "blocked_needs_human",
+            "receipt_payload": {},
+        },
+        {
+            "target_date": eligible[2].isoformat(),
+            "state": "report_generated",
+            "receipt_payload": {"fixture": True},
+        },
+        {
+            "target_date": eligible[3].isoformat(),
+            "state": "analysis_complete_no_recommendations",
+            "receipt_payload": {"backfill_only": True},
+        },
+    ]
+
+    days = SupabaseAnalysisRepository(client).load_formal_focus_days(
+        before_date=date(2026, 7, 10),
+        eligible_dates=eligible,
+    )
+
+    assert days[0].formally_committed is True
+    assert days[1].blocked is True and days[1].formally_committed is False
+    assert days[2].fixture is True and days[2].formally_committed is False
+    assert days[3].backfill_only is True and days[3].formally_committed is False
+    assert days[4].blocked is True and days[4].formally_committed is False
+
+
 def test_supabase_repository_prepares_pending_formal_rows_and_activates_through_rpc():
     from stock_analyzer.ops.activation import hash_ledger_rows
 

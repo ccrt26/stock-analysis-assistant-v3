@@ -220,3 +220,52 @@ def test_formal_readiness_schema_does_not_add_wide_market_payload_columns():
         "amount numeric",
     ]:
         assert forbidden not in sql
+
+
+def test_formal_migration_explicitly_grants_service_role_and_revokes_public_api_roles():
+    compact_sql = re.sub(
+        r"\s+",
+        " ",
+        FORMAL_READINESS_SCHEMA_PATH.read_text(encoding="utf-8").lower(),
+    )
+    for table in [
+        "formal_run_receipt",
+        "formal_run_pending_batch",
+        "formal_run_activation_marker",
+        "formal_decision_activation_row",
+        "formal_reconciliation_task",
+    ]:
+        assert (
+            f"revoke all on table public.{table} from public, anon, authenticated"
+            in compact_sql
+        )
+        assert (
+            f"grant select, insert, update, delete on table public.{table} to service_role"
+            in compact_sql
+        )
+
+
+def test_formal_views_are_security_invoker_and_service_role_select_only():
+    compact_sql = re.sub(
+        r"\s+",
+        " ",
+        FORMAL_READINESS_SCHEMA_PATH.read_text(encoding="utf-8").lower(),
+    )
+    assert compact_sql.count("with (security_invoker = true)") == 2
+    for view in ["active_formal_run_receipt", "active_formal_decision_row"]:
+        assert (
+            f"revoke all on table public.{view} from public, anon, authenticated"
+            in compact_sql
+        )
+        assert f"grant select on table public.{view} to service_role" in compact_sql
+
+
+def test_activation_rpc_revokes_public_anon_authenticated_and_grants_service_role():
+    compact_sql = re.sub(
+        r"\s+",
+        " ",
+        FORMAL_READINESS_SCHEMA_PATH.read_text(encoding="utf-8").lower(),
+    )
+    signature = "public.activate_formal_run_v1(text, text, text, text, text)"
+    assert f"revoke all on function {signature} from public, anon, authenticated" in compact_sql
+    assert f"grant execute on function {signature} to service_role" in compact_sql

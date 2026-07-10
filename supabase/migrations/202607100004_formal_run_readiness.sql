@@ -58,6 +58,17 @@ alter table public.formal_run_activation_marker enable row level security;
 alter table public.formal_decision_activation_row enable row level security;
 alter table public.formal_reconciliation_task enable row level security;
 
+revoke all on table public.formal_run_receipt from public, anon, authenticated;
+grant select, insert, update, delete on table public.formal_run_receipt to service_role;
+revoke all on table public.formal_run_pending_batch from public, anon, authenticated;
+grant select, insert, update, delete on table public.formal_run_pending_batch to service_role;
+revoke all on table public.formal_run_activation_marker from public, anon, authenticated;
+grant select, insert, update, delete on table public.formal_run_activation_marker to service_role;
+revoke all on table public.formal_decision_activation_row from public, anon, authenticated;
+grant select, insert, update, delete on table public.formal_decision_activation_row to service_role;
+revoke all on table public.formal_reconciliation_task from public, anon, authenticated;
+grant select, insert, update, delete on table public.formal_reconciliation_task to service_role;
+
 drop policy if exists formal_run_receipt_service_role_all on public.formal_run_receipt;
 create policy formal_run_receipt_service_role_all on public.formal_run_receipt
     for all to service_role using (true) with check (true);
@@ -87,6 +98,9 @@ where receipt.state in ('report_generated', 'analysis_complete_no_recommendation
   and receipt.local_activation_id = marker.activation_id
   and receipt.ledger_activation_id = marker.activation_id;
 
+revoke all on table public.active_formal_run_receipt from public, anon, authenticated;
+grant select on table public.active_formal_run_receipt to service_role;
+
 create or replace view public.active_formal_decision_row
 with (security_invoker = true)
 as
@@ -101,6 +115,9 @@ from public.formal_decision_activation_row as decision
 join public.active_formal_run_receipt as receipt
     on receipt.run_id = decision.run_id
    and receipt.activation_id = decision.activation_id;
+
+revoke all on table public.active_formal_decision_row from public, anon, authenticated;
+grant select on table public.active_formal_decision_row to service_role;
 
 create or replace function public.activate_formal_run_v1(
     p_run_id text,

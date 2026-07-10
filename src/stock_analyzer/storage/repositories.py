@@ -530,6 +530,60 @@ class SupabaseAnalysisRepository:
             ),
         )
 
+    def load_formal_focus_days(
+        self,
+        before_date: date,
+        eligible_dates: list[date],
+    ) -> list[FormalFocusDay]:
+        eligible = [value for value in eligible_dates if value < before_date]
+        eligible_set = set(eligible)
+        result = self.client.table("active_formal_run_receipt").select(
+            "target_date,state,receipt_payload"
+        ).execute()
+        rows_by_date = {
+            parsed: row
+            for row in result.data or []
+            if (parsed := _date_from_row(row.get("target_date"))) in eligible_set
+        }
+        days: list[FormalFocusDay] = []
+        committed_states = {
+            "report_generated",
+            "analysis_complete_no_recommendations",
+        }
+        for value in eligible:
+            row = rows_by_date.get(value)
+            if row is None:
+                days.append(
+                    FormalFocusDay(
+                        trade_date=value,
+                        formally_committed=False,
+                        blocked=True,
+                    )
+                )
+                continue
+            receipt_payload = row.get("receipt_payload")
+            if not isinstance(receipt_payload, dict):
+                receipt_payload = {}
+            fixture = bool(
+                receipt_payload.get("fixture")
+                or receipt_payload.get("fixture_mode")
+                or receipt_payload.get("is_fixture")
+            )
+            backfill_only = bool(receipt_payload.get("backfill_only"))
+            state = str(row.get("state", ""))
+            blocked = state not in committed_states
+            formally_committed = not blocked and not fixture and not backfill_only
+            days.append(
+                FormalFocusDay(
+                    trade_date=value,
+                    formally_committed=formally_committed,
+                    blocked=blocked,
+                    fixture=fixture,
+                    backfill_only=backfill_only,
+                )
+            )
+        return days
+
     def _load_active_formal_payloads(
         self,
         row_kinds: tuple[str, ...],
