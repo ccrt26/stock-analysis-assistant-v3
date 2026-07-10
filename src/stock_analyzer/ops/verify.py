@@ -17,6 +17,7 @@ from stock_analyzer.storage.capacity_guard import (
 
 MAX_DAILY_RECOMMENDATIONS = 10
 EVALUATION_TASKS_PER_RECOMMENDATION = 6
+VALID_REPORT_MODES = ("production", "data_insufficient")
 FIXTURE_SAMPLE_PATTERNS = (
     re.compile(r"fixture/sample", re.IGNORECASE),
     re.compile(r"\bfixture\b", re.IGNORECASE),
@@ -455,9 +456,24 @@ def _append_operational_status_failures(
     if report_mode == "data_insufficient":
         return _append_data_insufficient_failures(failures, operational_status)
 
-    if report_mode == "production" and not _has_generated_operational_states(
-        operational_status
-    ):
+    if report_mode != "production":
+        failures.append(
+            ProductionVerificationFailure(
+                code="report_mode_invalid",
+                message=(
+                    "Report payload report_mode must be one of "
+                    f"{', '.join(VALID_REPORT_MODES)}; found {report_mode!r}."
+                ),
+                fix_suggestion=(
+                    "Regenerate latest.json with report_mode='production' and "
+                    "generated operational_status, or report_mode='data_insufficient' "
+                    "with recovery evidence."
+                ),
+            )
+        )
+        return False
+
+    if not _has_generated_operational_states(operational_status):
         failures.append(
             ProductionVerificationFailure(
                 code="trading_day_output_state_invalid",
@@ -573,7 +589,7 @@ def _string_or_none(value: Any) -> str | None:
 def _has_strategy_v2_recommendation_cards(
     payload: dict[str, Any] | None,
 ) -> bool:
-    if payload is None or payload.get("report_mode") != "production":
+    if payload is None:
         return False
     cards = payload.get("recommendation_cards")
     return isinstance(cards, list) and bool(cards)

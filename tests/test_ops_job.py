@@ -305,6 +305,82 @@ def test_verify_strategy_v2_fails_when_score_is_visible_in_production_html(
     assert _failure(verification, "visible_total_score").fix_suggestion
 
 
+def test_verify_rejects_report_with_missing_report_mode(tmp_path):
+    trade_date = date(2026, 7, 10)
+    _write_production_report(
+        tmp_path,
+        trade_date,
+        report_json_payload={
+            "trade_date": trade_date.isoformat(),
+            "is_fixture": False,
+            "recommendations": [],
+        },
+    )
+
+    verification = verify_production_result(
+        tmp_path,
+        FakeVerificationRepository(),
+        trade_date,
+    )
+
+    assert verification.passed is False
+    failure = _failure(verification, "report_mode_invalid")
+    assert "report_mode" in failure.message
+    assert failure.fix_suggestion
+
+
+def test_verify_rejects_report_with_unknown_report_mode(tmp_path):
+    trade_date = date(2026, 7, 10)
+    _write_production_report(
+        tmp_path,
+        trade_date,
+        report_json_payload={
+            "trade_date": trade_date.isoformat(),
+            "report_mode": "preview",
+            "is_fixture": False,
+            "recommendations": [],
+        },
+    )
+
+    verification = verify_production_result(
+        tmp_path,
+        FakeVerificationRepository(),
+        trade_date,
+    )
+
+    assert verification.passed is False
+    failure = _failure(verification, "report_mode_invalid")
+    assert "preview" in failure.message
+    assert failure.fix_suggestion
+
+
+def test_verify_strategy_v2_score_scan_runs_when_report_mode_is_missing(
+    tmp_path,
+):
+    trade_date = date(2026, 7, 10)
+    _write_production_report(
+        tmp_path,
+        trade_date,
+        index_html="<html><body>评分 83.2</body></html>",
+        report_json_payload={
+            "trade_date": trade_date.isoformat(),
+            "is_fixture": False,
+            "recommendation_cards": [{"ts_code": "600000.SH"}],
+            "strategy_snapshots": [{"internal_score": 83.2}],
+        },
+    )
+
+    verification = verify_production_result(
+        tmp_path,
+        FakeVerificationRepository(),
+        trade_date,
+    )
+
+    assert verification.passed is False
+    assert _failure(verification, "report_mode_invalid").fix_suggestion
+    assert _failure(verification, "visible_total_score").fix_suggestion
+
+
 def test_verify_rejects_production_report_without_generated_operational_status(
     tmp_path,
 ):
