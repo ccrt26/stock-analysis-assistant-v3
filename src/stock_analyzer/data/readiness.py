@@ -128,6 +128,8 @@ class AcquisitionPayload(BaseModel):
     source_names: tuple[str, ...]
     records: tuple[dict[str, Any], ...]
     covered_dates: tuple[date, ...]
+    coverage_codes: tuple[str, ...] = ()
+    coverage_proven: bool = False
     field_coverage: dict[str, bool]
     unit_metadata: dict[str, str] = Field(default_factory=dict)
     adjustment_basis: str | None = None
@@ -155,6 +157,8 @@ class AcquisitionPayload(BaseModel):
             "source_names": sorted(self.source_names),
             "records": records,
             "covered_dates": sorted(value.isoformat() for value in self.covered_dates),
+            "coverage_codes": sorted(self.coverage_codes),
+            "coverage_proven": self.coverage_proven,
             "field_coverage": self.field_coverage,
             "unit_metadata": self.unit_metadata,
             "adjustment_basis": self.adjustment_basis,
@@ -249,6 +253,12 @@ def validate_group_payload(
     for code in expected_codes:
         target = target_rows.get(code)
         if target is None:
+            if (
+                not contract.current_fact_fields
+                and payload.coverage_proven
+                and code in payload.coverage_codes
+            ):
+                continue
             reasons.append(f"missing_code:{code}:{request.trade_date.isoformat()}")
             continue
         for field in contract.current_fact_fields:

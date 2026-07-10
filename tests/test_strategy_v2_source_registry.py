@@ -50,8 +50,12 @@ def test_source_registry_names_exact_collection_paths():
     )
     assert (
         registry["events_catalysts"].backup_path
-        == "eastmoney.announcements|sse.disclosure_cache|szse.disclosure_cache"
+        == "EastmoneyEndpointClient.fetch_official_events_risk"
     )
+    assert registry["events_catalysts"].primary_route_id == "official.events_risk.v1"
+    assert registry["events_catalysts"].backup_route_id == "eastmoney.events_risk.v1"
+    assert registry["manual_holdings"].approved_single_source is True
+    assert registry["manual_holdings"].backup_route_id is None
 
 
 def test_recovery_attempt_serializes_secret_key_value_pairs_without_values():

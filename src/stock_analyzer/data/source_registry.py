@@ -5,6 +5,7 @@ from datetime import date
 from pydantic import BaseModel, ConfigDict
 
 from stock_analyzer.data.models import SourceStatus
+from stock_analyzer.data.readiness import AcquisitionGroupId
 from stock_analyzer.domain.models import DataRecoveryAttempt, DataRequirementLevel
 
 
@@ -16,6 +17,10 @@ class DataFamilySourcePlan(BaseModel):
     primary_path: str
     backup_path: str
     local_cache_path: str
+    formal_group_id: AcquisitionGroupId | None = None
+    primary_route_id: str | None = None
+    backup_route_id: str | None = None
+    approved_single_source: bool = False
 
 
 _SOURCE_REGISTRY = {
@@ -104,8 +109,8 @@ _SOURCE_REGISTRY = {
     "events_catalysts": DataFamilySourcePlan(
         family="events_catalysts",
         level=DataRequirementLevel.REQUIRED,
-        primary_path="tushare.announcements|official_exchange_disclosure_cache",
-        backup_path="eastmoney.announcements|sse.disclosure_cache|szse.disclosure_cache",
+        primary_path="OfficialDisclosureClient.fetch_official_events_risk",
+        backup_path="EastmoneyEndpointClient.fetch_official_events_risk",
         local_cache_path=(
             "local_warehouse/parquet/event_catalysts/"
             "trade_date=<date>/data.parquet"
@@ -134,8 +139,78 @@ _SOURCE_REGISTRY = {
 }
 
 
+_FORMAL_ROUTE_BINDINGS = {
+    "stock_identity": (
+        AcquisitionGroupId.CALENDAR_UNIVERSE,
+        "tushare.calendar_universe.v1",
+        "official_exchange.calendar_universe.v1",
+    ),
+    "daily_ohlcv": (
+        AcquisitionGroupId.MARKET_DECISION,
+        "tushare.market_decision.v1",
+        "eastmoney.market_decision.v1",
+    ),
+    "daily_basic_valuation": (
+        AcquisitionGroupId.MARKET_DECISION,
+        "tushare.market_decision.v1",
+        "eastmoney.market_decision.v1",
+    ),
+    "company_profile": (
+        AcquisitionGroupId.CANDIDATE_FUNDAMENTAL,
+        "tushare.candidate_fundamental.v1",
+        "eastmoney.candidate_fundamental.v1",
+    ),
+    "industry_board": (
+        AcquisitionGroupId.BOARD_INDUSTRY,
+        "tushare.board_industry.v1",
+        "eastmoney.board_industry.v1",
+    ),
+    "concept_tags": (
+        AcquisitionGroupId.CONCEPT_THEME,
+        "tushare.concept_theme.v1",
+        "eastmoney.concept_theme.v1",
+    ),
+    "fundamentals_summary": (
+        AcquisitionGroupId.CANDIDATE_FUNDAMENTAL,
+        "tushare.candidate_fundamental.v1",
+        "eastmoney.candidate_fundamental.v1",
+    ),
+    "market_board_context": (
+        AcquisitionGroupId.MARKET_DECISION,
+        "tushare.market_decision.v1",
+        "eastmoney.market_decision.v1",
+    ),
+    "events_catalysts": (
+        AcquisitionGroupId.OFFICIAL_EVENTS_RISK,
+        "official.events_risk.v1",
+        "eastmoney.events_risk.v1",
+    ),
+    "official_hard_risk": (
+        AcquisitionGroupId.OFFICIAL_EVENTS_RISK,
+        "official.events_risk.v1",
+        "eastmoney.events_risk.v1",
+    ),
+    "manual_holdings": (
+        AcquisitionGroupId.MANUAL_HOLDINGS,
+        "local.manual_holdings.v1",
+        None,
+    ),
+}
+
+
 def strategy_v2_source_registry() -> dict[str, DataFamilySourcePlan]:
-    return dict(_SOURCE_REGISTRY)
+    return {
+        family: plan.model_copy(
+            update={
+                "formal_group_id": binding[0],
+                "primary_route_id": binding[1],
+                "backup_route_id": binding[2],
+                "approved_single_source": family == "manual_holdings",
+            }
+        )
+        for family, plan in _SOURCE_REGISTRY.items()
+        for binding in (_FORMAL_ROUTE_BINDINGS[family],)
+    }
 
 
 def record_recovery_attempt(
