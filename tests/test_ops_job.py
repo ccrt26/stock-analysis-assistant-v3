@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import json
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from types import SimpleNamespace
+from zoneinfo import ZoneInfo
 
 import pytest
 from typer.testing import CliRunner
@@ -10,6 +11,8 @@ from typer.testing import CliRunner
 from stock_analyzer.cli import app
 from stock_analyzer.ops.calendar import TradingDayDecision
 from stock_analyzer.ops.cleanup import CleanupSummary
+from stock_analyzer.data.readiness import FormalRunState
+from stock_analyzer.ops.formal_run import RunReceipt
 from stock_analyzer.ops.job import (
     HumanInterventionJobError,
     RetryableJobError,
@@ -37,12 +40,45 @@ from stock_analyzer.storage.capacity_guard import (
 )
 
 
+def _activated_receipt(trade_date: date) -> RunReceipt:
+    return RunReceipt(
+        run_id=f"verified-{trade_date.isoformat()}",
+        target_date=trade_date,
+        report_cutoff=datetime(
+            trade_date.year,
+            trade_date.month,
+            trade_date.day,
+            16,
+            tzinfo=ZoneInfo("Asia/Shanghai"),
+        ),
+        acquisition_contract_version="formal-v1",
+        screening_version="screen-v1",
+        state=FormalRunState.REPORT_GENERATED,
+        group_version_ids={"market_decision": "version-1"},
+        input_set_id="input-1",
+        candidate_set_id="candidate-1",
+        evidence_hashes={"evidence": "hash"},
+        artifact_hashes={"index.html": "hash"},
+        local_activation_id="activation-1",
+        ledger_activation_id="activation-1",
+    )
+
+
+def _verify(project_root, repository, trade_date):
+    return verify_production_result(
+        project_root,
+        repository,
+        trade_date,
+        receipt=_activated_receipt(trade_date),
+    )
+
+
 def test_verify_accepts_zero_recommendations_as_success_no_recommendations(tmp_path):
     trade_date = date(2026, 7, 9)
     repository = FakeVerificationRepository()
     _write_production_report(tmp_path, trade_date)
 
-    verification = verify_production_result(tmp_path, repository, trade_date)
+    verification = _verify(tmp_path, repository, trade_date)
 
     assert verification.passed is True
     assert verification.status == RunStatus.SUCCESS_NO_RECOMMENDATIONS
@@ -74,7 +110,7 @@ def test_verify_accepts_recommendations_when_counts_and_artifacts_match(tmp_path
     )
     _write_production_report(tmp_path, trade_date)
 
-    verification = verify_production_result(tmp_path, repository, trade_date)
+    verification = _verify(tmp_path, repository, trade_date)
 
     assert verification.passed is True
     assert verification.status == RunStatus.SUCCESS_WITH_RECOMMENDATIONS
@@ -105,7 +141,7 @@ def test_verify_fails_when_recommendations_exceed_daily_limit(tmp_path):
     )
     _write_production_report(tmp_path, trade_date)
 
-    verification = verify_production_result(tmp_path, repository, trade_date)
+    verification = _verify(tmp_path, repository, trade_date)
 
     assert verification.passed is False
     assert verification.status == RunStatus.FAILED_NEEDS_HUMAN
@@ -122,7 +158,7 @@ def test_verify_fails_when_evidence_count_does_not_match_recommendations(tmp_pat
     )
     _write_production_report(tmp_path, trade_date)
 
-    verification = verify_production_result(tmp_path, repository, trade_date)
+    verification = _verify(tmp_path, repository, trade_date)
 
     assert verification.passed is False
     assert _failure(verification, "evidence_count_mismatch").fix_suggestion
@@ -140,7 +176,7 @@ def test_verify_fails_when_evaluation_task_count_is_not_six_per_recommendation(
     )
     _write_production_report(tmp_path, trade_date)
 
-    verification = verify_production_result(tmp_path, repository, trade_date)
+    verification = _verify(tmp_path, repository, trade_date)
 
     assert verification.passed is False
     assert _failure(verification, "evaluation_task_count_mismatch").fix_suggestion
@@ -156,7 +192,7 @@ def test_verify_fails_when_selected_market_rows_reach_full_market_scale(tmp_path
     )
     _write_production_report(tmp_path, trade_date)
 
-    verification = verify_production_result(tmp_path, repository, trade_date)
+    verification = _verify(tmp_path, repository, trade_date)
 
     assert verification.passed is False
     assert _failure(verification, "selected_market_rows_too_large").fix_suggestion
@@ -179,7 +215,7 @@ def test_verify_fails_when_supabase_selected_market_codes_exceed_limit(tmp_path)
     repository = FakeSupabaseVerificationRepository(client)
     _write_production_report(tmp_path, trade_date)
 
-    verification = verify_production_result(tmp_path, repository, trade_date)
+    verification = _verify(tmp_path, repository, trade_date)
 
     assert verification.passed is False
     assert _failure(verification, "selected_market_codes_too_large").fix_suggestion
@@ -189,7 +225,7 @@ def test_verify_fails_when_report_date_differs_from_trade_date(tmp_path):
     trade_date = date(2026, 7, 9)
     _write_production_report(tmp_path, date(2026, 7, 8))
 
-    verification = verify_production_result(
+    verification = _verify(
         tmp_path,
         FakeVerificationRepository(),
         trade_date,
@@ -207,7 +243,7 @@ def test_verify_fails_when_fixture_or_sample_strings_leak_into_reports(tmp_path)
         index_html="<html>Fixture/sample report: generated from local sample data</html>",
     )
 
-    verification = verify_production_result(
+    verification = _verify(
         tmp_path,
         FakeVerificationRepository(),
         trade_date,
@@ -236,7 +272,7 @@ def test_verify_fails_when_fixture_or_sample_strings_leak_into_report_json(tmp_p
         },
     )
 
-    verification = verify_production_result(
+    verification = _verify(
         tmp_path,
         FakeVerificationRepository(),
         trade_date,
@@ -268,7 +304,7 @@ def test_verify_ignores_false_fixture_flags_in_report_json(tmp_path):
         },
     )
 
-    verification = verify_production_result(
+    verification = _verify(
         tmp_path,
         FakeVerificationRepository(),
         trade_date,
@@ -298,7 +334,7 @@ def test_verify_strategy_v2_fails_when_score_is_visible_in_production_html(
         },
     )
 
-    verification = verify_production_result(
+    verification = _verify(
         tmp_path,
         FakeVerificationRepository(),
         trade_date,
@@ -329,7 +365,7 @@ def test_verify_strategy_v2_score_scan_runs_with_empty_cards_and_generated_statu
         },
     )
 
-    verification = verify_production_result(
+    verification = _verify(
         tmp_path,
         FakeVerificationRepository(),
         trade_date,
@@ -351,7 +387,7 @@ def test_verify_rejects_report_with_missing_report_mode(tmp_path):
         },
     )
 
-    verification = verify_production_result(
+    verification = _verify(
         tmp_path,
         FakeVerificationRepository(),
         trade_date,
@@ -376,7 +412,7 @@ def test_verify_rejects_report_with_unknown_report_mode(tmp_path):
         },
     )
 
-    verification = verify_production_result(
+    verification = _verify(
         tmp_path,
         FakeVerificationRepository(),
         trade_date,
@@ -404,7 +440,7 @@ def test_verify_strategy_v2_score_scan_runs_when_report_mode_is_missing(
         },
     )
 
-    verification = verify_production_result(
+    verification = _verify(
         tmp_path,
         FakeVerificationRepository(),
         trade_date,
@@ -430,7 +466,7 @@ def test_verify_rejects_production_report_without_generated_operational_status(
         },
     )
 
-    verification = verify_production_result(
+    verification = _verify(
         tmp_path,
         FakeVerificationRepository(),
         trade_date,
@@ -459,7 +495,7 @@ def test_verify_rejects_production_report_with_incomplete_operational_status(
         },
     )
 
-    verification = verify_production_result(
+    verification = _verify(
         tmp_path,
         FakeVerificationRepository(),
         trade_date,
@@ -469,7 +505,7 @@ def test_verify_rejects_production_report_with_incomplete_operational_status(
     assert _failure(verification, "trading_day_output_state_invalid").fix_suggestion
 
 
-def test_verify_accepts_explicit_data_insufficient_trading_day_report(tmp_path):
+def test_verify_rejects_data_insufficient_as_formal_report_mode(tmp_path):
     trade_date = date(2026, 7, 10)
     _write_production_report(
         tmp_path,
@@ -499,16 +535,14 @@ def test_verify_accepts_explicit_data_insufficient_trading_day_report(tmp_path):
         },
     )
 
-    verification = verify_production_result(
+    verification = _verify(
         tmp_path,
         FakeVerificationRepository(),
         trade_date,
     )
 
-    assert verification.passed is True
-    assert verification.recommendation_state == "data_insufficient"
-    assert verification.focus_state == "data_insufficient"
-    assert verification.blocking_missing_fields == ("daily_ohlcv.close",)
+    assert verification.passed is False
+    assert _failure(verification, "report_mode_invalid").fix_suggestion
 
 
 def test_verify_rejects_data_insufficient_report_without_recovery_evidence(tmp_path):
@@ -535,14 +569,14 @@ def test_verify_rejects_data_insufficient_report_without_recovery_evidence(tmp_p
         },
     )
 
-    verification = verify_production_result(
+    verification = _verify(
         tmp_path,
         FakeVerificationRepository(),
         trade_date,
     )
 
     assert verification.passed is False
-    assert _failure(verification, "data_insufficient_recovery_missing").fix_suggestion
+    assert _failure(verification, "report_mode_invalid").fix_suggestion
 
 
 def test_verify_rejects_data_insufficient_report_with_malformed_recovery_attempt(
@@ -571,21 +605,21 @@ def test_verify_rejects_data_insufficient_report_with_malformed_recovery_attempt
         },
     )
 
-    verification = verify_production_result(
+    verification = _verify(
         tmp_path,
         FakeVerificationRepository(),
         trade_date,
     )
 
     assert verification.passed is False
-    assert _failure(verification, "data_insufficient_recovery_missing").fix_suggestion
+    assert _failure(verification, "report_mode_invalid").fix_suggestion
 
 
 def test_verify_fails_when_report_index_is_missing(tmp_path):
     trade_date = date(2026, 7, 9)
     _write_production_report(tmp_path, trade_date, include_root_index=False)
 
-    verification = verify_production_result(
+    verification = _verify(
         tmp_path,
         FakeVerificationRepository(),
         trade_date,
@@ -627,84 +661,73 @@ def test_run_daily_job_skips_non_trading_day_without_production_run(tmp_path):
     assert events == ["calendar"]
 
 
-def test_default_run_daily_uses_strategy_v2_and_data_insufficient_output(
+def test_default_run_daily_uses_formal_strategy_v2_entry(
     monkeypatch,
     tmp_path,
 ):
-    captured = {}
-
+    captured = []
+    dependencies = object()
+    result = SimpleNamespace(receipt=SimpleNamespace(state=FormalRunState.REPORT_GENERATED))
     monkeypatch.setattr(
-        "stock_analyzer.ops.job.AppConfig.load",
-        lambda: SimpleNamespace(
-            reports_dir=tmp_path / "reports",
-            local_warehouse_dir=tmp_path / "warehouse",
-            local_archive_dir=tmp_path / "archive",
+        "stock_analyzer.ops.job.build_production_formal_dependencies",
+        lambda project_root, repository, trade_date: dependencies,
+    )
+    monkeypatch.setattr(
+        "stock_analyzer.ops.job.run_formal_strategy_v2",
+        lambda trade_date, report_cutoff, dependencies_arg: captured.append(
+            (trade_date, report_cutoff, dependencies_arg)
+        ) or result,
+    )
+
+    returned = _default_run_daily(
+        tmp_path,
+        FakeJobRepository(),
+        date(2026, 7, 10),
+    )
+
+    assert returned is result
+    assert captured[0][0] == date(2026, 7, 10)
+    assert captured[0][1].tzinfo is not None
+    assert captured[0][2] is dependencies
+
+
+def test_blocked_job_skips_verify_prepare_deploy_and_publish(tmp_path):
+    trade_date = date(2026, 7, 10)
+    events: list[str] = []
+    blocked_result = SimpleNamespace(
+        receipt=SimpleNamespace(
+            state=FormalRunState.BLOCKED_NEEDS_HUMAN,
+            run_id="blocked-formal-run",
+            blocked_reasons=("missing_field:value",),
+        )
+    )
+
+    status = run_daily_job(
+        tmp_path,
+        trade_date,
+        "18:30",
+        1,
+        prepare_deploy=True,
+        repository=FakeJobRepository(),
+        calendar_decider=lambda *_args, **_kwargs: TradingDayDecision(
+            status="trading_day",
+            source="supabase",
+            message="market open",
         ),
-    )
-    monkeypatch.setattr(
-        "stock_analyzer.ops.job.build_production_market_data_provider",
-        lambda _config: object(),
-    )
-
-    def fake_run_daily_pipeline(*args, **kwargs):
-        captured["args"] = args
-        captured.update(kwargs)
-
-    monkeypatch.setattr(
-        "stock_analyzer.ops.job.run_daily_pipeline",
-        fake_run_daily_pipeline,
+        health_check=lambda *_args: events.append("health"),
+        run_daily=lambda *_args: events.append("run") or blocked_result,
+        verifier=lambda *_args: events.append("verify"),
+        prepare_deploy_func=lambda *_args: events.append("prepare"),
+        auto_publish=True,
+        publish_func=lambda *_args: events.append("publish"),
     )
 
-    _default_run_daily(tmp_path, FakeJobRepository(), date(2026, 7, 10))
-
-    assert captured["strategy_v2"] is True
-    assert captured["allow_data_insufficient_output"] is True
-    assert captured["dry_run"] is False
-    assert captured["persist"] is True
-    assert captured["fixture_mode"] is False
-
-
-def test_default_run_daily_routes_provider_build_unavailable_to_pipeline(
-    monkeypatch,
-    tmp_path,
-):
-    captured = {}
-
-    monkeypatch.setattr(
-        "stock_analyzer.ops.job.AppConfig.load",
-        lambda: SimpleNamespace(
-            reports_dir=tmp_path / "reports",
-            local_warehouse_dir=tmp_path / "warehouse",
-            local_archive_dir=tmp_path / "archive",
-        ),
-    )
-
-    def unavailable_provider(_config):
-        raise CurrentLiveDataUnavailable("current live data unavailable")
-
-    monkeypatch.setattr(
-        "stock_analyzer.ops.job.build_production_market_data_provider",
-        unavailable_provider,
-    )
-
-    def fake_run_daily_pipeline(*args, **kwargs):
-        captured["args"] = args
-        captured.update(kwargs)
-
-    monkeypatch.setattr(
-        "stock_analyzer.ops.job.run_daily_pipeline",
-        fake_run_daily_pipeline,
-    )
-
-    _default_run_daily(tmp_path, FakeJobRepository(), date(2026, 7, 10))
-
-    provider = captured["market_data_provider"]
-    assert provider is not None
-    with pytest.raises(CurrentLiveDataUnavailable) as excinfo:
-        provider.load(date(2026, 7, 10))
-    assert "current live data unavailable" in str(excinfo.value)
-    assert captured["strategy_v2"] is True
-    assert captured["allow_data_insufficient_output"] is True
+    assert status.status == RunStatus.BLOCKED_NEEDS_HUMAN
+    assert status.run_id == "blocked-formal-run"
+    assert status.stage == "run_daily"
+    assert status.deploy_artifact_prepared is False
+    assert status.publish_skipped_reason == "data_readiness_blocked"
+    assert events == ["health", "run"]
 
 
 def test_run_daily_job_calendar_unknown_requires_human_intervention(tmp_path):
@@ -1570,7 +1593,7 @@ def test_ops_verify_production_cli_exits_zero_when_verification_passes(
     )
     monkeypatch.setattr(
         "stock_analyzer.cli.verify_production_result",
-        lambda project_root, repo, parsed_trade_date: ProductionVerification(
+        lambda project_root, repo, parsed_trade_date, **_kwargs: ProductionVerification(
             trade_date=parsed_trade_date,
             status=RunStatus.SUCCESS_NO_RECOMMENDATIONS,
             passed=True,
@@ -1609,7 +1632,7 @@ def test_ops_verify_production_cli_exits_nonzero_when_verification_fails(
     )
     monkeypatch.setattr(
         "stock_analyzer.cli.verify_production_result",
-        lambda project_root, repo, parsed_trade_date: ProductionVerification(
+        lambda project_root, repo, parsed_trade_date, **_kwargs: ProductionVerification(
             trade_date=parsed_trade_date,
             status=RunStatus.FAILED_NEEDS_HUMAN,
             passed=False,

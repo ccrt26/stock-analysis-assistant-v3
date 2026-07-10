@@ -17,7 +17,7 @@ from stock_analyzer.storage.capacity_guard import (
 
 MAX_DAILY_RECOMMENDATIONS = 10
 EVALUATION_TASKS_PER_RECOMMENDATION = 6
-VALID_REPORT_MODES = ("production", "data_insufficient")
+VALID_REPORT_MODES = ("production",)
 FIXTURE_SAMPLE_PATTERNS = (
     re.compile(r"fixture/sample", re.IGNORECASE),
     re.compile(r"\bfixture\b", re.IGNORECASE),
@@ -81,8 +81,11 @@ def verify_production_result(
     project_root: Path,
     repository,
     trade_date: date,
+    *,
+    receipt,
 ) -> ProductionVerification:
     _ensure_trade_date(trade_date)
+    _require_activated_report_receipt(receipt, trade_date)
     root = Path(project_root)
     reports_dir = root / "reports"
 
@@ -222,6 +225,27 @@ def verify_production_result(
         focus_state=focus_state,
         blocking_missing_fields=blocking_missing_fields,
     )
+
+
+def _require_activated_report_receipt(receipt, trade_date: date) -> None:
+    from stock_analyzer.data.readiness import FormalRunState
+
+    if (
+        receipt is None
+        or getattr(receipt, "target_date", None) != trade_date
+        or getattr(receipt, "state", None) != FormalRunState.REPORT_GENERATED
+        or not getattr(receipt, "group_version_ids", None)
+        or getattr(receipt, "input_set_id", None) is None
+        or getattr(receipt, "candidate_set_id", None) is None
+        or not getattr(receipt, "evidence_hashes", None)
+        or not getattr(receipt, "artifact_hashes", None)
+        or getattr(receipt, "local_activation_id", None) is None
+        or getattr(receipt, "local_activation_id", None)
+        != getattr(receipt, "ledger_activation_id", None)
+    ):
+        raise ValueError(
+            "Production verification requires an activated REPORT_GENERATED receipt."
+        )
 
 
 def _append_selected_market_failures(
@@ -453,9 +477,6 @@ def _append_operational_status_failures(
         return False
 
     report_mode = payload.get("report_mode")
-    if report_mode == "data_insufficient":
-        return _append_data_insufficient_failures(failures, operational_status)
-
     if report_mode != "production":
         failures.append(
             ProductionVerificationFailure(
@@ -465,9 +486,8 @@ def _append_operational_status_failures(
                     f"{', '.join(VALID_REPORT_MODES)}; found {report_mode!r}."
                 ),
                 fix_suggestion=(
-                    "Regenerate latest.json with report_mode='production' and "
-                    "generated operational_status, or report_mode='data_insufficient' "
-                    "with recovery evidence."
+                    "Regenerate latest.json only after READY_TO_ANALYZE with "
+                    "report_mode='production' and generated operational_status."
                 ),
             )
         )
@@ -483,8 +503,7 @@ def _append_operational_status_failures(
                 ),
                 fix_suggestion=(
                     "Regenerate the report after Strategy V2 recommendations and "
-                    "focus output are generated, or emit a data_insufficient "
-                    "report with recovery evidence."
+                    "focus output are generated after READY_TO_ANALYZE."
                 ),
             )
         )

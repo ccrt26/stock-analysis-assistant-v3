@@ -2,30 +2,26 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import asdict, is_dataclass
-from datetime import date, datetime, timezone
+from datetime import date, datetime, time, timezone
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from stock_analyzer.config import AppConfig
 from stock_analyzer.data.health import HealthStatus, run_health_checks
-from stock_analyzer.data.provider import (
-    CurrentLiveDataUnavailable,
-    build_production_market_data_provider,
-)
+from stock_analyzer.data.readiness import FormalRunState
 from stock_analyzer.ops.calendar import decide_trading_day
 from stock_analyzer.ops.cleanup import cleanup_trade_date
 from stock_analyzer.ops.notify import notify_mac, should_notify
 from stock_analyzer.ops.redaction import redact_secrets
 from stock_analyzer.ops.status import FailureClass, JobStatus, RunStatus
 from stock_analyzer.ops.verify import ProductionVerification, verify_production_result
-from stock_analyzer.pipeline import ProductionDataSourceUnavailable, run_daily_pipeline
+from stock_analyzer.ops.formal_run import run_formal_strategy_v2
 from stock_analyzer.storage.capacity_guard import (
     SupabaseCapacityGuard,
     SupabaseCapacityLimitExceeded,
     SupabaseWriteScopeError,
 )
-from stock_analyzer.storage.local_archive import LocalArchive
-from stock_analyzer.storage.local_warehouse import LocalWarehouse
 from stock_analyzer.storage.repositories import SupabaseAnalysisRepository
 from stock_analyzer.storage.supabase_client import create_supabase_client
 
@@ -35,6 +31,7 @@ ACTION_REQUIRED_STATUSES = {
     RunStatus.FAILED_NEEDS_HUMAN,
     RunStatus.FAILED_RETRYABLE,
     RunStatus.CALENDAR_UNKNOWN,
+    RunStatus.BLOCKED_NEEDS_HUMAN,
 }
 
 
@@ -64,16 +61,6 @@ class HumanInterventionJobError(RuntimeError):
         super().__init__(message)
         self.failure_class = failure_class
         self.fix_suggestion = fix_suggestion
-
-
-class _UnavailableMarketDataProvider:
-    source_name = "production_market_data_provider"
-
-    def __init__(self, message: str) -> None:
-        self.message = message
-
-    def load(self, trade_date: date):
-        raise CurrentLiveDataUnavailable(self.message)
 
 
 def run_daily_job(
@@ -168,7 +155,9 @@ def run_daily_job(
     cleanup_func = cleanup or cleanup_trade_date
     health_check_func = health_check or _default_health_check
     run_daily_func = run_daily or _default_run_daily
+    use_default_verifier = verifier is None
     verify_func = verifier or verify_production_result
+    use_default_prepare_deploy = prepare_deploy_func is None
     prepare_deploy_func = prepare_deploy_func or _default_prepare_deploy
 
     try:
@@ -254,7 +243,7 @@ def run_daily_job(
         )
 
     try:
-        _invoke(run_daily_func, root, repo, trade_date)
+        run_result = _invoke(run_daily_func, root, repo, trade_date)
     except Exception as exc:
         return failure_status(
             trade_date=trade_date,
@@ -267,8 +256,40 @@ def run_daily_job(
             cleanup_summary=cleanup_summary,
         )
 
+    receipt = getattr(run_result, "receipt", None)
+    if (
+        receipt is not None
+        and getattr(receipt, "state", None) == FormalRunState.BLOCKED_NEEDS_HUMAN
+    ):
+        return write_status(
+            run_id=receipt.run_id,
+            trade_date=trade_date,
+            attempt=attempt,
+            scheduled_slot=scheduled_slot,
+            started_at=started_at,
+            status=RunStatus.BLOCKED_NEEDS_HUMAN,
+            stage="run_daily",
+            cleanup_performed=cleanup_performed,
+            cleanup_summary=cleanup_summary,
+            publish_skipped_reason="data_readiness_blocked",
+            fix_suggestion=(
+                "Inspect the local blocked run status and restore a complete approved route before retrying."
+            ),
+            error_message_redacted="; ".join(
+                getattr(receipt, "blocked_reasons", ())
+            ),
+        )
+
     try:
-        verification = verify_func(root, repo, trade_date)
+        if use_default_verifier:
+            verification = verify_func(
+                root,
+                repo,
+                trade_date,
+                receipt=receipt,
+            )
+        else:
+            verification = verify_func(root, repo, trade_date)
     except Exception as exc:
         return failure_status(
             trade_date=trade_date,
@@ -314,7 +335,10 @@ def run_daily_job(
     publish_skipped_reason = None
     if prepare_deploy:
         try:
-            prepare_deploy_func(root)
+            if use_default_prepare_deploy:
+                prepare_deploy_func(root, receipt=receipt)
+            else:
+                prepare_deploy_func(root)
             deploy_artifact_prepared = True
         except Exception as exc:
             return failure_status(
@@ -410,40 +434,47 @@ def _default_health_check(*_args) -> None:
         )
 
 
-def _default_run_daily(project_root: Path, repository, trade_date: date) -> None:
-    config = AppConfig.load()
-    try:
-        market_data_provider = build_production_market_data_provider(config)
-    except CurrentLiveDataUnavailable as exc:
-        market_data_provider = _UnavailableMarketDataProvider(str(exc))
-
-    try:
-        run_daily_pipeline(
-            trade_date,
-            config.reports_dir,
-            dry_run=False,
-            repository=repository,
-            persist=True,
-            fixture_mode=False,
-            market_data_provider=market_data_provider,
-            local_warehouse=LocalWarehouse(config.local_warehouse_dir),
-            local_archive=LocalArchive(config.local_archive_dir),
-            strategy_v2=True,
-            allow_data_insufficient_output=True,
-        )
-    except ProductionDataSourceUnavailable as exc:
-        raise RetryableJobError(
-            str(exc),
-            failure_class=FailureClass.TUSHARE_DATA_TEMPORARILY_UNAVAILABLE,
-            fix_suggestion="Retry after confirming current production data is available.",
-        ) from exc
+def build_production_formal_dependencies(
+    project_root: Path,
+    repository,
+    trade_date: date,
+):
+    raise HumanInterventionJobError(
+        "Production formal route clients and recorded capability evidence are not configured. Live acquisition requires separate explicit approval.",
+        failure_class=FailureClass.SCHEMA_MISMATCH,
+        fix_suggestion=(
+            "Configure the approved formal route clients and capability records; do not fall back to the legacy report path."
+        ),
+    )
 
 
-def _default_prepare_deploy(project_root: Path) -> Path:
+def _default_run_daily(project_root: Path, repository, trade_date: date):
+    dependencies = build_production_formal_dependencies(
+        Path(project_root),
+        repository,
+        trade_date,
+    )
+    report_cutoff = datetime.combine(
+        trade_date,
+        time(hour=16),
+        tzinfo=ZoneInfo("Asia/Shanghai"),
+    )
+    return run_formal_strategy_v2(
+        trade_date,
+        report_cutoff,
+        dependencies,
+    )
+
+
+def _default_prepare_deploy(project_root: Path, *, receipt=None) -> Path:
     from stock_analyzer.ops.artifacts import prepare_pages_artifact
 
     root = Path(project_root)
-    return prepare_pages_artifact(root, root / "dist" / "pages")
+    return prepare_pages_artifact(
+        root,
+        root / "dist" / "pages",
+        receipt=receipt,
+    )
 
 
 def _default_publish(project_root: Path, trade_date: date) -> Any:
@@ -649,6 +680,7 @@ def _cleanup_summary_to_dict(summary: Any) -> dict[str, Any]:
 def _write_status(
     path: Path,
     *,
+    run_id: str | None = None,
     trade_date: date,
     attempt: int,
     scheduled_slot: str,
@@ -673,6 +705,7 @@ def _write_status(
     error_message_redacted: str | None = None,
 ) -> JobStatus:
     job_status = JobStatus(
+        run_id=run_id,
         trade_date=trade_date,
         attempt=attempt,
         scheduled_slot=scheduled_slot,

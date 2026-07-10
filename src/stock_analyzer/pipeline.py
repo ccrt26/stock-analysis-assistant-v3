@@ -48,6 +48,7 @@ from stock_analyzer.reports.generator import (
     render_reports,
 )
 from stock_analyzer.storage.repositories import AnalysisRepository, InMemoryAnalysisRepository
+from stock_analyzer.storage.evidence_store import LocalEvidenceStore
 
 
 class DailyRunResult(BaseModel):
@@ -159,6 +160,8 @@ def run_daily_pipeline(
 ) -> DailyRunResult:
     repository = repository or InMemoryAnalysisRepository()
     persist = persist and not dry_run
+    if not fixture_mode and not dry_run:
+        allow_data_insufficient_output = False
     production_bundle = None
     if fixture_mode or dry_run:
         stocks, stock_names, feature_profiles = _sample_market(trade_date)
@@ -813,8 +816,16 @@ def render_report_for_date(
     output_dir: Path,
     repository: Optional[AnalysisRepository] = None,
     allow_fixture_fallback: bool = False,
+    receipt_store: LocalEvidenceStore | None = None,
+    expected_input_set_id: str | None = None,
 ) -> DailyRunResult:
     repository = repository or InMemoryAnalysisRepository()
+    if not allow_fixture_fallback:
+        _require_committed_render_receipt(
+            trade_date,
+            receipt_store,
+            expected_input_set_id,
+        )
     recommendations = repository.load_daily_recommendations(trade_date)
     focus_states = repository.load_focus_states_for_date(trade_date)
     evidence_packages = repository.load_evidence_packages(trade_date)
@@ -862,6 +873,81 @@ def render_report_for_date(
         persist=False,
         fixture_mode=True,
     )
+
+
+def latest_committed_report_receipt(
+    receipt_store: LocalEvidenceStore,
+    trade_date: date,
+    *,
+    expected_input_set_id: str | None = None,
+):
+    from stock_analyzer.data.readiness import FormalRunState
+
+    receipt_root = receipt_store.root / "run_receipts"
+    candidates = []
+    if receipt_root.is_dir():
+        for run_dir in receipt_root.iterdir():
+            if not run_dir.is_dir() or not (run_dir / "latest.json").is_file():
+                continue
+            try:
+                receipt = receipt_store.latest_run_receipt(run_dir.name)
+            except (OSError, ValueError, KeyError):
+                continue
+            if receipt.target_date != trade_date:
+                continue
+            if receipt.state != FormalRunState.REPORT_GENERATED:
+                continue
+            if (
+                expected_input_set_id is not None
+                and receipt.input_set_id != expected_input_set_id
+            ):
+                continue
+            candidates.append(receipt)
+    if not candidates:
+        return None
+    return max(candidates, key=lambda item: (item.report_cutoff, item.revision, item.run_id))
+
+
+def _require_committed_render_receipt(
+    trade_date: date,
+    receipt_store: LocalEvidenceStore | None,
+    expected_input_set_id: str | None,
+):
+    if receipt_store is None:
+        raise StoredAnalysisNotFound(
+            "Production render-report requires a committed REPORT_GENERATED receipt."
+        )
+    receipt = latest_committed_report_receipt(
+        receipt_store,
+        trade_date,
+        expected_input_set_id=expected_input_set_id,
+    )
+    if receipt is None:
+        detail = (
+            f" matching input_set_id {expected_input_set_id!r}"
+            if expected_input_set_id is not None
+            else ""
+        )
+        raise StoredAnalysisNotFound(
+            "Production render-report requires a committed REPORT_GENERATED receipt"
+            f"{detail}."
+        )
+    if expected_input_set_id is None or receipt.input_set_id != expected_input_set_id:
+        raise StoredAnalysisNotFound(
+            "Production render-report requires an exact input_set_id match."
+        )
+    if (
+        not receipt.group_version_ids
+        or receipt.candidate_set_id is None
+        or not receipt.evidence_hashes
+        or not receipt.artifact_hashes
+        or receipt.local_activation_id is None
+        or receipt.local_activation_id != receipt.ledger_activation_id
+    ):
+        raise StoredAnalysisNotFound(
+            "Production render-report requires a complete committed REPORT_GENERATED receipt."
+        )
+    return receipt
 
 
 def _assign_evidence_ids(

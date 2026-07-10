@@ -16,6 +16,8 @@ _FORBIDDEN_DIR_NAMES = {
     "local_archive",
     "logs",
     ".superpowers",
+    ".staging",
+    ".activation",
 }
 _FORBIDDEN_FILE_PREFIXES = (".env",)
 _FORBIDDEN_RELATIVE_PREFIXES = (
@@ -30,7 +32,9 @@ def prepare_pages_artifact(
     output_dir: Path,
     *,
     source_root: Path | None = None,
+    receipt=None,
 ) -> Path:
+    _validate_formal_receipt(receipt)
     root = Path(project_root).expanduser().resolve()
     source = Path(source_root or _DEFAULT_SOURCE_ROOT).expanduser().resolve()
     target = _resolve_output_dir(root, output_dir)
@@ -50,6 +54,26 @@ def prepare_pages_artifact(
     shutil.copy2(middleware_path, middleware_target)
     _assert_forbidden_paths_absent(target)
     return target
+
+
+def _validate_formal_receipt(receipt) -> None:
+    from stock_analyzer.data.readiness import FormalRunState
+
+    if (
+        receipt is None
+        or getattr(receipt, "state", None) != FormalRunState.REPORT_GENERATED
+        or not getattr(receipt, "group_version_ids", None)
+        or getattr(receipt, "input_set_id", None) is None
+        or getattr(receipt, "candidate_set_id", None) is None
+        or not getattr(receipt, "evidence_hashes", None)
+        or not getattr(receipt, "artifact_hashes", None)
+        or getattr(receipt, "local_activation_id", None) is None
+        or getattr(receipt, "local_activation_id", None)
+        != getattr(receipt, "ledger_activation_id", None)
+    ):
+        raise DeployArtifactError(
+            "Deploy preparation requires an activated REPORT_GENERATED receipt."
+        )
 
 
 def _middleware_path(project_root: Path, source_root: Path) -> Path:

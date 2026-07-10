@@ -4,14 +4,32 @@ import hashlib
 import json
 import os
 import uuid
+from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from stock_analyzer.data.acquisition import RouteAttempt
-from stock_analyzer.data.readiness import AcquisitionGroupId, FormalRunState
+from stock_analyzer.data.acquisition import (
+    AcquisitionBlocked,
+    AcquisitionResult,
+    AtomicGroupAcquirer,
+    RouteAttempt,
+    RouteFailure,
+)
+from stock_analyzer.data.formal_routes import FormalRoutePair
+from stock_analyzer.data.readiness import (
+    AcquisitionGroupContract,
+    AcquisitionGroupId,
+    AcquisitionPayload,
+    AcquisitionRequest,
+    FailureClassification,
+    FormalRunState,
+    GroupValidation,
+    RouteKind,
+    validate_group_payload,
+)
 from stock_analyzer.ops.redaction import redact_secrets
 from stock_analyzer.storage.evidence_store import LocalEvidenceStore
 
@@ -51,6 +69,49 @@ class CandidateSet(BaseModel):
     screening_version: str
     upstream_input_set_id: str
     content_hash: str
+
+
+@dataclass(frozen=True)
+class FormalAcquisitionGroup:
+    contract: AcquisitionGroupContract
+    routes: FormalRoutePair
+
+
+@dataclass(frozen=True)
+class FormalScreeningOutput:
+    ordered_codes: tuple[str, ...]
+    active_focus_codes: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class FormalAnalysisOutput:
+    value: Any
+    ledger_rows: tuple[dict[str, Any], ...]
+    evidence_hashes: dict[str, str]
+    pointer_payloads: dict[Path, bytes] = field(default_factory=dict)
+    has_publishable_output: bool = True
+
+
+@dataclass(frozen=True)
+class FormalPipelineDependencies:
+    screening_routes: tuple[FormalAcquisitionGroup, ...]
+    target_routes: tuple[FormalAcquisitionGroup, ...]
+    screen: Callable[..., FormalScreeningOutput]
+    analyze: Callable[..., FormalAnalysisOutput]
+    llm_express: Callable[..., Any] | None
+    render: Callable[..., None]
+    verify: Callable[..., bool]
+    ledger: Any
+    evidence_store: LocalEvidenceStore
+    log_root: Path
+
+
+@dataclass(frozen=True)
+class FormalRunResult:
+    receipt: RunReceipt
+    candidate_set: CandidateSet | None = None
+    analysis: FormalAnalysisOutput | None = None
+    narrative: Any = None
 
 
 ALLOWED_TRANSITIONS: dict[FormalRunState, set[FormalRunState]] = {
@@ -240,6 +301,13 @@ class FormalRunController:
             raise InvalidRunTransition("artifact hashes require RENDERING")
         return self._replace(artifact_hashes=dict(sorted(hashes.items())))
 
+    def record_evidence_hashes(self, hashes: dict[str, str]) -> RunReceipt:
+        if self.receipt.state != FormalRunState.ANALYZING:
+            raise InvalidRunTransition("evidence hashes require ANALYZING")
+        if not hashes:
+            raise ValueError("formal analysis requires evidence hashes")
+        return self._replace(evidence_hashes=dict(sorted(hashes.items())))
+
     def commit_activation(
         self,
         activation_id: str,
@@ -287,6 +355,274 @@ class FormalRunController:
         self.receipt = self.receipt.model_copy(update=updates)
         self.store.save_run_receipt(self.receipt)
         return self.receipt
+
+
+def run_formal_strategy_v2(
+    trade_date: date,
+    report_cutoff: datetime,
+    dependencies: FormalPipelineDependencies,
+    run_id: str | None = None,
+) -> FormalRunResult:
+    if report_cutoff.tzinfo is None or report_cutoff.utcoffset() is None:
+        raise ValueError("report_cutoff must be timezone-aware")
+    effective_run_id = run_id or f"formal-{trade_date.isoformat()}-{uuid.uuid4().hex}"
+    controller = FormalRunController.start(
+        dependencies.evidence_store,
+        run_id=effective_run_id,
+        target_date=trade_date,
+        report_cutoff=report_cutoff,
+        acquisition_contract_version=_shared_contract_version(dependencies),
+        screening_version="strategy-v2-screen-v1",
+    )
+    candidate_set: CandidateSet | None = None
+    all_payloads: dict[AcquisitionGroupId, AcquisitionPayload] = {}
+
+    try:
+        controller.transition(FormalRunState.ACQUIRING_SCREENING_PRIMARY)
+        screening_payloads, screening_used_backup = _acquire_formal_groups(
+            controller,
+            dependencies.screening_routes,
+            target_codes=(),
+        )
+        all_payloads.update(screening_payloads)
+        if screening_used_backup:
+            controller.transition(FormalRunState.ACQUIRING_SCREENING_BACKUP)
+        controller.transition(FormalRunState.VALIDATING_SCREENING)
+        controller.enter_ready_to_screen()
+
+        screening = dependencies.screen(
+            controller.receipt,
+            dict(screening_payloads),
+        )
+        if not isinstance(screening, FormalScreeningOutput):
+            raise TypeError("screen must return FormalScreeningOutput")
+        candidate_set = controller.freeze_candidates(
+            screening.ordered_codes,
+            screening.active_focus_codes,
+        )
+        target_codes = tuple(
+            dict.fromkeys(
+                (*candidate_set.ordered_codes, *candidate_set.active_focus_codes)
+            )
+        )
+
+        controller.transition(FormalRunState.ACQUIRING_TARGET_PRIMARY)
+        target_payloads, target_used_backup = _acquire_formal_groups(
+            controller,
+            dependencies.target_routes,
+            target_codes=target_codes,
+        )
+        all_payloads.update(target_payloads)
+        if target_used_backup:
+            controller.transition(FormalRunState.ACQUIRING_TARGET_BACKUP)
+        controller.transition(FormalRunState.VALIDATING_TARGET)
+        controller.enter_ready_to_analyze()
+        controller.begin_analysis()
+
+        analysis = dependencies.analyze(
+            controller.receipt,
+            candidate_set,
+            dict(all_payloads),
+        )
+        if not isinstance(analysis, FormalAnalysisOutput):
+            raise TypeError("analyze must return FormalAnalysisOutput")
+        controller.record_evidence_hashes(analysis.evidence_hashes)
+        narrative = (
+            dependencies.llm_express(controller.receipt, analysis.value)
+            if dependencies.llm_express is not None
+            else None
+        )
+
+        from stock_analyzer.ops.activation import FormalActivationCoordinator
+
+        report_root = Path(dependencies.log_root).parent.parent / "reports"
+        coordinator = FormalActivationCoordinator(
+            report_root,
+            dependencies.evidence_store,
+            dependencies.ledger,
+        )
+
+        def render(staging: Path) -> None:
+            dependencies.render(
+                staging,
+                dependencies.evidence_store.latest_run_receipt(effective_run_id),
+                analysis.value,
+                narrative,
+            )
+
+        def verify(staging: Path, artifact_hashes: dict[str, str]) -> bool:
+            return dependencies.verify(
+                staging,
+                artifact_hashes,
+                dependencies.evidence_store.latest_run_receipt(effective_run_id),
+            )
+
+        completed = coordinator.activate(
+            controller.receipt,
+            render=render,
+            verify=verify,
+            ledger_rows=analysis.ledger_rows,
+            pointer_payloads=analysis.pointer_payloads,
+            advance_report_pointer=analysis.has_publishable_output,
+        )
+        return FormalRunResult(
+            receipt=completed,
+            candidate_set=candidate_set,
+            analysis=analysis,
+            narrative=narrative,
+        )
+    except AcquisitionBlocked as exc:
+        blocked = controller.block(exc.group_id, exc.reasons)
+        write_blocked_status(
+            dependencies.log_root,
+            blocked,
+            exc.group_id,
+            exc.attempts,
+            exc.reasons,
+            "Inspect the failed complete route capability or data coverage, then retry the same frozen run only after correction.",
+        )
+        return FormalRunResult(receipt=blocked, candidate_set=candidate_set)
+
+
+def _shared_contract_version(dependencies: FormalPipelineDependencies) -> str:
+    groups = (*dependencies.screening_routes, *dependencies.target_routes)
+    if not groups:
+        raise ValueError("formal pipeline requires at least one acquisition group")
+    versions = {group.contract.contract_version for group in groups}
+    if len(versions) != 1:
+        raise ValueError("formal acquisition groups must share one contract version")
+    return versions.pop()
+
+
+def _acquire_formal_groups(
+    controller: FormalRunController,
+    groups: tuple[FormalAcquisitionGroup, ...],
+    *,
+    target_codes: tuple[str, ...],
+) -> tuple[dict[AcquisitionGroupId, AcquisitionPayload], bool]:
+    payloads: dict[AcquisitionGroupId, AcquisitionPayload] = {}
+    used_backup = False
+    for group in groups:
+        request = AcquisitionRequest(
+            run_id=controller.receipt.run_id,
+            trade_date=controller.receipt.target_date,
+            report_cutoff=controller.receipt.report_cutoff,
+            target_codes=target_codes,
+            contract_version=group.contract.contract_version,
+        )
+        result = _acquire_formal_group(group, request)
+        manifest = controller.store.save_group_version(
+            result.payload,
+            result.validation,
+        )
+        controller.store.set_canonical(
+            manifest.group_id,
+            manifest.trade_date,
+            manifest.version_id,
+        )
+        if result.used_backup:
+            controller.store.create_reconciliation_task(manifest)
+        controller.record_group(group.contract.group_id, manifest.version_id)
+        payloads[group.contract.group_id] = result.payload
+        used_backup = used_backup or result.used_backup
+    return payloads, used_backup
+
+
+def _acquire_formal_group(
+    group: FormalAcquisitionGroup,
+    request: AcquisitionRequest,
+) -> AcquisitionResult:
+    if group.routes.backup is not None:
+        return AtomicGroupAcquirer().acquire(
+            group.contract,
+            request,
+            group.routes.primary,
+            group.routes.backup,
+        )
+    if not group.routes.approved_single_source:
+        raise AcquisitionBlocked(
+            group.contract.group_id,
+            (),
+            (f"single_source_not_approved:{group.contract.group_id.value}",),
+        )
+    route = group.routes.primary
+    capability = route.capability
+    capability_reasons = []
+    if route.kind != RouteKind.LOCAL:
+        capability_reasons.append(f"single_source_not_local:{route.route_id}")
+    if capability.group_id != group.contract.group_id:
+        capability_reasons.append(f"capability_group_mismatch:{route.route_id}")
+    if capability.contract_version != group.contract.contract_version:
+        capability_reasons.append(f"capability_contract_mismatch:{route.route_id}")
+    if not capability.approved:
+        capability_reasons.append(f"capability_unproven:{route.route_id}")
+    if capability_reasons:
+        raise AcquisitionBlocked(
+            group.contract.group_id,
+            (),
+            tuple(capability_reasons),
+        )
+    try:
+        payload = route.fetch(request)
+    except RouteFailure as exc:
+        attempt = RouteAttempt(
+            route_id=route.route_id,
+            route_kind=route.kind,
+            attempt=1,
+            status="failed",
+            classification=exc.classification,
+            message=exc.redacted_message,
+        )
+        raise AcquisitionBlocked(
+            group.contract.group_id,
+            (attempt,),
+            (exc.redacted_message,),
+        ) from exc
+    except Exception as exc:
+        message = redact_secrets(str(exc))
+        attempt = RouteAttempt(
+            route_id=route.route_id,
+            route_kind=route.kind,
+            attempt=1,
+            status="failed",
+            classification=FailureClassification.UNKNOWN,
+            message=message,
+        )
+        raise AcquisitionBlocked(
+            group.contract.group_id,
+            (attempt,),
+            (message,),
+        ) from exc
+    validation = validate_group_payload(group.contract, request, payload)
+    if not validation.complete:
+        attempt = RouteAttempt(
+            route_id=route.route_id,
+            route_kind=route.kind,
+            attempt=1,
+            status="failed",
+            classification=FailureClassification.INVALID_SEMANTICS,
+            message="complete single-source group rejected",
+            validation_reasons=validation.reasons,
+        )
+        raise AcquisitionBlocked(
+            group.contract.group_id,
+            (attempt,),
+            validation.reasons,
+        )
+    return AcquisitionResult(
+        payload=payload,
+        validation=validation,
+        attempts=(
+            RouteAttempt(
+                route_id=route.route_id,
+                route_kind=route.kind,
+                attempt=1,
+                status="success",
+                message="complete single-source acquisition group accepted",
+            ),
+        ),
+        used_backup=False,
+    )
 
 
 def write_blocked_status(
@@ -370,8 +706,14 @@ def _atomic_write(path: Path, payload: bytes) -> None:
 __all__ = [
     "ALLOWED_TRANSITIONS",
     "CandidateSet",
+    "FormalAcquisitionGroup",
+    "FormalAnalysisOutput",
+    "FormalPipelineDependencies",
+    "FormalRunResult",
     "FormalRunController",
+    "FormalScreeningOutput",
     "InvalidRunTransition",
     "RunReceipt",
+    "run_formal_strategy_v2",
     "write_blocked_status",
 ]

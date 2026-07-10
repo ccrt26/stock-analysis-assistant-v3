@@ -1,9 +1,11 @@
 import json
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import pytest
 
 from stock_analyzer.analysis.focus import FormalFocusDay
+from stock_analyzer.data.readiness import FormalRunState
 from stock_analyzer.data.models import (
     DailyBar,
     DailyBasicRow,
@@ -23,11 +25,14 @@ from stock_analyzer.domain.models import (
     Recommendation,
 )
 from stock_analyzer.pipeline import (
+    ProductionDataSourceUnavailable,
     StoredAnalysisNotFound,
     _sample_market,
     render_report_for_date,
     run_daily_pipeline,
 )
+from stock_analyzer.ops.formal_run import RunReceipt
+from stock_analyzer.storage.evidence_store import LocalEvidenceStore
 from stock_analyzer.storage.repositories import InMemoryAnalysisRepository
 
 
@@ -75,6 +80,34 @@ class FailingSaveRepository(InMemoryAnalysisRepository):
     def save_data_source_runs(self, rows):
         self.save_attempts.append("data_source_runs")
         raise AssertionError("dry-run must not save data source runs")
+
+
+def _committed_receipt_store(tmp_path, trade_date):
+    store = LocalEvidenceStore(tmp_path / "formal-evidence")
+    store.save_run_receipt(
+        RunReceipt(
+            run_id=f"committed-{trade_date.isoformat()}",
+            target_date=trade_date,
+            report_cutoff=datetime(
+                trade_date.year,
+                trade_date.month,
+                trade_date.day,
+                16,
+                tzinfo=ZoneInfo("Asia/Shanghai"),
+            ),
+            acquisition_contract_version="formal-v1",
+            screening_version="screen-v1",
+            state=FormalRunState.REPORT_GENERATED,
+            group_version_ids={"market_decision": "version-1"},
+            input_set_id="input-1",
+            candidate_set_id="candidate-1",
+            evidence_hashes={"evidence": "hash"},
+            artifact_hashes={"index.html": "hash"},
+            local_activation_id="activation-1",
+            ledger_activation_id="activation-1",
+        )
+    )
+    return store
 
 
 class PreflightRejectingRepository(InMemoryAnalysisRepository):
@@ -803,62 +836,41 @@ def test_run_daily_pipeline_production_fails_when_provider_cannot_generate_decis
     assert not (tmp_path / "index.html").exists()
 
 
-def test_trading_day_pipeline_outputs_data_insufficient_report_when_live_data_missing(tmp_path):
+def test_trading_day_pipeline_refuses_public_report_when_live_data_missing(tmp_path):
     repo = InMemoryAnalysisRepository()
 
-    result = run_daily_pipeline(
-        date(2026, 7, 10),
-        tmp_path,
-        repository=repo,
-        fixture_mode=False,
-        market_data_provider=InsufficientProductionProvider(),
-        local_warehouse=RecordingWarehouse(),
-        allow_data_insufficient_output=True,
-    )
+    with pytest.raises(ProductionDataSourceUnavailable):
+        run_daily_pipeline(
+            date(2026, 7, 10),
+            tmp_path,
+            repository=repo,
+            fixture_mode=False,
+            market_data_provider=InsufficientProductionProvider(),
+            local_warehouse=RecordingWarehouse(),
+            allow_data_insufficient_output=True,
+        )
 
-    assert result.operational_status.recommendation_state.value == "data_insufficient"
-    assert result.operational_status.focus_state.value == "data_insufficient"
-    assert result.recommendations == []
     assert repo.recommendations == []
-    assert (tmp_path / "index.html").exists()
-    assert (tmp_path / "daily" / "2026-07-10" / "index.html").exists()
-    payload = json.loads(
-        (tmp_path / "data" / "latest.json").read_text(encoding="utf-8")
-    )
-    assert payload["report_mode"] == "data_insufficient"
-    assert payload["operational_status"]["blocking_missing_fields"]
+    assert not (tmp_path / "index.html").exists()
+    assert not (tmp_path / "data" / "latest.json").exists()
 
 
-def test_trading_day_pipeline_outputs_data_insufficient_report_when_provider_load_raises(tmp_path):
+def test_trading_day_pipeline_refuses_public_report_when_provider_load_raises(tmp_path):
     repo = InMemoryAnalysisRepository()
 
-    result = run_daily_pipeline(
-        date(2026, 7, 10),
-        tmp_path,
-        repository=repo,
-        fixture_mode=False,
-        market_data_provider=RaisingCurrentLiveDataProvider(),
-        allow_data_insufficient_output=True,
-    )
+    with pytest.raises(ProductionDataSourceUnavailable, match="current trade date daily bars"):
+        run_daily_pipeline(
+            date(2026, 7, 10),
+            tmp_path,
+            repository=repo,
+            fixture_mode=False,
+            market_data_provider=RaisingCurrentLiveDataProvider(),
+            allow_data_insufficient_output=True,
+        )
 
-    assert result.operational_status.recommendation_state.value == "data_insufficient"
-    assert result.operational_status.focus_state.value == "data_insufficient"
-    assert result.recommendations == []
     assert repo.recommendations == []
-    assert (tmp_path / "index.html").exists()
-    assert (tmp_path / "daily" / "2026-07-10" / "index.html").exists()
-    payload = json.loads(
-        (tmp_path / "data" / "latest.json").read_text(encoding="utf-8")
-    )
-    assert payload["report_mode"] == "data_insufficient"
-    assert "current trade date daily bars" in payload["operational_status"]["message"]
-    attempts = payload["operational_status"]["data_recovery_attempts"]
-    assert attempts
-    assert attempts[0]["family"]
-    assert attempts[0]["source_name"]
-    assert attempts[0]["status"]
-    assert attempts[0]["message"]
-    assert payload["operational_status"]["blocking_missing_fields"]
+    assert not (tmp_path / "index.html").exists()
+    assert not (tmp_path / "data" / "latest.json").exists()
 
 
 def test_strategy_v2_pipeline_persists_operational_status_without_full_market_supabase_write(tmp_path):
@@ -928,9 +940,16 @@ def test_run_daily_pipeline_preserves_existing_focus_from_repository(tmp_path):
 
 def test_render_report_for_date_fails_when_repository_has_no_stored_rows(tmp_path):
     repo = InMemoryAnalysisRepository()
+    receipt_store = _committed_receipt_store(tmp_path, date(2026, 7, 7))
 
     with pytest.raises(StoredAnalysisNotFound) as excinfo:
-        render_report_for_date(date(2026, 7, 7), tmp_path, repository=repo)
+        render_report_for_date(
+            date(2026, 7, 7),
+            tmp_path,
+            repository=repo,
+            receipt_store=receipt_store,
+            expected_input_set_id="input-1",
+        )
 
     assert "No stored analysis rows found for 2026-07-07" in str(excinfo.value)
     assert not (tmp_path / "index.html").exists()
@@ -951,9 +970,16 @@ def test_render_report_for_date_fails_when_recommendation_lacks_matching_evidenc
             )
         ]
     )
+    receipt_store = _committed_receipt_store(tmp_path, date(2026, 7, 7))
 
     with pytest.raises(StoredAnalysisNotFound) as excinfo:
-        render_report_for_date(date(2026, 7, 7), tmp_path, repository=repo)
+        render_report_for_date(
+            date(2026, 7, 7),
+            tmp_path,
+            repository=repo,
+            receipt_store=receipt_store,
+            expected_input_set_id="input-1",
+        )
 
     assert "Missing evidence package" in str(excinfo.value)
     assert "missing-evidence-600000" in str(excinfo.value)
@@ -989,9 +1015,16 @@ def test_render_report_for_date_fails_when_evaluation_tasks_are_missing(tmp_path
             )
         ],
     )
+    receipt_store = _committed_receipt_store(tmp_path, date(2026, 7, 7))
 
     with pytest.raises(StoredAnalysisNotFound) as excinfo:
-        render_report_for_date(date(2026, 7, 7), tmp_path, repository=repo)
+        render_report_for_date(
+            date(2026, 7, 7),
+            tmp_path,
+            repository=repo,
+            receipt_store=receipt_store,
+            expected_input_set_id="input-1",
+        )
 
     assert "Missing evaluation task" in str(excinfo.value)
     assert "2026-07-07-600000.SH" in str(excinfo.value)
@@ -1037,8 +1070,15 @@ def test_render_report_for_date_renders_complete_stored_analysis(tmp_path):
             )
         ],
     )
+    receipt_store = _committed_receipt_store(tmp_path, date(2026, 7, 7))
 
-    result = render_report_for_date(date(2026, 7, 7), tmp_path, repository=repo)
+    result = render_report_for_date(
+        date(2026, 7, 7),
+        tmp_path,
+        repository=repo,
+        receipt_store=receipt_store,
+        expected_input_set_id="input-1",
+    )
 
     assert result.recommendations == [recommendation]
     assert len(result.evaluation_tasks) == 1

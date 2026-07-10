@@ -1,4 +1,5 @@
 from datetime import date
+import json
 import os
 from pathlib import Path
 from typing import Optional
@@ -7,11 +8,13 @@ import typer
 
 from stock_analyzer.config import AppConfig
 from stock_analyzer.data.health import run_health_checks
-from stock_analyzer.data.provider import (
-    CurrentLiveDataUnavailable,
-    build_production_market_data_provider,
+from stock_analyzer.ops.job import (
+    ACTION_REQUIRED_STATUSES,
+    HumanInterventionJobError,
+    RetryableJobError,
+    _default_run_daily,
+    run_daily_job,
 )
-from stock_analyzer.ops.job import ACTION_REQUIRED_STATUSES, run_daily_job
 from stock_analyzer.ops.artifacts import DeployArtifactError, prepare_pages_artifact
 from stock_analyzer.ops.publish import (
     PublishConfig,
@@ -25,12 +28,12 @@ from stock_analyzer.ops.verify import verify_production_result
 from stock_analyzer.pipeline import (
     ProductionDataSourceUnavailable,
     StoredAnalysisNotFound,
+    latest_committed_report_receipt,
     render_report_for_date,
     run_daily_pipeline,
 )
+from stock_analyzer.storage.evidence_store import LocalEvidenceStore
 from stock_analyzer.storage.capacity_guard import SupabaseCapacityGuard
-from stock_analyzer.storage.local_archive import LocalArchive
-from stock_analyzer.storage.local_warehouse import LocalWarehouse
 from stock_analyzer.storage.repositories import (
     InMemoryAnalysisRepository,
     SupabaseAnalysisRepository,
@@ -96,13 +99,24 @@ def run_daily(
     except MissingSupabaseConfig as exc:
         _fail(str(exc))
 
-    market_data_provider = None
-    if not effective_fixture_mode and not dry_run:
+    if not dry_run and not effective_fixture_mode:
         try:
-            market_data_provider = build_production_market_data_provider(config)
-        except CurrentLiveDataUnavailable as exc:
-            if not allow_data_insufficient_output:
-                _fail(str(exc))
+            formal_result = _default_run_daily(
+                config.project_root,
+                repository,
+                parsed_trade_date,
+            )
+        except (HumanInterventionJobError, RetryableJobError, RuntimeError) as exc:
+            _fail(str(exc))
+        if formal_result.receipt.state.value == "blocked_needs_human":
+            _fail(
+                "Formal run blocked_needs_human; inspect logs/run-daily/latest-status.json."
+            )
+        typer.echo(
+            f"daily formal run completed for {parsed_trade_date.isoformat()} "
+            f"({formal_result.receipt.state.value})"
+        )
+        return
 
     try:
         result = run_daily_pipeline(
@@ -112,19 +126,10 @@ def run_daily(
             repository=repository,
             persist=not dry_run,
             fixture_mode=effective_fixture_mode,
-            market_data_provider=market_data_provider,
-            local_warehouse=(
-                LocalWarehouse(config.local_warehouse_dir)
-                if not dry_run and not effective_fixture_mode
-                else None
-            ),
-            local_archive=(
-                LocalArchive(config.local_archive_dir)
-                if not dry_run and not effective_fixture_mode
-                else None
-            ),
             strategy_v2=strategy_v2,
-            allow_data_insufficient_output=allow_data_insufficient_output,
+            allow_data_insufficient_output=(
+                allow_data_insufficient_output and (effective_fixture_mode or dry_run)
+            ),
         )
     except ProductionDataSourceUnavailable as exc:
         _fail(str(exc))
@@ -155,6 +160,18 @@ def render_report(
     config = AppConfig.load()
     target_dir = output_dir or config.reports_dir
     effective_fixture_mode = fixture_mode or config.fixture_mode
+    receipt_store = None
+    expected_input_set_id = None
+    if not effective_fixture_mode:
+        receipt_store = LocalEvidenceStore(
+            config.local_warehouse_dir / "formal_evidence"
+        )
+        committed = latest_committed_report_receipt(
+            receipt_store,
+            parsed_trade_date,
+        )
+        if committed is not None:
+            expected_input_set_id = committed.input_set_id
     try:
         result = render_report_for_date(
             parsed_trade_date,
@@ -165,6 +182,8 @@ def render_report(
                 fixture_mode=effective_fixture_mode,
             ),
             allow_fixture_fallback=effective_fixture_mode,
+            receipt_store=receipt_store,
+            expected_input_set_id=expected_input_set_id,
         )
     except (MissingSupabaseConfig, StoredAnalysisNotFound) as exc:
         _fail(str(exc))
@@ -231,8 +250,20 @@ def ops_prepare_deploy(
     config = AppConfig.load()
     target_dir = output_dir if output_dir.is_absolute() else config.project_root / output_dir
     try:
-        artifact_dir = prepare_pages_artifact(config.project_root, target_dir)
-    except DeployArtifactError as exc:
+        report_payload = json.loads(
+            (config.reports_dir / "data" / "latest.json").read_text(encoding="utf-8")
+        )
+        report_date = date.fromisoformat(report_payload["trade_date"])
+        receipt = latest_committed_report_receipt(
+            LocalEvidenceStore(config.local_warehouse_dir / "formal_evidence"),
+            report_date,
+        )
+        artifact_dir = prepare_pages_artifact(
+            config.project_root,
+            target_dir,
+            receipt=receipt,
+        )
+    except (DeployArtifactError, OSError, ValueError, KeyError, json.JSONDecodeError) as exc:
         _fail(str(exc))
     typer.echo(f"deploy artifact prepared: {artifact_dir}")
 
@@ -280,11 +311,19 @@ def ops_verify_production(
         repository = _analysis_repository(config, require_supabase=True)
     except MissingSupabaseConfig as exc:
         _fail(str(exc))
-    verification = verify_production_result(
-        config.project_root,
-        repository,
+    receipt = latest_committed_report_receipt(
+        LocalEvidenceStore(config.local_warehouse_dir / "formal_evidence"),
         parsed_trade_date,
     )
+    try:
+        verification = verify_production_result(
+            config.project_root,
+            repository,
+            parsed_trade_date,
+            receipt=receipt,
+        )
+    except ValueError as exc:
+        _fail(str(exc))
     typer.echo(
         f"{verification.status.value} "
         f"recommendations={verification.recommendations} "
