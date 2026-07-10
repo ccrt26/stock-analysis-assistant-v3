@@ -16,6 +16,7 @@ from stock_analyzer.data.readiness import (
     AcquisitionPayload,
     AcquisitionRequest,
     FailureClassification,
+    CapabilityEvidenceKind,
     RouteCapabilityEvidence,
     RouteKind,
 )
@@ -207,3 +208,11 @@ def test_unproven_route_capability_blocks_before_fetch():
 
     assert primary.calls == []
     assert backup.calls == []
+
+
+def test_recorded_capability_is_approved_offline_but_not_for_live_use():
+    capability = _capability("primary", RouteKind.PRIMARY)
+
+    assert capability.evidence_kind is CapabilityEvidenceKind.RECORDED
+    assert capability.approved is True
+    assert capability.approved_for_live is False

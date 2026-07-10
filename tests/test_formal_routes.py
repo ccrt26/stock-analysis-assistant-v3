@@ -323,3 +323,23 @@ def test_registry_contains_no_unverified_tushare_announcements_name():
     )
     assert "tushare.announcements" not in serialized
     assert "OfficialDisclosureClient.fetch_official_events_risk" in serialized
+
+
+def test_live_registry_rejects_recorded_capabilities_before_any_client_fetch(tmp_path):
+    primary = RecordedClient()
+    backup = RecordedClient()
+    official = RecordedClient()
+
+    with pytest.raises(ValueError, match="live capability evidence required"):
+        build_formal_route_registry(
+            primary,
+            backup,
+            official,
+            tmp_path / "holdings.json",
+            _capabilities(),
+            require_live_capability=True,
+        )
+
+    assert primary.calls == []
+    assert backup.calls == []
+    assert official.calls == []

@@ -199,7 +199,19 @@ def build_formal_route_registry(
     official_client: FormalEndpointClient,
     holdings_path: Path,
     capabilities: dict[str, RouteCapabilityEvidence],
+    *,
+    require_live_capability: bool = False,
 ) -> dict[AcquisitionGroupId, FormalRoutePair]:
+    if require_live_capability:
+        recorded_routes = sorted(
+            route_id
+            for route_id, capability in capabilities.items()
+            if not capability.approved_for_live
+        )
+        if recorded_routes:
+            raise ValueError(
+                "live capability evidence required for " + ", ".join(recorded_routes)
+            )
     registry: dict[AcquisitionGroupId, FormalRoutePair] = {}
     for group_id, (primary_id, backup_id, method) in _ROUTE_DEFINITIONS.items():
         primary_owner = official_client if group_id == AcquisitionGroupId.OFFICIAL_EVENTS_RISK else primary_client
@@ -228,6 +240,16 @@ def build_formal_route_registry(
         approved_single_source=True,
     )
     return registry
+
+
+def formal_route_group_ids() -> dict[str, AcquisitionGroupId]:
+    groups = {
+        route_id: group_id
+        for group_id, definition in _ROUTE_DEFINITIONS.items()
+        for route_id in definition[:2]
+    }
+    groups[ManualHoldingsFileRoute.route_id] = AcquisitionGroupId.MANUAL_HOLDINGS
+    return groups
 
 
 def derive_expected_tradable_codes(
@@ -271,4 +293,5 @@ __all__ = [
     "NormalizedEndpointRoute",
     "build_formal_route_registry",
     "derive_expected_tradable_codes",
+    "formal_route_group_ids",
 ]

@@ -62,6 +62,11 @@ class FailureClassification(str, Enum):
     UNKNOWN = "unknown"
 
 
+class CapabilityEvidenceKind(str, Enum):
+    RECORDED = "recorded"
+    LIVE = "live"
+
+
 class RouteCapabilityEvidence(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -73,6 +78,9 @@ class RouteCapabilityEvidence(BaseModel):
     full_universe_verified: bool
     post_close_verified: bool
     tested_at: datetime
+    evidence_kind: CapabilityEvidenceKind = CapabilityEvidenceKind.RECORDED
+    response_hash: str = "0" * 64
+    tested_library_versions: dict[str, str] = Field(default_factory=dict)
 
     @property
     def approved(self) -> bool:
@@ -84,6 +92,10 @@ class RouteCapabilityEvidence(BaseModel):
                 self.post_close_verified,
             )
         )
+
+    @property
+    def approved_for_live(self) -> bool:
+        return self.approved and self.evidence_kind is CapabilityEvidenceKind.LIVE
 
 
 class RecordTypeContract(BaseModel):
@@ -450,6 +462,7 @@ __all__ = [
     "AcquisitionGroupId",
     "AcquisitionPayload",
     "AcquisitionRequest",
+    "CapabilityEvidenceKind",
     "FailureClassification",
     "FormalRunState",
     "GroupValidation",
