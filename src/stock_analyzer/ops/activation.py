@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 import uuid
 from pathlib import Path
 from typing import Any, Callable, Protocol
@@ -198,9 +199,31 @@ class FormalActivationCoordinator:
             if not self.ledger.is_formal_run_active(receipt.run_id, activation_id):
                 raise ActivationError("ledger activation marker missing")
 
+            immutable_root = self.report_root / ".formal-runs" / receipt.run_id
+            _preserve_immutable_artifacts(
+                staging,
+                immutable_root,
+                artifact_hashes,
+            )
             if advance_report_pointer:
                 self._inject("pointer")
-                _write_pointer_batch(pointer_payloads)
+                activated_payloads = {
+                    self.report_root / relative_path: (
+                        immutable_root / relative_path
+                    ).read_bytes()
+                    for relative_path in artifact_hashes
+                }
+                for pointer_path, pointer_payload in pointer_payloads.items():
+                    existing_payload = activated_payloads.get(pointer_path)
+                    if (
+                        existing_payload is not None
+                        and existing_payload != pointer_payload
+                    ):
+                        raise ActivationError(
+                            f"pointer payload conflicts with report artifact: {pointer_path}"
+                        )
+                    activated_payloads[pointer_path] = pointer_payload
+                _write_pointer_batch(activated_payloads)
 
             completed = controller.commit_activation(
                 activation_id,
@@ -287,6 +310,27 @@ def _write_pointer_batch(pointer_payloads: dict[Path, bytes]) -> None:
             elif path.exists():
                 path.unlink()
         raise
+
+
+def _preserve_immutable_artifacts(
+    staging: Path,
+    immutable_root: Path,
+    expected_hashes: dict[str, str],
+) -> None:
+    if immutable_root.exists():
+        if hash_artifact_tree(immutable_root) != expected_hashes:
+            raise ActivationError("immutable formal artifact hash mismatch")
+        return
+    immutable_root.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        shutil.copytree(staging, immutable_root)
+    except Exception:
+        if immutable_root.exists():
+            shutil.rmtree(immutable_root)
+        raise
+    if hash_artifact_tree(immutable_root) != expected_hashes:
+        shutil.rmtree(immutable_root)
+        raise ActivationError("immutable formal artifact copy hash mismatch")
 
 
 def _hash(value: Any) -> str:

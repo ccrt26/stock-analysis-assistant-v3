@@ -18,6 +18,7 @@ _FORBIDDEN_DIR_NAMES = {
     ".superpowers",
     ".staging",
     ".activation",
+    ".formal-runs",
 }
 _FORBIDDEN_FILE_PREFIXES = (".env",)
 _FORBIDDEN_RELATIVE_PREFIXES = (

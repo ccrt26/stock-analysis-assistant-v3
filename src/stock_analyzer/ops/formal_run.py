@@ -31,7 +31,10 @@ from stock_analyzer.data.readiness import (
     validate_group_payload,
 )
 from stock_analyzer.ops.redaction import redact_secrets
-from stock_analyzer.storage.evidence_store import LocalEvidenceStore
+from stock_analyzer.storage.evidence_store import (
+    FrozenReportReference,
+    LocalEvidenceStore,
+)
 
 
 class InvalidRunTransition(RuntimeError):
@@ -104,6 +107,7 @@ class FormalPipelineDependencies:
     ledger: Any
     evidence_store: LocalEvidenceStore
     log_root: Path
+    activation_failure_point: str | None = None
 
 
 @dataclass(frozen=True)
@@ -440,6 +444,7 @@ def run_formal_strategy_v2(
             report_root,
             dependencies.evidence_store,
             dependencies.ledger,
+            failure_point=dependencies.activation_failure_point,
         )
 
         def render(staging: Path) -> None:
@@ -464,6 +469,19 @@ def run_formal_strategy_v2(
             ledger_rows=analysis.ledger_rows,
             pointer_payloads=analysis.pointer_payloads,
             advance_report_pointer=analysis.has_publishable_output,
+        )
+        if completed.input_set_id is None:
+            raise ValueError("activated formal receipt lacks input_set_id")
+        dependencies.evidence_store.save_frozen_report_reference(
+            FrozenReportReference(
+                run_id=completed.run_id,
+                input_set_id=completed.input_set_id,
+                group_version_ids=tuple(
+                    completed.group_version_ids[key]
+                    for key in sorted(completed.group_version_ids)
+                ),
+                artifact_hashes=completed.artifact_hashes,
+            )
         )
         return FormalRunResult(
             receipt=completed,
