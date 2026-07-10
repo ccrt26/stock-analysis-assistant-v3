@@ -101,7 +101,8 @@ def run_daily(
         try:
             market_data_provider = build_production_market_data_provider(config)
         except CurrentLiveDataUnavailable as exc:
-            _fail(str(exc))
+            if not allow_data_insufficient_output:
+                _fail(str(exc))
 
     try:
         result = run_daily_pipeline(

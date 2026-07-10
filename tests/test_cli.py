@@ -17,6 +17,7 @@ from stock_analyzer.data.models import (
     SourceStatus,
     StockBasicRow,
 )
+from stock_analyzer.data.provider import CurrentLiveDataUnavailable
 from stock_analyzer.domain.models import (
     ActionLabel,
     EvaluationTask,
@@ -480,6 +481,56 @@ def test_run_daily_forwards_strategy_v2_and_data_insufficient_flags(monkeypatch)
 
     assert result.exit_code == 0
     assert captured["strategy_v2"] is True
+    assert captured["allow_data_insufficient_output"] is True
+
+
+def test_run_daily_allow_data_insufficient_continues_when_provider_build_fails(
+    monkeypatch,
+):
+    repo = RecordingRepository()
+    captured = {}
+
+    def fake_build_provider(config):
+        raise CurrentLiveDataUnavailable("current live data unavailable")
+
+    def fake_run_daily_pipeline(trade_date, output_dir, **kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(
+            trade_date=trade_date,
+            recommendations=[],
+            evaluation_tasks=[],
+        )
+
+    monkeypatch.setenv("SUPABASE_URL", "https://supabase.example.test")
+    monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "fake-service-role-key")
+    monkeypatch.delenv("STOCK_ANALYZER_FIXTURE_MODE", raising=False)
+    monkeypatch.setattr(
+        "stock_analyzer.cli._analysis_repository",
+        lambda config, **kwargs: repo,
+    )
+    monkeypatch.setattr(
+        "stock_analyzer.cli.build_production_market_data_provider",
+        fake_build_provider,
+    )
+    monkeypatch.setattr(
+        "stock_analyzer.cli.run_daily_pipeline",
+        fake_run_daily_pipeline,
+    )
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "run-daily",
+            "--allow-data-insufficient-output",
+            "--trade-date",
+            "2026-07-07",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "daily run completed for 2026-07-07" in result.stdout
+    assert captured["market_data_provider"] is None
+    assert captured["fixture_mode"] is False
     assert captured["allow_data_insufficient_output"] is True
 
 

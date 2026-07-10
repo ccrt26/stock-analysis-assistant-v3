@@ -273,6 +273,14 @@ class InsufficientProductionProvider:
         )
 
 
+class RaisingCurrentLiveDataProvider:
+    def load(self, trade_date):
+        raise CurrentLiveDataUnavailable(
+            "Tushare returned no current trade date daily bars for "
+            f"{trade_date.isoformat()}"
+        )
+
+
 class RawOnlyProductionProvider:
     def load(self, trade_date):
         daily_bars = _raw_daily_bars(trade_date)
@@ -783,6 +791,31 @@ def test_trading_day_pipeline_outputs_data_insufficient_report_when_live_data_mi
     )
     assert payload["report_mode"] == "data_insufficient"
     assert payload["operational_status"]["blocking_missing_fields"]
+
+
+def test_trading_day_pipeline_outputs_data_insufficient_report_when_provider_load_raises(tmp_path):
+    repo = InMemoryAnalysisRepository()
+
+    result = run_daily_pipeline(
+        date(2026, 7, 10),
+        tmp_path,
+        repository=repo,
+        fixture_mode=False,
+        market_data_provider=RaisingCurrentLiveDataProvider(),
+        allow_data_insufficient_output=True,
+    )
+
+    assert result.operational_status.recommendation_state.value == "data_insufficient"
+    assert result.operational_status.focus_state.value == "data_insufficient"
+    assert result.recommendations == []
+    assert repo.recommendations == []
+    assert (tmp_path / "index.html").exists()
+    assert (tmp_path / "daily" / "2026-07-10" / "index.html").exists()
+    payload = json.loads(
+        (tmp_path / "data" / "latest.json").read_text(encoding="utf-8")
+    )
+    assert payload["report_mode"] == "data_insufficient"
+    assert "current trade date daily bars" in payload["operational_status"]["message"]
 
 
 def test_strategy_v2_pipeline_persists_operational_status_without_full_market_supabase_write(tmp_path):

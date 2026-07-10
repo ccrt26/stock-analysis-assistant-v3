@@ -23,7 +23,7 @@ from stock_analyzer.data.models import (
     MarketDataBundle,
     SourceRunRecord,
 )
-from stock_analyzer.data.provider import MarketDataProvider
+from stock_analyzer.data.provider import CurrentLiveDataUnavailable, MarketDataProvider
 from stock_analyzer.domain.models import (
     ActionDecision,
     ActionLabel,
@@ -169,7 +169,18 @@ def run_daily_pipeline(
                 local_archive=local_archive,
                 dry_run=dry_run,
             )
-        bundle = market_data_provider.load(trade_date)
+        try:
+            bundle = market_data_provider.load(trade_date)
+        except CurrentLiveDataUnavailable as exc:
+            return _handle_data_insufficient_output_or_raise(
+                trade_date=trade_date,
+                output_dir=output_dir,
+                message=str(exc),
+                allow_data_insufficient_output=allow_data_insufficient_output,
+                bundle=None,
+                local_archive=local_archive,
+                dry_run=dry_run,
+            )
         if not bundle.can_generate_decisions:
             return _handle_data_insufficient_output_or_raise(
                 trade_date=trade_date,
