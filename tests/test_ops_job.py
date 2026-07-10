@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import date, timedelta
+from types import SimpleNamespace
 
 import pytest
 from typer.testing import CliRunner
@@ -12,11 +13,13 @@ from stock_analyzer.ops.cleanup import CleanupSummary
 from stock_analyzer.ops.job import (
     HumanInterventionJobError,
     RetryableJobError,
+    _default_run_daily,
     _default_publish,
     run_daily_job,
 )
 from stock_analyzer.ops.status import FailureClass, JobStatus, RunStatus
 from stock_analyzer.data.models import DailyBar, DailyBasicRow, SourceGrade
+from stock_analyzer.data.provider import CurrentLiveDataUnavailable
 from stock_analyzer.domain.models import (
     ActionLabel,
     EvaluationTask,
@@ -287,6 +290,37 @@ def test_verify_strategy_v2_fails_when_score_is_visible_in_production_html(
             "report_mode": "production",
             "is_fixture": False,
             "recommendation_cards": [{"ts_code": "600000.SH"}],
+            "strategy_snapshots": [{"internal_score": 83.2}],
+            "operational_status": {
+                "recommendation_state": "generated",
+                "focus_state": "generated",
+            },
+        },
+    )
+
+    verification = verify_production_result(
+        tmp_path,
+        FakeVerificationRepository(),
+        trade_date,
+    )
+
+    assert verification.passed is False
+    assert _failure(verification, "visible_total_score").fix_suggestion
+
+
+def test_verify_strategy_v2_score_scan_runs_with_empty_cards_and_generated_status(
+    tmp_path,
+):
+    trade_date = date(2026, 7, 10)
+    _write_production_report(
+        tmp_path,
+        trade_date,
+        index_html="<html><body>评分 83.2</body></html>",
+        report_json_payload={
+            "trade_date": trade_date.isoformat(),
+            "report_mode": "production",
+            "is_fixture": False,
+            "recommendation_cards": [],
             "strategy_snapshots": [{"internal_score": 83.2}],
             "operational_status": {
                 "recommendation_state": "generated",
@@ -591,6 +625,86 @@ def test_run_daily_job_skips_non_trading_day_without_production_run(tmp_path):
     assert status.publish_skipped_reason == "non_trading_day"
     assert status.deploy_artifact_prepared is False
     assert events == ["calendar"]
+
+
+def test_default_run_daily_uses_strategy_v2_and_data_insufficient_output(
+    monkeypatch,
+    tmp_path,
+):
+    captured = {}
+
+    monkeypatch.setattr(
+        "stock_analyzer.ops.job.AppConfig.load",
+        lambda: SimpleNamespace(
+            reports_dir=tmp_path / "reports",
+            local_warehouse_dir=tmp_path / "warehouse",
+            local_archive_dir=tmp_path / "archive",
+        ),
+    )
+    monkeypatch.setattr(
+        "stock_analyzer.ops.job.build_production_market_data_provider",
+        lambda _config: object(),
+    )
+
+    def fake_run_daily_pipeline(*args, **kwargs):
+        captured["args"] = args
+        captured.update(kwargs)
+
+    monkeypatch.setattr(
+        "stock_analyzer.ops.job.run_daily_pipeline",
+        fake_run_daily_pipeline,
+    )
+
+    _default_run_daily(tmp_path, FakeJobRepository(), date(2026, 7, 10))
+
+    assert captured["strategy_v2"] is True
+    assert captured["allow_data_insufficient_output"] is True
+    assert captured["dry_run"] is False
+    assert captured["persist"] is True
+    assert captured["fixture_mode"] is False
+
+
+def test_default_run_daily_routes_provider_build_unavailable_to_pipeline(
+    monkeypatch,
+    tmp_path,
+):
+    captured = {}
+
+    monkeypatch.setattr(
+        "stock_analyzer.ops.job.AppConfig.load",
+        lambda: SimpleNamespace(
+            reports_dir=tmp_path / "reports",
+            local_warehouse_dir=tmp_path / "warehouse",
+            local_archive_dir=tmp_path / "archive",
+        ),
+    )
+
+    def unavailable_provider(_config):
+        raise CurrentLiveDataUnavailable("current live data unavailable")
+
+    monkeypatch.setattr(
+        "stock_analyzer.ops.job.build_production_market_data_provider",
+        unavailable_provider,
+    )
+
+    def fake_run_daily_pipeline(*args, **kwargs):
+        captured["args"] = args
+        captured.update(kwargs)
+
+    monkeypatch.setattr(
+        "stock_analyzer.ops.job.run_daily_pipeline",
+        fake_run_daily_pipeline,
+    )
+
+    _default_run_daily(tmp_path, FakeJobRepository(), date(2026, 7, 10))
+
+    provider = captured["market_data_provider"]
+    assert provider is not None
+    with pytest.raises(CurrentLiveDataUnavailable) as excinfo:
+        provider.load(date(2026, 7, 10))
+    assert "current live data unavailable" in str(excinfo.value)
+    assert captured["strategy_v2"] is True
+    assert captured["allow_data_insufficient_output"] is True
 
 
 def test_run_daily_job_calendar_unknown_requires_human_intervention(tmp_path):

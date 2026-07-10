@@ -334,7 +334,7 @@ def _append_report_artifact_failures(
             )
         )
 
-    if _has_strategy_v2_recommendation_cards(report_payload):
+    if _should_scan_visible_total_scores(report_payload):
         score_leak_path = _find_visible_total_score_leak(reports_dir)
         if score_leak_path is not None:
             failures.append(
@@ -586,13 +586,18 @@ def _string_or_none(value: Any) -> str | None:
     return None
 
 
-def _has_strategy_v2_recommendation_cards(
+def _should_scan_visible_total_scores(
     payload: dict[str, Any] | None,
 ) -> bool:
     if payload is None:
         return False
     cards = payload.get("recommendation_cards")
-    return isinstance(cards, list) and bool(cards)
+    if isinstance(cards, list) and bool(cards):
+        return True
+    snapshots = payload.get("strategy_snapshots")
+    if isinstance(snapshots, list) and bool(snapshots):
+        return True
+    return _has_generated_operational_states(_operational_status(payload))
 
 
 def _verification_status(passed: bool, recommendation_count: int) -> RunStatus:

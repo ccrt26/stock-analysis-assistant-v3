@@ -66,6 +66,16 @@ class HumanInterventionJobError(RuntimeError):
         self.fix_suggestion = fix_suggestion
 
 
+class _UnavailableMarketDataProvider:
+    source_name = "production_market_data_provider"
+
+    def __init__(self, message: str) -> None:
+        self.message = message
+
+    def load(self, trade_date: date):
+        raise CurrentLiveDataUnavailable(self.message)
+
+
 def run_daily_job(
     project_root: Path,
     trade_date: date,
@@ -405,11 +415,7 @@ def _default_run_daily(project_root: Path, repository, trade_date: date) -> None
     try:
         market_data_provider = build_production_market_data_provider(config)
     except CurrentLiveDataUnavailable as exc:
-        raise RetryableJobError(
-            str(exc),
-            failure_class=FailureClass.TUSHARE_DATA_TEMPORARILY_UNAVAILABLE,
-            fix_suggestion="Retry after the live data provider publishes current rows.",
-        ) from exc
+        market_data_provider = _UnavailableMarketDataProvider(str(exc))
 
     try:
         run_daily_pipeline(
@@ -422,6 +428,8 @@ def _default_run_daily(project_root: Path, repository, trade_date: date) -> None
             market_data_provider=market_data_provider,
             local_warehouse=LocalWarehouse(config.local_warehouse_dir),
             local_archive=LocalArchive(config.local_archive_dir),
+            strategy_v2=True,
+            allow_data_insufficient_output=True,
         )
     except ProductionDataSourceUnavailable as exc:
         raise RetryableJobError(

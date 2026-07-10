@@ -27,11 +27,13 @@ from stock_analyzer.data.provider import CurrentLiveDataUnavailable, MarketDataP
 from stock_analyzer.domain.models import (
     ActionDecision,
     ActionLabel,
+    ActionRecommendationSummary,
     DataRecoveryAttempt,
     EvaluationTask,
     EvidencePackage,
     FeatureSnapshot,
     FocusState,
+    ManualHoldingSummary,
     ManualHolding,
     OperationalDailyStatus,
     OperationalReportState,
@@ -168,6 +170,13 @@ def run_daily_pipeline(
                 bundle=None,
                 local_archive=local_archive,
                 dry_run=dry_run,
+                recovery_attempts=[
+                    _provider_unavailable_recovery_attempt(
+                        trade_date,
+                        PRODUCTION_DATA_SOURCE_UNAVAILABLE_MESSAGE,
+                        source_name="market_data_provider",
+                    )
+                ],
             )
         try:
             bundle = market_data_provider.load(trade_date)
@@ -180,6 +189,13 @@ def run_daily_pipeline(
                 bundle=None,
                 local_archive=local_archive,
                 dry_run=dry_run,
+                recovery_attempts=[
+                    _provider_unavailable_recovery_attempt(
+                        trade_date,
+                        str(exc),
+                        source_name=_provider_source_name(market_data_provider),
+                    )
+                ],
             )
         if not bundle.can_generate_decisions:
             return _handle_data_insufficient_output_or_raise(
@@ -236,6 +252,12 @@ def run_daily_pipeline(
         if existing_focus_states is not None
         else repository.load_focus_states()
     )
+    strategy_v2_cards = []
+    strategy_v2_snapshots = []
+    focus_entry_theses = []
+    focus_daily_updates = []
+    action_recommendation_summaries = []
+    manual_holding_summaries = []
     if strategy_v2:
         strategy_result = generate_strategy_v2_recommendations(
             features,
@@ -243,8 +265,9 @@ def run_daily_pipeline(
             trade_date=trade_date,
             current_holdings=_manual_holdings_by_code(manual_holdings or []),
         )
+        strategy_v2_cards = list(strategy_result.cards)
         strategy_snapshots = list(strategy_result.snapshots)
-        all_strategy_snapshots = [
+        strategy_v2_snapshots = [
             *strategy_snapshots,
             *strategy_result.data_insufficient_snapshots,
         ]
@@ -253,11 +276,21 @@ def run_daily_pipeline(
         )
         focus_result = update_focus_watchlist_v2(
             existing=existing,
-            recommendation_snapshots=all_strategy_snapshots,
+            recommendation_snapshots=strategy_v2_snapshots,
             manual_entries=list(manual_entries or []),
             trade_date=trade_date,
         )
         focus_states = focus_result.focus_states
+        focus_entry_theses = list(focus_result.entry_theses)
+        focus_daily_updates = list(focus_result.daily_updates)
+        action_recommendation_summaries = (
+            _action_recommendation_summaries_from_snapshots(strategy_v2_snapshots)
+        )
+        manual_holding_summaries = _manual_holding_summaries_from_holdings(
+            trade_date,
+            manual_holdings or [],
+            strategy_v2_snapshots,
+        )
         evidence_packages = [
             build_evidence_package_from_strategy_snapshot(snapshot)
             for snapshot in strategy_snapshots
@@ -328,8 +361,28 @@ def run_daily_pipeline(
         repository.save_focus_states(focus_states)
         repository.save_evidence_packages(evidence_packages)
         repository.save_evaluation_tasks(evaluation_tasks)
+        if strategy_v2:
+            _save_strategy_v2_ledger_rows(
+                repository=repository,
+                strategy_snapshots=strategy_v2_snapshots,
+                focus_entry_theses=focus_entry_theses,
+                focus_daily_updates=focus_daily_updates,
+                action_recommendations=action_recommendation_summaries,
+                manual_holding_summaries=manual_holding_summaries,
+                operational_status=operational_status,
+            )
 
     if not dry_run:
+        strategy_v2_report_kwargs = (
+            {
+                "strategy_v2_cards": strategy_v2_cards,
+                "strategy_v2_snapshots": strategy_v2_snapshots,
+                "focus_entry_theses": focus_entry_theses,
+                "focus_daily_updates": focus_daily_updates,
+            }
+            if strategy_v2
+            else {}
+        )
         render_reports(
             output_dir,
             recommendations,
@@ -342,6 +395,7 @@ def run_daily_pipeline(
                 production_bundle.source_versions if production_bundle else None
             ),
             operational_status=operational_status,
+            **strategy_v2_report_kwargs,
         )
         if local_archive is not None and not fixture_mode:
             local_archive.archive_report_tree(output_dir, trade_date)
@@ -365,6 +419,7 @@ def _handle_data_insufficient_output_or_raise(
     local_archive,
     dry_run: bool,
     extra_blocking_missing_fields: Optional[list[str]] = None,
+    recovery_attempts: Optional[list[DataRecoveryAttempt]] = None,
 ) -> DailyRunResult:
     if not allow_data_insufficient_output:
         raise ProductionDataSourceUnavailable(message)
@@ -374,6 +429,7 @@ def _handle_data_insufficient_output_or_raise(
         message=message,
         bundle=bundle,
         extra_blocking_missing_fields=extra_blocking_missing_fields,
+        recovery_attempts=recovery_attempts,
     )
     if not dry_run:
         render_data_insufficient_report(
@@ -414,6 +470,7 @@ def _data_insufficient_operational_status(
     message: str,
     bundle: Optional[MarketDataBundle],
     extra_blocking_missing_fields: Optional[list[str]] = None,
+    recovery_attempts: Optional[list[DataRecoveryAttempt]] = None,
 ) -> OperationalDailyStatus:
     blocking_missing_fields = _dedupe(
         [
@@ -421,6 +478,20 @@ def _data_insufficient_operational_status(
             *(extra_blocking_missing_fields or []),
         ]
     )
+    data_recovery_attempts = _data_recovery_attempts_from_source_runs(
+        bundle.source_runs if bundle else []
+    )
+    if recovery_attempts:
+        data_recovery_attempts.extend(recovery_attempts)
+    if not data_recovery_attempts:
+        data_recovery_attempts.append(
+            _provider_unavailable_recovery_attempt(
+                trade_date,
+                message,
+                source_name="market_data_provider",
+            )
+        )
+
     return OperationalDailyStatus(
         trade_date=trade_date,
         is_trading_day=True,
@@ -428,9 +499,7 @@ def _data_insufficient_operational_status(
         focus_state=OperationalReportState.DATA_INSUFFICIENT,
         recommendation_count=0,
         focus_count=0,
-        data_recovery_attempts=_data_recovery_attempts_from_source_runs(
-            bundle.source_runs if bundle else []
-        ),
+        data_recovery_attempts=data_recovery_attempts,
         blocking_missing_fields=blocking_missing_fields,
         message=message,
     )
@@ -499,6 +568,127 @@ def _data_recovery_attempts_from_source_runs(
             )
         )
     return attempts
+
+
+def _provider_unavailable_recovery_attempt(
+    trade_date: date,
+    message: str,
+    *,
+    source_name: str,
+) -> DataRecoveryAttempt:
+    return DataRecoveryAttempt(
+        family="market_data_provider",
+        source_name=source_name,
+        source=source_name,
+        status="failed",
+        message=message,
+        trade_date=trade_date,
+        succeeded=False,
+        error=message,
+    )
+
+
+def _provider_source_name(provider: MarketDataProvider) -> str:
+    configured_name = getattr(provider, "source_name", None)
+    if isinstance(configured_name, str) and configured_name.strip():
+        return configured_name.strip()
+    return provider.__class__.__name__ or "market_data_provider"
+
+
+def _action_recommendation_summaries_from_snapshots(
+    snapshots: list[StrategyEvidenceSnapshot],
+) -> list[ActionRecommendationSummary]:
+    return [
+        ActionRecommendationSummary(
+            trade_date=snapshot.trade_date,
+            ts_code=snapshot.ts_code,
+            decision=snapshot.action.decision,
+            position_min_pct=snapshot.action.position_min_pct,
+            position_max_pct=snapshot.action.position_max_pct,
+            invalidation_conditions=list(snapshot.action.invalidation_conditions),
+        )
+        for snapshot in snapshots
+    ]
+
+
+def _manual_holding_summaries_from_holdings(
+    trade_date: date,
+    manual_holdings: list[ManualHolding],
+    snapshots: list[StrategyEvidenceSnapshot],
+) -> list[ManualHoldingSummary]:
+    snapshots_by_code = {snapshot.ts_code: snapshot for snapshot in snapshots}
+    return [
+        ManualHoldingSummary(
+            trade_date=trade_date,
+            ts_code=holding.ts_code,
+            held=True,
+            position_band=_manual_position_band(holding.position_pct),
+            last_action_state=_manual_holding_action_state(
+                snapshots_by_code.get(holding.ts_code)
+            ),
+        )
+        for holding in manual_holdings
+    ]
+
+
+def _manual_position_band(position_pct: float) -> str:
+    if position_pct <= 0:
+        return "empty"
+    if position_pct < 2:
+        return "tracking"
+    if position_pct < 5:
+        return "small"
+    if position_pct < 10:
+        return "medium"
+    return "large"
+
+
+def _manual_holding_action_state(
+    snapshot: StrategyEvidenceSnapshot | None,
+) -> str:
+    if snapshot is None:
+        return "manual_holding_without_strategy_snapshot"
+    return snapshot.action.decision.value
+
+
+def _save_strategy_v2_ledger_rows(
+    *,
+    repository: AnalysisRepository,
+    strategy_snapshots: list[StrategyEvidenceSnapshot],
+    focus_entry_theses: list,
+    focus_daily_updates: list,
+    action_recommendations: list[ActionRecommendationSummary],
+    manual_holding_summaries: list[ManualHoldingSummary],
+    operational_status: OperationalDailyStatus,
+) -> None:
+    _call_repository_save(repository, "save_strategy_snapshots", strategy_snapshots)
+    _call_repository_save(repository, "save_focus_entry_theses", focus_entry_theses)
+    _call_repository_save(repository, "save_focus_daily_updates", focus_daily_updates)
+    _call_repository_save(
+        repository,
+        "save_action_recommendations",
+        action_recommendations,
+    )
+    _call_repository_save(
+        repository,
+        "save_manual_holding_summaries",
+        manual_holding_summaries,
+    )
+    _call_repository_save(
+        repository,
+        "save_operational_daily_status",
+        operational_status,
+    )
+
+
+def _call_repository_save(
+    repository: AnalysisRepository,
+    method_name: str,
+    value,
+) -> None:
+    save = getattr(repository, method_name, None)
+    if save is not None:
+        save(value)
 
 
 def _recommendations_from_strategy_snapshots(

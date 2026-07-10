@@ -483,6 +483,41 @@ def test_run_daily_pipeline_creates_report_and_evaluation_tasks(tmp_path):
     assert (tmp_path / "daily" / "2026-07-07" / "index.html").exists()
 
 
+def test_strategy_v2_fixture_pipeline_writes_v2_report_and_narrow_ledger_rows(
+    tmp_path,
+):
+    repo = InMemoryAnalysisRepository()
+
+    result = run_daily_pipeline(
+        date(2026, 7, 7),
+        tmp_path,
+        dry_run=False,
+        repository=repo,
+        fixture_mode=True,
+        strategy_v2=True,
+        manual_entries=[("600000.SH", "人工跟踪")],
+    )
+
+    payload = json.loads(
+        (tmp_path / "data" / "latest.json").read_text(encoding="utf-8")
+    )
+    html = (tmp_path / "index.html").read_text(encoding="utf-8")
+
+    assert result.recommendations
+    assert payload["recommendation_cards"]
+    assert payload["strategy_snapshots"]
+    assert "评分" not in html
+    assert repo.strategy_snapshots
+    assert repo.focus_entry_theses
+    assert repo.focus_daily_updates
+    assert repo.action_recommendation_summaries
+    assert repo.operational_daily_statuses
+    assert repo.recommendations
+    assert repo.focus_states
+    assert repo.evidence_packages
+    assert repo.evaluation_tasks
+
+
 def test_run_daily_pipeline_dry_run_does_not_persist_any_analysis_state(tmp_path):
     repo = FailingSaveRepository()
 
@@ -816,6 +851,13 @@ def test_trading_day_pipeline_outputs_data_insufficient_report_when_provider_loa
     )
     assert payload["report_mode"] == "data_insufficient"
     assert "current trade date daily bars" in payload["operational_status"]["message"]
+    attempts = payload["operational_status"]["data_recovery_attempts"]
+    assert attempts
+    assert attempts[0]["family"]
+    assert attempts[0]["source_name"]
+    assert attempts[0]["status"]
+    assert attempts[0]["message"]
+    assert payload["operational_status"]["blocking_missing_fields"]
 
 
 def test_strategy_v2_pipeline_persists_operational_status_without_full_market_supabase_write(tmp_path):
