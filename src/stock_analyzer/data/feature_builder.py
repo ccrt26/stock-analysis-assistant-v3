@@ -32,7 +32,9 @@ def build_market_bundle(
     source_grade: SourceGrade,
     source_versions: dict[str, str],
     source_runs: list[SourceRunRecord],
+    stock_status_by_code: dict[str, dict[str, bool]] | None = None,
 ) -> MarketDataBundle:
+    stock_status_by_code = stock_status_by_code or {}
     bars_by_code: dict[str, list[DailyBar]] = {}
     for bar in daily_bars:
         bars_by_code.setdefault(bar.ts_code, []).append(bar)
@@ -86,6 +88,7 @@ def build_market_bundle(
         if len(current_bars) < 61:
             continue
 
+        status = stock_status_by_code.get(stock.ts_code, {})
         stocks.append(
             StockSnapshot(
                 trade_date=trade_date,
@@ -94,6 +97,9 @@ def build_market_bundle(
                 listing_days=_listing_days(stock.list_date, trade_date),
                 turnover_rate=current_basic.turnover_rate if current_basic else None,
                 amount=current_bars[-1].amount,
+                is_st=status.get("is_st", False),
+                is_suspended=status.get("is_suspended", False),
+                has_delisting_risk=status.get("has_delisting_risk", False),
             )
         )
         feature_profiles[stock.ts_code] = FeatureSnapshot(
