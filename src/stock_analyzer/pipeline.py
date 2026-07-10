@@ -11,6 +11,7 @@ from stock_analyzer.analysis.evidence import (
     build_evidence_package_from_strategy_snapshot,
 )
 from stock_analyzer.analysis.focus import (
+    FormalFocusDay,
     update_focus_watchlist,
     update_focus_watchlist_v2,
 )
@@ -154,6 +155,7 @@ def run_daily_pipeline(
     allow_data_insufficient_output: bool = False,
     manual_entries: Optional[list[tuple[str, str | None]]] = None,
     manual_holdings: Optional[list[ManualHolding]] = None,
+    eligible_focus_days: Optional[list[FormalFocusDay]] = None,
 ) -> DailyRunResult:
     repository = repository or InMemoryAnalysisRepository()
     persist = persist and not dry_run
@@ -274,11 +276,23 @@ def run_daily_pipeline(
         recommendations = _recommendations_from_strategy_snapshots(
             strategy_snapshots,
         )
+        prior_focus_snapshots: list[StrategyEvidenceSnapshot] = []
+        if eligible_focus_days is not None:
+            prior_focus_snapshots = (
+                repository.load_formally_committed_strategy_snapshots(
+                    before_date=trade_date,
+                    eligible_dates=[day.trade_date for day in eligible_focus_days],
+                )
+            )
         focus_result = update_focus_watchlist_v2(
             existing=existing,
-            recommendation_snapshots=strategy_v2_snapshots,
+            recommendation_snapshots=[
+                *prior_focus_snapshots,
+                *strategy_v2_snapshots,
+            ],
             manual_entries=list(manual_entries or []),
             trade_date=trade_date,
+            eligible_focus_days=eligible_focus_days,
         )
         focus_states = focus_result.focus_states
         focus_entry_theses = list(focus_result.entry_theses)

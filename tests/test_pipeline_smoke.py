@@ -3,6 +3,7 @@ from datetime import date, timedelta
 
 import pytest
 
+from stock_analyzer.analysis.focus import FormalFocusDay
 from stock_analyzer.data.models import (
     DailyBar,
     DailyBasicRow,
@@ -1057,3 +1058,43 @@ def test_render_report_for_date_allows_explicit_fixture_fallback(tmp_path):
     assert result.recommendations
     assert (tmp_path / "index.html").exists()
     assert repo.recommendations == []
+
+
+def test_pipeline_loads_prior_formally_committed_focus_snapshots_before_update(
+    tmp_path,
+    monkeypatch,
+):
+    import stock_analyzer.pipeline as pipeline_module
+    from tests.test_focus_strategy_v2 import _snapshot
+
+    prior_date = date(2026, 7, 9)
+    current_date = date(2026, 7, 10)
+    prior = _snapshot(prior_date)
+    repository = InMemoryAnalysisRepository(
+        strategy_snapshots=[prior],
+        formally_committed_run_dates={prior_date},
+    )
+    captured_dates = []
+    original = pipeline_module.update_focus_watchlist_v2
+
+    def capture_history(**kwargs):
+        captured_dates.extend(
+            snapshot.trade_date for snapshot in kwargs["recommendation_snapshots"]
+        )
+        return original(**kwargs)
+
+    monkeypatch.setattr(pipeline_module, "update_focus_watchlist_v2", capture_history)
+
+    run_daily_pipeline(
+        current_date,
+        tmp_path / "reports",
+        dry_run=True,
+        repository=repository,
+        strategy_v2=True,
+        eligible_focus_days=[
+            FormalFocusDay(trade_date=prior_date, formally_committed=True)
+        ],
+    )
+
+    assert prior_date in captured_dates
+    assert current_date in captured_dates

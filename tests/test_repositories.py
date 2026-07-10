@@ -391,6 +391,64 @@ def test_in_memory_repository_upserts_strategy_v2_ledger_by_stable_keys():
     assert repo.operational_daily_statuses[0].message == "二次运行仍然阻塞。"
 
 
+def test_in_memory_repository_loads_only_formally_committed_strategy_snapshots():
+    from tests.test_focus_strategy_v2 import _snapshot
+
+    committed_date = date(2026, 7, 8)
+    uncommitted_date = date(2026, 7, 9)
+    current_date = date(2026, 7, 10)
+    repo = InMemoryAnalysisRepository(
+        strategy_snapshots=[
+            _snapshot(committed_date),
+            _snapshot(uncommitted_date),
+            _snapshot(current_date),
+        ],
+        formally_committed_run_dates={committed_date},
+    )
+
+    loaded = repo.load_formally_committed_strategy_snapshots(
+        before_date=current_date,
+        eligible_dates=[committed_date, uncommitted_date, current_date],
+    )
+
+    assert [snapshot.trade_date for snapshot in loaded] == [committed_date]
+
+
+def test_supabase_repository_loads_snapshots_only_through_active_formal_receipt_view():
+    from tests.test_focus_strategy_v2 import _snapshot
+
+    active_date = date(2026, 7, 8)
+    inactive_date = date(2026, 7, 9)
+    active = _snapshot(active_date)
+    inactive = _snapshot(inactive_date)
+    client = FakeSupabaseClient()
+    client.table_data["active_formal_run_receipt"] = [
+        {"target_date": active_date.isoformat()}
+    ]
+    client.table_data["strategy_v2_snapshot"] = [
+        {
+            "trade_date": active_date.isoformat(),
+            "payload": active.model_dump(mode="json"),
+        },
+        {
+            "trade_date": inactive_date.isoformat(),
+            "payload": inactive.model_dump(mode="json"),
+        },
+    ]
+    repo = SupabaseAnalysisRepository(client)
+
+    loaded = repo.load_formally_committed_strategy_snapshots(
+        before_date=date(2026, 7, 10),
+        eligible_dates=[active_date, inactive_date],
+    )
+
+    assert [snapshot.trade_date for snapshot in loaded] == [active_date]
+    assert client.table_calls[:2] == [
+        "active_formal_run_receipt",
+        "strategy_v2_snapshot",
+    ]
+
+
 def test_in_memory_repository_upserts_core_daily_outputs_by_stable_keys():
     repo = InMemoryAnalysisRepository()
     original = Recommendation(

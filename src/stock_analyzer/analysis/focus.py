@@ -38,6 +38,14 @@ class FocusUpdateResult(BaseModel):
     daily_updates: list[FocusDailyUpdate] = Field(default_factory=list)
 
 
+class FormalFocusDay(BaseModel):
+    trade_date: date
+    formally_committed: bool
+    blocked: bool = False
+    fixture: bool = False
+    backfill_only: bool = False
+
+
 def update_focus_watchlist(
     existing: list[FocusState],
     recommendations: list[Recommendation],
@@ -90,6 +98,7 @@ def update_focus_watchlist_v2(
     recommendation_snapshots: list[StrategyEvidenceSnapshot],
     manual_entries: list[Any],
     trade_date: date,
+    eligible_focus_days: list[FormalFocusDay] | None = None,
 ) -> FocusUpdateResult:
     snapshots_by_code = _group_snapshots_by_code(recommendation_snapshots)
     current_by_code = _current_snapshots_by_code(snapshots_by_code, trade_date)
@@ -128,7 +137,11 @@ def update_focus_watchlist_v2(
             daily_updates.append(_build_missing_snapshot_daily_update(old, trade_date))
             daily_update_codes.add(old.ts_code)
 
-    system_candidates = _system_focus_candidates(snapshots_by_code, trade_date)
+    system_candidates = _system_focus_candidates(
+        snapshots_by_code,
+        trade_date,
+        eligible_focus_days=eligible_focus_days,
+    )
     system_selected_count = 0
     for snapshot in _rank_system_candidates(system_candidates):
         if system_selected_count >= remaining_system_slots:
@@ -291,9 +304,31 @@ def _current_snapshots_by_code(
 def _system_focus_candidates(
     snapshots_by_code: dict[str, list[StrategyEvidenceSnapshot]],
     trade_date: date,
+    eligible_focus_days: list[FormalFocusDay] | None = None,
 ) -> list[StrategyEvidenceSnapshot]:
     candidates: list[StrategyEvidenceSnapshot] = []
     for snapshots in snapshots_by_code.values():
+        if eligible_focus_days is not None:
+            prior_window = contiguous_focus_window(
+                snapshots,
+                eligible_focus_days,
+                trade_date,
+            )
+            current = [
+                snapshot for snapshot in snapshots if snapshot.trade_date == trade_date
+            ]
+            if not prior_window or not current:
+                continue
+            latest = current[-1]
+            supportive_count = sum(
+                1 for item in prior_window if _is_supportive(item)
+            )
+            if (
+                supportive_count >= MIN_SUPPORTIVE_OBSERVATIONS
+                and _is_supportive(latest)
+            ):
+                candidates.append(latest)
+            continue
         latest_five = snapshots[-SUPPORTIVE_OBSERVATION_WINDOW:]
         if len(latest_five) < SUPPORTIVE_OBSERVATION_WINDOW:
             continue
@@ -304,6 +339,40 @@ def _system_focus_candidates(
         if supportive_count >= MIN_SUPPORTIVE_OBSERVATIONS and _is_supportive(latest):
             candidates.append(latest)
     return candidates
+
+
+def contiguous_focus_window(
+    snapshots: list[StrategyEvidenceSnapshot],
+    eligible_dates: list[FormalFocusDay],
+    current_date: date,
+) -> list[StrategyEvidenceSnapshot]:
+    prior_days = sorted(
+        (day for day in eligible_dates if day.trade_date < current_date),
+        key=lambda day: day.trade_date,
+    )[-SUPPORTIVE_OBSERVATION_WINDOW:]
+    if len(prior_days) != SUPPORTIVE_OBSERVATION_WINDOW:
+        return []
+    if any(
+        not day.formally_committed
+        or day.blocked
+        or day.fixture
+        or day.backfill_only
+        for day in prior_days
+    ):
+        return []
+    by_date: dict[date, StrategyEvidenceSnapshot] = {}
+    for snapshot in sorted(
+        snapshots,
+        key=lambda item: (item.trade_date, item.evidence_id),
+    ):
+        by_date[snapshot.trade_date] = snapshot
+    window: list[StrategyEvidenceSnapshot] = []
+    for day in prior_days:
+        snapshot = by_date.get(day.trade_date)
+        if snapshot is None:
+            return []
+        window.append(snapshot)
+    return window
 
 
 def _rank_system_candidates(

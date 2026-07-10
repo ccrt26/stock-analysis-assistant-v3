@@ -61,6 +61,11 @@ class AnalysisRepository(Protocol):
     def load_focus_states_for_date(self, trade_date: date) -> List[FocusState]: ...
     def load_evidence_packages(self, trade_date: date) -> List[EvidencePackage]: ...
     def load_evaluation_tasks(self, trade_date: date) -> List[EvaluationTask]: ...
+    def load_formally_committed_strategy_snapshots(
+        self,
+        before_date: date,
+        eligible_dates: list[date],
+    ) -> list[StrategyEvidenceSnapshot]: ...
     def preflight_market_window_writes(
         self,
         bars: List[DailyBar],
@@ -119,6 +124,7 @@ class InMemoryAnalysisRepository:
         daily_basic_indicators: Optional[List[DailyBasicRow]] = None,
         data_source_runs: Optional[List[SourceRunRecord]] = None,
         market_calendar: Optional[dict[date, bool]] = None,
+        formally_committed_run_dates: Optional[set[date]] = None,
     ) -> None:
         self.recommendations = list(recommendations or [])
         self.focus_states = list(focus_states or [])
@@ -139,6 +145,7 @@ class InMemoryAnalysisRepository:
         self.daily_basic_indicators = list(daily_basic_indicators or [])
         self.data_source_runs = list(data_source_runs or [])
         self.market_calendar = dict(market_calendar or {})
+        self.formally_committed_run_dates = set(formally_committed_run_dates or set())
 
     def load_market_calendar_day(
         self,
@@ -169,6 +176,29 @@ class InMemoryAnalysisRepository:
 
     def load_evaluation_tasks(self, trade_date: date) -> List[EvaluationTask]:
         return [item for item in self.evaluation_tasks if item.trade_date == trade_date]
+
+    def load_formally_committed_strategy_snapshots(
+        self,
+        before_date: date,
+        eligible_dates: list[date],
+    ) -> list[StrategyEvidenceSnapshot]:
+        allowed = {
+            value
+            for value in eligible_dates
+            if value < before_date and value in self.formally_committed_run_dates
+        }
+        return sorted(
+            (
+                snapshot
+                for snapshot in self.strategy_snapshots
+                if snapshot.trade_date in allowed
+            ),
+            key=lambda snapshot: (
+                snapshot.trade_date,
+                snapshot.ts_code,
+                snapshot.evidence_id,
+            ),
+        )
 
     def preflight_market_window_writes(
         self,
@@ -394,6 +424,40 @@ class SupabaseAnalysisRepository:
             .execute()
         )
         return [_evaluation_task_from_row(row) for row in result.data or []]
+
+    def load_formally_committed_strategy_snapshots(
+        self,
+        before_date: date,
+        eligible_dates: list[date],
+    ) -> list[StrategyEvidenceSnapshot]:
+        eligible = {value for value in eligible_dates if value < before_date}
+        active_result = (
+            self.client.table("active_formal_run_receipt")
+            .select("target_date")
+            .execute()
+        )
+        active_dates = {
+            parsed
+            for row in active_result.data or []
+            if (parsed := _date_from_row(row.get("target_date"))) in eligible
+        }
+        if not active_dates:
+            return []
+        snapshot_result = self.client.table("strategy_v2_snapshot").select(
+            "trade_date,payload"
+        ).execute()
+        return sorted(
+            (
+                StrategyEvidenceSnapshot.model_validate(row["payload"])
+                for row in snapshot_result.data or []
+                if _date_from_row(row.get("trade_date")) in active_dates
+            ),
+            key=lambda snapshot: (
+                snapshot.trade_date,
+                snapshot.ts_code,
+                snapshot.evidence_id,
+            ),
+        )
 
     def preflight_market_window_writes(
         self,

@@ -1,6 +1,10 @@
 from datetime import date, timedelta
 
-from stock_analyzer.analysis.focus import update_focus_watchlist_v2
+from stock_analyzer.analysis.focus import (
+    FormalFocusDay,
+    contiguous_focus_window,
+    update_focus_watchlist_v2,
+)
 from stock_analyzer.analysis.strategy_v2 import generate_strategy_v2_recommendations
 from stock_analyzer.domain.models import (
     ActionDecision,
@@ -312,3 +316,99 @@ def test_existing_focus_with_stale_history_without_today_snapshot_gets_data_insu
     assert update.action.decision == ActionDecision.CONFIRM_REMOVAL
     assert "数据不足" in update.thesis
     assert "支持 2-8 周观察" not in update.thesis
+
+
+def _formal_previous_days(**overrides):
+    dates = [
+        date(2026, 7, 3),
+        date(2026, 7, 6),
+        date(2026, 7, 7),
+        date(2026, 7, 8),
+        date(2026, 7, 9),
+    ]
+    days = [
+        FormalFocusDay(trade_date=value, formally_committed=True)
+        for value in dates
+    ]
+    for index, update in overrides.items():
+        days[int(index)] = days[int(index)].model_copy(update=update)
+    return days
+
+
+def _formal_history(code="600000.SH"):
+    prior_dates = [day.trade_date for day in _formal_previous_days()]
+    return [_snapshot(value, code) for value in prior_dates] + [_snapshot(date(2026, 7, 10), code)]
+
+
+def test_focus_uses_five_immediately_preceding_eligible_dates():
+    history = _formal_history()
+    window = contiguous_focus_window(
+        history,
+        _formal_previous_days(),
+        date(2026, 7, 10),
+    )
+
+    result = update_focus_watchlist_v2(
+        existing=[],
+        recommendation_snapshots=history,
+        manual_entries=[],
+        trade_date=date(2026, 7, 10),
+        eligible_focus_days=_formal_previous_days(),
+    )
+
+    assert [item.trade_date for item in window] == [
+        date(2026, 7, 3),
+        date(2026, 7, 6),
+        date(2026, 7, 7),
+        date(2026, 7, 8),
+        date(2026, 7, 9),
+    ]
+    assert [state.ts_code for state in result.focus_states] == ["600000.SH"]
+
+
+def test_blocked_middle_day_breaks_window_instead_of_using_older_snapshot():
+    older = _snapshot(date(2026, 7, 2))
+    history = [older, *_formal_history()]
+    days = _formal_previous_days(**{"2": {"formally_committed": False, "blocked": True}})
+
+    result = update_focus_watchlist_v2(
+        existing=[],
+        recommendation_snapshots=history,
+        manual_entries=[],
+        trade_date=date(2026, 7, 10),
+        eligible_focus_days=days,
+    )
+
+    assert result.focus_states == []
+    assert contiguous_focus_window(history, days, date(2026, 7, 10)) == []
+
+
+def test_fixture_incomplete_and_backfill_only_days_do_not_count():
+    history = _formal_history()
+    invalid_days = (
+        _formal_previous_days(**{"1": {"fixture": True}}),
+        _formal_previous_days(**{"1": {"formally_committed": False}}),
+        _formal_previous_days(**{"1": {"backfill_only": True}}),
+    )
+
+    for days in invalid_days:
+        assert contiguous_focus_window(history, days, date(2026, 7, 10)) == []
+
+
+def test_formally_committed_zero_recommendation_focus_day_counts():
+    history = _formal_history()
+    days = _formal_previous_days()
+
+    window = contiguous_focus_window(history, days, date(2026, 7, 10))
+
+    assert len(window) == 5
+    assert all(day.formally_committed for day in days)
+
+
+def test_reconciled_primary_does_not_retroactively_create_focus_observation():
+    history = _formal_history()
+    days = _formal_previous_days(
+        **{"0": {"formally_committed": False, "backfill_only": True}}
+    )
+
+    assert contiguous_focus_window(history, days, date(2026, 7, 10)) == []
