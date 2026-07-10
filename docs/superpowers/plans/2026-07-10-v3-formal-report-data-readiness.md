@@ -420,7 +420,6 @@ git commit -m "feat: activate formal reports and ledger atomically"
 - Modify: `tests/test_pipeline_smoke.py`
 - Modify: `tests/test_cli.py`
 - Modify: `tests/test_ops_job.py`
-- Modify: `tests/test_ops_verify.py`
 - Modify: `tests/test_ops_artifacts.py`
 
 **Interfaces:**
@@ -453,7 +452,7 @@ def test_deploy_artifact_excludes_blocked_status_staging_and_pending_content(): 
 
 - [ ] **Step 2: Run RED slices**
 
-Run: `.venv/bin/python -m pytest tests/test_formal_pipeline.py tests/test_pipeline_smoke.py tests/test_cli.py tests/test_ops_job.py tests/test_ops_verify.py tests/test_ops_artifacts.py -q`
+Run: `.venv/bin/python -m pytest tests/test_formal_pipeline.py tests/test_pipeline_smoke.py tests/test_cli.py tests/test_ops_job.py tests/test_ops_artifacts.py -q`
 
 Expected: new formal symbols/receipt requirements fail; existing production-insufficient tests expose the old public `data_insufficient` behavior.
 
@@ -467,14 +466,14 @@ Keep fixture reports available only through explicit fixture mode. Remove `allow
 
 - [ ] **Step 5: Run GREEN slices**
 
-Run: `.venv/bin/python -m pytest tests/test_formal_pipeline.py tests/test_pipeline_smoke.py tests/test_cli.py tests/test_ops_job.py tests/test_ops_verify.py tests/test_ops_artifacts.py -q`
+Run: `.venv/bin/python -m pytest tests/test_formal_pipeline.py tests/test_pipeline_smoke.py tests/test_cli.py tests/test_ops_job.py tests/test_ops_artifacts.py -q`
 
 Expected: all selected tests pass; no test creates production credentials, network calls, Supabase writes, or deploys.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/stock_analyzer/ops/formal_run.py src/stock_analyzer/pipeline.py src/stock_analyzer/cli.py src/stock_analyzer/ops/job.py src/stock_analyzer/ops/verify.py src/stock_analyzer/ops/artifacts.py tests/test_formal_pipeline.py tests/test_pipeline_smoke.py tests/test_cli.py tests/test_ops_job.py tests/test_ops_verify.py tests/test_ops_artifacts.py
+git add src/stock_analyzer/ops/formal_run.py src/stock_analyzer/pipeline.py src/stock_analyzer/cli.py src/stock_analyzer/ops/job.py src/stock_analyzer/ops/verify.py src/stock_analyzer/ops/artifacts.py tests/test_formal_pipeline.py tests/test_pipeline_smoke.py tests/test_cli.py tests/test_ops_job.py tests/test_ops_artifacts.py
 git commit -m "fix: close formal report readiness escape paths"
 ```
 
