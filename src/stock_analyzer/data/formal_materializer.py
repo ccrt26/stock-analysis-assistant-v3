@@ -246,6 +246,8 @@ def materialize_target_context(
             fundamental_summaries[code] = FundamentalSummaryRow(
                 trade_date=trade_date,
                 ts_code=code,
+                period_end=_as_date(record.get("period_end")),
+                announcement_time=record.get("announcement_time"),
                 revenue_yoy=_optional_float(record.get("revenue_yoy")),
                 profit_yoy=_optional_float(record.get("profit_yoy")),
                 gross_margin=_optional_float(record.get("gross_margin")),
@@ -299,6 +301,7 @@ def materialize_target_context(
                 title=str(record["title"]),
                 source_reliability=str(record["source_reliability"]),
                 is_new_information=bool(record["is_new_information"]),
+                hard_risk=bool(record.get("hard_risk", False)),
                 source_name=str(record.get("source_name", events.route_id)),
                 source_grade=_source_grade(events.route_kind),
             )

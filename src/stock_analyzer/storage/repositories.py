@@ -12,6 +12,7 @@ from stock_analyzer.data.models import (
     SourceRunRecord,
     StockBasicRow,
 )
+from stock_analyzer.analysis.focus import FormalFocusDay
 from stock_analyzer.domain.models import (
     ActionLabel,
     ActionRecommendationSummary,
@@ -66,6 +67,11 @@ class AnalysisRepository(Protocol):
         before_date: date,
         eligible_dates: list[date],
     ) -> list[StrategyEvidenceSnapshot]: ...
+    def load_formal_focus_days(
+        self,
+        before_date: date,
+        eligible_dates: list[date],
+    ) -> list[FormalFocusDay]: ...
     def preflight_market_window_writes(
         self,
         bars: List[DailyBar],
@@ -125,6 +131,7 @@ class InMemoryAnalysisRepository:
         data_source_runs: Optional[List[SourceRunRecord]] = None,
         market_calendar: Optional[dict[date, bool]] = None,
         formally_committed_run_dates: Optional[set[date]] = None,
+        formal_focus_days: Optional[list[FormalFocusDay]] = None,
     ) -> None:
         self.recommendations = list(recommendations or [])
         self.focus_states = list(focus_states or [])
@@ -146,6 +153,8 @@ class InMemoryAnalysisRepository:
         self.data_source_runs = list(data_source_runs or [])
         self.market_calendar = dict(market_calendar or {})
         self.formally_committed_run_dates = set(formally_committed_run_dates or set())
+        self.formal_focus_days = list(formal_focus_days or [])
+        self.formal_focus_day_calls: list[tuple[date, list[date]]] = []
 
     def load_market_calendar_day(
         self,
@@ -199,6 +208,26 @@ class InMemoryAnalysisRepository:
                 snapshot.evidence_id,
             ),
         )
+
+    def load_formal_focus_days(
+        self,
+        before_date: date,
+        eligible_dates: list[date],
+    ) -> list[FormalFocusDay]:
+        self.formal_focus_day_calls.append((before_date, list(eligible_dates)))
+        allowed = {value for value in eligible_dates if value < before_date}
+        if self.formal_focus_days:
+            by_date = {item.trade_date: item for item in self.formal_focus_days}
+            return [by_date[value] for value in eligible_dates if value in allowed and value in by_date]
+        return [
+            FormalFocusDay(
+                trade_date=value,
+                formally_committed=value in self.formally_committed_run_dates,
+                blocked=value not in self.formally_committed_run_dates,
+            )
+            for value in eligible_dates
+            if value in allowed
+        ]
 
     def preflight_market_window_writes(
         self,

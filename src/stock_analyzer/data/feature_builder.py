@@ -71,6 +71,7 @@ def build_market_bundle(
 
     stocks: list[StockSnapshot] = []
     feature_profiles: dict[str, FeatureSnapshot] = {}
+    raw_relative_returns: dict[str, float] = {}
     stock_names: dict[str, str] = {}
     for stock in stock_basic:
         stock_names[stock.ts_code] = stock.name
@@ -102,18 +103,27 @@ def build_market_bundle(
                 has_delisting_risk=status.get("has_delisting_risk", False),
             )
         )
+        raw_relative_returns[stock.ts_code] = _trend(current_bars, 20)
         feature_profiles[stock.ts_code] = FeatureSnapshot(
             trade_date=trade_date,
             ts_code=stock.ts_code,
             trend_20d=_trend(current_bars, 20),
             trend_60d=_trend(current_bars, 60),
-            relative_strength=_trend(current_bars, 20),
+            relative_strength=raw_relative_returns[stock.ts_code],
             volatility_20d=_volatility(current_bars[-20:]),
             liquidity_score=_liquidity_score(current_bars[-1].amount),
             quality_score=0.7 if current_basic else 0.5,
             market_regime="unknown",
             data_quality="ok" if current_basic else "missing_daily_basic",
         )
+
+    relative_strengths = _cross_sectional_percentiles(raw_relative_returns)
+    feature_profiles = {
+        code: feature.model_copy(
+            update={"relative_strength": relative_strengths[code]}
+        )
+        for code, feature in feature_profiles.items()
+    }
 
     return MarketDataBundle(
         trade_date=trade_date,
@@ -156,3 +166,23 @@ def _liquidity_score(amount: float | None) -> float:
     if amount is None:
         return 0.0
     return min(amount / 500000000.0, 1.0)
+
+
+def _cross_sectional_percentiles(values: dict[str, float]) -> dict[str, float]:
+    if not values:
+        return {}
+    if len(values) == 1:
+        return {next(iter(values)): 0.5}
+    ordered = sorted(values.items(), key=lambda item: (item[1], item[0]))
+    output: dict[str, float] = {}
+    index = 0
+    denominator = len(ordered) - 1
+    while index < len(ordered):
+        end = index + 1
+        while end < len(ordered) and ordered[end][1] == ordered[index][1]:
+            end += 1
+        percentile = ((index + end - 1) / 2) / denominator
+        for code, _ in ordered[index:end]:
+            output[code] = round(percentile, 6)
+        index = end
+    return output

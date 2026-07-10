@@ -7,7 +7,8 @@ from stock_analyzer.analysis.strategy_v2 import (
     build_strategy_snapshot,
     generate_strategy_v2_recommendations,
 )
-from stock_analyzer.domain.models import ActionDecision, FeatureSnapshot
+from stock_analyzer.data.models import FundamentalSummaryRow, SourceGrade
+from stock_analyzer.domain.models import ActionDecision, EvidenceModule, FeatureSnapshot
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -87,6 +88,42 @@ def test_strategy_v2_recommendation_marks_data_insufficient_instead_of_positive_
     assert result.data_insufficient_snapshots
     assert result.data_insufficient_snapshots[0].data_insufficient is True
     assert "数据不足" in result.data_insufficient_snapshots[0].data_insufficient_reason
+
+
+def test_fundamental_module_uses_structured_summary_and_never_claims_missing_values():
+    summary = FundamentalSummaryRow(
+        trade_date=date(2026, 7, 10),
+        ts_code="600000.SH",
+        period_end=date(2026, 3, 31),
+        revenue_yoy=5.0,
+        profit_yoy=None,
+        gross_margin=None,
+        operating_cashflow=None,
+        source_name="tushare.fina_indicator",
+        source_grade=SourceGrade.PRIMARY,
+    )
+
+    result = generate_strategy_v2_recommendations(
+        features=[_feature("600000.SH")],
+        stock_names={"600000.SH": "浦发银行"},
+        trade_date=date(2026, 7, 10),
+        fundamental_summaries={"600000.SH": summary},
+    )
+
+    module = next(
+        item
+        for item in result.snapshots[0].modules
+        if item.module is EvidenceModule.FUNDAMENTALS_VALUATION
+    )
+    rendered = " ".join(
+        atom.detail for atom in [*module.support, *module.counter]
+    )
+    assert "营业收入同比 5.00%" in rendered
+    assert "2026-03-31" in rendered
+    assert "tushare.fina_indicator" in rendered
+    assert "利润同比" not in rendered
+    assert "毛利率" not in rendered
+    assert "经营现金流" not in rendered
 
 
 def test_strategy_v2_no_participation_thesis_does_not_overclaim_positive_support():

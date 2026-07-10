@@ -9,6 +9,7 @@ from stock_analyzer.analysis.action_policy import (
     build_action_recommendation,
 )
 from stock_analyzer.analysis.scoring import score_feature
+from stock_analyzer.data.models import FundamentalSummaryRow
 from stock_analyzer.domain.models import (
     ActionDecision,
     ActionRecommendation,
@@ -46,6 +47,8 @@ def generate_strategy_v2_recommendations(
     official_events: dict[str, list[str]] | None = None,
     public_information: dict[str, list[str]] | None = None,
     current_holdings: dict[str, ManualHolding] | None = None,
+    fundamental_summaries: dict[str, FundamentalSummaryRow] | None = None,
+    official_hard_risks: dict[str, bool] | None = None,
 ) -> StrategyRecommendationResult:
     effective_limit = max(min(limit, 10), 0)
     usable_snapshots: list[StrategyEvidenceSnapshot] = []
@@ -61,6 +64,8 @@ def generate_strategy_v2_recommendations(
             official_events=(official_events or {}).get(feature.ts_code, []),
             public_information=(public_information or {}).get(feature.ts_code, []),
             current_holding=(current_holdings or {}).get(feature.ts_code),
+            fundamental_summary=(fundamental_summaries or {}).get(feature.ts_code),
+            official_hard_risk=(official_hard_risks or {}).get(feature.ts_code, False),
         )
         if snapshot.data_insufficient:
             data_insufficient_snapshots.append(snapshot)
@@ -87,6 +92,8 @@ def build_strategy_snapshot(
     official_events: list[str] | None = None,
     public_information: list[str] | None = None,
     current_holding: ManualHolding | None = None,
+    fundamental_summary: FundamentalSummaryRow | None = None,
+    official_hard_risk: bool = False,
 ) -> StrategyEvidenceSnapshot:
     snapshot_date = trade_date or feature.trade_date
     name = stock_name or feature.ts_code
@@ -105,7 +112,7 @@ def build_strategy_snapshot(
     expected_upside_pct = _expected_upside_pct(feature)
     expected_downside_pct = _expected_downside_pct(feature)
     risk_reward = round(expected_upside_pct / expected_downside_pct, 2)
-    hard_risk = _has_official_risk(official_events)
+    hard_risk = official_hard_risk or _has_official_risk(official_events)
     market_support = _market_support(feature, board_context)
     thesis_quality = _thesis_quality(feature, company_profile, official_events)
     technical_invalidation = _technical_invalidation(feature)
@@ -128,7 +135,11 @@ def build_strategy_snapshot(
         _company_business_module(
             feature, name, snapshot_date, company_profile
         ),
-        _fundamentals_valuation_module(feature, snapshot_date),
+        _fundamentals_valuation_module(
+            feature,
+            snapshot_date,
+            fundamental_summary,
+        ),
         _market_board_module(feature, snapshot_date, board_context),
         _trend_volume_module(feature, snapshot_date),
         _events_catalysts_module(
@@ -140,6 +151,7 @@ def build_strategy_snapshot(
             official_events=official_events,
             current_holding=current_holding,
             action=action,
+            official_hard_risk=official_hard_risk,
         ),
     ]
 
@@ -268,8 +280,14 @@ def _company_business_module(
 def _fundamentals_valuation_module(
     feature: FeatureSnapshot,
     trade_date: date,
+    fundamental_summary: FundamentalSummaryRow | None = None,
 ) -> ModuleEvidence:
-    support: list[EvidenceAtom] = []
+    structured_support, structured_counter = _structured_fundamental_atoms(
+        feature,
+        trade_date,
+        fundamental_summary,
+    )
+    support: list[EvidenceAtom] = list(structured_support)
     counter: list[EvidenceAtom] = [
         _atom(
             feature,
@@ -286,6 +304,7 @@ def _fundamentals_valuation_module(
             source_grade="C",
         )
     ]
+    counter.extend(structured_counter)
     if feature.quality_score >= 0.65:
         support.append(
             _atom(
@@ -337,9 +356,58 @@ def _fundamentals_valuation_module(
                 DataAvailability.UNAVAILABLE_AFTER_RECOVERY,
                 missing_fields=["pe", "pb"],
             ),
+            _requirement(
+                "fundamental_summary",
+                DataRequirementLevel.ENHANCED,
+                DataAvailability.AVAILABLE_PRIMARY
+                if fundamental_summary is not None
+                and fundamental_summary.source_grade.value == "primary"
+                else DataAvailability.AVAILABLE_BACKUP
+                if fundamental_summary is not None
+                else DataAvailability.UNAVAILABLE_AFTER_RECOVERY,
+                missing_fields=[] if fundamental_summary is not None else ["fundamental_summary"],
+            ),
         ],
         conclusion=conclusion,
     )
+
+
+def _structured_fundamental_atoms(
+    feature: FeatureSnapshot,
+    trade_date: date,
+    summary: FundamentalSummaryRow | None,
+) -> tuple[list[EvidenceAtom], list[EvidenceAtom]]:
+    if summary is None:
+        return [], []
+    period = summary.period_end.isoformat() if summary.period_end else "报告期未标注"
+    source = summary.source_name
+    specifications = (
+        ("revenue_yoy", "营业收入同比", summary.revenue_yoy, "%"),
+        ("profit_yoy", "利润同比", summary.profit_yoy, "%"),
+        ("gross_margin", "毛利率", summary.gross_margin, "%"),
+        ("operating_cashflow", "经营现金流", summary.operating_cashflow, ""),
+    )
+    support: list[EvidenceAtom] = []
+    counter: list[EvidenceAtom] = []
+    for field, label, value, suffix in specifications:
+        if value is None:
+            continue
+        formatted = f"{value:.2f}{suffix}"
+        atom = _atom(
+            feature,
+            trade_date,
+            f"structured-{field}",
+            EvidenceModule.FUNDAMENTALS_VALUATION,
+            EvidencePolarity.SUPPORT if value >= 0 else EvidencePolarity.COUNTER,
+            f"{label}已取得结构化证据",
+            f"{period} {source}：{label} {formatted}。",
+            [field, "period_end", "source_name"],
+            ["src_dechow_ge_schrand_2010"],
+            0.55,
+            source,
+        )
+        (support if value >= 0 else counter).append(atom)
+    return support, counter
 
 
 def _market_board_module(
@@ -614,10 +682,11 @@ def _risk_counter_module(
     official_events: list[str],
     current_holding: ManualHolding | None,
     action: ActionRecommendation,
+    official_hard_risk: bool = False,
 ) -> ModuleEvidence:
     support: list[EvidenceAtom] = []
     counter: list[EvidenceAtom] = []
-    if _has_official_risk(official_events):
+    if official_hard_risk or _has_official_risk(official_events):
         counter.append(
             _atom(
                 feature,

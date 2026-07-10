@@ -90,6 +90,8 @@ class CompanyProfileRow(BaseModel):
 class FundamentalSummaryRow(BaseModel):
     trade_date: date
     ts_code: str
+    period_end: Optional[date] = None
+    announcement_time: Optional[datetime] = None
     revenue_yoy: Optional[float] = None
     profit_yoy: Optional[float] = None
     gross_margin: Optional[float] = None
@@ -124,6 +126,7 @@ class EventCatalystRow(BaseModel):
     title: str
     source_reliability: str
     is_new_information: bool
+    hard_risk: bool = False
     source_name: str
     source_grade: SourceGrade
 
