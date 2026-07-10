@@ -117,7 +117,12 @@ ALLOWED_TRANSITIONS: dict[FormalRunState, set[FormalRunState]] = {
     },
     FormalRunState.COMMITTING: {
         FormalRunState.REPORT_GENERATED,
+        FormalRunState.ANALYSIS_COMPLETE_NO_RECOMMENDATIONS,
         FormalRunState.FAILED_RETRYABLE,
+        FormalRunState.FAILED_NEEDS_HUMAN,
+    },
+    FormalRunState.FAILED_RETRYABLE: {
+        FormalRunState.RENDERING,
         FormalRunState.FAILED_NEEDS_HUMAN,
     },
 }
@@ -229,6 +234,30 @@ class FormalRunController:
         if self.receipt.state != FormalRunState.READY_TO_ANALYZE:
             raise InvalidRunTransition("analysis requires READY_TO_ANALYZE")
         return self.transition(FormalRunState.ANALYZING)
+
+    def record_artifact_hashes(self, hashes: dict[str, str]) -> RunReceipt:
+        if self.receipt.state != FormalRunState.RENDERING:
+            raise InvalidRunTransition("artifact hashes require RENDERING")
+        return self._replace(artifact_hashes=dict(sorted(hashes.items())))
+
+    def commit_activation(
+        self,
+        activation_id: str,
+        *,
+        no_recommendations: bool,
+    ) -> RunReceipt:
+        if self.receipt.state != FormalRunState.COMMITTING:
+            raise InvalidRunTransition("formal activation requires COMMITTING")
+        final_state = (
+            FormalRunState.ANALYSIS_COMPLETE_NO_RECOMMENDATIONS
+            if no_recommendations
+            else FormalRunState.REPORT_GENERATED
+        )
+        return self._replace(
+            state=final_state,
+            local_activation_id=activation_id,
+            ledger_activation_id=activation_id,
+        )
 
     def block(
         self,

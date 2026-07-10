@@ -349,6 +349,7 @@ class SupabaseAnalysisRepository:
     def __init__(self, client, capacity_guard=None) -> None:
         self.client = client
         self.capacity_guard = capacity_guard
+        self._formal_pending_meta: dict[str, dict[str, str]] = {}
 
     def load_market_calendar_day(
         self,
@@ -458,6 +459,113 @@ class SupabaseAnalysisRepository:
                 snapshot.evidence_id,
             ),
         )
+
+    def prepare_formal_run(
+        self,
+        run_id: str,
+        receipt_hash: str,
+        rows: tuple[dict, ...],
+    ) -> str:
+        rows_hash = _formal_rows_sha256(rows)
+        pending_id = "pending-" + _payload_sha256(
+            {
+                "run_id": run_id,
+                "receipt_hash": receipt_hash,
+                "rows_hash": rows_hash,
+            }
+        )
+        row = {
+            "pending_id": pending_id,
+            "run_id": run_id,
+            "receipt_hash": receipt_hash,
+            "rows_hash": rows_hash,
+            "rows": list(rows),
+            "status": "pending",
+        }
+        self.client.table("formal_run_pending_batch").upsert(
+            [row],
+            on_conflict="pending_id",
+        ).execute()
+        self._formal_pending_meta[pending_id] = {
+            "run_id": run_id,
+            "receipt_hash": receipt_hash,
+            "rows_hash": rows_hash,
+        }
+        return pending_id
+
+    def pending_hash(self, pending_id: str) -> str:
+        result = (
+            self.client.table("formal_run_pending_batch")
+            .select("rows_hash")
+            .eq("pending_id", pending_id)
+            .execute()
+        )
+        rows = result.data or []
+        if len(rows) != 1 or not rows[0].get("rows_hash"):
+            raise ValueError("formal pending batch is missing")
+        return str(rows[0]["rows_hash"])
+
+    def activate_formal_run(
+        self,
+        run_id: str,
+        pending_id: str,
+        activation_id: str,
+    ) -> None:
+        meta = self._formal_pending_meta.get(pending_id)
+        if meta is None:
+            result = (
+                self.client.table("formal_run_pending_batch")
+                .select("run_id,receipt_hash,rows_hash")
+                .eq("pending_id", pending_id)
+                .execute()
+            )
+            rows = result.data or []
+            if len(rows) != 1:
+                raise ValueError("formal pending batch is missing")
+            meta = rows[0]
+        if meta["run_id"] != run_id:
+            raise ValueError("formal pending batch run mismatch")
+        result = self.client.rpc(
+            "activate_formal_run_v1",
+            {
+                "p_run_id": run_id,
+                "p_pending_id": pending_id,
+                "p_activation_id": activation_id,
+                "p_expected_receipt_hash": meta["receipt_hash"],
+                "p_expected_rows_hash": meta["rows_hash"],
+            },
+        )
+        execute = getattr(result, "execute", None)
+        if execute is not None:
+            execute()
+
+    def is_formal_run_active(self, run_id: str, activation_id: str) -> bool:
+        result = (
+            self.client.table("active_formal_run_receipt")
+            .select("run_id,activation_id")
+            .eq("run_id", run_id)
+            .eq("activation_id", activation_id)
+            .execute()
+        )
+        return len(result.data or []) == 1
+
+    def discard_pending(self, pending_id: str) -> None:
+        meta = self._formal_pending_meta.get(pending_id)
+        if meta is None:
+            return
+        self.client.table("formal_run_pending_batch").upsert(
+            [
+                {
+                    "pending_id": pending_id,
+                    "run_id": meta["run_id"],
+                    "receipt_hash": meta["receipt_hash"],
+                    "rows_hash": meta["rows_hash"],
+                    "rows": [],
+                    "status": "discarded",
+                }
+            ],
+            on_conflict="pending_id",
+        ).execute()
 
     def preflight_market_window_writes(
         self,
@@ -745,6 +853,20 @@ class SupabaseAnalysisRepository:
 
 def _payload_sha256(payload: dict) -> str:
     payload_text = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    return hashlib.sha256(payload_text.encode("utf-8")).hexdigest()
+
+
+def _formal_rows_sha256(rows: tuple[dict, ...]) -> str:
+    canonical_rows = sorted(
+        json.dumps(row, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        for row in rows
+    )
+    payload_text = json.dumps(
+        canonical_rows,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
     return hashlib.sha256(payload_text.encode("utf-8")).hexdigest()
 
 

@@ -20,6 +20,12 @@ STRATEGY_V2_SCHEMA_PATH = (
     / "migrations"
     / "202607100003_strategy_v2_decision_ledger.sql"
 )
+FORMAL_READINESS_SCHEMA_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "supabase"
+    / "migrations"
+    / "202607100004_formal_run_readiness.sql"
+)
 
 
 def test_initial_schema_contains_required_tables_and_rls():
@@ -165,3 +171,48 @@ def test_strategy_v2_schema_contains_required_ledger_columns():
         "message text not null",
     ]:
         assert column in compact_sql
+
+
+def test_formal_readiness_migration_adds_receipts_pending_batches_markers_and_reconciliation():
+    sql = FORMAL_READINESS_SCHEMA_PATH.read_text().lower()
+    for table in [
+        "formal_run_receipt",
+        "formal_run_pending_batch",
+        "formal_run_activation_marker",
+        "formal_reconciliation_task",
+    ]:
+        assert f"create table if not exists public.{table}" in sql
+        assert f"alter table public.{table} enable row level security" in sql
+        assert f"create policy {table}_service_role_all" in sql
+    assert "create or replace view public.active_formal_run_receipt" in sql
+
+
+def test_activation_rpc_verifies_hashes_and_activates_in_one_transaction():
+    sql = FORMAL_READINESS_SCHEMA_PATH.read_text().lower()
+    compact_sql = re.sub(r"\s+", " ", sql)
+
+    assert "create or replace function public.activate_formal_run_v1(" in compact_sql
+    assert "security definer" in compact_sql
+    assert "set search_path = public, pg_temp" in compact_sql
+    assert "for update" in compact_sql
+    assert "pending receipt hash mismatch" in compact_sql
+    assert "pending rows hash mismatch" in compact_sql
+    assert "insert into public.formal_run_activation_marker" in compact_sql
+    assert "update public.formal_run_receipt" in compact_sql
+    assert "grant execute on function public.activate_formal_run_v1" in compact_sql
+
+
+def test_formal_readiness_schema_does_not_add_wide_market_payload_columns():
+    sql = FORMAL_READINESS_SCHEMA_PATH.read_text().lower()
+
+    for forbidden in [
+        "market_price_daily",
+        "daily_basic_indicator",
+        "open numeric",
+        "high numeric",
+        "low numeric",
+        "close numeric",
+        "volume numeric",
+        "amount numeric",
+    ]:
+        assert forbidden not in sql

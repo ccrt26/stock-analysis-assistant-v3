@@ -105,10 +105,15 @@ class FakeSupabaseClient:
         self.upsert_calls = []
         self.table_calls = []
         self.table_data = {}
+        self.rpc_calls = []
 
     def table(self, name: str) -> FakeSupabaseTable:
         self.table_calls.append(name)
         return FakeSupabaseTable(name, self)
+
+    def rpc(self, name: str, params=None):
+        self.rpc_calls.append((name, params or {}))
+        return FakeSupabaseResult([{ "activated": True }])
 
 
 class RejectingCapacityGuard:
@@ -447,6 +452,51 @@ def test_supabase_repository_loads_snapshots_only_through_active_formal_receipt_
         "active_formal_run_receipt",
         "strategy_v2_snapshot",
     ]
+
+
+def test_supabase_repository_prepares_pending_formal_rows_and_activates_through_rpc():
+    from stock_analyzer.ops.activation import hash_ledger_rows
+
+    client = FakeSupabaseClient()
+    repo = SupabaseAnalysisRepository(client)
+    rows = ({"kind": "focus", "ts_code": "600000.SH"},)
+
+    pending_id = repo.prepare_formal_run("run-1", "receipt-hash", rows)
+
+    assert pending_id.startswith("pending-")
+    assert client.write_calls[0][0] == "formal_run_pending_batch"
+    pending_row = client.write_calls[0][2][0]
+    assert pending_row["status"] == "pending"
+    assert pending_row["rows"] == list(rows)
+    assert pending_row["rows_hash"] == hash_ledger_rows(rows)
+    client.table_data["formal_run_pending_batch"] = [pending_row]
+    assert repo.pending_hash(pending_id) == pending_row["rows_hash"]
+
+    repo.activate_formal_run("run-1", pending_id, "activation-1")
+
+    assert client.rpc_calls == [
+        (
+            "activate_formal_run_v1",
+            {
+                "p_run_id": "run-1",
+                "p_pending_id": pending_id,
+                "p_activation_id": "activation-1",
+                "p_expected_receipt_hash": "receipt-hash",
+                "p_expected_rows_hash": pending_row["rows_hash"],
+            },
+        )
+    ]
+
+
+def test_supabase_repository_active_marker_read_is_fail_closed():
+    client = FakeSupabaseClient()
+    repo = SupabaseAnalysisRepository(client)
+    client.table_data["active_formal_run_receipt"] = [
+        {"run_id": "run-1", "activation_id": "activation-1"}
+    ]
+
+    assert repo.is_formal_run_active("run-1", "activation-1") is True
+    assert repo.is_formal_run_active("run-1", "other") is False
 
 
 def test_in_memory_repository_upserts_core_daily_outputs_by_stable_keys():
