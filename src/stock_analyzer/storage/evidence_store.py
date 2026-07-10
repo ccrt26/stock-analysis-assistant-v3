@@ -290,6 +290,41 @@ class LocalEvidenceStore:
             _read_json(self._frozen_report_path(run_id))
         )
 
+    def save_run_receipt(self, receipt) -> Path:
+        from stock_analyzer.ops.formal_run import RunReceipt
+
+        validated = RunReceipt.model_validate(receipt)
+        path = self._run_receipt_revision_path(validated.run_id, validated.revision)
+        _write_immutable(path, _json_bytes(validated.model_dump(mode="json")))
+        _atomic_write(
+            self._run_receipt_latest_path(validated.run_id),
+            _json_bytes({"revision": validated.revision}),
+        )
+        return path
+
+    def latest_run_receipt(self, run_id: str):
+        from stock_analyzer.ops.formal_run import RunReceipt
+
+        latest = _read_json(self._run_receipt_latest_path(run_id))
+        return RunReceipt.model_validate(
+            _read_json(self._run_receipt_revision_path(run_id, latest["revision"]))
+        )
+
+    def save_candidate_set(self, candidate_set) -> Path:
+        from stock_analyzer.ops.formal_run import CandidateSet
+
+        validated = CandidateSet.model_validate(candidate_set)
+        path = self._candidate_set_path(validated.candidate_set_id)
+        _write_immutable(path, _json_bytes(validated.model_dump(mode="json")))
+        return path
+
+    def candidate_set(self, candidate_set_id: str):
+        from stock_analyzer.ops.formal_run import CandidateSet
+
+        return CandidateSet.model_validate(
+            _read_json(self._candidate_set_path(candidate_set_id))
+        )
+
     def _canonical_path(
         self,
         group_id: AcquisitionGroupId,
@@ -309,6 +344,18 @@ class LocalEvidenceStore:
     def _frozen_report_path(self, run_id: str) -> Path:
         _validate_id(run_id)
         return self.root / "frozen_reports" / f"{run_id}.json"
+
+    def _run_receipt_revision_path(self, run_id: str, revision: int) -> Path:
+        _validate_id(run_id)
+        return self.root / "run_receipts" / run_id / f"{revision:06d}.json"
+
+    def _run_receipt_latest_path(self, run_id: str) -> Path:
+        _validate_id(run_id)
+        return self.root / "run_receipts" / run_id / "latest.json"
+
+    def _candidate_set_path(self, candidate_set_id: str) -> Path:
+        _validate_id(candidate_set_id)
+        return self.root / "candidate_sets" / f"{candidate_set_id}.json"
 
 
 def _validate_id(value: str) -> None:

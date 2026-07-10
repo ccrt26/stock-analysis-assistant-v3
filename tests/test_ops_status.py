@@ -14,6 +14,7 @@ def test_run_status_values_match_operations_plan():
         "warning",
         "failed_retryable",
         "failed_needs_human",
+        "blocked_needs_human",
     ]
 
 
@@ -46,6 +47,7 @@ def test_job_status_writes_complete_machine_json(tmp_path):
 
     payload = json.loads(output_path.read_text(encoding="utf-8"))
     assert {
+        "run_id",
         "trade_date",
         "attempt",
         "scheduled_slot",
@@ -75,6 +77,7 @@ def test_job_status_writes_complete_machine_json(tmp_path):
         "error_message_redacted",
     } <= set(payload)
     assert payload["trade_date"] == "2026-07-09"
+    assert payload["run_id"] == "2026-07-09-18-30-attempt-1"
     assert payload["attempt"] == 1
     assert payload["scheduled_slot"] == "18:30"
     assert payload["status"] == "success_no_recommendations"
