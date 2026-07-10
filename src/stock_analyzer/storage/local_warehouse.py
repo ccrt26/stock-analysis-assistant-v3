@@ -10,6 +10,7 @@ import pandas as pd
 from pydantic import BaseModel
 
 from stock_analyzer.data.models import MarketDataBundle
+from stock_analyzer.storage.manual_holdings import ManualHoldingStore
 
 
 class WarehouseWriteResult(BaseModel):
@@ -56,6 +57,9 @@ class LocalWarehouse:
                     [str(partition)],
                 ).fetchone()[0]
             )
+
+    def manual_holding_store(self) -> ManualHoldingStore:
+        return ManualHoldingStore(self.root / "manual")
 
     def _write_trade_date_partition(self, dataset: str, trade_date: date, rows: list[dict]) -> None:
         partition_dir = self.parquet_root / dataset / f"trade_date={trade_date.isoformat()}"
