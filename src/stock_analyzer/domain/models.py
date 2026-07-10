@@ -3,9 +3,51 @@ from __future__ import annotations
 import re
 from datetime import date, datetime
 from enum import Enum
-from typing import Dict, List, Optional
+from typing import Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
+
+RecoveryStatus = Literal["success", "failed", "skipped"]
+
+_SENSITIVE_PAIR_RE = re.compile(
+    r"""
+    \b
+    (?P<key>
+        [a-z0-9_.-]*
+        (?:
+            token
+            | secret
+            | password
+            | authorization
+            | api[\s_.-]?key
+        )
+        [a-z0-9_.-]*
+    )
+    \b
+    (?P<separator>\s*[:=]\s*)
+    (?P<value>
+        (?:Bearer\s+)?
+        (?:
+            "[^"]*"
+            | '[^']*'
+            | [^\s,;&]+
+        )
+    )
+    """,
+    flags=re.IGNORECASE | re.VERBOSE,
+)
+_BEARER_VALUE_RE = re.compile(
+    r"""\bBearer\s+(?:"[^"]*"|'[^']*'|[^\s,;&]+)""",
+    flags=re.IGNORECASE | re.VERBOSE,
+)
+
+
+def _redact_sensitive_text(value: str) -> str:
+    def redact_pair(match: re.Match[str]) -> str:
+        return f"{match.group('key')}{match.group('separator')}[redacted]"
+
+    value = _SENSITIVE_PAIR_RE.sub(redact_pair, value)
+    return _BEARER_VALUE_RE.sub("Bearer [redacted]", value)
 
 
 class ActionLabel(str, Enum):
@@ -159,7 +201,7 @@ class DataRecoveryAttempt(BaseModel):
     source: Optional[str] = None
     family: Optional[str] = None
     source_name: Optional[str] = None
-    status: Optional[str] = None
+    status: Optional[RecoveryStatus] = None
     message: Optional[str] = None
     trade_date: Optional[date] = None
     attempted_at: Optional[datetime] = None
@@ -172,11 +214,7 @@ class DataRecoveryAttempt(BaseModel):
     def _redact_sensitive_terms(cls, value: Optional[str]) -> Optional[str]:
         if value is None:
             return value
-        return re.sub(
-            r"(?i)\b(token|secret|password|api[\s_-]?key|authorization|bearer)\b",
-            "[redacted]",
-            value,
-        )
+        return _redact_sensitive_text(value)
 
     @model_validator(mode="after")
     def _backfill_source_contract_fields(self) -> "DataRecoveryAttempt":

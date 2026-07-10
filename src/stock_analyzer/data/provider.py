@@ -35,6 +35,9 @@ class CurrentLiveDataUnavailable(RuntimeError):
 
 class MarketDataProvider(Protocol):
     def load(self, trade_date: date) -> MarketDataBundle: ...
+
+
+class StrategyV2DataProvider(MarketDataProvider, Protocol):
     def load_company_profiles(
         self, trade_date: date, codes: list[str]
     ) -> list[CompanyProfileRow]: ...

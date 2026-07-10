@@ -1,12 +1,15 @@
 from datetime import date
 
+import pytest
+from pydantic import ValidationError
+
 from stock_analyzer.data.models import SourceStatus
 from stock_analyzer.data.source_registry import (
     DataFamilySourcePlan,
     record_recovery_attempt,
     strategy_v2_source_registry,
 )
-from stock_analyzer.domain.models import DataRequirementLevel
+from stock_analyzer.domain.models import DataRecoveryAttempt, DataRequirementLevel
 
 
 def test_required_data_families_have_primary_backup_and_local_cache():
@@ -51,18 +54,32 @@ def test_source_registry_names_exact_collection_paths():
     )
 
 
-def test_recovery_attempt_serializes_without_secrets():
+def test_recovery_attempt_serializes_secret_key_value_pairs_without_values():
     attempt = record_recovery_attempt(
         family="daily_ohlcv",
         source_name="tushare.daily",
         status=SourceStatus.FAILED,
-        message="request failed without exposing token",
+        message=(
+            "request failed token=abc123 password: hunter2 "
+            "Authorization: Bearer xyz while refreshing daily OHLCV"
+        ),
         trade_date=date(2026, 7, 10),
     )
 
     payload = attempt.model_dump(mode="json")
+    serialized_text = f"{payload['message']} {payload['error']}"
 
     assert payload["family"] == "daily_ohlcv"
     assert payload["source_name"] == "tushare.daily"
     assert payload["status"] == "failed"
-    assert "token" not in payload["message"].lower()
+    assert "request failed" in payload["message"]
+    assert "while refreshing daily OHLCV" in payload["message"]
+    assert "abc123" not in serialized_text
+    assert "hunter2" not in serialized_text
+    assert "xyz" not in serialized_text
+    assert "Bearer xyz" not in serialized_text
+
+
+def test_recovery_attempt_rejects_unknown_status_value():
+    with pytest.raises(ValidationError):
+        DataRecoveryAttempt(source="local-cache", status="partial")
