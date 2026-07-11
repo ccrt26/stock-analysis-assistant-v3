@@ -54,6 +54,7 @@ from stock_analyzer.ops.formal_narrative import (
     validate_formal_narrative,
 )
 from stock_analyzer.ops.activation import hash_artifact_tree
+from stock_analyzer.ops.verify import report_readability_failure_codes
 from stock_analyzer.pipeline import (
     _action_recommendation_summaries_from_snapshots,
     _generated_operational_status,
@@ -340,6 +341,8 @@ def verify_staged_formal_report(
     if manifest != expected_manifest:
         return False
     if _json_contains_fixture_value(latest):
+        return False
+    if report_readability_failure_codes(staging, latest, receipt.target_date):
         return False
     secret_shape = re.compile(
         r"(?:token|password|secret|authorization|api[_-]?key)\s*[:=]",

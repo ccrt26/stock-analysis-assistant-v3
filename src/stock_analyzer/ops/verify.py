@@ -9,6 +9,9 @@ from html import unescape
 from pathlib import Path
 from typing import Any
 
+from pydantic import ValidationError
+
+from stock_analyzer.ops.formal_narrative import FormalNarrative
 from stock_analyzer.ops.status import FailureClass, RunStatus
 from stock_analyzer.storage.capacity_guard import (
     MAX_SELECTED_WINDOW_CODES,
@@ -37,6 +40,22 @@ VISIBLE_TOTAL_SCORE_PATTERNS = (
         re.IGNORECASE,
     ),
 )
+REPORT_MAIN_VIEW_HEADINGS = (
+    "市场总体结论",
+    "推荐股票排序",
+    "明确动作与仓位",
+    "三条核心理由",
+    "买入或继续观察的条件",
+    "失效和退出条件",
+)
+REPORT_INTERNAL_TERM_PATTERNS = (
+    re.compile(r"\bgate\b", re.IGNORECASE),
+    re.compile(r"\binput\s+set\b", re.IGNORECASE),
+    re.compile(r"\bthesis\s+quality\b", re.IGNORECASE),
+    re.compile(r"\breceipt\b", re.IGNORECASE),
+    re.compile(r"数据就绪凭证"),
+)
+NARRATIVE_MARKER_PATTERN = re.compile(r"^NARRATIVE-[A-F0-9]{12}$")
 
 
 @dataclass(frozen=True)
@@ -76,6 +95,129 @@ class ProductionVerification:
         if not self.failures:
             return None
         return self.failures[0].fix_suggestion
+
+
+def report_readability_failure_codes(
+    reports_dir: Path,
+    payload: dict[str, Any],
+    trade_date: date,
+) -> tuple[str, ...]:
+    """Return bounded, non-secret REPORT-004 artifact failure codes."""
+    reports_dir = Path(reports_dir)
+    narrative = payload.get("formal_narrative")
+    stocks = narrative.get("stocks") if isinstance(narrative, dict) else None
+    market = narrative.get("market") if isinstance(narrative, dict) else None
+    snapshots = payload.get("strategy_snapshots")
+    if not isinstance(stocks, list) or not isinstance(market, dict):
+        return ("formal_narrative_missing",)
+    try:
+        FormalNarrative.model_validate(narrative)
+    except ValidationError:
+        return ("formal_narrative_schema_invalid",)
+    if not isinstance(snapshots, list):
+        return ("formal_narrative_stock_set_invalid",)
+
+    expected_codes = [
+        item.get("ts_code")
+        for item in snapshots
+        if isinstance(item, dict) and _is_non_empty_string(item.get("ts_code"))
+    ]
+    actual_codes = [
+        item.get("ts_code")
+        for item in stocks
+        if isinstance(item, dict) and _is_non_empty_string(item.get("ts_code"))
+    ]
+    failures: list[str] = []
+    if (
+        len(expected_codes) != len(set(expected_codes))
+        or len(actual_codes) != len(stocks)
+        or len(actual_codes) != len(set(actual_codes))
+        or actual_codes != expected_codes
+    ):
+        failures.append("formal_narrative_stock_set_invalid")
+
+    home = _read_utf8(reports_dir / "index.html")
+    daily_home = _read_utf8(
+        reports_dir / "daily" / trade_date.isoformat() / "index.html"
+    )
+    if home is None or daily_home is None:
+        failures.append("narrative_home_missing")
+        return tuple(dict.fromkeys(failures))
+
+    for page in (home, daily_home):
+        if '<details class="audit-details">' not in page:
+            failures.append("audit_details_not_collapsed")
+            continue
+        if '<details class="audit-details" open' in page:
+            failures.append("audit_details_not_collapsed")
+        main_view = page.split('<details class="audit-details">', 1)[0]
+        visible_main = _html_visible_text(main_view)
+        if any(pattern.search(visible_main) for pattern in REPORT_INTERNAL_TERM_PATTERNS):
+            failures.append("internal_term_in_main_view")
+        if any(heading not in visible_main for heading in REPORT_MAIN_VIEW_HEADINGS):
+            failures.append("decision_heading_missing")
+
+    market_summary = market.get("summary")
+    if (
+        not _is_non_empty_string(market_summary)
+        or market_summary not in _html_visible_text(home)
+    ):
+        failures.append("market_narrative_missing_from_home")
+
+    stock_by_code = {
+        item.get("ts_code"): item
+        for item in stocks
+        if isinstance(item, dict) and _is_non_empty_string(item.get("ts_code"))
+    }
+    snapshot_by_code = {
+        item.get("ts_code"): item
+        for item in snapshots
+        if isinstance(item, dict) and _is_non_empty_string(item.get("ts_code"))
+    }
+    cards = payload.get("recommendation_cards")
+    card_by_code = {
+        item.get("ts_code"): item
+        for item in cards or []
+        if isinstance(item, dict) and _is_non_empty_string(item.get("ts_code"))
+    }
+    for code in expected_codes:
+        stock = stock_by_code.get(code)
+        snapshot = snapshot_by_code.get(code)
+        if not isinstance(stock, dict) or not isinstance(snapshot, dict):
+            continue
+        marker = stock.get("narrative_marker")
+        if (
+            not isinstance(marker, str)
+            or not NARRATIVE_MARKER_PATTERN.fullmatch(marker)
+        ):
+            failures.append("narrative_marker_invalid")
+            continue
+        stock_page = _read_utf8(
+            reports_dir
+            / "daily"
+            / trade_date.isoformat()
+            / "stocks"
+            / f"{code}.html"
+        )
+        if stock_page is None or marker not in stock_page or marker not in home:
+            failures.append("narrative_marker_missing")
+            continue
+        if (
+            '<details class="audit-details">' not in stock_page
+            or '<details class="audit-details" open' in stock_page
+        ):
+            failures.append("audit_details_not_collapsed")
+        stock_main = stock_page.split('<details class="audit-details">', 1)[0]
+        visible_stock = _html_visible_text(stock_main)
+        if any(pattern.search(visible_stock) for pattern in REPORT_INTERNAL_TERM_PATTERNS):
+            failures.append("internal_term_in_main_view")
+        exact_texts = _narrative_exact_texts(stock)
+        if any(text not in visible_stock for text in exact_texts):
+            failures.append("narrative_text_missing_from_stock")
+        if not _narrative_decision_matches(stock, snapshot, card_by_code.get(code)):
+            failures.append("narrative_decision_mismatch")
+
+    return tuple(dict.fromkeys(failures))
 
 
 def verify_production_result(
@@ -374,6 +516,28 @@ def _append_report_artifact_failures(
         )
     elif report_payload is not None:
         _append_report_json_failures(failures, report_payload, trade_date)
+        if report_payload.get("strategy_snapshots"):
+            readability_codes = report_readability_failure_codes(
+                reports_dir,
+                report_payload,
+                trade_date,
+            )
+            if readability_codes:
+                failures.append(
+                    ProductionVerificationFailure(
+                        code="report_readability_invalid",
+                        message=(
+                            "Formal report readability verification failed: "
+                            + ", ".join(readability_codes)
+                            + "."
+                        ),
+                        fix_suggestion=(
+                            "Keep the prior active report and regenerate the formal "
+                            "candidate with a validated narrative present in the home "
+                            "and matching stock pages."
+                        ),
+                    )
+                )
 
     leak_path = _find_fixture_sample_leak(reports_dir, artifact_paths)
     if leak_path is not None:
@@ -792,6 +956,50 @@ def _find_visible_total_score_leak(
         if any(pattern.search(visible_text) for pattern in VISIBLE_TOTAL_SCORE_PATTERNS):
             return path.relative_to(reports_dir.parent).as_posix()
     return None
+
+
+def _read_utf8(path: Path) -> str | None:
+    try:
+        return path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
+def _narrative_exact_texts(stock: dict[str, Any]) -> tuple[str, ...]:
+    points: list[Any] = [stock.get("analysis_summary")]
+    points.extend(stock.get("core_reasons") or [])
+    points.extend(stock.get("five_day_progress") or [])
+    return tuple(
+        point["text"]
+        for point in points
+        if isinstance(point, dict) and _is_non_empty_string(point.get("text"))
+    )
+
+
+def _narrative_decision_matches(
+    stock: dict[str, Any],
+    snapshot: dict[str, Any],
+    card: dict[str, Any] | None,
+) -> bool:
+    action = snapshot.get("action")
+    if not isinstance(action, dict):
+        return False
+    observation_conditions = (
+        card.get("needed_before_focus_entry")
+        if isinstance(card, dict) and card.get("needed_before_focus_entry")
+        else action.get("required_confirmation")
+    )
+    expected = {
+        "action": action.get("decision"),
+        "position_min_pct": action.get("position_min_pct"),
+        "position_max_pct": action.get("position_max_pct"),
+        "risk_if_wrong": action.get("risk_if_wrong"),
+        "required_confirmation": action.get("required_confirmation"),
+        "observation_conditions": observation_conditions,
+        "invalidation_conditions": action.get("invalidation_conditions"),
+        "exit_conditions": action.get("invalidation_conditions"),
+    }
+    return all(stock.get(field) == value for field, value in expected.items())
 
 
 def _html_visible_text(html_text: str) -> str:

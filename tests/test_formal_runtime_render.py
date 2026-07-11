@@ -21,6 +21,7 @@ from tests.test_formal_strategy_runtime import (
     ready_receipt,
 )
 from stock_analyzer.ops.formal_narrative import NarrativePoint, validate_formal_narrative
+from stock_analyzer.ops.verify import verify_production_result
 from tests.test_formal_narrative import _valid_narrative
 
 
@@ -93,6 +94,110 @@ def test_staged_verifier_rejects_fixture_text_hash_mismatch_or_wrong_input_set(t
         hash_artifact_tree(tmp_path),
         verify_receipt,
     ) is False
+
+
+def test_staged_verifier_rejects_json_only_narrative(tmp_path):
+    output = analysis_output()
+    receipt = rendering_receipt(output)
+    narrative = _valid_narrative(output.value)
+    render_formal_report(tmp_path, receipt, output.value, narrative=narrative)
+    stock_path = (
+        tmp_path
+        / "daily"
+        / output.value.trade_date.isoformat()
+        / "stocks"
+        / f"{narrative.stocks[0].ts_code}.html"
+    )
+    stock_path.write_text(
+        stock_path.read_text(encoding="utf-8").replace(
+            narrative.stocks[0].narrative_marker,
+            "",
+        ),
+        encoding="utf-8",
+    )
+    verify_receipt = receipt.model_copy(update={"state": FormalRunState.VERIFYING})
+
+    assert verify_staged_formal_report(
+        tmp_path,
+        hash_artifact_tree(tmp_path),
+        verify_receipt,
+    ) is False
+
+
+def test_staged_verifier_rejects_internal_terms_in_main_view(tmp_path):
+    output = analysis_output()
+    receipt = rendering_receipt(output)
+    narrative = _valid_narrative(output.value)
+    render_formal_report(tmp_path, receipt, output.value, narrative=narrative)
+    home = tmp_path / "index.html"
+    home.write_text(
+        home.read_text(encoding="utf-8").replace(
+            "市场总体结论",
+            "Gate receipt input set",
+        ),
+        encoding="utf-8",
+    )
+    verify_receipt = receipt.model_copy(update={"state": FormalRunState.VERIFYING})
+
+    assert verify_staged_formal_report(
+        tmp_path,
+        hash_artifact_tree(tmp_path),
+        verify_receipt,
+    ) is False
+
+
+def test_production_verifier_repeats_readability_gate_after_activation(tmp_path):
+    output = analysis_output()
+    receipt = rendering_receipt(output)
+    narrative = _valid_narrative(output.value)
+    reports = tmp_path / "reports"
+    render_formal_report(reports, receipt, output.value, narrative=narrative)
+
+    class Repository:
+        def load_daily_recommendations(self, trade_date):
+            return output.value.recommendations
+
+        def load_evidence_packages(self, trade_date):
+            return output.value.evidence_packages
+
+        def load_evaluation_tasks(self, trade_date):
+            return output.value.evaluation_tasks
+
+    activated = receipt.model_copy(
+        update={
+            "state": FormalRunState.REPORT_GENERATED,
+            "artifact_hashes": hash_artifact_tree(reports),
+            "local_activation_id": "activation-1",
+            "ledger_activation_id": "activation-1",
+        }
+    )
+    accepted = verify_production_result(
+        tmp_path,
+        Repository(),
+        output.value.trade_date,
+        receipt=activated,
+    )
+    assert accepted.passed is True
+
+    home = reports / "index.html"
+    home.write_text(
+        home.read_text(encoding="utf-8").replace(
+            "市场总体结论",
+            "Gate receipt input set",
+        ),
+        encoding="utf-8",
+    )
+    rejected = verify_production_result(
+        tmp_path,
+        Repository(),
+        output.value.trade_date,
+        receipt=activated,
+    )
+    assert rejected.passed is False
+    assert any(
+        failure.code == "report_readability_invalid"
+        for failure in rejected.failures
+    )
 
 
 def test_expression_client_receives_structured_payload_and_returns_validated_narrative():
