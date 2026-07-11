@@ -1,6 +1,8 @@
 # V3 Formal Warehouse Restoration Design
 
 > **Status:** Approved for implementation on 2026-07-12. This document resolves the storage contradiction introduced after the original storage-governance design. Where later plans or code store wide formal acquisition payloads as JSON, this design supersedes that behavior while preserving the existing formal-v2 data and decision contracts.
+>
+> **Current-state authority:** Implementation and production status are authoritative only in `docs/operations/production-capability-matrix.md`; this specification defines required behavior but is not evidence that migration or activation is complete.
 
 ## 1. Purpose
 

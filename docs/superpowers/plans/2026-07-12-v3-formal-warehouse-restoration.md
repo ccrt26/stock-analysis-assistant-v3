@@ -1,6 +1,8 @@
 # V3 Formal Warehouse Restoration Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:executing-plans` to implement this plan inline task-by-task. Do not use subagents unless the user later explicitly authorizes an exception. Steps use checkbox (`- [ ]`) syntax for tracking.
+>
+> **Current-state authority:** Completion claims remain governed by `docs/operations/production-capability-matrix.md`; checked plan steps alone are not production evidence.
 
 **Goal:** Restore the approved DuckDB + Parquet formal warehouse, migrate every active and historical formal JSON object without semantic change, cut production over to the warehouse, verify real 2026-07-10 evidence and reports, and delete the superseded wide JSON store only after all gates pass.
 
