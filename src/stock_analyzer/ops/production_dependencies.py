@@ -10,6 +10,7 @@ from typing import Any, Callable, Literal
 from stock_analyzer.config import AppConfig
 from stock_analyzer.data.akshare_formal_client import AkshareFormalEndpointClient
 from stock_analyzer.data.capability_store import LocalCapabilityStore
+from stock_analyzer.data.cninfo_disclosure_client import CninfoDisclosureClient
 from stock_analyzer.data.formal_contracts import (
     FORMAL_CONTRACT_VERSION,
     build_screening_contracts,
@@ -43,6 +44,7 @@ class ProductionExternalRuntime:
     config: AppConfig
     tushare_pro: Any
     akshare_module: Any
+    cninfo_http_client: Any
     capability_store: LocalCapabilityStore
     capability_mode: Literal["recorded", "live"] = "live"
     ledger: Any | None = None
@@ -60,6 +62,7 @@ def load_default_external_runtime(
     try:
         tushare = module_loader("tushare")
         akshare = module_loader("akshare")
+        httpx = module_loader("httpx")
     except (ImportError, ModuleNotFoundError) as exc:
         raise ProductionDependencyError(
             "optional data dependencies are missing; install the data extra"
@@ -78,10 +81,19 @@ def load_default_external_runtime(
         / FORMAL_CONTRACT_VERSION
         / "latest.json"
     )
+    cninfo_http_client = httpx.Client(
+        headers={
+            "User-Agent": "stock-analysis-assistant-v3/1.0",
+            "Referer": f"{config.cninfo_base_url.rstrip('/')}/",
+            "Accept": "application/json",
+        },
+        follow_redirects=True,
+    )
     return ProductionExternalRuntime(
         config=config,
         tushare_pro=tushare_pro,
         akshare_module=akshare,
+        cninfo_http_client=cninfo_http_client,
         capability_store=capability_store,
         capability_mode="live",
         enable_concepts=_env_flag("STOCK_ANALYZER_ENABLE_CONCEPTS"),
@@ -106,12 +118,21 @@ def build_production_formal_dependencies(
     )
     primary = TushareFormalEndpointClient(runtime.tushare_pro)
     backup = AkshareFormalEndpointClient(runtime.akshare_module)
+    events_backup = CninfoDisclosureClient(
+        primary,
+        runtime.cninfo_http_client,
+        base_url=runtime.config.cninfo_base_url,
+        calls_per_minute=runtime.config.cninfo_calls_per_minute,
+        timeout_seconds=runtime.config.cninfo_timeout_seconds,
+        max_retries=runtime.config.cninfo_max_retries,
+    )
     registry = build_formal_route_registry(
         primary,
         backup,
         primary,
         runtime.config.local_warehouse_dir / "manual" / "holdings.json",
         capabilities,
+        events_backup_client=events_backup,
         require_live_capability=runtime.capability_mode == "live",
     )
     screening_contracts = build_screening_contracts(trade_date, ())

@@ -6,11 +6,13 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from stock_analyzer.config import AppConfig
+from stock_analyzer.data.akshare_formal_client import AkshareFormalEndpointClient
 from stock_analyzer.data.capability_store import (
     CapabilityBundle,
     CapabilityEvidenceError,
     LocalCapabilityStore,
 )
+from stock_analyzer.data.cninfo_disclosure_client import CninfoDisclosureClient
 from stock_analyzer.data.formal_routes import formal_route_group_ids
 from stock_analyzer.data.readiness import (
     AcquisitionGroupId,
@@ -82,6 +84,7 @@ def recorded_external_runtime(tmp_path, *, mode="recorded"):
         config=config,
         tushare_pro=RecordedTusharePro(),
         akshare_module=RecordedAkshare(),
+        cninfo_http_client=object(),
         capability_store=store,
         capability_mode=mode,
         ledger=InMemoryFormalLedger(),
@@ -111,6 +114,64 @@ def test_recorded_runtime_builds_complete_real_dependencies_without_high_level_m
     assert callable(dependencies.render) and callable(dependencies.verify)
     assert runtime.tushare_pro.calls == []
     assert runtime.akshare_module.calls == []
+
+
+def test_factory_uses_direct_cninfo_for_event_backup_and_akshare_elsewhere(tmp_path):
+    runtime = recorded_external_runtime(tmp_path)
+    dependencies = build_production_formal_dependencies(
+        tmp_path,
+        InMemoryAnalysisRepository(),
+        TARGET,
+        runtime=runtime,
+    )
+
+    targets = {
+        group.contract.group_id: group.routes
+        for group in dependencies.target_routes
+    }
+    assert isinstance(
+        targets[AcquisitionGroupId.OFFICIAL_EVENTS_RISK].backup.client,
+        CninfoDisclosureClient,
+    )
+    assert isinstance(
+        targets[AcquisitionGroupId.BOARD_INDUSTRY].backup.client,
+        AkshareFormalEndpointClient,
+    )
+
+
+def test_default_runtime_builds_cninfo_http_client_without_secret_headers(tmp_path):
+    captured = {}
+
+    class FakeTushare:
+        @staticmethod
+        def pro_api(token):
+            return object()
+
+    class FakeHttpx:
+        class Client:
+            def __init__(self, **kwargs):
+                captured.update(kwargs)
+                self.headers = kwargs.get("headers", {})
+
+    modules = {
+        "tushare": FakeTushare(),
+        "akshare": object(),
+        "httpx": FakeHttpx(),
+    }
+    runtime = load_default_external_runtime(
+        AppConfig(
+            project_root=tmp_path,
+            local_warehouse_dir=tmp_path / "local_warehouse",
+            tushare_token="secret-sentinel",
+        ),
+        module_loader=modules.__getitem__,
+    )
+
+    assert runtime.cninfo_http_client is not None
+    assert captured["follow_redirects"] is True
+    header_names = {name.lower() for name in captured["headers"]}
+    assert header_names == {"user-agent", "referer", "accept"}
+    assert "secret-sentinel" not in str(captured)
 
 
 def test_live_runtime_rejects_recorded_capability_before_provider_call(tmp_path):
@@ -145,7 +206,11 @@ def test_default_factory_reports_missing_optional_packages_without_secret_values
         def pro_api(token):
             raise RuntimeError(f"provider echoed {token}")
 
-    modules = {"tushare": FailingTushare(), "akshare": object()}
+    modules = {
+        "tushare": FailingTushare(),
+        "akshare": object(),
+        "httpx": object(),
+    }
     with pytest.raises(ProductionDependencyError, match="client initialization failed") as raised:
         load_default_external_runtime(config, module_loader=modules.__getitem__)
     assert "secret-sentinel" not in str(raised.value)

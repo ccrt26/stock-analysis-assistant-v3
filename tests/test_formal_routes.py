@@ -130,7 +130,7 @@ ROUTE_SPECS = {
     ),
     AcquisitionGroupId.OFFICIAL_EVENTS_RISK: (
         "official.events_risk.v1",
-        "cninfo.events_risk.v1",
+        "cninfo.direct.events_risk.v2",
     ),
     AcquisitionGroupId.CONCEPT_THEME: (
         "tushare.concept_theme.v1",
@@ -211,6 +211,29 @@ def test_registry_uses_unavailable_backup_route_when_only_primary_has_capability
     pair = registry[AcquisitionGroupId.BOARD_INDUSTRY]
     assert isinstance(pair.primary, NormalizedEndpointRoute)
     assert isinstance(pair.backup, UnavailableFormalRoute)
+
+
+def test_registry_binds_only_event_backup_to_dedicated_owner(tmp_path):
+    primary = RecordedClient()
+    backup = RecordedClient()
+    official = RecordedClient()
+    event_backup = RecordedClient()
+    registry = build_formal_route_registry(
+        primary,
+        backup,
+        official,
+        tmp_path / "holdings.json",
+        _capabilities(),
+        events_backup_client=event_backup,
+    )
+
+    registry[AcquisitionGroupId.BOARD_INDUSTRY].backup.fetch(_request())
+    registry[AcquisitionGroupId.OFFICIAL_EVENTS_RISK].backup.fetch(_request())
+
+    assert [name for name, _ in backup.calls] == ["fetch_board_industry"]
+    assert [name for name, _ in event_backup.calls] == [
+        "fetch_official_events_risk"
+    ]
 
 
 def test_each_route_calls_its_exact_endpoint_method_and_normalizes_a_complete_payload():

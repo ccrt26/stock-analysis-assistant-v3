@@ -221,7 +221,7 @@ _ROUTE_DEFINITIONS = {
     ),
     AcquisitionGroupId.OFFICIAL_EVENTS_RISK: (
         "official.events_risk.v1",
-        "cninfo.events_risk.v1",
+        "cninfo.direct.events_risk.v2",
         "fetch_official_events_risk",
     ),
     AcquisitionGroupId.CONCEPT_THEME: (
@@ -239,6 +239,7 @@ def build_formal_route_registry(
     holdings_path: Path,
     capabilities: dict[str, RouteCapabilityEvidence],
     *,
+    events_backup_client: FormalEndpointClient | None = None,
     require_live_capability: bool = False,
 ) -> dict[AcquisitionGroupId, FormalRoutePair]:
     if require_live_capability:
@@ -258,7 +259,11 @@ def build_formal_route_registry(
     contract_version = next(iter(contract_versions))
     for group_id, (primary_id, backup_id, method) in _ROUTE_DEFINITIONS.items():
         primary_owner = official_client if group_id == AcquisitionGroupId.OFFICIAL_EVENTS_RISK else primary_client
-        backup_owner = backup_client
+        backup_owner = (
+            events_backup_client or backup_client
+            if group_id == AcquisitionGroupId.OFFICIAL_EVENTS_RISK
+            else backup_client
+        )
         primary_capability = capabilities.get(primary_id)
         backup_capability = capabilities.get(backup_id)
         registry[group_id] = FormalRoutePair(
