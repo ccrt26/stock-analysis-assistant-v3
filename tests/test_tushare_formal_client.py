@@ -725,6 +725,106 @@ def test_tushare_official_events_proves_empty_target_coverage_and_keeps_risks():
     assert risk["hard_risk"] is True
 
 
+def test_tushare_status_risk_component_never_calls_anns_d():
+    pro = RecordedTusharePro(
+        {
+            "suspend_d": pd.DataFrame(
+                [
+                    {
+                        "ts_code": CODES[0],
+                        "trade_date": "20260710",
+                        "suspend_type": "停牌",
+                    }
+                ]
+            )
+        }
+    )
+
+    response = TushareFormalEndpointClient(pro).fetch_official_status_risk(request())
+
+    assert [name for name, _ in pro.calls] == [
+        "trade_cal",
+        "suspend_d",
+        "stock_basic",
+    ]
+    assert response.coverage_codes == CODES
+    assert response.coverage_proven is True
+    assert response.covered_dates[-1] == TARGET
+    assert response.records[0]["event_type"] == "suspension"
+    assert "anns_d" not in [name for name, _ in pro.calls]
+
+
+def test_tushare_full_event_route_combines_fresh_status_with_anns_d():
+    pro = RecordedTusharePro(
+        {
+            "anns_d": pd.DataFrame(
+                [
+                    {
+                        "ann_date": "20260709",
+                        "ts_code": CODES[0],
+                        "name": "浦发银行",
+                        "title": "经营事项公告",
+                        "url": "https://example.invalid/announcement.pdf",
+                        "rec_time": "2026-07-09 17:01:02",
+                    }
+                ]
+            )
+        }
+    )
+
+    response = TushareFormalEndpointClient(pro).fetch_official_events_risk(request())
+
+    assert [name for name, _ in pro.calls] == [
+        "trade_cal",
+        "suspend_d",
+        "stock_basic",
+        "anns_d",
+    ]
+    assert response.records[0]["event_type"] == "company_announcement"
+    assert response.source_names == (
+        "tushare.anns_d",
+        "tushare.suspend_d",
+        "tushare.stock_basic",
+    )
+
+
+def test_tushare_event_semantic_probe_requires_populated_and_valid_empty_cases():
+    def announcements(kwargs):
+        if "ts_code" not in kwargs:
+            return pd.DataFrame(
+                [
+                    {
+                        "ann_date": "20260710",
+                        "ts_code": CODES[0],
+                        "name": "浦发银行",
+                        "title": "盘后公告",
+                        "url": "https://example.invalid/populated.pdf",
+                        "rec_time": "2026-07-10 15:31:02.123",
+                    }
+                ]
+            )
+        return pd.DataFrame(
+            columns=["ann_date", "ts_code", "name", "title", "url", "rec_time"]
+        )
+
+    client = TushareFormalEndpointClient(
+        RecordedTusharePro({"anns_d": announcements})
+    )
+
+    hashes = client.verify_event_semantics(request())
+
+    assert set(hashes) == {"populated_precise_time", "empty_coverage"}
+    assert all(len(value) == 64 for value in hashes.values())
+    assert len(set(hashes.values())) == 2
+
+    denied = TushareFormalEndpointClient(
+        RecordedTusharePro({"anns_d": RuntimeError("抱歉，您没有接口访问权限")})
+    )
+    with pytest.raises(PermanentRouteFailure) as raised:
+        denied.verify_event_semantics(request())
+    assert raised.value.classification is FailureClassification.PERMISSION
+
+
 def test_tushare_official_events_include_disclosures_and_filter_after_cutoff():
     pro = RecordedTusharePro(
         {

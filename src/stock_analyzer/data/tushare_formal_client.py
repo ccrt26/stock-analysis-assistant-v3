@@ -755,6 +755,75 @@ class TushareFormalEndpointClient:
         self,
         request: AcquisitionRequest,
     ) -> EndpointResponse:
+        status = self.fetch_official_status_risk(request)
+        sessions = status.covered_dates
+        announcements: list[Any] = []
+        for code in request.target_codes:
+            frame = self._call(
+                "anns_d",
+                ts_code=code,
+                start_date=_yyyymmdd(sessions[0]),
+                end_date=_yyyymmdd(request.trade_date),
+                fields="ann_date,ts_code,name,title,url,rec_time",
+            )
+            _require_columns(
+                frame,
+                ("ann_date", "ts_code", "name", "title", "url", "rec_time"),
+                "anns_d",
+            )
+            announcements.extend(frame.itertuples(index=False))
+        requested = set(request.target_codes)
+        records = list(status.records)
+        publication_times = dict(status.publication_times)
+        for row in announcements:
+            code = _ts_code(row.ts_code)
+            if code not in requested:
+                continue
+            announcement_time = _provider_datetime(
+                row.rec_time,
+                fallback_date=row.ann_date,
+                request=request,
+            )
+            if announcement_time > request.report_cutoff:
+                continue
+            event_id = _text(row.url)
+            title = _text(row.title)
+            if not event_id or event_id.lower() == "nan" or not title:
+                raise PermanentRouteFailure(
+                    "Tushare anns_d response lacks a stable URL or title",
+                    FailureClassification.SCHEMA,
+                )
+            publication_times[event_id] = announcement_time
+            records.append(
+                _event_record(
+                    request,
+                    code,
+                    event_id,
+                    "company_announcement",
+                    title,
+                    announcement_time,
+                    hard_risk=False,
+                    source_name="tushare.anns_d",
+                )
+            )
+        return EndpointResponse(
+            records=tuple(records),
+            covered_dates=status.covered_dates,
+            coverage_codes=status.coverage_codes,
+            coverage_proven=status.coverage_proven,
+            field_coverage=status.field_coverage,
+            source_names=(
+                "tushare.anns_d",
+                "tushare.suspend_d",
+                "tushare.stock_basic",
+            ),
+            publication_times=publication_times,
+        )
+
+    def fetch_official_status_risk(
+        self,
+        request: AcquisitionRequest,
+    ) -> EndpointResponse:
         sessions = self._required_sessions(request.trade_date)
         suspensions = self._call(
             "suspend_d",
@@ -778,21 +847,6 @@ class TushareFormalEndpointClient:
             "stock_basic",
         )
         requested = set(request.target_codes)
-        announcements: list[Any] = []
-        for code in request.target_codes:
-            frame = self._call(
-                "anns_d",
-                ts_code=code,
-                start_date=_yyyymmdd(sessions[-2]),
-                end_date=_yyyymmdd(request.trade_date),
-                fields="ann_date,ts_code,name,title,url,rec_time",
-            )
-            _require_columns(
-                frame,
-                ("ann_date", "ts_code", "name", "title", "url", "rec_time"),
-                "anns_d",
-            )
-            announcements.extend(frame.itertuples(index=False))
         publication = datetime.combine(
             request.trade_date,
             time.min,
@@ -836,40 +890,9 @@ class TushareFormalEndpointClient:
                     source_name="tushare.stock_basic",
                 )
             )
-        for row in announcements:
-            code = _ts_code(row.ts_code)
-            if code not in requested:
-                continue
-            announcement_time = _provider_datetime(
-                row.rec_time,
-                fallback_date=row.ann_date,
-                request=request,
-            )
-            if announcement_time > request.report_cutoff:
-                continue
-            event_id = _text(row.url)
-            title = _text(row.title)
-            if not event_id or event_id.lower() == "nan" or not title:
-                raise PermanentRouteFailure(
-                    "Tushare anns_d response lacks a stable URL or title",
-                    FailureClassification.SCHEMA,
-                )
-            publication_times[event_id] = announcement_time
-            records.append(
-                _event_record(
-                    request,
-                    code,
-                    event_id,
-                    "company_announcement",
-                    title,
-                    announcement_time,
-                    hard_risk=False,
-                    source_name="tushare.anns_d",
-                )
-            )
         return EndpointResponse(
             records=tuple(records),
-            covered_dates=(request.trade_date,),
+            covered_dates=(sessions[-2], sessions[-1]),
             coverage_codes=tuple(sorted(requested)),
             coverage_proven=True,
             field_coverage=_field_coverage(
@@ -877,12 +900,87 @@ class TushareFormalEndpointClient:
                 AcquisitionGroupId.OFFICIAL_EVENTS_RISK,
             ),
             source_names=(
-                "tushare.anns_d",
                 "tushare.suspend_d",
                 "tushare.stock_basic",
             ),
             publication_times=publication_times,
         )
+
+    def verify_event_semantics(
+        self,
+        request: AcquisitionRequest,
+    ) -> dict[str, str]:
+        populated = self._call(
+            "anns_d",
+            start_date=_yyyymmdd(request.trade_date),
+            end_date=_yyyymmdd(request.trade_date),
+            fields="ann_date,ts_code,name,title,url,rec_time",
+        )
+        required = ("ann_date", "ts_code", "name", "title", "url", "rec_time")
+        _require_columns(populated, required, "anns_d")
+        populated_fact: dict[str, Any] | None = None
+        for row in populated.itertuples(index=False):
+            published_at = _provider_datetime(
+                row.rec_time,
+                fallback_date=row.ann_date,
+                request=request,
+            )
+            if published_at.date() != request.trade_date or published_at.time() == time.min:
+                continue
+            populated_fact = {
+                "probe": "populated_precise_time",
+                "ts_code": _ts_code(row.ts_code),
+                "event_id": _text(row.url),
+                "publication_time": published_at.isoformat(),
+            }
+            if not populated_fact["event_id"]:
+                raise PermanentRouteFailure(
+                    "Tushare populated event probe lacks a stable URL",
+                    FailureClassification.SCHEMA,
+                )
+            break
+        if populated_fact is None:
+            raise PermanentRouteFailure(
+                "Tushare anns_d did not prove a populated precise-time response",
+                FailureClassification.INVALID_SEMANTICS,
+            )
+
+        securities = self._call(
+            "stock_basic",
+            exchange="",
+            list_status="L",
+            fields="ts_code,name",
+        )
+        _require_columns(securities, ("ts_code", "name"), "stock_basic")
+        empty_fact: dict[str, Any] | None = None
+        candidate_codes = sorted(
+            {_ts_code(row.ts_code) for row in securities.itertuples(index=False)}
+        )[:20]
+        for code in candidate_codes:
+            frame = self._call(
+                "anns_d",
+                ts_code=code,
+                start_date=_yyyymmdd(request.trade_date),
+                end_date=_yyyymmdd(request.trade_date),
+                fields="ann_date,ts_code,name,title,url,rec_time",
+            )
+            _require_columns(frame, required, "anns_d")
+            if frame.empty:
+                empty_fact = {
+                    "probe": "empty_coverage",
+                    "ts_code": code,
+                    "trade_date": request.trade_date.isoformat(),
+                }
+                break
+        if empty_fact is None:
+            raise PermanentRouteFailure(
+                "Tushare anns_d did not prove a valid-code empty response",
+                FailureClassification.INVALID_SEMANTICS,
+            )
+        return {
+            "populated_precise_time": _semantic_hash(populated_fact),
+            "empty_coverage": _semantic_hash(empty_fact),
+        }
 
     def _required_sessions(self, trade_date: date) -> tuple[date, ...]:
         calendar = self._call(
@@ -1067,6 +1165,16 @@ def _stable_provider_record_id(prefix: str, row: Any) -> str:
         default=str,
     )
     return f"{prefix}:{hashlib.sha256(serialized.encode('utf-8')).hexdigest()}"
+
+
+def _semantic_hash(value: dict[str, Any]) -> str:
+    serialized = json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
 
 def _membership_active_on(in_date: Any, out_date: Any, target: date) -> bool:

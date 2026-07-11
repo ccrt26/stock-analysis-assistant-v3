@@ -1,5 +1,8 @@
 from pathlib import Path
 
+import pytest
+from pydantic import ValidationError
+
 from stock_analyzer.config import AppConfig
 from stock_analyzer.data.health import (
     HealthItem,
@@ -48,6 +51,42 @@ def test_config_supports_project_root_and_reports_dir_overrides(tmp_path):
     assert config.project_root == project_root
     assert config.reports_dir == reports_dir
     assert config.tushare_token_path == tmp_path / "token"
+
+
+def test_cninfo_runtime_defaults_and_overrides_are_configuration_backed():
+    defaults = AppConfig.load(env={})
+
+    assert defaults.cninfo_base_url == "https://www.cninfo.com.cn"
+    assert defaults.cninfo_calls_per_minute == 20
+    assert defaults.cninfo_timeout_seconds == 20.0
+    assert defaults.cninfo_max_retries == 2
+
+    configured = AppConfig.load(
+        env={
+            "CNINFO_BASE_URL": "https://disclosure.example.test",
+            "CNINFO_CALLS_PER_MINUTE": "12",
+            "CNINFO_TIMEOUT_SECONDS": "9.5",
+            "CNINFO_MAX_RETRIES": "1",
+        }
+    )
+    assert configured.cninfo_base_url == "https://disclosure.example.test"
+    assert configured.cninfo_calls_per_minute == 12
+    assert configured.cninfo_timeout_seconds == 9.5
+    assert configured.cninfo_max_retries == 1
+    assert "credential" not in configured.model_dump_json().lower()
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("CNINFO_CALLS_PER_MINUTE", "0"),
+        ("CNINFO_TIMEOUT_SECONDS", "0"),
+        ("CNINFO_MAX_RETRIES", "-1"),
+    ],
+)
+def test_cninfo_runtime_rejects_nonpositive_limits(name, value):
+    with pytest.raises(ValidationError):
+        AppConfig.load(env={name: value})
 
 
 def test_storage_governance_paths_and_thresholds_default_to_project_root(tmp_path):
