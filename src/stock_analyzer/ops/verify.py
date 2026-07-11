@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections import Counter
 from dataclasses import dataclass
 from datetime import date, datetime
 from html import unescape
@@ -152,27 +153,53 @@ def verify_production_result(
             )
         )
 
-    if not valid_data_insufficient and len(evidence_packages) != len(recommendations):
+    evidence_ids = [package.evidence_id for package in evidence_packages]
+    evidence_id_set = set(evidence_ids)
+    recommendation_evidence_ids = {
+        recommendation.evidence_id
+        for recommendation in recommendations
+        if recommendation.evidence_id
+    }
+    missing_recommendation_evidence = (
+        len(recommendation_evidence_ids) != len(recommendations)
+        or not recommendation_evidence_ids.issubset(evidence_id_set)
+    )
+    duplicate_evidence_ids = len(evidence_ids) != len(evidence_id_set)
+    if (
+        not valid_data_insufficient
+        and (missing_recommendation_evidence or duplicate_evidence_ids)
+    ):
         failures.append(
             ProductionVerificationFailure(
                 code="evidence_count_mismatch",
                 message=(
-                    f"Expected {len(recommendations)} evidence packages, "
-                    f"found {len(evidence_packages)}."
+                    "Every recommendation must reference one unique active evidence "
+                    "package; focus-only packages are allowed."
                 ),
                 fix_suggestion=(
-                    "Regenerate evidence packages for each recommendation and verify "
-                    "that stale same-day rows were cleaned before retrying."
+                    "Regenerate the combined recommendation/focus evidence set and "
+                    "remove missing or duplicate evidence identifiers before retrying."
                 ),
             )
         )
 
     expected_evaluation_tasks = (
-        len(recommendations) * EVALUATION_TASKS_PER_RECOMMENDATION
+        len(evidence_packages) * EVALUATION_TASKS_PER_RECOMMENDATION
     )
+    task_counts = Counter(task.evidence_id for task in evaluation_tasks)
+    invalid_task_evidence = set(task_counts) - evidence_id_set
+    incomplete_task_evidence = {
+        evidence_id
+        for evidence_id in evidence_id_set
+        if task_counts[evidence_id] != EVALUATION_TASKS_PER_RECOMMENDATION
+    }
     if (
         not valid_data_insufficient
-        and len(evaluation_tasks) != expected_evaluation_tasks
+        and (
+            len(evaluation_tasks) != expected_evaluation_tasks
+            or invalid_task_evidence
+            or incomplete_task_evidence
+        )
     ):
         failures.append(
             ProductionVerificationFailure(
@@ -182,8 +209,9 @@ def verify_production_result(
                     f"found {len(evaluation_tasks)}."
                 ),
                 fix_suggestion=(
-                    "Recreate evaluation tasks from the evidence packages so each "
-                    "recommendation has the configured evaluation schedule."
+                    "Recreate evaluation tasks from the active evidence packages so "
+                    "each recommendation or focus package has six tasks and no task "
+                    "references an unknown package."
                 ),
             )
         )

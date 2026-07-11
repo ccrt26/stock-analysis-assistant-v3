@@ -573,6 +573,28 @@ git add docs/superpowers/specs/2026-07-10-v3-formal-report-data-readiness-design
 git commit -m "fix: query unmapped cninfo candidates exactly"
 ```
 
+- [ ] **Finding 9B: Verify combined recommendation and focus evidence instead of recommendation-only counts**
+
+The resumed real run reached `report_generated`, atomically activated its receipt, and produced 10 daily recommendations plus 4 independent focus-stock snapshots. The active formal ledger therefore correctly contained 14 evidence packages and 84 evaluation tasks. `verify_production_result()` incorrectly required evidence-package count to equal recommendation count and evaluation-task count to equal `recommendations * 6`, causing a false `report_artifact_invalid` after activation.
+
+In `tests/test_ops_job.py`, add `test_verify_accepts_additional_focus_evidence_with_complete_evaluation_tasks`; construct two recommendations, one additional focus-only evidence package, and six tasks for each of all three packages. It must fail before the verifier change. Add `test_verify_rejects_evaluation_task_for_unknown_evidence`; it must fail if total task count happens to match but one task references an evidence ID outside the package set. Keep `test_verify_fails_when_evidence_count_does_not_match_recommendations`, but its assertion now means a recommendation evidence ID is absent rather than raw counts differ.
+
+In `src/stock_analyzer/ops/verify.py`, compare the non-empty recommendation `evidence_id` set as a subset of the unique evidence-package ID set; reject missing or duplicate IDs with `evidence_count_mismatch`. Set the expected task count to `len(evidence_packages) * EVALUATION_TASKS_PER_RECOMMENDATION`, reject task evidence IDs not in the package set, and require exactly six tasks per evidence ID. Do not change Strategy V2, focus selection, report content, activated ledger rows, or the ten-recommendation limit.
+
+Run:
+
+```bash
+.venv/bin/python -m pytest tests/test_ops_job.py -q
+.venv/bin/python -m pytest tests/test_formal_strategy_runtime.py tests/test_ops_job.py tests/test_default_formal_production_entry.py tests/test_july10_formal_readiness_acceptance.py -q
+```
+
+Expected: the new acceptance test fails before the source edit; both commands pass afterward. Commit boundary:
+
+```bash
+git add docs/superpowers/specs/2026-07-10-v3-formal-report-data-readiness-design.md docs/superpowers/plans/2026-07-11-v3-formal-production-completion.md src/stock_analyzer/ops/verify.py tests/test_ops_job.py
+git commit -m "fix: verify focus evidence independently"
+```
+
 - [ ] **Step 1: Verify current Supabase guidance and runtime presence without exposing values**
 
 Fetch `https://supabase.com/changelog.md`, inspect relevant breaking changes, then consult current official docs for RPC, RLS/security-invoker views, and service-role server usage. Run a boolean-only configuration check for `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`; if absent, use the already authenticated Supabase mechanism or request user authorization rather than displaying or copying a secret.

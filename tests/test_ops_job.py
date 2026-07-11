@@ -121,6 +121,58 @@ def test_verify_accepts_recommendations_when_counts_and_artifacts_match(tmp_path
     assert verification.daily_basic_indicator_current_day_rows == 1
 
 
+def test_verify_accepts_additional_focus_evidence_with_complete_evaluation_tasks(
+    tmp_path,
+):
+    trade_date = date(2026, 7, 9)
+    recommendations = [
+        _recommendation(trade_date, "600000.SH"),
+        _recommendation(trade_date, "600519.SH"),
+    ]
+    focus_code = "000001.SZ"
+    all_evidence_codes = [
+        *(item.ts_code for item in recommendations),
+        focus_code,
+    ]
+    repository = FakeVerificationRepository(
+        recommendations=recommendations,
+        evidence_packages=[
+            _evidence_package(trade_date, code) for code in all_evidence_codes
+        ],
+        evaluation_tasks=[
+            task
+            for code in all_evidence_codes
+            for task in _evaluation_tasks(_recommendation(trade_date, code))
+        ],
+    )
+    _write_production_report(tmp_path, trade_date)
+
+    verification = _verify(tmp_path, repository, trade_date)
+
+    assert verification.passed is True
+    assert verification.recommendations == 2
+    assert verification.evidence_packages == 3
+    assert verification.evaluation_tasks == 18
+
+
+def test_verify_rejects_evaluation_task_for_unknown_evidence(tmp_path):
+    trade_date = date(2026, 7, 9)
+    recommendation = _recommendation(trade_date, "600000.SH")
+    tasks = _evaluation_tasks(recommendation)
+    tasks[-1] = tasks[-1].model_copy(update={"evidence_id": "unknown-evidence"})
+    repository = FakeVerificationRepository(
+        recommendations=[recommendation],
+        evidence_packages=[_evidence_package(trade_date, "600000.SH")],
+        evaluation_tasks=tasks,
+    )
+    _write_production_report(tmp_path, trade_date)
+
+    verification = _verify(tmp_path, repository, trade_date)
+
+    assert verification.passed is False
+    assert _failure(verification, "evaluation_task_count_mismatch").fix_suggestion
+
+
 def test_verify_fails_when_recommendations_exceed_daily_limit(tmp_path):
     trade_date = date(2026, 7, 9)
     recommendations = [
