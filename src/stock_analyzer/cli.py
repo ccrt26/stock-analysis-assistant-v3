@@ -23,6 +23,12 @@ from stock_analyzer.ops.formal_live import (
     LiveCapabilityVerificationError,
     verify_and_record_live_capabilities,
 )
+from stock_analyzer.ops.formal_warehouse_ops import (
+    run_formal_warehouse_audit,
+    run_formal_warehouse_deletion_manifest,
+    run_formal_warehouse_inventory,
+    run_formal_warehouse_migration,
+)
 from stock_analyzer.ops.production_dependencies import (
     ProductionDependencyError,
     load_default_external_runtime,
@@ -65,6 +71,82 @@ MISSING_SUPABASE_CONFIG_MESSAGE = (
     "run-daily/render-report. Use --fixture-mode or set "
     "STOCK_ANALYZER_FIXTURE_MODE=1 only for local fixture data."
 )
+
+
+@app.command("formal-warehouse-inventory")
+def formal_warehouse_inventory(
+    source_root: Path = typer.Option(..., "--source-root"),
+    output: Path = typer.Option(..., "--output"),
+) -> None:
+    inventory = run_formal_warehouse_inventory(source_root, output)
+    typer.echo(
+        f"formal warehouse inventory: files={len(inventory.items)} "
+        f"unknown={len(inventory.unknown_paths)} output={output}"
+    )
+    if inventory.unknown_paths:
+        raise typer.Exit(code=2)
+
+
+@app.command("formal-warehouse-migrate")
+def formal_warehouse_migrate(
+    source_root: Path = typer.Option(..., "--source-root"),
+    warehouse_root: Path = typer.Option(..., "--warehouse-root"),
+    migration_id: str = typer.Option(..., "--migration-id"),
+    output: Path = typer.Option(..., "--output"),
+) -> None:
+    audit = run_formal_warehouse_migration(
+        source_root,
+        warehouse_root,
+        migration_id,
+        output,
+    )
+    typer.echo(
+        f"formal warehouse migration: items={len(audit.items)} "
+        f"deletion_eligible={str(audit.deletion_eligible).lower()} output={output}"
+    )
+    if not audit.deletion_eligible:
+        raise typer.Exit(code=2)
+
+
+@app.command("formal-warehouse-audit")
+def formal_warehouse_audit(
+    warehouse_root: Path = typer.Option(..., "--warehouse-root"),
+    strict_hashes: bool = typer.Option(False, "--strict-hashes"),
+    output: Path = typer.Option(..., "--output"),
+) -> None:
+    audit = run_formal_warehouse_audit(
+        warehouse_root,
+        output,
+        strict_hashes=strict_hashes,
+    )
+    typer.echo(
+        f"formal warehouse audit: complete={str(audit.complete).lower()} "
+        f"versions={audit.version_count} rows={audit.row_count} output={output}"
+    )
+    if not audit.complete:
+        raise typer.Exit(code=2)
+
+
+@app.command("formal-warehouse-deletion-manifest")
+def formal_warehouse_deletion_manifest(
+    source_root: Path = typer.Option(..., "--source-root"),
+    warehouse_root: Path = typer.Option(..., "--warehouse-root"),
+    migration_id: str = typer.Option(..., "--migration-id"),
+    output: Path = typer.Option(..., "--output"),
+) -> None:
+    try:
+        manifest = run_formal_warehouse_deletion_manifest(
+            source_root,
+            warehouse_root,
+            migration_id,
+            output,
+        )
+    except (FileNotFoundError, ValueError) as exc:
+        _fail(str(exc))
+    typer.echo(
+        f"formal warehouse deletion manifest: files={len(manifest.files)} "
+        f"bytes={manifest.total_bytes} output={output}"
+    )
 
 
 @app.command("health-check")

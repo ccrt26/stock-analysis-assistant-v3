@@ -797,6 +797,65 @@ def test_render_report_command_fails_without_stored_data_in_production(tmp_path,
     assert not (tmp_path / "index.html").exists()
 
 
+def test_formal_warehouse_operator_commands_migrate_audit_and_manifest(tmp_path):
+    from tests.test_formal_migration import _legacy_tree
+
+    source = tmp_path / "formal_evidence"
+    warehouse_root = tmp_path / "warehouse"
+    _legacy_tree(source)
+    inventory_output = tmp_path / "inventory.json"
+    migration_output = tmp_path / "migration.json"
+    audit_output = tmp_path / "audit.json"
+    deletion_output = tmp_path / "deletion.json"
+
+    inventory = CliRunner().invoke(
+        app,
+        [
+            "formal-warehouse-inventory",
+            "--source-root", str(source),
+            "--output", str(inventory_output),
+        ],
+    )
+    migration = CliRunner().invoke(
+        app,
+        [
+            "formal-warehouse-migrate",
+            "--source-root", str(source),
+            "--warehouse-root", str(warehouse_root),
+            "--migration-id", "migration-1",
+            "--output", str(migration_output),
+        ],
+    )
+    audit = CliRunner().invoke(
+        app,
+        [
+            "formal-warehouse-audit",
+            "--warehouse-root", str(warehouse_root),
+            "--strict-hashes",
+            "--output", str(audit_output),
+        ],
+    )
+    deletion = CliRunner().invoke(
+        app,
+        [
+            "formal-warehouse-deletion-manifest",
+            "--source-root", str(source),
+            "--warehouse-root", str(warehouse_root),
+            "--migration-id", "migration-1",
+            "--output", str(deletion_output),
+        ],
+    )
+
+    assert inventory.exit_code == 0, inventory.output
+    assert migration.exit_code == 0, migration.output
+    assert audit.exit_code == 0, audit.output
+    assert deletion.exit_code == 0, deletion.output
+    assert json.loads(inventory_output.read_text())["unknown_paths"] == []
+    assert json.loads(migration_output.read_text())["deletion_eligible"] is True
+    assert json.loads(audit_output.read_text())["complete"] is True
+    assert json.loads(deletion_output.read_text())["files"]
+
+
 def test_render_report_requires_supabase_config_without_fixture_mode(tmp_path, monkeypatch):
     monkeypatch.delenv("SUPABASE_URL", raising=False)
     monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)

@@ -593,6 +593,37 @@ class FormalWarehouse:
             ]
         return tuple(self.reconciliation_task(task_id) for task_id in task_ids)
 
+    def import_reconciliation_task(self, task: ReconciliationTask) -> None:
+        payload = task.model_dump(mode="json")
+        with self._connect() as connection:
+            existing = connection.execute(
+                "select payload from formal_reconciliation_tasks where task_id = ?",
+                [task.task_id],
+            ).fetchone()
+            if existing is not None:
+                if _from_json(existing[0]) != payload:
+                    raise ValueError(
+                        "reconciliation task already exists with different payload"
+                    )
+                return
+            connection.execute(
+                "insert into formal_reconciliation_tasks values (?, ?, ?, ?, ?)",
+                [
+                    task.task_id,
+                    task.group_id.value,
+                    task.trade_date,
+                    task.status,
+                    _json(payload),
+                ],
+            )
+
+    def list_run_receipts(self) -> tuple[Any, ...]:
+        with self._connect(read_only=True) as connection:
+            keys = connection.execute(
+                "select run_id, revision from formal_run_receipts order by run_id, revision"
+            ).fetchall()
+        return tuple(self.run_receipt(str(run_id), int(revision)) for run_id, revision in keys)
+
     def save_capability_bundle(
         self,
         *,
@@ -632,6 +663,42 @@ class FormalWarehouse:
         if len(rows) != 1:
             raise FileNotFoundError("capability bundle is missing or ambiguous")
         return str(rows[0][0]), _from_json(rows[0][1])
+
+    def save_migration_audit(
+        self,
+        migration_id: str,
+        source_root: str,
+        state: str,
+        deletion_eligible: bool,
+        payload: dict[str, Any],
+    ) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                insert or replace into formal_migrations values (?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    migration_id,
+                    source_root,
+                    state,
+                    deletion_eligible,
+                    datetime.now(timezone.utc),
+                    _json(payload),
+                ],
+            )
+
+    def migration_audit_payload(self, migration_id: str) -> dict[str, Any]:
+        with self._connect(read_only=True) as connection:
+            row = connection.execute(
+                "select payload from formal_migrations where migration_id = ?",
+                [migration_id],
+            ).fetchone()
+        if row is None:
+            raise FileNotFoundError(f"migration audit not found: {migration_id}")
+        value = _from_json(row[0])
+        if not isinstance(value, dict):
+            raise ValueError("migration audit payload must be an object")
+        return value
 
     def _insert_immutable_payload(
         self,
