@@ -1,7 +1,11 @@
-from datetime import date, timedelta
+import json
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import pytest
 
+from stock_analyzer.analysis.focus import FormalFocusDay
+from stock_analyzer.data.readiness import FormalRunState
 from stock_analyzer.data.models import (
     DailyBar,
     DailyBasicRow,
@@ -21,11 +25,14 @@ from stock_analyzer.domain.models import (
     Recommendation,
 )
 from stock_analyzer.pipeline import (
+    ProductionDataSourceUnavailable,
     StoredAnalysisNotFound,
     _sample_market,
     render_report_for_date,
     run_daily_pipeline,
 )
+from stock_analyzer.ops.formal_run import RunReceipt
+from stock_analyzer.storage.evidence_store import LocalEvidenceStore
 from stock_analyzer.storage.repositories import InMemoryAnalysisRepository
 
 
@@ -73,6 +80,34 @@ class FailingSaveRepository(InMemoryAnalysisRepository):
     def save_data_source_runs(self, rows):
         self.save_attempts.append("data_source_runs")
         raise AssertionError("dry-run must not save data source runs")
+
+
+def _committed_receipt_store(tmp_path, trade_date):
+    store = LocalEvidenceStore(tmp_path / "formal-evidence")
+    store.save_run_receipt(
+        RunReceipt(
+            run_id=f"committed-{trade_date.isoformat()}",
+            target_date=trade_date,
+            report_cutoff=datetime(
+                trade_date.year,
+                trade_date.month,
+                trade_date.day,
+                16,
+                tzinfo=ZoneInfo("Asia/Shanghai"),
+            ),
+            acquisition_contract_version="formal-v1",
+            screening_version="screen-v1",
+            state=FormalRunState.REPORT_GENERATED,
+            group_version_ids={"market_decision": "version-1"},
+            input_set_id="input-1",
+            candidate_set_id="candidate-1",
+            evidence_hashes={"evidence": "hash"},
+            artifact_hashes={"index.html": "hash"},
+            local_activation_id="activation-1",
+            ledger_activation_id="activation-1",
+        )
+    )
+    return store
 
 
 class PreflightRejectingRepository(InMemoryAnalysisRepository):
@@ -269,6 +304,14 @@ class InsufficientProductionProvider:
             stock_names=stock_names,
             feature_profiles=feature_profiles,
             source_runs=[],
+        )
+
+
+class RaisingCurrentLiveDataProvider:
+    def load(self, trade_date):
+        raise CurrentLiveDataUnavailable(
+            "Tushare returned no current trade date daily bars for "
+            f"{trade_date.isoformat()}"
         )
 
 
@@ -474,6 +517,41 @@ def test_run_daily_pipeline_creates_report_and_evaluation_tasks(tmp_path):
     assert (tmp_path / "daily" / "2026-07-07" / "index.html").exists()
 
 
+def test_strategy_v2_fixture_pipeline_writes_v2_report_and_narrow_ledger_rows(
+    tmp_path,
+):
+    repo = InMemoryAnalysisRepository()
+
+    result = run_daily_pipeline(
+        date(2026, 7, 7),
+        tmp_path,
+        dry_run=False,
+        repository=repo,
+        fixture_mode=True,
+        strategy_v2=True,
+        manual_entries=[("600000.SH", "人工跟踪")],
+    )
+
+    payload = json.loads(
+        (tmp_path / "data" / "latest.json").read_text(encoding="utf-8")
+    )
+    html = (tmp_path / "index.html").read_text(encoding="utf-8")
+
+    assert result.recommendations
+    assert payload["recommendation_cards"]
+    assert payload["strategy_snapshots"]
+    assert "评分" not in html
+    assert repo.strategy_snapshots
+    assert repo.focus_entry_theses
+    assert repo.focus_daily_updates
+    assert repo.action_recommendation_summaries
+    assert repo.operational_daily_statuses
+    assert repo.recommendations
+    assert repo.focus_states
+    assert repo.evidence_packages
+    assert repo.evaluation_tasks
+
+
 def test_run_daily_pipeline_dry_run_does_not_persist_any_analysis_state(tmp_path):
     repo = FailingSaveRepository()
 
@@ -488,145 +566,6 @@ def test_run_daily_pipeline_dry_run_does_not_persist_any_analysis_state(tmp_path
     assert repo.save_attempts == []
     assert not (tmp_path / "index.html").exists()
 
-
-def test_run_daily_pipeline_production_without_data_source_fails_before_persisting(tmp_path):
-    repo = FailingSaveRepository()
-
-    with pytest.raises(RuntimeError) as excinfo:
-        run_daily_pipeline(
-            date(2026, 7, 7),
-            tmp_path,
-            dry_run=False,
-            repository=repo,
-        )
-
-    assert "real market data ingestion" in str(excinfo.value)
-    assert "--fixture-mode" in str(excinfo.value)
-    assert repo.save_attempts == []
-    assert not (tmp_path / "index.html").exists()
-
-
-def test_run_daily_pipeline_production_uses_provider_and_persists_real_bundle(tmp_path):
-    repo = InMemoryAnalysisRepository()
-    warehouse = RecordingWarehouse()
-
-    result = run_daily_pipeline(
-        date(2026, 7, 7),
-        tmp_path,
-        repository=repo,
-        fixture_mode=False,
-        market_data_provider=FakeProductionProvider(),
-        local_warehouse=warehouse,
-    )
-
-    assert result.recommendations
-    assert len(warehouse.saved_bundles) == 1
-    assert repo.recommendations
-    assert repo.stock_master
-    assert repo.market_bars
-    assert repo.daily_basic_indicators
-    assert repo.data_source_runs
-    assert (tmp_path / "index.html").exists()
-
-
-def test_production_pipeline_writes_full_bundle_to_warehouse_and_selected_windows_to_repo(tmp_path):
-    repo = InMemoryAnalysisRepository()
-    warehouse = RecordingWarehouse()
-
-    run_daily_pipeline(
-        date(2026, 7, 7),
-        tmp_path,
-        repository=repo,
-        fixture_mode=False,
-        market_data_provider=ProviderWithExtraRawCode(),
-        local_warehouse=warehouse,
-    )
-
-    assert len(warehouse.saved_bundles) == 1
-    assert {bar.ts_code for bar in warehouse.saved_bundles[0].daily_bars} == {
-        "600000.SH",
-        "600519.SH",
-        "000004.SZ",
-    }
-    selected_codes = {item.ts_code for item in repo.recommendations} | {
-        item.ts_code for item in repo.focus_states
-    }
-    assert {bar.ts_code for bar in repo.market_bars} <= selected_codes
-    assert {row.ts_code for row in repo.daily_basic_indicators} <= selected_codes
-    assert {stock.ts_code for stock in repo.stock_statuses} <= selected_codes
-    assert {feature.ts_code for feature in repo.feature_snapshots} <= selected_codes
-    assert "000004.SZ" not in {bar.ts_code for bar in repo.market_bars}
-    assert "000004.SZ" not in {row.ts_code for row in repo.daily_basic_indicators}
-    assert "000004.SZ" not in {stock.ts_code for stock in repo.stock_statuses}
-    assert "000004.SZ" not in {feature.ts_code for feature in repo.feature_snapshots}
-
-
-def test_production_pipeline_archives_report_after_render(tmp_path):
-    repo = InMemoryAnalysisRepository()
-    warehouse = RecordingWarehouse()
-    archive = RecordingArchive()
-
-    run_daily_pipeline(
-        date(2026, 7, 7),
-        tmp_path,
-        repository=repo,
-        fixture_mode=False,
-        market_data_provider=ProviderWithExtraRawCode(),
-        local_warehouse=warehouse,
-        local_archive=archive,
-    )
-
-    assert archive.calls == [(tmp_path, date(2026, 7, 7))]
-
-
-def test_production_pipeline_saves_full_stock_master_once_without_status_downgrade(tmp_path):
-    class RecordingStockMasterRepository(InMemoryAnalysisRepository):
-        def __init__(self):
-            super().__init__()
-            self.stock_master_saves = []
-
-        def save_stock_master(self, stocks):
-            self.stock_master_saves.append(list(stocks))
-            super().save_stock_master(stocks)
-
-    repo = RecordingStockMasterRepository()
-    warehouse = RecordingWarehouse()
-
-    run_daily_pipeline(
-        date(2026, 7, 7),
-        tmp_path,
-        repository=repo,
-        fixture_mode=False,
-        market_data_provider=ProviderWithExtraRawCode(),
-        local_warehouse=warehouse,
-    )
-
-    assert len(repo.stock_master_saves) == 1
-    assert {item.ts_code for item in repo.stock_master_saves[0]} == {
-        "600000.SH",
-        "000004.SZ",
-    }
-    stock_master_by_code = {item.ts_code: item for item in repo.stock_master}
-    assert isinstance(stock_master_by_code["600000.SH"], StockBasicRow)
-    assert stock_master_by_code["600000.SH"].exchange == "SSE"
-    assert stock_master_by_code["600000.SH"].list_date == date(1999, 11, 10)
-
-
-def test_production_pipeline_requires_local_warehouse_before_persisting(tmp_path):
-    repo = InMemoryAnalysisRepository()
-
-    with pytest.raises(RuntimeError) as excinfo:
-        run_daily_pipeline(
-            date(2026, 7, 7),
-            tmp_path,
-            repository=repo,
-            fixture_mode=False,
-            market_data_provider=ProviderWithExtraRawCode(),
-        )
-
-    assert "local warehouse" in str(excinfo.value).lower()
-    assert repo.recommendations == []
-    assert repo.market_bars == []
 
 
 def test_selected_decision_codes_include_recommendations_and_active_focus_only():
@@ -662,100 +601,6 @@ def test_selected_decision_codes_include_recommendations_and_active_focus_only()
         [active_focus, exited_focus, insufficient_focus],
     ) == {"600000.SH", "600519.SH"}
 
-
-def test_run_daily_pipeline_production_preflight_failure_prevents_all_repository_writes(tmp_path):
-    repo = PreflightRejectingRepository()
-    warehouse = RecordingWarehouse()
-
-    with pytest.raises(RuntimeError, match="preflight stopped"):
-        run_daily_pipeline(
-            date(2026, 7, 7),
-            tmp_path,
-            repository=repo,
-            fixture_mode=False,
-            market_data_provider=FakeProductionProvider(),
-            local_warehouse=warehouse,
-        )
-
-    assert repo.calls == [("preflight", 1, 1)]
-    assert len(warehouse.saved_bundles) == 1
-    assert not (tmp_path / "index.html").exists()
-
-
-def test_run_daily_pipeline_production_rejects_raw_only_decision_bundle(tmp_path):
-    repo = InMemoryAnalysisRepository()
-
-    with pytest.raises(RuntimeError) as excinfo:
-        run_daily_pipeline(
-            date(2026, 7, 7),
-            tmp_path,
-            repository=repo,
-            fixture_mode=False,
-            market_data_provider=RawOnlyProductionProvider(),
-        )
-
-    assert "no production decisions were generated" in str(excinfo.value)
-    assert repo.market_bars == []
-    assert repo.daily_basic_indicators == []
-    assert repo.data_source_runs == []
-    assert not (tmp_path / "index.html").exists()
-
-
-def test_run_daily_pipeline_production_rejects_no_recommendation_eligible_features(tmp_path):
-    repo = InMemoryAnalysisRepository()
-
-    with pytest.raises(RuntimeError) as excinfo:
-        run_daily_pipeline(
-            date(2026, 7, 7),
-            tmp_path,
-            repository=repo,
-            fixture_mode=False,
-            market_data_provider=MissingDailyBasicProductionProvider(),
-        )
-
-    assert "no production decisions were generated" in str(excinfo.value)
-    assert repo.market_bars == []
-    assert repo.daily_basic_indicators == []
-    assert repo.data_source_runs == []
-    assert repo.recommendations == []
-    assert not (tmp_path / "index.html").exists()
-
-
-def test_run_daily_pipeline_production_rejects_all_hard_excluded_stocks(tmp_path):
-    repo = InMemoryAnalysisRepository()
-
-    with pytest.raises(RuntimeError) as excinfo:
-        run_daily_pipeline(
-            date(2026, 7, 7),
-            tmp_path,
-            repository=repo,
-            fixture_mode=False,
-            market_data_provider=HardExcludedProductionProvider(),
-        )
-
-    assert "no production decisions were generated" in str(excinfo.value)
-    assert repo.market_bars == []
-    assert repo.daily_basic_indicators == []
-    assert repo.data_source_runs == []
-    assert repo.recommendations == []
-    assert not (tmp_path / "index.html").exists()
-
-
-def test_run_daily_pipeline_production_fails_when_provider_cannot_generate_decisions(tmp_path):
-    repo = FailingSaveRepository()
-
-    with pytest.raises(RuntimeError) as excinfo:
-        run_daily_pipeline(
-            date(2026, 7, 7),
-            tmp_path,
-            repository=repo,
-            fixture_mode=False,
-            market_data_provider=InsufficientProductionProvider(),
-        )
-
-    assert "no production decisions were generated" in str(excinfo.value)
-    assert repo.save_attempts == []
-    assert not (tmp_path / "index.html").exists()
 
 
 def test_run_daily_pipeline_assigns_evidence_ids_before_return_and_save(tmp_path):
@@ -802,9 +647,16 @@ def test_run_daily_pipeline_preserves_existing_focus_from_repository(tmp_path):
 
 def test_render_report_for_date_fails_when_repository_has_no_stored_rows(tmp_path):
     repo = InMemoryAnalysisRepository()
+    receipt_store = _committed_receipt_store(tmp_path, date(2026, 7, 7))
 
     with pytest.raises(StoredAnalysisNotFound) as excinfo:
-        render_report_for_date(date(2026, 7, 7), tmp_path, repository=repo)
+        render_report_for_date(
+            date(2026, 7, 7),
+            tmp_path,
+            repository=repo,
+            receipt_store=receipt_store,
+            expected_input_set_id="input-1",
+        )
 
     assert "No stored analysis rows found for 2026-07-07" in str(excinfo.value)
     assert not (tmp_path / "index.html").exists()
@@ -825,9 +677,16 @@ def test_render_report_for_date_fails_when_recommendation_lacks_matching_evidenc
             )
         ]
     )
+    receipt_store = _committed_receipt_store(tmp_path, date(2026, 7, 7))
 
     with pytest.raises(StoredAnalysisNotFound) as excinfo:
-        render_report_for_date(date(2026, 7, 7), tmp_path, repository=repo)
+        render_report_for_date(
+            date(2026, 7, 7),
+            tmp_path,
+            repository=repo,
+            receipt_store=receipt_store,
+            expected_input_set_id="input-1",
+        )
 
     assert "Missing evidence package" in str(excinfo.value)
     assert "missing-evidence-600000" in str(excinfo.value)
@@ -863,9 +722,16 @@ def test_render_report_for_date_fails_when_evaluation_tasks_are_missing(tmp_path
             )
         ],
     )
+    receipt_store = _committed_receipt_store(tmp_path, date(2026, 7, 7))
 
     with pytest.raises(StoredAnalysisNotFound) as excinfo:
-        render_report_for_date(date(2026, 7, 7), tmp_path, repository=repo)
+        render_report_for_date(
+            date(2026, 7, 7),
+            tmp_path,
+            repository=repo,
+            receipt_store=receipt_store,
+            expected_input_set_id="input-1",
+        )
 
     assert "Missing evaluation task" in str(excinfo.value)
     assert "2026-07-07-600000.SH" in str(excinfo.value)
@@ -911,8 +777,15 @@ def test_render_report_for_date_renders_complete_stored_analysis(tmp_path):
             )
         ],
     )
+    receipt_store = _committed_receipt_store(tmp_path, date(2026, 7, 7))
 
-    result = render_report_for_date(date(2026, 7, 7), tmp_path, repository=repo)
+    result = render_report_for_date(
+        date(2026, 7, 7),
+        tmp_path,
+        repository=repo,
+        receipt_store=receipt_store,
+        expected_input_set_id="input-1",
+    )
 
     assert result.recommendations == [recommendation]
     assert len(result.evaluation_tasks) == 1
@@ -932,3 +805,43 @@ def test_render_report_for_date_allows_explicit_fixture_fallback(tmp_path):
     assert result.recommendations
     assert (tmp_path / "index.html").exists()
     assert repo.recommendations == []
+
+
+def test_pipeline_loads_prior_formally_committed_focus_snapshots_before_update(
+    tmp_path,
+    monkeypatch,
+):
+    import stock_analyzer.pipeline as pipeline_module
+    from tests.test_focus_strategy_v2 import _snapshot
+
+    prior_date = date(2026, 7, 9)
+    current_date = date(2026, 7, 10)
+    prior = _snapshot(prior_date)
+    repository = InMemoryAnalysisRepository(
+        strategy_snapshots=[prior],
+        formally_committed_run_dates={prior_date},
+    )
+    captured_dates = []
+    original = pipeline_module.update_focus_watchlist_v2
+
+    def capture_history(**kwargs):
+        captured_dates.extend(
+            snapshot.trade_date for snapshot in kwargs["recommendation_snapshots"]
+        )
+        return original(**kwargs)
+
+    monkeypatch.setattr(pipeline_module, "update_focus_watchlist_v2", capture_history)
+
+    run_daily_pipeline(
+        current_date,
+        tmp_path / "reports",
+        dry_run=True,
+        repository=repository,
+        strategy_v2=True,
+        eligible_focus_days=[
+            FormalFocusDay(trade_date=prior_date, formally_committed=True)
+        ],
+    )
+
+    assert prior_date in captured_dates
+    assert current_date in captured_dates

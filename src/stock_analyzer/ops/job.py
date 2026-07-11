@@ -2,39 +2,41 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import asdict, is_dataclass
-from datetime import date, datetime, timezone
+from datetime import date, datetime, time, timezone
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from stock_analyzer.config import AppConfig
 from stock_analyzer.data.health import HealthStatus, run_health_checks
-from stock_analyzer.data.provider import (
-    CurrentLiveDataUnavailable,
-    build_production_market_data_provider,
-)
+from stock_analyzer.data.readiness import FormalRunState
 from stock_analyzer.ops.calendar import decide_trading_day
 from stock_analyzer.ops.cleanup import cleanup_trade_date
 from stock_analyzer.ops.notify import notify_mac, should_notify
 from stock_analyzer.ops.redaction import redact_secrets
 from stock_analyzer.ops.status import FailureClass, JobStatus, RunStatus
 from stock_analyzer.ops.verify import ProductionVerification, verify_production_result
-from stock_analyzer.pipeline import ProductionDataSourceUnavailable, run_daily_pipeline
+from stock_analyzer.ops.formal_run import run_formal_strategy_v2
+from stock_analyzer.ops.production_dependencies import (
+    ProductionExternalRuntime,
+    build_production_formal_dependencies,
+)
 from stock_analyzer.storage.capacity_guard import (
     SupabaseCapacityGuard,
     SupabaseCapacityLimitExceeded,
     SupabaseWriteScopeError,
 )
-from stock_analyzer.storage.local_archive import LocalArchive
-from stock_analyzer.storage.local_warehouse import LocalWarehouse
 from stock_analyzer.storage.repositories import SupabaseAnalysisRepository
 from stock_analyzer.storage.supabase_client import create_supabase_client
 
 
 MAX_ATTEMPTS = 3
+FORMAL_FIRST_ATTEMPT_CUTOFF = time(hour=18, minute=30)
 ACTION_REQUIRED_STATUSES = {
     RunStatus.FAILED_NEEDS_HUMAN,
     RunStatus.FAILED_RETRYABLE,
     RunStatus.CALENDAR_UNKNOWN,
+    RunStatus.BLOCKED_NEEDS_HUMAN,
 }
 
 
@@ -120,6 +122,14 @@ def run_daily_job(
             fix_suggestion="Reject attempts above 3; inspect latest-status.json.",
         )
 
+    prior_terminal_status = _prior_terminal_status(
+        status_file,
+        trade_date,
+        attempt,
+    )
+    if prior_terminal_status is not None:
+        return prior_terminal_status
+
     if attempt > 1:
         retry_preflight_error = _retry_preflight_error(
             status_file,
@@ -158,7 +168,9 @@ def run_daily_job(
     cleanup_func = cleanup or cleanup_trade_date
     health_check_func = health_check or _default_health_check
     run_daily_func = run_daily or _default_run_daily
+    use_default_verifier = verifier is None
     verify_func = verifier or verify_production_result
+    use_default_prepare_deploy = prepare_deploy_func is None
     prepare_deploy_func = prepare_deploy_func or _default_prepare_deploy
 
     try:
@@ -244,7 +256,7 @@ def run_daily_job(
         )
 
     try:
-        _invoke(run_daily_func, root, repo, trade_date)
+        run_result = _invoke(run_daily_func, root, repo, trade_date)
     except Exception as exc:
         return failure_status(
             trade_date=trade_date,
@@ -257,8 +269,40 @@ def run_daily_job(
             cleanup_summary=cleanup_summary,
         )
 
+    receipt = getattr(run_result, "receipt", None)
+    if (
+        receipt is not None
+        and getattr(receipt, "state", None) == FormalRunState.BLOCKED_NEEDS_HUMAN
+    ):
+        return write_status(
+            run_id=receipt.run_id,
+            trade_date=trade_date,
+            attempt=attempt,
+            scheduled_slot=scheduled_slot,
+            started_at=started_at,
+            status=RunStatus.BLOCKED_NEEDS_HUMAN,
+            stage="run_daily",
+            cleanup_performed=cleanup_performed,
+            cleanup_summary=cleanup_summary,
+            publish_skipped_reason="data_readiness_blocked",
+            fix_suggestion=(
+                "Inspect the local blocked run status and restore a complete approved route before retrying."
+            ),
+            error_message_redacted="; ".join(
+                getattr(receipt, "blocked_reasons", ())
+            ),
+        )
+
     try:
-        verification = verify_func(root, repo, trade_date)
+        if use_default_verifier:
+            verification = verify_func(
+                root,
+                repo,
+                trade_date,
+                receipt=receipt,
+            )
+        else:
+            verification = verify_func(root, repo, trade_date)
     except Exception as exc:
         return failure_status(
             trade_date=trade_date,
@@ -288,6 +332,9 @@ def run_daily_job(
             recommendations=verification.recommendations,
             evidence_packages=verification.evidence_packages,
             evaluation_tasks=verification.evaluation_tasks,
+            recommendation_state=verification.recommendation_state,
+            focus_state=verification.focus_state,
+            blocking_missing_fields=list(verification.blocking_missing_fields),
             market_price_daily_current_day_rows=(
                 verification.market_price_daily_current_day_rows
             ),
@@ -301,7 +348,10 @@ def run_daily_job(
     publish_skipped_reason = None
     if prepare_deploy:
         try:
-            prepare_deploy_func(root)
+            if use_default_prepare_deploy:
+                prepare_deploy_func(root, receipt=receipt)
+            else:
+                prepare_deploy_func(root)
             deploy_artifact_prepared = True
         except Exception as exc:
             return failure_status(
@@ -338,6 +388,9 @@ def run_daily_job(
         recommendations=verification.recommendations,
         evidence_packages=verification.evidence_packages,
         evaluation_tasks=verification.evaluation_tasks,
+        recommendation_state=verification.recommendation_state,
+        focus_state=verification.focus_state,
+        blocking_missing_fields=list(verification.blocking_missing_fields),
         market_price_daily_current_day_rows=(
             verification.market_price_daily_current_day_rows
         ),
@@ -394,42 +447,49 @@ def _default_health_check(*_args) -> None:
         )
 
 
-def _default_run_daily(project_root: Path, repository, trade_date: date) -> None:
-    config = AppConfig.load()
-    try:
-        market_data_provider = build_production_market_data_provider(config)
-    except CurrentLiveDataUnavailable as exc:
-        raise RetryableJobError(
-            str(exc),
-            failure_class=FailureClass.TUSHARE_DATA_TEMPORARILY_UNAVAILABLE,
-            fix_suggestion="Retry after the live data provider publishes current rows.",
-        ) from exc
-
-    try:
-        run_daily_pipeline(
+def _default_run_daily(
+    project_root: Path,
+    repository,
+    trade_date: date,
+    *,
+    runtime: ProductionExternalRuntime | None = None,
+):
+    dependencies = (
+        build_production_formal_dependencies(
+            Path(project_root),
+            repository,
             trade_date,
-            config.reports_dir,
-            dry_run=False,
-            repository=repository,
-            persist=True,
-            fixture_mode=False,
-            market_data_provider=market_data_provider,
-            local_warehouse=LocalWarehouse(config.local_warehouse_dir),
-            local_archive=LocalArchive(config.local_archive_dir),
+            runtime=runtime,
         )
-    except ProductionDataSourceUnavailable as exc:
-        raise RetryableJobError(
-            str(exc),
-            failure_class=FailureClass.TUSHARE_DATA_TEMPORARILY_UNAVAILABLE,
-            fix_suggestion="Retry after confirming current production data is available.",
-        ) from exc
+        if runtime is not None
+        else build_production_formal_dependencies(
+            Path(project_root),
+            repository,
+            trade_date,
+        )
+    )
+    report_cutoff = datetime.combine(
+        trade_date,
+        FORMAL_FIRST_ATTEMPT_CUTOFF,
+        tzinfo=ZoneInfo("Asia/Shanghai"),
+    )
+    return run_formal_strategy_v2(
+        trade_date,
+        report_cutoff,
+        dependencies,
+        run_id=f"formal-{trade_date.isoformat()}",
+    )
 
 
-def _default_prepare_deploy(project_root: Path) -> Path:
+def _default_prepare_deploy(project_root: Path, *, receipt=None) -> Path:
     from stock_analyzer.ops.artifacts import prepare_pages_artifact
 
     root = Path(project_root)
-    return prepare_pages_artifact(root, root / "dist" / "pages")
+    return prepare_pages_artifact(
+        root,
+        root / "dist" / "pages",
+        receipt=receipt,
+    )
 
 
 def _default_publish(project_root: Path, trade_date: date) -> Any:
@@ -488,6 +548,33 @@ def _retry_preflight_error(
             "Previous latest-status.json status must be failed_retryable before "
             "a retry slot can clean or rerun production."
         )
+    return None
+
+
+def _prior_terminal_status(
+    status_path: Path,
+    trade_date: date,
+    attempt: int,
+) -> JobStatus | None:
+    if not status_path.is_file():
+        return None
+    try:
+        previous = JobStatus.model_validate_json(
+            status_path.read_text(encoding="utf-8")
+        )
+    except Exception:
+        return None
+    terminal_noop_statuses = {
+        RunStatus.SUCCESS_WITH_RECOMMENDATIONS,
+        RunStatus.SUCCESS_NO_RECOMMENDATIONS,
+        RunStatus.SKIPPED_NON_TRADING_DAY,
+    }
+    if (
+        previous.trade_date == trade_date
+        and previous.attempt <= attempt
+        and previous.status in terminal_noop_statuses
+    ):
+        return previous
     return None
 
 
@@ -635,6 +722,7 @@ def _cleanup_summary_to_dict(summary: Any) -> dict[str, Any]:
 def _write_status(
     path: Path,
     *,
+    run_id: str | None = None,
     trade_date: date,
     attempt: int,
     scheduled_slot: str,
@@ -647,6 +735,9 @@ def _write_status(
     recommendations: int | None = None,
     evidence_packages: int | None = None,
     evaluation_tasks: int | None = None,
+    recommendation_state: str | None = None,
+    focus_state: str | None = None,
+    blocking_missing_fields: list[str] | None = None,
     market_price_daily_current_day_rows: int | None = None,
     daily_basic_indicator_current_day_rows: int | None = None,
     report_index_exists: bool | None = None,
@@ -656,6 +747,7 @@ def _write_status(
     error_message_redacted: str | None = None,
 ) -> JobStatus:
     job_status = JobStatus(
+        run_id=run_id,
         trade_date=trade_date,
         attempt=attempt,
         scheduled_slot=scheduled_slot,
@@ -669,6 +761,9 @@ def _write_status(
         recommendations=recommendations,
         evidence_packages=evidence_packages,
         evaluation_tasks=evaluation_tasks,
+        recommendation_state=recommendation_state,
+        focus_state=focus_state,
+        blocking_missing_fields=blocking_missing_fields or [],
         market_price_daily_current_day_rows=market_price_daily_current_day_rows,
         daily_basic_indicator_current_day_rows=daily_basic_indicator_current_day_rows,
         report_index_exists=report_index_exists,

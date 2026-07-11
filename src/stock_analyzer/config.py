@@ -6,6 +6,12 @@ from typing import Mapping, Optional
 
 from pydantic import BaseModel, Field, field_serializer
 
+from stock_analyzer.data.formal_policy import (
+    CNINFO_DEFAULT_CALLS_PER_MINUTE,
+    CNINFO_DEFAULT_MAX_RETRIES,
+    CNINFO_DEFAULT_TIMEOUT_SECONDS,
+)
+
 
 def _default_project_root() -> Path:
     return Path(__file__).resolve().parents[2]
@@ -14,7 +20,7 @@ def _default_project_root() -> Path:
 class AppConfig(BaseModel):
     project_root: Path = _default_project_root()
     tushare_token: Optional[str] = Field(default=None, repr=False)
-    tushare_token_path: Path = Path("/Users/ccrt/.tushare_token")
+    tushare_token_path: Path = Path.home() / ".tushare_token"
     supabase_url: Optional[str] = None
     supabase_service_role_key: Optional[str] = Field(default=None, repr=False)
     reports_dir: Path = _default_project_root() / "reports"
@@ -31,6 +37,19 @@ class AppConfig(BaseModel):
     cloudflare_token_env: str = "CLOUDFLARE_API_TOKEN"
     cloudflare_account_id_env: str = "CLOUDFLARE_ACCOUNT_ID"
     cloudflare_pages_branch: str = "main"
+    cninfo_base_url: str = "https://www.cninfo.com.cn"
+    cninfo_calls_per_minute: int = Field(
+        default=CNINFO_DEFAULT_CALLS_PER_MINUTE,
+        gt=0,
+    )
+    cninfo_timeout_seconds: float = Field(
+        default=CNINFO_DEFAULT_TIMEOUT_SECONDS,
+        gt=0,
+    )
+    cninfo_max_retries: int = Field(
+        default=CNINFO_DEFAULT_MAX_RETRIES,
+        ge=0,
+    )
 
     @classmethod
     def load(
@@ -49,7 +68,7 @@ class AppConfig(BaseModel):
             project_root=project_root,
             tushare_token=values.get("TUSHARE_TOKEN"),
             tushare_token_path=Path(
-                values.get("TUSHARE_TOKEN_PATH", "/Users/ccrt/.tushare_token")
+                values.get("TUSHARE_TOKEN_PATH", Path.home() / ".tushare_token")
             ).expanduser(),
             supabase_url=values.get("SUPABASE_URL"),
             supabase_service_role_key=values.get("SUPABASE_SERVICE_ROLE_KEY"),
@@ -73,6 +92,25 @@ class AppConfig(BaseModel):
                 "CLOUDFLARE_ACCOUNT_ID",
             ),
             cloudflare_pages_branch=values.get("CLOUDFLARE_PAGES_BRANCH", "main"),
+            cninfo_base_url=values.get(
+                "CNINFO_BASE_URL",
+                "https://www.cninfo.com.cn",
+            ),
+            cninfo_calls_per_minute=int(
+                values.get(
+                    "CNINFO_CALLS_PER_MINUTE",
+                    CNINFO_DEFAULT_CALLS_PER_MINUTE,
+                )
+            ),
+            cninfo_timeout_seconds=float(
+                values.get(
+                    "CNINFO_TIMEOUT_SECONDS",
+                    CNINFO_DEFAULT_TIMEOUT_SECONDS,
+                )
+            ),
+            cninfo_max_retries=int(
+                values.get("CNINFO_MAX_RETRIES", CNINFO_DEFAULT_MAX_RETRIES)
+            ),
         )
 
     @property

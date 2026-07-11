@@ -9,10 +9,16 @@ from stock_analyzer.data.feature_builder import (
     build_market_bundle,
 )
 from stock_analyzer.data.models import (
+    BoardContextRow,
+    CompanyProfileRow,
+    ConceptTagRow,
     DailyBar,
     DailyBasicRow,
     DataStatus,
+    EventCatalystRow,
+    FundamentalSummaryRow,
     MarketDataBundle,
+    OfficialRiskEventRow,
     SourceGrade,
     SourceRunRecord,
     SourceStatus,
@@ -29,6 +35,25 @@ class CurrentLiveDataUnavailable(RuntimeError):
 
 class MarketDataProvider(Protocol):
     def load(self, trade_date: date) -> MarketDataBundle: ...
+
+
+class StrategyV2DataProvider(MarketDataProvider, Protocol):
+    def load_company_profiles(
+        self, trade_date: date, codes: list[str]
+    ) -> list[CompanyProfileRow]: ...
+    def load_fundamental_summaries(
+        self, trade_date: date, codes: list[str]
+    ) -> list[FundamentalSummaryRow]: ...
+    def load_board_context(self, trade_date: date) -> list[BoardContextRow]: ...
+    def load_concept_tags(
+        self, trade_date: date, codes: list[str]
+    ) -> list[ConceptTagRow]: ...
+    def load_event_catalysts(
+        self, trade_date: date, codes: list[str]
+    ) -> list[EventCatalystRow]: ...
+    def load_official_risk_events(
+        self, trade_date: date, codes: list[str]
+    ) -> list[OfficialRiskEventRow]: ...
 
 
 class TushareProvider:
@@ -90,7 +115,6 @@ class TushareProvider:
                 f"{trade_date.isoformat()}"
             )
         return bundle
-
 
 def _fetch_daily_history(
     source: TushareMarketDataSource,

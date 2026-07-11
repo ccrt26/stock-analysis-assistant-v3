@@ -2,6 +2,16 @@
 
 这是一个面向中国大陆 A 股的报告优先型分析助手。系统用于生成观察建议、重点关注状态、证据包和后评估任务，不用于自动交易。
 
+## 当前生产状态与文档权威
+
+截至 2026-07-11，正式生产程序已完成实现并通过默认入口离线验证：正式主备客户端、`formal-v2` 数据契约、能力凭证、默认依赖工厂、Strategy V2 适配、报告验证和两阶段激活已在仅替换外部传输边界的录制响应下连通。离线验收覆盖 2026-07-10 完整主源、整组备用切换、双源阻断、主源回补、重点股五日窗口、直接渲染门禁和六类原子失败。
+
+已完成 2026-07-10 真实只读主源回填，精确覆盖 2026-03-12 至 2026-07-10 的 82 个正式交易日；Supabase 迁移已应用并完成只读回查，15/15 个正式表、视图和 RPC 路径可见，安全顾问为零。正式事件能力 Gate 已通过：当前 Tushare 账户无 `anns_d` 权限且未获事件凭证；直连 CNINFO 原始路由已以真实非空毫秒时间戳、有效代码空窗口和完整目标合同获得 `LIVE_READ_VERIFIED`。
+
+真实正式运行已生成 10 个每日推荐、10 个重点股状态、14 个推荐/重点股证据包和 84 个复盘任务；Supabase 窄账本、正式报告和本地指针已原子激活并通过读回，launchd 已加载三个计划时段。15 文件凭证范围部署包已发布至 `https://tl-quant-reports.pages.dev`，独立在线密码、日期、内容与脱敏 smoke 通过，自动发布已启用。当前报告虽技术验收通过，但用户可读性验收未通过：可选 LLM 表达客户端未配置，且 narrative 尚未进入 HTML 主视图；该产品缺口由能力矩阵 `REPORT-004` 跟踪。没有经纪商连接或订单操作。
+
+当前能力、缺口、验证等级和激活状态只以 [`docs/operations/production-capability-matrix.md`](docs/operations/production-capability-matrix.md) 为准。`docs/superpowers/specs/` 保存设计约束，`docs/superpowers/plans/` 保存历史执行记录；历史文档中的“完成”不能替代能力矩阵中的当前证据。
+
 ## 本地运行
 
 需要 Python 3.11 或更新版本。推荐路径：创建虚拟环境并安装 editable package 后运行。
@@ -14,8 +24,7 @@ python3 -m stock_analyzer health-check
 python3 -m stock_analyzer run-daily --fixture-mode --trade-date 2026-07-07
 ```
 
-默认 `health-check` 只做本地配置和凭据状态检查，不访问外部网络。生产 `run-daily` 使用真实行情接入；
-如果 Supabase 配置、Tushare token、依赖或真实数据不可用，命令会明确失败，不会把内置样例数据写入 Supabase。
+默认 `health-check` 只做本地配置和凭据状态检查，不访问外部网络。旧的有限 Tushare provider 不能绕过正式数据门禁；非 fixture 生产命令必须具有实时能力凭证并通过完整正式契约，否则会失败关闭，也不能把内置样例数据写入 Supabase。正式窗口、盘后边界和基准指数由单一策略模块管理；交易日、候选代码、路径、环境身份、凭据和激活目标不得固化在生产流程中。
 
 未安装 editable package 的开发路径：使用 `PYTHONPATH=src` 直接运行源码。这是当前 smoke 已验证命令路径。
 
@@ -34,7 +43,7 @@ PYTHONPATH=src python3 -m stock_analyzer health-check --live-tushare-smoke
 
 ## 密钥
 
-- Tushare token 默认读取 `/Users/ccrt/.tushare_token`。
+- Tushare token 默认读取当前运行用户的 `~/.tushare_token`。
 - 也可以通过 `TUSHARE_TOKEN_PATH` 指定本地 token 文件。
 - 生产报告渲染必须设置 `SUPABASE_URL` 和 `SUPABASE_SERVICE_ROLE_KEY`。`SUPABASE_SERVICE_ROLE_KEY` 只用于服务端/本地受控脚本访问 Supabase，不能写入报告产物、前端代码或 Git。
 - 生产 `run-daily` 还需要真实行情接入、Tushare token 和数据依赖；缺失时会失败，不会持久化样例推荐。
@@ -62,16 +71,17 @@ Cloudflare Pages 只发布报告成品，不发布原始数据、日志、规则
 
 ## Operations
 
+- Current production capability matrix: [docs/operations/production-capability-matrix.md](docs/operations/production-capability-matrix.md)
 - Phase 1 runbook: [docs/operations/runbook.md](docs/operations/runbook.md)
 - Cloudflare Pages manual publish and smoke: [docs/operations/cloudflare-pages.md](docs/operations/cloudflare-pages.md)
 - Phase 2 Cloudflare automation: see `docs/operations/cloudflare-pages.md` and `docs/superpowers/specs/2026-07-09-v3-phase-2-cloudflare-automation-design.md`.
-- Mandatory next phases: [docs/operations/mandatory-next-phases.md](docs/operations/mandatory-next-phases.md)
 
 Operations are approval-gated. Do not enable launchd, run a real production job, run production cleanup, or deploy Cloudflare Pages without explicit approval.
 
 ## 验证边界
 
 - `python3 -m pytest` 使用本地 fake Supabase client 和内存仓库，不证明真实 Supabase 项目已连通。
+- 默认入口的录制响应测试证明生产工厂、主备客户端和内部数据链已经离线接通，但不证明任何实时端点、真实字段语义、限流、盘后可用性或生产环境写入。
 - 默认 `health-check` 不访问网络；`--live-tushare-smoke` 是显式 opt-in 的真实 Tushare 访问路径。
 - 真实 Supabase smoke 应验证非 `--dry-run` 的 `run-daily` 使用真实行情源，且在配置或行情不可用时清晰失败、不写样例数据。
 - `--dry-run` 可以不设置 Supabase，且不会持久化分析状态。

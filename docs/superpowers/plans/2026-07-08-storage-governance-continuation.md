@@ -1,5 +1,7 @@
 # Storage Governance Continuation Implementation Plan
 
+> **Lifecycle:** Historical execution record. Current production status is tracked only in [`docs/operations/production-capability-matrix.md`](../../operations/production-capability-matrix.md).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. Implementer and reviewer must use GPT-5.5 xhigh for every task in this plan; if unavailable, stop and ask the user before continuing.
 
 **Goal:** Continue the paused Tushare Ingestion V1 work by moving full-market raw/coarse-analysis data into a managed local DuckDB + Parquet warehouse, limiting Supabase to the decision ledger and selected market windows, and preserving complete reports in local archive.

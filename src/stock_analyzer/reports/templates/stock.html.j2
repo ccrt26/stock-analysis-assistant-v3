@@ -16,6 +16,76 @@
     {% endif %}
     <p>{{ conclusion }}</p>
 
+    {% if strategy_v2_card %}
+    <section>
+      <h2>操作建议</h2>
+      <p>{{ strategy_v2_card.action|strategy_text }}</p>
+      <p>仓位：{{ strategy_v2_card.position_min_pct }}%-{{ strategy_v2_card.position_max_pct }}%</p>
+
+      <h3>理由</h3>
+      <ul>
+        {% for line in strategy_v2_card.action_reasoning %}
+        <li>{{ line|strategy_text }}</li>
+        {% endfor %}
+      </ul>
+
+      <h3>确认条件</h3>
+      <ul>
+        {% for line in strategy_v2_card.required_confirmation %}
+        <li>{{ line|strategy_text }}</li>
+        {% endfor %}
+      </ul>
+
+      <h3>失效条件</h3>
+      <ul>
+        {% for line in strategy_v2_card.invalidation_conditions %}
+        <li>{{ line|strategy_text }}</li>
+        {% endfor %}
+      </ul>
+
+      <h3>分步计划</h3>
+      <ul>
+        {% for line in strategy_v2_card.staging_plan %}
+        <li>{{ line|strategy_text }}</li>
+        {% endfor %}
+      </ul>
+
+      <h3>看错风险</h3>
+      <p>{{ strategy_v2_card.risk_if_wrong|strategy_text }}</p>
+    </section>
+
+    <section>
+      <h2>六模块证据</h2>
+      {% if strategy_v2_snapshot %}
+      {% for module in strategy_v2_snapshot.modules %}
+      <article>
+        <h3>{{ strategy_module_labels.get(module.module.value, module.module.value) }}</h3>
+        <p>{{ module.conclusion|strategy_text }}</p>
+
+        {% if module.support %}
+        <h4>支持</h4>
+        <ul>
+          {% for atom in module.support %}
+          <li>{{ atom.headline|strategy_text }}</li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+
+        {% if module.counter %}
+        <h4>反证</h4>
+        <ul>
+          {% for atom in module.counter %}
+          <li>{{ atom.headline|strategy_text }}</li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+      </article>
+      {% endfor %}
+      {% else %}
+      <p>未匹配到模块快照。</p>
+      {% endif %}
+    </section>
+    {% else %}
     <section>
       <h2>发生了什么</h2>
       <p>{{ detail.what_happened }}</p>
@@ -76,6 +146,7 @@
       <h2>数据可信度</h2>
       <p>{{ detail.evidence.data_credibility }}</p>
     </section>
+    {% endif %}
   </main>
 </body>
 </html>

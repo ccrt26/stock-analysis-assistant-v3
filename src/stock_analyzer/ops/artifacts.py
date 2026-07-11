@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import os
 import shutil
 from pathlib import Path
@@ -16,6 +17,9 @@ _FORBIDDEN_DIR_NAMES = {
     "local_archive",
     "logs",
     ".superpowers",
+    ".staging",
+    ".activation",
+    ".formal-runs",
 }
 _FORBIDDEN_FILE_PREFIXES = (".env",)
 _FORBIDDEN_RELATIVE_PREFIXES = (
@@ -30,7 +34,9 @@ def prepare_pages_artifact(
     output_dir: Path,
     *,
     source_root: Path | None = None,
+    receipt=None,
 ) -> Path:
+    _validate_formal_receipt(receipt)
     root = Path(project_root).expanduser().resolve()
     source = Path(source_root or _DEFAULT_SOURCE_ROOT).expanduser().resolve()
     target = _resolve_output_dir(root, output_dir)
@@ -38,18 +44,54 @@ def prepare_pages_artifact(
     middleware_path = _middleware_path(root, source)
 
     _validate_required_inputs(reports_dir, middleware_path)
+    _validate_receipt_artifact_hashes(reports_dir, receipt)
     _validate_output_dir(root, reports_dir, middleware_path.parent, target)
 
     if target.exists():
         shutil.rmtree(target)
     target.mkdir(parents=True, exist_ok=True)
 
-    _copy_report_tree(reports_dir, target)
+    _copy_receipt_artifacts(reports_dir, target, receipt)
     middleware_target = target / "functions" / "_middleware.ts"
     middleware_target.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(middleware_path, middleware_target)
     _assert_forbidden_paths_absent(target)
     return target
+
+
+def _validate_formal_receipt(receipt) -> None:
+    from stock_analyzer.data.readiness import FormalRunState
+
+    if (
+        receipt is None
+        or getattr(receipt, "state", None) != FormalRunState.REPORT_GENERATED
+        or not getattr(receipt, "group_version_ids", None)
+        or getattr(receipt, "input_set_id", None) is None
+        or getattr(receipt, "candidate_set_id", None) is None
+        or not getattr(receipt, "evidence_hashes", None)
+        or not getattr(receipt, "artifact_hashes", None)
+        or getattr(receipt, "local_activation_id", None) is None
+        or getattr(receipt, "local_activation_id", None)
+        != getattr(receipt, "ledger_activation_id", None)
+    ):
+        raise DeployArtifactError(
+            "Deploy preparation requires an activated REPORT_GENERATED receipt."
+        )
+
+
+def _validate_receipt_artifact_hashes(reports_dir: Path, receipt) -> None:
+    for relative_name, expected_hash in receipt.artifact_hashes.items():
+        relative_path = Path(relative_name)
+        if relative_path.is_absolute() or ".." in relative_path.parts:
+            raise DeployArtifactError("Formal receipt contains an unsafe artifact path.")
+        artifact_path = reports_dir / relative_path
+        if (
+            not artifact_path.is_file()
+            or hashlib.sha256(artifact_path.read_bytes()).hexdigest() != expected_hash
+        ):
+            raise DeployArtifactError(
+                f"Formal report artifact hash mismatch: {relative_name}."
+            )
 
 
 def _middleware_path(project_root: Path, source_root: Path) -> Path:
@@ -94,25 +136,21 @@ def _validate_output_dir(
         )
 
 
-def _copy_report_tree(reports_dir: Path, target: Path) -> None:
-    for current_dir, dirnames, filenames in os.walk(reports_dir):
-        current_path = Path(current_dir)
-        relative_dir = current_path.relative_to(reports_dir)
-        dirnames[:] = [
-            dirname
-            for dirname in dirnames
-            if not _is_forbidden_relative_path(relative_dir / dirname)
-        ]
-        for filename in filenames:
-            relative_file = relative_dir / filename
-            if _is_forbidden_relative_path(relative_file):
-                continue
-            source = current_path / filename
-            if source.is_symlink():
-                continue
-            destination = target / relative_file
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(source, destination)
+def _copy_receipt_artifacts(reports_dir: Path, target: Path, receipt) -> None:
+    for relative_name in sorted(receipt.artifact_hashes):
+        relative_file = Path(relative_name)
+        if _is_forbidden_relative_path(relative_file):
+            raise DeployArtifactError(
+                f"Formal receipt contains a forbidden artifact path: {relative_name}."
+            )
+        source = reports_dir / relative_file
+        if source.is_symlink():
+            raise DeployArtifactError(
+                f"Formal receipt artifact cannot be a symlink: {relative_name}."
+            )
+        destination = target / relative_file
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, destination)
 
 
 def _assert_forbidden_paths_absent(target: Path) -> None:

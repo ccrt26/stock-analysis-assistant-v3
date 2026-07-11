@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import json
 import re
+from collections import Counter
 from dataclasses import dataclass
 from datetime import date, datetime
+from html import unescape
 from pathlib import Path
 from typing import Any
 
@@ -16,12 +18,24 @@ from stock_analyzer.storage.capacity_guard import (
 
 MAX_DAILY_RECOMMENDATIONS = 10
 EVALUATION_TASKS_PER_RECOMMENDATION = 6
+VALID_REPORT_MODES = ("production",)
 FIXTURE_SAMPLE_PATTERNS = (
     re.compile(r"fixture/sample", re.IGNORECASE),
     re.compile(r"\bfixture\b", re.IGNORECASE),
     re.compile(r"\bsample\b", re.IGNORECASE),
     re.compile(r"local sample data", re.IGNORECASE),
     re.compile(r"not production data", re.IGNORECASE),
+)
+VISIBLE_TOTAL_SCORE_PATTERNS = (
+    re.compile(
+        r"(?:评分|总评分|综合评分|总分)\s*[:：]?\s*"
+        r"(?:100(?:\.0+)?|[1-9]?\d(?:\.\d+)?)"
+    ),
+    re.compile(
+        r"(?:total\s+score|score)\s*[:：=]?\s*"
+        r"(?:100(?:\.0+)?|[1-9]?\d(?:\.\d+)?)",
+        re.IGNORECASE,
+    ),
 )
 
 
@@ -47,6 +61,9 @@ class ProductionVerification:
     daily_report_index_exists: bool
     report_json_exists: bool
     failures: tuple[ProductionVerificationFailure, ...]
+    recommendation_state: str | None = None
+    focus_state: str | None = None
+    blocking_missing_fields: tuple[str, ...] = ()
 
     @property
     def failure_class(self) -> FailureClass | None:
@@ -65,8 +82,11 @@ def verify_production_result(
     project_root: Path,
     repository,
     trade_date: date,
+    *,
+    receipt,
 ) -> ProductionVerification:
     _ensure_trade_date(trade_date)
+    _require_activated_report_receipt(receipt, trade_date)
     root = Path(project_root)
     reports_dir = root / "reports"
 
@@ -92,10 +112,34 @@ def verify_production_result(
     report_index_exists = report_index.exists()
     daily_report_index_exists = daily_report_index.exists()
     report_json_exists = report_json.exists()
+    artifact_paths = _receipt_artifact_paths(reports_dir, receipt)
 
     failures: list[ProductionVerificationFailure] = []
+    report_payload = _load_report_json_payload(
+        failures,
+        report_json,
+        report_json_exists,
+    )
+    operational_status = _operational_status(report_payload)
+    recommendation_state = _string_or_none(
+        operational_status.get("recommendation_state")
+    )
+    focus_state = _string_or_none(operational_status.get("focus_state"))
+    blocking_missing_fields = tuple(
+        item.strip()
+        for item in operational_status.get("blocking_missing_fields", [])
+        if isinstance(item, str) and item.strip()
+    )
+    valid_data_insufficient = _append_operational_status_failures(
+        failures,
+        report_payload,
+        operational_status,
+    )
 
-    if not 0 <= len(recommendations) <= MAX_DAILY_RECOMMENDATIONS:
+    if (
+        not valid_data_insufficient
+        and not 0 <= len(recommendations) <= MAX_DAILY_RECOMMENDATIONS
+    ):
         failures.append(
             ProductionVerificationFailure(
                 code="recommendation_count_out_of_range",
@@ -110,25 +154,54 @@ def verify_production_result(
             )
         )
 
-    if len(evidence_packages) != len(recommendations):
+    evidence_ids = [package.evidence_id for package in evidence_packages]
+    evidence_id_set = set(evidence_ids)
+    recommendation_evidence_ids = {
+        recommendation.evidence_id
+        for recommendation in recommendations
+        if recommendation.evidence_id
+    }
+    missing_recommendation_evidence = (
+        len(recommendation_evidence_ids) != len(recommendations)
+        or not recommendation_evidence_ids.issubset(evidence_id_set)
+    )
+    duplicate_evidence_ids = len(evidence_ids) != len(evidence_id_set)
+    if (
+        not valid_data_insufficient
+        and (missing_recommendation_evidence or duplicate_evidence_ids)
+    ):
         failures.append(
             ProductionVerificationFailure(
                 code="evidence_count_mismatch",
                 message=(
-                    f"Expected {len(recommendations)} evidence packages, "
-                    f"found {len(evidence_packages)}."
+                    "Every recommendation must reference one unique active evidence "
+                    "package; focus-only packages are allowed."
                 ),
                 fix_suggestion=(
-                    "Regenerate evidence packages for each recommendation and verify "
-                    "that stale same-day rows were cleaned before retrying."
+                    "Regenerate the combined recommendation/focus evidence set and "
+                    "remove missing or duplicate evidence identifiers before retrying."
                 ),
             )
         )
 
     expected_evaluation_tasks = (
-        len(recommendations) * EVALUATION_TASKS_PER_RECOMMENDATION
+        len(evidence_packages) * EVALUATION_TASKS_PER_RECOMMENDATION
     )
-    if len(evaluation_tasks) != expected_evaluation_tasks:
+    task_counts = Counter(task.evidence_id for task in evaluation_tasks)
+    invalid_task_evidence = set(task_counts) - evidence_id_set
+    incomplete_task_evidence = {
+        evidence_id
+        for evidence_id in evidence_id_set
+        if task_counts[evidence_id] != EVALUATION_TASKS_PER_RECOMMENDATION
+    }
+    if (
+        not valid_data_insufficient
+        and (
+            len(evaluation_tasks) != expected_evaluation_tasks
+            or invalid_task_evidence
+            or incomplete_task_evidence
+        )
+    ):
         failures.append(
             ProductionVerificationFailure(
                 code="evaluation_task_count_mismatch",
@@ -137,8 +210,9 @@ def verify_production_result(
                     f"found {len(evaluation_tasks)}."
                 ),
                 fix_suggestion=(
-                    "Recreate evaluation tasks from the evidence packages so each "
-                    "recommendation has the configured evaluation schedule."
+                    "Recreate evaluation tasks from the active evidence packages so "
+                    "each recommendation or focus package has six tasks and no task "
+                    "references an unknown package."
                 ),
             )
         )
@@ -158,6 +232,8 @@ def verify_production_result(
         daily_report_index_exists,
         report_json,
         report_json_exists,
+        report_payload,
+        artifact_paths,
     )
 
     passed = not failures
@@ -175,7 +251,31 @@ def verify_production_result(
         daily_report_index_exists=daily_report_index_exists,
         report_json_exists=report_json_exists,
         failures=tuple(failures),
+        recommendation_state=recommendation_state,
+        focus_state=focus_state,
+        blocking_missing_fields=blocking_missing_fields,
     )
+
+
+def _require_activated_report_receipt(receipt, trade_date: date) -> None:
+    from stock_analyzer.data.readiness import FormalRunState
+
+    if (
+        receipt is None
+        or getattr(receipt, "target_date", None) != trade_date
+        or getattr(receipt, "state", None) != FormalRunState.REPORT_GENERATED
+        or not getattr(receipt, "group_version_ids", None)
+        or getattr(receipt, "input_set_id", None) is None
+        or getattr(receipt, "candidate_set_id", None) is None
+        or not getattr(receipt, "evidence_hashes", None)
+        or not getattr(receipt, "artifact_hashes", None)
+        or getattr(receipt, "local_activation_id", None) is None
+        or getattr(receipt, "local_activation_id", None)
+        != getattr(receipt, "ledger_activation_id", None)
+    ):
+        raise ValueError(
+            "Production verification requires an activated REPORT_GENERATED receipt."
+        )
 
 
 def _append_selected_market_failures(
@@ -232,6 +332,8 @@ def _append_report_artifact_failures(
     daily_report_index_exists: bool,
     report_json: Path,
     report_json_exists: bool,
+    report_payload: dict[str, Any] | None,
+    artifact_paths: tuple[Path, ...],
 ) -> None:
     if not report_index_exists:
         failures.append(
@@ -270,10 +372,10 @@ def _append_report_artifact_failures(
                 ),
             )
         )
-    else:
-        _append_report_json_failures(failures, report_json, trade_date)
+    elif report_payload is not None:
+        _append_report_json_failures(failures, report_payload, trade_date)
 
-    leak_path = _find_fixture_sample_leak(reports_dir)
+    leak_path = _find_fixture_sample_leak(reports_dir, artifact_paths)
     if leak_path is not None:
         failures.append(
             ProductionVerificationFailure(
@@ -287,27 +389,33 @@ def _append_report_artifact_failures(
             )
         )
 
+    if _should_scan_visible_total_scores(report_payload):
+        score_leak_path = _find_visible_total_score_leak(
+            reports_dir,
+            artifact_paths,
+        )
+        if score_leak_path is not None:
+            failures.append(
+                ProductionVerificationFailure(
+                    code="visible_total_score",
+                    message=(
+                        "Visible Strategy V2 total score text found in "
+                        f"{score_leak_path}."
+                    ),
+                    fix_suggestion=(
+                        "Remove total numeric score labels from production HTML; "
+                        "keep internal_score only inside structured latest.json "
+                        "strategy_snapshots."
+                    ),
+                )
+            )
+
 
 def _append_report_json_failures(
     failures: list[ProductionVerificationFailure],
-    report_json: Path,
+    payload: dict[str, Any],
     trade_date: date,
 ) -> None:
-    try:
-        payload = json.loads(report_json.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        failures.append(
-            ProductionVerificationFailure(
-                code="report_json_invalid",
-                message=f"reports/data/latest.json is not valid JSON: {exc}.",
-                fix_suggestion=(
-                    "Regenerate the report payload and keep the previous published "
-                    "report in place until latest.json is valid."
-                ),
-            )
-        )
-        return
-
     report_date = payload.get("trade_date")
     if report_date != trade_date.isoformat():
         failures.append(
@@ -356,6 +464,193 @@ def _append_report_json_failures(
                     failure_class=FailureClass.FIXTURE_SAMPLE_IN_PRODUCTION,
                 )
             )
+
+
+def _load_report_json_payload(
+    failures: list[ProductionVerificationFailure],
+    report_json: Path,
+    report_json_exists: bool,
+) -> dict[str, Any] | None:
+    if not report_json_exists:
+        return None
+    try:
+        payload = json.loads(report_json.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        failures.append(
+            ProductionVerificationFailure(
+                code="report_json_invalid",
+                message=f"reports/data/latest.json is not valid JSON: {exc}.",
+                fix_suggestion=(
+                    "Regenerate the report payload and keep the previous published "
+                    "report in place until latest.json is valid."
+                ),
+            )
+        )
+        return None
+    if not isinstance(payload, dict):
+        failures.append(
+            ProductionVerificationFailure(
+                code="report_json_invalid",
+                message="reports/data/latest.json must be a JSON object.",
+                fix_suggestion=(
+                    "Regenerate the report payload with the Strategy V2 report "
+                    "contract object shape before publishing."
+                ),
+            )
+        )
+        return None
+    return payload
+
+
+def _append_operational_status_failures(
+    failures: list[ProductionVerificationFailure],
+    payload: dict[str, Any] | None,
+    operational_status: dict[str, Any],
+) -> bool:
+    if payload is None:
+        return False
+
+    report_mode = payload.get("report_mode")
+    if report_mode != "production":
+        failures.append(
+            ProductionVerificationFailure(
+                code="report_mode_invalid",
+                message=(
+                    "Report payload report_mode must be one of "
+                    f"{', '.join(VALID_REPORT_MODES)}; found {report_mode!r}."
+                ),
+                fix_suggestion=(
+                    "Regenerate latest.json only after READY_TO_ANALYZE with "
+                    "report_mode='production' and generated operational_status."
+                ),
+            )
+        )
+        return False
+
+    if not _has_generated_operational_states(operational_status):
+        failures.append(
+            ProductionVerificationFailure(
+                code="trading_day_output_state_invalid",
+                message=(
+                    "Trading-day production reports must record generated "
+                    "recommendation_state and focus_state."
+                ),
+                fix_suggestion=(
+                    "Regenerate the report after Strategy V2 recommendations and "
+                    "focus output are generated after READY_TO_ANALYZE."
+                ),
+            )
+        )
+    return False
+
+
+def _has_generated_operational_states(operational_status: dict[str, Any]) -> bool:
+    return (
+        operational_status.get("recommendation_state") == "generated"
+        and operational_status.get("focus_state") == "generated"
+    )
+
+
+def _append_data_insufficient_failures(
+    failures: list[ProductionVerificationFailure],
+    operational_status: dict[str, Any],
+) -> bool:
+    valid = True
+    if (
+        operational_status.get("is_trading_day") is not True
+        or operational_status.get("recommendation_state") != "data_insufficient"
+        or operational_status.get("focus_state") != "data_insufficient"
+    ):
+        failures.append(
+            ProductionVerificationFailure(
+                code="data_insufficient_operational_status_invalid",
+                message=(
+                    "Data-insufficient reports must explicitly mark a trading day "
+                    "with recommendation_state and focus_state set to "
+                    "data_insufficient."
+                ),
+                fix_suggestion=(
+                    "Write operational_status.is_trading_day=true and set both "
+                    "generation states to data_insufficient before publishing."
+                ),
+            )
+        )
+        valid = False
+
+    recovery_attempts = operational_status.get("data_recovery_attempts")
+    blocking_fields = operational_status.get("blocking_missing_fields")
+    has_recovery_attempt = _has_structured_recovery_attempts(recovery_attempts)
+    has_blocking_field = (
+        isinstance(blocking_fields, list)
+        and any(isinstance(item, str) and item.strip() for item in blocking_fields)
+    )
+    recovery_missing = (
+        not has_recovery_attempt
+        or not has_blocking_field
+    )
+    if recovery_missing:
+        valid = False
+        failures.append(
+            ProductionVerificationFailure(
+                code="data_insufficient_recovery_missing",
+                message=(
+                    "Data-insufficient reports must include at least one recovery "
+                    "attempt and at least one blocking missing field."
+                ),
+                fix_suggestion=(
+                    "Record data_recovery_attempts with family, source_name, and "
+                    "status, plus blocking_missing_fields in latest.json "
+                    "operational_status before accepting the run."
+                ),
+            )
+        )
+    return valid
+
+
+def _has_structured_recovery_attempts(value: Any) -> bool:
+    if not isinstance(value, list) or not value:
+        return False
+    return all(_is_structured_recovery_attempt(item) for item in value)
+
+
+def _is_structured_recovery_attempt(value: Any) -> bool:
+    if not isinstance(value, dict):
+        return False
+    required_fields = ("family", "source_name", "status")
+    return all(_is_non_empty_string(value.get(field)) for field in required_fields)
+
+
+def _is_non_empty_string(value: Any) -> bool:
+    return isinstance(value, str) and bool(value.strip())
+
+
+def _operational_status(payload: dict[str, Any] | None) -> dict[str, Any]:
+    if payload is None:
+        return {}
+    status = payload.get("operational_status")
+    if isinstance(status, dict):
+        return status
+    return {}
+
+
+def _string_or_none(value: Any) -> str | None:
+    if isinstance(value, str):
+        return value
+    return None
+
+
+def _should_scan_visible_total_scores(
+    payload: dict[str, Any] | None,
+) -> bool:
+    if payload is None:
+        return False
+    cards = payload.get("recommendation_cards")
+    if isinstance(cards, list) and bool(cards):
+        return True
+    snapshots = payload.get("strategy_snapshots")
+    if isinstance(snapshots, list) and bool(snapshots):
+        return True
+    return _has_generated_operational_states(_operational_status(payload))
 
 
 def _verification_status(passed: bool, recommendation_count: int) -> RunStatus:
@@ -456,10 +751,21 @@ def _count_supabase_unique_codes(repository, trade_date: date) -> int | None:
     return len(codes)
 
 
-def _find_fixture_sample_leak(reports_dir: Path) -> str | None:
-    if not reports_dir.exists():
-        return None
-    for path in sorted(reports_dir.rglob("*")):
+def _receipt_artifact_paths(reports_dir: Path, receipt) -> tuple[Path, ...]:
+    result: list[Path] = []
+    for relative_name in sorted(receipt.artifact_hashes):
+        relative_path = Path(relative_name)
+        if relative_path.is_absolute() or ".." in relative_path.parts:
+            raise ValueError("Formal receipt contains an unsafe artifact path.")
+        result.append(reports_dir / relative_path)
+    return tuple(result)
+
+
+def _find_fixture_sample_leak(
+    reports_dir: Path,
+    artifact_paths: tuple[Path, ...],
+) -> str | None:
+    for path in artifact_paths:
         if not path.is_file() or path.suffix.lower() != ".html":
             continue
         try:
@@ -469,6 +775,33 @@ def _find_fixture_sample_leak(reports_dir: Path) -> str | None:
         if _contains_fixture_sample_marker(text):
             return path.relative_to(reports_dir.parent).as_posix()
     return None
+
+
+def _find_visible_total_score_leak(
+    reports_dir: Path,
+    artifact_paths: tuple[Path, ...],
+) -> str | None:
+    for path in artifact_paths:
+        if not path.is_file() or path.suffix.lower() != ".html":
+            continue
+        try:
+            html_text = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            html_text = path.read_text(encoding="utf-8", errors="ignore")
+        visible_text = _html_visible_text(html_text)
+        if any(pattern.search(visible_text) for pattern in VISIBLE_TOTAL_SCORE_PATTERNS):
+            return path.relative_to(reports_dir.parent).as_posix()
+    return None
+
+
+def _html_visible_text(html_text: str) -> str:
+    text = re.sub(
+        r"(?is)<(script|style|template)\b[^>]*>.*?</\1>",
+        " ",
+        html_text,
+    )
+    text = re.sub(r"(?s)<[^>]+>", " ", text)
+    return unescape(re.sub(r"\s+", " ", text))
 
 
 def _contains_fixture_sample_marker(text: str) -> bool:

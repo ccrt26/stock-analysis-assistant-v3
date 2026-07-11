@@ -14,6 +14,24 @@ INGESTION_SCHEMA_PATH = (
     / "migrations"
     / "202607080002_ingestion_v1.sql"
 )
+STRATEGY_V2_SCHEMA_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "supabase"
+    / "migrations"
+    / "202607100003_strategy_v2_decision_ledger.sql"
+)
+FORMAL_READINESS_SCHEMA_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "supabase"
+    / "migrations"
+    / "202607100004_formal_run_readiness.sql"
+)
+ADVISOR_OPTIMIZATION_SCHEMA_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "supabase"
+    / "migrations"
+    / "20260711112251_optimize_advisor_indexes.sql"
+)
 
 
 def test_initial_schema_contains_required_tables_and_rls():
@@ -114,3 +132,192 @@ def test_ingestion_schema_adds_capacity_guard_function():
     assert revoke_statement in compact_sql
     assert grant_statement in compact_sql
     assert compact_sql.index(revoke_statement) < compact_sql.index(grant_statement)
+
+
+def test_strategy_v2_schema_adds_narrow_decision_ledger_tables():
+    sql = STRATEGY_V2_SCHEMA_PATH.read_text().lower()
+    compact_sql = re.sub(r"\s+", " ", sql)
+
+    for table in [
+        "strategy_v2_snapshot",
+        "focus_entry_thesis",
+        "focus_daily_update",
+        "action_recommendation_summary",
+        "manual_holding_summary",
+        "operational_daily_status",
+    ]:
+        assert f"create table if not exists public.{table}" in sql
+        assert f"alter table public.{table} enable row level security" in sql
+        assert f"create policy {table}_service_role_all" in sql
+
+    assert "market_price_daily" not in compact_sql
+    assert "daily_basic_indicator" not in compact_sql
+    assert "unique (trade_date, ts_code)" in compact_sql
+
+
+def test_strategy_v2_schema_contains_required_ledger_columns():
+    sql = STRATEGY_V2_SCHEMA_PATH.read_text().lower()
+    compact_sql = re.sub(r"\s+", " ", sql)
+
+    for column in [
+        "evidence_id text primary key",
+        "payload jsonb not null",
+        "action_payload jsonb not null",
+        "source_versions jsonb not null",
+        "thesis_payload jsonb not null",
+        "update_payload jsonb not null",
+        "decision text not null",
+        "position_min_pct numeric not null",
+        "position_max_pct numeric not null",
+        "held boolean not null",
+        "position_band text not null",
+        "last_action_state text not null",
+        "trade_date date primary key",
+        "blocking_missing_fields jsonb not null",
+        "message text not null",
+    ]:
+        assert column in compact_sql
+
+
+def test_formal_readiness_migration_adds_receipts_pending_batches_markers_and_reconciliation():
+    sql = FORMAL_READINESS_SCHEMA_PATH.read_text().lower()
+    for table in [
+        "formal_run_receipt",
+        "formal_run_pending_batch",
+        "formal_run_activation_marker",
+        "formal_reconciliation_task",
+    ]:
+        assert f"create table if not exists public.{table}" in sql
+        assert f"alter table public.{table} enable row level security" in sql
+        assert f"create policy {table}_service_role_all" in sql
+    assert "create or replace view public.active_formal_run_receipt" in sql
+    assert "create or replace view public.active_formal_decision_row" in sql
+    assert "join public.active_formal_run_receipt" in sql
+
+
+def test_activation_rpc_verifies_hashes_and_activates_in_one_transaction():
+    sql = FORMAL_READINESS_SCHEMA_PATH.read_text().lower()
+    compact_sql = re.sub(r"\s+", " ", sql)
+
+    assert "create or replace function public.activate_formal_run_v1(" in compact_sql
+    assert "security definer" in compact_sql
+    assert "set search_path = public, pg_temp" in compact_sql
+    assert "for update" in compact_sql
+    assert "pending receipt hash mismatch" in compact_sql
+    assert "pending rows hash mismatch" in compact_sql
+    assert "insert into public.formal_run_activation_marker" in compact_sql
+    assert "update public.formal_run_receipt" in compact_sql
+    assert "local_activation_id = p_activation_id" in compact_sql
+    assert "state = v_receipt.receipt_payload->>'activation_final_state'" in compact_sql
+    assert "grant execute on function public.activate_formal_run_v1" in compact_sql
+
+
+def test_formal_readiness_schema_does_not_add_wide_market_payload_columns():
+    sql = FORMAL_READINESS_SCHEMA_PATH.read_text().lower()
+
+    for forbidden in [
+        "market_price_daily",
+        "daily_basic_indicator",
+        "open numeric",
+        "high numeric",
+        "low numeric",
+        "close numeric",
+        "volume numeric",
+        "amount numeric",
+    ]:
+        assert forbidden not in sql
+
+
+def test_formal_migration_explicitly_grants_service_role_and_revokes_public_api_roles():
+    compact_sql = re.sub(
+        r"\s+",
+        " ",
+        FORMAL_READINESS_SCHEMA_PATH.read_text(encoding="utf-8").lower(),
+    )
+    for table in [
+        "formal_run_receipt",
+        "formal_run_pending_batch",
+        "formal_run_activation_marker",
+        "formal_decision_activation_row",
+        "formal_reconciliation_task",
+    ]:
+        assert (
+            f"revoke all on table public.{table} from public, anon, authenticated"
+            in compact_sql
+        )
+        assert (
+            f"grant select, insert, update, delete on table public.{table} to service_role"
+            in compact_sql
+        )
+
+
+def test_formal_views_are_security_invoker_and_service_role_select_only():
+    compact_sql = re.sub(
+        r"\s+",
+        " ",
+        FORMAL_READINESS_SCHEMA_PATH.read_text(encoding="utf-8").lower(),
+    )
+    assert compact_sql.count("with (security_invoker = true)") == 2
+    for view in ["active_formal_run_receipt", "active_formal_decision_row"]:
+        assert (
+            f"revoke all on table public.{view} from public, anon, authenticated"
+            in compact_sql
+        )
+        assert f"grant select on table public.{view} to service_role" in compact_sql
+
+
+def test_activation_rpc_revokes_public_anon_authenticated_and_grants_service_role():
+    compact_sql = re.sub(
+        r"\s+",
+        " ",
+        FORMAL_READINESS_SCHEMA_PATH.read_text(encoding="utf-8").lower(),
+    )
+    signature = "public.activate_formal_run_v1(text, text, text, text, text)"
+    assert f"revoke all on function {signature} from public, anon, authenticated" in compact_sql
+    assert f"grant execute on function {signature} to service_role" in compact_sql
+
+
+def test_advisor_optimization_promotes_narrow_unique_keys_to_primary_keys():
+    compact_sql = re.sub(
+        r"\s+",
+        " ",
+        ADVISOR_OPTIMIZATION_SCHEMA_PATH.read_text(encoding="utf-8").lower(),
+    )
+    for table in [
+        "focus_daily_update",
+        "action_recommendation_summary",
+        "manual_holding_summary",
+    ]:
+        assert (
+            f"alter table public.{table} drop constraint if exists "
+            f"{table}_trade_date_ts_code_key"
+        ) in compact_sql
+        assert (
+            f"add constraint {table}_pkey primary key (trade_date, ts_code)"
+        ) in compact_sql
+
+
+def test_advisor_optimization_indexes_every_reported_foreign_key():
+    compact_sql = re.sub(
+        r"\s+",
+        " ",
+        ADVISOR_OPTIMIZATION_SCHEMA_PATH.read_text(encoding="utf-8").lower(),
+    )
+    expected = {
+        "daily_basic_indicator": "ts_code",
+        "daily_feature_snapshot": "ts_code",
+        "evaluation_result": "evaluation_task_id",
+        "evidence_package_index": "ts_code",
+        "focus_watchlist_state": "ts_code",
+        "formal_run_activation_marker": "pending_id",
+        "formal_run_pending_batch": "run_id",
+        "knowledge_rule_match": "rule_id",
+        "market_price_daily": "ts_code",
+        "recommendation_daily": "ts_code",
+        "stock_status_daily": "ts_code",
+    }
+    for table, column in expected.items():
+        assert (
+            f"create index if not exists {table}_{column}_idx "
+            f"on public.{table} ({column})"
+        ) in compact_sql

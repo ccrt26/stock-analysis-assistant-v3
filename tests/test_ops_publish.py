@@ -4,6 +4,7 @@ import json
 import subprocess
 from datetime import date, datetime, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pytest
 from typer.testing import CliRunner
@@ -31,7 +32,10 @@ from stock_analyzer.ops.publish import (
     set_auto_publish_enabled,
 )
 from stock_analyzer.ops.smoke import SmokeResult
+from stock_analyzer.data.readiness import FormalRunState
+from stock_analyzer.ops.formal_run import RunReceipt
 from stock_analyzer.storage.capacity_guard import CapacityStatus
+from stock_analyzer.storage.evidence_store import LocalEvidenceStore
 
 
 def test_publish_state_write_json_redacts_secret_like_text(tmp_path):
@@ -163,6 +167,34 @@ def _write_job_status(root, payload):
 
 
 def _write_report(root, trade_date):
+    _write_report_without_receipt(root, trade_date)
+    store = LocalEvidenceStore(root / "local_warehouse" / "formal_evidence")
+    store.save_run_receipt(
+        RunReceipt(
+            run_id=f"publish-{trade_date.isoformat()}",
+            target_date=trade_date,
+            report_cutoff=datetime(
+                trade_date.year,
+                trade_date.month,
+                trade_date.day,
+                16,
+                tzinfo=ZoneInfo("Asia/Shanghai"),
+            ),
+            acquisition_contract_version="formal-v1",
+            screening_version="screen-v1",
+            state=FormalRunState.REPORT_GENERATED,
+            group_version_ids={"market_decision": "version-1"},
+            input_set_id="input-1",
+            candidate_set_id="candidate-1",
+            evidence_hashes={"evidence": "hash"},
+            artifact_hashes={"index.html": "hash"},
+            local_activation_id="activation-1",
+            ledger_activation_id="activation-1",
+        )
+    )
+
+
+def _write_report_without_receipt(root, trade_date):
     reports = root / "reports"
     (reports / "daily" / trade_date.isoformat()).mkdir(parents=True)
     (reports / "index.html").write_text(f"<html>{trade_date.isoformat()}</html>", encoding="utf-8")
@@ -209,6 +241,22 @@ def test_load_publish_candidate_uses_today_success_with_recommendations(tmp_path
         job_status_path=status_path,
         reports_dir=tmp_path / "reports",
     )
+
+
+def test_load_publish_candidate_rejects_success_status_without_committed_receipt(tmp_path):
+    trade_date = date(2026, 7, 9)
+    _write_report_without_receipt(tmp_path, trade_date)
+    _write_job_status(
+        tmp_path,
+        {
+            "trade_date": trade_date.isoformat(),
+            "status": "success_with_recommendations",
+            "recommendations": 3,
+        },
+    )
+
+    with pytest.raises(PublishPreflightError, match="committed formal run receipt"):
+        load_publish_candidate(_publish_config(tmp_path), trade_date=trade_date)
 
 
 def test_load_publish_candidate_accepts_ten_recommendations(tmp_path):

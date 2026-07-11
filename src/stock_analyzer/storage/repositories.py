@@ -12,14 +12,21 @@ from stock_analyzer.data.models import (
     SourceRunRecord,
     StockBasicRow,
 )
+from stock_analyzer.analysis.focus import FormalFocusDay
 from stock_analyzer.domain.models import (
     ActionLabel,
+    ActionRecommendationSummary,
     EvaluationTask,
     EvidencePackage,
     FeatureSnapshot,
+    FocusDailyUpdate,
+    FocusEntryThesis,
     FocusState,
+    ManualHoldingSummary,
+    OperationalDailyStatus,
     Recommendation,
     StockSnapshot,
+    StrategyEvidenceSnapshot,
 )
 from stock_analyzer.storage.capacity_guard import ensure_selected_market_window_scope
 
@@ -55,6 +62,16 @@ class AnalysisRepository(Protocol):
     def load_focus_states_for_date(self, trade_date: date) -> List[FocusState]: ...
     def load_evidence_packages(self, trade_date: date) -> List[EvidencePackage]: ...
     def load_evaluation_tasks(self, trade_date: date) -> List[EvaluationTask]: ...
+    def load_formally_committed_strategy_snapshots(
+        self,
+        before_date: date,
+        eligible_dates: list[date],
+    ) -> list[StrategyEvidenceSnapshot]: ...
+    def load_formal_focus_days(
+        self,
+        before_date: date,
+        eligible_dates: list[date],
+    ) -> list[FormalFocusDay]: ...
     def preflight_market_window_writes(
         self,
         bars: List[DailyBar],
@@ -67,6 +84,24 @@ class AnalysisRepository(Protocol):
     def save_focus_states(self, states: List[FocusState]) -> None: ...
     def save_evidence_packages(self, packages: List[EvidencePackage]) -> None: ...
     def save_evaluation_tasks(self, tasks: List[EvaluationTask]) -> None: ...
+    def save_strategy_snapshots(
+        self,
+        snapshots: list[StrategyEvidenceSnapshot],
+    ) -> None: ...
+    def save_focus_entry_theses(self, theses: list[FocusEntryThesis]) -> None: ...
+    def save_focus_daily_updates(self, updates: list[FocusDailyUpdate]) -> None: ...
+    def save_action_recommendations(
+        self,
+        recommendations: list[ActionRecommendationSummary],
+    ) -> None: ...
+    def save_manual_holding_summaries(
+        self,
+        holdings: list[ManualHoldingSummary],
+    ) -> None: ...
+    def save_operational_daily_status(
+        self,
+        status: OperationalDailyStatus,
+    ) -> None: ...
     def save_market_bars(self, bars: List[DailyBar]) -> None: ...
     def save_daily_basic_indicators(self, rows: List[DailyBasicRow]) -> None: ...
     def save_data_source_runs(self, rows: List[SourceRunRecord]) -> None: ...
@@ -83,10 +118,20 @@ class InMemoryAnalysisRepository:
         stock_master: Optional[List[StockSnapshot]] = None,
         stock_statuses: Optional[List[StockSnapshot]] = None,
         feature_snapshots: Optional[List[FeatureSnapshot]] = None,
+        strategy_snapshots: Optional[list[StrategyEvidenceSnapshot]] = None,
+        focus_entry_theses: Optional[list[FocusEntryThesis]] = None,
+        focus_daily_updates: Optional[list[FocusDailyUpdate]] = None,
+        action_recommendation_summaries: Optional[
+            list[ActionRecommendationSummary]
+        ] = None,
+        manual_holding_summaries: Optional[list[ManualHoldingSummary]] = None,
+        operational_daily_statuses: Optional[list[OperationalDailyStatus]] = None,
         market_bars: Optional[List[DailyBar]] = None,
         daily_basic_indicators: Optional[List[DailyBasicRow]] = None,
         data_source_runs: Optional[List[SourceRunRecord]] = None,
         market_calendar: Optional[dict[date, bool]] = None,
+        formally_committed_run_dates: Optional[set[date]] = None,
+        formal_focus_days: Optional[list[FormalFocusDay]] = None,
     ) -> None:
         self.recommendations = list(recommendations or [])
         self.focus_states = list(focus_states or [])
@@ -95,10 +140,21 @@ class InMemoryAnalysisRepository:
         self.stock_master = list(stock_master or [])
         self.stock_statuses = list(stock_statuses or [])
         self.feature_snapshots = list(feature_snapshots or [])
+        self.strategy_snapshots = list(strategy_snapshots or [])
+        self.focus_entry_theses = list(focus_entry_theses or [])
+        self.focus_daily_updates = list(focus_daily_updates or [])
+        self.action_recommendation_summaries = list(
+            action_recommendation_summaries or []
+        )
+        self.manual_holding_summaries = list(manual_holding_summaries or [])
+        self.operational_daily_statuses = list(operational_daily_statuses or [])
         self.market_bars = list(market_bars or [])
         self.daily_basic_indicators = list(daily_basic_indicators or [])
         self.data_source_runs = list(data_source_runs or [])
         self.market_calendar = dict(market_calendar or {})
+        self.formally_committed_run_dates = set(formally_committed_run_dates or set())
+        self.formal_focus_days = list(formal_focus_days or [])
+        self.formal_focus_day_calls: list[tuple[date, list[date]]] = []
 
     def load_market_calendar_day(
         self,
@@ -129,6 +185,49 @@ class InMemoryAnalysisRepository:
 
     def load_evaluation_tasks(self, trade_date: date) -> List[EvaluationTask]:
         return [item for item in self.evaluation_tasks if item.trade_date == trade_date]
+
+    def load_formally_committed_strategy_snapshots(
+        self,
+        before_date: date,
+        eligible_dates: list[date],
+    ) -> list[StrategyEvidenceSnapshot]:
+        allowed = {
+            value
+            for value in eligible_dates
+            if value < before_date and value in self.formally_committed_run_dates
+        }
+        return sorted(
+            (
+                snapshot
+                for snapshot in self.strategy_snapshots
+                if snapshot.trade_date in allowed
+            ),
+            key=lambda snapshot: (
+                snapshot.trade_date,
+                snapshot.ts_code,
+                snapshot.evidence_id,
+            ),
+        )
+
+    def load_formal_focus_days(
+        self,
+        before_date: date,
+        eligible_dates: list[date],
+    ) -> list[FormalFocusDay]:
+        self.formal_focus_day_calls.append((before_date, list(eligible_dates)))
+        allowed = {value for value in eligible_dates if value < before_date}
+        if self.formal_focus_days:
+            by_date = {item.trade_date: item for item in self.formal_focus_days}
+            return [by_date[value] for value in eligible_dates if value in allowed and value in by_date]
+        return [
+            FormalFocusDay(
+                trade_date=value,
+                formally_committed=value in self.formally_committed_run_dates,
+                blocked=value not in self.formally_committed_run_dates,
+            )
+            for value in eligible_dates
+            if value in allowed
+        ]
 
     def preflight_market_window_writes(
         self,
@@ -193,6 +292,60 @@ class InMemoryAnalysisRepository:
             ),
         )
 
+    def save_strategy_snapshots(
+        self,
+        snapshots: list[StrategyEvidenceSnapshot],
+    ) -> None:
+        self.strategy_snapshots = _upsert_model_list(
+            self.strategy_snapshots,
+            snapshots,
+            key=lambda item: item.evidence_id,
+        )
+
+    def save_focus_entry_theses(self, theses: list[FocusEntryThesis]) -> None:
+        self.focus_entry_theses = _upsert_model_list(
+            self.focus_entry_theses,
+            theses,
+            key=lambda item: item.evidence_id,
+        )
+
+    def save_focus_daily_updates(self, updates: list[FocusDailyUpdate]) -> None:
+        self.focus_daily_updates = _upsert_model_list(
+            self.focus_daily_updates,
+            updates,
+            key=lambda item: (item.trade_date, item.ts_code),
+        )
+
+    def save_action_recommendations(
+        self,
+        recommendations: list[ActionRecommendationSummary],
+    ) -> None:
+        self.action_recommendation_summaries = _upsert_model_list(
+            self.action_recommendation_summaries,
+            recommendations,
+            key=lambda item: (item.trade_date, item.ts_code),
+        )
+
+    def save_manual_holding_summaries(
+        self,
+        holdings: list[ManualHoldingSummary],
+    ) -> None:
+        self.manual_holding_summaries = _upsert_model_list(
+            self.manual_holding_summaries,
+            holdings,
+            key=lambda item: (item.trade_date, item.ts_code),
+        )
+
+    def save_operational_daily_status(
+        self,
+        status: OperationalDailyStatus,
+    ) -> None:
+        self.operational_daily_statuses = _upsert_model_list(
+            self.operational_daily_statuses,
+            [status],
+            key=lambda item: item.trade_date,
+        )
+
     def save_market_bars(self, bars: List[DailyBar]) -> None:
         self.market_bars = _upsert_model_list(
             self.market_bars,
@@ -225,6 +378,7 @@ class SupabaseAnalysisRepository:
     def __init__(self, client, capacity_guard=None) -> None:
         self.client = client
         self.capacity_guard = capacity_guard
+        self._formal_pending_meta: dict[str, dict[str, str]] = {}
 
     def load_market_calendar_day(
         self,
@@ -261,11 +415,22 @@ class SupabaseAnalysisRepository:
         ).execute()
 
     def load_focus_states(self) -> List[FocusState]:
+        formal_rows = self._load_active_formal_payloads(("focus_state", "focus"))
+        if formal_rows:
+            return _latest_active_focus_states(
+                [FocusState.model_validate(row) for row in formal_rows]
+            )
         result = self.client.table("focus_watchlist_state").select("*").execute()
         states = [_focus_state_from_row(row) for row in result.data or []]
         return _latest_active_focus_states(states)
 
     def load_daily_recommendations(self, trade_date: date) -> List[Recommendation]:
+        formal_rows = self._load_active_formal_payloads(
+            ("recommendation",),
+            trade_date,
+        )
+        if formal_rows or self._has_active_formal_receipt(trade_date):
+            return [Recommendation.model_validate(row) for row in formal_rows]
         result = (
             self.client.table("recommendation_daily")
             .select("*, stock_master(name)")
@@ -275,6 +440,12 @@ class SupabaseAnalysisRepository:
         return [_recommendation_from_row(row) for row in result.data or []]
 
     def load_focus_states_for_date(self, trade_date: date) -> List[FocusState]:
+        formal_rows = self._load_active_formal_payloads(
+            ("focus_state", "focus"),
+            trade_date,
+        )
+        if formal_rows or self._has_active_formal_receipt(trade_date):
+            return [FocusState.model_validate(row) for row in formal_rows]
         result = (
             self.client.table("focus_watchlist_state")
             .select("*")
@@ -284,6 +455,12 @@ class SupabaseAnalysisRepository:
         return [_focus_state_from_row(row) for row in result.data or []]
 
     def load_evidence_packages(self, trade_date: date) -> List[EvidencePackage]:
+        formal_rows = self._load_active_formal_payloads(
+            ("evidence_package", "evidence"),
+            trade_date,
+        )
+        if formal_rows or self._has_active_formal_receipt(trade_date):
+            return [EvidencePackage.model_validate(row) for row in formal_rows]
         result = (
             self.client.table("evidence_package_index")
             .select("*")
@@ -293,6 +470,12 @@ class SupabaseAnalysisRepository:
         return [_evidence_package_from_row(row) for row in result.data or []]
 
     def load_evaluation_tasks(self, trade_date: date) -> List[EvaluationTask]:
+        formal_rows = self._load_active_formal_payloads(
+            ("evaluation_task",),
+            trade_date,
+        )
+        if formal_rows or self._has_active_formal_receipt(trade_date):
+            return [EvaluationTask.model_validate(row) for row in formal_rows]
         result = (
             self.client.table("evaluation_task")
             .select("*")
@@ -300,6 +483,337 @@ class SupabaseAnalysisRepository:
             .execute()
         )
         return [_evaluation_task_from_row(row) for row in result.data or []]
+
+    def load_formally_committed_strategy_snapshots(
+        self,
+        before_date: date,
+        eligible_dates: list[date],
+    ) -> list[StrategyEvidenceSnapshot]:
+        eligible = {value for value in eligible_dates if value < before_date}
+        formal_rows = self._load_active_formal_payloads(("strategy_snapshot",))
+        if formal_rows:
+            return sorted(
+                (
+                    StrategyEvidenceSnapshot.model_validate(row)
+                    for row in formal_rows
+                    if _date_from_row(row.get("trade_date")) in eligible
+                ),
+                key=lambda snapshot: (
+                    snapshot.trade_date,
+                    snapshot.ts_code,
+                    snapshot.evidence_id,
+                ),
+            )
+        active_result = self.client.table("active_formal_run_receipt").select(
+            "target_date"
+        ).execute()
+        active_dates = {
+            parsed
+            for row in active_result.data or []
+            if (parsed := _date_from_row(row.get("target_date"))) in eligible
+        }
+        if not active_dates:
+            return []
+        snapshot_result = self.client.table("strategy_v2_snapshot").select(
+            "trade_date,payload"
+        ).execute()
+        return sorted(
+            (
+                StrategyEvidenceSnapshot.model_validate(row["payload"])
+                for row in snapshot_result.data or []
+                if _date_from_row(row.get("trade_date")) in active_dates
+            ),
+            key=lambda snapshot: (
+                snapshot.trade_date,
+                snapshot.ts_code,
+                snapshot.evidence_id,
+            ),
+        )
+
+    def load_formal_focus_days(
+        self,
+        before_date: date,
+        eligible_dates: list[date],
+    ) -> list[FormalFocusDay]:
+        eligible = [value for value in eligible_dates if value < before_date]
+        eligible_set = set(eligible)
+        result = self.client.table("active_formal_run_receipt").select(
+            "target_date,state,receipt_payload"
+        ).execute()
+        rows_by_date = {
+            parsed: row
+            for row in result.data or []
+            if (parsed := _date_from_row(row.get("target_date"))) in eligible_set
+        }
+        days: list[FormalFocusDay] = []
+        committed_states = {
+            "report_generated",
+            "analysis_complete_no_recommendations",
+        }
+        for value in eligible:
+            row = rows_by_date.get(value)
+            if row is None:
+                days.append(
+                    FormalFocusDay(
+                        trade_date=value,
+                        formally_committed=False,
+                        blocked=True,
+                    )
+                )
+                continue
+            receipt_payload = row.get("receipt_payload")
+            if not isinstance(receipt_payload, dict):
+                receipt_payload = {}
+            fixture = bool(
+                receipt_payload.get("fixture")
+                or receipt_payload.get("fixture_mode")
+                or receipt_payload.get("is_fixture")
+            )
+            backfill_only = bool(receipt_payload.get("backfill_only"))
+            state = str(row.get("state", ""))
+            blocked = state not in committed_states
+            formally_committed = not blocked and not fixture and not backfill_only
+            days.append(
+                FormalFocusDay(
+                    trade_date=value,
+                    formally_committed=formally_committed,
+                    blocked=blocked,
+                    fixture=fixture,
+                    backfill_only=backfill_only,
+                )
+            )
+        return days
+
+    def _load_active_formal_payloads(
+        self,
+        row_kinds: tuple[str, ...],
+        trade_date: date | None = None,
+    ) -> list[dict]:
+        payloads: list[dict] = []
+        for row_kind in row_kinds:
+            query = self.client.table("active_formal_decision_row").select(
+                "target_date,row_kind,row_payload"
+            ).eq("row_kind", row_kind)
+            if trade_date is not None:
+                query = query.eq("target_date", trade_date.isoformat())
+            for row in query.execute().data or []:
+                payload = row.get("row_payload")
+                if isinstance(payload, dict):
+                    payloads.append(payload)
+        return payloads
+
+    def _has_active_formal_receipt(self, trade_date: date) -> bool:
+        result = (
+            self.client.table("active_formal_run_receipt")
+            .select("run_id")
+            .eq("target_date", trade_date.isoformat())
+            .execute()
+        )
+        return bool(result.data or [])
+
+    def prepare_formal_run(
+        self,
+        run_id: str,
+        receipt_hash: str,
+        rows: tuple[dict, ...],
+    ) -> str:
+        rows_hash = _formal_rows_sha256(rows)
+        pending_id = "pending-" + _payload_sha256(
+            {
+                "run_id": run_id,
+                "receipt_hash": receipt_hash,
+                "rows_hash": rows_hash,
+            }
+        )
+        row = {
+            "pending_id": pending_id,
+            "run_id": run_id,
+            "receipt_hash": receipt_hash,
+            "rows_hash": rows_hash,
+            "rows": list(rows),
+            "status": "pending",
+        }
+        self.client.table("formal_run_pending_batch").upsert(
+            [row],
+            on_conflict="pending_id",
+        ).execute()
+        self._formal_pending_meta[pending_id] = {
+            "run_id": run_id,
+            "receipt_hash": receipt_hash,
+            "rows_hash": rows_hash,
+        }
+        return pending_id
+
+    def register_formal_receipt(
+        self,
+        receipt,
+        receipt_hash: str,
+        final_state,
+    ) -> None:
+        if receipt.input_set_id is None:
+            raise ValueError("formal receipt input_set_id is required")
+        payload = receipt.model_dump(mode="json")
+        payload["activation_final_state"] = final_state.value
+        row = {
+            "run_id": receipt.run_id,
+            "target_date": receipt.target_date.isoformat(),
+            "report_cutoff": receipt.report_cutoff.isoformat(),
+            "receipt_hash": receipt_hash,
+            "input_set_id": receipt.input_set_id,
+            "candidate_set_id": receipt.candidate_set_id,
+            "state": receipt.state.value,
+            "artifact_hashes": receipt.artifact_hashes,
+            "local_activation_id": None,
+            "ledger_activation_id": None,
+            "receipt_payload": payload,
+        }
+        self.client.table("formal_run_receipt").upsert(
+            [row],
+            on_conflict="run_id",
+        ).execute()
+
+    def pending_hash(self, pending_id: str) -> str:
+        result = (
+            self.client.table("formal_run_pending_batch")
+            .select("rows_hash")
+            .eq("pending_id", pending_id)
+            .execute()
+        )
+        rows = result.data or []
+        if len(rows) != 1 or not rows[0].get("rows_hash"):
+            raise ValueError("formal pending batch is missing")
+        return str(rows[0]["rows_hash"])
+
+    def activate_formal_run(
+        self,
+        run_id: str,
+        pending_id: str,
+        activation_id: str,
+    ) -> None:
+        meta = self._formal_pending_meta.get(pending_id)
+        if meta is None:
+            result = (
+                self.client.table("formal_run_pending_batch")
+                .select("run_id,receipt_hash,rows_hash")
+                .eq("pending_id", pending_id)
+                .execute()
+            )
+            rows = result.data or []
+            if len(rows) != 1:
+                raise ValueError("formal pending batch is missing")
+            meta = rows[0]
+        if meta["run_id"] != run_id:
+            raise ValueError("formal pending batch run mismatch")
+        result = self.client.rpc(
+            "activate_formal_run_v1",
+            {
+                "p_run_id": run_id,
+                "p_pending_id": pending_id,
+                "p_activation_id": activation_id,
+                "p_expected_receipt_hash": meta["receipt_hash"],
+                "p_expected_rows_hash": meta["rows_hash"],
+            },
+        )
+        execute = getattr(result, "execute", None)
+        if execute is not None:
+            execute()
+
+    def is_formal_run_active(self, run_id: str, activation_id: str) -> bool:
+        result = (
+            self.client.table("active_formal_run_receipt")
+            .select("run_id,activation_id")
+            .eq("run_id", run_id)
+            .eq("activation_id", activation_id)
+            .execute()
+        )
+        return len(result.data or []) == 1
+
+    def verify_formal_run_active(
+        self,
+        run_id: str,
+        activation_id: str,
+        receipt_hash: str,
+        rows_hash: str,
+    ) -> bool:
+        receipt_rows = (
+            self.client.table("active_formal_run_receipt")
+            .select("run_id,activation_id,receipt_hash")
+            .eq("run_id", run_id)
+            .eq("activation_id", activation_id)
+            .execute()
+            .data
+            or []
+        )
+        if (
+            len(receipt_rows) != 1
+            or receipt_rows[0].get("receipt_hash") != receipt_hash
+        ):
+            return False
+        marker_rows = (
+            self.client.table("formal_run_activation_marker")
+            .select("run_id,pending_id,activation_id")
+            .eq("run_id", run_id)
+            .eq("activation_id", activation_id)
+            .execute()
+            .data
+            or []
+        )
+        if len(marker_rows) != 1 or not marker_rows[0].get("pending_id"):
+            return False
+        pending_id = str(marker_rows[0]["pending_id"])
+        pending_rows = (
+            self.client.table("formal_run_pending_batch")
+            .select("run_id,pending_id,rows_hash,status")
+            .eq("run_id", run_id)
+            .eq("pending_id", pending_id)
+            .execute()
+            .data
+            or []
+        )
+        if (
+            len(pending_rows) != 1
+            or pending_rows[0].get("status") != "active"
+            or pending_rows[0].get("rows_hash") != rows_hash
+        ):
+            return False
+        active_rows = (
+            self.client.table("active_formal_decision_row")
+            .select("run_id,row_ordinal,row_payload,activation_id")
+            .eq("run_id", run_id)
+            .eq("activation_id", activation_id)
+            .execute()
+            .data
+            or []
+        )
+        try:
+            ordered = sorted(active_rows, key=lambda row: int(row["row_ordinal"]))
+            ordinals = [int(row["row_ordinal"]) for row in ordered]
+            payloads = tuple(row["row_payload"] for row in ordered)
+        except (KeyError, TypeError, ValueError):
+            return False
+        if ordinals != list(range(1, len(ordered) + 1)):
+            return False
+        if any(not isinstance(payload, dict) for payload in payloads):
+            return False
+        return _formal_rows_sha256(payloads) == rows_hash
+
+    def discard_pending(self, pending_id: str) -> None:
+        meta = self._formal_pending_meta.get(pending_id)
+        if meta is None:
+            return
+        self.client.table("formal_run_pending_batch").upsert(
+            [
+                {
+                    "pending_id": pending_id,
+                    "run_id": meta["run_id"],
+                    "receipt_hash": meta["receipt_hash"],
+                    "rows_hash": meta["rows_hash"],
+                    "rows": [],
+                    "status": "discarded",
+                }
+            ],
+            on_conflict="pending_id",
+        ).execute()
 
     def preflight_market_window_writes(
         self,
@@ -431,6 +945,72 @@ class SupabaseAnalysisRepository:
             on_conflict="trade_date,ts_code,evidence_id,checkpoint_days,evaluation_layer",
         ).execute()
 
+    def save_strategy_snapshots(
+        self,
+        snapshots: list[StrategyEvidenceSnapshot],
+    ) -> None:
+        if not snapshots:
+            return
+        rows = [_strategy_snapshot_to_row(snapshot) for snapshot in snapshots]
+        self.client.table("strategy_v2_snapshot").upsert(
+            rows,
+            on_conflict="evidence_id",
+        ).execute()
+
+    def save_focus_entry_theses(self, theses: list[FocusEntryThesis]) -> None:
+        if not theses:
+            return
+        rows = [_focus_entry_thesis_to_row(thesis) for thesis in theses]
+        self.client.table("focus_entry_thesis").upsert(
+            rows,
+            on_conflict="evidence_id",
+        ).execute()
+
+    def save_focus_daily_updates(self, updates: list[FocusDailyUpdate]) -> None:
+        if not updates:
+            return
+        rows = [_focus_daily_update_to_row(update) for update in updates]
+        self.client.table("focus_daily_update").upsert(
+            rows,
+            on_conflict="trade_date,ts_code",
+        ).execute()
+
+    def save_action_recommendations(
+        self,
+        recommendations: list[ActionRecommendationSummary],
+    ) -> None:
+        if not recommendations:
+            return
+        rows = [
+            _action_recommendation_summary_to_row(recommendation)
+            for recommendation in recommendations
+        ]
+        self.client.table("action_recommendation_summary").upsert(
+            rows,
+            on_conflict="trade_date,ts_code",
+        ).execute()
+
+    def save_manual_holding_summaries(
+        self,
+        holdings: list[ManualHoldingSummary],
+    ) -> None:
+        if not holdings:
+            return
+        rows = [_manual_holding_summary_to_row(holding) for holding in holdings]
+        self.client.table("manual_holding_summary").upsert(
+            rows,
+            on_conflict="trade_date,ts_code",
+        ).execute()
+
+    def save_operational_daily_status(
+        self,
+        status: OperationalDailyStatus,
+    ) -> None:
+        self.client.table("operational_daily_status").upsert(
+            [_operational_daily_status_to_row(status)],
+            on_conflict="trade_date",
+        ).execute()
+
     def save_market_bars(self, bars: List[DailyBar]) -> None:
         if not bars:
             return
@@ -517,6 +1097,96 @@ class SupabaseAnalysisRepository:
             )
             deleted_counts[table] = len(result.data or [])
         return deleted_counts
+
+
+def _payload_sha256(payload: dict) -> str:
+    payload_text = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    return hashlib.sha256(payload_text.encode("utf-8")).hexdigest()
+
+
+def _formal_rows_sha256(rows: tuple[dict, ...]) -> str:
+    canonical_rows = [
+        json.dumps(row, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        for row in rows
+    ]
+    payload_text = json.dumps(
+        canonical_rows,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(payload_text.encode("utf-8")).hexdigest()
+
+
+def _strategy_snapshot_to_row(snapshot: StrategyEvidenceSnapshot) -> dict:
+    payload = snapshot.model_dump(mode="json")
+    return {
+        "evidence_id": snapshot.evidence_id,
+        "trade_date": snapshot.trade_date.isoformat(),
+        "ts_code": snapshot.ts_code,
+        "name": snapshot.name,
+        "payload": payload,
+        "action_payload": snapshot.action.model_dump(mode="json"),
+        "data_insufficient": snapshot.data_insufficient,
+        "source_versions": snapshot.source_versions,
+        "sha256": _payload_sha256(payload),
+    }
+
+
+def _focus_entry_thesis_to_row(thesis: FocusEntryThesis) -> dict:
+    return {
+        "evidence_id": thesis.evidence_id,
+        "trade_date": thesis.trade_date.isoformat(),
+        "ts_code": thesis.ts_code,
+        "source": thesis.source.value,
+        "thesis_payload": thesis.model_dump(mode="json"),
+        "action_payload": thesis.action.model_dump(mode="json"),
+    }
+
+
+def _focus_daily_update_to_row(update: FocusDailyUpdate) -> dict:
+    return {
+        "trade_date": update.trade_date.isoformat(),
+        "ts_code": update.ts_code,
+        "update_payload": update.model_dump(mode="json"),
+        "action_payload": update.action.model_dump(mode="json"),
+    }
+
+
+def _action_recommendation_summary_to_row(
+    recommendation: ActionRecommendationSummary,
+) -> dict:
+    return {
+        "trade_date": recommendation.trade_date.isoformat(),
+        "ts_code": recommendation.ts_code,
+        "decision": recommendation.decision.value,
+        "position_min_pct": recommendation.position_min_pct,
+        "position_max_pct": recommendation.position_max_pct,
+        "invalidation_conditions": recommendation.invalidation_conditions,
+    }
+
+
+def _manual_holding_summary_to_row(holding: ManualHoldingSummary) -> dict:
+    return {
+        "trade_date": holding.trade_date.isoformat(),
+        "ts_code": holding.ts_code,
+        "held": holding.held,
+        "position_band": holding.position_band,
+        "last_action_state": holding.last_action_state,
+    }
+
+
+def _operational_daily_status_to_row(status: OperationalDailyStatus) -> dict:
+    return {
+        "trade_date": status.trade_date.isoformat(),
+        "is_trading_day": status.is_trading_day,
+        "recommendation_state": status.recommendation_state.value,
+        "focus_state": status.focus_state.value,
+        "recommendation_count": status.recommendation_count,
+        "focus_count": status.focus_count,
+        "blocking_missing_fields": status.blocking_missing_fields,
+        "message": status.message,
+    }
 
 
 def _date_from_row(value) -> Optional[date]:

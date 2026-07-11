@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-from stock_analyzer.domain.models import EvidencePackage, Recommendation
+from stock_analyzer.domain.models import (
+    EvidenceAtom,
+    EvidencePackage,
+    Recommendation,
+    StrategyEvidenceSnapshot,
+)
 
 
 def build_evidence_package(
@@ -20,3 +25,50 @@ def build_evidence_package(
         invalidation_conditions=["核心趋势证据消失", "出现官方重大风险", "反证强于支持证据"],
         source_versions={"recommendation": evidence_id},
     )
+
+
+def build_evidence_package_from_strategy_snapshot(
+    snapshot: StrategyEvidenceSnapshot,
+) -> EvidencePackage:
+    source_versions = dict(snapshot.source_versions)
+    source_versions.setdefault("strategy_snapshot", snapshot.evidence_id)
+    return EvidencePackage(
+        evidence_id=snapshot.evidence_id,
+        trade_date=snapshot.trade_date,
+        ts_code=snapshot.ts_code,
+        thesis=snapshot.thesis,
+        support=_flatten_atoms(
+            atom for module in snapshot.modules for atom in module.support
+        ),
+        counter_evidence=_flatten_atoms(
+            atom for module in snapshot.modules for atom in module.counter
+        ),
+        matched_rules=sorted(
+            {
+                rule
+                for module in snapshot.modules
+                for atom in [*module.support, *module.counter]
+                for rule in atom.knowledge_rule_ids
+            }
+        ),
+        confidence_level=_confidence_level(snapshot),
+        expected_confirmation_path=list(snapshot.action.required_confirmation),
+        invalidation_conditions=list(snapshot.action.invalidation_conditions),
+        source_versions=source_versions,
+    )
+
+
+def _flatten_atoms(atoms) -> list[str]:
+    return [_atom_text(atom) for atom in atoms]
+
+
+def _atom_text(atom: EvidenceAtom) -> str:
+    return f"{atom.headline}：{atom.detail}" if atom.detail else atom.headline
+
+
+def _confidence_level(snapshot: StrategyEvidenceSnapshot) -> str:
+    if snapshot.data_insufficient:
+        return "low"
+    if snapshot.risk_reward is not None and snapshot.risk_reward >= 1.5:
+        return "medium"
+    return "low"

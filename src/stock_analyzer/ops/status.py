@@ -19,6 +19,7 @@ class RunStatus(str, Enum):
     WARNING = "warning"
     FAILED_RETRYABLE = "failed_retryable"
     FAILED_NEEDS_HUMAN = "failed_needs_human"
+    BLOCKED_NEEDS_HUMAN = "blocked_needs_human"
 
 
 class FailureClass(str, Enum):
@@ -68,6 +69,7 @@ def _utc_now() -> datetime:
 
 
 class JobStatus(BaseModel):
+    run_id: str | None = None
     trade_date: date
     attempt: int = Field(ge=1)
     scheduled_slot: str
@@ -82,6 +84,9 @@ class JobStatus(BaseModel):
     recommendations: int | None = None
     evidence_packages: int | None = None
     evaluation_tasks: int | None = None
+    recommendation_state: str | None = None
+    focus_state: str | None = None
+    blocking_missing_fields: list[str] = Field(default_factory=list)
     market_price_daily_current_day_rows: int | None = None
     daily_basic_indicator_current_day_rows: int | None = None
     supabase_database_size_mb: float | None = None
@@ -96,6 +101,8 @@ class JobStatus(BaseModel):
     @field_validator(
         "scheduled_slot",
         "stage",
+        "recommendation_state",
+        "focus_state",
         "publish_skipped_reason",
         "fix_suggestion",
         "error_message_redacted",
@@ -107,12 +114,25 @@ class JobStatus(BaseModel):
         return redact_secrets(value)
 
     @model_validator(mode="after")
+    def _derive_run_id(self) -> "JobStatus":
+        if self.run_id is None:
+            slot = "".join(
+                character if character.isalnum() else "-"
+                for character in self.scheduled_slot
+            ).strip("-")
+            self.run_id = (
+                f"{self.trade_date.isoformat()}-{slot}-attempt-{self.attempt}"
+            )
+        return self
+
+    @model_validator(mode="after")
     def _derive_retryable(self) -> "JobStatus":
         if self.status == RunStatus.FAILED_RETRYABLE:
             self.retryable = True
         elif self.status in {
             RunStatus.CALENDAR_UNKNOWN,
             RunStatus.FAILED_NEEDS_HUMAN,
+            RunStatus.BLOCKED_NEEDS_HUMAN,
         }:
             self.retryable = False
         elif self.failure_class is not None:

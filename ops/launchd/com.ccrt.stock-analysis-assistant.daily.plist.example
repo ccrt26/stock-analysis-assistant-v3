@@ -8,20 +8,20 @@
   <string>com.ccrt.stock-analysis-assistant.daily</string>
 
   <key>WorkingDirectory</key>
-  <string>/Users/ccrt/股票分析助手</string>
+  <string>__PROJECT_ROOT__</string>
 
   <key>ProgramArguments</key>
   <array>
     <string>/bin/zsh</string>
     <string>-lc</string>
     <string><![CDATA[
-cd /Users/ccrt/股票分析助手
+cd "__PROJECT_ROOT__"
 if [ ! -f .env.local ]; then
   echo ".env.local is required at runtime and is not embedded in this template."
   exit 1
 fi
 set -a
-source .env.local
+source .env.local >/dev/null 2>&1
 set +a
 slot="$(date +%H:%M)"
 case "$slot" in
@@ -63,9 +63,9 @@ exec .venv/bin/python -m stock_analyzer ops run-daily-job --trade-date "$(date +
   <false/>
 
   <key>StandardOutPath</key>
-  <string>/Users/ccrt/股票分析助手/logs/run-daily/launchd.out.log</string>
+  <string>__PROJECT_ROOT__/logs/run-daily/launchd.out.log</string>
 
   <key>StandardErrorPath</key>
-  <string>/Users/ccrt/股票分析助手/logs/run-daily/launchd.err.log</string>
+  <string>__PROJECT_ROOT__/logs/run-daily/launchd.err.log</string>
 </dict>
 </plist>

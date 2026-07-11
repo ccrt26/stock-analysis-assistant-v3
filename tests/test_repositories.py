@@ -15,13 +15,23 @@ from stock_analyzer.data.models import (
     StockBasicRow,
 )
 from stock_analyzer.domain.models import (
+    ActionDecision,
     ActionLabel,
+    ActionRecommendation,
+    ActionRecommendationSummary,
     EvaluationTask,
     EvidencePackage,
+    FocusDailyUpdate,
+    FocusEntryThesis,
+    FocusSource,
     FeatureSnapshot,
     FocusState,
+    ManualHoldingSummary,
+    OperationalDailyStatus,
+    OperationalReportState,
     Recommendation,
     StockSnapshot,
+    StrategyEvidenceSnapshot,
 )
 from stock_analyzer.storage.repositories import (
     InMemoryAnalysisRepository,
@@ -95,10 +105,15 @@ class FakeSupabaseClient:
         self.upsert_calls = []
         self.table_calls = []
         self.table_data = {}
+        self.rpc_calls = []
 
     def table(self, name: str) -> FakeSupabaseTable:
         self.table_calls.append(name)
         return FakeSupabaseTable(name, self)
+
+    def rpc(self, name: str, params=None):
+        self.rpc_calls.append((name, params or {}))
+        return FakeSupabaseResult([{ "activated": True }])
 
 
 class RejectingCapacityGuard:
@@ -133,6 +148,105 @@ class RecordingWarehouse:
 
     def save_bundle(self, bundle):
         self.saved_bundles.append(bundle)
+
+
+def _strategy_v2_action() -> ActionRecommendation:
+    return ActionRecommendation(
+        decision=ActionDecision.WAIT_FOR_CONFIRMATION,
+        position_min_pct=0.0,
+        position_max_pct=3.0,
+        reasoning=["趋势证据偏积极，但仍需确认。"],
+        required_confirmation=["板块相对强度继续改善"],
+        invalidation_conditions=["跌破 20 日均线且放量"],
+        risk_if_wrong="若是假突破，短线回撤可能扩大。",
+        staging_plan=["等待确认后再进入观察仓位。"],
+    )
+
+
+def _strategy_v2_snapshot() -> StrategyEvidenceSnapshot:
+    return StrategyEvidenceSnapshot(
+        evidence_id="2026-07-10-600000.SH",
+        trade_date=date(2026, 7, 10),
+        ts_code="600000.SH",
+        name="浦发银行",
+        action=_strategy_v2_action(),
+        thesis="银行板块企稳下的 2-8 周修复观察。",
+        expected_upside_pct=10.0,
+        expected_downside_pct=6.0,
+        risk_reward=1.67,
+        focus_entry_progress="观察第 2/5 个交易日。",
+        display_rank_bucket="重点观察",
+        internal_score=86.0,
+        source_versions={"market_daily": "2026-07-10"},
+    )
+
+
+def _focus_entry_thesis() -> FocusEntryThesis:
+    snapshot = _strategy_v2_snapshot()
+    return FocusEntryThesis(
+        evidence_id=snapshot.evidence_id,
+        trade_date=snapshot.trade_date,
+        ts_code=snapshot.ts_code,
+        name=snapshot.name,
+        source=FocusSource.SYSTEM,
+        thesis=snapshot.thesis,
+        action=snapshot.action,
+        required_confirmation=snapshot.action.required_confirmation,
+        invalidation_conditions=snapshot.action.invalidation_conditions,
+        supporting_evidence_ids=[snapshot.evidence_id],
+        validation_result="通过",
+        risk_notes=[snapshot.action.risk_if_wrong],
+    )
+
+
+def _focus_daily_update() -> FocusDailyUpdate:
+    snapshot = _strategy_v2_snapshot()
+    return FocusDailyUpdate(
+        trade_date=snapshot.trade_date,
+        ts_code=snapshot.ts_code,
+        name=snapshot.name,
+        evidence_id=snapshot.evidence_id,
+        thesis=snapshot.thesis,
+        action=snapshot.action,
+        focus_entry_progress="观察第 2/5 个交易日，最近 5 日支持 2 日。",
+        required_confirmation=snapshot.action.required_confirmation,
+        invalidation_conditions=snapshot.action.invalidation_conditions,
+    )
+
+
+def _action_recommendation_summary() -> ActionRecommendationSummary:
+    action = _strategy_v2_action()
+    return ActionRecommendationSummary(
+        trade_date=date(2026, 7, 10),
+        ts_code="600000.SH",
+        decision=action.decision,
+        position_min_pct=action.position_min_pct,
+        position_max_pct=action.position_max_pct,
+        invalidation_conditions=action.invalidation_conditions,
+    )
+
+
+def _manual_holding_summary() -> ManualHoldingSummary:
+    return ManualHoldingSummary(
+        trade_date=date(2026, 7, 10),
+        ts_code="600000.SH",
+        held=True,
+        position_band="0-3%",
+        last_action_state="等待确认",
+    )
+
+
+def _operational_daily_status() -> OperationalDailyStatus:
+    return OperationalDailyStatus(
+        trade_date=date(2026, 7, 10),
+        is_trading_day=True,
+        recommendation_state=OperationalReportState.DATA_INSUFFICIENT,
+        focus_state=OperationalReportState.DATA_INSUFFICIENT,
+        recommendation_count=0,
+        focus_count=0,
+        blocking_missing_fields=["daily_basic.turnover_rate"],
+        message="行情基础指标不足，保留阻塞状态。",
+    )
 
 
 def test_in_memory_repository_saves_daily_outputs():
@@ -223,6 +337,487 @@ def test_in_memory_repository_saves_daily_outputs():
     assert len(repo.feature_snapshots) == 1
     assert repo.load_focus_states() == [focus]
     assert repo.load_evaluation_tasks(date(2026, 7, 7)) == [task]
+
+
+def test_strategy_v2_repository_saves_operational_status_to_narrow_table():
+    repo = InMemoryAnalysisRepository()
+    status = _operational_daily_status()
+
+    repo.save_operational_daily_status(status)
+
+    assert repo.operational_daily_statuses[0] == status
+
+
+def test_in_memory_repository_upserts_strategy_v2_ledger_by_stable_keys():
+    repo = InMemoryAnalysisRepository()
+    snapshot = _strategy_v2_snapshot()
+    thesis = _focus_entry_thesis()
+    update = _focus_daily_update()
+    recommendation = _action_recommendation_summary()
+    holding = _manual_holding_summary()
+    status = _operational_daily_status()
+
+    repo.save_strategy_snapshots([snapshot])
+    repo.save_strategy_snapshots(
+        [snapshot.model_copy(update={"display_rank_bucket": "强观察"})]
+    )
+    repo.save_focus_entry_theses([thesis])
+    repo.save_focus_entry_theses(
+        [thesis.model_copy(update={"validation_result": "复核通过"})]
+    )
+    repo.save_focus_daily_updates([update])
+    repo.save_focus_daily_updates(
+        [update.model_copy(update={"focus_entry_progress": "观察第 3/5 个交易日。"})]
+    )
+    repo.save_action_recommendations([recommendation])
+    repo.save_action_recommendations(
+        [recommendation.model_copy(update={"position_max_pct": 2.0})]
+    )
+    repo.save_manual_holding_summaries([holding])
+    repo.save_manual_holding_summaries(
+        [holding.model_copy(update={"position_band": "1-2%"})]
+    )
+    repo.save_operational_daily_status(status)
+    repo.save_operational_daily_status(
+        status.model_copy(update={"message": "二次运行仍然阻塞。"})
+    )
+
+    assert len(repo.strategy_snapshots) == 1
+    assert repo.strategy_snapshots[0].display_rank_bucket == "强观察"
+    assert len(repo.focus_entry_theses) == 1
+    assert repo.focus_entry_theses[0].validation_result == "复核通过"
+    assert len(repo.focus_daily_updates) == 1
+    assert repo.focus_daily_updates[0].focus_entry_progress == "观察第 3/5 个交易日。"
+    assert len(repo.action_recommendation_summaries) == 1
+    assert repo.action_recommendation_summaries[0].position_max_pct == 2.0
+    assert len(repo.manual_holding_summaries) == 1
+    assert repo.manual_holding_summaries[0].position_band == "1-2%"
+    assert len(repo.operational_daily_statuses) == 1
+    assert repo.operational_daily_statuses[0].message == "二次运行仍然阻塞。"
+
+
+def test_in_memory_repository_loads_only_formally_committed_strategy_snapshots():
+    from tests.test_focus_strategy_v2 import _snapshot
+
+    committed_date = date(2026, 7, 8)
+    uncommitted_date = date(2026, 7, 9)
+    current_date = date(2026, 7, 10)
+    repo = InMemoryAnalysisRepository(
+        strategy_snapshots=[
+            _snapshot(committed_date),
+            _snapshot(uncommitted_date),
+            _snapshot(current_date),
+        ],
+        formally_committed_run_dates={committed_date},
+    )
+
+    loaded = repo.load_formally_committed_strategy_snapshots(
+        before_date=current_date,
+        eligible_dates=[committed_date, uncommitted_date, current_date],
+    )
+
+    assert [snapshot.trade_date for snapshot in loaded] == [committed_date]
+
+
+def test_supabase_repository_loads_snapshots_only_through_active_formal_receipt_view():
+    from tests.test_focus_strategy_v2 import _snapshot
+
+    active_date = date(2026, 7, 8)
+    inactive_date = date(2026, 7, 9)
+    active = _snapshot(active_date)
+    inactive = _snapshot(inactive_date)
+    client = FakeSupabaseClient()
+    client.table_data["active_formal_run_receipt"] = [
+        {"target_date": active_date.isoformat()}
+    ]
+    client.table_data["strategy_v2_snapshot"] = [
+        {
+            "trade_date": active_date.isoformat(),
+            "payload": active.model_dump(mode="json"),
+        },
+        {
+            "trade_date": inactive_date.isoformat(),
+            "payload": inactive.model_dump(mode="json"),
+        },
+    ]
+    repo = SupabaseAnalysisRepository(client)
+
+    loaded = repo.load_formally_committed_strategy_snapshots(
+        before_date=date(2026, 7, 10),
+        eligible_dates=[active_date, inactive_date],
+    )
+
+    assert [snapshot.trade_date for snapshot in loaded] == [active_date]
+    assert client.table_calls[:3] == [
+        "active_formal_decision_row",
+        "active_formal_run_receipt",
+        "strategy_v2_snapshot",
+    ]
+
+
+def test_supabase_repository_builds_focus_days_only_from_active_receipts():
+    eligible = [date(2026, 7, value) for value in (3, 6, 7, 8, 9)]
+    client = FakeSupabaseClient()
+    client.table_data["active_formal_run_receipt"] = [
+        {
+            "target_date": value.isoformat(),
+            "state": "report_generated",
+            "receipt_payload": {},
+        }
+        for value in eligible
+    ]
+    client.table_data["formal_run_receipt"] = [
+        {"target_date": "2026-07-02", "state": "report_generated"}
+    ]
+
+    days = SupabaseAnalysisRepository(client).load_formal_focus_days(
+        before_date=date(2026, 7, 10),
+        eligible_dates=eligible,
+    )
+
+    assert [item.trade_date for item in days] == eligible
+    assert all(item.formally_committed for item in days)
+    assert all(not item.blocked and not item.fixture and not item.backfill_only for item in days)
+    assert client.table_calls == ["active_formal_run_receipt"]
+
+
+def test_blocked_fixture_or_backfill_receipt_cannot_become_formal_focus_day():
+    eligible = [date(2026, 7, value) for value in (3, 6, 7, 8, 9)]
+    client = FakeSupabaseClient()
+    client.table_data["active_formal_run_receipt"] = [
+        {
+            "target_date": eligible[0].isoformat(),
+            "state": "report_generated",
+            "receipt_payload": {},
+        },
+        {
+            "target_date": eligible[1].isoformat(),
+            "state": "blocked_needs_human",
+            "receipt_payload": {},
+        },
+        {
+            "target_date": eligible[2].isoformat(),
+            "state": "report_generated",
+            "receipt_payload": {"fixture": True},
+        },
+        {
+            "target_date": eligible[3].isoformat(),
+            "state": "analysis_complete_no_recommendations",
+            "receipt_payload": {"backfill_only": True},
+        },
+    ]
+
+    days = SupabaseAnalysisRepository(client).load_formal_focus_days(
+        before_date=date(2026, 7, 10),
+        eligible_dates=eligible,
+    )
+
+    assert days[0].formally_committed is True
+    assert days[1].blocked is True and days[1].formally_committed is False
+    assert days[2].fixture is True and days[2].formally_committed is False
+    assert days[3].backfill_only is True and days[3].formally_committed is False
+    assert days[4].blocked is True and days[4].formally_committed is False
+
+
+def test_supabase_repository_prepares_pending_formal_rows_and_activates_through_rpc():
+    from stock_analyzer.ops.activation import hash_ledger_rows
+
+    client = FakeSupabaseClient()
+    repo = SupabaseAnalysisRepository(client)
+    rows = ({"kind": "focus", "ts_code": "600000.SH"},)
+
+    pending_id = repo.prepare_formal_run("run-1", "receipt-hash", rows)
+
+    assert pending_id.startswith("pending-")
+    assert client.write_calls[0][0] == "formal_run_pending_batch"
+    pending_row = client.write_calls[0][2][0]
+    assert pending_row["status"] == "pending"
+    assert pending_row["rows"] == list(rows)
+    assert pending_row["rows_hash"] == hash_ledger_rows(rows)
+    client.table_data["formal_run_pending_batch"] = [pending_row]
+    assert repo.pending_hash(pending_id) == pending_row["rows_hash"]
+
+    repo.activate_formal_run("run-1", pending_id, "activation-1")
+
+    assert client.rpc_calls == [
+        (
+            "activate_formal_run_v1",
+            {
+                "p_run_id": "run-1",
+                "p_pending_id": pending_id,
+                "p_activation_id": "activation-1",
+                "p_expected_receipt_hash": "receipt-hash",
+                "p_expected_rows_hash": pending_row["rows_hash"],
+            },
+        )
+    ]
+
+
+def test_supabase_repository_registers_formal_receipt_before_pending_batch():
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from stock_analyzer.data.readiness import FormalRunState
+    from stock_analyzer.ops.formal_run import RunReceipt
+
+    client = FakeSupabaseClient()
+    repo = SupabaseAnalysisRepository(client)
+    receipt = RunReceipt(
+        run_id="run-registered",
+        target_date=date(2026, 7, 10),
+        report_cutoff=datetime(
+            2026, 7, 10, 16, 0, tzinfo=ZoneInfo("Asia/Shanghai")
+        ),
+        acquisition_contract_version="formal-v1",
+        screening_version="screen-v1",
+        state=FormalRunState.COMMITTING,
+        group_version_ids={"market_decision": "version-1"},
+        input_set_id="input-1",
+        candidate_set_id="candidate-1",
+        evidence_hashes={"evidence": "hash"},
+        artifact_hashes={"index.html": "hash"},
+    )
+
+    repo.register_formal_receipt(
+        receipt,
+        "receipt-hash",
+        FormalRunState.REPORT_GENERATED,
+    )
+    repo.prepare_formal_run(
+        receipt.run_id,
+        "receipt-hash",
+        ({"kind": "recommendation"},),
+    )
+
+    assert client.write_calls[0][0] == "formal_run_receipt"
+    receipt_row = client.write_calls[0][2][0]
+    assert receipt_row["run_id"] == receipt.run_id
+    assert receipt_row["state"] == "committing"
+    assert receipt_row["input_set_id"] == "input-1"
+    assert receipt_row["receipt_payload"]["activation_final_state"] == "report_generated"
+    assert client.write_calls[1][0] == "formal_run_pending_batch"
+
+
+def test_supabase_repository_active_marker_read_is_fail_closed():
+    client = FakeSupabaseClient()
+    repo = SupabaseAnalysisRepository(client)
+    client.table_data["active_formal_run_receipt"] = [
+        {"run_id": "run-1", "activation_id": "activation-1"}
+    ]
+
+    assert repo.is_formal_run_active("run-1", "activation-1") is True
+    assert repo.is_formal_run_active("run-1", "other") is False
+
+
+def test_supabase_activation_readback_requires_matching_receipt_and_rows_hashes():
+    from stock_analyzer.ops.activation import hash_ledger_rows
+
+    rows = (
+        {"kind": "recommendation", "ts_code": "600000.SH"},
+        {"kind": "focus", "ts_code": "600001.SH"},
+    )
+    rows_hash = hash_ledger_rows(rows)
+    client = FakeSupabaseClient()
+    client.table_data.update(
+        {
+            "active_formal_run_receipt": [
+                {
+                    "run_id": "run-1",
+                    "activation_id": "activation-1",
+                    "receipt_hash": "receipt-hash",
+                }
+            ],
+            "formal_run_activation_marker": [
+                {
+                    "run_id": "run-1",
+                    "activation_id": "activation-1",
+                    "pending_id": "pending-1",
+                }
+            ],
+            "formal_run_pending_batch": [
+                {
+                    "run_id": "run-1",
+                    "pending_id": "pending-1",
+                    "rows_hash": rows_hash,
+                    "status": "active",
+                }
+            ],
+            "active_formal_decision_row": [
+                {
+                    "run_id": "run-1",
+                    "activation_id": "activation-1",
+                    "row_ordinal": index,
+                    "row_payload": row,
+                }
+                for index, row in enumerate(rows, start=1)
+            ],
+        }
+    )
+    repo = SupabaseAnalysisRepository(client)
+
+    assert repo.verify_formal_run_active(
+        "run-1",
+        "activation-1",
+        "receipt-hash",
+        rows_hash,
+    ) is True
+    assert repo.verify_formal_run_active(
+        "run-1",
+        "activation-1",
+        "wrong-receipt",
+        rows_hash,
+    ) is False
+    assert repo.verify_formal_run_active(
+        "run-1",
+        "activation-1",
+        "receipt-hash",
+        "wrong-rows",
+    ) is False
+
+    client.table_data["active_formal_decision_row"].pop()
+    assert repo.verify_formal_run_active(
+        "run-1",
+        "activation-1",
+        "receipt-hash",
+        rows_hash,
+    ) is False
+
+
+def test_supabase_activation_readback_rejects_missing_extra_or_reordered_rows():
+    from stock_analyzer.ops.activation import hash_ledger_rows
+
+    first = {"kind": "recommendation", "ts_code": "600000.SH"}
+    second = {"kind": "focus", "ts_code": "600001.SH"}
+    expected_hash = hash_ledger_rows((first, second))
+    client = FakeSupabaseClient()
+    client.table_data.update(
+        {
+            "active_formal_run_receipt": [
+                {
+                    "run_id": "run-1",
+                    "activation_id": "activation-1",
+                    "receipt_hash": "receipt-hash",
+                }
+            ],
+            "formal_run_activation_marker": [
+                {
+                    "run_id": "run-1",
+                    "activation_id": "activation-1",
+                    "pending_id": "pending-1",
+                }
+            ],
+            "formal_run_pending_batch": [
+                {
+                    "run_id": "run-1",
+                    "pending_id": "pending-1",
+                    "rows_hash": expected_hash,
+                    "status": "active",
+                }
+            ],
+            "active_formal_decision_row": [
+                {
+                    "run_id": "run-1",
+                    "activation_id": "activation-1",
+                    "row_ordinal": 1,
+                    "row_payload": second,
+                },
+                {
+                    "run_id": "run-1",
+                    "activation_id": "activation-1",
+                    "row_ordinal": 2,
+                    "row_payload": first,
+                },
+            ],
+        }
+    )
+    repo = SupabaseAnalysisRepository(client)
+
+    assert repo.verify_formal_run_active(
+        "run-1",
+        "activation-1",
+        "receipt-hash",
+        expected_hash,
+    ) is False
+
+    client.table_data["active_formal_decision_row"].append(
+        {
+            "run_id": "run-1",
+            "activation_id": "activation-1",
+            "row_ordinal": 3,
+            "row_payload": {"kind": "unexpected"},
+        }
+    )
+    assert repo.verify_formal_run_active(
+        "run-1",
+        "activation-1",
+        "receipt-hash",
+        expected_hash,
+    ) is False
+
+
+def test_supabase_repository_reads_activated_formal_rows_before_legacy_rows():
+    trade_date = date(2026, 7, 10)
+    formal = Recommendation(
+        trade_date=trade_date,
+        ts_code="600000.SH",
+        name="正式激活推荐",
+        action=ActionLabel.ENTER_OBSERVATION,
+        score=81,
+        reasons=["正式证据"],
+        risks=["正式风险"],
+        evidence_id="formal-evidence",
+    )
+    legacy = formal.model_copy(
+        update={"name": "旧表未激活推荐", "evidence_id": "legacy-evidence"}
+    )
+    client = FakeSupabaseClient()
+    client.table_data["active_formal_decision_row"] = [
+        {
+            "target_date": trade_date.isoformat(),
+            "row_kind": "recommendation",
+            "row_payload": formal.model_dump(mode="json"),
+        }
+    ]
+    client.table_data["recommendation_daily"] = [
+        {
+            **legacy.model_dump(mode="json"),
+            "stock_master": {"name": legacy.name},
+        }
+    ]
+
+    loaded = SupabaseAnalysisRepository(client).load_daily_recommendations(trade_date)
+
+    assert loaded == [formal]
+    assert client.table_calls[0] == "active_formal_decision_row"
+
+
+def test_supabase_repository_does_not_fall_back_to_legacy_rows_for_active_empty_kind():
+    trade_date = date(2026, 7, 10)
+    legacy = Recommendation(
+        trade_date=trade_date,
+        ts_code="600000.SH",
+        name="旧表未激活推荐",
+        action=ActionLabel.ENTER_OBSERVATION,
+        score=81,
+        reasons=["旧证据"],
+        risks=["旧风险"],
+        evidence_id="legacy-evidence",
+    )
+    client = FakeSupabaseClient()
+    client.table_data["active_formal_run_receipt"] = [
+        {"run_id": "active-empty", "target_date": trade_date.isoformat()}
+    ]
+    client.table_data["recommendation_daily"] = [
+        {
+            **legacy.model_dump(mode="json"),
+            "stock_master": {"name": legacy.name},
+        }
+    ]
+
+    loaded = SupabaseAnalysisRepository(client).load_daily_recommendations(trade_date)
+
+    assert loaded == []
+    assert "recommendation_daily" not in client.table_calls
 
 
 def test_in_memory_repository_upserts_core_daily_outputs_by_stable_keys():
@@ -380,6 +975,87 @@ def test_supabase_repository_maps_rows_without_network():
     assert evidence_row["expected_confirmation_path"] == ["趋势延续"]
     assert client.upsert_calls[1][0] == "evaluation_task"
     assert client.upsert_calls[1][1][0]["due_date"] == "2026-07-12"
+
+
+def test_supabase_repository_upserts_strategy_v2_ledger_without_network():
+    client = FakeSupabaseClient()
+    repo = SupabaseAnalysisRepository(client)
+    snapshot = _strategy_v2_snapshot()
+    thesis = _focus_entry_thesis()
+    update = _focus_daily_update()
+    recommendation = _action_recommendation_summary()
+    holding = _manual_holding_summary()
+    status = _operational_daily_status()
+
+    repo.save_strategy_snapshots([snapshot])
+    repo.save_focus_entry_theses([thesis])
+    repo.save_focus_daily_updates([update])
+    repo.save_action_recommendations([recommendation])
+    repo.save_manual_holding_summaries([holding])
+    repo.save_operational_daily_status(status)
+
+    assert [name for name, _, _ in client.write_calls] == [
+        "strategy_v2_snapshot",
+        "focus_entry_thesis",
+        "focus_daily_update",
+        "action_recommendation_summary",
+        "manual_holding_summary",
+        "operational_daily_status",
+    ]
+    assert "market_price_daily" not in client.table_calls
+    assert "daily_basic_indicator" not in client.table_calls
+
+    conflict_targets = {
+        name: options.get("on_conflict")
+        for name, operation, options in client.write_options
+        if operation == "upsert"
+    }
+    assert conflict_targets["strategy_v2_snapshot"] == "evidence_id"
+    assert conflict_targets["focus_entry_thesis"] == "evidence_id"
+    assert conflict_targets["focus_daily_update"] == "trade_date,ts_code"
+    assert conflict_targets["action_recommendation_summary"] == "trade_date,ts_code"
+    assert conflict_targets["manual_holding_summary"] == "trade_date,ts_code"
+    assert conflict_targets["operational_daily_status"] == "trade_date"
+
+    snapshot_row = client.write_calls[0][2][0]
+    assert snapshot_row["payload"]["trade_date"] == "2026-07-10"
+    assert snapshot_row["action_payload"]["reasoning"] == snapshot.action.reasoning
+    assert snapshot_row["data_insufficient"] is False
+    assert snapshot_row["source_versions"] == {"market_daily": "2026-07-10"}
+    assert len(snapshot_row["sha256"]) == 64
+
+    thesis_row = client.write_calls[1][2][0]
+    assert thesis_row["source"] == "system"
+    assert thesis_row["thesis_payload"]["action"]["decision"] == "等待确认"
+    assert thesis_row["action_payload"]["required_confirmation"] == [
+        "板块相对强度继续改善"
+    ]
+
+    update_row = client.write_calls[2][2][0]
+    assert update_row["update_payload"]["focus_entry_progress"].startswith("观察第")
+    assert update_row["action_payload"]["invalidation_conditions"] == [
+        "跌破 20 日均线且放量"
+    ]
+
+    recommendation_row = client.write_calls[3][2][0]
+    assert recommendation_row == {
+        "trade_date": "2026-07-10",
+        "ts_code": "600000.SH",
+        "decision": "等待确认",
+        "position_min_pct": 0.0,
+        "position_max_pct": 3.0,
+        "invalidation_conditions": ["跌破 20 日均线且放量"],
+    }
+
+    holding_row = client.write_calls[4][2][0]
+    assert holding_row["held"] is True
+    assert holding_row["position_band"] == "0-3%"
+    assert holding_row["last_action_state"] == "等待确认"
+
+    status_row = client.write_calls[5][2][0]
+    assert status_row["recommendation_state"] == "data_insufficient"
+    assert status_row["focus_state"] == "data_insufficient"
+    assert status_row["blocking_missing_fields"] == ["daily_basic.turnover_rate"]
 
 
 def test_supabase_repository_persists_ingestion_rows_without_network():
@@ -737,111 +1413,6 @@ def test_supabase_repository_upserts_prerequisites_before_dependent_pipeline_row
     assert all(row["evidence_id"] for row in recommendation_rows)
     assert all(item.evidence_id for item in result.recommendations)
 
-
-def test_production_pipeline_writes_full_stock_master_before_market_bars(tmp_path):
-    if run_daily_pipeline is None:
-        pytest.skip("jinja2 is not installed in this local test environment")
-
-    class ProviderWithRawBarsBeyondFeatureUniverse:
-        def load(self, trade_date):
-            stock = StockSnapshot(
-                trade_date=trade_date,
-                ts_code="600000.SH",
-                name="浦发银行",
-                listing_days=9000,
-                turnover_rate=1.2,
-                amount=200000000,
-            )
-            feature = FeatureSnapshot(
-                trade_date=trade_date,
-                ts_code="600000.SH",
-                trend_20d=0.2,
-                trend_60d=0.2,
-                relative_strength=0.2,
-                volatility_20d=0.1,
-                liquidity_score=0.8,
-                quality_score=0.7,
-                market_regime="unknown",
-                data_quality="ok",
-            )
-            return MarketDataBundle(
-                trade_date=trade_date,
-                data_status=DataStatus.COMPLETE_PRIMARY,
-                source_grade=SourceGrade.PRIMARY,
-                source_versions={"fake-live": trade_date.isoformat()},
-                stock_basic=[
-                    StockBasicRow(
-                        ts_code="600000.SH",
-                        name="浦发银行",
-                        exchange="SSE",
-                        list_date=date(1999, 11, 10),
-                    ),
-                    StockBasicRow(
-                        ts_code="000004.SZ",
-                        name="国华网安",
-                        exchange="SZSE",
-                        list_date=date(1991, 1, 14),
-                    ),
-                ],
-                daily_bars=[
-                    DailyBar(
-                        trade_date=trade_date,
-                        ts_code="600000.SH",
-                        close=10.2,
-                        amount=200000000,
-                        source_name="fake-live",
-                        source_grade=SourceGrade.PRIMARY,
-                    ),
-                    DailyBar(
-                        trade_date=trade_date,
-                        ts_code="000004.SZ",
-                        close=12.3,
-                        amount=80000000,
-                        source_name="fake-live",
-                        source_grade=SourceGrade.PRIMARY,
-                    ),
-                ],
-                daily_basic=[
-                    DailyBasicRow(
-                        trade_date=trade_date,
-                        ts_code="600000.SH",
-                        turnover_rate=1.2,
-                        source_name="fake-live",
-                        source_grade=SourceGrade.PRIMARY,
-                    )
-                ],
-                source_runs=[],
-                stocks=[stock],
-                stock_names={
-                    "600000.SH": "浦发银行",
-                    "000004.SZ": "国华网安",
-                },
-                feature_profiles={"600000.SH": feature},
-            )
-
-    client = FakeSupabaseClient()
-    repo = SupabaseAnalysisRepository(client)
-    warehouse = RecordingWarehouse()
-
-    run_daily_pipeline(
-        date(2026, 7, 8),
-        tmp_path,
-        repository=repo,
-        fixture_mode=False,
-        market_data_provider=ProviderWithRawBarsBeyondFeatureUniverse(),
-        local_warehouse=warehouse,
-    )
-
-    assert len(warehouse.saved_bundles) == 1
-    write_tables = [name for name, _, _ in client.write_calls]
-    assert write_tables.index("stock_master") < write_tables.index("market_price_daily")
-    first_stock_master_rows = client.write_calls[0][2]
-    assert {
-        "ts_code": "000004.SZ",
-        "name": "国华网安",
-        "exchange": "SZSE",
-        "list_date": "1991-01-14",
-    } in first_stock_master_rows
 
 
 def test_supabase_repository_upserts_core_daily_rows_with_conflict_targets(tmp_path):

@@ -1,6 +1,9 @@
 from datetime import date
 
-from stock_analyzer.analysis.recommendation import generate_recommendations
+from stock_analyzer.analysis.recommendation import (
+    generate_recommendations,
+    generate_strategy_v2_recommendations,
+)
 from stock_analyzer.domain.models import ActionLabel, FeatureSnapshot
 
 
@@ -53,3 +56,17 @@ def test_generate_recommendations_non_positive_limit_yields_no_recommendations()
     assert len(zero_limit.near_misses) == 3
     assert len(negative_limit.recommendations) == 0
     assert len(negative_limit.near_misses) == 3
+
+
+def test_recommendation_module_exposes_strategy_v2_without_score_on_cards():
+    features = [feature("600000.SH", 0.08, 0.12, 0.75, 0.9, 0.75)]
+
+    result = generate_strategy_v2_recommendations(
+        features,
+        {"600000.SH": "浦发银行"},
+        trade_date=date(2026, 7, 10),
+    )
+
+    assert len(result.cards) == 1
+    assert result.snapshots[0].internal_score > 0
+    assert "score" not in result.cards[0].model_dump(mode="json")

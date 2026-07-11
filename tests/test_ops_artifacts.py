@@ -1,7 +1,10 @@
 from __future__ import annotations
 
-from datetime import date
+import hashlib
+from datetime import date, datetime
 from pathlib import Path
+from types import SimpleNamespace
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -11,6 +14,8 @@ from stock_analyzer.ops.calendar import TradingDayDecision
 from stock_analyzer.ops.job import run_daily_job
 from stock_analyzer.ops.status import RunStatus
 from stock_analyzer.ops.verify import ProductionVerification
+from stock_analyzer.data.readiness import FormalRunState
+from stock_analyzer.ops.formal_run import RunReceipt
 
 
 def test_prepare_pages_artifact_copies_reports_and_middleware_only(tmp_path):
@@ -22,7 +27,11 @@ def test_prepare_pages_artifact_copies_reports_and_middleware_only(tmp_path):
     stale_env_path.parent.mkdir(parents=True)
     stale_env_path.write_text("stale-secret", encoding="utf-8")
 
-    artifact_dir = prepare_pages_artifact(tmp_path, output_dir)
+    artifact_dir = prepare_pages_artifact(
+        tmp_path,
+        output_dir,
+        receipt=_activated_receipt(tmp_path, date(2026, 7, 9)),
+    )
 
     assert artifact_dir == output_dir
     assert (artifact_dir / "index.html").read_text(encoding="utf-8") == (
@@ -43,6 +52,8 @@ def test_prepare_pages_artifact_copies_reports_and_middleware_only(tmp_path):
     assert not (artifact_dir / "logs").exists()
     assert not (artifact_dir / "data" / "cache").exists()
     assert not (artifact_dir / "data" / "raw").exists()
+    assert not (artifact_dir / ".staging").exists()
+    assert not (artifact_dir / ".activation").exists()
     assert not (artifact_dir / ".superpowers").exists()
     assert not any(path.name.startswith(".env") for path in artifact_dir.rglob("*"))
 
@@ -52,7 +63,11 @@ def test_prepare_pages_artifact_requires_report_index(tmp_path):
     _write_middleware(tmp_path)
 
     with pytest.raises(DeployArtifactError, match="reports/index.html"):
-        prepare_pages_artifact(tmp_path, tmp_path / "dist" / "pages")
+        prepare_pages_artifact(
+            tmp_path,
+            tmp_path / "dist" / "pages",
+            receipt=_activated_receipt(tmp_path, date(2026, 7, 9)),
+        )
 
 
 def test_prepare_pages_artifact_can_use_source_root_for_middleware(
@@ -68,6 +83,7 @@ def test_prepare_pages_artifact_can_use_source_root_for_middleware(
     artifact_dir = prepare_pages_artifact(
         production_root,
         tmp_path / "stock-analysis-pages",
+        receipt=_activated_receipt(production_root, date(2026, 7, 9)),
     )
 
     assert (artifact_dir / "index.html").exists()
@@ -89,7 +105,11 @@ def test_prepare_pages_artifact_rejects_existing_absolute_dir_outside_safe_roots
     monkeypatch.setenv("TMPDIR", str(allowed_temp_root))
 
     with pytest.raises(DeployArtifactError, match="Output directory"):
-        prepare_pages_artifact(project_root, output_dir)
+        prepare_pages_artifact(
+            project_root,
+            output_dir,
+            receipt=_activated_receipt(project_root, date(2026, 7, 9)),
+        )
 
     assert marker.read_text(encoding="utf-8") == "keep me"
 
@@ -107,7 +127,11 @@ def test_prepare_pages_artifact_allows_existing_configured_temp_artifact_dir(
     _write_middleware(project_root)
     monkeypatch.setenv("TMPDIR", str(allowed_temp_root))
 
-    artifact_dir = prepare_pages_artifact(project_root, output_dir)
+    artifact_dir = prepare_pages_artifact(
+        project_root,
+        output_dir,
+        receipt=_activated_receipt(project_root, date(2026, 7, 9)),
+    )
 
     assert artifact_dir == output_dir.resolve()
     assert (artifact_dir / "index.html").exists()
@@ -132,7 +156,9 @@ def test_run_daily_job_default_prepare_deploy_builds_pages_artifact(tmp_path):
             message="market open",
         ),
         health_check=lambda *_args: None,
-        run_daily=lambda *_args: None,
+        run_daily=lambda *_args: SimpleNamespace(
+            receipt=_activated_receipt(tmp_path, trade_date)
+        ),
         verifier=lambda *_args: _successful_verification(trade_date),
     )
 
@@ -141,6 +167,87 @@ def test_run_daily_job_default_prepare_deploy_builds_pages_artifact(tmp_path):
     assert status.publish_skipped_reason is None
     assert (tmp_path / "dist" / "pages" / "index.html").exists()
     assert (tmp_path / "dist" / "pages" / "functions" / "_middleware.ts").exists()
+
+
+def test_prepare_pages_artifact_requires_activated_report_generated_receipt(tmp_path):
+    _write_report_tree(tmp_path)
+    _write_middleware(tmp_path)
+
+    with pytest.raises(DeployArtifactError, match="activated REPORT_GENERATED receipt"):
+        prepare_pages_artifact(tmp_path, tmp_path / "dist" / "pages")
+
+
+def test_prepare_pages_artifact_rejects_report_changed_after_activation(tmp_path):
+    _write_report_tree(tmp_path)
+    _write_middleware(tmp_path)
+    receipt = _activated_receipt(tmp_path, date(2026, 7, 9))
+    (tmp_path / "reports" / "index.html").write_text(
+        "<html>tampered after activation</html>",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(DeployArtifactError, match="artifact hash mismatch"):
+        prepare_pages_artifact(
+            tmp_path,
+            tmp_path / "dist" / "pages",
+            receipt=receipt,
+        )
+
+
+def test_prepare_pages_artifact_excludes_unactivated_historical_reports(tmp_path):
+    _write_report_tree(tmp_path)
+    _write_middleware(tmp_path)
+    receipt = _activated_receipt(tmp_path, date(2026, 7, 9))
+    historical = tmp_path / "reports" / "daily" / "2026-07-07" / "index.html"
+    historical.parent.mkdir(parents=True)
+    historical.write_text(
+        "<html>Fixture/sample report 总评分：83.2</html>",
+        encoding="utf-8",
+    )
+
+    artifact_dir = prepare_pages_artifact(
+        tmp_path,
+        tmp_path / "dist" / "pages",
+        receipt=receipt,
+    )
+
+    assert (artifact_dir / "daily" / "2026-07-09" / "index.html").is_file()
+    assert not (artifact_dir / "daily" / "2026-07-07").exists()
+
+
+def _activated_receipt(project_root: Path, trade_date: date) -> RunReceipt:
+    reports = project_root / "reports"
+    artifact_hashes = {
+        path.relative_to(reports).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in sorted(reports.rglob("*"))
+        if path.is_file()
+        and not artifacts_module._is_forbidden_relative_path(
+            path.relative_to(reports)
+        )
+    }
+    if not artifact_hashes:
+        artifact_hashes = {"index.html": hashlib.sha256(b"").hexdigest()}
+    return RunReceipt(
+        run_id=f"activated-{trade_date.isoformat()}",
+        target_date=trade_date,
+        report_cutoff=datetime(
+            trade_date.year,
+            trade_date.month,
+            trade_date.day,
+            16,
+            tzinfo=ZoneInfo("Asia/Shanghai"),
+        ),
+        acquisition_contract_version="formal-v1",
+        screening_version="screen-v1",
+        state=FormalRunState.REPORT_GENERATED,
+        group_version_ids={"market_decision": "version-1"},
+        input_set_id="input-1",
+        candidate_set_id="candidate-1",
+        evidence_hashes={"evidence": "hash"},
+        artifact_hashes=artifact_hashes,
+        local_activation_id="activation-1",
+        ledger_activation_id="activation-1",
+    )
 
 
 class FakeJobRepository:
@@ -189,6 +296,8 @@ def _write_forbidden_source_paths(project_root: Path) -> None:
         "reports/.env.production",
         "reports/data/cache/leak.json",
         "reports/data/raw/leak.json",
+        "reports/.staging/pending-run/index.html",
+        "reports/.activation/pending-run.pending.json",
     ]
     for relative_path in forbidden_files:
         path = project_root / relative_path

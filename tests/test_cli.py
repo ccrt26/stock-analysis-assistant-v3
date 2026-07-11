@@ -1,5 +1,6 @@
-from datetime import date
+from datetime import date, datetime
 from types import SimpleNamespace
+from zoneinfo import ZoneInfo
 
 import json
 
@@ -17,6 +18,7 @@ from stock_analyzer.data.models import (
     SourceStatus,
     StockBasicRow,
 )
+from stock_analyzer.data.provider import CurrentLiveDataUnavailable
 from stock_analyzer.domain.models import (
     ActionLabel,
     EvaluationTask,
@@ -24,6 +26,9 @@ from stock_analyzer.domain.models import (
     FocusState,
     Recommendation,
 )
+from stock_analyzer.data.readiness import FormalRunState
+from stock_analyzer.ops.formal_run import RunReceipt
+from stock_analyzer.storage.evidence_store import LocalEvidenceStore
 from stock_analyzer.pipeline import _sample_market
 from stock_analyzer.storage.capacity_guard import SupabaseCapacityGuard
 from stock_analyzer.storage.repositories import SupabaseAnalysisRepository
@@ -165,6 +170,34 @@ class FakeProductionProvider:
         )
 
 
+def _write_committed_receipt(root, trade_date):
+    store = LocalEvidenceStore(root / "formal_evidence")
+    store.save_run_receipt(
+        RunReceipt(
+            run_id=f"committed-{trade_date.isoformat()}",
+            target_date=trade_date,
+            report_cutoff=datetime(
+                trade_date.year,
+                trade_date.month,
+                trade_date.day,
+                16,
+                tzinfo=ZoneInfo("Asia/Shanghai"),
+            ),
+            acquisition_contract_version="formal-v1",
+            screening_version="screen-v1",
+            state=FormalRunState.REPORT_GENERATED,
+            group_version_ids={"market_decision": "version-1"},
+            input_set_id="input-1",
+            candidate_set_id="candidate-1",
+            evidence_hashes={"evidence": "hash"},
+            artifact_hashes={"index.html": "hash"},
+            local_activation_id="activation-1",
+            ledger_activation_id="activation-1",
+        )
+    )
+    return store
+
+
 def test_health_check_command_prints_status(monkeypatch, tmp_path):
     monkeypatch.delenv("TUSHARE_TOKEN", raising=False)
     monkeypatch.setenv("TUSHARE_TOKEN_PATH", str(tmp_path / "missing-token"))
@@ -201,7 +234,15 @@ def test_health_check_live_tushare_smoke_requires_token(monkeypatch, tmp_path):
     monkeypatch.delenv("TUSHARE_TOKEN", raising=False)
     monkeypatch.setenv("TUSHARE_TOKEN_PATH", str(tmp_path / "missing-token"))
 
-    result = CliRunner().invoke(app, ["health-check", "--live-tushare-smoke"])
+    result = CliRunner().invoke(
+        app,
+        [
+            "health-check",
+            "--live-tushare-smoke",
+            "--live-tushare-trade-date",
+            "2026-07-08",
+        ],
+    )
 
     assert result.exit_code != 0
     assert "Tushare token missing" in result.output
@@ -227,7 +268,15 @@ def test_health_check_live_tushare_smoke_uses_fake_source_without_leaking_token(
         raising=False,
     )
 
-    result = CliRunner().invoke(app, ["health-check", "--live-tushare-smoke"])
+    result = CliRunner().invoke(
+        app,
+        [
+            "health-check",
+            "--live-tushare-smoke",
+            "--live-tushare-trade-date",
+            "2026-07-08",
+        ],
+    )
 
     assert result.exit_code == 0
     assert "live_tushare_smoke: rows=2" in result.stdout
@@ -248,12 +297,47 @@ def test_health_check_live_tushare_smoke_masks_token_in_source_errors(monkeypatc
         raising=False,
     )
 
-    result = CliRunner().invoke(app, ["health-check", "--live-tushare-smoke"])
+    result = CliRunner().invoke(
+        app,
+        [
+            "health-check",
+            "--live-tushare-smoke",
+            "--live-tushare-trade-date",
+            "2026-07-08",
+        ],
+    )
 
     assert result.exit_code != 0
     assert "live Tushare smoke failed" in result.output
     assert "[masked]" in result.output
     assert "fake-error-token" not in result.output
+
+
+def test_live_capability_cli_requires_explicit_confirmation(monkeypatch):
+    calls = []
+
+    def forbidden_loader(config):
+        calls.append(config)
+        raise AssertionError("provider runtime must not load without confirmation")
+
+    monkeypatch.setattr(
+        "stock_analyzer.cli.load_default_external_runtime",
+        forbidden_loader,
+    )
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "ops",
+            "verify-formal-capabilities",
+            "--trade-date",
+            "2026-07-10",
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert "--confirm-live-read is required" in result.output
+    assert calls == []
 
 
 def test_run_daily_dry_run_completes():
@@ -326,16 +410,20 @@ def test_analysis_repository_wires_supabase_capacity_guard_from_config(monkeypat
     assert repo.capacity_guard.stop_mb == 456.5
 
 
-def test_run_daily_with_supabase_config_fails_without_tushare_token(monkeypatch):
+def test_run_daily_with_supabase_config_fails_when_formal_dependencies_are_unavailable(monkeypatch):
     repo = RecordingRepository()
     monkeypatch.setenv("SUPABASE_URL", "https://supabase.example.test")
     monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "fake-service-role-key")
-    monkeypatch.delenv("TUSHARE_TOKEN", raising=False)
-    monkeypatch.setenv("TUSHARE_TOKEN_PATH", "/tmp/stock-analyzer-missing-token")
     monkeypatch.delenv("STOCK_ANALYZER_FIXTURE_MODE", raising=False)
     monkeypatch.setattr(
         "stock_analyzer.cli._analysis_repository",
         lambda config, **kwargs: repo,
+    )
+    monkeypatch.setattr(
+        "stock_analyzer.cli._default_run_daily",
+        lambda *_args: (_ for _ in ()).throw(
+            RuntimeError("formal capability evidence unavailable")
+        ),
     )
 
     result = CliRunner().invoke(
@@ -344,37 +432,30 @@ def test_run_daily_with_supabase_config_fails_without_tushare_token(monkeypatch)
     )
 
     assert result.exit_code != 0
-    assert "Tushare token is missing" in result.output
+    assert "formal capability evidence unavailable" in result.output
     assert repo.save_calls == []
 
 
-def test_run_daily_with_supabase_config_calls_production_provider(tmp_path, monkeypatch):
+def test_run_daily_with_supabase_config_calls_formal_entry(tmp_path, monkeypatch):
     repo = RecordingRepository()
-    warehouse_instances = []
-
-    class FakeWarehouse:
-        def __init__(self, root):
-            self.root = root
-            self.saved_bundles = []
-            warehouse_instances.append(self)
-
-        def save_bundle(self, bundle):
-            self.saved_bundles.append(bundle)
+    captured = []
 
     monkeypatch.setenv("SUPABASE_URL", "https://supabase.example.test")
     monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "fake-service-role-key")
-    monkeypatch.setenv("TUSHARE_TOKEN", "fake-tushare-token")
-    monkeypatch.setenv("LOCAL_WAREHOUSE_DIR", str(tmp_path / "warehouse"))
     monkeypatch.delenv("STOCK_ANALYZER_FIXTURE_MODE", raising=False)
     monkeypatch.setattr(
         "stock_analyzer.cli._analysis_repository",
         lambda config, **kwargs: repo,
     )
     monkeypatch.setattr(
-        "stock_analyzer.cli.build_production_market_data_provider",
-        lambda config: FakeProductionProvider(),
+        "stock_analyzer.cli._default_run_daily",
+        lambda project_root, repository, trade_date: captured.append(
+            (project_root, repository, trade_date)
+        )
+        or SimpleNamespace(
+            receipt=SimpleNamespace(state=FormalRunState.REPORT_GENERATED)
+        ),
     )
-    monkeypatch.setattr("stock_analyzer.cli.LocalWarehouse", FakeWarehouse)
 
     result = CliRunner().invoke(
         app,
@@ -382,35 +463,49 @@ def test_run_daily_with_supabase_config_calls_production_provider(tmp_path, monk
     )
 
     assert result.exit_code == 0
-    assert "daily run completed for 2026-07-07" in result.stdout
-    assert "fake-tushare-token" not in result.output
-    assert warehouse_instances[0].root == tmp_path / "warehouse"
-    assert len(warehouse_instances[0].saved_bundles) == 1
-    save_payloads = {name: payload for name, payload in repo.save_calls}
-    assert save_payloads["recommendations"]
-    assert save_payloads["market_bars"]
-    assert save_payloads["daily_basic_indicators"]
-    assert save_payloads["data_source_runs"]
+    assert "daily formal run completed for 2026-07-07" in result.stdout
+    assert captured[0][1] is repo
+    assert captured[0][2] == date(2026, 7, 7)
+    assert repo.save_calls == []
 
 
-def test_run_daily_with_supabase_config_passes_configured_local_storage(
+def test_run_daily_allow_data_insufficient_cannot_bypass_formal_block(
     tmp_path,
     monkeypatch,
 ):
     repo = RecordingRepository()
+
+    monkeypatch.setenv("SUPABASE_URL", "https://supabase.example.test")
+    monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "fake-service-role-key")
+    monkeypatch.delenv("STOCK_ANALYZER_FIXTURE_MODE", raising=False)
+    monkeypatch.setattr(
+        "stock_analyzer.cli._analysis_repository",
+        lambda config, **kwargs: repo,
+    )
+    monkeypatch.setattr(
+        "stock_analyzer.cli._default_run_daily",
+        lambda *_args: SimpleNamespace(
+            receipt=SimpleNamespace(state=FormalRunState.BLOCKED_NEEDS_HUMAN)
+        ),
+    )
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "run-daily",
+            "--allow-data-insufficient-output",
+            "--trade-date",
+            "2026-07-07",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "blocked_needs_human" in result.output
+    assert not (tmp_path / "index.html").exists()
+
+
+def test_run_daily_forwards_strategy_v2_and_data_insufficient_flags(monkeypatch):
     captured = {}
-    warehouse_instances = []
-    archive_instances = []
-
-    class FakeWarehouse:
-        def __init__(self, root):
-            self.root = root
-            warehouse_instances.append(self)
-
-    class FakeArchive:
-        def __init__(self, root):
-            self.root = root
-            archive_instances.append(self)
 
     def fake_run_daily_pipeline(trade_date, output_dir, **kwargs):
         captured.update(kwargs)
@@ -420,34 +515,23 @@ def test_run_daily_with_supabase_config_passes_configured_local_storage(
             evaluation_tasks=[],
         )
 
-    monkeypatch.setenv("SUPABASE_URL", "https://supabase.example.test")
-    monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "fake-service-role-key")
-    monkeypatch.setenv("TUSHARE_TOKEN", "fake-tushare-token")
-    monkeypatch.setenv("LOCAL_WAREHOUSE_DIR", str(tmp_path / "warehouse"))
-    monkeypatch.setenv("LOCAL_ARCHIVE_DIR", str(tmp_path / "archive"))
-    monkeypatch.delenv("STOCK_ANALYZER_FIXTURE_MODE", raising=False)
-    monkeypatch.setattr(
-        "stock_analyzer.cli._analysis_repository",
-        lambda config, **kwargs: repo,
-    )
-    monkeypatch.setattr(
-        "stock_analyzer.cli.build_production_market_data_provider",
-        lambda config: FakeProductionProvider(),
-    )
-    monkeypatch.setattr("stock_analyzer.cli.LocalWarehouse", FakeWarehouse, raising=False)
-    monkeypatch.setattr("stock_analyzer.cli.LocalArchive", FakeArchive, raising=False)
     monkeypatch.setattr("stock_analyzer.cli.run_daily_pipeline", fake_run_daily_pipeline)
 
     result = CliRunner().invoke(
         app,
-        ["run-daily", "--trade-date", "2026-07-07"],
+        [
+            "run-daily",
+            "--dry-run",
+            "--strategy-v2",
+            "--allow-data-insufficient-output",
+            "--trade-date",
+            "2026-07-07",
+        ],
     )
 
     assert result.exit_code == 0
-    assert captured["local_warehouse"] is warehouse_instances[0]
-    assert captured["local_archive"] is archive_instances[0]
-    assert warehouse_instances[0].root == tmp_path / "warehouse"
-    assert archive_instances[0].root == tmp_path / "archive"
+    assert captured["strategy_v2"] is True
+    assert captured["allow_data_insufficient_output"] is True
 
 
 def test_run_daily_fixture_mode_writes_local_sample_report(tmp_path, monkeypatch):
@@ -522,6 +606,9 @@ def test_render_report_command_writes_requested_output_dir_in_fixture_mode(tmp_p
 
 def test_render_report_command_uses_stored_repository_data_when_available(tmp_path, monkeypatch):
     repo = RecordingRepository()
+    warehouse_root = tmp_path / "warehouse"
+    monkeypatch.setenv("LOCAL_WAREHOUSE_DIR", str(warehouse_root))
+    _write_committed_receipt(warehouse_root, date(2026, 7, 7))
     repo.daily_recommendations = [
         Recommendation(
             trade_date=date(2026, 7, 7),
@@ -587,6 +674,9 @@ def test_render_report_command_uses_stored_repository_data_when_available(tmp_pa
 
 def test_render_report_command_fails_when_stored_evidence_is_incomplete(tmp_path, monkeypatch):
     repo = RecordingRepository()
+    warehouse_root = tmp_path / "warehouse"
+    monkeypatch.setenv("LOCAL_WAREHOUSE_DIR", str(warehouse_root))
+    _write_committed_receipt(warehouse_root, date(2026, 7, 7))
     repo.daily_recommendations = [
         Recommendation(
             trade_date=date(2026, 7, 7),
@@ -624,6 +714,9 @@ def test_render_report_command_fails_when_stored_evidence_is_incomplete(tmp_path
 
 def test_render_report_command_fails_without_stored_data_in_production(tmp_path, monkeypatch):
     repo = RecordingRepository()
+    warehouse_root = tmp_path / "warehouse"
+    monkeypatch.setenv("LOCAL_WAREHOUSE_DIR", str(warehouse_root))
+    _write_committed_receipt(warehouse_root, date(2026, 7, 7))
     monkeypatch.setattr(
         "stock_analyzer.cli._analysis_repository",
         lambda config, **kwargs: repo,

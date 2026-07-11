@@ -189,3 +189,40 @@ def test_later_dated_bars_do_not_influence_current_trade_date_features():
 
     assert stocks[0].amount == current_amount
     assert features["600000.SH"].trend_20d > 0
+
+
+def test_relative_strength_is_cross_sectional_percentile_not_raw_return():
+    trade_date = date(2026, 6, 9)
+    stocks = _stock_rows(3)
+    bars = []
+    for index, stock in enumerate(stocks):
+        stock_bars = _bars(stock.ts_code)
+        multiplier = 1.0 + index * 0.005
+        bars.extend(
+            bar.model_copy(update={"close": bar.close * (multiplier ** offset)})
+            for offset, bar in enumerate(stock_bars)
+        )
+
+    bundle = build_market_bundle(
+        trade_date=trade_date,
+        stock_basic=stocks,
+        daily_bars=bars,
+        daily_basic=[
+            DailyBasicRow(
+                trade_date=trade_date,
+                ts_code=stock.ts_code,
+                turnover_rate=1.2,
+                source_name="recorded",
+                source_grade=SourceGrade.PRIMARY,
+            )
+            for stock in stocks
+        ],
+        data_status=DataStatus.COMPLETE_PRIMARY,
+        source_grade=SourceGrade.PRIMARY,
+        source_versions={"recorded": "v1"},
+        source_runs=[],
+    )
+
+    strengths = [bundle.feature_profiles[stock.ts_code].relative_strength for stock in stocks]
+    assert strengths == [0.0, 0.5, 1.0]
+    assert strengths[-1] != bundle.feature_profiles[stocks[-1].ts_code].trend_20d

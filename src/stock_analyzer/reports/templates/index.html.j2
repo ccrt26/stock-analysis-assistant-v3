@@ -3,16 +3,36 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% if data_unavailable_notice %}数据不可用通知{% else %}股票观察报告{% endif %}</title>
+  <title>{% if data_unavailable_notice %}{% if report_mode == "data_insufficient" %}数据不足通知{% else %}数据不可用通知{% endif %}{% else %}股票观察报告{% endif %}</title>
 </head>
 <body>
   <main>
     {% if data_unavailable_notice %}
-    <h1>{{ trade_date.isoformat() }} 数据不可用</h1>
+    <h1>{{ trade_date.isoformat() }} {% if report_mode == "data_insufficient" %}数据不足{% else %}数据不可用{% endif %}</h1>
     <section role="alert">
-      <h2>当日实时数据不可用</h2>
+      <h2>当日实时{% if report_mode == "data_insufficient" %}数据不足{% else %}数据不可用{% endif %}</h2>
       <p>不生成新的股票分析结论。</p>
       <p>原因：{{ data_unavailable_notice.reason }}</p>
+      {% if operational_status and operational_status.blocking_missing_fields %}
+      <h3>阻塞缺失字段</h3>
+      <ul>
+        {% for field in operational_status.blocking_missing_fields %}
+        <li>{{ field }}</li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+      {% if operational_status and operational_status.data_recovery_attempts %}
+      <h3>数据恢复尝试</h3>
+      <ul>
+        {% for attempt in operational_status.data_recovery_attempts %}
+        <li>{{ attempt.family or "unknown" }} / {{ attempt.source_name or attempt.source or "unknown" }} / {{ attempt.status or "unknown" }}{% if attempt.message %} / {{ attempt.message }}{% endif %}</li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+      {% if report_mode == "data_insufficient" %}
+      <h3>影响</h3>
+      <p>推荐与重点关注不能形成完整结论；等待缺失字段恢复后重新生成报告。</p>
+      {% endif %}
       {% if data_unavailable_notice.last_successful_trade_date %}
       <p>最近一次成功数据日期：{{ data_unavailable_notice.last_successful_trade_date.isoformat() }}</p>
       {% endif %}
@@ -28,6 +48,62 @@
 
     <section>
       <h2>今日推荐</h2>
+      {% if strategy_v2_cards %}
+      {% for item in strategy_v2_cards %}
+      <article>
+        <h3><a href="{{ item.stock_page }}">{{ item.name }} {{ item.ts_code }}</a></h3>
+        <p>分层：{{ item.display_rank_bucket|strategy_text }}</p>
+        <p>操作建议：{{ item.action|strategy_text }}</p>
+        <p>仓位：{{ item.position_min_pct }}%-{{ item.position_max_pct }}%</p>
+
+        <h4>发生了什么</h4>
+        <p>{{ item.what_happened|strategy_text }}</p>
+
+        <h4>为什么可能发生</h4>
+        <p>{{ item.why_it_may_have_happened|strategy_text }}</p>
+
+        <h4>可能意味着什么</h4>
+        <p>{{ item.what_it_may_mean|strategy_text }}</p>
+
+        <h4>主要风险</h4>
+        <p>{{ item.main_risk|strategy_text }}</p>
+
+        <h4>重点关注进度</h4>
+        <p>{{ item.focus_entry_progress|strategy_text if item.focus_entry_progress else "待观察" }}</p>
+
+        <h4>进入重点前需要</h4>
+        <ul>
+          {% for line in item.needed_before_focus_entry %}
+          <li>{{ line|strategy_text }}</li>
+          {% endfor %}
+        </ul>
+
+        <h4>行动依据</h4>
+        <ul>
+          {% for line in item.action_reasoning %}
+          <li>{{ line|strategy_text }}</li>
+          {% endfor %}
+        </ul>
+
+        <h4>确认条件</h4>
+        <ul>
+          {% for line in item.required_confirmation %}
+          <li>{{ line|strategy_text }}</li>
+          {% endfor %}
+        </ul>
+
+        <h4>失效条件</h4>
+        <ul>
+          {% for line in item.invalidation_conditions %}
+          <li>{{ line|strategy_text }}</li>
+          {% endfor %}
+        </ul>
+
+        <h4>看错风险</h4>
+        <p>{{ item.risk_if_wrong|strategy_text }}</p>
+      </article>
+      {% endfor %}
+      {% elif recommendation_details %}
       {% for item in recommendation_details %}
       <article>
         <h3><a href="{{ item.stock_page }}">{{ item.name }} {{ item.ts_code }}</a></h3>
@@ -78,21 +154,108 @@
         <h4>数据可信度</h4>
         <p>{{ item.evidence.data_credibility }}</p>
       </article>
+      {% endfor %}
       {% else %}
       <p>今日没有符合标准的推荐。</p>
-      {% endfor %}
+      {% endif %}
     </section>
 
     <section>
       <h2>重点关注</h2>
+      {% if focus_entry_theses or focus_daily_updates %}
+      {% for item in focus_entry_theses %}
+      <article>
+        <h3>{{ item.name }} {{ item.ts_code }}</h3>
+        <p>来源：{{ item.source.value }}</p>
+        <p>状态：{{ item.validation_result|strategy_text }}</p>
+        <p>论点：{{ item.thesis|strategy_text }}</p>
+        <p>操作建议：{{ item.action.decision.value|strategy_text }}</p>
+        <p>仓位：{{ item.action.position_min_pct }}%-{{ item.action.position_max_pct }}%</p>
+
+        <h4>理由</h4>
+        <ul>
+          {% for line in item.action.reasoning %}
+          <li>{{ line|strategy_text }}</li>
+          {% endfor %}
+        </ul>
+
+        <h4>要求确认</h4>
+        <ul>
+          {% for line in item.required_confirmation or item.action.required_confirmation %}
+          <li>{{ line|strategy_text }}</li>
+          {% endfor %}
+        </ul>
+
+        <h4>失效点</h4>
+        <ul>
+          {% for line in item.invalidation_conditions or item.action.invalidation_conditions %}
+          <li>{{ line|strategy_text }}</li>
+          {% endfor %}
+        </ul>
+
+        <h4>看错风险</h4>
+        <p>{{ item.action.risk_if_wrong|strategy_text }}</p>
+
+        {% if item.risk_notes %}
+        <h4>风险备注</h4>
+        <ul>
+          {% for line in item.risk_notes %}
+          <li>{{ line|strategy_text }}</li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+      </article>
+      {% endfor %}
+      {% for item in focus_daily_updates %}
+      <article>
+        <h3>{{ item.name }} {{ item.ts_code }}</h3>
+        <p>来源：重点关注更新</p>
+        <p>状态：{{ item.focus_entry_progress|strategy_text }}</p>
+        <p>论点：{{ item.thesis|strategy_text }}</p>
+        <p>操作建议：{{ item.action.decision.value|strategy_text }}</p>
+        <p>仓位：{{ item.action.position_min_pct }}%-{{ item.action.position_max_pct }}%</p>
+
+        <h4>理由</h4>
+        <ul>
+          {% for line in item.action.reasoning %}
+          <li>{{ line|strategy_text }}</li>
+          {% endfor %}
+        </ul>
+
+        <h4>要求确认</h4>
+        <ul>
+          {% for line in item.required_confirmation or item.action.required_confirmation %}
+          <li>{{ line|strategy_text }}</li>
+          {% endfor %}
+        </ul>
+
+        <h4>失效点</h4>
+        <ul>
+          {% for line in item.invalidation_conditions or item.action.invalidation_conditions %}
+          <li>{{ line|strategy_text }}</li>
+          {% endfor %}
+        </ul>
+
+        <h4>看错风险</h4>
+        <p>{{ item.action.risk_if_wrong|strategy_text }}</p>
+        {% if item.action.decision.value == "建议确认是否移出重点" %}
+        <p>移出确认：等待人工复核。</p>
+        {% endif %}
+        {% if item.data_insufficient_reason %}
+        <p>数据不足：{{ item.data_insufficient_reason|strategy_text }}</p>
+        {% endif %}
+      </article>
+      {% endfor %}
+      {% elif focus_states %}
       {% for item in focus_states %}
       <article>
         <h3>{{ item.ts_code }}</h3>
         <p>{{ item.state.value }}</p>
       </article>
+      {% endfor %}
       {% else %}
       <p>当前没有重点关注股票。</p>
-      {% endfor %}
+      {% endif %}
     </section>
     {% endif %}
   </main>

@@ -4,14 +4,23 @@ import json
 
 import pytest
 
-from stock_analyzer.data.models import DataUnavailableNotice
+from stock_analyzer.analysis.strategy_v2 import generate_strategy_v2_recommendations
+from stock_analyzer.data.models import DataUnavailableNotice, SourceStatus
 from stock_analyzer.domain.models import (
     ActionLabel,
+    DataRecoveryAttempt,
     EvidencePackage,
+    FeatureSnapshot,
     FocusState,
+    OperationalDailyStatus,
+    OperationalReportState,
     Recommendation,
 )
-from stock_analyzer.reports.generator import render_data_unavailable_notice, render_reports
+from stock_analyzer.reports.generator import (
+    render_data_unavailable_notice,
+    render_reports,
+    render_strategy_v2_data_insufficient_report,
+)
 
 
 def test_render_reports_creates_fixed_entry_and_hides_secrets(tmp_path):
@@ -212,6 +221,85 @@ def test_render_reports_marks_fixture_outputs_in_html_and_json(tmp_path):
         assert "not production data" in html
 
 
+def test_strategy_v2_report_hides_scores_and_shows_action_position(tmp_path):
+    result = generate_strategy_v2_recommendations(
+        features=[_strategy_feature("600000.SH")],
+        stock_names={"600000.SH": "浦发银行"},
+        trade_date=date(2026, 7, 10),
+    )
+
+    render_reports(
+        tmp_path,
+        [],
+        [],
+        trade_date=date(2026, 7, 10),
+        strategy_v2_cards=result.cards,
+        strategy_v2_snapshots=result.snapshots,
+        operational_status=_generated_status(
+            date(2026, 7, 10), recommendation_count=1, focus_count=0
+        ),
+    )
+
+    html = (tmp_path / "index.html").read_text(encoding="utf-8")
+    stock_html = (
+        tmp_path / "daily" / "2026-07-10" / "stocks" / "600000.SH.html"
+    ).read_text(encoding="utf-8")
+    payload = json.loads((tmp_path / "data" / "latest.json").read_text(encoding="utf-8"))
+
+    assert "评分" not in html
+    assert "评分" not in stock_html
+    assert "internal_score" in payload["strategy_snapshots"][0]
+    assert "internal_score" not in payload["recommendation_cards"][0]
+    assert "操作建议" in html
+    assert "仓位" in html
+    assert "失效" in html
+    assert "操作建议" in stock_html
+    assert "确认条件" in stock_html
+    assert "看错风险" in stock_html
+    for label in [
+        "公司业务",
+        "基本面与估值",
+        "市场与板块",
+        "趋势与成交",
+        "事件与催化",
+        "风险与反证",
+    ]:
+        assert label in stock_html
+
+
+def test_data_insufficient_report_lists_recovery_attempts_and_impact(tmp_path):
+    status = OperationalDailyStatus(
+        trade_date=date(2026, 7, 10),
+        is_trading_day=True,
+        recommendation_state=OperationalReportState.DATA_INSUFFICIENT,
+        focus_state=OperationalReportState.DATA_INSUFFICIENT,
+        recommendation_count=0,
+        focus_count=0,
+        data_recovery_attempts=[
+            DataRecoveryAttempt(
+                trade_date=date(2026, 7, 10),
+                family="daily_ohlcv",
+                source_name="tushare.daily",
+                status=SourceStatus.FAILED,
+                message="no current rows",
+            )
+        ],
+        blocking_missing_fields=["daily_ohlcv.close"],
+        message="核心行情缺失，不能形成完整结论。",
+    )
+
+    render_strategy_v2_data_insufficient_report(tmp_path, status)
+
+    html = (tmp_path / "index.html").read_text(encoding="utf-8")
+    payload = json.loads((tmp_path / "data" / "latest.json").read_text(encoding="utf-8"))
+
+    assert payload["report_mode"] == "data_insufficient"
+    assert "核心行情缺失" in html
+    assert "daily_ohlcv.close" in html
+    assert "tushare.daily" in html
+    assert "影响" in html
+
+
 def test_data_unavailable_notice_does_not_create_stock_analysis_pages(tmp_path):
     notice = DataUnavailableNotice(
         trade_date=date(2026, 7, 8),
@@ -250,4 +338,36 @@ def _evidence_package() -> EvidencePackage:
         expected_confirmation_path=["趋势延续", "成交量维持"],
         invalidation_conditions=["核心趋势证据消失", "反证强于支持证据"],
         source_versions={"recommendation": "2026-07-07-600000.SH"},
+    )
+
+
+def _strategy_feature(ts_code: str) -> FeatureSnapshot:
+    return FeatureSnapshot(
+        trade_date=date(2026, 7, 10),
+        ts_code=ts_code,
+        trend_20d=0.08,
+        trend_60d=0.12,
+        relative_strength=0.75,
+        volatility_20d=0.24,
+        liquidity_score=0.9,
+        quality_score=0.7,
+        market_regime="sideways",
+        industry="测试行业",
+        data_quality="ok",
+    )
+
+
+def _generated_status(
+    trade_date: date,
+    recommendation_count: int,
+    focus_count: int,
+) -> OperationalDailyStatus:
+    return OperationalDailyStatus(
+        trade_date=trade_date,
+        is_trading_day=True,
+        recommendation_state=OperationalReportState.GENERATED,
+        focus_state=OperationalReportState.GENERATED,
+        recommendation_count=recommendation_count,
+        focus_count=focus_count,
+        message="Daily recommendations and focus watchlist generated.",
     )
