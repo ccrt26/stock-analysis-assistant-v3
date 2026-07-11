@@ -199,6 +199,7 @@ def _require_formal_ledger(ledger: Any) -> None:
         "pending_hash",
         "activate_formal_run",
         "is_formal_run_active",
+        "verify_formal_run_active",
         "discard_pending",
     )
     missing = [name for name in methods if not callable(getattr(ledger, name, None))]

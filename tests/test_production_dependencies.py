@@ -260,6 +260,22 @@ def test_live_runtime_rejects_recorded_capability_before_provider_call(tmp_path)
     assert runtime.akshare_module.calls == []
 
 
+def test_factory_requires_strong_formal_activation_readback(tmp_path):
+    runtime = recorded_external_runtime(tmp_path)
+    runtime.ledger.verify_formal_run_active = None
+
+    with pytest.raises(
+        ProductionDependencyError,
+        match="verify_formal_run_active",
+    ):
+        build_production_formal_dependencies(
+            tmp_path,
+            InMemoryAnalysisRepository(),
+            TARGET,
+            runtime=runtime,
+        )
+
+
 def test_default_factory_reports_missing_optional_packages_without_secret_values(tmp_path):
     config = AppConfig(
         project_root=tmp_path,

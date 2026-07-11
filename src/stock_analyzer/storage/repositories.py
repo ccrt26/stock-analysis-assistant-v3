@@ -728,6 +728,75 @@ class SupabaseAnalysisRepository:
         )
         return len(result.data or []) == 1
 
+    def verify_formal_run_active(
+        self,
+        run_id: str,
+        activation_id: str,
+        receipt_hash: str,
+        rows_hash: str,
+    ) -> bool:
+        receipt_rows = (
+            self.client.table("active_formal_run_receipt")
+            .select("run_id,activation_id,receipt_hash")
+            .eq("run_id", run_id)
+            .eq("activation_id", activation_id)
+            .execute()
+            .data
+            or []
+        )
+        if (
+            len(receipt_rows) != 1
+            or receipt_rows[0].get("receipt_hash") != receipt_hash
+        ):
+            return False
+        marker_rows = (
+            self.client.table("formal_run_activation_marker")
+            .select("run_id,pending_id,activation_id")
+            .eq("run_id", run_id)
+            .eq("activation_id", activation_id)
+            .execute()
+            .data
+            or []
+        )
+        if len(marker_rows) != 1 or not marker_rows[0].get("pending_id"):
+            return False
+        pending_id = str(marker_rows[0]["pending_id"])
+        pending_rows = (
+            self.client.table("formal_run_pending_batch")
+            .select("run_id,pending_id,rows_hash,status")
+            .eq("run_id", run_id)
+            .eq("pending_id", pending_id)
+            .execute()
+            .data
+            or []
+        )
+        if (
+            len(pending_rows) != 1
+            or pending_rows[0].get("status") != "active"
+            or pending_rows[0].get("rows_hash") != rows_hash
+        ):
+            return False
+        active_rows = (
+            self.client.table("active_formal_decision_row")
+            .select("run_id,row_ordinal,row_payload,activation_id")
+            .eq("run_id", run_id)
+            .eq("activation_id", activation_id)
+            .execute()
+            .data
+            or []
+        )
+        try:
+            ordered = sorted(active_rows, key=lambda row: int(row["row_ordinal"]))
+            ordinals = [int(row["row_ordinal"]) for row in ordered]
+            payloads = tuple(row["row_payload"] for row in ordered)
+        except (KeyError, TypeError, ValueError):
+            return False
+        if ordinals != list(range(1, len(ordered) + 1)):
+            return False
+        if any(not isinstance(payload, dict) for payload in payloads):
+            return False
+        return _formal_rows_sha256(payloads) == rows_hash
+
     def discard_pending(self, pending_id: str) -> None:
         meta = self._formal_pending_meta.get(pending_id)
         if meta is None:
@@ -1036,10 +1105,10 @@ def _payload_sha256(payload: dict) -> str:
 
 
 def _formal_rows_sha256(rows: tuple[dict, ...]) -> str:
-    canonical_rows = sorted(
+    canonical_rows = [
         json.dumps(row, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         for row in rows
-    )
+    ]
     payload_text = json.dumps(
         canonical_rows,
         ensure_ascii=False,

@@ -47,6 +47,14 @@ class FormalLedger(Protocol):
 
     def is_formal_run_active(self, run_id: str, activation_id: str) -> bool: ...
 
+    def verify_formal_run_active(
+        self,
+        run_id: str,
+        activation_id: str,
+        receipt_hash: str,
+        rows_hash: str,
+    ) -> bool: ...
+
     def discard_pending(self, pending_id: str) -> None: ...
 
 
@@ -119,6 +127,31 @@ class InMemoryFormalLedger:
     def is_formal_run_active(self, run_id: str, activation_id: str) -> bool:
         marker = self.active.get(run_id)
         return marker is not None and marker["activation_id"] == activation_id
+
+    def verify_formal_run_active(
+        self,
+        run_id: str,
+        activation_id: str,
+        receipt_hash: str,
+        rows_hash: str,
+    ) -> bool:
+        marker = self.active.get(run_id)
+        receipt = self.receipts.get(run_id)
+        if (
+            marker is None
+            or marker["activation_id"] != activation_id
+            or receipt is None
+            or receipt["receipt_hash"] != receipt_hash
+        ):
+            return False
+        pending = self.pending.get(marker["pending_id"])
+        return (
+            pending is not None
+            and pending["run_id"] == run_id
+            and pending["receipt_hash"] == receipt_hash
+            and pending["rows_hash"] == rows_hash
+            and hash_ledger_rows(pending["rows"]) == rows_hash
+        )
 
     def discard_pending(self, pending_id: str) -> None:
         if any(
@@ -231,8 +264,13 @@ class FormalActivationCoordinator:
                 pending_id,
                 activation_id,
             )
-            if not self.ledger.is_formal_run_active(receipt.run_id, activation_id):
-                raise ActivationError("ledger activation marker missing")
+            if not self.ledger.verify_formal_run_active(
+                receipt.run_id,
+                activation_id,
+                receipt_hash,
+                expected_pending_hash,
+            ):
+                raise ActivationError("ledger activation strong readback failed")
 
             immutable_root = self.report_root / ".formal-runs" / receipt.run_id
             _preserve_immutable_artifacts(
@@ -317,7 +355,7 @@ def formal_receipt_hash(receipt: RunReceipt) -> str:
 
 
 def hash_ledger_rows(rows: tuple[dict[str, Any], ...]) -> str:
-    return _hash(sorted((_canonical_json(row) for row in rows)))
+    return _hash([_canonical_json(row) for row in rows])
 
 
 def hash_artifact_tree(root: Path) -> dict[str, str]:

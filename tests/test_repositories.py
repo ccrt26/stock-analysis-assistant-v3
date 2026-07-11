@@ -609,6 +609,152 @@ def test_supabase_repository_active_marker_read_is_fail_closed():
     assert repo.is_formal_run_active("run-1", "other") is False
 
 
+def test_supabase_activation_readback_requires_matching_receipt_and_rows_hashes():
+    from stock_analyzer.ops.activation import hash_ledger_rows
+
+    rows = (
+        {"kind": "recommendation", "ts_code": "600000.SH"},
+        {"kind": "focus", "ts_code": "600001.SH"},
+    )
+    rows_hash = hash_ledger_rows(rows)
+    client = FakeSupabaseClient()
+    client.table_data.update(
+        {
+            "active_formal_run_receipt": [
+                {
+                    "run_id": "run-1",
+                    "activation_id": "activation-1",
+                    "receipt_hash": "receipt-hash",
+                }
+            ],
+            "formal_run_activation_marker": [
+                {
+                    "run_id": "run-1",
+                    "activation_id": "activation-1",
+                    "pending_id": "pending-1",
+                }
+            ],
+            "formal_run_pending_batch": [
+                {
+                    "run_id": "run-1",
+                    "pending_id": "pending-1",
+                    "rows_hash": rows_hash,
+                    "status": "active",
+                }
+            ],
+            "active_formal_decision_row": [
+                {
+                    "run_id": "run-1",
+                    "activation_id": "activation-1",
+                    "row_ordinal": index,
+                    "row_payload": row,
+                }
+                for index, row in enumerate(rows, start=1)
+            ],
+        }
+    )
+    repo = SupabaseAnalysisRepository(client)
+
+    assert repo.verify_formal_run_active(
+        "run-1",
+        "activation-1",
+        "receipt-hash",
+        rows_hash,
+    ) is True
+    assert repo.verify_formal_run_active(
+        "run-1",
+        "activation-1",
+        "wrong-receipt",
+        rows_hash,
+    ) is False
+    assert repo.verify_formal_run_active(
+        "run-1",
+        "activation-1",
+        "receipt-hash",
+        "wrong-rows",
+    ) is False
+
+    client.table_data["active_formal_decision_row"].pop()
+    assert repo.verify_formal_run_active(
+        "run-1",
+        "activation-1",
+        "receipt-hash",
+        rows_hash,
+    ) is False
+
+
+def test_supabase_activation_readback_rejects_missing_extra_or_reordered_rows():
+    from stock_analyzer.ops.activation import hash_ledger_rows
+
+    first = {"kind": "recommendation", "ts_code": "600000.SH"}
+    second = {"kind": "focus", "ts_code": "600001.SH"}
+    expected_hash = hash_ledger_rows((first, second))
+    client = FakeSupabaseClient()
+    client.table_data.update(
+        {
+            "active_formal_run_receipt": [
+                {
+                    "run_id": "run-1",
+                    "activation_id": "activation-1",
+                    "receipt_hash": "receipt-hash",
+                }
+            ],
+            "formal_run_activation_marker": [
+                {
+                    "run_id": "run-1",
+                    "activation_id": "activation-1",
+                    "pending_id": "pending-1",
+                }
+            ],
+            "formal_run_pending_batch": [
+                {
+                    "run_id": "run-1",
+                    "pending_id": "pending-1",
+                    "rows_hash": expected_hash,
+                    "status": "active",
+                }
+            ],
+            "active_formal_decision_row": [
+                {
+                    "run_id": "run-1",
+                    "activation_id": "activation-1",
+                    "row_ordinal": 1,
+                    "row_payload": second,
+                },
+                {
+                    "run_id": "run-1",
+                    "activation_id": "activation-1",
+                    "row_ordinal": 2,
+                    "row_payload": first,
+                },
+            ],
+        }
+    )
+    repo = SupabaseAnalysisRepository(client)
+
+    assert repo.verify_formal_run_active(
+        "run-1",
+        "activation-1",
+        "receipt-hash",
+        expected_hash,
+    ) is False
+
+    client.table_data["active_formal_decision_row"].append(
+        {
+            "run_id": "run-1",
+            "activation_id": "activation-1",
+            "row_ordinal": 3,
+            "row_payload": {"kind": "unexpected"},
+        }
+    )
+    assert repo.verify_formal_run_active(
+        "run-1",
+        "activation-1",
+        "receipt-hash",
+        expected_hash,
+    ) is False
+
+
 def test_supabase_repository_reads_activated_formal_rows_before_legacy_rows():
     trade_date = date(2026, 7, 10)
     formal = Recommendation(

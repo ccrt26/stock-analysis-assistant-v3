@@ -221,6 +221,46 @@ def test_artifact_or_pending_hash_mismatch_fails_closed(tmp_path):
     assert pointer.read_bytes() == b"prior"
 
 
+def test_coordinator_does_not_move_local_pointer_when_strong_readback_fails(
+    tmp_path,
+):
+    class ReadbackRejectingLedger(InMemoryFormalLedger):
+        def verify_formal_run_active(
+            self,
+            run_id,
+            activation_id,
+            receipt_hash,
+            rows_hash,
+        ):
+            return False
+
+    controller = _analyzing_controller(tmp_path, run_id="readback-rejected")
+    ledger = ReadbackRejectingLedger()
+    reports = tmp_path / "reports"
+    reports.mkdir(exist_ok=True)
+    pointer = reports / "current.json"
+    pointer.write_bytes(b"prior")
+
+    with pytest.raises(ActivationError, match="strong readback"):
+        FormalActivationCoordinator(
+            reports,
+            controller.store,
+            ledger,
+        ).activate(
+            controller.receipt,
+            render=_render,
+            verify=_verify,
+            ledger_rows=({"kind": "focus", "ts_code": "600000.SH"},),
+            pointer_payloads={pointer: b"new"},
+        )
+
+    latest = controller.store.latest_run_receipt("readback-rejected")
+    assert latest.state is FormalRunState.FAILED_RETRYABLE
+    assert latest.local_activation_id is None
+    assert pointer.read_bytes() == b"prior"
+    assert ledger.visible_rows(latest.run_id, latest.local_activation_id) == []
+
+
 def test_zero_recommendations_commits_focus_rows_without_advancing_report_pointer(tmp_path):
     controller = _analyzing_controller(tmp_path, run_id="focus-only")
     ledger = InMemoryFormalLedger()

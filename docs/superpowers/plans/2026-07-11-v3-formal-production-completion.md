@@ -381,12 +381,14 @@ git commit -m "test: prove precise event failover end to end"
 **Files:**
 - Modify: `src/stock_analyzer/ops/activation.py`
 - Modify: `src/stock_analyzer/storage/repositories.py`
+- Modify: `src/stock_analyzer/ops/production_dependencies.py`
 - Modify: `tests/test_formal_activation.py`
 - Modify: `tests/test_repositories.py`
 
 **Interfaces:**
 - Add `FormalLedger.verify_formal_run_active(run_id, activation_id, receipt_hash, rows_hash) -> bool`.
 - `SupabaseAnalysisRepository.verify_formal_run_active()` reads `active_formal_run_receipt`, `active_formal_decision_row`, and the active pending batch; it recomputes the active rows hash and compares all four identifiers/hashes.
+- `hash_ledger_rows()` and `_formal_rows_sha256()` hash canonical rows in declared tuple/`row_ordinal` order; changing ordinals changes the hash.
 
 - [ ] **Step 1: Write failing hash-read-back tests**
 
@@ -412,6 +414,8 @@ Expected: FAIL because only run/activation identity is currently checked.
 
 Select the active receipt by both identifiers, compare its `receipt_hash`, fetch active rows ordered by `row_ordinal`, recompute `_formal_rows_sha256`, and compare the active pending batch `rows_hash`. The coordinator must call this method after RPC completion and before local/current/published pointer activation. Keep `is_formal_run_active()` as the read-only history predicate, not the activation commit proof.
 
+Add `verify_formal_run_active` to `_require_formal_ledger()` so the default production factory fails before acquisition when a ledger cannot provide strong read-back.
+
 - [ ] **Step 4: Run and prove green**
 
 Run the Step 2 command.
@@ -421,7 +425,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit atomic read-back**
 
 ```bash
-git add src/stock_analyzer/ops/activation.py src/stock_analyzer/storage/repositories.py tests/test_formal_activation.py tests/test_repositories.py
+git add src/stock_analyzer/ops/activation.py src/stock_analyzer/storage/repositories.py src/stock_analyzer/ops/production_dependencies.py tests/test_formal_activation.py tests/test_repositories.py tests/test_production_dependencies.py docs/superpowers/plans/2026-07-11-v3-formal-production-completion.md
 git commit -m "fix: verify formal activation hashes on readback"
 ```
 
