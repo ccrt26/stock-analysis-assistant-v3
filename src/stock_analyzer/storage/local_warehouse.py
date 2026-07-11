@@ -10,6 +10,7 @@ import pandas as pd
 from pydantic import BaseModel
 
 from stock_analyzer.data.models import MarketDataBundle
+from stock_analyzer.storage.formal_schema import connect_formal_warehouse
 from stock_analyzer.storage.manual_holdings import ManualHoldingStore
 
 
@@ -82,6 +83,7 @@ class LocalWarehouse:
         }
 
     def _refresh_duckdb_marker(self) -> None:
-        with duckdb.connect(str(self.duckdb_path)) as connection:
-            connection.execute("create table if not exists warehouse_metadata (key text primary key, value text)")
-            connection.execute("insert or replace into warehouse_metadata values ('format', 'duckdb-parquet-v1')")
+        with connect_formal_warehouse(self.duckdb_path) as connection:
+            connection.execute(
+                "insert or replace into warehouse_metadata values ('format', 'duckdb-parquet-v2')"
+            )

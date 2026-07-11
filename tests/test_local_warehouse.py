@@ -11,6 +11,7 @@ from stock_analyzer.data.models import (
     StockBasicRow,
 )
 from stock_analyzer.storage.local_warehouse import LocalWarehouse
+from stock_analyzer.storage.formal_schema import connect_formal_warehouse
 
 
 def _bundle(trade_date: date) -> MarketDataBundle:
@@ -78,6 +79,17 @@ def test_local_warehouse_writes_partitioned_parquet_and_duckdb_index(tmp_path):
     assert (tmp_path / "local_warehouse" / "warehouse.duckdb").exists()
     assert warehouse.query_count("market_daily", trade_date) == 2
     assert warehouse.query_count("daily_basic", trade_date) == 1
+    with connect_formal_warehouse(
+        tmp_path / "local_warehouse" / "warehouse.duckdb",
+        read_only=True,
+    ) as connection:
+        metadata = dict(
+            connection.execute(
+                "select key, value from warehouse_metadata"
+            ).fetchall()
+        )
+    assert metadata["format"] == "duckdb-parquet-v2"
+    assert metadata["formal_schema_version"] == "1"
 
 
 def test_local_warehouse_rerun_replaces_same_partition(tmp_path):
