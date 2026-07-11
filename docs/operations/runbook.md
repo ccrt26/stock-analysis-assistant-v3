@@ -39,6 +39,8 @@ Before installing the launchd example, replace every literal `__PROJECT_ROOT__` 
 
 For approved retries, keep the same `trade_date`, set `--scheduled-slot 19:00 --attempt 2` or `--scheduled-slot 19:30 --attempt 3`, and keep `--prepare-deploy`.
 
+All three launchd slots remain installed. If an earlier slot for the same date already ended in `success_with_recommendations`, `success_no_recommendations`, or `skipped_non_trading_day`, a later slot returns that prior terminal status unchanged. It performs no cleanup, provider acquisition, analysis, report render, Supabase write, deployment, publication, or notification. Reinvoking the identical completed formal run likewise reuses the frozen `REPORT_GENERATED` receipt without increasing its revision.
+
 Mac notification is disabled by default. Enable it only when desired with `--notify-mac` or `STOCK_ANALYZER_NOTIFY_MAC=1`; it should fire only when the final status is `failed_needs_human`.
 
 ### Strategy V2 daily run
