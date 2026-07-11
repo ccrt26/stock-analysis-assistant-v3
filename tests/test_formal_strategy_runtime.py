@@ -110,6 +110,36 @@ def test_formal_analysis_loads_exact_five_formal_days_and_breaks_on_blocked_day(
     assert output.value.focus_states == []
 
 
+def test_formal_analysis_carries_exact_five_session_history_for_focus_stock():
+    prior_days = [TARGET - timedelta(days=value) for value in (7, 4, 3, 2, 1)]
+    repository = InMemoryAnalysisRepository(
+        strategy_snapshots=_prior_snapshots(CODES[0], prior_days),
+        formally_committed_run_dates=set(prior_days),
+        formal_focus_days=[
+            FormalFocusDay(trade_date=value, formally_committed=True)
+            for value in prior_days
+        ],
+        focus_states=[
+            FocusState(
+                trade_date=prior_days[-1],
+                ts_code=CODES[0],
+                state=ActionLabel.CONTINUE_OBSERVATION,
+            )
+        ],
+    )
+
+    output = analyze_formal_inputs(
+        ready_receipt(),
+        candidate_set(ordered=(CODES[-1],), active=(CODES[0],)),
+        complete_payloads((CODES[-1], CODES[0])),
+        repository,
+    )
+
+    history = output.value.focus_history_by_code[CODES[0]]
+    assert [item.trade_date for item in history] == prior_days
+    assert all(item.ts_code == CODES[0] for item in history)
+
+
 def test_formal_focus_sessions_come_from_current_market_payload():
     current = date(2026, 7, 14)
     covered_sessions = (

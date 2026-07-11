@@ -74,6 +74,7 @@ class FormalReportPayload(BaseModel):
     strategy_snapshots: list[StrategyEvidenceSnapshot]
     focus_entry_theses: list[FocusEntryThesis]
     focus_daily_updates: list[FocusDailyUpdate]
+    focus_history_by_code: dict[str, list[StrategyEvidenceSnapshot]]
     action_recommendations: list[ActionRecommendationSummary]
     manual_holding_summaries: list[ManualHoldingSummary]
     operational_status: OperationalDailyStatus
@@ -175,6 +176,14 @@ def analyze_formal_inputs(
         before_date=receipt.target_date,
         eligible_dates=eligible_dates,
     )
+    focus_history_by_code = {
+        code: [
+            snapshot
+            for snapshot in prior_snapshots
+            if snapshot.ts_code == code and snapshot.trade_date in eligible_dates
+        ]
+        for code in candidate_set.active_focus_codes
+    }
     focus_result = update_focus_watchlist_v2(
         existing=repository.load_focus_states(),
         recommendation_snapshots=[*prior_snapshots, *current_snapshots],
@@ -219,6 +228,7 @@ def analyze_formal_inputs(
         strategy_snapshots=current_snapshots,
         focus_entry_theses=list(focus_result.entry_theses),
         focus_daily_updates=list(focus_result.daily_updates),
+        focus_history_by_code=focus_history_by_code,
         action_recommendations=action_recommendations,
         manual_holding_summaries=manual_holding_summaries,
         operational_status=operational_status,
