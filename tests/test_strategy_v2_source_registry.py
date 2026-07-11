@@ -49,7 +49,10 @@ def test_source_registry_names_exact_collection_paths():
         == "tushare.income|balancesheet|cashflow|fina_indicator|forecast|express"
     )
     assert registry["events_catalysts"].primary_route_id == "official.events_risk.v1"
-    assert registry["events_catalysts"].backup_route_id == "cninfo.events_risk.v1"
+    assert (
+        registry["events_catalysts"].backup_route_id
+        == "cninfo.direct.events_risk.v2"
+    )
     assert (
         registry["events_catalysts"].backup_path
         == "CninfoDisclosureClient.fetch_official_events_risk"

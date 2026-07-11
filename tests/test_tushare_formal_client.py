@@ -101,6 +101,19 @@ class RecordedTusharePro:
         if name == "suspend_d":
             return pd.DataFrame(columns=["ts_code", "trade_date", "suspend_type"])
         if name == "anns_d":
+            if "ts_code" not in kwargs:
+                return pd.DataFrame(
+                    [
+                        {
+                            "ann_date": "20260710",
+                            "ts_code": CODES[0],
+                            "name": "浦发银行",
+                            "title": "录制精确时间公告",
+                            "url": "https://example.invalid/semantic-probe.pdf",
+                            "rec_time": "2026-07-10 15:31:02.123",
+                        }
+                    ]
+                )
             return pd.DataFrame(
                 columns=["ann_date", "ts_code", "name", "title", "url", "rec_time"]
             )

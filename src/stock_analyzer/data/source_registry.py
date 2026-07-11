@@ -183,12 +183,12 @@ _FORMAL_ROUTE_BINDINGS = {
     "events_catalysts": (
         AcquisitionGroupId.OFFICIAL_EVENTS_RISK,
         "official.events_risk.v1",
-        "cninfo.events_risk.v1",
+        "cninfo.direct.events_risk.v2",
     ),
     "official_hard_risk": (
         AcquisitionGroupId.OFFICIAL_EVENTS_RISK,
         "official.events_risk.v1",
-        "cninfo.events_risk.v1",
+        "cninfo.direct.events_risk.v2",
     ),
     "manual_holdings": (
         AcquisitionGroupId.MANUAL_HOLDINGS,

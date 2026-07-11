@@ -10,6 +10,7 @@ from typing import Any
 from stock_analyzer.data.acquisition import RouteFailure
 from stock_analyzer.data.akshare_formal_client import AkshareFormalEndpointClient
 from stock_analyzer.data.capability_store import CapabilityBundle, LocalCapabilityStore
+from stock_analyzer.data.cninfo_disclosure_client import CninfoDisclosureClient
 from stock_analyzer.data.formal_contracts import (
     FORMAL_CONTRACT_VERSION,
     build_screening_contracts,
@@ -79,6 +80,14 @@ def verify_and_record_live_capabilities(
     versions = tested_library_versions or _installed_library_versions()
     primary = TushareFormalEndpointClient(runtime.tushare_pro)
     backup = AkshareFormalEndpointClient(runtime.akshare_module)
+    events_backup = CninfoDisclosureClient(
+        primary,
+        runtime.cninfo_http_client,
+        base_url=runtime.config.cninfo_base_url,
+        calls_per_minute=runtime.config.cninfo_calls_per_minute,
+        timeout_seconds=runtime.config.cninfo_timeout_seconds,
+        max_retries=runtime.config.cninfo_max_retries,
+    )
     clients = (
         (RouteKind.PRIMARY, primary),
         (RouteKind.BACKUP, backup),
@@ -120,7 +129,13 @@ def verify_and_record_live_capabilities(
             )
             for group_id in target_group_ids:
                 route_id = definitions[group_id][route_index]
-                if _live_capability_block_reason(client, group_id):
+                target_client = _target_client(
+                    route_kind,
+                    group_id,
+                    client,
+                    events_backup,
+                )
+                if _live_capability_block_reason(target_client, group_id):
                     unavailable_route_ids.append(route_id)
                     continue
                 target_request = _request(
@@ -130,8 +145,13 @@ def verify_and_record_live_capabilities(
                     suffix=route_kind.value,
                 )
                 try:
+                    semantic_probe_hashes = _semantic_probe_hashes(
+                        target_client,
+                        group_id,
+                        target_request,
+                    )
                     response = EndpointResponse.model_validate(
-                        getattr(client, definitions[group_id][2])(target_request)
+                        getattr(target_client, definitions[group_id][2])(target_request)
                     )
                     _validated_payload(
                         route_id,
@@ -153,6 +173,7 @@ def verify_and_record_live_capabilities(
                         evidence_kind,
                         tested_at,
                         versions,
+                        semantic_probe_hashes=semantic_probe_hashes,
                     )
                 )
             continue
@@ -267,15 +288,26 @@ def verify_and_record_live_capabilities(
                 suffix=route_kind.value,
             )
             route_id = definitions[group_id][route_index]
+            target_client = _target_client(
+                route_kind,
+                group_id,
+                client,
+                events_backup,
+            )
             if (
                 evidence_kind is CapabilityEvidenceKind.LIVE
-                and _live_capability_block_reason(client, group_id)
+                and _live_capability_block_reason(target_client, group_id)
             ):
                 unavailable_route_ids.append(route_id)
                 continue
             try:
+                semantic_probe_hashes = _semantic_probe_hashes(
+                    target_client,
+                    group_id,
+                    target_request,
+                )
                 response = EndpointResponse.model_validate(
-                    getattr(client, method_name)(target_request)
+                    getattr(target_client, method_name)(target_request)
                 )
                 _validated_payload(
                     route_id,
@@ -297,6 +329,7 @@ def verify_and_record_live_capabilities(
                     evidence_kind,
                     tested_at,
                     versions,
+                    semantic_probe_hashes=semantic_probe_hashes,
                 )
             )
 
@@ -348,6 +381,8 @@ def _route_evidence(
     evidence_kind: CapabilityEvidenceKind,
     tested_at: datetime,
     versions: dict[str, str],
+    *,
+    semantic_probe_hashes: dict[str, str] | None = None,
 ) -> RouteCapabilityEvidence:
     return RouteCapabilityEvidence(
         route_id=route_id,
@@ -361,7 +396,46 @@ def _route_evidence(
         evidence_kind=evidence_kind,
         response_hash=_response_hash(response),
         tested_library_versions=versions,
+        semantic_probe_hashes=semantic_probe_hashes or {},
     )
+
+
+def _target_client(
+    route_kind: RouteKind,
+    group_id: AcquisitionGroupId,
+    default_client: Any,
+    events_backup: CninfoDisclosureClient,
+) -> Any:
+    if (
+        route_kind is RouteKind.BACKUP
+        and group_id is AcquisitionGroupId.OFFICIAL_EVENTS_RISK
+    ):
+        return events_backup
+    return default_client
+
+
+def _semantic_probe_hashes(
+    client: Any,
+    group_id: AcquisitionGroupId,
+    request: AcquisitionRequest,
+) -> dict[str, str]:
+    if group_id is not AcquisitionGroupId.OFFICIAL_EVENTS_RISK:
+        return {}
+    verifier = getattr(client, "verify_event_semantics", None)
+    if not callable(verifier):
+        raise LiveCapabilityVerificationError(
+            "event route lacks populated and empty semantic probes"
+        )
+    hashes = verifier(request)
+    if set(hashes) != {"populated_precise_time", "empty_coverage"}:
+        raise LiveCapabilityVerificationError(
+            "event route returned incomplete semantic probe evidence"
+        )
+    if len(set(hashes.values())) != 2:
+        raise LiveCapabilityVerificationError(
+            "event semantic probe hashes must be distinct"
+        )
+    return dict(hashes)
 
 
 def _live_capability_block_reason(
@@ -455,7 +529,7 @@ def _save_capability_bundle(
 
 def _installed_library_versions() -> dict[str, str]:
     result: dict[str, str] = {}
-    for package in ("tushare", "akshare", "pandas"):
+    for package in ("tushare", "akshare", "httpx", "pandas"):
         try:
             result[package] = importlib.metadata.version(package)
         except importlib.metadata.PackageNotFoundError:

@@ -36,6 +36,75 @@ from tests.test_tushare_formal_client import RecordedTusharePro
 NOW = datetime(2026, 7, 10, 16, 0, tzinfo=ZoneInfo("Asia/Shanghai"))
 
 
+class RecordedHttpResponse:
+    def __init__(self, payload, status_code=200):
+        self.payload = payload
+        self.status_code = status_code
+
+    def json(self):
+        return self.payload
+
+
+class RecordedCninfoHttp:
+    def __init__(
+        self,
+        *,
+        invalid_timestamp=False,
+        no_empty=False,
+        no_populated=False,
+    ):
+        self.invalid_timestamp = invalid_timestamp
+        self.no_empty = no_empty
+        self.no_populated = no_populated
+        self.calls = []
+
+    def get(self, url, **kwargs):
+        self.calls.append(("GET", url, kwargs))
+        return RecordedHttpResponse(
+            {
+                "stockList": [
+                    {
+                        "code": code,
+                        "orgId": f"org-{code}",
+                        "zwjc": f"录制公司-{code}",
+                        "category": "A股",
+                    }
+                    for code in ("600000", "600001")
+                ]
+            }
+        )
+
+    def post(self, url, **kwargs):
+        self.calls.append(("POST", url, kwargs))
+        data = kwargs["data"]
+        code = data["stock"].split(",", 1)[0] if data["stock"] else "600000"
+        populated = not self.no_populated and not data["category"] and (
+            data["stock"] == "" or code == "600000" or self.no_empty
+        )
+        if not populated:
+            return RecordedHttpResponse(
+                {"totalAnnouncement": 0, "announcements": []}
+            )
+        published = int(
+            datetime(2026, 7, 10, 15, 31, 2, 123000, tzinfo=NOW.tzinfo).timestamp()
+            * 1000
+        )
+        if self.invalid_timestamp:
+            published = "2026-07-10"
+        row = {
+            "secCode": code,
+            "secName": f"录制公司-{code}",
+            "orgId": f"org-{code}",
+            "announcementId": f"recorded-{code}",
+            "announcementTitle": "录制精确时间公告",
+            "announcementTime": published,
+            "adjunctUrl": f"finalpage/2026-07-10/recorded-{code}.PDF",
+        }
+        return RecordedHttpResponse(
+            {"totalAnnouncement": 1, "announcements": [row]}
+        )
+
+
 def recorded_external_runtime(tmp_path, *, mode="recorded"):
     capability_path = tmp_path / "capabilities.json"
     routes = tuple(
@@ -84,7 +153,7 @@ def recorded_external_runtime(tmp_path, *, mode="recorded"):
         config=config,
         tushare_pro=RecordedTusharePro(),
         akshare_module=RecordedAkshare(),
-        cninfo_http_client=object(),
+        cninfo_http_client=RecordedCninfoHttp(),
         capability_store=store,
         capability_mode=mode,
         ledger=InMemoryFormalLedger(),

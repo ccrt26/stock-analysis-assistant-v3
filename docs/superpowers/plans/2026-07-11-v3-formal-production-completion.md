@@ -279,6 +279,8 @@ git commit -m "feat: wire dedicated cninfo event backup"
 - Modify: `src/stock_analyzer/ops/formal_live.py`
 - Modify: `tests/test_formal_live.py`
 - Modify: `tests/test_default_formal_production_entry.py`
+- Modify: `src/stock_analyzer/data/source_registry.py`
+- Modify: `tests/test_strategy_v2_source_registry.py`
 
 **Interfaces:**
 - `_route_evidence(..., semantic_probe_hashes: dict[str, str] | None = None) -> RouteCapabilityEvidence`
@@ -309,6 +311,8 @@ Expected: FAIL because live verification does not call or persist route-specific
 
 Instantiate the direct CNINFO owner separately from AkShare. Before issuing evidence for either primary or backup event route, call that exact owner's `verify_event_semantics()` with the frozen capability request. Pass only its returned hashes into `_route_evidence`. Never synthesize hashes for an empty response, and never copy probe hashes between routes. Continue storing partial latest bundles on failure.
 
+Replace the revoked event backup route ID in the Strategy V2 source registry with `cninfo.direct.events_risk.v2`; source-policy metadata and executable route definitions must identify the same route.
+
 - [ ] **Step 4: Run and prove green**
 
 Run the Step 2 command.
@@ -318,7 +322,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit live admission**
 
 ```bash
-git add src/stock_analyzer/ops/formal_live.py tests/test_formal_live.py tests/test_default_formal_production_entry.py
+git add src/stock_analyzer/ops/formal_live.py src/stock_analyzer/data/source_registry.py tests/test_formal_live.py tests/test_default_formal_production_entry.py tests/test_strategy_v2_source_registry.py tests/test_production_dependencies.py tests/test_tushare_formal_client.py docs/superpowers/plans/2026-07-11-v3-formal-production-completion.md
 git commit -m "fix: harden live event capability admission"
 ```
 
