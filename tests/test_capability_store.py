@@ -27,9 +27,11 @@ def capability(
     kind: CapabilityEvidenceKind = CapabilityEvidenceKind.RECORDED,
     contract_version: str = "formal-v2",
     group_id: AcquisitionGroupId = AcquisitionGroupId.MARKET_DECISION,
+    route_id: str = ROUTE_ID,
+    semantic_probe_hashes: dict[str, str] | None = None,
 ) -> RouteCapabilityEvidence:
     return RouteCapabilityEvidence(
-        route_id=ROUTE_ID,
+        route_id=route_id,
         group_id=group_id,
         contract_version=contract_version,
         full_contract_tested=True,
@@ -40,6 +42,7 @@ def capability(
         evidence_kind=kind,
         response_hash="a" * 64,
         tested_library_versions={"tushare": "1.4.19", "pandas": "2.2.3"},
+        semantic_probe_hashes=semantic_probe_hashes or {},
     )
 
 
@@ -111,3 +114,54 @@ def test_persisted_capability_requires_real_response_hash_and_library_versions(t
                 routes=(capability().model_copy(update={"tested_library_versions": {}}),)
             )
         )
+
+
+def test_event_capability_requires_distinct_populated_and_empty_probe_hashes():
+    base = capability(
+        route_id="official.events_risk.v1",
+        group_id=AcquisitionGroupId.OFFICIAL_EVENTS_RISK,
+    )
+
+    assert base.approved is False
+    assert base.model_copy(
+        update={"semantic_probe_hashes": {"populated_precise_time": "b" * 64}}
+    ).approved is False
+    assert base.model_copy(
+        update={
+            "semantic_probe_hashes": {
+                "populated_precise_time": "b" * 64,
+                "empty_coverage": "b" * 64,
+            }
+        }
+    ).approved is False
+    assert base.model_copy(
+        update={
+            "semantic_probe_hashes": {
+                "populated_precise_time": "b" * 64,
+                "empty_coverage": "c" * 64,
+            }
+        }
+    ).approved is True
+
+
+def test_non_event_capability_does_not_require_event_probe_hashes():
+    assert capability().approved is True
+
+
+@pytest.mark.parametrize("invalid_hash", ["not-a-hash", "0" * 64])
+def test_capability_store_rejects_malformed_semantic_probe_hash(
+    tmp_path,
+    invalid_hash,
+):
+    store = LocalCapabilityStore(tmp_path / "capabilities.json")
+    event = capability(
+        route_id="official.events_risk.v1",
+        group_id=AcquisitionGroupId.OFFICIAL_EVENTS_RISK,
+        semantic_probe_hashes={
+            "populated_precise_time": invalid_hash,
+            "empty_coverage": "c" * 64,
+        },
+    )
+
+    with pytest.raises(CapabilityEvidenceError, match="semantic probe hash"):
+        store.save(bundle(routes=(event,)))

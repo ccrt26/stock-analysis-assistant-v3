@@ -81,6 +81,7 @@ class RouteCapabilityEvidence(BaseModel):
     evidence_kind: CapabilityEvidenceKind = CapabilityEvidenceKind.RECORDED
     response_hash: str = "0" * 64
     tested_library_versions: dict[str, str] = Field(default_factory=dict)
+    semantic_probe_hashes: dict[str, str] = Field(default_factory=dict)
 
     @property
     def approved(self) -> bool:
@@ -90,8 +91,18 @@ class RouteCapabilityEvidence(BaseModel):
                 self.field_semantics_verified,
                 self.full_universe_verified,
                 self.post_close_verified,
+                self._event_semantics_approved(),
             )
         )
+
+    def _event_semantics_approved(self) -> bool:
+        if self.group_id is not AcquisitionGroupId.OFFICIAL_EVENTS_RISK:
+            return True
+        required = {"populated_precise_time", "empty_coverage"}
+        if set(self.semantic_probe_hashes) != required:
+            return False
+        values = {self.semantic_probe_hashes[key] for key in required}
+        return len(values) == 2
 
     @property
     def approved_for_live(self) -> bool:

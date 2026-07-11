@@ -49,6 +49,14 @@ def recorded_external_runtime(tmp_path, *, mode="recorded"):
             evidence_kind=CapabilityEvidenceKind.RECORDED,
             response_hash=f"{index + 1:064x}",
             tested_library_versions={"recorded": "2026-07-10"},
+            semantic_probe_hashes=(
+                {
+                    "populated_precise_time": "e" * 64,
+                    "empty_coverage": "f" * 64,
+                }
+                if group_id is AcquisitionGroupId.OFFICIAL_EVENTS_RISK
+                else {}
+            ),
         )
         for index, (route_id, group_id) in enumerate(formal_route_group_ids().items())
         if group_id is not AcquisitionGroupId.MANUAL_HOLDINGS

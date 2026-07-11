@@ -114,6 +114,13 @@ def _validate_bundle(bundle: CapabilityBundle) -> None:
             raise CapabilityEvidenceError(
                 f"response hash is required for route {capability.route_id}"
             )
+        if capability.group_id.value == "official_events_risk":
+            for name, digest in capability.semantic_probe_hashes.items():
+                if not _SHA256.fullmatch(digest) or digest == "0" * 64:
+                    raise CapabilityEvidenceError(
+                        "semantic probe hash is invalid for route "
+                        f"{capability.route_id}: {name}"
+                    )
         if not capability.tested_library_versions:
             raise CapabilityEvidenceError(
                 f"library versions are required for route {capability.route_id}"

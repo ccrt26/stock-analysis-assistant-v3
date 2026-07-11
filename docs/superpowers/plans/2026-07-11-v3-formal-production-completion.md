@@ -49,6 +49,9 @@
 - Modify: `src/stock_analyzer/data/capability_store.py`
 - Modify: `tests/test_capability_store.py`
 - Modify: `tests/test_formal_routes.py`
+- Modify: `tests/test_production_dependencies.py`
+- Modify: `tests/test_formal_pipeline.py`
+- Modify: `tests/test_july10_formal_readiness_acceptance.py`
 
 **Interfaces:**
 - Produces: `RouteCapabilityEvidence.semantic_probe_hashes: dict[str, str]`
@@ -94,6 +97,8 @@ def _event_semantics_approved(self) -> bool:
 
 Include `_event_semantics_approved()` in `approved`. In capability-store validation, require both keys, validate `_SHA256`, reject all-zero values, and reject identical populated/empty hashes.
 
+Update every existing recorded event-capability fixture in the listed tests with two distinct deterministic nonzero hashes. Do not add hashes to production `_route_evidence()` in this task; live and recorded bootstrap evidence must come from the provider-specific probe implemented in Task 4.
+
 - [ ] **Step 4: Run the focused tests and prove green**
 
 Run the Step 2 command.
@@ -103,7 +108,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit the evidence boundary**
 
 ```bash
-git add src/stock_analyzer/data/readiness.py src/stock_analyzer/data/capability_store.py tests/test_capability_store.py tests/test_formal_routes.py
+git add src/stock_analyzer/data/readiness.py src/stock_analyzer/data/capability_store.py tests/test_capability_store.py tests/test_formal_routes.py tests/test_production_dependencies.py tests/test_formal_pipeline.py tests/test_july10_formal_readiness_acceptance.py docs/superpowers/plans/2026-07-11-v3-formal-production-completion.md
 git commit -m "fix: require event semantic probe evidence"
 ```
 

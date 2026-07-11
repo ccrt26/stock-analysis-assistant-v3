@@ -68,6 +68,14 @@ class FakeRoute:
             full_universe_verified=True,
             post_close_verified=True,
             tested_at=CUTOFF,
+            semantic_probe_hashes=(
+                {
+                    "populated_precise_time": "b" * 64,
+                    "empty_coverage": "c" * 64,
+                }
+                if group_id is AcquisitionGroupId.OFFICIAL_EVENTS_RISK
+                else {}
+            ),
         )
 
     def fetch(self, request):
