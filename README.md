@@ -12,6 +12,8 @@
 
 此前真实运行生成 10 个每日推荐，launchd 已加载；这项既有生产证据继续有效，但不代表新的 REPORT-004 用户可读报告已经通过人工验收。
 
+存储纠偏 `STORE-004` 当前为 `IMPLEMENTED_NOT_MIGRATED`：正式程序的 DuckDB + Parquet 路径、迁移器和审计门禁已经实现并通过离线测试，但主检出目录中的既有正式数据尚未完成真实迁移，大 JSON 尚未删除。在真实迁移、精确重放、切换和删除后审计全部通过前，不得把该 Gate 表述为生产完成。
+
 当前能力、缺口、验证等级和激活状态只以 [`docs/operations/production-capability-matrix.md`](docs/operations/production-capability-matrix.md) 为准。`docs/superpowers/specs/` 保存设计约束，`docs/superpowers/plans/` 保存历史执行记录；历史文档中的“完成”不能替代能力矩阵中的当前证据。
 
 ## 本地运行

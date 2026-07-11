@@ -500,6 +500,8 @@ It contains no recommendation, thesis, position suggestion, LLM narrative, or pu
 
 The local warehouse remains the wide-data source of truth. Supabase remains a narrow decision ledger.
 
+Wide formal records MUST NOT be stored as JSON. `FormalWarehouse` registers immutable versions, canonical pointers, receipts, candidates, capabilities, and audits in `warehouse.duckdb`; normalized wide rows live in Parquet. JSON is limited to published report contracts, operator status, and explicitly approved small manual inputs.
+
 Required local datasets include versioned partitions for:
 
 - calendar and stock universe
@@ -515,7 +517,7 @@ Required local datasets include versioned partitions for:
 - canonical-version pointers
 - run receipts and immutable candidate sets
 
-Historical bars must not be stored only under the report target-date partition. Each row remains queryable by its actual trade date.
+Historical bars must not be stored only under the report target-date partition. Each row remains queryable by its actual covered trade date through DuckDB, with the underlying Parquet partition using that actual date.
 
 Replacing a backup canonical version with a recovered primary version updates a pointer or manifest transactionally. It does not delete immutable raw versions.
 

@@ -1,6 +1,8 @@
 # 股票分析助手 V3 存储与执行治理设计
 
 > **Lifecycle:** Historical storage design and still a normative boundary for local-wide/Supabase-narrow storage. It does not state current production readiness; see [`docs/operations/production-capability-matrix.md`](../../operations/production-capability-matrix.md).
+>
+> **2026-07-12 restoration:** [`2026-07-12-v3-formal-warehouse-restoration-design.md`](2026-07-12-v3-formal-warehouse-restoration-design.md) makes this boundary executable for formal-v2. `warehouse.duckdb` is the formal catalog and query entry; Parquet stores wide formal payload rows. The `formal_versions`, file inventory, canonical pointer, receipt, candidate, capability, and migration tables replace the contradictory wide formal payload JSON implementation.
 
 ## 1. 目标
 
@@ -9,6 +11,8 @@
 本设计遵循一个核心原则：
 
 > Supabase 是云端决策账本和计算事实库；本地 DuckDB + Parquet 是全市场粗分析库；本地归档是完整报告和长文本冷存储。
+
+Wide formal payload records are part of the local calculation warehouse. They must not be stored as standalone JSON group payloads or treated as a second source of truth.
 
 系统必须保证：
 

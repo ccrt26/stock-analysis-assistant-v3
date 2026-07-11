@@ -17,6 +17,35 @@ This runbook covers the Phase 1 local Mac production flow for stock-analysis-ass
 - Do not print, copy, commit, or log the local env file contents or credential values.
 - Do not activate, prepare a deploy artifact, or publish a REPORT-004 candidate before explicit human readability acceptance.
 
+## Formal Warehouse Restoration
+
+`STORE-004` currently means the DuckDB + Parquet code path is implemented but production JSON data is not yet migrated. The following commands are offline and non-destructive; each writes a machine-readable result. The deletion-manifest command does not delete anything.
+
+```bash
+stock-analyzer formal-warehouse-inventory \
+  --source-root local_warehouse/formal_evidence \
+  --output local_archive/manifests/formal-warehouse-inventory.json
+
+stock-analyzer formal-warehouse-migrate \
+  --source-root local_warehouse/formal_evidence \
+  --warehouse-root local_warehouse \
+  --migration-id formal-json-to-duckdb-parquet-20260712 \
+  --output local_archive/manifests/formal-warehouse-migration.json
+
+stock-analyzer formal-warehouse-audit \
+  --warehouse-root local_warehouse \
+  --strict-hashes \
+  --output local_archive/manifests/formal-warehouse-audit.json
+
+stock-analyzer formal-warehouse-deletion-manifest \
+  --source-root local_warehouse/formal_evidence \
+  --warehouse-root local_warehouse \
+  --migration-id formal-json-to-duckdb-parquet-20260712 \
+  --output local_archive/manifests/formal-warehouse-deletion-manifest.json
+```
+
+Migration copies and validates before any cutover or deletion. If any object is unknown, any source hash changes, any payload hash differs, or any frozen receipt cannot resolve, stop and leave all source JSON untouched. Deletion requires a separately approved destructive operation against the exact generated manifest, followed immediately by strict audit, real-data acceptance, offline replay and the full test suite.
+
 ## Daily Schedule
 
 The required local schedule is:

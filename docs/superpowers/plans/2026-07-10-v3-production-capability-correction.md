@@ -1,5 +1,7 @@
 # V3 Production Capability Correction Implementation Plan
 
+> **Storage supersession (2026-07-12):** References in this historical plan to retaining or extending the wide JSON evidence store are superseded by [`2026-07-12-v3-formal-warehouse-restoration-design.md`](../specs/2026-07-12-v3-formal-warehouse-restoration-design.md). Provider and contract work remains historical evidence; formal storage now requires DuckDB + Parquet.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:executing-plans` to execute this plan inline in the current primary-agent context. Do not default to `subagent-driven-development`. A subagent is optional only for an independent, read-only, high-value investigation or final review; if used it must be GPT-5.6 sol, reasoning high, speed standard, must not modify files/commit/push, and its conclusions must be re-verified by the primary agent.
 
 **Goal:** Replace the formal-production shell with concrete primary/backup clients, production contracts, durable capability evidence, default screening/analysis/render bindings, and a recorded-response default-entry acceptance so the program is fully implemented and offline verified without performing unauthorized production actions.
