@@ -312,17 +312,51 @@ def test_cninfo_route_accepts_null_announcements_only_when_total_zero():
     assert raised.value.classification is FailureClassification.SCHEMA
 
 
-def test_cninfo_route_rejects_missing_stock_map_code():
+def test_cninfo_missing_stock_map_code_uses_exact_searchkey_and_preserves_frozen_candidate():
     def handler(method, path, kwargs):
-        return FakeResponse(stock_map("000001"))
+        if method == "GET":
+            return FakeResponse(stock_map("000001"))
+        if kwargs["data"]["category"] == "":
+            return FakeResponse(page([announcement("unmapped", code="603065")]))
+        return FakeResponse(page())
 
     client, _, http = client_with(handler)
 
-    with pytest.raises(PermanentRouteFailure) as raised:
-        client.fetch_official_events_risk(request())
+    response = client.fetch_official_events_risk(request(("603065.SH",)))
 
-    assert raised.value.classification is FailureClassification.INCOMPLETE_UNIVERSE
-    assert [call[0] for call in http.calls] == ["GET"]
+    assert response.coverage_codes == ("603065.SH",)
+    assert {row["ts_code"] for row in response.records} == {"603065.SH"}
+    disclosure_calls = [call for call in http.calls if call[0] == "POST"]
+    assert len(disclosure_calls) == 4
+    assert all(call[2]["data"]["stock"] == "" for call in disclosure_calls)
+    assert all(
+        call[2]["data"]["searchkey"] == "603065"
+        for call in disclosure_calls
+    )
+
+
+@pytest.mark.parametrize(
+    ("payload", "classification"),
+    [
+        (page([announcement("wrong", code="000001")]), FailureClassification.SCHEMA),
+        (page([], total=1), FailureClassification.INCOMPLETE_UNIVERSE),
+    ],
+)
+def test_cninfo_searchkey_fallback_rejects_wrong_code_or_incomplete_pagination(
+    payload,
+    classification,
+):
+    def handler(method, path, kwargs):
+        if method == "GET":
+            return FakeResponse(stock_map("000001"))
+        return FakeResponse(payload)
+
+    client, _, _ = client_with(handler)
+
+    with pytest.raises(PermanentRouteFailure) as raised:
+        client.fetch_official_events_risk(request(("603065.SH",)))
+
+    assert raised.value.classification is classification
 
 
 @pytest.mark.parametrize("bad_timestamp", [None, "2026-07-10", "not-a-time"])

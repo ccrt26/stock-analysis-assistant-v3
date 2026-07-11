@@ -126,15 +126,11 @@ class CninfoDisclosureClient:
         for code in expected_codes:
             bare_code = _bare_code(code)
             org_id = stock_map.get(bare_code)
-            if not org_id:
-                raise PermanentRouteFailure(
-                    f"CNINFO stock map is missing requested code {code}",
-                    FailureClassification.INCOMPLETE_UNIVERSE,
-                )
             for category, event_type, hard_risk in _CATEGORY_SPECS:
                 rows = self._query_pages(
                     code=bare_code,
-                    org_id=org_id,
+                    org_id=org_id or "",
+                    searchkey="" if org_id else bare_code,
                     category=category,
                     start_date=window_start,
                     end_date=request.trade_date,
@@ -184,6 +180,7 @@ class CninfoDisclosureClient:
         populated_rows, _ = self._query_page(
             code="",
             org_id="",
+            searchkey="",
             category="",
             start_date=request.trade_date,
             end_date=request.trade_date,
@@ -221,6 +218,7 @@ class CninfoDisclosureClient:
             rows = self._query_pages(
                 code=code,
                 org_id=stock_map[code],
+                searchkey="",
                 category="",
                 start_date=request.trade_date,
                 end_date=request.trade_date,
@@ -283,6 +281,7 @@ class CninfoDisclosureClient:
         *,
         code: str,
         org_id: str,
+        searchkey: str,
         category: str,
         start_date: date,
         end_date: date,
@@ -290,6 +289,7 @@ class CninfoDisclosureClient:
         first_rows, total = self._query_page(
             code=code,
             org_id=org_id,
+            searchkey=searchkey,
             category=category,
             start_date=start_date,
             end_date=end_date,
@@ -301,6 +301,7 @@ class CninfoDisclosureClient:
             page_rows, page_total = self._query_page(
                 code=code,
                 org_id=org_id,
+                searchkey=searchkey,
                 category=category,
                 start_date=start_date,
                 end_date=end_date,
@@ -324,12 +325,13 @@ class CninfoDisclosureClient:
         *,
         code: str,
         org_id: str,
+        searchkey: str,
         category: str,
         start_date: date,
         end_date: date,
         page_number: int,
     ) -> tuple[list[dict[str, Any]], int]:
-        stock = "" if not code else f"{code},{org_id}"
+        stock = f"{code},{org_id}" if code and org_id else ""
         payload = self._request_json(
             "POST",
             _DISCLOSURE_PATH,
@@ -340,7 +342,7 @@ class CninfoDisclosureClient:
                 "tabName": "fulltext",
                 "plate": "",
                 "stock": stock,
-                "searchkey": "",
+                "searchkey": searchkey,
                 "secid": "",
                 "category": category,
                 "trade": "",

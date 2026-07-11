@@ -551,6 +551,28 @@ git commit -m "docs: record precise event live capability"
 - Modify after success: `docs/operations/production-capability-matrix.md`
 - Modify after success: `docs/operations/runbook.md`
 
+- [ ] **Finding 9A: Remove the incomplete CNINFO stock map as a false universe Gate**
+
+The first real formal run froze candidate `603065.SH` and failed closed because the legacy `GET /new/data/szse_stock.json` response omitted that active security. Direct read-only provider probes proved that `POST /new/hisAnnouncement/query` with `stock=603065,` is incorrectly broadened to the all-market result, `stock=603065` returns zero, and `searchkey=603065` returns only rows whose `secCode` is exactly `603065`. The map is therefore a query optimization rather than authoritative coverage evidence.
+
+In `tests/test_cninfo_disclosure_client.py`, replace `test_cninfo_route_rejects_missing_stock_map_code` with `test_cninfo_missing_stock_map_code_uses_exact_searchkey_and_preserves_frozen_candidate`; assert all four category calls use `stock=""`, `searchkey="603065"`, coverage remains exactly `("603065.SH",)`, and returned announcements are normalized normally. Add `test_cninfo_searchkey_fallback_rejects_wrong_code_or_incomplete_pagination`; it must prove that a wrong-code row is `SCHEMA` failure and a declared total not satisfied by completely paginated rows is `INCOMPLETE_UNIVERSE`. Both tests must fail before the implementation change.
+
+In `src/stock_analyzer/data/cninfo_disclosure_client.py`, extend `_query_pages()` and `_query_page()` with an explicit `searchkey` parameter. For a mapped code keep `stock=f"{code},{org_id}"` and blank `searchkey`; for an unmapped frozen code use blank `stock` and exact six-digit `searchkey`. Reuse the existing total-stability and exact-row-count pagination checks, and retain `_normalize_announcement(expected_code=...)` as the fail-closed exact-code validator. Never infer an empty result from map absence, never use `stock=f"{code},"`, never fetch an unbounded all-market universe, and never alter `target_codes`.
+
+Run:
+
+```bash
+.venv/bin/python -m pytest tests/test_cninfo_disclosure_client.py -q
+.venv/bin/python -m pytest tests/test_cninfo_disclosure_client.py tests/test_tushare_formal_client.py tests/test_formal_routes.py tests/test_production_dependencies.py tests/test_formal_live.py tests/test_default_formal_production_entry.py tests/test_july10_formal_readiness_acceptance.py -q
+```
+
+Expected: the new tests fail before the source edit; after the edit both commands pass. Commit boundary:
+
+```bash
+git add docs/superpowers/specs/2026-07-10-v3-formal-report-data-readiness-design.md docs/superpowers/plans/2026-07-11-v3-formal-production-completion.md src/stock_analyzer/data/cninfo_disclosure_client.py tests/test_cninfo_disclosure_client.py
+git commit -m "fix: query unmapped cninfo candidates exactly"
+```
+
 - [ ] **Step 1: Verify current Supabase guidance and runtime presence without exposing values**
 
 Fetch `https://supabase.com/changelog.md`, inspect relevant breaking changes, then consult current official docs for RPC, RLS/security-invoker views, and service-role server usage. Run a boolean-only configuration check for `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`; if absent, use the already authenticated Supabase mechanism or request user authorization rather than displaying or copying a secret.

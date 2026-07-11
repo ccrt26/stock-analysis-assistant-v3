@@ -321,7 +321,7 @@ Rules:
 - any hard-risk conclusion uses official facts available by the report cutoff
 - an empty provider response can prove only empty-window coverage; it can never prove timestamp field semantics
 - live event capability evidence must persist separate hashes for one populated precise-time probe and one valid-code empty-window probe
-- every CNINFO page must agree with the requested code and date window; pagination totals, duplicate announcement IDs, missing stock-map entries, missing PDF paths, and malformed timestamps fail the complete route
+- every CNINFO page must agree with the requested code and date window; pagination totals, duplicate announcement IDs, missing PDF paths, and malformed timestamps fail the complete route. The legacy `szse_stock.json` mapping is an optimization, not an authoritative security universe: when a frozen target code is absent, the route must query the official endpoint with that exact six-digit code in `searchkey`, completely paginate the declared result, and reject any returned row whose `secCode` differs. It must never send a blank `orgId` in `stock` (which CNINFO interprets as an all-market query), silently treat the missing mapping as a proven empty result, or replace the frozen candidate.
 - risk-category queries are part of the complete CNINFO route and may mark an announcement as hard risk; generic title text is not used to invent a risk category
 
 ### 5.6 Concept and Theme Group
