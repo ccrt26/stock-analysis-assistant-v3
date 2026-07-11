@@ -24,6 +24,7 @@ from stock_analyzer.ops.formal_run import (
     FormalAcquisitionGroup,
     FormalPipelineDependencies,
 )
+from stock_analyzer.ops.codex_expression_client import CodexExpressionClient
 from stock_analyzer.ops.formal_strategy_runtime import (
     analyze_formal_inputs,
     express_formal_analysis,
@@ -96,6 +97,7 @@ def load_default_external_runtime(
         cninfo_http_client=cninfo_http_client,
         capability_store=capability_store,
         capability_mode="live",
+        expression_client=CodexExpressionClient(),
         enable_concepts=_env_flag("STOCK_ANALYZER_ENABLE_CONCEPTS"),
     )
 
@@ -158,11 +160,9 @@ def build_production_formal_dependencies(
     )
     ledger = runtime.ledger or repository
     _require_formal_ledger(ledger)
-    expression = (
-        partial(express_formal_analysis, client=runtime.expression_client)
-        if runtime.expression_client is not None
-        else None
-    )
+    if runtime.expression_client is None:
+        raise ProductionDependencyError("formal Codex expression client is required")
+    expression = partial(express_formal_analysis, client=runtime.expression_client)
     return FormalPipelineDependencies(
         screening_routes=tuple(
             FormalAcquisitionGroup(

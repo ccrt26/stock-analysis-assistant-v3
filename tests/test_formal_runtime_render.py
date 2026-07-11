@@ -19,6 +19,7 @@ from tests.test_formal_strategy_runtime import (
     complete_payloads,
     ready_receipt,
 )
+from tests.test_formal_narrative import _valid_narrative
 
 
 def analysis_output():
@@ -90,9 +91,9 @@ def test_staged_verifier_rejects_fixture_text_hash_mismatch_or_wrong_input_set(t
     ) is False
 
 
-def test_expression_client_receives_structured_payload_only_and_cannot_add_ledger_facts():
+def test_expression_client_receives_structured_payload_and_returns_validated_narrative():
     output = analysis_output()
-    evidence_id = output.value.evidence_packages[0].evidence_id
+    expected = _valid_narrative(output.value)
 
     class ExpressionClient:
         def __init__(self, result):
@@ -103,24 +104,22 @@ def test_expression_client_receives_structured_payload_only_and_cannot_add_ledge
             self.received = payload
             return self.result
 
-    accepted = ExpressionClient({evidence_id: "基于既有证据的表达"})
+    accepted = ExpressionClient(expected)
     narrative = express_formal_analysis(ready_receipt(), output.value, accepted)
     assert accepted.received is output.value
-    assert narrative == {evidence_id: "基于既有证据的表达"}
-    assert all("kind" not in value for value in narrative.values())
+    assert narrative == expected
 
-    rejected = ExpressionClient({"new-ledger-fact": "未经证据支持的新事实"})
-    with pytest.raises(ValueError, match="unknown evidence id"):
+    rejected_stock = expected.stocks[0].model_copy(update={"action": "小仓试探"})
+    rejected = ExpressionClient(
+        expected.model_copy(update={"stocks": [rejected_stock]})
+    )
+    with pytest.raises(ValueError, match="decision lock"):
         express_formal_analysis(ready_receipt(), output.value, rejected)
 
 
-def test_no_llm_configuration_renders_deterministic_formal_report(tmp_path):
+def test_no_llm_configuration_fails_closed_before_render(tmp_path):
     output = analysis_output()
-    receipt = rendering_receipt(output)
 
-    assert express_formal_analysis(ready_receipt(), output.value, client=None) is None
-    render_formal_report(tmp_path, receipt, output.value, narrative=None)
-    first = hash_artifact_tree(tmp_path)
-    render_formal_report(tmp_path, receipt, output.value, narrative=None)
-
-    assert hash_artifact_tree(tmp_path) == first
+    with pytest.raises(ValueError, match="expression client is required"):
+        express_formal_analysis(ready_receipt(), output.value, client=None)
+    assert list(tmp_path.iterdir()) == []

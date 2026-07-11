@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -26,6 +27,7 @@ from stock_analyzer.ops.production_dependencies import (
     build_production_formal_dependencies,
     load_default_external_runtime,
 )
+from stock_analyzer.ops.codex_expression_client import CodexExpressionClient
 from stock_analyzer.ops.job import _default_run_daily
 from stock_analyzer.storage.repositories import InMemoryAnalysisRepository
 from tests.test_akshare_formal_client import RecordedAkshare
@@ -109,6 +111,13 @@ class RecordedCninfoHttp:
         )
 
 
+class RecordedExpressionClient:
+    def express(self, payload):
+        from tests.test_formal_narrative import _valid_narrative
+
+        return _valid_narrative(payload)
+
+
 def recorded_external_runtime(tmp_path, *, mode="recorded"):
     capability_path = tmp_path / "capabilities.json"
     routes = tuple(
@@ -161,6 +170,7 @@ def recorded_external_runtime(tmp_path, *, mode="recorded"):
         capability_store=store,
         capability_mode=mode,
         ledger=InMemoryFormalLedger(),
+        expression_client=RecordedExpressionClient(),
     )
 
 
@@ -187,6 +197,36 @@ def test_recorded_runtime_builds_complete_real_dependencies_without_high_level_m
     assert callable(dependencies.render) and callable(dependencies.verify)
     assert runtime.tushare_pro.calls == []
     assert runtime.akshare_module.calls == []
+
+
+def test_production_factory_rejects_runtime_without_expression_client(tmp_path):
+    runtime = replace(recorded_external_runtime(tmp_path), expression_client=None)
+    assert runtime.expression_client is None
+
+    with pytest.raises(ProductionDependencyError, match="Codex expression client"):
+        build_production_formal_dependencies(
+            tmp_path,
+            InMemoryAnalysisRepository(),
+            TARGET,
+            runtime=runtime,
+        )
+
+
+def test_default_external_runtime_constructs_codex_expression_client(tmp_path):
+    config = AppConfig(
+        project_root=tmp_path,
+        tushare_token="recorded-token",
+        local_warehouse_dir=tmp_path / "local_warehouse",
+    )
+    modules = {
+        "tushare": type("Tushare", (), {"pro_api": staticmethod(lambda token: object())}),
+        "akshare": object(),
+        "httpx": type("Httpx", (), {"Client": staticmethod(lambda **kwargs: object())}),
+    }
+
+    runtime = load_default_external_runtime(config, module_loader=modules.__getitem__)
+
+    assert isinstance(runtime.expression_client, CodexExpressionClient)
 
 
 def test_factory_uses_direct_cninfo_for_event_backup_and_akshare_elsewhere(tmp_path):

@@ -49,6 +49,10 @@ from stock_analyzer.ops.formal_run import (
     FormalAnalysisOutput,
     RunReceipt,
 )
+from stock_analyzer.ops.formal_narrative import (
+    FormalNarrative,
+    validate_formal_narrative,
+)
 from stock_analyzer.ops.activation import hash_artifact_tree
 from stock_analyzer.pipeline import (
     _action_recommendation_summaries_from_snapshots,
@@ -82,7 +86,7 @@ class FormalReportPayload(BaseModel):
 
 
 class StructuredExpressionClient(Protocol):
-    def express(self, payload: FormalReportPayload) -> dict[str, str]: ...
+    def express(self, payload: FormalReportPayload) -> FormalNarrative: ...
 
 
 def analyze_formal_inputs(
@@ -252,31 +256,22 @@ def express_formal_analysis(
     receipt: RunReceipt,
     payload: FormalReportPayload,
     client: StructuredExpressionClient | None = None,
-) -> dict[str, str] | None:
+) -> FormalNarrative:
     if client is None:
-        return None
+        raise ValueError("formal expression client is required")
     if receipt.run_id != payload.run_id or receipt.input_set_id != payload.input_set_id:
         raise ValueError("expression receipt does not match formal payload")
     result = client.express(payload)
-    if not isinstance(result, dict):
-        raise ValueError("expression client must return a string mapping")
-    evidence_ids = {item.evidence_id for item in payload.evidence_packages}
-    unknown = sorted(set(result) - evidence_ids)
-    if unknown:
-        raise ValueError("unknown evidence id in expression output: " + ", ".join(unknown))
-    for evidence_id, value in result.items():
-        if not isinstance(value, str) or not value.strip():
-            raise ValueError(f"expression text is empty for {evidence_id}")
-        if len(value) > 4000:
-            raise ValueError(f"expression text is too long for {evidence_id}")
-    return dict(sorted((key, value.strip()) for key, value in result.items()))
+    if not isinstance(result, FormalNarrative):
+        raise ValueError("expression client must return FormalNarrative")
+    return validate_formal_narrative(payload, result)
 
 
 def render_formal_report(
     staging: Path,
     receipt: RunReceipt,
     payload: FormalReportPayload,
-    narrative: dict[str, str] | None,
+    narrative: FormalNarrative | None,
 ) -> None:
     if receipt.state is not FormalRunState.RENDERING:
         raise ValueError("formal rendering requires RENDERING receipt")
@@ -290,12 +285,7 @@ def render_formal_report(
         }
     ):
         raise ValueError("formal rendering receipt does not match payload")
-    narrative = narrative or {}
-    unknown_narrative = set(narrative) - {
-        package.evidence_id for package in payload.evidence_packages
-    }
-    if unknown_narrative:
-        raise ValueError("formal narrative contains unknown evidence ids")
+    narrative_payload = narrative.model_dump(mode="json") if narrative else {}
     render_reports(
         Path(staging),
         payload.recommendations,
@@ -309,7 +299,7 @@ def render_formal_report(
         strategy_v2_snapshots=payload.strategy_snapshots,
         focus_entry_theses=payload.focus_entry_theses,
         focus_daily_updates=payload.focus_daily_updates,
-        formal_narrative=narrative,
+        formal_narrative=narrative_payload,
     )
     manifest = {
         "acquisition_contract_version": receipt.acquisition_contract_version,
