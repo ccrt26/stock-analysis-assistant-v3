@@ -23,6 +23,7 @@ fi
 set -a
 source .env.local >/dev/null 2>&1
 set +a
+export PROJECT_ROOT="$PWD"
 slot="$(date +%H:%M)"
 case "$slot" in
   18:30) attempt=1 ;;

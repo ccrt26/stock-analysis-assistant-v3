@@ -113,6 +113,10 @@ def test_launchd_template_uses_project_root_and_env_contract_without_secrets():
     assert "/Users/" not in template
     assert ".env.local" in template
     assert "source .env.local >/dev/null 2>&1" in template
+    assert 'export PROJECT_ROOT="$PWD"' in template
+    assert template.index("source .env.local >/dev/null 2>&1") < template.index(
+        'export PROJECT_ROOT="$PWD"'
+    )
     assert "service-role-secret" not in template
     assert "tushare-secret" not in template
     assert "cloudflare-secret" not in template
