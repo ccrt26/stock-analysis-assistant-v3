@@ -26,6 +26,12 @@ FORMAL_READINESS_SCHEMA_PATH = (
     / "migrations"
     / "202607100004_formal_run_readiness.sql"
 )
+ADVISOR_OPTIMIZATION_SCHEMA_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "supabase"
+    / "migrations"
+    / "20260711112251_optimize_advisor_indexes.sql"
+)
 
 
 def test_initial_schema_contains_required_tables_and_rls():
@@ -269,3 +275,49 @@ def test_activation_rpc_revokes_public_anon_authenticated_and_grants_service_rol
     signature = "public.activate_formal_run_v1(text, text, text, text, text)"
     assert f"revoke all on function {signature} from public, anon, authenticated" in compact_sql
     assert f"grant execute on function {signature} to service_role" in compact_sql
+
+
+def test_advisor_optimization_promotes_narrow_unique_keys_to_primary_keys():
+    compact_sql = re.sub(
+        r"\s+",
+        " ",
+        ADVISOR_OPTIMIZATION_SCHEMA_PATH.read_text(encoding="utf-8").lower(),
+    )
+    for table in [
+        "focus_daily_update",
+        "action_recommendation_summary",
+        "manual_holding_summary",
+    ]:
+        assert (
+            f"alter table public.{table} drop constraint if exists "
+            f"{table}_trade_date_ts_code_key"
+        ) in compact_sql
+        assert (
+            f"add constraint {table}_pkey primary key (trade_date, ts_code)"
+        ) in compact_sql
+
+
+def test_advisor_optimization_indexes_every_reported_foreign_key():
+    compact_sql = re.sub(
+        r"\s+",
+        " ",
+        ADVISOR_OPTIMIZATION_SCHEMA_PATH.read_text(encoding="utf-8").lower(),
+    )
+    expected = {
+        "daily_basic_indicator": "ts_code",
+        "daily_feature_snapshot": "ts_code",
+        "evaluation_result": "evaluation_task_id",
+        "evidence_package_index": "ts_code",
+        "focus_watchlist_state": "ts_code",
+        "formal_run_activation_marker": "pending_id",
+        "formal_run_pending_batch": "run_id",
+        "knowledge_rule_match": "rule_id",
+        "market_price_daily": "ts_code",
+        "recommendation_daily": "ts_code",
+        "stock_status_daily": "ts_code",
+    }
+    for table, column in expected.items():
+        assert (
+            f"create index if not exists {table}_{column}_idx "
+            f"on public.{table} ({column})"
+        ) in compact_sql
