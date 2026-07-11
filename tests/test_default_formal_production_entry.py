@@ -134,6 +134,112 @@ def test_default_recorded_july10_incomplete_primary_and_backup_blocks_before_str
     assert runtime.ledger.pending == {}
 
 
+def test_july10_denied_anns_d_uses_complete_cninfo_group_without_primary_rows(
+    tmp_path,
+):
+    runtime = production_recorded_runtime(tmp_path)
+    runtime.tushare_pro.overrides["anns_d"] = RuntimeError("permission denied")
+    suspension_calls = 0
+
+    def route_specific_suspension(_kwargs):
+        nonlocal suspension_calls
+        suspension_calls += 1
+        if suspension_calls == 1:
+            return pd.DataFrame(columns=["ts_code", "trade_date", "suspend_type"])
+        title = "primary-sentinel" if suspension_calls == 2 else "backup-clean"
+        return pd.DataFrame(
+            [
+                {
+                    "ts_code": "600000.SH",
+                    "trade_date": "20260710",
+                    "suspend_type": title,
+                }
+            ]
+        )
+
+    runtime.tushare_pro.overrides["suspend_d"] = route_specific_suspension
+
+    result = _default_run_daily(
+        tmp_path,
+        InMemoryAnalysisRepository(),
+        TARGET,
+        runtime=runtime,
+    )
+
+    assert result.receipt.state is FormalRunState.REPORT_GENERATED
+    version_id = result.receipt.group_version_ids["official_events_risk"]
+    payload = LocalEvidenceStore(
+        tmp_path / "local_warehouse/formal_evidence"
+    ).read_group_version(version_id)
+    assert payload is not None
+    assert payload.route_id == "cninfo.direct.events_risk.v2"
+    serialized = json.dumps(payload.model_dump(mode="json"), ensure_ascii=False)
+    assert "primary-sentinel" not in serialized
+    assert "backup-clean" in serialized
+    assert "tushare.anns_d" not in payload.source_names
+    assert payload.source_names == (
+        "tushare.suspend_d",
+        "tushare.stock_basic",
+        "cninfo.raw.disclosure",
+    )
+
+
+def test_july10_invalid_cninfo_time_blocks_before_analysis_llm_report_and_ledger(
+    tmp_path,
+):
+    runtime = production_recorded_runtime(tmp_path)
+    runtime.tushare_pro.overrides["anns_d"] = RuntimeError("permission denied")
+    runtime.cninfo_http_client.invalid_timestamp = True
+    reports = tmp_path / "reports"
+    (reports / "data").mkdir(parents=True)
+    (reports / "index.html").write_bytes(b"<html>prior</html>")
+    (reports / "data/latest.json").write_bytes(
+        b'{"trade_date":"2026-07-09","report_mode":"production"}'
+    )
+    prior_index = (reports / "index.html").read_bytes()
+    prior_latest = (reports / "data/latest.json").read_bytes()
+
+    result = _default_run_daily(
+        tmp_path,
+        InMemoryAnalysisRepository(),
+        TARGET,
+        runtime=runtime,
+    )
+
+    assert result.receipt.state is FormalRunState.BLOCKED_NEEDS_HUMAN
+    assert result.receipt.blocked_group is AcquisitionGroupId.OFFICIAL_EVENTS_RISK
+    assert result.analysis is None
+    assert runtime.ledger.pending == {}
+    assert runtime.ledger.active == {}
+    assert (reports / "index.html").read_bytes() == prior_index
+    assert (reports / "data/latest.json").read_bytes() == prior_latest
+
+
+def test_july10_cninfo_empty_coverage_still_allows_formal_analysis(tmp_path):
+    runtime = production_recorded_runtime(tmp_path)
+    runtime.tushare_pro.overrides["anns_d"] = RuntimeError("permission denied")
+    runtime.cninfo_http_client.route_empty = True
+
+    result = _default_run_daily(
+        tmp_path,
+        InMemoryAnalysisRepository(),
+        TARGET,
+        runtime=runtime,
+    )
+
+    assert result.receipt.state is FormalRunState.REPORT_GENERATED
+    assert result.analysis is not None
+    version_id = result.receipt.group_version_ids["official_events_risk"]
+    payload = LocalEvidenceStore(
+        tmp_path / "local_warehouse/formal_evidence"
+    ).read_group_version(version_id)
+    assert payload is not None
+    assert payload.route_id == "cninfo.direct.events_risk.v2"
+    assert payload.coverage_codes == ("600000.SH",)
+    assert payload.coverage_proven is True
+    assert payload.records == ()
+
+
 def test_market_request_excludes_suspended_hard_excluded_and_too_new_codes(tmp_path):
     runtime = production_recorded_runtime(tmp_path)
     suspended = "000001.SZ"

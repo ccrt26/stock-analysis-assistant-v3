@@ -52,10 +52,12 @@ class RecordedCninfoHttp:
         invalid_timestamp=False,
         no_empty=False,
         no_populated=False,
+        route_empty=False,
     ):
         self.invalid_timestamp = invalid_timestamp
         self.no_empty = no_empty
         self.no_populated = no_populated
+        self.route_empty = route_empty
         self.calls = []
 
     def get(self, url, **kwargs):
@@ -81,6 +83,8 @@ class RecordedCninfoHttp:
         populated = not self.no_populated and not data["category"] and (
             data["stock"] == "" or code == "600000" or self.no_empty
         )
+        if self.route_empty and data["stock"]:
+            populated = False
         if not populated:
             return RecordedHttpResponse(
                 {"totalAnnouncement": 0, "announcements": []}
