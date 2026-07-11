@@ -299,6 +299,7 @@ def render_formal_report(
         strategy_v2_snapshots=payload.strategy_snapshots,
         focus_entry_theses=payload.focus_entry_theses,
         focus_daily_updates=payload.focus_daily_updates,
+        focus_history_by_code=payload.focus_history_by_code,
         formal_narrative=narrative,
     )
     manifest = {

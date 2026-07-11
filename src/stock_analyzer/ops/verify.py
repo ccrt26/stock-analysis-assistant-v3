@@ -180,6 +180,10 @@ def report_readability_failure_codes(
         for item in cards or []
         if isinstance(item, dict) and _is_non_empty_string(item.get("ts_code"))
     }
+    focus_history_by_code = payload.get("focus_history_by_code")
+    if not isinstance(focus_history_by_code, dict):
+        failures.append("focus_history_audit_missing")
+        focus_history_by_code = {}
     for code in expected_codes:
         stock = stock_by_code.get(code)
         snapshot = snapshot_by_code.get(code)
@@ -214,6 +218,11 @@ def report_readability_failure_codes(
         exact_texts = _narrative_exact_texts(stock)
         if any(text not in visible_stock for text in exact_texts):
             failures.append("narrative_text_missing_from_stock")
+        if not _focus_progress_matches(
+            stock.get("five_day_progress"),
+            focus_history_by_code.get(code, []),
+        ):
+            failures.append("focus_progress_mismatch")
         if not _narrative_decision_matches(stock, snapshot, card_by_code.get(code)):
             failures.append("narrative_decision_mismatch")
 
@@ -1000,6 +1009,26 @@ def _narrative_decision_matches(
         "exit_conditions": action.get("invalidation_conditions"),
     }
     return all(stock.get(field) == value for field, value in expected.items())
+
+
+def _focus_progress_matches(progress: Any, history: Any) -> bool:
+    if not isinstance(progress, list) or not isinstance(history, list):
+        return False
+    if len(progress) != len(history):
+        return False
+    for point, day in zip(progress, history):
+        if not isinstance(point, dict) or not isinstance(day, dict):
+            return False
+        evidence_ids = point.get("evidence_ids")
+        text = point.get("text")
+        if (
+            not isinstance(evidence_ids, list)
+            or day.get("evidence_id") not in evidence_ids
+            or not _is_non_empty_string(text)
+            or str(day.get("trade_date")) not in text
+        ):
+            return False
+    return True
 
 
 def _html_visible_text(html_text: str) -> str:

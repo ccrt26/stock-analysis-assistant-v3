@@ -300,7 +300,6 @@ def test_focus_only_narrative_is_visible_on_home_and_own_stock_page(tmp_path):
         verify_receipt,
     ) is True
 
-
 def test_user_view_precedes_collapsed_audit_details(tmp_path):
     output = analysis_output()
     receipt = rendering_receipt(output)
@@ -367,6 +366,32 @@ def test_focus_stock_page_displays_exact_five_session_progress(tmp_path):
     assert "重点股票五日进展" in html
     for trade_date in dates:
         assert trade_date.isoformat() in html
+
+    verify_receipt = rendering_receipt(output).model_copy(
+        update={"state": FormalRunState.VERIFYING}
+    )
+    assert verify_staged_formal_report(
+        tmp_path,
+        hash_artifact_tree(tmp_path),
+        verify_receipt,
+    ) is True
+    latest_path = tmp_path / "data/latest.json"
+    latest = json.loads(latest_path.read_text(encoding="utf-8"))
+    stock_payload = next(
+        item
+        for item in latest["formal_narrative"]["stocks"]
+        if item["ts_code"] == code
+    )
+    stock_payload["five_day_progress"].pop()
+    latest_path.write_text(
+        json.dumps(latest, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    assert verify_staged_formal_report(
+        tmp_path,
+        hash_artifact_tree(tmp_path),
+        verify_receipt,
+    ) is False
 
 
 def test_production_renderer_rejects_missing_validated_narrative(tmp_path):

@@ -53,12 +53,16 @@ def render_reports(
     strategy_v2_snapshots: Optional[list[StrategyEvidenceSnapshot]] = None,
     focus_entry_theses: Optional[list[FocusEntryThesis]] = None,
     focus_daily_updates: Optional[list[FocusDailyUpdate]] = None,
+    focus_history_by_code: Optional[
+        dict[str, list[StrategyEvidenceSnapshot]]
+    ] = None,
     formal_narrative: Optional[FormalNarrative] = None,
 ) -> None:
     strategy_v2_cards = strategy_v2_cards or []
     strategy_v2_snapshots = strategy_v2_snapshots or []
     focus_entry_theses = focus_entry_theses or []
     focus_daily_updates = focus_daily_updates or []
+    focus_history_by_code = focus_history_by_code or {}
     report_date = _resolve_trade_date(
         trade_date,
         recommendations,
@@ -147,6 +151,10 @@ def render_reports(
         "focus_daily_updates": [
             item.model_dump(mode="json") for item in focus_daily_updates
         ],
+        "focus_history_by_code": {
+            code: [item.model_dump(mode="json") for item in items]
+            for code, items in sorted(focus_history_by_code.items())
+        },
         "formal_narrative": (
             formal_narrative.model_dump(mode="json") if formal_narrative else {}
         ),

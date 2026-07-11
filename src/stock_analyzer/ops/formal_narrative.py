@@ -246,6 +246,14 @@ def validate_stock_narrative(
     )
     if any(_numeric_tokens(point.text) - allowed_numbers for point in points):
         raise ValueError("formal narrative numeric whitelist mismatch")
+    if len(stock.five_day_progress) != len(request.focus_history):
+        raise ValueError("formal narrative focus history mismatch")
+    for point, history in zip(stock.five_day_progress, request.focus_history):
+        if (
+            history.evidence_id not in point.evidence_ids
+            or history.trade_date not in point.text
+        ):
+            raise ValueError("formal narrative focus history mismatch")
     return stock
 
 
