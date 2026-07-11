@@ -12,7 +12,7 @@ This design remains the normative authority for formal-report behavior. It does 
 
 The implementation completed through commit `8e252ad48296dcc4375c10cacb5b81ff30663709` established generic route wrappers, atomic failover, immutable evidence, readiness states, focus-history rules, receipt gates, and two-phase activation under recorded or synthetic tests, but it lacked the concrete production program. The correction through default-entry evidence commit `0cd98dd` added the production contracts, Tushare and AKShare clients, durable capability records, screening/analysis/expression adapters, report bindings, Supabase hardening, and a functioning `build_production_formal_dependencies()` factory.
 
-正式生产程序已完成实现并通过默认入口离线验证；尚未执行真实数据读取，包括 2026-03-12 至 2026-07-10 的 82 个正式交易日回填。Supabase 正式迁移和写入、launchd 激活、Cloudflare 发布、经纪商连接和订单操作也均未执行。These unexecuted actions are later approval and environment-verification gates, not missing production-program code.
+正式生产程序已完成实现并通过默认入口离线验证。已完成 2026-07-10 真实只读主源回填，共覆盖 2026-03-12 至 2026-07-10 的 82 个正式交易日；Supabase 迁移已应用并完成只读回查。正式分析仍被 `official_events_risk` 阻断；正式决策窄账本激活、launchd 激活、Cloudflare 发布、经纪商连接和订单操作均未执行。These remaining actions are capability and production-activation gates, not missing production-program code.
 
 The following terms are distinct and must not be collapsed into a single “complete” status:
 
