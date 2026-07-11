@@ -1,7 +1,7 @@
 # V3 Formal Report Data Readiness Design
 
 **Date:** 2026-07-10  
-**Status:** Active normative design; production program offline-verified, live-read and production activation pending
+**Status:** Active normative design; 82-session market backfill and Supabase schema verified, precise-event route and production activation in progress
 
 **Scope:** Repair data acquisition, validation, historical reuse, and formal-report eligibility after Phase 3 Strategy V2  
 **Out of scope:** Strategy scoring, financial decision rules, position sizing, LLM writing style, broker integration, and automated orders
@@ -25,6 +25,23 @@ The following terms are distinct and must not be collapsed into a single “comp
 Lack of permission for live acquisition, Supabase mutation, Cloudflare deployment, or launchd activation never removes the requirement to implement and offline-test the concrete production program. Tests may replace an HTTP/API transport, but they may not replace the default production dependency factory, production route clients, production contracts, screening adapter, analysis adapter, renderer binding, or ledger binding.
 
 Historical specifications and implementation plans remain audit records. They must not be used as current production-readiness evidence when they conflict with the production capability matrix.
+
+### 0.1 2026-07-11 Production-Completion Amendment
+
+The remaining production work is one continuous completion sequence under this design; it is not a new strategy phase and does not reopen Strategy V2 decisions, position rules, report structure, or broker/order scope.
+
+The existing Tushare credential was tested through a redacted, read-only `anns_d` probe and does not have that independently licensed permission. Tushare remains the preferred primary event route if the permission is later granted, but production completion must not depend on assuming that access.
+
+The approved immediate backup is a direct CNINFO disclosure route. A live read of the CNINFO raw response for 2026-07-10 proved that `announcementTime` is an epoch-millisecond value with sub-day precision; the loss of precision observed in the revoked route occurred in a third-party normalized wrapper. The production route must therefore consume the raw CNINFO value, retain its exact Asia/Shanghai timestamp, and reject missing, date-only, malformed, or timezone-ambiguous values. It must not recover precision by assigning midnight or any other invented time.
+
+Provider selection for `official_events_risk` is fixed as follows:
+
+1. Use Tushare `anns_d` only when a current live capability record proves permission, a populated precise-time response, and an empty covered window.
+2. Otherwise discard the complete Tushare event-group attempt and start the direct CNINFO backup route from the original request.
+3. Use iFinD or another provider only through a later capability-onboarding change that passes the identical contract; a credential or documented field name alone is not approval.
+4. Never combine the rejected primary payload with the backup payload. The complete CNINFO backup recipe independently refetches current `suspend_d` and `stock_basic` status evidence through their already authorized Tushare endpoints, then fetches raw CNINFO generic and risk-category disclosures from the original request. Those calls form one declared backup route; no record from the failed primary attempt is reused. If either the shared status component or CNINFO disclosure component fails, the whole backup group fails.
+
+This amendment is pre-approved by the user's instruction to test the existing Tushare permission and use a qualified backup when it is absent. Implementation still follows the detailed Superpowers plan and test-first gates; it does not require another strategy-design discussion.
 
 ## 1. Objective
 
@@ -291,8 +308,9 @@ Primary route candidates:
 Backup route candidates:
 
 - approved Eastmoney/AkShare announcement adapters such as `stock_notice_report` when their coverage and publication timestamps pass capability testing
+- direct CNINFO `hisAnnouncement/query` plus `szse_stock.json`, with the raw epoch-millisecond `announcementTime`, stable `announcementId`, official PDF path, and per-code/category pagination retained without third-party timestamp normalization
 
-2026-07-11 live correction: `stock_notice_report` and the public CNINFO disclosure adapter returned date-only values and therefore did not pass the 18:30 point-in-time contract. 已完成 2026-07-10 真实只读主源回填；Supabase 迁移已应用并完成只读回查；正式分析仍被 `official_events_risk` 阻断。The immutable capability store must remove these routes from `latest.json`; historical evidence remains audit-only. A future Tushare `anns_d`, iFinD `ctime`, or exchange route may advance only after populated and proven-empty live cases both pass the same cutoff contract.
+2026-07-11 live correction: Eastmoney `stock_notice_report` and the AkShare-normalized CNINFO route returned date-only values and therefore did not pass the 18:30 point-in-time contract. The corresponding capability evidence was removed from `latest.json`; historical evidence remains audit-only. A subsequent direct read of the CNINFO raw endpoint proved that its unwrapped `announcementTime` contains epoch-millisecond precision. The direct route is a distinct implementation and route ID; it may advance only after both a populated non-midnight response and a proven-empty valid-code window pass the same cutoff contract. Tushare `anns_d`, iFinD `ctime`, or another official route remains subject to the identical onboarding rule.
 
 Rules:
 
@@ -301,6 +319,10 @@ Rules:
 - rumors, social-media heat, and low-reliability material cannot satisfy this group
 - absence of a hard-risk event is valid only after the route proves coverage for the target code set and time window
 - any hard-risk conclusion uses official facts available by the report cutoff
+- an empty provider response can prove only empty-window coverage; it can never prove timestamp field semantics
+- live event capability evidence must persist separate hashes for one populated precise-time probe and one valid-code empty-window probe
+- every CNINFO page must agree with the requested code and date window; pagination totals, duplicate announcement IDs, missing stock-map entries, missing PDF paths, and malformed timestamps fail the complete route
+- risk-category queries are part of the complete CNINFO route and may mark an announcement as hard risk; generic title text is not used to invent a risk category
 
 ### 5.6 Concept and Theme Group
 
@@ -593,6 +615,8 @@ Implementation is not complete until an isolated end-to-end rehearsal for 2026-0
 
 Live data acquisition and any real production write require separate explicit user approval after implementation and offline verification.
 
+That approval was granted on 2026-07-11 for provider reads, the formal 2026-07-10 run, Supabase narrow formal writes, first report publication, and scheduler activation after all preceding gates pass. It does not authorize broker connectivity or order operations. Production mutations remain sequenced and fail closed; the approval does not permit skipping capability, test, receipt, hash, capacity, or smoke verification.
+
 ## 16. Acceptance Criteria
 
 This repair is complete when:
@@ -608,7 +632,22 @@ This repair is complete when:
 - blocked runs produce internal diagnostics and human intervention only
 - prior valid focus history is loaded and incomplete days never count
 - formal report generation is demonstrated offline for July 10
-- no secret, broker connection, order execution, or production write is introduced
+- no secret, broker connection, order execution, or write outside the approved narrow formal receipt/ledger/report activation flow is introduced
+
+### 16.1 Production-Completion Acceptance
+
+The current `/goal` is complete only when all of the following have fresh evidence:
+
+1. The existing Tushare credential has a redacted `anns_d` permission result; when denied, no Tushare event capability is issued.
+2. The direct CNINFO route has immutable live evidence for a populated raw millisecond timestamp and a valid-code empty response, passes the full target contract, and is the only active CNINFO event route in `latest.json`.
+3. The already stored 82 official sessions remain complete and canonical; the formal run reuses them or refetches a whole primary group when validation requires it, never patches them with another route.
+4. One real 2026-07-10 run reaches `READY_TO_ANALYZE`, executes the existing deterministic daily recommendation and focus analysis, renders and verifies its formal report, prepares and atomically activates its Supabase narrow rows, and confirms active-view read-back against the same receipt and hashes.
+5. The first Cloudflare publish deploys only the activated artifact, passes online date/content/password/redaction smoke, and enables automatic publication only after that success.
+6. The generated launchd service contains the resolved checkout path only in the local installed copy, loads successfully, exposes no secret value, and its executable command passes a non-mutating configuration/health smoke before scheduling is declared active.
+7. Targeted tests, one complete test suite, source hardcoding scans, secret scans, production Gate checks, and an independent read-only final review have no unresolved Critical or Important finding.
+8. The worktree is clean and every design, plan, implementation, evidence-status, and operational change has been committed and pushed to `origin/codex/v3-mvp`.
+
+If a required external credential for Supabase or Cloudflare is unavailable, invalid, or cannot be used without exposing it, the pipeline stops before that mutation and reports the exact external blocker. It must not mark later production-completion items satisfied.
 
 ## 17. Design Boundary Summary
 
