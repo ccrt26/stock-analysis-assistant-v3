@@ -21,7 +21,7 @@ if [ ! -f .env.local ]; then
   exit 1
 fi
 set -a
-source .env.local
+source .env.local >/dev/null 2>&1
 set +a
 slot="$(date +%H:%M)"
 case "$slot" in

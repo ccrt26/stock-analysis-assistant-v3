@@ -665,6 +665,10 @@ git commit -m "docs: record verified formal production run"
 - Modify after success: `docs/operations/runbook.md`
 - Modify after success: `docs/operations/cloudflare-pages.md`
 
+- [ ] **Finding 10A: Prevent runtime environment loading from writing to launchd logs**
+
+Before installation, the versioned launchd template still used bare `source .env.local`. The authorized runtime must load those values, but neither normal output nor shell-side diagnostics from that file may reach launchd stdout/stderr logs. In `tests/test_ops_notify.py`, extend `test_launchd_template_uses_project_root_and_env_contract_without_secrets` to require the literal fail-closed loader `source .env.local >/dev/null 2>&1`. It must fail before the template edit. Update only that line in `ops/launchd/com.ccrt.stock-analysis-assistant.daily.plist.example`; keep the missing-file check, three slots, and no embedded value. Run `pytest tests/test_ops_notify.py -q` and `plutil -lint` on the template; both must pass. Include this file in the Task 10 operational-evidence commit.
+
 - [ ] **Step 1: Verify Cloudflare configuration without exposing values**
 
 Check only presence/auth status, project identity, branch, report password variable name, and prepared artifact manifest. Do not print tokens, account IDs, passwords, session secrets, or `.env.local`.

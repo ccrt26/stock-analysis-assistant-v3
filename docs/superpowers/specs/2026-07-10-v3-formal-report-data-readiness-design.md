@@ -1,7 +1,7 @@
 # V3 Formal Report Data Readiness Design
 
 **Date:** 2026-07-10  
-**Status:** Active normative design; 82-session market backfill and Supabase schema verified, precise-event route and production activation in progress
+**Status:** Active normative design; real formal run, Supabase activation/read-back, report verification, and launchd activation complete; Cloudflare publication externally blocked
 
 **Scope:** Repair data acquisition, validation, historical reuse, and formal-report eligibility after Phase 3 Strategy V2  
 **Out of scope:** Strategy scoring, financial decision rules, position sizing, LLM writing style, broker integration, and automated orders
@@ -12,7 +12,7 @@ This design remains the normative authority for formal-report behavior. It does 
 
 The implementation completed through commit `8e252ad48296dcc4375c10cacb5b81ff30663709` established generic route wrappers, atomic failover, immutable evidence, readiness states, focus-history rules, receipt gates, and two-phase activation under recorded or synthetic tests, but it lacked the concrete production program. The correction through default-entry evidence commit `0cd98dd` added the production contracts, Tushare and AKShare clients, durable capability records, screening/analysis/expression adapters, report bindings, Supabase hardening, and a functioning `build_production_formal_dependencies()` factory.
 
-正式生产程序已完成实现并通过默认入口离线验证。已完成 2026-07-10 真实只读主源回填，共覆盖 2026-03-12 至 2026-07-10 的 82 个正式交易日；Supabase 迁移已应用并完成只读回查。正式事件能力 Gate 已通过：Tushare `anns_d` 权限拒绝且未获凭证，直连 CNINFO 备源通过真实非空毫秒时间戳、有效代码空窗口和完整目标合同。正式分析、正式决策窄账本激活、launchd 激活、Cloudflare 发布、经纪商连接和订单操作均未执行。These remaining actions are production-run and activation gates, not missing production-program code.
+正式生产程序已完成实现并通过默认入口离线验证。已完成 2026-07-10 真实只读主源回填，共覆盖 2026-03-12 至 2026-07-10 的 82 个正式交易日；Supabase 迁移已应用并完成只读回查。正式事件能力 Gate 已通过：Tushare `anns_d` 权限拒绝且未获凭证，直连 CNINFO 备源通过真实非空毫秒时间戳、有效代码空窗口和完整目标合同。真实正式运行已完成 Strategy V2 每日推荐与重点股分析、Supabase 窄账本和报告原子激活、强读回及生产报告验证；launchd 已加载。可选 LLM 表达客户端未配置或调用。Cloudflare 的凭证范围部署包已准备，但当前执行环境禁止外部上传，因而尚未发布或启用自动发布。经纪商连接和订单操作均未执行。
 
 The following terms are distinct and must not be collapsed into a single “complete” status:
 

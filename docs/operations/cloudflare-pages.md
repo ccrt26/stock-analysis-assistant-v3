@@ -1,8 +1,8 @@
 # Cloudflare Pages Publish and Smoke
 
-> **Current availability:** Publish automation and the upstream formal default path are implemented and offline-tested, but no report from live data has been produced or approved. The automatic-publish flag is absent, no Cloudflare deployment has run, and deployment must wait for the live-read and production-write gates in [`production-capability-matrix.md`](production-capability-matrix.md).
+> **Current availability:** The 2026-07-10 live-data formal report passed Supabase activation/read-back and production verification. Its receipt-scoped 15-file Pages package is prepared at `dist/pages`. No Cloudflare deployment or online smoke has run because the current execution environment prohibited uploading private workspace-derived report artifacts; the automatic-publish flag therefore remains absent. An authorized operator may run the documented one-command publish outside that restriction.
 
-Phase 1 prepares a Cloudflare Pages artifact at `dist/pages`, but it does not upload it. Manual publish is allowed only after explicit approval and after the local production run has completed successfully.
+The prepared package contains only the 14 files listed by the activated receipt plus `functions/_middleware.ts`; historical report files are preserved locally but excluded. Manual publish is allowed only after explicit approval and after the local production run has completed successfully.
 
 ## Approval Gates
 

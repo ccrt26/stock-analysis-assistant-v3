@@ -281,6 +281,10 @@ def test_active_docs_record_live_backfill_schema_and_precise_event_gate():
         assert "Supabase 迁移已应用并完成只读回查" in document
         assert "正式事件能力 Gate 已通过" in document
 
+    for document in (readme, runbook):
+        assert "10 个每日推荐" in document
+        assert "launchd 已加载" in document
+
 
 def test_matrix_default_factory_and_route_rows_match_verified_evidence():
     offline_verified = (
@@ -291,15 +295,8 @@ def test_matrix_default_factory_and_route_rows_match_verified_evidence():
         "DATA-008",
         "DATA-009",
         "PIPE-002",
-        "PIPE-006",
         "PIPE-007",
-        "PIPE-008",
         "PIPE-009",
-        "ACT-001",
-        "REPORT-001",
-        "REPORT-002",
-        "REPORT-003",
-        "OPS-001",
         "OPS-003",
     )
 
@@ -309,17 +306,38 @@ def test_matrix_default_factory_and_route_rows_match_verified_evidence():
     assert capability_level("DATA-001") == "LIVE_READ_VERIFIED"
     assert capability_level("DATA-003") == "LIVE_READ_VERIFIED"
     assert capability_level("DATA-010") == "LIVE_READ_VERIFIED"
-    assert capability_level("STORE-001") == "LIVE_READ_VERIFIED"
     assert capability_level("DATA-007") == "LIVE_READ_VERIFIED"
+    production_write_verified = (
+        "PIPE-004",
+        "PIPE-005",
+        "PIPE-006",
+        "PIPE-008",
+        "STORE-001",
+        "STORE-003",
+        "ACT-001",
+        "REPORT-001",
+        "REPORT-002",
+        "REPORT-003",
+        "OPS-001",
+        "PUB-001",
+    )
+    assert {
+        capability_id: capability_level(capability_id)
+        for capability_id in production_write_verified
+    } == {
+        capability_id: "PRODUCTION_WRITE_VERIFIED"
+        for capability_id in production_write_verified
+    }
     for capability_id in ("DATA-005", "DATA-006"):
         assert capability_level(capability_id) == "BLOCKED"
 
 
-def test_matrix_claims_only_verified_live_schema_and_keeps_activation_blocked():
+def test_matrix_claims_verified_production_and_keeps_publication_blocked():
     assert capability_level("DATA-011") == "LIVE_READ_VERIFIED"
     assert capability_level("STORE-002") == "PRODUCTION_WRITE_VERIFIED"
-    assert capability_level("STORE-003") == "IMPLEMENTED_UNVERIFIED"
-    assert capability_level("OPS-002") == "BLOCKED"
+    assert capability_level("STORE-003") == "PRODUCTION_WRITE_VERIFIED"
+    assert capability_level("OPS-002") == "ACTIVATED"
+    assert capability_level("PUB-002") == "BLOCKED"
     assert capability_level("PUB-003") == "BLOCKED"
     assert capability_level("SAFE-001") == "NOT_APPLICABLE"
 

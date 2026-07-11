@@ -1,8 +1,8 @@
 # Phase 1 Operations Runbook
 
-> **Current availability:** The concrete formal production program, 82-session live backfill, Supabase schema/read-back, and precise event-route gates have passed. The next gate is one real formal analysis with atomic Supabase activation and report verification; launchd and Cloudflare remain inactive until that run succeeds.
+> **Current availability:** The concrete formal production program, 82-session live backfill, precise event route, real 2026-07-10 Strategy V2 analysis, Supabase atomic activation/read-back, production report verification, and receipt-scoped deploy preparation have passed. launchd is installed and active for the three approved slots. Cloudflare remains unpublished because the current execution environment prohibited the external upload; automatic publication remains disabled.
 
-已完成 2026-07-10 真实只读主源回填；Supabase 迁移已应用并完成只读回查。正式事件能力 Gate 已通过：当前 Tushare 无 `anns_d` 权限，直连 CNINFO 备源已通过真实非空与空窗口验证。尚未执行正式分析、LLM 表达、正式决策窄账本激活、launchd 激活、Cloudflare 发布、经纪商连接或订单操作。
+已完成 2026-07-10 真实只读主源回填与正式分析：生成 10 个每日推荐、10 个重点股状态、14 个推荐/重点股证据包和 84 个复盘任务；Supabase 迁移已应用并完成只读回查，窄账本、正式报告和本地指针已原子激活并通过强读回。正式事件能力 Gate 已通过。当前未配置或调用可选 LLM 表达客户端。launchd 已加载；Cloudflare 发布及在线 smoke 尚未执行；从未连接经纪商或执行订单。
 
 This runbook covers the Phase 1 local Mac production flow for stock-analysis-assistant-v3. Phase 1 can run the local daily job, classify failures, clean same-day partial outputs before approved retries, write machine-readable status, and prepare `dist/pages`. It does not publish Cloudflare Pages automatically.
 
@@ -24,7 +24,7 @@ The required local schedule is:
 | 19:00 | 2 | First retry after classification and cleanup-before-retry. |
 | 19:30 | 3 | Final retry after classification and cleanup-before-retry. |
 
-The launchd template is `ops/launchd/com.ccrt.stock-analysis-assistant.daily.plist.example`. It is an example only and must remain unloaded until explicitly approved.
+The launchd template is `ops/launchd/com.ccrt.stock-analysis-assistant.daily.plist.example`. The approved local copy is installed under `~/Library/LaunchAgents/`, uses silent runtime environment loading, and is loaded for the three slots above. Keep personal paths out of the versioned template.
 
 ## Production Run Command After Readiness Approval
 
