@@ -8,10 +8,6 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from stock_analyzer.data.capability_store import (
-    CapabilityBundle,
-    WarehouseCapabilityStore,
-)
 from stock_analyzer.data.readiness import AcquisitionGroupId, AcquisitionPayload, GroupValidation
 from stock_analyzer.ops.formal_run import CandidateSet, RunReceipt
 from stock_analyzer.storage.evidence_store import (
@@ -310,11 +306,28 @@ def _migrate_item(
     if kind in {"capability_version", "capability_latest"}:
         envelope = dict(value)
         bundle_hash = str(envelope.pop("bundle_hash"))
-        bundle = CapabilityBundle.model_validate(envelope)
+        if bundle_hash != _canonical_payload_hash(envelope):
+            raise ValueError("capability bundle source hash mismatch")
+        contract_version = str(envelope["contract_version"])
+        generated_at = datetime.fromisoformat(str(envelope["generated_at"]))
+        routes = envelope.get("routes")
+        if not isinstance(routes, list):
+            raise ValueError("capability bundle routes must be a list")
+        mode = (
+            "live"
+            if routes and all(route.get("evidence_kind") == "live" for route in routes)
+            else "recorded"
+        )
         already = _has_capability(warehouse, bundle_hash)
-        WarehouseCapabilityStore(warehouse).save(bundle)
-        stored_hash, _ = warehouse.latest_capability_bundle()
-        if stored_hash != bundle_hash:
+        warehouse.save_capability_bundle(
+            bundle_hash=bundle_hash,
+            contract_version=contract_version,
+            generated_at=generated_at,
+            mode=mode,
+            payload=envelope,
+        )
+        stored_hash, stored_payload = warehouse.latest_capability_bundle()
+        if stored_hash != bundle_hash or stored_payload != envelope:
             raise ValueError("capability bundle hash mismatch")
         return already, (bundle_hash,)
     if kind == "run_receipt":
@@ -469,6 +482,17 @@ def _sha256(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _canonical_payload_hash(payload: dict[str, Any]) -> str:
+    return hashlib.sha256(
+        json.dumps(
+            payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
 
 
 def _from_json(value: Any) -> Any:

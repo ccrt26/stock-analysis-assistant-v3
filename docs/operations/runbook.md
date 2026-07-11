@@ -19,7 +19,9 @@ This runbook covers the Phase 1 local Mac production flow for stock-analysis-ass
 
 ## Formal Warehouse Restoration
 
-`STORE-004` currently means the DuckDB + Parquet code path is implemented but production JSON data is not yet migrated. The following commands are offline and non-destructive; each writes a machine-readable result. The deletion-manifest command does not delete anything.
+`STORE-004` is `MIGRATED_NOT_DELETED` as of 2026-07-12. The copy migration completed for all 162 legacy objects and its strict warehouse audit verified 18 versions, 1,825 Parquet files, 3,097,646 rows and 116 receipt revisions. Real acceptance verified 82 market sessions from 2026-03-12 through 2026-07-10. The authoritative audit is `local_archive/manifests/formal-warehouse-migration-2026-07-12.json`; the pre-migration database backup is `local_archive/warehouse.duckdb.pre-formal-migration-2026-07-12`. The legacy JSON tree remains intact pending cutover and deletion gates.
+
+The following commands are offline and non-destructive; each writes a machine-readable result. The deletion-manifest command does not delete anything.
 
 ```bash
 stock-analyzer formal-warehouse-inventory \

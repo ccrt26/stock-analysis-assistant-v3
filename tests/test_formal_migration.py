@@ -1,4 +1,5 @@
 import json
+import hashlib
 from datetime import date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -203,3 +204,82 @@ def test_deletion_manifest_lists_only_legacy_store_files(tmp_path):
     relative_parts = [Path(entry.path).relative_to(source).parts for entry in manifest.files]
     assert all(parts[0] != "reports" for parts in relative_parts)
     assert all(parts[:2] != ("manual", "holdings.json") for parts in relative_parts)
+
+
+def _write_historical_capability(
+    path: Path,
+    *,
+    route_id: str,
+    include_semantic_probe_hashes: bool,
+) -> str:
+    route = {
+        "route_id": route_id,
+        "group_id": "official_events_risk",
+        "contract_version": "formal-v2",
+        "full_contract_tested": True,
+        "field_semantics_verified": True,
+        "full_universe_verified": True,
+        "post_close_verified": True,
+        "tested_at": NOW.isoformat(),
+        "evidence_kind": "live",
+        "response_hash": "e" * 64,
+        "tested_library_versions": {"httpx": "0.28.1"},
+    }
+    if include_semantic_probe_hashes:
+        route["semantic_probe_hashes"] = {"probe": "f" * 64}
+    payload = {
+        "contract_version": "formal-v2",
+        "generated_at": NOW.isoformat(),
+        "routes": [route],
+    }
+    bundle_hash = hashlib.sha256(
+        json.dumps(
+            payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps({**payload, "bundle_hash": bundle_hash}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    return bundle_hash
+
+
+@pytest.mark.parametrize(
+    ("route_id", "include_semantic_probe_hashes"),
+    [
+        ("eastmoney.events_risk.v1", True),
+        ("cninfo.direct.events_risk.v2", False),
+    ],
+)
+def test_migration_preserves_valid_historical_capability_envelopes(
+    tmp_path,
+    route_id,
+    include_semantic_probe_hashes,
+):
+    source = tmp_path / "formal_evidence"
+    version_path = source / "capabilities/formal-v2/versions/history.json"
+    bundle_hash = _write_historical_capability(
+        version_path,
+        route_id=route_id,
+        include_semantic_probe_hashes=include_semantic_probe_hashes,
+    )
+    warehouse = FormalWarehouse(tmp_path / "warehouse")
+
+    audit = migrate_legacy_formal_store(source, warehouse, migration_id="migration-1")
+
+    assert audit.deletion_eligible is True
+    with warehouse._connect(read_only=True) as connection:
+        row = connection.execute(
+            "select payload from formal_capability_bundles where bundle_hash = ?",
+            [bundle_hash],
+        ).fetchone()
+    assert row is not None
+    stored_payload = json.loads(row[0])
+    assert stored_payload["routes"][0]["route_id"] == route_id
+    assert (
+        "semantic_probe_hashes" in stored_payload["routes"][0]
+    ) is include_semantic_probe_hashes

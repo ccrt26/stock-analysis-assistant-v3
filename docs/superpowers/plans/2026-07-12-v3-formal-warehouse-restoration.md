@@ -596,11 +596,11 @@ Use one commit for each independently explainable failure. Do not bundle cleanup
 
 **Safety:** Copy and validate only. Do not delete JSON, publish, write Supabase, call providers or alter broker state. Request exact command approval if the sandbox requires it.
 
-- [ ] **Step 1: Capture pre-migration inventory**
+- [x] **Step 1: Capture pre-migration inventory**
 
 Record file count, bytes, object counts, version IDs, canonical pointers, receipt graph and source hashes. Known current canonical market evidence should contain 82 dates from 2026-03-12 through 2026-07-10, 431,310 equity bars, 246 index bars and 5,270 target-date daily-basic rows. If the pointer differs, stop and explain before writing.
 
-- [ ] **Step 2: Add opt-in real-data RED acceptance**
+- [x] **Step 2: Add opt-in real-data RED acceptance**
 
 Skip unless `STOCK_ANALYZER_REAL_WAREHOUSE_ROOT` is set. Enumerate every source version/reference, not only canonical market data. Before migration it must fail because DuckDB lacks the graph.
 
@@ -610,7 +610,7 @@ STOCK_ANALYZER_REAL_WAREHOUSE_ROOT=/Users/ccrt/股票分析助手/local_warehous
 
 Expected RED: missing migrated versions/references.
 
-- [ ] **Step 3: Run idempotent real migration**
+- [x] **Step 3: Run idempotent real migration**
 
 ```bash
 .venv/bin/stock-analyzer-publish formal-warehouse-migrate \
@@ -622,11 +622,11 @@ Expected RED: missing migrated versions/references.
 
 Expected: exit zero, source bytes unchanged, every item `migrated` or `already_present`, no unknown/failed item, exact content hashes.
 
-- [ ] **Step 4: Run strict audit and migrate again**
+- [x] **Step 4: Run strict audit and migrate again**
 
 Hash every Parquet file and reconstruct every payload. Second migration creates zero new versions/files.
 
-- [ ] **Step 5: Run real-data GREEN acceptance**
+- [x] **Step 5: Run real-data GREEN acceptance**
 
 ```bash
 STOCK_ANALYZER_REAL_WAREHOUSE_ROOT=/Users/ccrt/股票分析助手/local_warehouse .venv/bin/python -m pytest tests/test_formal_warehouse_real_data.py -q
@@ -634,11 +634,11 @@ STOCK_ANALYZER_REAL_WAREHOUSE_ROOT=/Users/ccrt/股票分析助手/local_warehous
 
 Expected: pass with exact 82-session and reference-graph assertions.
 
-- [ ] **Step 6: Replay every existing receipt offline**
+- [x] **Step 6: Replay every existing receipt offline**
 
 Compare input-set, candidate-set, evidence and artifact hashes. Do not regenerate or activate production output.
 
-- [ ] **Step 7: Record migration evidence**
+- [x] **Step 7: Record migration evidence**
 
 Set `STORE-004` to `MIGRATED_NOT_DELETED`, with audit path, counts, dates, tests and cutover state. Commit code/test/doc evidence, not local data.
 
