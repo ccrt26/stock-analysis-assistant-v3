@@ -2,7 +2,9 @@
 
 Date: 2026-07-10
 
-Status: Historical normative Strategy V2 design; deterministic strategy implemented offline, formal production data path incomplete
+REPORT-004 readability correction approved: 2026-07-12
+
+Status: Normative Strategy V2 product design; REPORT-004 correction restores the approved LLM analysis and user-report outcome without changing deterministic decisions
 
 > Current implementation, live-read, production-write, and activation status is tracked only in [`docs/operations/production-capability-matrix.md`](../../operations/production-capability-matrix.md). This design remains authoritative for Strategy V2 behavior but does not prove production readiness.
 
@@ -23,7 +25,7 @@ The first version optimizes for useful decision support:
 - Daily recommendation discovers opportunities.
 - Focus watchlist tracks high-priority stocks.
 - Focus analysis must support trading decisions with clear action suggestions, quantitative position ranges, reasons, and invalidation conditions.
-- The system must use local knowledge and structured evidence first; the LLM only turns evidence into readable analysis.
+- The system must use local knowledge and structured evidence first. The LLM applies those materials to each stock, reasons about their investment meaning where the local library does not encode a complete method, and turns the resulting evidence-bound analysis into a readable user report.
 
 This design does not connect to a broker, does not auto-trade, and does not execute orders.
 
@@ -39,6 +41,7 @@ The LLM may:
 - Organize evidence into the approved report structure.
 - Translate indicators into "what happened, why it may have happened, what it may mean."
 - Draft action suggestions from explicit evidence, risk boundaries, holding state, and invalidation conditions.
+- Use its general analytical capability when the local knowledge library does not encode a complete interpretation method, provided every factual premise comes from the verified stock-specific input and every inference is presented as an inference rather than a new fact.
 
 The LLM must not:
 
@@ -47,6 +50,14 @@ The LLM must not:
 - Override official hard constraints.
 - Create unsupported trade instructions.
 - Hide missing data behind fluent language.
+- Change the structured stock action, position range, risk level, required confirmation, observation condition, invalidation condition, or exit condition.
+- Introduce an evidence ID, company fact, event, price, metric, or current market claim that is not present in the verified input whitelist for that stock.
+
+Knowledge coverage and factual coverage are different:
+
+- If verified facts exist but the local library lacks a complete interpretation rule, the LLM may reason from those facts within the boundaries above.
+- If a required fact is missing, the LLM must not fill the gap from model memory. The formal run follows the existing primary, backup, cache, and data-insufficient rules.
+- Model fluency is never evidence. Only verified input facts and approved knowledge references may support a formal conclusion.
 
 ### 2.2 Knowledge Library Must Be Used Deliberately
 
@@ -93,6 +104,34 @@ Daily reports and focus reports should not list long literature citations or kno
 
 The separate HTML architecture page is where knowledge usage is made transparent for design and optimization.
 
+### 2.5 One Stock, One Isolated Analysis
+
+Formal LLM analysis runs independently for each unique stock in the frozen daily-recommendation and active-focus sets. A stock present in both sets is analyzed once with the union of its approved inputs and rendered in both product contexts.
+
+Each stock input contains only:
+
+- Its verified company, fundamental, price-volume, event, risk, holding, and focus-history evidence.
+- The broad-market, exchange/board, industry, and genuine business-related concept context applicable to that stock.
+- Its matched local knowledge rules and explicit knowledge/data gaps.
+- Its immutable Strategy V2 action, position, risk, confirmation, observation, invalidation, and exit fields.
+
+The client must not receive another stock's facts. A generic market conclusion must not be copied into every stock. The home-page market summary is a separate evidence-bound view of verified market context and the distribution of frozen stock decisions; it cannot reorder stocks or modify any stock decision.
+
+### 2.6 Formal Codex Runtime and Failure Boundary
+
+The concrete production LLM client is the locally authenticated official Codex CLI in non-interactive mode. It uses the user's existing ChatGPT/Codex entitlement and must not require an OpenAI API key.
+
+The approved production model configuration is:
+
+- Model: `gpt-5.6-sol`.
+- Reasoning effort: `high`.
+- Speed: `standard`.
+- Invocation: ephemeral, non-interactive, structured JSON output validated against an exact schema.
+
+The Codex process receives a serialized allowlisted payload rather than repository paths, raw warehouse tables, credentials, logs, receipts, or deployment state. Its output is untrusted until all structural, evidence-whitelist, factual, decision-consistency, and report-completeness validators pass.
+
+A production formal run fails closed before rendering, ledger activation, report-pointer activation, deployment, or publication when Codex authentication is unavailable, quota is exhausted, the process times out, any stock output is missing, or any validator fails. The previously activated and published report remains unchanged.
+
 ## 3. Product Outputs
 
 Every trading day must produce:
@@ -103,6 +142,18 @@ Every trading day must produce:
 4. Operational status for whether recommendation and focus reports were generated.
 
 If required data is missing, the system still produces an explicit data-insufficient output with attempted recovery steps and impact. It must not silently skip a trading day.
+
+For a formal publishable run, the home page presents in this order:
+
+1. Plain-language overall market conclusion.
+2. Frozen recommended-stock ranking.
+3. Each stock's explicit action and position range.
+4. Three core reasons.
+5. Buy, wait, or continued-observation conditions.
+6. Invalidation and exit conditions.
+7. Five immediately preceding eligible trading-day progress for focus stocks.
+
+The stock page presents the validated stock-specific analysis before audit detail. Six-module breakdowns, evidence IDs, data-source versions, knowledge references, and internal technical metadata are collapsed by default. The user-facing main view must not contain Gate, input-set, thesis-quality, receipt, readiness-credential, or equivalent internal runtime terminology.
 
 ## 4. Daily Recommendation
 
@@ -466,9 +517,21 @@ Evaluation checks:
 
 Evaluation should improve future rules and data priorities.
 
+### 14.1 REPORT-004 Automated and Human Acceptance
+
+Automated acceptance must prove all of the following:
+
+- A designated unique narrative marker from the validated Codex response appears in the home page and its corresponding stock page.
+- Missing or invalid Codex output blocks a formal publishable run; `client=None` is not a valid production configuration.
+- Unknown evidence IDs, facts, prices, and decision fields are rejected.
+- Mutation tests prove Codex cannot change action, position, risk, confirmation, observation, invalidation, or exit conditions.
+- Main-view HTML contains every required user outcome and excludes the listed internal terminology; audit details remain available but collapsed.
+
+Automated success proves technical release readiness only. REPORT-004 remains `BLOCKED` until the user reviews a real candidate report and explicitly accepts its readability. Before that acceptance, the candidate must not replace the active local report pointer, Supabase activation, or Cloudflare Pages deployment, and no status text may call technical publication success a completed product acceptance.
+
 ## 15. Subagent and Model Allocation Guidance
 
-Phase 3 design, financial-analysis logic, knowledge mapping, data-source selection, safety review, and final code review require high-accuracy models. The default for these tasks should be GPT-5.5 xhigh or the strongest available equivalent.
+Phase 3 design, financial-analysis logic, knowledge mapping, data-source selection, safety review, and final code review require high-accuracy models. REPORT-004 production stock analysis uses the fixed `gpt-5.6-sol` configuration in section 2.6; implementation and review use the strongest available high-reasoning model.
 
 Lower-cost models may be used only when the task is fully specified and low judgment:
 
@@ -530,3 +593,5 @@ The implementation plan must still specify:
 - Exact HTML report page changes.
 - Backtest and replay scope for first validation.
 - Which existing tests are extended and which new tests are required.
+
+For REPORT-004, the LLM provider, model configuration, per-stock isolation, report-content priority, validation boundary, failure policy, and human acceptance rule are resolved by sections 2.5, 2.6, 3, and 14.1. The correction implementation plan must specify exact files, interfaces, schemas, commands, tests, and commit boundaries without reopening those decisions.
