@@ -269,7 +269,7 @@ def test_deprecated_mandatory_next_phases_file_is_removed():
     assert not (PROJECT_ROOT / "docs/operations/mandatory-next-phases.md").exists()
 
 
-def test_active_docs_record_live_backfill_schema_verification_and_current_blocker():
+def test_active_docs_record_live_backfill_schema_and_precise_event_gate():
     readme = read_project_file("README.md")
     runbook = read_project_file("docs/operations/runbook.md")
     design = read_project_file(
@@ -279,7 +279,7 @@ def test_active_docs_record_live_backfill_schema_verification_and_current_blocke
     for document in (readme, runbook, design):
         assert "已完成 2026-07-10 真实只读主源回填" in document
         assert "Supabase 迁移已应用并完成只读回查" in document
-        assert "正式分析仍被 `official_events_risk` 阻断" in document
+        assert "正式事件能力 Gate 已通过" in document
 
 
 def test_matrix_default_factory_and_route_rows_match_verified_evidence():
@@ -310,7 +310,8 @@ def test_matrix_default_factory_and_route_rows_match_verified_evidence():
     assert capability_level("DATA-003") == "LIVE_READ_VERIFIED"
     assert capability_level("DATA-010") == "LIVE_READ_VERIFIED"
     assert capability_level("STORE-001") == "LIVE_READ_VERIFIED"
-    for capability_id in ("DATA-005", "DATA-006", "DATA-007"):
+    assert capability_level("DATA-007") == "LIVE_READ_VERIFIED"
+    for capability_id in ("DATA-005", "DATA-006"):
         assert capability_level(capability_id) == "BLOCKED"
 
 
