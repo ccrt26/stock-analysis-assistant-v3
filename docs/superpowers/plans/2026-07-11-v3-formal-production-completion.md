@@ -780,7 +780,7 @@ Final report must list design/plan/implementation/evidence commits, targeted and
 - Modify after activation evidence exists: `docs/operations/runbook.md`
 - Modify after activation evidence exists: `docs/operations/production-capability-matrix.md`
 - Generated locally, never committed: `/Users/ccrt/Library/LaunchAgents/com.ccrt.stock-analysis-assistant.daily.plist`
-- Runtime-only copies, never committed: `/Users/ccrt/股票分析助手/.env.local`, `.venv/`, `logs/`, `reports/`, `local_warehouse/`, and `local_archive/`
+- Runtime-only copies, never committed: `/Users/ccrt/股票分析助手/.env.local`, `.venv/`, `logs/`, `reports/`, `local_warehouse/`, `local_archive/`, and `dist/`
 
 **Interfaces:**
 - Consumes: the merged `main` commit, the activated runtime state under `/Users/ccrt/股票分析助手/.worktrees/codex/v3-mvp`, and the versioned launchd template placeholder `__PROJECT_ROOT__`.
@@ -841,13 +841,13 @@ Expected: zero merge conflicts, `570` or more tests pass with zero failures, and
 
 - [ ] **Step 5: Quiesce scheduling and copy runtime state without exposing credentials**
 
-Boot out `gui/501/com.ccrt.stock-analysis-assistant.daily` before copying. Copy `.env.local` with mode `600`; copy `.venv`, `logs`, `reports`, `local_warehouse`, and `local_archive` while the service is stopped. Reinstall the local editable package with:
+Boot out `gui/501/com.ccrt.stock-analysis-assistant.daily` before copying. Copy `.env.local` with mode `600`; copy `.venv`, `logs`, `reports`, `local_warehouse`, `local_archive`, and the activated receipt-scoped `dist` artifact while the service is stopped. Reinstall the local editable package with:
 
 ```bash
 /Users/ccrt/股票分析助手/.venv/bin/python -m pip install --no-deps -e /Users/ccrt/股票分析助手
 ```
 
-Verify `stock_analyzer.__file__` begins with `/Users/ccrt/股票分析助手/src/`, and use dry-run `rsync --archive --itemize-changes --delete` comparisons for the five state directories. Expected: no pending itemized differences. Never print, hash, parse, or log `.env.local` values.
+Verify `stock_analyzer.__file__` begins with `/Users/ccrt/股票分析助手/src/`, and use dry-run `rsync --archive --checksum --itemize-changes --omit-dir-times` comparisons for `logs`, `reports`, `local_warehouse`, `local_archive`, and `dist`. Expected: no source content difference. Preserve target-only historical artifacts instead of using `--delete`; remove only non-semantic macOS metadata in a separately reviewed cleanup. Never print, hash, parse, or log `.env.local` values.
 
 - [ ] **Step 6: Generate, load, and inspect the canonical service**
 

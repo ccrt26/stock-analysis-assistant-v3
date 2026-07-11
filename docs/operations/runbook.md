@@ -24,7 +24,7 @@ The required local schedule is:
 | 19:00 | 2 | First retry after classification and cleanup-before-retry. |
 | 19:30 | 3 | Final retry after classification and cleanup-before-retry. |
 
-The launchd template is `ops/launchd/com.ccrt.stock-analysis-assistant.daily.plist.example`. The approved local copy is installed under `~/Library/LaunchAgents/`, uses silent runtime environment loading, and is loaded for the three slots above. Keep personal paths out of the versioned template.
+The launchd template is `ops/launchd/com.ccrt.stock-analysis-assistant.daily.plist.example`. The approved local copy is installed under `~/Library/LaunchAgents/`, uses silent runtime environment loading, and is loaded for the three slots above. Its canonical production checkout is the clean local `main` worktree resolved from Git at installation time; after loading the environment it pins `PROJECT_ROOT` to that installed checkout, so stale environment configuration cannot redirect the scheduler to a retired feature worktree. The virtual environment, logs, reports, warehouse, archive, and activated deployment artifact were migrated with source-content verification. Keep personal paths out of the versioned template and active operations documents.
 
 ## Production Run Command After Readiness Approval
 
