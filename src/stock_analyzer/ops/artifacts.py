@@ -51,7 +51,7 @@ def prepare_pages_artifact(
         shutil.rmtree(target)
     target.mkdir(parents=True, exist_ok=True)
 
-    _copy_report_tree(reports_dir, target)
+    _copy_receipt_artifacts(reports_dir, target, receipt)
     middleware_target = target / "functions" / "_middleware.ts"
     middleware_target.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(middleware_path, middleware_target)
@@ -136,25 +136,21 @@ def _validate_output_dir(
         )
 
 
-def _copy_report_tree(reports_dir: Path, target: Path) -> None:
-    for current_dir, dirnames, filenames in os.walk(reports_dir):
-        current_path = Path(current_dir)
-        relative_dir = current_path.relative_to(reports_dir)
-        dirnames[:] = [
-            dirname
-            for dirname in dirnames
-            if not _is_forbidden_relative_path(relative_dir / dirname)
-        ]
-        for filename in filenames:
-            relative_file = relative_dir / filename
-            if _is_forbidden_relative_path(relative_file):
-                continue
-            source = current_path / filename
-            if source.is_symlink():
-                continue
-            destination = target / relative_file
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(source, destination)
+def _copy_receipt_artifacts(reports_dir: Path, target: Path, receipt) -> None:
+    for relative_name in sorted(receipt.artifact_hashes):
+        relative_file = Path(relative_name)
+        if _is_forbidden_relative_path(relative_file):
+            raise DeployArtifactError(
+                f"Formal receipt contains a forbidden artifact path: {relative_name}."
+            )
+        source = reports_dir / relative_file
+        if source.is_symlink():
+            raise DeployArtifactError(
+                f"Formal receipt artifact cannot be a symlink: {relative_name}."
+            )
+        destination = target / relative_file
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, destination)
 
 
 def _assert_forbidden_paths_absent(target: Path) -> None:

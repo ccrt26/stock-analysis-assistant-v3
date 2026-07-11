@@ -194,12 +194,36 @@ def test_prepare_pages_artifact_rejects_report_changed_after_activation(tmp_path
         )
 
 
+def test_prepare_pages_artifact_excludes_unactivated_historical_reports(tmp_path):
+    _write_report_tree(tmp_path)
+    _write_middleware(tmp_path)
+    receipt = _activated_receipt(tmp_path, date(2026, 7, 9))
+    historical = tmp_path / "reports" / "daily" / "2026-07-07" / "index.html"
+    historical.parent.mkdir(parents=True)
+    historical.write_text(
+        "<html>Fixture/sample report 总评分：83.2</html>",
+        encoding="utf-8",
+    )
+
+    artifact_dir = prepare_pages_artifact(
+        tmp_path,
+        tmp_path / "dist" / "pages",
+        receipt=receipt,
+    )
+
+    assert (artifact_dir / "daily" / "2026-07-09" / "index.html").is_file()
+    assert not (artifact_dir / "daily" / "2026-07-07").exists()
+
+
 def _activated_receipt(project_root: Path, trade_date: date) -> RunReceipt:
     reports = project_root / "reports"
     artifact_hashes = {
         path.relative_to(reports).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
         for path in sorted(reports.rglob("*"))
         if path.is_file()
+        and not artifacts_module._is_forbidden_relative_path(
+            path.relative_to(reports)
+        )
     }
     if not artifact_hashes:
         artifact_hashes = {"index.html": hashlib.sha256(b"").hexdigest()}

@@ -595,6 +595,30 @@ git add docs/superpowers/specs/2026-07-10-v3-formal-report-data-readiness-design
 git commit -m "fix: verify focus evidence independently"
 ```
 
+- [ ] **Finding 9C: Scope report verification and deployment to the activated receipt artifact set**
+
+The corrected live verifier then found fixture text in an old `600000.SH` report and a visible score in a frozen 2026-07-07 report. Neither path is present in the current receipt's 14 `artifact_hashes`; the verifier scanned the whole historical `reports/` tree, and `prepare_pages_artifact()` would also copy that whole tree. This conflicts with frozen-history preservation and the approved rule that deployment contains only the activated artifact.
+
+In `tests/test_ops_job.py`, add `test_verify_ignores_historical_leaks_outside_activated_receipt_artifacts`: place fixture and score text in an older date path excluded from the receipt and assert current verification passes. Retain the existing tests that put fixture/score text in `index.html`, which is inside every activated receipt and must still fail. Add an unsafe receipt-path test if path validation is not already covered by deployment tests.
+
+In `tests/test_ops_artifacts.py`, add `test_prepare_pages_artifact_excludes_unactivated_historical_reports`: create current and historical files, construct a receipt whose hashes include only `index.html`, current daily files, and current data files, and assert the historical file is absent from `dist/pages`. Retain the existing tampered-current-artifact rejection.
+
+In `src/stock_analyzer/ops/verify.py`, derive a sorted list of safe existing artifact paths from `receipt.artifact_hashes` after rejecting absolute paths and `..`; scan only those paths for fixture/sample and visible-score leaks. In `src/stock_analyzer/ops/artifacts.py`, replace whole-tree copying with copying only receipt-listed regular files after the existing hash verification, then add the middleware. Do not delete, rewrite, or hide historical source reports.
+
+Run:
+
+```bash
+.venv/bin/python -m pytest tests/test_ops_job.py tests/test_ops_artifacts.py -q
+.venv/bin/python -m pytest tests/test_ops_publish.py tests/test_ops_smoke.py tests/test_default_formal_production_entry.py tests/test_july10_formal_readiness_acceptance.py -q
+```
+
+Expected: both new tests fail before source edits; afterward both commands pass and a current receipt leak still fails. Commit boundary:
+
+```bash
+git add docs/superpowers/specs/2026-07-10-v3-formal-report-data-readiness-design.md docs/superpowers/plans/2026-07-11-v3-formal-production-completion.md src/stock_analyzer/ops/verify.py src/stock_analyzer/ops/artifacts.py tests/test_ops_job.py tests/test_ops_artifacts.py
+git commit -m "fix: deploy only activated report artifacts"
+```
+
 - [ ] **Step 1: Verify current Supabase guidance and runtime presence without exposing values**
 
 Fetch `https://supabase.com/changelog.md`, inspect relevant breaking changes, then consult current official docs for RPC, RLS/security-invoker views, and service-role server usage. Run a boolean-only configuration check for `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`; if absent, use the already authenticated Supabase mechanism or request user authorization rather than displaying or copying a secret.

@@ -112,6 +112,7 @@ def verify_production_result(
     report_index_exists = report_index.exists()
     daily_report_index_exists = daily_report_index.exists()
     report_json_exists = report_json.exists()
+    artifact_paths = _receipt_artifact_paths(reports_dir, receipt)
 
     failures: list[ProductionVerificationFailure] = []
     report_payload = _load_report_json_payload(
@@ -232,6 +233,7 @@ def verify_production_result(
         report_json,
         report_json_exists,
         report_payload,
+        artifact_paths,
     )
 
     passed = not failures
@@ -331,6 +333,7 @@ def _append_report_artifact_failures(
     report_json: Path,
     report_json_exists: bool,
     report_payload: dict[str, Any] | None,
+    artifact_paths: tuple[Path, ...],
 ) -> None:
     if not report_index_exists:
         failures.append(
@@ -372,7 +375,7 @@ def _append_report_artifact_failures(
     elif report_payload is not None:
         _append_report_json_failures(failures, report_payload, trade_date)
 
-    leak_path = _find_fixture_sample_leak(reports_dir)
+    leak_path = _find_fixture_sample_leak(reports_dir, artifact_paths)
     if leak_path is not None:
         failures.append(
             ProductionVerificationFailure(
@@ -387,7 +390,10 @@ def _append_report_artifact_failures(
         )
 
     if _should_scan_visible_total_scores(report_payload):
-        score_leak_path = _find_visible_total_score_leak(reports_dir)
+        score_leak_path = _find_visible_total_score_leak(
+            reports_dir,
+            artifact_paths,
+        )
         if score_leak_path is not None:
             failures.append(
                 ProductionVerificationFailure(
@@ -745,10 +751,21 @@ def _count_supabase_unique_codes(repository, trade_date: date) -> int | None:
     return len(codes)
 
 
-def _find_fixture_sample_leak(reports_dir: Path) -> str | None:
-    if not reports_dir.exists():
-        return None
-    for path in sorted(reports_dir.rglob("*")):
+def _receipt_artifact_paths(reports_dir: Path, receipt) -> tuple[Path, ...]:
+    result: list[Path] = []
+    for relative_name in sorted(receipt.artifact_hashes):
+        relative_path = Path(relative_name)
+        if relative_path.is_absolute() or ".." in relative_path.parts:
+            raise ValueError("Formal receipt contains an unsafe artifact path.")
+        result.append(reports_dir / relative_path)
+    return tuple(result)
+
+
+def _find_fixture_sample_leak(
+    reports_dir: Path,
+    artifact_paths: tuple[Path, ...],
+) -> str | None:
+    for path in artifact_paths:
         if not path.is_file() or path.suffix.lower() != ".html":
             continue
         try:
@@ -760,10 +777,11 @@ def _find_fixture_sample_leak(reports_dir: Path) -> str | None:
     return None
 
 
-def _find_visible_total_score_leak(reports_dir: Path) -> str | None:
-    if not reports_dir.exists():
-        return None
-    for path in sorted(reports_dir.rglob("*")):
+def _find_visible_total_score_leak(
+    reports_dir: Path,
+    artifact_paths: tuple[Path, ...],
+) -> str | None:
+    for path in artifact_paths:
         if not path.is_file() or path.suffix.lower() != ".html":
             continue
         try:

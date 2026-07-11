@@ -305,6 +305,27 @@ def test_verify_fails_when_fixture_or_sample_strings_leak_into_reports(tmp_path)
     assert _failure(verification, "fixture_sample_leak").fix_suggestion
 
 
+def test_verify_ignores_historical_leaks_outside_activated_receipt_artifacts(
+    tmp_path,
+):
+    trade_date = date(2026, 7, 9)
+    _write_production_report(tmp_path, trade_date)
+    historical = tmp_path / "reports" / "daily" / "2026-07-07" / "index.html"
+    historical.parent.mkdir(parents=True)
+    historical.write_text(
+        "<html>Fixture/sample report 总评分：83.2</html>",
+        encoding="utf-8",
+    )
+
+    verification = _verify(
+        tmp_path,
+        FakeVerificationRepository(),
+        trade_date,
+    )
+
+    assert verification.passed is True
+
+
 def test_verify_fails_when_fixture_or_sample_strings_leak_into_report_json(tmp_path):
     trade_date = date(2026, 7, 9)
     _write_production_report(
