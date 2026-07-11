@@ -12,6 +12,7 @@ from stock_analyzer.data.capability_store import (
     CapabilityBundle,
     CapabilityEvidenceError,
     LocalCapabilityStore,
+    WarehouseCapabilityStore,
 )
 from stock_analyzer.data.cninfo_disclosure_client import CninfoDisclosureClient
 from stock_analyzer.data.formal_routes import formal_route_group_ids
@@ -30,6 +31,7 @@ from stock_analyzer.ops.production_dependencies import (
 from stock_analyzer.ops.codex_expression_client import CodexExpressionClient
 from stock_analyzer.ops.job import _default_run_daily
 from stock_analyzer.storage.repositories import InMemoryAnalysisRepository
+from stock_analyzer.storage.formal_warehouse import FormalWarehouse
 from tests.test_akshare_formal_client import RecordedAkshare
 from tests.test_formal_materializer import TARGET
 from tests.test_tushare_formal_client import RecordedTusharePro
@@ -195,6 +197,7 @@ def test_recorded_runtime_builds_complete_real_dependencies_without_high_level_m
     }
     assert callable(dependencies.screen) and callable(dependencies.analyze)
     assert callable(dependencies.render) and callable(dependencies.verify)
+    assert isinstance(dependencies.evidence_store, FormalWarehouse)
     assert runtime.tushare_pro.calls == []
     assert runtime.akshare_module.calls == []
 
@@ -227,6 +230,8 @@ def test_default_external_runtime_constructs_codex_expression_client(tmp_path):
     runtime = load_default_external_runtime(config, module_loader=modules.__getitem__)
 
     assert isinstance(runtime.expression_client, CodexExpressionClient)
+    assert isinstance(runtime.capability_store, WarehouseCapabilityStore)
+    assert isinstance(runtime.capability_store.warehouse, FormalWarehouse)
 
 
 def test_factory_uses_direct_cninfo_for_event_backup_and_akshare_elsewhere(tmp_path):

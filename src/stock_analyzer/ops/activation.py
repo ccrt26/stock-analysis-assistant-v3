@@ -16,7 +16,6 @@ from stock_analyzer.ops.formal_run import (
     FormalRunController,
     RunReceipt,
 )
-from stock_analyzer.storage.evidence_store import LocalEvidenceStore
 
 
 class ActivationError(RuntimeError):
@@ -190,7 +189,7 @@ class FormalActivationCoordinator:
     def __init__(
         self,
         report_root: Path,
-        evidence_store: LocalEvidenceStore,
+        evidence_store: Any,
         ledger: FormalLedger,
         *,
         failure_point: str | None = None,

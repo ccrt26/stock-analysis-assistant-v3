@@ -22,7 +22,7 @@ from stock_analyzer.ops.activation import ActivationError, hash_artifact_tree
 from stock_analyzer.ops.job import _default_run_daily
 from stock_analyzer.ops.production_dependencies import build_production_formal_dependencies
 from stock_analyzer.pipeline import StoredAnalysisNotFound, render_report_for_date
-from stock_analyzer.storage.evidence_store import LocalEvidenceStore
+from stock_analyzer.storage.formal_warehouse import FormalWarehouse
 from stock_analyzer.storage.repositories import InMemoryAnalysisRepository
 from tests.test_formal_materializer import TARGET
 from tests.test_formal_strategy_runtime import _prior_snapshots
@@ -168,8 +168,8 @@ def test_july10_denied_anns_d_uses_complete_cninfo_group_without_primary_rows(
 
     assert result.receipt.state is FormalRunState.REPORT_GENERATED
     version_id = result.receipt.group_version_ids["official_events_risk"]
-    payload = LocalEvidenceStore(
-        tmp_path / "local_warehouse/formal_evidence"
+    payload = FormalWarehouse(
+        tmp_path / "local_warehouse"
     ).read_group_version(version_id)
     assert payload is not None
     assert payload.route_id == "cninfo.direct.events_risk.v2"
@@ -230,8 +230,8 @@ def test_july10_cninfo_empty_coverage_still_allows_formal_analysis(tmp_path):
     assert result.receipt.state is FormalRunState.REPORT_GENERATED
     assert result.analysis is not None
     version_id = result.receipt.group_version_ids["official_events_risk"]
-    payload = LocalEvidenceStore(
-        tmp_path / "local_warehouse/formal_evidence"
+    payload = FormalWarehouse(
+        tmp_path / "local_warehouse"
     ).read_group_version(version_id)
     assert payload is not None
     assert payload.route_id == "cninfo.direct.events_risk.v2"
@@ -302,7 +302,7 @@ def test_market_request_excludes_suspended_hard_excluded_and_too_new_codes(tmp_p
         runtime=runtime,
     )
 
-    store = LocalEvidenceStore(tmp_path / "local_warehouse/formal_evidence")
+    store = FormalWarehouse(tmp_path / "local_warehouse")
     payload = store.read_group_version(
         result.receipt.group_version_ids[AcquisitionGroupId.MARKET_DECISION.value]
     )
@@ -327,12 +327,12 @@ def test_default_recorded_reconciliation_keeps_frozen_report_and_promotes_primar
         TARGET,
         runtime=runtime,
     )
-    store = LocalEvidenceStore(tmp_path / "local_warehouse/formal_evidence")
+    store = FormalWarehouse(tmp_path / "local_warehouse")
     report_hashes = hash_artifact_tree(tmp_path / "reports")
     frozen = store.frozen_report_reference(result.receipt.run_id)
-    reconciliation_path = next((store.root / "reconciliation").glob("*.json"))
-    task_id = reconciliation_path.stem
-    backup_version = store.reconciliation_task(task_id).backup_version_id
+    task = store.list_reconciliation_tasks()[0]
+    task_id = task.task_id
+    backup_version = task.backup_version_id
 
     def complete_primary(kwargs):
         frame = runtime.tushare_pro._default("daily", kwargs)
@@ -364,7 +364,7 @@ def test_default_recorded_reconciliation_keeps_frozen_report_and_promotes_primar
     primary = store.reconcile_primary(task_id, primary_payload, validation)
 
     assert primary.route_kind.value == "primary"
-    assert store.version_path(backup_version).is_file()
+    assert store.verify_group_version(backup_version).complete is True
     assert (
         store.canonical_manifest(AcquisitionGroupId.MARKET_DECISION, TARGET).version_id
         == primary.version_id
@@ -412,7 +412,7 @@ def test_default_recorded_direct_render_requires_activated_receipt(tmp_path):
             TARGET,
             tmp_path / "reports",
             repository=InMemoryAnalysisRepository(),
-            receipt_store=LocalEvidenceStore(tmp_path / "local_warehouse/formal_evidence"),
+            receipt_store=FormalWarehouse(tmp_path / "local_warehouse"),
             expected_input_set_id="missing-input-set",
         )
 
@@ -446,8 +446,8 @@ def test_default_recorded_atomic_failure_preserves_prior_consumers(tmp_path, fai
 
     assert (reports / "index.html").read_bytes() == prior_index
     assert (reports / "data/latest.json").read_bytes() == prior_latest
-    receipt = LocalEvidenceStore(
-        tmp_path / "local_warehouse/formal_evidence"
+    receipt = FormalWarehouse(
+        tmp_path / "local_warehouse"
     ).latest_run_receipt("formal-2026-07-10")
     assert receipt.state is FormalRunState.FAILED_RETRYABLE
     assert receipt.local_activation_id is None

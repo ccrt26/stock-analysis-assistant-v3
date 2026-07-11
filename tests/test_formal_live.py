@@ -4,14 +4,14 @@ from dataclasses import replace
 
 import pytest
 
-from stock_analyzer.data.capability_store import LocalCapabilityStore
+from stock_analyzer.data.capability_store import WarehouseCapabilityStore
 from stock_analyzer.data.readiness import CapabilityEvidenceKind, FormalRunState
 from stock_analyzer.ops.formal_live import (
     LiveCapabilityVerificationError,
     verify_and_record_live_capabilities,
 )
 from stock_analyzer.ops.job import _default_run_daily
-from stock_analyzer.storage.evidence_store import LocalEvidenceStore
+from stock_analyzer.storage.formal_warehouse import FormalWarehouse
 from stock_analyzer.storage.repositories import InMemoryAnalysisRepository
 from tests.test_formal_materializer import TARGET
 from tests.test_production_dependencies import NOW, recorded_external_runtime
@@ -21,13 +21,8 @@ def bootstrap_runtime(tmp_path):
     runtime = recorded_external_runtime(tmp_path)
     return replace(
         runtime,
-        capability_store=LocalCapabilityStore(
-            tmp_path
-            / "local_warehouse"
-            / "formal_evidence"
-            / "capabilities"
-            / "formal-v2"
-            / "latest.json"
+        capability_store=WarehouseCapabilityStore(
+            FormalWarehouse(tmp_path / "local_warehouse")
         ),
     )
 
@@ -55,10 +50,11 @@ def test_live_capability_bootstrap_uses_real_clients_and_writes_no_ledger_or_rep
     assert runtime.ledger.pending == {}
     assert runtime.ledger.active == {}
     assert not (tmp_path / "reports").exists()
-    store = LocalEvidenceStore(tmp_path / "local_warehouse/formal_evidence")
+    store = FormalWarehouse(tmp_path / "local_warehouse")
     for manifest in result.primary_screening_versions:
-        assert store.version_path(manifest.version_id).is_file()
+        assert store.verify_group_version(manifest.version_id).complete is True
         assert store.canonical_manifest(manifest.group_id, TARGET) == manifest
+    assert not list((tmp_path / "local_warehouse").glob("formal_evidence/**/*.json"))
 
 
 def test_live_capability_bootstrap_requires_explicit_confirmation_before_provider_call(
@@ -149,10 +145,11 @@ def test_failed_reverification_replaces_stale_latest_capability_with_partial_bun
         route.group_id.value != "official_events_risk"
         for route in latest.values()
     )
-    version_files = list(
-        (runtime.capability_store.path.parent / "versions").glob("*.json")
-    )
-    assert len(version_files) == 2
+    with runtime.capability_store.warehouse._connect(read_only=True) as connection:
+        version_count = connection.execute(
+            "select count(*) from formal_capability_bundles"
+        ).fetchone()[0]
+    assert version_count == 2
 
 
 def test_live_bootstrap_rejects_cninfo_date_only_event_semantics_and_saves_partial_bundle(

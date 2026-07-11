@@ -9,7 +9,7 @@ from typing import Any, Callable, Literal
 
 from stock_analyzer.config import AppConfig
 from stock_analyzer.data.akshare_formal_client import AkshareFormalEndpointClient
-from stock_analyzer.data.capability_store import LocalCapabilityStore
+from stock_analyzer.data.capability_store import WarehouseCapabilityStore
 from stock_analyzer.data.cninfo_disclosure_client import CninfoDisclosureClient
 from stock_analyzer.data.formal_contracts import (
     FORMAL_CONTRACT_VERSION,
@@ -32,7 +32,7 @@ from stock_analyzer.ops.formal_strategy_runtime import (
     verify_staged_formal_report,
 )
 from stock_analyzer.ops.redaction import redact_secrets
-from stock_analyzer.storage.evidence_store import LocalEvidenceStore
+from stock_analyzer.storage.formal_warehouse import FormalWarehouse
 
 
 class ProductionDependencyError(RuntimeError):
@@ -46,7 +46,7 @@ class ProductionExternalRuntime:
     tushare_pro: Any
     akshare_module: Any
     cninfo_http_client: Any
-    capability_store: LocalCapabilityStore
+    capability_store: Any
     capability_mode: Literal["recorded", "live"] = "live"
     ledger: Any | None = None
     expression_client: Any | None = None
@@ -75,12 +75,8 @@ def load_default_external_runtime(
         tushare_pro = tushare.pro_api(token)
     except Exception as exc:
         raise ProductionDependencyError("Tushare client initialization failed") from exc
-    capability_store = LocalCapabilityStore(
-        config.local_warehouse_dir
-        / "formal_evidence"
-        / "capabilities"
-        / FORMAL_CONTRACT_VERSION
-        / "latest.json"
+    capability_store = WarehouseCapabilityStore(
+        FormalWarehouse(config.local_warehouse_dir)
     )
     cninfo_http_client = httpx.Client(
         headers={
@@ -184,9 +180,7 @@ def build_production_formal_dependencies(
         render=render_formal_report,
         verify=verify_staged_formal_report,
         ledger=ledger,
-        evidence_store=LocalEvidenceStore(
-            runtime.config.local_warehouse_dir / "formal_evidence"
-        ),
+        evidence_store=FormalWarehouse(runtime.config.local_warehouse_dir),
         log_root=root / "logs" / "run-daily",
         activation_failure_point=runtime.activation_failure_point,
     )

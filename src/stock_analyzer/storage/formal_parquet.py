@@ -124,6 +124,7 @@ def prepare_version_files(root: Path, payload: AcquisitionPayload) -> PreparedVe
             / "formal"
             / family
             / f"{date_key}={partition_date.isoformat()}"
+            / f"record_type={record_type}"
             / f"version_id={version_id}"
             / "part-00000.parquet"
         )

@@ -35,7 +35,7 @@ from stock_analyzer.ops.smoke import SmokeResult
 from stock_analyzer.data.readiness import FormalRunState
 from stock_analyzer.ops.formal_run import RunReceipt
 from stock_analyzer.storage.capacity_guard import CapacityStatus
-from stock_analyzer.storage.evidence_store import LocalEvidenceStore
+from stock_analyzer.storage.formal_warehouse import FormalWarehouse
 
 
 def test_publish_state_write_json_redacts_secret_like_text(tmp_path):
@@ -168,7 +168,7 @@ def _write_job_status(root, payload):
 
 def _write_report(root, trade_date):
     _write_report_without_receipt(root, trade_date)
-    store = LocalEvidenceStore(root / "local_warehouse" / "formal_evidence")
+    store = FormalWarehouse(root / "local_warehouse")
     store.save_run_receipt(
         RunReceipt(
             run_id=f"publish-{trade_date.isoformat()}",

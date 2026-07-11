@@ -22,7 +22,7 @@ from stock_analyzer.ops.notify import notify_mac
 from stock_analyzer.ops.redaction import redact_secrets
 from stock_analyzer.ops.smoke import smoke_report_site
 from stock_analyzer.storage.capacity_guard import CapacityStatus
-from stock_analyzer.storage.evidence_store import LocalEvidenceStore
+from stock_analyzer.storage.formal_warehouse import FormalWarehouse
 
 
 class PublishStatus(str, Enum):
@@ -217,7 +217,7 @@ class PublishConfig:
     state_path: Path
     status_page_path: Path
     last_known_good_dir: Path
-    formal_evidence_root: Path | None = None
+    formal_warehouse_root: Path | None = None
 
     @classmethod
     def from_app_config(cls, config: AppConfig) -> "PublishConfig":
@@ -235,7 +235,7 @@ class PublishConfig:
             state_path=root / "logs" / "publish" / "latest-status.json",
             status_page_path=root / "logs" / "publish" / "status.html",
             last_known_good_dir=root / "local_archive" / "publish" / "last-known-good",
-            formal_evidence_root=config.local_warehouse_dir / "formal_evidence",
+            formal_warehouse_root=config.local_warehouse_dir,
         )
 
 
@@ -361,12 +361,12 @@ def load_publish_candidate(
 
     from stock_analyzer.pipeline import latest_committed_report_receipt
 
-    evidence_root = (
-        config.formal_evidence_root
-        or config.project_root / "local_warehouse" / "formal_evidence"
+    warehouse_root = (
+        config.formal_warehouse_root
+        or config.project_root / "local_warehouse"
     )
     receipt = latest_committed_report_receipt(
-        LocalEvidenceStore(evidence_root),
+        FormalWarehouse(warehouse_root),
         status_trade_date,
     )
     if receipt is None:

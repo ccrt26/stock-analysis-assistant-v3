@@ -530,6 +530,16 @@ class FormalWarehouse:
             raise FileNotFoundError(f"run receipt not found: {run_id}")
         return self.run_receipt(run_id, int(row[0]))
 
+    def list_latest_run_receipts(self) -> tuple[Any, ...]:
+        with self._connect(read_only=True) as connection:
+            run_ids = [
+                str(row[0])
+                for row in connection.execute(
+                    "select run_id from formal_run_latest order by run_id"
+                ).fetchall()
+            ]
+        return tuple(self.latest_run_receipt(run_id) for run_id in run_ids)
+
     def save_candidate_set(self, candidate_set) -> None:
         from stock_analyzer.ops.formal_run import CandidateSet
 
@@ -572,6 +582,16 @@ class FormalWarehouse:
         if not isinstance(value, dict) or value.get("run_id") != run_id:
             raise ValueError("formal report candidate bundle mismatch")
         return value
+
+    def list_reconciliation_tasks(self) -> tuple[ReconciliationTask, ...]:
+        with self._connect(read_only=True) as connection:
+            task_ids = [
+                str(row[0])
+                for row in connection.execute(
+                    "select task_id from formal_reconciliation_tasks order by task_id"
+                ).fetchall()
+            ]
+        return tuple(self.reconciliation_task(task_id) for task_id in task_ids)
 
     def save_capability_bundle(
         self,

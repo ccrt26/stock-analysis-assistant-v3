@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel
 
@@ -48,7 +48,6 @@ from stock_analyzer.reports.generator import (
     render_reports,
 )
 from stock_analyzer.storage.repositories import AnalysisRepository, InMemoryAnalysisRepository
-from stock_analyzer.storage.evidence_store import LocalEvidenceStore
 
 
 class DailyRunResult(BaseModel):
@@ -821,7 +820,7 @@ def render_report_for_date(
     output_dir: Path,
     repository: Optional[AnalysisRepository] = None,
     allow_fixture_fallback: bool = False,
-    receipt_store: LocalEvidenceStore | None = None,
+    receipt_store: Any | None = None,
     expected_input_set_id: str | None = None,
 ) -> DailyRunResult:
     repository = repository or InMemoryAnalysisRepository()
@@ -881,33 +880,39 @@ def render_report_for_date(
 
 
 def latest_committed_report_receipt(
-    receipt_store: LocalEvidenceStore,
+    receipt_store: Any,
     trade_date: date,
     *,
     expected_input_set_id: str | None = None,
 ):
     from stock_analyzer.data.readiness import FormalRunState
 
-    receipt_root = receipt_store.root / "run_receipts"
     candidates = []
-    if receipt_root.is_dir():
-        for run_dir in receipt_root.iterdir():
-            if not run_dir.is_dir() or not (run_dir / "latest.json").is_file():
-                continue
-            try:
-                receipt = receipt_store.latest_run_receipt(run_dir.name)
-            except (OSError, ValueError, KeyError):
-                continue
-            if receipt.target_date != trade_date:
-                continue
-            if receipt.state != FormalRunState.REPORT_GENERATED:
-                continue
-            if (
-                expected_input_set_id is not None
-                and receipt.input_set_id != expected_input_set_id
-            ):
-                continue
-            candidates.append(receipt)
+    list_latest = getattr(receipt_store, "list_latest_run_receipts", None)
+    if callable(list_latest):
+        receipts = list_latest()
+    else:
+        receipts = []
+        receipt_root = receipt_store.root / "run_receipts"
+        if receipt_root.is_dir():
+            for run_dir in receipt_root.iterdir():
+                if not run_dir.is_dir() or not (run_dir / "latest.json").is_file():
+                    continue
+                try:
+                    receipts.append(receipt_store.latest_run_receipt(run_dir.name))
+                except (OSError, ValueError, KeyError):
+                    continue
+    for receipt in receipts:
+        if receipt.target_date != trade_date:
+            continue
+        if receipt.state != FormalRunState.REPORT_GENERATED:
+            continue
+        if (
+            expected_input_set_id is not None
+            and receipt.input_set_id != expected_input_set_id
+        ):
+            continue
+        candidates.append(receipt)
     if not candidates:
         return None
     return max(candidates, key=lambda item: (item.report_cutoff, item.revision, item.run_id))
@@ -915,7 +920,7 @@ def latest_committed_report_receipt(
 
 def _require_committed_render_receipt(
     trade_date: date,
-    receipt_store: LocalEvidenceStore | None,
+    receipt_store: Any | None,
     expected_input_set_id: str | None,
 ):
     if receipt_store is None:

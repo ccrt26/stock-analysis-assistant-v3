@@ -136,3 +136,30 @@ def test_empty_payload_needs_no_parquet_file(tmp_path):
 
     assert prepared.files == ()
     assert read_version_records(tmp_path, ()) == ()
+
+
+def test_record_types_in_same_family_and_date_use_distinct_files(tmp_path):
+    payload = _payload().model_copy(
+        update={
+            "group_id": AcquisitionGroupId.CANDIDATE_FUNDAMENTAL,
+            "records": (
+                {
+                    "record_type": "financial_summary",
+                    "trade_date": TARGET,
+                    "ts_code": "600000.SH",
+                    "revenue": 1,
+                },
+                {
+                    "record_type": "forecast",
+                    "trade_date": TARGET,
+                    "ts_code": "600000.SH",
+                    "forecast": 2,
+                },
+            ),
+        }
+    )
+
+    prepared = prepare_version_files(tmp_path, payload)
+
+    assert len({item.staging_path for item in prepared.files}) == 2
+    verify_prepared_version(prepared, payload)

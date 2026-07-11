@@ -37,7 +37,6 @@ from stock_analyzer.data.readiness import (
 from stock_analyzer.ops.redaction import redact_secrets
 from stock_analyzer.storage.evidence_store import (
     FrozenReportReference,
-    LocalEvidenceStore,
 )
 
 
@@ -109,7 +108,7 @@ class FormalPipelineDependencies:
     render: Callable[..., None]
     verify: Callable[..., bool]
     ledger: Any
-    evidence_store: LocalEvidenceStore
+    evidence_store: Any
     log_root: Path
     activation_failure_point: str | None = None
 
@@ -209,14 +208,14 @@ ALLOWED_TRANSITIONS: dict[FormalRunState, set[FormalRunState]] = {
 
 
 class FormalRunController:
-    def __init__(self, store: LocalEvidenceStore, receipt: RunReceipt) -> None:
+    def __init__(self, store: Any, receipt: RunReceipt) -> None:
         self.store = store
         self.receipt = receipt
 
     @classmethod
     def start(
         cls,
-        store: LocalEvidenceStore,
+        store: Any,
         *,
         run_id: str,
         target_date: date,
@@ -236,7 +235,7 @@ class FormalRunController:
         return cls(store, receipt)
 
     @classmethod
-    def resume(cls, store: LocalEvidenceStore, run_id: str) -> "FormalRunController":
+    def resume(cls, store: Any, run_id: str) -> "FormalRunController":
         return cls(store, store.latest_run_receipt(run_id))
 
     def transition(self, next_state: FormalRunState) -> RunReceipt:

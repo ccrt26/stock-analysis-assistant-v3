@@ -28,7 +28,7 @@ from stock_analyzer.domain.models import (
 )
 from stock_analyzer.data.readiness import FormalRunState
 from stock_analyzer.ops.formal_run import RunReceipt
-from stock_analyzer.storage.evidence_store import LocalEvidenceStore
+from stock_analyzer.storage.formal_warehouse import FormalWarehouse
 from stock_analyzer.pipeline import _sample_market
 from stock_analyzer.storage.capacity_guard import SupabaseCapacityGuard
 from stock_analyzer.storage.repositories import SupabaseAnalysisRepository
@@ -171,7 +171,7 @@ class FakeProductionProvider:
 
 
 def _write_committed_receipt(root, trade_date):
-    store = LocalEvidenceStore(root / "formal_evidence")
+    store = FormalWarehouse(root)
     store.save_run_receipt(
         RunReceipt(
             run_id=f"committed-{trade_date.isoformat()}",

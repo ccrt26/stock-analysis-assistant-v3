@@ -9,7 +9,7 @@ from typing import Any
 
 from stock_analyzer.data.acquisition import RouteFailure
 from stock_analyzer.data.akshare_formal_client import AkshareFormalEndpointClient
-from stock_analyzer.data.capability_store import CapabilityBundle, LocalCapabilityStore
+from stock_analyzer.data.capability_store import CapabilityBundle
 from stock_analyzer.data.cninfo_disclosure_client import CninfoDisclosureClient
 from stock_analyzer.data.formal_contracts import (
     FORMAL_CONTRACT_VERSION,
@@ -38,7 +38,8 @@ from stock_analyzer.data.readiness import (
 )
 from stock_analyzer.data.tushare_formal_client import TushareFormalEndpointClient
 from stock_analyzer.ops.redaction import redact_secrets
-from stock_analyzer.storage.evidence_store import GroupVersionManifest, LocalEvidenceStore
+from stock_analyzer.storage.evidence_store import GroupVersionManifest
+from stock_analyzer.storage.formal_warehouse import FormalWarehouse
 
 
 class LiveCapabilityVerificationError(RuntimeError):
@@ -348,9 +349,7 @@ def verify_and_record_live_capabilities(
         routes=tuple(sorted(evidence, key=lambda item: item.route_id)),
     )
     _save_capability_bundle(runtime.capability_store, bundle)
-    store = LocalEvidenceStore(
-        runtime.config.local_warehouse_dir / "formal_evidence"
-    )
+    store = FormalWarehouse(runtime.config.local_warehouse_dir)
     manifests: list[GroupVersionManifest] = []
     for group_id in (
         AcquisitionGroupId.CALENDAR_UNIVERSE,
@@ -510,20 +509,9 @@ def _response_hash(response: EndpointResponse) -> str:
 
 
 def _save_capability_bundle(
-    store: LocalCapabilityStore,
+    store: Any,
     bundle: CapabilityBundle,
 ) -> None:
-    if store.path.name == "latest.json":
-        digest = hashlib.sha256(
-            json.dumps(
-                bundle.model_dump(mode="json"),
-                ensure_ascii=False,
-                sort_keys=True,
-                separators=(",", ":"),
-            ).encode("utf-8")
-        ).hexdigest()
-        version_path = store.path.parent / "versions" / f"{digest}.json"
-        LocalCapabilityStore(version_path).save(bundle)
     store.save(bundle)
 
 

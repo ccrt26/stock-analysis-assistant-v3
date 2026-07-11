@@ -45,7 +45,8 @@ from stock_analyzer.pipeline import (
     render_report_for_date,
     run_daily_pipeline,
 )
-from stock_analyzer.storage.evidence_store import FrozenReportReference, LocalEvidenceStore
+from stock_analyzer.storage.evidence_store import FrozenReportReference
+from stock_analyzer.storage.formal_warehouse import FormalWarehouse
 from stock_analyzer.storage.capacity_guard import SupabaseCapacityGuard
 from stock_analyzer.storage.repositories import (
     InMemoryAnalysisRepository,
@@ -236,7 +237,7 @@ def activate_formal_report_candidate(
             require_supabase=True,
             fixture_mode=False,
         )
-        store = LocalEvidenceStore(config.local_warehouse_dir / "formal_evidence")
+        store = FormalWarehouse(config.local_warehouse_dir)
         coordinator = FormalActivationCoordinator(
             config.reports_dir,
             store,
@@ -281,9 +282,7 @@ def render_report(
     receipt_store = None
     expected_input_set_id = None
     if not effective_fixture_mode:
-        receipt_store = LocalEvidenceStore(
-            config.local_warehouse_dir / "formal_evidence"
-        )
+        receipt_store = FormalWarehouse(config.local_warehouse_dir)
         committed = latest_committed_report_receipt(
             receipt_store,
             parsed_trade_date,
@@ -404,7 +403,7 @@ def ops_prepare_deploy(
         )
         report_date = date.fromisoformat(report_payload["trade_date"])
         receipt = latest_committed_report_receipt(
-            LocalEvidenceStore(config.local_warehouse_dir / "formal_evidence"),
+            FormalWarehouse(config.local_warehouse_dir),
             report_date,
         )
         artifact_dir = prepare_pages_artifact(
@@ -461,7 +460,7 @@ def ops_verify_production(
     except MissingSupabaseConfig as exc:
         _fail(str(exc))
     receipt = latest_committed_report_receipt(
-        LocalEvidenceStore(config.local_warehouse_dir / "formal_evidence"),
+        FormalWarehouse(config.local_warehouse_dir),
         parsed_trade_date,
     )
     try:
