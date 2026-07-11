@@ -1,0 +1,36 @@
+from __future__ import annotations
+
+from datetime import time
+
+
+# Approved product-contract invariants. Runtime dates, codes, paths, provider
+# versions, environment identities, and activation identifiers do not belong here.
+FORMAL_SCREENING_SESSION_COUNT = 82
+FORMAL_EQUITY_FEATURE_SESSION_COUNT = 61
+FORMAL_BOARD_SESSION_COUNT = 21
+FORMAL_FOCUS_OBSERVATION_SESSION_COUNT = 5
+FORMAL_CALENDAR_LOOKBACK_DAYS = 180
+FORMAL_CAPABILITY_POST_CLOSE_START = time(hour=15)
+
+FORMAL_PRIMARY_INDEX_CODES = (
+    "000001.SH",
+    "399001.SZ",
+    "899050.BJ",
+)
+FORMAL_BACKUP_INDEX_SYMBOLS = (
+    "sh000001",
+    "sz399001",
+    "bj899050",
+)
+
+
+__all__ = [
+    "FORMAL_BACKUP_INDEX_SYMBOLS",
+    "FORMAL_BOARD_SESSION_COUNT",
+    "FORMAL_CALENDAR_LOOKBACK_DAYS",
+    "FORMAL_CAPABILITY_POST_CLOSE_START",
+    "FORMAL_EQUITY_FEATURE_SESSION_COUNT",
+    "FORMAL_FOCUS_OBSERVATION_SESSION_COUNT",
+    "FORMAL_PRIMARY_INDEX_CODES",
+    "FORMAL_SCREENING_SESSION_COUNT",
+]

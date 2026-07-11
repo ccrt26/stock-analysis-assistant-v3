@@ -25,11 +25,11 @@ from stock_analyzer.data.formal_materializer import (
     materialize_target_context,
 )
 from stock_analyzer.data.readiness import (
-    JULY_10_OFFICIAL_SESSIONS,
     AcquisitionGroupId,
     AcquisitionPayload,
     FormalRunState,
 )
+from stock_analyzer.data.formal_policy import FORMAL_FOCUS_OBSERVATION_SESSION_COUNT
 from stock_analyzer.domain.models import (
     ActionRecommendationSummary,
     EvaluationTask,
@@ -160,7 +160,11 @@ def analyze_formal_inputs(
     ]
     current_snapshots = [*candidate_snapshots, *focus_snapshots]
 
-    eligible_dates = _prior_five_sessions(receipt.target_date)
+    market_payload = payloads[AcquisitionGroupId.MARKET_DECISION]
+    eligible_dates = _prior_five_sessions(
+        receipt.target_date,
+        market_payload.covered_dates,
+    )
     focus_days = repository.load_formal_focus_days(
         before_date=receipt.target_date,
         eligible_dates=eligible_dates,
@@ -387,10 +391,13 @@ def _build_focus_snapshot(
     )
 
 
-def _prior_five_sessions(trade_date: date) -> list[date]:
-    prior = [value for value in JULY_10_OFFICIAL_SESSIONS if value < trade_date]
-    selected = prior[-5:]
-    if len(selected) != 5:
+def _prior_five_sessions(
+    trade_date: date,
+    covered_sessions: tuple[date, ...],
+) -> list[date]:
+    prior = sorted({value for value in covered_sessions if value < trade_date})
+    selected = prior[-FORMAL_FOCUS_OBSERVATION_SESSION_COUNT:]
+    if len(selected) != FORMAL_FOCUS_OBSERVATION_SESSION_COUNT:
         raise FormalMaterializationError("five prior official sessions are unavailable")
     return selected
 

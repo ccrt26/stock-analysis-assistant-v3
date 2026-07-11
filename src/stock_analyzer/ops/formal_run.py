@@ -18,7 +18,10 @@ from stock_analyzer.data.acquisition import (
     RouteAttempt,
     RouteFailure,
 )
-from stock_analyzer.data.formal_routes import FormalRoutePair
+from stock_analyzer.data.formal_routes import (
+    FormalRoutePair,
+    derive_expected_tradable_codes,
+)
 from stock_analyzer.data.readiness import (
     AcquisitionGroupContract,
     AcquisitionGroupId,
@@ -323,8 +326,6 @@ class FormalRunController:
     def record_evidence_hashes(self, hashes: dict[str, str]) -> RunReceipt:
         if self.receipt.state != FormalRunState.ANALYZING:
             raise InvalidRunTransition("evidence hashes require ANALYZING")
-        if not hashes:
-            raise ValueError("formal analysis requires evidence hashes")
         return self._replace(evidence_hashes=dict(sorted(hashes.items())))
 
     def commit_activation(
@@ -620,7 +621,35 @@ def _acquire_formal_groups(
                     (),
                     ("validated_calendar_universe_coverage_required",),
                 )
-            request_target_codes = universe.coverage_codes
+            sessions = sorted(set(universe.covered_dates))
+            security_records = tuple(
+                record
+                for record in universe.records
+                if record.get("record_type") == "security"
+            )
+            if len(sessions) < 61 or not security_records:
+                raise AcquisitionBlocked(
+                    group.contract.group_id,
+                    (),
+                    ("validated_calendar_eligibility_required",),
+                )
+            try:
+                request_target_codes = derive_expected_tradable_codes(
+                    security_records,
+                    minimum_history_start=sessions[-61],
+                )
+            except ValueError as exc:
+                raise AcquisitionBlocked(
+                    group.contract.group_id,
+                    (),
+                    (str(exc),),
+                ) from exc
+            if not request_target_codes:
+                raise AcquisitionBlocked(
+                    group.contract.group_id,
+                    (),
+                    ("validated_calendar_has_no_analysis_eligible_codes",),
+                )
         request = AcquisitionRequest(
             run_id=controller.receipt.run_id,
             trade_date=controller.receipt.target_date,
@@ -628,6 +657,32 @@ def _acquire_formal_groups(
             target_codes=request_target_codes,
             contract_version=group.contract.contract_version,
         )
+        canonical = controller.store.canonical_manifest(
+            group.contract.group_id,
+            controller.receipt.target_date,
+        )
+        if canonical is not None:
+            canonical_payload = controller.store.read_group_version(
+                canonical.version_id,
+                report_cutoff=controller.receipt.report_cutoff,
+            )
+            if canonical_payload is not None:
+                canonical_validation = validate_group_payload(
+                    group.contract,
+                    request,
+                    canonical_payload,
+                )
+                if canonical_validation.complete:
+                    controller.record_group(
+                        group.contract.group_id,
+                        canonical.version_id,
+                    )
+                    payloads[group.contract.group_id] = canonical_payload
+                    used_backup = (
+                        used_backup
+                        or canonical_payload.route_kind is RouteKind.BACKUP
+                    )
+                    continue
         result = _acquire_formal_group(group, request)
         manifest = controller.store.save_group_version(
             result.payload,

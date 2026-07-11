@@ -15,9 +15,14 @@ from stock_analyzer.data.formal_contracts import (
     build_screening_contracts,
     build_target_contracts,
 )
+from stock_analyzer.data.formal_policy import (
+    FORMAL_BACKUP_INDEX_SYMBOLS,
+    FORMAL_BOARD_SESSION_COUNT,
+    FORMAL_EQUITY_FEATURE_SESSION_COUNT,
+    FORMAL_SCREENING_SESSION_COUNT,
+)
 from stock_analyzer.data.formal_routes import EndpointResponse
 from stock_analyzer.data.readiness import (
-    JULY_10_OFFICIAL_SESSIONS,
     AcquisitionGroupId,
     AcquisitionRequest,
     FailureClassification,
@@ -81,19 +86,13 @@ class AkshareFormalEndpointClient:
         self,
         ak: object,
         *,
-        required_index_symbols: tuple[str, ...] = (
-            "sh000001",
-            "sz399001",
-            "bj899050",
-        ),
+        required_index_symbols: tuple[str, ...] = FORMAL_BACKUP_INDEX_SYMBOLS,
     ) -> None:
         self.ak = ak
         self.required_index_symbols = required_index_symbols
 
     def fetch_calendar_universe(self, request: AcquisitionRequest) -> EndpointResponse:
-        sessions = _required_sessions(request.trade_date)
-        calendar = self._call("tool_trade_date_hist_sina")
-        _require_columns(calendar, ("trade_date",), "tool_trade_date_hist_sina")
+        sessions = self._required_sessions(request.trade_date)
         sh = self._call("stock_info_sh_name_code")
         _require_columns(sh, ("证券代码", "证券简称", "上市日期"), "stock_info_sh_name_code")
         sz = self._call("stock_info_sz_name_code")
@@ -154,13 +153,7 @@ class AkshareFormalEndpointClient:
             _to_ts_code(getattr(row, "代码")): row
             for row in spot.itertuples(index=False)
         }
-        covered_dates = tuple(
-            sorted(
-                value
-                for value in (_parse_date(item) for item in calendar["trade_date"])
-                if value in sessions
-            )
-        )
+        covered_dates = sessions
         records: list[dict[str, Any]] = [
             {
                 "record_type": "calendar",
@@ -171,6 +164,8 @@ class AkshareFormalEndpointClient:
             for session in covered_dates
         ]
         for code, name, exchange, list_date in listed:
+            if list_date > request.trade_date:
+                continue
             spot_row = spot_by_code.get(code)
             verified = spot_row is not None and _finite(getattr(spot_row, "最新价"))
             records.append(
@@ -190,7 +185,13 @@ class AkshareFormalEndpointClient:
         return EndpointResponse(
             records=tuple(records),
             covered_dates=covered_dates,
-            coverage_codes=tuple(sorted(code for code, _, _, _ in listed)),
+            coverage_codes=tuple(
+                sorted(
+                    code
+                    for code, _, _, list_date in listed
+                    if list_date <= request.trade_date
+                )
+            ),
             coverage_proven=True,
             field_coverage=_field_coverage(request, AcquisitionGroupId.CALENDAR_UNIVERSE),
             source_names=(
@@ -205,7 +206,7 @@ class AkshareFormalEndpointClient:
         )
 
     def fetch_market_decision(self, request: AcquisitionRequest) -> EndpointResponse:
-        sessions = _required_sessions(request.trade_date)
+        sessions = self._required_sessions(request.trade_date)
         requested = set(request.target_codes)
         records: list[dict[str, Any]] = []
         dates_by_code: dict[str, set[date]] = {}
@@ -237,12 +238,30 @@ class AkshareFormalEndpointClient:
                     }
                 )
 
+        required_feature_dates = set(
+            sessions[-FORMAL_EQUITY_FEATURE_SESSION_COUNT:]
+        )
+        incomplete_codes = sorted(
+            code
+            for code in requested
+            if not required_feature_dates <= dates_by_code.get(code, set())
+        )
+        if incomplete_codes:
+            raise PermanentRouteFailure(
+                "AKShare history lacks the latest "
+                f"{FORMAL_EQUITY_FEATURE_SESSION_COUNT} sessions for: "
+                + ", ".join(incomplete_codes),
+                FailureClassification.INCOMPLETE_UNIVERSE,
+            )
+
         spot = self._call("stock_zh_a_spot_em")
         _require_column_map(spot, SPOT_COLUMNS, "stock_zh_a_spot_em")
         for row in spot.to_dict(orient="records"):
             code = _to_ts_code(row["代码"])
             if code not in requested:
                 continue
+            pe_ttm = _safe_float(row["市盈率-动态"])
+            pb = _safe_float(row["市净率"])
             records.append(
                 {
                     "record_type": "daily_basic",
@@ -251,23 +270,34 @@ class AkshareFormalEndpointClient:
                     "turnover_rate": _safe_float(row["换手率"]),
                     "total_mv": _safe_float(row["总市值"]),
                     "circ_mv": _safe_float(row["流通市值"]),
-                    "pe_ttm": _safe_float(row["市盈率-动态"]),
-                    "pb": _safe_float(row["市净率"]),
+                    "pe_ttm": pe_ttm,
+                    "pb": pb,
+                    **(
+                        {
+                            "valuation_null_reason":
+                            "provider_reported_not_applicable"
+                        }
+                        if pe_ttm is None or pb is None
+                        else {}
+                    ),
                     "source_name": "akshare.stock_zh_a_spot_em",
                 }
             )
 
         found_indexes: set[str] = set()
+        index_dates_by_code: dict[str, set[date]] = {}
         for symbol in self.required_index_symbols:
             frame = self._call("stock_zh_index_daily_em", symbol=symbol)
             _require_column_map(frame, INDEX_COLUMNS, "stock_zh_index_daily_em")
             index_code = _index_ts_code(symbol)
             for row in frame.itertuples(index=False):
                 found_indexes.add(index_code)
+                index_date = _parse_date(row.date)
+                index_dates_by_code.setdefault(index_code, set()).add(index_date)
                 records.append(
                     {
                         "record_type": "index_bar",
-                        "trade_date": _parse_date(row.date),
+                        "trade_date": index_date,
                         "ts_code": index_code,
                         "open": _safe_float(row.open),
                         "high": _safe_float(row.high),
@@ -285,11 +315,19 @@ class AkshareFormalEndpointClient:
                 "AKShare index response missing required indexes: " + ", ".join(missing_indexes),
                 FailureClassification.INCOMPLETE_UNIVERSE,
             )
-        covered_dates = tuple(
-            session
-            for session in sessions
-            if all(session in dates_by_code.get(code, set()) for code in requested)
+        incomplete_indexes = sorted(
+            code
+            for code in required_indexes
+            if not set(sessions) <= index_dates_by_code.get(code, set())
         )
+        if incomplete_indexes:
+            raise PermanentRouteFailure(
+                "AKShare index history lacks the declared "
+                f"{FORMAL_SCREENING_SESSION_COUNT} sessions for: "
+                + ", ".join(incomplete_indexes),
+                FailureClassification.INCOMPLETE_UNIVERSE,
+            )
+        covered_dates = sessions
         return EndpointResponse(
             records=tuple(records),
             covered_dates=covered_dates,
@@ -306,6 +344,7 @@ class AkshareFormalEndpointClient:
         )
 
     def fetch_board_industry(self, request: AcquisitionRequest) -> EndpointResponse:
+        sessions = self._required_sessions(request.trade_date)
         names = self._call("stock_board_industry_name_em")
         _require_columns(names, ("排名", "板块名称", "板块代码"), "stock_board_industry_name_em")
         requested = set(request.target_codes)
@@ -337,14 +376,16 @@ class AkshareFormalEndpointClient:
             history = self._call(
                 "stock_board_industry_hist_em",
                 symbol=board_name,
-                start_date=_yyyymmdd(JULY_10_OFFICIAL_SESSIONS[0]),
+                start_date=_yyyymmdd(sessions[0]),
                 end_date=_yyyymmdd(request.trade_date),
                 period="日k",
                 adjust="",
             )
             _require_column_map(history, BOARD_HISTORY_COLUMNS, "stock_board_industry_hist_em")
+            board_dates: set[date] = set()
             for row in history.itertuples(index=False):
                 trade_date = _parse_date(getattr(row, "日期"))
+                board_dates.add(trade_date)
                 covered_dates.add(trade_date)
                 records.append(
                     {
@@ -360,6 +401,12 @@ class AkshareFormalEndpointClient:
                         "amount": _safe_float(getattr(row, "成交额")),
                         "source_name": "akshare.stock_board_industry_hist_em",
                     }
+                )
+            if not set(sessions[-FORMAL_BOARD_SESSION_COUNT:]) <= board_dates:
+                raise PermanentRouteFailure(
+                    "AKShare board history lacks "
+                    f"{FORMAL_BOARD_SESSION_COUNT} sessions for {board_code}",
+                    FailureClassification.INCOMPLETE_UNIVERSE,
                 )
         return EndpointResponse(
             records=tuple(records),
@@ -427,6 +474,12 @@ class AkshareFormalEndpointClient:
                 period_end = _parse_date(getattr(row, "报告期"))
                 announcement = _publication_time(getattr(row, "公告日期"), request)
                 publication_times[f"{code}:financial_summary:{period_end.isoformat()}"] = announcement
+                revenue_yoy = _safe_float(getattr(row, "营业总收入同比增长率"))
+                profit_yoy = _safe_float(getattr(row, "净利润同比增长率"))
+                gross_margin = _safe_float(getattr(row, "销售毛利率"))
+                operating_cashflow = _safe_float(
+                    getattr(row, "经营活动产生的现金流量净额")
+                )
                 records.append(
                     {
                         "record_type": "financial_summary",
@@ -434,11 +487,25 @@ class AkshareFormalEndpointClient:
                         "ts_code": code,
                         "period_end": period_end,
                         "announcement_time": announcement,
-                        "revenue_yoy": _safe_float(getattr(row, "营业总收入同比增长率")),
-                        "profit_yoy": _safe_float(getattr(row, "净利润同比增长率")),
-                        "gross_margin": _safe_float(getattr(row, "销售毛利率")),
-                        "operating_cashflow": _safe_float(
-                            getattr(row, "经营活动产生的现金流量净额")
+                        "revenue_yoy": revenue_yoy,
+                        "profit_yoy": profit_yoy,
+                        "gross_margin": gross_margin,
+                        "operating_cashflow": operating_cashflow,
+                        **(
+                            {
+                                "fundamental_null_reason":
+                                "provider_reported_not_available_as_of_cutoff"
+                            }
+                            if any(
+                                value is None
+                                for value in (
+                                    revenue_yoy,
+                                    profit_yoy,
+                                    gross_margin,
+                                    operating_cashflow,
+                                )
+                            )
+                            else {}
                         ),
                         "source_name": "akshare.stock_financial_abstract_ths",
                     }
@@ -544,6 +611,29 @@ class AkshareFormalEndpointClient:
             ),
         )
 
+    def _required_sessions(self, trade_date: date) -> tuple[date, ...]:
+        calendar = self._call("tool_trade_date_hist_sina")
+        _require_columns(calendar, ("trade_date",), "tool_trade_date_hist_sina")
+        sessions = tuple(
+            sorted(
+                {
+                    parsed
+                    for value in calendar["trade_date"]
+                    if (parsed := _parse_date(value)) <= trade_date
+                }
+            )[-FORMAL_SCREENING_SESSION_COUNT:]
+        )
+        if (
+            len(sessions) != FORMAL_SCREENING_SESSION_COUNT
+            or sessions[-1] != trade_date
+        ):
+            raise PermanentRouteFailure(
+                "provider calendar does not prove the latest "
+                f"{FORMAL_SCREENING_SESSION_COUNT}-session window",
+                FailureClassification.STALE_DATA,
+            )
+        return sessions
+
     def _call(self, method: str, **kwargs: Any) -> pd.DataFrame:
         try:
             frame = getattr(self.ak, method)(**kwargs)
@@ -578,15 +668,6 @@ def _field_coverage(
         for record_type in contract.record_types
         for field in record_type.required_fields
     }
-
-
-def _required_sessions(trade_date: date) -> tuple[date, ...]:
-    if trade_date != JULY_10_OFFICIAL_SESSIONS[-1]:
-        raise PermanentRouteFailure(
-            "verified 82-session window is unavailable for requested trade date",
-            FailureClassification.STALE_DATA,
-        )
-    return JULY_10_OFFICIAL_SESSIONS
 
 
 def _require_columns(frame: pd.DataFrame, names: Iterable[str], stage: str) -> None:
@@ -628,7 +709,7 @@ def _publication_time(value: Any, request: AcquisitionRequest) -> datetime:
 
 
 def _safe_float(value: Any) -> float | None:
-    if pd.isna(value):
+    if pd.isna(value) or str(value).strip().lower() in {"", "-", "--", "none", "null"}:
         return None
     try:
         return float(value)

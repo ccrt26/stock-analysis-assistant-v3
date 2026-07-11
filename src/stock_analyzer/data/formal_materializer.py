@@ -9,6 +9,10 @@ from stock_analyzer.analysis.pool import clean_stock_pool
 from stock_analyzer.analysis.scoring import score_feature
 from stock_analyzer.data.feature_builder import build_market_bundle
 from stock_analyzer.data.formal_routes import derive_expected_tradable_codes
+from stock_analyzer.data.formal_policy import (
+    FORMAL_BOARD_SESSION_COUNT,
+    FORMAL_EQUITY_FEATURE_SESSION_COUNT,
+)
 from stock_analyzer.data.models import (
     BoardContextRow,
     CompanyProfileRow,
@@ -76,8 +80,17 @@ def materialize_market_inputs(
     security_records = [
         record for record in calendar.records if record.get("record_type") == "security"
     ]
+    market_sessions = sorted(set(market.covered_dates))
+    if len(market_sessions) < FORMAL_EQUITY_FEATURE_SESSION_COUNT:
+        raise FormalMaterializationError(
+            "market payload has fewer than "
+            f"{FORMAL_EQUITY_FEATURE_SESSION_COUNT} sessions"
+        )
     try:
-        tradable_codes = derive_expected_tradable_codes(tuple(security_records))
+        tradable_codes = derive_expected_tradable_codes(
+            tuple(security_records),
+            minimum_history_start=market_sessions[-FORMAL_EQUITY_FEATURE_SESSION_COUNT],
+        )
     except ValueError as exc:
         raise FormalMaterializationError(str(exc)) from exc
     security_by_code: dict[str, dict[str, Any]] = {}
@@ -273,8 +286,11 @@ def materialize_target_context(
             key=lambda row: _as_date(row.get("trade_date")) or date.min,
         )
         strength = None
-        if len(history) >= 2:
-            first = _required_float(history[max(0, len(history) - 21)].get("close"), "close")
+        if len(history) >= FORMAL_BOARD_SESSION_COUNT:
+            first = _required_float(
+                history[-FORMAL_BOARD_SESSION_COUNT].get("close"),
+                "close",
+            )
             last = _required_float(history[-1].get("close"), "close")
             strength = 0.0 if first == 0 else (last - first) / first
         board_contexts[code] = BoardContextRow(

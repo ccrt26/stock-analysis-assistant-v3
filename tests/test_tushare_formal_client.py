@@ -26,6 +26,7 @@ from stock_analyzer.data.tushare_formal_client import TushareFormalEndpointClien
 
 TARGET = date(2026, 7, 10)
 CUTOFF = datetime(2026, 7, 10, 16, 0, tzinfo=ZoneInfo("Asia/Shanghai"))
+NEXT_TARGET = date(2026, 7, 13)
 CODES = ("600000.SH",)
 INDEX_CODES = ("000001.SH", "399001.SZ", "899050.BJ")
 
@@ -83,6 +84,10 @@ class RecordedTusharePro:
             )
         if name in {"suspend_d", "stock_st"}:
             return pd.DataFrame(columns=["ts_code", "trade_date", "suspend_type", "name"])
+        if name == "anns_d":
+            return pd.DataFrame(
+                columns=["ann_date", "ts_code", "name", "title", "url", "rec_time"]
+            )
         if name == "daily":
             return pd.DataFrame(
                 [
@@ -117,7 +122,7 @@ class RecordedTusharePro:
                 [
                     {
                         "ts_code": kwargs["ts_code"],
-                        "trade_date": TARGET.strftime("%Y%m%d"),
+                        "trade_date": session.strftime("%Y%m%d"),
                         "open": 3_000.0,
                         "high": 3_050.0,
                         "low": 2_990.0,
@@ -125,6 +130,7 @@ class RecordedTusharePro:
                         "vol": 2_000.0,
                         "amount": 20_000.0,
                     }
+                    for session in JULY_10_OFFICIAL_SESSIONS
                 ]
             )
         if name == "index_classify":
@@ -172,6 +178,23 @@ class RecordedTusharePro:
                         "netprofit_yoy": 99.0,
                         "grossprofit_margin": 99.0,
                         "ocf_to_or": 99.0,
+                    },
+                ]
+            )
+        if name == "cashflow":
+            return pd.DataFrame(
+                [
+                    {
+                        "ts_code": kwargs["ts_code"],
+                        "end_date": "20260331",
+                        "ann_date": "20260430",
+                        "n_cashflow_act": 123_000_000.0,
+                    },
+                    {
+                        "ts_code": kwargs["ts_code"],
+                        "end_date": "20260630",
+                        "ann_date": "20260711",
+                        "n_cashflow_act": 999_000_000.0,
                     },
                 ]
             )
@@ -240,7 +263,7 @@ def test_tushare_calendar_universe_calls_exact_endpoints_and_normalizes_verified
     assert [name for name, _ in pro.calls] == ["trade_cal", "stock_basic", "suspend_d", "stock_st"]
     assert pro.calls[0][1] == {
         "exchange": "SSE",
-        "start_date": "20260312",
+        "start_date": "20260111",
         "end_date": "20260710",
         "fields": "cal_date,is_open",
     }
@@ -286,12 +309,123 @@ def test_tushare_market_fetches_each_of_82_sessions_daily_basic_and_indexes_with
     assert response.adjustment_basis == "unadjusted"
 
 
+def test_tushare_market_uses_provider_calendar_for_next_trading_day_window():
+    sessions = (*JULY_10_OFFICIAL_SESSIONS[1:], NEXT_TARGET)
+
+    def next_index(kwargs):
+        return pd.DataFrame(
+            [
+                {
+                    "ts_code": kwargs["ts_code"],
+                    "trade_date": value.strftime("%Y%m%d"),
+                    "open": 3_000.0,
+                    "high": 3_050.0,
+                    "low": 2_990.0,
+                    "close": 3_020.0,
+                    "vol": 2_000.0,
+                    "amount": 20_000.0,
+                }
+                for value in sessions
+            ]
+        )
+
+    pro = RecordedTusharePro(
+        {
+            "trade_cal": pd.DataFrame(
+                {
+                    "cal_date": [value.strftime("%Y%m%d") for value in sessions],
+                    "is_open": [1] * len(sessions),
+                }
+            ),
+            "index_daily": next_index,
+        }
+    )
+    next_request = request().model_copy(
+        update={
+            "trade_date": NEXT_TARGET,
+            "report_cutoff": datetime(
+                2026,
+                7,
+                13,
+                16,
+                0,
+                tzinfo=ZoneInfo("Asia/Shanghai"),
+            ),
+        }
+    )
+
+    response = TushareFormalEndpointClient(pro).fetch_market_decision(next_request)
+
+    assert response.covered_dates == sessions
+    assert pro.calls[0][0] == "trade_cal"
+    daily_dates = [
+        kwargs["trade_date"]
+        for name, kwargs in pro.calls
+        if name == "daily"
+    ]
+    assert daily_dates == [value.strftime("%Y%m%d") for value in sessions]
+
+
+def test_eligible_code_missing_one_of_latest_61_sessions_rejects_whole_route():
+    pro = RecordedTusharePro()
+    missing_date = JULY_10_OFFICIAL_SESSIONS[-2].strftime("%Y%m%d")
+
+    def missing_recent_bar(kwargs):
+        if kwargs["trade_date"] == missing_date:
+            return pd.DataFrame(
+                columns=[
+                    "ts_code",
+                    "trade_date",
+                    "open",
+                    "high",
+                    "low",
+                    "close",
+                    "vol",
+                    "amount",
+                ]
+            )
+        return pro._default("daily", kwargs)
+
+    pro.overrides["daily"] = missing_recent_bar
+
+    with pytest.raises(PermanentRouteFailure, match="latest 61 sessions") as raised:
+        TushareFormalEndpointClient(pro).fetch_market_decision(request())
+
+    assert raised.value.classification is FailureClassification.INCOMPLETE_UNIVERSE
+
+
+def test_index_and_board_history_must_cover_declared_windows():
+    short_index = RecordedTusharePro()
+
+    def missing_index_session(kwargs):
+        return short_index._default("index_daily", kwargs).iloc[1:].reset_index(drop=True)
+
+    short_index.overrides["index_daily"] = missing_index_session
+    with pytest.raises(PermanentRouteFailure, match="declared 82 sessions"):
+        TushareFormalEndpointClient(short_index).fetch_market_decision(request())
+
+    short_board = RecordedTusharePro()
+
+    def missing_board_session(kwargs):
+        frame = short_board._default("index_daily", kwargs)
+        return frame.iloc[-20:].reset_index(drop=True)
+
+    short_board.overrides["index_daily"] = missing_board_session
+    with pytest.raises(PermanentRouteFailure, match="board history lacks 21 sessions"):
+        TushareFormalEndpointClient(short_board).fetch_board_industry(request())
+
+
 def test_tushare_board_industry_maps_members_and_history_without_text_inference():
     pro = RecordedTusharePro()
 
     response = TushareFormalEndpointClient(pro).fetch_board_industry(request())
 
-    assert [name for name, _ in pro.calls] == ["index_classify", "index_member_all", "index_daily"]
+    assert [name for name, _ in pro.calls] == [
+        "trade_cal",
+        "index_classify",
+        "index_member_all",
+        "index_daily",
+    ]
     assert {row["record_type"] for row in response.records} == {
         "industry_mapping",
         "board_bar",
@@ -310,6 +444,7 @@ def test_tushare_candidate_fundamentals_filters_announcements_after_cutoff():
     assert [name for name, _ in pro.calls] == [
         "stock_company",
         "fina_indicator",
+        "cashflow",
         "forecast",
         "express",
         "fina_mainbz",
@@ -324,6 +459,9 @@ def test_tushare_candidate_fundamentals_filters_announcements_after_cutoff():
     financial = next(row for row in response.records if row["record_type"] == "financial_summary")
     assert financial["period_end"] == date(2026, 3, 31)
     assert financial["revenue_yoy"] == 5.0
+    assert financial["operating_cashflow"] == 123_000_000.0
+    assert financial["operating_cashflow"] != 20.0
+    assert "tushare.cashflow" in response.source_names
     assert all(value <= CUTOFF for value in response.publication_times.values())
 
 
@@ -346,6 +484,54 @@ def test_tushare_official_events_proves_empty_target_coverage_and_keeps_risks():
     assert risk["record_type"] == "official_event"
     assert risk["event_type"] == "special_treatment"
     assert risk["hard_risk"] is True
+
+
+def test_tushare_official_events_include_disclosures_and_filter_after_cutoff():
+    pro = RecordedTusharePro(
+        {
+            "anns_d": pd.DataFrame(
+                [
+                    {
+                        "ann_date": "20260709",
+                        "ts_code": CODES[0],
+                        "name": "浦发银行",
+                        "title": "关于重大事项的公告",
+                        "url": "https://example.invalid/official-1.pdf",
+                        "rec_time": "2026-07-09 18:00:00",
+                    },
+                    {
+                        "ann_date": "20260710",
+                        "ts_code": CODES[0],
+                        "name": "浦发银行",
+                        "title": "截止时间之后的公告",
+                        "url": "https://example.invalid/official-2.pdf",
+                        "rec_time": "2026-07-10 17:00:00",
+                    },
+                ]
+            )
+        }
+    )
+
+    response = TushareFormalEndpointClient(pro).fetch_official_events_risk(request())
+
+    assert [name for name, _ in pro.calls] == [
+        "trade_cal",
+        "suspend_d",
+        "stock_st",
+        "anns_d",
+    ]
+    assert len(response.records) == 1
+    event = response.records[0]
+    assert event["event_id"] == "https://example.invalid/official-1.pdf"
+    assert event["event_type"] == "company_announcement"
+    assert event["title"] == "关于重大事项的公告"
+    assert event["hard_risk"] is False
+    assert response.source_names == (
+        "tushare.anns_d",
+        "tushare.suspend_d",
+        "tushare.stock_st",
+    )
+    assert all(value <= CUTOFF for value in response.publication_times.values())
 
 
 def test_tushare_concepts_returns_only_requested_codes():

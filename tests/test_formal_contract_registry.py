@@ -128,6 +128,36 @@ def test_unknown_record_type_and_missing_type_specific_field_fail_closed():
     assert "missing_field:close:row=0" in missing_result.reasons
 
 
+def test_legitimate_null_requires_explicit_provider_reason():
+    records = list(complete_market_payload().records)
+    basic_index = next(
+        index
+        for index, record in enumerate(records)
+        if record["record_type"] == "daily_basic"
+    )
+    records[basic_index] = {
+        **records[basic_index],
+        "pe_ttm": None,
+        "pb": None,
+        "valuation_null_reason": "provider_reported_not_applicable",
+    }
+    explained = complete_market_payload().model_copy(update={"records": tuple(records)})
+
+    explained_result = validate_group_payload(market_contract(), request(), explained)
+    unexplained_records = list(explained.records)
+    unexplained_records[basic_index] = dict(unexplained_records[basic_index])
+    del unexplained_records[basic_index]["valuation_null_reason"]
+    unexplained_result = validate_group_payload(
+        market_contract(),
+        request(),
+        explained.model_copy(update={"records": tuple(unexplained_records)}),
+    )
+
+    assert explained_result.complete is True
+    assert "unclassified_null:pe_ttm:row=82" in unexplained_result.reasons
+    assert "unclassified_null:pb:row=82" in unexplained_result.reasons
+
+
 def test_formal_v2_registry_contains_all_required_groups_and_exact_history():
     screening = build_screening_contracts(TARGET, CODES)
     target = build_target_contracts(TARGET, CODES)

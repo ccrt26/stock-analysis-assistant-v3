@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 from typing import Any
 
 import pandas as pd
@@ -15,9 +15,15 @@ from stock_analyzer.data.formal_contracts import (
     build_screening_contracts,
     build_target_contracts,
 )
+from stock_analyzer.data.formal_policy import (
+    FORMAL_BOARD_SESSION_COUNT,
+    FORMAL_CALENDAR_LOOKBACK_DAYS,
+    FORMAL_EQUITY_FEATURE_SESSION_COUNT,
+    FORMAL_PRIMARY_INDEX_CODES,
+    FORMAL_SCREENING_SESSION_COUNT,
+)
 from stock_analyzer.data.formal_routes import EndpointResponse
 from stock_analyzer.data.readiness import (
-    JULY_10_OFFICIAL_SESSIONS,
     AcquisitionGroupId,
     AcquisitionRequest,
     FailureClassification,
@@ -29,25 +35,13 @@ class TushareFormalEndpointClient:
         self,
         pro: object,
         *,
-        required_index_codes: tuple[str, ...] = (
-            "000001.SH",
-            "399001.SZ",
-            "899050.BJ",
-        ),
+        required_index_codes: tuple[str, ...] = FORMAL_PRIMARY_INDEX_CODES,
     ) -> None:
         self.pro = pro
         self.required_index_codes = required_index_codes
 
     def fetch_calendar_universe(self, request: AcquisitionRequest) -> EndpointResponse:
-        sessions = _required_sessions(request.trade_date)
-        calendar = self._call(
-            "trade_cal",
-            exchange="SSE",
-            start_date=_yyyymmdd(sessions[0]),
-            end_date=_yyyymmdd(request.trade_date),
-            fields="cal_date,is_open",
-        )
-        _require_columns(calendar, ("cal_date", "is_open"), "trade_cal")
+        sessions = self._required_sessions(request.trade_date)
         securities = self._call(
             "stock_basic",
             exchange="",
@@ -79,13 +73,7 @@ class TushareFormalEndpointClient:
             "stock_st",
         )
 
-        open_dates = tuple(
-            sorted(
-                _parse_yyyymmdd(row.cal_date)
-                for row in calendar.itertuples(index=False)
-                if int(row.is_open) == 1
-            )
-        )
+        open_dates = sessions
         suspended_codes = {
             _ts_code(row.ts_code) for row in suspensions.itertuples(index=False)
         }
@@ -95,11 +83,11 @@ class TushareFormalEndpointClient:
         records: list[dict[str, Any]] = [
             {
                 "record_type": "calendar",
-                "trade_date": _parse_yyyymmdd(row.cal_date),
-                "is_open": int(row.is_open) == 1,
+                "trade_date": session,
+                "is_open": True,
                 "source_name": "tushare.trade_cal",
             }
-            for row in calendar.itertuples(index=False)
+            for session in sessions
         ]
         records.extend(
             {
@@ -115,9 +103,14 @@ class TushareFormalEndpointClient:
                 "source_name": "tushare.stock_basic+suspend_d+stock_st",
             }
             for row in securities.itertuples(index=False)
+            if _parse_yyyymmdd(row.list_date) <= request.trade_date
         )
         coverage_codes = tuple(
-            sorted(_ts_code(row.ts_code) for row in securities.itertuples(index=False))
+            sorted(
+                _ts_code(row.ts_code)
+                for row in securities.itertuples(index=False)
+                if _parse_yyyymmdd(row.list_date) <= request.trade_date
+            )
         )
         return EndpointResponse(
             records=tuple(records),
@@ -137,10 +130,10 @@ class TushareFormalEndpointClient:
         )
 
     def fetch_market_decision(self, request: AcquisitionRequest) -> EndpointResponse:
-        sessions = _required_sessions(request.trade_date)
+        sessions = self._required_sessions(request.trade_date)
         expected_codes = set(request.target_codes)
         records: list[dict[str, Any]] = []
-        codes_by_date: dict[date, set[str]] = {}
+        dates_by_code: dict[str, set[date]] = {}
         for session in sessions:
             frame = self._call("daily", trade_date=_yyyymmdd(session))
             _require_columns(
@@ -162,7 +155,7 @@ class TushareFormalEndpointClient:
                 if expected_codes and code not in expected_codes:
                     continue
                 trade_date = _parse_yyyymmdd(row.trade_date)
-                codes_by_date.setdefault(trade_date, set()).add(code)
+                dates_by_code.setdefault(code, set()).add(trade_date)
                 records.append(
                     {
                         "record_type": "equity_bar",
@@ -177,6 +170,22 @@ class TushareFormalEndpointClient:
                         "source_name": "tushare.daily",
                     }
                 )
+
+        required_feature_dates = set(
+            sessions[-FORMAL_EQUITY_FEATURE_SESSION_COUNT:]
+        )
+        incomplete_codes = sorted(
+            code
+            for code in expected_codes
+            if not required_feature_dates <= dates_by_code.get(code, set())
+        )
+        if incomplete_codes:
+            raise PermanentRouteFailure(
+                "Tushare daily response lacks the latest "
+                f"{FORMAL_EQUITY_FEATURE_SESSION_COUNT} sessions for: "
+                + ", ".join(incomplete_codes),
+                FailureClassification.INCOMPLETE_UNIVERSE,
+            )
 
         daily_basic = self._call(
             "daily_basic",
@@ -199,6 +208,8 @@ class TushareFormalEndpointClient:
             code = _ts_code(row.ts_code)
             if expected_codes and code not in expected_codes:
                 continue
+            pe_ttm = _safe_float(row.pe_ttm)
+            pb = _safe_float(row.pb)
             records.append(
                 {
                     "record_type": "daily_basic",
@@ -207,13 +218,22 @@ class TushareFormalEndpointClient:
                     "turnover_rate": _safe_float(row.turnover_rate),
                     "total_mv": _safe_float(row.total_mv, multiplier=10_000.0),
                     "circ_mv": _safe_float(row.circ_mv, multiplier=10_000.0),
-                    "pe_ttm": _safe_float(row.pe_ttm),
-                    "pb": _safe_float(row.pb),
+                    "pe_ttm": pe_ttm,
+                    "pb": pb,
+                    **(
+                        {
+                            "valuation_null_reason":
+                            "provider_reported_not_applicable"
+                        }
+                        if pe_ttm is None or pb is None
+                        else {}
+                    ),
                     "source_name": "tushare.daily_basic",
                 }
             )
 
         found_indexes: set[str] = set()
+        index_dates_by_code: dict[str, set[date]] = {}
         for index_code in self.required_index_codes:
             frame = self._call(
                 "index_daily",
@@ -236,12 +256,15 @@ class TushareFormalEndpointClient:
                 "index_daily",
             )
             for row in frame.itertuples(index=False):
-                found_indexes.add(_ts_code(row.ts_code))
+                normalized_index = _ts_code(row.ts_code)
+                index_date = _parse_yyyymmdd(row.trade_date)
+                found_indexes.add(normalized_index)
+                index_dates_by_code.setdefault(normalized_index, set()).add(index_date)
                 records.append(
                     {
                         "record_type": "index_bar",
-                        "trade_date": _parse_yyyymmdd(row.trade_date),
-                        "ts_code": _ts_code(row.ts_code),
+                        "trade_date": index_date,
+                        "ts_code": normalized_index,
                         "open": _safe_float(row.open),
                         "high": _safe_float(row.high),
                         "low": _safe_float(row.low),
@@ -258,12 +281,20 @@ class TushareFormalEndpointClient:
                 + ", ".join(missing_indexes),
                 FailureClassification.INCOMPLETE_UNIVERSE,
             )
-
-        covered_dates = tuple(
-            session
-            for session in sessions
-            if not expected_codes or expected_codes <= codes_by_date.get(session, set())
+        incomplete_indexes = sorted(
+            code
+            for code in self.required_index_codes
+            if not set(sessions) <= index_dates_by_code.get(code, set())
         )
+        if incomplete_indexes:
+            raise PermanentRouteFailure(
+                "Tushare index_daily lacks the declared "
+                f"{FORMAL_SCREENING_SESSION_COUNT} sessions for: "
+                + ", ".join(incomplete_indexes),
+                FailureClassification.INCOMPLETE_UNIVERSE,
+            )
+
+        covered_dates = sessions
         return EndpointResponse(
             records=tuple(records),
             covered_dates=covered_dates,
@@ -287,7 +318,7 @@ class TushareFormalEndpointClient:
         )
 
     def fetch_board_industry(self, request: AcquisitionRequest) -> EndpointResponse:
-        sessions = _required_sessions(request.trade_date)
+        sessions = self._required_sessions(request.trade_date)
         classifications = self._call("index_classify", level="L3", src="SW2021")
         _require_columns(
             classifications,
@@ -308,7 +339,7 @@ class TushareFormalEndpointClient:
             )
             for member in members.itertuples(index=False):
                 code = _ts_code(member.ts_code)
-                if requested and code not in requested:
+                if code not in requested:
                     continue
                 relevant_boards[board_code] = board_name
                 records.append(
@@ -344,8 +375,10 @@ class TushareFormalEndpointClient:
                 ),
                 "index_daily",
             )
+            board_dates: set[date] = set()
             for row in history.itertuples(index=False):
                 trade_date = _parse_yyyymmdd(row.trade_date)
+                board_dates.add(trade_date)
                 covered_dates.add(trade_date)
                 records.append(
                     {
@@ -361,6 +394,12 @@ class TushareFormalEndpointClient:
                         "amount": _safe_float(row.amount, multiplier=1_000.0),
                         "source_name": "tushare.index_daily",
                     }
+                )
+            if not set(sessions[-FORMAL_BOARD_SESSION_COUNT:]) <= board_dates:
+                raise PermanentRouteFailure(
+                    "Tushare board history lacks "
+                    f"{FORMAL_BOARD_SESSION_COUNT} sessions for {board_code}",
+                    FailureClassification.INCOMPLETE_UNIVERSE,
                 )
         return EndpointResponse(
             records=tuple(records),
@@ -418,15 +457,43 @@ class TushareFormalEndpointClient:
                     "or_yoy",
                     "netprofit_yoy",
                     "grossprofit_margin",
-                    "ocf_to_or",
                 ),
                 "fina_indicator",
             )
-            valid_indicators = _published_rows(indicators, "ann_date", request)
+            valid_indicators = [
+                row
+                for row in _published_rows(indicators, "ann_date", request)
+                if _ts_code(row.ts_code) == code
+            ]
             valid_indicators.sort(
                 key=lambda row: (_text(row.end_date), _text(row.ann_date)),
                 reverse=True,
             )
+            cashflows = self._call("cashflow", ts_code=code)
+            _require_columns(
+                cashflows,
+                ("ts_code", "end_date", "ann_date", "n_cashflow_act"),
+                "cashflow",
+            )
+            valid_cashflows = [
+                row
+                for row in _published_rows(cashflows, "ann_date", request)
+                if _ts_code(row.ts_code) == code
+            ]
+            valid_cashflows.sort(
+                key=lambda row: (_text(row.end_date), _text(row.ann_date)),
+                reverse=True,
+            )
+            cashflow_by_period: dict[date, tuple[float | None, datetime]] = {}
+            for row in valid_cashflows:
+                period_end = _parse_yyyymmdd(row.end_date)
+                cashflow_by_period.setdefault(
+                    period_end,
+                    (
+                        _safe_float(row.n_cashflow_act),
+                        _publication_time(row.ann_date, request),
+                    ),
+                )
             announcement_by_period: dict[date, datetime] = {}
             for row in valid_indicators:
                 period_end = _parse_yyyymmdd(row.end_date)
@@ -436,8 +503,16 @@ class TushareFormalEndpointClient:
                 row = valid_indicators[0]
                 period_end = _parse_yyyymmdd(row.end_date)
                 announcement = announcement_by_period[period_end]
+                cashflow_value, cashflow_announcement = cashflow_by_period.get(
+                    period_end,
+                    (None, announcement),
+                )
+                announcement = max(announcement, cashflow_announcement)
                 identifier = f"{code}:financial_summary:{period_end.isoformat()}"
                 publication_times[identifier] = announcement
+                revenue_yoy = _safe_float(row.or_yoy)
+                profit_yoy = _safe_float(row.netprofit_yoy)
+                gross_margin = _safe_float(row.grossprofit_margin)
                 records.append(
                     {
                         "record_type": "financial_summary",
@@ -445,11 +520,27 @@ class TushareFormalEndpointClient:
                         "ts_code": code,
                         "period_end": period_end,
                         "announcement_time": announcement,
-                        "revenue_yoy": _safe_float(row.or_yoy),
-                        "profit_yoy": _safe_float(row.netprofit_yoy),
-                        "gross_margin": _safe_float(row.grossprofit_margin),
-                        "operating_cashflow": _safe_float(row.ocf_to_or),
-                        "source_name": "tushare.fina_indicator",
+                        "revenue_yoy": revenue_yoy,
+                        "profit_yoy": profit_yoy,
+                        "gross_margin": gross_margin,
+                        "operating_cashflow": cashflow_value,
+                        **(
+                            {
+                                "fundamental_null_reason":
+                                "provider_reported_not_available_as_of_cutoff"
+                            }
+                            if any(
+                                value is None
+                                for value in (
+                                    revenue_yoy,
+                                    profit_yoy,
+                                    gross_margin,
+                                    cashflow_value,
+                                )
+                            )
+                            else {}
+                        ),
+                        "source_name": "tushare.fina_indicator+tushare.cashflow",
                     }
                 )
 
@@ -538,6 +629,7 @@ class TushareFormalEndpointClient:
             source_names=(
                 "tushare.stock_company",
                 "tushare.fina_indicator",
+                "tushare.cashflow",
                 "tushare.forecast",
                 "tushare.express",
                 "tushare.fina_mainbz",
@@ -549,6 +641,7 @@ class TushareFormalEndpointClient:
         self,
         request: AcquisitionRequest,
     ) -> EndpointResponse:
+        sessions = self._required_sessions(request.trade_date)
         suspensions = self._call(
             "suspend_d",
             trade_date=_yyyymmdd(request.trade_date),
@@ -569,6 +662,21 @@ class TushareFormalEndpointClient:
             "stock_st",
         )
         requested = set(request.target_codes)
+        announcements: list[Any] = []
+        for code in request.target_codes:
+            frame = self._call(
+                "anns_d",
+                ts_code=code,
+                start_date=_yyyymmdd(sessions[-2]),
+                end_date=_yyyymmdd(request.trade_date),
+                fields="ann_date,ts_code,name,title,url,rec_time",
+            )
+            _require_columns(
+                frame,
+                ("ann_date", "ts_code", "name", "title", "url", "rec_time"),
+                "anns_d",
+            )
+            announcements.extend(frame.itertuples(index=False))
         publication = datetime.combine(
             request.trade_date,
             time.min,
@@ -612,6 +720,37 @@ class TushareFormalEndpointClient:
                     source_name="tushare.stock_st",
                 )
             )
+        for row in announcements:
+            code = _ts_code(row.ts_code)
+            if code not in requested:
+                continue
+            announcement_time = _provider_datetime(
+                row.rec_time,
+                fallback_date=row.ann_date,
+                request=request,
+            )
+            if announcement_time > request.report_cutoff:
+                continue
+            event_id = _text(row.url)
+            title = _text(row.title)
+            if not event_id or event_id.lower() == "nan" or not title:
+                raise PermanentRouteFailure(
+                    "Tushare anns_d response lacks a stable URL or title",
+                    FailureClassification.SCHEMA,
+                )
+            publication_times[event_id] = announcement_time
+            records.append(
+                _event_record(
+                    request,
+                    code,
+                    event_id,
+                    "company_announcement",
+                    title,
+                    announcement_time,
+                    hard_risk=False,
+                    source_name="tushare.anns_d",
+                )
+            )
         return EndpointResponse(
             records=tuple(records),
             covered_dates=(request.trade_date,),
@@ -621,9 +760,45 @@ class TushareFormalEndpointClient:
                 request,
                 AcquisitionGroupId.OFFICIAL_EVENTS_RISK,
             ),
-            source_names=("tushare.suspend_d", "tushare.stock_st"),
+            source_names=(
+                "tushare.anns_d",
+                "tushare.suspend_d",
+                "tushare.stock_st",
+            ),
             publication_times=publication_times,
         )
+
+    def _required_sessions(self, trade_date: date) -> tuple[date, ...]:
+        calendar = self._call(
+            "trade_cal",
+            exchange="SSE",
+            start_date=_yyyymmdd(
+                trade_date - timedelta(days=FORMAL_CALENDAR_LOOKBACK_DAYS)
+            ),
+            end_date=_yyyymmdd(trade_date),
+            fields="cal_date,is_open",
+        )
+        _require_columns(calendar, ("cal_date", "is_open"), "trade_cal")
+        sessions = tuple(
+            sorted(
+                {
+                    _parse_yyyymmdd(row.cal_date)
+                    for row in calendar.itertuples(index=False)
+                    if int(row.is_open) == 1
+                    and _parse_yyyymmdd(row.cal_date) <= trade_date
+                }
+            )[-FORMAL_SCREENING_SESSION_COUNT:]
+        )
+        if (
+            len(sessions) != FORMAL_SCREENING_SESSION_COUNT
+            or sessions[-1] != trade_date
+        ):
+            raise PermanentRouteFailure(
+                "provider calendar does not prove the latest "
+                f"{FORMAL_SCREENING_SESSION_COUNT}-session window",
+                FailureClassification.STALE_DATA,
+            )
+        return sessions
 
     def fetch_concepts(self, request: AcquisitionRequest) -> EndpointResponse:
         concepts = self._call("concept")
@@ -734,15 +909,6 @@ def _field_coverage(
     }
 
 
-def _required_sessions(trade_date: date) -> tuple[date, ...]:
-    if trade_date != JULY_10_OFFICIAL_SESSIONS[-1]:
-        raise PermanentRouteFailure(
-            "verified 82-session window is unavailable for requested trade date",
-            FailureClassification.STALE_DATA,
-        )
-    return JULY_10_OFFICIAL_SESSIONS
-
-
 def _require_columns(
     frame: pd.DataFrame,
     names: Iterable[str],
@@ -789,6 +955,26 @@ def _publication_time(value: Any, request: AcquisitionRequest) -> datetime:
         time.min,
         tzinfo=request.report_cutoff.tzinfo,
     )
+
+
+def _provider_datetime(
+    value: Any,
+    *,
+    fallback_date: Any,
+    request: AcquisitionRequest,
+) -> datetime:
+    if value is None or pd.isna(value):
+        return _publication_time(fallback_date, request)
+    try:
+        parsed = pd.Timestamp(value).to_pydatetime()
+    except (TypeError, ValueError) as exc:
+        raise PermanentRouteFailure(
+            "Tushare response contains an invalid publication time",
+            FailureClassification.SCHEMA,
+        ) from exc
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=request.report_cutoff.tzinfo)
+    return parsed.astimezone(request.report_cutoff.tzinfo)
 
 
 def _published_rows(

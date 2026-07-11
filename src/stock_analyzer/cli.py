@@ -1,8 +1,9 @@
-from datetime import date
+from datetime import date, datetime
 import json
 import os
 from pathlib import Path
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 import typer
 
@@ -10,10 +11,19 @@ from stock_analyzer.config import AppConfig
 from stock_analyzer.data.health import run_health_checks
 from stock_analyzer.ops.job import (
     ACTION_REQUIRED_STATUSES,
+    FORMAL_FIRST_ATTEMPT_CUTOFF,
     HumanInterventionJobError,
     RetryableJobError,
     _default_run_daily,
     run_daily_job,
+)
+from stock_analyzer.ops.formal_live import (
+    LiveCapabilityVerificationError,
+    verify_and_record_live_capabilities,
+)
+from stock_analyzer.ops.production_dependencies import (
+    ProductionDependencyError,
+    load_default_external_runtime,
 )
 from stock_analyzer.ops.artifacts import DeployArtifactError, prepare_pages_artifact
 from stock_analyzer.ops.publish import (
@@ -56,6 +66,10 @@ MISSING_SUPABASE_CONFIG_MESSAGE = (
 @app.command("health-check")
 def health_check(
     live_tushare_smoke: bool = typer.Option(False, "--live-tushare-smoke"),
+    live_tushare_trade_date: Optional[str] = typer.Option(
+        None,
+        "--live-tushare-trade-date",
+    ),
 ) -> None:
     config = AppConfig.load()
     report = run_health_checks(config)
@@ -65,9 +79,12 @@ def health_check(
         token = config.resolve_tushare_token()
         if not token:
             _fail("Tushare token missing; set TUSHARE_TOKEN or TUSHARE_TOKEN_PATH")
+        if live_tushare_trade_date is None:
+            _fail("--live-tushare-trade-date is required for live Tushare smoke")
+        smoke_trade_date = date.fromisoformat(live_tushare_trade_date)
         try:
             source = _build_tushare_source(token)
-            rows = source.fetch_daily(date(2026, 7, 8))
+            rows = source.fetch_daily(smoke_trade_date)
         except Exception as exc:
             _fail(f"live Tushare smoke failed: {_mask_secret(str(exc), token)}")
         typer.echo(f"live_tushare_smoke: rows={len(rows)}")
@@ -215,6 +232,37 @@ def ops_run_daily_job(
     typer.echo(f"{status.status.value} stage={status.stage}")
     if status.status in ACTION_REQUIRED_STATUSES:
         raise typer.Exit(code=2)
+
+
+@ops_app.command("verify-formal-capabilities")
+def ops_verify_formal_capabilities(
+    trade_date: str = typer.Option(..., "--trade-date"),
+    confirm_live_read: bool = typer.Option(False, "--confirm-live-read"),
+) -> None:
+    if not confirm_live_read:
+        _fail("--confirm-live-read is required before any provider call")
+    parsed_trade_date = date.fromisoformat(trade_date)
+    cutoff = datetime.combine(
+        parsed_trade_date,
+        FORMAL_FIRST_ATTEMPT_CUTOFF,
+        tzinfo=ZoneInfo("Asia/Shanghai"),
+    )
+    config = AppConfig.load()
+    try:
+        runtime = load_default_external_runtime(config)
+        result = verify_and_record_live_capabilities(
+            runtime,
+            parsed_trade_date,
+            cutoff,
+            confirm_live_read=True,
+        )
+    except (ProductionDependencyError, LiveCapabilityVerificationError, RuntimeError) as exc:
+        _fail(str(exc))
+    typer.echo(
+        "formal capability verification completed: "
+        f"routes={len(result.bundle.routes)} "
+        f"screening_versions={len(result.primary_screening_versions)}"
+    )
 
 
 @ops_app.command("publish-report-site")

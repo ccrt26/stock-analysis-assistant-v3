@@ -7,6 +7,7 @@ from stock_analyzer.data.readiness import (
     AcquisitionGroupId,
     RecordTypeContract,
 )
+from stock_analyzer.data.formal_policy import FORMAL_SCREENING_SESSION_COUNT
 
 
 FORMAL_CONTRACT_VERSION = "formal-v2"
@@ -85,6 +86,10 @@ DAILY_BASIC = _record_type(
         "source_name",
     ),
     ("trade_date", "ts_code"),
+    legitimate_null_fields={
+        "pe_ttm": "valuation_null_reason",
+        "pb": "valuation_null_reason",
+    },
     current_fact_fields=("turnover_rate", "total_mv", "circ_mv"),
 )
 INDEX_BAR = _record_type(
@@ -144,6 +149,12 @@ FINANCIAL_SUMMARY = _record_type(
         "source_name",
     ),
     ("trade_date", "ts_code", "period_end"),
+    legitimate_null_fields={
+        "revenue_yoy": "fundamental_null_reason",
+        "profit_yoy": "fundamental_null_reason",
+        "gross_margin": "fundamental_null_reason",
+        "operating_cashflow": "fundamental_null_reason",
+    },
     current_fact_fields=("period_end", "announcement_time"),
 )
 MAIN_BUSINESS = _record_type(
@@ -243,13 +254,13 @@ def build_screening_contracts(
             AcquisitionGroupId.CALENDAR_UNIVERSE,
             (CALENDAR, SECURITY),
             expected_codes,
-            minimum_history_sessions=82,
+            minimum_history_sessions=FORMAL_SCREENING_SESSION_COUNT,
         ),
         AcquisitionGroupId.MARKET_DECISION: _group(
             AcquisitionGroupId.MARKET_DECISION,
             (EQUITY_BAR, DAILY_BASIC, INDEX_BAR),
             expected_codes,
-            minimum_history_sessions=82,
+            minimum_history_sessions=FORMAL_SCREENING_SESSION_COUNT,
         ),
     }
 

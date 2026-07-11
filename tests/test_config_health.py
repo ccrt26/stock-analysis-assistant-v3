@@ -282,3 +282,82 @@ def test_matrix_does_not_claim_live_read_supabase_write_launchd_or_publish():
     assert capability_level("OPS-002") == "BLOCKED"
     assert capability_level("PUB-003") == "BLOCKED"
     assert capability_level("SAFE-001") == "NOT_APPLICABLE"
+
+
+def test_production_source_has_no_july10_or_absolute_user_path_runtime_literal():
+    allowed_fixture_files = {
+        "stock_analyzer/data/readiness.py",
+        "stock_analyzer/pipeline.py",
+    }
+    forbidden_date_literals = (
+        "2026-07-10",
+        "20260710",
+        "date(2026, 7, 10)",
+        "date(2026, 3, 12)",
+    )
+    source_root = PROJECT_ROOT / "src"
+    for path in source_root.rglob("*.py"):
+        relative = path.relative_to(source_root).as_posix()
+        source = path.read_text(encoding="utf-8")
+        assert "/Users/" not in source, relative
+        assert ".worktrees/" not in source, relative
+        if relative not in allowed_fixture_files:
+            for literal in forbidden_date_literals:
+                assert literal not in source, f"{relative}: {literal}"
+
+    active_operational_files = (
+        "README.md",
+        "docs/operations/runbook.md",
+        "docs/operations/cloudflare-pages.md",
+        "ops/launchd/com.ccrt.stock-analysis-assistant.daily.plist.example",
+    )
+    for relative in active_operational_files:
+        text = read_project_file(relative)
+        assert "/Users/" not in text, relative
+        assert ".worktrees/" not in text, relative
+
+
+def test_formal_policy_constants_are_the_single_window_and_benchmark_authority():
+    from stock_analyzer.data.formal_policy import (
+        FORMAL_BACKUP_INDEX_SYMBOLS,
+        FORMAL_BOARD_SESSION_COUNT,
+        FORMAL_CALENDAR_LOOKBACK_DAYS,
+        FORMAL_EQUITY_FEATURE_SESSION_COUNT,
+        FORMAL_FOCUS_OBSERVATION_SESSION_COUNT,
+        FORMAL_PRIMARY_INDEX_CODES,
+        FORMAL_SCREENING_SESSION_COUNT,
+    )
+
+    assert FORMAL_SCREENING_SESSION_COUNT == 82
+    assert FORMAL_EQUITY_FEATURE_SESSION_COUNT == 61
+    assert FORMAL_BOARD_SESSION_COUNT == 21
+    assert FORMAL_CALENDAR_LOOKBACK_DAYS == 180
+    assert FORMAL_FOCUS_OBSERVATION_SESSION_COUNT == 5
+    assert FORMAL_PRIMARY_INDEX_CODES == ("000001.SH", "399001.SZ", "899050.BJ")
+    assert FORMAL_BACKUP_INDEX_SYMBOLS == ("sh000001", "sz399001", "bj899050")
+
+
+def test_production_source_has_no_distributed_formal_window_magic_numbers():
+    policy_consumers = (
+        "src/stock_analyzer/data/formal_contracts.py",
+        "src/stock_analyzer/data/formal_materializer.py",
+        "src/stock_analyzer/data/tushare_formal_client.py",
+        "src/stock_analyzer/data/akshare_formal_client.py",
+        "src/stock_analyzer/ops/formal_strategy_runtime.py",
+        "src/stock_analyzer/ops/formal_live.py",
+    )
+    forbidden_fragments = (
+        "[-82:]",
+        "[-61:]",
+        "[-21:]",
+        "[-5:]",
+        "!= 82",
+        "!= 5",
+        "minimum_history_sessions=82",
+        '"000001.SH",\n',
+        '"sh000001",\n',
+    )
+    for relative in policy_consumers:
+        source = read_project_file(relative)
+        for fragment in forbidden_fragments:
+            assert fragment not in source, f"{relative}: {fragment}"

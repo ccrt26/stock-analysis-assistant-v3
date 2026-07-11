@@ -10,7 +10,10 @@ from stock_analyzer.data.formal_materializer import materialize_market_inputs
 from stock_analyzer.data.readiness import FormalRunState
 from stock_analyzer.domain.models import ActionDecision, ActionLabel, FocusState
 from stock_analyzer.ops.formal_run import CandidateSet
-from stock_analyzer.ops.formal_strategy_runtime import analyze_formal_inputs
+from stock_analyzer.ops.formal_strategy_runtime import (
+    _prior_five_sessions,
+    analyze_formal_inputs,
+)
 from stock_analyzer.storage.repositories import InMemoryAnalysisRepository
 from tests.test_formal_materializer import (
     CODES,
@@ -105,6 +108,26 @@ def test_formal_analysis_loads_exact_five_formal_days_and_breaks_on_blocked_day(
 
     assert repository.formal_focus_day_calls == [(TARGET, prior_days)]
     assert output.value.focus_states == []
+
+
+def test_formal_focus_sessions_come_from_current_market_payload():
+    current = date(2026, 7, 14)
+    covered_sessions = (
+        date(2026, 7, 7),
+        date(2026, 7, 8),
+        date(2026, 7, 9),
+        date(2026, 7, 10),
+        date(2026, 7, 13),
+        current,
+    )
+
+    assert _prior_five_sessions(current, covered_sessions) == [
+        date(2026, 7, 7),
+        date(2026, 7, 8),
+        date(2026, 7, 9),
+        date(2026, 7, 10),
+        date(2026, 7, 13),
+    ]
 
 
 def test_formal_analysis_builds_complete_evidence_hashes_and_narrow_ledger_rows():

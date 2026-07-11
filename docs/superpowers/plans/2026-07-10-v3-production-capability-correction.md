@@ -808,6 +808,8 @@ git commit -m "docs: record corrected formal production gates"
 - Approved invariant constants may remain only when they express a named product contract: state enum values, `formal-v2`, schema/table names, route IDs, required benchmark index identifiers, approved Strategy V2 thresholds, the three declared schedule slots, and the July 10 acceptance fixture.
 - Run-varying values may not be embedded in production flow: target dates, history start/end dates, prior focus dates, report cutoff, candidate/security codes, absolute user paths, provider/library versions, capability hashes, credentials, Supabase project identity, Cloudflare project/domain, or activation IDs.
 - A named policy default is configurable or centralized and tested. A duplicated literal that can change independently is rejected even if its present value is correct.
+- The audit covers every operational hardcoding class, not only dates: provider endpoint identity and query semantics, history/focus windows, benchmark/index identity, candidate identity, cutoff/schedule/timezone, retry/rate-limit policy, filesystem paths, environment and project identity, contract/provider versions, capability hashes, database schema/RPC/table names, publication target/domain, activation IDs, credentials, and feature switches. Values that vary by run or environment must enter through validated requests/configuration; approved domain invariants must have one named authority and consumer tests.
+- Approved window invariants are centralized in `data/formal_policy.py`: 82 screening sessions, 61 equity-feature sessions, 21 board-context sessions, five focus-observation sessions, the calendar-query safety lookback, the post-close capability boundary, and primary/backup benchmark identifiers. Production consumers may not redefine these literals independently.
 
 **Interfaces:**
 - Each formal provider client derives the latest 82 official sessions ending at `request.trade_date` from its own validated calendar response. July 10 must still resolve exactly to 2026-03-12 through 2026-07-10.
@@ -835,8 +837,10 @@ Add tests named:
 - `test_live_capability_bootstrap_uses_real_clients_and_writes_no_ledger_or_report`
 - `test_live_capability_cli_requires_explicit_confirmation`
 - `test_production_source_has_no_july10_or_absolute_user_path_runtime_literal`
+- `test_formal_policy_constants_are_the_single_window_and_benchmark_authority`
+- `test_production_source_has_no_distributed_formal_window_magic_numbers`
 
-The source audit parses Python AST under `src/stock_analyzer` and rejects date/string literals representing `2026-07-10`, `2026-03-12`, `/Users/`, `.worktrees/`, or a candidate stock code outside the named July acceptance constant module and fixture-only CLI examples. It separately scans SQL, shell, plist, and active operations docs for absolute user paths or embedded project identities; examples must use `${PROJECT_ROOT}` or documented placeholders.
+The source audit parses Python AST under `src/stock_analyzer` and rejects date/string literals representing `2026-07-10`, `2026-03-12`, `/Users/`, `.worktrees/`, or a candidate stock code outside the named July acceptance constant module and fixture-only CLI examples. It also rejects distributed definitions of the formal 82/61/21/5 windows and benchmark identifiers outside `data/formal_policy.py` (human-facing messages may interpolate the imported constant). It separately scans SQL, shell, plist, and active operations docs for absolute user paths or embedded project identities; examples must use `${PROJECT_ROOT}` or documented placeholders.
 
 - [ ] **Step 2: Run the hardcoding RED gate**
 

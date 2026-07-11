@@ -28,11 +28,14 @@ The launchd template is `ops/launchd/com.ccrt.stock-analysis-assistant.daily.pli
 
 ## Production Run Command After Readiness Approval
 
-After approval, run the daily job from `/Users/ccrt/股票分析助手`:
+After approval, change to the checked-out project root and derive `PROJECT_ROOT` from that directory:
 
 ```bash
-PROJECT_ROOT=/Users/ccrt/股票分析助手 PYTHONPATH=src .venv/bin/python -m stock_analyzer ops run-daily-job --trade-date YYYY-MM-DD --scheduled-slot 18:30 --attempt 1 --prepare-deploy
+export PROJECT_ROOT="$PWD"
+PYTHONPATH=src .venv/bin/python -m stock_analyzer ops run-daily-job --trade-date YYYY-MM-DD --scheduled-slot 18:30 --attempt 1 --prepare-deploy
 ```
+
+Before installing the launchd example, replace every literal `__PROJECT_ROOT__` with the resolved absolute checkout path in the copied plist. Never edit the versioned example to a personal path.
 
 For approved retries, keep the same `trade_date`, set `--scheduled-slot 19:00 --attempt 2` or `--scheduled-slot 19:30 --attempt 3`, and keep `--prepare-deploy`.
 
@@ -95,9 +98,16 @@ PYTHONPATH=src .venv/bin/python -m pytest tests/test_default_formal_production_e
 
 This test invokes the real `_default_run_daily()` and `build_production_formal_dependencies()` path. It replaces only Tushare, AKShare, and ledger transport boundaries with recorded/fake external runtimes; it does not patch the production factory or reuse `_sample_market`.
 
-The default live capability-record location is `local_warehouse/formal_evidence/capabilities/formal-v2/latest.json`. A recorded evidence bundle is accepted only by recorded test mode; live mode rejects it before any provider call. An approved live-read verification must create live evidence at that location without exposing credentials.
+The default live capability-record location is `local_warehouse/formal_evidence/capabilities/formal-v2/latest.json`. A recorded evidence bundle is accepted only by recorded test mode; live mode rejects it before any provider call. After the offline gate passes and live reads are explicitly approved, create the live evidence and exact same-day immutable screening backfill with:
 
-Passing this offline rehearsal does not authorize live acquisition, Supabase mutation, Cloudflare deployment, publication, broker access, or order execution. Each real production action remains separately approval-gated. The lower-level readiness regression remains available as `PYTHONPATH=src .venv/bin/python -m pytest tests/test_july10_formal_readiness_acceptance.py -q`.
+```bash
+PYTHONPATH=src .venv/bin/python -m stock_analyzer ops verify-formal-capabilities \
+  --trade-date YYYY-MM-DD --confirm-live-read
+```
+
+The command validates all six formal groups for both provider families, records hashes and installed library versions without credentials, and writes only local capability/evidence files. It does not call analysis or an LLM, write Supabase, render/publish a report, activate launchd, or access a broker. Any incomplete route fails closed before those actions.
+
+Passing this offline rehearsal does not itself authorize a real action. Live acquisition, Supabase mutation, Cloudflare deployment/publication, scheduler activation, broker access, and order execution remain separate scopes. The lower-level readiness regression remains available as `PYTHONPATH=src .venv/bin/python -m pytest tests/test_july10_formal_readiness_acceptance.py -q`.
 
 ## Non-Trading-Day Skip Rule
 

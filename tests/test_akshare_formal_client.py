@@ -26,6 +26,7 @@ from stock_analyzer.data.readiness import (
 
 TARGET = date(2026, 7, 10)
 CUTOFF = datetime(2026, 7, 10, 16, 0, tzinfo=ZoneInfo("Asia/Shanghai"))
+NEXT_TARGET = date(2026, 7, 13)
 CODE = "600000.SH"
 
 
@@ -120,7 +121,7 @@ class RecordedAkshare:
             return pd.DataFrame(
                 [
                     {
-                        "date": TARGET,
+                        "date": session,
                         "open": 3_000.0,
                         "close": 3_020.0,
                         "high": 3_050.0,
@@ -128,6 +129,7 @@ class RecordedAkshare:
                         "volume": 2_000_000.0,
                         "amount": 20_000_000.0,
                     }
+                    for session in JULY_10_OFFICIAL_SESSIONS
                 ]
             )
         if name == "stock_board_industry_name_em":
@@ -138,7 +140,7 @@ class RecordedAkshare:
             return pd.DataFrame(
                 [
                     {
-                        "日期": TARGET,
+                        "日期": session,
                         "开盘": 1_000.0,
                         "收盘": 1_010.0,
                         "最高": 1_020.0,
@@ -146,6 +148,7 @@ class RecordedAkshare:
                         "成交量": 500_000.0,
                         "成交额": 5_000_000.0,
                     }
+                    for session in JULY_10_OFFICIAL_SESSIONS[-21:]
                 ]
             )
         if name == "stock_individual_info_em":
@@ -251,19 +254,86 @@ def test_akshare_market_builds_whole_82_session_group_without_primary_records():
     assert all("tushare" not in source for source in response.source_names)
 
 
+def test_akshare_market_uses_provider_calendar_for_next_trading_day_window():
+    sessions = (*JULY_10_OFFICIAL_SESSIONS[1:], NEXT_TARGET)
+
+    def next_history(kwargs):
+        return pd.DataFrame(
+            [
+                {
+                    "日期": session,
+                    "开盘": 10.0,
+                    "收盘": 10.5,
+                    "最高": 11.0,
+                    "最低": 9.0,
+                    "成交量": 1_000_000.0,
+                    "成交额": 10_500_000.0,
+                    "振幅": 2.0,
+                    "涨跌幅": 1.0,
+                    "涨跌额": 0.1,
+                    "换手率": 1.2,
+                }
+                for session in sessions
+            ]
+        )
+
+    def next_index(kwargs):
+        return pd.DataFrame(
+            [
+                {
+                    "date": session,
+                    "open": 3_000.0,
+                    "close": 3_020.0,
+                    "high": 3_050.0,
+                    "low": 2_990.0,
+                    "volume": 2_000_000.0,
+                    "amount": 20_000_000.0,
+                }
+                for session in sessions
+            ]
+        )
+
+    ak = RecordedAkshare(
+        {
+            "tool_trade_date_hist_sina": pd.DataFrame({"trade_date": sessions}),
+            "stock_zh_a_hist": next_history,
+            "stock_zh_index_daily_em": next_index,
+        }
+    )
+    next_request = request().model_copy(
+        update={
+            "trade_date": NEXT_TARGET,
+            "report_cutoff": datetime(
+                2026,
+                7,
+                13,
+                16,
+                0,
+                tzinfo=ZoneInfo("Asia/Shanghai"),
+            ),
+        }
+    )
+
+    response = AkshareFormalEndpointClient(ak).fetch_market_decision(next_request)
+
+    assert response.covered_dates == sessions
+    assert ak.calls[0][0] == "tool_trade_date_hist_sina"
+
+
 def test_akshare_market_preserves_spot_valuation_units_and_unadjusted_history():
     ak = RecordedAkshare()
 
     response = AkshareFormalEndpointClient(ak).fetch_market_decision(request())
 
     assert [name for name, _ in ak.calls] == [
+        "tool_trade_date_hist_sina",
         "stock_zh_a_hist",
         "stock_zh_a_spot_em",
         "stock_zh_index_daily_em",
         "stock_zh_index_daily_em",
         "stock_zh_index_daily_em",
     ]
-    assert ak.calls[0][1] == {
+    assert ak.calls[1][1] == {
         "symbol": "600000",
         "period": "daily",
         "start_date": "20260312",
@@ -286,6 +356,7 @@ def test_akshare_board_industry_calls_name_constituent_and_history_endpoints():
     response = AkshareFormalEndpointClient(ak).fetch_board_industry(request())
 
     assert [name for name, _ in ak.calls] == [
+        "tool_trade_date_hist_sina",
         "stock_board_industry_name_em",
         "stock_board_industry_cons_em",
         "stock_board_industry_hist_em",

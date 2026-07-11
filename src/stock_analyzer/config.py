@@ -14,7 +14,7 @@ def _default_project_root() -> Path:
 class AppConfig(BaseModel):
     project_root: Path = _default_project_root()
     tushare_token: Optional[str] = Field(default=None, repr=False)
-    tushare_token_path: Path = Path("/Users/ccrt/.tushare_token")
+    tushare_token_path: Path = Path.home() / ".tushare_token"
     supabase_url: Optional[str] = None
     supabase_service_role_key: Optional[str] = Field(default=None, repr=False)
     reports_dir: Path = _default_project_root() / "reports"
@@ -49,7 +49,7 @@ class AppConfig(BaseModel):
             project_root=project_root,
             tushare_token=values.get("TUSHARE_TOKEN"),
             tushare_token_path=Path(
-                values.get("TUSHARE_TOKEN_PATH", "/Users/ccrt/.tushare_token")
+                values.get("TUSHARE_TOKEN_PATH", Path.home() / ".tushare_token")
             ).expanduser(),
             supabase_url=values.get("SUPABASE_URL"),
             supabase_service_role_key=values.get("SUPABASE_SERVICE_ROLE_KEY"),

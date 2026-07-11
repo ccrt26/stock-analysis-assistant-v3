@@ -31,6 +31,7 @@ from stock_analyzer.storage.supabase_client import create_supabase_client
 
 
 MAX_ATTEMPTS = 3
+FORMAL_FIRST_ATTEMPT_CUTOFF = time(hour=18, minute=30)
 ACTION_REQUIRED_STATUSES = {
     RunStatus.FAILED_NEEDS_HUMAN,
     RunStatus.FAILED_RETRYABLE,
@@ -461,7 +462,7 @@ def _default_run_daily(
     )
     report_cutoff = datetime.combine(
         trade_date,
-        time(hour=16),
+        FORMAL_FIRST_ATTEMPT_CUTOFF,
         tzinfo=ZoneInfo("Asia/Shanghai"),
     )
     return run_formal_strategy_v2(

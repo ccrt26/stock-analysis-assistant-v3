@@ -289,6 +289,30 @@ def test_calendar_route_excuses_only_officially_suspended_or_hard_excluded_codes
     assert derive_expected_tradable_codes(rows) == ("600000.SH",)
 
 
+def test_calendar_route_excludes_too_new_code_from_required_market_history():
+    rows = (
+        {
+            "ts_code": "600000.SH",
+            "status_verified": True,
+            "is_suspended": False,
+            "hard_excluded": False,
+            "list_date": date(1999, 11, 10),
+        },
+        {
+            "ts_code": "688999.SH",
+            "status_verified": True,
+            "is_suspended": False,
+            "hard_excluded": False,
+            "list_date": date(2026, 6, 1),
+        },
+    )
+
+    assert derive_expected_tradable_codes(
+        rows,
+        minimum_history_start=date(2026, 4, 16),
+    ) == ("600000.SH",)
+
+
 def test_unknown_missing_market_code_is_not_inferred_suspended():
     rows = (
         {"ts_code": "600000.SH", "status_verified": True, "is_suspended": False, "hard_excluded": False},

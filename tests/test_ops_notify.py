@@ -109,7 +109,8 @@ def test_launchd_template_uses_project_root_and_env_contract_without_secrets():
 
     template = LAUNCHD_TEMPLATE.read_text(encoding="utf-8")
 
-    assert "/Users/ccrt/股票分析助手" in template
+    assert "__PROJECT_ROOT__" in template
+    assert "/Users/" not in template
     assert ".env.local" in template
     assert "service-role-secret" not in template
     assert "tushare-secret" not in template

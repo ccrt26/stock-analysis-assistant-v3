@@ -234,7 +234,15 @@ def test_health_check_live_tushare_smoke_requires_token(monkeypatch, tmp_path):
     monkeypatch.delenv("TUSHARE_TOKEN", raising=False)
     monkeypatch.setenv("TUSHARE_TOKEN_PATH", str(tmp_path / "missing-token"))
 
-    result = CliRunner().invoke(app, ["health-check", "--live-tushare-smoke"])
+    result = CliRunner().invoke(
+        app,
+        [
+            "health-check",
+            "--live-tushare-smoke",
+            "--live-tushare-trade-date",
+            "2026-07-08",
+        ],
+    )
 
     assert result.exit_code != 0
     assert "Tushare token missing" in result.output
@@ -260,7 +268,15 @@ def test_health_check_live_tushare_smoke_uses_fake_source_without_leaking_token(
         raising=False,
     )
 
-    result = CliRunner().invoke(app, ["health-check", "--live-tushare-smoke"])
+    result = CliRunner().invoke(
+        app,
+        [
+            "health-check",
+            "--live-tushare-smoke",
+            "--live-tushare-trade-date",
+            "2026-07-08",
+        ],
+    )
 
     assert result.exit_code == 0
     assert "live_tushare_smoke: rows=2" in result.stdout
@@ -281,12 +297,47 @@ def test_health_check_live_tushare_smoke_masks_token_in_source_errors(monkeypatc
         raising=False,
     )
 
-    result = CliRunner().invoke(app, ["health-check", "--live-tushare-smoke"])
+    result = CliRunner().invoke(
+        app,
+        [
+            "health-check",
+            "--live-tushare-smoke",
+            "--live-tushare-trade-date",
+            "2026-07-08",
+        ],
+    )
 
     assert result.exit_code != 0
     assert "live Tushare smoke failed" in result.output
     assert "[masked]" in result.output
     assert "fake-error-token" not in result.output
+
+
+def test_live_capability_cli_requires_explicit_confirmation(monkeypatch):
+    calls = []
+
+    def forbidden_loader(config):
+        calls.append(config)
+        raise AssertionError("provider runtime must not load without confirmation")
+
+    monkeypatch.setattr(
+        "stock_analyzer.cli.load_default_external_runtime",
+        forbidden_loader,
+    )
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "ops",
+            "verify-formal-capabilities",
+            "--trade-date",
+            "2026-07-10",
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert "--confirm-live-read is required" in result.output
+    assert calls == []
 
 
 def test_run_daily_dry_run_completes():

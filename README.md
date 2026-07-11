@@ -22,7 +22,7 @@ python3 -m stock_analyzer health-check
 python3 -m stock_analyzer run-daily --fixture-mode --trade-date 2026-07-07
 ```
 
-默认 `health-check` 只做本地配置和凭据状态检查，不访问外部网络。旧的有限 Tushare provider 不能绕过正式数据门禁；非 fixture 生产命令必须具有实时能力凭证并通过完整正式契约，否则会失败关闭，也不能把内置样例数据写入 Supabase。
+默认 `health-check` 只做本地配置和凭据状态检查，不访问外部网络。旧的有限 Tushare provider 不能绕过正式数据门禁；非 fixture 生产命令必须具有实时能力凭证并通过完整正式契约，否则会失败关闭，也不能把内置样例数据写入 Supabase。正式窗口、盘后边界和基准指数由单一策略模块管理；交易日、候选代码、路径、环境身份、凭据和激活目标不得固化在生产流程中。
 
 未安装 editable package 的开发路径：使用 `PYTHONPATH=src` 直接运行源码。这是当前 smoke 已验证命令路径。
 
@@ -41,7 +41,7 @@ PYTHONPATH=src python3 -m stock_analyzer health-check --live-tushare-smoke
 
 ## 密钥
 
-- Tushare token 默认读取 `/Users/ccrt/.tushare_token`。
+- Tushare token 默认读取当前运行用户的 `~/.tushare_token`。
 - 也可以通过 `TUSHARE_TOKEN_PATH` 指定本地 token 文件。
 - 生产报告渲染必须设置 `SUPABASE_URL` 和 `SUPABASE_SERVICE_ROLE_KEY`。`SUPABASE_SERVICE_ROLE_KEY` 只用于服务端/本地受控脚本访问 Supabase，不能写入报告产物、前端代码或 Git。
 - 生产 `run-daily` 还需要真实行情接入、Tushare token 和数据依赖；缺失时会失败，不会持久化样例推荐。

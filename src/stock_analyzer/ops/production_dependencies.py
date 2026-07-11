@@ -11,6 +11,7 @@ from stock_analyzer.config import AppConfig
 from stock_analyzer.data.akshare_formal_client import AkshareFormalEndpointClient
 from stock_analyzer.data.capability_store import LocalCapabilityStore
 from stock_analyzer.data.formal_contracts import (
+    FORMAL_CONTRACT_VERSION,
     build_screening_contracts,
     build_target_contracts,
 )
@@ -74,7 +75,7 @@ def load_default_external_runtime(
         config.local_warehouse_dir
         / "formal_evidence"
         / "capabilities"
-        / "formal-v2"
+        / FORMAL_CONTRACT_VERSION
         / "latest.json"
     )
     return ProductionExternalRuntime(

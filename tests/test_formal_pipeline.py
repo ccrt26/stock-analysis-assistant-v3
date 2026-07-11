@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -333,10 +333,48 @@ def test_required_group_failure_calls_no_strategy_llm_report_publish_or_decision
 
 def test_market_group_inherits_validated_calendar_universe_coverage(tmp_path):
     calls: list[str] = []
+
+    class StatusCalendarRoute(FakeRoute):
+        def fetch(self, request):
+            payload = super().fetch(request)
+            return payload.model_copy(
+                update={
+                    "records": tuple(
+                        {
+                            **record,
+                            "record_type": "security",
+                            "status_verified": True,
+                            "is_suspended": False,
+                            "hard_excluded": False,
+                            "list_date": date(2000, 1, 1),
+                        }
+                        for record in payload.records
+                    ),
+                    "covered_dates": tuple(
+                        TARGET - timedelta(days=offset) for offset in range(82)
+                    ),
+                }
+            )
+
     calendar = _group(
         AcquisitionGroupId.CALENDAR_UNIVERSE,
         calls,
         expected_codes=("600000.SH", "600001.SH"),
+    )
+    calendar = replace(
+        calendar,
+        routes=FormalRoutePair(
+            primary=StatusCalendarRoute(
+                AcquisitionGroupId.CALENDAR_UNIVERSE,
+                RouteKind.PRIMARY,
+                calls,
+            ),
+            backup=StatusCalendarRoute(
+                AcquisitionGroupId.CALENDAR_UNIVERSE,
+                RouteKind.BACKUP,
+                calls,
+            ),
+        ),
     )
     partial_market = _group(
         AcquisitionGroupId.MARKET_DECISION,

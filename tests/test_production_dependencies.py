@@ -164,6 +164,8 @@ def test_job_default_run_uses_factory_and_stable_formal_date_run_id(monkeypatch,
     assert result is expected
     assert captured[0][0] == TARGET
     assert captured[0][1].tzinfo is not None
+    assert captured[0][1].hour == 18
+    assert captured[0][1].minute == 30
     assert captured[0][3] == "formal-2026-07-10"
     assert runtime.tushare_pro.calls == []
     assert runtime.akshare_module.calls == []

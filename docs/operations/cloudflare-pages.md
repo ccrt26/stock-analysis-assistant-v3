@@ -43,7 +43,8 @@ Do not print, copy, commit, or log Cloudflare token, report password, report ses
 After an approved successful production run, `dist/pages` should already be prepared. To prepare it manually after approval:
 
 ```bash
-PROJECT_ROOT=/Users/ccrt/股票分析助手 PYTHONPATH=src .venv/bin/python -m stock_analyzer ops prepare-deploy --output-dir dist/pages
+export PROJECT_ROOT="$PWD"
+PYTHONPATH=src .venv/bin/python -m stock_analyzer ops prepare-deploy --output-dir dist/pages
 ```
 
 The artifact must include the report files and `functions/_middleware.ts`. It must not include local env files, Git metadata, virtualenvs, local warehouse data, local archive data, logs, raw caches, or `.superpowers`.
@@ -63,7 +64,8 @@ This command intentionally uses manual `wrangler pages deploy dist/pages`. Phase
 After a manual deployment, run the smoke command from the project root. Provide the report password through the approved local secret source and reference its environment variable name with `--password-env`.
 
 ```bash
-PROJECT_ROOT=/Users/ccrt/股票分析助手 PYTHONPATH=src .venv/bin/python -m stock_analyzer ops smoke-report-site --url https://YOUR-PAGES-DOMAIN --password-env REPORT_PASSWORD --expected-trade-date YYYY-MM-DD
+export PROJECT_ROOT="$PWD"
+PYTHONPATH=src .venv/bin/python -m stock_analyzer ops smoke-report-site --url https://YOUR-PAGES-DOMAIN --password-env REPORT_PASSWORD --expected-trade-date YYYY-MM-DD
 ```
 
 The smoke check must verify:

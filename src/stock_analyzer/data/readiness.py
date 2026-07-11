@@ -373,6 +373,8 @@ def _append_current_fact_reasons(
     for field in fields:
         if field not in target or target[field] is None:
             reasons.append(f"missing_current_fact:{code}:{field}")
+        elif isinstance(target[field], str) and not target[field].strip():
+            reasons.append(f"invalid_current_fact:{code}:{field}")
         elif isinstance(target[field], (int, float)) and not math.isfinite(
             float(target[field])
         ):

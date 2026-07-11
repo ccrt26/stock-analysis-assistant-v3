@@ -8,6 +8,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pytest
+import pandas as pd
 
 from stock_analyzer.analysis.focus import FormalFocusDay
 from stock_analyzer.data.formal_contracts import FORMAL_CONTRACT_VERSION
@@ -131,6 +132,80 @@ def test_default_recorded_july10_incomplete_primary_and_backup_blocks_before_str
     assert result.analysis is None
     assert not (tmp_path / "reports").exists()
     assert runtime.ledger.pending == {}
+
+
+def test_market_request_excludes_suspended_hard_excluded_and_too_new_codes(tmp_path):
+    runtime = production_recorded_runtime(tmp_path)
+    suspended = "000001.SZ"
+    too_new = "688999.SH"
+    runtime.tushare_pro.overrides["stock_basic"] = pd.DataFrame(
+        [
+            {
+                "ts_code": "600000.SH",
+                "name": "浦发银行",
+                "exchange": "SSE",
+                "list_date": "19991110",
+            },
+            {
+                "ts_code": suspended,
+                "name": "平安银行",
+                "exchange": "SZSE",
+                "list_date": "19910403",
+            },
+            {
+                "ts_code": too_new,
+                "name": "新上市样本",
+                "exchange": "SSE",
+                "list_date": "20260601",
+            },
+        ]
+    )
+    runtime.tushare_pro.overrides["suspend_d"] = pd.DataFrame(
+        [
+            {
+                "ts_code": suspended,
+                "trade_date": "20260710",
+                "suspend_type": "S",
+                "name": "平安银行",
+            }
+        ]
+    )
+
+    def three_code_daily(kwargs):
+        base = runtime.tushare_pro._default("daily", kwargs).iloc[0].to_dict()
+        return pd.DataFrame(
+            [
+                {**base, "ts_code": code, "amount": 500_000.0}
+                for code in ("600000.SH", suspended, too_new)
+            ]
+        )
+
+    def three_code_basic(kwargs):
+        base = runtime.tushare_pro._default("daily_basic", kwargs).iloc[0].to_dict()
+        return pd.DataFrame(
+            [{**base, "ts_code": code} for code in ("600000.SH", suspended, too_new)]
+        )
+
+    runtime.tushare_pro.overrides["daily"] = three_code_daily
+    runtime.tushare_pro.overrides["daily_basic"] = three_code_basic
+
+    result = _default_run_daily(
+        tmp_path,
+        InMemoryAnalysisRepository(),
+        TARGET,
+        runtime=runtime,
+    )
+
+    store = LocalEvidenceStore(tmp_path / "local_warehouse/formal_evidence")
+    payload = store.read_group_version(
+        result.receipt.group_version_ids[AcquisitionGroupId.MARKET_DECISION.value]
+    )
+    equity_codes = {
+        row["ts_code"]
+        for row in payload.records
+        if row.get("record_type") == "equity_bar"
+    }
+    assert equity_codes == {"600000.SH"}
 
 
 def test_default_recorded_reconciliation_keeps_frozen_report_and_promotes_primary_history(tmp_path):

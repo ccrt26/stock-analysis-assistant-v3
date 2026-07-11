@@ -269,8 +269,17 @@ def formal_route_group_ids() -> dict[str, AcquisitionGroupId]:
     return groups
 
 
+def formal_network_route_definitions() -> dict[
+    AcquisitionGroupId,
+    tuple[str, str, str],
+]:
+    return dict(_ROUTE_DEFINITIONS)
+
+
 def derive_expected_tradable_codes(
     universe_records: tuple[dict[str, Any], ...],
+    *,
+    minimum_history_start: date | None = None,
 ) -> tuple[str, ...]:
     expected: list[str] = []
     seen: set[str] = set()
@@ -285,6 +294,20 @@ def derive_expected_tradable_codes(
             raise ValueError(f"unverified_status:{code}")
         if record.get("is_suspended") is True or record.get("hard_excluded") is True:
             continue
+        if minimum_history_start is not None:
+            raw_list_date = record.get("list_date")
+            try:
+                list_date = (
+                    raw_list_date.date()
+                    if isinstance(raw_list_date, datetime)
+                    else raw_list_date
+                    if isinstance(raw_list_date, date)
+                    else date.fromisoformat(str(raw_list_date)[:10])
+                )
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"invalid_list_date:{code}") from exc
+            if list_date > minimum_history_start:
+                continue
         expected.append(code)
     return tuple(sorted(expected))
 
@@ -311,4 +334,5 @@ __all__ = [
     "build_formal_route_registry",
     "derive_expected_tradable_codes",
     "formal_route_group_ids",
+    "formal_network_route_definitions",
 ]
