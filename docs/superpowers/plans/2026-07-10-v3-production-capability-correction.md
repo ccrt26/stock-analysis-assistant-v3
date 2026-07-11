@@ -15,7 +15,7 @@
 - Current primary agent performs all implementation, test decisions, commits, and push.
 - Do not use `superpowers:subagent-driven-development`.
 - Optional subagents must use GPT-5.6 sol, reasoning high, speed standard; if that exact configuration cannot be guaranteed, do not dispatch them.
-- Never read, print, copy, persist, or log `.env.local`, token values, passwords, service-role keys, authorization headers, or cookies.
+- Never print, copy, persist, or log `.env.local` contents, token values, passwords, service-role keys, authorization headers, or cookies. After the user explicitly authorized configuration and live operations, production commands may load `.env.local` programmatically without displaying values.
 - This plan authorizes production-code implementation and offline recorded-response tests only.
 - This plan does not authorize real provider acquisition, Supabase migration/application/write, Cloudflare deployment, launchd loading, broker connection, or order action.
 - Primary and backup are whole-group availability routes. Never merge partial records or fields, compare provider values, or emit difference warnings.
@@ -814,8 +814,8 @@ git commit -m "docs: record corrected formal production gates"
 **Interfaces:**
 - Each formal provider client derives the latest 82 official sessions ending at `request.trade_date` from its own validated calendar response. July 10 must still resolve exactly to 2026-03-12 through 2026-07-10.
 - Formal focus dates are the five immediately preceding sessions in the accepted market payload, never a module-level July fixture.
-- Market acquisition derives eligible codes from validated security status and listing dates; suspended, hard-excluded, unverified, or fewer-than-61-session new listings cannot create unexplained history failures.
-- Primary and backup clients reject an older eligible code missing any of the latest 61 required bars; they validate all required benchmark-index dates and at least 21 board sessions before claiming coverage.
+- Market acquisition derives request codes from validated security status and listing dates; suspended, hard-excluded, and unverified securities never enter the request. The target bar/current fact remains mandatory for every requested code. A security with fewer than 61 real observations inside the 82-session window is deterministically excluded from feature eligibility rather than treating legitimate historical suspension as a missing provider row.
+- Primary and backup clients validate all required benchmark-index dates and at least 21 board sessions before claiming coverage. They never synthesize bars for historical suspension days; the shared feature builder is the single 61-observation eligibility authority.
 - Legitimate valuation/fundamental nulls require an explicit normalized reason; a missing column or unexplained null remains incomplete.
 - `_default_run_daily()` applies the centralized 18:30 Asia/Shanghai first-attempt cutoff policy and reuses that same cutoff on retries.
 - `verify_and_record_live_capabilities(runtime, trade_date, report_cutoff) -> CapabilityBundle` directly validates both production clients without a pre-existing capability file, writes hashed live evidence, and stores the complete primary calendar/market versions as the initial local backfill. It writes no Supabase rows and invokes no strategy, LLM, renderer, deployment, or publication code.
@@ -829,7 +829,8 @@ Add tests named:
 - `test_tushare_market_uses_provider_calendar_for_next_trading_day_window`
 - `test_akshare_market_uses_provider_calendar_for_next_trading_day_window`
 - `test_market_request_excludes_suspended_hard_excluded_and_too_new_codes`
-- `test_eligible_code_missing_one_of_latest_61_sessions_rejects_whole_route`
+- `test_historical_suspension_gap_is_valid_when_61_observations_and_target_exist`
+- `test_eligible_code_with_only_60_observations_is_returned_for_feature_exclusion`
 - `test_index_and_board_history_must_cover_declared_windows`
 - `test_formal_focus_sessions_come_from_current_market_payload`
 - `test_default_cutoff_uses_centralized_first_schedule_policy`
@@ -863,7 +864,7 @@ Expected: fail for July-only client/focus windows, ineligible-code propagation, 
 
 - [ ] **Step 3: Implement dynamic sessions, eligibility, and point-in-time semantics**
 
-Use provider calendars for 82-session windows. Keep the July constant only as a test oracle. Validate last-61 equity coverage per eligible code, full declared index coverage, 21-session board coverage, current daily-basic facts, and point-in-time financial/event timestamps. Use `cashflow.n_cashflow_act` for operating cash flow; never map `fina_indicator.ocf_to_or` into a cash amount. Include `anns_d` disclosures in the Tushare event route and never claim complete empty-event coverage from ST/suspension calls alone.
+Use provider calendars for 82-session windows. Keep the July constant only as a test oracle. Require every requested equity's target bar/current facts, use the shared 61-real-observation feature eligibility rule without inventing bars for historical suspensions, and validate full declared index coverage, 21-session board coverage, and point-in-time financial/event timestamps. Use `cashflow.n_cashflow_act` for operating cash flow; never map `fina_indicator.ocf_to_or` into a cash amount. Include `anns_d` disclosures in the Tushare event route and never claim complete empty-event coverage from ST/suspension calls alone.
 
 - [ ] **Step 4: Implement and offline-test the live bootstrap**
 
@@ -1025,3 +1026,16 @@ Expected: `## codex/v3-mvp...origin/codex/v3-mvp` with no ahead/behind marker an
 - **Supabase currency:** the plan includes explicit Data API grants, RLS, `security_invoker` views, and service-role-only RPC access in response to current Supabase platform defaults.
 - **Placeholder scan:** no TBD, TODO, “implement later”, unnamed error handling, unspecified test, or source-name-only route remains.
 - **Execution mode:** inline current-primary-agent execution with optional exact-model read-only subagents only; no subagent-driven-development.
+
+## 2026-07-11 Live Execution and Correction Record
+
+- **Live primary backfill:** the Tushare calendar and market routes passed `formal-v2`; immutable primary versions cover exactly 2026-03-12 through 2026-07-10, 82 official sessions.
+- **Rate policy:** Tushare calls use centralized 60-second windows with endpoint-specific conservative limits and one cooldown retry; focused fake-clock tests cover throttling without sleeping.
+- **Live target routes:** Tushare board/industry and candidate/fundamental routes passed. Tushare `anns_d` returned a permission failure. Eastmoney board/fundamental calls were rejected by the remote host through both proxy and direct connections.
+- **Point-in-time correction:** populated CNINFO samples returned date-only publication values even though the adapter field is named `公告时间`. The live verifier now refuses to issue an `official_events_risk` capability for that client; failed re-verification atomically replaces `latest.json` with the still-valid partial bundle and preserves all immutable historical bundles.
+- **Primary/backup correction:** capability validation is per route. An unavailable primary is recorded and the complete backup starts from the frozen request; an unavailable backup does not block a complete primary result. Any route actually used must still pass the entire group contract, and no cross-source merge occurs.
+- **Supabase:** migrations `202607100003`, `202607100004`, and `20260711112251` were applied after migration-history reconciliation. Data API read-back found all 15 expected table/view/RPC paths; `database_size_mb` succeeded; database lint and security advisors returned zero findings. The performance migration promotes three narrow unique keys to primary keys and indexes all previously reported foreign keys. Remaining `unused_index` INFO notices are expected before workload statistics exist.
+- **Real formal run:** the run reached target readiness and stopped at `official_events_risk`. It wrote only redacted local `blocked_needs_human` status; no LLM, formal decision activation, report generation, deployment, or publication occurred.
+- **Environment correction:** `httpx[socks]>=0.27` is a declared dependency because the authorized Supabase runtime uses a SOCKS proxy; the missing extra had previously stopped client creation before any mutation.
+- **Remaining external gate:** a precise official publication-time route must be configured and live-verified. Viable candidates are authorized Tushare `anns_d`, iFinD `THS_ReportQuery` with `ctime`, or an exchange source proving equivalent populated and empty coverage. The cutoff may not be weakened and a date-only source may not be relabeled as precise.
+- **Explicitly unexecuted:** Cloudflare deployment/publication, launchd loading, broker connection, and order operations.

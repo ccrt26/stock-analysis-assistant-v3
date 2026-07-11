@@ -230,7 +230,7 @@ def test_deprecated_mandatory_next_phases_file_is_removed():
     assert not (PROJECT_ROOT / "docs/operations/mandatory-next-phases.md").exists()
 
 
-def test_active_docs_say_program_offline_ready_but_live_actions_not_executed():
+def test_active_docs_record_live_backfill_schema_verification_and_current_blocker():
     readme = read_project_file("README.md")
     runbook = read_project_file("docs/operations/runbook.md")
     design = read_project_file(
@@ -238,30 +238,24 @@ def test_active_docs_say_program_offline_ready_but_live_actions_not_executed():
     )
 
     for document in (readme, runbook, design):
-        assert "正式生产程序已完成实现并通过默认入口离线验证" in document
-        assert "尚未执行真实数据读取" in document
+        assert "已完成 2026-07-10 真实只读主源回填" in document
+        assert "Supabase 迁移已应用并完成只读回查" in document
+        assert "正式分析仍被 `official_events_risk` 阻断" in document
 
 
 def test_matrix_default_factory_and_route_rows_match_verified_evidence():
     offline_verified = (
         "GOV-002",
         "GOV-003",
-        "DATA-001",
         "DATA-002",
-        "DATA-003",
         "DATA-004",
-        "DATA-005",
-        "DATA-006",
-        "DATA-007",
         "DATA-008",
         "DATA-009",
-        "DATA-010",
         "PIPE-002",
         "PIPE-006",
         "PIPE-007",
         "PIPE-008",
         "PIPE-009",
-        "STORE-001",
         "ACT-001",
         "REPORT-001",
         "REPORT-002",
@@ -273,11 +267,17 @@ def test_matrix_default_factory_and_route_rows_match_verified_evidence():
     assert {capability_id: capability_level(capability_id) for capability_id in offline_verified} == {
         capability_id: "OFFLINE_VERIFIED" for capability_id in offline_verified
     }
+    assert capability_level("DATA-001") == "LIVE_READ_VERIFIED"
+    assert capability_level("DATA-003") == "LIVE_READ_VERIFIED"
+    assert capability_level("DATA-010") == "LIVE_READ_VERIFIED"
+    assert capability_level("STORE-001") == "LIVE_READ_VERIFIED"
+    for capability_id in ("DATA-005", "DATA-006", "DATA-007"):
+        assert capability_level(capability_id) == "BLOCKED"
 
 
-def test_matrix_does_not_claim_live_read_supabase_write_launchd_or_publish():
-    assert capability_level("DATA-011") == "BLOCKED"
-    assert capability_level("STORE-002") == "IMPLEMENTED_UNVERIFIED"
+def test_matrix_claims_only_verified_live_schema_and_keeps_activation_blocked():
+    assert capability_level("DATA-011") == "LIVE_READ_VERIFIED"
+    assert capability_level("STORE-002") == "PRODUCTION_WRITE_VERIFIED"
     assert capability_level("STORE-003") == "IMPLEMENTED_UNVERIFIED"
     assert capability_level("OPS-002") == "BLOCKED"
     assert capability_level("PUB-003") == "BLOCKED"
@@ -341,10 +341,12 @@ def test_production_source_has_no_distributed_formal_window_magic_numbers():
     policy_consumers = (
         "src/stock_analyzer/data/formal_contracts.py",
         "src/stock_analyzer/data/formal_materializer.py",
+        "src/stock_analyzer/data/feature_builder.py",
         "src/stock_analyzer/data/tushare_formal_client.py",
         "src/stock_analyzer/data/akshare_formal_client.py",
         "src/stock_analyzer/ops/formal_strategy_runtime.py",
         "src/stock_analyzer/ops/formal_live.py",
+        "src/stock_analyzer/ops/formal_run.py",
     )
     forbidden_fragments = (
         "[-82:]",
@@ -361,3 +363,10 @@ def test_production_source_has_no_distributed_formal_window_magic_numbers():
         source = read_project_file(relative)
         for fragment in forbidden_fragments:
             assert fragment not in source, f"{relative}: {fragment}"
+
+
+def test_supabase_http_client_declares_socks_proxy_support():
+    pyproject = read_project_file("pyproject.toml")
+
+    assert '"httpx[socks]>=0.27"' in pyproject
+    assert '"httpx>=0.27"' not in pyproject

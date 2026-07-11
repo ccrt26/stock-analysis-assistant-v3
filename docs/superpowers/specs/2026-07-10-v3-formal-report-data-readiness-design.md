@@ -292,6 +292,8 @@ Backup route candidates:
 
 - approved Eastmoney/AkShare announcement adapters such as `stock_notice_report` when their coverage and publication timestamps pass capability testing
 
+2026-07-11 live correction: `stock_notice_report` and the public CNINFO disclosure adapter returned date-only values and therefore did not pass the 18:30 point-in-time contract. 已完成 2026-07-10 真实只读主源回填；Supabase 迁移已应用并完成只读回查；正式分析仍被 `official_events_risk` 阻断。The immutable capability store must remove these routes from `latest.json`; historical evidence remains audit-only. A future Tushare `anns_d`, iFinD `ctime`, or exchange route may advance only after populated and proven-empty live cases both pass the same cutoff contract.
+
 Rules:
 
 - the unverified generic name `tushare.announcements` is not an executable source contract

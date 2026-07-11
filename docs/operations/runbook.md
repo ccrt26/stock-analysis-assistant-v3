@@ -1,8 +1,8 @@
 # Phase 1 Operations Runbook
 
-> **Current availability:** The concrete formal production program and default command path are offline-verified with recorded responses at the external transport boundary. It is not live-data-ready or production-write-verified. Do not execute the real production command below until the separately approved live-read, 82-session backfill, and Supabase gates in [`production-capability-matrix.md`](production-capability-matrix.md) pass.
+> **Current availability:** The concrete formal production program and default command path are offline-verified. The 2026-07-10 primary live backfill and Supabase schema/read-back gates have passed, but the required event group has no route that proves sub-day publication time. Do not expect a formal report until [`DATA-007`](production-capability-matrix.md) advances.
 
-正式生产程序已完成实现并通过默认入口离线验证；尚未执行真实数据读取、82 个正式交易日回填、Supabase 正式迁移或写入、launchd 激活、Cloudflare 发布、经纪商连接或订单操作。
+已完成 2026-07-10 真实只读主源回填；Supabase 迁移已应用并完成只读回查。正式分析仍被 `official_events_risk` 阻断，当前运行只保留本地 `blocked_needs_human` 状态，不调用 LLM、不生成或激活报告。尚未执行正式决策窄账本激活、launchd 激活、Cloudflare 发布、经纪商连接或订单操作。
 
 This runbook covers the Phase 1 local Mac production flow for stock-analysis-assistant-v3. Phase 1 can run the local daily job, classify failures, clean same-day partial outputs before approved retries, write machine-readable status, and prepare `dist/pages`. It does not publish Cloudflare Pages automatically.
 
