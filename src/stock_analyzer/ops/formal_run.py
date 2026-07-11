@@ -410,6 +410,18 @@ def run_formal_strategy_v2(
             or existing_receipt.acquisition_contract_version != contract_version
         ):
             raise ValueError("formal run resume date, cutoff, or contract mismatch")
+        if existing_receipt.state is FormalRunState.REPORT_GENERATED:
+            candidate_set = (
+                dependencies.evidence_store.candidate_set(
+                    existing_receipt.candidate_set_id
+                )
+                if existing_receipt.candidate_set_id is not None
+                else None
+            )
+            return FormalRunResult(
+                receipt=existing_receipt,
+                candidate_set=candidate_set,
+            )
         if existing_receipt.state != FormalRunState.BLOCKED_NEEDS_HUMAN:
             raise InvalidRunTransition(
                 f"formal run {effective_run_id} cannot resume from {existing_receipt.state.value}"

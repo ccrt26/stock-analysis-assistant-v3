@@ -318,6 +318,34 @@ def test_target_retry_reuses_same_run_and_frozen_candidate_set(tmp_path):
     assert completed.candidate_set.candidate_set_id == frozen_id
 
 
+def test_report_generated_run_is_reused_without_callbacks_or_revision(tmp_path):
+    calls: list[str] = []
+    dependencies = _dependencies(tmp_path, calls)
+    completed = run_formal_strategy_v2(
+        TARGET,
+        CUTOFF,
+        dependencies,
+        run_id="completed-terminal-reuse",
+    )
+    revision = completed.receipt.revision
+    candidate_id = completed.receipt.candidate_set_id
+    calls.clear()
+
+    reused = run_formal_strategy_v2(
+        TARGET,
+        CUTOFF,
+        dependencies,
+        run_id="completed-terminal-reuse",
+    )
+
+    assert reused.receipt.state is FormalRunState.REPORT_GENERATED
+    assert reused.receipt.revision == revision
+    assert reused.receipt.candidate_set_id == candidate_id
+    assert reused.candidate_set is not None
+    assert reused.candidate_set.candidate_set_id == candidate_id
+    assert calls == []
+
+
 def test_required_group_failure_calls_no_strategy_llm_report_publish_or_decision_write(tmp_path):
     calls: list[str] = []
     dependencies = _dependencies(

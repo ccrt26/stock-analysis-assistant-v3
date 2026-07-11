@@ -122,6 +122,14 @@ def run_daily_job(
             fix_suggestion="Reject attempts above 3; inspect latest-status.json.",
         )
 
+    prior_terminal_status = _prior_terminal_status(
+        status_file,
+        trade_date,
+        attempt,
+    )
+    if prior_terminal_status is not None:
+        return prior_terminal_status
+
     if attempt > 1:
         retry_preflight_error = _retry_preflight_error(
             status_file,
@@ -540,6 +548,33 @@ def _retry_preflight_error(
             "Previous latest-status.json status must be failed_retryable before "
             "a retry slot can clean or rerun production."
         )
+    return None
+
+
+def _prior_terminal_status(
+    status_path: Path,
+    trade_date: date,
+    attempt: int,
+) -> JobStatus | None:
+    if not status_path.is_file():
+        return None
+    try:
+        previous = JobStatus.model_validate_json(
+            status_path.read_text(encoding="utf-8")
+        )
+    except Exception:
+        return None
+    terminal_noop_statuses = {
+        RunStatus.SUCCESS_WITH_RECOMMENDATIONS,
+        RunStatus.SUCCESS_NO_RECOMMENDATIONS,
+        RunStatus.SKIPPED_NON_TRADING_DAY,
+    }
+    if (
+        previous.trade_date == trade_date
+        and previous.attempt <= attempt
+        and previous.status in terminal_noop_statuses
+    ):
+        return previous
     return None
 
 

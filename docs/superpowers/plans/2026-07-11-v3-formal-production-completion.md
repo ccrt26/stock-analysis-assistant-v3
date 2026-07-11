@@ -707,6 +707,28 @@ git commit -m "docs: record report publication and automation activation"
 **Files:**
 - Review every file changed since `d7e3c2e` and all production evidence/status documents.
 
+- [ ] **Finding 11A: Make completed-run reuse and later launchd slots operationally idempotent**
+
+The final production recheck proved that a second invocation of `formal-2026-07-10` raises `cannot resume from report_generated`. Separately, the existing retry preflight converts a 19:00 invocation after an 18:30 success into `failed_needs_human`; because launchd schedules all three slots unconditionally, that would overwrite every successful day's status with a false failure.
+
+In `tests/test_formal_pipeline.py`, add `test_report_generated_run_is_reused_without_callbacks_or_revision`; complete a run, clear the callback/route recorder, invoke the identical run again, and assert the same receipt revision/candidate ID returns with zero acquisition, screen, analysis, LLM, render, verify, or ledger activity. In `tests/test_ops_job.py`, change `test_run_daily_job_attempt_two_after_success_does_not_cleanup_or_run` to require the prior successful `JobStatus` to be returned unchanged, and add `test_run_daily_job_attempt_three_after_attempt_one_success_is_noop` to prove fixed calendar slots do not require an immediately preceding retry record. Both fail before the source edits.
+
+In `src/stock_analyzer/ops/formal_run.py`, after exact date/cutoff/contract validation, return the existing `REPORT_GENERATED` receipt and frozen candidate set before constructing any mutable pipeline stage. Do not treat blocked or failed states as success. In `src/stock_analyzer/ops/job.py`, before retry preflight, load a same-date prior status; when its status is `success_with_recommendations`, `success_no_recommendations`, or `skipped_non_trading_day` and its attempt is lower than the scheduled attempt, return it without writing status, cleanup, health checks, run, verification, deployment, publication, or notification. All other retry states retain the existing strict preflight.
+
+Run:
+
+```bash
+.venv/bin/python -m pytest tests/test_formal_pipeline.py tests/test_ops_job.py -q
+.venv/bin/python -m pytest tests/test_default_formal_production_entry.py tests/test_july10_formal_readiness_acceptance.py tests/test_ops_notify.py -q
+```
+
+Expected: the new tests fail before the source edit; both commands pass afterward. Commit boundary:
+
+```bash
+git add docs/superpowers/specs/2026-07-10-v3-formal-report-data-readiness-design.md docs/superpowers/plans/2026-07-11-v3-formal-production-completion.md src/stock_analyzer/ops/formal_run.py src/stock_analyzer/ops/job.py tests/test_formal_pipeline.py tests/test_ops_job.py
+git commit -m "fix: reuse completed formal runs idempotently"
+```
+
 - [ ] **Step 1: Perform the read-only final review**
 
 Review design-to-code traceability, exact provider semantics, paging/coverage, pacing, primary/backup isolation, candidate freeze, LLM/report reachability, Supabase atomicity, Cloudflare artifact scope, launchd secret loading, hardcoding, and rollback. Do not dispatch a subagent unless the required GPT-5.6 sol/high/standard configuration is explicitly available. Fix every Critical or Important finding with a failing regression test and focused commit.

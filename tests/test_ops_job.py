@@ -936,9 +936,48 @@ def test_run_daily_job_attempt_two_after_success_does_not_cleanup_or_run(tmp_pat
         status_path=status_path,
     )
 
-    assert status.status == RunStatus.FAILED_NEEDS_HUMAN
-    assert status.stage == "retry_preflight"
+    assert status.status == RunStatus.SUCCESS_NO_RECOMMENDATIONS
+    assert status.attempt == 1
     assert status.cleanup_performed is False
+    assert events == []
+
+
+def test_run_daily_job_attempt_three_after_attempt_one_success_is_noop(tmp_path):
+    trade_date = date(2026, 7, 9)
+    events: list[str] = []
+    status_path = tmp_path / "logs" / "run-daily" / "latest-status.json"
+    _write_previous_status(
+        status_path,
+        trade_date=trade_date,
+        attempt=1,
+        run_status=RunStatus.SUCCESS_WITH_RECOMMENDATIONS,
+    )
+
+    status = run_daily_job(
+        tmp_path,
+        trade_date,
+        "19:30",
+        3,
+        prepare_deploy=True,
+        repository=FakeJobRepository(),
+        calendar_decider=_calendar_decider(
+            TradingDayDecision(
+                status="trading_day",
+                source="supabase",
+                message="market open",
+            ),
+            events,
+        ),
+        cleanup=lambda *_args: _cleanup_summary(trade_date, events),
+        health_check=_recording_call(events, "health_check"),
+        run_daily=_recording_call(events, "run_daily"),
+        verifier=lambda *_args: _successful_verification(trade_date),
+        prepare_deploy_func=_recording_call(events, "prepare_deploy"),
+        status_path=status_path,
+    )
+
+    assert status.status is RunStatus.SUCCESS_WITH_RECOMMENDATIONS
+    assert status.attempt == 1
     assert events == []
 
 
