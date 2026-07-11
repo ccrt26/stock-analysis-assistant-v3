@@ -85,6 +85,19 @@ def test_requests_are_deduplicated_and_contain_only_their_stock_evidence():
     assert requests[1].is_focus_stock is True
 
 
+def test_stock_request_includes_matched_local_knowledge_content():
+    request = build_stock_analysis_requests(_payload())[0]
+    context_by_id = {
+        item["knowledge_id"]: item for item in request.knowledge_context
+    }
+
+    assert context_by_id["RESEARCH_TREND_CONFIRMATION"]["report_phrasing"]
+    assert context_by_id["src_acharya_pedersen_2005"]["title"] == (
+        "Asset pricing with liquidity risk"
+    )
+    assert set(context_by_id) == set(request.knowledge_refs)
+
+
 def test_valid_narrative_requires_exactly_three_reasons_per_stock():
     payload = _payload()
     narrative = _valid_narrative(payload)

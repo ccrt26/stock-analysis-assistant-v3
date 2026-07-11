@@ -4,11 +4,13 @@
 
 ## 当前生产状态与文档权威
 
-截至 2026-07-11，正式生产程序已完成实现并通过默认入口离线验证：正式主备客户端、`formal-v2` 数据契约、能力凭证、默认依赖工厂、Strategy V2 适配、报告验证和两阶段激活已在仅替换外部传输边界的录制响应下连通。离线验收覆盖 2026-07-10 完整主源、整组备用切换、双源阻断、主源回补、重点股五日窗口、直接渲染门禁和六类原子失败。
+截至 2026-07-12，正式生产程序已完成实现并通过默认入口离线验证：正式主备客户端、`formal-v2` 数据契约、能力凭证、默认依赖工厂、Strategy V2 适配、受约束的 Codex 个股分析、用户可读报告验证和两阶段激活已在仅替换外部传输边界的录制响应下连通。离线验收覆盖完整主源、整组备用切换、双源阻断、主源回补、重点股五日窗口、正文一致性、可读性门禁和原子失败。
 
 已完成 2026-07-10 真实只读主源回填，精确覆盖 2026-03-12 至 2026-07-10 的 82 个正式交易日；Supabase 迁移已应用并完成只读回查，15/15 个正式表、视图和 RPC 路径可见，安全顾问为零。正式事件能力 Gate 已通过：当前 Tushare 账户无 `anns_d` 权限且未获事件凭证；直连 CNINFO 原始路由已以真实非空毫秒时间戳、有效代码空窗口和完整目标合同获得 `LIVE_READ_VERIFIED`。
 
-真实正式运行已生成 10 个每日推荐、10 个重点股状态、14 个推荐/重点股证据包和 84 个复盘任务；Supabase 窄账本、正式报告和本地指针已原子激活并通过读回，launchd 已加载三个计划时段。15 文件凭证范围部署包已发布至 `https://tl-quant-reports.pages.dev`，独立在线密码、日期、内容与脱敏 smoke 通过，自动发布已启用。当前报告虽技术验收通过，但用户可读性验收未通过：可选 LLM 表达客户端未配置，且 narrative 尚未进入 HTML 主视图；该产品缺口由能力矩阵 `REPORT-004` 跟踪。没有经纪商连接或订单操作。
+现有线上报告仍是此前原子激活并发布的版本，launchd 三个计划时段保持加载。REPORT-004 的纠偏代码已经接入本机已登录的 Codex Pro 客户端：每只股票独立使用 `gpt-5.6-sol`、高推理、标准速度分析，且只能引用已验证证据，不能改写 Strategy V2 的动作、仓位、风险和条件。新正文会进入首页和个股页，六模块与内部技术信息默认折叠。真实新候选仍须通过自动门禁和人工可读性验收；在人工接受前不得替换现有报告、准备发布包或发布 Cloudflare。技术门禁通过不等于产品验收通过。没有经纪商连接或订单操作。
+
+此前真实运行生成 10 个每日推荐，launchd 已加载；这项既有生产证据继续有效，但不代表新的 REPORT-004 用户可读报告已经通过人工验收。
 
 当前能力、缺口、验证等级和激活状态只以 [`docs/operations/production-capability-matrix.md`](docs/operations/production-capability-matrix.md) 为准。`docs/superpowers/specs/` 保存设计约束，`docs/superpowers/plans/` 保存历史执行记录；历史文档中的“完成”不能替代能力矩阵中的当前证据。
 
@@ -66,6 +68,8 @@ PYTHONPATH=src python3 -m stock_analyzer health-check --live-tushare-smoke
 `render-report --trade-date YYYY-MM-DD` 默认只渲染 Supabase 中已存储的分析记录；如果没有存储记录会失败并提示先写入生产分析记录。要生成本地样例报告，使用 `render-report --fixture-mode --trade-date YYYY-MM-DD`。
 
 生产 `render-report` 会要求每条存储推荐都有匹配证据包，并且对应评估任务已注册；如果 Supabase 中只有部分推荐、证据或评估任务，命令会失败，不会发布回退到推荐理由的成品报告。
+
+正式可读报告先运行 `prepare-formal-report-candidate --trade-date YYYY-MM-DD`。该命令生成并验证隔离候选，但不改动当前报告或 Supabase 激活账本。人工阅读候选并明确接受后，才可用候选的完整哈希和 `--accept-readability` 执行 `activate-formal-report-candidate`；激活不会重新抓取数据或再次调用 Codex。
 
 Cloudflare Pages 只发布报告成品，不发布原始数据、日志、规则编辑器、数据库后台或其他内部调试产物。
 

@@ -454,6 +454,7 @@ def _default_run_daily(
     *,
     runtime: ProductionExternalRuntime | None = None,
     require_human_acceptance: bool = False,
+    run_id: str | None = None,
 ):
     dependencies = (
         build_production_formal_dependencies(
@@ -474,12 +475,15 @@ def _default_run_daily(
         FORMAL_FIRST_ATTEMPT_CUTOFF,
         tzinfo=ZoneInfo("Asia/Shanghai"),
     )
+    run_options = {}
+    if require_human_acceptance:
+        run_options["require_human_acceptance"] = True
     return run_formal_strategy_v2(
         trade_date,
         report_cutoff,
         dependencies,
-        run_id=f"formal-{trade_date.isoformat()}",
-        require_human_acceptance=require_human_acceptance,
+        run_id=run_id or f"formal-{trade_date.isoformat()}",
+        **run_options,
     )
 
 

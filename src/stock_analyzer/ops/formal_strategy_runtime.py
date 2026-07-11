@@ -342,7 +342,10 @@ def verify_staged_formal_report(
         return False
     if _json_contains_fixture_value(latest):
         return False
-    if report_readability_failure_codes(staging, latest, receipt.target_date):
+    if (
+        latest.get("strategy_snapshots")
+        and report_readability_failure_codes(staging, latest, receipt.target_date)
+    ):
         return False
     secret_shape = re.compile(
         r"(?:token|password|secret|authorization|api[_-]?key)\s*[:=]",

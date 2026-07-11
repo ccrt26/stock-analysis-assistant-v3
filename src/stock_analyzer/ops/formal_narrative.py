@@ -1,9 +1,14 @@
 from __future__ import annotations
 
 import re
+from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from stock_analyzer.analysis.knowledge_map import load_strategy_knowledge_map
+from stock_analyzer.knowledge.rule_schema import load_rules
 
 
 class DecisionLock(BaseModel):
@@ -40,6 +45,7 @@ class StockAnalysisRequest(BaseModel):
     evidence: dict[str, Any]
     allowed_evidence_ids: list[str]
     knowledge_refs: list[str]
+    knowledge_context: list[dict[str, Any]]
     explicit_gaps: list[str]
     focus_history: list[FocusProgressDay]
     decision_lock: DecisionLock
@@ -172,6 +178,16 @@ def build_stock_analysis_requests(payload: Any) -> tuple[StockAnalysisRequest, .
                     *(item.evidence_id for item in focus_history),
                 ],
                 knowledge_refs=knowledge_refs,
+                knowledge_context=[
+                    _knowledge_catalog().get(
+                        knowledge_id,
+                        {
+                            "knowledge_id": knowledge_id,
+                            "coverage": "reference_only",
+                        },
+                    )
+                    for knowledge_id in knowledge_refs
+                ],
                 explicit_gaps=explicit_gaps,
                 focus_history=focus_history,
                 decision_lock=DecisionLock(
@@ -217,7 +233,9 @@ def validate_formal_narrative(payload: Any, narrative: FormalNarrative) -> Forma
         points = [stock.analysis_summary, *stock.core_reasons, *stock.five_day_progress]
         if any(set(point.evidence_ids) - allowed for point in points):
             raise ValueError("formal narrative evidence whitelist mismatch")
-        allowed_numbers = _numeric_tokens(request.model_dump_json())
+        allowed_numbers = _numeric_tokens(
+            request.model_dump_json(exclude={"knowledge_context"})
+        )
         for point in points:
             if _numeric_tokens(point.text) - allowed_numbers:
                 raise ValueError("formal narrative numeric whitelist mismatch")
@@ -229,6 +247,23 @@ def validate_formal_narrative(payload: Any, narrative: FormalNarrative) -> Forma
 
 def _numeric_tokens(value: str) -> set[str]:
     return set(re.findall(r"(?<![A-Za-z0-9_.])\d+(?:\.\d+)?%?", value))
+
+
+@lru_cache(maxsize=1)
+def _knowledge_catalog() -> dict[str, dict[str, Any]]:
+    knowledge_root = Path(__file__).resolve().parents[1] / "knowledge"
+    catalog = {
+        entry.knowledge_id: entry.model_dump(mode="json")
+        for entry in load_strategy_knowledge_map(
+            knowledge_root / "strategy_v2_map.yaml"
+        )
+    }
+    for rule in load_rules(knowledge_root / "rules.seed.yaml"):
+        catalog[rule.rule_id] = {
+            "knowledge_id": rule.rule_id,
+            **rule.model_dump(mode="json", exclude={"rule_id"}),
+        }
+    return catalog
 
 
 __all__ = [

@@ -505,7 +505,10 @@ def run_formal_strategy_v2(
         controller.record_evidence_hashes(analysis.evidence_hashes)
         narrative = (
             dependencies.llm_express(controller.receipt, analysis.value)
-            if dependencies.llm_express is not None
+            if (
+                dependencies.llm_express is not None
+                and analysis.has_publishable_output
+            )
             else None
         )
 

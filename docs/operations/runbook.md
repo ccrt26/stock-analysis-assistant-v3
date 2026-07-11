@@ -1,8 +1,10 @@
 # Phase 1 Operations Runbook
 
-> **Current availability:** The concrete formal production program, 82-session live backfill, precise event route, real 2026-07-10 Strategy V2 analysis, Supabase atomic activation/read-back, production report verification, launchd, Cloudflare publication, independent online smoke, and automatic publication are active. The real report remains blocked on the separate user-readability capability `REPORT-004`; technical publication success must not be reported as product readability success.
+> **Current availability:** The formal production program, prior Strategy V2 activation, launchd, Cloudflare publication, and online smoke remain active. The REPORT-004 correction is implemented and offline verified, but its new real candidate is not a product success until a human accepts readability. The prior active report must remain unchanged until then.
 
-已完成 2026-07-10 真实只读主源回填与正式分析：生成 10 个每日推荐、10 个重点股状态、14 个推荐/重点股证据包和 84 个复盘任务；Supabase 迁移已应用并完成只读回查，窄账本、正式报告和本地指针已原子激活并通过强读回。正式事件能力 Gate 已通过。launchd 已加载；Cloudflare 已发布，独立在线 smoke 通过，自动发布已启用。当前未配置或调用 LLM 表达客户端，真实报告未通过用户可读性验收；从未连接经纪商或执行订单。
+现有正式报告、Supabase 激活账本和 Cloudflare 内容均保持此前版本。新的正式表达客户端使用本机已登录的 Codex Pro，会按股票逐只分析，并由自动门禁锁定结构化动作、仓位、风险、买入/观察条件和失效/退出条件。真实候选必须停在 `awaiting_human_acceptance`，人工验收前不得激活或发布；从未连接经纪商或执行订单。
+
+已完成 2026-07-10 真实只读主源回填；Supabase 迁移已应用并完成只读回查，正式事件能力 Gate 已通过。此前真实运行生成 10 个每日推荐，launchd 已加载。这些既有数据准备和激活证据保持有效，但不能替代 REPORT-004 的新候选人工可读性验收。
 
 This runbook covers the Phase 1 local Mac production flow for stock-analysis-assistant-v3. Phase 1 can run the local daily job, classify failures, clean same-day partial outputs before approved retries, write machine-readable status, and prepare `dist/pages`. It does not publish Cloudflare Pages automatically.
 
@@ -13,6 +15,7 @@ This runbook covers the Phase 1 local Mac production flow for stock-analysis-ass
 - Do not run production same-day cleanup without explicit approval.
 - Do not deploy Cloudflare Pages without explicit approval.
 - Do not print, copy, commit, or log the local env file contents or credential values.
+- Do not activate, prepare a deploy artifact, or publish a REPORT-004 candidate before explicit human readability acceptance.
 
 ## Daily Schedule
 
@@ -54,6 +57,39 @@ stock-analyzer run-daily --trade-date YYYY-MM-DD --fixture-mode --strategy-v2
 Production Strategy V2 writes require explicit approval before running without fixture mode. Do not print `.env.local`, service-role keys, Tushare tokens, Cloudflare tokens, report passwords, or session secrets. Do not perform unapproved production writes.
 
 On trading days, a formal run produces analysis only after `READY_TO_SCREEN` and `READY_TO_ANALYZE`. If any required group is incomplete, the run stops as `blocked_needs_human`; it does not call Strategy V2 analysis or the LLM, write decision rows, render a `data_insufficient` page, prepare deploy files, or publish. The previous current and published report remains byte-for-byte unchanged.
+
+### REPORT-004 candidate and human acceptance
+
+Preflight the local subscription client without printing credentials:
+
+```bash
+codex login status
+codex debug models
+```
+
+The production client is fixed to `gpt-5.6-sol`, reasoning effort `high`, and standard speed (`fast_mode` disabled). It runs once per stock with only that stock's verified evidence and locked Strategy V2 decision. It does not use an OpenAI API key and must not receive Supabase, Cloudflare, report-password, or data-provider credentials.
+
+Prepare the isolated candidate:
+
+```bash
+stock-analyzer prepare-formal-report-candidate --trade-date YYYY-MM-DD
+```
+
+Expected state: `awaiting_human_acceptance`. Inspect the printed candidate directory locally. Automated success means only that the evidence, decision locks, narrative markers, main-view language, folded audit details, secrets scan, and artifact hashes passed. REPORT-004 remains `BLOCKED` until the user accepts readability.
+
+Only after explicit acceptance, activate the exact unchanged candidate:
+
+```bash
+stock-analyzer activate-formal-report-candidate \
+  --run-id RUN_ID \
+  --expected-candidate-hash SHA256 \
+  --accept-readability
+stock-analyzer ops verify-production --trade-date YYYY-MM-DD
+stock-analyzer ops prepare-deploy --trade-date YYYY-MM-DD
+stock-analyzer ops publish-report-site --trade-date YYYY-MM-DD
+```
+
+The activation command performs no provider acquisition and no Codex call. A missing acceptance flag, wrong hash, changed artifact, changed narrative, changed receipt/evidence set, or changed ledger rows fails closed and leaves the prior report active. The final three verification/deployment commands are forbidden before human acceptance.
 
 ## Formal Readiness Inspection
 
