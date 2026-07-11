@@ -700,6 +700,8 @@ git add docs/operations/production-capability-matrix.md docs/operations/runbook.
 git commit -m "docs: record report publication and automation activation"
 ```
 
+**2026-07-11 production evidence:** `publish-report-site --trade-date 2026-07-10` exited 0 and published `https://tl-quant-reports.pages.dev`; its integrated smoke passed, last-known-good was saved, and the auto-publish flag was enabled. A separate `smoke-report-site` invocation for the same URL and trade date also exited 0. This completes Task 10 publication mechanics. Subsequent user review rejected report readability; that distinct Phase 3 product defect is recorded as `REPORT-004` and is not concealed by this successful deployment evidence.
+
 ---
 
 ### Task 11: Final review, complete verification, push, and goal closure

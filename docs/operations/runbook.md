@@ -1,8 +1,8 @@
 # Phase 1 Operations Runbook
 
-> **Current availability:** The concrete formal production program, 82-session live backfill, precise event route, real 2026-07-10 Strategy V2 analysis, Supabase atomic activation/read-back, production report verification, and receipt-scoped deploy preparation have passed. launchd is installed and active for the three approved slots. Cloudflare remains unpublished because the current execution environment prohibited the external upload; automatic publication remains disabled.
+> **Current availability:** The concrete formal production program, 82-session live backfill, precise event route, real 2026-07-10 Strategy V2 analysis, Supabase atomic activation/read-back, production report verification, launchd, Cloudflare publication, independent online smoke, and automatic publication are active. The real report remains blocked on the separate user-readability capability `REPORT-004`; technical publication success must not be reported as product readability success.
 
-已完成 2026-07-10 真实只读主源回填与正式分析：生成 10 个每日推荐、10 个重点股状态、14 个推荐/重点股证据包和 84 个复盘任务；Supabase 迁移已应用并完成只读回查，窄账本、正式报告和本地指针已原子激活并通过强读回。正式事件能力 Gate 已通过。当前未配置或调用可选 LLM 表达客户端。launchd 已加载；Cloudflare 发布及在线 smoke 尚未执行；从未连接经纪商或执行订单。
+已完成 2026-07-10 真实只读主源回填与正式分析：生成 10 个每日推荐、10 个重点股状态、14 个推荐/重点股证据包和 84 个复盘任务；Supabase 迁移已应用并完成只读回查，窄账本、正式报告和本地指针已原子激活并通过强读回。正式事件能力 Gate 已通过。launchd 已加载；Cloudflare 已发布，独立在线 smoke 通过，自动发布已启用。当前未配置或调用 LLM 表达客户端，真实报告未通过用户可读性验收；从未连接经纪商或执行订单。
 
 This runbook covers the Phase 1 local Mac production flow for stock-analysis-assistant-v3. Phase 1 can run the local daily job, classify failures, clean same-day partial outputs before approved retries, write machine-readable status, and prepare `dist/pages`. It does not publish Cloudflare Pages automatically.
 

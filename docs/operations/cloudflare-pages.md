@@ -1,6 +1,6 @@
 # Cloudflare Pages Publish and Smoke
 
-> **Current availability:** The 2026-07-10 live-data formal report passed Supabase activation/read-back and production verification. Its receipt-scoped 15-file Pages package is prepared at `dist/pages`. No Cloudflare deployment or online smoke has run because the current execution environment prohibited uploading private workspace-derived report artifacts; the automatic-publish flag therefore remains absent. An authorized operator may run the documented one-command publish outside that restriction.
+> **Current availability:** The receipt-scoped 15-file 2026-07-10 report package is live at `https://tl-quant-reports.pages.dev`. The one-command publish and an independent online password/date/content/redaction smoke both passed on 2026-07-11; last-known-good was saved and automatic publication is enabled. This proves publication mechanics, not report readability; the separate `REPORT-004` product Gate remains blocked.
 
 The prepared package contains only the 14 files listed by the activated receipt plus `functions/_middleware.ts`; historical report files are preserved locally but excluded. Manual publish is allowed only after explicit approval and after the local production run has completed successfully.
 

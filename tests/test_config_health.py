@@ -337,8 +337,9 @@ def test_matrix_claims_verified_production_and_keeps_publication_blocked():
     assert capability_level("STORE-002") == "PRODUCTION_WRITE_VERIFIED"
     assert capability_level("STORE-003") == "PRODUCTION_WRITE_VERIFIED"
     assert capability_level("OPS-002") == "ACTIVATED"
-    assert capability_level("PUB-002") == "BLOCKED"
-    assert capability_level("PUB-003") == "BLOCKED"
+    assert capability_level("REPORT-004") == "BLOCKED"
+    assert capability_level("PUB-002") == "ACTIVATED"
+    assert capability_level("PUB-003") == "ACTIVATED"
     assert capability_level("SAFE-001") == "NOT_APPLICABLE"
 
 

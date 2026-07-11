@@ -1,7 +1,7 @@
 # Production Capability Matrix
 
 **Status:** Canonical current-state authority  
-**Last verified:** 2026-07-11 through live Tushare/CNINFO provider reads, a successful real formal run, Supabase atomic activation/read-back, activated-report verification, launchd activation, and offline regression evidence
+**Last verified:** 2026-07-11 through live Tushare/CNINFO provider reads, a successful real formal run, Supabase atomic activation/read-back, activated-report verification, launchd activation, Cloudflare publication/online smoke, and offline regression evidence
 **Scope:** Stock Analysis Assistant V3 from data acquisition through analysis, storage, scheduling, and publication
 
 ## 1. Authority and Use
@@ -95,6 +95,7 @@ The absence of approval for steps 3-7 does not permit omission of the code and o
 | `REPORT-001` | Formal report renderer | Production formal analysis renders existing Phase 3 content only from the same ready run or a committed exact receipt | The live-data Strategy V2 output rendered the activated 2026-07-10 production report with daily recommendation and focus sections | `PRODUCTION_WRITE_VERIFIED` | None |
 | `REPORT-002` | Production report verification | Reject fixture/sample, incomplete evidence, visible total score, mismatched receipt/hash, or missing artifacts | Live verification passed for 10 recommendations, 14 combined evidence packages, and 84 evaluation tasks; scanning and deployment are restricted to the exact activated artifact set | `PRODUCTION_WRITE_VERIFIED` | None |
 | `REPORT-003` | Manual render gate | Reject missing, blocked, uncommitted, hash-incomplete, or input-mismatched receipts | Offline bypass tests pass and the production read path resolved only the committed activated `REPORT_GENERATED` receipt | `PRODUCTION_WRITE_VERIFIED` | None |
+| `REPORT-004` | User-readable decision report | The publishable HTML presents plain-language conclusions, reasons, risks, action/position conditions, and invalidation before audit detail; constrained LLM narrative is actually rendered and cannot alter structured decisions | User review of the real 2026-07-10 report failed readability; `formal_narrative` is empty, production has no expression client, and the renderer serializes narrative to JSON without passing it to HTML templates | `BLOCKED` | Amend the existing Phase 3 design, bind a concrete constrained expression client, render validated narrative in the main view, demote six-module evidence to audit detail, and pass human plus automated readability acceptance |
 
 ### 4.5 Operations and Publication
 
@@ -104,8 +105,8 @@ The absence of approval for steps 3-7 does not permit omission of the code and o
 | `OPS-002` | launchd scheduling | Installed service runs 18:30, 19:00, 19:30 with correct attempts and approved runtime secret loading | User plist is installed with mode 600; `launchctl print gui/501/com.ccrt.stock-analysis-assistant.daily` shows all three calendar triggers, resolved worktree, silent env loading, `RunAtLoad=false`, and zero unscheduled runs; tests prove later slots return an earlier success without cleanup, rerun, or status overwrite | `ACTIVATED` | None |
 | `OPS-003` | Human-intervention notification | Redacted notification only for actionable terminal states | Blocked default runs produce only local redacted status and optional human notification; unit and default-path tests prove analysis/report/ledger remain unreachable | `OFFLINE_VERIFIED` | Mac notification is disabled and no approved operational smoke exists |
 | `PUB-001` | Deployment artifact gate | Only activated receipt artifacts; exclude evidence, staging, logs, secrets, warehouse, and internal state | The real deploy package contains exactly 14 receipt-listed report files plus the authentication middleware; historical reports, internal state, and credential files are absent | `PRODUCTION_WRITE_VERIFIED` | None |
-| `PUB-002` | Cloudflare deploy, smoke, retry, rollback | One-command first publish, online auth/date/content smoke, one retry, last-known-good rollback, redaction | Publish tests pass and the real receipt-scoped package is prepared locally | `BLOCKED` | The execution environment prohibited uploading private workspace-derived report artifacts to Cloudflare even after user approval; no deployment or online smoke occurred |
-| `PUB-003` | Automatic publication | First approved publish enables flag; later successful jobs publish automatically | Auto-publish code exists; enable flag remains absent because the first Cloudflare publish did not occur | `BLOCKED` | Requires an operator-run first deployment and successful online smoke outside this restricted execution environment |
+| `PUB-002` | Cloudflare deploy, smoke, retry, rollback | One-command first publish, online auth/date/content smoke, one retry, last-known-good rollback, redaction | The receipt-scoped package was published to `https://tl-quant-reports.pages.dev`; the integrated smoke and an independent password/date/content/redaction smoke passed, and last-known-good was saved | `ACTIVATED` | None for publication mechanics; `REPORT-004` separately blocks claiming the report product is user-ready |
+| `PUB-003` | Automatic publication | First approved publish enables flag; later successful jobs publish automatically | `logs/publish/auto-publish-enabled.json` records `enabled=true` only after the successful online smoke; scheduled successful future reports may auto-publish | `ACTIVATED` | None for automation mechanics; future publication still consumes only activated receipt artifacts |
 | `SAFE-001` | Broker and order operations | No broker connection, order placement, or automatic trading path | No broker/order implementation exists; designs exclude it | `NOT_APPLICABLE` | Intentionally prohibited |
 
 ## 5. System-Level Gates
@@ -153,6 +154,6 @@ This implementation gate is satisfied. The authorized 2026-07-10 completion run 
 
 ## 7. Remaining Production Advancement Order
 
-Implementation, default-path offline verification, `DATA-011`, the real formal analysis, Supabase atomic activation/read-back, report verification, receipt-scoped deploy preparation, and launchd activation are complete. The only remaining production advancement is an operator-run first Cloudflare deployment and online smoke outside the current restricted execution environment; only that successful smoke may enable automatic publication.
+Implementation, default-path offline verification, `DATA-011`, the real formal analysis, Supabase atomic activation/read-back, report verification, receipt-scoped deployment, Cloudflare online smoke, automatic publication, and launchd activation are complete. Remaining product advancement is tracked separately: `REPORT-004` must restore the approved plain-language report outcome, while `DATA-005` and `DATA-006` retain the deferred backup-source resilience gaps.
 
 No corrective task may redesign Strategy V2 decisions, position rules, report structure, or add broker/order behavior unless a new approved design explicitly changes that boundary.

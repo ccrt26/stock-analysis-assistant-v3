@@ -17,3 +17,4 @@ local_archive/
 *.pyc
 *.egg-info/
 supabase/.temp/
+.wrangler/
