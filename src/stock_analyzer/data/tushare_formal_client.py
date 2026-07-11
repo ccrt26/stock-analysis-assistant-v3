@@ -847,11 +847,7 @@ class TushareFormalEndpointClient:
             "stock_basic",
         )
         requested = set(request.target_codes)
-        publication = datetime.combine(
-            request.trade_date,
-            time.min,
-            tzinfo=request.report_cutoff.tzinfo,
-        )
+        publication = request.report_cutoff
         records: list[dict[str, Any]] = []
         publication_times: dict[str, datetime] = {}
         for row in suspensions.itertuples(index=False):
@@ -870,6 +866,7 @@ class TushareFormalEndpointClient:
                     publication,
                     hard_risk=True,
                     source_name="tushare.suspend_d",
+                    time_semantics="as_of_cutoff",
                 )
             )
         for row in listed_securities.itertuples(index=False):
@@ -888,6 +885,7 @@ class TushareFormalEndpointClient:
                     publication,
                     hard_risk=True,
                     source_name="tushare.stock_basic",
+                    time_semantics="as_of_cutoff",
                 )
             )
         return EndpointResponse(
@@ -1091,6 +1089,7 @@ def _event_record(
     *,
     hard_risk: bool,
     source_name: str,
+    time_semantics: str = "official_publication",
 ) -> dict[str, Any]:
     return {
         "record_type": "official_event",
@@ -1104,6 +1103,7 @@ def _event_record(
         "is_new_information": True,
         "hard_risk": hard_risk,
         "source_name": source_name,
+        "time_semantics": time_semantics,
     }
 
 

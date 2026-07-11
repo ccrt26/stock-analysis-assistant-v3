@@ -767,6 +767,29 @@ def test_tushare_status_risk_component_never_calls_anns_d():
     assert "anns_d" not in [name for name, _ in pro.calls]
 
 
+def test_tushare_status_risk_uses_frozen_cutoff_as_asof_time_not_synthetic_midnight():
+    pro = RecordedTusharePro(
+        {
+            "suspend_d": pd.DataFrame(
+                [
+                    {
+                        "ts_code": CODES[0],
+                        "trade_date": "20260710",
+                        "suspend_type": "停牌",
+                    }
+                ]
+            )
+        }
+    )
+
+    response = TushareFormalEndpointClient(pro).fetch_official_status_risk(request())
+
+    status = response.records[0]
+    assert status["publication_time"] == CUTOFF
+    assert status["time_semantics"] == "as_of_cutoff"
+    assert response.publication_times[status["event_id"]] == CUTOFF
+
+
 def test_tushare_full_event_route_combines_fresh_status_with_anns_d():
     pro = RecordedTusharePro(
         {

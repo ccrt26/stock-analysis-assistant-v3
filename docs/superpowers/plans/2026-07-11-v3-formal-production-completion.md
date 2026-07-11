@@ -468,6 +468,19 @@ rg -n "\.env\.local|TUSHARE_TOKEN\s*=|SUPABASE_SERVICE_ROLE_KEY\s*=|CLOUDFLARE_A
 
 Expected: no credential value, no `.env.local` content, and no announcement-time fallback. Allowlisted strings are configuration variable names and redaction checks only; inspect every match.
 
+- [ ] **Finding 7A: Remove synthetic midnight from current official status facts**
+
+Files: `src/stock_analyzer/data/tushare_formal_client.py`, `tests/test_tushare_formal_client.py`.
+
+Add `test_tushare_status_risk_uses_frozen_cutoff_as_asof_time_not_synthetic_midnight`. It must fail while suspension/ST status rows use `time.min`. Set current status records and their `publication_times` entry to the frozen `request.report_cutoff`, add `time_semantics="as_of_cutoff"`, and rerun the Tushare/CNINFO/formal failover tests. Prior-day date-only financial facts may retain midnight because they are categorically before the current-day cutoff and same-day date-only facts already fail closed.
+
+Commit boundary:
+
+```bash
+git add docs/superpowers/plans/2026-07-11-v3-formal-production-completion.md src/stock_analyzer/data/tushare_formal_client.py tests/test_tushare_formal_client.py
+git commit -m "fix: remove synthetic current-status timestamps"
+```
+
 - [ ] **Step 4: Run one complete test suite**
 
 ```bash
