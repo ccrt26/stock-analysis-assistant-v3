@@ -14,8 +14,36 @@
       <p>{{ fixture_warning }}</p>
     </section>
     {% endif %}
+    {% if stock_narrative %}
+    <section data-narrative-marker="{{ stock_narrative.narrative_marker }}">
+      <h2>当前结论</h2>
+      <p>{{ stock_narrative.analysis_summary.text }}</p>
+      <h2>明确动作与仓位</h2>
+      <p>{{ stock_narrative.action|strategy_text }}；仓位 {{ stock_narrative.position_min_pct }}%-{{ stock_narrative.position_max_pct }}%</p>
+      <h2>三条核心理由</h2>
+      <ol>{% for reason in stock_narrative.core_reasons %}<li>{{ reason.text }}</li>{% endfor %}</ol>
+      <h2>买入或继续观察的条件</h2>
+      <ul>
+        {% for line in stock_narrative.required_confirmation %}<li>{{ line|strategy_text }}</li>{% endfor %}
+        {% for line in stock_narrative.observation_conditions %}<li>{{ line|strategy_text }}</li>{% endfor %}
+      </ul>
+      <h2>失效和退出条件</h2>
+      <ul>
+        {% for line in stock_narrative.invalidation_conditions %}<li>{{ line|strategy_text }}</li>{% endfor %}
+        {% for line in stock_narrative.exit_conditions %}<li>{{ line|strategy_text }}</li>{% endfor %}
+      </ul>
+      <p>看错的主要风险：{{ stock_narrative.risk_if_wrong|strategy_text }}</p>
+      {% if stock_narrative.five_day_progress %}
+      <h2>重点股票五日进展</h2>
+      <ul>{% for point in stock_narrative.five_day_progress %}<li>{{ point.text }}</li>{% endfor %}</ul>
+      {% endif %}
+    </section>
+    {% else %}
     <p>{{ conclusion }}</p>
+    {% endif %}
 
+    <details class="audit-details">
+      <summary>审计详情</summary>
     {% if strategy_v2_card %}
     <section>
       <h2>操作建议</h2>
@@ -147,6 +175,7 @@
       <p>{{ detail.evidence.data_credibility }}</p>
     </section>
     {% endif %}
+    </details>
   </main>
 </body>
 </html>

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import date
 
 import pytest
 
@@ -19,6 +20,7 @@ from tests.test_formal_strategy_runtime import (
     complete_payloads,
     ready_receipt,
 )
+from stock_analyzer.ops.formal_narrative import NarrativePoint, validate_formal_narrative
 from tests.test_formal_narrative import _valid_narrative
 
 
@@ -43,8 +45,9 @@ def rendering_receipt(output):
 def test_formal_renderer_writes_production_report_and_receipt_manifest(tmp_path):
     output = analysis_output()
     receipt = rendering_receipt(output)
+    narrative = _valid_narrative(output.value)
 
-    render_formal_report(tmp_path, receipt, output.value, narrative=None)
+    render_formal_report(tmp_path, receipt, output.value, narrative=narrative)
 
     latest = json.loads((tmp_path / "data/latest.json").read_text(encoding="utf-8"))
     manifest = json.loads((tmp_path / "data/formal-run.json").read_text(encoding="utf-8"))
@@ -63,7 +66,8 @@ def test_formal_renderer_writes_production_report_and_receipt_manifest(tmp_path)
 def test_staged_verifier_rejects_fixture_text_hash_mismatch_or_wrong_input_set(tmp_path):
     output = analysis_output()
     receipt = rendering_receipt(output)
-    render_formal_report(tmp_path, receipt, output.value, narrative=None)
+    narrative = _valid_narrative(output.value)
+    render_formal_report(tmp_path, receipt, output.value, narrative=narrative)
     hashes = hash_artifact_tree(tmp_path)
     verify_receipt = receipt.model_copy(update={"state": FormalRunState.VERIFYING})
     assert verify_staged_formal_report(tmp_path, hashes, verify_receipt) is True
@@ -79,7 +83,7 @@ def test_staged_verifier_rejects_fixture_text_hash_mismatch_or_wrong_input_set(t
     ) is False
     assert verify_staged_formal_report(tmp_path, hashes, verify_receipt) is False
 
-    render_formal_report(tmp_path, receipt, output.value, narrative=None)
+    render_formal_report(tmp_path, receipt, output.value, narrative=narrative)
     manifest_path = tmp_path / "data/formal-run.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     manifest["input_set_id"] = "wrong-input"
@@ -123,3 +127,107 @@ def test_no_llm_configuration_fails_closed_before_render(tmp_path):
     with pytest.raises(ValueError, match="expression client is required"):
         express_formal_analysis(ready_receipt(), output.value, client=None)
     assert list(tmp_path.iterdir()) == []
+
+
+def test_validated_narrative_is_visible_on_home_and_stock_pages(tmp_path):
+    output = analysis_output()
+    receipt = rendering_receipt(output)
+    narrative = _valid_narrative(output.value)
+    marker = narrative.stocks[0].narrative_marker
+
+    render_formal_report(tmp_path, receipt, output.value, narrative=narrative)
+
+    home = (tmp_path / "index.html").read_text(encoding="utf-8")
+    stock = (
+        tmp_path
+        / "daily"
+        / output.value.trade_date.isoformat()
+        / "stocks"
+        / f"{narrative.stocks[0].ts_code}.html"
+    ).read_text(encoding="utf-8")
+    for html in (home, stock):
+        assert marker in html
+        assert narrative.stocks[0].analysis_summary.text in html
+        assert "三条核心理由" in html
+        assert "买入或继续观察的条件" in html
+        assert "失效和退出条件" in html
+
+
+def test_user_view_precedes_collapsed_audit_details(tmp_path):
+    output = analysis_output()
+    receipt = rendering_receipt(output)
+    narrative = _valid_narrative(output.value)
+
+    render_formal_report(tmp_path, receipt, output.value, narrative=narrative)
+
+    html = (tmp_path / "index.html").read_text(encoding="utf-8")
+    main_view = html.split('<details class="audit-details">', 1)[0]
+    assert main_view.index("市场总体结论") < main_view.index("推荐股票排序")
+    assert "Gate" not in main_view
+    assert "input set" not in main_view.lower()
+    assert "receipt" not in main_view.lower()
+    assert '<details class="audit-details">' in html
+    assert '<details class="audit-details" open>' not in html
+
+
+def test_focus_stock_page_displays_exact_five_session_progress(tmp_path):
+    output = analysis_output()
+    code = output.value.strategy_snapshots[0].ts_code
+    dates = [
+        date(2026, 7, 3),
+        date(2026, 7, 6),
+        date(2026, 7, 7),
+        date(2026, 7, 8),
+        date(2026, 7, 9),
+    ]
+    history = [
+        output.value.strategy_snapshots[0].model_copy(
+            update={
+                "trade_date": trade_date,
+                "evidence_id": f"history-{trade_date.isoformat()}",
+            }
+        )
+        for trade_date in dates
+    ]
+    payload = output.value.model_copy(
+        update={"focus_history_by_code": {code: history}}
+    )
+    narrative = _valid_narrative(payload)
+    progress = [
+        NarrativePoint(
+            text=f"{item.trade_date.isoformat()}：按既定条件观察。",
+            evidence_ids=[item.evidence_id],
+        )
+        for item in history
+    ]
+    focus_stock = narrative.stocks[0].model_copy(
+        update={"five_day_progress": progress}
+    )
+    narrative = narrative.model_copy(update={"stocks": [focus_stock]})
+    validate_formal_narrative(payload, narrative)
+
+    render_formal_report(
+        tmp_path,
+        rendering_receipt(output),
+        payload,
+        narrative=narrative,
+    )
+
+    html = (
+        tmp_path / "daily/2026-07-10/stocks" / f"{code}.html"
+    ).read_text(encoding="utf-8")
+    assert "重点股票五日进展" in html
+    for trade_date in dates:
+        assert trade_date.isoformat() in html
+
+
+def test_production_renderer_rejects_missing_validated_narrative(tmp_path):
+    output = analysis_output()
+
+    with pytest.raises(ValueError, match="validated formal narrative is required"):
+        render_formal_report(
+            tmp_path,
+            rendering_receipt(output),
+            output.value,
+            narrative=None,
+        )

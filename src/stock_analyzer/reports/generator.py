@@ -23,6 +23,7 @@ from stock_analyzer.domain.models import (
     RecommendationCard,
     StrategyEvidenceSnapshot,
 )
+from stock_analyzer.ops.formal_narrative import FormalNarrative, StockNarrative
 
 
 FIXTURE_REPORT_WARNING = (
@@ -52,13 +53,12 @@ def render_reports(
     strategy_v2_snapshots: Optional[list[StrategyEvidenceSnapshot]] = None,
     focus_entry_theses: Optional[list[FocusEntryThesis]] = None,
     focus_daily_updates: Optional[list[FocusDailyUpdate]] = None,
-    formal_narrative: Optional[dict[str, str]] = None,
+    formal_narrative: Optional[FormalNarrative] = None,
 ) -> None:
     strategy_v2_cards = strategy_v2_cards or []
     strategy_v2_snapshots = strategy_v2_snapshots or []
     focus_entry_theses = focus_entry_theses or []
     focus_daily_updates = focus_daily_updates or []
-    formal_narrative = formal_narrative or {}
     report_date = _resolve_trade_date(
         trade_date,
         recommendations,
@@ -73,6 +73,11 @@ def render_reports(
     source_versions = source_versions or {}
     if not fixture_mode:
         _require_matching_evidence(recommendations, evidence_packages)
+        if strategy_v2_cards and formal_narrative is None:
+            raise ValueError("validated formal narrative is required")
+    narrative_by_code = {
+        item.ts_code: item for item in formal_narrative.stocks
+    } if formal_narrative else {}
     recommendation_details = _recommendation_details(
         recommendations,
         report_date,
@@ -127,7 +132,9 @@ def render_reports(
         "focus_daily_updates": [
             item.model_dump(mode="json") for item in focus_daily_updates
         ],
-        "formal_narrative": dict(sorted(formal_narrative.items())),
+        "formal_narrative": (
+            formal_narrative.model_dump(mode="json") if formal_narrative else {}
+        ),
     }
     latest_path = data_dir / "latest.json"
     latest_path.write_text(
@@ -147,6 +154,8 @@ def render_reports(
         data_unavailable_notice=None,
         operational_status=operational_status,
         report_mode=payload["report_mode"],
+        formal_narrative=formal_narrative,
+        narrative_by_code=narrative_by_code,
     )
     (output_dir / "index.html").write_text(index_html, encoding="utf-8")
 
@@ -164,6 +173,8 @@ def render_reports(
         data_unavailable_notice=None,
         operational_status=operational_status,
         report_mode=payload["report_mode"],
+        formal_narrative=formal_narrative,
+        narrative_by_code=narrative_by_code,
     )
     (daily_dir / "index.html").write_text(daily_index_html, encoding="utf-8")
 
@@ -183,6 +194,7 @@ def render_reports(
             strategy_v2_snapshot=None,
             is_fixture=fixture_mode,
             fixture_warning=FIXTURE_REPORT_WARNING,
+            stock_narrative=narrative_by_code.get(recommendation.ts_code),
         )
         (stocks_dir / f"{recommendation.ts_code}.html").write_text(
             stock_html,
@@ -203,6 +215,7 @@ def render_reports(
             strategy_v2_snapshot=snapshot,
             is_fixture=fixture_mode,
             fixture_warning=FIXTURE_REPORT_WARNING,
+            stock_narrative=narrative_by_code.get(card.ts_code),
         )
         (stocks_dir / f"{card.ts_code}.html").write_text(
             stock_html,
@@ -308,6 +321,8 @@ def _render_empty_operational_notice(
         data_unavailable_notice=notice,
         operational_status=operational_status,
         report_mode=report_mode,
+        formal_narrative=None,
+        narrative_by_code={},
     )
     (output_dir / "index.html").write_text(html, encoding="utf-8")
 
@@ -338,6 +353,8 @@ def _render_index_html(
     data_unavailable_notice: Optional[DataUnavailableNotice],
     operational_status: Optional[OperationalDailyStatus],
     report_mode: str,
+    formal_narrative: Optional[FormalNarrative],
+    narrative_by_code: dict[str, StockNarrative],
 ) -> str:
     if Environment is not None:
         return _template_env().get_template("index.html.j2").render(
@@ -352,6 +369,8 @@ def _render_index_html(
             data_unavailable_notice=data_unavailable_notice,
             operational_status=operational_status,
             report_mode=report_mode,
+            formal_narrative=formal_narrative,
+            narrative_by_code=narrative_by_code,
         )
     return _render_index_html_without_jinja(
         trade_date,
@@ -365,6 +384,8 @@ def _render_index_html(
         data_unavailable_notice,
         operational_status,
         report_mode,
+        formal_narrative,
+        narrative_by_code,
     )
 
 
@@ -378,6 +399,7 @@ def _render_stock_html(
     strategy_v2_snapshot: Optional[StrategyEvidenceSnapshot],
     is_fixture: bool,
     fixture_warning: str,
+    stock_narrative: Optional[StockNarrative],
 ) -> str:
     if Environment is not None:
         return _template_env().get_template("stock.html.j2").render(
@@ -391,6 +413,7 @@ def _render_stock_html(
             strategy_module_labels=STRATEGY_MODULE_LABELS,
             is_fixture=is_fixture,
             fixture_warning=fixture_warning,
+            stock_narrative=stock_narrative,
         )
     return _render_stock_html_without_jinja(
         stock_name,
@@ -402,6 +425,7 @@ def _render_stock_html(
         strategy_v2_snapshot,
         is_fixture,
         fixture_warning,
+        stock_narrative,
     )
 
 
@@ -427,6 +451,8 @@ def _render_index_html_without_jinja(
     data_unavailable_notice: Optional[DataUnavailableNotice],
     operational_status: Optional[OperationalDailyStatus],
     report_mode: str,
+    formal_narrative: Optional[FormalNarrative],
+    narrative_by_code: dict[str, StockNarrative],
 ) -> str:
     if data_unavailable_notice:
         is_data_insufficient = report_mode == "data_insufficient"
@@ -483,6 +509,47 @@ def _render_index_html_without_jinja(
                 "</section>",
             ]
         )
+
+    if formal_narrative:
+        lines.extend(
+            [
+                "<section>",
+                "<h2>市场总体结论</h2>",
+                f"<p>{_html(formal_narrative.market.summary)}</p>",
+                "</section>",
+                "<section>",
+                "<h2>推荐股票排序</h2>",
+            ]
+        )
+        for item in strategy_v2_cards:
+            narrative = narrative_by_code.get(item["ts_code"])
+            if narrative is None:
+                continue
+            lines.extend(
+                [
+                    f'<article data-narrative-marker="{_html(narrative.narrative_marker)}">',
+                    f"<h3>{_html(item['name'])} {_html(item['ts_code'])}</h3>",
+                    f"<p>{_html(narrative.analysis_summary.text)}</p>",
+                    "<h4>三条核心理由</h4>",
+                ]
+            )
+            _append_html_list(lines, [point.text for point in narrative.core_reasons])
+            lines.extend(
+                [
+                    "<h4>买入或继续观察的条件</h4>",
+                ]
+            )
+            _append_html_list(
+                lines,
+                [*narrative.required_confirmation, *narrative.observation_conditions],
+            )
+            lines.append("<h4>失效和退出条件</h4>")
+            _append_html_list(
+                lines,
+                [*narrative.invalidation_conditions, *narrative.exit_conditions],
+            )
+            lines.append("</article>")
+        lines.extend(["</section>", '<details class="audit-details">', "<summary>审计详情</summary>"])
 
     lines.extend(["<section>", "<h2>今日推荐</h2>"])
     if strategy_v2_cards:
@@ -637,6 +704,8 @@ def _render_index_html_without_jinja(
     else:
         lines.append("<p>当前没有重点关注股票。</p>")
     lines.append("</section>")
+    if formal_narrative:
+        lines.append("</details>")
     return _html_page("股票观察报告", lines)
 
 
@@ -650,6 +719,7 @@ def _render_stock_html_without_jinja(
     strategy_v2_snapshot: Optional[StrategyEvidenceSnapshot],
     is_fixture: bool,
     fixture_warning: str,
+    stock_narrative: Optional[StockNarrative],
 ) -> str:
     del recommendation, focus_state
 
@@ -663,7 +733,29 @@ def _render_stock_html_without_jinja(
                 "</section>",
             ]
         )
-    lines.append(f"<p>{_html(conclusion)}</p>")
+    if stock_narrative:
+        lines.extend(
+            [
+                f'<section data-narrative-marker="{_html(stock_narrative.narrative_marker)}">',
+                "<h2>当前结论</h2>",
+                f"<p>{_html(stock_narrative.analysis_summary.text)}</p>",
+                "<h2>三条核心理由</h2>",
+            ]
+        )
+        _append_html_list(lines, [point.text for point in stock_narrative.core_reasons])
+        lines.append("<h2>买入或继续观察的条件</h2>")
+        _append_html_list(
+            lines,
+            [*stock_narrative.required_confirmation, *stock_narrative.observation_conditions],
+        )
+        lines.append("<h2>失效和退出条件</h2>")
+        _append_html_list(
+            lines,
+            [*stock_narrative.invalidation_conditions, *stock_narrative.exit_conditions],
+        )
+        lines.extend(["</section>", '<details class="audit-details">', "<summary>审计详情</summary>"])
+    else:
+        lines.append(f"<p>{_html(conclusion)}</p>")
     if strategy_v2_card:
         lines.extend(
             [
@@ -722,6 +814,8 @@ def _render_stock_html_without_jinja(
                     )
                 lines.append("</article>")
         lines.append("</section>")
+        if stock_narrative:
+            lines.append("</details>")
         return _html_page(f"{stock_name} 股票报告", lines)
 
     if detail is None:
@@ -762,6 +856,8 @@ def _render_stock_html_without_jinja(
             "</section>",
         ]
     )
+    if stock_narrative:
+        lines.append("</details>")
     return _html_page(f"{stock_name} 股票报告", lines)
 
 

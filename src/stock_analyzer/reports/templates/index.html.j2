@@ -46,6 +46,63 @@
     </section>
     {% endif %}
 
+    {% if formal_narrative %}
+    <section>
+      <h2>市场总体结论</h2>
+      <p>{{ formal_narrative.market.summary }}</p>
+    </section>
+
+    <section>
+      <h2>推荐股票排序</h2>
+      {% for item in strategy_v2_cards %}
+      {% set narrative = narrative_by_code.get(item.ts_code) %}
+      {% if narrative %}
+      <article data-narrative-marker="{{ narrative.narrative_marker }}">
+        <h3><a href="{{ item.stock_page }}">{{ loop.index }}. {{ item.name }} {{ item.ts_code }}</a></h3>
+        <p>{{ narrative.analysis_summary.text }}</p>
+        <h4>明确动作与仓位</h4>
+        <p>{{ narrative.action|strategy_text }}；仓位 {{ narrative.position_min_pct }}%-{{ narrative.position_max_pct }}%</p>
+        <h4>三条核心理由</h4>
+        <ol>
+          {% for reason in narrative.core_reasons %}
+          <li>{{ reason.text }}</li>
+          {% endfor %}
+        </ol>
+        <h4>买入或继续观察的条件</h4>
+        <ul>
+          {% for line in narrative.required_confirmation %}<li>{{ line|strategy_text }}</li>{% endfor %}
+          {% for line in narrative.observation_conditions %}<li>{{ line|strategy_text }}</li>{% endfor %}
+        </ul>
+        <h4>失效和退出条件</h4>
+        <ul>
+          {% for line in narrative.invalidation_conditions %}<li>{{ line|strategy_text }}</li>{% endfor %}
+          {% for line in narrative.exit_conditions %}<li>{{ line|strategy_text }}</li>{% endfor %}
+        </ul>
+        <p>看错的主要风险：{{ narrative.risk_if_wrong|strategy_text }}</p>
+      </article>
+      {% endif %}
+      {% endfor %}
+    </section>
+
+    {% if focus_daily_updates or focus_entry_theses %}
+    <section>
+      <h2>重点股票五日进展</h2>
+      {% for item in focus_daily_updates %}
+      {% set narrative = narrative_by_code.get(item.ts_code) %}
+      {% if narrative %}
+      <article data-narrative-marker="{{ narrative.narrative_marker }}">
+        <h3>{{ item.name }} {{ item.ts_code }}</h3>
+        <ul>{% for point in narrative.five_day_progress %}<li>{{ point.text }}</li>{% endfor %}</ul>
+      </article>
+      {% endif %}
+      {% endfor %}
+    </section>
+    {% endif %}
+    {% endif %}
+
+    <details class="audit-details">
+      <summary>审计详情</summary>
+
     <section>
       <h2>今日推荐</h2>
       {% if strategy_v2_cards %}
@@ -257,6 +314,7 @@
       <p>当前没有重点关注股票。</p>
       {% endif %}
     </section>
+    </details>
     {% endif %}
   </main>
 </body>

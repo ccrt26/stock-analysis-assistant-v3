@@ -140,6 +140,19 @@ def build_stock_analysis_requests(payload: Any) -> tuple[StockAnalysisRequest, .
             if card is not None and card.needed_before_focus_entry
             else action.required_confirmation
         )
+        focus_history = [
+            FocusProgressDay(
+                trade_date=item.trade_date.isoformat(),
+                evidence_id=item.evidence_id,
+                thesis=item.thesis,
+                action=item.action.decision.value,
+                supportive=(
+                    not item.data_insufficient
+                    and item.action.position_max_pct > 0
+                ),
+            )
+            for item in payload.focus_history_by_code.get(code, [])
+        ]
         requests.append(
             StockAnalysisRequest(
                 ts_code=code,
@@ -153,22 +166,14 @@ def build_stock_analysis_requests(payload: Any) -> tuple[StockAnalysisRequest, .
                         module.model_dump(mode="json") for module in snapshot.modules
                     ],
                 },
-                allowed_evidence_ids=[package.evidence_id, *atom_ids],
+                allowed_evidence_ids=[
+                    package.evidence_id,
+                    *atom_ids,
+                    *(item.evidence_id for item in focus_history),
+                ],
                 knowledge_refs=knowledge_refs,
                 explicit_gaps=explicit_gaps,
-                focus_history=[
-                    FocusProgressDay(
-                        trade_date=item.trade_date.isoformat(),
-                        evidence_id=item.evidence_id,
-                        thesis=item.thesis,
-                        action=item.action.decision.value,
-                        supportive=(
-                            not item.data_insufficient
-                            and item.action.position_max_pct > 0
-                        ),
-                    )
-                    for item in payload.focus_history_by_code.get(code, [])
-                ],
+                focus_history=focus_history,
                 decision_lock=DecisionLock(
                     action=action.decision.value,
                     position_min_pct=action.position_min_pct,

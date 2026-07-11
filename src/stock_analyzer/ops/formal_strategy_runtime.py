@@ -285,7 +285,6 @@ def render_formal_report(
         }
     ):
         raise ValueError("formal rendering receipt does not match payload")
-    narrative_payload = narrative.model_dump(mode="json") if narrative else {}
     render_reports(
         Path(staging),
         payload.recommendations,
@@ -299,7 +298,7 @@ def render_formal_report(
         strategy_v2_snapshots=payload.strategy_snapshots,
         focus_entry_theses=payload.focus_entry_theses,
         focus_daily_updates=payload.focus_daily_updates,
-        formal_narrative=narrative_payload,
+        formal_narrative=narrative,
     )
     manifest = {
         "acquisition_contract_version": receipt.acquisition_contract_version,

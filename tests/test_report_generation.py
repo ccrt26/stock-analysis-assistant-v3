@@ -235,6 +235,7 @@ def test_strategy_v2_report_hides_scores_and_shows_action_position(tmp_path):
         trade_date=date(2026, 7, 10),
         strategy_v2_cards=result.cards,
         strategy_v2_snapshots=result.snapshots,
+        fixture_mode=True,
         operational_status=_generated_status(
             date(2026, 7, 10), recommendation_count=1, focus_count=0
         ),
