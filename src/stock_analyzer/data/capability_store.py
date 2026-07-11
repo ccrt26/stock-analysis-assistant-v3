@@ -56,28 +56,75 @@ class LocalCapabilityStore:
             envelope = json.loads(self.path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
             raise CapabilityEvidenceError("capability bundle is missing or malformed") from exc
-        if not isinstance(envelope, dict):
-            raise CapabilityEvidenceError("capability bundle must be a JSON object")
-        expected_hash = envelope.pop("bundle_hash", None)
-        if not isinstance(expected_hash, str) or expected_hash != _payload_hash(envelope):
-            raise CapabilityEvidenceError("capability bundle hash mismatch")
-        try:
-            bundle = CapabilityBundle.model_validate(envelope)
-        except ValidationError as exc:
-            raise CapabilityEvidenceError("capability bundle schema is invalid") from exc
+        return _validated_routes(envelope, require_live=require_live)
+
+
+class WarehouseCapabilityStore:
+    def __init__(self, warehouse: Any) -> None:
+        self.warehouse = warehouse
+
+    def save(self, bundle: CapabilityBundle) -> None:
         _validate_bundle(bundle)
-        routes = {item.route_id: item for item in bundle.routes}
-        if require_live:
-            missing_live = sorted(
-                route_id
-                for route_id, capability in routes.items()
-                if not capability.approved_for_live
+        payload = bundle.model_dump(mode="json")
+        bundle_hash = _payload_hash(payload)
+        mode = (
+            "live"
+            if all(route.approved_for_live for route in bundle.routes)
+            else "recorded"
+        )
+        self.warehouse.save_capability_bundle(
+            bundle_hash=bundle_hash,
+            contract_version=bundle.contract_version,
+            generated_at=bundle.generated_at,
+            mode=mode,
+            payload=payload,
+        )
+
+    def load(
+        self,
+        *,
+        require_live: bool,
+    ) -> dict[str, RouteCapabilityEvidence]:
+        try:
+            bundle_hash, payload = self.warehouse.latest_capability_bundle()
+        except (FileNotFoundError, ValueError) as exc:
+            raise CapabilityEvidenceError(
+                "capability bundle is missing or malformed"
+            ) from exc
+        return _validated_routes(
+            {**payload, "bundle_hash": bundle_hash},
+            require_live=require_live,
+        )
+
+
+def _validated_routes(
+    envelope: Any,
+    *,
+    require_live: bool,
+) -> dict[str, RouteCapabilityEvidence]:
+    if not isinstance(envelope, dict):
+        raise CapabilityEvidenceError("capability bundle must be a JSON object")
+    payload = dict(envelope)
+    expected_hash = payload.pop("bundle_hash", None)
+    if not isinstance(expected_hash, str) or expected_hash != _payload_hash(payload):
+        raise CapabilityEvidenceError("capability bundle hash mismatch")
+    try:
+        bundle = CapabilityBundle.model_validate(payload)
+    except ValidationError as exc:
+        raise CapabilityEvidenceError("capability bundle schema is invalid") from exc
+    _validate_bundle(bundle)
+    routes = {item.route_id: item for item in bundle.routes}
+    if require_live:
+        missing_live = sorted(
+            route_id
+            for route_id, capability in routes.items()
+            if not capability.approved_for_live
+        )
+        if missing_live:
+            raise CapabilityEvidenceError(
+                "live capability evidence required for " + ", ".join(missing_live)
             )
-            if missing_live:
-                raise CapabilityEvidenceError(
-                    "live capability evidence required for " + ", ".join(missing_live)
-                )
-        return routes
+    return routes
 
 
 def _validate_bundle(bundle: CapabilityBundle) -> None:
@@ -176,4 +223,5 @@ __all__ = [
     "CapabilityBundle",
     "CapabilityEvidenceError",
     "LocalCapabilityStore",
+    "WarehouseCapabilityStore",
 ]

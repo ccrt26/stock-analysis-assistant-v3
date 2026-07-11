@@ -13,6 +13,10 @@ from stock_analyzer.data.readiness import (
     GroupValidation,
 )
 from stock_analyzer.storage.evidence_store import GroupVersionManifest
+from stock_analyzer.storage.evidence_store import (
+    FrozenReportReference,
+    ReconciliationTask,
+)
 from stock_analyzer.storage.formal_parquet import (
     FormalParquetCorruption,
     FormalVersionFile,
@@ -331,6 +335,332 @@ class FormalWarehouse:
             for _, version_id in reversed(rows)
         ]
         return [payload for payload in payloads if payload is not None]
+
+    def save_checkpoint(
+        self,
+        run_id: str,
+        trade_date: date,
+        contract_version: str,
+        stage: str,
+        object_id: str,
+    ) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                insert or replace into formal_checkpoints values (?, ?, ?, ?, ?)
+                """,
+                [run_id, stage, trade_date, contract_version, object_id],
+            )
+
+    def load_checkpoint(
+        self,
+        run_id: str,
+        trade_date: date,
+        contract_version: str,
+        stage: str,
+    ) -> str | None:
+        with self._connect(read_only=True) as connection:
+            row = connection.execute(
+                """
+                select object_id from formal_checkpoints
+                where run_id = ? and stage = ? and trade_date = ?
+                  and contract_version = ?
+                """,
+                [run_id, stage, trade_date, contract_version],
+            ).fetchone()
+        return str(row[0]) if row is not None else None
+
+    def create_reconciliation_task(
+        self,
+        backup_manifest: GroupVersionManifest,
+    ) -> ReconciliationTask:
+        if backup_manifest.route_kind.value != "backup":
+            raise ValueError("reconciliation requires a backup group version")
+        import hashlib
+
+        task_id = hashlib.sha256(
+            f"reconcile:{backup_manifest.version_id}".encode("utf-8")
+        ).hexdigest()
+        task = ReconciliationTask(
+            task_id=task_id,
+            group_id=backup_manifest.group_id,
+            trade_date=backup_manifest.trade_date,
+            backup_version_id=backup_manifest.version_id,
+            status="pending",
+        )
+        payload = _json(task.model_dump(mode="json"))
+        with self._connect() as connection:
+            existing = connection.execute(
+                "select payload from formal_reconciliation_tasks where task_id = ?",
+                [task_id],
+            ).fetchone()
+            if existing is not None:
+                if _from_json(existing[0]) != task.model_dump(mode="json"):
+                    raise ValueError("reconciliation task already exists with different payload")
+                return task
+            connection.execute(
+                "insert into formal_reconciliation_tasks values (?, ?, ?, ?, ?)",
+                [task_id, task.group_id.value, task.trade_date, task.status, payload],
+            )
+        return task
+
+    def reconciliation_task(self, task_id: str) -> ReconciliationTask:
+        with self._connect(read_only=True) as connection:
+            row = connection.execute(
+                "select payload from formal_reconciliation_tasks where task_id = ?",
+                [task_id],
+            ).fetchone()
+        if row is None:
+            raise FileNotFoundError(f"reconciliation task not found: {task_id}")
+        return ReconciliationTask.model_validate(_from_json(row[0]))
+
+    def reconcile_primary(
+        self,
+        task_id: str,
+        primary_payload: AcquisitionPayload,
+        validation: GroupValidation,
+    ) -> GroupVersionManifest:
+        task = self.reconciliation_task(task_id)
+        if task.status == "completed":
+            if task.primary_version_id is None:
+                raise ValueError("completed reconciliation lacks primary version")
+            return self.group_version_manifest(task.primary_version_id)
+        if primary_payload.route_kind.value != "primary":
+            raise ValueError("reconciliation payload must use the primary route")
+        if (
+            primary_payload.group_id != task.group_id
+            or primary_payload.trade_date != task.trade_date
+        ):
+            raise ValueError("reconciliation primary group/date mismatch")
+        manifest = self.save_group_version(primary_payload, validation)
+        self.set_canonical(task.group_id, task.trade_date, manifest.version_id)
+        completed = task.model_copy(
+            update={"status": "completed", "primary_version_id": manifest.version_id}
+        )
+        with self._connect() as connection:
+            connection.execute(
+                """
+                update formal_reconciliation_tasks set status = ?, payload = ?
+                where task_id = ? and status = 'pending'
+                """,
+                [completed.status, _json(completed.model_dump(mode="json")), task_id],
+            )
+        return manifest
+
+    def save_frozen_report_reference(
+        self,
+        reference: FrozenReportReference,
+    ) -> None:
+        self._insert_immutable_payload(
+            "formal_frozen_reports",
+            "run_id",
+            reference.run_id,
+            ("input_set_id", reference.input_set_id),
+            payload=reference.model_dump(mode="json"),
+        )
+
+    def frozen_report_reference(self, run_id: str) -> FrozenReportReference:
+        return FrozenReportReference.model_validate(
+            self._load_payload("formal_frozen_reports", "run_id", run_id)
+        )
+
+    def save_run_receipt(self, receipt) -> None:
+        from stock_analyzer.ops.formal_run import RunReceipt
+
+        validated = RunReceipt.model_validate(receipt)
+        payload = validated.model_dump(mode="json")
+        with self._connect() as connection:
+            connection.begin()
+            existing = connection.execute(
+                """
+                select payload from formal_run_receipts
+                where run_id = ? and revision = ?
+                """,
+                [validated.run_id, validated.revision],
+            ).fetchone()
+            if existing is not None:
+                if _from_json(existing[0]) != payload:
+                    connection.rollback()
+                    raise ValueError("run receipt revision already exists with different payload")
+                connection.rollback()
+                return
+            connection.execute(
+                "insert into formal_run_receipts values (?, ?, ?, ?, ?)",
+                [
+                    validated.run_id,
+                    validated.revision,
+                    validated.target_date,
+                    validated.state.value,
+                    _json(payload),
+                ],
+            )
+            latest = connection.execute(
+                "select revision from formal_run_latest where run_id = ?",
+                [validated.run_id],
+            ).fetchone()
+            if latest is None or validated.revision > int(latest[0]):
+                connection.execute(
+                    "insert or replace into formal_run_latest values (?, ?)",
+                    [validated.run_id, validated.revision],
+                )
+            connection.commit()
+
+    def run_receipt(self, run_id: str, revision: int):
+        from stock_analyzer.ops.formal_run import RunReceipt
+
+        with self._connect(read_only=True) as connection:
+            row = connection.execute(
+                """
+                select payload from formal_run_receipts
+                where run_id = ? and revision = ?
+                """,
+                [run_id, revision],
+            ).fetchone()
+        if row is None:
+            raise FileNotFoundError(f"run receipt not found: {run_id}:{revision}")
+        return RunReceipt.model_validate(_from_json(row[0]))
+
+    def latest_run_receipt(self, run_id: str):
+        with self._connect(read_only=True) as connection:
+            row = connection.execute(
+                "select revision from formal_run_latest where run_id = ?",
+                [run_id],
+            ).fetchone()
+        if row is None:
+            raise FileNotFoundError(f"run receipt not found: {run_id}")
+        return self.run_receipt(run_id, int(row[0]))
+
+    def save_candidate_set(self, candidate_set) -> None:
+        from stock_analyzer.ops.formal_run import CandidateSet
+
+        validated = CandidateSet.model_validate(candidate_set)
+        self._insert_immutable_payload(
+            "formal_candidate_sets",
+            "candidate_set_id",
+            validated.candidate_set_id,
+            ("run_id", validated.run_id),
+            payload=validated.model_dump(mode="json"),
+        )
+
+    def candidate_set(self, candidate_set_id: str):
+        from stock_analyzer.ops.formal_run import CandidateSet
+
+        return CandidateSet.model_validate(
+            self._load_payload(
+                "formal_candidate_sets",
+                "candidate_set_id",
+                candidate_set_id,
+            )
+        )
+
+    def save_report_candidate_bundle(
+        self,
+        run_id: str,
+        bundle: dict[str, Any],
+    ) -> None:
+        if bundle.get("run_id") != run_id:
+            raise ValueError("formal report candidate bundle mismatch")
+        self._insert_immutable_payload(
+            "formal_report_candidates",
+            "run_id",
+            run_id,
+            payload=bundle,
+        )
+
+    def report_candidate_bundle(self, run_id: str) -> dict[str, Any]:
+        value = self._load_payload("formal_report_candidates", "run_id", run_id)
+        if not isinstance(value, dict) or value.get("run_id") != run_id:
+            raise ValueError("formal report candidate bundle mismatch")
+        return value
+
+    def save_capability_bundle(
+        self,
+        *,
+        bundle_hash: str,
+        contract_version: str,
+        generated_at: datetime,
+        mode: str,
+        payload: dict[str, Any],
+    ) -> None:
+        with self._connect() as connection:
+            connection.begin()
+            connection.execute("update formal_capability_bundles set is_latest = false")
+            existing = connection.execute(
+                "select payload from formal_capability_bundles where bundle_hash = ?",
+                [bundle_hash],
+            ).fetchone()
+            if existing is None:
+                connection.execute(
+                    "insert into formal_capability_bundles values (?, ?, ?, ?, true, ?)",
+                    [bundle_hash, contract_version, generated_at, mode, _json(payload)],
+                )
+            elif _from_json(existing[0]) != payload:
+                connection.rollback()
+                raise ValueError("capability bundle hash collision")
+            else:
+                connection.execute(
+                    "update formal_capability_bundles set is_latest = true where bundle_hash = ?",
+                    [bundle_hash],
+                )
+            connection.commit()
+
+    def latest_capability_bundle(self) -> tuple[str, dict[str, Any]]:
+        with self._connect(read_only=True) as connection:
+            rows = connection.execute(
+                "select bundle_hash, payload from formal_capability_bundles where is_latest"
+            ).fetchall()
+        if len(rows) != 1:
+            raise FileNotFoundError("capability bundle is missing or ambiguous")
+        return str(rows[0][0]), _from_json(rows[0][1])
+
+    def _insert_immutable_payload(
+        self,
+        table: str,
+        key_column: str,
+        key_value: str,
+        *extra_columns: tuple[str, Any],
+        payload: Any,
+    ) -> None:
+        allowed = {
+            "formal_frozen_reports",
+            "formal_candidate_sets",
+            "formal_report_candidates",
+        }
+        if table not in allowed:
+            raise ValueError(f"unsupported immutable payload table: {table}")
+        columns = [key_column, *(name for name, _ in extra_columns), "payload"]
+        values = [key_value, *(value for _, value in extra_columns), _json(payload)]
+        with self._connect() as connection:
+            existing = connection.execute(
+                f"select payload from {table} where {key_column} = ?",
+                [key_value],
+            ).fetchone()
+            if existing is not None:
+                if _from_json(existing[0]) != payload:
+                    raise ValueError(f"immutable formal object already exists: {key_value}")
+                return
+            placeholders = ", ".join("?" for _ in columns)
+            connection.execute(
+                f"insert into {table} ({', '.join(columns)}) values ({placeholders})",
+                values,
+            )
+
+    def _load_payload(self, table: str, key_column: str, key_value: str) -> Any:
+        allowed = {
+            "formal_frozen_reports",
+            "formal_candidate_sets",
+            "formal_report_candidates",
+        }
+        if table not in allowed:
+            raise ValueError(f"unsupported payload table: {table}")
+        with self._connect(read_only=True) as connection:
+            row = connection.execute(
+                f"select payload from {table} where {key_column} = ?",
+                [key_value],
+            ).fetchone()
+        if row is None:
+            raise FileNotFoundError(f"formal object not found: {key_value}")
+        return _from_json(row[0])
 
 
 def _version_id(payload: AcquisitionPayload) -> str:

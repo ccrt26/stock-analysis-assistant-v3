@@ -70,7 +70,7 @@ create table if not exists formal_run_latest (
 
 create table if not exists formal_candidate_sets (
     candidate_set_id varchar primary key,
-    target_date date not null,
+    run_id varchar not null,
     payload json not null
 );
 

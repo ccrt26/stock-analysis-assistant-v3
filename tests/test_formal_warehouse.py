@@ -8,7 +8,10 @@ from stock_analyzer.data.readiness import (
     AcquisitionPayload,
     GroupValidation,
     RouteKind,
+    FormalRunState,
 )
+from stock_analyzer.ops.formal_run import CandidateSet, RunReceipt
+from stock_analyzer.storage.evidence_store import FrozenReportReference
 from stock_analyzer.storage.formal_parquet import FormalParquetCorruption
 from stock_analyzer.storage.formal_warehouse import FormalWarehouse
 
@@ -151,3 +154,83 @@ def test_catalog_failure_leaves_no_visible_version(tmp_path, monkeypatch):
         warehouse.save_group_version(_payload(), VALID)
 
     assert warehouse.list_group_versions() == ()
+
+
+def _receipt(revision: int, state: FormalRunState) -> RunReceipt:
+    return RunReceipt(
+        run_id="run-1",
+        target_date=TARGET,
+        report_cutoff=CUTOFF,
+        acquisition_contract_version="formal-v2",
+        screening_version="screen-v2",
+        state=state,
+        revision=revision,
+    )
+
+
+def test_receipt_revisions_are_append_only_and_latest_is_transactional(tmp_path):
+    warehouse = FormalWarehouse(tmp_path / "local_warehouse")
+    first = _receipt(0, FormalRunState.PENDING)
+    second = _receipt(1, FormalRunState.ACQUIRING_SCREENING_PRIMARY)
+
+    warehouse.save_run_receipt(first)
+    warehouse.save_run_receipt(second)
+
+    assert warehouse.latest_run_receipt("run-1") == second
+    assert warehouse.run_receipt("run-1", 0) == first
+    with pytest.raises(ValueError, match="already exists"):
+        warehouse.save_run_receipt(
+            _receipt(1, FormalRunState.FAILED_RETRYABLE)
+        )
+
+
+def test_candidate_checkpoint_frozen_report_and_report_candidate_round_trip(tmp_path):
+    warehouse = FormalWarehouse(tmp_path / "local_warehouse")
+    candidate = CandidateSet(
+        candidate_set_id="candidate-1",
+        run_id="run-1",
+        ordered_codes=("600000.SH",),
+        active_focus_codes=(),
+        screening_version="screen-v2",
+        upstream_input_set_id="input-screen",
+        content_hash="a" * 64,
+    )
+    frozen = FrozenReportReference(
+        run_id="run-1",
+        input_set_id="input-1",
+        group_version_ids=("market-v1",),
+        artifact_hashes={"index.html": "b" * 64},
+    )
+    report_candidate = {"run_id": "run-1", "candidate_hash": "c" * 64}
+
+    warehouse.save_candidate_set(candidate)
+    warehouse.save_checkpoint("run-1", TARGET, "formal-v2", "screen", "market-v1")
+    warehouse.save_frozen_report_reference(frozen)
+    warehouse.save_report_candidate_bundle("run-1", report_candidate)
+
+    assert warehouse.candidate_set("candidate-1") == candidate
+    assert warehouse.load_checkpoint("run-1", TARGET, "formal-v2", "screen") == "market-v1"
+    assert warehouse.load_checkpoint("run-1", TARGET, "formal-v1", "screen") is None
+    assert warehouse.frozen_report_reference("run-1") == frozen
+    assert warehouse.report_candidate_bundle("run-1") == report_candidate
+    assert not list((tmp_path / "local_warehouse").glob("formal_evidence/**/*.json"))
+
+
+def test_backup_reconciliation_promotes_primary_and_preserves_backup(tmp_path):
+    warehouse = FormalWarehouse(tmp_path / "local_warehouse")
+    backup = warehouse.save_group_version(
+        _payload(route_kind=RouteKind.BACKUP),
+        VALID,
+    )
+    warehouse.set_canonical(backup.group_id, TARGET, backup.version_id)
+    task = warehouse.create_reconciliation_task(backup)
+
+    primary = warehouse.reconcile_primary(
+        task.task_id,
+        _payload(close=12.5, route_kind=RouteKind.PRIMARY),
+        VALID,
+    )
+
+    assert warehouse.reconciliation_task(task.task_id).status == "completed"
+    assert warehouse.canonical_manifest(backup.group_id, TARGET) == primary
+    assert warehouse.group_version_manifest(backup.version_id) == backup

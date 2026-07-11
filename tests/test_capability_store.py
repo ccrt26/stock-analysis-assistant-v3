@@ -10,7 +10,9 @@ from stock_analyzer.data.capability_store import (
     CapabilityBundle,
     CapabilityEvidenceError,
     LocalCapabilityStore,
+    WarehouseCapabilityStore,
 )
+from stock_analyzer.storage.formal_warehouse import FormalWarehouse
 from stock_analyzer.data.readiness import (
     AcquisitionGroupId,
     CapabilityEvidenceKind,
@@ -146,6 +148,28 @@ def test_event_capability_requires_distinct_populated_and_empty_probe_hashes():
 
 def test_non_event_capability_does_not_require_event_probe_hashes():
     assert capability().approved is True
+
+
+def test_warehouse_capability_store_round_trip_creates_no_json(tmp_path):
+    warehouse = FormalWarehouse(tmp_path / "local_warehouse")
+    store = WarehouseCapabilityStore(warehouse)
+    expected = bundle(kind=CapabilityEvidenceKind.LIVE)
+
+    store.save(expected)
+    loaded = store.load(require_live=True)
+
+    assert loaded[ROUTE_ID].approved_for_live is True
+    assert not list((tmp_path / "local_warehouse").glob("**/*.json"))
+
+
+def test_warehouse_capability_store_rejects_recorded_bundle_for_live(tmp_path):
+    store = WarehouseCapabilityStore(
+        FormalWarehouse(tmp_path / "local_warehouse")
+    )
+    store.save(bundle(kind=CapabilityEvidenceKind.RECORDED))
+
+    with pytest.raises(CapabilityEvidenceError, match="live capability evidence required"):
+        store.load(require_live=True)
 
 
 @pytest.mark.parametrize("invalid_hash", ["not-a-hash", "0" * 64])
