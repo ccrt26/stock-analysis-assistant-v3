@@ -181,10 +181,15 @@ RECORD_FAMILIES = {
     "calendar": "calendar", "security": "stock_universe",
     "equity_bar": "market_daily", "daily_basic": "daily_basic",
     "index_bar": "index_daily", "board_bar": "board_daily",
-    "company_profile": "company_profile", "financial": "fundamental_snapshot",
+    "company_profile": "company_profile",
+    "financial": "fundamental_snapshot",
+    "financial_summary": "fundamental_snapshot",
+    "forecast": "fundamental_snapshot", "express": "fundamental_snapshot",
+    "main_business": "fundamental_snapshot",
     "industry_mapping": "industry_membership",
     "concept_mapping": "concept_membership", "event": "event_catalyst",
-    "official_risk": "official_risk", "manual_holding": "manual_holding",
+    "official_event": "official_risk", "official_risk": "official_risk",
+    "manual_holding": "manual_holding",
 }
 ```
 
