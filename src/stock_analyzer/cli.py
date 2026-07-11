@@ -9,6 +9,7 @@ import typer
 
 from stock_analyzer.config import AppConfig
 from stock_analyzer.data.health import run_health_checks
+from stock_analyzer.data.readiness import FormalRunState
 from stock_analyzer.ops.job import (
     ACTION_REQUIRED_STATUSES,
     FORMAL_FIRST_ATTEMPT_CUTOFF,
@@ -26,6 +27,7 @@ from stock_analyzer.ops.production_dependencies import (
     load_default_external_runtime,
 )
 from stock_analyzer.ops.artifacts import DeployArtifactError, prepare_pages_artifact
+from stock_analyzer.ops.activation import ActivationError, FormalActivationCoordinator
 from stock_analyzer.ops.publish import (
     PublishConfig,
     PublishMode,
@@ -42,7 +44,7 @@ from stock_analyzer.pipeline import (
     render_report_for_date,
     run_daily_pipeline,
 )
-from stock_analyzer.storage.evidence_store import LocalEvidenceStore
+from stock_analyzer.storage.evidence_store import FrozenReportReference, LocalEvidenceStore
 from stock_analyzer.storage.capacity_guard import SupabaseCapacityGuard
 from stock_analyzer.storage.repositories import (
     InMemoryAnalysisRepository,
@@ -165,6 +167,94 @@ def run_daily(
     typer.echo(f"daily run completed for {result.trade_date.isoformat()}")
     typer.echo(f"recommendations: {len(result.recommendations)}")
     typer.echo(f"evaluation_tasks: {len(result.evaluation_tasks)}")
+
+
+@app.command("prepare-formal-report-candidate")
+def prepare_formal_report_candidate(
+    trade_date: str = typer.Option(..., "--trade-date"),
+) -> None:
+    parsed_trade_date = date.fromisoformat(trade_date)
+    config = AppConfig.load()
+    if not config.has_supabase_config:
+        _fail(MISSING_SUPABASE_CONFIG_MESSAGE)
+    try:
+        repository = _analysis_repository(
+            config,
+            require_supabase=True,
+            fixture_mode=False,
+        )
+        result = _default_run_daily(
+            config.project_root,
+            repository,
+            parsed_trade_date,
+            require_human_acceptance=True,
+        )
+    except (MissingSupabaseConfig, HumanInterventionJobError, RetryableJobError, RuntimeError) as exc:
+        _fail(str(exc))
+    if result.receipt.state is not FormalRunState.AWAITING_HUMAN_ACCEPTANCE:
+        _fail(
+            "Formal candidate was not prepared; inspect the redacted formal run status."
+        )
+    candidate = result.prepared_candidate
+    if candidate is None:
+        _fail("Formal candidate metadata is missing.")
+    typer.echo(f"run_id: {candidate.run_id}")
+    typer.echo(f"candidate_root: {candidate.candidate_root}")
+    typer.echo("automated_gates_passed: true")
+    typer.echo(f"candidate_hash: {candidate.candidate_hash}")
+    typer.echo("product_acceptance: awaiting_human_readability_acceptance")
+
+
+@app.command("activate-formal-report-candidate")
+def activate_formal_report_candidate(
+    run_id: str = typer.Option(..., "--run-id"),
+    expected_candidate_hash: str = typer.Option(
+        ...,
+        "--expected-candidate-hash",
+    ),
+    accept_readability: bool = typer.Option(False, "--accept-readability"),
+) -> None:
+    if not accept_readability:
+        _fail("--accept-readability is required after human readability review")
+    config = AppConfig.load()
+    if not config.has_supabase_config:
+        _fail(MISSING_SUPABASE_CONFIG_MESSAGE)
+    try:
+        repository = _analysis_repository(
+            config,
+            require_supabase=True,
+            fixture_mode=False,
+        )
+        store = LocalEvidenceStore(config.local_warehouse_dir / "formal_evidence")
+        coordinator = FormalActivationCoordinator(
+            config.reports_dir,
+            store,
+            repository,
+        )
+        candidate = coordinator.load_prepared_candidate(run_id)
+        completed = coordinator.activate_prepared_candidate(
+            candidate,
+            expected_candidate_hash,
+        )
+        if completed.input_set_id is None:
+            raise ActivationError("activated receipt lacks input set")
+        store.save_frozen_report_reference(
+            FrozenReportReference(
+                run_id=completed.run_id,
+                input_set_id=completed.input_set_id,
+                group_version_ids=tuple(
+                    completed.group_version_ids[key]
+                    for key in sorted(completed.group_version_ids)
+                ),
+                artifact_hashes=completed.artifact_hashes,
+            )
+        )
+    except (MissingSupabaseConfig, ActivationError, FileNotFoundError, ValueError) as exc:
+        _fail(str(exc))
+    typer.echo(
+        f"formal report candidate activated for run {completed.run_id} "
+        f"({completed.state.value})"
+    )
 
 
 @app.command("render-report")

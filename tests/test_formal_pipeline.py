@@ -468,6 +468,28 @@ def test_complete_run_calls_analysis_only_after_ready_to_analyze(tmp_path):
     ) == [{"kind": "recommendation", "ts_code": "600000.SH"}]
 
 
+def test_human_gated_run_stops_before_ledger_or_report_pointer(tmp_path):
+    calls: list[str] = []
+    dependencies = _dependencies(tmp_path, calls)
+    reports = tmp_path / "reports"
+    reports.mkdir(parents=True, exist_ok=True)
+    (reports / "index.html").write_bytes(b"prior-report")
+
+    result = run_formal_strategy_v2(
+        TARGET,
+        CUTOFF,
+        dependencies,
+        run_id="await-human-readability",
+        require_human_acceptance=True,
+    )
+
+    assert result.receipt.state is FormalRunState.AWAITING_HUMAN_ACCEPTANCE
+    assert result.prepared_candidate is not None
+    assert (reports / "index.html").read_bytes() == b"prior-report"
+    assert dependencies.ledger.active == {}
+    assert dependencies.ledger.pending == {}
+
+
 @pytest.mark.parametrize(
     ("state", "local_activation_id", "ledger_activation_id", "expected_input_set_id"),
     [

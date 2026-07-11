@@ -453,6 +453,7 @@ def _default_run_daily(
     trade_date: date,
     *,
     runtime: ProductionExternalRuntime | None = None,
+    require_human_acceptance: bool = False,
 ):
     dependencies = (
         build_production_formal_dependencies(
@@ -478,6 +479,7 @@ def _default_run_daily(
         report_cutoff,
         dependencies,
         run_id=f"formal-{trade_date.isoformat()}",
+        require_human_acceptance=require_human_acceptance,
     )
 
 

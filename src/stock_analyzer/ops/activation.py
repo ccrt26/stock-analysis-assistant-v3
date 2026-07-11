@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import os
 import shutil
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Protocol
 
@@ -19,6 +21,17 @@ from stock_analyzer.storage.evidence_store import LocalEvidenceStore
 
 class ActivationError(RuntimeError):
     pass
+
+
+@dataclass(frozen=True)
+class PreparedReportCandidate:
+    run_id: str
+    candidate_root: Path
+    artifact_hashes: dict[str, str]
+    candidate_hash: str
+    ledger_rows_hash: str
+    narrative_hash: str
+    receipt: RunReceipt
 
 
 class FormalLedger(Protocol):
@@ -197,13 +210,37 @@ class FormalActivationCoordinator:
         pointer_payloads: dict[Path, bytes],
         advance_report_pointer: bool = True,
     ) -> RunReceipt:
+        candidate = self.prepare_candidate(
+            receipt,
+            render=render,
+            verify=verify,
+            ledger_rows=ledger_rows,
+            pointer_payloads=pointer_payloads,
+            advance_report_pointer=advance_report_pointer,
+        )
+        return self.activate_prepared_candidate(
+            candidate,
+            candidate.candidate_hash,
+        )
+
+    def prepare_candidate(
+        self,
+        receipt: RunReceipt,
+        *,
+        render: Callable[[Path], None],
+        verify: Callable[[Path, dict[str, str]], bool],
+        ledger_rows: tuple[dict[str, Any], ...],
+        pointer_payloads: dict[Path, bytes],
+        advance_report_pointer: bool = True,
+    ) -> PreparedReportCandidate:
         controller = FormalRunController.resume(self.evidence_store, receipt.run_id)
         if controller.receipt.state not in {
             FormalRunState.ANALYZING,
             FormalRunState.FAILED_RETRYABLE,
         }:
             raise ActivationError(
-                f"activation requires ANALYZING or FAILED_RETRYABLE, got {controller.receipt.state.value}"
+                "candidate preparation requires ANALYZING or FAILED_RETRYABLE, "
+                f"got {controller.receipt.state.value}"
             )
         staging = self.report_root / ".staging" / receipt.run_id
         try:
@@ -222,9 +259,87 @@ class FormalActivationCoordinator:
             if verify(staging, artifact_hashes) is not True:
                 raise ActivationError("verify rejected staged artifacts")
 
+            pointer_records = self._pointer_records(pointer_payloads)
+            ledger_rows_hash = hash_ledger_rows(ledger_rows)
+            narrative_hash = _candidate_narrative_hash(staging)
+            candidate_core = {
+                "run_id": receipt.run_id,
+                "receipt_hash": formal_receipt_hash(controller.receipt),
+                "artifact_hashes": dict(sorted(artifact_hashes.items())),
+                "ledger_rows_hash": ledger_rows_hash,
+                "narrative_hash": narrative_hash,
+                "pointer_hashes": {
+                    item["relative_path"]: item["payload_hash"]
+                    for item in pointer_records
+                },
+                "advance_report_pointer": advance_report_pointer,
+            }
+            candidate_hash = _hash(candidate_core)
+            bundle = {
+                **candidate_core,
+                "candidate_hash": candidate_hash,
+                "ledger_rows": list(ledger_rows),
+                "pointer_payloads": pointer_records,
+            }
+            self.evidence_store.save_report_candidate_bundle(receipt.run_id, bundle)
+            awaiting = controller.transition(
+                FormalRunState.AWAITING_HUMAN_ACCEPTANCE
+            )
+            return PreparedReportCandidate(
+                run_id=receipt.run_id,
+                candidate_root=staging,
+                artifact_hashes=artifact_hashes,
+                candidate_hash=candidate_hash,
+                ledger_rows_hash=ledger_rows_hash,
+                narrative_hash=narrative_hash,
+                receipt=awaiting,
+            )
+        except Exception as exc:
+            self._mark_retryable(controller)
+            if isinstance(exc, ActivationError):
+                raise
+            raise ActivationError(str(exc)) from exc
+
+    def load_prepared_candidate(self, run_id: str) -> PreparedReportCandidate:
+        bundle = self.evidence_store.report_candidate_bundle(run_id)
+        receipt = self.evidence_store.latest_run_receipt(run_id)
+        return PreparedReportCandidate(
+            run_id=run_id,
+            candidate_root=self.report_root / ".staging" / run_id,
+            artifact_hashes=dict(bundle.get("artifact_hashes") or {}),
+            candidate_hash=str(bundle.get("candidate_hash") or ""),
+            ledger_rows_hash=str(bundle.get("ledger_rows_hash") or ""),
+            narrative_hash=str(bundle.get("narrative_hash") or ""),
+            receipt=receipt,
+        )
+
+    def activate_prepared_candidate(
+        self,
+        candidate: PreparedReportCandidate,
+        expected_candidate_hash: str,
+    ) -> RunReceipt:
+        controller = FormalRunController.resume(
+            self.evidence_store,
+            candidate.run_id,
+        )
+        if controller.receipt.state is not FormalRunState.AWAITING_HUMAN_ACCEPTANCE:
+            raise ActivationError("candidate is not awaiting human acceptance")
+        bundle = self.evidence_store.report_candidate_bundle(candidate.run_id)
+        self._validate_candidate_bundle(
+            candidate,
+            bundle,
+            expected_candidate_hash,
+        )
+        ledger_rows = tuple(bundle["ledger_rows"])
+        pointer_payloads = self._decode_pointer_records(
+            bundle["pointer_payloads"]
+        )
+        advance_report_pointer = bool(bundle["advance_report_pointer"])
+        artifact_hashes = dict(bundle["artifact_hashes"])
+        try:
             controller.transition(FormalRunState.COMMITTING)
             receipt_hash = formal_receipt_hash(controller.receipt)
-            expected_pending_hash = hash_ledger_rows(ledger_rows)
+            expected_pending_hash = str(bundle["ledger_rows_hash"])
             self._inject("ledger_prepare")
             final_state = (
                 FormalRunState.REPORT_GENERATED
@@ -237,20 +352,31 @@ class FormalActivationCoordinator:
                 final_state,
             )
             pending_id = self.ledger.prepare_formal_run(
-                receipt.run_id,
+                candidate.run_id,
                 receipt_hash,
                 ledger_rows,
             )
             if self.ledger.pending_hash(pending_id) != expected_pending_hash:
                 raise ActivationError("pending hash mismatch")
-            activation_id = f"activation-{_hash({'run_id': receipt.run_id, 'receipt_hash': receipt_hash, 'pending_id': pending_id})}"
+            activation_id = (
+                "activation-"
+                + _hash(
+                    {
+                        "run_id": candidate.run_id,
+                        "receipt_hash": receipt_hash,
+                        "pending_id": pending_id,
+                    }
+                )
+            )
 
             self._inject("local_marker")
             _atomic_write(
-                self.report_root / ".activation" / f"{receipt.run_id}.pending.json",
+                self.report_root
+                / ".activation"
+                / f"{candidate.run_id}.pending.json",
                 _json_bytes(
                     {
-                        "run_id": receipt.run_id,
+                        "run_id": candidate.run_id,
                         "activation_id": activation_id,
                         "artifact_hashes": artifact_hashes,
                         "pending_id": pending_id,
@@ -260,21 +386,21 @@ class FormalActivationCoordinator:
 
             self._inject("ledger_activate")
             self.ledger.activate_formal_run(
-                receipt.run_id,
+                candidate.run_id,
                 pending_id,
                 activation_id,
             )
             if not self.ledger.verify_formal_run_active(
-                receipt.run_id,
+                candidate.run_id,
                 activation_id,
                 receipt_hash,
                 expected_pending_hash,
             ):
                 raise ActivationError("ledger activation strong readback failed")
 
-            immutable_root = self.report_root / ".formal-runs" / receipt.run_id
+            immutable_root = self.report_root / ".formal-runs" / candidate.run_id
             _preserve_immutable_artifacts(
-                staging,
+                candidate.candidate_root,
                 immutable_root,
                 artifact_hashes,
             )
@@ -293,7 +419,8 @@ class FormalActivationCoordinator:
                         and existing_payload != pointer_payload
                     ):
                         raise ActivationError(
-                            f"pointer payload conflicts with report artifact: {pointer_path}"
+                            "pointer payload conflicts with report artifact: "
+                            f"{pointer_path}"
                         )
                     activated_payloads[pointer_path] = pointer_payload
                 _write_pointer_batch(activated_payloads)
@@ -303,26 +430,124 @@ class FormalActivationCoordinator:
                 no_recommendations=not advance_report_pointer,
             )
             _atomic_write(
-                self.report_root / ".activation" / f"{receipt.run_id}.active.json",
+                self.report_root
+                / ".activation"
+                / f"{candidate.run_id}.active.json",
                 _json_bytes(
                     {
-                        "run_id": receipt.run_id,
+                        "run_id": candidate.run_id,
                         "activation_id": activation_id,
                     }
                 ),
             )
             return completed
         except Exception as exc:
-            current = controller.receipt.state
-            if (
-                current != FormalRunState.FAILED_RETRYABLE
-                and FormalRunState.FAILED_RETRYABLE
-                in ALLOWED_TRANSITIONS.get(current, set())
-            ):
-                controller.transition(FormalRunState.FAILED_RETRYABLE)
+            self._mark_retryable(controller)
             if isinstance(exc, ActivationError):
                 raise
             raise ActivationError(str(exc)) from exc
+
+    def _validate_candidate_bundle(
+        self,
+        candidate: PreparedReportCandidate,
+        bundle: dict[str, Any],
+        expected_candidate_hash: str,
+    ) -> None:
+        stored_hash = bundle.get("candidate_hash")
+        expected_root = self.report_root / ".staging" / candidate.run_id
+        if candidate.candidate_root != expected_root:
+            raise ActivationError("candidate root mismatch")
+        if (
+            expected_candidate_hash != stored_hash
+            or candidate.candidate_hash != stored_hash
+        ):
+            raise ActivationError("candidate hash mismatch")
+        if (
+            candidate.artifact_hashes != bundle.get("artifact_hashes")
+            or candidate.ledger_rows_hash != bundle.get("ledger_rows_hash")
+            or candidate.narrative_hash != bundle.get("narrative_hash")
+        ):
+            raise ActivationError("candidate metadata mismatch")
+        current_receipt = self.evidence_store.latest_run_receipt(candidate.run_id)
+        if formal_receipt_hash(current_receipt) != bundle.get("receipt_hash"):
+            raise ActivationError("candidate receipt hash mismatch")
+        if hash_artifact_tree(candidate.candidate_root) != bundle.get(
+            "artifact_hashes"
+        ):
+            raise ActivationError("candidate artifact hash mismatch")
+        if hash_ledger_rows(tuple(bundle.get("ledger_rows") or ())) != bundle.get(
+            "ledger_rows_hash"
+        ):
+            raise ActivationError("candidate ledger rows hash mismatch")
+        if _candidate_narrative_hash(candidate.candidate_root) != bundle.get(
+            "narrative_hash"
+        ):
+            raise ActivationError("candidate narrative hash mismatch")
+        pointer_hashes = {
+            item["relative_path"]: hashlib.sha256(
+                base64.b64decode(item["payload_base64"], validate=True)
+            ).hexdigest()
+            for item in bundle.get("pointer_payloads") or []
+        }
+        candidate_core = {
+            "run_id": candidate.run_id,
+            "receipt_hash": bundle.get("receipt_hash"),
+            "artifact_hashes": bundle.get("artifact_hashes"),
+            "ledger_rows_hash": bundle.get("ledger_rows_hash"),
+            "narrative_hash": bundle.get("narrative_hash"),
+            "pointer_hashes": pointer_hashes,
+            "advance_report_pointer": bundle.get("advance_report_pointer"),
+        }
+        if _hash(candidate_core) != stored_hash:
+            raise ActivationError("candidate hash mismatch")
+
+    def _pointer_records(
+        self,
+        pointer_payloads: dict[Path, bytes],
+    ) -> list[dict[str, str]]:
+        records: list[dict[str, str]] = []
+        for path, payload in sorted(
+            pointer_payloads.items(), key=lambda item: str(item[0])
+        ):
+            try:
+                relative = Path(path).relative_to(self.report_root)
+            except ValueError as exc:
+                raise ActivationError(
+                    "pointer path must remain within the report root"
+                ) from exc
+            records.append(
+                {
+                    "relative_path": relative.as_posix(),
+                    "payload_base64": base64.b64encode(payload).decode("ascii"),
+                    "payload_hash": hashlib.sha256(payload).hexdigest(),
+                }
+            )
+        return records
+
+    def _decode_pointer_records(
+        self,
+        records: list[dict[str, str]],
+    ) -> dict[Path, bytes]:
+        payloads: dict[Path, bytes] = {}
+        for item in records:
+            relative = Path(item["relative_path"])
+            if relative.is_absolute() or ".." in relative.parts:
+                raise ActivationError("candidate pointer path is unsafe")
+            payloads[self.report_root / relative] = base64.b64decode(
+                item["payload_base64"],
+                validate=True,
+            )
+        return payloads
+
+    @staticmethod
+    def _mark_retryable(controller: FormalRunController) -> None:
+        current = controller.receipt.state
+        if (
+            current != FormalRunState.FAILED_RETRYABLE
+            and FormalRunState.FAILED_RETRYABLE
+            in ALLOWED_TRANSITIONS.get(current, set())
+        ):
+            controller.transition(FormalRunState.FAILED_RETRYABLE)
 
     def _inject(self, point: str) -> None:
         if self.failure_point == point:
@@ -406,6 +631,24 @@ def _preserve_immutable_artifacts(
         raise ActivationError("immutable formal artifact copy hash mismatch")
 
 
+def _candidate_narrative_hash(candidate_root: Path) -> str:
+    latest_paths = (
+        candidate_root / "data" / "latest.json",
+        candidate_root / "latest.json",
+    )
+    for path in latest_paths:
+        if not path.is_file():
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ActivationError("candidate latest JSON is invalid") from exc
+        if not isinstance(payload, dict):
+            raise ActivationError("candidate latest JSON must be an object")
+        return _hash(payload.get("formal_narrative"))
+    raise ActivationError("candidate latest JSON is missing")
+
+
 def _hash(value: Any) -> str:
     return hashlib.sha256(_canonical_json(value).encode("utf-8")).hexdigest()
 
@@ -444,6 +687,7 @@ __all__ = [
     "FormalActivationCoordinator",
     "FormalLedger",
     "InMemoryFormalLedger",
+    "PreparedReportCandidate",
     "activation_markers_agree",
     "formal_receipt_hash",
     "hash_artifact_tree",

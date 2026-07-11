@@ -120,6 +120,7 @@ class FormalRunResult:
     candidate_set: CandidateSet | None = None
     analysis: FormalAnalysisOutput | None = None
     narrative: Any = None
+    prepared_candidate: Any = None
 
 
 ALLOWED_TRANSITIONS: dict[FormalRunState, set[FormalRunState]] = {
@@ -180,6 +181,12 @@ ALLOWED_TRANSITIONS: dict[FormalRunState, set[FormalRunState]] = {
         FormalRunState.FAILED_NEEDS_HUMAN,
     },
     FormalRunState.VERIFYING: {
+        FormalRunState.AWAITING_HUMAN_ACCEPTANCE,
+        FormalRunState.COMMITTING,
+        FormalRunState.FAILED_RETRYABLE,
+        FormalRunState.FAILED_NEEDS_HUMAN,
+    },
+    FormalRunState.AWAITING_HUMAN_ACCEPTANCE: {
         FormalRunState.COMMITTING,
         FormalRunState.FAILED_RETRYABLE,
         FormalRunState.FAILED_NEEDS_HUMAN,
@@ -383,6 +390,7 @@ def run_formal_strategy_v2(
     report_cutoff: datetime,
     dependencies: FormalPipelineDependencies,
     run_id: str | None = None,
+    require_human_acceptance: bool = False,
 ) -> FormalRunResult:
     if report_cutoff.tzinfo is None or report_cutoff.utcoffset() is None:
         raise ValueError("report_cutoff must be timezone-aware")
@@ -524,6 +532,23 @@ def run_formal_strategy_v2(
                 staging,
                 artifact_hashes,
                 dependencies.evidence_store.latest_run_receipt(effective_run_id),
+            )
+
+        if require_human_acceptance:
+            prepared = coordinator.prepare_candidate(
+                controller.receipt,
+                render=render,
+                verify=verify,
+                ledger_rows=analysis.ledger_rows,
+                pointer_payloads=analysis.pointer_payloads,
+                advance_report_pointer=analysis.has_publishable_output,
+            )
+            return FormalRunResult(
+                receipt=prepared.receipt,
+                candidate_set=candidate_set,
+                analysis=analysis,
+                narrative=narrative,
+                prepared_candidate=prepared,
             )
 
         completed = coordinator.activate(

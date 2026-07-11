@@ -325,6 +325,21 @@ class LocalEvidenceStore:
             _read_json(self._candidate_set_path(candidate_set_id))
         )
 
+    def save_report_candidate_bundle(
+        self,
+        run_id: str,
+        bundle: dict[str, Any],
+    ) -> Path:
+        path = self._report_candidate_path(run_id)
+        _write_immutable(path, _json_bytes(bundle))
+        return path
+
+    def report_candidate_bundle(self, run_id: str) -> dict[str, Any]:
+        value = _read_json(self._report_candidate_path(run_id))
+        if not isinstance(value, dict) or value.get("run_id") != run_id:
+            raise ValueError("formal report candidate bundle mismatch")
+        return value
+
     def _canonical_path(
         self,
         group_id: AcquisitionGroupId,
@@ -356,6 +371,10 @@ class LocalEvidenceStore:
     def _candidate_set_path(self, candidate_set_id: str) -> Path:
         _validate_id(candidate_set_id)
         return self.root / "candidate_sets" / f"{candidate_set_id}.json"
+
+    def _report_candidate_path(self, run_id: str) -> Path:
+        _validate_id(run_id)
+        return self.root / "report_candidates" / f"{run_id}.json"
 
 
 def _validate_id(value: str) -> None:

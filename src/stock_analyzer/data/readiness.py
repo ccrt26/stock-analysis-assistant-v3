@@ -41,6 +41,7 @@ class FormalRunState(str, Enum):
     ANALYZING = "analyzing"
     RENDERING = "rendering"
     VERIFYING = "verifying"
+    AWAITING_HUMAN_ACCEPTANCE = "awaiting_human_acceptance"
     COMMITTING = "committing"
     ANALYSIS_COMPLETE_NO_RECOMMENDATIONS = "analysis_complete_no_recommendations"
     REPORT_GENERATED = "report_generated"

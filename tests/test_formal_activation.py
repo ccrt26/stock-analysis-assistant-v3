@@ -70,6 +70,66 @@ def test_pending_ledger_rows_are_invisible_until_both_markers_agree():
     assert ledger.visible_rows("run-1", local_activation_id=activation_id) == list(rows)
 
 
+def test_prepare_candidate_preserves_active_report_and_ledger(tmp_path):
+    controller = _analyzing_controller(tmp_path, run_id="human-gated")
+    ledger = InMemoryFormalLedger()
+    reports = tmp_path / "reports"
+    reports.mkdir(exist_ok=True)
+    prior = reports / "index.html"
+    prior.write_bytes(b"prior-report")
+    coordinator = FormalActivationCoordinator(reports, controller.store, ledger)
+
+    candidate = coordinator.prepare_candidate(
+        controller.receipt,
+        render=_render,
+        verify=_verify,
+        ledger_rows=({"kind": "recommendation", "ts_code": "600000.SH"},),
+        pointer_payloads={},
+    )
+
+    assert candidate.receipt.state is FormalRunState.AWAITING_HUMAN_ACCEPTANCE
+    assert prior.read_bytes() == b"prior-report"
+    assert ledger.active == {}
+    assert ledger.pending == {}
+    assert candidate.candidate_root.is_dir()
+
+
+def test_activation_requires_exact_candidate_hash_and_does_not_rerender(tmp_path):
+    controller = _analyzing_controller(tmp_path, run_id="exact-human-candidate")
+    ledger = InMemoryFormalLedger()
+    reports = tmp_path / "reports"
+    render_calls: list[str] = []
+
+    def render(staging):
+        render_calls.append("render")
+        _render(staging)
+
+    coordinator = FormalActivationCoordinator(reports, controller.store, ledger)
+    candidate = coordinator.prepare_candidate(
+        controller.receipt,
+        render=render,
+        verify=_verify,
+        ledger_rows=({"kind": "recommendation", "ts_code": "600000.SH"},),
+        pointer_payloads={},
+    )
+    assert render_calls == ["render"]
+
+    with pytest.raises(ActivationError, match="candidate hash"):
+        coordinator.activate_prepared_candidate(candidate, "0" * 64)
+    assert ledger.active == {}
+
+    completed = coordinator.activate_prepared_candidate(
+        candidate,
+        candidate.candidate_hash,
+    )
+    assert completed.state is FormalRunState.REPORT_GENERATED
+    assert render_calls == ["render"]
+    assert ledger.activation_count == 1
+    assert (reports / "index.html").read_bytes() == (
+        candidate.candidate_root / "index.html"
+    ).read_bytes()
+
+
 @pytest.mark.parametrize(
     "failure_point",
     ["render", "verify", "ledger_prepare", "local_marker", "ledger_activate", "pointer"],

@@ -469,6 +469,63 @@ def test_run_daily_with_supabase_config_calls_formal_entry(tmp_path, monkeypatch
     assert repo.save_calls == []
 
 
+def test_prepare_formal_candidate_requires_human_gate_and_reports_awaiting_state(
+    tmp_path,
+    monkeypatch,
+):
+    repo = RecordingRepository()
+    captured = {}
+    candidate = SimpleNamespace(
+        run_id="formal-2026-07-07",
+        candidate_root=tmp_path / "reports" / ".staging" / "formal-2026-07-07",
+        candidate_hash="a" * 64,
+    )
+    monkeypatch.setenv("SUPABASE_URL", "https://supabase.example.test")
+    monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "fake-service-role-key")
+    monkeypatch.setattr(
+        "stock_analyzer.cli._analysis_repository",
+        lambda config, **kwargs: repo,
+    )
+
+    def fake_run(project_root, repository, trade_date, **kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(
+            receipt=SimpleNamespace(
+                state=FormalRunState.AWAITING_HUMAN_ACCEPTANCE
+            ),
+            prepared_candidate=candidate,
+        )
+
+    monkeypatch.setattr("stock_analyzer.cli._default_run_daily", fake_run)
+
+    result = CliRunner().invoke(
+        app,
+        ["prepare-formal-report-candidate", "--trade-date", "2026-07-07"],
+    )
+
+    assert result.exit_code == 0
+    assert captured["require_human_acceptance"] is True
+    assert "automated_gates_passed: true" in result.output
+    assert "awaiting_human_readability_acceptance" in result.output
+    assert "a" * 64 in result.output
+
+
+def test_activate_formal_candidate_requires_explicit_readability_acceptance():
+    result = CliRunner().invoke(
+        app,
+        [
+            "activate-formal-report-candidate",
+            "--run-id",
+            "formal-2026-07-07",
+            "--expected-candidate-hash",
+            "a" * 64,
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "--accept-readability is required" in result.output
+
+
 def test_run_daily_allow_data_insufficient_cannot_bypass_formal_block(
     tmp_path,
     monkeypatch,
