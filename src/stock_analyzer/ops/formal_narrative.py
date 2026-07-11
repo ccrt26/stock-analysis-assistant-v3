@@ -213,36 +213,59 @@ def validate_formal_narrative(payload: Any, narrative: FormalNarrative) -> Forma
         raise ValueError("formal narrative stock set does not match formal payload")
     request_by_code = {item.ts_code: item for item in requests}
     for stock in narrative.stocks:
-        request = request_by_code[stock.ts_code]
-        if stock.evidence_id != request.evidence_id:
-            raise ValueError("formal narrative evidence whitelist mismatch")
-        lock = request.decision_lock
-        locked_fields = (
-            "action",
-            "position_min_pct",
-            "position_max_pct",
-            "risk_if_wrong",
-            "required_confirmation",
-            "observation_conditions",
-            "invalidation_conditions",
-            "exit_conditions",
-        )
-        if any(getattr(stock, field) != getattr(lock, field) for field in locked_fields):
-            raise ValueError("formal narrative violates the Strategy V2 decision lock")
-        allowed = set(request.allowed_evidence_ids)
-        points = [stock.analysis_summary, *stock.core_reasons, *stock.five_day_progress]
-        if any(set(point.evidence_ids) - allowed for point in points):
-            raise ValueError("formal narrative evidence whitelist mismatch")
-        allowed_numbers = _numeric_tokens(
-            request.model_dump_json(exclude={"knowledge_context"})
-        )
-        for point in points:
-            if _numeric_tokens(point.text) - allowed_numbers:
-                raise ValueError("formal narrative numeric whitelist mismatch")
-    all_package_ids = {item.evidence_id for item in requests}
-    if set(narrative.market.evidence_ids) - all_package_ids:
-        raise ValueError("market narrative evidence whitelist mismatch")
+        validate_stock_narrative(request_by_code[stock.ts_code], stock)
+    validate_market_narrative(requests, narrative.market)
     return narrative
+
+
+def validate_stock_narrative(
+    request: StockAnalysisRequest,
+    stock: StockNarrative,
+) -> StockNarrative:
+    if stock.ts_code != request.ts_code or stock.evidence_id != request.evidence_id:
+        raise ValueError("formal narrative evidence whitelist mismatch")
+    lock = request.decision_lock
+    locked_fields = (
+        "action",
+        "position_min_pct",
+        "position_max_pct",
+        "risk_if_wrong",
+        "required_confirmation",
+        "observation_conditions",
+        "invalidation_conditions",
+        "exit_conditions",
+    )
+    if any(getattr(stock, field) != getattr(lock, field) for field in locked_fields):
+        raise ValueError("formal narrative violates the Strategy V2 decision lock")
+    allowed = set(request.allowed_evidence_ids)
+    points = [stock.analysis_summary, *stock.core_reasons, *stock.five_day_progress]
+    if any(set(point.evidence_ids) - allowed for point in points):
+        raise ValueError("formal narrative evidence whitelist mismatch")
+    allowed_numbers = _numeric_tokens(
+        request.model_dump_json(exclude={"knowledge_context"})
+    )
+    if any(_numeric_tokens(point.text) - allowed_numbers for point in points):
+        raise ValueError("formal narrative numeric whitelist mismatch")
+    return stock
+
+
+def validate_market_narrative(
+    requests: tuple[StockAnalysisRequest, ...],
+    market: MarketNarrative,
+) -> MarketNarrative:
+    all_package_ids = {item.evidence_id for item in requests}
+    if set(market.evidence_ids) - all_package_ids:
+        raise ValueError("market narrative evidence whitelist mismatch")
+    allowed_numbers: set[str] = set()
+    for request in requests:
+        allowed_numbers.update(
+            _numeric_tokens(
+                request.model_dump_json(exclude={"knowledge_context"})
+            )
+        )
+    if _numeric_tokens(market.summary) - allowed_numbers:
+        raise ValueError("market narrative numeric whitelist mismatch")
+    return market
 
 
 def _numeric_tokens(value: str) -> set[str]:
@@ -276,4 +299,6 @@ __all__ = [
     "StockNarrative",
     "build_stock_analysis_requests",
     "validate_formal_narrative",
+    "validate_market_narrative",
+    "validate_stock_narrative",
 ]

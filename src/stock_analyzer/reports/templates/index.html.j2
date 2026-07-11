@@ -84,17 +84,15 @@
       {% endfor %}
     </section>
 
-    {% if focus_daily_updates or focus_entry_theses %}
+    {% if focus_narratives %}
     <section>
       <h2>重点股票五日进展</h2>
-      {% for item in focus_daily_updates %}
-      {% set narrative = narrative_by_code.get(item.ts_code) %}
-      {% if narrative %}
+      {% for narrative in focus_narratives %}
       <article data-narrative-marker="{{ narrative.narrative_marker }}">
-        <h3>{{ item.name }} {{ item.ts_code }}</h3>
+        <h3><a href="daily/{{ trade_date.isoformat() }}/stocks/{{ narrative.ts_code }}.html">{{ stock_names_by_code.get(narrative.ts_code, narrative.ts_code) }} {{ narrative.ts_code }}</a></h3>
+        <p>{{ narrative.analysis_summary.text }}</p>
         <ul>{% for point in narrative.five_day_progress %}<li>{{ point.text }}</li>{% endfor %}</ul>
       </article>
-      {% endif %}
       {% endfor %}
     </section>
     {% endif %}

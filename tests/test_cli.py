@@ -505,7 +505,7 @@ def test_prepare_formal_candidate_requires_human_gate_and_reports_awaiting_state
 
     assert result.exit_code == 0
     assert captured["require_human_acceptance"] is True
-    assert captured["run_id"] == "formal-report-readability-2026-07-07"
+    assert captured["run_id"].startswith("formal-report-readability-2026-07-07-")
     assert "automated_gates_passed: true" in result.output
     assert "awaiting_human_readability_acceptance" in result.output
     assert "a" * 64 in result.output

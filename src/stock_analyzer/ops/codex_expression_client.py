@@ -17,6 +17,8 @@ from stock_analyzer.ops.formal_narrative import (
     StockNarrative,
     build_stock_analysis_requests,
     validate_formal_narrative,
+    validate_market_narrative,
+    validate_stock_narrative,
 )
 
 
@@ -73,10 +75,14 @@ class CodexExpressionClient:
     def express(self, payload: Any) -> FormalNarrative:
         requests = build_stock_analysis_requests(payload)
         stocks = [
-            self._invoke(
+            self._invoke_validated(
                 schema=StockNarrative.model_json_schema(),
                 response_type=StockNarrative,
                 prompt=self._stock_prompt(request.model_dump(mode="json")),
+                validator=lambda stock, request=request: validate_stock_narrative(
+                    request,
+                    stock,
+                ),
             )
             for request in requests
         ]
@@ -93,13 +99,43 @@ class CodexExpressionClient:
             }
             for request in requests
         ]
-        market = self._invoke(
+        market = self._invoke_validated(
             schema=MarketNarrative.model_json_schema(),
             response_type=MarketNarrative,
             prompt=self._market_prompt(market_context),
+            validator=lambda result: validate_market_narrative(requests, result),
         )
         narrative = FormalNarrative(market=market, stocks=stocks)
         return validate_formal_narrative(payload, narrative)
+
+    def _invoke_validated(
+        self,
+        *,
+        schema: dict[str, Any],
+        response_type,
+        prompt: str,
+        validator,
+    ):
+        current_prompt = prompt
+        for attempt in range(2):
+            result = self._invoke(
+                schema=schema,
+                response_type=response_type,
+                prompt=current_prompt,
+            )
+            try:
+                return validator(result)
+            except ValueError as exc:
+                if attempt == 1:
+                    raise CodexExpressionError(
+                        "formal Codex analysis violated evidence constraints"
+                    ) from exc
+                current_prompt = self._correction_prompt(
+                    original_prompt=prompt,
+                    previous_output=result.model_dump(mode="json"),
+                    failure=str(exc),
+                )
+        raise CodexExpressionError("formal Codex analysis validation failed")
 
     def _invoke(self, *, schema: dict[str, Any], response_type, prompt: str):
         try:
@@ -181,6 +217,29 @@ class CodexExpressionClient:
                     "输出必须严格符合给定 JSON Schema。",
                 ],
                 "input": context,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+
+    @staticmethod
+    def _correction_prompt(
+        *,
+        original_prompt: str,
+        previous_output: dict[str, Any],
+        failure: str,
+    ) -> str:
+        return json.dumps(
+            {
+                "instructions": [
+                    "上一次输出未通过正式约束校验，只修正违规内容。",
+                    "删除输入中不存在的数字、事实或证据引用。",
+                    "decision_lock 的每个字段必须逐字逐值保持不变。",
+                    "输出必须严格符合给定 JSON Schema。",
+                ],
+                "validation_failure": failure,
+                "original_request": json.loads(original_prompt),
+                "previous_output": previous_output,
             },
             ensure_ascii=False,
             sort_keys=True,

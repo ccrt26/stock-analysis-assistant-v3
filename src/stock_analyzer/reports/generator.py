@@ -78,6 +78,21 @@ def render_reports(
     narrative_by_code = {
         item.ts_code: item for item in formal_narrative.stocks
     } if formal_narrative else {}
+    snapshot_by_code = {item.ts_code: item for item in strategy_v2_snapshots}
+    card_codes = {item.ts_code for item in strategy_v2_cards}
+    focus_codes = {
+        item.ts_code
+        for item in (*focus_states, *focus_entry_theses, *focus_daily_updates)
+    }
+    focus_codes.update(set(narrative_by_code) - card_codes)
+    focus_narratives = [
+        narrative_by_code[code]
+        for code in narrative_by_code
+        if code in focus_codes
+    ]
+    stock_names_by_code = {
+        code: snapshot.name for code, snapshot in snapshot_by_code.items()
+    }
     recommendation_details = _recommendation_details(
         recommendations,
         report_date,
@@ -156,6 +171,8 @@ def render_reports(
         report_mode=payload["report_mode"],
         formal_narrative=formal_narrative,
         narrative_by_code=narrative_by_code,
+        focus_narratives=focus_narratives,
+        stock_names_by_code=stock_names_by_code,
     )
     (output_dir / "index.html").write_text(index_html, encoding="utf-8")
 
@@ -175,6 +192,8 @@ def render_reports(
         report_mode=payload["report_mode"],
         formal_narrative=formal_narrative,
         narrative_by_code=narrative_by_code,
+        focus_narratives=focus_narratives,
+        stock_names_by_code=stock_names_by_code,
     )
     (daily_dir / "index.html").write_text(daily_index_html, encoding="utf-8")
 
@@ -218,6 +237,32 @@ def render_reports(
             stock_narrative=narrative_by_code.get(card.ts_code),
         )
         (stocks_dir / f"{card.ts_code}.html").write_text(
+            stock_html,
+            encoding="utf-8",
+        )
+    rendered_codes = {
+        *strategy_codes,
+        *(item.ts_code for item in recommendations),
+    }
+    for stock_narrative in formal_narrative.stocks if formal_narrative else []:
+        if stock_narrative.ts_code in rendered_codes:
+            continue
+        snapshot = snapshot_by_code.get(stock_narrative.ts_code)
+        if snapshot is None:
+            raise ValueError("formal narrative stock snapshot is required")
+        stock_html = _render_stock_html(
+            stock_name=f"{snapshot.name} {snapshot.ts_code}",
+            conclusion=snapshot.thesis,
+            recommendation=None,
+            detail=None,
+            focus_state=_focus_state_for(snapshot.ts_code, focus_states),
+            strategy_v2_card=_strategy_v2_snapshot_card_view(snapshot),
+            strategy_v2_snapshot=snapshot,
+            is_fixture=fixture_mode,
+            fixture_warning=FIXTURE_REPORT_WARNING,
+            stock_narrative=stock_narrative,
+        )
+        (stocks_dir / f"{snapshot.ts_code}.html").write_text(
             stock_html,
             encoding="utf-8",
         )
@@ -323,6 +368,8 @@ def _render_empty_operational_notice(
         report_mode=report_mode,
         formal_narrative=None,
         narrative_by_code={},
+        focus_narratives=[],
+        stock_names_by_code={},
     )
     (output_dir / "index.html").write_text(html, encoding="utf-8")
 
@@ -355,6 +402,8 @@ def _render_index_html(
     report_mode: str,
     formal_narrative: Optional[FormalNarrative],
     narrative_by_code: dict[str, StockNarrative],
+    focus_narratives: list[StockNarrative],
+    stock_names_by_code: dict[str, str],
 ) -> str:
     if Environment is not None:
         return _template_env().get_template("index.html.j2").render(
@@ -371,6 +420,8 @@ def _render_index_html(
             report_mode=report_mode,
             formal_narrative=formal_narrative,
             narrative_by_code=narrative_by_code,
+            focus_narratives=focus_narratives,
+            stock_names_by_code=stock_names_by_code,
         )
     return _render_index_html_without_jinja(
         trade_date,
@@ -386,6 +437,8 @@ def _render_index_html(
         report_mode,
         formal_narrative,
         narrative_by_code,
+        focus_narratives,
+        stock_names_by_code,
     )
 
 
@@ -453,6 +506,8 @@ def _render_index_html_without_jinja(
     report_mode: str,
     formal_narrative: Optional[FormalNarrative],
     narrative_by_code: dict[str, StockNarrative],
+    focus_narratives: list[StockNarrative],
+    stock_names_by_code: dict[str, str],
 ) -> str:
     if data_unavailable_notice:
         is_data_insufficient = report_mode == "data_insufficient"
@@ -549,7 +604,27 @@ def _render_index_html_without_jinja(
                 [*narrative.invalidation_conditions, *narrative.exit_conditions],
             )
             lines.append("</article>")
-        lines.extend(["</section>", '<details class="audit-details">', "<summary>审计详情</summary>"])
+        lines.append("</section>")
+        if focus_narratives:
+            lines.extend(["<section>", "<h2>重点股票五日进展</h2>"])
+            for narrative in focus_narratives:
+                code = narrative.ts_code
+                lines.extend(
+                    [
+                        f'<article data-narrative-marker="{_html(narrative.narrative_marker)}">',
+                        f"<h3>{_html(stock_names_by_code.get(code, code))} {_html(code)}</h3>",
+                        f"<p>{_html(narrative.analysis_summary.text)}</p>",
+                    ]
+                )
+                _append_html_list(
+                    lines,
+                    [point.text for point in narrative.five_day_progress],
+                )
+                lines.append("</article>")
+            lines.append("</section>")
+        lines.extend(
+            ['<details class="audit-details">', "<summary>审计详情</summary>"]
+        )
 
     lines.extend(["<section>", "<h2>今日推荐</h2>"])
     if strategy_v2_cards:
@@ -935,6 +1010,26 @@ def _strategy_v2_card_view(
         ]
     payload["stock_page"] = stock_page
     return payload
+
+
+def _strategy_v2_snapshot_card_view(snapshot: StrategyEvidenceSnapshot) -> dict:
+    action = snapshot.action
+    return {
+        "action": _strategy_display_text(action.decision.value),
+        "position_min_pct": action.position_min_pct,
+        "position_max_pct": action.position_max_pct,
+        "action_reasoning": [_strategy_display_text(snapshot.thesis)],
+        "required_confirmation": [
+            _strategy_display_text(item) for item in action.required_confirmation
+        ],
+        "invalidation_conditions": [
+            _strategy_display_text(item) for item in action.invalidation_conditions
+        ],
+        "staging_plan": [
+            _strategy_display_text(item) for item in action.staging_plan
+        ],
+        "risk_if_wrong": _strategy_display_text(action.risk_if_wrong),
+    }
 
 
 def _strategy_v2_snapshot_for_card(

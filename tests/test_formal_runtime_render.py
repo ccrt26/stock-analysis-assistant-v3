@@ -34,6 +34,15 @@ def analysis_output():
     )
 
 
+def analysis_output_with_focus_only_stock():
+    return analyze_formal_inputs(
+        ready_receipt(),
+        candidate_set(ordered=(CODES[-1],), active=(CODES[0],)),
+        complete_payloads(),
+        InMemoryAnalysisRepository(),
+    )
+
+
 def rendering_receipt(output):
     return ready_receipt().model_copy(
         update={
@@ -256,6 +265,40 @@ def test_validated_narrative_is_visible_on_home_and_stock_pages(tmp_path):
         assert "三条核心理由" in html
         assert "买入或继续观察的条件" in html
         assert "失效和退出条件" in html
+
+
+def test_focus_only_narrative_is_visible_on_home_and_own_stock_page(tmp_path):
+    output = analysis_output_with_focus_only_stock()
+    receipt = rendering_receipt(output)
+    narrative = _valid_narrative(output.value)
+    recommendation_codes = {
+        item.ts_code for item in output.value.recommendation_cards
+    }
+    focus_only = next(
+        item for item in narrative.stocks if item.ts_code not in recommendation_codes
+    )
+
+    render_formal_report(tmp_path, receipt, output.value, narrative=narrative)
+
+    home = (tmp_path / "index.html").read_text(encoding="utf-8")
+    stock_path = (
+        tmp_path
+        / "daily"
+        / output.value.trade_date.isoformat()
+        / "stocks"
+        / f"{focus_only.ts_code}.html"
+    )
+    assert stock_path.is_file()
+    stock = stock_path.read_text(encoding="utf-8")
+    for html in (home, stock):
+        assert focus_only.narrative_marker in html
+        assert focus_only.analysis_summary.text in html
+    verify_receipt = receipt.model_copy(update={"state": FormalRunState.VERIFYING})
+    assert verify_staged_formal_report(
+        tmp_path,
+        hash_artifact_tree(tmp_path),
+        verify_receipt,
+    ) is True
 
 
 def test_user_view_precedes_collapsed_audit_details(tmp_path):

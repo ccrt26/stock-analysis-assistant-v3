@@ -104,6 +104,30 @@ def test_client_does_not_inherit_application_credentials(monkeypatch, tmp_path):
     assert "secret-sentinel" not in json.dumps(child_env)
 
 
+def test_client_retries_only_the_stock_that_violates_numeric_whitelist(tmp_path):
+    payload, narrative, _ = _recorded_outputs()
+    first = narrative.stocks[0]
+    invalid_point = first.analysis_summary.model_copy(
+        update={"text": "目标价为 99.99 元。"}
+    )
+    invalid_first = first.model_copy(update={"analysis_summary": invalid_point})
+    runner = RecordingRunner(
+        [
+            invalid_first.model_dump_json(),
+            first.model_dump_json(),
+            narrative.stocks[1].model_dump_json(),
+            narrative.market.model_dump_json(),
+        ]
+    )
+
+    result = CodexExpressionClient(runner=runner, temp_root=tmp_path).express(payload)
+
+    assert result == narrative
+    assert len(runner.calls) == 4
+    assert "previous_output" in runner.calls[1].input_text
+    assert narrative.stocks[1].ts_code not in runner.calls[1].input_text
+
+
 @pytest.mark.parametrize(
     "failure",
     ["nonzero", "timeout", "missing_output", "invalid_json"],

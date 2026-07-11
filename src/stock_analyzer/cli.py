@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 from typing import Optional
+import uuid
 from zoneinfo import ZoneInfo
 
 import typer
@@ -188,9 +189,18 @@ def prepare_formal_report_candidate(
             repository,
             parsed_trade_date,
             require_human_acceptance=True,
-            run_id=f"formal-report-readability-{parsed_trade_date.isoformat()}",
+            run_id=(
+                f"formal-report-readability-{parsed_trade_date.isoformat()}-"
+                f"{uuid.uuid4().hex}"
+            ),
         )
-    except (MissingSupabaseConfig, HumanInterventionJobError, RetryableJobError, RuntimeError) as exc:
+    except (
+        MissingSupabaseConfig,
+        HumanInterventionJobError,
+        RetryableJobError,
+        RuntimeError,
+        ValueError,
+    ) as exc:
         _fail(str(exc))
     if result.receipt.state is not FormalRunState.AWAITING_HUMAN_ACCEPTANCE:
         _fail(
