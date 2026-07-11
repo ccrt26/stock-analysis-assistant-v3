@@ -96,22 +96,27 @@ class AtomicGroupAcquirer:
         primary: AcquisitionRoute,
         backup: AcquisitionRoute,
     ) -> AcquisitionResult:
-        capability_reasons = self._capability_reasons(
-            contract,
-            primary,
-            backup,
-        )
-        if capability_reasons:
-            raise AcquisitionBlocked(contract.group_id, (), capability_reasons)
-
         attempts: list[RouteAttempt] = []
-        primary_result = self._run_route(
+        primary_capability_reasons = self._route_capability_reasons(
             contract,
-            request,
             primary,
-            attempts,
-            retry_limit=self.primary_retry_limit,
+            RouteKind.PRIMARY,
         )
+        primary_result = (
+            None
+            if primary_capability_reasons
+            else self._run_route(
+                contract,
+                request,
+                primary,
+                attempts,
+                retry_limit=self.primary_retry_limit,
+            )
+        )
+        if primary_capability_reasons:
+            attempts.append(
+                _capability_attempt(primary, primary_capability_reasons)
+            )
         if primary_result is not None:
             payload, validation = primary_result
             return AcquisitionResult(
@@ -121,13 +126,26 @@ class AtomicGroupAcquirer:
                 used_backup=False,
             )
 
-        backup_result = self._run_route(
+        backup_capability_reasons = self._route_capability_reasons(
             contract,
-            request,
             backup,
-            attempts,
-            retry_limit=self.primary_retry_limit,
+            RouteKind.BACKUP,
         )
+        backup_result = (
+            None
+            if backup_capability_reasons
+            else self._run_route(
+                contract,
+                request,
+                backup,
+                attempts,
+                retry_limit=self.primary_retry_limit,
+            )
+        )
+        if backup_capability_reasons:
+            attempts.append(
+                _capability_attempt(backup, backup_capability_reasons)
+            )
         if backup_result is not None:
             payload, validation = backup_result
             return AcquisitionResult(
@@ -152,29 +170,25 @@ class AtomicGroupAcquirer:
         )
 
     @staticmethod
-    def _capability_reasons(
+    def _route_capability_reasons(
         contract: AcquisitionGroupContract,
-        primary: AcquisitionRoute,
-        backup: AcquisitionRoute,
+        route: AcquisitionRoute,
+        expected_kind: RouteKind,
     ) -> tuple[str, ...]:
         reasons: list[str] = []
-        for route, expected_kind in (
-            (primary, RouteKind.PRIMARY),
-            (backup, RouteKind.BACKUP),
-        ):
-            capability = route.capability
-            if route.kind != expected_kind:
-                reasons.append(
-                    f"capability_kind_mismatch:{route.route_id}:{route.kind.value}"
-                )
-            if capability.route_id != route.route_id:
-                reasons.append(f"capability_route_mismatch:{route.route_id}")
-            if capability.group_id != contract.group_id:
-                reasons.append(f"capability_group_mismatch:{route.route_id}")
-            if capability.contract_version != contract.contract_version:
-                reasons.append(f"capability_contract_mismatch:{route.route_id}")
-            if not capability.approved:
-                reasons.append(f"capability_unproven:{route.route_id}")
+        capability = route.capability
+        if route.kind != expected_kind:
+            reasons.append(
+                f"capability_kind_mismatch:{route.route_id}:{route.kind.value}"
+            )
+        if capability.route_id != route.route_id:
+            reasons.append(f"capability_route_mismatch:{route.route_id}")
+        if capability.group_id != contract.group_id:
+            reasons.append(f"capability_group_mismatch:{route.route_id}")
+        if capability.contract_version != contract.contract_version:
+            reasons.append(f"capability_contract_mismatch:{route.route_id}")
+        if not capability.approved:
+            reasons.append(f"capability_unproven:{route.route_id}")
         return tuple(reasons)
 
     @staticmethod
@@ -251,6 +265,21 @@ class AtomicGroupAcquirer:
             )
             return None
         return None
+
+
+def _capability_attempt(
+    route: AcquisitionRoute,
+    reasons: tuple[str, ...],
+) -> RouteAttempt:
+    return RouteAttempt(
+        route_id=route.route_id,
+        route_kind=route.kind,
+        attempt=1,
+        status="failed",
+        classification=FailureClassification.PERMISSION,
+        message="route capability unavailable",
+        validation_reasons=reasons,
+    )
 
 
 __all__ = [

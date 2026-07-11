@@ -173,34 +173,32 @@ class RecordedAkshare:
                     }
                 ]
             )
-        if name == "stock_notice_report":
+        if name == "stock_zh_a_disclosure_report_cninfo":
+            columns = ("代码", "简称", "公告标题", "公告时间", "公告链接")
+            category = kwargs.get("category", "")
+            risk = {
+                "代码": "600000",
+                "简称": "浦发银行",
+                "公告标题": "关于重大事项的风险提示",
+                "公告时间": "2026-07-09 15:20:00",
+                "公告链接": "https://example.invalid/notice-1",
+            }
+            if category == "风险提示":
+                return pd.DataFrame([risk], columns=columns)
+            if category:
+                return pd.DataFrame(columns=columns)
             return pd.DataFrame(
                 [
+                    risk,
                     {
                         "代码": "600000",
-                        "名称": "浦发银行",
-                        "公告标题": "关于重大事项的风险提示",
-                        "公告类型": "风险提示",
-                        "公告日期": "2026-07-09",
-                        "网址": "https://example.invalid/notice-1",
+                        "简称": "浦发银行",
+                        "公告标题": "截止时间后的公告",
+                        "公告时间": "2026-07-10 19:00:00",
+                        "公告链接": "https://example.invalid/notice-after-cutoff",
                     },
-                    {
-                        "代码": "000001",
-                        "名称": "平安银行",
-                        "公告标题": "其他公告",
-                        "公告类型": "公司公告",
-                        "公告日期": "2026-07-09",
-                        "网址": "https://example.invalid/notice-2",
-                    },
-                    {
-                        "代码": "600000",
-                        "名称": "浦发银行",
-                        "公告标题": "未来公告",
-                        "公告类型": "公司公告",
-                        "公告日期": "2026-07-11",
-                        "网址": "https://example.invalid/notice-3",
-                    },
-                ]
+                ],
+                columns=columns,
             )
         if name == "stock_board_concept_name_em":
             return pd.DataFrame([{"排名": 1, "板块名称": "中特估", "板块代码": "BK1000"}])
@@ -223,8 +221,6 @@ def test_akshare_calendar_universe_uses_exchange_lists_and_refuses_unproven_miss
         "stock_info_sh_name_code",
         "stock_info_sz_name_code",
         "stock_info_bj_name_code",
-        "stock_info_sh_delist",
-        "stock_info_sz_delist",
         "stock_zh_a_spot_em",
     ]
     security = next(row for row in response.records if row["record_type"] == "security")
@@ -320,6 +316,27 @@ def test_akshare_market_uses_provider_calendar_for_next_trading_day_window():
     assert ak.calls[0][0] == "tool_trade_date_hist_sina"
 
 
+def test_akshare_historical_suspension_gap_keeps_route_with_61_observations():
+    history = RecordedAkshare()._default("stock_zh_a_hist", {})
+    history = history.drop(index=history.index[-2]).reset_index(drop=True)
+    ak = RecordedAkshare({"stock_zh_a_hist": history})
+
+    response = AkshareFormalEndpointClient(ak).fetch_market_decision(request())
+
+    equity = [row for row in response.records if row["record_type"] == "equity_bar"]
+    assert len(equity) == len(JULY_10_OFFICIAL_SESSIONS) - 1
+
+
+def test_akshare_only_60_observations_is_returned_for_feature_exclusion():
+    history = RecordedAkshare()._default("stock_zh_a_hist", {}).tail(60)
+    ak = RecordedAkshare({"stock_zh_a_hist": history})
+
+    response = AkshareFormalEndpointClient(ak).fetch_market_decision(request())
+
+    equity = [row for row in response.records if row["record_type"] == "equity_bar"]
+    assert len(equity) == 60
+
+
 def test_akshare_market_preserves_spot_valuation_units_and_unadjusted_history():
     ak = RecordedAkshare()
 
@@ -387,18 +404,94 @@ def test_akshare_candidate_fundamentals_normalizes_profile_and_financial_abstrac
     assert summary["revenue_yoy"] == 5.0
 
 
-def test_akshare_notice_report_filters_codes_categories_and_cutoff():
+def test_akshare_same_day_financial_date_without_precise_time_fails_closed():
+    financial = RecordedAkshare()._default("stock_financial_abstract_ths", {})
+    financial.loc[0, "公告日期"] = TARGET.isoformat()
+    ak = RecordedAkshare({"stock_financial_abstract_ths": financial})
+
+    with pytest.raises(
+        PermanentRouteFailure,
+        match="precise publication time",
+    ) as raised:
+        AkshareFormalEndpointClient(ak).fetch_candidate_fundamentals(request())
+
+    assert raised.value.classification is FailureClassification.INVALID_SEMANTICS
+
+
+def test_cninfo_disclosure_uses_precise_time_categories_and_cutoff():
     ak = RecordedAkshare()
 
     response = AkshareFormalEndpointClient(ak).fetch_official_events_risk(request())
 
-    assert [name for name, _ in ak.calls] == ["stock_notice_report"]
+    assert [name for name, _ in ak.calls] == [
+        "tool_trade_date_hist_sina",
+        "stock_zh_a_disclosure_report_cninfo",
+        "stock_zh_a_disclosure_report_cninfo",
+        "stock_zh_a_disclosure_report_cninfo",
+        "stock_zh_a_disclosure_report_cninfo",
+    ]
+    assert [kwargs["category"] for _, kwargs in ak.calls[1:]] == [
+        "",
+        "风险提示",
+        "特别处理和退市",
+        "退市整理期",
+    ]
     assert len(response.records) == 1
     event = response.records[0]
     assert event["ts_code"] == CODE
     assert event["event_type"] == "风险提示"
     assert event["hard_risk"] is True
+    assert event["publication_time"].hour == 15
+    assert response.source_names == (
+        "akshare.stock_zh_a_disclosure_report_cninfo",
+    )
     assert all(value <= CUTOFF for value in response.publication_times.values())
+
+
+def test_cninfo_known_zero_announcement_keyerror_is_proven_empty():
+    empty_selection = KeyError(
+        "None of [Index(['代码', '简称', '公告标题', '公告时间', "
+        "'announcementId', 'orgId'], dtype='str')] are in the [columns]"
+    )
+    ak = RecordedAkshare(
+        {"stock_zh_a_disclosure_report_cninfo": empty_selection}
+    )
+
+    response = AkshareFormalEndpointClient(ak).fetch_official_events_risk(request())
+
+    assert response.records == ()
+    assert response.coverage_codes == (CODE,)
+    assert response.coverage_proven is True
+
+
+def test_cninfo_unrecognized_keyerror_still_fails_schema():
+    ak = RecordedAkshare(
+        {"stock_zh_a_disclosure_report_cninfo": KeyError("new schema")}
+    )
+
+    with pytest.raises(PermanentRouteFailure) as raised:
+        AkshareFormalEndpointClient(ak).fetch_official_events_risk(request())
+
+    assert raised.value.classification is FailureClassification.SCHEMA
+
+
+def test_cninfo_date_only_publication_value_fails_point_in_time_semantics():
+    notices = RecordedAkshare()._default(
+        "stock_zh_a_disclosure_report_cninfo",
+        {"category": ""},
+    )
+    notices["公告时间"] = "2026-07-09"
+    ak = RecordedAkshare(
+        {"stock_zh_a_disclosure_report_cninfo": notices}
+    )
+
+    with pytest.raises(
+        PermanentRouteFailure,
+        match="precise publication time",
+    ) as raised:
+        AkshareFormalEndpointClient(ak).fetch_official_events_risk(request())
+
+    assert raised.value.classification is FailureClassification.INVALID_SEMANTICS
 
 
 def test_akshare_concept_mapping_is_structured_not_inferred_from_text():

@@ -46,7 +46,7 @@ def test_live_capability_bootstrap_uses_real_clients_and_writes_no_ledger_or_rep
         tested_library_versions={"recorded": "2026-07-10"},
     )
 
-    assert len(result.bundle.routes) == 12
+    assert len(result.bundle.routes) == 10
     assert len(result.primary_screening_versions) == 2
     assert result.target_probe_codes == ("600000.SH",)
     assert runtime.capability_store.load(require_live=False)
@@ -80,6 +80,104 @@ def test_live_capability_bootstrap_requires_explicit_confirmation_before_provide
     assert runtime.akshare_module.calls == []
 
 
+def test_live_capability_bootstrap_accepts_complete_backup_when_primary_route_unavailable(
+    tmp_path,
+):
+    runtime = bootstrap_runtime(tmp_path)
+    runtime.tushare_pro.overrides["anns_d"] = RuntimeError("permission denied")
+
+    result = verify_and_record_live_capabilities(
+        runtime,
+        TARGET,
+        NOW,
+        evidence_kind=CapabilityEvidenceKind.RECORDED,
+        tested_at=NOW,
+        tested_library_versions={"recorded": "2026-07-10"},
+    )
+
+    route_ids = {route.route_id for route in result.bundle.routes}
+    assert "official.events_risk.v1" not in route_ids
+    assert "cninfo.events_risk.v1" in route_ids
+    assert result.unavailable_route_ids == ("official.events_risk.v1",)
+
+
+def test_failed_reverification_replaces_stale_latest_capability_with_partial_bundle(
+    tmp_path,
+):
+    runtime = bootstrap_runtime(tmp_path)
+    initial = verify_and_record_live_capabilities(
+        runtime,
+        TARGET,
+        NOW,
+        evidence_kind=CapabilityEvidenceKind.RECORDED,
+        tested_at=NOW,
+        tested_library_versions={"recorded": "2026-07-10"},
+    )
+    assert any(
+        route.group_id.value == "official_events_risk"
+        for route in initial.bundle.routes
+    )
+    runtime.tushare_pro.overrides["anns_d"] = RuntimeError("permission denied")
+    runtime.akshare_module.overrides[
+        "stock_zh_a_disclosure_report_cninfo"
+    ] = RuntimeError(
+        "publication timestamp unavailable"
+    )
+
+    with pytest.raises(
+        LiveCapabilityVerificationError,
+        match="official_events_risk",
+    ):
+        verify_and_record_live_capabilities(
+            runtime,
+            TARGET,
+            NOW,
+            evidence_kind=CapabilityEvidenceKind.RECORDED,
+            tested_at=NOW,
+            tested_library_versions={"recorded": "2026-07-11"},
+        )
+
+    latest = runtime.capability_store.load(require_live=False)
+    assert latest
+    assert all(
+        route.group_id.value != "official_events_risk"
+        for route in latest.values()
+    )
+    version_files = list(
+        (runtime.capability_store.path.parent / "versions").glob("*.json")
+    )
+    assert len(version_files) == 2
+
+
+def test_live_bootstrap_rejects_cninfo_date_only_event_semantics_and_saves_partial_bundle(
+    tmp_path,
+):
+    runtime = bootstrap_runtime(tmp_path)
+    runtime.tushare_pro.overrides["anns_d"] = RuntimeError("permission denied")
+
+    with pytest.raises(
+        LiveCapabilityVerificationError,
+        match="official_events_risk",
+    ):
+        verify_and_record_live_capabilities(
+            runtime,
+            TARGET,
+            NOW,
+            evidence_kind=CapabilityEvidenceKind.LIVE,
+            confirm_live_read=True,
+            tested_at=NOW,
+            tested_library_versions={"recorded": "2026-07-10"},
+        )
+
+    route_ids = set(runtime.capability_store.load(require_live=True))
+    assert "official_exchange.calendar_universe.v1" not in route_ids
+    assert "eastmoney.market_decision.v1" not in route_ids
+    assert "cninfo.events_risk.v1" not in route_ids
+    assert "stock_zh_a_hist" not in [
+        name for name, _ in runtime.akshare_module.calls
+    ]
+
+
 def test_default_run_reuses_exact_same_day_screening_backfill(tmp_path):
     runtime = bootstrap_runtime(tmp_path)
     verify_and_record_live_capabilities(
@@ -107,5 +205,10 @@ def test_default_run_reuses_exact_same_day_screening_backfill(tmp_path):
     called_methods = [name for name, _ in runtime.tushare_pro.calls]
     assert "daily" not in called_methods
     assert "daily_basic" not in called_methods
-    assert "stock_basic" not in called_methods
+    screening_stock_basic_calls = [
+        kwargs
+        for name, kwargs in runtime.tushare_pro.calls
+        if name == "stock_basic" and "list_date" in kwargs.get("fields", "")
+    ]
+    assert screening_stock_basic_calls == []
     assert runtime.akshare_module.calls == []

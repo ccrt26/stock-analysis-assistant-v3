@@ -174,25 +174,33 @@ FORECAST = _record_type(
     (
         "trade_date",
         "ts_code",
+        "forecast_id",
         "announcement_time",
+        "period_end",
         "forecast_type",
         "min_change",
         "max_change",
         "source_name",
     ),
-    ("trade_date", "ts_code", "announcement_time", "forecast_type"),
+    ("trade_date", "ts_code", "forecast_id"),
+    legitimate_null_fields={
+        "min_change": "forecast_range_null_reason",
+        "max_change": "forecast_range_null_reason",
+    },
 )
 EXPRESS = _record_type(
     "express",
     (
         "trade_date",
         "ts_code",
+        "express_id",
         "announcement_time",
+        "period_end",
         "revenue",
         "profit",
         "source_name",
     ),
-    ("trade_date", "ts_code", "announcement_time"),
+    ("trade_date", "ts_code", "express_id"),
 )
 OFFICIAL_EVENT = _record_type(
     "official_event",

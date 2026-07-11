@@ -22,6 +22,7 @@ from stock_analyzer.data.formal_routes import (
     FormalRoutePair,
     derive_expected_tradable_codes,
 )
+from stock_analyzer.data.formal_policy import FORMAL_EQUITY_FEATURE_SESSION_COUNT
 from stock_analyzer.data.readiness import (
     AcquisitionGroupContract,
     AcquisitionGroupId,
@@ -627,7 +628,10 @@ def _acquire_formal_groups(
                 for record in universe.records
                 if record.get("record_type") == "security"
             )
-            if len(sessions) < 61 or not security_records:
+            if (
+                len(sessions) < FORMAL_EQUITY_FEATURE_SESSION_COUNT
+                or not security_records
+            ):
                 raise AcquisitionBlocked(
                     group.contract.group_id,
                     (),
@@ -636,7 +640,7 @@ def _acquire_formal_groups(
             try:
                 request_target_codes = derive_expected_tradable_codes(
                     security_records,
-                    minimum_history_start=sessions[-61],
+                    minimum_history_start=sessions[-FORMAL_EQUITY_FEATURE_SESSION_COUNT],
                 )
             except ValueError as exc:
                 raise AcquisitionBlocked(

@@ -10,6 +10,7 @@ from stock_analyzer.data.acquisition import (
     AtomicGroupAcquirer,
     TransientRouteFailure,
 )
+from stock_analyzer.data.formal_routes import UnavailableFormalRoute
 from stock_analyzer.data.readiness import (
     AcquisitionGroupContract,
     AcquisitionGroupId,
@@ -197,17 +198,64 @@ def test_incomplete_backup_raises_acquisition_blocked():
     assert any(reason.startswith("missing_field:amount") for reason in captured.value.reasons)
 
 
-def test_unproven_route_capability_blocks_before_fetch():
+def test_unproven_primary_capability_falls_back_without_fetching_primary():
     primary = FakeRoute(
         "primary", RouteKind.PRIMARY, [_payload(RouteKind.PRIMARY, "primary")], approved=False
     )
     backup = FakeRoute("backup", RouteKind.BACKUP, [_payload(RouteKind.BACKUP, "backup")])
 
-    with pytest.raises(AcquisitionBlocked, match="capability"):
-        AtomicGroupAcquirer().acquire(_contract(), _request(), primary, backup)
+    result = AtomicGroupAcquirer().acquire(
+        _contract(), _request(), primary, backup
+    )
 
     assert primary.calls == []
+    assert len(backup.calls) == 1
+    assert result.used_backup is True
+    assert result.payload.route_id == "backup"
+    assert result.attempts[0].validation_reasons == (
+        "capability_unproven:primary",
+    )
+
+
+def test_unproven_backup_capability_does_not_block_complete_primary():
+    primary = FakeRoute(
+        "primary", RouteKind.PRIMARY, [_payload(RouteKind.PRIMARY, "primary")]
+    )
+    backup = FakeRoute(
+        "backup",
+        RouteKind.BACKUP,
+        [_payload(RouteKind.BACKUP, "backup")],
+        approved=False,
+    )
+
+    result = AtomicGroupAcquirer().acquire(
+        _contract(), _request(), primary, backup
+    )
+
+    assert result.used_backup is False
+    assert result.payload.route_id == "primary"
     assert backup.calls == []
+
+
+def test_production_unavailable_primary_route_falls_back_without_attribute_error():
+    primary = UnavailableFormalRoute(
+        "primary",
+        RouteKind.PRIMARY,
+        AcquisitionGroupId.MARKET_DECISION,
+    )
+    backup = FakeRoute(
+        "backup",
+        RouteKind.BACKUP,
+        [_payload(RouteKind.BACKUP, "backup")],
+    )
+
+    result = AtomicGroupAcquirer().acquire(
+        _contract(), _request(), primary, backup
+    )
+
+    assert result.used_backup is True
+    assert result.payload.route_id == "backup"
+    assert result.attempts[0].classification is FailureClassification.PERMISSION
 
 
 def test_recorded_capability_is_approved_offline_but_not_for_live_use():

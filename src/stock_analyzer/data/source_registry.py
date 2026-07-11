@@ -110,7 +110,7 @@ _SOURCE_REGISTRY = {
         family="events_catalysts",
         level=DataRequirementLevel.REQUIRED,
         primary_path="OfficialDisclosureClient.fetch_official_events_risk",
-        backup_path="EastmoneyEndpointClient.fetch_official_events_risk",
+        backup_path="CninfoDisclosureClient.fetch_official_events_risk",
         local_cache_path=(
             "local_warehouse/parquet/event_catalysts/"
             "trade_date=<date>/data.parquet"
@@ -183,12 +183,12 @@ _FORMAL_ROUTE_BINDINGS = {
     "events_catalysts": (
         AcquisitionGroupId.OFFICIAL_EVENTS_RISK,
         "official.events_risk.v1",
-        "eastmoney.events_risk.v1",
+        "cninfo.events_risk.v1",
     ),
     "official_hard_risk": (
         AcquisitionGroupId.OFFICIAL_EVENTS_RISK,
         "official.events_risk.v1",
-        "eastmoney.events_risk.v1",
+        "cninfo.events_risk.v1",
     ),
     "manual_holdings": (
         AcquisitionGroupId.MANUAL_HOLDINGS,

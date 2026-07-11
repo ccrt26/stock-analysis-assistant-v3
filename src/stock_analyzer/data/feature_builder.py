@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import date
 from statistics import pstdev
 
+from stock_analyzer.data.formal_policy import FORMAL_EQUITY_FEATURE_SESSION_COUNT
 from stock_analyzer.data.models import (
     DailyBar,
     DailyBasicRow,
@@ -86,7 +87,7 @@ def build_market_bundle(
         )
         if not current_bars or current_bars[-1].trade_date != trade_date:
             continue
-        if len(current_bars) < 61:
+        if len(current_bars) < FORMAL_EQUITY_FEATURE_SESSION_COUNT:
             continue
 
         status = stock_status_by_code.get(stock.ts_code, {})

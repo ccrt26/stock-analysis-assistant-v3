@@ -48,12 +48,12 @@ def test_source_registry_names_exact_collection_paths():
         registry["fundamentals_summary"].primary_path
         == "tushare.income|balancesheet|cashflow|fina_indicator|forecast|express"
     )
+    assert registry["events_catalysts"].primary_route_id == "official.events_risk.v1"
+    assert registry["events_catalysts"].backup_route_id == "cninfo.events_risk.v1"
     assert (
         registry["events_catalysts"].backup_path
-        == "EastmoneyEndpointClient.fetch_official_events_risk"
+        == "CninfoDisclosureClient.fetch_official_events_risk"
     )
-    assert registry["events_catalysts"].primary_route_id == "official.events_risk.v1"
-    assert registry["events_catalysts"].backup_route_id == "eastmoney.events_risk.v1"
     assert registry["manual_holdings"].approved_single_source is True
     assert registry["manual_holdings"].backup_route_id is None
 

@@ -18,7 +18,6 @@ from stock_analyzer.data.formal_contracts import (
 from stock_analyzer.data.formal_policy import (
     FORMAL_BACKUP_INDEX_SYMBOLS,
     FORMAL_BOARD_SESSION_COUNT,
-    FORMAL_EQUITY_FEATURE_SESSION_COUNT,
     FORMAL_SCREENING_SESSION_COUNT,
 )
 from stock_analyzer.data.formal_routes import EndpointResponse
@@ -45,6 +44,19 @@ SPOT_COLUMNS = {
     "总市值": "total_mv",
     "流通市值": "circ_mv",
 }
+
+CNINFO_HARD_RISK_CATEGORIES = (
+    "风险提示",
+    "特别处理和退市",
+    "退市整理期",
+)
+CNINFO_DISCLOSURE_COLUMNS = (
+    "代码",
+    "简称",
+    "公告标题",
+    "公告时间",
+    "公告链接",
+)
 
 HISTORY_COLUMNS = {
     "日期": "trade_date",
@@ -91,6 +103,17 @@ class AkshareFormalEndpointClient:
         self.ak = ak
         self.required_index_symbols = required_index_symbols
 
+    def live_capability_block_reason(
+        self,
+        group_id: AcquisitionGroupId,
+    ) -> str | None:
+        if group_id is AcquisitionGroupId.OFFICIAL_EVENTS_RISK:
+            return (
+                "CNINFO public disclosure results do not guarantee "
+                "sub-day publication timestamps"
+            )
+        return None
+
     def fetch_calendar_universe(self, request: AcquisitionRequest) -> EndpointResponse:
         sessions = self._required_sessions(request.trade_date)
         sh = self._call("stock_info_sh_name_code")
@@ -99,18 +122,6 @@ class AkshareFormalEndpointClient:
         _require_columns(sz, ("A股代码", "A股简称", "A股上市日期"), "stock_info_sz_name_code")
         bj = self._call("stock_info_bj_name_code")
         _require_columns(bj, ("证券代码", "证券简称", "上市日期"), "stock_info_bj_name_code")
-        sh_delist = self._call("stock_info_sh_delist")
-        _require_columns(
-            sh_delist,
-            ("公司代码", "公司简称", "终止上市日期"),
-            "stock_info_sh_delist",
-        )
-        sz_delist = self._call("stock_info_sz_delist")
-        _require_columns(
-            sz_delist,
-            ("证券代码", "证券简称", "终止上市日期"),
-            "stock_info_sz_delist",
-        )
         spot = self._call("stock_zh_a_spot_em")
         _require_column_map(spot, SPOT_COLUMNS, "stock_zh_a_spot_em")
 
@@ -142,13 +153,6 @@ class AkshareFormalEndpointClient:
             )
             for row in bj.itertuples(index=False)
         )
-        delisted = {
-            _to_ts_code(row.公司代码, exchange="SH")
-            for row in sh_delist.itertuples(index=False)
-        } | {
-            _to_ts_code(row.证券代码, exchange="SZ")
-            for row in sz_delist.itertuples(index=False)
-        }
         spot_by_code = {
             _to_ts_code(getattr(row, "代码")): row
             for row in spot.itertuples(index=False)
@@ -178,7 +182,7 @@ class AkshareFormalEndpointClient:
                     "list_date": list_date,
                     "status_verified": verified,
                     "is_suspended": False,
-                    "hard_excluded": code in delisted,
+                    "hard_excluded": _is_special_treatment_name(name),
                     "source_name": "akshare.exchange_lists+eastmoney_spot",
                 }
             )
@@ -199,8 +203,6 @@ class AkshareFormalEndpointClient:
                 "akshare.stock_info_sh_name_code",
                 "akshare.stock_info_sz_name_code",
                 "akshare.stock_info_bj_name_code",
-                "akshare.stock_info_sh_delist",
-                "akshare.stock_info_sz_delist",
                 "akshare.stock_zh_a_spot_em",
             ),
         )
@@ -238,18 +240,14 @@ class AkshareFormalEndpointClient:
                     }
                 )
 
-        required_feature_dates = set(
-            sessions[-FORMAL_EQUITY_FEATURE_SESSION_COUNT:]
-        )
         incomplete_codes = sorted(
             code
             for code in requested
-            if not required_feature_dates <= dates_by_code.get(code, set())
+            if request.trade_date not in dates_by_code.get(code, set())
         )
         if incomplete_codes:
             raise PermanentRouteFailure(
-                "AKShare history lacks the latest "
-                f"{FORMAL_EQUITY_FEATURE_SESSION_COUNT} sessions for: "
+                "AKShare history lacks the target bar for: "
                 + ", ".join(incomplete_codes),
                 FailureClassification.INCOMPLETE_UNIVERSE,
             )
@@ -524,50 +522,77 @@ class AkshareFormalEndpointClient:
         )
 
     def fetch_official_events_risk(self, request: AcquisitionRequest) -> EndpointResponse:
-        notices = self._call(
-            "stock_notice_report",
-            symbol="全部",
-            date=_yyyymmdd(request.trade_date),
-        )
-        _require_columns(
-            notices,
-            ("代码", "名称", "公告标题", "公告类型", "公告日期", "网址"),
-            "stock_notice_report",
-        )
-        requested = set(request.target_codes)
-        hard_risk_types = {"风险提示", "停牌", "退市", "处罚"}
-        records: list[dict[str, Any]] = []
+        sessions = self._required_sessions(request.trade_date)
+        requested_by_bare = {_bare_code(code): code for code in request.target_codes}
+        records_by_id: dict[str, dict[str, Any]] = {}
         publication_times: dict[str, datetime] = {}
-        for row in notices.itertuples(index=False):
-            code = _to_ts_code(getattr(row, "代码"))
-            publication = _publication_time(getattr(row, "公告日期"), request)
-            if code not in requested or publication > request.report_cutoff:
-                continue
-            event_id = str(getattr(row, "网址"))
-            event_type = str(getattr(row, "公告类型"))
-            publication_times[event_id] = publication
-            records.append(
-                {
-                    "record_type": "official_event",
-                    "trade_date": request.trade_date,
-                    "ts_code": code,
-                    "event_id": event_id,
-                    "event_type": event_type,
-                    "title": str(getattr(row, "公告标题")),
-                    "publication_time": publication,
-                    "source_reliability": "exchange_disclosure",
-                    "is_new_information": True,
-                    "hard_risk": event_type in hard_risk_types,
-                    "source_name": "akshare.stock_notice_report",
-                }
+        for bare_code, expected_code in requested_by_bare.items():
+            for category in ("", *CNINFO_HARD_RISK_CATEGORIES):
+                notices = self._call(
+                    "stock_zh_a_disclosure_report_cninfo",
+                    symbol=bare_code,
+                    market="沪深京",
+                    keyword="",
+                    category=category,
+                    start_date=_yyyymmdd(sessions[-2]),
+                    end_date=_yyyymmdd(request.trade_date),
+                )
+                _require_columns(
+                    notices,
+                    CNINFO_DISCLOSURE_COLUMNS,
+                    "stock_zh_a_disclosure_report_cninfo",
+                )
+                for row in notices.itertuples(index=False):
+                    raw_code = str(getattr(row, "代码")).strip().zfill(6)
+                    code = requested_by_bare.get(raw_code)
+                    if code is None or code != expected_code:
+                        continue
+                    publication = _precise_publication_time(
+                        getattr(row, "公告时间"),
+                        request,
+                    )
+                    if publication > request.report_cutoff:
+                        continue
+                    url = str(getattr(row, "公告链接")).strip()
+                    title = str(getattr(row, "公告标题")).strip()
+                    if not url or url.lower() == "nan" or not title:
+                        raise PermanentRouteFailure(
+                            "CNINFO disclosure lacks a stable URL or title",
+                            FailureClassification.SCHEMA,
+                        )
+                    event_id = f"{code}:{url}"
+                    hard_risk = bool(category)
+                    if event_id in records_by_id and not hard_risk:
+                        continue
+                    publication_times[event_id] = publication
+                    records_by_id[event_id] = {
+                        "record_type": "official_event",
+                        "trade_date": request.trade_date,
+                        "ts_code": code,
+                        "event_id": event_id,
+                        "event_type": category or "official_disclosure",
+                        "title": title,
+                        "publication_time": publication,
+                        "source_reliability": "official_disclosure",
+                        "is_new_information": True,
+                        "hard_risk": hard_risk,
+                        "source_name": (
+                            "akshare.stock_zh_a_disclosure_report_cninfo"
+                        ),
+                    }
+        records = tuple(
+            sorted(
+                records_by_id.values(),
+                key=lambda item: (item["publication_time"], item["event_id"]),
             )
+        )
         return EndpointResponse(
-            records=tuple(records),
+            records=records,
             covered_dates=(request.trade_date,),
-            coverage_codes=tuple(sorted(requested)),
+            coverage_codes=tuple(sorted(request.target_codes)),
             coverage_proven=True,
             field_coverage=_field_coverage(request, AcquisitionGroupId.OFFICIAL_EVENTS_RISK),
-            source_names=("akshare.stock_notice_report",),
+            source_names=("akshare.stock_zh_a_disclosure_report_cninfo",),
             publication_times=publication_times,
         )
 
@@ -640,6 +665,10 @@ class AkshareFormalEndpointClient:
         except RouteFailure:
             raise
         except Exception as exc:
+            if method == "stock_zh_a_disclosure_report_cninfo" and (
+                _is_cninfo_zero_announcement_error(exc)
+            ):
+                return pd.DataFrame(columns=CNINFO_DISCLOSURE_COLUMNS)
             _raise_provider_error(method, exc)
         if not isinstance(frame, pd.DataFrame):
             raise PermanentRouteFailure(
@@ -701,10 +730,59 @@ def _parse_date(value: Any) -> date:
 
 
 def _publication_time(value: Any, request: AcquisitionRequest) -> datetime:
+    publication_date = _parse_date(value)
+    if publication_date == request.report_cutoff.date():
+        raise PermanentRouteFailure(
+            "AKShare date-only response lacks a precise publication time "
+            "for a same-day fact",
+            FailureClassification.INVALID_SEMANTICS,
+        )
     return datetime.combine(
-        _parse_date(value),
+        publication_date,
         time.min,
         tzinfo=request.report_cutoff.tzinfo,
+    )
+
+
+def _precise_publication_time(
+    value: Any,
+    request: AcquisitionRequest,
+) -> datetime:
+    if not isinstance(value, datetime):
+        text = str(value).strip()
+        if len(text) <= 11 or text[10] not in {" ", "T"} or ":" not in text[11:]:
+            raise PermanentRouteFailure(
+                "CNINFO disclosure lacks a precise publication time",
+                FailureClassification.INVALID_SEMANTICS,
+            )
+    parsed = pd.to_datetime(value, errors="coerce")
+    if pd.isna(parsed):
+        raise PermanentRouteFailure(
+            "CNINFO disclosure contains an invalid publication time",
+            FailureClassification.SCHEMA,
+        )
+    timestamp = pd.Timestamp(parsed)
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.tz_localize(request.report_cutoff.tzinfo)
+    else:
+        timestamp = timestamp.tz_convert(request.report_cutoff.tzinfo)
+    return timestamp.to_pydatetime()
+
+
+def _is_cninfo_zero_announcement_error(exc: Exception) -> bool:
+    if not isinstance(exc, KeyError):
+        return False
+    message = str(exc)
+    return all(
+        marker in message
+        for marker in (
+            "None of [Index(",
+            "代码",
+            "公告时间",
+            "announcementId",
+            "orgId",
+            "are in the [columns]",
+        )
     )
 
 
@@ -758,6 +836,11 @@ def _infer_exchange(code: str) -> str:
     )
 
 
+def _is_special_treatment_name(value: Any) -> bool:
+    name = str(value).strip().upper()
+    return name.startswith(("ST", "*ST", "S*ST", "SST"))
+
+
 def _bare_code(code: str) -> str:
     normalized = _to_ts_code(code)
     return normalized.split(".", 1)[0]
@@ -799,4 +882,9 @@ def _raise_provider_error(method: str, exc: Exception) -> None:
     ) from exc
 
 
-__all__ = ["AkshareFormalEndpointClient", "SPOT_COLUMNS"]
+__all__ = [
+    "AkshareFormalEndpointClient",
+    "CNINFO_DISCLOSURE_COLUMNS",
+    "CNINFO_HARD_RISK_CATEGORIES",
+    "SPOT_COLUMNS",
+]

@@ -12,6 +12,7 @@ from stock_analyzer.data.formal_routes import (
     EndpointResponse,
     ManualHoldingsFileRoute,
     NormalizedEndpointRoute,
+    UnavailableFormalRoute,
     build_formal_route_registry,
     derive_expected_tradable_codes,
 )
@@ -121,7 +122,7 @@ ROUTE_SPECS = {
     ),
     AcquisitionGroupId.OFFICIAL_EVENTS_RISK: (
         "official.events_risk.v1",
-        "eastmoney.events_risk.v1",
+        "cninfo.events_risk.v1",
     ),
     AcquisitionGroupId.CONCEPT_THEME: (
         "tushare.concept_theme.v1",
@@ -166,6 +167,42 @@ def test_every_required_group_has_executable_primary_and_backup_or_approved_sing
     assert callable(holdings.primary.fetch)
     assert holdings.backup is None
     assert holdings.approved_single_source is True
+
+
+def test_registry_uses_fail_closed_primary_when_only_backup_has_live_capability(tmp_path):
+    capabilities = _capabilities()
+    capabilities.pop("official.events_risk.v1")
+    registry = build_formal_route_registry(
+        RecordedClient(),
+        RecordedClient(),
+        RecordedClient(),
+        tmp_path / "holdings.json",
+        capabilities,
+    )
+
+    pair = registry[AcquisitionGroupId.OFFICIAL_EVENTS_RISK]
+    assert isinstance(pair.primary, UnavailableFormalRoute)
+    assert isinstance(pair.backup, NormalizedEndpointRoute)
+    with pytest.raises(PermanentRouteFailure, match="no verified live capability"):
+        pair.primary.fetch(_request())
+
+
+def test_registry_uses_unavailable_backup_route_when_only_primary_has_capability(
+    tmp_path,
+):
+    capabilities = _capabilities()
+    capabilities.pop("eastmoney.board_industry.v1")
+    registry = build_formal_route_registry(
+        RecordedClient(),
+        RecordedClient(),
+        RecordedClient(),
+        tmp_path / "holdings.json",
+        capabilities,
+    )
+
+    pair = registry[AcquisitionGroupId.BOARD_INDUSTRY]
+    assert isinstance(pair.primary, NormalizedEndpointRoute)
+    assert isinstance(pair.backup, UnavailableFormalRoute)
 
 
 def test_each_route_calls_its_exact_endpoint_method_and_normalizes_a_complete_payload():

@@ -169,6 +169,35 @@ class FormalRoutePair(BaseModel):
     approved_single_source: bool = False
 
 
+class UnavailableFormalRoute:
+    def __init__(
+        self,
+        route_id: str,
+        kind: RouteKind,
+        group_id: AcquisitionGroupId,
+    ) -> None:
+        self.route_id = route_id
+        self.kind = kind
+        self.group_id = group_id
+        self.capability = RouteCapabilityEvidence(
+            route_id=route_id,
+            group_id=group_id,
+            contract_version="unavailable",
+            full_contract_tested=False,
+            field_semantics_verified=False,
+            full_universe_verified=False,
+            post_close_verified=False,
+            tested_at=datetime(1970, 1, 1, tzinfo=timezone.utc),
+        )
+
+    def fetch(self, request: AcquisitionRequest) -> AcquisitionPayload:
+        del request
+        raise PermanentRouteFailure(
+            f"formal route has no verified live capability: {self.route_id}",
+            FailureClassification.PERMISSION,
+        )
+
+
 _ROUTE_DEFINITIONS = {
     AcquisitionGroupId.CALENDAR_UNIVERSE: (
         "tushare.calendar_universe.v1",
@@ -192,7 +221,7 @@ _ROUTE_DEFINITIONS = {
     ),
     AcquisitionGroupId.OFFICIAL_EVENTS_RISK: (
         "official.events_risk.v1",
-        "eastmoney.events_risk.v1",
+        "cninfo.events_risk.v1",
         "fetch_official_events_risk",
     ),
     AcquisitionGroupId.CONCEPT_THEME: (
@@ -230,22 +259,36 @@ def build_formal_route_registry(
     for group_id, (primary_id, backup_id, method) in _ROUTE_DEFINITIONS.items():
         primary_owner = official_client if group_id == AcquisitionGroupId.OFFICIAL_EVENTS_RISK else primary_client
         backup_owner = backup_client
+        primary_capability = capabilities.get(primary_id)
+        backup_capability = capabilities.get(backup_id)
         registry[group_id] = FormalRoutePair(
-            primary=NormalizedEndpointRoute(
-                route_id=primary_id,
-                kind=RouteKind.PRIMARY,
-                group_id=group_id,
-                client=primary_owner,
-                client_method=method,
-                capability=_required_capability(capabilities, primary_id, group_id),
+            primary=(
+                NormalizedEndpointRoute(
+                    route_id=primary_id,
+                    kind=RouteKind.PRIMARY,
+                    group_id=group_id,
+                    client=primary_owner,
+                    client_method=method,
+                    capability=_required_capability(capabilities, primary_id, group_id),
+                )
+                if primary_capability is not None
+                else UnavailableFormalRoute(primary_id, RouteKind.PRIMARY, group_id)
             ),
-            backup=NormalizedEndpointRoute(
-                route_id=backup_id,
-                kind=RouteKind.BACKUP,
-                group_id=group_id,
-                client=backup_owner,
-                client_method=method,
-                capability=_required_capability(capabilities, backup_id, group_id),
+            backup=(
+                NormalizedEndpointRoute(
+                    route_id=backup_id,
+                    kind=RouteKind.BACKUP,
+                    group_id=group_id,
+                    client=backup_owner,
+                    client_method=method,
+                    capability=_required_capability(capabilities, backup_id, group_id),
+                )
+                if backup_capability is not None
+                else UnavailableFormalRoute(
+                    backup_id,
+                    RouteKind.BACKUP,
+                    group_id,
+                )
             ),
         )
     registry[AcquisitionGroupId.MANUAL_HOLDINGS] = FormalRoutePair(
@@ -331,6 +374,7 @@ __all__ = [
     "FormalRoutePair",
     "ManualHoldingsFileRoute",
     "NormalizedEndpointRoute",
+    "UnavailableFormalRoute",
     "build_formal_route_registry",
     "derive_expected_tradable_codes",
     "formal_route_group_ids",
