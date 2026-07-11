@@ -767,3 +767,108 @@ Expected: before push, only intended committed changes and no untracked producti
 - [ ] **Step 6: Complete `/goal` only after every Gate is true**
 
 Final report must list design/plan/implementation/evidence commits, targeted and complete test counts, real capability result, 82-session result, formal analysis/LLM/report result, Supabase activation/read-back, Cloudflare URL/smoke result without secrets, launchd status, push result, and explicitly state that no broker connection or order operation occurred.
+
+---
+
+### Task 12: Move the activated local runtime to canonical `main` and retire the feature worktree
+
+**Files:**
+- Modify: `tests/test_ops_notify.py`
+- Modify: `ops/launchd/com.ccrt.stock-analysis-assistant.daily.plist.example`
+- Modify: `docs/superpowers/specs/2026-07-10-v3-formal-report-data-readiness-design.md`
+- Modify: `docs/superpowers/plans/2026-07-11-v3-formal-production-completion.md`
+- Modify after activation evidence exists: `docs/operations/runbook.md`
+- Modify after activation evidence exists: `docs/operations/production-capability-matrix.md`
+- Generated locally, never committed: `/Users/ccrt/Library/LaunchAgents/com.ccrt.stock-analysis-assistant.daily.plist`
+- Runtime-only copies, never committed: `/Users/ccrt/股票分析助手/.env.local`, `.venv/`, `logs/`, `reports/`, `local_warehouse/`, and `local_archive/`
+
+**Interfaces:**
+- Consumes: the merged `main` commit, the activated runtime state under `/Users/ccrt/股票分析助手/.worktrees/codex/v3-mvp`, and the versioned launchd template placeholder `__PROJECT_ROOT__`.
+- Produces: a launchd service whose `WorkingDirectory`, command `cd`, stdout path, stderr path, `PROJECT_ROOT`, editable `stock_analyzer` import, and runtime state all resolve under `/Users/ccrt/股票分析助手`.
+- Preserves: the three schedule slots, `RunAtLoad=false`, silent `.env.local` loading, completed-run idempotency, activated reports and formal receipts, and the prohibition on broker/order operations.
+
+- [ ] **Step 1: Add the failing root-pinning regression test**
+
+In `test_launchd_template_uses_project_root_and_env_contract_without_secrets`, require the shell command to pin the resolved checkout after loading the environment:
+
+```python
+assert "source .env.local >/dev/null 2>&1" in template
+assert 'export PROJECT_ROOT="$PWD"' in template
+assert template.index("source .env.local >/dev/null 2>&1") < template.index(
+    'export PROJECT_ROOT="$PWD"'
+)
+```
+
+Run:
+
+```bash
+.venv/bin/python -m pytest tests/test_ops_notify.py::test_launchd_template_uses_project_root_and_env_contract_without_secrets -q
+```
+
+Expected before the template edit: `1 failed`, because `export PROJECT_ROOT="$PWD"` is absent.
+
+- [ ] **Step 2: Pin the runtime checkout and verify the template**
+
+Immediately after `set +a` in the versioned template, add:
+
+```bash
+export PROJECT_ROOT="$PWD"
+```
+
+Run:
+
+```bash
+.venv/bin/python -m pytest tests/test_ops_notify.py -q
+plutil -lint ops/launchd/com.ccrt.stock-analysis-assistant.daily.plist.example
+```
+
+Expected: all `test_ops_notify.py` tests pass; `plutil` prints `OK` and exits 0.
+
+- [ ] **Step 3: Commit the migration contract before changing local operations**
+
+```bash
+git add tests/test_ops_notify.py ops/launchd/com.ccrt.stock-analysis-assistant.daily.plist.example docs/superpowers/specs/2026-07-10-v3-formal-report-data-readiness-design.md docs/superpowers/plans/2026-07-11-v3-formal-production-completion.md
+git commit -m "fix: pin launchd runtime to canonical checkout"
+```
+
+Expected: one focused commit containing the test, template, normative design amendment, and this exact execution task; no runtime data or credential file is staged.
+
+- [ ] **Step 4: Merge and verify the corrected contract on `main`**
+
+From `/Users/ccrt/股票分析助手`, merge `codex/v3-mvp` with `--no-ff`, run the complete suite with the feature environment and `PYTHONPATH=/Users/ccrt/股票分析助手/src`, and push `main` only after all tests pass.
+
+Expected: zero merge conflicts, `570` or more tests pass with zero failures, and local `main` equals `origin/main`.
+
+- [ ] **Step 5: Quiesce scheduling and copy runtime state without exposing credentials**
+
+Boot out `gui/501/com.ccrt.stock-analysis-assistant.daily` before copying. Copy `.env.local` with mode `600`; copy `.venv`, `logs`, `reports`, `local_warehouse`, and `local_archive` while the service is stopped. Reinstall the local editable package with:
+
+```bash
+/Users/ccrt/股票分析助手/.venv/bin/python -m pip install --no-deps -e /Users/ccrt/股票分析助手
+```
+
+Verify `stock_analyzer.__file__` begins with `/Users/ccrt/股票分析助手/src/`, and use dry-run `rsync --archive --itemize-changes --delete` comparisons for the five state directories. Expected: no pending itemized differences. Never print, hash, parse, or log `.env.local` values.
+
+- [ ] **Step 6: Generate, load, and inspect the canonical service**
+
+Generate the user plist from the versioned template by replacing only `__PROJECT_ROOT__` with `/Users/ccrt/股票分析助手`, set mode `600`, run `plutil -lint`, bootstrap it into `gui/501`, and inspect only non-secret launchctl fields.
+
+Expected: the service is loaded with `RunAtLoad=false`, all three calendar triggers, and every displayed working/program/log path under `/Users/ccrt/股票分析助手`; no `.worktrees/codex/v3-mvp` path remains.
+
+- [ ] **Step 7: Prove main-root health and completed-run read-only reuse**
+
+Load `/Users/ccrt/股票分析助手/.env.local` silently, force `PROJECT_ROOT=/Users/ccrt/股票分析助手`, and run `python -m stock_analyzer health-check` without any live-provider flag. Then run the already completed `2026-07-10` first-slot command with `--prepare-deploy`.
+
+Expected: health exits 0; the job returns the prior successful terminal status; the formal receipt revision, activated report hashes, latest status file, and report files remain unchanged. No provider acquisition, LLM call, Supabase mutation, Cloudflare upload, broker connection, or order operation occurs.
+
+- [ ] **Step 8: Record activation evidence, rerun tests, and push**
+
+Update `docs/operations/runbook.md` and row `OPS-002` in `docs/operations/production-capability-matrix.md` from the old worktree wording to the verified canonical `main` path. Run targeted launchd tests and the complete suite from `main`; commit the two documentation changes and push `main`.
+
+Expected: all tests pass, `main` is clean and equals `origin/main`, and the matrix cites only evidence obtained in Steps 5-7.
+
+- [ ] **Step 9: Remove the merged worktree and branches only after every prior Gate passes**
+
+From `/Users/ccrt/股票分析助手`, remove `/Users/ccrt/股票分析助手/.worktrees/codex/v3-mvp`, prune worktrees, delete the merged local `codex/v3-mvp` branch with `git branch -d`, and delete `origin/codex/v3-mvp` with `git push origin --delete codex/v3-mvp`.
+
+Expected: `git worktree list` contains the canonical `main` worktree and no `v3-mvp` worktree; neither local nor remote branch list contains `codex/v3-mvp`; launchctl still resolves only the canonical `main` path; `main` remains clean and equal to `origin/main`.
