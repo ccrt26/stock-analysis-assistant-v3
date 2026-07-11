@@ -366,6 +366,8 @@ class CninfoDisclosureClient:
                 "CNINFO disclosure total is invalid",
                 FailureClassification.SCHEMA,
             ) from exc
+        if total == 0 and raw_rows is None:
+            raw_rows = []
         if total < 0 or not isinstance(raw_rows, list):
             raise PermanentRouteFailure(
                 "CNINFO disclosure rows are malformed",

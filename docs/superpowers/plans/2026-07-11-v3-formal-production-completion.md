@@ -502,6 +502,15 @@ Expected: no source change and no commit in this task. If a Gate fails, stop exe
 - Modify after success: `docs/operations/production-capability-matrix.md`
 - Modify after success: `docs/operations/runbook.md`
 
+- [ ] **Finding 8A: Accept the provider's proven-empty null shape without weakening schema checks**
+
+Live diagnosis proved that CNINFO returns `totalAnnouncement: 0` with `announcements: null` for a valid-code empty window. Add `test_cninfo_route_accepts_null_announcements_only_when_total_zero` in `tests/test_cninfo_disclosure_client.py`; it must fail before the fix. In `src/stock_analyzer/data/cninfo_disclosure_client.py`, normalize `null` to an empty list only when the declared total is exactly zero, and keep `null` with a positive total as `SCHEMA` failure. Run the complete CNINFO/Tushare/live/default-entry target set and commit:
+
+```bash
+git add docs/superpowers/plans/2026-07-11-v3-formal-production-completion.md src/stock_analyzer/data/cninfo_disclosure_client.py tests/test_cninfo_disclosure_client.py
+git commit -m "fix: accept proven-empty cninfo response shape"
+```
+
 - [ ] **Step 1: Run the redacted Tushare permission probe**
 
 Use `AppConfig.resolve_tushare_token()` inside the process and print only `granted`, `denied`, or a redacted failure class. Call `anns_d` once for a dynamically selected valid code/date. Never print request headers, URLs containing credentials, client repr, or exception payloads.

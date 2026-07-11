@@ -288,6 +288,30 @@ def test_cninfo_route_proves_valid_code_empty_coverage():
     assert response.coverage_proven is True
 
 
+def test_cninfo_route_accepts_null_announcements_only_when_total_zero():
+    def empty_handler(method, path, kwargs):
+        if method == "GET":
+            return FakeResponse(stock_map("600000"))
+        return FakeResponse({"totalAnnouncement": 0, "announcements": None})
+
+    client, _, _ = client_with(empty_handler)
+
+    response = client.fetch_official_events_risk(request())
+
+    assert response.records == ()
+    assert response.coverage_proven is True
+
+    def inconsistent_handler(method, path, kwargs):
+        if method == "GET":
+            return FakeResponse(stock_map("600000"))
+        return FakeResponse({"totalAnnouncement": 1, "announcements": None})
+
+    inconsistent, _, _ = client_with(inconsistent_handler)
+    with pytest.raises(PermanentRouteFailure) as raised:
+        inconsistent.fetch_official_events_risk(request())
+    assert raised.value.classification is FailureClassification.SCHEMA
+
+
 def test_cninfo_route_rejects_missing_stock_map_code():
     def handler(method, path, kwargs):
         return FakeResponse(stock_map("000001"))
