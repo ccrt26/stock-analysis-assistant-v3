@@ -19,7 +19,7 @@ This runbook covers the Phase 1 local Mac production flow for stock-analysis-ass
 
 ## Formal Warehouse Restoration
 
-`STORE-004` is `MIGRATED_NOT_DELETED` as of 2026-07-12. The copy migration completed for all 162 legacy objects and its strict warehouse audit verified 18 versions, 1,825 Parquet files, 3,097,646 rows and 116 receipt revisions. Real acceptance verified 82 market sessions from 2026-03-12 through 2026-07-10. The authoritative audit is `local_archive/manifests/formal-warehouse-migration-2026-07-12.json`; the pre-migration database backup is `local_archive/warehouse.duckdb.pre-formal-migration-2026-07-12`. The legacy JSON tree remains intact pending cutover and deletion gates.
+`STORE-004` is `PRODUCTION_WRITE_VERIFIED` as of 2026-07-12. The copy migration completed for all 162 legacy objects and the exact re-hashed manifest then removed 162 JSON files / 620,398,257 bytes. `local_warehouse/formal_evidence` must remain absent; recreation of that tree is a storage-governance failure. Final strict audit verified 18 versions, 1,825 Parquet files, 3,097,646 rows and 116 receipt revisions. No-JSON real acceptance verified 82 market sessions from 2026-03-12 through 2026-07-10, all receipt/version/candidate references and 7 capability bundles. The authoritative final audit is `local_archive/manifests/formal-warehouse-post-delete-final-2026-07-12.json`; the deletion manifest is `local_archive/manifests/formal-warehouse-deletion-manifest-2026-07-12.json`. Pre-migration and pre-cleanup DuckDB backups remain under `local_archive/` for controlled rollback.
 
 The following commands are offline and non-destructive; each writes a machine-readable result. The deletion-manifest command does not delete anything.
 
@@ -46,7 +46,7 @@ stock-analyzer formal-warehouse-deletion-manifest \
   --output local_archive/manifests/formal-warehouse-deletion-manifest.json
 ```
 
-Migration copies and validates before any cutover or deletion. If any object is unknown, any source hash changes, any payload hash differs, or any frozen receipt cannot resolve, stop and leave all source JSON untouched. Deletion requires a separately approved destructive operation against the exact generated manifest, followed immediately by strict audit, real-data acceptance, offline replay and the full test suite.
+These commands are retained for audit and disaster-recovery rehearsal. Normal production must not recreate the legacy JSON store. Any future migration copies and validates before cutover or deletion; unknown objects, changed hashes, payload differences or unresolved frozen receipts stop the operation. Deletion always requires separately approved execution against an exact manifest, followed immediately by strict audit, real-data acceptance, offline replay and the full test suite.
 
 ## Daily Schedule
 

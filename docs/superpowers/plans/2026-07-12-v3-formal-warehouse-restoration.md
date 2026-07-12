@@ -652,27 +652,27 @@ Set `STORE-004` to `MIGRATED_NOT_DELETED`, with audit path, counts, dates, tests
 - Modify: `docs/operations/runbook.md`
 - Modify: `README.md`
 
-- [ ] **Step 1: Run post-migration production health and offline verification**
+- [x] **Step 1: Run post-migration production health and offline verification**
 
 Use production paths without provider refetch or Supabase mutation. Confirm dependency construction, canonical reads, receipts, report verification and scheduler imports use `FormalWarehouse`.
 
-- [ ] **Step 2: Prove zero legacy reads**
+- [x] **Step 2: Prove zero legacy reads**
 
 Run source scan and instrumented replay with the legacy source unreadable in a temporary clone. Replay must pass with no `formal_evidence` open attempt.
 
-- [ ] **Step 3: Generate deletion manifest**
+- [x] **Step 3: Generate deletion manifest**
 
 List exact path, current SHA-256, size, semantic ID, migration target IDs and safety audit. Re-hash immediately before deletion; any change invalidates authorization.
 
-- [ ] **Step 4: Request explicit destructive authorization**
+- [x] **Step 4: Request explicit destructive authorization**
 
 Present manifest totals and evidence. Request escalation for the exact deletion command without a reusable prefix.
 
-- [ ] **Step 5: Delete only manifested legacy paths**
+- [x] **Step 5: Delete only manifested legacy paths**
 
 Do not delete published report JSON, manual holdings, Parquet, DuckDB, migration audit or local archive. Remove empty legacy directories only after files.
 
-- [ ] **Step 6: Run immediate post-deletion gates**
+- [x] **Step 6: Run immediate post-deletion gates**
 
 ```bash
 .venv/bin/stock-analyzer-publish formal-warehouse-audit \
@@ -685,11 +685,11 @@ STOCK_ANALYZER_REAL_WAREHOUSE_ROOT=/Users/ccrt/股票分析助手/local_warehous
 
 Expected: zero failures, no wide formal JSON, every version/receipt resolves through DuckDB, exact 82-session counts remain.
 
-- [ ] **Step 7: Final documentation state**
+- [x] **Step 7: Final documentation state**
 
 Set `STORE-004` to `PRODUCTION_WRITE_VERIFIED` only now. Record pre/post counts and sizes, schema version, Parquet/version counts, exact coverage, migration/cutover/deletion audit IDs, tests and zero-fallback confirmation.
 
-- [ ] **Step 8: Final repository verification and commit**
+- [x] **Step 8: Final repository verification and commit**
 
 ```bash
 git diff --check
@@ -705,11 +705,11 @@ Do not claim completion without fresh full tests, strict audit, real-data accept
 
 ## Plan Self-Review Checklist
 
-- [ ] Every restoration-design requirement maps to a task.
-- [ ] No task introduces historical `daily_basic`, strategy change, refetch or full-market Supabase write.
-- [ ] `FormalWarehouse`, `WarehouseCapabilityStore`, migration functions and CLI names are consistent.
-- [ ] Every production change has a RED test first.
-- [ ] Real migration is copy-only until separately authorized deletion.
-- [ ] Inventory includes all formal objects, not only canonical market data.
-- [ ] Documentation reports implemented, migrated, cutover and deleted states honestly.
-- [ ] No subagent step exists; execution is inline with `executing-plans`.
+- [x] Every restoration-design requirement maps to a task.
+- [x] No task introduces historical `daily_basic`, strategy change, refetch or full-market Supabase write.
+- [x] `FormalWarehouse`, `WarehouseCapabilityStore`, migration functions and CLI names are consistent.
+- [x] Every production change has a RED test first.
+- [x] Real migration is copy-only until separately authorized deletion.
+- [x] Inventory includes all formal objects, not only canonical market data.
+- [x] Documentation reports implemented, migrated, cutover and deleted states honestly.
+- [x] No subagent step exists; execution is inline with `executing-plans`.

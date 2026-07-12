@@ -12,7 +12,7 @@
 
 此前真实运行生成 10 个每日推荐，launchd 已加载；这项既有生产证据继续有效，但不代表新的 REPORT-004 用户可读报告已经通过人工验收。
 
-存储纠偏 `STORE-004` 当前为 `MIGRATED_NOT_DELETED`：162 个既有正式 JSON 对象已复制迁移到 `warehouse.duckdb` 与按实际交易日分区的不可变 Parquet；严格审计覆盖 18 个版本、1,825 个文件、3,097,646 行和 116 个回执，82 个正式交易日及正式指针已通过真实数据验收。旧 `local_warehouse/formal_evidence` 仍作为删除前回退源保留；在正式代码切换、删除清单复核、授权删除、删除后审计和无 JSON 回退重放全部通过前，不得把该 Gate 表述为生产完成。
+存储纠偏 `STORE-004` 已达到 `PRODUCTION_WRITE_VERIFIED`：正式主线只使用 `warehouse.duckdb` 与按实际交易日分区的不可变 Parquet；162 个既有正式 JSON 对象已完整迁移并经清单复核删除，共移除 620,398,257 字节，`local_warehouse/formal_evidence` 已不存在。删除后严格审计覆盖 18 个版本、1,825 个文件、3,097,646 行和 116 个回执；真实验收确认 82 个交易日、正式指针、全部回执引用和 7 条能力证据均可在无 JSON 环境中独立重放。
 
 当前能力、缺口、验证等级和激活状态只以 [`docs/operations/production-capability-matrix.md`](docs/operations/production-capability-matrix.md) 为准。`docs/superpowers/specs/` 保存设计约束，`docs/superpowers/plans/` 保存历史执行记录；历史文档中的“完成”不能替代能力矩阵中的当前证据。
 

@@ -35,12 +35,12 @@ def test_historical_conflicting_plans_have_visible_supersession_banners():
         assert "2026-07-12-v3-formal-warehouse-restoration-design.md" in text
 
 
-def test_capability_matrix_reports_migrated_not_deleted_honestly():
+def test_capability_matrix_reports_production_write_verified_with_deletion_evidence():
     text = _text("docs/operations/production-capability-matrix.md")
     assert "STORE-004" in text
-    assert "MIGRATED_NOT_DELETED" in _store_004_row(text)
-    assert "Legacy JSON is still present" in _store_004_row(text)
-    assert "PRODUCTION_WRITE_VERIFIED" not in _store_004_row(text)
+    assert "PRODUCTION_WRITE_VERIFIED" in _store_004_row(text)
+    assert "formal_evidence` no longer exists" in _store_004_row(text)
+    assert "620,398,257 bytes" in _store_004_row(text)
 
 
 def test_runbook_contains_exact_non_destructive_migration_commands():
@@ -55,11 +55,11 @@ def test_runbook_contains_exact_non_destructive_migration_commands():
     assert "does not delete" in text
 
 
-def test_readme_reports_migration_without_claiming_json_deletion():
+def test_readme_reports_verified_json_deletion():
     text = _text("README.md")
     assert "STORE-004" in text
-    assert "MIGRATED_NOT_DELETED" in text
-    assert "仍作为删除前回退源保留" in text
+    assert "PRODUCTION_WRITE_VERIFIED" in text
+    assert "formal_evidence` 已不存在" in text
 
 
 def _store_004_row(text: str) -> str:

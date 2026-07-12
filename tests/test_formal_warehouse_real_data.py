@@ -1,4 +1,3 @@
-import json
 import os
 from collections import Counter
 from datetime import date
@@ -8,10 +7,8 @@ import duckdb
 import pytest
 
 from stock_analyzer.data.readiness import AcquisitionGroupId
-from stock_analyzer.ops.formal_run import RunReceipt
 from stock_analyzer.storage.formal_migration import (
     audit_formal_warehouse,
-    inventory_legacy_formal_store,
 )
 from stock_analyzer.storage.formal_warehouse import FormalWarehouse
 
@@ -26,32 +23,33 @@ def _root() -> Path:
     return Path(value)
 
 
-def test_real_formal_json_graph_is_fully_migrated_and_canonical_market_is_exact():
+CANONICAL_MARKET_VERSION = (
+    "market_decision-2026-07-10-"
+    "b7a9de49700fa01bc8836b18f0f050e5d31f6c6c1107b0453707515df8e2cb66"
+)
+
+
+def test_real_formal_warehouse_is_complete_without_legacy_json():
     root = _root()
     source = root / "formal_evidence"
-    inventory = inventory_legacy_formal_store(source)
-    kinds = Counter(item.object_kind for item in inventory.items)
-    assert inventory.unknown_paths == ()
+    assert not source.exists()
 
     with duckdb.connect(str(root / "warehouse.duckdb"), read_only=True) as connection:
-        assert connection.execute("select count(*) from formal_versions").fetchone()[0] == kinds["group_version"]
-        assert connection.execute("select count(*) from formal_run_receipts").fetchone()[0] == kinds["run_receipt"]
-        assert connection.execute("select count(*) from formal_candidate_sets").fetchone()[0] == kinds["candidate_set"]
-        assert connection.execute("select count(*) from formal_frozen_reports").fetchone()[0] == kinds["frozen_report"]
-        assert connection.execute("select count(*) from formal_report_candidates").fetchone()[0] == kinds["report_candidate"]
+        assert connection.execute("select count(*) from formal_versions").fetchone()[0] == 18
+        assert connection.execute("select count(*) from formal_run_receipts").fetchone()[0] == 116
+        assert connection.execute("select count(*) from formal_candidate_sets").fetchone()[0] == 5
+        assert connection.execute("select count(*) from formal_frozen_reports").fetchone()[0] == 1
+        assert connection.execute("select count(*) from formal_report_candidates").fetchone()[0] == 2
+        assert connection.execute("select count(*) from formal_capability_bundles").fetchone()[0] == 7
+        assert connection.execute("select count(*) from formal_canonical_versions").fetchone()[0] == 6
 
     warehouse = FormalWarehouse(root)
-    pointer = json.loads(
-        (source / "canonical/market_decision/2026-07-10.json").read_text(
-            encoding="utf-8"
-        )
-    )
     manifest = warehouse.canonical_manifest(
         AcquisitionGroupId.MARKET_DECISION,
         date(2026, 7, 10),
     )
     assert manifest is not None
-    assert manifest.version_id == pointer["version_id"]
+    assert manifest.version_id == CANONICAL_MARKET_VERSION
     payload = warehouse.read_group_version(manifest.version_id)
     assert payload is not None
     counts = Counter(record["record_type"] for record in payload.records)
@@ -66,22 +64,16 @@ def test_real_formal_json_graph_is_fully_migrated_and_canonical_market_is_exact(
     audit = audit_formal_warehouse(warehouse, strict_hashes=True)
     assert audit.complete is True, audit.errors
 
-    receipt_items = [
-        item for item in inventory.items if item.object_kind == "run_receipt"
-    ]
-    for item in receipt_items:
-        source_receipt = RunReceipt.model_validate_json(
-            (source / item.relative_path).read_text(encoding="utf-8")
-        )
-        stored_receipt = warehouse.run_receipt(
-            source_receipt.run_id,
-            source_receipt.revision,
-        )
-        assert stored_receipt == source_receipt
+    receipts = warehouse.list_run_receipts()
+    assert len(receipts) == 116
+    candidate_references = 0
+    for stored_receipt in receipts:
         assert all(
             warehouse.group_version_manifest(version_id) is not None
             for version_id in stored_receipt.group_version_ids.values()
         )
         if stored_receipt.candidate_set_id is not None:
+            candidate_references += 1
             candidate = warehouse.candidate_set(stored_receipt.candidate_set_id)
             assert candidate.run_id == stored_receipt.run_id
+    assert candidate_references == 81
