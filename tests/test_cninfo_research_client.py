@@ -335,15 +335,15 @@ def test_cninfo_descends_to_stock_batches_when_global_and_subboard_totals_drift(
             plate = data["plate"]
             stock = data["stock"]
             if plate == "":
-                total, ids = (3, ("G1", "G2")) if page == 1 else (2, ())
+                total, ids = (2, ("G1",)) if page == 1 else (3, ())
             elif plate != "szcy":
                 total, ids = 0, ()
             elif stock and ";" in stock:
-                total, ids = 2, ("C1", "C2")
+                total, ids = 2, ("C1",) if page == 1 else ("C2",)
             elif stock:
                 total, ids = 1, ("C3",)
             else:
-                total, ids = (3, ("C1", "C2")) if page == 1 else (2, ())
+                total, ids = (3, ("C1",)) if page == 1 else (2, ())
             rows = [
                 {
                     "announcementId": value,
@@ -362,7 +362,7 @@ def test_cninfo_descends_to_stock_batches_when_global_and_subboard_totals_drift(
 
     client = CninfoResearchClient(
         DriftingHierarchyHttp(),
-        page_size=2,
+        page_size=1,
         stock_batch_size=2,
         pacer=lambda: None,
         max_retries=0,

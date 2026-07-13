@@ -81,8 +81,15 @@ class CninfoResearchClient:
                 normalized = self._normalize(raw, current)
                 previous = records.get(normalized["announcement_id"])
                 if previous is not None and previous != normalized:
+                    conflicting_fields = sorted(
+                        key
+                        for key in set(previous) | set(normalized)
+                        if previous.get(key) != normalized.get(key)
+                    )
                     raise ResearchSourceError(
-                        "CNINFO duplicate announcement id has conflicting content",
+                        f"CNINFO duplicate announcement id "
+                        f"{normalized['announcement_id']} has conflicting fields: "
+                        f"{','.join(conflicting_fields)}",
                         category="schema",
                         endpoint="new/hisAnnouncement/query",
                     )
@@ -102,10 +109,12 @@ class CninfoResearchClient:
                 value, plate="", stock="", first_page=first_page
             )
         except _PaginationTotalChanged:
-            return self._query_split_day(value, expected_total=first_page[1])
+            return self._query_split_day(value, expected_total=None)
         return rows
 
-    def _query_split_day(self, value: date, *, expected_total: int) -> list[dict[str, Any]]:
+    def _query_split_day(
+        self, value: date, *, expected_total: int | None
+    ) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []
         split_total = 0
         for plate in _DENSE_DAY_PLATES:
@@ -131,15 +140,20 @@ class CninfoResearchClient:
         announcement_ids = {
             str(row.get("announcementId", "")).strip() for row in rows
         }
-        if (
-            not all(announcement_ids)
-            or split_total != expected_total
-            or len(announcement_ids) != expected_total
-        ):
+        split_is_incomplete = (
+            not all(announcement_ids) or len(announcement_ids) != split_total
+        )
+        conflicts_with_stable_global = expected_total is not None and (
+            split_total != expected_total or len(announcement_ids) != expected_total
+        )
+        if split_is_incomplete or conflicts_with_stable_global:
+            global_description = (
+                str(expected_total) if expected_total is not None else "unstable"
+            )
             raise ResearchSourceError(
                 f"CNINFO {value.isoformat()} market plates returned "
                 f"{len(announcement_ids)} unique rows and declared {split_total}, "
-                f"but the global total was {expected_total}",
+                f"but the global total was {global_description}",
                 category="incomplete",
                 endpoint="new/hisAnnouncement/query",
             )
