@@ -88,11 +88,20 @@ class CninfoResearchClient:
                 )
             rows.extend(page_rows)
         if len(rows) != total:
-            raise ResearchSourceError(
-                f"CNINFO returned {len(rows)} rows but declared {total}",
-                category="incomplete",
-                endpoint="new/hisAnnouncement/query",
+            announcement_ids = [
+                str(row.get("announcementId", "")).strip() for row in rows
+            ]
+            pages_only_overlap = (
+                len(rows) > total
+                and all(announcement_ids)
+                and len(set(announcement_ids)) == total
             )
+            if not pages_only_overlap:
+                raise ResearchSourceError(
+                    f"CNINFO returned {len(rows)} rows but declared {total}",
+                    category="incomplete",
+                    endpoint="new/hisAnnouncement/query",
+                )
         return rows
 
     def _query_page(self, value: date, page: int) -> tuple[list[dict[str, Any]], int]:

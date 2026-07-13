@@ -78,3 +78,39 @@ def test_cninfo_normalizes_shenzhen_and_shanghai_b_share_codes():
     rows = client.fetch_announcements(date(2026, 7, 10), date(2026, 7, 10))
 
     assert [row["ts_code"] for row in rows] == ["200553.SZ", "900901.SH"]
+
+
+def test_cninfo_accepts_overlapping_pages_only_when_unique_ids_match_total():
+    class OverlappingPagesHttp:
+        def post(self, url, data, timeout):
+            page = int(data["pageNum"])
+            if page == 1:
+                ids = range(1, 31)
+            else:
+                ids = range(2, 32)
+            rows = [
+                {
+                    "announcementId": f"O{value}",
+                    "announcementTitle": "年度报告",
+                    "announcementTime": int(
+                        datetime(2026, 7, 10, 10, tzinfo=timezone.utc).timestamp()
+                        * 1000
+                    ),
+                    "secCode": "000001",
+                    "secName": "平安银行",
+                    "adjunctUrl": f"finalpage/O{value}.PDF",
+                }
+                for value in ids
+            ]
+            return Response({"totalAnnouncement": 31, "announcements": rows})
+
+    client = CninfoResearchClient(
+        OverlappingPagesHttp(), page_size=30, pacer=lambda: None, max_retries=0
+    )
+
+    rows = client.fetch_announcements(date(2026, 7, 10), date(2026, 7, 10))
+
+    assert len(rows) == 31
+    assert {row["announcement_id"] for row in rows} == {
+        f"O{value}" for value in range(1, 32)
+    }
