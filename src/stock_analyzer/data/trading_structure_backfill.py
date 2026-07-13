@@ -139,12 +139,12 @@ class TradingStructureBackfillService:
                     freq="1min",
                     asset="I" if code in index_set else "E",
                 )
-            except Exception as exc:
+            except Exception:
                 summary.failed += 1
-                continue
+                break
             if not isinstance(frame, pd.DataFrame):
                 summary.failed += 1
-                continue
+                break
             required = (
                 "ts_code",
                 "trade_time",

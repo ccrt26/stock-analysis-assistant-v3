@@ -133,3 +133,30 @@ def test_margin_empty_dataframe_without_columns_is_waiting_not_schema_failure(
 
     assert summary.waiting_upstream == 1
     assert summary.failed == 0
+
+
+def test_minute_permission_error_stops_remaining_scope_after_first_failure(tmp_path):
+    calls = []
+
+    def denied_minute_fetcher(**kwargs):
+        calls.append(kwargs["ts_code"])
+        raise RuntimeError("访问接口(stk_mins)频率超限(2次/天)")
+
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    service = TradingStructureBackfillService(
+        TushareResearchClient(Pro(), pacer=lambda method: None),
+        warehouse,
+        minute_fetcher=denied_minute_fetcher,
+        minute_pacer=lambda: None,
+    )
+
+    summary = service.backfill(
+        trading_dates=(date(2026, 7, 10),),
+        through=date(2026, 7, 10),
+        candidate_codes=("000001.SZ", "000002.SZ", "000003.SZ"),
+        index_codes=(),
+        resume=True,
+    )
+
+    assert calls == ["000001.SZ"]
+    assert summary.failed == 1

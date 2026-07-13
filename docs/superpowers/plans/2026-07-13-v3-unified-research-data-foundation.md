@@ -468,6 +468,8 @@ PYTHONPATH=src .venv/bin/python -m pytest tests/test_cninfo_research_client.py t
 
 > **2026-07-14 执行修订：** Tushare 官方历史分钟权限为每分钟 500 次、单次最多 8000 行；默认串行间隔采用 0.13 秒（约每分钟 461 次），不再沿用缺乏依据的 61 秒间隔。20 个交易日约 4800 根 1 分钟记录，可在单次上限内按一个代码提取。依据：<https://tushare.pro/document/1?doc_id=290>、<https://tushare.pro/document/1?doc_id=234>。
 
+> **真实权限验收补充：** 当前本地凭证只有历史分钟试用额度（接口实测提示每天 2 次、每分钟 1 次），不能完成 50 只冻结候选加 8 个宽基指数的 20 日补齐。运行时改为直接调用分钟端点，让权限错误可见；首个权限、频率或接口失败后立即停止剩余代码并登记缺口，禁止重复轰击接口或把分钟覆盖标为完成。只有换成正式历史分钟权限后，0.13 秒正式权限限速才生效。
+
 **新增：**
 
 - `src/stock_analyzer/data/trading_structure_backfill.py`

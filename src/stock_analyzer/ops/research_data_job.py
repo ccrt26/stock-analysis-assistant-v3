@@ -47,7 +47,22 @@ class ResearchDataRuntime:
     http_client: httpx.Client
 
     def minute_fetcher(self, **kwargs: Any) -> pd.DataFrame:
-        return self.tushare_module.pro_bar(api=self.pro, **kwargs)
+        frame = self.pro.stk_mins(
+            ts_code=kwargs["ts_code"],
+            start_date=kwargs["start_date"],
+            end_date=kwargs["end_date"],
+            freq=kwargs["freq"],
+        )
+        if isinstance(frame, pd.DataFrame) and not frame.empty:
+            frame = frame.copy()
+            if "trade_date" not in frame.columns and "trade_time" in frame.columns:
+                frame["trade_date"] = (
+                    frame["trade_time"]
+                    .astype(str)
+                    .str.slice(0, 10)
+                    .str.replace("-", "", regex=False)
+                )
+        return frame
 
 
 def build_research_data_runtime(config: AppConfig) -> ResearchDataRuntime:
@@ -409,14 +424,31 @@ def select_minute_candidate_scope(
     *,
     limit: int = 50,
 ) -> tuple[str, ...]:
-    frame = warehouse.read_current(ResearchDatasetId.EQUITY_DAILY)
-    if frame.empty:
+    calendar = warehouse.read_current(ResearchDatasetId.TRADE_CALENDAR)
+    if calendar.empty:
         return ()
-    frame = frame[pd.to_datetime(frame["trade_date"]).dt.date <= through].copy()
-    dates = sorted(pd.to_datetime(frame["trade_date"]).dt.date.unique())[-21:]
+    dates = sorted(
+        {
+            value
+            for value in pd.to_datetime(
+                calendar.loc[calendar["is_open"].astype(bool), "cal_date"]
+            ).dt.date
+            if value <= through
+        }
+    )[-21:]
     if len(dates) < 2:
         return ()
-    frame = frame[pd.to_datetime(frame["trade_date"]).dt.date.isin(dates)]
+    frames = [
+        warehouse.read_current(
+            ResearchDatasetId.EQUITY_DAILY,
+            partition_value=value.isoformat(),
+        )
+        for value in dates
+    ]
+    frames = [frame for frame in frames if not frame.empty]
+    if not frames:
+        return ()
+    frame = pd.concat(frames, ignore_index=True, sort=False)
     frame = frame.sort_values(["ts_code", "trade_date"])
     grouped = frame.groupby("ts_code", sort=False)
     stats = grouped.agg(
