@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections import defaultdict
 from datetime import date, datetime, time, timedelta, timezone
 import hashlib
 import json
@@ -47,10 +46,11 @@ class EventBackfillService:
         current_month = through.strftime("%Y-%m")
         for month_start, month_end in _month_ranges(announcement_start, through):
             partition = month_start.strftime("%Y-%m")
-            if (
-                resume
-                and partition < current_month
-                and self._complete(ResearchDatasetId.ANNOUNCEMENT, partition)
+            if self._should_skip_historical(
+                ResearchDatasetId.ANNOUNCEMENT,
+                partition,
+                current_month=current_month,
+                resume=resume,
             ):
                 summary.skipped += 1
                 continue
@@ -63,74 +63,159 @@ class EventBackfillService:
                 through,
                 summary,
             )
-
-        holder = self.tushare.call_paged(
-            "stk_holdertrade",
-            limit=3000,
-            start_date=_yyyymmdd(start),
-            end_date=_yyyymmdd(through),
-        ).drop_duplicates(ignore_index=True)
-        self._commit_grouped(
-            ResearchDatasetId.HOLDER_TRADE,
-            [_holder_row(row) for row in holder.to_dict(orient="records")],
-            lambda row: row["ann_date"].strftime("%Y-%m"),
-            "stk_holdertrade",
-            through,
-            resume,
-            summary,
-        )
+            self._mark_partition_checked(
+                ResearchDatasetId.ANNOUNCEMENT,
+                partition,
+                f"rows:{len(announcements)}",
+            )
 
         for month_start, month_end in _month_ranges(start, through):
             partition = month_start.strftime("%Y-%m")
-            if (
-                resume
-                and partition < current_month
-                and self._complete(ResearchDatasetId.SHARE_FLOAT, partition)
+            if self._should_skip_historical(
+                ResearchDatasetId.HOLDER_TRADE,
+                partition,
+                current_month=current_month,
+                resume=resume,
+            ):
+                summary.skipped += 1
+                continue
+            holder = self.tushare.call_paged(
+                "stk_holdertrade",
+                limit=3000,
+                start_date=_yyyymmdd(month_start),
+                end_date=_yyyymmdd(month_end),
+            ).drop_duplicates(ignore_index=True)
+            self._require_dates_in_range(
+                holder,
+                "ann_date",
+                month_start,
+                month_end,
+                "stk_holdertrade",
+            )
+            holder_rows = [
+                _holder_row(row) for row in holder.to_dict(orient="records")
+            ]
+            self._commit(
+                ResearchDatasetId.HOLDER_TRADE,
+                partition,
+                "stk_holdertrade",
+                holder_rows,
+                through,
+                summary,
+            )
+            self._mark_partition_checked(
+                ResearchDatasetId.HOLDER_TRADE,
+                partition,
+                f"rows:{len(holder_rows)}",
+            )
+
+        for month_start, month_end in _month_ranges(start, through):
+            partition = month_start.strftime("%Y-%m")
+            if self._should_skip_historical(
+                ResearchDatasetId.SHARE_FLOAT,
+                partition,
+                current_month=current_month,
+                resume=resume,
             ):
                 summary.skipped += 1
                 continue
             floats = self._fetch_share_float_range(month_start, month_end)
+            float_rows = [
+                _float_row(row) for row in floats.to_dict(orient="records")
+            ]
             self._commit(
                 ResearchDatasetId.SHARE_FLOAT,
                 partition,
                 "share_float",
-                [_float_row(row) for row in floats.to_dict(orient="records")],
+                float_rows,
                 through,
                 summary,
             )
+            self._mark_partition_checked(
+                ResearchDatasetId.SHARE_FLOAT,
+                partition,
+                f"rows:{len(float_rows)}",
+            )
 
-        repurchases = self.tushare.call_paged(
-            "repurchase", start_date=_yyyymmdd(start), end_date=_yyyymmdd(through)
-        )
-        self._commit_grouped(
-            ResearchDatasetId.REPURCHASE,
-            [_repurchase_row(row) for row in repurchases.to_dict(orient="records")],
-            lambda row: row["announcement_date"].strftime("%Y-%m"),
-            "repurchase",
-            through,
-            resume,
-            summary,
-        )
+        for month_start, month_end in _month_ranges(start, through):
+            partition = month_start.strftime("%Y-%m")
+            if self._should_skip_historical(
+                ResearchDatasetId.REPURCHASE,
+                partition,
+                current_month=current_month,
+                resume=resume,
+            ):
+                summary.skipped += 1
+                continue
+            repurchases = self.tushare.call_paged(
+                "repurchase",
+                start_date=_yyyymmdd(month_start),
+                end_date=_yyyymmdd(month_end),
+            ).drop_duplicates(ignore_index=True)
+            self._require_dates_in_range(
+                repurchases,
+                "ann_date",
+                month_start,
+                month_end,
+                "repurchase",
+            )
+            repurchase_rows = [
+                _repurchase_row(row)
+                for row in repurchases.to_dict(orient="records")
+            ]
+            self._commit(
+                ResearchDatasetId.REPURCHASE,
+                partition,
+                "repurchase",
+                repurchase_rows,
+                through,
+                summary,
+            )
+            self._mark_partition_checked(
+                ResearchDatasetId.REPURCHASE,
+                partition,
+                f"rows:{len(repurchase_rows)}",
+            )
 
-        pledge_rows: list[dict[str, Any]] = []
         for snapshot in _quarter_snapshots(start, through):
+            partition = snapshot.strftime("%Y-%m")
+            if self._should_skip_historical(
+                ResearchDatasetId.PLEDGE,
+                partition,
+                current_month=current_month,
+                resume=resume,
+            ):
+                summary.skipped += 1
+                continue
             frame = self.tushare.call_paged(
                 "pledge_stat", end_date=_yyyymmdd(snapshot)
+            ).drop_duplicates(ignore_index=True)
+            self._require_dates_in_range(
+                frame,
+                "end_date",
+                snapshot,
+                snapshot,
+                "pledge_stat",
             )
+            pledge_rows: list[dict[str, Any]] = []
             for row in frame.to_dict(orient="records"):
                 normalized = _clean(row)
                 normalized["end_date"] = _date(row["end_date"])
                 normalized["available_at"] = _conservative_available(snapshot)
                 pledge_rows.append(normalized)
-        self._commit_grouped(
-            ResearchDatasetId.PLEDGE,
-            pledge_rows,
-            lambda row: row["end_date"].strftime("%Y-%m"),
-            "pledge_stat",
-            through,
-            resume,
-            summary,
-        )
+            self._commit(
+                ResearchDatasetId.PLEDGE,
+                partition,
+                "pledge_stat",
+                pledge_rows,
+                through,
+                summary,
+            )
+            self._mark_partition_checked(
+                ResearchDatasetId.PLEDGE,
+                partition,
+                f"rows:{len(pledge_rows)}",
+            )
 
         suspension_start = through - timedelta(days=365)
         for trading_date in sorted(
@@ -201,26 +286,6 @@ class EventBackfillService:
             )
         return frame.drop_duplicates(ignore_index=True)
 
-    def _commit_grouped(
-        self,
-        dataset: ResearchDatasetId,
-        rows: list[dict[str, Any]],
-        partitioner,
-        endpoint: str,
-        through: date,
-        resume: bool,
-        summary: BackfillSummary,
-    ) -> None:
-        grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
-        for row in rows:
-            grouped[str(partitioner(row))].append(row)
-        for partition, partition_rows in sorted(grouped.items()):
-            current_month = through.strftime("%Y-%m")
-            if resume and partition < current_month and self._complete(dataset, partition):
-                summary.skipped += 1
-                continue
-            self._commit(dataset, partition, endpoint, partition_rows, through, summary)
-
     def _commit(
         self,
         dataset: ResearchDatasetId,
@@ -251,6 +316,83 @@ class EventBackfillService:
         return not frame.empty and bool(
             (frame["partition_value"].astype(str) == partition).any()
         )
+
+    def _should_skip_historical(
+        self,
+        dataset: ResearchDatasetId,
+        partition: str,
+        *,
+        current_month: str,
+        resume: bool,
+    ) -> bool:
+        return bool(
+            resume
+            and partition < current_month
+            and (
+                self._complete(dataset, partition)
+                or self._partition_checked(dataset, partition)
+            )
+        )
+
+    def _partition_checked(
+        self, dataset: ResearchDatasetId, partition: str
+    ) -> bool:
+        with connect_research_warehouse(
+            self.warehouse.duckdb_path, read_only=True
+        ) as connection:
+            row = connection.execute(
+                """
+                select 1 from research_watermarks
+                where dataset_id = ? and scope_key = ?
+                """,
+                [f"event_partition_check:{dataset.value}", partition],
+            ).fetchone()
+        return row is not None
+
+    def _mark_partition_checked(
+        self,
+        dataset: ResearchDatasetId,
+        partition: str,
+        value: str,
+    ) -> None:
+        with connect_research_warehouse(self.warehouse.duckdb_path) as connection:
+            connection.execute(
+                """
+                insert or replace into research_watermarks
+                (dataset_id, scope_key, watermark_value, updated_at, run_id)
+                values (?, ?, ?, now(), ?)
+                """,
+                [
+                    f"event_partition_check:{dataset.value}",
+                    partition,
+                    value,
+                    f"events:{dataset.value}-check:{partition}",
+                ],
+            )
+
+    @staticmethod
+    def _require_dates_in_range(
+        frame: pd.DataFrame,
+        field: str,
+        start: date,
+        through: date,
+        endpoint: str,
+    ) -> None:
+        if frame.empty:
+            return
+        if field not in frame.columns:
+            raise ResearchSourceError(
+                f"Tushare {endpoint} lacks {field}",
+                category="schema",
+                endpoint=endpoint,
+            )
+        returned_dates = frame[field].map(_date)
+        if ((returned_dates < start) | (returned_dates > through)).any():
+            raise ResearchSourceError(
+                f"Tushare {endpoint} returned rows outside the requested range",
+                category="invalid_semantics",
+                endpoint=endpoint,
+            )
 
     def _suspension_checked(self, partition: str) -> bool:
         with connect_research_warehouse(

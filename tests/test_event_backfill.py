@@ -15,7 +15,9 @@ class ActionPro:
 
     def stk_holdertrade(self, **kwargs):
         return pd.DataFrame([{
-            "ts_code": "000001.SZ", "ann_date": "20260710", "holder_name": "股东A",
+            "ts_code": "000001.SZ",
+            "ann_date": kwargs.get("end_date", "20260710"),
+            "holder_name": "股东A",
             "holder_type": "G", "in_de": "DE", "change_vol": 100.0,
             "change_ratio": 0.1, "after_share": 900.0, "after_ratio": 0.9,
             "avg_price": 10.0, "total_share": 1000.0,
@@ -31,7 +33,9 @@ class ActionPro:
 
     def repurchase(self, **kwargs):
         return pd.DataFrame([{
-            "ts_code": "000001.SZ", "ann_date": "20260710", "end_date": "20260709",
+            "ts_code": "000001.SZ",
+            "ann_date": kwargs.get("end_date", "20260710"),
+            "end_date": kwargs.get("end_date", "20260709"),
             "proc": "实施", "exp_date": None, "vol": 10.0, "amount": 100.0,
             "high_limit": 11.0, "low_limit": 9.0,
         }])
@@ -254,3 +258,74 @@ def test_share_float_recursively_splits_a_date_range_that_hits_page_capacity(
         ("20260701", "20260701"),
         ("20260702", "20260702"),
     ]
+
+
+def test_resume_skips_checked_historical_event_ranges_before_fetch(tmp_path):
+    class IncrementalActionPro(ActionPro):
+        def __init__(self):
+            super().__init__()
+            self.holder_ranges = []
+            self.float_ranges = []
+            self.repurchase_ranges = []
+            self.pledge_snapshots = []
+
+        def stk_holdertrade(self, **kwargs):
+            requested = (kwargs["start_date"], kwargs["end_date"])
+            self.holder_ranges.append(requested)
+            if kwargs["start_date"] == "20260601":
+                return pd.DataFrame()
+            row = super().stk_holdertrade(**kwargs).iloc[0].to_dict()
+            row["ann_date"] = kwargs["end_date"]
+            return pd.DataFrame([row])
+
+        def share_float(self, **kwargs):
+            requested = (kwargs["start_date"], kwargs["end_date"])
+            self.float_ranges.append(requested)
+            if kwargs["start_date"] == "20260601":
+                return pd.DataFrame()
+            return super().share_float(**kwargs)
+
+        def repurchase(self, **kwargs):
+            requested = (kwargs["start_date"], kwargs["end_date"])
+            self.repurchase_ranges.append(requested)
+            if kwargs["start_date"] == "20260601":
+                return pd.DataFrame()
+            row = super().repurchase(**kwargs).iloc[0].to_dict()
+            row["ann_date"] = kwargs["end_date"]
+            return pd.DataFrame([row])
+
+        def pledge_stat(self, **kwargs):
+            self.pledge_snapshots.append(kwargs["end_date"])
+            if kwargs["end_date"] == "20260630":
+                return pd.DataFrame()
+            return super().pledge_stat(**kwargs)
+
+    pro = IncrementalActionPro()
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    service = EventBackfillService(
+        TushareResearchClient(pro, pacer=lambda method: None),
+        type(
+            "EmptyAnnouncementClient",
+            (),
+            {"fetch_announcements": lambda self, start, through: []},
+        )(),
+        warehouse,
+    )
+
+    for _ in range(2):
+        service.backfill(
+            start=date(2026, 6, 1),
+            through=date(2026, 7, 10),
+            trading_dates=(),
+            resume=True,
+        )
+
+    expected_month_ranges = [
+        ("20260601", "20260630"),
+        ("20260701", "20260710"),
+        ("20260701", "20260710"),
+    ]
+    assert pro.holder_ranges == expected_month_ranges
+    assert pro.float_ranges == expected_month_ranges
+    assert pro.repurchase_ranges == expected_month_ranges
+    assert pro.pledge_snapshots == ["20260630", "20260710", "20260710"]
