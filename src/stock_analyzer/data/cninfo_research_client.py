@@ -11,6 +11,7 @@ from stock_analyzer.data.tushare_research_client import ResearchSourceError
 
 
 _TITLE_TAG = re.compile(r"<[^>]+>")
+_DENSE_DAY_PLATES = ("szmb", "szcy", "shmb", "shkcp", "bj")
 
 
 class CninfoRequestPacer:
@@ -44,17 +45,22 @@ class CninfoResearchClient:
         base_url: str = "https://www.cninfo.com.cn",
         page_size: int = 30,
         max_pages: int = 100,
+        stock_batch_size: int = 50,
         timeout_seconds: float = 20.0,
         max_retries: int = 2,
         pacer: Callable[[], None] | None = None,
     ) -> None:
+        if page_size <= 0 or max_pages <= 0 or stock_batch_size <= 0:
+            raise ValueError("CNINFO pagination settings must be positive")
         self.http_client = http_client
         self.base_url = base_url.rstrip("/")
         self.page_size = page_size
         self.max_pages = max_pages
+        self.stock_batch_size = stock_batch_size
         self.timeout_seconds = timeout_seconds
         self.max_retries = max_retries
         self.pacer = pacer or CninfoRequestPacer()
+        self._stock_map: list[tuple[str, str]] | None = None
 
     def fetch_announcements(self, start: date, through: date) -> list[dict[str, Any]]:
         records: dict[str, dict[str, Any]] = {}
@@ -78,12 +84,28 @@ class CninfoResearchClient:
         )
 
     def _query_day(self, value: date) -> list[dict[str, Any]]:
-        first_page = self._query_page(value, 1, plate="")
+        first_page = self._query_page(value, 1, plate="", stock="")
         if math.ceil(first_page[1] / self.page_size) > self.max_pages:
             rows: list[dict[str, Any]] = []
             split_total = 0
-            for plate in ("sz", "sh", "bj"):
-                plate_rows, plate_total = self._query_stable_scope(value, plate=plate)
+            for plate in _DENSE_DAY_PLATES:
+                first_plate_page = self._query_page(
+                    value, 1, plate=plate, stock=""
+                )
+                if (
+                    math.ceil(first_plate_page[1] / self.page_size)
+                    > self.max_pages
+                ):
+                    plate_rows, plate_total = self._query_by_stock_batches(
+                        value, plate=plate, expected_total=first_plate_page[1]
+                    )
+                else:
+                    plate_rows, plate_total = self._query_stable_scope(
+                        value,
+                        plate=plate,
+                        stock="",
+                        first_page=first_plate_page,
+                    )
                 rows.extend(plate_rows)
                 split_total += plate_total
             announcement_ids = {
@@ -101,15 +123,47 @@ class CninfoResearchClient:
                 )
             return rows
         rows, _ = self._query_stable_scope(
-            value, plate="", first_page=first_page
+            value, plate="", stock="", first_page=first_page
         )
         return rows
+
+    def _query_by_stock_batches(
+        self, value: date, *, plate: str, expected_total: int
+    ) -> tuple[list[dict[str, Any]], int]:
+        stocks = [
+            f"{code},{org_id}"
+            for code, org_id in self._load_stock_map()
+            if _plate_for_code(code) == plate
+        ]
+        rows: list[dict[str, Any]] = []
+        for offset in range(0, len(stocks), self.stock_batch_size):
+            stock = ";".join(stocks[offset : offset + self.stock_batch_size])
+            first_page = self._query_page(value, 1, plate=plate, stock=stock)
+            batch_rows, _ = self._query_stable_scope(
+                value,
+                plate=plate,
+                stock=stock,
+                first_page=first_page,
+            )
+            rows.extend(batch_rows)
+        announcement_ids = {
+            str(row.get("announcementId", "")).strip() for row in rows
+        }
+        if not all(announcement_ids) or len(announcement_ids) != expected_total:
+            raise ResearchSourceError(
+                f"CNINFO {value.isoformat()} plate={plate} stock batches returned "
+                f"{len(announcement_ids)} unique rows but declared {expected_total}",
+                category="incomplete",
+                endpoint="new/hisAnnouncement/query",
+            )
+        return rows, expected_total
 
     def _query_stable_scope(
         self,
         value: date,
         *,
         plate: str,
+        stock: str,
         first_page: tuple[list[dict[str, Any]], int] | None = None,
     ) -> tuple[list[dict[str, Any]], int]:
         rows: list[dict[str, Any]] = []
@@ -119,6 +173,7 @@ class CninfoResearchClient:
             pass_rows, pass_total = self._query_pages_once(
                 value,
                 plate=plate,
+                stock=stock,
                 first_page=first_page if attempt == 0 else None,
             )
             if declared_total is None:
@@ -155,9 +210,12 @@ class CninfoResearchClient:
         value: date,
         *,
         plate: str,
+        stock: str,
         first_page: tuple[list[dict[str, Any]], int] | None = None,
     ) -> tuple[list[dict[str, Any]], int]:
-        first, total = first_page or self._query_page(value, 1, plate=plate)
+        first, total = first_page or self._query_page(
+            value, 1, plate=plate, stock=stock
+        )
         rows = list(first)
         pages = math.ceil(total / self.page_size)
         if pages > self.max_pages:
@@ -167,7 +225,9 @@ class CninfoResearchClient:
                 endpoint="new/hisAnnouncement/query",
             )
         for page in range(2, pages + 1):
-            page_rows, page_total = self._query_page(value, page, plate=plate)
+            page_rows, page_total = self._query_page(
+                value, page, plate=plate, stock=stock
+            )
             if page_total != total:
                 raise ResearchSourceError(
                     "CNINFO pagination total changed during acquisition",
@@ -178,7 +238,7 @@ class CninfoResearchClient:
         return rows, total
 
     def _query_page(
-        self, value: date, page: int, *, plate: str
+        self, value: date, page: int, *, plate: str, stock: str
     ) -> tuple[list[dict[str, Any]], int]:
         payload = self._post(
             {
@@ -187,7 +247,7 @@ class CninfoResearchClient:
                 "column": "szse",
                 "tabName": "fulltext",
                 "plate": plate,
-                "stock": "",
+                "stock": stock,
                 "searchkey": "",
                 "secid": "",
                 "category": "",
@@ -225,6 +285,93 @@ class CninfoResearchClient:
                 endpoint="new/hisAnnouncement/query",
             )
         return list(raw_rows), total
+
+    def _load_stock_map(self) -> list[tuple[str, str]]:
+        if self._stock_map is not None:
+            return self._stock_map
+        payload = self._get_json("/new/data/szse_stock.json")
+        raw_rows = payload.get("stockList") if isinstance(payload, dict) else None
+        if not isinstance(raw_rows, list) or any(
+            not isinstance(row, dict) for row in raw_rows
+        ):
+            raise ResearchSourceError(
+                "CNINFO stock map is malformed",
+                category="schema",
+                endpoint="new/data/szse_stock.json",
+            )
+        stocks: dict[str, str] = {}
+        for row in raw_rows:
+            code = str(row.get("code", "")).strip().zfill(6)
+            org_id = str(row.get("orgId", "")).strip()
+            if len(code) != 6 or not code.isdigit() or not org_id:
+                raise ResearchSourceError(
+                    "CNINFO stock map contains an invalid code or orgId",
+                    category="schema",
+                    endpoint="new/data/szse_stock.json",
+                )
+            previous = stocks.get(code)
+            if previous is not None and previous != org_id:
+                raise ResearchSourceError(
+                    f"CNINFO stock map contains conflicting orgId values for {code}",
+                    category="schema",
+                    endpoint="new/data/szse_stock.json",
+                )
+            stocks[code] = org_id
+        if not stocks:
+            raise ResearchSourceError(
+                "CNINFO stock map is empty",
+                category="incomplete",
+                endpoint="new/data/szse_stock.json",
+            )
+        self._stock_map = sorted(stocks.items())
+        return self._stock_map
+
+    def _get_json(self, path: str) -> Any:
+        url = f"{self.base_url}{path}"
+        for attempt in range(self.max_retries + 1):
+            self.pacer()
+            try:
+                response = self.http_client.get(url, timeout=self.timeout_seconds)
+            except Exception as exc:
+                if attempt < self.max_retries:
+                    system_time.sleep(min(2**attempt, 5))
+                    continue
+                raise ResearchSourceError(
+                    f"CNINFO transport failed: {type(exc).__name__}",
+                    category="network",
+                    endpoint=path.lstrip("/"),
+                ) from exc
+            status = getattr(response, "status_code", None)
+            if status == 429 or (isinstance(status, int) and status >= 500):
+                if attempt < self.max_retries:
+                    system_time.sleep(min(2**attempt, 5))
+                    continue
+                raise ResearchSourceError(
+                    f"CNINFO HTTP {status}",
+                    category="rate_limited" if status == 429 else "network",
+                    endpoint=path.lstrip("/"),
+                )
+            if status in {401, 403}:
+                raise ResearchSourceError(
+                    f"CNINFO HTTP {status}",
+                    category="permission_denied",
+                    endpoint=path.lstrip("/"),
+                )
+            if not isinstance(status, int) or status >= 400:
+                raise ResearchSourceError(
+                    f"CNINFO HTTP {status}",
+                    category="schema",
+                    endpoint=path.lstrip("/"),
+                )
+            try:
+                return response.json()
+            except Exception as exc:
+                raise ResearchSourceError(
+                    "CNINFO returned invalid JSON",
+                    category="schema",
+                    endpoint=path.lstrip("/"),
+                ) from exc
+        raise AssertionError("unreachable")
 
     def _post(self, data: dict[str, str]) -> Any:
         url = f"{self.base_url}/new/hisAnnouncement/query"
@@ -356,6 +503,24 @@ def _ts_code(code: str) -> str:
             endpoint="new/hisAnnouncement/query",
         )
     return f"{code}.{suffix}"
+
+
+def _plate_for_code(code: str) -> str:
+    if code.startswith(("300", "301", "302")):
+        return "szcy"
+    if code.startswith(("000", "001", "002", "003", "200", "201")):
+        return "szmb"
+    if code.startswith(("688", "689")):
+        return "shkcp"
+    if code.startswith(("600", "601", "603", "605", "900")):
+        return "shmb"
+    if code.startswith(("4", "8", "92")):
+        return "bj"
+    raise ResearchSourceError(
+        f"CNINFO stock map contains an unrecognized security code: {code}",
+        category="schema",
+        endpoint="new/data/szse_stock.json",
+    )
 
 
 __all__ = ["CninfoRequestPacer", "CninfoResearchClient"]

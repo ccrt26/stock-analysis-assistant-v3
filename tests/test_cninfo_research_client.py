@@ -169,12 +169,14 @@ def test_cninfo_splits_dense_days_by_official_market_plate():
             self.plates.append(plate)
             if plate == "":
                 total, ids = 3, ("G1", "G2")
-            elif plate == "sz":
+            elif plate == "szmb":
                 total, ids = 1, ("SZ1",)
-            elif plate == "sh":
+            elif plate == "shmb":
                 total, ids = 1, ("SH1",)
-            else:
+            elif plate == "bj":
                 total, ids = 1, ("BJ1",)
+            else:
+                total, ids = 0, ()
             rows = [
                 {
                     "announcementId": value,
@@ -203,4 +205,69 @@ def test_cninfo_splits_dense_days_by_official_market_plate():
     rows = client.fetch_announcements(date(2026, 7, 10), date(2026, 7, 10))
 
     assert {row["announcement_id"] for row in rows} == {"SZ1", "SH1", "BJ1"}
-    assert http.plates == ["", "sz", "sh", "bj"]
+    assert http.plates == ["", "szmb", "szcy", "shmb", "shkcp", "bj"]
+
+
+def test_cninfo_batches_official_stock_map_when_a_subboard_exceeds_page_cap():
+    class DenseSubboardHttp:
+        def __init__(self):
+            self.map_calls = 0
+
+        def get(self, url, timeout):
+            self.map_calls += 1
+            return Response(
+                {
+                    "stockList": [
+                        {
+                            "code": f"30000{value}",
+                            "orgId": f"org{value}",
+                            "category": "A股",
+                        }
+                        for value in range(1, 4)
+                    ]
+                }
+            )
+
+        def post(self, url, data, timeout):
+            plate = data["plate"]
+            stock = data["stock"]
+            if plate == "":
+                total, ids = 3, ("G1", "G2")
+            elif plate != "szcy":
+                total, ids = 0, ()
+            elif not stock:
+                total, ids = 3, ("C1", "C2")
+            elif ";" in stock:
+                total, ids = 2, ("C1", "C2")
+            else:
+                total, ids = 1, ("C3",)
+            rows = [
+                {
+                    "announcementId": value,
+                    "announcementTitle": "年度报告",
+                    "announcementTime": int(
+                        datetime(2026, 7, 10, 10, tzinfo=timezone.utc).timestamp()
+                        * 1000
+                    ),
+                    "secCode": "300001",
+                    "secName": "创业板公司",
+                    "adjunctUrl": f"finalpage/{value}.PDF",
+                }
+                for value in ids
+            ]
+            return Response({"totalAnnouncement": total, "announcements": rows})
+
+    http = DenseSubboardHttp()
+    client = CninfoResearchClient(
+        http,
+        page_size=2,
+        max_pages=1,
+        stock_batch_size=2,
+        pacer=lambda: None,
+        max_retries=0,
+    )
+
+    rows = client.fetch_announcements(date(2026, 7, 10), date(2026, 7, 10))
+
+    assert {row["announcement_id"] for row in rows} == {"C1", "C2", "C3"}
+    assert http.map_calls == 1
