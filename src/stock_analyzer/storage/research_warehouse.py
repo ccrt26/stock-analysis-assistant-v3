@@ -1,0 +1,537 @@
+from __future__ import annotations
+
+import hashlib
+import json
+import shutil
+from dataclasses import dataclass
+from datetime import date, datetime, timezone
+from pathlib import Path
+from typing import Any
+
+import duckdb
+import pandas as pd
+
+from stock_analyzer.data.research_contracts import (
+    FactBatch,
+    ResearchDatasetId,
+    research_contract,
+    research_contract_registry,
+)
+from stock_analyzer.storage.research_parquet import (
+    atomic_promote,
+    discard_backup,
+    restore_previous,
+    sha256_file,
+    write_staged_parquet,
+)
+from stock_analyzer.storage.research_schema import connect_research_warehouse
+
+
+_GOVERNANCE_FIELDS = {
+    "source_name",
+    "source_endpoint",
+    "source_record_id",
+    "source_updated_at",
+    "available_at",
+    "availability_precision",
+    "ingested_at",
+    "ingestion_run_id",
+    "payload_hash",
+    "business_key_hash",
+    "quality_status",
+    "revision_no",
+}
+
+
+@dataclass(frozen=True)
+class FactCommitResult:
+    dataset_id: ResearchDatasetId
+    partition_value: str
+    row_count: int
+    new_rows: int
+    changed_rows: int
+    unchanged_rows: int
+    content_hash: str
+    file_sha256: str
+
+
+class ResearchWarehouse:
+    def __init__(self, root: Path) -> None:
+        self.root = Path(root)
+        self.facts_root = self.root / "facts"
+        self.staging_root = self.root / ".staging"
+        self.duckdb_path = self.root / "research.duckdb"
+        self.root.mkdir(parents=True, exist_ok=True)
+        with connect_research_warehouse(self.duckdb_path) as connection:
+            for dataset_id, contract in research_contract_registry().items():
+                connection.execute(
+                    """
+                    insert or replace into research_dataset_catalog
+                    (dataset_id, contract_json, updated_at)
+                    values (?, ?, now())
+                    """,
+                    [dataset_id.value, contract.model_dump_json()],
+                )
+
+    def commit_batch(self, batch: FactBatch) -> FactCommitResult:
+        contract = research_contract(batch.dataset_id)
+        incoming = self._normalize_batch(batch)
+        self._validate_frame(batch.dataset_id, incoming, contract.business_key)
+        final_path = self._partition_path(batch.dataset_id, batch.partition_value)
+        existing = self._read_path(final_path)
+        merged, revisions, counts = self._merge(
+            existing,
+            incoming,
+            contract.business_key,
+            batch,
+        )
+        content_hash = self._frame_content_hash(merged)
+
+        current_meta = self._partition_metadata(
+            batch.dataset_id,
+            batch.partition_value,
+        )
+        if (
+            current_meta is not None
+            and current_meta[0] == content_hash
+            and counts[0] == 0
+            and counts[1] == 0
+        ):
+            return FactCommitResult(
+                dataset_id=batch.dataset_id,
+                partition_value=batch.partition_value,
+                row_count=len(merged),
+                new_rows=0,
+                changed_rows=0,
+                unchanged_rows=counts[2],
+                content_hash=content_hash,
+                file_sha256=current_meta[1],
+            )
+
+        stage_dir = self.staging_root / batch.ingestion_run_id / batch.dataset_id.value
+        staged_path = stage_dir / f"{_safe_partition(batch.partition_value)}.parquet"
+        file_sha256 = write_staged_parquet(staged_path, merged)
+        backup_path: Path | None = None
+        try:
+            backup_path = self._promote_staged_partition(staged_path, final_path)
+            try:
+                self._commit_metadata(
+                    batch,
+                    merged,
+                    final_path,
+                    content_hash,
+                    file_sha256,
+                    revisions,
+                )
+            except Exception:
+                restore_previous(final_path, backup_path)
+                raise
+            discard_backup(backup_path)
+        finally:
+            shutil.rmtree(stage_dir.parent, ignore_errors=True)
+
+        return FactCommitResult(
+            dataset_id=batch.dataset_id,
+            partition_value=batch.partition_value,
+            row_count=len(merged),
+            new_rows=counts[0],
+            changed_rows=counts[1],
+            unchanged_rows=counts[2],
+            content_hash=content_hash,
+            file_sha256=file_sha256,
+        )
+
+    def _promote_staged_partition(self, staged_path: Path, final_path: Path) -> Path | None:
+        return atomic_promote(staged_path, final_path)
+
+    def read_current(
+        self,
+        dataset_id: ResearchDatasetId | str,
+        *,
+        partition_value: str | None = None,
+    ) -> pd.DataFrame:
+        dataset = ResearchDatasetId(dataset_id)
+        if partition_value is not None:
+            return self._read_path(self._partition_path(dataset, partition_value))
+        paths = sorted((self.facts_root / dataset.value).glob("*/data.parquet"))
+        if not paths:
+            return pd.DataFrame()
+        with duckdb.connect() as connection:
+            return connection.execute(
+                "select * from read_parquet(?, union_by_name=true)",
+                [[str(path) for path in paths]],
+            ).fetchdf()
+
+    def revision_count(self, dataset_id: ResearchDatasetId | str) -> int:
+        with connect_research_warehouse(self.duckdb_path, read_only=True) as connection:
+            return int(
+                connection.execute(
+                    "select count(*) from research_fact_revisions where dataset_id = ?",
+                    [ResearchDatasetId(dataset_id).value],
+                ).fetchone()[0]
+            )
+
+    def revision_rows(self, dataset_id: ResearchDatasetId | str) -> list[dict[str, Any]]:
+        with connect_research_warehouse(self.duckdb_path, read_only=True) as connection:
+            cursor = connection.execute(
+                """
+                select business_key_hash, revision_no, row_payload,
+                       cast(valid_from as varchar), cast(valid_to as varchar)
+                from research_fact_revisions
+                where dataset_id = ?
+                order by business_key_hash, revision_no
+                """,
+                [ResearchDatasetId(dataset_id).value],
+            )
+            rows = cursor.fetchall()
+        return [
+            {
+                "business_key_hash": row[0],
+                "revision_no": int(row[1]),
+                "row_payload": _from_json(row[2]),
+                "valid_from": _parse_datetime(row[3]),
+                "valid_to": _parse_datetime(row[4]),
+            }
+            for row in rows
+        ]
+
+    def partition_manifest(self, dataset_id: ResearchDatasetId | str) -> pd.DataFrame:
+        with connect_research_warehouse(self.duckdb_path, read_only=True) as connection:
+            return connection.execute(
+                """
+                select * from research_fact_partitions
+                where dataset_id = ? order by partition_value
+                """,
+                [ResearchDatasetId(dataset_id).value],
+            ).fetchdf()
+
+    def _normalize_batch(self, batch: FactBatch) -> pd.DataFrame:
+        contract = research_contract(batch.dataset_id)
+        rows: list[dict[str, Any]] = []
+        for raw in batch.records:
+            missing = [field for field in contract.business_key if raw.get(field) is None]
+            if missing:
+                raise ValueError(
+                    f"missing business key fields for {batch.dataset_id.value}: {missing}"
+                )
+            row = {key: _parquet_safe(value) for key, value in raw.items()}
+            available_at = raw.get("available_at", batch.default_available_at)
+            if available_at is None:
+                raise ValueError("available_at is required for every fact")
+            key_payload = {field: _json_safe(raw[field]) for field in contract.business_key}
+            business_payload = {
+                key: _json_safe(value)
+                for key, value in raw.items()
+                if key not in _GOVERNANCE_FIELDS
+            }
+            row.update(
+                {
+                    "source_name": raw.get("source_name", batch.source_name),
+                    "source_endpoint": raw.get("source_endpoint", batch.source_endpoint),
+                    "source_record_id": raw.get(
+                        "source_record_id", _stable_hash(key_payload)
+                    ),
+                    "source_updated_at": _parquet_safe(raw.get("source_updated_at")),
+                    "available_at": _as_utc(available_at),
+                    "availability_precision": raw.get(
+                        "availability_precision", batch.availability_precision.value
+                    ),
+                    "ingested_at": _as_utc(batch.ingested_at),
+                    "ingestion_run_id": batch.ingestion_run_id,
+                    "payload_hash": _stable_hash(business_payload),
+                    "business_key_hash": _stable_hash(key_payload),
+                    "quality_status": "passed",
+                    "revision_no": 1,
+                }
+            )
+            rows.append(row)
+        return pd.DataFrame(rows)
+
+    def _validate_frame(
+        self,
+        dataset_id: ResearchDatasetId,
+        frame: pd.DataFrame,
+        business_key: tuple[str, ...],
+    ) -> None:
+        if frame.empty:
+            return
+        duplicates = frame.duplicated(subset=list(business_key), keep=False)
+        if duplicates.any():
+            raise ValueError(
+                f"duplicate business key in {dataset_id.value}: "
+                f"{int(duplicates.sum())} rows"
+            )
+        ohlc_datasets = {
+            ResearchDatasetId.EQUITY_DAILY,
+            ResearchDatasetId.INDEX_DAILY,
+            ResearchDatasetId.INDUSTRY_DAILY,
+            ResearchDatasetId.THEME_DAILY,
+            ResearchDatasetId.MINUTE_BAR,
+        }
+        if dataset_id in ohlc_datasets and {"open", "high", "low", "close"} <= set(frame):
+            invalid = (
+                (frame["high"] < frame[["open", "close", "low"]].max(axis=1))
+                | (frame["low"] > frame[["open", "close", "high"]].min(axis=1))
+            )
+            if invalid.any():
+                raise ValueError(f"OHLC relationship failed for {dataset_id.value}")
+        for field in ("vol", "volume", "amount"):
+            if field in frame and (pd.to_numeric(frame[field], errors="coerce") < 0).any():
+                raise ValueError(f"negative {field} in {dataset_id.value}")
+
+    def _merge(
+        self,
+        existing: pd.DataFrame,
+        incoming: pd.DataFrame,
+        business_key: tuple[str, ...],
+        batch: FactBatch,
+    ) -> tuple[pd.DataFrame, list[dict[str, Any]], tuple[int, int, int]]:
+        if existing.empty:
+            return incoming.sort_values(list(business_key)).reset_index(drop=True), [], (
+                len(incoming),
+                0,
+                0,
+            )
+        if incoming.empty:
+            return existing, [], (0, 0, 0)
+
+        old_by_hash = {
+            str(row["business_key_hash"]): row
+            for row in existing.to_dict(orient="records")
+        }
+        new_by_hash = {
+            str(row["business_key_hash"]): row
+            for row in incoming.to_dict(orient="records")
+        }
+        revisions: list[dict[str, Any]] = []
+        new_rows = 0
+        changed_rows = 0
+        unchanged_rows = 0
+        merged_by_hash = dict(old_by_hash)
+
+        for key_hash, new_row in new_by_hash.items():
+            old_row = old_by_hash.get(key_hash)
+            if old_row is None:
+                new_rows += 1
+                merged_by_hash[key_hash] = new_row
+                continue
+            if str(old_row["payload_hash"]) == str(new_row["payload_hash"]):
+                unchanged_rows += 1
+                merged_by_hash[key_hash] = old_row
+                continue
+            changed_rows += 1
+            old_revision = int(old_row.get("revision_no", 1))
+            new_row["revision_no"] = old_revision + 1
+            revisions.append(
+                {
+                    "dataset_id": batch.dataset_id.value,
+                    "business_key_hash": key_hash,
+                    "revision_no": old_revision,
+                    "partition_value": batch.partition_value,
+                    "payload_hash": str(old_row["payload_hash"]),
+                    "row_payload": _row_json(old_row),
+                    "valid_from": _as_utc(old_row["available_at"]),
+                    "valid_to": _as_utc(new_row["available_at"]),
+                    "superseded_by_run_id": batch.ingestion_run_id,
+                    "changed_fields": _changed_business_fields(old_row, new_row),
+                }
+            )
+            merged_by_hash[key_hash] = new_row
+
+        merged = pd.DataFrame(list(merged_by_hash.values()))
+        merged = merged.sort_values(list(business_key)).reset_index(drop=True)
+        self._validate_frame(batch.dataset_id, merged, business_key)
+        return merged, revisions, (new_rows, changed_rows, unchanged_rows)
+
+    def _commit_metadata(
+        self,
+        batch: FactBatch,
+        frame: pd.DataFrame,
+        final_path: Path,
+        content_hash: str,
+        file_sha256: str,
+        revisions: list[dict[str, Any]],
+    ) -> None:
+        available = pd.to_datetime(frame.get("available_at"), utc=True, errors="coerce")
+        min_available = None if frame.empty else available.min().to_pydatetime()
+        max_available = None if frame.empty else available.max().to_pydatetime()
+        sources = sorted(set(frame.get("source_name", pd.Series(dtype=str)).dropna().astype(str)))
+        with connect_research_warehouse(self.duckdb_path) as connection:
+            connection.begin()
+            try:
+                for revision in revisions:
+                    connection.execute(
+                        """
+                        insert into research_fact_revisions values
+                        (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        on conflict(dataset_id, business_key_hash, revision_no)
+                        do nothing
+                        """,
+                        [
+                            revision["dataset_id"],
+                            revision["business_key_hash"],
+                            revision["revision_no"],
+                            revision["partition_value"],
+                            revision["payload_hash"],
+                            json.dumps(revision["row_payload"], ensure_ascii=False, sort_keys=True),
+                            revision["valid_from"],
+                            revision["valid_to"],
+                            revision["superseded_by_run_id"],
+                            json.dumps(revision["changed_fields"], ensure_ascii=False, sort_keys=True),
+                        ],
+                    )
+                connection.execute(
+                    """
+                    insert into research_fact_partitions
+                    (dataset_id, partition_value, relative_path, row_count,
+                     content_hash, file_sha256, min_available_at, max_available_at,
+                     source_names, committed_at, ingestion_run_id, quality_status)
+                    values (?, ?, ?, ?, ?, ?, ?, ?, ?, now(), ?, 'passed')
+                    on conflict(dataset_id, partition_value) do update set
+                        relative_path = excluded.relative_path,
+                        row_count = excluded.row_count,
+                        content_hash = excluded.content_hash,
+                        file_sha256 = excluded.file_sha256,
+                        min_available_at = excluded.min_available_at,
+                        max_available_at = excluded.max_available_at,
+                        source_names = excluded.source_names,
+                        committed_at = excluded.committed_at,
+                        ingestion_run_id = excluded.ingestion_run_id,
+                        quality_status = excluded.quality_status
+                    """,
+                    [
+                        batch.dataset_id.value,
+                        batch.partition_value,
+                        final_path.relative_to(self.root).as_posix(),
+                        len(frame),
+                        content_hash,
+                        file_sha256,
+                        min_available,
+                        max_available,
+                        json.dumps(sources, ensure_ascii=False),
+                        batch.ingestion_run_id,
+                    ],
+                )
+            except Exception:
+                connection.rollback()
+                raise
+            connection.commit()
+
+    def _partition_metadata(
+        self,
+        dataset_id: ResearchDatasetId,
+        partition_value: str,
+    ) -> tuple[str, str] | None:
+        with connect_research_warehouse(self.duckdb_path, read_only=True) as connection:
+            row = connection.execute(
+                """
+                select content_hash, file_sha256 from research_fact_partitions
+                where dataset_id = ? and partition_value = ?
+                """,
+                [dataset_id.value, partition_value],
+            ).fetchone()
+        return None if row is None else (str(row[0]), str(row[1]))
+
+    def _partition_path(
+        self,
+        dataset_id: ResearchDatasetId,
+        partition_value: str,
+    ) -> Path:
+        contract = research_contract(dataset_id)
+        return (
+            self.facts_root
+            / dataset_id.value
+            / f"{contract.partition_field}={_safe_partition(partition_value)}"
+            / "data.parquet"
+        )
+
+    def _read_path(self, path: Path) -> pd.DataFrame:
+        if not path.is_file():
+            return pd.DataFrame()
+        return pd.read_parquet(path)
+
+    def _frame_content_hash(self, frame: pd.DataFrame) -> str:
+        if frame.empty:
+            return hashlib.sha256(b"[]").hexdigest()
+        rows = sorted(
+            (
+                str(row["business_key_hash"]),
+                str(row["payload_hash"]),
+                int(row.get("revision_no", 1)),
+            )
+            for row in frame.to_dict(orient="records")
+        )
+        return _stable_hash(rows)
+
+
+def _changed_business_fields(old: dict[str, Any], new: dict[str, Any]) -> list[str]:
+    keys = (set(old) | set(new)) - _GOVERNANCE_FIELDS
+    return sorted(
+        key for key in keys if _json_safe(old.get(key)) != _json_safe(new.get(key))
+    )
+
+
+def _row_json(row: dict[str, Any]) -> dict[str, Any]:
+    return {key: _json_safe(value) for key, value in row.items()}
+
+
+def _parquet_safe(value: Any) -> Any:
+    if value is None:
+        return None
+    if isinstance(value, (dict, list, tuple, set)):
+        return json.dumps(_json_safe(value), ensure_ascii=False, sort_keys=True)
+    if isinstance(value, datetime):
+        return _as_utc(value)
+    return value
+
+
+def _json_safe(value: Any) -> Any:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, (datetime, pd.Timestamp)):
+        return _as_utc(value).isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_json_safe(item) for item in value]
+    if pd.isna(value):
+        return None
+    return str(value)
+
+
+def _stable_hash(value: Any) -> str:
+    encoded = json.dumps(
+        _json_safe(value),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _as_utc(value: Any) -> datetime:
+    timestamp = pd.Timestamp(value)
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.tz_localize("UTC")
+    else:
+        timestamp = timestamp.tz_convert("UTC")
+    return timestamp.to_pydatetime()
+
+
+def _parse_datetime(value: Any) -> datetime:
+    return _as_utc(value)
+
+
+def _from_json(value: Any) -> Any:
+    if isinstance(value, str):
+        return json.loads(value)
+    return value
+
+
+def _safe_partition(value: str) -> str:
+    return value.replace("/", "_").replace("..", "_")
+
+
+__all__ = ["FactCommitResult", "ResearchWarehouse"]

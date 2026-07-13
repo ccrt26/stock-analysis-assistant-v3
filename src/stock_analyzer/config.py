@@ -117,6 +117,14 @@ class AppConfig(BaseModel):
     def has_supabase_config(self) -> bool:
         return bool(self.supabase_url and _clean_secret(self.supabase_service_role_key))
 
+    @property
+    def research_warehouse_path(self) -> Path:
+        return self.local_warehouse_dir / "research.duckdb"
+
+    @property
+    def research_facts_dir(self) -> Path:
+        return self.local_warehouse_dir / "facts"
+
     def resolve_tushare_token(self) -> Optional[str]:
         env_token = _clean_secret(self.tushare_token)
         if env_token:
