@@ -75,7 +75,7 @@ class ResearchBackfillService:
             )
             summary.committed += 1
 
-        snapshot = through.isoformat()
+        snapshot = "security-master"
         if not (resume and self._complete(ResearchDatasetId.SECURITY_MASTER, snapshot)):
             securities = self.client.fetch_security_master(through)
             self.warehouse.commit_batch(

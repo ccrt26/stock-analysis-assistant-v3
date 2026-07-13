@@ -133,7 +133,7 @@ def _contract(
 def research_contract_registry() -> dict[ResearchDatasetId, DatasetContract]:
     items = (
         _contract(ResearchDatasetId.TRADE_CALENDAR, ("exchange", "cal_date"), "cal_year", required=True, window="five_years_plus_buffer"),
-        _contract(ResearchDatasetId.SECURITY_MASTER, ("ts_code", "valid_from"), "snapshot_date", required=True, window="all_effective_securities"),
+        _contract(ResearchDatasetId.SECURITY_MASTER, ("ts_code", "valid_from"), "catalog_version", required=True, window="all_effective_securities"),
         _contract(ResearchDatasetId.EQUITY_DAILY, ("trade_date", "ts_code"), "trade_date", required=True, window="five_years"),
         _contract(ResearchDatasetId.ADJ_FACTOR, ("trade_date", "ts_code"), "trade_date", required=True, window="five_years"),
         _contract(ResearchDatasetId.DAILY_BASIC, ("trade_date", "ts_code"), "trade_date", required=True, window="five_years"),
@@ -145,7 +145,7 @@ def research_contract_registry() -> dict[ResearchDatasetId, DatasetContract]:
         _contract(ResearchDatasetId.THEME_CATALOG, ("publisher", "theme_code", "valid_from"), "catalog_version", required=True, window="controlled_catalog"),
         _contract(ResearchDatasetId.THEME_MEMBER, ("theme_code", "ts_code", "valid_from"), "catalog_version", required=True, window="available_effective_history"),
         _contract(ResearchDatasetId.THEME_DAILY, ("trade_date", "theme_code"), "trade_date", required=True, window="five_years"),
-        _contract(ResearchDatasetId.COMPANY_PROFILE, ("ts_code", "valid_from"), "snapshot_date", window="all_listed_companies"),
+        _contract(ResearchDatasetId.COMPANY_PROFILE, ("ts_code", "valid_from"), "catalog_version", window="all_listed_companies"),
         _contract(ResearchDatasetId.INCOME_STATEMENT, ("ts_code", "report_period", "report_type", "statement_type"), "report_period", window="12_quarters_and_5_years", availability="announcement time, never report-period end"),
         _contract(ResearchDatasetId.BALANCE_SHEET, ("ts_code", "report_period", "report_type", "statement_type"), "report_period", window="12_quarters_and_5_years", availability="announcement time, never report-period end"),
         _contract(ResearchDatasetId.CASH_FLOW, ("ts_code", "report_period", "report_type", "statement_type"), "report_period", window="12_quarters_and_5_years", availability="announcement time, never report-period end"),

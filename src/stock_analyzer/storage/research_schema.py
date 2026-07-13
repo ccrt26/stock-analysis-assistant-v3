@@ -5,7 +5,7 @@ from pathlib import Path
 import duckdb
 
 
-RESEARCH_SCHEMA_VERSION = 1
+RESEARCH_SCHEMA_VERSION = 2
 
 
 _SCHEMA_SQL = """
@@ -57,6 +57,13 @@ create table if not exists research_fact_partitions (
     ingestion_run_id varchar not null,
     quality_status varchar not null,
     primary key(dataset_id, partition_value)
+);
+
+create table if not exists research_fact_keys (
+    dataset_id varchar not null,
+    business_key_hash varchar not null,
+    partition_value varchar not null,
+    primary key(dataset_id, business_key_hash)
 );
 
 create table if not exists research_fact_revisions (
@@ -142,6 +149,8 @@ create index if not exists research_revisions_lookup_idx
     on research_fact_revisions(dataset_id, business_key_hash, valid_from, valid_to);
 create index if not exists research_gaps_status_idx
     on research_data_gaps(status, dataset_id);
+create index if not exists research_fact_keys_partition_idx
+    on research_fact_keys(dataset_id, partition_value);
 """
 
 

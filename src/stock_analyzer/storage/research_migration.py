@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import gc
 from collections import defaultdict
 from datetime import date, datetime, time, timezone
 from pathlib import Path
@@ -11,6 +12,7 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 import pyarrow.parquet as pq
+import pyarrow as pa
 import duckdb
 from pydantic import BaseModel, ConfigDict
 
@@ -194,6 +196,9 @@ def migrate_legacy_market(
                     records=records,
                 )
             )
+        del combined, frames, version_frame
+        gc.collect()
+        pa.default_memory_pool().release_unused()
 
     current = warehouse.read_current(ResearchDatasetId.EQUITY_DAILY)
     migrated_keys = int(

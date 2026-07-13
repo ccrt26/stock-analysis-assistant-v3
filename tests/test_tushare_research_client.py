@@ -16,11 +16,12 @@ class FakePro:
 
     def daily(self, **kwargs):
         self.calls.append(("daily", kwargs))
+        trade_date = kwargs.get("trade_date", "20260710")
         return pd.DataFrame(
             [
                 {
                     "ts_code": "000001.SZ",
-                    "trade_date": "20260710",
+                    "trade_date": trade_date,
                     "open": 10.0,
                     "high": 10.5,
                     "low": 9.8,
@@ -36,11 +37,12 @@ class FakePro:
 
     def daily_basic(self, **kwargs):
         self.calls.append(("daily_basic", kwargs))
+        trade_date = kwargs.get("trade_date", "20260710")
         return pd.DataFrame(
             [
                 {
                     "ts_code": "000001.SZ",
-                    "trade_date": "20260710",
+                    "trade_date": trade_date,
                     "close": 10.2,
                     "turnover_rate": 1.2,
                     "turnover_rate_f": 2.3,
@@ -63,14 +65,16 @@ class FakePro:
 
     def adj_factor(self, **kwargs):
         self.calls.append(("adj_factor", kwargs))
+        trade_date = kwargs.get("trade_date", "20260710")
         return pd.DataFrame(
-            [{"ts_code": "000001.SZ", "trade_date": "20260710", "adj_factor": 2.0}]
+            [{"ts_code": "000001.SZ", "trade_date": trade_date, "adj_factor": 2.0}]
         )
 
     def stk_limit(self, **kwargs):
         self.calls.append(("stk_limit", kwargs))
+        trade_date = kwargs.get("trade_date", "20260710")
         return pd.DataFrame(
-            [{"ts_code": "000001.SZ", "trade_date": "20260710", "up_limit": 11.0, "down_limit": 9.0}]
+            [{"ts_code": "000001.SZ", "trade_date": trade_date, "up_limit": 11.0, "down_limit": 9.0}]
         )
 
 
@@ -115,3 +119,15 @@ def test_permission_error_is_distinguished_from_empty_upstream():
     with pytest.raises(ResearchSourceError) as exc:
         client.call("daily", trade_date="20260710")
     assert exc.value.category == "permission_denied"
+
+
+def test_market_endpoint_cannot_return_a_different_trade_date():
+    pro = FakePro()
+    pro.adj_factor = lambda **kwargs: pd.DataFrame(
+        [{"ts_code": "000001.SZ", "trade_date": "20260709", "adj_factor": 2.0}]
+    )
+    client = TushareResearchClient(pro, pacer=lambda method: None)
+
+    with pytest.raises(ResearchSourceError, match="unexpected trade_date") as exc:
+        client.fetch_market_date(date(2026, 7, 10), run_id="run-1")
+    assert exc.value.category == "schema"

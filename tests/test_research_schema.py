@@ -20,6 +20,7 @@ def test_research_schema_initialization_is_idempotent_and_has_governance_tables(
         "research_ingestion_runs",
         "research_run_datasets",
         "research_fact_partitions",
+        "research_fact_keys",
         "research_fact_revisions",
         "research_quality_checks",
         "research_data_gaps",

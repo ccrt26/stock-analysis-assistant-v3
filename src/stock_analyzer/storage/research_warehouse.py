@@ -10,6 +10,7 @@ from typing import Any
 
 import duckdb
 import pandas as pd
+import pyarrow.parquet as pq
 
 from stock_analyzer.data.research_contracts import (
     FactBatch,
@@ -72,6 +73,7 @@ class ResearchWarehouse:
                     """,
                     [dataset_id.value, contract.model_dump_json()],
                 )
+        self._ensure_fact_key_index()
 
     def commit_batch(self, batch: FactBatch) -> FactCommitResult:
         contract = research_contract(batch.dataset_id)
@@ -84,6 +86,11 @@ class ResearchWarehouse:
             incoming,
             contract.business_key,
             batch,
+        )
+        self._assert_partition_ownership(
+            batch.dataset_id,
+            batch.partition_value,
+            set(incoming.get("business_key_hash", pd.Series(dtype=str)).astype(str)),
         )
         content_hash = self._frame_content_hash(merged)
 
@@ -412,6 +419,18 @@ class ResearchWarehouse:
                         batch.ingestion_run_id,
                     ],
                 )
+                connection.executemany(
+                    """
+                    insert into research_fact_keys
+                    (dataset_id, business_key_hash, partition_value)
+                    values (?, ?, ?)
+                    on conflict(dataset_id, business_key_hash) do nothing
+                    """,
+                    [
+                        (batch.dataset_id.value, str(key_hash), batch.partition_value)
+                        for key_hash in frame["business_key_hash"].astype(str).unique()
+                    ],
+                )
             except Exception:
                 connection.rollback()
                 raise
@@ -431,6 +450,82 @@ class ResearchWarehouse:
                 [dataset_id.value, partition_value],
             ).fetchone()
         return None if row is None else (str(row[0]), str(row[1]))
+
+    def _assert_partition_ownership(
+        self,
+        dataset_id: ResearchDatasetId,
+        partition_value: str,
+        key_hashes: set[str],
+    ) -> None:
+        if not key_hashes:
+            return
+        hashes = sorted(key_hashes)
+        with connect_research_warehouse(self.duckdb_path, read_only=True) as connection:
+            for start in range(0, len(hashes), 500):
+                chunk = hashes[start : start + 500]
+                placeholders = ",".join("?" for _ in chunk)
+                rows = connection.execute(
+                    f"""
+                    select business_key_hash, partition_value
+                    from research_fact_keys
+                    where dataset_id = ?
+                      and business_key_hash in ({placeholders})
+                      and partition_value <> ?
+                    """,
+                    [dataset_id.value, *chunk, partition_value],
+                ).fetchall()
+                if rows:
+                    raise ValueError(
+                        f"business key belongs to a different partition in "
+                        f"{dataset_id.value}: {rows[0][1]}"
+                    )
+
+    def _ensure_fact_key_index(self) -> None:
+        with connect_research_warehouse(self.duckdb_path) as connection:
+            marker = connection.execute(
+                "select value from research_metadata where key = 'fact_key_index_built'"
+            ).fetchone()
+            if marker is not None:
+                return
+            manifests = connection.execute(
+                """
+                select dataset_id, partition_value, relative_path
+                from research_fact_partitions
+                order by dataset_id, partition_value
+                """
+            ).fetchall()
+            connection.begin()
+            try:
+                connection.execute("delete from research_fact_keys")
+                for dataset_id, partition_value, relative_path in manifests:
+                    parquet_path = self.root / str(relative_path)
+                    if not parquet_path.is_file():
+                        raise FileNotFoundError(parquet_path)
+                    parquet_file = pq.ParquetFile(parquet_path)
+                    if "business_key_hash" not in parquet_file.schema_arrow.names:
+                        raise ValueError(
+                            f"business_key_hash missing from {parquet_path}"
+                        )
+                    for record_batch in parquet_file.iter_batches(
+                        batch_size=50_000,
+                        columns=["business_key_hash"],
+                    ):
+                        keys = record_batch.column(0).to_pylist()
+                        connection.executemany(
+                            "insert into research_fact_keys values (?, ?, ?)",
+                            [
+                                (str(dataset_id), str(key_hash), str(partition_value))
+                                for key_hash in keys
+                            ],
+                        )
+                connection.execute(
+                    "insert or replace into research_metadata values "
+                    "('fact_key_index_built', '1')"
+                )
+            except Exception:
+                connection.rollback()
+                raise
+            connection.commit()
 
     def _partition_path(
         self,

@@ -231,12 +231,7 @@ class TushareResearchClient:
                 ),
                 "daily",
             )
-            if frame.empty:
-                raise ResearchSourceError(
-                    f"Tushare daily is empty for {partition}",
-                    category="waiting_upstream",
-                    endpoint="daily",
-                )
+            _require_exact_trade_date(frame, trade_date, "daily")
             records = []
             for row in frame.to_dict(orient="records"):
                 if not _equity_code(row["ts_code"]):
@@ -271,6 +266,7 @@ class TushareResearchClient:
         if ResearchDatasetId.ADJ_FACTOR in requested:
             frame = self.call("adj_factor", trade_date=_yyyymmdd(trade_date))
             _require_columns(frame, ("ts_code", "trade_date", "adj_factor"), "adj_factor")
+            _require_exact_trade_date(frame, trade_date, "adj_factor")
             records = [
                 {
                     "trade_date": _parse_date(row["trade_date"]),
@@ -292,6 +288,7 @@ class TushareResearchClient:
                 "dv_ttm", "total_share", "float_share", "free_share", "total_mv", "circ_mv"
             )
             _require_columns(frame, required, "daily_basic")
+            _require_exact_trade_date(frame, trade_date, "daily_basic")
             records = []
             for row in frame.to_dict(orient="records"):
                 if not _equity_code(row["ts_code"]):
@@ -310,6 +307,7 @@ class TushareResearchClient:
         if ResearchDatasetId.STOCK_LIMIT in requested:
             frame = self.call("stk_limit", trade_date=_yyyymmdd(trade_date))
             _require_columns(frame, ("trade_date", "ts_code", "up_limit", "down_limit"), "stk_limit")
+            _require_exact_trade_date(frame, trade_date, "stk_limit")
             records = [
                 {
                     "trade_date": _parse_date(row["trade_date"]),
@@ -352,6 +350,28 @@ def _require_columns(frame: pd.DataFrame, required: Iterable[str], endpoint: str
     if missing:
         raise ResearchSourceError(
             f"Tushare {endpoint} missing columns: {', '.join(missing)}",
+            category="schema",
+            endpoint=endpoint,
+        )
+
+
+def _require_exact_trade_date(
+    frame: pd.DataFrame,
+    requested: date,
+    endpoint: str,
+) -> None:
+    if frame.empty:
+        raise ResearchSourceError(
+            f"Tushare {endpoint} is empty for {requested.isoformat()}",
+            category="waiting_upstream",
+            endpoint=endpoint,
+        )
+    returned = {_parse_date(value) for value in frame["trade_date"].dropna().tolist()}
+    if returned != {requested}:
+        values = ", ".join(sorted(value.isoformat() for value in returned)) or "missing"
+        raise ResearchSourceError(
+            f"Tushare {endpoint} returned unexpected trade_date: {values}; "
+            f"requested {requested.isoformat()}",
             category="schema",
             endpoint=endpoint,
         )

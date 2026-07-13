@@ -140,7 +140,7 @@ class FundamentalBackfillService:
         resume: bool,
         summary: BackfillSummary,
     ) -> None:
-        partition = through.isoformat()
+        partition = "company-profile"
         if resume and self._partition_complete(
             ResearchDatasetId.COMPANY_PROFILE, partition
         ):

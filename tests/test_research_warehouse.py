@@ -115,3 +115,23 @@ def test_ohlc_quality_failure_is_rejected(tmp_path):
     with pytest.raises(ValueError, match="OHLC"):
         warehouse.commit_batch(bad)
     assert warehouse.read_current(ResearchDatasetId.EQUITY_DAILY).empty
+
+
+def test_same_business_key_cannot_silently_move_to_another_partition(tmp_path):
+    warehouse = ResearchWarehouse(tmp_path)
+    first = FactBatch(
+        dataset_id=ResearchDatasetId.ANNOUNCEMENT,
+        partition_value="2026-07",
+        source_name="cninfo",
+        source_endpoint="announcement",
+        ingestion_run_id="a1",
+        ingested_at=datetime(2026, 7, 10, 10, tzinfo=timezone.utc),
+        default_available_at=datetime(2026, 7, 10, 10, tzinfo=timezone.utc),
+        records=[{"announcement_id": "A1", "title": "公告"}],
+    )
+    warehouse.commit_batch(first)
+    moved = first.model_copy(
+        update={"partition_value": "2026-08", "ingestion_run_id": "a2"}
+    )
+    with pytest.raises(ValueError, match="different partition"):
+        warehouse.commit_batch(moved)
