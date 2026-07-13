@@ -329,7 +329,9 @@ PYTHONPATH=src .venv/bin/python -m pytest tests/test_research_migration.py tests
 PYTHONPATH=src .venv/bin/python -m pytest tests/test_tushare_research_client.py tests/test_research_rate_limit.py tests/test_tushare_formal_client.py -q
 ```
 
-## 任务 8：实现全市场价格、估值与指数五年回填
+## 任务 8：实现分层历史窗口的全市场价格、估值与指数回填
+
+> **2026-07-14 执行修订：** 已接近完成的五年股票日线、复权、每日估值、涨跌停和宽基指数作为一次性紧凑底库保留；日常分析默认 82 日，市场状态最多 250 日。行业/主题行情限制为最近 250 个交易日，后续每日只增量获取。
 
 **新增：**
 
@@ -342,7 +344,8 @@ PYTHONPATH=src .venv/bin/python -m pytest tests/test_tushare_research_client.py 
 
 ### 8.1 先写失败测试
 
-- 计划器为 2021-07-14 至 2026-07-13 的交易日生成应有分区。
+- 一次性市场核心底库可为 2021-07-14 至 2026-07-13 的交易日生成应有分区。
+- 行业和主题历史请求只覆盖截至日以前最近 250 个实际交易日。
 - 已完成分区不重复请求。
 - 日线、复权、估值、涨跌停中任一必需表失败时，该日期核心状态不完整。
 - 停牌/退市股票导致的合理行数差异被声明，不简单要求所有表等行。
@@ -353,6 +356,7 @@ PYTHONPATH=src .venv/bin/python -m pytest tests/test_tushare_research_client.py 
 
 - 新命令：`stock-analyzer data backfill --through 2026-07-13 --scope market-core`。
 - 日线类按交易日分批，指数历史可按代码/日期块获取。
+- 默认选股查询只读 82 个交易日；市场状态查询最多读取 250 个交易日；五年读取必须由明确的估值或历史验证用途触发。
 - 交易日预期证券数基于当日有效证券与交易状态计算。
 - 生成每日核心数据健康状态。
 
@@ -446,7 +450,7 @@ PYTHONPATH=src .venv/bin/python -m pytest tests/test_fundamental_backfill.py -q
 ### 11.2 实现
 
 - 新命令范围：`--scope events`。
-- 首次补齐近一年全市场公告元数据；五年结构化公司行动。
+- 首次补齐近一年全市场公告元数据；五年稀疏结构化公司行动；停复牌按日数据只补近一年。
 - 候选股票需要全文时按公告 ID 单独获取，默认不下载全市场 PDF。
 - 事件分类规则有版本号并与事实分离。
 
@@ -466,6 +470,7 @@ PYTHONPATH=src .venv/bin/python -m pytest tests/test_cninfo_research_client.py t
 ### 12.1 先写失败测试
 
 - 融资融券按实际上游可用时间进入，7 月 13 日未发布时状态为等待而非成功空表。
+- 融资融券首次补齐只覆盖最近 250 个实际交易日。
 - 交易所覆盖和缺失项被分项记录。
 - 指数最近 20 个交易日分钟线完整。
 - 宽候选池在获取前冻结，保存规则版本和股票代码。
@@ -666,11 +671,11 @@ PYTHONPATH=src .venv/bin/python -m stock_analyzer data backfill \
 执行器按以下顺序推进并保存水位：
 
 1. 交易日历、证券主数据；
-2. 五年股票/指数日线、复权、估值、涨跌停；
-3. 申万三级行业与受控主题；
+2. 一次性五年股票/宽基指数日线、复权、估值、涨跌停底库；
+3. 申万三级行业与受控主题，以及最近 250 个交易日板块行情；
 4. 公司资料、12 季/5 年财务、主营、预告、快报；
-5. 五年结构化公司行动、近一年公告元数据与风险事件；
-6. 融资融券；
+5. 五年稀疏公司行动、近一年停复牌、公告元数据与风险事件；
+6. 最近 250 个交易日融资融券；
 7. 20 日指数和冻结候选分钟线。
 
 遇到频率限制、网络中断或上游未发布时命令可安全退出，下一次 `--resume` 从水位继续。不得用“返回空表”冒充完成。
@@ -759,7 +764,7 @@ rg -n "Supabase|publish|Cloudflare|render_report" src/stock_analyzer/ops/researc
 只有以下条件全部成立才清理：
 
 1. 迁移严格审计通过；
-2. 五年回填完成或缺口已声明；
+2. 各数据集按修订后的分层窗口完成回填或缺口已声明；
 3. 新仓库幂等重跑通过；
 4. `rg` 证明生产代码不再读取旧版本树；
 5. 清理清单中的路径全部位于旧 `local_warehouse/parquet/formal` 范围；
