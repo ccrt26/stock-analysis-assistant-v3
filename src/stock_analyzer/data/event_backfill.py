@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import date, datetime, time, timedelta, timezone
+import hashlib
+import json
 from typing import Any, Iterable
 from zoneinfo import ZoneInfo
 
@@ -56,8 +58,11 @@ class EventBackfillService:
             )
 
         holder = self.tushare.call_paged(
-            "stk_holdertrade", start_date=_yyyymmdd(start), end_date=_yyyymmdd(through)
-        )
+            "stk_holdertrade",
+            limit=3000,
+            start_date=_yyyymmdd(start),
+            end_date=_yyyymmdd(through),
+        ).drop_duplicates(ignore_index=True)
         self._commit_grouped(
             ResearchDatasetId.HOLDER_TRADE,
             [_holder_row(row) for row in holder.to_dict(orient="records")],
@@ -226,6 +231,13 @@ class EventBackfillService:
 
 def _holder_row(raw: dict[str, Any]) -> dict[str, Any]:
     row = _clean(raw)
+    row["provider_record_id"] = _stable_payload_hash(row)
+    row["variant_group_id"] = _stable_payload_hash(
+        {
+            key: row.get(key)
+            for key in ("ts_code", "holder_name", "ann_date", "in_de", "change_vol")
+        }
+    )
     row["ann_date"] = _date(raw["ann_date"])
     row["available_at"] = _conservative_available(row["ann_date"])
     return row
@@ -310,6 +322,17 @@ def _post_close(value: date) -> datetime:
     return datetime.combine(
         value, time(15, 1), tzinfo=ZoneInfo("Asia/Shanghai")
     ).astimezone(timezone.utc)
+
+
+def _stable_payload_hash(payload: dict[str, Any]) -> str:
+    encoded = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 __all__ = ["EventBackfillService"]

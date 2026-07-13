@@ -122,3 +122,49 @@ def test_empty_suspension_day_is_checked_once_on_resume(tmp_path):
         )
 
     assert pro.suspension_calls == ["20260710"]
+
+
+def test_holder_trade_deduplicates_exact_rows_but_preserves_provider_variants(tmp_path):
+    class VariantHolderPro(ActionPro):
+        def __init__(self):
+            super().__init__()
+            self.holder_limits = []
+
+        def stk_holdertrade(self, **kwargs):
+            self.holder_limits.append(kwargs["limit"])
+            base = {
+                "ts_code": "000001.SZ",
+                "ann_date": "20260710",
+                "holder_name": "股东A",
+                "holder_type": "G",
+                "in_de": "IN",
+                "change_vol": 100.0,
+                "change_ratio": 0.1,
+                "after_share": 900.0,
+                "after_ratio": 0.9,
+                "avg_price": 10.0,
+                "total_share": 1000.0,
+            }
+            variant = {**base, "avg_price": 10.1}
+            return pd.DataFrame([base, base, variant])
+
+    pro = VariantHolderPro()
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    service = EventBackfillService(
+        TushareResearchClient(pro, pacer=lambda method: None),
+        AnnouncementClient(),
+        warehouse,
+    )
+
+    service.backfill(
+        start=date(2026, 7, 1),
+        through=date(2026, 7, 10),
+        trading_dates=(),
+        resume=True,
+    )
+
+    rows = warehouse.read_current(ResearchDatasetId.HOLDER_TRADE)
+    assert len(rows) == 2
+    assert rows["provider_record_id"].nunique() == 2
+    assert rows["variant_group_id"].nunique() == 1
+    assert pro.holder_limits == [3000]
