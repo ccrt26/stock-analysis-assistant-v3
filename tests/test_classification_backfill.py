@@ -140,3 +140,74 @@ def test_classification_history_uses_latest_250_actual_trading_days(tmp_path):
     assert {kwargs["start_date"] for kwargs in index_calls} == {
         open_dates[-250].strftime("%Y%m%d")
     }
+
+
+def test_classification_backfill_records_empty_theme_members_as_waiting(tmp_path):
+    class OneEmptyThemePro(ClassificationPro):
+        def index_weight(self, **kwargs):
+            self.calls.append(("index_weight", kwargs))
+            if kwargs["index_code"] == "000019.SH":
+                return pd.DataFrame()
+            return pd.DataFrame(
+                [
+                    {
+                        "index_code": kwargs["index_code"],
+                        "con_code": "000001.SZ",
+                        "trade_date": "20260710",
+                        "weight": 5.0,
+                    }
+                ]
+            )
+
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    service = ClassificationBackfillService(
+        TushareResearchClient(OneEmptyThemePro(), pacer=lambda method: None),
+        warehouse,
+    )
+
+    summary = service.backfill(
+        start=date(2026, 7, 10), through=date(2026, 7, 10), resume=True
+    )
+
+    members = warehouse.read_current(ResearchDatasetId.THEME_MEMBER)
+    assert set(members["theme_code"]) == {"399013.SZ"}
+    assert summary.waiting_upstream == 1
+
+
+def test_classification_backfill_records_empty_index_history_as_waiting(tmp_path):
+    class OneEmptyIndexPro(ClassificationPro):
+        def index_daily(self, **kwargs):
+            self.calls.append(("index_daily", kwargs))
+            if kwargs["ts_code"] == "801010.SI":
+                return pd.DataFrame()
+            return pd.DataFrame(
+                [
+                    {
+                        "ts_code": kwargs["ts_code"],
+                        "trade_date": "20260710",
+                        "close": 1000.0,
+                        "open": 990.0,
+                        "high": 1010.0,
+                        "low": 980.0,
+                        "pre_close": 985.0,
+                        "change": 15.0,
+                        "pct_chg": 1.5,
+                        "vol": 10.0,
+                        "amount": 20.0,
+                    }
+                ]
+            )
+
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    service = ClassificationBackfillService(
+        TushareResearchClient(OneEmptyIndexPro(), pacer=lambda method: None),
+        warehouse,
+    )
+
+    summary = service.backfill(
+        start=date(2026, 7, 10), through=date(2026, 7, 10), resume=True
+    )
+
+    industry = warehouse.read_current(ResearchDatasetId.INDUSTRY_DAILY)
+    assert "801010.SI" not in set(industry["industry_code"])
+    assert summary.waiting_upstream == 1

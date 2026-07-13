@@ -483,10 +483,10 @@ class ClassificationBackfillService:
                 start_date=_yyyymmdd(start),
                 end_date=_yyyymmdd(through),
             )
-            _require(frame, ("index_code", "con_code", "trade_date", "weight"), "index_weight")
             if frame.empty:
                 summary.waiting_upstream += 1
                 continue
+            _require(frame, ("index_code", "con_code", "trade_date", "weight"), "index_weight")
             frame = frame.copy()
             frame["effective_date"] = frame["trade_date"].map(_date)
             snapshot_dates = sorted(frame["effective_date"].unique())
@@ -534,6 +534,9 @@ class ClassificationBackfillService:
                 start_date=_yyyymmdd(start),
                 end_date=_yyyymmdd(through),
             )
+            if frame.empty:
+                summary.waiting_upstream += 1
+                continue
             _require(
                 frame,
                 (
@@ -548,9 +551,6 @@ class ClassificationBackfillService:
                 ),
                 "index_daily",
             )
-            if frame.empty:
-                summary.waiting_upstream += 1
-                continue
             for row in frame.to_dict(orient="records"):
                 trade_date = _date(row["trade_date"])
                 records.append(
