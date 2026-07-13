@@ -135,3 +135,13 @@ def test_same_business_key_cannot_silently_move_to_another_partition(tmp_path):
     )
     with pytest.raises(ValueError, match="different partition"):
         warehouse.commit_batch(moved)
+
+
+def test_daily_fact_date_must_match_its_partition(tmp_path):
+    warehouse = ResearchWarehouse(tmp_path)
+    wrong_partition = _batch().model_copy(
+        update={"partition_value": "2026-07-11"}
+    )
+
+    with pytest.raises(ValueError, match="partition does not match"):
+        warehouse.commit_batch(wrong_partition)

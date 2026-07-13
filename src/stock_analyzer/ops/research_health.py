@@ -61,16 +61,7 @@ def build_research_health_report(
             ]
             selected = same_day if not same_day.empty else manifest.tail(1)
         file_audit = _audit_partition_files(warehouse, selected)
-        with connect_research_warehouse(
-            warehouse.duckdb_path, read_only=True
-        ) as connection:
-            indexed_keys = int(
-                connection.execute(
-                    "select count(*) from research_fact_keys where dataset_id = ?",
-                    [dataset_id.value],
-                ).fetchone()[0]
-            )
-        duplicates = max(0, rows - indexed_keys)
+        duplicates = 0
         if full_history and file_audit["paths"]:
             with duckdb.connect() as connection:
                 physical_rows, unique_keys = connection.execute(

@@ -42,6 +42,23 @@ _GOVERNANCE_FIELDS = {
     "revision_no",
 }
 
+_EXACT_DATE_PARTITION_DATASETS = {
+    ResearchDatasetId.EQUITY_DAILY,
+    ResearchDatasetId.ADJ_FACTOR,
+    ResearchDatasetId.DAILY_BASIC,
+    ResearchDatasetId.STOCK_LIMIT,
+    ResearchDatasetId.INDEX_DAILY,
+    ResearchDatasetId.INDUSTRY_DAILY,
+    ResearchDatasetId.THEME_DAILY,
+    ResearchDatasetId.SUSPENSION,
+    ResearchDatasetId.MARGIN_DETAIL,
+    ResearchDatasetId.MINUTE_BAR,
+}
+
+_GLOBAL_KEY_INDEX_DATASETS = set(research_contract_registry()) - (
+    _EXACT_DATE_PARTITION_DATASETS | {ResearchDatasetId.TRADE_CALENDAR}
+)
+
 
 @dataclass(frozen=True)
 class FactCommitResult:
@@ -78,6 +95,7 @@ class ResearchWarehouse:
         contract = research_contract(batch.dataset_id)
         incoming = self._normalize_batch(batch)
         self._validate_frame(batch.dataset_id, incoming, contract.business_key)
+        self._validate_partition_semantics(batch, incoming)
         final_path = self._partition_path(batch.dataset_id, batch.partition_value)
         existing = self._read_path(final_path)
         merged, revisions, counts = self._merge(
@@ -418,18 +436,19 @@ class ResearchWarehouse:
                         batch.ingestion_run_id,
                     ],
                 )
-                connection.executemany(
-                    """
-                    insert into research_fact_keys
-                    (dataset_id, business_key_hash, partition_value)
-                    values (?, ?, ?)
-                    on conflict(dataset_id, business_key_hash) do nothing
-                    """,
-                    [
-                        (batch.dataset_id.value, str(key_hash), batch.partition_value)
-                        for key_hash in frame["business_key_hash"].astype(str).unique()
-                    ],
-                )
+                if batch.dataset_id in _GLOBAL_KEY_INDEX_DATASETS:
+                    connection.executemany(
+                        """
+                        insert into research_fact_keys
+                        (dataset_id, business_key_hash, partition_value)
+                        values (?, ?, ?)
+                        on conflict(dataset_id, business_key_hash) do nothing
+                        """,
+                        [
+                            (batch.dataset_id.value, str(key_hash), batch.partition_value)
+                            for key_hash in frame["business_key_hash"].astype(str).unique()
+                        ],
+                    )
             except Exception:
                 connection.rollback()
                 raise
@@ -456,7 +475,7 @@ class ResearchWarehouse:
         partition_value: str,
         key_hashes: set[str],
     ) -> None:
-        if not key_hashes:
+        if dataset_id not in _GLOBAL_KEY_INDEX_DATASETS or not key_hashes:
             return
         hashes = sorted(key_hashes)
         with connect_research_warehouse(self.duckdb_path, read_only=True) as connection:
@@ -497,6 +516,8 @@ class ResearchWarehouse:
             try:
                 connection.execute("delete from research_fact_keys")
                 for dataset_id, partition_value, relative_path in manifests:
+                    if ResearchDatasetId(str(dataset_id)) not in _GLOBAL_KEY_INDEX_DATASETS:
+                        continue
                     parquet_path = self.root / str(relative_path)
                     if not parquet_path.is_file():
                         raise FileNotFoundError(parquet_path)
@@ -516,6 +537,30 @@ class ResearchWarehouse:
                 connection.rollback()
                 raise
             connection.commit()
+
+    def _validate_partition_semantics(
+        self,
+        batch: FactBatch,
+        frame: pd.DataFrame,
+    ) -> None:
+        if frame.empty:
+            return
+        if batch.dataset_id in _EXACT_DATE_PARTITION_DATASETS:
+            values = {
+                pd.Timestamp(value).date().isoformat()
+                for value in frame["trade_date"].dropna().tolist()
+            }
+            if values != {batch.partition_value}:
+                raise ValueError(
+                    f"partition does not match trade_date in {batch.dataset_id.value}"
+                )
+        elif batch.dataset_id is ResearchDatasetId.TRADE_CALENDAR:
+            years = {
+                str(pd.Timestamp(value).year)
+                for value in frame["cal_date"].dropna().tolist()
+            }
+            if years != {batch.partition_value}:
+                raise ValueError("partition does not match calendar year")
 
     def _partition_path(
         self,
