@@ -24,7 +24,7 @@ class MinuteRequestPacer:
     def __init__(
         self,
         *,
-        interval_seconds: float = 61.0,
+        interval_seconds: float = 0.13,
         clock: Callable[[], float] = system_time.monotonic,
         sleeper: Callable[[float], None] = system_time.sleep,
     ) -> None:

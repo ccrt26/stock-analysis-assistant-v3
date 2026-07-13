@@ -466,6 +466,8 @@ PYTHONPATH=src .venv/bin/python -m pytest tests/test_cninfo_research_client.py t
 
 ## 任务 12：补齐融资融券与分钟线分层数据
 
+> **2026-07-14 执行修订：** Tushare 官方历史分钟权限为每分钟 500 次、单次最多 8000 行；默认串行间隔采用 0.13 秒（约每分钟 461 次），不再沿用缺乏依据的 61 秒间隔。20 个交易日约 4800 根 1 分钟记录，可在单次上限内按一个代码提取。依据：<https://tushare.pro/document/1?doc_id=290>、<https://tushare.pro/document/1?doc_id=234>。
+
 **新增：**
 
 - `src/stock_analyzer/data/trading_structure_backfill.py`

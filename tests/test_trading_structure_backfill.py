@@ -3,7 +3,10 @@ from datetime import date
 import pandas as pd
 
 from stock_analyzer.data.research_contracts import ResearchDatasetId
-from stock_analyzer.data.trading_structure_backfill import TradingStructureBackfillService
+from stock_analyzer.data.trading_structure_backfill import (
+    MinuteRequestPacer,
+    TradingStructureBackfillService,
+)
 from stock_analyzer.data.tushare_research_client import TushareResearchClient
 from stock_analyzer.storage.research_warehouse import ResearchWarehouse
 
@@ -35,6 +38,24 @@ def minute_fetcher(**kwargs):
          "open": 10.1, "high": 10.3, "low": 10.0, "close": 10.2,
          "vol": 60.0, "amount": 600.0, "trade_date": "20260710"},
     ])
+
+
+def test_minute_pacer_default_stays_below_official_500_calls_per_minute():
+    now = [0.0]
+    sleeps = []
+
+    def clock():
+        return now[0]
+
+    def sleeper(delay):
+        sleeps.append(delay)
+        now[0] += delay
+
+    pacer = MinuteRequestPacer(clock=clock, sleeper=sleeper)
+    pacer()
+    pacer()
+
+    assert sleeps == [0.13]
 
 
 def test_trading_structure_records_margin_lag_and_freezes_minute_scope(tmp_path):
