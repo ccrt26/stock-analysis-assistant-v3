@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
@@ -53,6 +54,45 @@ class ResearchQuery:
         return pd.DataFrame(best.values()).sort_values(
             list(contract.business_key)
         ).reset_index(drop=True)
+
+    def controlled_themes_as_of(self, as_of: datetime) -> pd.DataFrame:
+        catalog = self.dataset_as_of(ResearchDatasetId.THEME_CATALOG, as_of)
+        members = self.dataset_as_of(ResearchDatasetId.THEME_MEMBER, as_of)
+        daily = self.dataset_as_of(ResearchDatasetId.THEME_DAILY, as_of)
+        if catalog.empty or members.empty or daily.empty:
+            return catalog.iloc[0:0].copy()
+
+        cutoff_date = pd.Timestamp(_utc(as_of)).tz_convert(
+            ZoneInfo("Asia/Shanghai")
+        ).tz_localize(None).normalize()
+        members = members.copy()
+        members["valid_from"] = pd.to_datetime(members["valid_from"])
+        valid_to = pd.to_datetime(members["valid_to"], errors="coerce")
+        members = members[
+            (members["valid_from"] <= cutoff_date)
+            & (valid_to.isna() | (valid_to >= cutoff_date))
+        ]
+        daily = daily.copy()
+        daily["trade_date"] = pd.to_datetime(daily["trade_date"])
+        daily = daily[daily["trade_date"] <= cutoff_date]
+
+        member_counts = members.groupby("theme_code")["ts_code"].nunique()
+        latest_dates = daily.groupby("theme_code")["trade_date"].max()
+        usable_codes = set(member_counts.index.astype(str)) & set(
+            latest_dates.index.astype(str)
+        )
+        result = catalog[
+            catalog["theme_code"].astype(str).isin(usable_codes)
+        ].copy()
+        if result.empty:
+            return result
+        result["active_member_count"] = result["theme_code"].astype(str).map(
+            member_counts
+        )
+        result["latest_trade_date"] = result["theme_code"].astype(str).map(
+            latest_dates
+        )
+        return result.sort_values("theme_code").reset_index(drop=True)
 
 
 def _utc(value: Any) -> datetime:

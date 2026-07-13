@@ -36,7 +36,9 @@ class ClassificationBackfillService:
         summary = BackfillSummary(
             scope="classifications", start=start, through=through
         )
-        history_start = self._latest_session_start(start, through, sessions=250)
+        history_dates = self._latest_sessions(start, through, sessions=250)
+        history_start = history_dates[0] if history_dates else start
+        allowed_dates = set(history_dates) if history_dates else None
         catalog, members = self._sw_catalog_and_members(through)
         self._commit(
             ResearchDatasetId.INDUSTRY_CATALOG,
@@ -62,23 +64,30 @@ class ClassificationBackfillService:
                 str(row["industry_code"])
                 for row in catalog
                 if str(row.get("is_published", "")) == "1"
+                and str(row.get("level", "")) == "L1"
             }
         )
-        industry_bars = self._index_history(
-            industry_codes,
-            start=history_start,
-            through=through,
-            code_field="industry_code",
-            summary=summary,
-        )
-        self._commit_daily_groups(
-            ResearchDatasetId.INDUSTRY_DAILY,
-            "index_daily",
-            industry_bars,
-            through,
-            resume,
-            summary,
-        )
+        if resume and self._daily_history_complete(
+            ResearchDatasetId.INDUSTRY_DAILY, history_dates
+        ):
+            summary.skipped += len(history_dates)
+        else:
+            industry_bars = self._index_history(
+                industry_codes,
+                start=history_start,
+                through=through,
+                code_field="industry_code",
+                summary=summary,
+                allowed_dates=allowed_dates,
+            )
+            self._commit_daily_groups(
+                ResearchDatasetId.INDUSTRY_DAILY,
+                "index_daily",
+                industry_bars,
+                through,
+                resume,
+                summary,
+            )
 
         themes = self._theme_catalog(through)
         self._commit(
@@ -103,21 +112,27 @@ class ClassificationBackfillService:
             resume,
             summary,
         )
-        theme_bars = self._index_history(
-            theme_codes,
-            start=history_start,
-            through=through,
-            code_field="theme_code",
-            summary=summary,
-        )
-        self._commit_daily_groups(
-            ResearchDatasetId.THEME_DAILY,
-            "index_daily",
-            theme_bars,
-            through,
-            resume,
-            summary,
-        )
+        if resume and self._daily_history_complete(
+            ResearchDatasetId.THEME_DAILY, history_dates
+        ):
+            summary.skipped += len(history_dates)
+        else:
+            theme_bars = self._index_history(
+                theme_codes,
+                start=history_start,
+                through=through,
+                code_field="theme_code",
+                summary=summary,
+                allowed_dates=allowed_dates,
+            )
+            self._commit_daily_groups(
+                ResearchDatasetId.THEME_DAILY,
+                "index_daily",
+                theme_bars,
+                through,
+                resume,
+                summary,
+            )
         return summary
 
     def _latest_session_start(
@@ -127,9 +142,19 @@ class ClassificationBackfillService:
         *,
         sessions: int,
     ) -> date:
+        dates = self._latest_sessions(requested_start, through, sessions=sessions)
+        return dates[0] if dates else requested_start
+
+    def _latest_sessions(
+        self,
+        requested_start: date,
+        through: date,
+        *,
+        sessions: int,
+    ) -> tuple[date, ...]:
         calendar = self.warehouse.read_current(ResearchDatasetId.TRADE_CALENDAR)
         if calendar.empty:
-            return requested_start
+            return ()
         values = pd.to_datetime(
             calendar.loc[calendar["is_open"].astype(bool), "cal_date"]
         ).dt.date
@@ -141,8 +166,8 @@ class ClassificationBackfillService:
             }
         )
         if len(open_dates) <= sessions:
-            return requested_start
-        return open_dates[-sessions]
+            return tuple(open_dates)
+        return tuple(open_dates[-sessions:])
 
     def refresh_daily(self, data_date: date) -> BackfillSummary:
         summary = BackfillSummary(
@@ -525,6 +550,7 @@ class ClassificationBackfillService:
         through: date,
         code_field: str,
         summary: BackfillSummary,
+        allowed_dates: set[date] | None,
     ) -> list[dict[str, Any]]:
         records: list[dict[str, Any]] = []
         for code in codes:
@@ -553,6 +579,8 @@ class ClassificationBackfillService:
             )
             for row in frame.to_dict(orient="records"):
                 trade_date = _date(row["trade_date"])
+                if allowed_dates is not None and trade_date not in allowed_dates:
+                    continue
                 records.append(
                     {
                         "trade_date": trade_date,
@@ -619,6 +647,20 @@ class ClassificationBackfillService:
         return not frame.empty and bool(
             (frame["partition_value"].astype(str) == partition).any()
         )
+
+    def _daily_history_complete(
+        self,
+        dataset: ResearchDatasetId,
+        trading_dates: tuple[date, ...],
+    ) -> bool:
+        if not trading_dates:
+            return False
+        manifest = self.warehouse.partition_manifest(dataset)
+        if manifest.empty:
+            return False
+        completed = set(manifest["partition_value"].astype(str))
+        expected = {value.isoformat() for value in trading_dates}
+        return expected <= completed
 
 
 def _require(frame: pd.DataFrame, columns: tuple[str, ...], endpoint: str) -> None:

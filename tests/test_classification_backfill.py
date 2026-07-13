@@ -5,6 +5,7 @@ import pandas as pd
 from stock_analyzer.data.classification_backfill import ClassificationBackfillService
 from stock_analyzer.data.research_contracts import FactBatch, ResearchDatasetId
 from stock_analyzer.data.tushare_research_client import TushareResearchClient
+from stock_analyzer.storage.research_query import ResearchQuery
 from stock_analyzer.storage.research_warehouse import ResearchWarehouse
 
 
@@ -87,6 +88,12 @@ def test_classification_backfill_builds_all_sw_levels_and_traceable_themes(tmp_p
     assert set(theme_members["theme_code"]) == {"000019.SH", "399013.SZ"}
     assert summary.failed == 0
     assert all(method != "concept" for method, _ in pro.calls)
+    industry_daily_calls = [
+        kwargs["ts_code"]
+        for method, kwargs in pro.calls
+        if method == "index_daily" and kwargs["ts_code"].endswith(".SI")
+    ]
+    assert industry_daily_calls == ["801010.SI"]
 
 
 def test_classification_history_uses_latest_250_actual_trading_days(tmp_path):
@@ -170,7 +177,11 @@ def test_classification_backfill_records_empty_theme_members_as_waiting(tmp_path
     )
 
     members = warehouse.read_current(ResearchDatasetId.THEME_MEMBER)
+    controlled = ResearchQuery(warehouse).controlled_themes_as_of(
+        datetime(2026, 7, 10, 10, tzinfo=timezone.utc)
+    )
     assert set(members["theme_code"]) == {"399013.SZ"}
+    assert set(controlled["theme_code"]) == {"399013.SZ"}
     assert summary.waiting_upstream == 1
 
 
@@ -209,5 +220,143 @@ def test_classification_backfill_records_empty_index_history_as_waiting(tmp_path
     )
 
     industry = warehouse.read_current(ResearchDatasetId.INDUSTRY_DAILY)
-    assert "801010.SI" not in set(industry["industry_code"])
+    assert industry.empty
     assert summary.waiting_upstream == 1
+
+
+def test_classification_daily_history_keeps_only_a_share_open_dates(tmp_path):
+    class HolidayIndexPro(ClassificationPro):
+        def index_daily(self, **kwargs):
+            self.calls.append(("index_daily", kwargs))
+            return pd.DataFrame(
+                [
+                    {
+                        "ts_code": kwargs["ts_code"],
+                        "trade_date": trade_date,
+                        "close": 1000.0,
+                        "open": 990.0,
+                        "high": 1010.0,
+                        "low": 980.0,
+                        "pre_close": 985.0,
+                        "change": 15.0,
+                        "pct_chg": 1.5,
+                        "vol": 10.0,
+                        "amount": 20.0,
+                    }
+                    for trade_date in ("20260710", "20260711")
+                ]
+            )
+
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    warehouse.commit_batch(
+        FactBatch(
+            dataset_id=ResearchDatasetId.TRADE_CALENDAR,
+            partition_value="2026",
+            source_name="test",
+            source_endpoint="calendar",
+            ingestion_run_id="calendar-2026",
+            ingested_at=datetime.now(timezone.utc),
+            default_available_at=datetime.now(timezone.utc),
+            records=[
+                {
+                    "exchange": "SSE",
+                    "cal_date": date(2026, 7, 10),
+                    "is_open": True,
+                    "pretrade_date": None,
+                },
+                {
+                    "exchange": "SSE",
+                    "cal_date": date(2026, 7, 11),
+                    "is_open": False,
+                    "pretrade_date": date(2026, 7, 10),
+                },
+            ],
+        )
+    )
+    service = ClassificationBackfillService(
+        TushareResearchClient(HolidayIndexPro(), pacer=lambda method: None),
+        warehouse,
+    )
+
+    service.backfill(
+        start=date(2026, 7, 10), through=date(2026, 7, 11), resume=True
+    )
+
+    industry = warehouse.read_current(ResearchDatasetId.INDUSTRY_DAILY)
+    themes = warehouse.read_current(ResearchDatasetId.THEME_DAILY)
+    assert set(pd.to_datetime(industry["trade_date"]).dt.date) == {
+        date(2026, 7, 10)
+    }
+    assert set(pd.to_datetime(themes["trade_date"]).dt.date) == {
+        date(2026, 7, 10)
+    }
+
+
+def test_classification_resume_does_not_refetch_complete_daily_partitions(tmp_path):
+    pro = ClassificationPro()
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    available_at = datetime(2026, 7, 10, 10, tzinfo=timezone.utc)
+    warehouse.commit_batch(
+        FactBatch(
+            dataset_id=ResearchDatasetId.TRADE_CALENDAR,
+            partition_value="2026",
+            source_name="test",
+            source_endpoint="calendar",
+            ingestion_run_id="calendar-2026",
+            ingested_at=available_at,
+            default_available_at=available_at,
+            records=[
+                {
+                    "exchange": "SSE",
+                    "cal_date": date(2026, 7, 10),
+                    "is_open": True,
+                    "pretrade_date": None,
+                }
+            ],
+        )
+    )
+    for dataset, code_field, codes in (
+        (
+            ResearchDatasetId.INDUSTRY_DAILY,
+            "industry_code",
+            ("801010.SI",),
+        ),
+        (
+            ResearchDatasetId.THEME_DAILY,
+            "theme_code",
+            ("000019.SH", "399013.SZ"),
+        ),
+    ):
+        warehouse.commit_batch(
+            FactBatch(
+                dataset_id=dataset,
+                partition_value="2026-07-10",
+                source_name="test",
+                source_endpoint="index_daily",
+                ingestion_run_id=f"{dataset.value}-20260710",
+                ingested_at=available_at,
+                default_available_at=available_at,
+                records=[
+                    {
+                        "trade_date": date(2026, 7, 10),
+                        code_field: code,
+                        "open": 990.0,
+                        "high": 1010.0,
+                        "low": 980.0,
+                        "close": 1000.0,
+                        "volume": 1000.0,
+                        "amount": 2000.0,
+                    }
+                    for code in codes
+                ],
+            )
+        )
+    service = ClassificationBackfillService(
+        TushareResearchClient(pro, pacer=lambda method: None), warehouse
+    )
+
+    service.backfill(
+        start=date(2026, 7, 10), through=date(2026, 7, 10), resume=True
+    )
+
+    assert all(method != "index_daily" for method, _ in pro.calls)
