@@ -131,3 +131,60 @@ def test_fundamental_watermark_includes_the_requested_company_scope(tmp_path):
     income_calls = [kwargs for method, kwargs in pro.calls if method == "income"]
     assert len(income_calls) == first_income_calls + 1
     assert income_calls[-1]["ts_code"] == "000002.SZ"
+
+
+def test_fundamental_storage_keeps_12_quarters_plus_5_annual_periods(tmp_path):
+    class LongHistoryPro(FundamentalPro):
+        def income(self, **kwargs):
+            current = super().income(**kwargs)
+            older = pd.DataFrame(
+                [
+                    {
+                        "ts_code": "000001.SZ",
+                        "ann_date": "20230320",
+                        "f_ann_date": "20230320",
+                        "end_date": "20221231",
+                        "report_type": "1",
+                        "comp_type": "2",
+                        "end_type": "1",
+                        "total_revenue": 80.0,
+                        "n_income_attr_p": 8.0,
+                        "update_flag": "0",
+                    },
+                    {
+                        "ts_code": "000001.SZ",
+                        "ann_date": "20221020",
+                        "f_ann_date": "20221020",
+                        "end_date": "20220930",
+                        "report_type": "1",
+                        "comp_type": "2",
+                        "end_type": "1",
+                        "total_revenue": 70.0,
+                        "n_income_attr_p": 7.0,
+                        "update_flag": "0",
+                    },
+                ]
+            )
+            return pd.concat([current, older], ignore_index=True)
+
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    service = FundamentalBackfillService(
+        TushareResearchClient(LongHistoryPro(), pacer=lambda method: None), warehouse
+    )
+
+    service.backfill(
+        start=date(2021, 7, 14),
+        through=date(2026, 7, 13),
+        codes=("000001.SZ",),
+        resume=True,
+    )
+
+    periods = set(
+        pd.to_datetime(
+            warehouse.read_current(ResearchDatasetId.INCOME_STATEMENT)[
+                "report_period"
+            ]
+        ).dt.date
+    )
+    assert date(2022, 12, 31) in periods
+    assert date(2022, 9, 30) not in periods

@@ -63,6 +63,7 @@ class FundamentalBackfillService:
         effective_codes = tuple(sorted(set(codes or self._warehouse_codes())))
         if not effective_codes:
             raise ValueError("fundamental backfill has no security universe")
+        target_periods = _target_report_periods(start, through)
         scope_hash = hashlib.sha256("|".join(effective_codes).encode("utf-8")).hexdigest()
         scope_key = f"{start.isoformat()}:{through.isoformat()}:{scope_hash}"
         if resume and self._watermark_complete(scope_key):
@@ -105,7 +106,7 @@ class FundamentalBackfillService:
                 if not frame.empty:
                     frame = frame.loc[
                         frame["end_date"].map(
-                            lambda value: start <= _date(value) <= through
+                            lambda value: _date(value) in target_periods
                         ).astype(bool)
                     ].copy()
                 if dataset is ResearchDatasetId.INCOME_STATEMENT:
@@ -467,6 +468,23 @@ def _date(value: Any) -> date:
 
 def _yyyymmdd(value: date) -> str:
     return value.strftime("%Y%m%d")
+
+
+def _target_report_periods(start: date, through: date) -> set[date]:
+    quarter_ends: list[date] = []
+    for year in range(through.year - 6, through.year + 1):
+        for month, day in ((3, 31), (6, 30), (9, 30), (12, 31)):
+            value = date(year, month, day)
+            if start <= value <= through:
+                quarter_ends.append(value)
+    latest_quarters = sorted(quarter_ends, reverse=True)[:12]
+
+    annual_ends = [
+        date(year, 12, 31)
+        for year in range(through.year, through.year - 7, -1)
+        if start <= date(year, 12, 31) <= through
+    ][:5]
+    return set(latest_quarters) | set(annual_ends)
 
 
 def _conservative_date_available(value: date) -> datetime:
