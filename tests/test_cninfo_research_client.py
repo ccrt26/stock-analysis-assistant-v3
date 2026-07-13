@@ -114,3 +114,46 @@ def test_cninfo_accepts_overlapping_pages_only_when_unique_ids_match_total():
     assert {row["announcement_id"] for row in rows} == {
         f"O{value}" for value in range(1, 32)
     }
+
+
+def test_cninfo_repeats_unstable_pagination_until_declared_unique_total_is_met():
+    class UnstablePagesHttp:
+        def __init__(self):
+            self.calls = 0
+
+        def post(self, url, data, timeout):
+            self.calls += 1
+            page = int(data["pageNum"])
+            pass_number = (self.calls - 1) // 2
+            if page == 1:
+                ids = (1, 2)
+            elif pass_number == 0:
+                ids = (2,)
+            else:
+                ids = (3,)
+            rows = [
+                {
+                    "announcementId": f"U{value}",
+                    "announcementTitle": "年度报告",
+                    "announcementTime": int(
+                        datetime(2026, 7, 10, 10, tzinfo=timezone.utc).timestamp()
+                        * 1000
+                    ),
+                    "secCode": "000001",
+                    "secName": "平安银行",
+                    "adjunctUrl": f"finalpage/U{value}.PDF",
+                }
+                for value in ids
+            ]
+            return Response({"totalAnnouncement": 3, "announcements": rows})
+
+    http = UnstablePagesHttp()
+    client = CninfoResearchClient(
+        http, page_size=2, pacer=lambda: None, max_retries=1
+    )
+
+    rows = client.fetch_announcements(date(2026, 7, 10), date(2026, 7, 10))
+
+    assert len(rows) == 3
+    assert {row["announcement_id"] for row in rows} == {"U1", "U2", "U3"}
+    assert http.calls == 4

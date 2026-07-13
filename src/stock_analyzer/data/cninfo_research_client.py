@@ -75,6 +75,40 @@ class CninfoResearchClient:
             key=lambda row: (row["announcement_time"], row["announcement_id"]),
         )
     def _query_day(self, value: date) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        declared_total: int | None = None
+        unique_total = 0
+        for _ in range(self.max_retries + 1):
+            pass_rows, pass_total = self._query_pages_once(value)
+            if declared_total is None:
+                declared_total = pass_total
+            elif pass_total != declared_total:
+                raise ResearchSourceError(
+                    "CNINFO pagination total changed during acquisition",
+                    category="schema",
+                    endpoint="new/hisAnnouncement/query",
+                )
+            rows.extend(pass_rows)
+            announcement_ids = [
+                str(row.get("announcementId", "")).strip() for row in rows
+            ]
+            unique_total = len(set(announcement_ids))
+            if all(announcement_ids) and unique_total == declared_total:
+                return rows
+            if unique_total > declared_total:
+                raise ResearchSourceError(
+                    "CNINFO returned more unique announcement IDs than declared",
+                    category="incomplete",
+                    endpoint="new/hisAnnouncement/query",
+                )
+        raise ResearchSourceError(
+            f"CNINFO {value.isoformat()} returned {unique_total} unique rows "
+            f"but declared {declared_total}",
+            category="incomplete",
+            endpoint="new/hisAnnouncement/query",
+        )
+
+    def _query_pages_once(self, value: date) -> tuple[list[dict[str, Any]], int]:
         first, total = self._query_page(value, 1)
         rows = list(first)
         pages = math.ceil(total / self.page_size)
@@ -87,22 +121,7 @@ class CninfoResearchClient:
                     endpoint="new/hisAnnouncement/query",
                 )
             rows.extend(page_rows)
-        if len(rows) != total:
-            announcement_ids = [
-                str(row.get("announcementId", "")).strip() for row in rows
-            ]
-            pages_only_overlap = (
-                len(rows) > total
-                and all(announcement_ids)
-                and len(set(announcement_ids)) == total
-            )
-            if not pages_only_overlap:
-                raise ResearchSourceError(
-                    f"CNINFO returned {len(rows)} rows but declared {total}",
-                    category="incomplete",
-                    endpoint="new/hisAnnouncement/query",
-                )
-        return rows
+        return rows, total
 
     def _query_page(self, value: date, page: int) -> tuple[list[dict[str, Any]], int]:
         payload = self._post(
