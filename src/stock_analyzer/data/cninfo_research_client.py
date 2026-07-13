@@ -261,7 +261,7 @@ def _candidate_event_types(title: str) -> list[str]:
 def _ts_code(code: str) -> str:
     if code.startswith(("4", "8", "92")):
         suffix = "BJ"
-    elif code.startswith(("0", "3")):
+    elif code.startswith(("0", "2", "3")):
         suffix = "SZ"
     elif code.startswith(("5", "6", "9")):
         suffix = "SH"
