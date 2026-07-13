@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo
 
 import duckdb
 import pandas as pd
+import pyarrow.parquet as pq
 
 from stock_analyzer.data.research_backfill import BackfillSummary
 from stock_analyzer.data.research_contracts import (
@@ -40,6 +41,7 @@ _STATEMENTS = {
     ResearchDatasetId.BALANCE_SHEET,
     ResearchDatasetId.CASH_FLOW,
 }
+_CORE_FINANCIALS = _STATEMENTS | {ResearchDatasetId.FINANCIAL_INDICATOR}
 
 
 class FundamentalBackfillService:
@@ -64,6 +66,7 @@ class FundamentalBackfillService:
         if not effective_codes:
             raise ValueError("fundamental backfill has no security universe")
         target_periods = _target_report_periods(start, through)
+        expected_core_codes = self._expected_core_codes(effective_codes, through)
         scope_hash = hashlib.sha256("|".join(effective_codes).encode("utf-8")).hexdigest()
         scope_key = f"{start.isoformat()}:{through.isoformat()}:{scope_hash}"
         if resume and self._watermark_complete(scope_key):
@@ -82,10 +85,17 @@ class FundamentalBackfillService:
             for dataset, endpoint in _ENDPOINTS.items():
                 path = staging / dataset.value / f"{code}.parquet"
                 if resume and path.is_file():
-                    if dataset is ResearchDatasetId.INCOME_STATEMENT:
-                        income_announcement_map = _announcement_map(pd.read_parquet(path))
-                    summary.skipped += 1
-                    continue
+                    if (
+                        dataset in _CORE_FINANCIALS
+                        and code in expected_core_codes
+                        and pq.ParquetFile(path).metadata.num_rows == 0
+                    ):
+                        path.unlink()
+                    else:
+                        if dataset is ResearchDatasetId.INCOME_STATEMENT:
+                            income_announcement_map = _announcement_map(pd.read_parquet(path))
+                        summary.skipped += 1
+                        continue
                 try:
                     frame = self.client.call(
                         endpoint,
@@ -103,6 +113,13 @@ class FundamentalBackfillService:
                     else:
                         summary.failed += 1
                         continue
+                if (
+                    frame.empty
+                    and dataset in _CORE_FINANCIALS
+                    and code in expected_core_codes
+                ):
+                    summary.waiting_upstream += 1
+                    continue
                 if not frame.empty:
                     frame = frame.loc[
                         frame["end_date"].map(
@@ -131,7 +148,7 @@ class FundamentalBackfillService:
                 summary,
             )
 
-        if summary.failed == 0:
+        if summary.failed == 0 and summary.waiting_upstream == 0:
             self._save_watermark(scope_key, through)
             shutil.rmtree(staging, ignore_errors=True)
         return summary
@@ -381,6 +398,25 @@ class FundamentalBackfillService:
             securities = securities[securities["list_status"] == "L"]
         return tuple(sorted(securities["ts_code"].astype(str).unique()))
 
+    def _expected_core_codes(
+        self,
+        codes: tuple[str, ...],
+        through: date,
+    ) -> set[str]:
+        required_period = _latest_mandatory_report_period(through)
+        securities = self.warehouse.read_current(ResearchDatasetId.SECURITY_MASTER)
+        if required_period is None or securities.empty or "list_date" not in securities:
+            return set(codes)
+        list_dates = {
+            str(row["ts_code"]): _optional_date(row.get("list_date"))
+            for row in securities.to_dict(orient="records")
+        }
+        return {
+            code
+            for code in codes
+            if list_dates.get(code) is None or list_dates[code] <= required_period
+        }
+
     def _partition_complete(
         self,
         dataset: ResearchDatasetId,
@@ -466,6 +502,18 @@ def _date(value: Any) -> date:
     return datetime.strptime(str(value).replace("-", ""), "%Y%m%d").date()
 
 
+def _optional_date(value: Any) -> date | None:
+    if value is None or pd.isna(value):
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    if isinstance(value, pd.Timestamp):
+        return value.date()
+    return _date(value)
+
+
 def _yyyymmdd(value: date) -> str:
     return value.strftime("%Y%m%d")
 
@@ -485,6 +533,23 @@ def _target_report_periods(start: date, through: date) -> set[date]:
         if start <= date(year, 12, 31) <= through
     ][:5]
     return set(latest_quarters) | set(annual_ends)
+
+
+def _latest_mandatory_report_period(through: date) -> date | None:
+    candidates: list[tuple[date, date]] = []
+    for year in range(through.year - 3, through.year + 1):
+        candidates.extend(
+            [
+                (date(year, 3, 31), date(year, 4, 30)),
+                (date(year, 6, 30), date(year, 8, 31)),
+                (date(year, 9, 30), date(year, 10, 31)),
+                (date(year, 12, 31), date(year + 1, 4, 30)),
+            ]
+        )
+    available = [item for item in candidates if item[1] <= through]
+    if not available:
+        return None
+    return max(available, key=lambda item: (item[1], item[0]))[0]
 
 
 def _conservative_date_available(value: date) -> datetime:

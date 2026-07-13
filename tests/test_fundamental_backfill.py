@@ -1,9 +1,9 @@
-from datetime import date
+from datetime import date, datetime, timezone
 
 import pandas as pd
 
 from stock_analyzer.data.fundamental_backfill import FundamentalBackfillService
-from stock_analyzer.data.research_contracts import ResearchDatasetId
+from stock_analyzer.data.research_contracts import FactBatch, ResearchDatasetId
 from stock_analyzer.data.tushare_research_client import TushareResearchClient
 from stock_analyzer.storage.research_warehouse import ResearchWarehouse
 
@@ -188,3 +188,92 @@ def test_fundamental_storage_keeps_12_quarters_plus_5_annual_periods(tmp_path):
     )
     assert date(2022, 12, 31) in periods
     assert date(2022, 9, 30) not in periods
+
+
+def test_expected_core_financial_empty_result_is_retried_not_watermarked(tmp_path):
+    class EmptyIncomePro(FundamentalPro):
+        def income(self, **kwargs):
+            self.calls.append(("income", kwargs))
+            return pd.DataFrame()
+
+    pro = EmptyIncomePro()
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    service = FundamentalBackfillService(
+        TushareResearchClient(pro, pacer=lambda method: None), warehouse
+    )
+
+    first = service.backfill(
+        start=date(2021, 7, 14),
+        through=date(2026, 7, 13),
+        codes=("000001.SZ",),
+        resume=True,
+    )
+    second = service.backfill(
+        start=date(2021, 7, 14),
+        through=date(2026, 7, 13),
+        codes=("000001.SZ",),
+        resume=True,
+    )
+
+    income_calls = [method for method, _ in pro.calls if method == "income"]
+    assert len(income_calls) == 2
+    assert first.waiting_upstream == 1
+    assert second.waiting_upstream == 1
+    assert not (
+        warehouse.root
+        / ".backfill_staging"
+        / "fundamentals"
+        / ResearchDatasetId.INCOME_STATEMENT.value
+        / "000001.SZ.parquet"
+    ).exists()
+
+
+def test_recent_listing_without_due_periodic_report_can_complete_empty(tmp_path):
+    class EmptyIncomePro(FundamentalPro):
+        def income(self, **kwargs):
+            self.calls.append(("income", kwargs))
+            return pd.DataFrame()
+
+    pro = EmptyIncomePro()
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    available_at = datetime(2026, 7, 13, 10, tzinfo=timezone.utc)
+    warehouse.commit_batch(
+        FactBatch(
+            dataset_id=ResearchDatasetId.SECURITY_MASTER,
+            partition_value="security-master",
+            source_name="test",
+            source_endpoint="stock_basic",
+            ingestion_run_id="security-master",
+            ingested_at=available_at,
+            default_available_at=available_at,
+            records=[
+                {
+                    "ts_code": "000001.SZ",
+                    "valid_from": date(2026, 4, 1),
+                    "list_date": date(2026, 4, 1),
+                    "list_status": "L",
+                }
+            ],
+        )
+    )
+    service = FundamentalBackfillService(
+        TushareResearchClient(pro, pacer=lambda method: None), warehouse
+    )
+
+    first = service.backfill(
+        start=date(2021, 7, 14),
+        through=date(2026, 7, 13),
+        codes=("000001.SZ",),
+        resume=True,
+    )
+    second = service.backfill(
+        start=date(2021, 7, 14),
+        through=date(2026, 7, 13),
+        codes=("000001.SZ",),
+        resume=True,
+    )
+
+    income_calls = [method for method, _ in pro.calls if method == "income"]
+    assert len(income_calls) == 1
+    assert first.waiting_upstream == 0
+    assert second.skipped == 1
