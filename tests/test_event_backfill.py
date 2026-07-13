@@ -1,6 +1,7 @@
 from datetime import date
 
 import pandas as pd
+import stock_analyzer.data.event_backfill as event_backfill_module
 
 from stock_analyzer.data.event_backfill import EventBackfillService
 from stock_analyzer.data.research_contracts import ResearchDatasetId
@@ -22,7 +23,8 @@ class ActionPro:
 
     def share_float(self, **kwargs):
         return pd.DataFrame([{
-            "ts_code": "000001.SZ", "ann_date": "20260701", "float_date": "20260710",
+            "ts_code": "000001.SZ", "ann_date": kwargs.get("start_date", "20260701"),
+            "float_date": kwargs.get("end_date", "20260710"),
             "float_share": 100.0, "float_ratio": 1.0, "holder_name": "股东A",
             "share_type": "首发",
         }])
@@ -168,3 +170,87 @@ def test_holder_trade_deduplicates_exact_rows_but_preserves_provider_variants(tm
     assert rows["provider_record_id"].nunique() == 2
     assert rows["variant_group_id"].nunique() == 1
     assert pro.holder_limits == [3000]
+
+
+def test_share_float_deduplicates_exact_rows_but_preserves_distinct_lots(tmp_path):
+    class VariantFloatPro(ActionPro):
+        def share_float(self, **kwargs):
+            base = {
+                "ts_code": "000001.SZ",
+                "ann_date": "20260701",
+                "float_date": "20260710",
+                "float_share": 100.0,
+                "float_ratio": 1.0,
+                "holder_name": "股东A",
+                "share_type": "首发",
+            }
+            return pd.DataFrame([base, base, {**base, "float_share": 200.0}])
+
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    service = EventBackfillService(
+        TushareResearchClient(VariantFloatPro(), pacer=lambda method: None),
+        AnnouncementClient(),
+        warehouse,
+    )
+
+    service.backfill(
+        start=date(2026, 7, 1),
+        through=date(2026, 7, 10),
+        trading_dates=(),
+        resume=True,
+    )
+
+    rows = warehouse.read_current(ResearchDatasetId.SHARE_FLOAT)
+    assert len(rows) == 2
+    assert rows["provider_record_id"].nunique() == 2
+    assert rows["variant_group_id"].nunique() == 1
+
+
+def test_share_float_recursively_splits_a_date_range_that_hits_page_capacity(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(event_backfill_module, "_SHARE_FLOAT_PAGE_SIZE", 2)
+    monkeypatch.setattr(event_backfill_module, "_SHARE_FLOAT_MAX_PAGES", 1)
+
+    class DenseFloatPro(ActionPro):
+        def __init__(self):
+            super().__init__()
+            self.float_ranges = []
+
+        def share_float(self, **kwargs):
+            self.float_ranges.append((kwargs["start_date"], kwargs["end_date"]))
+            start = kwargs["start_date"]
+            end = kwargs["end_date"]
+            count = 2 if start != end else 1
+            return pd.DataFrame(
+                [
+                    {
+                        "ts_code": "000001.SZ",
+                        "ann_date": start,
+                        "float_date": start,
+                        "float_share": float(index + 1),
+                        "float_ratio": 1.0,
+                        "holder_name": f"股东{index}",
+                        "share_type": "首发",
+                    }
+                    for index in range(count)
+                ]
+            )
+
+    pro = DenseFloatPro()
+    service = EventBackfillService(
+        TushareResearchClient(pro, pacer=lambda method: None),
+        AnnouncementClient(),
+        ResearchWarehouse(tmp_path / "warehouse"),
+    )
+
+    frame = service._fetch_share_float_range(
+        date(2026, 7, 1), date(2026, 7, 2)
+    )
+
+    assert len(frame) == 2
+    assert pro.float_ranges == [
+        ("20260701", "20260702"),
+        ("20260701", "20260701"),
+        ("20260702", "20260702"),
+    ]

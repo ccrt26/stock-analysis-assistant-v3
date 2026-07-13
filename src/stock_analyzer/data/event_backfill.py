@@ -11,9 +11,16 @@ import pandas as pd
 
 from stock_analyzer.data.research_backfill import BackfillSummary
 from stock_analyzer.data.research_contracts import FactBatch, ResearchDatasetId
-from stock_analyzer.data.tushare_research_client import TushareResearchClient
+from stock_analyzer.data.tushare_research_client import (
+    ResearchSourceError,
+    TushareResearchClient,
+)
 from stock_analyzer.storage.research_schema import connect_research_warehouse
 from stock_analyzer.storage.research_warehouse import ResearchWarehouse
+
+
+_SHARE_FLOAT_PAGE_SIZE = 5000
+_SHARE_FLOAT_MAX_PAGES = 20
 
 
 class EventBackfillService:
@@ -73,18 +80,24 @@ class EventBackfillService:
             summary,
         )
 
-        floats = self.tushare.call_paged(
-            "share_float", start_date=_yyyymmdd(start), end_date=_yyyymmdd(through)
-        )
-        self._commit_grouped(
-            ResearchDatasetId.SHARE_FLOAT,
-            [_float_row(row) for row in floats.to_dict(orient="records")],
-            lambda row: row["float_date"].strftime("%Y-%m"),
-            "share_float",
-            through,
-            resume,
-            summary,
-        )
+        for month_start, month_end in _month_ranges(start, through):
+            partition = month_start.strftime("%Y-%m")
+            if (
+                resume
+                and partition < current_month
+                and self._complete(ResearchDatasetId.SHARE_FLOAT, partition)
+            ):
+                summary.skipped += 1
+                continue
+            floats = self._fetch_share_float_range(month_start, month_end)
+            self._commit(
+                ResearchDatasetId.SHARE_FLOAT,
+                partition,
+                "share_float",
+                [_float_row(row) for row in floats.to_dict(orient="records")],
+                through,
+                summary,
+            )
 
         repurchases = self.tushare.call_paged(
             "repurchase", start_date=_yyyymmdd(start), end_date=_yyyymmdd(through)
@@ -152,6 +165,41 @@ class EventBackfillService:
             )
             self._mark_suspension_checked(partition, f"rows:{len(rows)}")
         return summary
+
+    def _fetch_share_float_range(self, start: date, through: date) -> pd.DataFrame:
+        try:
+            frame = self.tushare.call_paged(
+                "share_float",
+                limit=_SHARE_FLOAT_PAGE_SIZE,
+                max_pages=_SHARE_FLOAT_MAX_PAGES,
+                start_date=_yyyymmdd(start),
+                end_date=_yyyymmdd(through),
+            )
+        except ResearchSourceError as exc:
+            if exc.category != "incomplete" or start >= through:
+                raise
+            midpoint = start + timedelta(days=(through - start).days // 2)
+            left = self._fetch_share_float_range(start, midpoint)
+            right = self._fetch_share_float_range(midpoint + timedelta(days=1), through)
+            return pd.concat([left, right], ignore_index=True, sort=False).drop_duplicates(
+                ignore_index=True
+            )
+        if frame.empty:
+            return frame
+        if "float_date" not in frame.columns:
+            raise ResearchSourceError(
+                "Tushare share_float lacks float_date",
+                category="schema",
+                endpoint="share_float",
+            )
+        returned_dates = frame["float_date"].map(_date)
+        if ((returned_dates < start) | (returned_dates > through)).any():
+            raise ResearchSourceError(
+                "Tushare share_float returned rows outside the requested range",
+                category="invalid_semantics",
+                endpoint="share_float",
+            )
+        return frame.drop_duplicates(ignore_index=True)
 
     def _commit_grouped(
         self,
@@ -245,6 +293,13 @@ def _holder_row(raw: dict[str, Any]) -> dict[str, Any]:
 
 def _float_row(raw: dict[str, Any]) -> dict[str, Any]:
     row = _clean(raw)
+    row["provider_record_id"] = _stable_payload_hash(row)
+    row["variant_group_id"] = _stable_payload_hash(
+        {
+            key: row.get(key)
+            for key in ("ts_code", "float_date", "holder_name", "share_type")
+        }
+    )
     row["ann_date"] = _optional_date(raw.get("ann_date"))
     row["float_date"] = _date(raw["float_date"])
     publication = row["ann_date"] or row["float_date"]
