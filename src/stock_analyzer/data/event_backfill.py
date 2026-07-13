@@ -451,6 +451,7 @@ def _float_row(raw: dict[str, Any]) -> dict[str, Any]:
 
 def _repurchase_row(raw: dict[str, Any]) -> dict[str, Any]:
     row = _clean(raw)
+    row["provider_record_id"] = _stable_payload_hash(row)
     ann_date = _date(raw["ann_date"])
     row["announcement_date"] = ann_date
     row["process"] = str(raw.get("proc") or "unknown")
@@ -459,6 +460,14 @@ def _repurchase_row(raw: dict[str, Any]) -> dict[str, Any]:
         _optional_date(raw.get("end_date"))
         or row["expected_end_date"]
         or ann_date
+    )
+    row["variant_group_id"] = _stable_payload_hash(
+        {
+            "ts_code": row.get("ts_code"),
+            "announcement_date": row["announcement_date"],
+            "process": row["process"],
+            "event_effective_date": row["event_effective_date"],
+        }
     )
     row["available_at"] = _conservative_available(ann_date)
     return row

@@ -176,6 +176,44 @@ def test_holder_trade_deduplicates_exact_rows_but_preserves_provider_variants(tm
     assert pro.holder_limits == [3000]
 
 
+def test_repurchase_deduplicates_exact_rows_but_preserves_distinct_lots(tmp_path):
+    class VariantRepurchasePro(ActionPro):
+        def repurchase(self, **kwargs):
+            base = {
+                "ts_code": "000001.SZ",
+                "ann_date": kwargs["end_date"],
+                "end_date": kwargs["end_date"],
+                "proc": "完成",
+                "exp_date": None,
+                "vol": 100.0,
+                "amount": 1000.0,
+                "high_limit": 10.0,
+                "low_limit": 10.0,
+            }
+            return pd.DataFrame([base, base, {**base, "amount": 1200.0}])
+
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    service = EventBackfillService(
+        TushareResearchClient(
+            VariantRepurchasePro(), pacer=lambda method: None
+        ),
+        AnnouncementClient(),
+        warehouse,
+    )
+
+    service.backfill(
+        start=date(2026, 7, 1),
+        through=date(2026, 7, 10),
+        trading_dates=(),
+        resume=True,
+    )
+
+    rows = warehouse.read_current(ResearchDatasetId.REPURCHASE)
+    assert len(rows) == 2
+    assert rows["provider_record_id"].nunique() == 2
+    assert rows["variant_group_id"].nunique() == 1
+
+
 def test_share_float_deduplicates_exact_rows_but_preserves_distinct_lots(tmp_path):
     class VariantFloatPro(ActionPro):
         def share_float(self, **kwargs):

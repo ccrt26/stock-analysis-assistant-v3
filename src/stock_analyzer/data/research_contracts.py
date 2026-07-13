@@ -156,7 +156,7 @@ def research_contract_registry() -> dict[ResearchDatasetId, DatasetContract]:
         _contract(ResearchDatasetId.ANNOUNCEMENT, ("announcement_id",), "announcement_month", sources=_OFFICIAL_DISCLOSURE, lagged=True, window="one_year_metadata_candidate_full_text", availability="official publication timestamp"),
         _contract(ResearchDatasetId.HOLDER_TRADE, ("provider_record_id",), "announcement_month", lagged=True, window="five_years"),
         _contract(ResearchDatasetId.SHARE_FLOAT, ("provider_record_id",), "float_month", lagged=True, window="five_years"),
-        _contract(ResearchDatasetId.REPURCHASE, ("ts_code", "announcement_date", "process", "event_effective_date"), "announcement_month", lagged=True, window="five_years"),
+        _contract(ResearchDatasetId.REPURCHASE, ("provider_record_id",), "announcement_month", lagged=True, window="five_years"),
         _contract(ResearchDatasetId.PLEDGE, ("ts_code", "end_date"), "end_month", lagged=True, window="five_years_quarterly_snapshots"),
         _contract(ResearchDatasetId.SUSPENSION, ("ts_code", "trade_date", "suspend_type"), "trade_date", lagged=True, window="one_year"),
         _contract(ResearchDatasetId.MARGIN_DETAIL, ("trade_date", "ts_code", "exchange"), "trade_date", lagged=True, window="250_sessions", availability="T+1 or actual provider publication time"),
