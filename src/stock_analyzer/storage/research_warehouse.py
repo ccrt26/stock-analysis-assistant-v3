@@ -10,7 +10,6 @@ from typing import Any
 
 import duckdb
 import pandas as pd
-import pyarrow.parquet as pq
 
 from stock_analyzer.data.research_contracts import (
     FactBatch,
@@ -501,23 +500,14 @@ class ResearchWarehouse:
                     parquet_path = self.root / str(relative_path)
                     if not parquet_path.is_file():
                         raise FileNotFoundError(parquet_path)
-                    parquet_file = pq.ParquetFile(parquet_path)
-                    if "business_key_hash" not in parquet_file.schema_arrow.names:
-                        raise ValueError(
-                            f"business_key_hash missing from {parquet_path}"
-                        )
-                    for record_batch in parquet_file.iter_batches(
-                        batch_size=50_000,
-                        columns=["business_key_hash"],
-                    ):
-                        keys = record_batch.column(0).to_pylist()
-                        connection.executemany(
-                            "insert into research_fact_keys values (?, ?, ?)",
-                            [
-                                (str(dataset_id), str(key_hash), str(partition_value))
-                                for key_hash in keys
-                            ],
-                        )
+                    connection.execute(
+                        """
+                        insert into research_fact_keys
+                        select ?, cast(business_key_hash as varchar), ?
+                        from read_parquet(?, hive_partitioning=false)
+                        """,
+                        [str(dataset_id), str(partition_value), str(parquet_path)],
+                    )
                 connection.execute(
                     "insert or replace into research_metadata values "
                     "('fact_key_index_built', '1')"

@@ -1,7 +1,10 @@
 from datetime import date, datetime, timezone
 
 from stock_analyzer.data.research_contracts import FactBatch, ResearchDatasetId
-from stock_analyzer.ops.research_data_job import reconcile_research_gaps
+from stock_analyzer.ops.research_data_job import (
+    reconcile_research_gaps,
+    repair_research_gaps,
+)
 from stock_analyzer.storage.research_schema import connect_research_warehouse
 from stock_analyzer.storage.research_warehouse import ResearchWarehouse
 
@@ -50,3 +53,10 @@ def test_gap_is_marked_resolved_only_after_partition_is_committed(tmp_path):
             "select status from research_data_gaps where gap_id = 'gap'"
         ).fetchone()[0]
     assert status == "resolved"
+
+
+def test_repair_with_no_declared_gap_does_not_repeat_five_year_backfill(tmp_path):
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    runtime = type("Runtime", (), {"warehouse": warehouse})()
+
+    assert repair_research_gaps(runtime, through=date(2026, 7, 13)) == ()

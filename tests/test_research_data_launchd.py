@@ -11,6 +11,9 @@ def test_research_data_launchd_is_data_only_and_resolves_previous_trading_day_in
     assert "08:00" in text
     assert "18:30" in text
     assert "21:30" in text
+    assert "stage=\"next-morning\"" in text
+    assert "stage=\"close\"" in text
+    assert "stage=\"evening\"" in text
     assert "prepare-deploy" not in text
     assert "run-daily-job" not in text
     assert "Supabase" not in text

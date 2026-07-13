@@ -153,13 +153,54 @@ def repair_research_gaps(
     *,
     through: date,
 ) -> tuple[BackfillSummary, ...]:
-    return run_research_backfill(
-        runtime,
-        start=through - timedelta(days=5 * 366),
-        through=through,
-        scope="all",
-        resume=True,
-    )
+    with connect_research_warehouse(
+        runtime.warehouse.duckdb_path, read_only=True
+    ) as connection:
+        rows = connection.execute(
+            """
+            select dataset_id, partition_value
+            from research_data_gaps
+            where status in ('waiting_upstream', 'failed', 'validation_failed')
+            order by first_seen_at
+            """
+        ).fetchall()
+    if not rows:
+        return ()
+    scopes: dict[str, date] = {}
+    dataset_scope = {
+        "equity_daily": "market-core",
+        "adj_factor": "market-core",
+        "daily_basic": "market-core",
+        "stock_limit": "market-core",
+        "index_daily": "market-core",
+    }
+    for dataset_id, partition_value in rows:
+        dataset_text = str(dataset_id)
+        if dataset_text.startswith("scope:"):
+            scope = dataset_text.split(":", 1)[1]
+        else:
+            scope = dataset_scope.get(dataset_text)
+        if scope is None:
+            continue
+        first_partition = str(partition_value).split(":", 1)[0]
+        try:
+            start = date.fromisoformat(first_partition)
+        except ValueError:
+            start = through - timedelta(days=5 * 366)
+        scopes[scope] = min(scopes.get(scope, start), start)
+    summaries: list[BackfillSummary] = []
+    for scope, start in sorted(scopes.items()):
+        summaries.extend(
+            run_research_backfill(
+                runtime,
+                start=start,
+                through=through,
+                scope=scope,
+                resume=True,
+            )
+        )
+    reconcile_research_gaps(runtime.warehouse)
+    return tuple(summaries)
 
 
 def reconcile_research_gaps(warehouse: ResearchWarehouse) -> int:
@@ -258,6 +299,22 @@ def run_research_stage(
     data_date: date,
 ) -> tuple[BackfillSummary, ...]:
     if stage == "close":
+        calendar = runtime.tushare.fetch_trade_calendar(data_date, data_date)
+        is_open = bool(
+            not calendar.empty
+            and calendar.loc[
+                calendar["cal_date"] == data_date, "is_open"
+            ].astype(bool).any()
+        )
+        if not is_open:
+            summary = BackfillSummary(
+                scope="market-core",
+                start=data_date,
+                through=data_date,
+                skipped=1,
+            )
+            _record_scope_outcome(runtime.warehouse, summary)
+            return (summary,)
         return run_research_backfill(
             runtime,
             start=data_date,
@@ -307,8 +364,9 @@ def run_research_stage(
                     resume=True,
                 )
             )
-        return tuple(summaries)
+        return _finalize_stage_summaries(runtime, summaries)
     if stage == "next-morning":
+        repaired = list(repair_research_gaps(runtime, through=data_date))
         late_event_summary = EventBackfillService(
             runtime.tushare, runtime.cninfo, runtime.warehouse
         ).backfill(
@@ -329,8 +387,20 @@ def run_research_stage(
             index_codes=BROAD_INDEX_CODES,
             resume=True,
         )
-        return (late_event_summary, summary)
+        return _finalize_stage_summaries(
+            runtime, [*repaired, late_event_summary, summary]
+        )
     raise ValueError(f"unsupported research data stage: {stage}")
+
+
+def _finalize_stage_summaries(
+    runtime: ResearchDataRuntime,
+    summaries: list[BackfillSummary],
+) -> tuple[BackfillSummary, ...]:
+    for summary in summaries:
+        _record_scope_outcome(runtime.warehouse, summary)
+    reconcile_research_gaps(runtime.warehouse)
+    return tuple(summaries)
 
 
 def select_minute_candidate_scope(

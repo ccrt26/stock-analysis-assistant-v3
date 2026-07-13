@@ -20,18 +20,19 @@ set -a
 source .env.local >/dev/null 2>&1
 set +a
 export PROJECT_ROOT="$PWD"
-slot="$(date +%H:%M)"
-case "$slot" in
-  08:00) stage="next-morning" ;;
-  18:30) stage="close" ;;
-  21:30) stage="evening" ;;
-  *) echo "unsupported research-data slot: $slot"; exit 2 ;;
+hour="$(date +%H)"
+case "$hour" in
+  06|07|08|09|10|11) stage="next-morning" ;;
+  12|13|14|15|16|17|18|19|20) stage="close" ;;
+  21|22|23|00|01|02|03|04|05) stage="evening" ;;
+  *) echo "unsupported research-data hour: $hour"; exit 2 ;;
 esac
 exec .venv/bin/python -m stock_analyzer data run-stage --stage "$stage" --data-date auto
     ]]></string>
   </array>
 
   <key>StartCalendarInterval</key>
+  <!-- 08:00 next-morning; 18:30 close; 21:30 evening. -->
   <array>
     <dict><key>Hour</key><integer>8</integer><key>Minute</key><integer>0</integer></dict>
     <dict><key>Hour</key><integer>18</integer><key>Minute</key><integer>30</integer></dict>

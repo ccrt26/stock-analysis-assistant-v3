@@ -104,4 +104,30 @@ def test_fundamental_backfill_preserves_statement_revision_and_full_business_con
     assert warehouse.revision_count(ResearchDatasetId.INCOME_STATEMENT) == 1
     assert main_business.iloc[0]["classification"] == "product"
     assert main_business.iloc[0]["item_name"] == "零售银行(产品)"
+    express_manifest = warehouse.partition_manifest(
+        ResearchDatasetId.EARNINGS_EXPRESS
+    )
+    assert express_manifest["partition_value"].tolist() == ["2026-04"]
     assert summary.failed == 0
+
+
+def test_fundamental_watermark_includes_the_requested_company_scope(tmp_path):
+    pro = FundamentalPro()
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    service = FundamentalBackfillService(
+        TushareResearchClient(pro, pacer=lambda method: None), warehouse
+    )
+    service.backfill(
+        start=date(2021, 7, 14), through=date(2026, 7, 13),
+        codes=("000001.SZ",), resume=True,
+    )
+    first_income_calls = len([method for method, _ in pro.calls if method == "income"])
+
+    service.backfill(
+        start=date(2021, 7, 14), through=date(2026, 7, 13),
+        codes=("000002.SZ",), resume=True,
+    )
+
+    income_calls = [kwargs for method, kwargs in pro.calls if method == "income"]
+    assert len(income_calls) == first_income_calls + 1
+    assert income_calls[-1]["ts_code"] == "000002.SZ"

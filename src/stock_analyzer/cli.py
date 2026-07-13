@@ -236,6 +236,21 @@ def data_run_stage(
             f"{stage}/{item.scope}: committed={item.committed} skipped={item.skipped} "
             f"waiting={item.waiting_upstream} failed={item.failed}"
         )
+    from stock_analyzer.ops.research_health import (
+        build_research_health_report,
+        write_health_report,
+    )
+
+    health = build_research_health_report(
+        runtime.warehouse, parsed, full_history=False
+    )
+    health_path, _ = write_health_report(
+        health, runtime.config.local_archive_dir / "data_health"
+    )
+    typer.echo(
+        f"stage health: core_complete={str(health.complete_core_date).lower()} "
+        f"output={health_path}"
+    )
     if any(item.failed for item in summaries):
         raise typer.Exit(code=2)
 

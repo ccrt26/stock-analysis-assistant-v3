@@ -60,13 +60,14 @@ class FundamentalBackfillService:
         resume: bool = True,
     ) -> BackfillSummary:
         summary = BackfillSummary(scope="fundamentals", start=start, through=through)
-        scope_key = f"{start.isoformat()}:{through.isoformat()}"
-        if resume and self._watermark_complete(scope_key):
-            summary.skipped = 1
-            return summary
         effective_codes = tuple(sorted(set(codes or self._warehouse_codes())))
         if not effective_codes:
             raise ValueError("fundamental backfill has no security universe")
+        scope_hash = hashlib.sha256("|".join(effective_codes).encode("utf-8")).hexdigest()
+        scope_key = f"{start.isoformat()}:{through.isoformat()}:{scope_hash}"
+        if resume and self._watermark_complete(scope_key):
+            summary.skipped = 1
+            return summary
 
         try:
             self._backfill_company_profiles(through, resume, summary)
@@ -205,6 +206,46 @@ class FundamentalBackfillService:
     ) -> None:
         paths = [str(path) for path in files]
         with duckdb.connect() as connection:
+            if dataset in {
+                ResearchDatasetId.EARNINGS_FORECAST,
+                ResearchDatasetId.EARNINGS_EXPRESS,
+            }:
+                groups = [
+                    str(row[0])
+                    for row in connection.execute(
+                        """
+                        select distinct substr(cast(ann_date as varchar), 1, 6)
+                        from read_parquet(?, union_by_name=true,
+                                           hive_partitioning=false)
+                        where ann_date is not null
+                          and length(cast(ann_date as varchar)) >= 6
+                        order by 1
+                        """,
+                        [paths],
+                    ).fetchall()
+                ]
+                for ann_month in groups:
+                    frame = connection.execute(
+                        """
+                        select * from read_parquet(?, union_by_name=true,
+                                                   hive_partitioning=false)
+                        where substr(cast(ann_date as varchar), 1, 6) = ?
+                        """,
+                        [paths, ann_month],
+                    ).fetchdf()
+                    records = [
+                        self._normalize_financial_row(dataset, row, through)
+                        for row in frame.to_dict(orient="records")
+                    ]
+                    self._commit_revision_levels(
+                        dataset,
+                        f"{ann_month[:4]}-{ann_month[4:6]}",
+                        endpoint,
+                        records,
+                        through,
+                        summary,
+                    )
+                return
             periods = [
                 str(row[0])
                 for row in connection.execute(
