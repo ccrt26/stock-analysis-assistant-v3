@@ -14,6 +14,16 @@ _TITLE_TAG = re.compile(r"<[^>]+>")
 _DENSE_DAY_PLATES = ("szmb", "szcy", "shmb", "shkcp", "bj")
 
 
+class _PaginationTotalChanged(RuntimeError):
+    def __init__(self, *, expected: int, actual: int, page: int) -> None:
+        self.expected = expected
+        self.actual = actual
+        self.page = page
+        super().__init__(
+            f"pagination total changed from {expected} to {actual} at page {page}"
+        )
+
+
 class CninfoRequestPacer:
     def __init__(
         self,
@@ -170,12 +180,23 @@ class CninfoResearchClient:
         declared_total: int | None = None
         unique_total = 0
         for attempt in range(self.max_retries + 1):
-            pass_rows, pass_total = self._query_pages_once(
-                value,
-                plate=plate,
-                stock=stock,
-                first_page=first_page if attempt == 0 else None,
-            )
+            try:
+                pass_rows, pass_total = self._query_pages_once(
+                    value,
+                    plate=plate,
+                    stock=stock,
+                    first_page=first_page if attempt == 0 else None,
+                )
+            except _PaginationTotalChanged as exc:
+                if attempt < self.max_retries:
+                    continue
+                raise ResearchSourceError(
+                    f"CNINFO {value.isoformat()} plate={plate or 'all'} "
+                    f"changed total from {exc.expected} to {exc.actual} "
+                    f"at page {exc.page}",
+                    category="incomplete",
+                    endpoint="new/hisAnnouncement/query",
+                ) from exc
             if declared_total is None:
                 declared_total = pass_total
             elif pass_total != declared_total:
@@ -229,10 +250,8 @@ class CninfoResearchClient:
                 value, page, plate=plate, stock=stock
             )
             if page_total != total:
-                raise ResearchSourceError(
-                    "CNINFO pagination total changed during acquisition",
-                    category="schema",
-                    endpoint="new/hisAnnouncement/query",
+                raise _PaginationTotalChanged(
+                    expected=total, actual=page_total, page=page
                 )
             rows.extend(page_rows)
         return rows, total

@@ -271,3 +271,44 @@ def test_cninfo_batches_official_stock_map_when_a_subboard_exceeds_page_cap():
 
     assert {row["announcement_id"] for row in rows} == {"C1", "C2", "C3"}
     assert http.map_calls == 1
+
+
+def test_cninfo_restarts_the_whole_pass_when_page_total_changes():
+    class ChangingTotalHttp:
+        def __init__(self):
+            self.calls = 0
+
+        def post(self, url, data, timeout):
+            self.calls += 1
+            page = int(data["pageNum"])
+            if self.calls == 2:
+                total, ids = 4, ("T3",)
+            elif page == 1:
+                total, ids = 3, ("T1", "T2")
+            else:
+                total, ids = 3, ("T3",)
+            rows = [
+                {
+                    "announcementId": value,
+                    "announcementTitle": "年度报告",
+                    "announcementTime": int(
+                        datetime(2026, 7, 10, 10, tzinfo=timezone.utc).timestamp()
+                        * 1000
+                    ),
+                    "secCode": "000001",
+                    "secName": "平安银行",
+                    "adjunctUrl": f"finalpage/{value}.PDF",
+                }
+                for value in ids
+            ]
+            return Response({"totalAnnouncement": total, "announcements": rows})
+
+    http = ChangingTotalHttp()
+    client = CninfoResearchClient(
+        http, page_size=2, pacer=lambda: None, max_retries=1
+    )
+
+    rows = client.fetch_announcements(date(2026, 7, 10), date(2026, 7, 10))
+
+    assert {row["announcement_id"] for row in rows} == {"T1", "T2", "T3"}
+    assert http.calls == 4
