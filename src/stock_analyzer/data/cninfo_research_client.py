@@ -43,6 +43,7 @@ class CninfoResearchClient:
         *,
         base_url: str = "https://www.cninfo.com.cn",
         page_size: int = 30,
+        max_pages: int = 100,
         timeout_seconds: float = 20.0,
         max_retries: int = 2,
         pacer: Callable[[], None] | None = None,
@@ -50,6 +51,7 @@ class CninfoResearchClient:
         self.http_client = http_client
         self.base_url = base_url.rstrip("/")
         self.page_size = page_size
+        self.max_pages = max_pages
         self.timeout_seconds = timeout_seconds
         self.max_retries = max_retries
         self.pacer = pacer or CninfoRequestPacer()
@@ -74,12 +76,51 @@ class CninfoResearchClient:
             records.values(),
             key=lambda row: (row["announcement_time"], row["announcement_id"]),
         )
+
     def _query_day(self, value: date) -> list[dict[str, Any]]:
+        first_page = self._query_page(value, 1, plate="")
+        if math.ceil(first_page[1] / self.page_size) > self.max_pages:
+            rows: list[dict[str, Any]] = []
+            split_total = 0
+            for plate in ("sz", "sh", "bj"):
+                plate_rows, plate_total = self._query_stable_scope(value, plate=plate)
+                rows.extend(plate_rows)
+                split_total += plate_total
+            announcement_ids = {
+                str(row.get("announcementId", "")).strip() for row in rows
+            }
+            if (
+                not all(announcement_ids)
+                or split_total != first_page[1]
+                or len(announcement_ids) != first_page[1]
+            ):
+                raise ResearchSourceError(
+                    "CNINFO market-plate totals do not match the global total",
+                    category="incomplete",
+                    endpoint="new/hisAnnouncement/query",
+                )
+            return rows
+        rows, _ = self._query_stable_scope(
+            value, plate="", first_page=first_page
+        )
+        return rows
+
+    def _query_stable_scope(
+        self,
+        value: date,
+        *,
+        plate: str,
+        first_page: tuple[list[dict[str, Any]], int] | None = None,
+    ) -> tuple[list[dict[str, Any]], int]:
         rows: list[dict[str, Any]] = []
         declared_total: int | None = None
         unique_total = 0
-        for _ in range(self.max_retries + 1):
-            pass_rows, pass_total = self._query_pages_once(value)
+        for attempt in range(self.max_retries + 1):
+            pass_rows, pass_total = self._query_pages_once(
+                value,
+                plate=plate,
+                first_page=first_page if attempt == 0 else None,
+            )
             if declared_total is None:
                 declared_total = pass_total
             elif pass_total != declared_total:
@@ -94,7 +135,7 @@ class CninfoResearchClient:
             ]
             unique_total = len(set(announcement_ids))
             if all(announcement_ids) and unique_total == declared_total:
-                return rows
+                return rows, declared_total
             if unique_total > declared_total:
                 raise ResearchSourceError(
                     "CNINFO returned more unique announcement IDs than declared",
@@ -102,18 +143,31 @@ class CninfoResearchClient:
                     endpoint="new/hisAnnouncement/query",
                 )
         raise ResearchSourceError(
-            f"CNINFO {value.isoformat()} returned {unique_total} unique rows "
+            f"CNINFO {value.isoformat()} plate={plate or 'all'} returned "
+            f"{unique_total} unique rows "
             f"but declared {declared_total}",
             category="incomplete",
             endpoint="new/hisAnnouncement/query",
         )
 
-    def _query_pages_once(self, value: date) -> tuple[list[dict[str, Any]], int]:
-        first, total = self._query_page(value, 1)
+    def _query_pages_once(
+        self,
+        value: date,
+        *,
+        plate: str,
+        first_page: tuple[list[dict[str, Any]], int] | None = None,
+    ) -> tuple[list[dict[str, Any]], int]:
+        first, total = first_page or self._query_page(value, 1, plate=plate)
         rows = list(first)
         pages = math.ceil(total / self.page_size)
+        if pages > self.max_pages:
+            raise ResearchSourceError(
+                f"CNINFO plate={plate or 'all'} exceeds the pagination limit",
+                category="incomplete",
+                endpoint="new/hisAnnouncement/query",
+            )
         for page in range(2, pages + 1):
-            page_rows, page_total = self._query_page(value, page)
+            page_rows, page_total = self._query_page(value, page, plate=plate)
             if page_total != total:
                 raise ResearchSourceError(
                     "CNINFO pagination total changed during acquisition",
@@ -123,14 +177,16 @@ class CninfoResearchClient:
             rows.extend(page_rows)
         return rows, total
 
-    def _query_page(self, value: date, page: int) -> tuple[list[dict[str, Any]], int]:
+    def _query_page(
+        self, value: date, page: int, *, plate: str
+    ) -> tuple[list[dict[str, Any]], int]:
         payload = self._post(
             {
                 "pageNum": str(page),
                 "pageSize": str(self.page_size),
                 "column": "szse",
                 "tabName": "fulltext",
-                "plate": "",
+                "plate": plate,
                 "stock": "",
                 "searchkey": "",
                 "secid": "",

@@ -157,3 +157,50 @@ def test_cninfo_repeats_unstable_pagination_until_declared_unique_total_is_met()
     assert len(rows) == 3
     assert {row["announcement_id"] for row in rows} == {"U1", "U2", "U3"}
     assert http.calls == 4
+
+
+def test_cninfo_splits_dense_days_by_official_market_plate():
+    class DenseDayHttp:
+        def __init__(self):
+            self.plates = []
+
+        def post(self, url, data, timeout):
+            plate = data["plate"]
+            self.plates.append(plate)
+            if plate == "":
+                total, ids = 3, ("G1", "G2")
+            elif plate == "sz":
+                total, ids = 1, ("SZ1",)
+            elif plate == "sh":
+                total, ids = 1, ("SH1",)
+            else:
+                total, ids = 1, ("BJ1",)
+            rows = [
+                {
+                    "announcementId": value,
+                    "announcementTitle": "年度报告",
+                    "announcementTime": int(
+                        datetime(2026, 7, 10, 10, tzinfo=timezone.utc).timestamp()
+                        * 1000
+                    ),
+                    "secCode": "000001",
+                    "secName": "上市公司",
+                    "adjunctUrl": f"finalpage/{value}.PDF",
+                }
+                for value in ids
+            ]
+            return Response({"totalAnnouncement": total, "announcements": rows})
+
+    http = DenseDayHttp()
+    client = CninfoResearchClient(
+        http,
+        page_size=2,
+        max_pages=1,
+        pacer=lambda: None,
+        max_retries=0,
+    )
+
+    rows = client.fetch_announcements(date(2026, 7, 10), date(2026, 7, 10))
+
+    assert {row["announcement_id"] for row in rows} == {"SZ1", "SH1", "BJ1"}
+    assert http.plates == ["", "sz", "sh", "bj"]
