@@ -312,3 +312,62 @@ def test_cninfo_restarts_the_whole_pass_when_page_total_changes():
 
     assert {row["announcement_id"] for row in rows} == {"T1", "T2", "T3"}
     assert http.calls == 4
+
+
+def test_cninfo_descends_to_stock_batches_when_global_and_subboard_totals_drift():
+    class DriftingHierarchyHttp:
+        def get(self, url, timeout):
+            return Response(
+                {
+                    "stockList": [
+                        {
+                            "code": f"30000{value}",
+                            "orgId": f"org{value}",
+                            "category": "A股",
+                        }
+                        for value in range(1, 4)
+                    ]
+                }
+            )
+
+        def post(self, url, data, timeout):
+            page = int(data["pageNum"])
+            plate = data["plate"]
+            stock = data["stock"]
+            if plate == "":
+                total, ids = (3, ("G1", "G2")) if page == 1 else (2, ())
+            elif plate != "szcy":
+                total, ids = 0, ()
+            elif stock and ";" in stock:
+                total, ids = 2, ("C1", "C2")
+            elif stock:
+                total, ids = 1, ("C3",)
+            else:
+                total, ids = (3, ("C1", "C2")) if page == 1 else (2, ())
+            rows = [
+                {
+                    "announcementId": value,
+                    "announcementTitle": "年度报告",
+                    "announcementTime": int(
+                        datetime(2026, 7, 10, 10, tzinfo=timezone.utc).timestamp()
+                        * 1000
+                    ),
+                    "secCode": "300001",
+                    "secName": "创业板公司",
+                    "adjunctUrl": f"finalpage/{value}.PDF",
+                }
+                for value in ids
+            ]
+            return Response({"totalAnnouncement": total, "announcements": rows})
+
+    client = CninfoResearchClient(
+        DriftingHierarchyHttp(),
+        page_size=2,
+        stock_batch_size=2,
+        pacer=lambda: None,
+        max_retries=0,
+    )
+
+    rows = client.fetch_announcements(date(2026, 7, 10), date(2026, 7, 10))
+
+    assert {row["announcement_id"] for row in rows} == {"C1", "C2", "C3"}

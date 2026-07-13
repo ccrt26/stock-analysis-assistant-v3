@@ -96,45 +96,53 @@ class CninfoResearchClient:
     def _query_day(self, value: date) -> list[dict[str, Any]]:
         first_page = self._query_page(value, 1, plate="", stock="")
         if math.ceil(first_page[1] / self.page_size) > self.max_pages:
-            rows: list[dict[str, Any]] = []
-            split_total = 0
-            for plate in _DENSE_DAY_PLATES:
-                first_plate_page = self._query_page(
-                    value, 1, plate=plate, stock=""
+            return self._query_split_day(value, expected_total=first_page[1])
+        try:
+            rows, _ = self._query_stable_scope(
+                value, plate="", stock="", first_page=first_page
+            )
+        except _PaginationTotalChanged:
+            return self._query_split_day(value, expected_total=first_page[1])
+        return rows
+
+    def _query_split_day(self, value: date, *, expected_total: int) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        split_total = 0
+        for plate in _DENSE_DAY_PLATES:
+            first_plate_page = self._query_page(value, 1, plate=plate, stock="")
+            if math.ceil(first_plate_page[1] / self.page_size) > self.max_pages:
+                plate_rows, plate_total = self._query_by_stock_batches(
+                    value, plate=plate, expected_total=first_plate_page[1]
                 )
-                if (
-                    math.ceil(first_plate_page[1] / self.page_size)
-                    > self.max_pages
-                ):
-                    plate_rows, plate_total = self._query_by_stock_batches(
-                        value, plate=plate, expected_total=first_plate_page[1]
-                    )
-                else:
+            else:
+                try:
                     plate_rows, plate_total = self._query_stable_scope(
                         value,
                         plate=plate,
                         stock="",
                         first_page=first_plate_page,
                     )
-                rows.extend(plate_rows)
-                split_total += plate_total
-            announcement_ids = {
-                str(row.get("announcementId", "")).strip() for row in rows
-            }
-            if (
-                not all(announcement_ids)
-                or split_total != first_page[1]
-                or len(announcement_ids) != first_page[1]
-            ):
-                raise ResearchSourceError(
-                    "CNINFO market-plate totals do not match the global total",
-                    category="incomplete",
-                    endpoint="new/hisAnnouncement/query",
-                )
-            return rows
-        rows, _ = self._query_stable_scope(
-            value, plate="", stock="", first_page=first_page
-        )
+                except _PaginationTotalChanged:
+                    plate_rows, plate_total = self._query_by_stock_batches(
+                        value, plate=plate, expected_total=first_plate_page[1]
+                    )
+            rows.extend(plate_rows)
+            split_total += plate_total
+        announcement_ids = {
+            str(row.get("announcementId", "")).strip() for row in rows
+        }
+        if (
+            not all(announcement_ids)
+            or split_total != expected_total
+            or len(announcement_ids) != expected_total
+        ):
+            raise ResearchSourceError(
+                f"CNINFO {value.isoformat()} market plates returned "
+                f"{len(announcement_ids)} unique rows and declared {split_total}, "
+                f"but the global total was {expected_total}",
+                category="incomplete",
+                endpoint="new/hisAnnouncement/query",
+            )
         return rows
 
     def _query_by_stock_batches(
@@ -149,12 +157,21 @@ class CninfoResearchClient:
         for offset in range(0, len(stocks), self.stock_batch_size):
             stock = ";".join(stocks[offset : offset + self.stock_batch_size])
             first_page = self._query_page(value, 1, plate=plate, stock=stock)
-            batch_rows, _ = self._query_stable_scope(
-                value,
-                plate=plate,
-                stock=stock,
-                first_page=first_page,
-            )
+            try:
+                batch_rows, _ = self._query_stable_scope(
+                    value,
+                    plate=plate,
+                    stock=stock,
+                    first_page=first_page,
+                )
+            except _PaginationTotalChanged as exc:
+                raise ResearchSourceError(
+                    f"CNINFO {value.isoformat()} plate={plate} stock batch "
+                    f"changed total from {exc.expected} to {exc.actual} "
+                    f"at page {exc.page}",
+                    category="incomplete",
+                    endpoint="new/hisAnnouncement/query",
+                ) from exc
             rows.extend(batch_rows)
         announcement_ids = {
             str(row.get("announcementId", "")).strip() for row in rows
@@ -190,13 +207,7 @@ class CninfoResearchClient:
             except _PaginationTotalChanged as exc:
                 if attempt < self.max_retries:
                     continue
-                raise ResearchSourceError(
-                    f"CNINFO {value.isoformat()} plate={plate or 'all'} "
-                    f"changed total from {exc.expected} to {exc.actual} "
-                    f"at page {exc.page}",
-                    category="incomplete",
-                    endpoint="new/hisAnnouncement/query",
-                ) from exc
+                raise
             if declared_total is None:
                 declared_total = pass_total
             elif pass_total != declared_total:
