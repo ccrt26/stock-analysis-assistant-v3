@@ -10,6 +10,7 @@ import pandas as pd
 from stock_analyzer.data.research_backfill import BackfillSummary
 from stock_analyzer.data.research_contracts import FactBatch, ResearchDatasetId
 from stock_analyzer.data.tushare_research_client import TushareResearchClient
+from stock_analyzer.storage.research_schema import connect_research_warehouse
 from stock_analyzer.storage.research_warehouse import ResearchWarehouse
 
 
@@ -118,13 +119,17 @@ class EventBackfillService:
             value for value in set(trading_dates) if value >= suspension_start
         ):
             partition = trading_date.isoformat()
-            if resume and self._complete(ResearchDatasetId.SUSPENSION, partition):
+            if resume and (
+                self._complete(ResearchDatasetId.SUSPENSION, partition)
+                or self._suspension_checked(partition)
+            ):
                 summary.skipped += 1
                 continue
             frame = self.tushare.call(
                 "suspend_d", trade_date=_yyyymmdd(trading_date)
             )
             if frame.empty:
+                self._mark_suspension_checked(partition, "empty")
                 continue
             rows = []
             for raw in frame.to_dict(orient="records"):
@@ -140,6 +145,7 @@ class EventBackfillService:
                 through,
                 summary,
             )
+            self._mark_suspension_checked(partition, f"rows:{len(rows)}")
         return summary
 
     def _commit_grouped(
@@ -192,6 +198,30 @@ class EventBackfillService:
         return not frame.empty and bool(
             (frame["partition_value"].astype(str) == partition).any()
         )
+
+    def _suspension_checked(self, partition: str) -> bool:
+        with connect_research_warehouse(
+            self.warehouse.duckdb_path, read_only=True
+        ) as connection:
+            row = connection.execute(
+                """
+                select 1 from research_watermarks
+                where dataset_id = 'suspension_check' and scope_key = ?
+                """,
+                [partition],
+            ).fetchone()
+        return row is not None
+
+    def _mark_suspension_checked(self, partition: str, value: str) -> None:
+        with connect_research_warehouse(self.warehouse.duckdb_path) as connection:
+            connection.execute(
+                """
+                insert or replace into research_watermarks
+                (dataset_id, scope_key, watermark_value, updated_at, run_id)
+                values ('suspension_check', ?, ?, now(), ?)
+                """,
+                [partition, value, f"events:suspension-check:{partition}"],
+            )
 
 
 def _holder_row(raw: dict[str, Any]) -> dict[str, Any]:

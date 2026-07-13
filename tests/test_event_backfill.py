@@ -98,3 +98,27 @@ def test_event_backfill_limits_daily_suspension_history_to_one_year(tmp_path):
     )
 
     assert pro.suspension_calls == ["20260710"]
+
+
+def test_empty_suspension_day_is_checked_once_on_resume(tmp_path):
+    pro = ActionPro()
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    service = EventBackfillService(
+        TushareResearchClient(pro, pacer=lambda method: None),
+        type(
+            "EmptyAnnouncementClient",
+            (),
+            {"fetch_announcements": lambda self, start, through: []},
+        )(),
+        warehouse,
+    )
+
+    for _ in range(2):
+        service.backfill(
+            start=date(2026, 7, 10),
+            through=date(2026, 7, 10),
+            trading_dates=(date(2026, 7, 10),),
+            resume=True,
+        )
+
+    assert pro.suspension_calls == ["20260710"]

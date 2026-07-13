@@ -81,6 +81,9 @@ class TradingStructureBackfillService:
             frame = self.client.call(
                 "margin_detail", trade_date=_yyyymmdd(trading_date)
             )
+            if frame.empty:
+                summary.waiting_upstream += 1
+                continue
             required = (
                 "trade_date",
                 "ts_code",
@@ -94,9 +97,6 @@ class TradingStructureBackfillService:
                 "rzrqye",
             )
             _require(frame, required, "margin_detail")
-            if frame.empty:
-                summary.waiting_upstream += 1
-                continue
             rows = []
             for raw in frame.to_dict(orient="records"):
                 row = _clean(raw)

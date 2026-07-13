@@ -85,3 +85,30 @@ def test_margin_history_is_capped_at_latest_250_trading_days(tmp_path):
 
     assert len(pro.margin_calls) == 250
     assert pro.margin_calls[0] == dates[-250].strftime("%Y%m%d")
+
+
+def test_margin_empty_dataframe_without_columns_is_waiting_not_schema_failure(
+    tmp_path,
+):
+    class EmptyMarginPro:
+        def margin_detail(self, **kwargs):
+            return pd.DataFrame()
+
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    service = TradingStructureBackfillService(
+        TushareResearchClient(EmptyMarginPro(), pacer=lambda method: None),
+        warehouse,
+        minute_fetcher=lambda **kwargs: pd.DataFrame(),
+        minute_pacer=lambda: None,
+    )
+
+    summary = service.backfill(
+        trading_dates=(date(2026, 7, 13),),
+        through=date(2026, 7, 13),
+        candidate_codes=(),
+        index_codes=(),
+        resume=True,
+    )
+
+    assert summary.waiting_upstream == 1
+    assert summary.failed == 0
