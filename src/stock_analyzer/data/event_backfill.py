@@ -34,16 +34,25 @@ class EventBackfillService:
     ) -> BackfillSummary:
         summary = BackfillSummary(scope="events", start=start, through=through)
         announcement_start = max(start, through - timedelta(days=365))
-        announcements = self.cninfo.fetch_announcements(announcement_start, through)
-        self._commit_grouped(
-            ResearchDatasetId.ANNOUNCEMENT,
-            announcements,
-            lambda row: row["announcement_time"].strftime("%Y-%m"),
-            "cninfo.new/hisAnnouncement/query",
-            through,
-            resume,
-            summary,
-        )
+        current_month = through.strftime("%Y-%m")
+        for month_start, month_end in _month_ranges(announcement_start, through):
+            partition = month_start.strftime("%Y-%m")
+            if (
+                resume
+                and partition < current_month
+                and self._complete(ResearchDatasetId.ANNOUNCEMENT, partition)
+            ):
+                summary.skipped += 1
+                continue
+            announcements = self.cninfo.fetch_announcements(month_start, month_end)
+            self._commit(
+                ResearchDatasetId.ANNOUNCEMENT,
+                partition,
+                "cninfo.new/hisAnnouncement/query",
+                announcements,
+                through,
+                summary,
+            )
 
         holder = self.tushare.call_paged(
             "stk_holdertrade", start_date=_yyyymmdd(start), end_date=_yyyymmdd(through)
@@ -221,6 +230,20 @@ def _quarter_snapshots(start: date, through: date) -> list[date]:
             if start <= value <= through:
                 candidates.add(value)
     return sorted(candidates)
+
+
+def _month_ranges(start: date, through: date) -> list[tuple[date, date]]:
+    ranges: list[tuple[date, date]] = []
+    current = start
+    while current <= through:
+        if current.month == 12:
+            following = date(current.year + 1, 1, 1)
+        else:
+            following = date(current.year, current.month + 1, 1)
+        end = min(through, following - timedelta(days=1))
+        ranges.append((current, end))
+        current = following
+    return ranges
 
 
 def _clean(raw: dict[str, Any]) -> dict[str, Any]:

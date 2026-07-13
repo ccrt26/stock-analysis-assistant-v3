@@ -13,6 +13,29 @@ from stock_analyzer.data.tushare_research_client import ResearchSourceError
 _TITLE_TAG = re.compile(r"<[^>]+>")
 
 
+class CninfoRequestPacer:
+    def __init__(
+        self,
+        *,
+        interval_seconds: float = 0.25,
+        clock: Callable[[], float] = system_time.monotonic,
+        sleeper: Callable[[float], None] = system_time.sleep,
+    ) -> None:
+        self.interval_seconds = interval_seconds
+        self.clock = clock
+        self.sleeper = sleeper
+        self.last_call: float | None = None
+
+    def __call__(self) -> None:
+        now = self.clock()
+        if self.last_call is not None:
+            delay = self.last_call + self.interval_seconds - now
+            if delay > 0:
+                self.sleeper(delay)
+                now = self.clock()
+        self.last_call = now
+
+
 class CninfoResearchClient:
     def __init__(
         self,
@@ -29,7 +52,7 @@ class CninfoResearchClient:
         self.page_size = page_size
         self.timeout_seconds = timeout_seconds
         self.max_retries = max_retries
-        self.pacer = pacer or (lambda: None)
+        self.pacer = pacer or CninfoRequestPacer()
 
     def fetch_announcements(self, start: date, through: date) -> list[dict[str, Any]]:
         records: dict[str, dict[str, Any]] = {}
@@ -51,7 +74,6 @@ class CninfoResearchClient:
             records.values(),
             key=lambda row: (row["announcement_time"], row["announcement_id"]),
         )
-
     def _query_day(self, value: date) -> list[dict[str, Any]]:
         first, total = self._query_page(value, 1)
         rows = list(first)
@@ -252,4 +274,4 @@ def _ts_code(code: str) -> str:
     return f"{code}.{suffix}"
 
 
-__all__ = ["CninfoResearchClient"]
+__all__ = ["CninfoRequestPacer", "CninfoResearchClient"]
