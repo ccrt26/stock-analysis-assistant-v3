@@ -4,6 +4,7 @@ import pandas as pd
 import pytest
 
 from stock_analyzer.data.research_contracts import FactBatch, ResearchDatasetId
+from stock_analyzer.storage import research_warehouse as research_warehouse_module
 from stock_analyzer.storage.research_warehouse import ResearchWarehouse
 
 
@@ -145,3 +146,57 @@ def test_daily_fact_date_must_match_its_partition(tmp_path):
 
     with pytest.raises(ValueError, match="partition does not match"):
         warehouse.commit_batch(wrong_partition)
+
+
+def test_global_fact_keys_are_inserted_without_row_by_row_executemany(
+    tmp_path, monkeypatch
+):
+    warehouse = ResearchWarehouse(tmp_path)
+    real_connect = research_warehouse_module.connect_research_warehouse
+
+    class NoFactKeyExecutemany:
+        def __init__(self, connection):
+            self.connection = connection
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return self.connection.__exit__(*args)
+
+        def __getattr__(self, name):
+            return getattr(self.connection, name)
+
+        def executemany(self, sql, parameters):
+            if "research_fact_keys" in sql:
+                raise AssertionError("fact keys must use a bulk insert")
+            return self.connection.executemany(sql, parameters)
+
+    def connect_without_key_executemany(*args, **kwargs):
+        return NoFactKeyExecutemany(real_connect(*args, **kwargs))
+
+    monkeypatch.setattr(
+        research_warehouse_module,
+        "connect_research_warehouse",
+        connect_without_key_executemany,
+    )
+    batch = FactBatch(
+        dataset_id=ResearchDatasetId.COMPANY_PROFILE,
+        partition_value="catalog-v1",
+        source_name="tushare",
+        source_endpoint="stock_company",
+        ingestion_run_id="profile-1",
+        ingested_at=datetime(2026, 7, 13, 10, tzinfo=timezone.utc),
+        default_available_at=datetime(2026, 7, 13, 10, tzinfo=timezone.utc),
+        records=[
+            {
+                "ts_code": "000001.SZ",
+                "valid_from": date(1991, 4, 3),
+                "company_name": "平安银行",
+            }
+        ],
+    )
+
+    warehouse.commit_batch(batch)
+
+    assert len(warehouse.read_current(ResearchDatasetId.COMPANY_PROFILE)) == 1

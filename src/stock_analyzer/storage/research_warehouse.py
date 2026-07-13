@@ -437,16 +437,17 @@ class ResearchWarehouse:
                     ],
                 )
                 if batch.dataset_id in _GLOBAL_KEY_INDEX_DATASETS:
-                    connection.executemany(
+                    connection.execute(
                         """
-                        insert into research_fact_keys
+                        insert or ignore into research_fact_keys
                         (dataset_id, business_key_hash, partition_value)
-                        values (?, ?, ?)
-                        on conflict(dataset_id, business_key_hash) do nothing
+                        select ?, cast(business_key_hash as varchar), ?
+                        from read_parquet(?, hive_partitioning=false)
                         """,
                         [
-                            (batch.dataset_id.value, str(key_hash), batch.partition_value)
-                            for key_hash in frame["business_key_hash"].astype(str).unique()
+                            batch.dataset_id.value,
+                            batch.partition_value,
+                            str(final_path),
                         ],
                     )
             except Exception:
