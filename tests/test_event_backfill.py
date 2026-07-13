@@ -1,10 +1,10 @@
-from datetime import date
+from datetime import date, datetime, timezone
 
 import pandas as pd
 import stock_analyzer.data.event_backfill as event_backfill_module
 
 from stock_analyzer.data.event_backfill import EventBackfillService
-from stock_analyzer.data.research_contracts import ResearchDatasetId
+from stock_analyzer.data.research_contracts import FactBatch, ResearchDatasetId
 from stock_analyzer.data.tushare_research_client import TushareResearchClient
 from stock_analyzer.storage.research_warehouse import ResearchWarehouse
 
@@ -24,6 +24,16 @@ class ActionPro:
         }])
 
     def share_float(self, **kwargs):
+        if kwargs.get("ann_date"):
+            return pd.DataFrame([{
+                "ts_code": "000001.SZ",
+                "ann_date": kwargs["ann_date"],
+                "float_date": "20280620",
+                "float_share": 100.0,
+                "float_ratio": 1.0,
+                "holder_name": "股东A",
+                "share_type": "首发",
+            }])
         return pd.DataFrame([{
             "ts_code": "000001.SZ", "ann_date": kwargs.get("start_date", "20260701"),
             "float_date": kwargs.get("end_date", "20260710"),
@@ -296,6 +306,116 @@ def test_share_float_recursively_splits_a_date_range_that_hits_page_capacity(
         ("20260701", "20260701"),
         ("20260702", "20260702"),
     ]
+
+
+def test_daily_share_float_uses_announcement_date_and_keeps_future_schedule(
+    tmp_path,
+):
+    pro = ActionPro()
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    service = EventBackfillService(
+        TushareResearchClient(pro, pacer=lambda method: None),
+        AnnouncementClient(),
+        warehouse,
+    )
+
+    service.backfill(
+        start=date(2026, 7, 10),
+        through=date(2026, 7, 10),
+        trading_dates=(),
+        resume=True,
+    )
+
+    future = warehouse.read_current(
+        ResearchDatasetId.SHARE_FLOAT, partition_value="2028-06"
+    )
+    assert len(future) == 1
+    assert future.iloc[0]["float_date"] == date(2028, 6, 20)
+
+
+def test_long_backfill_limits_share_float_history_and_fetches_known_future(tmp_path):
+    class WindowPro(ActionPro):
+        def __init__(self):
+            super().__init__()
+            self.float_ranges = []
+
+        def stk_holdertrade(self, **kwargs):
+            return pd.DataFrame()
+
+        def share_float(self, **kwargs):
+            self.float_ranges.append((kwargs["start_date"], kwargs["end_date"]))
+            return pd.DataFrame()
+
+        def repurchase(self, **kwargs):
+            return pd.DataFrame()
+
+        def pledge_stat(self, **kwargs):
+            return pd.DataFrame()
+
+    pro = WindowPro()
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    warehouse.commit_batch(
+        FactBatch(
+            dataset_id=ResearchDatasetId.SHARE_FLOAT,
+            partition_value="2024-01",
+            source_name="tushare",
+            source_endpoint="share_float",
+            ingestion_run_id="old-share-float",
+            ingested_at=datetime(2024, 1, 31, tzinfo=timezone.utc),
+            default_available_at=datetime(2024, 1, 31, tzinfo=timezone.utc),
+            records=[
+                {
+                    "provider_record_id": "old-lot",
+                    "ts_code": "000001.SZ",
+                    "float_date": date(2024, 1, 31),
+                }
+            ],
+        )
+    )
+    service = EventBackfillService(
+        TushareResearchClient(pro, pacer=lambda method: None),
+        type(
+            "EmptyAnnouncementClient",
+            (),
+            {"fetch_announcements": lambda self, start, through: []},
+        )(),
+        warehouse,
+    )
+
+    service.backfill(
+        start=date(2021, 7, 14),
+        through=date(2026, 7, 13),
+        trading_dates=(),
+        resume=True,
+    )
+
+    assert pro.float_ranges[0][0] == "20250713"
+    assert pro.float_ranges[-1][1] == "20290715"
+    assert all(start >= "20250713" for start, _ in pro.float_ranges)
+    assert warehouse.read_current(
+        ResearchDatasetId.SHARE_FLOAT, partition_value="2024-01"
+    ).empty
+
+
+def test_future_share_float_requires_an_announcement_known_by_analysis_date():
+    known_through = date(2026, 7, 13)
+
+    assert event_backfill_module._share_float_known_as_of(
+        {"ann_date": "20260710", "float_date": "20280620"},
+        known_through,
+    )
+    assert not event_backfill_module._share_float_known_as_of(
+        {"ann_date": "20260714", "float_date": "20280620"},
+        known_through,
+    )
+    assert not event_backfill_module._share_float_known_as_of(
+        {"ann_date": None, "float_date": "20280620"},
+        known_through,
+    )
+    assert event_backfill_module._share_float_known_as_of(
+        {"ann_date": None, "float_date": "20260710"},
+        known_through,
+    )
 
 
 def test_resume_skips_checked_historical_event_ranges_before_fetch(tmp_path):

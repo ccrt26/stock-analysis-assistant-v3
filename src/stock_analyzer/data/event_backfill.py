@@ -20,6 +20,8 @@ from stock_analyzer.storage.research_warehouse import ResearchWarehouse
 
 _SHARE_FLOAT_PAGE_SIZE = 5000
 _SHARE_FLOAT_MAX_PAGES = 20
+_SHARE_FLOAT_HISTORY_DAYS = 365
+_SHARE_FLOAT_FUTURE_DAYS = 3 * 366
 
 
 class EventBackfillService:
@@ -109,33 +111,13 @@ class EventBackfillService:
                 f"rows:{len(holder_rows)}",
             )
 
-        for month_start, month_end in _month_ranges(start, through):
-            partition = month_start.strftime("%Y-%m")
-            if self._should_skip_historical(
-                ResearchDatasetId.SHARE_FLOAT,
-                partition,
-                current_month=current_month,
-                resume=resume,
-            ):
-                summary.skipped += 1
-                continue
-            floats = self._fetch_share_float_range(month_start, month_end)
-            float_rows = [
-                _float_row(row) for row in floats.to_dict(orient="records")
-            ]
-            self._commit(
-                ResearchDatasetId.SHARE_FLOAT,
-                partition,
-                "share_float",
-                float_rows,
-                through,
-                summary,
-            )
-            self._mark_partition_checked(
-                ResearchDatasetId.SHARE_FLOAT,
-                partition,
-                f"rows:{len(float_rows)}",
-            )
+        self._backfill_share_float(
+            start=start,
+            through=through,
+            current_month=current_month,
+            resume=resume,
+            summary=summary,
+        )
 
         for month_start, month_end in _month_ranges(start, through):
             partition = month_start.strftime("%Y-%m")
@@ -286,6 +268,99 @@ class EventBackfillService:
             )
         return frame.drop_duplicates(ignore_index=True)
 
+    def _backfill_share_float(
+        self,
+        *,
+        start: date,
+        through: date,
+        current_month: str,
+        resume: bool,
+        summary: BackfillSummary,
+    ) -> None:
+        if start == through:
+            self._backfill_share_float_announcements(through, summary)
+            return
+
+        full_window = start < through - timedelta(days=_SHARE_FLOAT_HISTORY_DAYS)
+        window_start = (
+            through - timedelta(days=_SHARE_FLOAT_HISTORY_DAYS)
+            if full_window
+            else start
+        )
+        window_end = (
+            through + timedelta(days=_SHARE_FLOAT_FUTURE_DAYS)
+            if full_window
+            else through
+        )
+        for month_start, month_end in _month_ranges(window_start, window_end):
+            partition = month_start.strftime("%Y-%m")
+            if resume and partition != current_month and (
+                self._complete(ResearchDatasetId.SHARE_FLOAT, partition)
+                or self._partition_checked(ResearchDatasetId.SHARE_FLOAT, partition)
+            ):
+                summary.skipped += 1
+                continue
+            floats = self._fetch_share_float_range(month_start, month_end)
+            float_rows = [
+                _float_row(row)
+                for row in floats.to_dict(orient="records")
+                if _share_float_known_as_of(row, through)
+            ]
+            self._commit(
+                ResearchDatasetId.SHARE_FLOAT,
+                partition,
+                "share_float",
+                float_rows,
+                through,
+                summary,
+            )
+            self._mark_partition_checked(
+                ResearchDatasetId.SHARE_FLOAT,
+                partition,
+                f"rows:{len(float_rows)}",
+            )
+        if full_window:
+            removed = self.warehouse.prune_partitions_before(
+                ResearchDatasetId.SHARE_FLOAT,
+                window_start.strftime("%Y-%m"),
+            )
+            self._clear_partition_checks(ResearchDatasetId.SHARE_FLOAT, removed)
+
+    def _backfill_share_float_announcements(
+        self,
+        announcement_date: date,
+        summary: BackfillSummary,
+    ) -> None:
+        frame = self.tushare.call_paged(
+            "share_float",
+            limit=_SHARE_FLOAT_PAGE_SIZE,
+            max_pages=_SHARE_FLOAT_MAX_PAGES,
+            ann_date=_yyyymmdd(announcement_date),
+        ).drop_duplicates(ignore_index=True)
+        self._require_dates_in_range(
+            frame,
+            "ann_date",
+            announcement_date,
+            announcement_date,
+            "share_float",
+        )
+        grouped: dict[str, list[dict[str, Any]]] = {}
+        for raw in frame.to_dict(orient="records"):
+            if not _share_float_known_as_of(raw, announcement_date):
+                continue
+            row = _float_row(raw)
+            partition = row["float_date"].strftime("%Y-%m")
+            grouped.setdefault(partition, []).append(row)
+        for partition, rows in sorted(grouped.items()):
+            self._commit(
+                ResearchDatasetId.SHARE_FLOAT,
+                partition,
+                "share_float:ann_date",
+                rows,
+                announcement_date,
+                summary,
+            )
+
     def _commit(
         self,
         dataset: ResearchDatasetId,
@@ -368,6 +443,23 @@ class EventBackfillService:
                     value,
                     f"events:{dataset.value}-check:{partition}",
                 ],
+            )
+
+    def _clear_partition_checks(
+        self,
+        dataset: ResearchDatasetId,
+        partitions: tuple[str, ...],
+    ) -> None:
+        if not partitions:
+            return
+        placeholders = ",".join("?" for _ in partitions)
+        with connect_research_warehouse(self.warehouse.duckdb_path) as connection:
+            connection.execute(
+                f"""
+                delete from research_watermarks
+                where dataset_id = ? and scope_key in ({placeholders})
+                """,
+                [f"event_partition_check:{dataset.value}", *partitions],
             )
 
     @staticmethod
@@ -512,6 +604,14 @@ def _optional_date(value: Any) -> date | None:
     if value is None or pd.isna(value) or not str(value).strip():
         return None
     return _date(value)
+
+
+def _share_float_known_as_of(raw: dict[str, Any], known_through: date) -> bool:
+    float_date = _date(raw["float_date"])
+    announcement_date = _optional_date(raw.get("ann_date"))
+    if announcement_date is not None:
+        return announcement_date <= known_through
+    return float_date <= known_through
 
 
 def _yyyymmdd(value: date) -> str:

@@ -34,6 +34,25 @@ def _batch(*, close: float = 10.2, records: list[dict] | None = None) -> FactBat
     )
 
 
+def _announcement_batch(
+    partition: str,
+    announcement_id: str,
+    *,
+    title: str = "公告",
+    run_id: str = "announcement-1",
+) -> FactBatch:
+    return FactBatch(
+        dataset_id=ResearchDatasetId.ANNOUNCEMENT,
+        partition_value=partition,
+        source_name="cninfo",
+        source_endpoint="announcement",
+        ingestion_run_id=run_id,
+        ingested_at=datetime(2026, 7, 13, 10, tzinfo=timezone.utc),
+        default_available_at=datetime(2026, 7, 13, 10, tzinfo=timezone.utc),
+        records=[{"announcement_id": announcement_id, "title": title}],
+    )
+
+
 def test_identical_retry_is_idempotent_and_keeps_one_business_fact(tmp_path):
     warehouse = ResearchWarehouse(tmp_path)
     first = warehouse.commit_batch(_batch())
@@ -136,6 +155,58 @@ def test_same_business_key_cannot_silently_move_to_another_partition(tmp_path):
     )
     with pytest.raises(ValueError, match="different partition"):
         warehouse.commit_batch(moved)
+
+
+def test_prune_partitions_before_removes_files_metadata_keys_and_revisions(tmp_path):
+    warehouse = ResearchWarehouse(tmp_path)
+    warehouse.commit_batch(_announcement_batch("2025-06", "A1"))
+    warehouse.commit_batch(
+        _announcement_batch(
+            "2025-06", "A1", title="更正公告", run_id="announcement-2"
+        )
+    )
+    warehouse.commit_batch(_announcement_batch("2025-07", "A2"))
+
+    removed = warehouse.prune_partitions_before(
+        ResearchDatasetId.ANNOUNCEMENT, "2025-07"
+    )
+
+    assert removed == ("2025-06",)
+    assert not (
+        tmp_path / "facts" / "announcement" / "announcement_month=2025-06"
+    ).exists()
+    assert warehouse.partition_manifest(ResearchDatasetId.ANNOUNCEMENT)[
+        "partition_value"
+    ].tolist() == ["2025-07"]
+    assert warehouse.revision_count(ResearchDatasetId.ANNOUNCEMENT) == 0
+    current = warehouse.read_current(ResearchDatasetId.ANNOUNCEMENT)
+    assert current["announcement_id"].tolist() == ["A2"]
+
+
+def test_prune_partition_metadata_failure_restores_moved_files(
+    tmp_path, monkeypatch
+):
+    warehouse = ResearchWarehouse(tmp_path)
+    warehouse.commit_batch(_announcement_batch("2025-06", "A1"))
+
+    def fail_metadata(*args, **kwargs):
+        raise RuntimeError("simulated prune metadata failure")
+
+    monkeypatch.setattr(warehouse, "_delete_partition_metadata", fail_metadata)
+
+    with pytest.raises(RuntimeError, match="simulated prune metadata failure"):
+        warehouse.prune_partitions_before(
+            ResearchDatasetId.ANNOUNCEMENT, "2025-07"
+        )
+
+    assert len(
+        warehouse.read_current(
+            ResearchDatasetId.ANNOUNCEMENT, partition_value="2025-06"
+        )
+    ) == 1
+    assert warehouse.partition_manifest(ResearchDatasetId.ANNOUNCEMENT)[
+        "partition_value"
+    ].tolist() == ["2025-06"]
 
 
 def test_daily_fact_date_must_match_its_partition(tmp_path):

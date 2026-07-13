@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import duckdb
 import pandas as pd
@@ -228,6 +229,87 @@ class ResearchWarehouse:
                 """,
                 [ResearchDatasetId(dataset_id).value],
             ).fetchdf()
+
+    def prune_partitions_before(
+        self,
+        dataset_id: ResearchDatasetId | str,
+        keep_from_partition: str,
+    ) -> tuple[str, ...]:
+        dataset = ResearchDatasetId(dataset_id)
+        manifest = self.partition_manifest(dataset)
+        if manifest.empty:
+            return ()
+        selected = manifest.loc[
+            manifest["partition_value"].astype(str) < str(keep_from_partition),
+            ["partition_value", "relative_path"],
+        ].sort_values("partition_value")
+        if selected.empty:
+            return ()
+
+        prune_root = self.staging_root / "prune" / uuid4().hex
+        moved: list[tuple[Path, Path]] = []
+        partitions = tuple(selected["partition_value"].astype(str).tolist())
+        try:
+            for row in selected.to_dict(orient="records"):
+                source_file = self.root / str(row["relative_path"])
+                if not source_file.is_file():
+                    raise FileNotFoundError(source_file)
+                source_dir = source_file.parent
+                staged_dir = prune_root / source_dir.relative_to(self.root)
+                staged_dir.parent.mkdir(parents=True, exist_ok=True)
+                source_dir.replace(staged_dir)
+                moved.append((source_dir, staged_dir))
+
+            with connect_research_warehouse(self.duckdb_path) as connection:
+                connection.begin()
+                try:
+                    self._delete_partition_metadata(
+                        connection, dataset, partitions
+                    )
+                except Exception:
+                    connection.rollback()
+                    raise
+                connection.commit()
+        except Exception:
+            for source_dir, staged_dir in reversed(moved):
+                if staged_dir.exists():
+                    source_dir.parent.mkdir(parents=True, exist_ok=True)
+                    staged_dir.replace(source_dir)
+            shutil.rmtree(prune_root, ignore_errors=True)
+            raise
+
+        shutil.rmtree(prune_root, ignore_errors=True)
+        return partitions
+
+    def _delete_partition_metadata(
+        self,
+        connection: duckdb.DuckDBPyConnection,
+        dataset: ResearchDatasetId,
+        partitions: tuple[str, ...],
+    ) -> None:
+        placeholders = ",".join("?" for _ in partitions)
+        parameters = [dataset.value, *partitions]
+        connection.execute(
+            f"""
+            delete from research_fact_revisions
+            where dataset_id = ? and partition_value in ({placeholders})
+            """,
+            parameters,
+        )
+        connection.execute(
+            f"""
+            delete from research_fact_keys
+            where dataset_id = ? and partition_value in ({placeholders})
+            """,
+            parameters,
+        )
+        connection.execute(
+            f"""
+            delete from research_fact_partitions
+            where dataset_id = ? and partition_value in ({placeholders})
+            """,
+            parameters,
+        )
 
     def _normalize_batch(self, batch: FactBatch) -> pd.DataFrame:
         contract = research_contract(batch.dataset_id)
