@@ -1,0 +1,89 @@
+from datetime import date
+
+import pandas as pd
+
+from stock_analyzer.data.classification_backfill import ClassificationBackfillService
+from stock_analyzer.data.research_contracts import ResearchDatasetId
+from stock_analyzer.data.tushare_research_client import TushareResearchClient
+from stock_analyzer.storage.research_warehouse import ResearchWarehouse
+
+
+class ClassificationPro:
+    def __init__(self):
+        self.calls = []
+
+    def index_classify(self, **kwargs):
+        self.calls.append(("index_classify", kwargs))
+        level = kwargs["level"]
+        code = {"L1": "801010.SI", "L2": "801016.SI", "L3": "850113.SI"}[level]
+        parent = {"L1": "0", "L2": "801010.SI", "L3": "801016.SI"}[level]
+        return pd.DataFrame([{
+            "index_code": code, "industry_name": level, "level": level,
+            "industry_code": code[:6], "is_pub": "1", "parent_code": parent,
+            "src": "SW2021",
+        }])
+
+    def index_basic(self, **kwargs):
+        self.calls.append(("index_basic", kwargs))
+        market = kwargs["market"]
+        if market == "SW":
+            return pd.DataFrame([
+                {"ts_code": "801010.SI", "name": "L1", "market": "SW", "publisher": "申万",
+                 "category": "行业指数", "base_date": "19991230", "base_point": 1000.0, "list_date": "20211213"},
+                {"ts_code": "801016.SI", "name": "L2", "market": "SW", "publisher": "申万",
+                 "category": "行业指数", "base_date": "19991230", "base_point": 1000.0, "list_date": "20211213"},
+                {"ts_code": "850113.SI", "name": "L3", "market": "SW", "publisher": "申万",
+                 "category": "行业指数", "base_date": "19991230", "base_point": 1000.0, "list_date": "20211213"},
+            ])
+        code = "000019.SH" if market == "SSE" else "399013.SZ"
+        return pd.DataFrame([{
+            "ts_code": code, "name": f"{market}主题", "market": market,
+            "publisher": market, "category": "主题指数", "base_date": "20200101",
+            "base_point": 1000.0, "list_date": "20200102",
+        }])
+
+    def index_member_all(self, **kwargs):
+        self.calls.append(("index_member_all", kwargs))
+        return pd.DataFrame([{
+            "l1_code": "801010.SI", "l1_name": "L1", "l2_code": "801016.SI",
+            "l2_name": "L2", "l3_code": "850113.SI", "l3_name": "L3",
+            "ts_code": "000001.SZ", "name": "平安银行", "in_date": "20220101",
+            "out_date": None, "is_new": "Y",
+        }])
+
+    def index_weight(self, **kwargs):
+        self.calls.append(("index_weight", kwargs))
+        return pd.DataFrame([{
+            "index_code": kwargs["index_code"], "con_code": "000001.SZ",
+            "trade_date": "20260710", "weight": 5.0,
+        }])
+
+    def index_daily(self, **kwargs):
+        self.calls.append(("index_daily", kwargs))
+        code = kwargs["ts_code"]
+        return pd.DataFrame([{
+            "ts_code": code, "trade_date": "20260710", "close": 1000.0,
+            "open": 990.0, "high": 1010.0, "low": 980.0, "pre_close": 985.0,
+            "change": 15.0, "pct_chg": 1.5, "vol": 10.0, "amount": 20.0,
+        }])
+
+
+def test_classification_backfill_builds_all_sw_levels_and_traceable_themes(tmp_path):
+    pro = ClassificationPro()
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    service = ClassificationBackfillService(
+        TushareResearchClient(pro, pacer=lambda method: None), warehouse
+    )
+
+    summary = service.backfill(
+        start=date(2026, 7, 10), through=date(2026, 7, 10), resume=True
+    )
+
+    members = warehouse.read_current(ResearchDatasetId.INDUSTRY_MEMBER)
+    themes = warehouse.read_current(ResearchDatasetId.THEME_CATALOG)
+    theme_members = warehouse.read_current(ResearchDatasetId.THEME_MEMBER)
+    assert set(members["level"]) == {"L1", "L2", "L3"}
+    assert set(themes["publisher_market"]) == {"SSE", "SZSE"}
+    assert set(theme_members["theme_code"]) == {"000019.SH", "399013.SZ"}
+    assert summary.failed == 0
+    assert all(method != "concept" for method, _ in pro.calls)

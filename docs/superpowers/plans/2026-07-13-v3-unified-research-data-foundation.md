@@ -8,6 +8,8 @@
 
 **技术栈：** Python 3.11、Pydantic、pandas、PyArrow、DuckDB、Tushare Pro、httpx、Typer、pytest、launchd。
 
+本计划记录执行方法，不单独作为当前运行状态证明；实际能力、真实回填和调度状态以 `docs/operations/production-capability-matrix.md` 的最新核验记录为准。
+
 ## 开始前的固定约束
 
 - 工作目录固定为 `/Users/ccrt/股票分析助手` 的本地 `main`。

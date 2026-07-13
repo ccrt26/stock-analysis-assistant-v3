@@ -158,7 +158,7 @@ class ResearchWarehouse:
             return pd.DataFrame()
         with duckdb.connect() as connection:
             return connection.execute(
-                "select * from read_parquet(?, union_by_name=true)",
+                "select * from read_parquet(?, union_by_name=true, hive_partitioning=false)",
                 [[str(path) for path in paths]],
             ).fetchdf()
 

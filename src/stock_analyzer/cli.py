@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 import json
 import os
 from pathlib import Path
@@ -63,7 +63,9 @@ from stock_analyzer.storage.supabase_client import create_supabase_client
 
 app = typer.Typer(no_args_is_help=True)
 ops_app = typer.Typer(no_args_is_help=True)
+data_app = typer.Typer(no_args_is_help=True)
 app.add_typer(ops_app, name="ops")
+app.add_typer(data_app, name="data")
 DEFAULT_REPORT_PASSWORD_ENV = "REPORT_" "PASSWORD"
 
 MISSING_SUPABASE_CONFIG_MESSAGE = (
@@ -71,6 +73,143 @@ MISSING_SUPABASE_CONFIG_MESSAGE = (
     "run-daily/render-report. Use --fixture-mode or set "
     "STOCK_ANALYZER_FIXTURE_MODE=1 only for local fixture data."
 )
+
+
+@data_app.command("inspect-legacy-market")
+def data_inspect_legacy_market(
+    source_root: Path = typer.Option(..., "--source-root"),
+    output: Optional[Path] = typer.Option(None, "--output"),
+) -> None:
+    from stock_analyzer.storage.research_migration import inspect_legacy_market
+
+    audit = inspect_legacy_market(source_root)
+    if output is not None:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(audit.model_dump_json(indent=2), encoding="utf-8")
+    typer.echo(
+        f"legacy market: physical={audit.physical_rows} "
+        f"unique={audit.unique_business_keys} duplicates={audit.duplicate_rows} "
+        f"versions={audit.version_count} conflicts={audit.conflicting_business_keys}"
+    )
+
+
+@data_app.command("migrate-legacy-market")
+def data_migrate_legacy_market(
+    source_root: Path = typer.Option(..., "--source-root"),
+    migration_id: str = typer.Option(..., "--migration-id"),
+) -> None:
+    from stock_analyzer.storage.research_migration import migrate_legacy_market
+    from stock_analyzer.storage.research_warehouse import ResearchWarehouse
+
+    config = AppConfig.load()
+    report = migrate_legacy_market(
+        source_root,
+        ResearchWarehouse(config.local_warehouse_dir),
+        migration_id=migration_id,
+    )
+    typer.echo(
+        f"migration {migration_id}: unique={report.migrated_business_keys} "
+        f"revisions={report.revision_rows} partitions={report.partition_count} "
+        f"already_completed={str(report.already_completed).lower()}"
+    )
+
+
+@data_app.command("backfill")
+def data_backfill(
+    through: str = typer.Option(..., "--through"),
+    start: Optional[str] = typer.Option(None, "--start"),
+    scope: str = typer.Option("all", "--scope"),
+    resume: bool = typer.Option(True, "--resume/--no-resume"),
+) -> None:
+    from stock_analyzer.ops.research_data_job import (
+        build_research_data_runtime,
+        run_research_backfill,
+    )
+
+    through_date = date.fromisoformat(through)
+    start_date = (
+        date.fromisoformat(start)
+        if start is not None
+        else date(through_date.year - 5, through_date.month, through_date.day)
+    )
+    runtime = build_research_data_runtime(AppConfig.load())
+    summaries = run_research_backfill(
+        runtime,
+        start=start_date,
+        through=through_date,
+        scope=scope,
+        resume=resume,
+    )
+    for item in summaries:
+        typer.echo(
+            f"{item.scope}: committed={item.committed} skipped={item.skipped} "
+            f"waiting={item.waiting_upstream} failed={item.failed}"
+        )
+    if any(item.failed for item in summaries):
+        raise typer.Exit(code=2)
+
+
+@data_app.command("run-stage")
+def data_run_stage(
+    stage: str = typer.Option(..., "--stage"),
+    data_date: str = typer.Option(..., "--data-date"),
+) -> None:
+    from stock_analyzer.ops.research_data_job import (
+        build_research_data_runtime,
+        run_research_stage,
+    )
+
+    runtime = build_research_data_runtime(AppConfig.load())
+    if data_date == "auto":
+        today = datetime.now(ZoneInfo("Asia/Shanghai")).date()
+        if stage == "next-morning":
+            calendar_start = today - timedelta(days=14)
+            calendar = runtime.tushare.fetch_trade_calendar(calendar_start, today)
+            candidates = sorted(
+                value
+                for value in calendar.loc[calendar["is_open"], "cal_date"].tolist()
+                if value < today
+            )
+            if not candidates:
+                _fail("cannot resolve previous trading date for next-morning stage")
+            parsed = candidates[-1]
+        else:
+            parsed = today
+    else:
+        parsed = date.fromisoformat(data_date)
+    summaries = run_research_stage(runtime, stage=stage, data_date=parsed)
+    for item in summaries:
+        typer.echo(
+            f"{stage}/{item.scope}: committed={item.committed} skipped={item.skipped} "
+            f"waiting={item.waiting_upstream} failed={item.failed}"
+        )
+    if any(item.failed for item in summaries):
+        raise typer.Exit(code=2)
+
+
+@data_app.command("health")
+def data_health(
+    data_date: str = typer.Option(..., "--data-date"),
+) -> None:
+    from stock_analyzer.ops.research_health import (
+        build_research_health_report,
+        write_health_report,
+    )
+    from stock_analyzer.storage.research_warehouse import ResearchWarehouse
+
+    config = AppConfig.load()
+    parsed = date.fromisoformat(data_date)
+    report = build_research_health_report(
+        ResearchWarehouse(config.local_warehouse_dir), parsed
+    )
+    json_path, _ = write_health_report(
+        report, config.local_archive_dir / "data_health"
+    )
+    typer.echo(
+        f"data health {parsed}: core_complete={str(report.complete_core_date).lower()} "
+        f"datasets={len(report.datasets)} gaps={sum(report.gap_counts.values())} "
+        f"output={json_path}"
+    )
 
 
 @app.command("formal-warehouse-inventory")
