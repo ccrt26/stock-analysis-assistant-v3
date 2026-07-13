@@ -72,6 +72,26 @@ class ClassificationPro:
 def test_classification_backfill_builds_all_sw_levels_and_traceable_themes(tmp_path):
     pro = ClassificationPro()
     warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    available_at = datetime(2026, 7, 10, 10, tzinfo=timezone.utc)
+    warehouse.commit_batch(
+        FactBatch(
+            dataset_id=ResearchDatasetId.TRADE_CALENDAR,
+            partition_value="2026",
+            source_name="test",
+            source_endpoint="calendar",
+            ingestion_run_id="calendar-2026",
+            ingested_at=available_at,
+            default_available_at=available_at,
+            records=[
+                {
+                    "exchange": "SSE",
+                    "cal_date": date(2026, 7, 10),
+                    "is_open": True,
+                    "pretrade_date": None,
+                }
+            ],
+        )
+    )
     service = ClassificationBackfillService(
         TushareResearchClient(pro, pacer=lambda method: None), warehouse
     )
@@ -360,3 +380,43 @@ def test_classification_resume_does_not_refetch_complete_daily_partitions(tmp_pa
     )
 
     assert all(method != "index_daily" for method, _ in pro.calls)
+
+
+def test_classification_resume_skips_all_complete_catalog_and_member_requests(
+    tmp_path,
+):
+    pro = ClassificationPro()
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    available_at = datetime(2026, 7, 10, 10, tzinfo=timezone.utc)
+    warehouse.commit_batch(
+        FactBatch(
+            dataset_id=ResearchDatasetId.TRADE_CALENDAR,
+            partition_value="2026",
+            source_name="test",
+            source_endpoint="calendar",
+            ingestion_run_id="calendar-2026",
+            ingested_at=available_at,
+            default_available_at=available_at,
+            records=[
+                {
+                    "exchange": "SSE",
+                    "cal_date": date(2026, 7, 10),
+                    "is_open": True,
+                    "pretrade_date": None,
+                }
+            ],
+        )
+    )
+    service = ClassificationBackfillService(
+        TushareResearchClient(pro, pacer=lambda method: None), warehouse
+    )
+    service.backfill(
+        start=date(2026, 7, 10), through=date(2026, 7, 10), resume=True
+    )
+    pro.calls.clear()
+
+    service.backfill(
+        start=date(2026, 7, 10), through=date(2026, 7, 10), resume=True
+    )
+
+    assert pro.calls == []

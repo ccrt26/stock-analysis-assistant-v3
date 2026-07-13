@@ -39,25 +39,35 @@ class ClassificationBackfillService:
         history_dates = self._latest_sessions(start, through, sessions=250)
         history_start = history_dates[0] if history_dates else start
         allowed_dates = set(history_dates) if history_dates else None
-        catalog, members = self._sw_catalog_and_members(through)
-        self._commit(
-            ResearchDatasetId.INDUSTRY_CATALOG,
-            "SW2021",
-            "index_classify+index_basic",
-            catalog,
-            through,
-            resume,
-            summary,
-        )
-        self._commit(
-            ResearchDatasetId.INDUSTRY_MEMBER,
-            "SW2021",
-            "index_member_all",
-            members,
-            through,
-            resume,
-            summary,
-        )
+        industry_snapshot_complete = resume and self._complete(
+            ResearchDatasetId.INDUSTRY_CATALOG, "SW2021"
+        ) and self._complete(ResearchDatasetId.INDUSTRY_MEMBER, "SW2021")
+        if industry_snapshot_complete:
+            catalog = self.warehouse.read_current(
+                ResearchDatasetId.INDUSTRY_CATALOG,
+                partition_value="SW2021",
+            ).to_dict(orient="records")
+            summary.skipped += 2
+        else:
+            catalog, members = self._sw_catalog_and_members(through)
+            self._commit(
+                ResearchDatasetId.INDUSTRY_CATALOG,
+                "SW2021",
+                "index_classify+index_basic",
+                catalog,
+                through,
+                resume,
+                summary,
+            )
+            self._commit(
+                ResearchDatasetId.INDUSTRY_MEMBER,
+                "SW2021",
+                "index_member_all",
+                members,
+                through,
+                resume,
+                summary,
+            )
 
         industry_codes = sorted(
             {
@@ -89,29 +99,43 @@ class ClassificationBackfillService:
                 summary,
             )
 
-        themes = self._theme_catalog(through)
-        self._commit(
-            ResearchDatasetId.THEME_CATALOG,
-            "official-theme-v1",
-            "index_basic",
-            themes,
-            through,
-            resume,
-            summary,
-        )
+        if resume and self._complete(
+            ResearchDatasetId.THEME_CATALOG, "official-theme-v1"
+        ):
+            themes = self.warehouse.read_current(
+                ResearchDatasetId.THEME_CATALOG,
+                partition_value="official-theme-v1",
+            ).to_dict(orient="records")
+            summary.skipped += 1
+        else:
+            themes = self._theme_catalog(through)
+            self._commit(
+                ResearchDatasetId.THEME_CATALOG,
+                "official-theme-v1",
+                "index_basic",
+                themes,
+                through,
+                resume,
+                summary,
+            )
         theme_codes = sorted({str(row["theme_code"]) for row in themes})
-        theme_members = self._theme_members(
-            theme_codes, start=history_start, through=through, summary=summary
-        )
-        self._commit(
-            ResearchDatasetId.THEME_MEMBER,
-            "official-theme-v1",
-            "index_weight",
-            theme_members,
-            through,
-            resume,
-            summary,
-        )
+        if resume and self._complete(
+            ResearchDatasetId.THEME_MEMBER, "official-theme-v1"
+        ):
+            summary.skipped += 1
+        else:
+            theme_members = self._theme_members(
+                theme_codes, start=history_start, through=through, summary=summary
+            )
+            self._commit(
+                ResearchDatasetId.THEME_MEMBER,
+                "official-theme-v1",
+                "index_weight",
+                theme_members,
+                through,
+                resume,
+                summary,
+            )
         if resume and self._daily_history_complete(
             ResearchDatasetId.THEME_DAILY, history_dates
         ):
