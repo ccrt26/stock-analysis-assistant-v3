@@ -371,3 +371,40 @@ def test_cninfo_descends_to_stock_batches_when_global_and_subboard_totals_drift(
     rows = client.fetch_announcements(date(2026, 7, 10), date(2026, 7, 10))
 
     assert {row["announcement_id"] for row in rows} == {"C1", "C2", "C3"}
+
+
+def test_cninfo_keeps_the_later_time_when_only_official_timestamp_was_revised():
+    class RevisedTimeHttp:
+        def post(self, url, data, timeout):
+            requested = date.fromisoformat(data["seDate"].split("~", 1)[0])
+            published = datetime(
+                requested.year,
+                requested.month,
+                requested.day,
+                10,
+                tzinfo=timezone.utc,
+            )
+            return Response(
+                {
+                    "totalAnnouncement": 1,
+                    "announcements": [
+                        {
+                            "announcementId": "R1",
+                            "announcementTitle": "关于经营情况的公告",
+                            "announcementTime": int(published.timestamp() * 1000),
+                            "secCode": "000001",
+                            "secName": "平安银行",
+                            "adjunctUrl": "finalpage/R1.PDF",
+                        }
+                    ],
+                }
+            )
+
+    client = CninfoResearchClient(
+        RevisedTimeHttp(), pacer=lambda: None, max_retries=0
+    )
+
+    rows = client.fetch_announcements(date(2026, 1, 1), date(2026, 1, 2))
+
+    assert len(rows) == 1
+    assert rows[0]["announcement_time"].date() == date(2026, 1, 2)

@@ -86,13 +86,20 @@ class CninfoResearchClient:
                         for key in set(previous) | set(normalized)
                         if previous.get(key) != normalized.get(key)
                     )
-                    raise ResearchSourceError(
-                        f"CNINFO duplicate announcement id "
-                        f"{normalized['announcement_id']} has conflicting fields: "
-                        f"{','.join(conflicting_fields)}",
-                        category="schema",
-                        endpoint="new/hisAnnouncement/query",
-                    )
+                    non_time_conflicts = set(conflicting_fields) - {
+                        "announcement_time",
+                        "available_at",
+                    }
+                    if non_time_conflicts:
+                        raise ResearchSourceError(
+                            f"CNINFO duplicate announcement id "
+                            f"{normalized['announcement_id']} has conflicting fields: "
+                            f"{','.join(conflicting_fields)}",
+                            category="schema",
+                            endpoint="new/hisAnnouncement/query",
+                        )
+                    if previous["announcement_time"] > normalized["announcement_time"]:
+                        normalized = previous
                 records[normalized["announcement_id"]] = normalized
             current += timedelta(days=1)
         return sorted(
