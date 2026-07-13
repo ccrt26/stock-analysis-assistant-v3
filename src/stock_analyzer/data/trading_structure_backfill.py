@@ -69,10 +69,11 @@ class TradingStructureBackfillService:
         dates = tuple(sorted(set(trading_dates)))
         if not dates:
             raise ValueError("trading-structure backfill requires trading dates")
+        margin_dates = dates[-250:]
         summary = BackfillSummary(
-            scope="trading-structure", start=dates[0], through=through
+            scope="trading-structure", start=margin_dates[0], through=through
         )
-        for trading_date in dates:
+        for trading_date in margin_dates:
             partition = trading_date.isoformat()
             if resume and self._complete(ResearchDatasetId.MARGIN_DETAIL, partition):
                 summary.skipped += 1
@@ -114,7 +115,7 @@ class TradingStructureBackfillService:
 
         codes = tuple(sorted(set(candidate_codes) | set(index_codes)))
         self._freeze_scope(through, candidate_codes, index_codes)
-        minute_dates = dates[-20:]
+        minute_dates = margin_dates[-20:]
         existing_minute = self.warehouse.read_current(ResearchDatasetId.MINUTE_BAR)
         covered_pairs: set[tuple[str, date]] = set()
         if not existing_minute.empty:

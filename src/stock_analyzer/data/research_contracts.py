@@ -141,10 +141,10 @@ def research_contract_registry() -> dict[ResearchDatasetId, DatasetContract]:
         _contract(ResearchDatasetId.INDEX_DAILY, ("trade_date", "index_code"), "trade_date", required=True, window="five_years"),
         _contract(ResearchDatasetId.INDUSTRY_CATALOG, ("industry_system", "level", "industry_code", "valid_from"), "classification_version", required=True, window="sw2021_full_hierarchy"),
         _contract(ResearchDatasetId.INDUSTRY_MEMBER, ("ts_code", "industry_system", "level", "valid_from"), "classification_version", required=True, window="available_effective_history"),
-        _contract(ResearchDatasetId.INDUSTRY_DAILY, ("trade_date", "industry_code"), "trade_date", required=True, window="five_years"),
+        _contract(ResearchDatasetId.INDUSTRY_DAILY, ("trade_date", "industry_code"), "trade_date", required=True, window="250_sessions"),
         _contract(ResearchDatasetId.THEME_CATALOG, ("publisher", "theme_code", "valid_from"), "catalog_version", required=True, window="controlled_catalog"),
         _contract(ResearchDatasetId.THEME_MEMBER, ("theme_code", "ts_code", "valid_from"), "catalog_version", required=True, window="available_effective_history"),
-        _contract(ResearchDatasetId.THEME_DAILY, ("trade_date", "theme_code"), "trade_date", required=True, window="five_years"),
+        _contract(ResearchDatasetId.THEME_DAILY, ("trade_date", "theme_code"), "trade_date", required=True, window="250_sessions"),
         _contract(ResearchDatasetId.COMPANY_PROFILE, ("ts_code", "valid_from"), "catalog_version", window="all_listed_companies"),
         _contract(ResearchDatasetId.INCOME_STATEMENT, ("ts_code", "report_period", "report_type", "statement_type"), "report_period", window="12_quarters_and_5_years", availability="announcement time, never report-period end"),
         _contract(ResearchDatasetId.BALANCE_SHEET, ("ts_code", "report_period", "report_type", "statement_type"), "report_period", window="12_quarters_and_5_years", availability="announcement time, never report-period end"),
@@ -158,8 +158,8 @@ def research_contract_registry() -> dict[ResearchDatasetId, DatasetContract]:
         _contract(ResearchDatasetId.SHARE_FLOAT, ("ts_code", "float_date", "holder_name", "share_type"), "float_month", lagged=True, window="five_years"),
         _contract(ResearchDatasetId.REPURCHASE, ("ts_code", "announcement_date", "process", "event_effective_date"), "announcement_month", lagged=True, window="five_years"),
         _contract(ResearchDatasetId.PLEDGE, ("ts_code", "end_date"), "end_month", lagged=True, window="five_years_quarterly_snapshots"),
-        _contract(ResearchDatasetId.SUSPENSION, ("ts_code", "trade_date", "suspend_type"), "trade_date", lagged=True, window="five_years"),
-        _contract(ResearchDatasetId.MARGIN_DETAIL, ("trade_date", "ts_code", "exchange"), "trade_date", lagged=True, window="five_years", availability="T+1 or actual provider publication time"),
+        _contract(ResearchDatasetId.SUSPENSION, ("ts_code", "trade_date", "suspend_type"), "trade_date", lagged=True, window="one_year"),
+        _contract(ResearchDatasetId.MARGIN_DETAIL, ("trade_date", "ts_code", "exchange"), "trade_date", lagged=True, window="250_sessions", availability="T+1 or actual provider publication time"),
         _contract(ResearchDatasetId.MINUTE_BAR, ("trade_date", "instrument_code", "minute", "frequency"), "trade_date", window="20_sessions_for_indexes_and_frozen_candidates", availability="after each minute; daily research uses post-close availability"),
     )
     return {item.dataset_id: item for item in items}

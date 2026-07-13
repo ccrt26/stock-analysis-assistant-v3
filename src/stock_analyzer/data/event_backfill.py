@@ -113,7 +113,10 @@ class EventBackfillService:
             summary,
         )
 
-        for trading_date in sorted(set(trading_dates)):
+        suspension_start = through - timedelta(days=365)
+        for trading_date in sorted(
+            value for value in set(trading_dates) if value >= suspension_start
+        ):
             partition = trading_date.isoformat()
             if resume and self._complete(ResearchDatasetId.SUSPENSION, partition):
                 summary.skipped += 1

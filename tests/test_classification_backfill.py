@@ -1,9 +1,9 @@
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 
 import pandas as pd
 
 from stock_analyzer.data.classification_backfill import ClassificationBackfillService
-from stock_analyzer.data.research_contracts import ResearchDatasetId
+from stock_analyzer.data.research_contracts import FactBatch, ResearchDatasetId
 from stock_analyzer.data.tushare_research_client import TushareResearchClient
 from stock_analyzer.storage.research_warehouse import ResearchWarehouse
 
@@ -87,3 +87,56 @@ def test_classification_backfill_builds_all_sw_levels_and_traceable_themes(tmp_p
     assert set(theme_members["theme_code"]) == {"000019.SH", "399013.SZ"}
     assert summary.failed == 0
     assert all(method != "concept" for method, _ in pro.calls)
+
+
+def test_classification_history_uses_latest_250_actual_trading_days(tmp_path):
+    pro = ClassificationPro()
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    start = date(2025, 1, 1)
+    calendar_rows = []
+    for offset in range(400):
+        value = start + timedelta(days=offset)
+        calendar_rows.append(
+            {
+                "exchange": "SSE",
+                "cal_date": value,
+                "is_open": value.weekday() < 5,
+                "pretrade_date": None,
+            }
+        )
+    warehouse.commit_batch(
+        FactBatch(
+            dataset_id=ResearchDatasetId.TRADE_CALENDAR,
+            partition_value="2025",
+            source_name="test",
+            source_endpoint="calendar",
+            ingestion_run_id="calendar-2025",
+            ingested_at=datetime.now(timezone.utc),
+            default_available_at=datetime.now(timezone.utc),
+            records=calendar_rows[:365],
+        )
+    )
+    warehouse.commit_batch(
+        FactBatch(
+            dataset_id=ResearchDatasetId.TRADE_CALENDAR,
+            partition_value="2026",
+            source_name="test",
+            source_endpoint="calendar",
+            ingestion_run_id="calendar-2026",
+            ingested_at=datetime.now(timezone.utc),
+            default_available_at=datetime.now(timezone.utc),
+            records=calendar_rows[365:],
+        )
+    )
+    service = ClassificationBackfillService(
+        TushareResearchClient(pro, pacer=lambda method: None), warehouse
+    )
+    through = calendar_rows[-1]["cal_date"]
+
+    service.backfill(start=start, through=through, resume=True)
+
+    index_calls = [kwargs for method, kwargs in pro.calls if method == "index_daily"]
+    open_dates = [row["cal_date"] for row in calendar_rows if row["is_open"]]
+    assert {kwargs["start_date"] for kwargs in index_calls} == {
+        open_dates[-250].strftime("%Y%m%d")
+    }

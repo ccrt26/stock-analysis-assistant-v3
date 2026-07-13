@@ -36,6 +36,7 @@ class ClassificationBackfillService:
         summary = BackfillSummary(
             scope="classifications", start=start, through=through
         )
+        history_start = self._latest_session_start(start, through, sessions=250)
         catalog, members = self._sw_catalog_and_members(through)
         self._commit(
             ResearchDatasetId.INDUSTRY_CATALOG,
@@ -65,7 +66,7 @@ class ClassificationBackfillService:
         )
         industry_bars = self._index_history(
             industry_codes,
-            start=start,
+            start=history_start,
             through=through,
             code_field="industry_code",
             summary=summary,
@@ -91,7 +92,7 @@ class ClassificationBackfillService:
         )
         theme_codes = sorted({str(row["theme_code"]) for row in themes})
         theme_members = self._theme_members(
-            theme_codes, start=start, through=through, summary=summary
+            theme_codes, start=history_start, through=through, summary=summary
         )
         self._commit(
             ResearchDatasetId.THEME_MEMBER,
@@ -104,7 +105,7 @@ class ClassificationBackfillService:
         )
         theme_bars = self._index_history(
             theme_codes,
-            start=start,
+            start=history_start,
             through=through,
             code_field="theme_code",
             summary=summary,
@@ -118,6 +119,30 @@ class ClassificationBackfillService:
             summary,
         )
         return summary
+
+    def _latest_session_start(
+        self,
+        requested_start: date,
+        through: date,
+        *,
+        sessions: int,
+    ) -> date:
+        calendar = self.warehouse.read_current(ResearchDatasetId.TRADE_CALENDAR)
+        if calendar.empty:
+            return requested_start
+        values = pd.to_datetime(
+            calendar.loc[calendar["is_open"].astype(bool), "cal_date"]
+        ).dt.date
+        open_dates = sorted(
+            {
+                value
+                for value in values
+                if requested_start <= value <= through
+            }
+        )
+        if len(open_dates) <= sessions:
+            return requested_start
+        return open_dates[-sessions]
 
     def refresh_daily(self, data_date: date) -> BackfillSummary:
         summary = BackfillSummary(

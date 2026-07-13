@@ -9,6 +9,9 @@ from stock_analyzer.storage.research_warehouse import ResearchWarehouse
 
 
 class ActionPro:
+    def __init__(self):
+        self.suspension_calls = []
+
     def stk_holdertrade(self, **kwargs):
         return pd.DataFrame([{
             "ts_code": "000001.SZ", "ann_date": "20260710", "holder_name": "股东A",
@@ -39,6 +42,7 @@ class ActionPro:
         }])
 
     def suspend_d(self, **kwargs):
+        self.suspension_calls.append(kwargs["trade_date"])
         return pd.DataFrame(columns=["ts_code", "trade_date", "suspend_timing", "suspend_type"])
 
 
@@ -71,3 +75,26 @@ def test_event_backfill_stores_official_announcement_and_structured_actions(tmp_
     assert len(warehouse.read_current(ResearchDatasetId.SHARE_FLOAT)) == 1
     assert len(warehouse.read_current(ResearchDatasetId.REPURCHASE)) == 1
     assert summary.failed == 0
+
+
+def test_event_backfill_limits_daily_suspension_history_to_one_year(tmp_path):
+    pro = ActionPro()
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    service = EventBackfillService(
+        TushareResearchClient(pro, pacer=lambda method: None),
+        type(
+            "EmptyAnnouncementClient",
+            (),
+            {"fetch_announcements": lambda self, start, through: []},
+        )(),
+        warehouse,
+    )
+
+    service.backfill(
+        start=date(2021, 7, 14),
+        through=date(2026, 7, 13),
+        trading_dates=(date(2024, 7, 10), date(2026, 7, 10)),
+        resume=True,
+    )
+
+    assert pro.suspension_calls == ["20260710"]

@@ -96,3 +96,14 @@ def test_completeness_status_distinguishes_waiting_from_empty_success():
     assert CompletenessStatus.COMPLETE_WITH_DECLARED_GAPS.value == (
         "complete_with_declared_gaps"
     )
+
+
+def test_history_windows_are_tiered_by_business_value():
+    registry = research_contract_registry()
+
+    assert registry[ResearchDatasetId.EQUITY_DAILY].history_window == "five_years"
+    assert registry[ResearchDatasetId.INDUSTRY_DAILY].history_window == "250_sessions"
+    assert registry[ResearchDatasetId.THEME_DAILY].history_window == "250_sessions"
+    assert registry[ResearchDatasetId.SUSPENSION].history_window == "one_year"
+    assert registry[ResearchDatasetId.MARGIN_DETAIL].history_window == "250_sessions"
+    assert registry[ResearchDatasetId.MINUTE_BAR].history_window.startswith("20_sessions")

@@ -9,7 +9,11 @@ from stock_analyzer.storage.research_warehouse import ResearchWarehouse
 
 
 class Pro:
+    def __init__(self):
+        self.margin_calls = []
+
     def margin_detail(self, **kwargs):
+        self.margin_calls.append(kwargs["trade_date"])
         if kwargs["trade_date"] == "20260713":
             return pd.DataFrame(columns=[
                 "trade_date", "ts_code", "rzye", "rqye", "rzmre", "rqyl",
@@ -58,3 +62,26 @@ def test_trading_structure_records_margin_lag_and_freezes_minute_scope(tmp_path)
     assert len(minute) == 2
     assert set(minute["instrument_code"]) == {"000001.SZ"}
     assert service.frozen_scope_codes(date(2026, 7, 13)) == ("000001.SZ",)
+
+
+def test_margin_history_is_capped_at_latest_250_trading_days(tmp_path):
+    pro = Pro()
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    service = TradingStructureBackfillService(
+        TushareResearchClient(pro, pacer=lambda method: None),
+        warehouse,
+        minute_fetcher=lambda **kwargs: pd.DataFrame(),
+        minute_pacer=lambda: None,
+    )
+    dates = tuple(pd.date_range("2025-01-01", periods=251, freq="B").date)
+
+    service.backfill(
+        trading_dates=dates,
+        through=dates[-1],
+        candidate_codes=(),
+        index_codes=(),
+        resume=True,
+    )
+
+    assert len(pro.margin_calls) == 250
+    assert pro.margin_calls[0] == dates[-250].strftime("%Y%m%d")
