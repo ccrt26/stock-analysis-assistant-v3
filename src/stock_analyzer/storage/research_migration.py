@@ -63,6 +63,19 @@ class LegacyMarketMigrationReport(BaseModel):
     already_completed: bool = False
 
 
+class LegacyMarketMigrationAudit(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    migration_id: str
+    passed: bool
+    source_manifest_matches: bool
+    source_business_keys: int
+    target_business_keys: int
+    missing_target_keys: int
+    extra_target_keys: int
+    value_mismatches: int
+
+
 def inspect_legacy_market(source_root: Path) -> LegacyMarketAudit:
     root = Path(source_root)
     files = _market_files(root)
@@ -249,6 +262,123 @@ def migrate_legacy_market(
     return report
 
 
+def audit_legacy_market_migration(
+    source_root: Path,
+    warehouse: ResearchWarehouse,
+    *,
+    migration_id: str,
+    strict_hashes: bool = False,
+) -> LegacyMarketMigrationAudit:
+    stored = _stored_report(warehouse, migration_id)
+    if stored is None:
+        raise ValueError(f"migration is not complete: {migration_id}")
+    source_audit = inspect_legacy_market(source_root)
+    manifest_matches = (
+        source_audit.source_manifest_hash
+        == stored.source_audit.source_manifest_hash
+    )
+    source_files = _market_files(Path(source_root))
+    source_dates = sorted(source_audit.per_date)
+    target_manifest = warehouse.partition_manifest(ResearchDatasetId.EQUITY_DAILY)
+    target_manifest = target_manifest[
+        target_manifest["partition_value"].astype(str).isin(source_dates)
+    ]
+    target_files = [
+        warehouse.root / str(value)
+        for value in target_manifest["relative_path"].tolist()
+    ]
+    if not target_files or any(not path.is_file() for path in target_files):
+        target_business_keys = int(target_manifest["row_count"].sum())
+        missing = max(0, source_audit.unique_business_keys - target_business_keys)
+        extra = max(0, target_business_keys - source_audit.unique_business_keys)
+        mismatches = 0
+    else:
+        source_volume = _first_available_column(source_files, ("volume", "vol"))
+        target_volume = _first_available_column(target_files, ("volume", "vol"))
+        source_paths = [str(path) for path in source_files]
+        target_paths = [str(path) for path in target_files]
+        with duckdb.connect() as connection:
+            result = connection.execute(
+                f"""
+                with source_ranked as (
+                    select cast(trade_date as varchar) as trade_date,
+                           cast(ts_code as varchar) as ts_code,
+                           try_cast(open as double) as open,
+                           try_cast(high as double) as high,
+                           try_cast(low as double) as low,
+                           try_cast(close as double) as close,
+                           try_cast({source_volume} as double) as volume,
+                           try_cast(amount as double) as amount,
+                           row_number() over (
+                               partition by cast(trade_date as varchar), ts_code
+                               order by cast(__version_id as varchar) desc
+                           ) as ordinal
+                    from read_parquet(?, union_by_name=true, hive_partitioning=false)
+                ),
+                source_current as (
+                    select * exclude ordinal from source_ranked where ordinal = 1
+                ),
+                target_current as (
+                    select cast(trade_date as varchar) as trade_date,
+                           cast(ts_code as varchar) as ts_code,
+                           try_cast(open as double) as open,
+                           try_cast(high as double) as high,
+                           try_cast(low as double) as low,
+                           try_cast(close as double) as close,
+                           try_cast({target_volume} as double) as volume,
+                           try_cast(amount as double) as amount
+                    from read_parquet(?, union_by_name=true, hive_partitioning=false)
+                ),
+                compared as (
+                    select s.trade_date as source_date,
+                           s.ts_code as source_code,
+                           t.trade_date as target_date,
+                           t.ts_code as target_code,
+                           case when s.trade_date is not null and t.trade_date is not null
+                                     and (s.open is distinct from t.open
+                                       or s.high is distinct from t.high
+                                       or s.low is distinct from t.low
+                                       or s.close is distinct from t.close
+                                       or s.volume is distinct from t.volume
+                                       or s.amount is distinct from t.amount)
+                                then 1 else 0 end as differs
+                    from source_current s
+                    full outer join target_current t
+                      on s.trade_date = t.trade_date and s.ts_code = t.ts_code
+                )
+                select
+                    (select count(*) from source_current),
+                    (select count(*) from target_current),
+                    sum(case when target_date is null then 1 else 0 end),
+                    sum(case when source_date is null then 1 else 0 end),
+                    sum(differs)
+                from compared
+                """,
+                [source_paths, target_paths],
+            ).fetchone()
+        target_business_keys = int(result[1])
+        missing = int(result[2] or 0)
+        extra = int(result[3] or 0)
+        mismatches = int(result[4] or 0)
+    passed = (
+        (manifest_matches or not strict_hashes)
+        and source_audit.unique_business_keys == target_business_keys
+        and missing == 0
+        and extra == 0
+        and mismatches == 0
+    )
+    return LegacyMarketMigrationAudit(
+        migration_id=migration_id,
+        passed=passed,
+        source_manifest_matches=manifest_matches,
+        source_business_keys=source_audit.unique_business_keys,
+        target_business_keys=target_business_keys,
+        missing_target_keys=missing,
+        extra_target_keys=extra,
+        value_mismatches=mismatches,
+    )
+
+
 def _stored_report(
     warehouse: ResearchWarehouse,
     migration_id: str,
@@ -273,6 +403,18 @@ def _market_files(root: Path) -> list[Path]:
         for path in market_root.rglob("*.parquet")
         if "record_type=equity_bar" in path.as_posix()
     )
+
+
+def _first_available_column(files: list[Path], candidates: tuple[str, ...]) -> str:
+    names: set[str] = set()
+    for path in files:
+        names.update(pq.ParquetFile(path).schema_arrow.names)
+        if any(candidate in names for candidate in candidates):
+            break
+    for candidate in candidates:
+        if candidate in names:
+            return candidate
+    raise ValueError(f"missing required columns: {', '.join(candidates)}")
 
 
 def _read_legacy_file(path: Path) -> pd.DataFrame:
@@ -352,6 +494,8 @@ def _sha256(path: Path) -> str:
 __all__ = [
     "LegacyMarketAudit",
     "LegacyMarketMigrationReport",
+    "LegacyMarketMigrationAudit",
+    "audit_legacy_market_migration",
     "inspect_legacy_market",
     "migrate_legacy_market",
 ]

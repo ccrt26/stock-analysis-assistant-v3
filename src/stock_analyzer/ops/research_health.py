@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import duckdb
+import pyarrow.parquet as pq
 from pydantic import BaseModel
 
 from stock_analyzer.data.research_contracts import research_contract_registry
@@ -18,7 +21,12 @@ class DatasetHealth(BaseModel):
     rows: int
     first_partition: str | None
     last_partition: str | None
+    checked_partitions: int
+    checked_rows: int
     duplicate_business_keys: int
+    missing_files: int
+    hash_mismatches: int
+    row_count_mismatches: int
 
 
 class ResearchHealthReport(BaseModel):
@@ -32,6 +40,8 @@ class ResearchHealthReport(BaseModel):
 def build_research_health_report(
     warehouse: ResearchWarehouse,
     data_date: date,
+    *,
+    full_history: bool = False,
 ) -> ResearchHealthReport:
     datasets: list[DatasetHealth] = []
     core_complete = True
@@ -39,17 +49,38 @@ def build_research_health_report(
         manifest = warehouse.partition_manifest(dataset_id)
         partitions = len(manifest)
         rows = int(manifest["row_count"].sum()) if not manifest.empty else 0
-        current = warehouse.read_current(dataset_id)
-        duplicates = 0
-        if not current.empty:
-            duplicates = int(
-                current.duplicated(subset=list(contract.business_key), keep=False).sum()
-            )
         values = (
             sorted(manifest["partition_value"].astype(str))
             if not manifest.empty
             else []
         )
+        selected = manifest
+        if not full_history and not manifest.empty:
+            same_day = manifest[
+                manifest["partition_value"].astype(str) == data_date.isoformat()
+            ]
+            selected = same_day if not same_day.empty else manifest.tail(1)
+        file_audit = _audit_partition_files(warehouse, selected)
+        with connect_research_warehouse(
+            warehouse.duckdb_path, read_only=True
+        ) as connection:
+            indexed_keys = int(
+                connection.execute(
+                    "select count(*) from research_fact_keys where dataset_id = ?",
+                    [dataset_id.value],
+                ).fetchone()[0]
+            )
+        duplicates = max(0, rows - indexed_keys)
+        if full_history and file_audit["paths"]:
+            with duckdb.connect() as connection:
+                physical_rows, unique_keys = connection.execute(
+                    """
+                    select count(*), count(distinct business_key_hash)
+                    from read_parquet(?, union_by_name=true, hive_partitioning=false)
+                    """,
+                    [file_audit["paths"]],
+                ).fetchone()
+            duplicates = int(physical_rows - unique_keys)
         datasets.append(
             DatasetHealth(
                 dataset_id=dataset_id.value,
@@ -57,7 +88,12 @@ def build_research_health_report(
                 rows=rows,
                 first_partition=values[0] if values else None,
                 last_partition=values[-1] if values else None,
+                checked_partitions=len(selected),
+                checked_rows=file_audit["rows"],
                 duplicate_business_keys=duplicates,
+                missing_files=file_audit["missing"],
+                hash_mismatches=file_audit["hash_mismatches"],
+                row_count_mismatches=file_audit["row_count_mismatches"],
             )
         )
         if contract.required_for_close_screen:
@@ -87,6 +123,41 @@ def build_research_health_report(
     )
 
 
+def _audit_partition_files(warehouse: ResearchWarehouse, manifest) -> dict[str, Any]:
+    paths: list[str] = []
+    rows = 0
+    missing = 0
+    hash_mismatches = 0
+    row_count_mismatches = 0
+    for item in manifest.to_dict(orient="records"):
+        path = warehouse.root / str(item["relative_path"])
+        if not path.is_file():
+            missing += 1
+            continue
+        paths.append(str(path))
+        metadata_rows = int(pq.ParquetFile(path).metadata.num_rows)
+        rows += metadata_rows
+        if metadata_rows != int(item["row_count"]):
+            row_count_mismatches += 1
+        if _sha256(path) != str(item["file_sha256"]):
+            hash_mismatches += 1
+    return {
+        "paths": paths,
+        "rows": rows,
+        "missing": missing,
+        "hash_mismatches": hash_mismatches,
+        "row_count_mismatches": row_count_mismatches,
+    }
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def write_health_report(
     report: ResearchHealthReport,
     output_root: Path,
@@ -101,14 +172,15 @@ def write_health_report(
         "",
         f"收盘核心数据是否完整：{'是' if report.complete_core_date else '否'}",
         "",
-        "| 数据 | 分区 | 记录 | 起始 | 截止 | 重复业务事实 |",
-        "| --- | ---: | ---: | --- | --- | ---: |",
+        "| 数据 | 分区 | 记录 | 本次核对分区 | 重复业务事实 | 缺文件 | 校验不符 |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     for item in report.datasets:
         lines.append(
             f"| {item.dataset_id} | {item.partitions} | {item.rows} | "
-            f"{item.first_partition or '-'} | {item.last_partition or '-'} | "
-            f"{item.duplicate_business_keys} |"
+            f"{item.checked_partitions} | {item.duplicate_business_keys} | "
+            f"{item.missing_files} | "
+            f"{item.hash_mismatches + item.row_count_mismatches} |"
         )
     lines.extend(["", "未完成或等待事项：", ""])
     if report.gap_counts:

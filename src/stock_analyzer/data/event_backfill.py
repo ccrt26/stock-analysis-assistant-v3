@@ -86,7 +86,9 @@ class EventBackfillService:
 
         pledge_rows: list[dict[str, Any]] = []
         for snapshot in _quarter_snapshots(start, through):
-            frame = self.tushare.call("pledge_stat", end_date=_yyyymmdd(snapshot))
+            frame = self.tushare.call_paged(
+                "pledge_stat", end_date=_yyyymmdd(snapshot)
+            )
             for row in frame.to_dict(orient="records"):
                 normalized = _clean(row)
                 normalized["end_date"] = _date(row["end_date"])

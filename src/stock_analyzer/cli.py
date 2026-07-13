@@ -107,6 +107,35 @@ def data_migrate_legacy_market(
         ResearchWarehouse(config.local_warehouse_dir),
         migration_id=migration_id,
     )
+
+
+@data_app.command("audit-migration")
+def data_audit_migration(
+    migration_id: str = typer.Option(..., "--migration-id"),
+    source_root: Path = typer.Option(
+        Path("local_warehouse/parquet/formal"), "--source-root"
+    ),
+    strict_hashes: bool = typer.Option(False, "--strict-hashes"),
+) -> None:
+    from stock_analyzer.storage.research_migration import (
+        audit_legacy_market_migration,
+    )
+    from stock_analyzer.storage.research_warehouse import ResearchWarehouse
+
+    config = AppConfig.load()
+    audit = audit_legacy_market_migration(
+        source_root,
+        ResearchWarehouse(config.local_warehouse_dir),
+        migration_id=migration_id,
+        strict_hashes=strict_hashes,
+    )
+    typer.echo(
+        f"migration audit {migration_id}: passed={str(audit.passed).lower()} "
+        f"missing={audit.missing_target_keys} extra={audit.extra_target_keys} "
+        f"value_mismatches={audit.value_mismatches}"
+    )
+    if not audit.passed:
+        raise typer.Exit(code=2)
     typer.echo(
         f"migration {migration_id}: unique={report.migrated_business_keys} "
         f"revisions={report.revision_rows} partitions={report.partition_count} "
@@ -130,7 +159,7 @@ def data_backfill(
     start_date = (
         date.fromisoformat(start)
         if start is not None
-        else date(through_date.year - 5, through_date.month, through_date.day)
+        else through_date - timedelta(days=5 * 366)
     )
     runtime = build_research_data_runtime(AppConfig.load())
     summaries = run_research_backfill(
@@ -144,6 +173,30 @@ def data_backfill(
         typer.echo(
             f"{item.scope}: committed={item.committed} skipped={item.skipped} "
             f"waiting={item.waiting_upstream} failed={item.failed}"
+        )
+    if any(item.failed for item in summaries):
+        raise typer.Exit(code=2)
+
+
+@data_app.command("repair-gaps")
+def data_repair_gaps(
+    through: str = typer.Option(..., "--through"),
+) -> None:
+    from stock_analyzer.ops.research_data_job import (
+        build_research_data_runtime,
+        repair_research_gaps,
+    )
+
+    runtime = build_research_data_runtime(AppConfig.load())
+    summaries = repair_research_gaps(
+        runtime,
+        through=date.fromisoformat(through),
+    )
+    for item in summaries:
+        typer.echo(
+            f"repair/{item.scope}: committed={item.committed} "
+            f"skipped={item.skipped} waiting={item.waiting_upstream} "
+            f"failed={item.failed}"
         )
     if any(item.failed for item in summaries):
         raise typer.Exit(code=2)
@@ -190,6 +243,7 @@ def data_run_stage(
 @data_app.command("health")
 def data_health(
     data_date: str = typer.Option(..., "--data-date"),
+    full_history: bool = typer.Option(False, "--full-history/--latest-only"),
 ) -> None:
     from stock_analyzer.ops.research_health import (
         build_research_health_report,
@@ -200,7 +254,9 @@ def data_health(
     config = AppConfig.load()
     parsed = date.fromisoformat(data_date)
     report = build_research_health_report(
-        ResearchWarehouse(config.local_warehouse_dir), parsed
+        ResearchWarehouse(config.local_warehouse_dir),
+        parsed,
+        full_history=full_history,
     )
     json_path, _ = write_health_report(
         report, config.local_archive_dir / "data_health"

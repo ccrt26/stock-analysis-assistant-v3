@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from functools import partial
 from pathlib import Path
 from typing import Any
@@ -18,6 +20,7 @@ from stock_analyzer.data.research_backfill import BackfillSummary, ResearchBackf
 from stock_analyzer.data.research_contracts import ResearchDatasetId
 from stock_analyzer.data.trading_structure_backfill import TradingStructureBackfillService
 from stock_analyzer.data.tushare_research_client import TushareResearchClient
+from stock_analyzer.storage.research_schema import connect_research_warehouse
 from stock_analyzer.storage.research_warehouse import ResearchWarehouse
 
 
@@ -139,7 +142,113 @@ def run_research_backfill(
                 resume=resume,
             )
         )
+    for summary in summaries:
+        _record_scope_outcome(runtime.warehouse, summary)
+    reconcile_research_gaps(runtime.warehouse)
     return tuple(summaries)
+
+
+def repair_research_gaps(
+    runtime: ResearchDataRuntime,
+    *,
+    through: date,
+) -> tuple[BackfillSummary, ...]:
+    return run_research_backfill(
+        runtime,
+        start=through - timedelta(days=5 * 366),
+        through=through,
+        scope="all",
+        resume=True,
+    )
+
+
+def reconcile_research_gaps(warehouse: ResearchWarehouse) -> int:
+    with connect_research_warehouse(warehouse.duckdb_path) as connection:
+        rows = connection.execute(
+            """
+            select gap_id, dataset_id, partition_value
+            from research_data_gaps
+            where status in ('waiting_upstream', 'failed', 'validation_failed')
+            """
+        ).fetchall()
+        resolved = 0
+        for gap_id, dataset_id, partition_value in rows:
+            complete = connection.execute(
+                """
+                select 1 from research_fact_partitions
+                where dataset_id = ? and partition_value = ?
+                  and quality_status = 'passed'
+                """,
+                [dataset_id, partition_value],
+            ).fetchone()
+            if complete is None:
+                continue
+            connection.execute(
+                """
+                update research_data_gaps
+                set status = 'resolved', last_checked_at = now(), next_retry_at = null
+                where gap_id = ?
+                """,
+                [gap_id],
+            )
+            resolved += 1
+    return resolved
+
+
+def _record_scope_outcome(
+    warehouse: ResearchWarehouse,
+    summary: BackfillSummary,
+) -> None:
+    scope_partition = f"{summary.start.isoformat()}:{summary.through.isoformat()}"
+    gap_id = hashlib.sha256(
+        f"scope|{summary.scope}|{scope_partition}".encode("utf-8")
+    ).hexdigest()
+    if summary.failed == 0 and summary.waiting_upstream == 0:
+        with connect_research_warehouse(warehouse.duckdb_path) as connection:
+            connection.execute(
+                """
+                update research_data_gaps
+                set status = 'resolved', last_checked_at = now(), next_retry_at = null
+                where gap_id = ?
+                """,
+                [gap_id],
+            )
+        return
+    status = "failed" if summary.failed else "waiting_upstream"
+    impact = {
+        "market-core": "核心行情不完整，不能进行全市场横向筛选。",
+        "classifications": "板块归属或板块行情不完整，热点判断需要降级。",
+        "fundamentals": "部分公司财务或主营资料不完整，基本面判断需要标注缺口。",
+        "events": "部分公告或公司行动不完整，事件与风险判断需要标注缺口。",
+        "trading-structure": "融资融券或分钟数据不完整，不能据此证明资金身份。",
+    }.get(summary.scope, "该范围数据不完整，相关结论需要降级。")
+    now = datetime.now(timezone.utc)
+    with connect_research_warehouse(warehouse.duckdb_path) as connection:
+        connection.execute(
+            """
+            insert into research_data_gaps
+            (gap_id, dataset_id, partition_value, status, reason_category,
+             source_name, first_seen_at, last_checked_at, next_retry_at,
+             impact_text, detail_json)
+            values (?, ?, ?, ?, ?, null, ?, ?, null, ?, ?)
+            on conflict(dataset_id, partition_value, reason_category)
+            do update set status=excluded.status,
+                          last_checked_at=excluded.last_checked_at,
+                          impact_text=excluded.impact_text,
+                          detail_json=excluded.detail_json
+            """,
+            [
+                gap_id,
+                f"scope:{summary.scope}",
+                scope_partition,
+                status,
+                "scope_incomplete",
+                now,
+                now,
+                impact,
+                json.dumps(summary.model_dump(mode="json"), ensure_ascii=False),
+            ],
+        )
 
 
 def run_research_stage(
@@ -282,5 +391,7 @@ __all__ = [
     "build_research_data_runtime",
     "run_research_backfill",
     "run_research_stage",
+    "repair_research_gaps",
+    "reconcile_research_gaps",
     "select_minute_candidate_scope",
 ]

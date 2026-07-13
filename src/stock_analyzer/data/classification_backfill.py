@@ -452,7 +452,7 @@ class ClassificationBackfillService:
     ) -> list[dict[str, Any]]:
         records: list[dict[str, Any]] = []
         for code in codes:
-            frame = self.client.call(
+            frame = self.client.call_paged(
                 "index_weight",
                 index_code=code,
                 start_date=_yyyymmdd(start),

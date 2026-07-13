@@ -4,6 +4,7 @@ import pandas as pd
 
 from stock_analyzer.data.research_contracts import ResearchDatasetId
 from stock_analyzer.storage.research_migration import (
+    audit_legacy_market_migration,
     inspect_legacy_market,
     migrate_legacy_market,
 )
@@ -138,3 +139,25 @@ def test_migration_uses_all_versions_not_only_latest_snapshot(tmp_path):
 
     assert result.source_audit.trade_date_count == 2
     assert sorted(current["trade_date"].astype(str)) == ["2026-07-08", "2026-07-10"]
+
+
+def test_strict_migration_audit_compares_source_values_and_manifest_hash(tmp_path):
+    source = tmp_path / "formal"
+    _write_version(
+        source,
+        version_id="market_decision-2026-07-10-a",
+        trade_date="2026-07-09",
+        closes={"000001.SZ": 10.0},
+    )
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    migrate_legacy_market(source, warehouse, migration_id="strict")
+
+    audit = audit_legacy_market_migration(
+        source, warehouse, migration_id="strict", strict_hashes=True
+    )
+
+    assert audit.passed is True
+    assert audit.missing_target_keys == 0
+    assert audit.extra_target_keys == 0
+    assert audit.value_mismatches == 0
+    assert audit.source_manifest_matches is True
