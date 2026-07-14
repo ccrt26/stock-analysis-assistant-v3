@@ -36,11 +36,11 @@ def compute_hotspot_features(
 ) -> pd.DataFrame:
     """Return one observation row for every governed industry or theme.
 
-    Horizon returns compound the daily cross-sectional mean/median stock
-    returns.  Breadth is the mean daily positive-return share.  Each day's
-    cross-section uses the membership effective on that day.  Turnover-share
-    change is the current share minus the share exactly 3/5 sessions earlier.
-    Missing sessions are never removed to make a window appear complete.
+    Horizon mean, median and breadth use each continuously eligible member's
+    exact endpoint return.  Daily turnover uses the membership effective on
+    that session.  Turnover-share change is the current share minus the share
+    exactly 3/5 sessions earlier.  Missing sessions are never removed to make a
+    window appear complete.
     """
 
     analysis_date = pd.Timestamp(analysis_date).date()
@@ -271,7 +271,9 @@ def _group_row(
     minute_values = _minute_observations(minutes, current_codes, analysis_date)
     base.update(minute_values)
     if minute_values["intraday_status"] == "limited":
-        limitations.append("intraday path is unavailable or covers fewer than 80% of members")
+        limitations.append(
+            "intraday member, time-point, open/close-anchor, or price coverage is incomplete"
+        )
 
     core_horizons = all(
         np.isfinite(base[f"equal_weight_return_{horizon}d"])
@@ -526,9 +528,9 @@ def _crowding_observations(
             and (
                 breadth < 0.40
                 or (
-                    positive_count >= 4
+                    positive_count >= 5
                     and np.isfinite(concentration)
-                    and concentration >= 0.70
+                    and concentration >= 0.80
                 )
             )
         )
@@ -574,19 +576,38 @@ def _minute_observations(
         (minutes["trade_date"] == analysis_date)
         & minutes["ts_code"].astype(str).isin(codes)
     ]
-    observed = int(current["ts_code"].nunique())
-    coverage = observed / len(codes)
-    empty["intraday_member_coverage_ratio"] = coverage
-    if coverage < MINIMUM_MEMBER_COVERAGE:
+    qualified_codes: list[str] = []
+    for code in codes:
+        code_rows = current[current["ts_code"].astype(str) == code].sort_values(
+            "minute"
+        )
+        prices = pd.to_numeric(code_rows["close"], errors="coerce")
+        if (
+            len(code_rows) / EXPECTED_MINUTE_POINTS
+            >= MINIMUM_MINUTE_TIME_COVERAGE
+            and _has_minute_session_anchors(code_rows["minute"])
+            and len(prices)
+            and bool(np.isfinite(prices).all())
+            and bool((prices > 0).all())
+        ):
+            qualified_codes.append(code)
+    member_coverage = len(qualified_codes) / len(codes)
+    empty["intraday_member_coverage_ratio"] = member_coverage
+    if member_coverage < MINIMUM_MEMBER_COVERAGE:
         return empty
-    pivot = current.pivot(index="minute", columns="ts_code", values="close").sort_index()
-    pivot = pivot.reindex(columns=codes)
+    pivot = (
+        current[current["ts_code"].astype(str).isin(qualified_codes)]
+        .pivot(index="minute", columns="ts_code", values="close")
+        .sort_index()
+        .reindex(columns=qualified_codes)
+        .dropna(axis=0, how="any")
+    )
     time_coverage = len(pivot) / EXPECTED_MINUTE_POINTS
     empty["intraday_time_coverage_ratio"] = time_coverage
     if (
         pivot.empty
-        or pivot.isna().any().any()
         or time_coverage < MINIMUM_MINUTE_TIME_COVERAGE
+        or not _has_minute_session_anchors(pd.Series(pivot.index))
     ):
         return empty
     normalized = pivot / pivot.iloc[0]
@@ -603,6 +624,17 @@ def _minute_observations(
         }
     )
     return empty
+
+
+def _has_minute_session_anchors(values: pd.Series) -> bool:
+    labels = sorted(str(value) for value in values.dropna().tolist())
+    if not labels:
+        return False
+    if labels[0].startswith("m"):
+        return labels[0] == "m000" and labels[-1] == "m239"
+    first = labels[0][-5:]
+    last = labels[-1][-5:]
+    return first in {"09:30", "09:31"} and last == "15:00"
 
 
 def _blank_observations() -> dict[str, object]:

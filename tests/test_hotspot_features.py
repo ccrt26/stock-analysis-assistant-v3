@@ -216,6 +216,25 @@ def test_actual_limits_official_index_and_observable_crowding_flags() -> None:
     assert isinstance(row["turnover_return_divergence_flag"], (bool, np.bool_))
 
 
+def test_four_equal_advancers_are_broad_participation_not_narrow() -> None:
+    dates = pd.bdate_range(end=ANALYSIS_DATE, periods=21)
+    codes = ["A.SZ", "B.SZ", "C.SZ", "D.SZ"]
+    equity = _daily(dates, {code: (10.0, 0.1) for code in codes})
+    catalog = pd.DataFrame([
+        {"group_type": "theme", "group_code": "T1", "group_name": "主题一", "level": "theme", "official_index_code": None}
+    ])
+    members = pd.DataFrame([
+        {"group_type": "theme", "group_code": "T1", "ts_code": code, "valid_from": dates[0].date(), "valid_to": None}
+        for code in codes
+    ])
+
+    row = _compute(equity, dates, catalog=catalog, members=members).iloc[0]
+
+    assert row["breadth_1d"] == pytest.approx(1.0)
+    assert row["top3_positive_contribution_1d"] == pytest.approx(0.75)
+    assert not bool(row["narrow_participation_flag"])
+
+
 def test_historical_and_new_high_coverage_cannot_be_carried_by_one_stock() -> None:
     dates = pd.bdate_range(end=ANALYSIS_DATE, periods=61)
     equity = _daily(dates, {"A.SZ": (10.0, 0.1)})
@@ -293,6 +312,49 @@ def test_minute_path_is_optional_and_never_fabricated() -> None:
     assert limited["intraday_status"] == "limited"
     assert limited["intraday_time_coverage_ratio"] < 0.95
     assert np.isnan(limited["intraday_open_phase_contribution"])
+
+
+def test_minute_member_threshold_uses_only_members_with_valid_full_paths() -> None:
+    dates = pd.bdate_range(end=ANALYSIS_DATE, periods=61)
+    codes = ["A.SZ", "B.SZ", "C.SZ", "D.SZ", "E.SZ"]
+    equity = _daily(dates, {code: (10.0, 0.1) for code in codes})
+    catalog = pd.DataFrame([
+        {"group_type": "theme", "group_code": "T1", "group_name": "主题一", "level": "theme", "official_index_code": None}
+    ])
+    members = pd.DataFrame([
+        {"group_type": "theme", "group_code": "T1", "ts_code": code, "valid_from": dates[0].date(), "valid_to": None}
+        for code in codes
+    ])
+    full = pd.DataFrame([
+        {"trade_date": ANALYSIS_DATE, "ts_code": code, "minute": f"m{i:03d}", "close": 10 + i / 1000, "amount": 1.0}
+        for code in codes[:4]
+        for i in range(240)
+    ])
+
+    complete = _compute(
+        equity, dates, catalog=catalog, members=members, minutes=full
+    ).iloc[0]
+    assert complete["intraday_status"] == "complete"
+    assert complete["intraday_member_coverage_ratio"] == pytest.approx(0.8)
+
+    no_close_anchor = pd.DataFrame([
+        {"trade_date": ANALYSIS_DATE, "ts_code": code, "minute": f"m{i:03d}", "close": 10 + i / 1000, "amount": 1.0}
+        for code in codes
+        for i in range(228)
+    ])
+    missing_close = _compute(
+        equity, dates, catalog=catalog, members=members, minutes=no_close_anchor
+    ).iloc[0]
+    assert missing_close["intraday_status"] == "limited"
+    assert np.isnan(missing_close["intraday_up_minute_share"])
+
+    invalid_open = full.copy()
+    invalid_open.loc[invalid_open["minute"] == "m000", "close"] = 0.0
+    invalid = _compute(
+        equity, dates, catalog=catalog, members=members, minutes=invalid_open
+    ).iloc[0]
+    assert invalid["intraday_status"] == "limited"
+    assert np.isnan(invalid["intraday_max_drawdown"])
 
 
 def test_duplicate_facts_fail_and_output_contains_no_hidden_score_or_trader_claim() -> None:
