@@ -255,15 +255,12 @@ def _record_scope_outcome(
     warehouse: ResearchWarehouse,
     summary: BackfillSummary,
 ) -> None:
+    _record_scope_limitation(warehouse, summary)
     scope_partition = f"{summary.start.isoformat()}:{summary.through.isoformat()}"
     gap_id = hashlib.sha256(
         f"scope|{summary.scope}|{scope_partition}".encode("utf-8")
     ).hexdigest()
-    if (
-        summary.failed == 0
-        and summary.waiting_upstream == 0
-        and summary.limited == 0
-    ):
+    if summary.failed == 0 and summary.waiting_upstream == 0:
         with connect_research_warehouse(warehouse.duckdb_path) as connection:
             connection.execute(
                 """
@@ -274,14 +271,7 @@ def _record_scope_outcome(
                 [gap_id],
             )
         return
-    status = (
-        "failed"
-        if summary.failed
-        else "waiting_upstream"
-        if summary.waiting_upstream
-        else "limited"
-    )
-    reason = "scope_limited" if status == "limited" else "scope_incomplete"
+    status = "failed" if summary.failed else "waiting_upstream"
     impact = {
         "market-core": "核心行情不完整，不能进行全市场横向筛选。",
         "classifications": "板块归属或板块行情不完整，热点判断需要降级。",
@@ -309,11 +299,67 @@ def _record_scope_outcome(
                 f"scope:{summary.scope}",
                 scope_partition,
                 status,
-                reason,
+                "scope_incomplete",
                 now,
                 now,
                 impact,
                 json.dumps(summary.model_dump(mode="json"), ensure_ascii=False),
+            ],
+        )
+
+
+def _record_scope_limitation(
+    warehouse: ResearchWarehouse,
+    summary: BackfillSummary,
+) -> None:
+    gap_id = hashlib.sha256(
+        f"limitation|{summary.scope}".encode("utf-8")
+    ).hexdigest()
+    if summary.limited == 0:
+        with connect_research_warehouse(warehouse.duckdb_path) as connection:
+            connection.execute(
+                """
+                update research_data_gaps
+                set status = 'resolved', last_checked_at = now(), next_retry_at = null
+                where gap_id = ?
+                """,
+                [gap_id],
+            )
+        return
+    impact = {
+        "trading-structure": (
+            "当前官方来源或账号不提供分钟数据，不能据此判断盘中成交路径或资金身份。"
+        ),
+    }.get(summary.scope, "当前来源能力受限，相关结论必须降级。")
+    now = datetime.now(timezone.utc)
+    limited_issues = [
+        issue for issue in summary.issues if "access_or_rate_limit" in issue
+    ]
+    with connect_research_warehouse(warehouse.duckdb_path) as connection:
+        connection.execute(
+            """
+            insert into research_data_gaps
+            (gap_id, dataset_id, partition_value, status, reason_category,
+             source_name, first_seen_at, last_checked_at, next_retry_at,
+             impact_text, detail_json)
+            values (?, ?, 'provider-capability', 'limited', 'source_limited',
+                    null, ?, ?, null, ?, ?)
+            on conflict(dataset_id, partition_value, reason_category)
+            do update set status=excluded.status,
+                          last_checked_at=excluded.last_checked_at,
+                          impact_text=excluded.impact_text,
+                          detail_json=excluded.detail_json
+            """,
+            [
+                gap_id,
+                f"scope:{summary.scope}",
+                now,
+                now,
+                impact,
+                json.dumps(
+                    {"limited": summary.limited, "issues": limited_issues},
+                    ensure_ascii=False,
+                ),
             ],
         )
 

@@ -151,14 +151,18 @@ def test_minute_candidate_scope_reads_only_latest_21_daily_partitions():
     ]
 
 
-def test_known_provider_limit_is_recorded_without_failing_the_data_job(tmp_path):
+def test_known_provider_limit_is_separate_from_temporary_upstream_wait(tmp_path):
     warehouse = ResearchWarehouse(tmp_path / "warehouse")
     summary = BackfillSummary(
         scope="trading-structure",
         start=date(2026, 7, 10),
         through=date(2026, 7, 10),
+        waiting_upstream=1,
         limited=1,
-        issues=["minute_bar:access_or_rate_limit"],
+        issues=[
+            "margin_detail:2026-07-10:waiting_upstream",
+            "minute_bar:access_or_rate_limit",
+        ],
     )
 
     _record_scope_outcome(warehouse, summary)
@@ -166,10 +170,14 @@ def test_known_provider_limit_is_recorded_without_failing_the_data_job(tmp_path)
     with connect_research_warehouse(
         warehouse.duckdb_path, read_only=True
     ) as connection:
-        row = connection.execute(
+        rows = connection.execute(
             """
             select status, reason_category from research_data_gaps
             where dataset_id = 'scope:trading-structure'
+            order by status
             """
-        ).fetchone()
-    assert row == ("limited", "scope_limited")
+        ).fetchall()
+    assert rows == [
+        ("limited", "source_limited"),
+        ("waiting_upstream", "scope_incomplete"),
+    ]
