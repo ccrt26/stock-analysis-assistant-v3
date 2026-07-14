@@ -160,7 +160,8 @@ class EventBackfillService:
             )
 
         for snapshot in _quarter_snapshots(start, through):
-            partition = snapshot.strftime("%Y-%m")
+            requested_snapshot = _latest_friday_on_or_before(snapshot)
+            partition = requested_snapshot.strftime("%Y-%m")
             if self._should_skip_historical(
                 ResearchDatasetId.PLEDGE,
                 partition,
@@ -169,25 +170,34 @@ class EventBackfillService:
             ):
                 summary.skipped += 1
                 continue
-            frame = self.tushare.call_paged(
-                "pledge_stat", end_date=_yyyymmdd(snapshot)
-            ).drop_duplicates(ignore_index=True)
+            frame, actual_snapshot = self._fetch_pledge_snapshot(
+                requested_snapshot
+            )
+            if frame.empty:
+                summary.waiting_upstream += 1
+                summary.issues.append(
+                    f"pledge:{requested_snapshot.isoformat()}:waiting_upstream"
+                )
+                continue
+            actual_partition = actual_snapshot.strftime("%Y-%m")
             self._require_dates_in_range(
                 frame,
                 "end_date",
-                snapshot,
-                snapshot,
+                actual_snapshot,
+                actual_snapshot,
                 "pledge_stat",
             )
             pledge_rows: list[dict[str, Any]] = []
             for row in frame.to_dict(orient="records"):
                 normalized = _clean(row)
                 normalized["end_date"] = _date(row["end_date"])
-                normalized["available_at"] = _conservative_available(snapshot)
+                normalized["available_at"] = _conservative_available(
+                    actual_snapshot
+                )
                 pledge_rows.append(normalized)
             self._commit(
                 ResearchDatasetId.PLEDGE,
-                partition,
+                actual_partition,
                 "pledge_stat",
                 pledge_rows,
                 through,
@@ -196,7 +206,7 @@ class EventBackfillService:
             self._mark_partition_checked(
                 ResearchDatasetId.PLEDGE,
                 partition,
-                f"rows:{len(pledge_rows)}",
+                f"actual:{actual_snapshot.isoformat()}:rows:{len(pledge_rows)}",
             )
 
         suspension_start = through - timedelta(days=365)
@@ -267,6 +277,21 @@ class EventBackfillService:
                 endpoint="share_float",
             )
         return frame.drop_duplicates(ignore_index=True)
+
+    def _fetch_pledge_snapshot(
+        self,
+        requested: date,
+        *,
+        max_weeks_back: int = 4,
+    ) -> tuple[pd.DataFrame, date]:
+        for weeks_back in range(max_weeks_back + 1):
+            candidate = requested - timedelta(days=7 * weeks_back)
+            frame = self.tushare.call_paged(
+                "pledge_stat", end_date=_yyyymmdd(candidate)
+            ).drop_duplicates(ignore_index=True)
+            if not frame.empty:
+                return frame, candidate
+        return pd.DataFrame(), requested
 
     def _backfill_share_float(
         self,
@@ -573,6 +598,10 @@ def _quarter_snapshots(start: date, through: date) -> list[date]:
             if start <= value <= through:
                 candidates.add(value)
     return sorted(candidates)
+
+
+def _latest_friday_on_or_before(value: date) -> date:
+    return value - timedelta(days=(value.weekday() - 4) % 7)
 
 
 def _month_ranges(start: date, through: date) -> list[tuple[date, date]]:

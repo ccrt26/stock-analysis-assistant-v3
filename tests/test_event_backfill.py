@@ -418,6 +418,37 @@ def test_future_share_float_requires_an_announcement_known_by_analysis_date():
     )
 
 
+def test_pledge_snapshots_query_latest_friday_not_calendar_quarter_end(tmp_path):
+    class PledgeDatePro(ActionPro):
+        def __init__(self):
+            super().__init__()
+            self.pledge_snapshots = []
+
+        def pledge_stat(self, **kwargs):
+            self.pledge_snapshots.append(kwargs["end_date"])
+            return super().pledge_stat(**kwargs)
+
+    pro = PledgeDatePro()
+    service = EventBackfillService(
+        TushareResearchClient(pro, pacer=lambda method: None),
+        type(
+            "EmptyAnnouncementClient",
+            (),
+            {"fetch_announcements": lambda self, start, through: []},
+        )(),
+        ResearchWarehouse(tmp_path / "warehouse"),
+    )
+
+    service.backfill(
+        start=date(2026, 1, 1),
+        through=date(2026, 7, 13),
+        trading_dates=(),
+        resume=True,
+    )
+
+    assert pro.pledge_snapshots == ["20260327", "20260626", "20260710"]
+
+
 def test_resume_skips_checked_historical_event_ranges_before_fetch(tmp_path):
     class IncrementalActionPro(ActionPro):
         def __init__(self):
@@ -454,7 +485,7 @@ def test_resume_skips_checked_historical_event_ranges_before_fetch(tmp_path):
 
         def pledge_stat(self, **kwargs):
             self.pledge_snapshots.append(kwargs["end_date"])
-            if kwargs["end_date"] == "20260630":
+            if kwargs["end_date"] == "20260626":
                 return pd.DataFrame()
             return super().pledge_stat(**kwargs)
 
@@ -486,4 +517,9 @@ def test_resume_skips_checked_historical_event_ranges_before_fetch(tmp_path):
     assert pro.holder_ranges == expected_month_ranges
     assert pro.float_ranges == expected_month_ranges
     assert pro.repurchase_ranges == expected_month_ranges
-    assert pro.pledge_snapshots == ["20260630", "20260710", "20260710"]
+    assert pro.pledge_snapshots == [
+        "20260626",
+        "20260619",
+        "20260710",
+        "20260710",
+    ]
