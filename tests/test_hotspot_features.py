@@ -8,6 +8,7 @@ import pytest
 
 from stock_analyzer.analysis.hotspot_features import (
     HOTSPOT_FORMULA_VERSION,
+    _daily_group_series,
     compute_hotspot_features,
 )
 
@@ -402,3 +403,35 @@ def test_missing_official_index_is_declared_and_overlapping_membership_fails() -
     members = pd.concat([members, overlap], ignore_index=True)
     with pytest.raises(ValueError, match="overlapping"):
         _compute(equity, dates, members=members)
+
+
+def test_daily_turnover_uses_preindexed_sessions_without_rescanning_full_market() -> None:
+    dates = pd.bdate_range(end=ANALYSIS_DATE, periods=3)
+    members = pd.DataFrame(
+        [
+            {
+                "group_type": "theme",
+                "group_code": "T1",
+                "ts_code": code,
+                "valid_from": dates[0].date(),
+                "valid_to": None,
+            }
+            for code in ("A.SZ", "B.SZ")
+        ]
+    )
+    indexed = {
+        trading_day.date(): pd.DataFrame(
+            {
+                "ts_code": ["A.SZ", "B.SZ", "OTHER.SZ"],
+                "amount": [100.0, 200.0, 700.0],
+            }
+        ).set_index("ts_code", drop=False)
+        for trading_day in dates
+    }
+    sessions = pd.Index(dates.date, name="trade_date")
+    market_amount = pd.Series(1000.0, index=sessions)
+
+    result = _daily_group_series(members, indexed, market_amount, sessions)
+
+    assert result["group_amount"].tolist() == [300.0, 300.0, 300.0]
+    assert result["turnover_share"].tolist() == pytest.approx([0.3, 0.3, 0.3])

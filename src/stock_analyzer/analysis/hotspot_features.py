@@ -89,30 +89,45 @@ def compute_hotspot_features(
     equity_returns = equity_close.pct_change(fill_method=None).replace([np.inf, -np.inf], np.nan)
     benchmark_close = benchmark.set_index("trade_date")["close"].reindex(sessions)
     market_amount = _strict_market_amount(equity, sessions)
-
-    rows = [
-        _group_row(
-            item,
-            equity,
-            equity_close,
-            equity_returns,
-            market_amount,
-            benchmark_close,
-            limits,
-            official,
-            minutes,
-            members,
-            sessions,
-            analysis_date,
+    equity_by_date = {
+        trading_day: group.assign(ts_code=group["ts_code"].astype(str)).set_index(
+            "ts_code", drop=False
         )
-        for item in catalog.to_dict(orient="records")
-    ]
+        for trading_day, group in equity.groupby("trade_date", sort=False)
+    }
+    member_groups = {
+        (str(group_type), str(group_code)): group
+        for (group_type, group_code), group in members.groupby(
+            ["group_type", "group_code"], sort=False
+        )
+    }
+    empty_members = members.iloc[0:0].copy()
+    rows = []
+    for item in catalog.to_dict(orient="records"):
+        key = (str(item["group_type"]), str(item["group_code"]))
+        rows.append(
+            _group_row(
+                item,
+                member_groups.get(key, empty_members),
+                equity_by_date,
+                equity_close,
+                equity_returns,
+                market_amount,
+                benchmark_close,
+                limits,
+                official,
+                minutes,
+                sessions,
+                analysis_date,
+            )
+        )
     return pd.DataFrame(rows).sort_values(["group_type", "level", "group_code"]).reset_index(drop=True)
 
 
 def _group_row(
     item: dict[str, object],
-    equity: pd.DataFrame,
+    group_members: pd.DataFrame,
+    equity_by_date: dict[date, pd.DataFrame],
     equity_close: pd.DataFrame,
     equity_returns: pd.DataFrame,
     market_amount: pd.Series,
@@ -120,16 +135,11 @@ def _group_row(
     limits: pd.DataFrame,
     official: pd.DataFrame,
     minutes: pd.DataFrame,
-    memberships: pd.DataFrame,
     sessions: pd.Index,
     analysis_date: date,
 ) -> dict[str, object]:
     group_type = str(item["group_type"])
     group_code = str(item["group_code"])
-    group_members = memberships[
-        (memberships["group_type"].astype(str) == group_type)
-        & (memberships["group_code"].astype(str) == group_code)
-    ]
     current_codes = _effective_codes(group_members, analysis_date)
     base = {
         "analysis_date": analysis_date,
@@ -157,8 +167,14 @@ def _group_row(
         )
         return base
 
-    current = equity[equity["trade_date"] == analysis_date]
-    current = current[current["ts_code"].astype(str).isin(current_codes)].copy()
+    current_indexed = equity_by_date.get(analysis_date)
+    current = (
+        pd.DataFrame(columns=["trade_date", "ts_code", "open", "high", "low", "close", "amount"])
+        if current_indexed is None
+        else current_indexed.reindex(current_codes)
+        .loc[lambda frame: frame["ts_code"].notna()]
+        .reset_index(drop=True)
+    )
     current_valid = current[_valid_ohlc_amount(current)]
     observed = int(current_valid["ts_code"].nunique())
     coverage_ratio = observed / len(current_codes)
@@ -167,7 +183,9 @@ def _group_row(
     if not member_complete:
         limitations.append(f"current member coverage {coverage_ratio:.2%} is below required 80%")
 
-    daily = _daily_group_series(group_members, equity, market_amount, sessions)
+    daily = _daily_group_series(
+        group_members, equity_by_date, market_amount, sessions
+    )
     base["observed_member_count"] = observed
     base["member_coverage_ratio"] = coverage_ratio
     for horizon in HORIZONS:
@@ -311,17 +329,20 @@ def _group_row(
 
 def _daily_group_series(
     group_members: pd.DataFrame,
-    equity: pd.DataFrame,
+    equity_by_date: dict[date, pd.DataFrame],
     market_amount: pd.Series,
     sessions: pd.Index,
 ) -> pd.DataFrame:
     rows: list[dict[str, object]] = []
     for trading_day in sessions:
         codes = _effective_codes(group_members, trading_day)
-        day_rows = equity[
-            (equity["trade_date"] == trading_day)
-            & equity["ts_code"].astype(str).isin(codes)
-        ]
+        indexed = equity_by_date.get(trading_day)
+        day_rows = (
+            pd.DataFrame(columns=["ts_code", "amount"])
+            if indexed is None or not codes
+            else indexed.reindex(codes)
+            .loc[lambda frame: frame["ts_code"].notna()]
+        )
         valid_amounts = pd.to_numeric(day_rows["amount"], errors="coerce")
         group_amount = (
             float(valid_amounts.sum())
