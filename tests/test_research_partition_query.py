@@ -8,7 +8,11 @@ import pandas as pd
 import pytest
 
 from stock_analyzer.data.research_contracts import FactBatch, ResearchDatasetId
-from stock_analyzer.storage.research_query import ResearchQuery
+from stock_analyzer.storage.research_query import (
+    ResearchQuery,
+    _fact_content_hash,
+    _resolve_as_of,
+)
 from stock_analyzer.storage.research_warehouse import ResearchWarehouse
 
 
@@ -394,3 +398,45 @@ def test_materialized_snapshot_hashes_the_exact_frames_returned_to_formula(tmp_p
     assert snapshot.frame(ResearchDatasetId.EQUITY_DAILY).iloc[0][
         "close"
     ] == pytest.approx(10.2)
+
+
+def test_large_as_of_resolution_and_hashing_do_not_materialize_python_row_dicts(
+    monkeypatch,
+):
+    row_count = 20_000
+    current = pd.DataFrame(
+        {
+            "trade_date": [date(2026, 7, 10)] * row_count,
+            "ts_code": [f"{value:06d}.SZ" for value in range(row_count)],
+            "business_key_hash": [f"key-{value}" for value in range(row_count)],
+            "payload_hash": [f"payload-{value}" for value in range(row_count)],
+            "available_at": [datetime(2026, 7, 10, 8, tzinfo=timezone.utc)]
+            * row_count,
+            "revision_no": [1] * row_count,
+        }
+    )
+    later = current.iloc[0].to_dict()
+    later.update(
+        payload_hash="revised",
+        available_at=datetime(2026, 7, 10, 9, tzinfo=timezone.utc),
+        revision_no=2,
+    )
+    monkeypatch.setattr(
+        pd.DataFrame,
+        "to_dict",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("large snapshots must not become Python row dictionaries")
+        ),
+    )
+
+    resolved = _resolve_as_of(
+        ResearchDatasetId.EQUITY_DAILY,
+        current,
+        [{"row_payload": later}],
+        datetime(2026, 7, 11, tzinfo=timezone.utc),
+    )
+    digest = _fact_content_hash(resolved)
+
+    assert len(resolved) == row_count
+    assert resolved.iloc[0]["payload_hash"] == "revised"
+    assert len(digest) == 64

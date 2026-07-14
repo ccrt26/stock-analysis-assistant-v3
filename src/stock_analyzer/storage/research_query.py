@@ -243,37 +243,61 @@ def _resolve_as_of(
     revisions: Iterable[Mapping[str, Any]],
     cutoff: datetime,
 ) -> pd.DataFrame:
-    candidates: list[dict[str, Any]] = []
+    frames: list[pd.DataFrame] = []
+    cutoff_stamp = pd.Timestamp(_utc(cutoff))
     if not current.empty:
-        for row in current.to_dict(orient="records"):
-            if _utc(row["available_at"]) <= cutoff:
-                candidates.append(row)
+        current_known = pd.to_datetime(
+            current["available_at"], utc=True, errors="raise"
+        ) <= cutoff_stamp
+        if current_known.any():
+            frames.append(current.loc[current_known].copy())
 
-    for revision in revisions:
-        row = dict(revision["row_payload"])
-        if _utc(row["available_at"]) <= cutoff:
-            candidates.append(row)
+    revision_payloads = [dict(revision["row_payload"]) for revision in revisions]
+    if revision_payloads:
+        revision_frame = pd.DataFrame.from_records(revision_payloads)
+        revision_known = pd.to_datetime(
+            revision_frame["available_at"], utc=True, errors="raise"
+        ) <= cutoff_stamp
+        if revision_known.any():
+            frames.append(revision_frame.loc[revision_known].copy())
 
-    if not candidates:
+    if not frames:
         return pd.DataFrame()
     contract = research_contract(dataset)
-    best: dict[str, dict[str, Any]] = {}
-    for row in candidates:
-        key_hash = str(row["business_key_hash"])
-        previous = best.get(key_hash)
-        rank = (_utc(row["available_at"]), int(row.get("revision_no", 1)))
-        if previous is None:
-            best[key_hash] = row
-            continue
-        previous_rank = (
-            _utc(previous["available_at"]),
-            int(previous.get("revision_no", 1)),
+    candidates = pd.concat(frames, ignore_index=True, sort=False)
+    candidates["__available_rank"] = pd.to_datetime(
+        candidates["available_at"], utc=True, errors="raise"
+    )
+    revision_values = (
+        candidates["revision_no"]
+        if "revision_no" in candidates
+        else pd.Series(1, index=candidates.index)
+    )
+    candidates["__revision_rank"] = pd.to_numeric(
+        revision_values, errors="coerce"
+    ).fillna(1)
+    candidates["__candidate_order"] = range(len(candidates))
+    best = (
+        candidates.sort_values(
+            [
+                "business_key_hash",
+                "__available_rank",
+                "__revision_rank",
+                "__candidate_order",
+            ],
+            ascending=[True, False, False, True],
+            kind="mergesort",
         )
-        if rank > previous_rank:
-            best[key_hash] = row
-    return pd.DataFrame(best.values()).sort_values(
-        list(contract.business_key)
-    ).reset_index(drop=True)
+        .drop_duplicates("business_key_hash", keep="first")
+        .drop(
+            columns=[
+                "__available_rank",
+                "__revision_rank",
+                "__candidate_order",
+            ]
+        )
+    )
+    return best.sort_values(list(contract.business_key)).reset_index(drop=True)
 
 
 def _assert_unique_current_hashes(
@@ -350,14 +374,24 @@ def _stable_hash(value: Any) -> str:
 
 
 def _fact_content_hash(frame: pd.DataFrame) -> str:
-    rows = sorted(
-        (
-            str(row["business_key_hash"]),
-            str(row["payload_hash"]),
-            int(row.get("revision_no", 1)),
-        )
-        for row in frame.to_dict(orient="records")
+    if frame.empty:
+        return _stable_hash([])
+    revision = (
+        pd.to_numeric(frame["revision_no"], errors="coerce").fillna(1)
+        if "revision_no" in frame
+        else pd.Series(1, index=frame.index)
     )
+    selected = pd.DataFrame(
+        {
+            "business_key_hash": frame["business_key_hash"].astype(str),
+            "payload_hash": frame["payload_hash"].astype(str),
+            "revision_no": revision.astype(int),
+        }
+    ).sort_values(
+        ["business_key_hash", "payload_hash", "revision_no"],
+        kind="mergesort",
+    )
+    rows = list(selected.itertuples(index=False, name=None))
     return _stable_hash(rows)
 
 
