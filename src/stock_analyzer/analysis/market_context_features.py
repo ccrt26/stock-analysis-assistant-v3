@@ -86,26 +86,29 @@ def compute_market_context_features(
     )
 
     current = equity[equity["trade_date"] == analysis_date].copy()
-    observed_current_rows = int(current["ts_code"].nunique())
+    current_core_valid = current[
+        _finite_positive(current["close"]) & _finite_nonnegative(current["amount"])
+    ].copy()
+    observed_current_rows = int(current_core_valid["ts_code"].nunique())
     coverage_ratio = observed_current_rows / int(expected_current_rows)
-    coverage_status = (
-        "complete" if coverage_ratio >= MINIMUM_CURRENT_COVERAGE else "limited"
-    )
-    limitation_notes = ""
-    if coverage_status == "limited":
-        limitation_notes = (
+    equity_coverage_complete = coverage_ratio >= MINIMUM_CURRENT_COVERAGE
+    limitation_notes: list[str] = []
+    if not equity_coverage_complete:
+        limitation_notes.append(
             f"current equity coverage {coverage_ratio:.2%} is below required 95%"
         )
 
-    pivot = _close_pivot(equity) if observed_current_rows else pd.DataFrame()
+    market_dates = sorted(equity["trade_date"].unique())
+    eligible_codes = set(current_core_valid["ts_code"].astype(str))
+    price_equity = equity[equity["ts_code"].astype(str).isin(eligible_codes)].copy()
+    price_equity.loc[~_finite_positive(price_equity["close"]), "close"] = np.nan
+    pivot = _close_pivot(price_equity) if observed_current_rows else pd.DataFrame()
     row: dict[str, object] = {
         "analysis_date": analysis_date,
         "formula_version": MARKET_CONTEXT_FORMULA_VERSION,
         "observed_current_rows": observed_current_rows,
         "expected_current_rows": int(expected_current_rows),
         "coverage_ratio": float(coverage_ratio),
-        "coverage_status": coverage_status,
-        "limitation_notes": limitation_notes,
         "interpretation_limit": "observable market facts only",
     }
 
@@ -115,21 +118,41 @@ def compute_market_context_features(
         row[f"median_return_{horizon}d"] = _median_or_nan(returns)
         row[f"breadth_{horizon}d"] = _positive_share(returns)
 
+    current_indexes = indexes[indexes["trade_date"] == analysis_date].copy()
+    current_indexes = current_indexes[
+        current_indexes["index_code"].astype(str).isin(BROAD_INDEX_CODES)
+        & _finite_positive(current_indexes["close"])
+    ]
+    index_current_count = int(current_indexes["index_code"].nunique())
+    index_coverage_ratio = index_current_count / len(BROAD_INDEX_CODES)
+    index_coverage_complete = index_current_count == len(BROAD_INDEX_CODES)
+    row["broad_index_current_count"] = index_current_count
+    row["broad_index_current_coverage_ratio"] = float(index_coverage_ratio)
+    if not index_coverage_complete:
+        limitation_notes.append(
+            "broad index current coverage "
+            f"{index_current_count}/{len(BROAD_INDEX_CODES)} is incomplete"
+        )
+
     for code in BROAD_INDEX_CODES:
         code_rows = indexes[indexes["index_code"].astype(str) == code].sort_values(
             "trade_date"
         )
+        code_series = (
+            code_rows.set_index("trade_date")["close"].reindex(market_dates)
+            if market_dates
+            else pd.Series(dtype=float)
+        )
         for horizon in RETURN_HORIZONS:
             row[f"index_{_code_slug(code)}_return_{horizon}d"] = _dated_series_return(
-                code_rows, horizon, analysis_date
+                code_series, horizon, analysis_date
             )
 
-    turnover_by_date = (
-        equity.groupby("trade_date", sort=True)["amount"].sum(min_count=1).sort_index()
-    )
+    turnover_by_date = _strict_turnover_by_date(equity)
     current_turnover = (
         float(turnover_by_date.loc[analysis_date])
-        if analysis_date in turnover_by_date.index
+        if equity_coverage_complete
+        and analysis_date in turnover_by_date.index
         and pd.notna(turnover_by_date.loc[analysis_date])
         else np.nan
     )
@@ -149,7 +172,28 @@ def compute_market_context_features(
         float(one_day_returns.std(ddof=0)) if not one_day_returns.empty else np.nan
     )
     row["realized_volatility_20d_annualized"] = _realized_market_volatility(pivot)
-    row.update(_limit_observations(current, limits, analysis_date))
+    limit_observations, limit_coverage_complete = _limit_observations(
+        current_core_valid,
+        limits,
+        analysis_date,
+        expected_current_rows=int(expected_current_rows),
+    )
+    row.update(limit_observations)
+    if not limit_coverage_complete:
+        limit_ratio = limit_observations["limit_price_coverage_ratio"]
+        limitation_notes.append(
+            f"stock limit coverage {limit_ratio:.2%} is below required 95%"
+            if pd.notna(limit_ratio)
+            else "stock limit coverage is unavailable"
+        )
+    row["coverage_status"] = (
+        "complete"
+        if equity_coverage_complete
+        and index_coverage_complete
+        and limit_coverage_complete
+        else "limited"
+    )
+    row["limitation_notes"] = "; ".join(limitation_notes)
     return pd.DataFrame([row])
 
 
@@ -193,21 +237,21 @@ def _cross_section_returns(pivot: pd.DataFrame, horizon: int) -> pd.Series:
 
 
 def _series_return(series: pd.Series, horizon: int) -> float:
-    values = pd.to_numeric(series, errors="coerce").dropna()
+    values = pd.to_numeric(series, errors="coerce")
     if len(values) <= horizon:
         return np.nan
-    earlier = float(values.iloc[-horizon - 1])
-    if earlier == 0:
+    window = values.iloc[-horizon - 1 :]
+    if len(window) != horizon + 1 or not _finite_positive(window).all():
         return np.nan
-    return float(values.iloc[-1] / earlier - 1.0)
+    return float(window.iloc[-1] / window.iloc[0] - 1.0)
 
 
 def _dated_series_return(
-    rows: pd.DataFrame, horizon: int, analysis_date: date
+    series: pd.Series, horizon: int, analysis_date: date
 ) -> float:
-    if rows.empty or rows.iloc[-1]["trade_date"] != analysis_date:
+    if series.empty or series.index[-1] != analysis_date:
         return np.nan
-    return _series_return(rows["close"], horizon)
+    return _series_return(series, horizon)
 
 
 def _mean_or_nan(values: pd.Series) -> float:
@@ -223,10 +267,13 @@ def _positive_share(values: pd.Series) -> float:
 
 
 def _trailing_ratio(series: pd.Series, current: float, window: int) -> float:
-    valid = pd.to_numeric(series, errors="coerce").dropna()
-    if len(valid) < window or pd.isna(current):
+    values = pd.to_numeric(series, errors="coerce")
+    if len(values) < window or not np.isfinite(current):
         return np.nan
-    average = float(valid.tail(window).mean())
+    trailing = values.tail(window)
+    if len(trailing) != window or not _finite_nonnegative(trailing).all():
+        return np.nan
+    average = float(trailing.mean())
     if average == 0:
         return np.nan
     return float(current / average)
@@ -275,7 +322,9 @@ def _limit_observations(
     current: pd.DataFrame,
     limits: pd.DataFrame,
     analysis_date: date,
-) -> dict[str, object]:
+    *,
+    expected_current_rows: int,
+) -> tuple[dict[str, object], bool]:
     current_limits = limits[limits["trade_date"] == analysis_date]
     merged = current[["ts_code", "close"]].merge(
         current_limits[["ts_code", "up_limit", "down_limit"]],
@@ -284,16 +333,21 @@ def _limit_observations(
         validate="one_to_one",
     )
     valid = merged[
-        merged[["close", "up_limit", "down_limit"]].notna().all(axis=1)
-        & (merged["up_limit"] > 0)
-        & (merged["down_limit"] > 0)
+        _finite_positive(merged["close"])
+        & _finite_positive(merged["up_limit"])
+        & _finite_positive(merged["down_limit"])
     ].copy()
     observed = int(len(valid))
-    market_denominator = int(current["ts_code"].nunique())
-    if not observed:
+    market_denominator = expected_current_rows
+    limit_coverage_ratio = observed / market_denominator
+    coverage_complete = bool(
+        pd.notna(limit_coverage_ratio)
+        and limit_coverage_ratio >= MINIMUM_CURRENT_COVERAGE
+    )
+    if not coverage_complete:
         return {
-            "limit_observed_count": 0,
-            "limit_price_coverage_ratio": 0.0 if market_denominator else np.nan,
+            "limit_observed_count": observed,
+            "limit_price_coverage_ratio": limit_coverage_ratio,
             "limit_up_count": np.nan,
             "near_limit_up_count": np.nan,
             "limit_down_count": np.nan,
@@ -302,7 +356,7 @@ def _limit_observations(
             "near_limit_up_share": np.nan,
             "limit_down_share": np.nan,
             "near_limit_down_share": np.nan,
-        }
+        }, False
 
     limit_up = pd.Series(
         np.isclose(valid["close"], valid["up_limit"], rtol=1e-6, atol=1e-8),
@@ -339,7 +393,27 @@ def _limit_observations(
         output[f"{name}_share"] = (
             count / market_denominator if market_denominator else np.nan
         )
-    return output
+    return output, True
+
+
+def _strict_turnover_by_date(equity: pd.DataFrame) -> pd.Series:
+    totals: dict[date, float] = {}
+    for trading_day, group in equity.groupby("trade_date", sort=True):
+        amounts = pd.to_numeric(group["amount"], errors="coerce")
+        totals[trading_day] = (
+            float(amounts.sum()) if _finite_nonnegative(amounts).all() else np.nan
+        )
+    return pd.Series(totals, dtype=float).sort_index()
+
+
+def _finite_positive(values: pd.Series) -> pd.Series:
+    numeric = pd.to_numeric(values, errors="coerce")
+    return pd.Series(np.isfinite(numeric) & (numeric > 0), index=values.index)
+
+
+def _finite_nonnegative(values: pd.Series) -> pd.Series:
+    numeric = pd.to_numeric(values, errors="coerce")
+    return pd.Series(np.isfinite(numeric) & (numeric >= 0), index=values.index)
 
 
 def _code_slug(code: str) -> str:
