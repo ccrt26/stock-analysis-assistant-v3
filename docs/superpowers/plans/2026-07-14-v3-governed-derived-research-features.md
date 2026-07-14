@@ -1,5 +1,7 @@
 # V3 Governed Derived Research Features Implementation Plan
 
+> **Current-state authority:** This plan defines required work and checks; it is not evidence that code, real data, or automatic execution is complete. Current proven status is tracked only in [`docs/operations/production-capability-matrix.md`](../../operations/production-capability-matrix.md).
+
 > **For Codex:** REQUIRED SUB-SKILLS: use `superpowers:test-driven-development` for every behavior change, then `superpowers:verification-before-completion`; use `superpowers:requesting-code-review` before final acceptance. Do not create a branch or worktree. Work on the current local `main` as explicitly requested by the user.
 
 **Goal:** Complete the missing derived layer of the unified research warehouse so market context, sector hotspot evidence, and stock trading context are reproducible, versioned, persisted, health-checked, and automatically recomputed by the existing data-only schedule.

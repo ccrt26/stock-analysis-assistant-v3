@@ -1,5 +1,7 @@
 # V3 可治理派生研究特征设计
 
+> **当前状态权威：** 本文档定义必须实现的业务行为，不代表程序、真实数据或每日自动执行已经完成；最新实讯状态只以 [`docs/operations/production-capability-matrix.md`](../../operations/production-capability-matrix.md) 为准。
+
 **日期：** 2026-07-14  
 **状态：** 根据用户授权完成自检，可进入执行计划  
 **依据：** `2026-07-13-v3-unified-research-data-foundation-design.md` 及其执行计划  
