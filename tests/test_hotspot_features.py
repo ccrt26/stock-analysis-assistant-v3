@@ -65,6 +65,12 @@ def _benchmark(dates: pd.DatetimeIndex) -> pd.DataFrame:
     return pd.DataFrame({"trade_date": dates.date, "close": [100.0] * len(dates)})
 
 
+def _official(dates: pd.DatetimeIndex) -> pd.DataFrame:
+    return pd.DataFrame(
+        {"trade_date": dates.date, "index_code": ["IDX1"] * len(dates), "close": [100.0] * len(dates)}
+    )
+
+
 def _limits(equity: pd.DataFrame) -> pd.DataFrame:
     return equity[["trade_date", "ts_code", "close"]].assign(
         up_limit=lambda frame: frame["close"] + 10.0,
@@ -88,9 +94,7 @@ def _compute(
         _members(dates) if members is None else members,
         _benchmark(dates),
         _limits(equity) if limits is None else limits,
-        pd.DataFrame(columns=["trade_date", "index_code", "close"])
-        if official is None
-        else official,
+        _official(dates) if official is None else official,
         pd.DataFrame(columns=["trade_date", "ts_code", "minute", "close", "amount"])
         if minutes is None
         else minutes,
@@ -143,11 +147,29 @@ def test_effective_membership_is_applied_on_each_historical_session() -> None:
 
     row = _compute(equity, dates, catalog=catalog, members=members).iloc[0]
 
-    # The latest three sessions use B, not today's membership backfilled over history.
+    # Daily turnover uses the member effective on each day.  No stock was a
+    # continuous member for the whole 5-session return window, so that horizon
+    # is unavailable instead of backfilling today's B into A's history.
     assert row["member_count"] == 1
-    assert row["breadth_5d"] == pytest.approx(2 / 5)
+    assert np.isnan(row["breadth_5d"])
+    assert row["horizon_observed_member_count_5d"] == 0
     assert row["turnover_share_average_5d"] == pytest.approx(1 / 3)
     assert row["turnover_share_change_3d"] == pytest.approx(0.0)
+
+
+def test_horizon_median_and_breadth_use_each_stocks_endpoint_return() -> None:
+    dates = pd.bdate_range(end=ANALYSIS_DATE, periods=4)
+    equity = _daily(dates, {"A.SZ": (100.0, 0.0), "B.SZ": (100.0, 0.0)})
+    equity.loc[equity["ts_code"] == "A.SZ", "close"] = [100.0, 100.0, 200.0, 100.0]
+    equity.loc[equity["ts_code"] == "B.SZ", "close"] = [100.0, 100.0, 50.0, 100.0]
+    catalog = _catalog().query("group_code == 'T1'").reset_index(drop=True)
+    members = _members(dates).query("group_code == 'T1'").reset_index(drop=True)
+
+    row = _compute(equity, dates, catalog=catalog, members=members).iloc[0]
+
+    assert row["equal_weight_return_3d"] == pytest.approx(0.0)
+    assert row["median_return_3d"] == pytest.approx(0.0)
+    assert row["breadth_3d"] == pytest.approx(0.0)
 
 
 def test_catalog_keeps_no_member_themes_and_partial_coverage_is_not_comparable() -> None:
@@ -194,13 +216,65 @@ def test_actual_limits_official_index_and_observable_crowding_flags() -> None:
     assert isinstance(row["turnover_return_divergence_flag"], (bool, np.bool_))
 
 
+def test_historical_and_new_high_coverage_cannot_be_carried_by_one_stock() -> None:
+    dates = pd.bdate_range(end=ANALYSIS_DATE, periods=61)
+    equity = _daily(dates, {"A.SZ": (10.0, 0.1)})
+    for code in ("B.SZ", "C.SZ", "D.SZ", "E.SZ"):
+        equity = pd.concat(
+            [equity, _daily(pd.DatetimeIndex([dates[-1]]), {code: (10.0, 0.0)})],
+            ignore_index=True,
+        )
+    catalog = pd.DataFrame([
+        {"group_type": "theme", "group_code": "T1", "group_name": "主题一", "level": "theme", "official_index_code": None}
+    ])
+    members = pd.DataFrame([
+        {"group_type": "theme", "group_code": "T1", "ts_code": code, "valid_from": dates[0].date(), "valid_to": None}
+        for code in ("A.SZ", "B.SZ", "C.SZ", "D.SZ", "E.SZ")
+    ])
+
+    row = _compute(equity, dates, catalog=catalog, members=members).iloc[0]
+
+    assert row["horizon_observed_member_count_20d"] == 1
+    assert row["horizon_member_coverage_ratio_20d"] == pytest.approx(0.2)
+    assert np.isnan(row["equal_weight_return_20d"])
+    assert row["new_high_observed_member_count_20d"] == 1
+    assert row["new_high_member_coverage_ratio_20d"] == pytest.approx(0.2)
+    assert np.isnan(row["new_high_20d_share"])
+    assert row["coverage_status"] == "limited"
+
+
+def test_limit_share_uses_observed_denominator_and_missing_flags_are_unknown() -> None:
+    dates = pd.bdate_range(end=ANALYSIS_DATE, periods=5)
+    codes = ["A.SZ", "B.SZ", "C.SZ", "D.SZ", "E.SZ"]
+    equity = _daily(dates, {code: (10.0, 0.0) for code in codes})
+    catalog = pd.DataFrame([
+        {"group_type": "theme", "group_code": "T1", "group_name": "主题一", "level": "theme", "official_index_code": None}
+    ])
+    members = pd.DataFrame([
+        {"group_type": "theme", "group_code": "T1", "ts_code": code, "valid_from": dates[0].date(), "valid_to": None}
+        for code in codes
+    ])
+    limits = _limits(equity)
+    limits = limits[~((limits["trade_date"] == ANALYSIS_DATE) & (limits["ts_code"] == "E.SZ"))]
+    limits.loc[(limits["trade_date"] == ANALYSIS_DATE) & (limits["ts_code"] == "A.SZ"), "up_limit"] = 10.0
+
+    row = _compute(equity, dates, catalog=catalog, members=members, limits=limits).iloc[0]
+
+    assert row["limit_coverage_ratio"] == pytest.approx(0.8)
+    assert row["limit_up_count"] == 1
+    assert row["limit_up_share"] == pytest.approx(0.25)
+    assert pd.isna(row["high_volume_low_progress_flag"])
+    assert pd.isna(row["turnover_return_divergence_flag"])
+
+
 def test_minute_path_is_optional_and_never_fabricated() -> None:
-    dates = pd.bdate_range(end=ANALYSIS_DATE, periods=21)
+    dates = pd.bdate_range(end=ANALYSIS_DATE, periods=61)
     equity = _daily(dates, {"A.SZ": (10.0, 0.1), "B.SZ": (20.0, 0.1)})
-    minute_values = [10.0, 10.2, 10.1, 10.4]
+    minute_values = np.linspace(10.0, 12.0, 240)
+    minute_values[120] = minute_values[119] - 0.2
     minutes = pd.DataFrame(
         [
-            {"trade_date": ANALYSIS_DATE, "ts_code": code, "minute": f"09:{30 + i:02d}", "close": value, "amount": 10.0}
+            {"trade_date": ANALYSIS_DATE, "ts_code": code, "minute": f"m{i:03d}", "close": value, "amount": 10.0}
             for code in ("A.SZ", "B.SZ")
             for i, value in enumerate(minute_values)
         ]
@@ -208,9 +282,17 @@ def test_minute_path_is_optional_and_never_fabricated() -> None:
     row = _compute(equity, dates, minutes=minutes).set_index("group_code").loc["L1"]
 
     assert row["intraday_status"] == "complete"
-    assert row["intraday_up_minute_share"] == pytest.approx(2 / 3)
+    assert row["intraday_time_coverage_ratio"] == pytest.approx(1.0)
+    assert row["intraday_up_minute_share"] > 0.95
     assert row["intraday_max_drawdown"] < 0
     assert row["intraday_high_to_close_pullback"] == pytest.approx(0.0)
+    assert row["coverage_status"] == "complete"
+
+    two_points = minutes[minutes["minute"].isin(["m000", "m239"])]
+    limited = _compute(equity, dates, minutes=two_points).set_index("group_code").loc["L1"]
+    assert limited["intraday_status"] == "limited"
+    assert limited["intraday_time_coverage_ratio"] < 0.95
+    assert np.isnan(limited["intraday_open_phase_contribution"])
 
 
 def test_duplicate_facts_fail_and_output_contains_no_hidden_score_or_trader_claim() -> None:
@@ -237,3 +319,20 @@ def test_duplicate_facts_fail_and_output_contains_no_hidden_score_or_trader_clai
         "出货",
     ):
         assert prohibited not in rendered
+
+
+def test_missing_official_index_is_declared_and_overlapping_membership_fails() -> None:
+    dates = pd.bdate_range(end=ANALYSIS_DATE, periods=61)
+    equity = _daily(dates, {"A.SZ": (10.0, 0.1), "B.SZ": (20.0, 0.1)})
+    empty_official = pd.DataFrame(columns=["trade_date", "index_code", "close"])
+    row = _compute(equity, dates, official=empty_official).set_index("group_code").loc["L1"]
+    assert row["official_index_status"] == "limited"
+    assert row["coverage_status"] == "limited"
+    assert "official index" in row["limitation_notes"]
+
+    members = _members(dates)
+    overlap = members.iloc[[0]].copy()
+    overlap["valid_from"] = dates[1].date()
+    members = pd.concat([members, overlap], ignore_index=True)
+    with pytest.raises(ValueError, match="overlapping"):
+        _compute(equity, dates, members=members)
