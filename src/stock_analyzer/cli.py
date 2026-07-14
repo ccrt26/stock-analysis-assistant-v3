@@ -273,6 +273,26 @@ def data_repair_gaps(
         raise typer.Exit(code=2)
 
 
+@data_app.command("normalize-share-float")
+def data_normalize_share_float(
+    through: str = typer.Option(..., "--through"),
+) -> None:
+    from stock_analyzer.data.event_backfill import normalize_existing_share_float
+    from stock_analyzer.storage.research_warehouse import ResearchWarehouse
+
+    config = AppConfig.load()
+    result = normalize_existing_share_float(
+        ResearchWarehouse(config.local_warehouse_dir),
+        through=date.fromisoformat(through),
+    )
+    typer.echo(
+        "share-float normalization: "
+        f"before={result['before_rows']} after={result['after_rows']} "
+        f"collapsed={result['collapsed_rows']} "
+        f"fallback_groups={result['fallback_variant_groups']}"
+    )
+
+
 @data_app.command("run-stage")
 def data_run_stage(
     stage: str = typer.Option(..., "--stage"),

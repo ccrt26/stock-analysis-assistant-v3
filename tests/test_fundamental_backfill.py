@@ -258,6 +258,28 @@ def test_expected_core_financial_empty_result_is_retried_not_watermarked(tmp_pat
     ).exists()
 
 
+def test_provider_error_keeps_the_exact_fundamental_code_for_retry(tmp_path):
+    class FailingIncomePro(FundamentalPro):
+        def income(self, **kwargs):
+            raise RuntimeError("temporary provider failure")
+
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    service = FundamentalBackfillService(
+        TushareResearchClient(FailingIncomePro(), pacer=lambda method: None),
+        warehouse,
+    )
+
+    summary = service.backfill(
+        start=date(2021, 7, 14),
+        through=date(2026, 7, 13),
+        codes=("000001.SZ",),
+        resume=True,
+    )
+
+    assert summary.failed == 1
+    assert summary.retry_codes == ["000001.SZ"]
+
+
 def test_recent_listing_without_due_periodic_report_can_complete_empty(tmp_path):
     class EmptyIncomePro(FundamentalPro):
         def income(self, **kwargs):

@@ -105,6 +105,8 @@ class FundamentalBackfillService:
                     )
                 except ResearchSourceError:
                     summary.failed += 1
+                    if code not in summary.retry_codes:
+                        summary.retry_codes.append(code)
                     continue
                 if "end_date" not in frame.columns:
                     if frame.empty:
@@ -112,6 +114,8 @@ class FundamentalBackfillService:
                         frame["end_date"] = pd.Series(dtype=str)
                     else:
                         summary.failed += 1
+                        if code not in summary.retry_codes:
+                            summary.retry_codes.append(code)
                         continue
                 if (
                     frame.empty

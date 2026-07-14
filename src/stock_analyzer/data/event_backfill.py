@@ -326,6 +326,7 @@ class EventBackfillService:
             if full_window
             else through
         )
+        total_shares = self._latest_total_shares(through)
         for month_start, month_end in _month_ranges(window_start, window_end):
             partition = month_start.strftime("%Y-%m")
             if resume and partition != current_month and (
@@ -335,11 +336,11 @@ class EventBackfillService:
                 summary.skipped += 1
                 continue
             floats = self._fetch_share_float_range(month_start, month_end)
-            float_rows = [
+            float_rows = _collapse_share_float_rows([
                 _float_row(row)
                 for row in floats.to_dict(orient="records")
                 if _share_float_known_as_of(row, through)
-            ]
+            ], total_shares)
             self._commit(
                 ResearchDatasetId.SHARE_FLOAT,
                 partition,
@@ -386,6 +387,10 @@ class EventBackfillService:
             partition = row["float_date"].strftime("%Y-%m")
             grouped.setdefault(partition, []).append(row)
         for partition, rows in sorted(grouped.items()):
+            rows = _collapse_share_float_rows(
+                rows,
+                self._latest_total_shares(announcement_date),
+            )
             self._commit(
                 ResearchDatasetId.SHARE_FLOAT,
                 partition,
@@ -394,6 +399,9 @@ class EventBackfillService:
                 announcement_date,
                 summary,
             )
+
+    def _latest_total_shares(self, through: date) -> dict[str, float]:
+        return _latest_total_shares(self.warehouse, through)
 
     def _commit(
         self,
@@ -573,6 +581,151 @@ def _float_row(raw: dict[str, Any]) -> dict[str, Any]:
     publication = row["ann_date"] or row["float_date"]
     row["available_at"] = _conservative_available(publication)
     return row
+
+
+def _collapse_share_float_rows(
+    rows: list[dict[str, Any]],
+    total_shares: dict[str, float],
+) -> list[dict[str, Any]]:
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        grouped.setdefault(str(row["variant_group_id"]), []).append(row)
+
+    collapsed: list[dict[str, Any]] = []
+    for group in grouped.values():
+        exact = {str(row["provider_record_id"]): row for row in group}
+        variants = list(exact.values())
+        if (
+            len(variants) == 1
+            and int(variants[0].get("provider_variant_count") or 1) > 1
+        ):
+            collapsed.append(dict(variants[0]))
+            continue
+        variants.sort(
+            key=lambda row: (
+                _sortable_date(row.get("ann_date")),
+                _finite_number(row.get("float_share")),
+                _finite_number(row.get("float_ratio")),
+                str(row["provider_record_id"]),
+            ),
+            reverse=True,
+        )
+        latest_announcement = _sortable_date(variants[0].get("ann_date"))
+        candidates = [
+            row
+            for row in variants
+            if _sortable_date(row.get("ann_date")) == latest_announcement
+        ]
+        total_share = total_shares.get(str(candidates[0].get("ts_code")))
+        resolution = "largest_float_share_fallback"
+        if total_share:
+            def ratio_error(row: dict[str, Any]) -> tuple[float, str]:
+                expected = _finite_number(row.get("float_share")) / total_share * 100.0
+                reported = _finite_number(row.get("float_ratio"))
+                return abs(expected - reported), str(row["provider_record_id"])
+
+            chosen = min(candidates, key=ratio_error)
+            resolution = "matched_latest_total_share"
+        else:
+            chosen = candidates[0]
+        chosen = dict(chosen)
+        chosen["provider_variant_count"] = len(variants)
+        chosen["provider_variant_resolution"] = resolution
+        chosen["provider_variant_hashes_json"] = json.dumps(
+            sorted(str(row["provider_record_id"]) for row in variants),
+            ensure_ascii=False,
+        )
+        collapsed.append(chosen)
+    return collapsed
+
+
+def normalize_existing_share_float(
+    warehouse: ResearchWarehouse,
+    *,
+    through: date,
+) -> dict[str, int]:
+    """Rebuild current share-float facts on their stable natural business key."""
+    manifest = warehouse.partition_manifest(ResearchDatasetId.SHARE_FLOAT)
+    total_shares = _latest_total_shares(warehouse, through)
+    batches: list[FactBatch] = []
+    before_rows = 0
+    after_rows = 0
+    fallback_rows = 0
+    now = datetime.now(timezone.utc)
+    for partition in manifest["partition_value"].astype(str).tolist():
+        frame = warehouse.read_current(
+            ResearchDatasetId.SHARE_FLOAT,
+            partition_value=partition,
+        )
+        before_rows += len(frame)
+        rows = _collapse_share_float_rows(
+            frame.to_dict(orient="records"),
+            total_shares,
+        )
+        after_rows += len(rows)
+        fallback_rows += sum(
+            row.get("provider_variant_resolution") == "largest_float_share_fallback"
+            and int(row.get("provider_variant_count") or 1) > 1
+            for row in rows
+        )
+        if rows:
+            batches.append(
+                FactBatch(
+                    dataset_id=ResearchDatasetId.SHARE_FLOAT,
+                    partition_value=partition,
+                    source_name="tushare",
+                    source_endpoint="share_float:stable-key-normalization",
+                    ingestion_run_id=f"share-float-normalize:{partition}",
+                    ingested_at=now,
+                    default_available_at=_conservative_available(through),
+                    records=rows,
+                )
+            )
+    warehouse.replace_dataset_batches(ResearchDatasetId.SHARE_FLOAT, batches)
+    return {
+        "before_rows": before_rows,
+        "after_rows": after_rows,
+        "collapsed_rows": before_rows - after_rows,
+        "fallback_variant_groups": fallback_rows,
+    }
+
+
+def _latest_total_shares(
+    warehouse: ResearchWarehouse,
+    through: date,
+) -> dict[str, float]:
+    manifest = warehouse.partition_manifest(ResearchDatasetId.DAILY_BASIC)
+    if manifest.empty:
+        return {}
+    eligible = manifest.loc[
+        manifest["partition_value"].astype(str) <= through.isoformat()
+    ]
+    if eligible.empty:
+        return {}
+    partition = str(eligible["partition_value"].astype(str).max())
+    frame = warehouse.read_current(
+        ResearchDatasetId.DAILY_BASIC,
+        partition_value=partition,
+    )
+    if frame.empty or not {"ts_code", "total_share"} <= set(frame):
+        return {}
+    result: dict[str, float] = {}
+    for raw in frame[["ts_code", "total_share"]].to_dict(orient="records"):
+        value = pd.to_numeric(raw.get("total_share"), errors="coerce")
+        if pd.notna(value) and float(value) > 0:
+            result[str(raw["ts_code"])] = float(value) * 10_000.0
+    return result
+
+
+def _sortable_date(value: Any) -> date:
+    if value is None or pd.isna(value):
+        return date.min
+    return pd.Timestamp(value).date()
+
+
+def _finite_number(value: Any) -> float:
+    parsed = pd.to_numeric(value, errors="coerce")
+    return 0.0 if pd.isna(parsed) else float(parsed)
 
 
 def _repurchase_row(raw: dict[str, Any]) -> dict[str, Any]:

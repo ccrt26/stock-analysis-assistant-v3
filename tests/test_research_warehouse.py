@@ -209,6 +209,52 @@ def test_prune_partition_metadata_failure_restores_moved_files(
     ].tolist() == ["2025-06"]
 
 
+def test_replace_dataset_batches_removes_obsolete_current_keys(tmp_path):
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    warehouse.commit_batch(
+        FactBatch(
+            dataset_id=ResearchDatasetId.SHARE_FLOAT,
+            partition_value="2026-07",
+            source_name="tushare",
+            source_endpoint="share_float",
+            ingestion_run_id="old-share-float",
+            ingested_at=datetime(2026, 7, 10, tzinfo=timezone.utc),
+            default_available_at=datetime(2026, 7, 10, tzinfo=timezone.utc),
+            records=[{
+                "variant_group_id": "obsolete-key",
+                "provider_record_id": "obsolete-record",
+                "ts_code": "000001.SZ",
+                "float_date": date(2026, 7, 10),
+            }],
+        )
+    )
+    replacement = FactBatch(
+        dataset_id=ResearchDatasetId.SHARE_FLOAT,
+        partition_value="2026-07",
+        source_name="tushare",
+        source_endpoint="share_float",
+        ingestion_run_id="normalized-share-float",
+        ingested_at=datetime(2026, 7, 14, tzinfo=timezone.utc),
+        default_available_at=datetime(2026, 7, 10, tzinfo=timezone.utc),
+        records=[{
+            "variant_group_id": "stable-key",
+            "provider_record_id": "current-record",
+            "ts_code": "000001.SZ",
+            "float_date": date(2026, 7, 10),
+        }],
+    )
+
+    warehouse.replace_dataset_batches(
+        ResearchDatasetId.SHARE_FLOAT,
+        [replacement],
+    )
+
+    current = warehouse.read_current(ResearchDatasetId.SHARE_FLOAT)
+    assert current["variant_group_id"].tolist() == ["stable-key"]
+    manifest = warehouse.partition_manifest(ResearchDatasetId.SHARE_FLOAT)
+    assert manifest["row_count"].tolist() == [1]
+
+
 def test_daily_fact_date_must_match_its_partition(tmp_path):
     warehouse = ResearchWarehouse(tmp_path)
     wrong_partition = _batch().model_copy(

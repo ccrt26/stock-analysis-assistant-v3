@@ -121,12 +121,7 @@ class TradingStructureBackfillService:
         self._freeze_scope(through, candidate_codes, index_codes)
         minute_dates = margin_dates[-20:]
         existing_minute = self.warehouse.read_current(ResearchDatasetId.MINUTE_BAR)
-        covered_pairs: set[tuple[str, date]] = set()
-        if not existing_minute.empty:
-            covered_pairs = {
-                (str(row["instrument_code"]), pd.Timestamp(row["trade_date"]).date())
-                for row in existing_minute.to_dict(orient="records")
-            }
+        covered_pairs = _complete_minute_pairs(existing_minute)
         start_at = f"{minute_dates[0].isoformat()} 09:00:00"
         end_at = f"{minute_dates[-1].isoformat()} 15:30:00"
         index_set = set(index_codes)
@@ -325,6 +320,27 @@ def _minute_failure_category(exc: Exception) -> str:
     if any(marker in message for marker in access_markers):
         return "access_or_rate_limit"
     return "provider_error"
+
+
+def _complete_minute_pairs(frame: pd.DataFrame) -> set[tuple[str, date]]:
+    if frame.empty or not {"instrument_code", "trade_date", "minute"} <= set(frame):
+        return set()
+    result: set[tuple[str, date]] = set()
+    working = frame.copy()
+    working["trade_date"] = pd.to_datetime(
+        working["trade_date"], errors="coerce"
+    ).dt.date
+    working["minute"] = pd.to_datetime(working["minute"], utc=True, errors="coerce")
+    for (code, trading_date), group in working.groupby(
+        ["instrument_code", "trade_date"], dropna=True
+    ):
+        minutes = group["minute"].dropna()
+        if len(minutes) < 200 or minutes.duplicated().any():
+            continue
+        local = minutes.dt.tz_convert("Asia/Shanghai")
+        if local.min().time() <= time(9, 35) and local.max().time() >= time(14, 55):
+            result.add((str(code), trading_date))
+    return result
 
 
 def _minute_utc(value: Any) -> datetime:

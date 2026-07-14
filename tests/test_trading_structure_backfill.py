@@ -85,6 +85,72 @@ def test_trading_structure_records_margin_lag_and_freezes_minute_scope(tmp_path)
     assert service.frozen_scope_codes(date(2026, 7, 13)) == ("000001.SZ",)
 
 
+def test_resume_refetches_a_minute_day_when_only_a_partial_row_is_stored(tmp_path):
+    calls = []
+
+    def complete_fetcher(**kwargs):
+        calls.append(kwargs["ts_code"])
+        rows = []
+        for minute in pd.date_range("2026-07-10 09:31:00", periods=120, freq="min"):
+            rows.append({
+                "ts_code": kwargs["ts_code"],
+                "trade_time": minute.strftime("%Y-%m-%d %H:%M:%S"),
+                "open": 10.0,
+                "high": 10.2,
+                "low": 9.9,
+                "close": 10.1,
+                "vol": 1.0,
+                "amount": 10.0,
+                "trade_date": "20260710",
+            })
+        for minute in pd.date_range("2026-07-10 13:01:00", periods=120, freq="min"):
+            rows.append({
+                "ts_code": kwargs["ts_code"],
+                "trade_time": minute.strftime("%Y-%m-%d %H:%M:%S"),
+                "open": 10.0,
+                "high": 10.2,
+                "low": 9.9,
+                "close": 10.1,
+                "vol": 1.0,
+                "amount": 10.0,
+                "trade_date": "20260710",
+            })
+        return pd.DataFrame(rows)
+
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    partial_service = TradingStructureBackfillService(
+        TushareResearchClient(Pro(), pacer=lambda method: None),
+        warehouse,
+        minute_fetcher=minute_fetcher,
+        minute_pacer=lambda: None,
+    )
+    partial_service.backfill(
+        trading_dates=(date(2026, 7, 10),),
+        through=date(2026, 7, 10),
+        candidate_codes=("000001.SZ",),
+        index_codes=(),
+        resume=False,
+    )
+
+    service = TradingStructureBackfillService(
+        TushareResearchClient(Pro(), pacer=lambda method: None),
+        warehouse,
+        minute_fetcher=complete_fetcher,
+        minute_pacer=lambda: None,
+    )
+    service.backfill(
+        trading_dates=(date(2026, 7, 10),),
+        through=date(2026, 7, 10),
+        candidate_codes=("000001.SZ",),
+        index_codes=(),
+        resume=True,
+    )
+
+    assert calls == ["000001.SZ"]
+    minute = warehouse.read_current(ResearchDatasetId.MINUTE_BAR)
+    assert len(minute) == 240
+
+
 def test_margin_history_is_capped_at_latest_250_trading_days(tmp_path):
     pro = Pro()
     warehouse = ResearchWarehouse(tmp_path / "warehouse")

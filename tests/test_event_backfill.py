@@ -4,7 +4,11 @@ import pandas as pd
 import stock_analyzer.data.event_backfill as event_backfill_module
 
 from stock_analyzer.data.event_backfill import EventBackfillService
-from stock_analyzer.data.research_contracts import FactBatch, ResearchDatasetId
+from stock_analyzer.data.research_contracts import (
+    FactBatch,
+    ResearchDatasetId,
+    research_contract,
+)
 from stock_analyzer.data.tushare_research_client import TushareResearchClient
 from stock_analyzer.storage.research_warehouse import ResearchWarehouse
 
@@ -224,7 +228,7 @@ def test_repurchase_deduplicates_exact_rows_but_preserves_distinct_lots(tmp_path
     assert rows["variant_group_id"].nunique() == 1
 
 
-def test_share_float_deduplicates_exact_rows_but_preserves_distinct_lots(tmp_path):
+def test_share_float_keeps_one_current_fact_for_provider_variants(tmp_path):
     class VariantFloatPro(ActionPro):
         def share_float(self, **kwargs):
             base = {
@@ -253,9 +257,81 @@ def test_share_float_deduplicates_exact_rows_but_preserves_distinct_lots(tmp_pat
     )
 
     rows = warehouse.read_current(ResearchDatasetId.SHARE_FLOAT)
-    assert len(rows) == 2
-    assert rows["provider_record_id"].nunique() == 2
+    assert len(rows) == 1
+    assert rows.iloc[0]["float_share"] == 200.0
+    assert rows.iloc[0]["provider_variant_count"] == 2
+    assert rows.iloc[0]["provider_variant_resolution"] == "largest_float_share_fallback"
     assert rows["variant_group_id"].nunique() == 1
+
+
+def test_share_float_variant_matches_the_latest_total_share_when_available():
+    base = {
+        "ts_code": "300779.SZ",
+        "ann_date": "20230718",
+        "float_date": "20260724",
+        "holder_name": "股东A",
+        "share_type": "定增股份",
+    }
+    rows = [
+        event_backfill_module._float_row(
+            {**base, "float_share": 27_000_000.0, "float_ratio": 19.36}
+        ),
+        event_backfill_module._float_row(
+            {**base, "float_share": 52_920_000.0, "float_ratio": 17.80}
+        ),
+    ]
+
+    selected = event_backfill_module._collapse_share_float_rows(
+        rows,
+        {"300779.SZ": 297_300_000.0},
+    )
+
+    assert len(selected) == 1
+    assert selected[0]["float_share"] == 52_920_000.0
+    assert selected[0]["provider_variant_resolution"] == "matched_latest_total_share"
+
+
+def test_existing_share_float_is_rebuilt_on_the_stable_business_key(tmp_path):
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    contract = research_contract(ResearchDatasetId.SHARE_FLOAT)
+    current_key = contract.business_key
+    contract.business_key = ("provider_record_id",)
+    try:
+        warehouse.commit_batch(
+            FactBatch(
+                dataset_id=ResearchDatasetId.SHARE_FLOAT,
+                partition_value="2026-07",
+                source_name="tushare",
+                source_endpoint="share_float",
+                ingestion_run_id="legacy-share-float",
+                ingested_at=datetime(2026, 7, 14, tzinfo=timezone.utc),
+                default_available_at=datetime(2026, 7, 1, tzinfo=timezone.utc),
+                records=[
+                    event_backfill_module._float_row({
+                        "ts_code": "000001.SZ",
+                        "ann_date": "20260701",
+                        "float_date": "20260710",
+                        "float_share": value,
+                        "float_ratio": 1.0,
+                        "holder_name": "股东A",
+                        "share_type": "首发",
+                    })
+                    for value in (100.0, 200.0)
+                ],
+            )
+        )
+    finally:
+        contract.business_key = current_key
+
+    result = event_backfill_module.normalize_existing_share_float(
+        warehouse,
+        through=date(2026, 7, 14),
+    )
+
+    assert result["before_rows"] == 2
+    assert result["after_rows"] == 1
+    current = warehouse.read_current(ResearchDatasetId.SHARE_FLOAT)
+    assert current["float_share"].tolist() == [200.0]
 
 
 def test_share_float_recursively_splits_a_date_range_that_hits_page_capacity(
@@ -364,9 +440,10 @@ def test_long_backfill_limits_share_float_history_and_fetches_known_future(tmp_p
             ingested_at=datetime(2024, 1, 31, tzinfo=timezone.utc),
             default_available_at=datetime(2024, 1, 31, tzinfo=timezone.utc),
             records=[
-                {
-                    "provider_record_id": "old-lot",
-                    "ts_code": "000001.SZ",
+                    {
+                        "provider_record_id": "old-lot",
+                        "variant_group_id": "old-fact",
+                        "ts_code": "000001.SZ",
                     "float_date": date(2024, 1, 31),
                 }
             ],

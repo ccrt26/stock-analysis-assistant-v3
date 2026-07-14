@@ -6,7 +6,7 @@ import shutil
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 from uuid import uuid4
 
 import duckdb
@@ -280,6 +280,98 @@ class ResearchWarehouse:
 
         shutil.rmtree(prune_root, ignore_errors=True)
         return partitions
+
+    def replace_dataset_batches(
+        self,
+        dataset_id: ResearchDatasetId | str,
+        batches: Iterable[FactBatch],
+    ) -> None:
+        """Atomically replace one dataset after rebuilding all current partitions."""
+        dataset = ResearchDatasetId(dataset_id)
+        prepared = tuple(batches)
+        if any(batch.dataset_id is not dataset for batch in prepared):
+            raise ValueError("replacement batches must belong to one dataset")
+        partitions = [batch.partition_value for batch in prepared]
+        if len(partitions) != len(set(partitions)):
+            raise ValueError("replacement batches must have unique partitions")
+
+        rebuild_root = self.staging_root / f"rebuild-{uuid4().hex}"
+        rebuilt = ResearchWarehouse(rebuild_root)
+        for batch in prepared:
+            rebuilt.commit_batch(batch)
+
+        source_dir = rebuilt.facts_root / dataset.value
+        source_dir.mkdir(parents=True, exist_ok=True)
+        target_dir = self.facts_root / dataset.value
+        swap_root = self.staging_root / f"swap-{uuid4().hex}"
+        backup_dir = swap_root / "previous"
+        swap_root.mkdir(parents=True, exist_ok=True)
+        had_previous = target_dir.exists()
+        if had_previous:
+            target_dir.replace(backup_dir)
+        target_dir.parent.mkdir(parents=True, exist_ok=True)
+        source_dir.replace(target_dir)
+
+        try:
+            with connect_research_warehouse(self.duckdb_path) as connection:
+                rebuilt_path = str(rebuilt.duckdb_path).replace("'", "''")
+                connection.execute(
+                    f"attach '{rebuilt_path}' as rebuilt_db (read_only)"
+                )
+                connection.begin()
+                try:
+                    connection.execute(
+                        "delete from research_fact_revisions where dataset_id = ?",
+                        [dataset.value],
+                    )
+                    connection.execute(
+                        "delete from research_fact_keys where dataset_id = ?",
+                        [dataset.value],
+                    )
+                    connection.execute(
+                        "delete from research_fact_partitions where dataset_id = ?",
+                        [dataset.value],
+                    )
+                    connection.execute(
+                        """
+                        insert into research_fact_partitions
+                        select * from rebuilt_db.research_fact_partitions
+                        where dataset_id = ?
+                        """,
+                        [dataset.value],
+                    )
+                    connection.execute(
+                        """
+                        insert into research_fact_keys
+                        select * from rebuilt_db.research_fact_keys
+                        where dataset_id = ?
+                        """,
+                        [dataset.value],
+                    )
+                    connection.execute(
+                        """
+                        insert into research_fact_revisions
+                        select * from rebuilt_db.research_fact_revisions
+                        where dataset_id = ?
+                        """,
+                        [dataset.value],
+                    )
+                except Exception:
+                    connection.rollback()
+                    connection.execute("detach rebuilt_db")
+                    raise
+                connection.commit()
+                connection.execute("detach rebuilt_db")
+        except Exception:
+            target_dir.replace(source_dir)
+            if had_previous:
+                backup_dir.replace(target_dir)
+            shutil.rmtree(rebuild_root, ignore_errors=True)
+            shutil.rmtree(swap_root, ignore_errors=True)
+            raise
+
+        shutil.rmtree(rebuild_root, ignore_errors=True)
+        shutil.rmtree(swap_root, ignore_errors=True)
 
     def _delete_partition_metadata(
         self,
