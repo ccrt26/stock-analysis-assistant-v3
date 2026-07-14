@@ -5,7 +5,7 @@ from pathlib import Path
 import duckdb
 
 
-RESEARCH_SCHEMA_VERSION = 2
+RESEARCH_SCHEMA_VERSION = 3
 
 
 _SCHEMA_SQL = """
@@ -134,6 +134,50 @@ create table if not exists research_analysis_snapshots (
     created_at timestamptz not null
 );
 
+create table if not exists research_derived_runs (
+    run_id varchar primary key,
+    feature_set varchar not null,
+    analysis_date date not null,
+    formula_version varchar not null,
+    input_manifest_json json not null,
+    input_manifest_hash varchar not null,
+    quality_status varchar not null check(
+        quality_status in (
+            'complete', 'complete_with_declared_gaps', 'limited', 'failed'
+        )
+    ),
+    limitations_json json not null,
+    status varchar not null check(
+        status in ('running', 'committed', 'skipped', 'failed')
+    ),
+    row_count bigint check(row_count >= 0),
+    content_hash varchar,
+    file_sha256 varchar,
+    started_at timestamptz not null,
+    finished_at timestamptz
+);
+
+create table if not exists research_derived_partitions (
+    feature_set varchar not null,
+    analysis_date date not null,
+    formula_version varchar not null,
+    relative_path varchar not null unique,
+    row_count bigint not null check(row_count >= 0),
+    content_hash varchar not null,
+    file_sha256 varchar not null,
+    input_manifest_hash varchar not null,
+    input_manifest_json json not null,
+    quality_status varchar not null check(
+        quality_status in (
+            'complete', 'complete_with_declared_gaps', 'limited'
+        )
+    ),
+    limitations_json json not null,
+    committed_at timestamptz not null,
+    run_id varchar not null,
+    primary key(feature_set, analysis_date, formula_version)
+);
+
 create table if not exists research_migrations (
     migration_id varchar primary key,
     source_root varchar not null,
@@ -151,6 +195,12 @@ create index if not exists research_gaps_status_idx
     on research_data_gaps(status, dataset_id);
 create index if not exists research_fact_keys_partition_idx
     on research_fact_keys(dataset_id, partition_value);
+create index if not exists research_derived_runs_lookup_idx
+    on research_derived_runs(
+        feature_set, analysis_date, formula_version, started_at
+    );
+create index if not exists research_derived_partitions_feature_date_idx
+    on research_derived_partitions(feature_set, analysis_date);
 """
 
 
