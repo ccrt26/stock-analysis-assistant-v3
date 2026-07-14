@@ -138,6 +138,61 @@ def data_audit_migration(
         raise typer.Exit(code=2)
 
 
+@data_app.command("legacy-cleanup-manifest")
+def data_legacy_cleanup_manifest(
+    migration_id: str = typer.Option(..., "--migration-id"),
+    source_root: Path = typer.Option(
+        Path("local_warehouse/parquet/formal"), "--source-root"
+    ),
+    output: Path = typer.Option(..., "--output"),
+) -> None:
+    from stock_analyzer.storage.research_migration import (
+        build_legacy_market_cleanup_manifest,
+    )
+    from stock_analyzer.storage.research_warehouse import ResearchWarehouse
+
+    config = AppConfig.load()
+    manifest = build_legacy_market_cleanup_manifest(
+        source_root,
+        ResearchWarehouse(config.local_warehouse_dir),
+        migration_id=migration_id,
+    )
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(manifest.model_dump_json(indent=2), encoding="utf-8")
+    typer.echo(
+        f"legacy cleanup manifest {migration_id}: files={len(manifest.files)} "
+        f"bytes={manifest.total_bytes} output={output}"
+    )
+
+
+@data_app.command("cleanup-legacy-market")
+def data_cleanup_legacy_market(
+    manifest: Path = typer.Option(..., "--manifest"),
+    receipt: Path = typer.Option(..., "--receipt"),
+) -> None:
+    from stock_analyzer.storage.research_migration import (
+        LegacyMarketCleanupManifest,
+        execute_legacy_market_cleanup,
+    )
+    from stock_analyzer.storage.research_warehouse import ResearchWarehouse
+
+    config = AppConfig.load()
+    cleanup_manifest = LegacyMarketCleanupManifest.model_validate_json(
+        manifest.read_text(encoding="utf-8")
+    )
+    result = execute_legacy_market_cleanup(
+        cleanup_manifest,
+        ResearchWarehouse(config.local_warehouse_dir),
+    )
+    receipt.parent.mkdir(parents=True, exist_ok=True)
+    receipt.write_text(result.model_dump_json(indent=2), encoding="utf-8")
+    typer.echo(
+        f"legacy cleanup {result.migration_id}: files={result.files_deleted} "
+        f"bytes={result.bytes_deleted} source_removed={str(result.source_removed).lower()} "
+        f"receipt={receipt}"
+    )
+
+
 @data_app.command("backfill")
 def data_backfill(
     through: str = typer.Option(..., "--through"),

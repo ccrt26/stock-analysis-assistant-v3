@@ -4,6 +4,7 @@ import hashlib
 import json
 import re
 import gc
+import shutil
 from collections import defaultdict
 from datetime import date, datetime, time, timezone
 from pathlib import Path
@@ -74,6 +75,64 @@ class LegacyMarketMigrationAudit(BaseModel):
     missing_target_keys: int
     extra_target_keys: int
     value_mismatches: int
+
+
+class LegacyMarketCleanupFile(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    relative_path: str
+    sha256: str
+    size: int
+
+
+class LegacyMarketCleanupManifest(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    migration_id: str
+    source_root: str
+    source_manifest_hash: str
+    strict_audit: LegacyMarketMigrationAudit
+    record_types: tuple[str, ...]
+    replacement_datasets: dict[str, tuple[str, ...]]
+    files: tuple[LegacyMarketCleanupFile, ...]
+    total_bytes: int
+    generated_at: datetime
+
+
+class LegacyMarketCleanupReceipt(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    migration_id: str
+    source_manifest_hash: str
+    files_deleted: int
+    bytes_deleted: int
+    source_removed: bool
+    completed_at: datetime
+
+
+_LEGACY_RECORD_REPLACEMENTS: dict[str, tuple[ResearchDatasetId, ...]] = {
+    "board_bar": (
+        ResearchDatasetId.INDUSTRY_DAILY,
+        ResearchDatasetId.THEME_DAILY,
+    ),
+    "calendar": (ResearchDatasetId.TRADE_CALENDAR,),
+    "company_profile": (ResearchDatasetId.COMPANY_PROFILE,),
+    "daily_basic": (ResearchDatasetId.DAILY_BASIC,),
+    "equity_bar": (ResearchDatasetId.EQUITY_DAILY,),
+    "express": (ResearchDatasetId.EARNINGS_EXPRESS,),
+    "financial_summary": (
+        ResearchDatasetId.INCOME_STATEMENT,
+        ResearchDatasetId.BALANCE_SHEET,
+        ResearchDatasetId.CASH_FLOW,
+        ResearchDatasetId.FINANCIAL_INDICATOR,
+    ),
+    "forecast": (ResearchDatasetId.EARNINGS_FORECAST,),
+    "index_bar": (ResearchDatasetId.INDEX_DAILY,),
+    "industry_mapping": (ResearchDatasetId.INDUSTRY_MEMBER,),
+    "main_business": (ResearchDatasetId.MAIN_BUSINESS,),
+    "official_event": (ResearchDatasetId.ANNOUNCEMENT,),
+    "security": (ResearchDatasetId.SECURITY_MASTER,),
+}
 
 
 def inspect_legacy_market(source_root: Path) -> LegacyMarketAudit:
@@ -379,6 +438,112 @@ def audit_legacy_market_migration(
     )
 
 
+def build_legacy_market_cleanup_manifest(
+    source_root: Path,
+    warehouse: ResearchWarehouse,
+    *,
+    migration_id: str,
+) -> LegacyMarketCleanupManifest:
+    root = Path(source_root).resolve()
+    expected = (warehouse.root / "parquet" / "formal").resolve()
+    if root != expected:
+        raise ValueError(
+            f"legacy cleanup source must be the managed formal path: {expected}"
+        )
+    strict_audit = audit_legacy_market_migration(
+        root,
+        warehouse,
+        migration_id=migration_id,
+        strict_hashes=True,
+    )
+    if not strict_audit.passed:
+        raise ValueError("legacy market migration is not strictly auditable")
+
+    parquet_files = sorted(root.rglob("*.parquet"))
+    record_types = tuple(sorted({_record_type_from_path(path) for path in parquet_files}))
+    unknown = sorted(set(record_types) - set(_LEGACY_RECORD_REPLACEMENTS))
+    if unknown:
+        raise ValueError(f"legacy record types lack replacements: {', '.join(unknown)}")
+    replacements: dict[str, tuple[str, ...]] = {}
+    for record_type in record_types:
+        datasets = _LEGACY_RECORD_REPLACEMENTS[record_type]
+        missing = [
+            dataset.value
+            for dataset in datasets
+            if warehouse.partition_manifest(dataset).empty
+        ]
+        if missing:
+            raise ValueError(
+                f"legacy {record_type} replacements are empty: {', '.join(missing)}"
+            )
+        replacements[record_type] = tuple(dataset.value for dataset in datasets)
+
+    entries = tuple(
+        LegacyMarketCleanupFile(
+            relative_path=path.relative_to(root).as_posix(),
+            sha256=_sha256(path),
+            size=path.stat().st_size,
+        )
+        for path in sorted(path for path in root.rglob("*") if path.is_file())
+    )
+    source_manifest_hash = _stable_hash(
+        [(item.relative_path, item.sha256, item.size) for item in entries]
+    )
+    return LegacyMarketCleanupManifest(
+        migration_id=migration_id,
+        source_root=str(root),
+        source_manifest_hash=source_manifest_hash,
+        strict_audit=strict_audit,
+        record_types=record_types,
+        replacement_datasets=replacements,
+        files=entries,
+        total_bytes=sum(item.size for item in entries),
+        generated_at=datetime.now(timezone.utc),
+    )
+
+
+def execute_legacy_market_cleanup(
+    manifest: LegacyMarketCleanupManifest,
+    warehouse: ResearchWarehouse,
+) -> LegacyMarketCleanupReceipt:
+    current = build_legacy_market_cleanup_manifest(
+        Path(manifest.source_root),
+        warehouse,
+        migration_id=manifest.migration_id,
+    )
+    if (
+        current.source_manifest_hash != manifest.source_manifest_hash
+        or current.files != manifest.files
+    ):
+        raise ValueError("source changed after cleanup manifest")
+
+    source = Path(manifest.source_root)
+    staged = (
+        warehouse.staging_root
+        / "legacy-cleanup"
+        / manifest.source_manifest_hash
+    )
+    if staged.exists():
+        raise FileExistsError(f"legacy cleanup staging already exists: {staged}")
+    staged.parent.mkdir(parents=True, exist_ok=True)
+    source.replace(staged)
+    try:
+        shutil.rmtree(staged)
+    except Exception:
+        if staged.exists() and not source.exists():
+            source.parent.mkdir(parents=True, exist_ok=True)
+            staged.replace(source)
+        raise
+    return LegacyMarketCleanupReceipt(
+        migration_id=manifest.migration_id,
+        source_manifest_hash=manifest.source_manifest_hash,
+        files_deleted=len(manifest.files),
+        bytes_deleted=manifest.total_bytes,
+        source_removed=not source.exists(),
+        completed_at=datetime.now(timezone.utc),
+    )
+
+
 def _stored_report(
     warehouse: ResearchWarehouse,
     migration_id: str,
@@ -403,6 +568,13 @@ def _market_files(root: Path) -> list[Path]:
         for path in market_root.rglob("*.parquet")
         if "record_type=equity_bar" in path.as_posix()
     )
+
+
+def _record_type_from_path(path: Path) -> str:
+    for part in path.parts:
+        if part.startswith("record_type="):
+            return part.split("=", 1)[1]
+    raise ValueError(f"legacy parquet lacks record_type partition: {path}")
 
 
 def _first_available_column(files: list[Path], candidates: tuple[str, ...]) -> str:
@@ -492,10 +664,15 @@ def _sha256(path: Path) -> str:
 
 
 __all__ = [
+    "LegacyMarketCleanupFile",
+    "LegacyMarketCleanupManifest",
+    "LegacyMarketCleanupReceipt",
     "LegacyMarketAudit",
     "LegacyMarketMigrationReport",
     "LegacyMarketMigrationAudit",
     "audit_legacy_market_migration",
+    "build_legacy_market_cleanup_manifest",
+    "execute_legacy_market_cleanup",
     "inspect_legacy_market",
     "migrate_legacy_market",
 ]

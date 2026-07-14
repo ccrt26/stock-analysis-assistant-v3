@@ -1,10 +1,13 @@
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 from stock_analyzer.data.research_contracts import ResearchDatasetId
 from stock_analyzer.storage.research_migration import (
     audit_legacy_market_migration,
+    build_legacy_market_cleanup_manifest,
+    execute_legacy_market_cleanup,
     inspect_legacy_market,
     migrate_legacy_market,
 )
@@ -161,3 +164,48 @@ def test_strict_migration_audit_compares_source_values_and_manifest_hash(tmp_pat
     assert audit.extra_target_keys == 0
     assert audit.value_mismatches == 0
     assert audit.source_manifest_matches is True
+
+
+def test_cleanup_manifest_requires_strict_audit_and_deletes_verified_source(tmp_path):
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    source = warehouse.root / "parquet" / "formal"
+    _write_version(
+        source,
+        version_id="market_decision-2026-07-10-a",
+        trade_date="2026-07-09",
+        closes={"000001.SZ": 10.0},
+    )
+    migrate_legacy_market(source, warehouse, migration_id="cleanup")
+
+    manifest = build_legacy_market_cleanup_manifest(
+        source, warehouse, migration_id="cleanup"
+    )
+    receipt = execute_legacy_market_cleanup(manifest, warehouse)
+
+    assert manifest.strict_audit.passed is True
+    assert manifest.record_types == ("equity_bar",)
+    assert receipt.files_deleted == 1
+    assert receipt.source_removed is True
+    assert not source.exists()
+    assert len(warehouse.read_current(ResearchDatasetId.EQUITY_DAILY)) == 1
+
+
+def test_cleanup_refuses_source_changed_after_manifest(tmp_path):
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    source = warehouse.root / "parquet" / "formal"
+    _write_version(
+        source,
+        version_id="market_decision-2026-07-10-a",
+        trade_date="2026-07-09",
+        closes={"000001.SZ": 10.0},
+    )
+    migrate_legacy_market(source, warehouse, migration_id="cleanup-changed")
+    manifest = build_legacy_market_cleanup_manifest(
+        source, warehouse, migration_id="cleanup-changed"
+    )
+    (source / ".DS_Store").write_bytes(b"changed")
+
+    with pytest.raises(ValueError, match="source changed after cleanup manifest"):
+        execute_legacy_market_cleanup(manifest, warehouse)
+
+    assert source.exists()

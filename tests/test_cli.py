@@ -859,7 +859,7 @@ def test_formal_warehouse_operator_commands_migrate_audit_and_manifest(tmp_path)
 def test_research_market_migration_audit_command_exits_cleanly(tmp_path):
     from tests.test_research_migration import _write_version
 
-    source = tmp_path / "legacy-formal"
+    source = tmp_path / "local_warehouse" / "parquet" / "formal"
     _write_version(
         source,
         version_id="market_decision-2026-07-10-a",
@@ -893,10 +893,42 @@ def test_research_market_migration_audit_command_exits_cleanly(tmp_path):
         ],
         env=env,
     )
+    manifest_path = tmp_path / "cleanup-manifest.json"
+    receipt_path = tmp_path / "cleanup-receipt.json"
+    manifest = CliRunner().invoke(
+        app,
+        [
+            "data",
+            "legacy-cleanup-manifest",
+            "--source-root",
+            str(source),
+            "--migration-id",
+            "cli-audit",
+            "--output",
+            str(manifest_path),
+        ],
+        env=env,
+    )
+    cleanup = CliRunner().invoke(
+        app,
+        [
+            "data",
+            "cleanup-legacy-market",
+            "--manifest",
+            str(manifest_path),
+            "--receipt",
+            str(receipt_path),
+        ],
+        env=env,
+    )
 
     assert migration.exit_code == 0, migration.output
     assert audit.exit_code == 0, audit.output
     assert "passed=true" in audit.output
+    assert manifest.exit_code == 0, manifest.output
+    assert cleanup.exit_code == 0, cleanup.output
+    assert json.loads(receipt_path.read_text())["source_removed"] is True
+    assert not source.exists()
 
 
 def test_render_report_requires_supabase_config_without_fixture_mode(tmp_path, monkeypatch):
