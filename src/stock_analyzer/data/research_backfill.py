@@ -7,7 +7,7 @@ from datetime import date, datetime, time, timezone
 from zoneinfo import ZoneInfo
 
 import pandas as pd
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from stock_analyzer.data.research_contracts import FactBatch, ResearchDatasetId
 from stock_analyzer.data.tushare_research_client import (
@@ -26,6 +26,7 @@ class BackfillSummary(BaseModel):
     skipped: int = 0
     waiting_upstream: int = 0
     failed: int = 0
+    issues: list[str] = Field(default_factory=list)
 
 
 class ResearchBackfillService:

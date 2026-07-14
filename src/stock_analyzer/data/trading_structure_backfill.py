@@ -83,6 +83,9 @@ class TradingStructureBackfillService:
             )
             if frame.empty:
                 summary.waiting_upstream += 1
+                summary.issues.append(
+                    f"margin_detail:{partition}:waiting_upstream"
+                )
                 continue
             required = (
                 "trade_date",
@@ -139,11 +142,15 @@ class TradingStructureBackfillService:
                     freq="1min",
                     asset="I" if code in index_set else "E",
                 )
-            except Exception:
+            except Exception as exc:
                 summary.failed += 1
+                summary.issues.append(
+                    f"minute_bar:{_minute_failure_category(exc)}"
+                )
                 break
             if not isinstance(frame, pd.DataFrame):
                 summary.failed += 1
+                summary.issues.append("minute_bar:invalid_response")
                 break
             required = (
                 "ts_code",
@@ -299,6 +306,22 @@ def _clean(raw: dict[str, Any]) -> dict[str, Any]:
 def _exchange(ts_code: str) -> str:
     suffix = ts_code.rsplit(".", 1)[-1]
     return {"SH": "SSE", "SZ": "SZSE", "BJ": "BSE"}.get(suffix, suffix)
+
+
+def _minute_failure_category(exc: Exception) -> str:
+    message = str(exc).lower()
+    access_markers = (
+        "权限",
+        "频率",
+        "积分",
+        "permission",
+        "rate",
+        "次/天",
+        "次/分钟",
+    )
+    if any(marker in message for marker in access_markers):
+        return "access_or_rate_limit"
+    return "provider_error"
 
 
 def _minute_utc(value: Any) -> datetime:

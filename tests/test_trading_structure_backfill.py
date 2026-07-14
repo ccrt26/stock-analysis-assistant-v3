@@ -133,6 +133,7 @@ def test_margin_empty_dataframe_without_columns_is_waiting_not_schema_failure(
 
     assert summary.waiting_upstream == 1
     assert summary.failed == 0
+    assert summary.issues == ["margin_detail:2026-07-13:waiting_upstream"]
 
 
 def test_minute_permission_error_stops_remaining_scope_after_first_failure(tmp_path):
@@ -160,3 +161,4 @@ def test_minute_permission_error_stops_remaining_scope_after_first_failure(tmp_p
 
     assert calls == ["000001.SZ"]
     assert summary.failed == 1
+    assert summary.issues == ["minute_bar:access_or_rate_limit"]
