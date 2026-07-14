@@ -215,10 +215,12 @@ def test_operations_docs_capture_phase1_runbook_requirements():
     combined_docs = "\n".join([runbook, cloudflare_pages, capability_matrix])
 
     assert "18:30" in combined_docs
-    assert "19:00" in combined_docs
-    assert "19:30" in combined_docs
-    assert "cleanup-before-retry" in combined_docs
-    assert "skipped_non_trading_day" in combined_docs
+    assert "21:30" in runbook
+    assert "08:00" in runbook
+    assert "research-data-close" in runbook
+    assert "research-data-evening" in runbook
+    assert "research-data-next-morning" in runbook
+    assert "run-daily-job --prepare-deploy" not in runbook
     assert "wrangler pages deploy dist/pages" in cloudflare_pages
     assert "`STRAT-001`" in capability_matrix
     assert "`SAFE-001`" in capability_matrix
@@ -247,8 +249,7 @@ def test_operations_docs_link_from_readme_and_gate_manual_actions():
     assert "docs/operations/runbook.md" in readme
     assert "docs/operations/cloudflare-pages.md" in readme
     assert "docs/operations/production-capability-matrix.md" in readme
-    assert "Do not enable launchd without explicit approval." in runbook
-    assert "Do not run a real production job without explicit approval." in runbook
+    assert "旧的自动选股、报告生成、激活、部署和发布任务均已停用" in runbook
     assert "Do not deploy Cloudflare Pages without explicit approval." in cloudflare_pages
 
 
@@ -269,21 +270,15 @@ def test_deprecated_mandatory_next_phases_file_is_removed():
     assert not (PROJECT_ROOT / "docs/operations/mandatory-next-phases.md").exists()
 
 
-def test_active_docs_record_live_backfill_schema_and_precise_event_gate():
+def test_active_docs_record_data_only_schedule_and_paused_reports():
     readme = read_project_file("README.md")
     runbook = read_project_file("docs/operations/runbook.md")
-    design = read_project_file(
-        "docs/superpowers/specs/2026-07-10-v3-formal-report-data-readiness-design.md"
-    )
-
-    for document in (readme, runbook, design):
-        assert "已完成 2026-07-10 真实只读主源回填" in document
-        assert "Supabase 迁移已应用并完成只读回查" in document
-        assert "正式事件能力 Gate 已通过" in document
-
     for document in (readme, runbook):
-        assert "10 个每日推荐" in document
-        assert "launchd 已加载" in document
+        assert "18:30" in document
+        assert "21:30" in document
+        assert "08:00" in document
+        assert "报告" in document
+        assert "停用" in document
 
 
 def test_matrix_default_factory_and_route_rows_match_verified_evidence():
@@ -336,6 +331,7 @@ def test_matrix_preserves_historical_publication_evidence_but_disables_automatio
     assert capability_level("DATA-011") == "LIVE_READ_VERIFIED"
     assert capability_level("STORE-002") == "PRODUCTION_WRITE_VERIFIED"
     assert capability_level("STORE-003") == "PRODUCTION_WRITE_VERIFIED"
+    assert capability_level("STORE-006") == "BLOCKED"
     assert capability_level("OPS-002") == "ACTIVATED"
     assert capability_level("REPORT-004") == "BLOCKED"
     assert capability_level("PUB-002") == "ACTIVATED"

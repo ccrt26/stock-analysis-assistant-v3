@@ -1,4 +1,4 @@
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 import json
 import os
 from pathlib import Path
@@ -107,6 +107,12 @@ def data_migrate_legacy_market(
         ResearchWarehouse(config.local_warehouse_dir),
         migration_id=migration_id,
     )
+    typer.echo(
+        f"legacy migration {report.migration_id}: "
+        f"keys={report.migrated_business_keys} "
+        f"partitions={report.partition_count} "
+        f"already_completed={str(report.already_completed).lower()}"
+    )
 
 
 @data_app.command("audit-migration")
@@ -165,6 +171,9 @@ def data_legacy_cleanup_manifest(
         Path("local_warehouse/parquet/formal"), "--source-root"
     ),
     output: Path = typer.Option(..., "--output"),
+    retirement_decisions: Optional[Path] = typer.Option(
+        None, "--retirement-decisions"
+    ),
 ) -> None:
     from stock_analyzer.storage.research_migration import (
         build_legacy_market_cleanup_manifest,
@@ -176,6 +185,11 @@ def data_legacy_cleanup_manifest(
         source_root,
         ResearchWarehouse(config.local_warehouse_dir),
         migration_id=migration_id,
+        retirement_decisions=(
+            json.loads(retirement_decisions.read_text(encoding="utf-8"))
+            if retirement_decisions is not None
+            else None
+        ),
     )
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(manifest.model_dump_json(indent=2), encoding="utf-8")
@@ -305,20 +319,11 @@ def data_run_stage(
 
     runtime = build_research_data_runtime(AppConfig.load())
     if data_date == "auto":
-        today = datetime.now(ZoneInfo("Asia/Shanghai")).date()
-        if stage == "next-morning":
-            calendar_start = today - timedelta(days=14)
-            calendar = runtime.tushare.fetch_trade_calendar(calendar_start, today)
-            candidates = sorted(
-                value
-                for value in calendar.loc[calendar["is_open"], "cal_date"].tolist()
-                if value < today
-            )
-            if not candidates:
-                _fail("cannot resolve previous trading date for next-morning stage")
-            parsed = candidates[-1]
-        else:
-            parsed = today
+        parsed = _resolve_research_stage_date(
+            runtime.tushare,
+            stage,
+            datetime.now(ZoneInfo("Asia/Shanghai")),
+        )
     else:
         parsed = date.fromisoformat(data_date)
     summaries = run_research_stage(runtime, stage=stage, data_date=parsed)
@@ -345,6 +350,36 @@ def data_run_stage(
     )
     if any(item.failed for item in summaries):
         raise typer.Exit(code=2)
+
+
+def _resolve_research_stage_date(client, stage: str, now: datetime) -> date:
+    local_now = now.astimezone(ZoneInfo("Asia/Shanghai"))
+    today = local_now.date()
+    calendar = client.fetch_trade_calendar(today - timedelta(days=14), today)
+    open_dates = sorted(
+        value
+        for value in calendar.loc[calendar["is_open"], "cal_date"].tolist()
+        if value <= today
+    )
+    if not open_dates:
+        _fail("cannot resolve a trading date for research data stage")
+
+    cutoffs = {
+        "close": time(18, 30),
+        "evening": time(21, 30),
+    }
+    if stage == "next-morning":
+        candidates = [value for value in open_dates if value < today]
+    elif stage in cutoffs:
+        today_is_open = today in open_dates
+        if today_is_open and local_now.time() >= cutoffs[stage]:
+            return today
+        candidates = [value for value in open_dates if value < today]
+    else:
+        _fail(f"unknown research data stage: {stage}")
+    if not candidates:
+        _fail(f"cannot resolve prior trading date for {stage} stage")
+    return candidates[-1]
 
 
 @data_app.command("health")

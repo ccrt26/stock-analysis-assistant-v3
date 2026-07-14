@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.ccrt.stock-analysis-assistant.research-data-close</string>
+  <key>WorkingDirectory</key>
+  <string>__PROJECT_ROOT__</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>-lc</string>
+    <string><![CDATA[
+cd "__PROJECT_ROOT__"
+set -a
+source .env.local >/dev/null 2>&1
+set +a
+export PROJECT_ROOT="$PWD"
+exec .venv/bin/python -m stock_analyzer data run-stage --stage close --data-date auto
+    ]]></string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <dict><key>Hour</key><integer>18</integer><key>Minute</key><integer>30</integer></dict>
+  <key>RunAtLoad</key><false/>
+  <key>KeepAlive</key><false/>
+  <key>StandardOutPath</key>
+  <string>__PROJECT_ROOT__/logs/research-data/close.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>__PROJECT_ROOT__/logs/research-data/close.err.log</string>
+</dict>
+</plist>

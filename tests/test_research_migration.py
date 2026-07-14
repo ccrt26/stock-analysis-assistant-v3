@@ -267,3 +267,34 @@ def test_cleanup_refuses_source_changed_after_manifest(tmp_path):
         execute_legacy_market_cleanup(manifest, warehouse)
 
     assert source.exists()
+
+
+def test_non_equity_cleanup_requires_an_explicit_retirement_decision(tmp_path):
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    source = warehouse.root / "parquet" / "formal"
+    _write_version(
+        source,
+        version_id="market_decision-2026-07-10-a",
+        trade_date="2026-07-09",
+        closes={"000001.SZ": 10.0},
+    )
+    board_path = (
+        source
+        / "market_daily"
+        / "trade_date=2026-07-09"
+        / "record_type=board_bar"
+        / "version_id=market_decision-2026-07-10-a"
+        / "part-00000.parquet"
+    )
+    board_path.parent.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame([{"record_type": "board_bar", "board_code": "SW801010"}]).to_parquet(
+        board_path, index=False
+    )
+    migrate_legacy_market(source, warehouse, migration_id="retirement-decision")
+
+    with pytest.raises(ValueError, match="explicit retirement decisions: board_bar"):
+        build_legacy_market_cleanup_manifest(
+            source,
+            warehouse,
+            migration_id="retirement-decision",
+        )

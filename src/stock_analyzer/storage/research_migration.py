@@ -15,7 +15,7 @@ import pandas as pd
 import pyarrow.parquet as pq
 import pyarrow as pa
 import duckdb
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from stock_analyzer.data.research_contracts import FactBatch, ResearchDatasetId
 from stock_analyzer.storage.research_schema import connect_research_warehouse
@@ -94,6 +94,7 @@ class LegacyMarketCleanupManifest(BaseModel):
     strict_audit: LegacyMarketMigrationAudit
     record_types: tuple[str, ...]
     replacement_datasets: dict[str, tuple[str, ...]]
+    retirement_decisions: dict[str, str] = Field(default_factory=dict)
     files: tuple[LegacyMarketCleanupFile, ...]
     total_bytes: int
     generated_at: datetime
@@ -547,6 +548,7 @@ def build_legacy_market_cleanup_manifest(
     warehouse: ResearchWarehouse,
     *,
     migration_id: str,
+    retirement_decisions: dict[str, str] | None = None,
 ) -> LegacyMarketCleanupManifest:
     root = Path(source_root).resolve()
     expected = (warehouse.root / "parquet" / "formal").resolve()
@@ -568,6 +570,17 @@ def build_legacy_market_cleanup_manifest(
     unknown = sorted(set(record_types) - set(_LEGACY_RECORD_REPLACEMENTS))
     if unknown:
         raise ValueError(f"legacy record types lack replacements: {', '.join(unknown)}")
+    decisions = dict(retirement_decisions or {})
+    missing_decisions = sorted(
+        record_type
+        for record_type in record_types
+        if record_type != "equity_bar" and not decisions.get(record_type, "").strip()
+    )
+    if missing_decisions:
+        raise ValueError(
+            "non-equity legacy cleanup requires explicit retirement decisions: "
+            + ", ".join(missing_decisions)
+        )
     replacements: dict[str, tuple[str, ...]] = {}
     for record_type in record_types:
         datasets = _LEGACY_RECORD_REPLACEMENTS[record_type]
@@ -600,6 +613,11 @@ def build_legacy_market_cleanup_manifest(
         strict_audit=strict_audit,
         record_types=record_types,
         replacement_datasets=replacements,
+        retirement_decisions={
+            record_type: decisions[record_type]
+            for record_type in record_types
+            if record_type != "equity_bar"
+        },
         files=entries,
         total_bytes=sum(item.size for item in entries),
         generated_at=datetime.now(timezone.utc),
@@ -614,6 +632,7 @@ def execute_legacy_market_cleanup(
         Path(manifest.source_root),
         warehouse,
         migration_id=manifest.migration_id,
+        retirement_decisions=manifest.retirement_decisions,
     )
     if (
         current.source_manifest_hash != manifest.source_manifest_hash

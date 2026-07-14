@@ -1,27 +1,83 @@
-# Phase 1 Operations Runbook
+# 统一研究数据运维手册
 
-> **Current availability:** The formal production program, prior Strategy V2 activation, launchd, Cloudflare publication, and online smoke remain active. The REPORT-004 correction is implemented and offline verified, but its new real candidate is not a product success until a human accepts readability. The prior active report must remain unchanged until then.
+> **当前状态（2026-07-14）：** 只有本地数据更新任务在运行。旧的自动选股、报告生成、激活、部署和发布任务均已停用。在用户认可新的分析框架和报告样式前，不得恢复这些报告任务。
 
-现有正式报告、Supabase 激活账本和 Cloudflare 内容均保持此前版本。新的正式表达客户端使用本机已登录的 Codex Pro，会按股票逐只分析，并由自动门禁锁定结构化动作、仓位、风险、买入/观察条件和失效/退出条件。真实候选必须停在 `awaiting_human_acceptance`，人工验收前不得激活或发布；从未连接经纪商或执行订单。
+这份手册只说明当前统一事实库的更新、检查和故障处理。历史正式报告链路不是当前运维对象。
 
-已完成 2026-07-10 真实只读主源回填；Supabase 迁移已应用并完成只读回查，正式事件能力 Gate 已通过。此前真实运行生成 10 个每日推荐，launchd 已加载。这些既有数据准备和激活证据保持有效，但不能替代 REPORT-004 的新候选人工可读性验收。
+## 数据保留窗口
 
-This runbook covers the Phase 1 local Mac production flow for stock-analysis-assistant-v3. Phase 1 can run the local daily job, classify failures, clean same-day partial outputs before approved retries, write machine-readable status, and prepare `dist/pages`. It does not publish Cloudflare Pages automatically.
+| 用途 | 默认长度 | 业务原因 |
+| --- | ---: | --- |
+| 逐股短期分析 | 82 个交易日 | 足够观察近期趋势、波动、成交和相对强弱 |
+| 市场、行业和概念 | 250 个交易日 | 识别风格轮动、热点持续性和拥挤变化 |
+| 财务报表 | 12 个季度加 5 个年度 | 比较盈利质量和周期变化 |
+| 公告元数据 | 1 年 | 支持当前事件和风险检查 |
+| 停复牌 | 1 年 | 支持近期可交易性检查 |
+| 融资融券 | 250 个交易日 | 观察中期变化，不证明资金身份 |
+| 分钟线 | 20 个交易日，仅候选股与宽基指数 | 验证盘中路径，避免全市场无限扩张 |
 
-## Approval Gates
+已经完整保存且体量可控的日线、复权、估值基础和宽基指数可作为长周期备查库保留 5 年，但日常分析不默认读取 5 年，日常任务也不重复下载 5 年。
 
-- Do not enable launchd without explicit approval.
-- Do not run a real production job without explicit approval.
-- Do not run production same-day cleanup without explicit approval.
-- Do not deploy Cloudflare Pages without explicit approval.
-- Do not print, copy, commit, or log the local env file contents or credential values.
-- Do not activate, prepare a deploy artifact, or publish a REPORT-004 candidate before explicit human readability acceptance.
+## 每日数据时间表
 
-## Formal Warehouse Restoration
+| 时间 | 固定阶段 | 作用 | launchd 标签 |
+| --- | --- | --- | --- |
+| 18:30 | `close` | 收盘行情、复权、每日估值、涨跌停价和宽基指数 | `com.ccrt.stock-analysis-assistant.research-data-close` |
+| 21:30 | `evening` | 公告、板块、概念、公司行动和晚间更新资料 | `com.ccrt.stock-analysis-assistant.research-data-evening` |
+| 次日 08:00 | `next-morning` | 融资融券、晚到修订和定点缺口重试 | `com.ccrt.stock-analysis-assistant.research-data-next-morning` |
 
-`STORE-004` is `PRODUCTION_WRITE_VERIFIED` as of 2026-07-12. The copy migration completed for all 162 legacy objects and the exact re-hashed manifest then removed 162 JSON files / 620,398,257 bytes. `local_warehouse/formal_evidence` must remain absent; recreation of that tree is a storage-governance failure. Final strict audit verified 18 versions, 1,825 Parquet files, 3,097,646 rows and 116 receipt revisions. No-JSON real acceptance verified 82 market sessions from 2026-03-12 through 2026-07-10, all receipt/version/candidate references and 7 capability bundles. The authoritative final audit is `local_archive/manifests/formal-warehouse-post-delete-final-2026-07-12.json`; the deletion manifest is `local_archive/manifests/formal-warehouse-deletion-manifest-2026-07-12.json`. Pre-migration and pre-cleanup DuckDB backups remain under `local_archive/` for controlled rollback.
+三个任务使用三个独立标签和固定阶段，不根据实际启动时间猜测阶段。如果 macOS 延迟到次日才执行，程序按阶段截止时间和官方交易日历选择应归属的交易日，不会把次日误当成当日收盘数据。
 
-The following commands are offline and non-destructive; each writes a machine-readable result. The deletion-manifest command does not delete anything.
+## 手工运行与检查
+
+手工运行单个数据阶段：
+
+```bash
+PYTHONPATH=src .venv/bin/python -m stock_analyzer data run-stage \
+  --stage close --data-date auto
+PYTHONPATH=src .venv/bin/python -m stock_analyzer data run-stage \
+  --stage evening --data-date auto
+PYTHONPATH=src .venv/bin/python -m stock_analyzer data run-stage \
+  --stage next-morning --data-date auto
+```
+
+检查指定交易日：
+
+```bash
+PYTHONPATH=src .venv/bin/python -m stock_analyzer data health \
+  --data-date YYYY-MM-DD --full-history
+```
+
+只修补已记录的精确缺口：
+
+```bash
+PYTHONPATH=src .venv/bin/python -m stock_analyzer data repair-gaps \
+  --through YYYY-MM-DD
+```
+
+缺口重试必须保留原缺口编号和股票代码。不得因一只股票的财务资料失败而重跑全市场。
+
+## 已知能力边界
+
+- 当前官方账号不提供可用的历史分钟数据；这是来源能力限制，不是无限重试的临时错误。
+- 部分官方主题指数不公开成分股；相关热点结论必须标注覆盖限制。
+- 新股或尚未披露定期报告的公司可以缺少核心财务记录；只按具体代码定向追补。
+- 日线量价、所谓“主力资金流”和不完整分钟数据都不能证明机构账户正在买入或卖出。
+
+## 限售股解禁事实
+
+同一股票、解禁日、股东和股份类型只保留一条当前事实。数据源返回多个版本时，优先用最新已知总股本核对解禁数量和比例；无法核对时保留降级标记和所有候选版本哈希，不将多版本相加。
+
+存量数据的统一化命令是：
+
+```bash
+PYTHONPATH=src .venv/bin/python -m stock_analyzer data normalize-share-float \
+  --through YYYY-MM-DD
+```
+
+## 旧存储迁移与灾备审计
+
+`STORE-004` 宽表 JSON 迁移是历史存储事件，不是日常任务。以下命令保留用于审计或灾备演练；它们都是非删除命令，清单生成命令 **does not delete** 任何文件。
 
 ```bash
 stock-analyzer formal-warehouse-inventory \
@@ -35,8 +91,7 @@ stock-analyzer formal-warehouse-migrate \
   --output local_archive/manifests/formal-warehouse-migration.json
 
 stock-analyzer formal-warehouse-audit \
-  --warehouse-root local_warehouse \
-  --strict-hashes \
+  --warehouse-root local_warehouse --strict-hashes \
   --output local_archive/manifests/formal-warehouse-audit.json
 
 stock-analyzer formal-warehouse-deletion-manifest \
@@ -46,169 +101,10 @@ stock-analyzer formal-warehouse-deletion-manifest \
   --output local_archive/manifests/formal-warehouse-deletion-manifest.json
 ```
 
-These commands are retained for audit and disaster-recovery rehearsal. Normal production must not recreate the legacy JSON store. Any future migration copies and validates before cutover or deletion; unknown objects, changed hashes, payload differences or unresolved frozen receipts stop the operation. Deletion always requires separately approved execution against an exact manifest, followed immediately by strict audit, real-data acceptance, offline replay and the full test suite.
+旧多版本市场 Parquet 的股票日线已通过业务键和内容哈希等值校验。其他 Phase 3 旧快照是经批准退役的旧设计数据，删除前只验证了新事实区的替代覆盖，没有完成逐值等价审计。这一历史限制必须保留在退役附录和能力矩阵中，不得声称已经证明全部旧数据与新数据逐值相同。
 
-## Daily Schedule
+## 安全要求
 
-The required local schedule is:
-
-| Slot | Attempt | Purpose |
-| --- | --- | --- |
-| 18:30 | 1 | First production run after market data should be available. |
-| 19:00 | 2 | First retry after classification and cleanup-before-retry. |
-| 19:30 | 3 | Final retry after classification and cleanup-before-retry. |
-
-The launchd template is `ops/launchd/com.ccrt.stock-analysis-assistant.daily.plist.example`. The approved local copy is installed under `~/Library/LaunchAgents/`, uses silent runtime environment loading, and is loaded for the three slots above. Its canonical production checkout is the clean local `main` worktree resolved from Git at installation time; after loading the environment it pins `PROJECT_ROOT` to that installed checkout, so stale environment configuration cannot redirect the scheduler to a retired feature worktree. The virtual environment, logs, reports, warehouse, archive, and activated deployment artifact were migrated with source-content verification. Keep personal paths out of the versioned template and active operations documents.
-
-## Production Run Command After Readiness Approval
-
-After approval, change to the checked-out project root and derive `PROJECT_ROOT` from that directory:
-
-```bash
-export PROJECT_ROOT="$PWD"
-PYTHONPATH=src .venv/bin/python -m stock_analyzer ops run-daily-job --trade-date YYYY-MM-DD --scheduled-slot 18:30 --attempt 1 --prepare-deploy
-```
-
-Before installing the launchd example, replace every literal `__PROJECT_ROOT__` with the resolved absolute checkout path in the copied plist. Never edit the versioned example to a personal path.
-
-For approved retries, keep the same `trade_date`, set `--scheduled-slot 19:00 --attempt 2` or `--scheduled-slot 19:30 --attempt 3`, and keep `--prepare-deploy`.
-
-All three launchd slots remain installed. If an earlier slot for the same date already ended in `success_with_recommendations`, `success_no_recommendations`, or `skipped_non_trading_day`, a later slot returns that prior terminal status unchanged. It performs no cleanup, provider acquisition, analysis, report render, Supabase write, deployment, publication, or notification. Reinvoking the identical completed formal run likewise reuses the frozen `REPORT_GENERATED` receipt without increasing its revision.
-
-Mac notification is disabled by default. Enable it only when desired with `--notify-mac` or `STOCK_ANALYZER_NOTIFY_MAC=1`; it should fire only when the final status is `failed_needs_human`.
-
-### Strategy V2 daily run
-
-Use fixture or dry-run for local validation:
-
-```bash
-stock-analyzer run-daily --trade-date YYYY-MM-DD --fixture-mode --strategy-v2
-```
-
-Production Strategy V2 writes require explicit approval before running without fixture mode. Do not print `.env.local`, service-role keys, Tushare tokens, Cloudflare tokens, report passwords, or session secrets. Do not perform unapproved production writes.
-
-On trading days, a formal run produces analysis only after `READY_TO_SCREEN` and `READY_TO_ANALYZE`. If any required group is incomplete, the run stops as `blocked_needs_human`; it does not call Strategy V2 analysis or the LLM, write decision rows, render a `data_insufficient` page, prepare deploy files, or publish. The previous current and published report remains byte-for-byte unchanged.
-
-### REPORT-004 candidate and human acceptance
-
-Preflight the local subscription client without printing credentials:
-
-```bash
-codex login status
-codex debug models
-```
-
-The production client is fixed to `gpt-5.6-sol`, reasoning effort `high`, and standard speed (`fast_mode` disabled). It runs once per stock with only that stock's verified evidence and locked Strategy V2 decision. It does not use an OpenAI API key and must not receive Supabase, Cloudflare, report-password, or data-provider credentials.
-
-Prepare the isolated candidate:
-
-```bash
-stock-analyzer prepare-formal-report-candidate --trade-date YYYY-MM-DD
-```
-
-Expected state: `awaiting_human_acceptance`. Inspect the printed candidate directory locally. Automated success means only that the evidence, decision locks, narrative markers, main-view language, folded audit details, secrets scan, and artifact hashes passed. REPORT-004 remains `BLOCKED` until the user accepts readability.
-
-Only after explicit acceptance, activate the exact unchanged candidate:
-
-```bash
-stock-analyzer activate-formal-report-candidate \
-  --run-id RUN_ID \
-  --expected-candidate-hash SHA256 \
-  --accept-readability
-stock-analyzer ops verify-production --trade-date YYYY-MM-DD
-stock-analyzer ops prepare-deploy --trade-date YYYY-MM-DD
-stock-analyzer ops publish-report-site --trade-date YYYY-MM-DD
-```
-
-The activation command performs no provider acquisition and no Codex call. A missing acceptance flag, wrong hash, changed artifact, changed narrative, changed receipt/evidence set, or changed ledger rows fails closed and leaves the prior report active. The final three verification/deployment commands are forbidden before human acceptance.
-
-## Formal Readiness Inspection
-
-Blocked operational output is local-only. Read the latest redacted status with:
-
-```bash
-python -m json.tool logs/run-daily/latest-status.json
-```
-
-Set the run ID from that status or the command output, then locate its append-only receipt and immutable candidate set:
-
-```bash
-RUN_ID=july10-formal
-RECEIPT_ROOT=local_warehouse/formal_evidence/run_receipts/$RUN_ID
-REVISION=$(jq -r '.revision' "$RECEIPT_ROOT/latest.json")
-RECEIPT_FILE="$RECEIPT_ROOT/$(printf '%06d' "$REVISION").json"
-jq . "$RECEIPT_FILE"
-CANDIDATE_ID=$(jq -r '.candidate_set_id' "$RECEIPT_FILE")
-jq . "local_warehouse/formal_evidence/candidate_sets/$CANDIDATE_ID.json"
-```
-
-Both activation IDs must be non-null and identical, and the local active marker must name the same activation ID:
-
-```bash
-jq '{state,local_activation_id,ledger_activation_id}' "$RECEIPT_FILE"
-jq . "reports/.activation/$RUN_ID.active.json"
-```
-
-For an approved read-only Supabase inspection, query `public.active_formal_run_receipt` for the same `run_id`; absence means the narrow ledger is not active and all formal consumers must ignore the run. Never infer activation from decision rows alone.
-
-List durable backup reconciliation work without changing it:
-
-```bash
-find local_warehouse/formal_evidence/reconciliation -name '*.json' -type f -exec jq '{task_id,group_id,trade_date,status,backup_version_id,primary_version_id}' {} \;
-```
-
-A complete backup group can support analysis after the identical contract passes. Its use creates reconciliation work but no provider-value comparison and no source-difference warning. When the full primary route later passes, it becomes canonical for future replay; the frozen report and its original `input_set_id` remain unchanged.
-
-Run the isolated July 10 acceptance without network or production writes:
-
-```bash
-PYTHONPATH=src .venv/bin/python -m pytest tests/test_default_formal_production_entry.py -q
-```
-
-This test invokes the real `_default_run_daily()` and `build_production_formal_dependencies()` path. It replaces only Tushare, AKShare, and ledger transport boundaries with recorded/fake external runtimes; it does not patch the production factory or reuse `_sample_market`.
-
-The default live capability-record location is `local_warehouse/formal_evidence/capabilities/formal-v2/latest.json`. A recorded evidence bundle is accepted only by recorded test mode; live mode rejects it before any provider call. After the offline gate passes and live reads are explicitly approved, create the live evidence and exact same-day immutable screening backfill with:
-
-```bash
-PYTHONPATH=src .venv/bin/python -m stock_analyzer ops verify-formal-capabilities \
-  --trade-date YYYY-MM-DD --confirm-live-read
-```
-
-The command validates all six formal groups for both provider families, records hashes and installed library versions without credentials, and writes only local capability/evidence files. It does not call analysis or an LLM, write Supabase, render/publish a report, activate launchd, or access a broker. Any incomplete route fails closed before those actions.
-
-Passing this offline rehearsal does not itself authorize a real action. Live acquisition, Supabase mutation, Cloudflare deployment/publication, scheduler activation, broker access, and order execution remain separate scopes. The lower-level readiness regression remains available as `PYTHONPATH=src .venv/bin/python -m pytest tests/test_july10_formal_readiness_acceptance.py -q`.
-
-## Non-Trading-Day Skip Rule
-
-When the calendar gate returns a non-trading day, the job status must be `skipped_non_trading_day`. The job must not run analysis, must not clean same-day outputs, must not prepare a new deploy package, and must not overwrite reports. It should only write the status JSON and job log.
-
-## Cleanup-Before-Retry Rule
-
-The cleanup-before-retry rule is mandatory for retry attempts. A retryable failure must be classified first, then the system cleans only the current `trade_date` before attempt 2 or attempt 3. Cleanup failure stops the retry and requires human intervention.
-
-Cleanup is limited to same-day partial outputs:
-
-- Supabase rows for the current `trade_date` in the approved operations tables.
-- `reports/daily/YYYY-MM-DD/`.
-- The same-day local archive manifest and report copy.
-- The same-day local warehouse partition replacement output. Treat replacement as scoped overwrite for the target `trade_date`, never as deletion of the whole warehouse.
-
-Never delete historical dates, a whole Supabase table, `stock_master`, the whole `local_archive`, or the whole `local_warehouse`.
-
-## Status and Logs
-
-The machine-readable status file is `logs/run-daily/latest-status.json`. The expected statuses include `success_with_recommendations`, `success_no_recommendations`, `skipped_non_trading_day`, `calendar_unknown`, `warning`, `failed_retryable`, `failed_needs_human`, and `blocked_needs_human`.
-
-Use status and logs for operations decisions. Do not paste log output into chat, tickets, or commits until it has been checked for credential values.
-
-## Incident Handling
-
-- `calendar_unknown`: stop and fix the calendar source before any production run.
-- `failed_retryable`: allow the scheduled retry only after cleanup-before-retry succeeds.
-- `failed_needs_human`: stop retries, keep the previous report online, and investigate the redacted `fix_suggestion`.
-- `blocked_needs_human`: stop before analysis, inspect the failed complete acquisition group and both route attempts, preserve the frozen candidate set if screening already completed, and keep the previous report online.
-- Repeated failure through the 19:30 attempt requires human review before another run.
-
-## Model Requirement
-
-For this production-capability correction, the main agent owns implementation, tests, commits, and push. A subagent may be used only for an independent read-only investigation or final review when GPT-5.6 sol, high reasoning, and standard speed can be guaranteed; otherwise do not delegate.
+- 不得打印、复制、提交或记录 `.env.local`、Tushare token 或其他凭据。
+- 数据任务不得连接经纪商、下单或自动交易。
+- 旧报告调度、自动发布和报告激活已停用；必须在新分析框架和报告样式获得用户明确认可后，另行设计和验收。
