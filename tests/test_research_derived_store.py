@@ -1,10 +1,14 @@
+import os
 from datetime import date
 
 import pandas as pd
 import pytest
 
 from stock_analyzer.storage import research_derived as research_derived_module
-from stock_analyzer.storage.research_derived import DerivedFeatureStore
+from stock_analyzer.storage.research_derived import (
+    DerivedFeatureStore,
+    stable_dataframe_content_hash,
+)
 
 
 FEATURE_SET = "market_technical"
@@ -26,6 +30,8 @@ def _commit(
     frame: pd.DataFrame,
     *,
     input_manifest: dict | None = None,
+    quality_status: str = "complete",
+    limitations: tuple[str, ...] = (),
     run_id: str = "derived-run-1",
 ):
     return store.commit(
@@ -33,12 +39,26 @@ def _commit(
         ANALYSIS_DATE,
         FORMULA_VERSION,
         frame,
-        input_manifest=input_manifest
-        or {"equity_daily": {"2026-07-10": "sha-1"}},
+        input_manifest=(
+            {"equity_daily": {"2026-07-10": "sha-1"}}
+            if input_manifest is None
+            else input_manifest
+        ),
         entity_key=("ts_code",),
-        quality_status="complete",
-        limitations=(),
+        quality_status=quality_status,
+        limitations=limitations,
         run_id=run_id,
+    )
+
+
+def _final_path(root):
+    return (
+        root
+        / "derived"
+        / FEATURE_SET
+        / "analysis_date=2026-07-10"
+        / f"formula_version={FORMULA_VERSION}"
+        / "data.parquet"
     )
 
 
@@ -47,14 +67,7 @@ def test_valid_frame_is_atomically_promoted_readable_and_governed(tmp_path):
 
     result = _commit(store, _frame())
 
-    expected_path = (
-        tmp_path
-        / "derived"
-        / FEATURE_SET
-        / "analysis_date=2026-07-10"
-        / f"formula_version={FORMULA_VERSION}"
-        / "data.parquet"
-    )
+    expected_path = _final_path(tmp_path)
     assert expected_path.is_file()
     assert not list((tmp_path / ".staging").rglob("*.parquet"))
     pd.testing.assert_frame_equal(
@@ -101,6 +114,38 @@ def test_same_input_and_output_retry_is_idempotent_without_rewrite(
     assert second.input_manifest_hash == first.input_manifest_hash
     assert second.idempotent is True
     assert second.skipped is True
+
+
+@pytest.mark.parametrize(
+    ("changed_frame", "quality_status", "limitations"),
+    [
+        (_frame(score=0.95), "complete", ()),
+        (_frame(), "limited", ()),
+        (_frame(), "complete", ("new limitation",)),
+    ],
+    ids=["content", "quality_status", "limitations"],
+)
+def test_same_input_manifest_rejects_nondeterministic_partition_change(
+    tmp_path, changed_frame, quality_status, limitations
+):
+    store = DerivedFeatureStore(tmp_path)
+    original = _commit(store, _frame())
+
+    with pytest.raises(ValueError, match="deterministic conflict"):
+        _commit(
+            store,
+            changed_frame,
+            quality_status=quality_status,
+            limitations=limitations,
+            run_id="derived-run-conflict",
+        )
+
+    current = store.read(FEATURE_SET, ANALYSIS_DATE, FORMULA_VERSION)
+    assert current.loc[current["ts_code"] == "000001.SZ", "score"].iloc[0] \
+        == pytest.approx(0.75)
+    assert store.partition_manifest(FEATURE_SET)["content_hash"].tolist() == [
+        original.content_hash
+    ]
 
 
 def test_changed_input_replaces_only_its_formula_date_partition(tmp_path):
@@ -178,6 +223,142 @@ def test_failed_commit_leaves_previous_partition_readable(
         == pytest.approx(0.75)
     manifest = store.partition_manifest(FEATURE_SET)
     assert manifest["content_hash"].tolist() == [first.content_hash]
+
+
+def test_second_promotion_step_failure_never_hides_previous_file(
+    tmp_path, monkeypatch
+):
+    store = DerivedFeatureStore(tmp_path)
+    _commit(store, _frame())
+    final_path = _final_path(tmp_path)
+    backup_path = final_path.with_suffix(".parquet.previous")
+    real_replace = os.replace
+    observed_old_file_during_replace = False
+
+    def fail_staged_replace(source, destination):
+        nonlocal observed_old_file_during_replace
+        if destination == final_path and source != backup_path:
+            assert final_path.is_file(), "previous partition disappeared"
+            current = pd.read_parquet(final_path)
+            assert current.loc[
+                current["ts_code"] == "000001.SZ", "score"
+            ].iloc[0] == pytest.approx(0.75)
+            observed_old_file_during_replace = True
+            raise RuntimeError("simulated staged replace failure")
+        return real_replace(source, destination)
+
+    monkeypatch.setattr(os, "replace", fail_staged_replace)
+    with pytest.raises(RuntimeError, match="simulated staged replace failure"):
+        _commit(
+            store,
+            _frame(score=0.95),
+            input_manifest={"equity_daily": {"2026-07-10": "sha-new"}},
+            run_id="derived-run-replace-failure",
+        )
+
+    assert observed_old_file_during_replace is True
+    assert not backup_path.exists()
+    current = store.read(FEATURE_SET, ANALYSIS_DATE, FORMULA_VERSION)
+    assert current.loc[current["ts_code"] == "000001.SZ", "score"].iloc[0] \
+        == pytest.approx(0.75)
+
+
+def test_initialization_recovers_crash_after_file_replace_before_metadata(
+    tmp_path
+):
+    store = DerivedFeatureStore(tmp_path)
+    original = _commit(store, _frame())
+    final_path = _final_path(tmp_path)
+    staged_path = tmp_path / ".staging" / "crashed-run" / "data.parquet"
+    research_derived_module.write_staged_parquet(
+        staged_path,
+        _frame(score=0.95).sort_values("ts_code").reset_index(drop=True),
+    )
+
+    backup_path = store._promote_staged_partition(staged_path, final_path)
+    assert backup_path is not None and backup_path.is_file()
+
+    recovered = DerivedFeatureStore(tmp_path)
+
+    assert not backup_path.exists()
+    current = recovered.read(FEATURE_SET, ANALYSIS_DATE, FORMULA_VERSION)
+    assert current.loc[current["ts_code"] == "000001.SZ", "score"].iloc[0] \
+        == pytest.approx(0.75)
+    assert recovered.partition_manifest(FEATURE_SET)["file_sha256"].tolist() \
+        == [original.file_sha256]
+
+
+def test_initialization_finalizes_crash_after_metadata_before_backup_delete(
+    tmp_path, monkeypatch
+):
+    store = DerivedFeatureStore(tmp_path)
+    _commit(store, _frame())
+    final_path = _final_path(tmp_path)
+    backup_path = final_path.with_suffix(".parquet.previous")
+
+    with monkeypatch.context() as context:
+        def simulate_crash(*args, **kwargs):
+            raise RuntimeError("simulated crash before backup delete")
+
+        context.setattr(research_derived_module, "discard_backup", simulate_crash)
+        with pytest.raises(RuntimeError, match="simulated crash"):
+            _commit(
+                store,
+                _frame(score=0.95),
+                input_manifest={"equity_daily": {"2026-07-10": "sha-new"}},
+                run_id="derived-run-metadata-committed",
+            )
+
+    assert backup_path.is_file()
+    recovered = DerivedFeatureStore(tmp_path)
+
+    assert not backup_path.exists()
+    current = recovered.read(FEATURE_SET, ANALYSIS_DATE, FORMULA_VERSION)
+    assert current.loc[current["ts_code"] == "000001.SZ", "score"].iloc[0] \
+        == pytest.approx(0.95)
+
+
+def test_initialization_fails_closed_when_backup_cannot_be_reconciled(tmp_path):
+    store = DerivedFeatureStore(tmp_path)
+    _commit(store, _frame())
+    final_path = _final_path(tmp_path)
+    backup_path = final_path.with_suffix(".parquet.previous")
+    final_path.write_bytes(b"unknown-current")
+    backup_path.write_bytes(b"unknown-backup")
+
+    with pytest.raises(RuntimeError, match="cannot reconcile"):
+        DerivedFeatureStore(tmp_path)
+
+
+def test_content_hash_distinguishes_missing_and_non_finite_values():
+    values = [None, float("nan"), float("inf"), float("-inf")]
+
+    hashes = {
+        stable_dataframe_content_hash(
+            pd.DataFrame([{"ts_code": "000001.SZ", "value": value}])
+        )
+        for value in values
+    }
+
+    assert len(hashes) == len(values)
+
+
+def test_staging_is_cleaned_when_parquet_write_fails(tmp_path, monkeypatch):
+    store = DerivedFeatureStore(tmp_path)
+
+    def fail_write(path, frame):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"partial parquet")
+        raise RuntimeError("simulated parquet write failure")
+
+    monkeypatch.setattr(
+        research_derived_module, "write_staged_parquet", fail_write
+    )
+    with pytest.raises(RuntimeError, match="simulated parquet write failure"):
+        _commit(store, _frame())
+
+    assert not list((tmp_path / ".staging").rglob("*"))
+    assert not list((tmp_path / "derived").rglob("*.parquet"))
 
 
 def test_failed_quality_status_is_rejected_before_staging(tmp_path, monkeypatch):

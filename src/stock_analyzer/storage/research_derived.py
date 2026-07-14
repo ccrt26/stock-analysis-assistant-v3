@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 import shutil
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
@@ -14,9 +15,8 @@ from uuid import uuid4
 import pandas as pd
 
 from stock_analyzer.storage.research_parquet import (
-    atomic_promote,
     discard_backup,
-    restore_previous,
+    sha256_file,
     write_staged_parquet,
 )
 from stock_analyzer.storage.research_schema import connect_research_warehouse
@@ -27,6 +27,14 @@ _COMMITTABLE_QUALITY_STATUSES = {
     "complete_with_declared_gaps",
     "limited",
 }
+
+
+class DerivedDeterminismError(ValueError):
+    pass
+
+
+class DerivedRecoveryError(RuntimeError):
+    pass
 
 
 @dataclass(frozen=True)
@@ -67,6 +75,7 @@ class DerivedFeatureStore:
         self.root.mkdir(parents=True, exist_ok=True)
         with connect_research_warehouse(self.duckdb_path):
             pass
+        self._recover_interrupted_promotions()
 
     def commit(
         self,
@@ -113,13 +122,21 @@ class DerivedFeatureStore:
             normalized_date,
             normalized_formula_version,
         )
-        if (
-            current is not None
-            and current.content_hash == content_hash
-            and current.input_manifest_hash == input_manifest_hash
-            and current.quality_status == quality_status
-            and current.limitations == normalized_limitations
-        ):
+        if current is not None and current.input_manifest_hash == input_manifest_hash:
+            conflicts = []
+            if current.content_hash != content_hash:
+                conflicts.append("content_hash")
+            if current.quality_status != quality_status:
+                conflicts.append("quality_status")
+            if current.limitations != normalized_limitations:
+                conflicts.append("limitations")
+            if conflicts:
+                raise DerivedDeterminismError(
+                    "deterministic conflict for derived partition "
+                    f"{normalized_feature_set}/{normalized_date.isoformat()}/"
+                    f"{normalized_formula_version}: {', '.join(conflicts)} changed "
+                    "for the same input manifest"
+                )
             return DerivedCommitResult(
                 feature_set=normalized_feature_set,
                 analysis_date=normalized_date,
@@ -139,9 +156,9 @@ class DerivedFeatureStore:
         final_path = self.root / relative_path
         stage_dir = self.staging_root / uuid4().hex
         staged_path = stage_dir / "data.parquet"
-        file_sha256 = write_staged_parquet(staged_path, prepared)
         backup_path: Path | None = None
         try:
+            file_sha256 = write_staged_parquet(staged_path, prepared)
             backup_path = self._promote_staged_partition(staged_path, final_path)
             try:
                 self._commit_metadata(
@@ -159,11 +176,12 @@ class DerivedFeatureStore:
                     limitations=normalized_limitations,
                 )
             except Exception:
-                restore_previous(final_path, backup_path)
+                self._restore_previous_partition(final_path, backup_path)
                 raise
             discard_backup(backup_path)
         finally:
             shutil.rmtree(stage_dir, ignore_errors=True)
+            self._remove_empty_staging_parents()
 
         return DerivedCommitResult(
             feature_set=normalized_feature_set,
@@ -243,10 +261,96 @@ class DerivedFeatureStore:
             / "data.parquet"
         )
 
+    def _remove_empty_staging_parents(self) -> None:
+        for path in (self.staging_root, self.staging_root.parent):
+            try:
+                path.rmdir()
+            except OSError:
+                pass
+
     def _promote_staged_partition(
         self, staged_path: Path, final_path: Path
     ) -> Path | None:
-        return atomic_promote(staged_path, final_path)
+        final_path.parent.mkdir(parents=True, exist_ok=True)
+        if not final_path.exists():
+            os.replace(staged_path, final_path)
+            return None
+
+        backup_path = final_path.with_suffix(".parquet.previous")
+        if backup_path.exists():
+            raise DerivedRecoveryError(
+                f"unreconciled derived backup already exists: {backup_path}"
+            )
+        shutil.copy2(final_path, backup_path)
+        try:
+            os.replace(staged_path, final_path)
+        except Exception:
+            if final_path.is_file() and sha256_file(final_path) == sha256_file(
+                backup_path
+            ):
+                discard_backup(backup_path)
+            raise
+        return backup_path
+
+    def _restore_previous_partition(
+        self,
+        final_path: Path,
+        backup_path: Path | None,
+    ) -> None:
+        if backup_path is None:
+            if final_path.exists():
+                final_path.unlink()
+            return
+        if not backup_path.is_file():
+            raise DerivedRecoveryError(
+                f"cannot restore missing derived backup: {backup_path}"
+            )
+        os.replace(backup_path, final_path)
+
+    def _recover_interrupted_promotions(self) -> None:
+        backup_paths = sorted(self.derived_root.rglob("*.parquet.previous"))
+        if not backup_paths:
+            return
+        with connect_research_warehouse(
+            self.duckdb_path, read_only=True
+        ) as connection:
+            for backup_path in backup_paths:
+                final_path = backup_path.with_suffix("")
+                relative_path = final_path.relative_to(self.root).as_posix()
+                row = connection.execute(
+                    """
+                    select file_sha256 from research_derived_partitions
+                    where relative_path = ?
+                    """,
+                    [relative_path],
+                ).fetchone()
+                if row is None:
+                    raise DerivedRecoveryError(
+                        "cannot reconcile interrupted derived promotion without "
+                        f"metadata: {relative_path}"
+                    )
+                metadata_sha256 = str(row[0])
+                try:
+                    final_sha256 = (
+                        sha256_file(final_path) if final_path.is_file() else None
+                    )
+                    backup_sha256 = sha256_file(backup_path)
+                except OSError as exc:
+                    raise DerivedRecoveryError(
+                        "cannot reconcile interrupted derived promotion for "
+                        f"{relative_path}"
+                    ) from exc
+
+                if final_sha256 == metadata_sha256:
+                    discard_backup(backup_path)
+                    continue
+                if backup_sha256 == metadata_sha256:
+                    os.replace(backup_path, final_path)
+                    continue
+                raise DerivedRecoveryError(
+                    "cannot reconcile interrupted derived promotion for "
+                    f"{relative_path}: neither file matches metadata"
+                )
 
     def _commit_metadata(
         self,
@@ -376,7 +480,7 @@ def stable_dataframe_content_hash(frame: pd.DataFrame) -> str:
         raise ValueError("derived output has duplicate column names")
     columns = sorted(str(column) for column in frame.columns)
     canonical_rows = [
-        {column: _json_safe(row[column]) for column in columns}
+        {column: _content_json_safe(row[column]) for column in columns}
         for row in frame.to_dict(orient="records")
     ]
     canonical_rows.sort(key=_stable_json)
@@ -491,7 +595,13 @@ def _json_safe(value: Any) -> Any:
     if isinstance(value, int):
         return value
     if isinstance(value, float):
-        return value if math.isfinite(value) else None
+        if math.isnan(value):
+            return {"__non_finite_float__": "nan"}
+        if value == math.inf:
+            return {"__non_finite_float__": "+inf"}
+        if value == -math.inf:
+            return {"__non_finite_float__": "-inf"}
+        return value
     if isinstance(value, Mapping):
         return {str(key): _json_safe(item) for key, item in value.items()}
     if isinstance(value, (list, tuple)):
@@ -510,6 +620,59 @@ def _json_safe(value: Any) -> Any:
     return str(value)
 
 
+def _content_json_safe(value: Any) -> Any:
+    if value is None:
+        return ["none"]
+    if value is pd.NA:
+        return ["missing", "pandas.NA"]
+    if isinstance(value, (datetime, pd.Timestamp)):
+        timestamp = pd.Timestamp(value)
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.tz_localize("UTC")
+        else:
+            timestamp = timestamp.tz_convert("UTC")
+        return ["datetime", timestamp.isoformat()]
+    if isinstance(value, date):
+        return ["date", value.isoformat()]
+    if isinstance(value, str):
+        return ["string", value]
+    if isinstance(value, bool):
+        return ["boolean", value]
+    if isinstance(value, int):
+        return ["integer", value]
+    if isinstance(value, float):
+        if math.isnan(value):
+            return ["float", "nan"]
+        if value == math.inf:
+            return ["float", "+inf"]
+        if value == -math.inf:
+            return ["float", "-inf"]
+        return ["float", value]
+    if isinstance(value, Mapping):
+        items = sorted(
+            (
+                ["key", str(key)],
+                _content_json_safe(item),
+            )
+            for key, item in value.items()
+        )
+        return ["mapping", items]
+    if isinstance(value, (list, tuple)):
+        return ["sequence", [_content_json_safe(item) for item in value]]
+    if isinstance(value, (set, frozenset)):
+        prepared = [_content_json_safe(item) for item in value]
+        return ["set", sorted(prepared, key=_stable_json)]
+    item = getattr(value, "item", None)
+    if callable(item):
+        return _content_json_safe(item())
+    try:
+        if bool(pd.isna(value)):
+            return ["missing", type(value).__name__]
+    except (TypeError, ValueError):
+        pass
+    return ["object", type(value).__name__, str(value)]
+
+
 def _stable_json(value: Any) -> str:
     return json.dumps(
         _json_safe(value),
@@ -526,7 +689,9 @@ def _sha256_text(value: str) -> str:
 
 __all__ = [
     "DerivedCommitResult",
+    "DerivedDeterminismError",
     "DerivedFeatureStore",
+    "DerivedRecoveryError",
     "stable_dataframe_content_hash",
     "stable_input_manifest_hash",
 ]
