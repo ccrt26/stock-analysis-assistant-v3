@@ -120,3 +120,30 @@ def test_fundamental_gap_repair_retries_only_missing_codes(tmp_path, monkeypatch
             True,
         )
     ]
+    with connect_research_warehouse(
+        warehouse.duckdb_path, read_only=True
+    ) as connection:
+        rows = connection.execute(
+            """
+            select gap_id, status from research_data_gaps
+            where dataset_id = 'scope:fundamentals'
+            """
+        ).fetchall()
+    assert rows == [("fundamental-gap", "resolved")]
+
+
+def test_legacy_fundamental_gap_without_codes_never_expands_to_full_market(tmp_path):
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    with connect_research_warehouse(warehouse.duckdb_path) as connection:
+        connection.execute(
+            """
+            insert into research_data_gaps values
+            ('legacy-fundamental-gap', 'scope:fundamentals',
+             '2021-07-09:2026-07-13', 'waiting_upstream',
+             'scope_incomplete', null, now(), now(), null,
+             '旧缺口没有股票范围。', '{}')
+            """
+        )
+    runtime = type("Runtime", (), {"warehouse": warehouse})()
+
+    assert repair_research_gaps(runtime, through=date(2026, 7, 14)) == ()

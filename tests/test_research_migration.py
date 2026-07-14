@@ -1,9 +1,10 @@
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 import pandas as pd
 import pytest
 
-from stock_analyzer.data.research_contracts import ResearchDatasetId
+from stock_analyzer.data.research_contracts import FactBatch, ResearchDatasetId
 from stock_analyzer.storage.research_migration import (
     audit_legacy_market_migration,
     build_legacy_market_cleanup_manifest,
@@ -211,6 +212,40 @@ def test_cleanup_manifest_requires_strict_audit_and_deletes_verified_source(tmp_
         cleanup_receipt=invalid_receipt,
     )
     assert invalid_audit.passed is False
+
+    warehouse.commit_batch(
+        FactBatch(
+            dataset_id=ResearchDatasetId.EQUITY_DAILY,
+            partition_value="2026-07-09",
+            source_name="test",
+            source_endpoint="changed-after-cleanup",
+            ingestion_run_id="changed-after-cleanup",
+            ingested_at=datetime.now(timezone.utc),
+            default_available_at=datetime.now(timezone.utc),
+            records=[
+                {
+                    "trade_date": date(2026, 7, 9),
+                    "ts_code": "000001.SZ",
+                    "open": 9.9,
+                    "high": 99.2,
+                    "low": 9.8,
+                    "close": 99.0,
+                    "volume": 100.0,
+                    "amount": 1000.0,
+                }
+            ],
+        )
+    )
+    changed_audit = audit_legacy_market_migration(
+        source,
+        warehouse,
+        migration_id="cleanup",
+        strict_hashes=True,
+        cleanup_manifest=manifest,
+        cleanup_receipt=receipt,
+    )
+    assert changed_audit.passed is False
+    assert changed_audit.value_mismatches > 0
 
 
 def test_cleanup_refuses_source_changed_after_manifest(tmp_path):

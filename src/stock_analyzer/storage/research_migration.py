@@ -485,23 +485,46 @@ def _audit_removed_legacy_market(
     target_manifest = target_manifest[
         target_manifest["partition_value"].astype(str).isin(source_dates)
     ]
-    target_business_keys = int(target_manifest["row_count"].sum())
     integrity_failures = 0
+    target_paths: list[str] = []
     for row in target_manifest.to_dict(orient="records"):
         path = warehouse.root / str(row["relative_path"])
         if not path.is_file():
             integrity_failures += 1
             continue
+        target_paths.append(str(path))
         if pq.ParquetFile(path).metadata.num_rows != int(row["row_count"]):
             integrity_failures += 1
         if _sha256(path) != str(row["file_sha256"]):
             integrity_failures += 1
     if len(target_manifest) != len(source_dates):
         integrity_failures += abs(len(source_dates) - len(target_manifest))
+    target_content_mismatch = 1
+    if target_paths and len(target_paths) == len(target_manifest):
+        with duckdb.connect() as connection:
+            target_rows = connection.execute(
+                """
+                select cast(business_key_hash as varchar),
+                       cast(payload_hash as varchar)
+                from read_parquet(?, union_by_name=true, hive_partitioning=false)
+                """,
+                [target_paths],
+            ).fetchall()
+        target_business_keys = len(target_rows)
+        target_content_hash = _stable_hash(sorted(target_rows))
+        target_content_mismatch = int(
+            target_content_hash != stored.target_content_hash
+        )
+    else:
+        target_business_keys = int(target_manifest["row_count"].sum())
     source_business_keys = stored.source_audit.unique_business_keys
     missing = max(0, source_business_keys - target_business_keys)
     extra = max(0, target_business_keys - source_business_keys)
-    mismatches = embedded.value_mismatches + integrity_failures
+    mismatches = (
+        embedded.value_mismatches
+        + integrity_failures
+        + target_content_mismatch
+    )
     return LegacyMarketMigrationAudit(
         migration_id=migration_id,
         passed=bool(

@@ -101,6 +101,7 @@ def run_research_backfill(
     through: date,
     scope: str,
     resume: bool,
+    record_outcomes: bool = True,
 ) -> tuple[BackfillSummary, ...]:
     valid = {
         "all",
@@ -157,9 +158,10 @@ def run_research_backfill(
                 resume=resume,
             )
         )
-    for summary in summaries:
-        _record_scope_outcome(runtime.warehouse, summary)
-    reconcile_research_gaps(runtime.warehouse)
+    if record_outcomes:
+        for summary in summaries:
+            _record_scope_outcome(runtime.warehouse, summary)
+        reconcile_research_gaps(runtime.warehouse)
     return tuple(summaries)
 
 
@@ -173,7 +175,7 @@ def repair_research_gaps(
     ) as connection:
         rows = connection.execute(
             """
-            select dataset_id, partition_value, detail_json
+            select gap_id, dataset_id, partition_value, detail_json
             from research_data_gaps
             where status in ('waiting_upstream', 'failed', 'validation_failed')
             order by first_seen_at
@@ -183,6 +185,7 @@ def repair_research_gaps(
         return ()
     scopes: dict[str, date] = {}
     retry_codes: dict[str, set[str]] = {}
+    gap_ids: dict[str, list[str]] = {}
     dataset_scope = {
         "equity_daily": "market-core",
         "adj_factor": "market-core",
@@ -190,7 +193,7 @@ def repair_research_gaps(
         "stock_limit": "market-core",
         "index_daily": "market-core",
     }
-    for dataset_id, partition_value, detail_json in rows:
+    for gap_id, dataset_id, partition_value, detail_json in rows:
         dataset_text = str(dataset_id)
         if dataset_text.startswith("scope:"):
             scope = dataset_text.split(":", 1)[1]
@@ -206,6 +209,7 @@ def repair_research_gaps(
         except ValueError:
             start = through - timedelta(days=5 * 366)
         scopes[scope] = min(scopes.get(scope, start), start)
+        gap_ids.setdefault(scope, []).append(str(gap_id))
         if scope == "fundamentals" and detail_json:
             payload = (
                 json.loads(detail_json)
@@ -217,32 +221,70 @@ def repair_research_gaps(
             )
     summaries: list[BackfillSummary] = []
     for scope, start in sorted(scopes.items()):
+        scope_summaries: list[BackfillSummary] = []
         codes = tuple(sorted(retry_codes.get(scope, set())))
-        if scope == "fundamentals" and codes:
-            summaries.append(
-                FundamentalBackfillService(
-                    runtime.tushare, runtime.warehouse
-                ).backfill(
+        if scope == "fundamentals":
+            if not codes:
+                continue
+            summary = FundamentalBackfillService(
+                runtime.tushare, runtime.warehouse
+            ).backfill(
                     start=start,
                     through=through,
                     codes=codes,
                     resume=True,
                 )
-            )
+            scope_summaries.append(summary)
         else:
-            summaries.extend(
+            scope_summaries.extend(
                 run_research_backfill(
                     runtime,
                     start=start,
                     through=through,
                     scope=scope,
                     resume=True,
+                    record_outcomes=False,
                 )
             )
-    for summary in summaries:
-        _record_scope_outcome(runtime.warehouse, summary)
+        for summary in scope_summaries:
+            _record_repair_outcome(
+                runtime.warehouse, gap_ids.get(scope, []), summary
+            )
+        summaries.extend(scope_summaries)
     reconcile_research_gaps(runtime.warehouse)
     return tuple(summaries)
+
+
+def _record_repair_outcome(
+    warehouse: ResearchWarehouse,
+    gap_ids: list[str],
+    summary: BackfillSummary,
+) -> None:
+    if not gap_ids:
+        return
+    _record_scope_limitation(warehouse, summary)
+    status = (
+        "failed"
+        if summary.failed
+        else "waiting_upstream"
+        if summary.waiting_upstream
+        else "resolved"
+    )
+    placeholders = ",".join("?" for _ in gap_ids)
+    with connect_research_warehouse(warehouse.duckdb_path) as connection:
+        connection.execute(
+            f"""
+            update research_data_gaps
+            set status = ?, last_checked_at = now(), next_retry_at = null,
+                detail_json = ?
+            where gap_id in ({placeholders})
+            """,
+            [
+                status,
+                json.dumps(summary.model_dump(mode="json"), ensure_ascii=False),
+                *gap_ids,
+            ],
+        )
 
 
 def reconcile_research_gaps(warehouse: ResearchWarehouse) -> int:
