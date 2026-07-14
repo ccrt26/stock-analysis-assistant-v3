@@ -25,6 +25,7 @@ class BackfillSummary(BaseModel):
     committed: int = 0
     skipped: int = 0
     waiting_upstream: int = 0
+    limited: int = 0
     failed: int = 0
     issues: list[str] = Field(default_factory=list)
 

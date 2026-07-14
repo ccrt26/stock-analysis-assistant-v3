@@ -259,7 +259,11 @@ def _record_scope_outcome(
     gap_id = hashlib.sha256(
         f"scope|{summary.scope}|{scope_partition}".encode("utf-8")
     ).hexdigest()
-    if summary.failed == 0 and summary.waiting_upstream == 0:
+    if (
+        summary.failed == 0
+        and summary.waiting_upstream == 0
+        and summary.limited == 0
+    ):
         with connect_research_warehouse(warehouse.duckdb_path) as connection:
             connection.execute(
                 """
@@ -270,7 +274,14 @@ def _record_scope_outcome(
                 [gap_id],
             )
         return
-    status = "failed" if summary.failed else "waiting_upstream"
+    status = (
+        "failed"
+        if summary.failed
+        else "waiting_upstream"
+        if summary.waiting_upstream
+        else "limited"
+    )
+    reason = "scope_limited" if status == "limited" else "scope_incomplete"
     impact = {
         "market-core": "核心行情不完整，不能进行全市场横向筛选。",
         "classifications": "板块归属或板块行情不完整，热点判断需要降级。",
@@ -298,7 +309,7 @@ def _record_scope_outcome(
                 f"scope:{summary.scope}",
                 scope_partition,
                 status,
-                "scope_incomplete",
+                reason,
                 now,
                 now,
                 impact,

@@ -6,10 +6,13 @@ import pandas as pd
 from stock_analyzer.config import AppConfig
 from stock_analyzer.ops.research_data_job import (
     ResearchDataRuntime,
+    _record_scope_outcome,
     run_research_stage,
     select_minute_candidate_scope,
 )
+from stock_analyzer.data.research_backfill import BackfillSummary
 from stock_analyzer.data.research_contracts import ResearchDatasetId
+from stock_analyzer.storage.research_schema import connect_research_warehouse
 from stock_analyzer.storage.research_warehouse import ResearchWarehouse
 
 
@@ -146,3 +149,27 @@ def test_minute_candidate_scope_reads_only_latest_21_daily_partitions():
     assert warehouse.daily_partition_calls == [
         value.isoformat() for value in dates[-21:]
     ]
+
+
+def test_known_provider_limit_is_recorded_without_failing_the_data_job(tmp_path):
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    summary = BackfillSummary(
+        scope="trading-structure",
+        start=date(2026, 7, 10),
+        through=date(2026, 7, 10),
+        limited=1,
+        issues=["minute_bar:access_or_rate_limit"],
+    )
+
+    _record_scope_outcome(warehouse, summary)
+
+    with connect_research_warehouse(
+        warehouse.duckdb_path, read_only=True
+    ) as connection:
+        row = connection.execute(
+            """
+            select status, reason_category from research_data_gaps
+            where dataset_id = 'scope:trading-structure'
+            """
+        ).fetchone()
+    assert row == ("limited", "scope_limited")

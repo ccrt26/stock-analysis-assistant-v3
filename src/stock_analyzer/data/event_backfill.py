@@ -160,7 +160,7 @@ class EventBackfillService:
             )
 
         for snapshot in _quarter_snapshots(start, through):
-            requested_snapshot = _latest_friday_on_or_before(snapshot)
+            requested_snapshot = snapshot
             partition = requested_snapshot.strftime("%Y-%m")
             if self._should_skip_historical(
                 ResearchDatasetId.PLEDGE,
@@ -284,8 +284,17 @@ class EventBackfillService:
         *,
         max_weeks_back: int = 4,
     ) -> tuple[pd.DataFrame, date]:
-        for weeks_back in range(max_weeks_back + 1):
-            candidate = requested - timedelta(days=7 * weeks_back)
+        latest_friday = _latest_friday_on_or_before(requested)
+        candidates = [requested]
+        candidates.extend(
+            latest_friday - timedelta(days=7 * weeks_back)
+            for weeks_back in range(max_weeks_back + 1)
+        )
+        seen: set[date] = set()
+        for candidate in candidates:
+            if candidate in seen:
+                continue
+            seen.add(candidate)
             frame = self.tushare.call_paged(
                 "pledge_stat", end_date=_yyyymmdd(candidate)
             ).drop_duplicates(ignore_index=True)
@@ -445,7 +454,7 @@ class EventBackfillService:
                 select 1 from research_watermarks
                 where dataset_id = ? and scope_key = ?
                 """,
-                [f"event_partition_check:{dataset.value}", partition],
+                [_partition_check_dataset_id(dataset), partition],
             ).fetchone()
         return row is not None
 
@@ -463,7 +472,7 @@ class EventBackfillService:
                 values (?, ?, ?, now(), ?)
                 """,
                 [
-                    f"event_partition_check:{dataset.value}",
+                    _partition_check_dataset_id(dataset),
                     partition,
                     value,
                     f"events:{dataset.value}-check:{partition}",
@@ -484,7 +493,7 @@ class EventBackfillService:
                 delete from research_watermarks
                 where dataset_id = ? and scope_key in ({placeholders})
                 """,
-                [f"event_partition_check:{dataset.value}", *partitions],
+                [_partition_check_dataset_id(dataset), *partitions],
             )
 
     @staticmethod
@@ -602,6 +611,12 @@ def _quarter_snapshots(start: date, through: date) -> list[date]:
 
 def _latest_friday_on_or_before(value: date) -> date:
     return value - timedelta(days=(value.weekday() - 4) % 7)
+
+
+def _partition_check_dataset_id(dataset: ResearchDatasetId) -> str:
+    if dataset is ResearchDatasetId.PLEDGE:
+        return "event_partition_check_v2:pledge"
+    return f"event_partition_check:{dataset.value}"
 
 
 def _month_ranges(start: date, through: date) -> list[tuple[date, date]]:

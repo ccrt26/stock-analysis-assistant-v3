@@ -143,10 +143,12 @@ class TradingStructureBackfillService:
                     asset="I" if code in index_set else "E",
                 )
             except Exception as exc:
-                summary.failed += 1
-                summary.issues.append(
-                    f"minute_bar:{_minute_failure_category(exc)}"
-                )
+                category = _minute_failure_category(exc)
+                if category == "access_or_rate_limit":
+                    summary.limited += 1
+                else:
+                    summary.failed += 1
+                summary.issues.append(f"minute_bar:{category}")
                 break
             if not isinstance(frame, pd.DataFrame):
                 summary.failed += 1

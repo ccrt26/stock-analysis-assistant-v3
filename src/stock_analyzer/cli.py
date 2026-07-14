@@ -222,7 +222,8 @@ def data_backfill(
     for item in summaries:
         typer.echo(
             f"{item.scope}: committed={item.committed} skipped={item.skipped} "
-            f"waiting={item.waiting_upstream} failed={item.failed}"
+            f"waiting={item.waiting_upstream} limited={item.limited} "
+            f"failed={item.failed}"
         )
     if any(item.failed for item in summaries):
         raise typer.Exit(code=2)
@@ -246,7 +247,7 @@ def data_repair_gaps(
         typer.echo(
             f"repair/{item.scope}: committed={item.committed} "
             f"skipped={item.skipped} waiting={item.waiting_upstream} "
-            f"failed={item.failed}"
+            f"limited={item.limited} failed={item.failed}"
         )
     if any(item.failed for item in summaries):
         raise typer.Exit(code=2)
@@ -284,7 +285,8 @@ def data_run_stage(
     for item in summaries:
         typer.echo(
             f"{stage}/{item.scope}: committed={item.committed} skipped={item.skipped} "
-            f"waiting={item.waiting_upstream} failed={item.failed}"
+            f"waiting={item.waiting_upstream} limited={item.limited} "
+            f"failed={item.failed}"
         )
     from stock_analyzer.ops.research_health import (
         build_research_health_report,
