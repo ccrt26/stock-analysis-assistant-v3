@@ -930,6 +930,26 @@ def test_research_market_migration_audit_command_exits_cleanly(tmp_path):
     assert json.loads(receipt_path.read_text())["source_removed"] is True
     assert not source.exists()
 
+    post_cleanup_audit = CliRunner().invoke(
+        app,
+        [
+            "data",
+            "audit-migration",
+            "--source-root",
+            str(source),
+            "--migration-id",
+            "cli-audit",
+            "--strict-hashes",
+            "--cleanup-manifest",
+            str(manifest_path),
+            "--cleanup-receipt",
+            str(receipt_path),
+        ],
+        env=env,
+    )
+    assert post_cleanup_audit.exit_code == 0, post_cleanup_audit.output
+    assert "passed=true" in post_cleanup_audit.output
+
 
 def test_render_report_requires_supabase_config_without_fixture_mode(tmp_path, monkeypatch):
     monkeypatch.delenv("SUPABASE_URL", raising=False)

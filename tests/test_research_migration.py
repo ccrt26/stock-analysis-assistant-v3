@@ -189,6 +189,29 @@ def test_cleanup_manifest_requires_strict_audit_and_deletes_verified_source(tmp_
     assert not source.exists()
     assert len(warehouse.read_current(ResearchDatasetId.EQUITY_DAILY)) == 1
 
+    post_cleanup_audit = audit_legacy_market_migration(
+        source,
+        warehouse,
+        migration_id="cleanup",
+        strict_hashes=True,
+        cleanup_manifest=manifest,
+        cleanup_receipt=receipt,
+    )
+    assert post_cleanup_audit.passed is True
+    assert post_cleanup_audit.source_manifest_matches is True
+    assert post_cleanup_audit.value_mismatches == 0
+
+    invalid_receipt = receipt.model_copy(update={"source_removed": False})
+    invalid_audit = audit_legacy_market_migration(
+        source,
+        warehouse,
+        migration_id="cleanup",
+        strict_hashes=True,
+        cleanup_manifest=manifest,
+        cleanup_receipt=invalid_receipt,
+    )
+    assert invalid_audit.passed is False
+
 
 def test_cleanup_refuses_source_changed_after_manifest(tmp_path):
     warehouse = ResearchWarehouse(tmp_path / "warehouse")

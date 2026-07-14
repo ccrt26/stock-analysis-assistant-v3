@@ -327,10 +327,21 @@ def audit_legacy_market_migration(
     *,
     migration_id: str,
     strict_hashes: bool = False,
+    cleanup_manifest: LegacyMarketCleanupManifest | None = None,
+    cleanup_receipt: LegacyMarketCleanupReceipt | None = None,
 ) -> LegacyMarketMigrationAudit:
     stored = _stored_report(warehouse, migration_id)
     if stored is None:
         raise ValueError(f"migration is not complete: {migration_id}")
+    if not _market_files(Path(source_root)):
+        return _audit_removed_legacy_market(
+            source_root,
+            warehouse,
+            stored=stored,
+            migration_id=migration_id,
+            cleanup_manifest=cleanup_manifest,
+            cleanup_receipt=cleanup_receipt,
+        )
     source_audit = inspect_legacy_market(source_root)
     manifest_matches = (
         source_audit.source_manifest_hash
@@ -431,6 +442,76 @@ def audit_legacy_market_migration(
         passed=passed,
         source_manifest_matches=manifest_matches,
         source_business_keys=source_audit.unique_business_keys,
+        target_business_keys=target_business_keys,
+        missing_target_keys=missing,
+        extra_target_keys=extra,
+        value_mismatches=mismatches,
+    )
+
+
+def _audit_removed_legacy_market(
+    source_root: Path,
+    warehouse: ResearchWarehouse,
+    *,
+    stored: LegacyMarketMigrationReport,
+    migration_id: str,
+    cleanup_manifest: LegacyMarketCleanupManifest | None,
+    cleanup_receipt: LegacyMarketCleanupReceipt | None,
+) -> LegacyMarketMigrationAudit:
+    if cleanup_manifest is None or cleanup_receipt is None:
+        raise FileNotFoundError(
+            "legacy source was removed; cleanup manifest and receipt are required"
+        )
+    embedded = cleanup_manifest.strict_audit
+    source = Path(source_root).resolve()
+    evidence_matches = bool(
+        cleanup_manifest.migration_id == migration_id
+        and cleanup_receipt.migration_id == migration_id
+        and Path(cleanup_manifest.source_root).resolve() == source
+        and cleanup_receipt.source_manifest_hash
+        == cleanup_manifest.source_manifest_hash
+        and cleanup_receipt.files_deleted == len(cleanup_manifest.files)
+        and cleanup_receipt.bytes_deleted == cleanup_manifest.total_bytes
+        and cleanup_receipt.source_removed
+        and not source.exists()
+        and embedded.migration_id == migration_id
+        and embedded.passed
+        and embedded.source_manifest_matches
+        and embedded.source_business_keys
+        == stored.source_audit.unique_business_keys
+    )
+    source_dates = set(stored.source_audit.per_date)
+    target_manifest = warehouse.partition_manifest(ResearchDatasetId.EQUITY_DAILY)
+    target_manifest = target_manifest[
+        target_manifest["partition_value"].astype(str).isin(source_dates)
+    ]
+    target_business_keys = int(target_manifest["row_count"].sum())
+    integrity_failures = 0
+    for row in target_manifest.to_dict(orient="records"):
+        path = warehouse.root / str(row["relative_path"])
+        if not path.is_file():
+            integrity_failures += 1
+            continue
+        if pq.ParquetFile(path).metadata.num_rows != int(row["row_count"]):
+            integrity_failures += 1
+        if _sha256(path) != str(row["file_sha256"]):
+            integrity_failures += 1
+    if len(target_manifest) != len(source_dates):
+        integrity_failures += abs(len(source_dates) - len(target_manifest))
+    source_business_keys = stored.source_audit.unique_business_keys
+    missing = max(0, source_business_keys - target_business_keys)
+    extra = max(0, target_business_keys - source_business_keys)
+    mismatches = embedded.value_mismatches + integrity_failures
+    return LegacyMarketMigrationAudit(
+        migration_id=migration_id,
+        passed=bool(
+            evidence_matches
+            and missing == 0
+            and extra == 0
+            and mismatches == 0
+        ),
+        source_manifest_matches=evidence_matches,
+        source_business_keys=source_business_keys,
         target_business_keys=target_business_keys,
         missing_target_keys=missing,
         extra_target_keys=extra,

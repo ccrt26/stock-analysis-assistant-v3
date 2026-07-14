@@ -116,18 +116,38 @@ def data_audit_migration(
         Path("local_warehouse/parquet/formal"), "--source-root"
     ),
     strict_hashes: bool = typer.Option(False, "--strict-hashes"),
+    cleanup_manifest: Path | None = typer.Option(None, "--cleanup-manifest"),
+    cleanup_receipt: Path | None = typer.Option(None, "--cleanup-receipt"),
 ) -> None:
     from stock_analyzer.storage.research_migration import (
+        LegacyMarketCleanupManifest,
+        LegacyMarketCleanupReceipt,
         audit_legacy_market_migration,
     )
     from stock_analyzer.storage.research_warehouse import ResearchWarehouse
 
     config = AppConfig.load()
+    manifest_evidence = (
+        LegacyMarketCleanupManifest.model_validate_json(
+            cleanup_manifest.read_text(encoding="utf-8")
+        )
+        if cleanup_manifest is not None
+        else None
+    )
+    receipt_evidence = (
+        LegacyMarketCleanupReceipt.model_validate_json(
+            cleanup_receipt.read_text(encoding="utf-8")
+        )
+        if cleanup_receipt is not None
+        else None
+    )
     audit = audit_legacy_market_migration(
         source_root,
         ResearchWarehouse(config.local_warehouse_dir),
         migration_id=migration_id,
         strict_hashes=strict_hashes,
+        cleanup_manifest=manifest_evidence,
+        cleanup_receipt=receipt_evidence,
     )
     typer.echo(
         f"migration audit {migration_id}: passed={str(audit.passed).lower()} "

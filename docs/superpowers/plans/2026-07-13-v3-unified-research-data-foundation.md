@@ -659,6 +659,16 @@ PYTHONPATH=src .venv/bin/python -m stock_analyzer data audit-migration \
   --strict-hashes
 ```
 
+旧目录按受控清理收据删除后，后续严格审计不得要求恢复重复源文件，必须显式提供当时生成的清理清单和收据：
+
+```bash
+PYTHONPATH=src .venv/bin/python -m stock_analyzer data audit-migration \
+  --migration-id unified-research-20260713 \
+  --strict-hashes \
+  --cleanup-manifest local_archive/migrations/2026-07-14-legacy-market-cleanup-manifest.json \
+  --cleanup-receipt local_archive/migrations/2026-07-14-legacy-market-cleanup-receipt.json
+```
+
 必须确认：
 
 - 旧物理 3,450,498 行被解释为版本快照；
