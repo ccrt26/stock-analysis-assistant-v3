@@ -141,7 +141,7 @@ def _compute_stock_row(
     benchmark_current_valid = _finite_positive_scalar(benchmark.loc[analysis_date])
     trailing_price = closes.tail(82)
     available_price_sessions = int(_finite_positive(trailing_price).sum())
-    limitations: list[str] = []
+    limitations: list[str] = ["trader identity unavailable from daily facts"]
     if not current_core_valid:
         limitations.append("current price or amount fact is incomplete")
     if not benchmark_current_valid:
@@ -168,26 +168,77 @@ def _compute_stock_row(
             if np.isfinite(stock_return) and np.isfinite(benchmark_return)
             else np.nan
         )
-
-    beta, downside_beta, correlation = _risk_observations(
-        stock_returns, benchmark_returns
+    return_available = sum(
+        np.isfinite(row[f"return_{horizon}d"])
+        and np.isfinite(row[f"relative_return_{horizon}d"])
+        for horizon in RETURN_HORIZONS
     )
-    row["beta_60d"] = beta
-    row["downside_beta_60d"] = downside_beta
-    row["benchmark_correlation_60d"] = correlation
+    row["return_available_horizon_count"] = int(return_available)
+    row["return_status"] = (
+        "complete" if return_available == len(RETURN_HORIZONS) else "limited"
+    )
+    if row["return_status"] == "limited":
+        limitations.append(
+            f"return observations available for {return_available}/{len(RETURN_HORIZONS)} horizons"
+        )
+
+    risk_observations = _risk_observations(stock_returns, benchmark_returns)
+    row.update(risk_observations)
+    if risk_observations["risk_status"] == "limited":
+        limitations.append(
+            "risk observations are limited: "
+            f"{risk_observations['risk_observation_count_60d']}/60 exact stock-benchmark return pairs, "
+            f"{risk_observations['downside_risk_observation_count_60d']} downside pairs"
+        )
     row["realized_volatility_20d_annualized"] = _realized_volatility(stock_returns)
     row["atr_ratio_20d"] = _atr_ratio(stock)
     for window in PRICE_LOCATION_WINDOWS:
         row[f"price_location_{window}d"] = _price_location(closes, window)
-
-    average_amount, amount_ratio = _amount_observations(amounts)
-    row["average_amount_20d"] = average_amount
-    row["current_amount_ratio_20d"] = amount_ratio
-    row["up_down_amount_ratio_60d"] = _up_down_amount_ratio(
-        amounts, stock_returns
+    price_required = (
+        "realized_volatility_20d_annualized",
+        "atr_ratio_20d",
+        "price_location_60d",
+        "price_location_82d",
     )
-    row.update(_high_volume_observations(stock, stock_returns))
-    row.update(_countertrend_observations(stock_returns, benchmark_returns))
+    row["price_observation_status"] = (
+        "complete"
+        if all(np.isfinite(row[field]) for field in price_required)
+        else "limited"
+    )
+    if row["price_observation_status"] == "limited":
+        limitations.append("volatility, ATR, or price-location history is incomplete")
+
+    amount_observations = _amount_observations(amounts)
+    row.update(amount_observations)
+    if amount_observations["amount_status"] == "limited":
+        limitations.append(
+            "20-session amount observations are incomplete: "
+            f"{amount_observations['amount_observation_count_20d']}/20"
+        )
+    direction_observations = _up_down_amount_observations(amounts, stock_returns)
+    row.update(direction_observations)
+    if direction_observations["amount_direction_status"] == "limited":
+        limitations.append(
+            "amount-direction observations are limited: "
+            f"{direction_observations['amount_direction_observation_count_60d']}/60 exact sessions"
+        )
+    high_volume_observations = _high_volume_observations(stock, stock_returns)
+    row.update(high_volume_observations)
+    if high_volume_observations["high_volume_status"] == "limited":
+        limitations.append(
+            "high-volume observations are limited: "
+            f"{high_volume_observations['high_volume_amount_observation_count_60d']}/60 amounts, "
+            f"{high_volume_observations['high_volume_selected_count_60d']} selected"
+        )
+    countertrend_observations = _countertrend_observations(
+        stock_returns, benchmark_returns
+    )
+    row.update(countertrend_observations)
+    if countertrend_observations["countertrend_status"] == "limited":
+        limitations.append(
+            "countertrend observations are limited by incomplete stock or benchmark returns: "
+            f"{countertrend_observations['countertrend_observation_count_60d']}/60"
+        )
 
     limit_observations, limit_complete = _limit_observations(
         code, stock, limits, session_index
@@ -195,29 +246,44 @@ def _compute_stock_row(
     row.update(limit_observations)
     if not limit_complete:
         limitations.append("recent stock-limit facts are incomplete")
+    if limit_observations["post_limit_behavior_status"] == "limited":
+        limitations.append("post-limit next-session facts are incomplete")
 
-    valuation_observations, valuation_current_complete = _valuation_observations(
-        code, valuations, analysis_date
+    valuation_observations, valuation_complete = _valuation_observations(
+        code, valuations, session_index, analysis_date
     )
     row.update(valuation_observations)
-    if not valuation_current_complete:
-        limitations.append("current valuation facts are incomplete")
+    if not valuation_complete:
+        limitations.append(
+            "250-session valuation observations are incomplete: "
+            f"{valuation_observations['valuation_observations_250d']}/250"
+        )
+    if valuation_observations["pe_percentile_status"] == "unavailable_non_positive":
+        limitations.append("PE percentiles are unavailable because the current valuation has a non-positive PE")
 
     history_complete = (
         len(trailing_price) >= 82 and bool(_finite_positive(trailing_price).all())
     )
-    risk_complete = all(
-        np.isfinite(row[field])
-        for field in ("beta_60d", "benchmark_correlation_60d", "atr_ratio_20d")
+    feature_statuses = (
+        row["return_status"],
+        row["risk_status"],
+        row["price_observation_status"],
+        row["amount_status"],
+        row["amount_direction_status"],
+        row["high_volume_status"],
+        row["countertrend_status"],
+        row["limit_data_status"],
+        row["valuation_data_status"],
     )
+    post_limit_usable = row["post_limit_behavior_status"] != "limited"
     row["coverage_status"] = (
         "complete_with_declared_gaps"
         if current_core_valid
         and benchmark_current_valid
         and history_complete
-        and risk_complete
         and limit_complete
-        and valuation_current_complete
+        and post_limit_usable
+        and all(status == "complete" for status in feature_statuses)
         else "limited"
     )
     row["limitation_notes"] = "; ".join(limitations)
@@ -262,35 +328,55 @@ def _exact_return(series: pd.Series, horizon: int, analysis_date: date) -> float
 
 def _risk_observations(
     stock_returns: pd.Series, benchmark_returns: pd.Series
-) -> tuple[float, float, float]:
+) -> dict[str, object]:
     """Compute 60-session beta, downside-day beta and correlation."""
 
     paired = pd.concat(
         [stock_returns.rename("stock"), benchmark_returns.rename("benchmark")], axis=1
     ).tail(RISK_WINDOW)
-    if len(paired) != RISK_WINDOW or not np.isfinite(paired.to_numpy()).all():
-        return np.nan, np.nan, np.nan
-    variance = float(paired["benchmark"].var(ddof=1))
+    valid = np.isfinite(paired["stock"]) & np.isfinite(paired["benchmark"])
+    observation_count = int(valid.sum())
+    complete = len(paired) == RISK_WINDOW and observation_count == RISK_WINDOW
+    usable = paired[valid]
+    downside = usable[usable["benchmark"] < 0]
+    downside_count = int(len(downside))
+    variance = float(usable["benchmark"].var(ddof=1)) if len(usable) >= 2 else np.nan
     beta = (
-        float(paired["stock"].cov(paired["benchmark"]) / variance)
-        if variance > 0
+        float(usable["stock"].cov(usable["benchmark"]) / variance)
+        if complete and variance > 0
         else np.nan
     )
-    stock_deviation = float(paired["stock"].std(ddof=1))
-    benchmark_deviation = float(paired["benchmark"].std(ddof=1))
+    stock_deviation = float(usable["stock"].std(ddof=1)) if len(usable) >= 2 else np.nan
+    benchmark_deviation = (
+        float(usable["benchmark"].std(ddof=1)) if len(usable) >= 2 else np.nan
+    )
     correlation = (
-        float(paired["stock"].corr(paired["benchmark"]))
-        if stock_deviation > 0 and benchmark_deviation > 0
+        float(usable["stock"].corr(usable["benchmark"]))
+        if complete and stock_deviation > 0 and benchmark_deviation > 0
         else np.nan
     )
-    downside = paired[paired["benchmark"] < 0]
     downside_variance = float(downside["benchmark"].var(ddof=1))
     downside_beta = (
         float(downside["stock"].cov(downside["benchmark"]) / downside_variance)
-        if len(downside) >= 2 and downside_variance > 0
+        if complete and downside_count >= 2 and downside_variance > 0
         else np.nan
     )
-    return beta, downside_beta, correlation
+    status = (
+        "complete"
+        if complete
+        and np.isfinite(beta)
+        and np.isfinite(downside_beta)
+        and np.isfinite(correlation)
+        else "limited"
+    )
+    return {
+        "beta_60d": beta,
+        "downside_beta_60d": downside_beta,
+        "benchmark_correlation_60d": correlation,
+        "risk_observation_count_60d": observation_count,
+        "downside_risk_observation_count_60d": downside_count,
+        "risk_status": status,
+    }
 
 
 def _realized_volatility(stock_returns: pd.Series) -> float:
@@ -338,20 +424,34 @@ def _price_location(closes: pd.Series, window: int) -> float:
     return float((sample.iloc[-1] - low) / (high - low))
 
 
-def _amount_observations(amounts: pd.Series) -> tuple[float, float]:
+def _amount_observations(amounts: pd.Series) -> dict[str, object]:
     """Return exact 20-session average amount and current/average ratio."""
 
     sample = amounts.tail(20)
     current = amounts.iloc[-1]
-    if len(sample) != 20 or not _finite_nonnegative(sample).all():
-        return np.nan, np.nan
-    average = float(sample.mean())
-    if average <= 0 or not _finite_nonnegative_scalar(current):
-        return average, np.nan
-    return average, float(current / average)
+    valid_count = int(_finite_nonnegative(sample).sum())
+    complete = len(sample) == 20 and valid_count == 20
+    average = float(sample.mean()) if complete else np.nan
+    ratio = (
+        float(current / average)
+        if complete
+        and average > 0
+        and _finite_nonnegative_scalar(current)
+        else np.nan
+    )
+    return {
+        "average_amount_20d": average,
+        "current_amount_ratio_20d": ratio,
+        "amount_observation_count_20d": valid_count,
+        "amount_status": (
+            "complete" if np.isfinite(average) and np.isfinite(ratio) else "limited"
+        ),
+    }
 
 
-def _up_down_amount_ratio(amounts: pd.Series, returns: pd.Series) -> float:
+def _up_down_amount_observations(
+    amounts: pd.Series, returns: pd.Series
+) -> dict[str, object]:
     """Compare mean amount on observed up days with observed down days."""
 
     sample = pd.concat(
@@ -361,9 +461,23 @@ def _up_down_amount_ratio(amounts: pd.Series, returns: pd.Series) -> float:
     sample = sample[valid]
     up = sample.loc[sample["return"] > 0, "amount"]
     down = sample.loc[sample["return"] < 0, "amount"]
-    if up.empty or down.empty or float(down.mean()) == 0:
-        return np.nan
-    return float(up.mean() / down.mean())
+    ratio = (
+        float(up.mean() / down.mean())
+        if not up.empty and not down.empty and float(down.mean()) > 0
+        else np.nan
+    )
+    observation_count = int(len(sample))
+    return {
+        "up_down_amount_ratio_60d": ratio,
+        "amount_direction_observation_count_60d": observation_count,
+        "amount_up_observation_count_60d": int(len(up)),
+        "amount_down_observation_count_60d": int(len(down)),
+        "amount_direction_status": (
+            "complete"
+            if observation_count == 60 and np.isfinite(ratio)
+            else "limited"
+        ),
+    }
 
 
 def _daily_efficiency(stock: pd.DataFrame) -> pd.DataFrame:
@@ -393,6 +507,10 @@ def _high_volume_observations(
     sample = stock.tail(HIGH_VOLUME_WINDOW).copy()
     valid_amount = sample.loc[_finite_nonnegative(sample["amount"]), "amount"]
     empty = {
+        "high_volume_definition": "amount >= trailing-60-session 80th percentile; all ties included",
+        "high_volume_amount_observation_count_60d": int(len(valid_amount)),
+        "high_volume_selected_count_60d": 0,
+        "high_volume_status": "limited",
         "high_volume_up_count_60d": np.nan,
         "high_volume_down_count_60d": np.nan,
         "high_volume_close_location_median_60d": np.nan,
@@ -411,7 +529,17 @@ def _high_volume_observations(
     body = efficiencies["body_efficiency"].dropna()
     minimum_date = body.idxmin() if not body.empty else pd.NaT
     directions_complete = bool(np.isfinite(selected_returns).all())
+    selected_complete = bool(
+        len(valid_amount) == HIGH_VOLUME_WINDOW
+        and directions_complete
+        and np.isfinite(efficiencies["close_location"]).all()
+        and np.isfinite(efficiencies["body_efficiency"]).all()
+    )
     return {
+        "high_volume_definition": empty["high_volume_definition"],
+        "high_volume_amount_observation_count_60d": int(len(valid_amount)),
+        "high_volume_selected_count_60d": int(len(selected)),
+        "high_volume_status": "complete" if selected_complete else "limited",
         "high_volume_up_count_60d": (
             int((selected_returns > 0).sum()) if directions_complete else np.nan
         ),
@@ -438,11 +566,15 @@ def _countertrend_observations(
         [stock_returns.rename("stock"), benchmark_returns.rename("benchmark")], axis=1
     ).tail(COUNTERTREND_WINDOW)
     valid_pairs = np.isfinite(paired["stock"]) & np.isfinite(paired["benchmark"])
+    observation_count = int(valid_pairs.sum())
     expected_pairs = min(COUNTERTREND_WINDOW, max(len(stock_returns) - 1, 0))
-    if expected_pairs == 0 or int(valid_pairs.sum()) != expected_pairs:
+    complete = expected_pairs == COUNTERTREND_WINDOW and observation_count == COUNTERTREND_WINDOW
+    if expected_pairs == 0 or observation_count != expected_pairs:
         return {
             "countertrend_up_count_60d": np.nan,
             "countertrend_up_recency_weighted_60d": np.nan,
+            "countertrend_observation_count_60d": observation_count,
+            "countertrend_status": "limited",
         }
     signal = (paired["benchmark"] < COUNTERTREND_MARKET_THRESHOLD) & (
         paired["stock"] > 0
@@ -454,6 +586,8 @@ def _countertrend_observations(
         "countertrend_up_recency_weighted_60d": float(
             weights[(signal & valid_pairs).to_numpy()].sum()
         ),
+        "countertrend_observation_count_60d": observation_count,
+        "countertrend_status": "complete" if complete else "limited",
     }
 
 
@@ -480,6 +614,7 @@ def _limit_observations(
     complete = len(recent_dates) > 0 and bool(valid.all())
     empty = {
         "limit_data_status": "limited",
+        "post_limit_behavior_status": "limited",
         "limit_observation_count_5d": int(valid.sum()),
         "recent_limit_up_count_5d": np.nan,
         "recent_limit_down_count_5d": np.nan,
@@ -502,15 +637,27 @@ def _limit_observations(
         }
     )
     if not hit_dates:
+        result["post_limit_behavior_status"] = "not_applicable"
         return result, True
     latest = hit_dates[-1]
     result["latest_limit_up_date"] = latest
     latest_position = list(session_index).index(latest)
     if latest_position >= len(session_index) - 1:
+        result["post_limit_behavior_status"] = "pending"
         return result, True
     next_date = session_index[latest_position + 1]
     hit_row = stock.loc[latest]
     next_row = stock.loc[next_date]
+    behavior_complete = bool(
+        _finite_positive_scalar(hit_row["close"])
+        and _finite_positive_scalar(hit_row["amount"])
+        and _finite_positive_scalar(next_row["close"])
+        and _finite_nonnegative_scalar(next_row["amount"])
+        and _finite_positive_scalar(next_row["high"])
+    )
+    result["post_limit_behavior_status"] = (
+        "complete" if behavior_complete else "limited"
+    )
     if _finite_positive_scalar(hit_row["close"]) and _finite_positive_scalar(
         next_row["close"]
     ):
@@ -533,7 +680,10 @@ def _limit_observations(
 
 
 def _valuation_observations(
-    code: str, valuations: pd.DataFrame, analysis_date: date
+    code: str,
+    valuations: pd.DataFrame,
+    session_index: pd.Index,
+    analysis_date: date,
 ) -> tuple[dict[str, object], bool]:
     """Calculate 250-session and available-five-year valuation percentiles."""
 
@@ -546,7 +696,21 @@ def _valuation_observations(
     current_complete = bool(np.isfinite(current_pe) and np.isfinite(current_pb))
     five_year_start = (pd.Timestamp(analysis_date) - pd.DateOffset(years=5)).date()
     available_five_year = code_values[code_values["trade_date"] >= five_year_start]
-    trailing_250 = code_values.tail(VALUATION_WINDOW)
+    canonical_dates = list(session_index[-VALUATION_WINDOW:])
+    trailing_250 = code_values.set_index("trade_date").reindex(canonical_dates)
+    raw_250_valid = np.isfinite(trailing_250["pe_ttm"]) & np.isfinite(
+        trailing_250["pb"]
+    )
+    raw_5y_valid = np.isfinite(available_five_year["pe_ttm"]) & np.isfinite(
+        available_five_year["pb"]
+    )
+    valuation_observations_250d = int(raw_250_valid.sum())
+    valuation_observations_5y = int(raw_5y_valid.sum())
+    valuation_complete = bool(
+        current_complete
+        and len(canonical_dates) == VALUATION_WINDOW
+        and valuation_observations_250d == VALUATION_WINDOW
+    )
     positive_pe_250 = trailing_250.loc[trailing_250["pe_ttm"] > 0, "pe_ttm"]
     positive_pe_5y = available_five_year.loc[
         available_five_year["pe_ttm"] > 0, "pe_ttm"
@@ -563,7 +727,7 @@ def _valuation_observations(
         else "available"
     )
     return {
-        "valuation_data_status": "complete" if current_complete else "limited",
+        "valuation_data_status": "complete" if valuation_complete else "limited",
         "pe_ttm": current_pe,
         "pb": current_pb,
         "pe_ttm_percentile_250d": _percentile_or_nan(
@@ -578,14 +742,10 @@ def _valuation_observations(
         "pb_percentile_5y_available": _percentile_or_nan(
             current_pb, positive_pb_5y, positive_required=True
         ),
-        "valuation_observations_250d": int(
-            min(len(positive_pe_250), len(positive_pb_250))
-        ),
-        "valuation_observations_5y": int(
-            min(len(positive_pe_5y), len(positive_pb_5y))
-        ),
+        "valuation_observations_250d": valuation_observations_250d,
+        "valuation_observations_5y": valuation_observations_5y,
         "pe_percentile_status": pe_status,
-    }, current_complete
+    }, valuation_complete
 
 
 def _percentile_or_nan(
