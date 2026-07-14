@@ -100,13 +100,27 @@ def compute_stock_context_features(
     benchmark_series = (
         benchmark.set_index("trade_date")["close"].reindex(session_index).astype(float)
     )
+    equity_groups = {
+        str(code): group
+        for code, group in equity.groupby("ts_code", sort=False)
+    }
+    limit_groups = {
+        str(code): group
+        for code, group in limits.groupby("ts_code", sort=False)
+    }
+    valuation_groups = {
+        str(code): group
+        for code, group in valuation.groupby("ts_code", sort=False)
+    }
+    empty_limits = limits.iloc[0:0].copy()
+    empty_valuations = valuation.iloc[0:0].copy()
     rows = [
         _compute_stock_row(
             code,
-            equity,
+            equity_groups[code],
             benchmark_series,
-            limits,
-            valuation,
+            limit_groups.get(code, empty_limits),
+            valuation_groups.get(code, empty_valuations),
             session_index,
             analysis_date,
         )
@@ -117,18 +131,14 @@ def compute_stock_context_features(
 
 def _compute_stock_row(
     code: str,
-    equity: pd.DataFrame,
+    stock_values: pd.DataFrame,
     benchmark: pd.Series,
-    limits: pd.DataFrame,
-    valuations: pd.DataFrame,
+    code_limits: pd.DataFrame,
+    code_valuations: pd.DataFrame,
     session_index: pd.Index,
     analysis_date: date,
 ) -> dict[str, object]:
-    stock = (
-        equity[equity["ts_code"].astype(str) == code]
-        .set_index("trade_date")
-        .reindex(session_index)
-    )
+    stock = stock_values.set_index("trade_date").reindex(session_index)
     closes = stock["close"].astype(float)
     amounts = stock["amount"].astype(float)
     benchmark = benchmark.reindex(session_index)
@@ -241,7 +251,7 @@ def _compute_stock_row(
         )
 
     limit_observations, limit_complete = _limit_observations(
-        code, stock, limits, session_index
+        stock, code_limits, session_index
     )
     row.update(limit_observations)
     if not limit_complete:
@@ -250,7 +260,7 @@ def _compute_stock_row(
         limitations.append("post-limit next-session facts are incomplete")
 
     valuation_observations, valuation_complete = _valuation_observations(
-        code, valuations, session_index, analysis_date
+        code_valuations, session_index, analysis_date
     )
     row.update(valuation_observations)
     if not valuation_complete:
@@ -592,19 +602,14 @@ def _countertrend_observations(
 
 
 def _limit_observations(
-    code: str,
     stock: pd.DataFrame,
-    limits: pd.DataFrame,
+    code_limit_values: pd.DataFrame,
     session_index: pd.Index,
 ) -> tuple[dict[str, object], bool]:
     """Use supplied daily limit prices for hits and next-session behavior."""
 
     recent_dates = list(session_index[-LIMIT_WINDOW:])
-    code_limits = (
-        limits[limits["ts_code"].astype(str) == code]
-        .set_index("trade_date")
-        .reindex(recent_dates)
-    )
+    code_limits = code_limit_values.set_index("trade_date").reindex(recent_dates)
     recent_stock = stock.reindex(recent_dates)
     valid = (
         _finite_positive(code_limits["up_limit"])
@@ -680,16 +685,13 @@ def _limit_observations(
 
 
 def _valuation_observations(
-    code: str,
-    valuations: pd.DataFrame,
+    code_valuation_values: pd.DataFrame,
     session_index: pd.Index,
     analysis_date: date,
 ) -> tuple[dict[str, object], bool]:
     """Calculate 250-session and available-five-year valuation percentiles."""
 
-    code_values = valuations[valuations["ts_code"].astype(str) == code].sort_values(
-        "trade_date"
-    )
+    code_values = code_valuation_values.sort_values("trade_date")
     current_rows = code_values[code_values["trade_date"] == analysis_date]
     current_pe = float(current_rows.iloc[0]["pe_ttm"]) if not current_rows.empty else np.nan
     current_pb = float(current_rows.iloc[0]["pb"]) if not current_rows.empty else np.nan

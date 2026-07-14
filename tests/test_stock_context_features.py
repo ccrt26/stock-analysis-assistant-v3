@@ -574,3 +574,44 @@ def test_complete_row_has_all_required_observations_and_declared_limitation() ->
     assert row["post_limit_behavior_status"] == "not_applicable"
     assert row["coverage_status"] == "complete_with_declared_gaps"
     assert "trader identity" in row["limitation_notes"]
+
+
+def test_full_universe_calculation_groups_each_input_once_by_stock(monkeypatch) -> None:
+    dates = pd.bdate_range(end=ANALYSIS_DATE, periods=82)
+    codes = [f"{value:06d}.SZ" for value in range(20)]
+    closes = {
+        code: (100.0 + np.arange(len(dates)) * 0.1).tolist()
+        for code in codes
+    }
+    equity = _equity_rows(dates, closes)
+    valuations = pd.DataFrame(
+        [
+            {
+                "trade_date": trading_day.date(),
+                "ts_code": code,
+                "pe_ttm": 10.0 + offset / 100,
+                "pb": 1.0 + offset / 1000,
+            }
+            for code in codes
+            for offset, trading_day in enumerate(dates)
+        ]
+    )
+    comparisons = 0
+    original_eq = pd.Series.__eq__
+
+    def count_code_comparison(series, other):
+        nonlocal comparisons
+        if series.name == "ts_code" and isinstance(other, str):
+            comparisons += 1
+        return original_eq(series, other)
+
+    monkeypatch.setattr(pd.Series, "__eq__", count_code_comparison)
+
+    result = _compute(
+        equity,
+        _benchmark(dates, (100.0 + np.arange(len(dates)) * 0.1).tolist()),
+        valuations=valuations,
+    )
+
+    assert len(result) == len(codes)
+    assert comparisons <= 1
