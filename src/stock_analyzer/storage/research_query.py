@@ -121,14 +121,22 @@ class ResearchQuery:
                 raise ValueError(
                     f"missing fact partitions for {dataset.value}: {missing}"
                 )
+            empty_partition = resolved.iloc[0:0]
+            resolved_partitions = (
+                {}
+                if resolved.empty
+                else {
+                    str(partition): group
+                    for partition, group in resolved.groupby(
+                        _PARTITION_VALUE_COLUMN, sort=False
+                    )
+                }
+            )
             for partition in partitions:
                 row = rows[partition]
-                if resolved.empty:
-                    partition_frame = resolved
-                else:
-                    partition_frame = resolved.loc[
-                        resolved[_PARTITION_VALUE_COLUMN].astype(str) == partition
-                    ]
+                partition_frame = resolved_partitions.get(
+                    partition, empty_partition
+                )
                 public_frame = _public_fact_frame(partition_frame)
                 items.append(
                     {

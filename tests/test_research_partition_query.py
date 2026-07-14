@@ -440,3 +440,62 @@ def test_large_as_of_resolution_and_hashing_do_not_materialize_python_row_dicts(
     assert len(resolved) == row_count
     assert resolved.iloc[0]["payload_hash"] == "revised"
     assert len(digest) == 64
+
+
+def test_manifest_groups_resolved_rows_once_instead_of_rescanning_per_partition(
+    monkeypatch,
+):
+    partitions = [f"2026-06-{day:02d}" for day in range(1, 9)]
+    frame = pd.DataFrame(
+        [
+            {
+                "trade_date": date.fromisoformat(partition),
+                "ts_code": f"{code:06d}.SZ",
+                "business_key_hash": f"{partition}-{code}",
+                "payload_hash": f"payload-{partition}-{code}",
+                "available_at": datetime(2026, 6, 20, tzinfo=timezone.utc),
+                "revision_no": 1,
+                "__research_partition_value": partition,
+            }
+            for partition in partitions
+            for code in range(10)
+        ]
+    )
+    metadata = pd.DataFrame(
+        [
+            {
+                "partition_value": partition,
+                "row_count": 10,
+                "content_hash": f"content-{partition}",
+                "file_sha256": f"file-{partition}",
+                "quality_status": "passed",
+            }
+            for partition in partitions
+        ]
+    )
+
+    class Warehouse:
+        def read_current_partitions_with_manifest(self, dataset, selected):
+            return frame.copy(), metadata.copy()
+
+        def revision_rows(self, dataset, *, partition_values=None):
+            return []
+
+    comparisons = 0
+    original_eq = pd.Series.__eq__
+
+    def count_partition_comparison(series, other):
+        nonlocal comparisons
+        if series.name == "__research_partition_value":
+            comparisons += 1
+        return original_eq(series, other)
+
+    monkeypatch.setattr(pd.Series, "__eq__", count_partition_comparison)
+
+    snapshot = ResearchQuery(Warehouse()).materialize_snapshot(
+        {ResearchDatasetId.EQUITY_DAILY: partitions},
+        as_of=datetime(2026, 7, 1, tzinfo=timezone.utc),
+    )
+
+    assert len(snapshot.input_manifest["partitions"]) == len(partitions)
+    assert comparisons <= 1
