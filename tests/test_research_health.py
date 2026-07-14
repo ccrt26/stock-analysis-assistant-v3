@@ -184,6 +184,8 @@ def test_derived_health_preserves_declared_gaps_and_explains_them_plainly(
     assert sector.quality_status == "complete_with_declared_gaps"
     assert sector.ready is True
     assert sector.no_membership_entities == 1
+    assert sector.no_membership_industries == 0
+    assert sector.no_membership_themes == 1
     assert sector.intraday_limited_entities == 2
     assert "可以使用，但有明确限制" in text
     assert "1 个主题没有公开成分股" in text

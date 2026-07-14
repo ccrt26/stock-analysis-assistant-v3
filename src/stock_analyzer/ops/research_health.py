@@ -53,6 +53,8 @@ class DerivedFeatureHealth(BaseModel):
     quality_status: str | None
     limitations: tuple[str, ...]
     no_membership_entities: int
+    no_membership_industries: int
+    no_membership_themes: int
     intraday_limited_entities: int
     missing_files: int
     hash_mismatches: int
@@ -203,6 +205,8 @@ def _build_derived_health(
         hash_mismatches = 0
         row_count_mismatches = 0
         no_membership_entities = 0
+        no_membership_industries = 0
+        no_membership_themes = 0
         intraday_limited_entities = 0
         stale_input_manifest = False
         committed_at: datetime | None = None
@@ -220,6 +224,8 @@ def _build_derived_health(
             hash_mismatches = audit["hash_mismatches"]
             row_count_mismatches = audit["row_count_mismatches"]
             no_membership_entities = audit["no_membership_entities"]
+            no_membership_industries = audit["no_membership_industries"]
+            no_membership_themes = audit["no_membership_themes"]
             intraday_limited_entities = audit["intraday_limited_entities"]
             stale_input_manifest = _derived_input_is_stale(
                 warehouse, row["input_manifest_json"]
@@ -253,6 +259,8 @@ def _build_derived_health(
                 quality_status=quality_status,
                 limitations=limitations,
                 no_membership_entities=no_membership_entities,
+                no_membership_industries=no_membership_industries,
+                no_membership_themes=no_membership_themes,
                 intraday_limited_entities=intraday_limited_entities,
                 missing_files=missing_files,
                 hash_mismatches=hash_mismatches,
@@ -277,6 +285,8 @@ def _audit_derived_partition(
         "hash_mismatches": 0,
         "row_count_mismatches": 0,
         "no_membership_entities": 0,
+        "no_membership_industries": 0,
+        "no_membership_themes": 0,
         "intraday_limited_entities": 0,
     }
     if not path.is_file():
@@ -292,17 +302,26 @@ def _audit_derived_partition(
     )
     names = set(parquet.schema_arrow.names)
     columns = [
-        name for name in ("coverage_status", "intraday_status") if name in names
+        name
+        for name in ("coverage_status", "group_type", "intraday_status")
+        if name in names
     ]
     if columns:
         observations = parquet.read(columns=columns).to_pandas()
         if "coverage_status" in observations:
-            audit["no_membership_entities"] = int(
-                (
-                    observations["coverage_status"].astype(str)
-                    == "limited_no_membership"
-                ).sum()
+            no_membership = (
+                observations["coverage_status"].astype(str)
+                == "limited_no_membership"
             )
+            audit["no_membership_entities"] = int(no_membership.sum())
+            if "group_type" in observations:
+                group_type = observations["group_type"].astype(str)
+                audit["no_membership_industries"] = int(
+                    (no_membership & group_type.eq("industry")).sum()
+                )
+                audit["no_membership_themes"] = int(
+                    (no_membership & group_type.eq("theme")).sum()
+                )
         if "intraday_status" in observations:
             audit["intraday_limited_entities"] = int(
                 (observations["intraday_status"].astype(str) == "limited").sum()
@@ -446,10 +465,15 @@ def write_health_report(
             f"{item.formula_version or '-'} | {item.quality_status or '缺失'} | "
             f"{'是' if item.ready else '否'} | {problems} |"
         )
-        if item.no_membership_entities:
+        if item.no_membership_themes:
             lines.append(
-                f"- {item.no_membership_entities} 个主题没有公开成分股，"
+                f"- {item.no_membership_themes} 个主题没有公开成分股，"
                 "程序保留了主题名称，但不编造板块内部结论。"
+            )
+        if item.no_membership_industries:
+            lines.append(
+                f"- {item.no_membership_industries} 个行业目录没有可用成分股，"
+                "程序保留目录状态，但不参与热点比较。"
             )
         if item.intraday_limited_entities:
             lines.append(
