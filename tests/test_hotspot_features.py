@@ -291,9 +291,13 @@ def test_minute_path_is_optional_and_never_fabricated() -> None:
     equity = _daily(dates, {"A.SZ": (10.0, 0.1), "B.SZ": (20.0, 0.1)})
     minute_values = np.linspace(10.0, 12.0, 240)
     minute_values[120] = minute_values[119] - 0.2
+    local_minutes = pd.DatetimeIndex(
+        list(pd.date_range("2026-07-10 09:31", "2026-07-10 11:30", freq="min", tz="Asia/Shanghai"))
+        + list(pd.date_range("2026-07-10 13:01", "2026-07-10 15:00", freq="min", tz="Asia/Shanghai"))
+    ).tz_convert("UTC")
     minutes = pd.DataFrame(
         [
-            {"trade_date": ANALYSIS_DATE, "ts_code": code, "minute": f"m{i:03d}", "close": value, "amount": 10.0}
+            {"trade_date": ANALYSIS_DATE, "ts_code": code, "minute": local_minutes[i], "close": value, "amount": 10.0}
             for code in ("A.SZ", "B.SZ")
             for i, value in enumerate(minute_values)
         ]
@@ -307,7 +311,7 @@ def test_minute_path_is_optional_and_never_fabricated() -> None:
     assert row["intraday_high_to_close_pullback"] == pytest.approx(0.0)
     assert row["coverage_status"] == "complete"
 
-    two_points = minutes[minutes["minute"].isin(["m000", "m239"])]
+    two_points = minutes[minutes["minute"].isin([local_minutes[0], local_minutes[-1]])]
     limited = _compute(equity, dates, minutes=two_points).set_index("group_code").loc["L1"]
     assert limited["intraday_status"] == "limited"
     assert limited["intraday_time_coverage_ratio"] < 0.95

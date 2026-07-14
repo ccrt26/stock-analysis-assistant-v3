@@ -9,6 +9,7 @@ constituents are never backfilled into history.
 from __future__ import annotations
 
 from datetime import date
+from zoneinfo import ZoneInfo
 
 import numpy as np
 import pandas as pd
@@ -627,14 +628,22 @@ def _minute_observations(
 
 
 def _has_minute_session_anchors(values: pd.Series) -> bool:
-    labels = sorted(str(value) for value in values.dropna().tolist())
+    raw = values.dropna()
+    labels = sorted(str(value) for value in raw.tolist())
     if not labels:
         return False
     if labels[0].startswith("m"):
         return labels[0] == "m000" and labels[-1] == "m239"
-    first = labels[0][-5:]
-    last = labels[-1][-5:]
-    return first in {"09:30", "09:31"} and last == "15:00"
+    parsed = pd.to_datetime(raw, errors="coerce", utc=True)
+    if parsed.isna().any():
+        return False
+    local = parsed.sort_values().dt.tz_convert(ZoneInfo("Asia/Shanghai"))
+    first = local.iloc[0]
+    last = local.iloc[-1]
+    return (first.hour, first.minute) in {(9, 30), (9, 31)} and (
+        last.hour,
+        last.minute,
+    ) == (15, 0)
 
 
 def _blank_observations() -> dict[str, object]:
