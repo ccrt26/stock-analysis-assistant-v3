@@ -1,51 +1,239 @@
+from __future__ import annotations
+
 from datetime import date
 
+import numpy as np
 import pandas as pd
+import pytest
 
-from stock_analyzer.analysis.hotspot_features import compute_hotspot_features
-
-
-def test_hotspot_features_use_breadth_relative_return_and_unique_turnover():
-    dates = pd.date_range("2026-06-10", periods=21, freq="B")
-    rows = []
-    for index, value in enumerate(dates):
-        rows.extend([
-            {"trade_date": value.date(), "ts_code": "A.SZ", "close": 10 + index * 0.2, "amount": 100.0},
-            {"trade_date": value.date(), "ts_code": "B.SZ", "close": 20 + index * 0.1, "amount": 200.0},
-            {"trade_date": value.date(), "ts_code": "C.SZ", "close": 30 - index * 0.1, "amount": 700.0},
-        ])
-    members = pd.DataFrame([
-        {"ts_code": "A.SZ", "group_code": "HOT", "valid_from": date(2020, 1, 1), "valid_to": None},
-        {"ts_code": "B.SZ", "group_code": "HOT", "valid_from": date(2020, 1, 1), "valid_to": None},
-        {"ts_code": "C.SZ", "group_code": "COLD", "valid_from": date(2020, 1, 1), "valid_to": None},
-    ])
-    benchmark = pd.DataFrame([
-        {"trade_date": value.date(), "close": 100 + index * 0.05}
-        for index, value in enumerate(dates)
-    ])
-
-    result = compute_hotspot_features(
-        pd.DataFrame(rows), members, benchmark, as_of=dates[-1].date()
-    ).set_index("group_code")
-
-    assert result.loc["HOT", "breadth_1d"] == 1.0
-    assert result.loc["HOT", "relative_return_20d"] > result.loc["COLD", "relative_return_20d"]
-    assert result.loc["HOT", "turnover_share"] == 0.3
-    assert "institution" not in " ".join(result.columns).lower()
+from stock_analyzer.analysis.hotspot_features import (
+    HOTSPOT_FORMULA_VERSION,
+    compute_hotspot_features,
+)
 
 
-def test_duplicate_business_fact_is_rejected_before_hotspot_calculation():
-    daily = pd.DataFrame([
-        {"trade_date": date(2026, 7, 10), "ts_code": "A.SZ", "close": 10.0, "amount": 1.0},
-        {"trade_date": date(2026, 7, 10), "ts_code": "A.SZ", "close": 10.0, "amount": 1.0},
-    ])
-    members = pd.DataFrame([
-        {"ts_code": "A.SZ", "group_code": "HOT", "valid_from": date(2020, 1, 1), "valid_to": None}
-    ])
-    benchmark = pd.DataFrame([{"trade_date": date(2026, 7, 10), "close": 100.0}])
-    try:
-        compute_hotspot_features(daily, members, benchmark, as_of=date(2026, 7, 10))
-    except ValueError as exc:
-        assert "duplicate" in str(exc)
-    else:
-        raise AssertionError("duplicate fact should be rejected")
+ANALYSIS_DATE = date(2026, 7, 10)
+
+
+def _daily(dates: pd.DatetimeIndex, specs: dict[str, tuple[float, float]]) -> pd.DataFrame:
+    rows: list[dict[str, object]] = []
+    for code, (start, step) in specs.items():
+        for offset, trading_day in enumerate(dates):
+            close = start + step * offset
+            rows.append(
+                {
+                    "trade_date": trading_day.date(),
+                    "ts_code": code,
+                    "open": close - step / 2,
+                    "high": close + 0.5,
+                    "low": close - 0.5,
+                    "close": close,
+                    "amount": 100.0,
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def _catalog() -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {"group_type": "industry", "group_code": "L1", "group_name": "一级", "level": "L1", "official_index_code": "IDX1"},
+            {"group_type": "industry", "group_code": "L2", "group_name": "二级", "level": "L2", "official_index_code": None},
+            {"group_type": "industry", "group_code": "L3", "group_name": "三级", "level": "L3", "official_index_code": None},
+            {"group_type": "theme", "group_code": "T1", "group_name": "主题一", "level": "theme", "official_index_code": None},
+            {"group_type": "theme", "group_code": "EMPTY", "group_name": "无成分主题", "level": "theme", "official_index_code": None},
+        ]
+    )
+
+
+def _members(dates: pd.DatetimeIndex) -> pd.DataFrame:
+    start = dates[0].date()
+    return pd.DataFrame(
+        [
+            {"group_type": "industry", "group_code": level, "ts_code": code, "valid_from": start, "valid_to": None}
+            for level in ("L1", "L2", "L3")
+            for code in ("A.SZ", "B.SZ")
+        ]
+        + [
+            {"group_type": "theme", "group_code": "T1", "ts_code": "A.SZ", "valid_from": start, "valid_to": None},
+            {"group_type": "theme", "group_code": "T1", "ts_code": "B.SZ", "valid_from": start, "valid_to": None},
+        ]
+    )
+
+
+def _benchmark(dates: pd.DatetimeIndex) -> pd.DataFrame:
+    return pd.DataFrame({"trade_date": dates.date, "close": [100.0] * len(dates)})
+
+
+def _limits(equity: pd.DataFrame) -> pd.DataFrame:
+    return equity[["trade_date", "ts_code", "close"]].assign(
+        up_limit=lambda frame: frame["close"] + 10.0,
+        down_limit=lambda frame: np.maximum(frame["close"] - 10.0, 0.01),
+    )[["trade_date", "ts_code", "up_limit", "down_limit"]]
+
+
+def _compute(
+    equity: pd.DataFrame,
+    dates: pd.DatetimeIndex,
+    *,
+    catalog: pd.DataFrame | None = None,
+    members: pd.DataFrame | None = None,
+    limits: pd.DataFrame | None = None,
+    official: pd.DataFrame | None = None,
+    minutes: pd.DataFrame | None = None,
+) -> pd.DataFrame:
+    return compute_hotspot_features(
+        equity,
+        _catalog() if catalog is None else catalog,
+        _members(dates) if members is None else members,
+        _benchmark(dates),
+        _limits(equity) if limits is None else limits,
+        pd.DataFrame(columns=["trade_date", "index_code", "close"])
+        if official is None
+        else official,
+        pd.DataFrame(columns=["trade_date", "ts_code", "minute", "close", "amount"])
+        if minutes is None
+        else minutes,
+        analysis_date=ANALYSIS_DATE,
+    )
+
+
+def test_core_returns_breadth_turnover_new_high_and_identity_are_reproducible() -> None:
+    dates = pd.bdate_range(end=ANALYSIS_DATE, periods=61)
+    equity = _daily(dates, {"A.SZ": (10.0, 0.2), "B.SZ": (20.0, -0.1), "C.SZ": (30.0, 0.0)})
+    result = _compute(equity, dates).set_index("group_code")
+    row = result.loc["L1"]
+
+    assert row["formula_version"] == HOTSPOT_FORMULA_VERSION
+    assert row["group_type"] == "industry"
+    assert row["level"] == "L1"
+    assert row["member_count"] == 2
+    assert row["observed_member_count"] == 2
+    assert row["member_coverage_ratio"] == 1.0
+    assert row["coverage_status"] == "complete_with_declared_gaps"
+    for horizon in (1, 3, 5, 20):
+        assert row[f"equal_weight_return_{horizon}d"] > 0
+        assert row[f"median_return_{horizon}d"] == pytest.approx(
+            row[f"equal_weight_return_{horizon}d"]
+        )
+        assert row[f"breadth_{horizon}d"] == pytest.approx(0.5)
+        assert row[f"relative_return_{horizon}d"] == pytest.approx(
+            row[f"equal_weight_return_{horizon}d"]
+        )
+        assert row[f"turnover_share_average_{horizon}d"] == pytest.approx(2 / 3)
+    assert row["new_high_20d_share"] == pytest.approx(0.5)
+    assert row["new_high_60d_share"] == pytest.approx(0.5)
+    assert row["return_dispersion_1d"] > 0
+    assert row["top3_positive_contribution_1d"] == pytest.approx(1.0)
+    assert row["intraday_status"] == "limited"
+    assert np.isnan(row["intraday_up_minute_share"])
+
+
+def test_effective_membership_is_applied_on_each_historical_session() -> None:
+    dates = pd.bdate_range(end=ANALYSIS_DATE, periods=6)
+    equity = _daily(dates, {"A.SZ": (10.0, 1.0), "B.SZ": (20.0, -1.0), "C.SZ": (30.0, 0.0)})
+    split = dates[-3].date()
+    members = pd.DataFrame(
+        [
+            {"group_type": "theme", "group_code": "T1", "ts_code": "A.SZ", "valid_from": dates[0].date(), "valid_to": dates[-4].date()},
+            {"group_type": "theme", "group_code": "T1", "ts_code": "B.SZ", "valid_from": split, "valid_to": None},
+        ]
+    )
+    catalog = _catalog().query("group_code == 'T1'").reset_index(drop=True)
+
+    row = _compute(equity, dates, catalog=catalog, members=members).iloc[0]
+
+    # The latest three sessions use B, not today's membership backfilled over history.
+    assert row["member_count"] == 1
+    assert row["breadth_5d"] == pytest.approx(2 / 5)
+    assert row["turnover_share_average_5d"] == pytest.approx(1 / 3)
+    assert row["turnover_share_change_3d"] == pytest.approx(0.0)
+
+
+def test_catalog_keeps_no_member_themes_and_partial_coverage_is_not_comparable() -> None:
+    dates = pd.bdate_range(end=ANALYSIS_DATE, periods=21)
+    equity = _daily(dates, {"A.SZ": (10.0, 0.1), "B.SZ": (20.0, 0.1)})
+    current_mask = (equity["trade_date"] == ANALYSIS_DATE) & (equity["ts_code"] == "B.SZ")
+    equity.loc[current_mask, "amount"] = np.nan
+    result = _compute(equity, dates).set_index("group_code")
+
+    assert result.loc["EMPTY", "coverage_status"] == "limited_no_membership"
+    assert result.loc["EMPTY", "member_count"] == 0
+    assert np.isnan(result.loc["EMPTY", "equal_weight_return_1d"])
+    assert result.loc["L1", "member_coverage_ratio"] == pytest.approx(0.5)
+    assert result.loc["L1", "coverage_status"] == "limited"
+    assert "80%" in result.loc["L1", "limitation_notes"]
+
+
+def test_actual_limits_official_index_and_observable_crowding_flags() -> None:
+    dates = pd.bdate_range(end=ANALYSIS_DATE, periods=21)
+    equity = _daily(dates, {"A.SZ": (10.0, 0.0), "B.SZ": (10.0, 0.0), "C.SZ": (10.0, 0.0)})
+    today = equity["trade_date"] == ANALYSIS_DATE
+    equity.loc[today & (equity["ts_code"] == "A.SZ"), ["open", "high", "low", "close", "amount"]] = [10.0, 12.0, 9.9, 10.1, 1000.0]
+    equity.loc[today & (equity["ts_code"] == "B.SZ"), ["open", "high", "low", "close", "amount"]] = [10.0, 10.2, 9.9, 10.0, 1000.0]
+    limits = _limits(equity)
+    limits.loc[today & (limits["ts_code"] == "A.SZ"), "up_limit"] = 10.1
+    official = pd.DataFrame(
+        {
+            "trade_date": dates.date,
+            "index_code": ["IDX1"] * len(dates),
+            "close": np.linspace(100.0, 110.0, len(dates)),
+        }
+    )
+    row = _compute(equity, dates, limits=limits, official=official).set_index("group_code").loc["L1"]
+
+    assert row["limit_up_count"] == 1
+    assert row["limit_up_share"] == pytest.approx(0.5)
+    assert row["official_index_return_20d"] == pytest.approx(0.10)
+    assert row["official_bottom_up_discrepancy_20d"] == pytest.approx(
+        row["official_index_return_20d"] - row["equal_weight_return_20d"]
+    )
+    assert bool(row["high_volume_low_progress_flag"])
+    assert bool(row["upper_wick_reversal_flag"])
+    assert isinstance(row["narrow_participation_flag"], (bool, np.bool_))
+    assert isinstance(row["turnover_return_divergence_flag"], (bool, np.bool_))
+
+
+def test_minute_path_is_optional_and_never_fabricated() -> None:
+    dates = pd.bdate_range(end=ANALYSIS_DATE, periods=21)
+    equity = _daily(dates, {"A.SZ": (10.0, 0.1), "B.SZ": (20.0, 0.1)})
+    minute_values = [10.0, 10.2, 10.1, 10.4]
+    minutes = pd.DataFrame(
+        [
+            {"trade_date": ANALYSIS_DATE, "ts_code": code, "minute": f"09:{30 + i:02d}", "close": value, "amount": 10.0}
+            for code in ("A.SZ", "B.SZ")
+            for i, value in enumerate(minute_values)
+        ]
+    )
+    row = _compute(equity, dates, minutes=minutes).set_index("group_code").loc["L1"]
+
+    assert row["intraday_status"] == "complete"
+    assert row["intraday_up_minute_share"] == pytest.approx(2 / 3)
+    assert row["intraday_max_drawdown"] < 0
+    assert row["intraday_high_to_close_pullback"] == pytest.approx(0.0)
+
+
+def test_duplicate_facts_fail_and_output_contains_no_hidden_score_or_trader_claim() -> None:
+    dates = pd.bdate_range(end=ANALYSIS_DATE, periods=3)
+    equity = _daily(dates, {"A.SZ": (10.0, 0.1), "B.SZ": (20.0, 0.1)})
+    duplicate = pd.concat([equity, equity.iloc[[-1]]], ignore_index=True)
+    with pytest.raises(ValueError, match="duplicate business fact"):
+        _compute(duplicate, dates)
+
+    result = _compute(equity, dates)
+    rendered = " ".join(map(str, result.columns)).lower()
+    for prohibited in (
+        "institution",
+        "main_force",
+        "accumulation",
+        "distribution",
+        "manipulation",
+        "score",
+        "ranking",
+        "recommend",
+        "机构",
+        "主力",
+        "吸筹",
+        "出货",
+    ):
+        assert prohibited not in rendered
