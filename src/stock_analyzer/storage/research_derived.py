@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import math
 import os
 import shutil
 from collections.abc import Iterable, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -66,16 +68,27 @@ class _PartitionMetadata:
     run_id: str
 
 
+@dataclass(frozen=True)
+class _PromotionState:
+    backup_path: Path | None
+    journal_path: Path
+
+
 class DerivedFeatureStore:
     def __init__(self, root: Path) -> None:
         self.root = Path(root)
         self.derived_root = self.root / "derived"
         self.staging_root = self.root / ".staging" / "derived"
+        self.journal_root = self.root / ".derived-promotions"
+        self.lock_path = self.root / ".derived.lock"
         self.duckdb_path = self.root / "research.duckdb"
         self.root.mkdir(parents=True, exist_ok=True)
-        with connect_research_warehouse(self.duckdb_path):
-            pass
-        self._recover_interrupted_promotions()
+        with self._file_lock(exclusive=True):
+            with connect_research_warehouse(self.duckdb_path):
+                pass
+            self._recover_interrupted_promotions()
+            self._recover_unjournaled_backups()
+            self._validate_registered_partitions()
 
     def commit(
         self,
@@ -117,30 +130,62 @@ class DerivedFeatureStore:
             normalized_formula_version,
         ).relative_to(self.root).as_posix()
 
+        with self._file_lock(exclusive=True):
+            return self._commit_locked(
+                feature_set=normalized_feature_set,
+                analysis_date=normalized_date,
+                formula_version=normalized_formula_version,
+                run_id=normalized_run_id,
+                prepared=prepared,
+                content_hash=content_hash,
+                input_manifest_hash=input_manifest_hash,
+                input_manifest_json=input_manifest_json,
+                relative_path=relative_path,
+                quality_status=quality_status,
+                limitations=normalized_limitations,
+            )
+
+    def _commit_locked(
+        self,
+        *,
+        feature_set: str,
+        analysis_date: date,
+        formula_version: str,
+        run_id: str,
+        prepared: pd.DataFrame,
+        content_hash: str,
+        input_manifest_hash: str,
+        input_manifest_json: str,
+        relative_path: str,
+        quality_status: str,
+        limitations: tuple[str, ...],
+    ) -> DerivedCommitResult:
         current = self._partition_metadata(
-            normalized_feature_set,
-            normalized_date,
-            normalized_formula_version,
+            feature_set,
+            analysis_date,
+            formula_version,
         )
+        if current is not None:
+            self._assert_partition_file_matches(current)
         if current is not None and current.input_manifest_hash == input_manifest_hash:
             conflicts = []
             if current.content_hash != content_hash:
                 conflicts.append("content_hash")
             if current.quality_status != quality_status:
                 conflicts.append("quality_status")
-            if current.limitations != normalized_limitations:
+            if current.limitations != limitations:
                 conflicts.append("limitations")
             if conflicts:
                 raise DerivedDeterminismError(
                     "deterministic conflict for derived partition "
-                    f"{normalized_feature_set}/{normalized_date.isoformat()}/"
-                    f"{normalized_formula_version}: {', '.join(conflicts)} changed "
+                    f"{feature_set}/{analysis_date.isoformat()}/"
+                    f"{formula_version}: {', '.join(conflicts)} changed "
                     "for the same input manifest"
                 )
             return DerivedCommitResult(
-                feature_set=normalized_feature_set,
-                analysis_date=normalized_date,
-                formula_version=normalized_formula_version,
+                feature_set=feature_set,
+                analysis_date=analysis_date,
+                formula_version=formula_version,
                 run_id=current.run_id,
                 row_count=current.row_count,
                 content_hash=current.content_hash,
@@ -156,16 +201,25 @@ class DerivedFeatureStore:
         final_path = self.root / relative_path
         stage_dir = self.staging_root / uuid4().hex
         staged_path = stage_dir / "data.parquet"
-        backup_path: Path | None = None
+        promotion: _PromotionState | None = None
         try:
             file_sha256 = write_staged_parquet(staged_path, prepared)
-            backup_path = self._promote_staged_partition(staged_path, final_path)
+            promotion = self._promote_staged_partition(
+                staged_path,
+                final_path,
+                old_metadata_sha256=(
+                    None if current is None else current.file_sha256
+                ),
+                new_file_sha256=file_sha256,
+                old_run_id=None if current is None else current.run_id,
+                new_run_id=run_id,
+            )
             try:
                 self._commit_metadata(
-                    feature_set=normalized_feature_set,
-                    analysis_date=normalized_date,
-                    formula_version=normalized_formula_version,
-                    run_id=normalized_run_id,
+                    feature_set=feature_set,
+                    analysis_date=analysis_date,
+                    formula_version=formula_version,
+                    run_id=run_id,
                     row_count=len(prepared),
                     content_hash=content_hash,
                     file_sha256=file_sha256,
@@ -173,28 +227,28 @@ class DerivedFeatureStore:
                     input_manifest_json=input_manifest_json,
                     relative_path=relative_path,
                     quality_status=quality_status,
-                    limitations=normalized_limitations,
+                    limitations=limitations,
                 )
             except Exception:
-                self._restore_previous_partition(final_path, backup_path)
+                self._rollback_promotion(final_path, promotion)
                 raise
-            discard_backup(backup_path)
+            self._finish_promotion(promotion)
         finally:
             shutil.rmtree(stage_dir, ignore_errors=True)
             self._remove_empty_staging_parents()
 
         return DerivedCommitResult(
-            feature_set=normalized_feature_set,
-            analysis_date=normalized_date,
-            formula_version=normalized_formula_version,
-            run_id=normalized_run_id,
+            feature_set=feature_set,
+            analysis_date=analysis_date,
+            formula_version=formula_version,
+            run_id=run_id,
             row_count=len(prepared),
             content_hash=content_hash,
             file_sha256=file_sha256,
             input_manifest_hash=input_manifest_hash,
             relative_path=relative_path,
             quality_status=quality_status,
-            limitations=normalized_limitations,
+            limitations=limitations,
             idempotent=False,
             skipped=False,
         )
@@ -205,14 +259,21 @@ class DerivedFeatureStore:
         analysis_date: date | str,
         formula_version: str,
     ) -> pd.DataFrame:
-        path = self._partition_path(
-            _path_component(feature_set, "feature_set"),
-            _as_date(analysis_date),
-            _path_component(formula_version, "formula_version"),
+        normalized_feature_set = _path_component(feature_set, "feature_set")
+        normalized_date = _as_date(analysis_date)
+        normalized_formula_version = _path_component(
+            formula_version, "formula_version"
         )
-        if not path.is_file():
-            return pd.DataFrame()
-        return pd.read_parquet(path)
+        with self._file_lock(exclusive=False):
+            metadata = self._partition_metadata(
+                normalized_feature_set,
+                normalized_date,
+                normalized_formula_version,
+            )
+            if metadata is None:
+                return pd.DataFrame()
+            path = self._assert_partition_file_matches(metadata)
+            return pd.read_parquet(path)
 
     def partition_manifest(
         self,
@@ -235,17 +296,24 @@ class DerivedFeatureStore:
                 _path_component(formula_version, "formula_version")
             )
         where = "" if not clauses else " where " + " and ".join(clauses)
-        with connect_research_warehouse(
-            self.duckdb_path, read_only=True
-        ) as connection:
-            return connection.execute(
-                f"""
-                select * from research_derived_partitions
-                {where}
-                order by feature_set, analysis_date, formula_version
-                """,
-                parameters,
-            ).fetchdf()
+        with self._file_lock(exclusive=False):
+            with connect_research_warehouse(
+                self.duckdb_path, read_only=True
+            ) as connection:
+                manifest = connection.execute(
+                    f"""
+                    select * from research_derived_partitions
+                    {where}
+                    order by feature_set, analysis_date, formula_version
+                    """,
+                    parameters,
+                ).fetchdf()
+            for row in manifest.to_dict(orient="records"):
+                self._assert_file_hash_matches(
+                    relative_path=str(row["relative_path"]),
+                    expected_sha256=str(row["file_sha256"]),
+                )
+            return manifest
 
     def _partition_path(
         self,
@@ -268,46 +336,268 @@ class DerivedFeatureStore:
             except OSError:
                 pass
 
-    def _promote_staged_partition(
-        self, staged_path: Path, final_path: Path
-    ) -> Path | None:
-        final_path.parent.mkdir(parents=True, exist_ok=True)
-        if not final_path.exists():
-            os.replace(staged_path, final_path)
-            return None
+    @contextmanager
+    def _file_lock(self, *, exclusive: bool):
+        with self.lock_path.open("a+b") as handle:
+            operation = fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH
+            fcntl.flock(handle.fileno(), operation)
+            try:
+                yield
+            finally:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
-        backup_path = final_path.with_suffix(".parquet.previous")
-        if backup_path.exists():
-            raise DerivedRecoveryError(
-                f"unreconciled derived backup already exists: {backup_path}"
+    def _promote_staged_partition(
+        self,
+        staged_path: Path,
+        final_path: Path,
+        *,
+        old_metadata_sha256: str | None,
+        new_file_sha256: str,
+        old_run_id: str | None = None,
+        new_run_id: str | None = None,
+    ) -> _PromotionState:
+        final_path.parent.mkdir(parents=True, exist_ok=True)
+        _fsync_file(staged_path)
+        backup_path: Path | None = None
+        if final_path.exists():
+            backup_path = final_path.with_suffix(".parquet.previous")
+            if backup_path.exists():
+                raise DerivedRecoveryError(
+                    f"unreconciled derived backup already exists: {backup_path}"
+                )
+            shutil.copy2(final_path, backup_path)
+            _fsync_file(backup_path)
+            _fsync_directory(backup_path.parent)
+
+        try:
+            journal_path = self._write_promotion_journal(
+                final_path=final_path,
+                backup_path=backup_path,
+                old_metadata_sha256=old_metadata_sha256,
+                new_file_sha256=new_file_sha256,
+                old_run_id=old_run_id,
+                new_run_id=new_run_id,
             )
-        shutil.copy2(final_path, backup_path)
+        except Exception:
+            if backup_path is not None and self._file_sha_or_none(
+                final_path
+            ) == self._file_sha_or_none(backup_path):
+                discard_backup(backup_path)
+                _fsync_directory(final_path.parent)
+            raise
+
+        promotion = _PromotionState(
+            backup_path=backup_path,
+            journal_path=journal_path,
+        )
         try:
             os.replace(staged_path, final_path)
+            _fsync_directory(final_path.parent)
         except Exception:
-            if final_path.is_file() and sha256_file(final_path) == sha256_file(
-                backup_path
-            ):
+            unchanged = (
+                backup_path is None and not final_path.exists()
+            ) or (
+                backup_path is not None
+                and self._file_sha_or_none(final_path)
+                == self._file_sha_or_none(backup_path)
+            )
+            if unchanged:
                 discard_backup(backup_path)
+                self._delete_promotion_journal(journal_path)
             raise
-        return backup_path
+        return promotion
 
-    def _restore_previous_partition(
+    def _rollback_promotion(
         self,
         final_path: Path,
-        backup_path: Path | None,
+        promotion: _PromotionState | None,
     ) -> None:
+        if promotion is None:
+            raise DerivedRecoveryError("missing derived promotion state")
+        backup_path = promotion.backup_path
         if backup_path is None:
             if final_path.exists():
                 final_path.unlink()
+                _fsync_directory(final_path.parent)
+        else:
+            if not backup_path.is_file():
+                raise DerivedRecoveryError(
+                    f"cannot restore missing derived backup: {backup_path}"
+                )
+            os.replace(backup_path, final_path)
+            _fsync_directory(final_path.parent)
+        self._delete_promotion_journal(promotion.journal_path)
+
+    def _finish_promotion(self, promotion: _PromotionState) -> None:
+        if promotion.backup_path is not None:
+            backup_parent = promotion.backup_path.parent
+            discard_backup(promotion.backup_path)
+            _fsync_directory(backup_parent)
+        self._delete_promotion_journal(promotion.journal_path)
+
+    def _write_promotion_journal(
+        self,
+        *,
+        final_path: Path,
+        backup_path: Path | None,
+        old_metadata_sha256: str | None,
+        new_file_sha256: str,
+        old_run_id: str | None,
+        new_run_id: str | None,
+    ) -> Path:
+        payload: dict[str, Any] = {
+            "backup_relative_path": (
+                None
+                if backup_path is None
+                else backup_path.relative_to(self.root).as_posix()
+            ),
+            "final_relative_path": final_path.relative_to(self.root).as_posix(),
+            "new_file_sha256": new_file_sha256,
+            "old_metadata_sha256": old_metadata_sha256,
+            "version": 1,
+        }
+        if old_run_id is not None:
+            payload["old_run_id"] = old_run_id
+        if new_run_id is not None:
+            payload["new_run_id"] = new_run_id
+        encoded = json.dumps(
+            payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        self.journal_root.mkdir(parents=True, exist_ok=True)
+        _fsync_directory(self.root)
+        journal_path = self.journal_root / f"{uuid4().hex}.json"
+        temporary_path = journal_path.with_suffix(".json.tmp")
+        try:
+            with temporary_path.open("xb") as handle:
+                handle.write(encoded)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary_path, journal_path)
+            _fsync_directory(self.journal_root)
+        except Exception:
+            if temporary_path.exists():
+                temporary_path.unlink()
+            raise
+        return journal_path
+
+    def _delete_promotion_journal(self, journal_path: Path) -> None:
+        if journal_path.exists():
+            journal_path.unlink()
+            _fsync_directory(journal_path.parent)
+        try:
+            self.journal_root.rmdir()
+        except OSError:
             return
-        if not backup_path.is_file():
-            raise DerivedRecoveryError(
-                f"cannot restore missing derived backup: {backup_path}"
-            )
-        os.replace(backup_path, final_path)
+        _fsync_directory(self.root)
 
     def _recover_interrupted_promotions(self) -> None:
+        journal_paths = sorted(self.journal_root.glob("*.json"))
+        if not journal_paths:
+            self._discard_unpublished_journal_temps()
+            return
+        with connect_research_warehouse(
+            self.duckdb_path, read_only=True
+        ) as connection:
+            for journal_path in journal_paths:
+                try:
+                    payload = json.loads(journal_path.read_text(encoding="utf-8"))
+                    if payload.get("version") != 1:
+                        raise ValueError("unsupported journal version")
+                    final_relative_path = str(payload["final_relative_path"])
+                    new_file_sha256 = str(payload["new_file_sha256"])
+                    old_metadata_sha256 = payload.get("old_metadata_sha256")
+                    if old_metadata_sha256 is not None:
+                        old_metadata_sha256 = str(old_metadata_sha256)
+                    backup_relative_path = payload.get("backup_relative_path")
+                    final_path = self._path_from_relative(final_relative_path)
+                    backup_path = (
+                        None
+                        if backup_relative_path is None
+                        else self._path_from_relative(str(backup_relative_path))
+                    )
+                except (KeyError, OSError, TypeError, ValueError) as exc:
+                    raise DerivedRecoveryError(
+                        f"cannot reconcile invalid derived journal: {journal_path}"
+                    ) from exc
+
+                row = connection.execute(
+                    """
+                    select file_sha256, run_id
+                    from research_derived_partitions
+                    where relative_path = ?
+                    """,
+                    [final_relative_path],
+                ).fetchone()
+                metadata_sha256 = None if row is None else str(row[0])
+                metadata_run_id = None if row is None else str(row[1])
+                final_sha256 = self._file_sha_or_none(final_path)
+                backup_sha256 = self._file_sha_or_none(backup_path)
+                old_run_id = payload.get("old_run_id")
+                new_run_id = payload.get("new_run_id")
+
+                if old_metadata_sha256 is None and metadata_sha256 is None:
+                    if backup_path is not None:
+                        raise self._unreconciled_journal_error(final_relative_path)
+                    if final_sha256 == new_file_sha256:
+                        final_path.unlink()
+                        _fsync_directory(final_path.parent)
+                    elif final_sha256 is not None:
+                        raise self._unreconciled_journal_error(final_relative_path)
+                    self._delete_promotion_journal(journal_path)
+                    continue
+
+                metadata_is_new = (
+                    metadata_sha256 == new_file_sha256
+                    and (new_run_id is None or metadata_run_id == str(new_run_id))
+                )
+                metadata_is_old = (
+                    old_metadata_sha256 is not None
+                    and metadata_sha256 == old_metadata_sha256
+                    and (old_run_id is None or metadata_run_id == str(old_run_id))
+                )
+                if metadata_is_new and metadata_is_old:
+                    raise self._unreconciled_journal_error(final_relative_path)
+                if metadata_is_new and final_sha256 == new_file_sha256:
+                    if backup_path is not None:
+                        discard_backup(backup_path)
+                        _fsync_directory(backup_path.parent)
+                    self._delete_promotion_journal(journal_path)
+                    continue
+                if metadata_is_old and final_sha256 == old_metadata_sha256:
+                    if backup_path is not None:
+                        discard_backup(backup_path)
+                        _fsync_directory(backup_path.parent)
+                    self._delete_promotion_journal(journal_path)
+                    continue
+                if metadata_is_old and backup_sha256 == old_metadata_sha256:
+                    if backup_path is None:
+                        raise self._unreconciled_journal_error(final_relative_path)
+                    os.replace(backup_path, final_path)
+                    _fsync_directory(final_path.parent)
+                    self._delete_promotion_journal(journal_path)
+                    continue
+                raise self._unreconciled_journal_error(final_relative_path)
+        self._discard_unpublished_journal_temps()
+
+    def _discard_unpublished_journal_temps(self) -> None:
+        if not self.journal_root.exists():
+            return
+        removed = False
+        for temporary_path in self.journal_root.glob("*.json.tmp"):
+            temporary_path.unlink()
+            removed = True
+        if removed:
+            _fsync_directory(self.journal_root)
+        try:
+            self.journal_root.rmdir()
+        except OSError:
+            return
+        _fsync_directory(self.root)
+
+    def _recover_unjournaled_backups(self) -> None:
         backup_paths = sorted(self.derived_root.rglob("*.parquet.previous"))
         if not backup_paths:
             return
@@ -326,31 +616,98 @@ class DerivedFeatureStore:
                 ).fetchone()
                 if row is None:
                     raise DerivedRecoveryError(
-                        "cannot reconcile interrupted derived promotion without "
-                        f"metadata: {relative_path}"
+                        "cannot reconcile unjournaled derived backup for "
+                        f"{relative_path}"
                     )
                 metadata_sha256 = str(row[0])
-                try:
-                    final_sha256 = (
-                        sha256_file(final_path) if final_path.is_file() else None
-                    )
-                    backup_sha256 = sha256_file(backup_path)
-                except OSError as exc:
-                    raise DerivedRecoveryError(
-                        "cannot reconcile interrupted derived promotion for "
-                        f"{relative_path}"
-                    ) from exc
-
+                final_sha256 = self._file_sha_or_none(final_path)
+                backup_sha256 = self._file_sha_or_none(backup_path)
                 if final_sha256 == metadata_sha256:
                     discard_backup(backup_path)
+                    _fsync_directory(backup_path.parent)
                     continue
                 if backup_sha256 == metadata_sha256:
                     os.replace(backup_path, final_path)
+                    _fsync_directory(final_path.parent)
                     continue
                 raise DerivedRecoveryError(
-                    "cannot reconcile interrupted derived promotion for "
-                    f"{relative_path}: neither file matches metadata"
+                    "cannot reconcile unjournaled derived backup for "
+                    f"{relative_path}"
                 )
+
+    def _validate_registered_partitions(self) -> None:
+        with connect_research_warehouse(
+            self.duckdb_path, read_only=True
+        ) as connection:
+            rows = connection.execute(
+                """
+                select relative_path, file_sha256
+                from research_derived_partitions
+                order by relative_path
+                """
+            ).fetchall()
+        for relative_path, file_sha256 in rows:
+            self._assert_file_hash_matches(
+                relative_path=str(relative_path),
+                expected_sha256=str(file_sha256),
+            )
+
+    def _assert_partition_file_matches(
+        self,
+        metadata: _PartitionMetadata,
+    ) -> Path:
+        return self._assert_file_hash_matches(
+            relative_path=metadata.relative_path,
+            expected_sha256=metadata.file_sha256,
+        )
+
+    def _assert_file_hash_matches(
+        self,
+        *,
+        relative_path: str,
+        expected_sha256: str,
+    ) -> Path:
+        path = self._path_from_relative(relative_path)
+        actual_sha256 = self._file_sha_or_none(path)
+        if actual_sha256 != expected_sha256:
+            raise DerivedRecoveryError(
+                "derived metadata/file mismatch for "
+                f"{relative_path}: expected {expected_sha256}, got {actual_sha256}"
+            )
+        return path
+
+    def _path_from_relative(self, relative_path: str) -> Path:
+        relative = Path(relative_path)
+        if relative.is_absolute():
+            raise DerivedRecoveryError(
+                f"derived path is not relative: {relative_path}"
+            )
+        root = self.root.resolve()
+        path = (self.root / relative).resolve()
+        if path != root and root not in path.parents:
+            raise DerivedRecoveryError(
+                f"derived path escapes warehouse root: {relative_path}"
+            )
+        return path
+
+    def _file_sha_or_none(self, path: Path | None) -> str | None:
+        if path is None or not path.is_file():
+            return None
+        try:
+            return sha256_file(path)
+        except OSError as exc:
+            raise DerivedRecoveryError(
+                f"cannot hash derived recovery file: {path}"
+            ) from exc
+
+    def _unreconciled_journal_error(
+        self,
+        relative_path: str,
+    ) -> DerivedRecoveryError:
+        return DerivedRecoveryError(
+            "cannot reconcile interrupted derived promotion for "
+            f"{relative_path}"
+        )
 
     def _commit_metadata(
         self,
@@ -473,6 +830,22 @@ class DerivedFeatureStore:
             limitations=tuple(str(item) for item in raw_limitations),
             run_id=str(row[7]),
         )
+
+
+def _fsync_file(path: Path) -> None:
+    descriptor = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def _fsync_directory(path: Path) -> None:
+    descriptor = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
 
 
 def stable_dataframe_content_hash(frame: pd.DataFrame) -> str:

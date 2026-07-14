@@ -1,4 +1,6 @@
+import json
 import os
+import threading
 from datetime import date
 
 import pandas as pd
@@ -270,12 +272,18 @@ def test_initialization_recovers_crash_after_file_replace_before_metadata(
     original = _commit(store, _frame())
     final_path = _final_path(tmp_path)
     staged_path = tmp_path / ".staging" / "crashed-run" / "data.parquet"
-    research_derived_module.write_staged_parquet(
+    new_sha256 = research_derived_module.write_staged_parquet(
         staged_path,
         _frame(score=0.95).sort_values("ts_code").reset_index(drop=True),
     )
 
-    backup_path = store._promote_staged_partition(staged_path, final_path)
+    promotion = store._promote_staged_partition(
+        staged_path,
+        final_path,
+        old_metadata_sha256=original.file_sha256,
+        new_file_sha256=new_sha256,
+    )
+    backup_path = promotion.backup_path
     assert backup_path is not None and backup_path.is_file()
 
     recovered = DerivedFeatureStore(tmp_path)
@@ -286,6 +294,41 @@ def test_initialization_recovers_crash_after_file_replace_before_metadata(
         == pytest.approx(0.75)
     assert recovered.partition_manifest(FEATURE_SET)["file_sha256"].tolist() \
         == [original.file_sha256]
+
+
+def test_initialization_removes_first_commit_orphan_using_durable_journal(
+    tmp_path
+):
+    store = DerivedFeatureStore(tmp_path)
+    final_path = _final_path(tmp_path)
+    staged_path = tmp_path / ".staging" / "first-crashed-run" / "data.parquet"
+    new_sha256 = research_derived_module.write_staged_parquet(
+        staged_path,
+        _frame().sort_values("ts_code").reset_index(drop=True),
+    )
+
+    promotion = store._promote_staged_partition(
+        staged_path,
+        final_path,
+        old_metadata_sha256=None,
+        new_file_sha256=new_sha256,
+    )
+    journal = json.loads(promotion.journal_path.read_text(encoding="utf-8"))
+
+    assert journal == {
+        "backup_relative_path": None,
+        "final_relative_path": final_path.relative_to(tmp_path).as_posix(),
+        "new_file_sha256": new_sha256,
+        "old_metadata_sha256": None,
+        "version": 1,
+    }
+    assert store.read(FEATURE_SET, ANALYSIS_DATE, FORMULA_VERSION).empty
+
+    recovered = DerivedFeatureStore(tmp_path)
+
+    assert recovered.read(FEATURE_SET, ANALYSIS_DATE, FORMULA_VERSION).empty
+    assert not final_path.exists()
+    assert not promotion.journal_path.exists()
 
 
 def test_initialization_finalizes_crash_after_metadata_before_backup_delete(
@@ -328,6 +371,70 @@ def test_initialization_fails_closed_when_backup_cannot_be_reconciled(tmp_path):
 
     with pytest.raises(RuntimeError, match="cannot reconcile"):
         DerivedFeatureStore(tmp_path)
+
+
+def test_metadata_file_mismatch_fails_closed_for_read_and_initialization(
+    tmp_path
+):
+    store = DerivedFeatureStore(tmp_path)
+    _commit(store, _frame())
+    final_path = _final_path(tmp_path)
+    final_path.write_bytes(b"corrupt derived output")
+
+    with pytest.raises(RuntimeError, match="metadata/file mismatch"):
+        store.read(FEATURE_SET, ANALYSIS_DATE, FORMULA_VERSION)
+    with pytest.raises(RuntimeError, match="metadata/file mismatch"):
+        DerivedFeatureStore(tmp_path)
+
+
+def test_second_store_initialization_waits_for_active_commit_lock(
+    tmp_path, monkeypatch
+):
+    committing_store = DerivedFeatureStore(tmp_path)
+    metadata_entered = threading.Event()
+    allow_metadata = threading.Event()
+    initialization_finished = threading.Event()
+    errors = []
+    real_commit_metadata = committing_store._commit_metadata
+
+    def pause_metadata(**kwargs):
+        metadata_entered.set()
+        if not allow_metadata.wait(timeout=5):
+            raise TimeoutError("test did not release metadata commit")
+        real_commit_metadata(**kwargs)
+
+    monkeypatch.setattr(committing_store, "_commit_metadata", pause_metadata)
+
+    def run_commit():
+        try:
+            _commit(committing_store, _frame())
+        except BaseException as exc:
+            errors.append(exc)
+
+    def initialize_second_store():
+        try:
+            DerivedFeatureStore(tmp_path)
+        except BaseException as exc:
+            errors.append(exc)
+        finally:
+            initialization_finished.set()
+
+    commit_thread = threading.Thread(target=run_commit)
+    initialization_thread = threading.Thread(target=initialize_second_store)
+    commit_thread.start()
+    assert metadata_entered.wait(timeout=2)
+    initialization_thread.start()
+    try:
+        assert not initialization_finished.wait(timeout=0.2)
+    finally:
+        allow_metadata.set()
+        commit_thread.join(timeout=5)
+        initialization_thread.join(timeout=5)
+
+    assert not commit_thread.is_alive()
+    assert not initialization_thread.is_alive()
+    assert initialization_finished.is_set()
+    assert errors == []
 
 
 def test_content_hash_distinguishes_missing_and_non_finite_values():
