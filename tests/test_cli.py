@@ -951,6 +951,107 @@ def test_research_market_migration_audit_command_exits_cleanly(tmp_path):
     assert "passed=true" in post_cleanup_audit.output
 
 
+def test_data_derive_uses_only_local_warehouse_and_prints_business_summary(
+    tmp_path, monkeypatch
+):
+    import stock_analyzer.ops.research_data_job as data_job
+    import stock_analyzer.ops.research_features as features
+    import stock_analyzer.storage.research_warehouse as warehouse_module
+
+    warehouse = object()
+    monkeypatch.setattr(
+        AppConfig,
+        "load",
+        classmethod(
+            lambda cls: SimpleNamespace(local_warehouse_dir=tmp_path / "warehouse")
+        ),
+    )
+    monkeypatch.setattr(
+        warehouse_module,
+        "ResearchWarehouse",
+        lambda root: warehouse,
+    )
+    monkeypatch.setattr(
+        data_job,
+        "build_research_data_runtime",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("手动计算不得创建API运行环境")
+        ),
+    )
+    monkeypatch.setattr(
+        features,
+        "run_research_features",
+        lambda actual, data_date: SimpleNamespace(
+            failed_feature_sets=(),
+            plain_language_summary="2026-07-13 已复算市场、板块和个股观察。",
+        ),
+    )
+
+    result = CliRunner().invoke(
+        app, ["data", "derive", "--data-date", "2026-07-13"]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "已复算市场、板块和个股观察" in result.output
+
+
+def test_data_stage_exits_nonzero_and_explains_derived_failure(
+    tmp_path, monkeypatch
+):
+    import stock_analyzer.ops.research_data_job as data_job
+    import stock_analyzer.ops.research_health as health
+
+    runtime = SimpleNamespace(
+        warehouse=object(),
+        config=SimpleNamespace(local_archive_dir=tmp_path / "archive"),
+    )
+    monkeypatch.setattr(AppConfig, "load", classmethod(lambda cls: object()))
+    monkeypatch.setattr(
+        data_job, "build_research_data_runtime", lambda config: runtime
+    )
+    monkeypatch.setattr(
+        data_job,
+        "run_research_stage",
+        lambda *args, **kwargs: (
+            SimpleNamespace(
+                scope="derived-research-features",
+                committed=2,
+                skipped=0,
+                waiting_upstream=0,
+                limited=0,
+                failed=1,
+                issues=["板块观察未能完成"],
+            ),
+        ),
+    )
+    monkeypatch.setattr(
+        health,
+        "build_research_health_report",
+        lambda *args, **kwargs: SimpleNamespace(complete_core_date=True),
+    )
+    monkeypatch.setattr(
+        health,
+        "write_health_report",
+        lambda *args, **kwargs: (tmp_path / "health.json", tmp_path / "health.md"),
+    )
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "data",
+            "run-stage",
+            "--stage",
+            "evening",
+            "--data-date",
+            "2026-07-13",
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert "failed=1" in result.output
+    assert "板块观察未能完成" in result.output
+
+
 def test_render_report_requires_supabase_config_without_fixture_mode(tmp_path, monkeypatch):
     monkeypatch.delenv("SUPABASE_URL", raising=False)
     monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)

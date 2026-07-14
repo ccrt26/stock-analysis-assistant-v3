@@ -333,6 +333,8 @@ def data_run_stage(
             f"waiting={item.waiting_upstream} limited={item.limited} "
             f"failed={item.failed}"
         )
+        if item.scope == "derived-research-features" and item.issues:
+            typer.echo(item.issues[0])
     from stock_analyzer.ops.research_health import (
         build_research_health_report,
         write_health_report,
@@ -349,6 +351,25 @@ def data_run_stage(
         f"output={health_path}"
     )
     if any(item.failed for item in summaries):
+        raise typer.Exit(code=2)
+
+
+@data_app.command("derive")
+def data_derive(
+    data_date: str = typer.Option(..., "--data-date"),
+) -> None:
+    """Recompute governed observations from facts already stored locally."""
+
+    from stock_analyzer.ops.research_features import run_research_features
+    from stock_analyzer.storage.research_warehouse import ResearchWarehouse
+
+    config = AppConfig.load()
+    summary = run_research_features(
+        ResearchWarehouse(config.local_warehouse_dir),
+        date.fromisoformat(data_date),
+    )
+    typer.echo(summary.plain_language_summary)
+    if summary.failed_feature_sets:
         raise typer.Exit(code=2)
 
 

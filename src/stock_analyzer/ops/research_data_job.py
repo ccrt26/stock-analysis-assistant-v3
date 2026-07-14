@@ -20,6 +20,7 @@ from stock_analyzer.data.research_backfill import BackfillSummary, ResearchBackf
 from stock_analyzer.data.research_contracts import ResearchDatasetId
 from stock_analyzer.data.trading_structure_backfill import TradingStructureBackfillService
 from stock_analyzer.data.tushare_research_client import TushareResearchClient
+from stock_analyzer.ops.research_features import run_research_features
 from stock_analyzer.storage.research_schema import connect_research_warehouse
 from stock_analyzer.storage.research_warehouse import ResearchWarehouse
 
@@ -505,7 +506,9 @@ def run_research_stage(
                     resume=True,
                 )
             )
-        return _finalize_stage_summaries(runtime, summaries)
+        return _finalize_stage_with_research_features(
+            runtime, summaries, data_date=data_date
+        )
     if stage == "next-morning":
         repaired = list(repair_research_gaps(runtime, through=data_date))
         late_event_summary = EventBackfillService(
@@ -528,8 +531,10 @@ def run_research_stage(
             index_codes=BROAD_INDEX_CODES,
             resume=True,
         )
-        return _finalize_stage_summaries(
-            runtime, [*repaired, late_event_summary, summary]
+        return _finalize_stage_with_research_features(
+            runtime,
+            [*repaired, late_event_summary, summary],
+            data_date=data_date,
         )
     raise ValueError(f"unsupported research data stage: {stage}")
 
@@ -542,6 +547,40 @@ def _finalize_stage_summaries(
         _record_scope_outcome(runtime.warehouse, summary)
     reconcile_research_gaps(runtime.warehouse)
     return tuple(summaries)
+
+
+def _finalize_stage_with_research_features(
+    runtime: ResearchDataRuntime,
+    summaries: list[BackfillSummary],
+    *,
+    data_date: date,
+) -> tuple[BackfillSummary, ...]:
+    """Finish fact bookkeeping, then compute the governed local observations."""
+
+    fact_summaries = _finalize_stage_summaries(runtime, summaries)
+    try:
+        derived = run_research_features(runtime.warehouse, data_date)
+        derived_summary = BackfillSummary(
+            scope="derived-research-features",
+            start=data_date,
+            through=data_date,
+            committed=len(derived.committed_feature_sets),
+            skipped=len(derived.skipped_feature_sets),
+            limited=len(derived.limitations),
+            limitations_checked=True,
+            failed=len(derived.failed_feature_sets),
+            issues=[derived.plain_language_summary, *derived.errors],
+        )
+    except Exception as exc:
+        derived_summary = BackfillSummary(
+            scope="derived-research-features",
+            start=data_date,
+            through=data_date,
+            limitations_checked=True,
+            failed=1,
+            issues=[f"研究观察未能完成：{exc}"],
+        )
+    return (*fact_summaries, derived_summary)
 
 
 def select_minute_candidate_scope(
