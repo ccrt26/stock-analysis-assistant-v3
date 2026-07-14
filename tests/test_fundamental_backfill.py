@@ -111,6 +111,34 @@ def test_fundamental_backfill_preserves_statement_revision_and_full_business_con
     assert summary.failed == 0
 
 
+def test_targeted_fundamental_retry_ignores_unrelated_staging_files(tmp_path):
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    unrelated = FundamentalPro().income().copy()
+    unrelated["ts_code"] = "000002.SZ"
+    unrelated_path = (
+        warehouse.root
+        / ".backfill_staging"
+        / "fundamentals"
+        / ResearchDatasetId.INCOME_STATEMENT.value
+        / "000002.SZ.parquet"
+    )
+    unrelated_path.parent.mkdir(parents=True, exist_ok=True)
+    unrelated.to_parquet(unrelated_path, index=False)
+    service = FundamentalBackfillService(
+        TushareResearchClient(FundamentalPro(), pacer=lambda method: None), warehouse
+    )
+
+    service.backfill(
+        start=date(2021, 7, 14),
+        through=date(2026, 7, 13),
+        codes=("000001.SZ",),
+        resume=True,
+    )
+
+    income = warehouse.read_current(ResearchDatasetId.INCOME_STATEMENT)
+    assert set(income["ts_code"]) == {"000001.SZ"}
+
+
 def test_fundamental_watermark_includes_the_requested_company_scope(tmp_path):
     pro = FundamentalPro()
     warehouse = ResearchWarehouse(tmp_path / "warehouse")

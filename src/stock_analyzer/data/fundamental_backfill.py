@@ -139,7 +139,11 @@ class FundamentalBackfillService:
                 summary.committed += 1
 
         for dataset, endpoint in _ENDPOINTS.items():
-            files = sorted((staging / dataset.value).glob("*.parquet"))
+            files = [
+                staging / dataset.value / f"{code}.parquet"
+                for code in effective_codes
+                if (staging / dataset.value / f"{code}.parquet").is_file()
+            ]
             if not files:
                 continue
             self._materialize_staged_dataset(
