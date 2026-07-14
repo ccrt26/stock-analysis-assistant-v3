@@ -13,6 +13,10 @@ from stock_analyzer.data.research_contracts import ResearchDatasetId, research_c
 from stock_analyzer.storage.research_warehouse import ResearchWarehouse
 
 
+_PARTITION_VALUE_COLUMN = "__research_partition_value"
+_SELECTED_REVISION_COLUMN = "__research_selected_revision"
+
+
 class ResearchQuery:
     def __init__(self, warehouse: ResearchWarehouse) -> None:
         self.warehouse = warehouse
@@ -41,19 +45,10 @@ class ResearchQuery:
         dataset = ResearchDatasetId(dataset_id)
         cutoff = _utc(as_of)
         partitions = _partitions_at_cutoff(dataset, partition_values, cutoff)
-        current = self.warehouse.read_current_partitions(dataset, partitions)
-        _assert_unique_current_hashes(dataset, current)
-        resolved = _resolve_as_of(
-            dataset,
-            current,
-            self.warehouse.revision_rows(
-                dataset,
-                partition_values=partitions,
-            ),
-            cutoff,
+        resolved, _ = self._partition_snapshot(
+            dataset, partitions, cutoff
         )
-        _assert_unique_business_keys(dataset, resolved)
-        return resolved
+        return _public_fact_frame(resolved)
 
     def input_manifest(
         self,
@@ -61,22 +56,28 @@ class ResearchQuery:
             ResearchDatasetId | str,
             Iterable[str] | str,
         ],
+        *,
+        as_of: datetime,
     ) -> dict[str, Any]:
         if not isinstance(dataset_partitions, Mapping):
             raise TypeError("dataset_partitions must be a mapping")
 
+        cutoff = _utc(as_of)
         items: list[dict[str, Any]] = []
         requested = sorted(
             (
                 ResearchDatasetId(dataset_id),
-                _normalized_partition_values(partition_values),
+                _partitions_at_cutoff(
+                    ResearchDatasetId(dataset_id),
+                    partition_values,
+                    cutoff,
+                ),
             )
             for dataset_id, partition_values in dataset_partitions.items()
         )
         for dataset, partitions in requested:
-            metadata = self.warehouse.partition_manifest(
-                dataset,
-                partition_values=partitions,
+            resolved, metadata = self._partition_snapshot(
+                dataset, partitions, cutoff
             )
             rows = {
                 str(row["partition_value"]): row
@@ -89,6 +90,13 @@ class ResearchQuery:
                 )
             for partition in partitions:
                 row = rows[partition]
+                if resolved.empty:
+                    partition_frame = resolved
+                else:
+                    partition_frame = resolved.loc[
+                        resolved[_PARTITION_VALUE_COLUMN].astype(str) == partition
+                    ]
+                public_frame = _public_fact_frame(partition_frame)
                 items.append(
                     {
                         "dataset": dataset.value,
@@ -97,13 +105,61 @@ class ResearchQuery:
                         "content_hash": str(row["content_hash"]),
                         "file_sha256": str(row["file_sha256"]),
                         "quality_status": str(row["quality_status"]),
+                        "resolved_row_count": len(public_frame),
+                        "resolved_content_hash": _fact_content_hash(public_frame),
+                        "selected_revision_count": (
+                            0
+                            if partition_frame.empty
+                            else int(
+                                partition_frame[_SELECTED_REVISION_COLUMN]
+                                .astype(bool)
+                                .sum()
+                            )
+                        ),
                     }
                 )
         items.sort(key=lambda item: (item["dataset"], item["partition"]))
-        return {
+        canonical_as_of = cutoff.isoformat()
+        canonical = {
+            "as_of": canonical_as_of,
             "partitions": items,
-            "input_manifest_hash": _stable_hash(items),
         }
+        return {
+            "as_of": canonical_as_of,
+            "partitions": items,
+            "input_manifest_hash": _stable_hash(canonical),
+        }
+
+    def _partition_snapshot(
+        self,
+        dataset: ResearchDatasetId,
+        partitions: tuple[str, ...],
+        cutoff: datetime,
+    ) -> tuple[pd.DataFrame, pd.DataFrame]:
+        current, metadata = self.warehouse.read_current_partitions_with_manifest(
+            dataset,
+            partitions,
+        )
+        current = current.copy()
+        if not current.empty:
+            current[_SELECTED_REVISION_COLUMN] = False
+        _assert_unique_current_hashes(dataset, current)
+
+        revisions: list[dict[str, Any]] = []
+        for revision in self.warehouse.revision_rows(
+            dataset,
+            partition_values=partitions,
+        ):
+            prepared = dict(revision)
+            payload = dict(revision["row_payload"])
+            payload[_PARTITION_VALUE_COLUMN] = str(revision["partition_value"])
+            payload[_SELECTED_REVISION_COLUMN] = True
+            prepared["row_payload"] = payload
+            revisions.append(prepared)
+
+        resolved = _resolve_as_of(dataset, current, revisions, cutoff)
+        _assert_unique_business_keys(dataset, resolved)
+        return resolved, metadata
 
     def controlled_themes_as_of(self, as_of: datetime) -> pd.DataFrame:
         catalog = self.dataset_as_of(ResearchDatasetId.THEME_CATALOG, as_of)
@@ -255,6 +311,25 @@ def _stable_hash(value: Any) -> str:
         separators=(",", ":"),
     ).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _fact_content_hash(frame: pd.DataFrame) -> str:
+    rows = sorted(
+        (
+            str(row["business_key_hash"]),
+            str(row["payload_hash"]),
+            int(row.get("revision_no", 1)),
+        )
+        for row in frame.to_dict(orient="records")
+    )
+    return _stable_hash(rows)
+
+
+def _public_fact_frame(frame: pd.DataFrame) -> pd.DataFrame:
+    return frame.drop(
+        columns=[_PARTITION_VALUE_COLUMN, _SELECTED_REVISION_COLUMN],
+        errors="ignore",
+    ).reset_index(drop=True)
 
 
 def _utc(value: Any) -> datetime:

@@ -60,6 +60,24 @@ def _partition_file(root, partition: str):
     )
 
 
+def _resolved_content_hash(frame: pd.DataFrame) -> str:
+    rows = sorted(
+        (
+            str(row["business_key_hash"]),
+            str(row["payload_hash"]),
+            int(row.get("revision_no", 1)),
+        )
+        for row in frame.to_dict(orient="records")
+    )
+    encoded = json.dumps(
+        rows,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
 def test_partition_query_physically_reads_only_requested_parquet_files(tmp_path):
     warehouse = ResearchWarehouse(tmp_path)
     warehouse.commit_batch(_daily_batch("2026-07-08"))
@@ -140,18 +158,74 @@ def test_partition_query_never_admits_a_future_partition_at_historical_cutoff(
 def test_partition_query_fails_closed_on_duplicate_business_keys(tmp_path):
     warehouse = ResearchWarehouse(tmp_path)
     warehouse.commit_batch(_daily_batch("2026-07-08"))
-    warehouse.commit_batch(_daily_batch("2026-07-09"))
+    current = warehouse.read_current_partitions(
+        ResearchDatasetId.EQUITY_DAILY,
+        ["2026-07-08"],
+    )
+    duplicate = current.copy()
+    duplicate.loc[:, "business_key_hash"] = "distinct-corrupt-hash"
 
-    first = pd.read_parquet(_partition_file(tmp_path, "2026-07-08"))
-    duplicate = pd.read_parquet(_partition_file(tmp_path, "2026-07-09"))
-    duplicate.loc[:, "trade_date"] = first.iloc[0]["trade_date"]
-    duplicate.to_parquet(_partition_file(tmp_path, "2026-07-09"), index=False)
+    class DuplicateWarehouse:
+        def read_current_partitions_with_manifest(
+            self, dataset_id, partition_values
+        ):
+            frame = pd.concat([current, duplicate], ignore_index=True)
+            frame["__research_partition_value"] = "2026-07-08"
+            return frame, pd.DataFrame(
+                [{"partition_value": "2026-07-08"}]
+            )
+
+        def revision_rows(self, dataset_id, *, partition_values=None):
+            return []
 
     with pytest.raises(ValueError, match="duplicate business key"):
-        ResearchQuery(warehouse).dataset_partitions_as_of(
+        ResearchQuery(DuplicateWarehouse()).dataset_partitions_as_of(
             ResearchDatasetId.EQUITY_DAILY,
-            ["2026-07-08", "2026-07-09"],
+            ["2026-07-08"],
             datetime(2026, 7, 10, tzinfo=timezone.utc),
+        )
+
+
+def test_partition_query_and_manifest_fail_closed_when_file_is_missing(tmp_path):
+    warehouse = ResearchWarehouse(tmp_path)
+    warehouse.commit_batch(_daily_batch("2026-07-08"))
+    _partition_file(tmp_path, "2026-07-08").unlink()
+    query = ResearchQuery(warehouse)
+    cutoff = datetime(2026, 7, 9, tzinfo=timezone.utc)
+
+    with pytest.raises(FileNotFoundError, match="partition file"):
+        query.dataset_partitions_as_of(
+            ResearchDatasetId.EQUITY_DAILY,
+            ["2026-07-08"],
+            cutoff,
+        )
+    with pytest.raises(FileNotFoundError, match="partition file"):
+        query.input_manifest(
+            {ResearchDatasetId.EQUITY_DAILY: ["2026-07-08"]},
+            as_of=cutoff,
+        )
+
+
+def test_partition_query_and_manifest_reject_valid_parquet_with_wrong_sha(tmp_path):
+    warehouse = ResearchWarehouse(tmp_path)
+    warehouse.commit_batch(_daily_batch("2026-07-08"))
+    path = _partition_file(tmp_path, "2026-07-08")
+    rewritten = pd.read_parquet(path)
+    rewritten.loc[:, "close"] = 99.0
+    rewritten.to_parquet(path, index=False)
+    query = ResearchQuery(warehouse)
+    cutoff = datetime(2026, 7, 9, tzinfo=timezone.utc)
+
+    with pytest.raises(ValueError, match="SHA-256 mismatch"):
+        query.dataset_partitions_as_of(
+            ResearchDatasetId.EQUITY_DAILY,
+            ["2026-07-08"],
+            cutoff,
+        )
+    with pytest.raises(ValueError, match="SHA-256 mismatch"):
+        query.input_manifest(
+            {ResearchDatasetId.EQUITY_DAILY: ["2026-07-08"]},
+            as_of=cutoff,
         )
 
 
@@ -162,15 +236,19 @@ def test_input_manifest_has_exact_stably_ordered_partition_metadata_and_hash(
     first = warehouse.commit_batch(_daily_batch("2026-07-08"))
     second = warehouse.commit_batch(_daily_batch("2026-07-09"))
     query = ResearchQuery(warehouse)
+    cutoff = datetime(2026, 7, 10, tzinfo=timezone.utc)
 
     reversed_manifest = query.input_manifest(
-        {ResearchDatasetId.EQUITY_DAILY: ["2026-07-09", "2026-07-08"]}
+        {ResearchDatasetId.EQUITY_DAILY: ["2026-07-09", "2026-07-08"]},
+        as_of=cutoff,
     )
     ordered_manifest = query.input_manifest(
-        {ResearchDatasetId.EQUITY_DAILY.value: ["2026-07-08", "2026-07-09"]}
+        {ResearchDatasetId.EQUITY_DAILY.value: ["2026-07-08", "2026-07-09"]},
+        as_of=cutoff,
     )
 
     assert reversed_manifest == ordered_manifest
+    assert reversed_manifest["as_of"] == "2026-07-10T00:00:00+00:00"
     assert reversed_manifest["partitions"] == [
         {
             "dataset": ResearchDatasetId.EQUITY_DAILY.value,
@@ -179,6 +257,9 @@ def test_input_manifest_has_exact_stably_ordered_partition_metadata_and_hash(
             "content_hash": first.content_hash,
             "file_sha256": first.file_sha256,
             "quality_status": "passed",
+            "resolved_row_count": 1,
+            "resolved_content_hash": first.content_hash,
+            "selected_revision_count": 0,
         },
         {
             "dataset": ResearchDatasetId.EQUITY_DAILY.value,
@@ -187,10 +268,16 @@ def test_input_manifest_has_exact_stably_ordered_partition_metadata_and_hash(
             "content_hash": second.content_hash,
             "file_sha256": second.file_sha256,
             "quality_status": "passed",
+            "resolved_row_count": 1,
+            "resolved_content_hash": second.content_hash,
+            "selected_revision_count": 0,
         },
     ]
     canonical = json.dumps(
-        reversed_manifest["partitions"],
+        {
+            "as_of": reversed_manifest["as_of"],
+            "partitions": reversed_manifest["partitions"],
+        },
         ensure_ascii=False,
         sort_keys=True,
         separators=(",", ":"),
@@ -198,3 +285,68 @@ def test_input_manifest_has_exact_stably_ordered_partition_metadata_and_hash(
     assert reversed_manifest["input_manifest_hash"] == hashlib.sha256(
         canonical
     ).hexdigest()
+
+
+def test_manifest_binds_historical_revision_snapshot_and_cutoff(tmp_path):
+    warehouse = ResearchWarehouse(tmp_path)
+    warehouse.commit_batch(
+        _daily_batch(
+            "2026-07-08",
+            close=10.2,
+            available_at=datetime(2026, 7, 8, 8, tzinfo=timezone.utc),
+            run_id="first",
+        )
+    )
+    current = warehouse.commit_batch(
+        _daily_batch(
+            "2026-07-08",
+            close=10.8,
+            available_at=datetime(2026, 7, 10, 8, tzinfo=timezone.utc),
+            run_id="correction",
+        )
+    )
+    query = ResearchQuery(warehouse)
+    requested = {ResearchDatasetId.EQUITY_DAILY: ["2026-07-08"]}
+    early_cutoff = datetime(2026, 7, 9, tzinfo=timezone.utc)
+    late_cutoff = datetime(2026, 7, 11, tzinfo=timezone.utc)
+
+    early = query.input_manifest(requested, as_of=early_cutoff)
+    late = query.input_manifest(requested, as_of=late_cutoff)
+    resolved = query.dataset_partitions_as_of(
+        ResearchDatasetId.EQUITY_DAILY,
+        ["2026-07-08"],
+        early_cutoff,
+    )
+
+    assert early["partitions"][0]["content_hash"] == current.content_hash
+    assert early["partitions"][0]["resolved_content_hash"] == (
+        _resolved_content_hash(resolved)
+    )
+    assert early["partitions"][0]["resolved_content_hash"] != current.content_hash
+    assert early["partitions"][0]["selected_revision_count"] == 1
+    assert late["partitions"][0]["resolved_content_hash"] == current.content_hash
+    assert late["partitions"][0]["selected_revision_count"] == 0
+    assert early["partitions"][0]["resolved_content_hash"] != (
+        late["partitions"][0]["resolved_content_hash"]
+    )
+    assert early["input_manifest_hash"] != late["input_manifest_hash"]
+
+
+def test_manifest_excludes_future_trade_date_partitions(tmp_path):
+    warehouse = ResearchWarehouse(tmp_path)
+    warehouse.commit_batch(_daily_batch("2026-07-08"))
+    warehouse.commit_batch(
+        _daily_batch(
+            "2026-07-10",
+            available_at=datetime(2026, 7, 8, 8, tzinfo=timezone.utc),
+        )
+    )
+
+    manifest = ResearchQuery(warehouse).input_manifest(
+        {ResearchDatasetId.EQUITY_DAILY: ["2026-07-08", "2026-07-10"]},
+        as_of=datetime(2026, 7, 9, 15, 59, tzinfo=timezone.utc),
+    )
+
+    assert [item["partition"] for item in manifest["partitions"]] == [
+        "2026-07-08"
+    ]

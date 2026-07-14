@@ -192,21 +192,98 @@ class ResearchWarehouse:
         dataset_id: ResearchDatasetId | str,
         partition_values: Iterable[str],
     ) -> pd.DataFrame:
+        frame, _ = self.read_current_partitions_with_manifest(
+            dataset_id,
+            partition_values,
+        )
+        return frame.drop(
+            columns=["__research_partition_value"],
+            errors="ignore",
+        )
+
+    def read_current_partitions_with_manifest(
+        self,
+        dataset_id: ResearchDatasetId | str,
+        partition_values: Iterable[str],
+    ) -> tuple[pd.DataFrame, pd.DataFrame]:
         dataset = ResearchDatasetId(dataset_id)
         partitions = _normalized_partition_values(partition_values)
-        paths: list[Path] = []
-        for partition in partitions:
-            path = self._partition_path(dataset, partition)
-            if path.is_file():
-                paths.append(path)
+        metadata = self.validated_partition_manifest(dataset, partitions)
+        paths = [self._partition_path(dataset, partition) for partition in partitions]
         if not paths:
-            return pd.DataFrame()
+            return pd.DataFrame(), metadata
         with duckdb.connect() as connection:
-            return connection.execute(
+            frame = connection.execute(
                 "select * from read_parquet(?, union_by_name=true, "
-                "hive_partitioning=false)",
+                "hive_partitioning=false, filename=true)",
                 [[str(path) for path in paths]],
             ).fetchdf()
+        expected_rows = int(metadata["row_count"].sum())
+        if len(frame) != expected_rows:
+            raise ValueError(
+                f"partition row count mismatch for {dataset.value}: "
+                f"metadata={expected_rows}, parquet={len(frame)}"
+            )
+        path_partitions = {
+            str(self._partition_path(dataset, partition)): partition
+            for partition in partitions
+        }
+        frame["__research_partition_value"] = frame.pop("filename").map(
+            path_partitions
+        )
+        if frame["__research_partition_value"].isna().any():
+            raise ValueError(f"unrecognized partition file for {dataset.value}")
+        return frame, metadata
+
+    def validated_partition_manifest(
+        self,
+        dataset_id: ResearchDatasetId | str,
+        partition_values: Iterable[str],
+    ) -> pd.DataFrame:
+        dataset = ResearchDatasetId(dataset_id)
+        partitions = _normalized_partition_values(partition_values)
+        metadata = self.partition_manifest(
+            dataset,
+            partition_values=partitions,
+        )
+        if not partitions:
+            return metadata
+        if metadata.empty or "partition_value" not in metadata:
+            raise ValueError(f"partition metadata missing for {dataset.value}")
+        counts = metadata["partition_value"].astype(str).value_counts()
+        invalid = [
+            partition
+            for partition in partitions
+            if int(counts.get(partition, 0)) != 1
+        ]
+        if invalid or len(metadata) != len(partitions):
+            raise ValueError(
+                f"partition metadata must contain exactly one row for "
+                f"{dataset.value}: {invalid}"
+            )
+        rows = {
+            str(row["partition_value"]): row
+            for row in metadata.to_dict(orient="records")
+        }
+        for partition in partitions:
+            row = rows[partition]
+            expected_path = self._partition_path(dataset, partition)
+            registered_path = self.root / str(row["relative_path"])
+            if registered_path != expected_path:
+                raise ValueError(
+                    f"partition path mismatch for {dataset.value}:{partition}"
+                )
+            if not expected_path.is_file():
+                raise FileNotFoundError(
+                    f"fact partition file missing: {dataset.value}:{partition}"
+                )
+            actual_sha256 = sha256_file(expected_path)
+            if actual_sha256 != str(row["file_sha256"]):
+                raise ValueError(
+                    f"partition file SHA-256 mismatch for "
+                    f"{dataset.value}:{partition}"
+                )
+        return metadata
 
     def revision_count(self, dataset_id: ResearchDatasetId | str) -> int:
         with connect_research_warehouse(self.duckdb_path, read_only=True) as connection:
