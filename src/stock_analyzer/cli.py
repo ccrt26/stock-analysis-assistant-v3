@@ -136,11 +136,6 @@ def data_audit_migration(
     )
     if not audit.passed:
         raise typer.Exit(code=2)
-    typer.echo(
-        f"migration {migration_id}: unique={report.migrated_business_keys} "
-        f"revisions={report.revision_rows} partitions={report.partition_count} "
-        f"already_completed={str(report.already_completed).lower()}"
-    )
 
 
 @data_app.command("backfill")

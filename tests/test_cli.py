@@ -856,6 +856,49 @@ def test_formal_warehouse_operator_commands_migrate_audit_and_manifest(tmp_path)
     assert json.loads(deletion_output.read_text())["files"]
 
 
+def test_research_market_migration_audit_command_exits_cleanly(tmp_path):
+    from tests.test_research_migration import _write_version
+
+    source = tmp_path / "legacy-formal"
+    _write_version(
+        source,
+        version_id="market_decision-2026-07-10-a",
+        trade_date="2026-07-09",
+        closes={"000001.SZ": 10.0},
+    )
+    env = {"PROJECT_ROOT": str(tmp_path)}
+
+    migration = CliRunner().invoke(
+        app,
+        [
+            "data",
+            "migrate-legacy-market",
+            "--source-root",
+            str(source),
+            "--migration-id",
+            "cli-audit",
+        ],
+        env=env,
+    )
+    audit = CliRunner().invoke(
+        app,
+        [
+            "data",
+            "audit-migration",
+            "--source-root",
+            str(source),
+            "--migration-id",
+            "cli-audit",
+            "--strict-hashes",
+        ],
+        env=env,
+    )
+
+    assert migration.exit_code == 0, migration.output
+    assert audit.exit_code == 0, audit.output
+    assert "passed=true" in audit.output
+
+
 def test_render_report_requires_supabase_config_without_fixture_mode(tmp_path, monkeypatch):
     monkeypatch.delenv("SUPABASE_URL", raising=False)
     monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
