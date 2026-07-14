@@ -145,6 +145,105 @@ class DerivedFeatureStore:
                 limitations=normalized_limitations,
             )
 
+    def record_attempt(
+        self,
+        feature_set: str,
+        analysis_date: date | str,
+        formula_version: str,
+        *,
+        input_manifest: Mapping[str, Any],
+        quality_status: str,
+        limitations: Iterable[str] = (),
+        status: str,
+        row_count: int | None,
+        run_id: str,
+    ) -> None:
+        """Persist a skipped or failed attempt without touching its partition."""
+
+        normalized_feature_set = _path_component(feature_set, "feature_set")
+        normalized_date = _as_date(analysis_date)
+        normalized_formula_version = _path_component(
+            formula_version, "formula_version"
+        )
+        normalized_run_id = _required_text(run_id, "run_id")
+        normalized_limitations = _normalize_limitations(limitations)
+        if not isinstance(input_manifest, Mapping):
+            raise TypeError("input_manifest must be a mapping")
+        if status not in {"skipped", "failed"}:
+            raise ValueError("attempt status must be skipped or failed")
+        if status == "failed" and quality_status != "failed":
+            raise ValueError("failed attempt must use failed quality status")
+        if status == "skipped" and quality_status not in _COMMITTABLE_QUALITY_STATUSES:
+            raise ValueError("skipped attempt must use a committable quality status")
+        if row_count is not None and (
+            not isinstance(row_count, int) or isinstance(row_count, bool) or row_count < 0
+        ):
+            raise ValueError("row_count must be a non-negative integer or None")
+
+        input_manifest_json = _stable_json(input_manifest)
+        input_manifest_hash = _sha256_text(input_manifest_json)
+        limitations_json = _stable_json(normalized_limitations)
+        recorded_at = datetime.now(timezone.utc)
+        expected = (
+            normalized_feature_set,
+            normalized_date,
+            normalized_formula_version,
+            input_manifest_hash,
+            quality_status,
+            limitations_json,
+            status,
+            row_count,
+        )
+        with self._file_lock(exclusive=True):
+            with connect_research_warehouse(self.duckdb_path) as connection:
+                existing = connection.execute(
+                    """
+                    select feature_set, analysis_date, formula_version,
+                           input_manifest_hash, quality_status,
+                           limitations_json, status, row_count
+                    from research_derived_runs where run_id = ?
+                    """,
+                    [normalized_run_id],
+                ).fetchone()
+                if existing is not None:
+                    comparable = tuple(existing)
+                    comparable = comparable[:5] + (
+                        _stable_json(
+                            json.loads(comparable[5])
+                            if isinstance(comparable[5], str)
+                            else comparable[5]
+                        ),
+                    ) + comparable[6:]
+                    if comparable != expected:
+                        raise DerivedDeterminismError(
+                            f"derived attempt run_id collision: {normalized_run_id}"
+                        )
+                    return
+                connection.execute(
+                    """
+                    insert into research_derived_runs
+                    (run_id, feature_set, analysis_date, formula_version,
+                     input_manifest_json, input_manifest_hash, quality_status,
+                     limitations_json, status, row_count, content_hash,
+                     file_sha256, started_at, finished_at)
+                    values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, null, null, ?, ?)
+                    """,
+                    [
+                        normalized_run_id,
+                        normalized_feature_set,
+                        normalized_date,
+                        normalized_formula_version,
+                        input_manifest_json,
+                        input_manifest_hash,
+                        quality_status,
+                        limitations_json,
+                        status,
+                        row_count,
+                        recorded_at,
+                        recorded_at,
+                    ],
+                )
+
     def _commit_locked(
         self,
         *,

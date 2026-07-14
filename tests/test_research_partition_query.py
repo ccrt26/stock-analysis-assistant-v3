@@ -350,3 +350,47 @@ def test_manifest_excludes_future_trade_date_partitions(tmp_path):
     assert [item["partition"] for item in manifest["partitions"]] == [
         "2026-07-08"
     ]
+
+
+def test_materialized_snapshot_hashes_the_exact_frames_returned_to_formula(tmp_path):
+    warehouse = ResearchWarehouse(tmp_path)
+    warehouse.commit_batch(_daily_batch("2026-07-08", close=10.2))
+    current, metadata = warehouse.read_current_partitions_with_manifest(
+        ResearchDatasetId.EQUITY_DAILY,
+        ["2026-07-08"],
+    )
+
+    class ChangingWarehouse:
+        def __init__(self):
+            self.read_count = 0
+
+        def read_current_partitions_with_manifest(
+            self, dataset_id, partition_values
+        ):
+            self.read_count += 1
+            frame = current.copy()
+            if self.read_count > 1:
+                frame.loc[:, "close"] = 99.0
+                frame.loc[:, "payload_hash"] = "later-revision"
+            return frame, metadata.copy()
+
+        def revision_rows(self, dataset_id, *, partition_values=None):
+            return []
+
+    changing = ChangingWarehouse()
+    snapshot = ResearchQuery(changing).materialize_snapshot(
+        {ResearchDatasetId.EQUITY_DAILY: ["2026-07-08"]},
+        as_of=datetime(2026, 7, 9, tzinfo=timezone.utc),
+    )
+    resolved = snapshot.frame(ResearchDatasetId.EQUITY_DAILY)
+
+    assert changing.read_count == 1
+    assert resolved.iloc[0]["close"] == pytest.approx(10.2)
+    assert snapshot.input_manifest["partitions"][0][
+        "resolved_content_hash"
+    ] == _resolved_content_hash(resolved)
+
+    resolved.loc[:, "close"] = -1.0
+    assert snapshot.frame(ResearchDatasetId.EQUITY_DAILY).iloc[0][
+        "close"
+    ] == pytest.approx(10.2)

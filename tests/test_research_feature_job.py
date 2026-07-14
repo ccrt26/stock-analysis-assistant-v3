@@ -19,8 +19,10 @@ class FakeWarehouse:
         self.root = root
         self.calls: list[tuple[str, object]] = []
         self.commits: list[dict[str, object]] = []
+        self.attempts: list[dict[str, object]] = []
         self.current: dict[tuple[str, date, str], dict[str, object]] = {}
         self.revisions: dict[str, str] = {}
+        self.hidden_datasets: set[ResearchDatasetId] = set()
         self.frames = _fact_frames(dates)
         self.partitions = {
             ResearchDatasetId.TRADE_CALENDAR: sorted({str(value.year) for value in dates}),
@@ -61,6 +63,25 @@ class FakeQuery:
         dataset = ResearchDatasetId(dataset)
         values = tuple(str(value) for value in partitions)
         self.warehouse.calls.append(("query", dataset, values, as_of))
+        frame = self._frame(dataset, values)
+        return frame
+
+    def materialize_snapshot(self, mapping, *, as_of: datetime):
+        normalized = {
+            ResearchDatasetId(dataset): tuple(str(value) for value in partitions)
+            for dataset, partitions in mapping.items()
+        }
+        frames = {
+            dataset: self._frame(dataset, partitions)
+            for dataset, partitions in normalized.items()
+        }
+        manifest = self.input_manifest(normalized, as_of=as_of)
+        self.warehouse.calls.append(("snapshot", normalized, manifest))
+        return FakeSnapshot(frames, manifest)
+
+    def _frame(self, dataset, values):
+        if dataset in self.warehouse.hidden_datasets:
+            return self.warehouse.frames[dataset].iloc[0:0].copy()
         frame = self.warehouse.frames[dataset].copy()
         if "trade_date" in frame:
             return frame[frame["trade_date"].astype(str).isin(values)].reset_index(drop=True)
@@ -91,6 +112,15 @@ class FakeQuery:
         ).hexdigest()
         self.warehouse.calls.append(("manifest", canonical))
         return canonical
+
+
+class FakeSnapshot:
+    def __init__(self, frames, input_manifest):
+        self.frames = frames
+        self.input_manifest = input_manifest
+
+    def frame(self, dataset):
+        return self.frames[ResearchDatasetId(dataset)].copy()
 
 
 class FakeStore:
@@ -142,6 +172,16 @@ class FakeStore:
             }
         ])
 
+    def record_attempt(self, feature_set, analysis_date, formula_version, **kwargs):
+        self.warehouse.attempts.append(
+            {
+                "feature_set": feature_set,
+                "analysis_date": analysis_date,
+                "formula_version": formula_version,
+                **kwargs,
+            }
+        )
+
 
 _WAREHOUSES: dict[Path, FakeWarehouse] = {}
 
@@ -163,10 +203,22 @@ def test_job_uses_calendar_windows_strict_manifests_and_exact_contracts(
 
     summary = job.run_research_features(warehouse, ANALYSIS_DATE)
 
-    query_calls = [call for call in warehouse.calls if call[0] == "query"]
-    equity_windows = [call[2] for call in query_calls if call[1] is ResearchDatasetId.EQUITY_DAILY]
-    index_windows = [call[2] for call in query_calls if call[1] is ResearchDatasetId.INDEX_DAILY]
-    valuation_windows = [call[2] for call in query_calls if call[1] is ResearchDatasetId.DAILY_BASIC]
+    snapshots = [call[1] for call in warehouse.calls if call[0] == "snapshot"]
+    equity_windows = [
+        mapping[ResearchDatasetId.EQUITY_DAILY]
+        for mapping in snapshots
+        if ResearchDatasetId.EQUITY_DAILY in mapping
+    ]
+    index_windows = [
+        mapping[ResearchDatasetId.INDEX_DAILY]
+        for mapping in snapshots
+        if ResearchDatasetId.INDEX_DAILY in mapping
+    ]
+    valuation_windows = [
+        mapping[ResearchDatasetId.DAILY_BASIC]
+        for mapping in snapshots
+        if ResearchDatasetId.DAILY_BASIC in mapping
+    ]
     assert equity_windows and max(map(len, equity_windows)) == 82
     assert index_windows and max(map(len, index_windows)) == 250
     assert valuation_windows and len(max(valuation_windows, key=len)) == 300
@@ -236,6 +288,10 @@ def test_job_is_idempotent_and_only_related_manifest_changes_recompute(
     assert third.committed_feature_sets == ("sector_hotspot",)
     assert third.skipped_feature_sets == ("market_context", "stock_trading_context")
     assert counts == {"market": 1, "sector": 2, "stock": 1}
+    assert any(
+        attempt["status"] == "skipped"
+        for attempt in warehouse.attempts
+    )
 
 
 def test_later_feature_failure_preserves_prior_commits_and_continues(
@@ -270,6 +326,121 @@ def test_later_feature_failure_preserves_prior_commits_and_continues(
         previous_sector,
     )
     assert summary.committed_feature_sets == ("market_context", "stock_trading_context")
+    assert any(
+        attempt["feature_set"] == "sector_hotspot"
+        and attempt["status"] == "failed"
+        and "sector formula failed" in " ".join(attempt["limitations"])
+        for attempt in warehouse.attempts
+    )
+
+
+def test_each_feature_uses_its_own_exact_materialized_snapshot(
+    tmp_path: Path, monkeypatch
+) -> None:
+    import stock_analyzer.ops.research_features as job
+
+    dates = [value.date() for value in pd.bdate_range(end=ANALYSIS_DATE, periods=300)]
+    warehouse = FakeWarehouse(tmp_path, dates)
+    _WAREHOUSES[tmp_path] = warehouse
+    captured = {}
+    monkeypatch.setattr(job, "ResearchQuery", FakeQuery)
+    monkeypatch.setattr(job, "DerivedFeatureStore", FakeStore)
+
+    def market_then_revise(*args, **kwargs):
+        warehouse.frames[ResearchDatasetId.EQUITY_DAILY].loc[:, "close"] = 20.0
+        warehouse.revisions[ResearchDatasetId.EQUITY_DAILY.value] = "revision-2"
+        return _simple_market()
+
+    monkeypatch.setattr(job, "compute_market_context_features", market_then_revise)
+    monkeypatch.setattr(job, "compute_hotspot_features", _capture_sector(captured))
+    monkeypatch.setattr(job, "compute_stock_context_features", _capture_stock(captured))
+
+    summary = job.run_research_features(warehouse, ANALYSIS_DATE)
+
+    assert summary.failed_feature_sets == ()
+    assert set(captured["sector"][0]["close"].unique()) == {20.0}
+    assert set(captured["stock"][0]["close"].unique()) == {20.0}
+    sector_manifest = warehouse.commits[1]["input_manifest"]["fact_snapshot"]
+    assert {
+        item["resolved_content_hash"]
+        for item in sector_manifest["partitions"]
+        if item["dataset"] == ResearchDatasetId.EQUITY_DAILY.value
+    } == {"revision-2"}
+
+
+def test_minute_partition_invisible_or_partial_is_declared(
+    tmp_path: Path, monkeypatch
+) -> None:
+    import stock_analyzer.ops.research_features as job
+
+    dates = [value.date() for value in pd.bdate_range(end=ANALYSIS_DATE, periods=300)]
+
+    def run_case(root: Path, *, hidden: bool):
+        warehouse = FakeWarehouse(root, dates)
+        warehouse.partitions[ResearchDatasetId.MINUTE_BAR] = [
+            ANALYSIS_DATE.isoformat()
+        ]
+        warehouse.frames[ResearchDatasetId.MINUTE_BAR] = pd.DataFrame([
+            {
+                "trade_date": ANALYSIS_DATE,
+                "instrument_code": "000001.SZ",
+                "minute": "2026-07-13T01:30:00+00:00",
+                "frequency": "1min",
+                "close": 10.0,
+                "amount": 1000.0,
+            }
+        ])
+        if hidden:
+            warehouse.hidden_datasets.add(ResearchDatasetId.MINUTE_BAR)
+        _WAREHOUSES[root] = warehouse
+        monkeypatch.setattr(job, "ResearchQuery", FakeQuery)
+        monkeypatch.setattr(job, "DerivedFeatureStore", FakeStore)
+        monkeypatch.setattr(job, "compute_market_context_features", _simple_market)
+        monkeypatch.setattr(job, "compute_hotspot_features", _simple_sector)
+        monkeypatch.setattr(job, "compute_stock_context_features", _simple_stock)
+        job.run_research_features(warehouse, ANALYSIS_DATE)
+        return next(
+            call for call in warehouse.commits
+            if call["feature_set"] == "sector_hotspot"
+        )
+
+    invisible = run_case(tmp_path / "invisible", hidden=True)
+    partial = run_case(tmp_path / "partial", hidden=False)
+
+    assert any("截止时点" in text for text in invisible["limitations"])
+    assert any("覆盖不完整" in text for text in partial["limitations"])
+
+
+def test_summary_counts_catalog_groups_without_public_membership(
+    tmp_path: Path, monkeypatch
+) -> None:
+    import stock_analyzer.ops.research_features as job
+
+    dates = [value.date() for value in pd.bdate_range(end=ANALYSIS_DATE, periods=300)]
+    warehouse = FakeWarehouse(tmp_path, dates)
+    _WAREHOUSES[tmp_path] = warehouse
+    monkeypatch.setattr(job, "ResearchQuery", FakeQuery)
+    monkeypatch.setattr(job, "DerivedFeatureStore", FakeStore)
+    monkeypatch.setattr(job, "compute_market_context_features", _simple_market)
+    monkeypatch.setattr(
+        job,
+        "compute_hotspot_features",
+        lambda *args, **kwargs: pd.DataFrame([
+            {
+                "analysis_date": ANALYSIS_DATE,
+                "group_type": "theme",
+                "group_code": "EMPTY",
+                "coverage_status": "limited_no_membership",
+                "intraday_status": "limited",
+            }
+        ]),
+    )
+    monkeypatch.setattr(job, "compute_stock_context_features", _simple_stock)
+
+    summary = job.run_research_features(warehouse, ANALYSIS_DATE)
+
+    assert summary.sector_no_membership_count == 1
+    assert "1 个行业/主题因未公开成分" in summary.plain_language_summary
 
 
 def _fact_frames(dates: list[date]) -> dict[ResearchDatasetId, pd.DataFrame]:
@@ -363,8 +534,14 @@ def _simple_market(*args, **kwargs):
 
 def _simple_sector(*args, **kwargs):
     return pd.DataFrame([
-        {"analysis_date": ANALYSIS_DATE, "group_type": "industry", "group_code": "801010.SI",
-         "coverage_status": "complete_with_declared_gaps", "limitation_notes": "minute data unavailable"}
+        {
+            "analysis_date": ANALYSIS_DATE,
+            "group_type": "industry",
+            "group_code": "801010.SI",
+            "coverage_status": "complete_with_declared_gaps",
+            "intraday_status": "limited",
+            "limitation_notes": "minute data unavailable",
+        }
     ])
 
 

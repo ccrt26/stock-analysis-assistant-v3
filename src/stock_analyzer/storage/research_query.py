@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -15,6 +16,20 @@ from stock_analyzer.storage.research_warehouse import ResearchWarehouse
 
 _PARTITION_VALUE_COLUMN = "__research_partition_value"
 _SELECTED_REVISION_COLUMN = "__research_selected_revision"
+
+
+@dataclass(frozen=True)
+class MaterializedResearchSnapshot:
+    """Exact resolved fact frames and the manifest calculated from those frames."""
+
+    _frames: Mapping[ResearchDatasetId, pd.DataFrame]
+    input_manifest: dict[str, Any]
+
+    def frame(self, dataset_id: ResearchDatasetId | str) -> pd.DataFrame:
+        dataset = ResearchDatasetId(dataset_id)
+        if dataset not in self._frames:
+            raise KeyError(f"dataset is not part of materialized snapshot: {dataset.value}")
+        return self._frames[dataset].copy()
 
 
 class ResearchQuery:
@@ -59,11 +74,28 @@ class ResearchQuery:
         *,
         as_of: datetime,
     ) -> dict[str, Any]:
+        return self.materialize_snapshot(
+            dataset_partitions,
+            as_of=as_of,
+        ).input_manifest
+
+    def materialize_snapshot(
+        self,
+        dataset_partitions: Mapping[
+            ResearchDatasetId | str,
+            Iterable[str] | str,
+        ],
+        *,
+        as_of: datetime,
+    ) -> MaterializedResearchSnapshot:
+        """Resolve each requested fact once and hash those exact returned rows."""
+
         if not isinstance(dataset_partitions, Mapping):
             raise TypeError("dataset_partitions must be a mapping")
 
         cutoff = _utc(as_of)
         items: list[dict[str, Any]] = []
+        frames: dict[ResearchDatasetId, pd.DataFrame] = {}
         requested = sorted(
             (
                 ResearchDatasetId(dataset_id),
@@ -79,6 +111,7 @@ class ResearchQuery:
             resolved, metadata = self._partition_snapshot(
                 dataset, partitions, cutoff
             )
+            frames[dataset] = _public_fact_frame(resolved)
             rows = {
                 str(row["partition_value"]): row
                 for row in metadata.to_dict(orient="records")
@@ -124,11 +157,14 @@ class ResearchQuery:
             "as_of": canonical_as_of,
             "partitions": items,
         }
-        return {
-            "as_of": canonical_as_of,
-            "partitions": items,
-            "input_manifest_hash": _stable_hash(canonical),
-        }
+        return MaterializedResearchSnapshot(
+            _frames=frames,
+            input_manifest={
+                "as_of": canonical_as_of,
+                "partitions": items,
+                "input_manifest_hash": _stable_hash(canonical),
+            },
+        )
 
     def _partition_snapshot(
         self,
@@ -341,4 +377,4 @@ def _utc(value: Any) -> datetime:
     return timestamp.to_pydatetime()
 
 
-__all__ = ["ResearchQuery"]
+__all__ = ["MaterializedResearchSnapshot", "ResearchQuery"]

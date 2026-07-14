@@ -11,6 +11,7 @@ from stock_analyzer.storage.research_derived import (
     DerivedFeatureStore,
     stable_dataframe_content_hash,
 )
+from stock_analyzer.storage.research_schema import connect_research_warehouse
 
 
 FEATURE_SET = "market_technical"
@@ -489,3 +490,72 @@ def test_failed_quality_status_is_rejected_before_staging(tmp_path, monkeypatch)
             limitations=("input gap",),
             run_id="derived-run-failed",
         )
+
+
+def test_skipped_and_failed_attempts_are_persisted_without_changing_partition(
+    tmp_path,
+):
+    store = DerivedFeatureStore(tmp_path)
+    committed = _commit(store, _frame())
+    original = store.read(FEATURE_SET, ANALYSIS_DATE, FORMULA_VERSION)
+
+    store.record_attempt(
+        FEATURE_SET,
+        ANALYSIS_DATE,
+        FORMULA_VERSION,
+        input_manifest={"fact_snapshot": {"input_manifest_hash": "same"}},
+        quality_status="complete",
+        limitations=(),
+        status="skipped",
+        row_count=committed.row_count,
+        run_id="derived-attempt-skipped",
+    )
+    store.record_attempt(
+        FEATURE_SET,
+        ANALYSIS_DATE,
+        FORMULA_VERSION,
+        input_manifest={"requested": ["equity_daily:2026-07-10"]},
+        quality_status="failed",
+        limitations=("formula failed: bad input",),
+        status="failed",
+        row_count=None,
+        run_id="derived-attempt-failed",
+    )
+    store.record_attempt(
+        FEATURE_SET,
+        ANALYSIS_DATE,
+        FORMULA_VERSION,
+        input_manifest={"fact_snapshot": {"input_manifest_hash": "same"}},
+        quality_status="complete",
+        limitations=(),
+        status="skipped",
+        row_count=committed.row_count,
+        run_id="derived-attempt-skipped",
+    )
+
+    with connect_research_warehouse(
+        tmp_path / "research.duckdb", read_only=True
+    ) as connection:
+        attempts = connection.execute(
+            """
+            select run_id, status, quality_status, limitations_json, row_count
+            from research_derived_runs
+            where run_id in ('derived-attempt-skipped', 'derived-attempt-failed')
+            order by run_id
+            """
+        ).fetchall()
+
+    assert attempts[0][0:3] == (
+        "derived-attempt-failed", "failed", "failed"
+    )
+    assert "formula failed" in str(attempts[0][3])
+    assert attempts[0][4] is None
+    assert attempts[1][0:3] == (
+        "derived-attempt-skipped", "skipped", "complete"
+    )
+    assert attempts[1][4] == 2
+    assert len(attempts) == 2
+    pd.testing.assert_frame_equal(
+        store.read(FEATURE_SET, ANALYSIS_DATE, FORMULA_VERSION),
+        original,
+    )

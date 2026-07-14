@@ -32,7 +32,10 @@ from stock_analyzer.analysis.stock_context_features import (
 )
 from stock_analyzer.data.research_contracts import ResearchDatasetId
 from stock_analyzer.storage.research_derived import DerivedFeatureStore
-from stock_analyzer.storage.research_query import ResearchQuery
+from stock_analyzer.storage.research_query import (
+    MaterializedResearchSnapshot,
+    ResearchQuery,
+)
 from stock_analyzer.storage.research_warehouse import ResearchWarehouse
 
 
@@ -49,6 +52,7 @@ class DerivedFeatureSummary:
     market_rows: int
     sector_rows: int
     stock_rows: int
+    sector_no_membership_count: int
     committed_feature_sets: tuple[str, ...]
     skipped_feature_sets: tuple[str, ...]
     failed_feature_sets: tuple[str, ...]
@@ -70,11 +74,11 @@ def run_research_features(
     store = DerivedFeatureStore(Path(warehouse.root))
 
     calendar_partitions = _calendar_partitions(warehouse, analysis_day)
-    calendar = query.dataset_partitions_as_of(
-        ResearchDatasetId.TRADE_CALENDAR,
-        calendar_partitions,
-        cutoff,
+    calendar_snapshot = query.materialize_snapshot(
+        {ResearchDatasetId.TRADE_CALENDAR: calendar_partitions},
+        as_of=cutoff,
     )
+    calendar = calendar_snapshot.frame(ResearchDatasetId.TRADE_CALENDAR)
     sessions = _open_sessions(calendar, analysis_day)
     if analysis_day not in sessions:
         raise ValueError(
@@ -88,21 +92,6 @@ def run_research_features(
     valuation_dates = tuple(
         value.isoformat() for value in sessions if value >= five_year_start
     )
-
-    cache: dict[tuple[ResearchDatasetId, tuple[str, ...]], pd.DataFrame] = {}
-
-    def read(
-        dataset: ResearchDatasetId,
-        partitions: Iterable[str],
-    ) -> pd.DataFrame:
-        key = (dataset, tuple(str(value) for value in partitions))
-        if key not in cache:
-            cache[key] = query.dataset_partitions_as_of(
-                dataset,
-                key[1],
-                cutoff,
-            )
-        return cache[key].copy()
 
     partition_cache: dict[ResearchDatasetId, tuple[str, ...]] = {}
 
@@ -121,6 +110,7 @@ def run_research_features(
     failed: list[str] = []
     errors: list[str] = []
     limitations: list[str] = []
+    sector_no_membership_count = 0
     row_counts = {
         "market_context": 0,
         "sector_hotspot": 0,
@@ -135,13 +125,29 @@ def run_research_features(
         input_partitions: Callable[
             [], Mapping[ResearchDatasetId, Iterable[str]]
         ],
-        calculate: Callable[[], pd.DataFrame],
+        calculate: Callable[[MaterializedResearchSnapshot], pd.DataFrame],
     ) -> None:
+        nonlocal sector_no_membership_count
+        requested: Mapping[ResearchDatasetId, Iterable[str]] = {}
+        attempt_manifest: dict[str, object] = {
+            "as_of": cutoff.astimezone(ZoneInfo("UTC")).isoformat(),
+            "requested_partitions": [],
+        }
         try:
-            fact_snapshot = query.input_manifest(
-                input_partitions(),
+            requested = input_partitions()
+            attempt_manifest = _requested_attempt_manifest(requested, cutoff)
+            snapshot = query.materialize_snapshot(
+                requested,
                 as_of=cutoff,
             )
+            attempt_manifest = {"fact_snapshot": snapshot.input_manifest}
+            _assert_calendar_window(
+                snapshot,
+                analysis_day,
+                price_dates=price_dates,
+                context_dates=context_dates,
+            )
+            fact_snapshot = snapshot.input_manifest
             previous = _unchanged_partition(
                 store,
                 feature_set=feature_set,
@@ -153,11 +159,44 @@ def run_research_features(
                 row_counts[feature_set] = previous[0]
                 skipped.append(feature_set)
                 limitations.extend(previous[1])
+                if feature_set == "sector_hotspot":
+                    existing = store.read(
+                        feature_set, analysis_day, formula_version
+                    )
+                    sector_no_membership_count = _no_membership_count(existing)
+                skipped_manifest = {
+                    "fact_snapshot": fact_snapshot,
+                    "plain_language_summary": (
+                        f"{analysis_day.isoformat()} {feature_set} 输入未变，"
+                        "已校验原有结果并跳过公式重算。"
+                    ),
+                }
+                store.record_attempt(
+                    feature_set,
+                    analysis_day,
+                    formula_version,
+                    input_manifest=skipped_manifest,
+                    quality_status=previous[2],
+                    limitations=previous[1],
+                    status="skipped",
+                    row_count=previous[0],
+                    run_id=_attempt_run_id(
+                        feature_set,
+                        analysis_day,
+                        formula_version,
+                        str(fact_snapshot["input_manifest_hash"]),
+                        "skipped",
+                    ),
+                )
                 return
-            frame = calculate()
+            frame = calculate(snapshot)
             row_counts[feature_set] = len(frame)
+            if feature_set == "sector_hotspot":
+                sector_no_membership_count = _no_membership_count(frame)
             quality_status, feature_limitations = _partition_quality(
-                feature_set, frame, minute_available=bool(minute_partitions)
+                feature_set,
+                frame,
+                minute_state=_minute_state(requested, snapshot),
             )
             feature_summary = _feature_summary(
                 feature_set,
@@ -193,7 +232,36 @@ def run_research_features(
             limitations.extend(feature_limitations)
         except Exception as exc:  # each feature set has an independent boundary
             failed.append(feature_set)
-            errors.append(f"{feature_set}: {exc}")
+            error_text = f"{feature_set}: {exc}"
+            errors.append(error_text)
+            failed_manifest = {
+                "attempted_input": attempt_manifest,
+                "plain_language_summary": (
+                    f"{analysis_day.isoformat()} {feature_set} 计算失败：{exc}"
+                ),
+            }
+            try:
+                store.record_attempt(
+                    feature_set,
+                    analysis_day,
+                    formula_version,
+                    input_manifest=failed_manifest,
+                    quality_status="failed",
+                    limitations=(f"特征计算失败：{exc}",),
+                    status="failed",
+                    row_count=None,
+                    run_id=_attempt_run_id(
+                        feature_set,
+                        analysis_day,
+                        formula_version,
+                        _stable_payload_hash(failed_manifest),
+                        "failed",
+                    ),
+                )
+            except Exception as record_error:
+                errors.append(
+                    f"{feature_set} 失败尝试未能持久化：{record_error}"
+                )
 
     calendar_input = {ResearchDatasetId.TRADE_CALENDAR: calendar_partitions}
 
@@ -208,16 +276,11 @@ def run_research_features(
             ResearchDatasetId.STOCK_LIMIT: (analysis_day.isoformat(),),
         }
 
-    def calculate_market() -> pd.DataFrame:
-        equity = read(ResearchDatasetId.EQUITY_DAILY, price_dates)
-        indexes = read(ResearchDatasetId.INDEX_DAILY, context_dates)
-        limits = read(
-            ResearchDatasetId.STOCK_LIMIT, (analysis_day.isoformat(),)
-        )
-        securities = read(
-            ResearchDatasetId.SECURITY_MASTER,
-            partitions(ResearchDatasetId.SECURITY_MASTER),
-        )
+    def calculate_market(snapshot: MaterializedResearchSnapshot) -> pd.DataFrame:
+        equity = snapshot.frame(ResearchDatasetId.EQUITY_DAILY)
+        indexes = snapshot.frame(ResearchDatasetId.INDEX_DAILY)
+        limits = snapshot.frame(ResearchDatasetId.STOCK_LIMIT)
+        securities = snapshot.frame(ResearchDatasetId.SECURITY_MASTER)
         return compute_market_context_features(
             equity,
             indexes,
@@ -259,33 +322,19 @@ def run_research_features(
             inputs[ResearchDatasetId.MINUTE_BAR] = minute_partitions
         return inputs
 
-    def calculate_sector() -> pd.DataFrame:
-        equity = read(ResearchDatasetId.EQUITY_DAILY, price_dates)
-        indexes = read(ResearchDatasetId.INDEX_DAILY, price_dates)
+    def calculate_sector(snapshot: MaterializedResearchSnapshot) -> pd.DataFrame:
+        equity = snapshot.frame(ResearchDatasetId.EQUITY_DAILY)
+        indexes = snapshot.frame(ResearchDatasetId.INDEX_DAILY)
         benchmark = _benchmark(indexes)
-        limits = read(
-            ResearchDatasetId.STOCK_LIMIT, (analysis_day.isoformat(),)
-        )
-        industry_catalog = read(
-            ResearchDatasetId.INDUSTRY_CATALOG,
-            partitions(ResearchDatasetId.INDUSTRY_CATALOG),
-        )
-        theme_catalog = read(
-            ResearchDatasetId.THEME_CATALOG,
-            partitions(ResearchDatasetId.THEME_CATALOG),
-        )
-        industry_members = read(
-            ResearchDatasetId.INDUSTRY_MEMBER,
-            partitions(ResearchDatasetId.INDUSTRY_MEMBER),
-        )
-        theme_members = read(
-            ResearchDatasetId.THEME_MEMBER,
-            partitions(ResearchDatasetId.THEME_MEMBER),
-        )
-        industry_daily = read(ResearchDatasetId.INDUSTRY_DAILY, price_dates)
-        theme_daily = read(ResearchDatasetId.THEME_DAILY, price_dates)
+        limits = snapshot.frame(ResearchDatasetId.STOCK_LIMIT)
+        industry_catalog = snapshot.frame(ResearchDatasetId.INDUSTRY_CATALOG)
+        theme_catalog = snapshot.frame(ResearchDatasetId.THEME_CATALOG)
+        industry_members = snapshot.frame(ResearchDatasetId.INDUSTRY_MEMBER)
+        theme_members = snapshot.frame(ResearchDatasetId.THEME_MEMBER)
+        industry_daily = snapshot.frame(ResearchDatasetId.INDUSTRY_DAILY)
+        theme_daily = snapshot.frame(ResearchDatasetId.THEME_DAILY)
         minutes = (
-            read(ResearchDatasetId.MINUTE_BAR, minute_partitions)
+            snapshot.frame(ResearchDatasetId.MINUTE_BAR)
             if minute_partitions
             else _empty_minutes()
         )
@@ -317,11 +366,11 @@ def run_research_features(
             ResearchDatasetId.DAILY_BASIC: valuation_dates,
         }
 
-    def calculate_stock() -> pd.DataFrame:
-        equity = read(ResearchDatasetId.EQUITY_DAILY, price_dates)
-        indexes = read(ResearchDatasetId.INDEX_DAILY, context_dates)
-        limits = read(ResearchDatasetId.STOCK_LIMIT, recent_limit_dates)
-        valuations = read(ResearchDatasetId.DAILY_BASIC, valuation_dates)
+    def calculate_stock(snapshot: MaterializedResearchSnapshot) -> pd.DataFrame:
+        equity = snapshot.frame(ResearchDatasetId.EQUITY_DAILY)
+        indexes = snapshot.frame(ResearchDatasetId.INDEX_DAILY)
+        limits = snapshot.frame(ResearchDatasetId.STOCK_LIMIT)
+        valuations = snapshot.frame(ResearchDatasetId.DAILY_BASIC)
         return compute_stock_context_features(
             equity,
             _benchmark(indexes),
@@ -347,6 +396,7 @@ def run_research_features(
         failed,
         errors,
         unique_limitations,
+        sector_no_membership_count,
     )
     return DerivedFeatureSummary(
         analysis_date=analysis_day,
@@ -354,6 +404,7 @@ def run_research_features(
         market_rows=row_counts["market_context"],
         sector_rows=row_counts["sector_hotspot"],
         stock_rows=row_counts["stock_trading_context"],
+        sector_no_membership_count=sector_no_membership_count,
         committed_feature_sets=tuple(committed),
         skipped_feature_sets=tuple(skipped),
         failed_feature_sets=tuple(failed),
@@ -370,7 +421,7 @@ def _unchanged_partition(
     analysis_date: date,
     formula_version: str,
     fact_manifest_hash: str,
-) -> tuple[int, tuple[str, ...]] | None:
+) -> tuple[int, tuple[str, ...], str] | None:
     manifest = store.partition_manifest(
         feature_set,
         analysis_date=analysis_date,
@@ -398,8 +449,10 @@ def _unchanged_partition(
         if isinstance(raw_limitations, str)
         else raw_limitations
     )
-    return int(row["row_count"]), tuple(
-        str(value) for value in (stored_limitations or ())
+    return (
+        int(row["row_count"]),
+        tuple(str(value) for value in (stored_limitations or ())),
+        str(row["quality_status"]),
     )
 
 
@@ -648,20 +701,109 @@ def _effective_rows(frame: pd.DataFrame, analysis_date: date) -> pd.DataFrame:
     ].copy()
 
 
+def _requested_attempt_manifest(
+    requested: Mapping[ResearchDatasetId, Iterable[str]],
+    cutoff: datetime,
+) -> dict[str, object]:
+    return {
+        "as_of": cutoff.astimezone(ZoneInfo("UTC")).isoformat(),
+        "requested_partitions": [
+            {
+                "dataset": ResearchDatasetId(dataset).value,
+                "partition": str(partition),
+            }
+            for dataset, values in sorted(
+                requested.items(), key=lambda item: ResearchDatasetId(item[0]).value
+            )
+            for partition in sorted(str(value) for value in values)
+        ],
+    }
+
+
+def _assert_calendar_window(
+    snapshot: MaterializedResearchSnapshot,
+    analysis_date: date,
+    *,
+    price_dates: tuple[str, ...],
+    context_dates: tuple[str, ...],
+) -> None:
+    sessions = _open_sessions(
+        snapshot.frame(ResearchDatasetId.TRADE_CALENDAR),
+        analysis_date,
+    )
+    resolved_price = tuple(
+        value.isoformat() for value in sessions[-_PRICE_WINDOW:]
+    )
+    resolved_context = tuple(
+        value.isoformat() for value in sessions[-_CONTEXT_WINDOW:]
+    )
+    if resolved_price != price_dates or resolved_context != context_dates:
+        raise RuntimeError(
+            "fact trading calendar changed while materializing feature inputs"
+        )
+
+
+def _minute_state(
+    requested: Mapping[ResearchDatasetId, Iterable[str]],
+    snapshot: MaterializedResearchSnapshot,
+) -> str:
+    if ResearchDatasetId.MINUTE_BAR not in requested:
+        return "not_requested"
+    return (
+        "unavailable_at_cutoff"
+        if snapshot.frame(ResearchDatasetId.MINUTE_BAR).empty
+        else "resolved"
+    )
+
+
+def _no_membership_count(frame: pd.DataFrame) -> int:
+    if frame.empty or "coverage_status" not in frame:
+        return 0
+    return int(
+        (frame["coverage_status"].astype(str) == "limited_no_membership").sum()
+    )
+
+
 def _partition_quality(
     feature_set: str,
     frame: pd.DataFrame,
     *,
-    minute_available: bool,
+    minute_state: str,
 ) -> tuple[str, tuple[str, ...]]:
     if frame.empty or "coverage_status" not in frame:
         return "limited", ("no derived observations were produced",)
     statuses = set(frame["coverage_status"].dropna().astype(str))
     limitations: list[str] = []
-    if feature_set == "sector_hotspot" and not minute_available:
-        limitations.append(
-            "历史分钟事实当前不可用，盘中路径指标留空，日线热点证据仍正常复算"
-        )
+    if feature_set == "sector_hotspot":
+        if minute_state == "not_requested":
+            limitations.append(
+                "历史分钟事实当前不可用，盘中路径指标留空，日线热点证据仍正常复算"
+            )
+        elif minute_state == "unavailable_at_cutoff":
+            limitations.append(
+                "分钟分区存在，但截止时点内没有可见事实，盘中路径指标留空"
+            )
+        else:
+            minute_comparable = (
+                frame[pd.to_numeric(frame["member_count"], errors="coerce") > 0]
+                if "member_count" in frame
+                else frame
+            )
+        if minute_state == "resolved" and (
+            "intraday_status" not in minute_comparable
+            or minute_comparable.empty
+            or (
+                minute_comparable["intraday_status"].astype(str) != "complete"
+            ).any()
+        ):
+            limitations.append(
+                "分钟事实对成分或时间点的覆盖不完整，只保留可验证的盘中观察"
+            )
+        no_membership = _no_membership_count(frame)
+        if no_membership:
+            limitations.append(
+                f"{no_membership} 个行业/主题因官方未公开成分不参与热点比较"
+            )
     if feature_set == "stock_trading_context":
         limitations.append(
             "日线事实不能识别交易者身份，成交现象不解释为机构买入或出货"
@@ -708,12 +850,17 @@ def _job_summary(
     failed: list[str],
     errors: list[str],
     limitations: tuple[str, ...],
+    sector_no_membership_count: int,
 ) -> str:
     text = (
         f"{analysis_date.isoformat()} 已处理市场环境 {row_counts['market_context']} 行、"
         f"行业/主题 {row_counts['sector_hotspot']} 行、个股背景 "
         f"{row_counts['stock_trading_context']} 行；新落地 {len(committed)} 类，"
         f"输入未变跳过 {len(skipped)} 类。"
+    )
+    text += (
+        f" {sector_no_membership_count} 个行业/主题因未公开成分"
+        "保留目录状态，不参与热点比较。"
     )
     if limitations:
         text += f" 已明确声明 {len(limitations)} 项数据边界。"
@@ -739,6 +886,37 @@ def _run_id(
         ).encode("utf-8")
     ).hexdigest()
     return f"derived:{feature_set}:{digest[:24]}"
+
+
+def _attempt_run_id(
+    feature_set: str,
+    analysis_date: date,
+    formula_version: str,
+    input_identity: str,
+    status: str,
+) -> str:
+    digest = hashlib.sha256(
+        "|".join(
+            (
+                feature_set,
+                analysis_date.isoformat(),
+                formula_version,
+                input_identity,
+                status,
+            )
+        ).encode("utf-8")
+    ).hexdigest()
+    return f"derived-attempt:{feature_set}:{status}:{digest[:20]}"
+
+
+def _stable_payload_hash(value: Mapping[str, object]) -> str:
+    encoded = json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def _cutoff(analysis_date: date, as_of: datetime | None) -> datetime:
