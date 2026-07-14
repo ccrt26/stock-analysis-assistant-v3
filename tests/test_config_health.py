@@ -332,14 +332,14 @@ def test_matrix_default_factory_and_route_rows_match_verified_evidence():
         assert capability_level(capability_id) == "BLOCKED"
 
 
-def test_matrix_claims_verified_production_and_keeps_publication_blocked():
+def test_matrix_preserves_historical_publication_evidence_but_disables_automation():
     assert capability_level("DATA-011") == "LIVE_READ_VERIFIED"
     assert capability_level("STORE-002") == "PRODUCTION_WRITE_VERIFIED"
     assert capability_level("STORE-003") == "PRODUCTION_WRITE_VERIFIED"
     assert capability_level("OPS-002") == "ACTIVATED"
     assert capability_level("REPORT-004") == "BLOCKED"
     assert capability_level("PUB-002") == "ACTIVATED"
-    assert capability_level("PUB-003") == "ACTIVATED"
+    assert capability_level("PUB-003") == "BLOCKED"
     assert capability_level("SAFE-001") == "NOT_APPLICABLE"
 
 

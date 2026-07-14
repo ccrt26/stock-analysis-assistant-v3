@@ -14,6 +14,8 @@
 
 此前 `STORE-004` 宽表存储迁移的历史验收仍为 `PRODUCTION_WRITE_VERIFIED`，其旧 `local_warehouse/formal_evidence` 已不存在；这项历史证据与当前统一事实区的 `STORE-005` 去重清理分别保留。
 
+历史正式运行证据仍保留原结论：已完成 2026-07-10 真实只读主源回填，Supabase 迁移已应用并完成只读回查，正式事件能力 Gate 已通过，并曾生成 10 个每日推荐、launchd 已加载。上述文字只说明当时机械链路通过；当前报告任务和自动发布均已停用，不代表旧分析框架仍被认可。
+
 已知限制仍明确保留：当前官方账号不能稳定取得历史分钟数据，因此系统不能用日线或所谓“主力资金流”证明机构买卖身份；部分官方主题指数不公开成分；个别新股的财务资料尚未披露。前两类标为来源能力限制，不会无止境重试；个别公司资料只按具体股票代码定向追补。
 
 当前能力、缺口、验证等级和激活状态只以 [`docs/operations/production-capability-matrix.md`](docs/operations/production-capability-matrix.md) 为准。`docs/superpowers/specs/` 保存设计约束，`docs/superpowers/plans/` 保存历史执行记录；历史文档中的“完成”不能替代能力矩阵中的当前证据。
