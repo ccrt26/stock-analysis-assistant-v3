@@ -10,9 +10,23 @@ import duckdb
 import pyarrow.parquet as pq
 from pydantic import BaseModel
 
-from stock_analyzer.data.research_contracts import research_contract_registry
+from stock_analyzer.analysis.hotspot_features import HOTSPOT_FORMULA_VERSION
+from stock_analyzer.analysis.market_context_features import MARKET_CONTEXT_FORMULA_VERSION
+from stock_analyzer.analysis.stock_context_features import STOCK_CONTEXT_FORMULA_VERSION
+from stock_analyzer.data.research_contracts import (
+    ResearchDatasetId,
+    research_contract_registry,
+)
+from stock_analyzer.storage.research_query import ResearchQuery
 from stock_analyzer.storage.research_schema import connect_research_warehouse
 from stock_analyzer.storage.research_warehouse import ResearchWarehouse
+
+
+_EXPECTED_DERIVED_FORMULAS = {
+    "market_context": MARKET_CONTEXT_FORMULA_VERSION,
+    "sector_hotspot": HOTSPOT_FORMULA_VERSION,
+    "stock_trading_context": STOCK_CONTEXT_FORMULA_VERSION,
+}
 
 
 class DatasetHealth(BaseModel):
@@ -29,12 +43,35 @@ class DatasetHealth(BaseModel):
     row_count_mismatches: int
 
 
+class DerivedFeatureHealth(BaseModel):
+    feature_set: str
+    expected_formula_version: str
+    formula_version: str | None
+    present: bool
+    rows: int
+    checked_rows: int
+    quality_status: str | None
+    limitations: tuple[str, ...]
+    no_membership_entities: int
+    intraday_limited_entities: int
+    missing_files: int
+    hash_mismatches: int
+    row_count_mismatches: int
+    stale_formula: bool
+    stale_input_manifest: bool
+    unresolved_failed_runs: int
+    ready: bool
+
+
 class ResearchHealthReport(BaseModel):
     data_date: date
     generated_at: datetime
     datasets: tuple[DatasetHealth, ...]
     gap_counts: dict[str, int]
     complete_core_date: bool
+    derived_features: tuple[DerivedFeatureHealth, ...]
+    derived_ready_for_research: bool
+    derived_has_declared_gaps: bool
 
 
 def build_research_health_report(
@@ -105,13 +142,215 @@ def build_research_health_report(
         gap_rows = connection.execute(
             "select status, count(*) from research_data_gaps group by status"
         ).fetchall()
+    derived = _build_derived_health(warehouse, data_date)
     return ResearchHealthReport(
         data_date=data_date,
         generated_at=datetime.now(timezone.utc),
         datasets=tuple(datasets),
         gap_counts={str(status): int(count) for status, count in gap_rows},
         complete_core_date=bool(core_complete),
+        derived_features=derived,
+        derived_ready_for_research=all(item.ready for item in derived),
+        derived_has_declared_gaps=any(
+            item.quality_status == "complete_with_declared_gaps"
+            or bool(item.limitations)
+            for item in derived
+        ),
     )
+
+
+def _build_derived_health(
+    warehouse: ResearchWarehouse,
+    data_date: date,
+) -> tuple[DerivedFeatureHealth, ...]:
+    with connect_research_warehouse(
+        warehouse.duckdb_path, read_only=True
+    ) as connection:
+        partitions = connection.execute(
+            """
+            select * from research_derived_partitions
+            where analysis_date = ?
+            order by feature_set, committed_at desc
+            """,
+            [data_date],
+        ).fetchdf()
+        failed_runs = connection.execute(
+            """
+            select feature_set, formula_version, started_at
+            from research_derived_runs
+            where analysis_date = ? and status = 'failed'
+            """,
+            [data_date],
+        ).fetchdf()
+
+    result: list[DerivedFeatureHealth] = []
+    for feature_set, expected_formula in _EXPECTED_DERIVED_FORMULAS.items():
+        candidates = partitions[
+            partitions["feature_set"].astype(str) == feature_set
+        ]
+        expected = candidates[
+            candidates["formula_version"].astype(str) == expected_formula
+        ]
+        present = not expected.empty
+        stale_formula = not candidates.empty and expected.empty
+        selected = expected.head(1) if present else candidates.head(1)
+        formula_version: str | None = None
+        quality_status: str | None = None
+        limitations: tuple[str, ...] = ()
+        rows = 0
+        checked_rows = 0
+        missing_files = 0
+        hash_mismatches = 0
+        row_count_mismatches = 0
+        no_membership_entities = 0
+        intraday_limited_entities = 0
+        stale_input_manifest = False
+        committed_at: datetime | None = None
+
+        if not selected.empty:
+            row = selected.iloc[0]
+            formula_version = str(row["formula_version"])
+            quality_status = str(row["quality_status"])
+            limitations = _json_text_tuple(row["limitations_json"])
+            rows = int(row["row_count"])
+            committed_at = _as_utc_datetime(row["committed_at"])
+            audit = _audit_derived_partition(warehouse, row)
+            checked_rows = audit["rows"]
+            missing_files = audit["missing"]
+            hash_mismatches = audit["hash_mismatches"]
+            row_count_mismatches = audit["row_count_mismatches"]
+            no_membership_entities = audit["no_membership_entities"]
+            intraday_limited_entities = audit["intraday_limited_entities"]
+            stale_input_manifest = _derived_input_is_stale(
+                warehouse, row["input_manifest_json"]
+            )
+
+        matching_failures = failed_runs[
+            (failed_runs["feature_set"].astype(str) == feature_set)
+            & (failed_runs["formula_version"].astype(str) == expected_formula)
+        ]
+        if committed_at is not None and not matching_failures.empty:
+            failure_times = matching_failures["started_at"].map(_as_utc_datetime)
+            matching_failures = matching_failures[failure_times > committed_at]
+        unresolved_failed_runs = len(matching_failures)
+        ready = (
+            present
+            and quality_status in {"complete", "complete_with_declared_gaps"}
+            and missing_files == 0
+            and hash_mismatches == 0
+            and row_count_mismatches == 0
+            and not stale_input_manifest
+            and unresolved_failed_runs == 0
+        )
+        result.append(
+            DerivedFeatureHealth(
+                feature_set=feature_set,
+                expected_formula_version=expected_formula,
+                formula_version=formula_version,
+                present=present,
+                rows=rows,
+                checked_rows=checked_rows,
+                quality_status=quality_status,
+                limitations=limitations,
+                no_membership_entities=no_membership_entities,
+                intraday_limited_entities=intraday_limited_entities,
+                missing_files=missing_files,
+                hash_mismatches=hash_mismatches,
+                row_count_mismatches=row_count_mismatches,
+                stale_formula=stale_formula,
+                stale_input_manifest=stale_input_manifest,
+                unresolved_failed_runs=unresolved_failed_runs,
+                ready=ready,
+            )
+        )
+    return tuple(result)
+
+
+def _audit_derived_partition(
+    warehouse: ResearchWarehouse,
+    row: Any,
+) -> dict[str, int]:
+    path = warehouse.root / str(row["relative_path"])
+    audit = {
+        "rows": 0,
+        "missing": 0,
+        "hash_mismatches": 0,
+        "row_count_mismatches": 0,
+        "no_membership_entities": 0,
+        "intraday_limited_entities": 0,
+    }
+    if not path.is_file():
+        audit["missing"] = 1
+        return audit
+    parquet = pq.ParquetFile(path)
+    audit["rows"] = int(parquet.metadata.num_rows)
+    audit["row_count_mismatches"] = int(
+        audit["rows"] != int(row["row_count"])
+    )
+    audit["hash_mismatches"] = int(
+        _sha256(path) != str(row["file_sha256"])
+    )
+    names = set(parquet.schema_arrow.names)
+    columns = [
+        name for name in ("coverage_status", "intraday_status") if name in names
+    ]
+    if columns:
+        observations = parquet.read(columns=columns).to_pandas()
+        if "coverage_status" in observations:
+            audit["no_membership_entities"] = int(
+                (
+                    observations["coverage_status"].astype(str)
+                    == "limited_no_membership"
+                ).sum()
+            )
+        if "intraday_status" in observations:
+            audit["intraday_limited_entities"] = int(
+                (observations["intraday_status"].astype(str) == "limited").sum()
+            )
+    return audit
+
+
+def _derived_input_is_stale(
+    warehouse: ResearchWarehouse,
+    raw_manifest: Any,
+) -> bool:
+    try:
+        manifest = _json_object(raw_manifest)
+        snapshot = manifest["fact_snapshot"]
+        requested: dict[ResearchDatasetId, list[str]] = {}
+        for item in snapshot["partitions"]:
+            dataset = ResearchDatasetId(str(item["dataset"]))
+            requested.setdefault(dataset, []).append(str(item["partition"]))
+        current = ResearchQuery(warehouse).input_manifest(
+            {key: tuple(values) for key, values in requested.items()},
+            as_of=datetime.fromisoformat(str(snapshot["as_of"])),
+        )
+        return str(current["input_manifest_hash"]) != str(
+            snapshot["input_manifest_hash"]
+        )
+    except Exception:
+        return True
+
+
+def _json_object(value: Any) -> dict[str, Any]:
+    parsed = json.loads(value) if isinstance(value, str) else value
+    if not isinstance(parsed, dict):
+        raise ValueError("expected JSON object")
+    return parsed
+
+
+def _json_text_tuple(value: Any) -> tuple[str, ...]:
+    parsed = json.loads(value) if isinstance(value, str) else value
+    if parsed is None:
+        return ()
+    return tuple(str(item) for item in parsed)
+
+
+def _as_utc_datetime(value: Any) -> datetime:
+    stamp = value if isinstance(value, datetime) else datetime.fromisoformat(str(value))
+    if stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=timezone.utc)
+    return stamp.astimezone(timezone.utc)
 
 
 def _audit_partition_files(warehouse: ResearchWarehouse, manifest) -> dict[str, Any]:
@@ -173,6 +412,52 @@ def write_health_report(
             f"{item.missing_files} | "
             f"{item.hash_mismatches + item.row_count_mismatches} |"
         )
+    lines.extend(
+        [
+            "",
+            "## 每日研究观察",
+            "",
+            (
+                "三类研究观察：可以使用，但有明确限制。"
+                if report.derived_ready_for_research
+                and report.derived_has_declared_gaps
+                else (
+                    "三类研究观察：已通过完整性检查。"
+                    if report.derived_ready_for_research
+                    else "三类研究观察：尚未全部通过，不应当作完整输入。"
+                )
+            ),
+            "",
+            "| 观察类型 | 行数 | 公式 | 状态 | 可用 | 文件/输入异常 |",
+            "| --- | ---: | --- | --- | --- | ---: |",
+        ]
+    )
+    for item in report.derived_features:
+        problems = (
+            item.missing_files
+            + item.hash_mismatches
+            + item.row_count_mismatches
+            + int(item.stale_formula)
+            + int(item.stale_input_manifest)
+            + item.unresolved_failed_runs
+        )
+        lines.append(
+            f"| {item.feature_set} | {item.rows} | "
+            f"{item.formula_version or '-'} | {item.quality_status or '缺失'} | "
+            f"{'是' if item.ready else '否'} | {problems} |"
+        )
+        if item.no_membership_entities:
+            lines.append(
+                f"- {item.no_membership_entities} 个主题没有公开成分股，"
+                "程序保留了主题名称，但不编造板块内部结论。"
+            )
+        if item.intraday_limited_entities:
+            lines.append(
+                f"- {item.intraday_limited_entities} 个板块的分钟数据不可用，"
+                "盘中持续性和尾盘拉升等观察保持空值。"
+            )
+        for limitation in item.limitations:
+            lines.append(f"- {item.feature_set}：{limitation}")
     lines.extend(["", "未完成或等待事项：", ""])
     if report.gap_counts:
         for status, count in sorted(report.gap_counts.items()):
@@ -185,6 +470,7 @@ def write_health_report(
 
 __all__ = [
     "DatasetHealth",
+    "DerivedFeatureHealth",
     "ResearchHealthReport",
     "build_research_health_report",
     "write_health_report",

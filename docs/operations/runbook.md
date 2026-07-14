@@ -23,10 +23,12 @@
 | 时间 | 固定阶段 | 作用 | launchd 标签 |
 | --- | --- | --- | --- |
 | 18:30 | `close` | 收盘行情、复权、每日估值、涨跌停价和宽基指数 | `com.ccrt.stock-analysis-assistant.research-data-close` |
-| 21:30 | `evening` | 公告、板块、概念、公司行动和晚间更新资料 | `com.ccrt.stock-analysis-assistant.research-data-evening` |
-| 次日 08:00 | `next-morning` | 融资融券、晚到修订和定点缺口重试 | `com.ccrt.stock-analysis-assistant.research-data-next-morning` |
+| 21:30 | `evening` | 公告、板块、概念、公司行动和晚间资料落地后，生成当日市场、板块和个股研究观察 | `com.ccrt.stock-analysis-assistant.research-data-evening` |
+| 次日 08:00 | `next-morning` | 融资融券、晚到修订和定点缺口重试；只有上游事实发生变化时才重新计算研究观察 | `com.ccrt.stock-analysis-assistant.research-data-next-morning` |
 
 三个任务使用三个独立标签和固定阶段，不根据实际启动时间猜测阶段。如果 macOS 延迟到次日才执行，程序按阶段截止时间和官方交易日历选择应归属的交易日，不会把次日误当成当日收盘数据。
+
+收盘阶段只保存原始事实，不提前生成资料尚未到齐的板块观察。晚间和次晨计算不连接新的 API，只读已验证并落地的统一事实库。任何一类观察失败，整个定时阶段都会明确报错，不会打印成功。
 
 ## 手工运行与检查
 
@@ -47,6 +49,15 @@ PYTHONPATH=src .venv/bin/python -m stock_analyzer data run-stage \
 PYTHONPATH=src .venv/bin/python -m stock_analyzer data health \
   --data-date YYYY-MM-DD --full-history
 ```
+
+只用本地已有事实手工复算三类研究观察（不访问 API）：
+
+```bash
+PYTHONPATH=src .venv/bin/python -m stock_analyzer data derive \
+  --data-date YYYY-MM-DD
+```
+
+健康报告会把“收盘核心事实是否完整”和“三类研究观察是否可用”分开展示。研究观察还会核对公式版本、文件指纹、行数和原始输入清单；`complete_with_declared_gaps` 只表示“可以使用，但有明确限制”，不会被说成没有缺口。
 
 只修补已记录的精确缺口：
 
