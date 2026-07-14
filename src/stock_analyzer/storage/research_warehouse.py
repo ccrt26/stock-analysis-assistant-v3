@@ -187,6 +187,27 @@ class ResearchWarehouse:
                 [[str(path) for path in paths]],
             ).fetchdf()
 
+    def read_current_partitions(
+        self,
+        dataset_id: ResearchDatasetId | str,
+        partition_values: Iterable[str],
+    ) -> pd.DataFrame:
+        dataset = ResearchDatasetId(dataset_id)
+        partitions = _normalized_partition_values(partition_values)
+        paths: list[Path] = []
+        for partition in partitions:
+            path = self._partition_path(dataset, partition)
+            if path.is_file():
+                paths.append(path)
+        if not paths:
+            return pd.DataFrame()
+        with duckdb.connect() as connection:
+            return connection.execute(
+                "select * from read_parquet(?, union_by_name=true, "
+                "hive_partitioning=false)",
+                [[str(path) for path in paths]],
+            ).fetchdf()
+
     def revision_count(self, dataset_id: ResearchDatasetId | str) -> int:
         with connect_research_warehouse(self.duckdb_path, read_only=True) as connection:
             return int(
@@ -196,38 +217,72 @@ class ResearchWarehouse:
                 ).fetchone()[0]
             )
 
-    def revision_rows(self, dataset_id: ResearchDatasetId | str) -> list[dict[str, Any]]:
+    def revision_rows(
+        self,
+        dataset_id: ResearchDatasetId | str,
+        *,
+        partition_values: Iterable[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        dataset = ResearchDatasetId(dataset_id)
+        parameters: list[Any] = [dataset.value]
+        partition_filter = ""
+        if partition_values is not None:
+            partitions = _normalized_partition_values(partition_values)
+            if not partitions:
+                return []
+            placeholders = ",".join("?" for _ in partitions)
+            partition_filter = f" and partition_value in ({placeholders})"
+            parameters.extend(partitions)
         with connect_research_warehouse(self.duckdb_path, read_only=True) as connection:
             cursor = connection.execute(
-                """
-                select business_key_hash, revision_no, row_payload,
+                f"""
+                select business_key_hash, revision_no, partition_value, row_payload,
                        cast(valid_from as varchar), cast(valid_to as varchar)
                 from research_fact_revisions
                 where dataset_id = ?
+                {partition_filter}
                 order by business_key_hash, revision_no
                 """,
-                [ResearchDatasetId(dataset_id).value],
+                parameters,
             )
             rows = cursor.fetchall()
         return [
             {
                 "business_key_hash": row[0],
                 "revision_no": int(row[1]),
-                "row_payload": _from_json(row[2]),
-                "valid_from": _parse_datetime(row[3]),
-                "valid_to": _parse_datetime(row[4]),
+                "partition_value": str(row[2]),
+                "row_payload": _from_json(row[3]),
+                "valid_from": _parse_datetime(row[4]),
+                "valid_to": _parse_datetime(row[5]),
             }
             for row in rows
         ]
 
-    def partition_manifest(self, dataset_id: ResearchDatasetId | str) -> pd.DataFrame:
+    def partition_manifest(
+        self,
+        dataset_id: ResearchDatasetId | str,
+        *,
+        partition_values: Iterable[str] | None = None,
+    ) -> pd.DataFrame:
+        dataset = ResearchDatasetId(dataset_id)
+        parameters: list[Any] = [dataset.value]
+        partition_filter = ""
+        if partition_values is not None:
+            partitions = _normalized_partition_values(partition_values)
+            if not partitions:
+                return pd.DataFrame()
+            placeholders = ",".join("?" for _ in partitions)
+            partition_filter = f" and partition_value in ({placeholders})"
+            parameters.extend(partitions)
         with connect_research_warehouse(self.duckdb_path, read_only=True) as connection:
             return connection.execute(
-                """
+                f"""
                 select * from research_fact_partitions
-                where dataset_id = ? order by partition_value
+                where dataset_id = ?
+                {partition_filter}
+                order by partition_value
                 """,
-                [ResearchDatasetId(dataset_id).value],
+                parameters,
             ).fetchdf()
 
     def prune_partitions_before(
@@ -837,6 +892,12 @@ def _from_json(value: Any) -> Any:
 
 def _safe_partition(value: str) -> str:
     return value.replace("/", "_").replace("..", "_")
+
+
+def _normalized_partition_values(values: Iterable[str]) -> tuple[str, ...]:
+    if isinstance(values, str):
+        values = (values,)
+    return tuple(sorted({str(value) for value in values}))
 
 
 __all__ = ["FactCommitResult", "ResearchWarehouse"]

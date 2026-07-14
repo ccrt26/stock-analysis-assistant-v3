@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+import hashlib
+import json
+from collections.abc import Iterable, Mapping
+from datetime import date, datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -21,39 +24,86 @@ class ResearchQuery:
     ) -> pd.DataFrame:
         dataset = ResearchDatasetId(dataset_id)
         cutoff = _utc(as_of)
-        candidates: list[dict[str, Any]] = []
-
         current = self.warehouse.read_current(dataset)
-        if not current.empty:
-            for row in current.to_dict(orient="records"):
-                if _utc(row["available_at"]) <= cutoff:
-                    candidates.append(row)
+        return _resolve_as_of(
+            dataset,
+            current,
+            self.warehouse.revision_rows(dataset),
+            cutoff,
+        )
 
-        for revision in self.warehouse.revision_rows(dataset):
-            row = dict(revision["row_payload"])
-            if _utc(row["available_at"]) <= cutoff:
-                candidates.append(row)
+    def dataset_partitions_as_of(
+        self,
+        dataset_id: ResearchDatasetId | str,
+        partition_values: Iterable[str],
+        as_of: datetime,
+    ) -> pd.DataFrame:
+        dataset = ResearchDatasetId(dataset_id)
+        cutoff = _utc(as_of)
+        partitions = _partitions_at_cutoff(dataset, partition_values, cutoff)
+        current = self.warehouse.read_current_partitions(dataset, partitions)
+        _assert_unique_current_hashes(dataset, current)
+        resolved = _resolve_as_of(
+            dataset,
+            current,
+            self.warehouse.revision_rows(
+                dataset,
+                partition_values=partitions,
+            ),
+            cutoff,
+        )
+        _assert_unique_business_keys(dataset, resolved)
+        return resolved
 
-        if not candidates:
-            return pd.DataFrame()
-        contract = research_contract(dataset)
-        best: dict[str, dict[str, Any]] = {}
-        for row in candidates:
-            key_hash = str(row["business_key_hash"])
-            previous = best.get(key_hash)
-            rank = (_utc(row["available_at"]), int(row.get("revision_no", 1)))
-            if previous is None:
-                best[key_hash] = row
-                continue
-            previous_rank = (
-                _utc(previous["available_at"]),
-                int(previous.get("revision_no", 1)),
+    def input_manifest(
+        self,
+        dataset_partitions: Mapping[
+            ResearchDatasetId | str,
+            Iterable[str] | str,
+        ],
+    ) -> dict[str, Any]:
+        if not isinstance(dataset_partitions, Mapping):
+            raise TypeError("dataset_partitions must be a mapping")
+
+        items: list[dict[str, Any]] = []
+        requested = sorted(
+            (
+                ResearchDatasetId(dataset_id),
+                _normalized_partition_values(partition_values),
             )
-            if rank > previous_rank:
-                best[key_hash] = row
-        return pd.DataFrame(best.values()).sort_values(
-            list(contract.business_key)
-        ).reset_index(drop=True)
+            for dataset_id, partition_values in dataset_partitions.items()
+        )
+        for dataset, partitions in requested:
+            metadata = self.warehouse.partition_manifest(
+                dataset,
+                partition_values=partitions,
+            )
+            rows = {
+                str(row["partition_value"]): row
+                for row in metadata.to_dict(orient="records")
+            }
+            missing = sorted(set(partitions) - set(rows))
+            if missing:
+                raise ValueError(
+                    f"missing fact partitions for {dataset.value}: {missing}"
+                )
+            for partition in partitions:
+                row = rows[partition]
+                items.append(
+                    {
+                        "dataset": dataset.value,
+                        "partition": partition,
+                        "row_count": int(row["row_count"]),
+                        "content_hash": str(row["content_hash"]),
+                        "file_sha256": str(row["file_sha256"]),
+                        "quality_status": str(row["quality_status"]),
+                    }
+                )
+        items.sort(key=lambda item: (item["dataset"], item["partition"]))
+        return {
+            "partitions": items,
+            "input_manifest_hash": _stable_hash(items),
+        }
 
     def controlled_themes_as_of(self, as_of: datetime) -> pd.DataFrame:
         catalog = self.dataset_as_of(ResearchDatasetId.THEME_CATALOG, as_of)
@@ -93,6 +143,118 @@ class ResearchQuery:
             latest_dates
         )
         return result.sort_values("theme_code").reset_index(drop=True)
+
+
+def _resolve_as_of(
+    dataset: ResearchDatasetId,
+    current: pd.DataFrame,
+    revisions: Iterable[Mapping[str, Any]],
+    cutoff: datetime,
+) -> pd.DataFrame:
+    candidates: list[dict[str, Any]] = []
+    if not current.empty:
+        for row in current.to_dict(orient="records"):
+            if _utc(row["available_at"]) <= cutoff:
+                candidates.append(row)
+
+    for revision in revisions:
+        row = dict(revision["row_payload"])
+        if _utc(row["available_at"]) <= cutoff:
+            candidates.append(row)
+
+    if not candidates:
+        return pd.DataFrame()
+    contract = research_contract(dataset)
+    best: dict[str, dict[str, Any]] = {}
+    for row in candidates:
+        key_hash = str(row["business_key_hash"])
+        previous = best.get(key_hash)
+        rank = (_utc(row["available_at"]), int(row.get("revision_no", 1)))
+        if previous is None:
+            best[key_hash] = row
+            continue
+        previous_rank = (
+            _utc(previous["available_at"]),
+            int(previous.get("revision_no", 1)),
+        )
+        if rank > previous_rank:
+            best[key_hash] = row
+    return pd.DataFrame(best.values()).sort_values(
+        list(contract.business_key)
+    ).reset_index(drop=True)
+
+
+def _assert_unique_current_hashes(
+    dataset: ResearchDatasetId,
+    current: pd.DataFrame,
+) -> None:
+    if current.empty or "business_key_hash" not in current:
+        return
+    duplicates = current["business_key_hash"].duplicated(keep=False)
+    if duplicates.any():
+        raise ValueError(
+            f"duplicate business key across selected partitions in "
+            f"{dataset.value}: {int(duplicates.sum())} rows"
+        )
+
+
+def _assert_unique_business_keys(
+    dataset: ResearchDatasetId,
+    resolved: pd.DataFrame,
+) -> None:
+    if resolved.empty:
+        return
+    duplicates = resolved.duplicated(
+        subset=list(research_contract(dataset).business_key),
+        keep=False,
+    )
+    if duplicates.any():
+        raise ValueError(
+            f"duplicate business key across selected partitions in "
+            f"{dataset.value}: {int(duplicates.sum())} rows"
+        )
+
+
+def _partitions_at_cutoff(
+    dataset: ResearchDatasetId,
+    partition_values: Iterable[str],
+    cutoff: datetime,
+) -> tuple[str, ...]:
+    partitions = _normalized_partition_values(partition_values)
+    if research_contract(dataset).partition_field != "trade_date":
+        return partitions
+    cutoff_date = pd.Timestamp(cutoff).tz_convert(
+        ZoneInfo("Asia/Shanghai")
+    ).date()
+    selected: list[str] = []
+    for partition in partitions:
+        try:
+            partition_date = date.fromisoformat(partition)
+        except ValueError as error:
+            raise ValueError(
+                f"invalid trade-date partition for {dataset.value}: {partition}"
+            ) from error
+        if partition_date <= cutoff_date:
+            selected.append(partition)
+    return tuple(selected)
+
+
+def _normalized_partition_values(
+    partition_values: Iterable[str] | str,
+) -> tuple[str, ...]:
+    if isinstance(partition_values, str):
+        partition_values = (partition_values,)
+    return tuple(sorted({str(value) for value in partition_values}))
+
+
+def _stable_hash(value: Any) -> str:
+    encoded = json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def _utc(value: Any) -> datetime:
