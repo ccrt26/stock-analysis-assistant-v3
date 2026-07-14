@@ -26,8 +26,10 @@ class BackfillSummary(BaseModel):
     skipped: int = 0
     waiting_upstream: int = 0
     limited: int = 0
+    limitations_checked: bool = False
     failed: int = 0
     issues: list[str] = Field(default_factory=list)
+    retry_codes: list[str] = Field(default_factory=list)
 
 
 class ResearchBackfillService:

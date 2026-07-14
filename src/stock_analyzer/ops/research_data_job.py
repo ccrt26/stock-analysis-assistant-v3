@@ -173,7 +173,7 @@ def repair_research_gaps(
     ) as connection:
         rows = connection.execute(
             """
-            select dataset_id, partition_value
+            select dataset_id, partition_value, detail_json
             from research_data_gaps
             where status in ('waiting_upstream', 'failed', 'validation_failed')
             order by first_seen_at
@@ -182,6 +182,7 @@ def repair_research_gaps(
     if not rows:
         return ()
     scopes: dict[str, date] = {}
+    retry_codes: dict[str, set[str]] = {}
     dataset_scope = {
         "equity_daily": "market-core",
         "adj_factor": "market-core",
@@ -189,7 +190,7 @@ def repair_research_gaps(
         "stock_limit": "market-core",
         "index_daily": "market-core",
     }
-    for dataset_id, partition_value in rows:
+    for dataset_id, partition_value, detail_json in rows:
         dataset_text = str(dataset_id)
         if dataset_text.startswith("scope:"):
             scope = dataset_text.split(":", 1)[1]
@@ -197,23 +198,49 @@ def repair_research_gaps(
             scope = dataset_scope.get(dataset_text)
         if scope is None:
             continue
+        if scope == "classification-daily":
+            scope = "classifications"
         first_partition = str(partition_value).split(":", 1)[0]
         try:
             start = date.fromisoformat(first_partition)
         except ValueError:
             start = through - timedelta(days=5 * 366)
         scopes[scope] = min(scopes.get(scope, start), start)
+        if scope == "fundamentals" and detail_json:
+            payload = (
+                json.loads(detail_json)
+                if isinstance(detail_json, str)
+                else detail_json
+            )
+            retry_codes.setdefault(scope, set()).update(
+                str(code) for code in payload.get("retry_codes", [])
+            )
     summaries: list[BackfillSummary] = []
     for scope, start in sorted(scopes.items()):
-        summaries.extend(
-            run_research_backfill(
-                runtime,
-                start=start,
-                through=through,
-                scope=scope,
-                resume=True,
+        codes = tuple(sorted(retry_codes.get(scope, set())))
+        if scope == "fundamentals" and codes:
+            summaries.append(
+                FundamentalBackfillService(
+                    runtime.tushare, runtime.warehouse
+                ).backfill(
+                    start=start,
+                    through=through,
+                    codes=codes,
+                    resume=True,
+                )
             )
-        )
+        else:
+            summaries.extend(
+                run_research_backfill(
+                    runtime,
+                    start=start,
+                    through=through,
+                    scope=scope,
+                    resume=True,
+                )
+            )
+    for summary in summaries:
+        _record_scope_outcome(runtime.warehouse, summary)
     reconcile_research_gaps(runtime.warehouse)
     return tuple(summaries)
 
@@ -312,6 +339,8 @@ def _record_scope_limitation(
     warehouse: ResearchWarehouse,
     summary: BackfillSummary,
 ) -> None:
+    if not summary.limitations_checked:
+        return
     gap_id = hashlib.sha256(
         f"limitation|{summary.scope}".encode("utf-8")
     ).hexdigest()
@@ -332,9 +361,7 @@ def _record_scope_limitation(
         ),
     }.get(summary.scope, "当前来源能力受限，相关结论必须降级。")
     now = datetime.now(timezone.utc)
-    limited_issues = [
-        issue for issue in summary.issues if "access_or_rate_limit" in issue
-    ]
+    limited_issues = list(summary.issues)
     with connect_research_warehouse(warehouse.duckdb_path) as connection:
         connection.execute(
             """

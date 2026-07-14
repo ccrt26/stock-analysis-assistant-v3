@@ -169,7 +169,7 @@ def test_classification_history_uses_latest_250_actual_trading_days(tmp_path):
     }
 
 
-def test_classification_backfill_records_empty_theme_members_as_waiting(tmp_path):
+def test_classification_backfill_records_empty_theme_members_as_source_limit(tmp_path):
     class OneEmptyThemePro(ClassificationPro):
         def index_weight(self, **kwargs):
             self.calls.append(("index_weight", kwargs))
@@ -202,7 +202,10 @@ def test_classification_backfill_records_empty_theme_members_as_waiting(tmp_path
     )
     assert set(members["theme_code"]) == {"399013.SZ"}
     assert set(controlled["theme_code"]) == {"399013.SZ"}
-    assert summary.waiting_upstream == 1
+    assert summary.waiting_upstream == 0
+    assert summary.limited == 1
+    assert summary.limitations_checked
+    assert summary.issues == ["theme_member:000019.SH:source_unavailable"]
 
 
 def test_classification_backfill_records_empty_index_history_as_waiting(tmp_path):

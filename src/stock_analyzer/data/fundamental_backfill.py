@@ -119,6 +119,8 @@ class FundamentalBackfillService:
                     and code in expected_core_codes
                 ):
                     summary.waiting_upstream += 1
+                    if code not in summary.retry_codes:
+                        summary.retry_codes.append(code)
                     continue
                 if not frame.empty:
                     frame = frame.loc[

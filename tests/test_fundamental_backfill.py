@@ -219,6 +219,8 @@ def test_expected_core_financial_empty_result_is_retried_not_watermarked(tmp_pat
     assert len(income_calls) == 2
     assert first.waiting_upstream == 1
     assert second.waiting_upstream == 1
+    assert first.retry_codes == ["000001.SZ"]
+    assert second.retry_codes == ["000001.SZ"]
     assert not (
         warehouse.root
         / ".backfill_staging"

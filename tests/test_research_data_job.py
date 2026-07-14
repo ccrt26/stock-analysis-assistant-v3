@@ -159,6 +159,7 @@ def test_known_provider_limit_is_separate_from_temporary_upstream_wait(tmp_path)
         through=date(2026, 7, 10),
         waiting_upstream=1,
         limited=1,
+        limitations_checked=True,
         issues=[
             "margin_detail:2026-07-10:waiting_upstream",
             "minute_bar:access_or_rate_limit",
@@ -181,3 +182,21 @@ def test_known_provider_limit_is_separate_from_temporary_upstream_wait(tmp_path)
         ("limited", "source_limited"),
         ("waiting_upstream", "scope_incomplete"),
     ]
+
+    unchecked = BackfillSummary(
+        scope="trading-structure",
+        start=date(2026, 7, 11),
+        through=date(2026, 7, 11),
+    )
+    _record_scope_outcome(warehouse, unchecked)
+    with connect_research_warehouse(
+        warehouse.duckdb_path, read_only=True
+    ) as connection:
+        status = connection.execute(
+            """
+            select status from research_data_gaps
+            where dataset_id = 'scope:trading-structure'
+              and reason_category = 'source_limited'
+            """
+        ).fetchone()[0]
+    assert status == "limited"

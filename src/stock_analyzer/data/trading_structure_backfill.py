@@ -117,6 +117,7 @@ class TradingStructureBackfillService:
             summary.committed += 1
 
         codes = tuple(sorted(set(candidate_codes) | set(index_codes)))
+        summary.limitations_checked = bool(codes)
         self._freeze_scope(through, candidate_codes, index_codes)
         minute_dates = margin_dates[-20:]
         existing_minute = self.warehouse.read_current(ResearchDatasetId.MINUTE_BAR)

@@ -525,6 +525,8 @@ class ClassificationBackfillService:
         summary: BackfillSummary,
     ) -> list[dict[str, Any]]:
         records: list[dict[str, Any]] = []
+        if codes:
+            summary.limitations_checked = True
         for code in codes:
             frame = self.client.call_paged(
                 "index_weight",
@@ -533,7 +535,10 @@ class ClassificationBackfillService:
                 end_date=_yyyymmdd(through),
             )
             if frame.empty:
-                summary.waiting_upstream += 1
+                summary.limited += 1
+                summary.issues.append(
+                    f"theme_member:{code}:source_unavailable"
+                )
                 continue
             _require(frame, ("index_code", "con_code", "trade_date", "weight"), "index_weight")
             frame = frame.copy()

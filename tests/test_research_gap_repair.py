@@ -1,10 +1,14 @@
 from datetime import date, datetime, timezone
+import json
+
+import stock_analyzer.ops.research_data_job as research_data_job_module
 
 from stock_analyzer.data.research_contracts import FactBatch, ResearchDatasetId
 from stock_analyzer.ops.research_data_job import (
     reconcile_research_gaps,
     repair_research_gaps,
 )
+from stock_analyzer.data.research_backfill import BackfillSummary
 from stock_analyzer.storage.research_schema import connect_research_warehouse
 from stock_analyzer.storage.research_warehouse import ResearchWarehouse
 
@@ -60,3 +64,59 @@ def test_repair_with_no_declared_gap_does_not_repeat_five_year_backfill(tmp_path
     runtime = type("Runtime", (), {"warehouse": warehouse})()
 
     assert repair_research_gaps(runtime, through=date(2026, 7, 13)) == ()
+
+
+def test_fundamental_gap_repair_retries_only_missing_codes(tmp_path, monkeypatch):
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    detail = json.dumps(
+        {
+            "scope": "fundamentals",
+            "start": "2021-07-09",
+            "through": "2026-07-13",
+            "waiting_upstream": 2,
+            "retry_codes": ["000001.SZ", "000002.SZ"],
+        }
+    )
+    with connect_research_warehouse(warehouse.duckdb_path) as connection:
+        connection.execute(
+            """
+            insert into research_data_gaps values
+            ('fundamental-gap', 'scope:fundamentals',
+             '2021-07-09:2026-07-13', 'waiting_upstream',
+             'scope_incomplete', null, now(), now(), null,
+             '部分公司资料待补。', ?)
+            """,
+            [detail],
+        )
+    calls = []
+
+    class FakeFundamentalService:
+        def __init__(self, client, target_warehouse):
+            assert target_warehouse is warehouse
+
+        def backfill(self, *, start, through, codes, resume):
+            calls.append((start, through, codes, resume))
+            return BackfillSummary(scope="fundamentals", start=start, through=through)
+
+    monkeypatch.setattr(
+        research_data_job_module,
+        "FundamentalBackfillService",
+        FakeFundamentalService,
+    )
+    runtime = type(
+        "Runtime",
+        (),
+        {"warehouse": warehouse, "tushare": object()},
+    )()
+
+    summaries = repair_research_gaps(runtime, through=date(2026, 7, 14))
+
+    assert len(summaries) == 1
+    assert calls == [
+        (
+            date(2021, 7, 9),
+            date(2026, 7, 14),
+            ("000001.SZ", "000002.SZ"),
+            True,
+        )
+    ]
