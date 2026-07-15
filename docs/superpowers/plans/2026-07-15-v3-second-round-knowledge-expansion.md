@@ -1,5 +1,7 @@
 # V3 Second-Round Knowledge Expansion Implementation Plan
 
+> **已被替代，禁止执行：** 本计划仍包含已被十三项直接验证淘汰的知识、`method_only` 中间状态以及不再需要的矩阵和复核文档。第二轮补充应以 [`2026-07-15-v3-direct-knowledge-supplement-design.md`](../specs/2026-07-15-v3-direct-knowledge-supplement-design.md) 及其后续实施计划为准。
+
 > **Current status authority:** This plan does not prove production activation; current status is authoritative only in [`docs/operations/production-capability-matrix.md`](../../operations/production-capability-matrix.md).
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:executing-plans` task-by-task. The user selected inline execution and does not authorize subagents unless later stated. Use `superpowers:test-driven-development` for every behavior or schema change and `superpowers:verification-before-completion` before completion.
