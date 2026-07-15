@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass
+import json
+import math
+from pathlib import Path
 from typing import Literal
 
+import duckdb
 import pandas as pd
 
 from stock_analyzer.data.research_contracts import ResearchDatasetId
@@ -697,6 +702,780 @@ def check_official_semantic_fields(
     return result
 
 
+def portfolio_common_exposure(
+    returns: pd.DataFrame,
+    *,
+    industries: dict[str, str],
+    themes: dict[str, set[str]],
+) -> dict[str, int | float]:
+    candidates = list(returns.columns)
+    if len(candidates) != 5:
+        raise ValueError("portfolio relationship requires exactly five candidates")
+    if set(industries) != set(candidates) or set(themes) != set(candidates):
+        raise ValueError("industry and theme mappings must cover exactly five candidates")
+
+    industry_counts = Counter(industries.values())
+    theme_counts = Counter(
+        theme for candidate in candidates for theme in themes[candidate]
+    )
+    correlations = returns.apply(pd.to_numeric, errors="coerce").corr()
+    pairwise = [
+        float(correlations.loc[left, right])
+        for index, left in enumerate(candidates)
+        for right in candidates[index + 1 :]
+        if pd.notna(correlations.loc[left, right])
+    ]
+    return {
+        "largest_industry_count": max(industry_counts.values(), default=0),
+        "largest_theme_count": max(theme_counts.values(), default=0),
+        "max_pairwise_correlation": max(pairwise) if pairwise else 0.0,
+    }
+
+
+def _fact_paths(root: Path, name: str) -> list[str]:
+    paths = [
+        str(path)
+        for path in sorted((root / "facts" / name).glob("*/data.parquet"))
+    ]
+    if not paths:
+        raise ValueError(f"no current fact partitions for {name}")
+    return paths
+
+
+def _query_frame(sql: str, parameters: list[object]) -> pd.DataFrame:
+    with duckdb.connect() as connection:
+        return connection.execute(sql, parameters).fetchdf()
+
+
+def _load_price_panel(root: Path) -> pd.DataFrame:
+    sql = """
+        with calendar_base as (
+          select trade_date, close market_close,
+                 row_number() over (order by trade_date) session_no,
+                 count(*) over () session_count
+          from read_parquet(?, union_by_name=true, hive_partitioning=false)
+          where index_code = '000300.SH'
+        ), calendar as (
+          select *,
+                 market_close / lag(market_close, 20) over (order by session_no) - 1
+                   market_return_20d,
+                 lag(market_close, 20) over (order by session_no)
+                   / lag(market_close, 40) over (order by session_no) - 1
+                   prior_market_return_20d,
+                 lead(market_close, 20) over (order by session_no)
+                   / market_close - 1 future_market_return_20d
+          from calendar_base
+        ), stock_base as (
+          select c.trade_date, c.session_no, c.session_count,
+                 c.market_return_20d, c.prior_market_return_20d,
+                 c.future_market_return_20d,
+                 e.ts_code, e.close * a.adj_factor adjusted_close,
+                 e.amount, b.turnover_rate_f
+          from calendar c
+          join read_parquet(?, union_by_name=true, hive_partitioning=false) e
+            on e.trade_date = c.trade_date
+          join read_parquet(?, union_by_name=true, hive_partitioning=false) a
+            on a.trade_date = e.trade_date and a.ts_code = e.ts_code
+          join read_parquet(?, union_by_name=true, hive_partitioning=false) b
+            on b.trade_date = e.trade_date and b.ts_code = e.ts_code
+          where e.close > 0 and a.adj_factor > 0
+        ), stock_returns as (
+          select *, adjusted_close
+                   / lag(adjusted_close) over company - 1 adjusted_return_1d,
+                 adjusted_close
+                   / lag(adjusted_close, 20) over company - 1 stock_return_20d,
+                 lag(adjusted_close, 20) over company
+                   / lag(adjusted_close, 40) over company - 1 prior_stock_return_20d,
+                 lead(adjusted_close, 20) over company
+                   / adjusted_close - 1 future_stock_return_20d
+          from stock_base
+          window company as (partition by ts_code order by session_no)
+        ), metrics as (
+          select *,
+                 avg(turnover_rate_f) over trailing_window turnover_rate_f_20d,
+                 max(adjusted_return_1d) over trailing_window max_return_20d,
+                 stddev_samp(adjusted_return_1d) over future_window
+                   future_realized_volatility_20d,
+                 min(adjusted_close) over future_window / adjusted_close - 1
+                   future_max_drawdown_20d
+          from stock_returns
+          window trailing_window as (
+            partition by ts_code order by session_no rows between 19 preceding and current row
+          ), future_window as (
+            partition by ts_code order by session_no rows between 1 following and 20 following
+          )
+        ), members as (
+          select ts_code, industry_code, valid_from, valid_to
+          from read_parquet(?, union_by_name=true, hive_partitioning=false)
+          where level = 'L1'
+        )
+        select m.trade_date formation_date, m.ts_code, members.industry_code,
+               m.prior_market_return_20d, m.market_return_20d,
+               m.prior_stock_return_20d - m.prior_market_return_20d
+                 prior_relative_return_20d,
+               m.future_stock_return_20d - m.future_market_return_20d
+                 future_excess_return_20d,
+               m.adjusted_return_1d, m.amount, m.turnover_rate_f_20d,
+               m.max_return_20d, m.future_realized_volatility_20d,
+               m.future_max_drawdown_20d
+        from metrics m
+        left join members
+          on members.ts_code = m.ts_code
+         and cast(members.valid_from as date) <= cast(m.trade_date as date)
+         and (members.valid_to is null
+              or cast(members.valid_to as date) >= cast(m.trade_date as date))
+        where m.session_no > 40 and m.session_no + 20 <= m.session_count
+          and m.session_no % 20 = 0
+          and m.prior_stock_return_20d is not null
+          and m.future_stock_return_20d is not null
+    """
+    frame = _query_frame(
+        sql,
+        [
+            _fact_paths(root, "index_daily"),
+            _fact_paths(root, "equity_daily"),
+            _fact_paths(root, "adj_factor"),
+            _fact_paths(root, "daily_basic"),
+            _fact_paths(root, "industry_member"),
+        ],
+    )
+    frame["formation_date"] = pd.to_datetime(frame["formation_date"]).dt.date
+    return frame.dropna(
+        subset=[
+            "prior_relative_return_20d",
+            "future_excess_return_20d",
+            "adjusted_return_1d",
+        ]
+    ).reset_index(drop=True)
+
+
+def _load_financial_panel(root: Path) -> pd.DataFrame:
+    sql = """
+        with calendar as (
+          select trade_date, close market_close,
+                 row_number() over (order by trade_date) session_no
+          from read_parquet(?, union_by_name=true, hive_partitioning=false)
+          where index_code = '000300.SH'
+        ), income as (
+          select * exclude (_row) from (
+            select ts_code, report_period, revenue, oper_cost, n_income_attr_p,
+                   available_at,
+                   row_number() over (
+                     partition by ts_code, report_period order by available_at
+                   ) _row
+            from read_parquet(?, union_by_name=true, hive_partitioning=false)
+          ) where _row = 1
+        ), balance as (
+          select * exclude (_row) from (
+            select ts_code, report_period, total_assets, total_liab,
+                   total_hldr_eqy_exc_min_int, available_at,
+                   row_number() over (
+                     partition by ts_code, report_period order by available_at
+                   ) _row
+            from read_parquet(?, union_by_name=true, hive_partitioning=false)
+          ) where _row = 1
+        ), cash as (
+          select * exclude (_row) from (
+            select ts_code, report_period, n_cashflow_act, available_at,
+                   row_number() over (
+                     partition by ts_code, report_period order by available_at
+                   ) _row
+            from read_parquet(?, union_by_name=true, hive_partitioning=false)
+          ) where _row = 1
+        ), indicators as (
+          select * exclude (_row) from (
+            select ts_code, report_period, assets_turn, available_at,
+                   row_number() over (
+                     partition by ts_code, report_period order by available_at
+                   ) _row
+            from read_parquet(?, union_by_name=true, hive_partitioning=false)
+          ) where _row = 1
+        ), combined as (
+          select i.ts_code, i.report_period, i.n_income_attr_p, i.revenue,
+                 i.oper_cost, b.total_assets, b.total_liab,
+                 b.total_hldr_eqy_exc_min_int,
+                 cf.n_cashflow_act, fi.assets_turn,
+                 greatest(i.available_at, b.available_at, cf.available_at, fi.available_at)
+                   available_at
+          from income i join balance b using (ts_code, report_period)
+          join cash cf using (ts_code, report_period)
+          join indicators fi using (ts_code, report_period)
+        ), compared as (
+          select *, lag(total_assets, 4) over company prior_total_assets,
+                 lead(n_income_attr_p / nullif(total_assets, 0), 4) over company
+                   future_profitability,
+                 n_income_attr_p / nullif(total_assets, 0) current_profitability
+          from combined
+          window company as (partition by ts_code order by report_period)
+        ), dated as (
+          select compared.*, mapped.trade_date formation_date, mapped.session_no
+          from compared
+          join lateral (
+            select trade_date, session_no from calendar
+            where trade_date > cast(compared.available_at as date)
+            order by trade_date limit 1
+          ) mapped on true
+        )
+        select d.formation_date, d.ts_code, d.report_period,
+               d.n_income_attr_p, d.n_cashflow_act, d.prior_total_assets,
+               d.total_assets, d.total_hldr_eqy_exc_min_int,
+               d.revenue, d.oper_cost, d.assets_turn,
+               b.pe_ttm, b.pb, b.ps_ttm, d.future_profitability,
+               (future.close * future_a.adj_factor)
+                 / (base.close * base_a.adj_factor) - 1
+                 - (future_market.market_close / base_market.market_close - 1)
+                   future_excess_return_20d,
+               d.current_profitability,
+               d.total_liab / nullif(d.total_assets, 0) debt_to_assets
+        from dated d
+        join calendar base_market on base_market.session_no = d.session_no
+        join calendar future_market on future_market.session_no = d.session_no + 20
+        join read_parquet(?, union_by_name=true, hive_partitioning=false) b
+          on b.ts_code = d.ts_code and b.trade_date = d.formation_date
+        join read_parquet(?, union_by_name=true, hive_partitioning=false) base
+          on base.ts_code = d.ts_code and base.trade_date = d.formation_date
+        join read_parquet(?, union_by_name=true, hive_partitioning=false) future
+          on future.ts_code = d.ts_code and future.trade_date = future_market.trade_date
+        join read_parquet(?, union_by_name=true, hive_partitioning=false) base_a
+          on base_a.ts_code = d.ts_code and base_a.trade_date = d.formation_date
+        join read_parquet(?, union_by_name=true, hive_partitioning=false) future_a
+          on future_a.ts_code = d.ts_code and future_a.trade_date = future_market.trade_date
+        where d.prior_total_assets > 0 and d.total_assets > 0
+          and base.close > 0 and future.close > 0
+          and base_a.adj_factor > 0 and future_a.adj_factor > 0
+    """
+    equity = _fact_paths(root, "equity_daily")
+    factors = _fact_paths(root, "adj_factor")
+    frame = _query_frame(
+        sql,
+        [
+            _fact_paths(root, "index_daily"),
+            _fact_paths(root, "income_statement"),
+            _fact_paths(root, "balance_sheet"),
+            _fact_paths(root, "cash_flow"),
+            _fact_paths(root, "financial_indicator"),
+            _fact_paths(root, "daily_basic"),
+            equity,
+            equity,
+            factors,
+            factors,
+        ],
+    )
+    frame["formation_date"] = pd.to_datetime(frame["formation_date"]).dt.date
+    frame["report_period"] = pd.to_datetime(frame["report_period"]).dt.date
+    return frame.dropna(
+        subset=["future_profitability", "future_excess_return_20d"]
+    ).reset_index(drop=True)
+
+
+def _next_price_observation(
+    events: pd.DataFrame,
+    price: pd.DataFrame,
+    *,
+    event_date: str,
+    price_columns: tuple[str, ...],
+) -> pd.DataFrame:
+    left = events.copy()
+    right = price.loc[:, ("formation_date", "ts_code") + price_columns].copy()
+    left[event_date] = pd.to_datetime(left[event_date]).astype("datetime64[ns]")
+    right["formation_date"] = pd.to_datetime(right["formation_date"]).astype(
+        "datetime64[ns]"
+    )
+    left = left.sort_values([event_date, "ts_code"], kind="mergesort")
+    right = right.sort_values(
+        ["formation_date", "ts_code"], kind="mergesort"
+    ).drop_duplicates(["formation_date", "ts_code"], keep="last")
+    return pd.merge_asof(
+        left,
+        right,
+        left_on=event_date,
+        right_on="formation_date",
+        by="ts_code",
+        direction="forward",
+        allow_exact_matches=True,
+    )
+
+
+def _load_margin_panel(root: Path, price: pd.DataFrame) -> pd.DataFrame:
+    raw = _query_frame(
+        """
+        select trade_date formation_date, ts_code, rzye, rzmre, rzche, rqye, rqyl
+        from read_parquet(?, union_by_name=true, hive_partitioning=false)
+        order by ts_code, trade_date
+        """,
+        [_fact_paths(root, "margin_detail")],
+    )
+    raw["formation_date"] = pd.to_datetime(raw["formation_date"]).dt.date
+    raw["financing_balance_change_20d"] = raw.groupby("ts_code")["rzye"].diff(20)
+    metrics = price.loc[
+        :,
+        [
+            "formation_date",
+            "ts_code",
+            "future_realized_volatility_20d",
+            "future_max_drawdown_20d",
+        ],
+    ]
+    return raw.merge(metrics, on=["formation_date", "ts_code"], how="inner")
+
+
+def _load_pledge_panel(
+    root: Path,
+    price: pd.DataFrame,
+    financial: pd.DataFrame,
+) -> pd.DataFrame:
+    raw = _query_frame(
+        """
+        select ts_code, cast(end_date as date) event_date, pledge_ratio
+        from read_parquet(?, union_by_name=true, hive_partitioning=false)
+        where pledge_ratio is not null
+        """,
+        [_fact_paths(root, "pledge")],
+    )
+    joined = _next_price_observation(
+        raw,
+        price,
+        event_date="event_date",
+        price_columns=(
+            "prior_relative_return_20d",
+            "amount",
+            "future_max_drawdown_20d",
+        ),
+    ).rename(
+        columns={"prior_relative_return_20d": "return_20d", "amount": "amount_20d"}
+    )
+    context = financial.loc[
+        :,
+        [
+            "formation_date",
+            "ts_code",
+            "report_period",
+            "debt_to_assets",
+            "n_cashflow_act",
+        ],
+    ].copy()
+    context["formation_date"] = pd.to_datetime(context["formation_date"]).astype(
+        "datetime64[ns]"
+    )
+    joined = joined.dropna(subset=["formation_date"]).sort_values(
+        ["formation_date", "ts_code"], kind="mergesort"
+    )
+    context = context.sort_values(
+        ["formation_date", "ts_code", "report_period"], kind="mergesort"
+    ).drop_duplicates(["formation_date", "ts_code"], keep="last")
+    joined = pd.merge_asof(
+        joined,
+        context[["formation_date", "ts_code", "debt_to_assets", "n_cashflow_act"]],
+        on="formation_date",
+        by="ts_code",
+        direction="backward",
+    )
+    return joined.loc[
+        :,
+        [
+            "formation_date",
+            "ts_code",
+            "pledge_ratio",
+            "return_20d",
+            "amount_20d",
+            "debt_to_assets",
+            "n_cashflow_act",
+            "future_max_drawdown_20d",
+        ],
+    ].dropna(subset=["pledge_ratio", "future_max_drawdown_20d"])
+
+
+def _load_holder_trade_panel(
+    root: Path,
+    price: pd.DataFrame,
+    financial: pd.DataFrame,
+) -> pd.DataFrame:
+    raw = _query_frame(
+        """
+        select ts_code, cast(ann_date as date) event_date, in_de, change_vol
+        from read_parquet(?, union_by_name=true, hive_partitioning=false)
+        where in_de in ('IN', 'DE') and change_vol is not null
+        """,
+        [_fact_paths(root, "holder_trade")],
+    )
+    joined = _next_price_observation(
+        raw,
+        price,
+        event_date="event_date",
+        price_columns=("future_excess_return_20d",),
+    )
+    finance = financial.loc[
+        :,
+        [
+            "formation_date",
+            "ts_code",
+            "report_period",
+            "current_profitability",
+            "future_profitability",
+        ],
+    ].copy()
+    finance["formation_date"] = pd.to_datetime(finance["formation_date"]).astype(
+        "datetime64[ns]"
+    )
+    finance["next_report_profit_change"] = (
+        finance["future_profitability"] - finance["current_profitability"]
+    )
+    joined = joined.dropna(subset=["formation_date"]).sort_values(
+        ["formation_date", "ts_code"], kind="mergesort"
+    )
+    finance = finance.sort_values(
+        ["formation_date", "ts_code", "report_period"], kind="mergesort"
+    ).drop_duplicates(["formation_date", "ts_code"], keep="last")
+    joined = pd.merge_asof(
+        joined,
+        finance[["formation_date", "ts_code", "next_report_profit_change"]],
+        on="formation_date",
+        by="ts_code",
+        direction="forward",
+    )
+    return joined.loc[
+        :,
+        [
+            "formation_date",
+            "ts_code",
+            "in_de",
+            "change_vol",
+            "next_report_profit_change",
+            "future_excess_return_20d",
+        ],
+    ].dropna(subset=["future_excess_return_20d"])
+
+
+def _load_buyback_panel(root: Path, price: pd.DataFrame) -> pd.DataFrame:
+    raw = _query_frame(
+        """
+        select ts_code, cast(announcement_date as date) event_date,
+               process, amount, vol
+        from read_parquet(?, union_by_name=true, hive_partitioning=false)
+        where process is not null
+        """,
+        [_fact_paths(root, "repurchase")],
+    )
+    joined = _next_price_observation(
+        raw,
+        price,
+        event_date="event_date",
+        price_columns=("future_excess_return_20d", "future_max_drawdown_20d"),
+    )
+    return joined.loc[
+        :,
+        [
+            "formation_date",
+            "ts_code",
+            "process",
+            "amount",
+            "vol",
+            "future_excess_return_20d",
+            "future_max_drawdown_20d",
+        ],
+    ].dropna(subset=["future_excess_return_20d"])
+
+
+def _load_official_field_map(root: Path) -> dict[str, tuple[str, ...]]:
+    datasets = (
+        "earnings_forecast",
+        "earnings_express",
+        "income_statement",
+        "announcement",
+        "share_float",
+        "holder_trade",
+        "company_profile",
+        "main_business",
+    )
+    field_map: dict[str, tuple[str, ...]] = {}
+    with duckdb.connect() as connection:
+        for dataset in datasets:
+            description = connection.execute(
+                "describe select * from read_parquet(?, union_by_name=true, hive_partitioning=false)",
+                [_fact_paths(root, dataset)],
+            ).fetchdf()
+            field_map[dataset] = tuple(sorted(description["column_name"].astype(str)))
+    return field_map
+
+
+def _stable(value: float | int | str | None) -> float | int | str:
+    if value is None:
+        return "not_available"
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            return "not_available"
+        return round(value, 12)
+    return value
+
+
+def _relation_evidence(
+    knowledge_id: str,
+    relation: dict[str, float | int | None],
+    *,
+    relationship_shape: str,
+    counter_evidence: str,
+    extra: dict[str, float | int | str] | None = None,
+) -> SupplementEvidence:
+    observations = {
+        key: _stable(value) for key, value in relation.items()
+    }
+    if extra:
+        observations.update({key: _stable(value) for key, value in extra.items()})
+    return SupplementEvidence(
+        knowledge_id=knowledge_id,
+        data_usable=relation.get("observations", 0) != 0,
+        overall_direction=str(_stable(relation.get("overall"))),
+        earlier_direction=str(_stable(relation.get("earlier"))),
+        later_direction=str(_stable(relation.get("later"))),
+        relationship_shape=relationship_shape,
+        counter_evidence=counter_evidence,
+        observations=observations,
+    )
+
+
+def validate_all_supplement_claims(
+    warehouse_root: Path,
+) -> tuple[SupplementEvidence, ...]:
+    root = Path(warehouse_root)
+    price = _load_price_panel(root)
+    financial = _load_financial_panel(root)
+    margin = _load_margin_panel(root, price)
+    pledge = _load_pledge_panel(root, price, financial)
+    holder = _load_holder_trade_panel(root, price, financial)
+    buyback = _load_buyback_panel(root, price)
+    official_fields = _load_official_field_map(root)
+    official_checks = check_official_semantic_fields(official_fields)
+
+    market = market_state_observations(price)
+    market_relation = chronological_relation(
+        market,
+        signal="prior_relative_return_20d",
+        outcome="future_excess_return_20d",
+        date_col="formation_date",
+    )
+
+    dispersion = dispersion_observations(
+        price.dropna(subset=["industry_code"])
+    )
+    dispersion_outcomes = price.groupby(
+        ["formation_date", "industry_code"], as_index=False, dropna=False
+    ).agg(
+        future_realized_volatility_20d=(
+            "future_realized_volatility_20d",
+            "mean",
+        )
+    )
+    dispersion = dispersion.merge(
+        dispersion_outcomes,
+        on=["formation_date", "industry_code"],
+        how="inner",
+    )
+    dispersion_relation = chronological_relation(
+        dispersion,
+        signal="return_dispersion",
+        outcome="future_realized_volatility_20d",
+        date_col="formation_date",
+    )
+
+    turnover = turnover_observations(price)
+    turnover_relation = chronological_relation(
+        turnover,
+        signal="prior_relative_return_20d",
+        outcome="future_excess_return_20d",
+        date_col="formation_date",
+    )
+    turnover_group_relations = {
+        str(group): chronological_relation(
+            rows,
+            signal="prior_relative_return_20d",
+            outcome="future_excess_return_20d",
+            date_col="formation_date",
+        )["overall"]
+        for group, rows in turnover.groupby("turnover_group", observed=True)
+    }
+
+    profitability = validate_profitability_valuation(financial)
+    profitability_relation = profitability["gross_profitability"]
+    cash = validate_cash_accrual(financial)
+    cash_relation = cash["cash_to_future_profitability"]
+
+    illiquidity = illiquidity_observations(price)
+    illiquidity_relation = chronological_relation(
+        illiquidity,
+        signal="amihud_illiquidity",
+        outcome="future_max_drawdown_20d",
+        date_col="formation_date",
+    )
+    maximum = max_overextension_observations(price)
+    max_relation = chronological_relation(
+        maximum,
+        signal="max_return_20d",
+        outcome="future_excess_return_20d",
+        date_col="formation_date",
+    )
+
+    margin = margin_observations(margin)
+    margin_relation = chronological_relation(
+        margin,
+        signal="financing_net_flow",
+        outcome="future_max_drawdown_20d",
+        date_col="formation_date",
+    )
+    pledge = pledge_observations(pledge)
+    pledge_relation = chronological_relation(
+        pledge,
+        signal="pledge_ratio",
+        outcome="future_max_drawdown_20d",
+        date_col="formation_date",
+    )
+    holder = holder_trade_observations(holder)
+    holder_relation = chronological_relation(
+        holder,
+        signal="signed_change_vol",
+        outcome="next_report_profit_change",
+        date_col="formation_date",
+    )
+    buyback = buyback_stage_observations(buyback)
+    buyback_means = buyback.groupby("buyback_stage", observed=True)[
+        "future_excess_return_20d"
+    ].mean()
+    buyback_relation = chronological_relation(
+        buyback.assign(actual_execution_numeric=buyback["actual_execution"].astype(int)),
+        signal="actual_execution_numeric",
+        outcome="future_excess_return_20d",
+        date_col="formation_date",
+    )
+
+    usable_counts = price.groupby("ts_code").size().sort_values(ascending=False)
+    candidates = sorted(usable_counts[usable_counts >= 10].index.astype(str))[:5]
+    portfolio_returns = price[price["ts_code"].isin(candidates)].pivot_table(
+        index="formation_date",
+        columns="ts_code",
+        values="adjusted_return_1d",
+        aggfunc="first",
+    ).reindex(columns=candidates)
+    industries = {
+        code: str(
+            price.loc[price["ts_code"] == code, "industry_code"].dropna().iloc[-1]
+        )
+        for code in candidates
+    }
+    themes = {code: set() for code in candidates}
+    portfolio = portfolio_common_exposure(
+        portfolio_returns,
+        industries=industries,
+        themes=themes,
+    )
+
+    source_count = len(SOURCE_REFS)
+    evidence_by_id = {
+        "src_cn_factor_momentum_2023": _relation_evidence(
+            "src_cn_factor_momentum_2023",
+            market_relation,
+            relationship_shape="市场状态分组中的20日相对强弱与后续超额收益关系",
+            counter_evidence="上涨市场不自动产生更可靠的个股延续。",
+        ),
+        "src_cn_return_dispersion_risk": _relation_evidence(
+            "src_cn_return_dispersion_risk",
+            dispersion_relation,
+            relationship_shape="行业成员收益样本标准差与后续实现波动关系",
+            counter_evidence="分化不直接给出涨跌方向。",
+        ),
+        "src_cn_turnover_momentum_boundary": _relation_evidence(
+            "src_cn_turnover_momentum_boundary",
+            turnover_relation,
+            relationship_shape="换手分组内相对强弱与后续超额收益关系",
+            counter_evidence="高换手不能识别资金身份。",
+            extra={
+                "turnover_group_relations": json.dumps(
+                    {key: _stable(value) for key, value in turnover_group_relations.items()},
+                    ensure_ascii=False,
+                    sort_keys=True,
+                )
+            },
+        ),
+        "src_cn_profitability_valuation_support": _relation_evidence(
+            "src_cn_profitability_valuation_support",
+            profitability_relation,
+            relationship_shape="盈利维度和估值维度分别与后续超额收益比较",
+            counter_evidence="盈利能力不直接等于二至六周上涨。",
+            extra={
+                "all_relations": json.dumps(profitability, ensure_ascii=False, sort_keys=True)
+            },
+        ),
+        "src_cn_cash_accrual_quality": _relation_evidence(
+            "src_cn_cash_accrual_quality",
+            cash_relation,
+            relationship_shape="现金和应计成分分别与下一年同季盈利及后续收益比较",
+            counter_evidence="旧退市制度下的原论文收益结论不移植。",
+            extra={"all_relations": json.dumps(cash, ensure_ascii=False, sort_keys=True)},
+        ),
+        "src_cn_illiquidity_operability": _relation_evidence(
+            "src_cn_illiquidity_operability",
+            illiquidity_relation,
+            relationship_shape="日收益相对成交额的粗粒度价格冲击与后续回撤关系",
+            counter_evidence="日线代理不是订单簿冲击，也不是收益加分。",
+        ),
+        "src_cn_max_overextension": _relation_evidence(
+            "src_cn_max_overextension",
+            max_relation,
+            relationship_shape="过去20日最大单日收益与后续超额收益关系",
+            counter_evidence="强势本身不能被机械淘汰。",
+        ),
+        "src_cn_earnings_disclosure_hierarchy": SupplementEvidence(
+            "src_cn_earnings_disclosure_hierarchy", True, "规则语义可执行",
+            "不适用", "不适用", "四类披露阶段字段独立存在",
+            "预告与快报仍可能更正。", {"source_count": source_count},
+        ),
+        "src_cn_margin_semantics": _relation_evidence(
+            "src_cn_margin_semantics", margin_relation,
+            relationship_shape="融资净流量、余额变化和后续风险分别观察",
+            counter_evidence="融资买入不表示机构看多。",
+        ),
+        "src_cn_share_reduction_rules_2024": SupplementEvidence(
+            "src_cn_share_reduction_rules_2024", True, "规则语义可执行",
+            "不适用", "不适用", "解禁、计划和实际交易字段独立存在",
+            "解禁不等于已经减持。", {"source_count": source_count},
+        ),
+        "src_cn_pledge_conditional_risk": _relation_evidence(
+            "src_cn_pledge_conditional_risk", pledge_relation,
+            relationship_shape="质押比例与价格、流动性、负债、现金流分别观察",
+            counter_evidence="无合同字段，不能计算平仓价。",
+        ),
+        "src_cn_disclosed_holder_trade": _relation_evidence(
+            "src_cn_disclosed_holder_trade", holder_relation,
+            relationship_shape="披露方向和数量与下一报告经营变化关系",
+            counter_evidence="单次增持不保证股价上涨。",
+        ),
+        "src_cn_buyback_rules_2023": _relation_evidence(
+            "src_cn_buyback_rules_2023", buyback_relation,
+            relationship_shape="计划阶段与实际执行阶段分别观察",
+            counter_evidence="实际回购仍不证明低估或必涨。",
+            extra={
+                "stage_means": json.dumps(
+                    {str(key): _stable(float(value)) for key, value in buyback_means.items()},
+                    ensure_ascii=False,
+                    sort_keys=True,
+                )
+            },
+        ),
+        "src_csrc_disclosure_rules_2025": SupplementEvidence(
+            "src_csrc_disclosure_rules_2025", True, "规则语义可执行",
+            "不适用", "不适用", "经营范围、主营分部和正式公告字段独立存在",
+            "概念名称本身不证明收入受益。", {"source_count": source_count},
+        ),
+        "src_portfolio_common_exposure": SupplementEvidence(
+            "src_portfolio_common_exposure", True, "方法可执行", "不适用", "不适用",
+            "恰好五只候选的行业、主题集中度和两两相关性",
+            "只做透明检查，不估计权重。", portfolio,
+        ),
+    }
+    for knowledge_id, checked in official_checks.items():
+        if not checked or knowledge_id not in evidence_by_id:
+            raise ValueError(f"official semantic check failed: {knowledge_id}")
+    return tuple(evidence_by_id[claim.knowledge_id] for claim in SUPPLEMENT_CLAIMS)
+
+
 __all__ = [
     "SOURCE_REFS",
     "SUPPLEMENT_CLAIMS",
@@ -714,7 +1493,9 @@ __all__ = [
     "max_overextension_observations",
     "profitability_valuation_observations",
     "pledge_observations",
+    "portfolio_common_exposure",
     "turnover_observations",
     "validate_cash_accrual",
     "validate_profitability_valuation",
+    "validate_all_supplement_claims",
 ]

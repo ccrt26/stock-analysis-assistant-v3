@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from datetime import date
+import hashlib
+from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -20,9 +22,11 @@ from stock_analyzer.knowledge_validation.supplement_validation import (
     max_overextension_observations,
     profitability_valuation_observations,
     pledge_observations,
+    portfolio_common_exposure,
     turnover_observations,
     validate_cash_accrual,
     validate_profitability_valuation,
+    validate_all_supplement_claims,
 )
 
 
@@ -396,3 +400,56 @@ def test_official_semantic_field_check_names_missing_field():
 
     with pytest.raises(ValueError, match="earnings_forecast.p_change_min"):
         check_official_semantic_fields(field_map)
+
+
+def test_portfolio_reports_concentration_and_correlation_only():
+    returns = pd.DataFrame(
+        {
+            "A": [0.01, 0.02, -0.01],
+            "B": [0.01, 0.02, -0.01],
+            "C": [-0.01, 0, 0.01],
+            "D": [0, 0.01, 0],
+            "E": [0.02, -0.01, 0.01],
+        }
+    )
+    result = portfolio_common_exposure(
+        returns,
+        industries={"A": "I1", "B": "I1", "C": "I2", "D": "I3", "E": "I4"},
+        themes={
+            "A": {"T1"},
+            "B": {"T1"},
+            "C": {"T2"},
+            "D": {"T3"},
+            "E": {"T4"},
+        },
+    )
+
+    assert result["largest_industry_count"] == 2
+    assert result["largest_theme_count"] == 2
+    assert result["max_pairwise_correlation"] == pytest.approx(1.0)
+    assert not ({"weights", "positions", "optimizer"} & set(result))
+
+
+def test_portfolio_requires_exactly_five_candidates():
+    with pytest.raises(ValueError, match="exactly five"):
+        portfolio_common_exposure(
+            pd.DataFrame({"A": [0.1], "B": [0.2]}),
+            industries={"A": "I1", "B": "I2"},
+            themes={"A": set(), "B": set()},
+        )
+
+
+def test_real_validation_is_exact_deterministic_and_read_only():
+    root = Path("local_warehouse")
+    warehouse = root / "research.duckdb"
+    before = hashlib.file_digest(warehouse.open("rb"), "sha256").hexdigest()
+
+    first = validate_all_supplement_claims(root)
+    second = validate_all_supplement_claims(root)
+
+    after = hashlib.file_digest(warehouse.open("rb"), "sha256").hexdigest()
+    assert tuple(item.knowledge_id for item in first) == tuple(
+        item.knowledge_id for item in SUPPLEMENT_CLAIMS
+    )
+    assert first == second
+    assert before == after
