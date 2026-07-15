@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
+import pandas as pd
+
 from stock_analyzer.data.research_contracts import ResearchDatasetId
 
 
@@ -353,9 +355,152 @@ SUPPLEMENT_CLAIMS = (
 )
 
 
+def _quantile_groups(values: pd.Series, groups: int) -> pd.Series:
+    numeric = pd.to_numeric(values, errors="coerce")
+    result = pd.Series(pd.NA, index=values.index, dtype="Int64")
+    valid = numeric.dropna()
+    if valid.empty:
+        return result
+    bins = min(groups, len(valid))
+    labels = pd.qcut(
+        valid.rank(method="first"),
+        bins,
+        labels=False,
+    )
+    result.loc[valid.index] = labels.astype("int64") + 1
+    return result
+
+
+def illiquidity_observations(frame: pd.DataFrame) -> pd.DataFrame:
+    out = frame.copy()
+    adjusted_return = pd.to_numeric(
+        out["adjusted_return_1d"], errors="coerce"
+    )
+    amount = pd.to_numeric(out["amount"], errors="coerce").mask(
+        lambda values: values.eq(0)
+    )
+    out["amihud_illiquidity"] = (
+        adjusted_return.abs() / amount * 100_000_000
+    )
+    return out
+
+
+def market_state_observations(frame: pd.DataFrame) -> pd.DataFrame:
+    out = frame.copy()
+    previous_return = pd.to_numeric(
+        out["prior_market_return_20d"], errors="coerce"
+    )
+    current_return = pd.to_numeric(
+        out["market_return_20d"], errors="coerce"
+    )
+    previous = previous_return.ge(0).map({True: "up", False: "down"})
+    current = current_return.ge(0).map({True: "up", False: "down"})
+    state = previous + "_to_" + current
+    out["market_state"] = state.mask(
+        previous_return.isna() | current_return.isna()
+    )
+    out["relative_strength_group"] = out.groupby(
+        "formation_date", group_keys=False, sort=False
+    )["prior_relative_return_20d"].transform(
+        lambda values: _quantile_groups(values, 5)
+    )
+    return out
+
+
+def dispersion_observations(frame: pd.DataFrame) -> pd.DataFrame:
+    required = ["formation_date", "industry_code", "adjusted_return_1d"]
+    working = frame.loc[:, required].copy()
+    working["adjusted_return_1d"] = pd.to_numeric(
+        working["adjusted_return_1d"], errors="coerce"
+    )
+    return (
+        working.groupby(
+            ["formation_date", "industry_code"],
+            as_index=False,
+            dropna=False,
+            sort=True,
+        )
+        .agg(
+            return_dispersion=("adjusted_return_1d", "std"),
+            member_count=("adjusted_return_1d", "count"),
+        )
+    )
+
+
+def turnover_observations(frame: pd.DataFrame) -> pd.DataFrame:
+    out = frame.copy()
+    grouped = out.groupby("formation_date", group_keys=False, sort=False)
+    out["turnover_group"] = grouped["turnover_rate_f_20d"].transform(
+        lambda values: _quantile_groups(values, 3)
+    )
+    out["prior_return_group"] = grouped[
+        "prior_relative_return_20d"
+    ].transform(lambda values: _quantile_groups(values, 5))
+    return out
+
+
+def max_overextension_observations(frame: pd.DataFrame) -> pd.DataFrame:
+    out = frame.copy()
+    for column in (
+        "max_return_20d",
+        "future_excess_return_20d",
+        "future_max_drawdown_20d",
+    ):
+        out[column] = pd.to_numeric(out[column], errors="coerce")
+    return out
+
+
+def _spearman(frame: pd.DataFrame, signal: str, outcome: str) -> float | None:
+    pair = frame.loc[:, [signal, outcome]].apply(
+        pd.to_numeric, errors="coerce"
+    ).dropna()
+    if len(pair) < 2:
+        return None
+    correlation = pair[signal].rank(method="average").corr(
+        pair[outcome].rank(method="average")
+    )
+    if pd.isna(correlation):
+        return None
+    return float(correlation)
+
+
+def chronological_relation(
+    frame: pd.DataFrame,
+    signal: str,
+    outcome: str,
+    date_col: str,
+) -> dict[str, float | int | None]:
+    working = frame.loc[:, [date_col, signal, outcome]].copy()
+    working[date_col] = pd.to_datetime(working[date_col], errors="coerce")
+    working = working.dropna(subset=[date_col])
+    dates = sorted(working[date_col].unique())
+    midpoint = len(dates) // 2
+    earlier_dates = set(dates[:midpoint])
+    later_dates = set(dates[midpoint:])
+    valid_pairs = working.loc[:, [signal, outcome]].apply(
+        pd.to_numeric, errors="coerce"
+    ).dropna()
+    return {
+        "overall": _spearman(working, signal, outcome),
+        "earlier": _spearman(
+            working[working[date_col].isin(earlier_dates)], signal, outcome
+        ),
+        "later": _spearman(
+            working[working[date_col].isin(later_dates)], signal, outcome
+        ),
+        "observations": int(len(valid_pairs)),
+    }
+
+
 __all__ = [
     "SOURCE_REFS",
     "SUPPLEMENT_CLAIMS",
     "SupplementClaim",
     "SupplementEvidence",
+    "chronological_relation",
+    "dispersion_observations",
+    "illiquidity_observations",
+    "market_state_observations",
+    "max_overextension_observations",
+    "turnover_observations",
 ]
