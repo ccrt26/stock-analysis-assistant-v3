@@ -226,6 +226,7 @@ class _FakeQuery:
                 ResearchDatasetId.INDUSTRY_MEMBER: ("SW2021",),
                 ResearchDatasetId.INDUSTRY_DAILY: tuple(item.isoformat() for item in dates),
                 ResearchDatasetId.SUSPENSION: tuple(item.isoformat() for item in dates),
+                ResearchDatasetId.ANNOUNCEMENT: ("2026-01",),
             }
         )
         self.calls = []
@@ -336,6 +337,17 @@ class _FakeQuery:
             )
         if ResearchDatasetId.SUSPENSION in dataset_partitions:
             frames[ResearchDatasetId.SUSPENSION] = pd.DataFrame()
+        if ResearchDatasetId.ANNOUNCEMENT in dataset_partitions:
+            frames[ResearchDatasetId.ANNOUNCEMENT] = pd.DataFrame(
+                [
+                    {
+                        "announcement_id": "ANN-1",
+                        "ts_code": "000001.SZ",
+                        "announcement_time": f"{self.dates[20].isoformat()} 14:00:00+08:00",
+                        "title": "测试公告",
+                    }
+                ]
+            )
         return _FakeSnapshot(frames, f"{'a' if len(self.calls) == 1 else 'b'}" * 64)
 
 
@@ -384,3 +396,45 @@ def test_build_industry_study_sample_uses_industry_units_and_separate_conditions
     assert sample.signal_inputs.loc[0, "breadth_20d"] == 1.0
     assert "top_contribution_share_20d" in sample.signal_inputs
     assert sample.future_labels.loc[0, "close_return_30d"] is not None
+
+
+def test_build_daily_event_sample_uses_official_event_time_and_separate_future_labels():
+    start = date(2026, 1, 1)
+    dates = tuple(start + timedelta(days=index) for index in range(51))
+    query = _FakeQuery(dates)
+    spec_path = (
+        Path(__file__).parents[1]
+        / "src"
+        / "stock_analyzer"
+        / "knowledge_validation"
+        / "studies.yaml"
+    )
+    spec = load_validation_registry(spec_path).studies[5]
+
+    sample = build_study_sample(spec, query)
+
+    assert sample.analysis_dates == (dates[20],)
+    assert sample.signal_inputs.loc[0, "event_id"] == "ANN-1"
+    assert sample.signal_inputs.loc[0, "local_formal_announcement_match"]
+    assert "stock_return_0" in sample.signal_inputs
+    assert "close_return_20d" in sample.future_labels
+    assert "close_return_20d" not in sample.signal_inputs
+
+
+def test_build_formal_reaction_sample_marks_only_local_formal_announcement_match():
+    start = date(2026, 1, 1)
+    dates = tuple(start + timedelta(days=index) for index in range(51))
+    query = _FakeQuery(dates)
+    spec_path = (
+        Path(__file__).parents[1]
+        / "src"
+        / "stock_analyzer"
+        / "knowledge_validation"
+        / "studies.yaml"
+    )
+    spec = load_validation_registry(spec_path).studies[7]
+
+    sample = build_study_sample(spec, query)
+
+    assert sample.signal_inputs.loc[0, "local_formal_announcement_match"]
+    assert "market_adjusted_return" in sample.signal_inputs

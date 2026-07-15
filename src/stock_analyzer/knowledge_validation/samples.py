@@ -9,6 +9,7 @@ import pandas as pd
 
 from stock_analyzer.data.research_contracts import ResearchDatasetId
 from stock_analyzer.knowledge_validation.models import StudySample, ValidationSpec
+from stock_analyzer.knowledge_validation.signals import map_announcement_sessions
 from stock_analyzer.storage.research_query import (
     MaterializedResearchSnapshot,
     ResearchQuery,
@@ -34,6 +35,7 @@ _PRICE_STUDIES = {
     "price_limit_t_plus_one",
     "a_share_factor_industry_momentum",
     "overseas_industry_momentum_method",
+    "formal_announcement_price_reaction",
 }
 
 _HISTORICAL_DATE_DATASETS = {
@@ -674,6 +676,15 @@ def _build_price_study_sample(
         )
         sessions = tuple(item for item in sessions if item.isoformat() in industry_dates)
     analysis_dates = sessions[20:-30] if len(sessions) >= 51 else ()
+    announcement_partitions = (
+        _manifest_partitions(query, ResearchDatasetId.ANNOUNCEMENT)
+        if spec.study_id == "formal_announcement_price_reaction"
+        else ()
+    )
+    if announcement_partitions:
+        analysis_dates = tuple(
+            item for item in analysis_dates if item.strftime("%Y-%m") in announcement_partitions
+        )
     signal_frames: list[pd.DataFrame] = []
     label_frames: list[pd.DataFrame] = []
     input_hashes: list[str] = []
@@ -690,6 +701,10 @@ def _build_price_study_sample(
             history_dates=history_dates,
             analysis_date=analysis_date,
         )
+        if spec.study_id == "formal_announcement_price_reaction":
+            signal_request[ResearchDatasetId.ANNOUNCEMENT] = (
+                analysis_date.strftime("%Y-%m"),
+            )
         signal_snapshot = materialize_signal_snapshot(
             query,
             signal_request,
@@ -733,6 +748,45 @@ def _build_price_study_sample(
             history_dates,
         )
         current = _attach_market_benchmark(current, signal_snapshot, analysis_date)
+        if spec.study_id == "formal_announcement_price_reaction":
+            factors = signal_snapshot.frame(ResearchDatasetId.ADJ_FACTOR)
+            indexes = signal_snapshot.frame(ResearchDatasetId.INDEX_DAILY)
+            previous_date = history_dates[-2]
+            current["stock_return_0"] = current["ts_code"].map(
+                lambda code: _return_between_sessions(
+                    daily,
+                    factors,
+                    code_column="ts_code",
+                    code=str(code),
+                    previous_date=previous_date,
+                    current_date=analysis_date,
+                )
+            )
+            current["market_return_0"] = current["market_index_code"].map(
+                lambda code: _return_between_sessions(
+                    indexes,
+                    pd.DataFrame(),
+                    code_column="index_code",
+                    code=str(code),
+                    previous_date=previous_date,
+                    current_date=analysis_date,
+                )
+            )
+            current["market_adjusted_return"] = (
+                current["stock_return_0"] - current["market_return_0"]
+            )
+            calendar = pd.DataFrame({"cal_date": sessions, "is_open": True})
+            announcements = map_announcement_sessions(
+                signal_snapshot.frame(ResearchDatasetId.ANNOUNCEMENT), calendar
+            )
+            matched = set(
+                announcements.loc[
+                    announcements["event_date"] == analysis_date, "ts_code"
+                ].astype(str)
+            )
+            current["local_formal_announcement_match"] = current[
+                "ts_code"
+            ].astype(str).isin(matched)
         industry_units = spec.study_id == "a_share_factor_industry_momentum"
         if spec.study_id in {
             "a_share_factor_industry_momentum",
@@ -787,12 +841,341 @@ def _build_price_study_sample(
     )
 
 
+def _return_between_sessions(
+    frame: pd.DataFrame,
+    factors: pd.DataFrame,
+    *,
+    code_column: str,
+    code: str,
+    previous_date: date,
+    current_date: date,
+) -> float | None:
+    selected = frame[frame[code_column].astype(str) == str(code)].copy()
+    selected["trade_date"] = pd.to_datetime(selected["trade_date"], errors="raise").dt.date
+    previous = selected[selected["trade_date"] == previous_date]
+    current = selected[selected["trade_date"] == current_date]
+    if previous.empty or current.empty:
+        return None
+    if code_column == "ts_code":
+        adjusted = factors[factors["ts_code"].astype(str) == str(code)].copy()
+        adjusted["trade_date"] = pd.to_datetime(
+            adjusted["trade_date"], errors="raise"
+        ).dt.date
+        prior_factor = adjusted.loc[
+            adjusted["trade_date"] == previous_date, "adj_factor"
+        ]
+        current_factor = adjusted.loc[
+            adjusted["trade_date"] == current_date, "adj_factor"
+        ]
+        if prior_factor.empty or current_factor.empty:
+            return None
+        comparable_previous = (
+            float(previous.iloc[0]["close"])
+            * float(prior_factor.iloc[0])
+            / float(current_factor.iloc[0])
+        )
+    else:
+        comparable_previous = float(previous.iloc[0]["close"])
+    return float(current.iloc[0]["close"]) / comparable_previous - 1
+
+
+def _normalized_event_facts(
+    snapshot: MaterializedResearchSnapshot,
+    spec: ValidationSpec,
+    calendar: pd.DataFrame,
+) -> pd.DataFrame:
+    if spec.study_id == "daily_event_study":
+        frame = snapshot.frame(ResearchDatasetId.ANNOUNCEMENT).copy()
+        frame = frame.rename(columns={"announcement_id": "event_id"})
+        return map_announcement_sessions(frame, calendar)
+    rows: list[pd.DataFrame] = []
+    for dataset, prefix in (
+        (ResearchDatasetId.EARNINGS_FORECAST, "forecast"),
+        (ResearchDatasetId.EARNINGS_EXPRESS, "express"),
+    ):
+        try:
+            frame = snapshot.frame(dataset)
+        except KeyError:
+            continue
+        if frame.empty:
+            continue
+        out = frame.copy()
+        available = pd.to_datetime(out["available_at"], utc=True, errors="coerce")
+        fallback = pd.to_datetime(out["ann_date"], errors="coerce").dt.tz_localize(
+            "Asia/Shanghai"
+        )
+        out["announcement_time"] = available.combine_first(fallback)
+        identifiers = (
+            out["source_record_id"].astype(str)
+            if "source_record_id" in out
+            else (
+                out["ts_code"].astype(str)
+                + ":"
+                + out["report_period"].astype(str)
+                + ":"
+                + out["ann_date"].astype(str)
+            )
+        )
+        out["event_id"] = prefix + ":" + identifiers
+        rows.append(out)
+    if not rows:
+        return pd.DataFrame(columns=["event_id", "ts_code", "announcement_time", "event_date"])
+    return map_announcement_sessions(pd.concat(rows, ignore_index=True), calendar)
+
+
+def _build_daily_event_sample(
+    spec: ValidationSpec,
+    query: ResearchQuery,
+) -> StudySample:
+    sessions = tuple(
+        date.fromisoformat(value)
+        for value in _manifest_partitions(query, ResearchDatasetId.EQUITY_DAILY)
+    )
+    if len(sessions) < 32:
+        return StudySample(
+            study_id=spec.study_id,
+            input_manifest_hashes=(),
+            label_manifest_hashes=(),
+            analysis_dates=(),
+            panel_row_count=0,
+            exclusion_counts={"insufficient_calendar": 1},
+            signal_inputs=pd.DataFrame(),
+            future_labels=pd.DataFrame(),
+        )
+    event_datasets = (
+        (ResearchDatasetId.ANNOUNCEMENT,)
+        if spec.study_id == "daily_event_study"
+        else (ResearchDatasetId.EARNINGS_FORECAST, ResearchDatasetId.EARNINGS_EXPRESS)
+    )
+    event_partitions = {
+        dataset: _manifest_partitions(query, dataset) for dataset in event_datasets
+    }
+    final_snapshot = query.materialize_snapshot(
+        event_partitions,
+        as_of=analysis_close_as_of(sessions[-1]),
+    )
+    calendar = pd.DataFrame({"cal_date": sessions, "is_open": True})
+    announcements = _normalized_event_facts(final_snapshot, spec, calendar)
+    session_index = {session: index for index, session in enumerate(sessions)}
+    announcements["event_session_index"] = announcements["event_date"].map(
+        session_index
+    )
+    announcements = announcements.dropna(subset=["event_session_index"]).copy()
+    announcements["event_session_index"] = announcements["event_session_index"].astype(int)
+    announcements = announcements[
+        (announcements["event_session_index"] >= 1)
+        & (announcements["event_session_index"] <= len(sessions) - 31)
+    ].sort_values(["ts_code", "event_session_index", "event_id"], kind="mergesort")
+    kept: list[object] = []
+    for _, company in announcements.groupby("ts_code", sort=True):
+        last: int | None = None
+        for row_index, row in company.iterrows():
+            position = int(row["event_session_index"])
+            if last is None or position - last > 30:
+                kept.append(row_index)
+                last = position
+    announcements = announcements.loc[kept].sort_values(
+        ["event_date", "ts_code", "event_id"], kind="mergesort"
+    )
+    announcements["is_pseudo_event"] = False
+    pseudo_rows: list[dict[str, object]] = []
+    for _, event in (
+        announcements.iterrows()
+        if spec.study_id == "daily_event_study"
+        else []
+    ):
+        pseudo_position = int(event["event_session_index"]) - 35
+        if pseudo_position < 1 or pseudo_position > len(sessions) - 31:
+            continue
+        company_positions = announcements.loc[
+            announcements["ts_code"].astype(str) == str(event["ts_code"]),
+            "event_session_index",
+        ].astype(int)
+        if ((company_positions - pseudo_position).abs() <= 30).any():
+            continue
+        pseudo_rows.append(
+            {
+                "event_id": f"PSEUDO-{event['event_id']}",
+                "ts_code": event["ts_code"],
+                "event_date": sessions[pseudo_position],
+                "event_session_index": pseudo_position,
+                "is_pseudo_event": True,
+            }
+        )
+    candidates_all = pd.concat(
+        [announcements, pd.DataFrame(pseudo_rows)], ignore_index=True, sort=False
+    ).sort_values(["event_date", "ts_code", "event_id"], kind="mergesort")
+
+    signals: list[pd.DataFrame] = []
+    labels: list[pd.DataFrame] = []
+    input_hashes: list[str] = [final_snapshot.input_manifest["input_manifest_hash"]]
+    label_hashes: list[str] = []
+    analysis_dates: list[date] = []
+    exclusions = {"event_stock_not_eligible": 0}
+    for event_date, candidates in candidates_all.groupby("event_date", sort=True):
+        position = session_index[event_date]
+        history_dates = sessions[position - 1 : position + 1]
+        future_dates = sessions[position + 1 : position + 31]
+        request = _requested_signal_partitions(
+            spec,
+            query,
+            history_dates=history_dates,
+            analysis_date=event_date,
+        )
+        event_month = event_date.strftime("%Y-%m")
+        for dataset, partitions in event_partitions.items():
+            if event_month in partitions:
+                request[dataset] = (event_month,)
+        snapshot = materialize_signal_snapshot(
+            query, request, analysis_date=event_date
+        )
+        input_hashes.append(snapshot.input_manifest["input_manifest_hash"])
+        as_of_events = _normalized_event_facts(snapshot, spec, calendar)
+        official_candidates = candidates[~candidates["is_pseudo_event"].astype(bool)]
+        pseudo_candidates = candidates[candidates["is_pseudo_event"].astype(bool)]
+        event_ids = set(official_candidates["event_id"].astype(str))
+        as_of_events = as_of_events[
+            as_of_events["event_id"].astype(str).isin(event_ids)
+        ][["event_id", "ts_code", "event_date"]]
+        candidate_events = pd.concat(
+            [
+                as_of_events.assign(is_pseudo_event=False),
+                pseudo_candidates[
+                    ["event_id", "ts_code", "event_date", "is_pseudo_event"]
+                ],
+            ],
+            ignore_index=True,
+        )
+        daily = snapshot.frame(ResearchDatasetId.EQUITY_DAILY)
+        current_daily = daily[
+            pd.to_datetime(daily["trade_date"], errors="raise").dt.date == event_date
+        ]
+        eligible = eligible_stock_rows(
+            snapshot.frame(ResearchDatasetId.SECURITY_MASTER),
+            current_daily,
+            snapshot.frame(ResearchDatasetId.SUSPENSION),
+            analysis_date=event_date,
+        )
+        eligible = _merge_current_facts(eligible, snapshot, request, event_date)
+        eligible = _attach_market_benchmark(eligible, snapshot, event_date)
+        event_rows = candidate_events.merge(
+            eligible,
+            on="ts_code",
+            how="inner",
+            validate="many_to_one",
+        )
+        exclusions["event_stock_not_eligible"] += len(candidate_events) - len(event_rows)
+        label_request = _requested_label_partitions(
+            query, future_dates, include_industry=False
+        )
+        label_snapshot = query.materialize_snapshot(
+            label_request, as_of=analysis_close_as_of(future_dates[-1])
+        )
+        label_hashes.append(label_snapshot.input_manifest["input_manifest_hash"])
+        stock_labels = _future_stock_labels(
+            eligible[eligible["ts_code"].isin(event_rows["ts_code"])],
+            label_snapshot,
+            label_request,
+            event_date,
+        )
+        factors = snapshot.frame(ResearchDatasetId.ADJ_FACTOR)
+        indexes = snapshot.frame(ResearchDatasetId.INDEX_DAILY)
+        event_rows["stock_return_0"] = event_rows["ts_code"].map(
+            lambda code: _return_between_sessions(
+                daily,
+                factors,
+                code_column="ts_code",
+                code=str(code),
+                previous_date=history_dates[0],
+                current_date=event_date,
+            )
+        )
+        event_rows["market_return_0"] = event_rows["market_index_code"].map(
+            lambda code: _return_between_sessions(
+                indexes,
+                pd.DataFrame(),
+                code_column="index_code",
+                code=str(code),
+                previous_date=history_dates[0],
+                current_date=event_date,
+            )
+        )
+        next_returns = stock_labels[
+            ["ts_code", "close_return_1d", "market_return_1d"]
+        ].drop_duplicates("ts_code")
+        event_rows = event_rows.merge(
+            next_returns, on="ts_code", how="left", validate="many_to_one"
+        ).rename(
+            columns={
+                "close_return_1d": "stock_return_1",
+                "market_return_1d": "market_return_1",
+            }
+        )
+        event_rows["local_formal_announcement_match"] = ~event_rows[
+            "is_pseudo_event"
+        ].astype(bool)
+        event_rows["event_session_index"] = position
+        if spec.study_id == "a_share_earnings_announcement_drift":
+            event_rows["event_car_0_1"] = (
+                event_rows["stock_return_0"]
+                - event_rows["market_return_0"]
+                + event_rows["stock_return_1"]
+                - event_rows["market_return_1"]
+            )
+            signal_columns = [
+                "event_id",
+                "ts_code",
+                "event_date",
+                "event_session_index",
+                "event_car_0_1",
+            ]
+        else:
+            signal_columns = [
+                "event_id",
+                "ts_code",
+                "event_date",
+                "event_session_index",
+                "stock_return_0",
+                "stock_return_1",
+                "market_return_0",
+                "market_return_1",
+                "local_formal_announcement_match",
+                "is_pseudo_event",
+            ]
+        signals.append(event_rows[signal_columns])
+        labels.append(
+            event_rows[["event_id", "ts_code", "event_date"]].merge(
+                stock_labels,
+                left_on=["ts_code", "event_date"],
+                right_on=["ts_code", "analysis_date"],
+                how="left",
+            ).drop(columns=["analysis_date"])
+        )
+        analysis_dates.append(event_date)
+    signal_inputs = pd.concat(signals, ignore_index=True) if signals else pd.DataFrame()
+    future_labels = pd.concat(labels, ignore_index=True) if labels else pd.DataFrame()
+    return StudySample(
+        study_id=spec.study_id,
+        input_manifest_hashes=tuple(input_hashes),
+        label_manifest_hashes=tuple(label_hashes),
+        analysis_dates=tuple(sorted(set(analysis_dates))),
+        panel_row_count=len(signal_inputs),
+        exclusion_counts=exclusions,
+        signal_inputs=signal_inputs,
+        future_labels=future_labels,
+    )
+
+
 def build_study_sample(
     spec: ValidationSpec,
     query: ResearchQuery,
 ) -> StudySample:
     if spec.study_id in _PRICE_STUDIES:
         return _build_price_study_sample(spec, query)
+    if spec.study_id == "daily_event_study":
+        return _build_daily_event_sample(spec, query)
+    if spec.study_id == "a_share_earnings_announcement_drift":
+        return _build_daily_event_sample(spec, query)
     raise ValueError(f"sample builder is not implemented for {spec.study_id}")
 
 
