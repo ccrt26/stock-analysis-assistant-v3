@@ -1,5 +1,7 @@
 # V3 十三项知识直接验证精简设计
 
+> **当前状态权威：** 本文只定义研究验证边界，不证明生产能力或激活状态；当前状态只以 [`docs/operations/production-capability-matrix.md`](../../operations/production-capability-matrix.md) 为准。
+
 ## 1. 唯一目标
 
 本阶段只回答一个问题：迁移清单中十三项 `revalidate` 知识，能否用当前研究仓库的数据证明其核心理论在中国 A 股历史中说得通，并直接用于后续股票分析。

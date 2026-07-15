@@ -1,5 +1,11 @@
 # V3 Thirteen Knowledge Direct Validation Implementation Plan
 
+> **Current status authority:** This plan does not prove production activation; current status is authoritative only in [`docs/operations/production-capability-matrix.md`](../../operations/production-capability-matrix.md).
+
+> **执行结果（2026-07-15）：** 已完成。十三项结论为四项 `use`、九项 `discard`；全量测试 `912 passed, 1 skipped`；研究仓库 SHA-256 保持 `b988c0bee9c99356eca602d3d6ec33c875ab471a3c3e4051e440f91d5c685747`。
+
+实施中基于真实字段做了三项不改变目标的纠正：同一旧知识可引用多个具名计算，因此契约使用 `calculations` 元组；为避免 `ResearchWarehouse` 构造函数更新元数据，真实执行直接只读受治理 Parquet；Dechow 的完整多维盈余质量理论判为可用，但不借此升级范围更宽且本地趋势未通过的 Piotroski 预测方向。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Do not use subagents. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 用现有研究仓库直接论证十三项 `revalidate` 知识是否可用于 A 股分析，并把每项收敛为 `use` 或 `discard`。
@@ -64,12 +70,12 @@ class HistoricalEvidence:
 CLAIMS: tuple[KnowledgeClaim, ...]
 ```
 
-- [ ] 写失败测试：`CLAIMS` 恰好覆盖迁移表十三项 `revalidate`，无重复，只引用七个计算名；测试逐项要求明确登记研究对象、核心变量关系、方向或时序、适用边界，不用字符数替代理论完整性复核。
-- [ ] 运行 `PYTHONPATH=src .venv/bin/python -m pytest tests/test_direct_knowledge_validation.py -q`，确认因模块不存在而失败。
-- [ ] 创建两个冻结数据类和十三项 `CLAIMS`。十三项核心理论直接依据已核验原文及现有登记，不写成“低估值会涨”式口号。
-- [ ] 删除六个通用实现、`studies.yaml` 和四个旧测试；`__init__.py` 只导出 `CLAIMS`、`HistoricalEvidence`、`KnowledgeClaim`、`validate_all_claims`。
-- [ ] 运行新测试和 `tests/test_knowledge_migration.py tests/test_knowledge_registry.py`，确认通过。
-- [ ] 提交 `refactor: simplify direct knowledge validation contracts`。
+- [x] 写失败测试：`CLAIMS` 恰好覆盖迁移表十三项 `revalidate`，无重复，只引用七个计算名；测试逐项要求明确登记研究对象、核心变量关系、方向或时序、适用边界，不用字符数替代理论完整性复核。
+- [x] 运行 `PYTHONPATH=src .venv/bin/python -m pytest tests/test_direct_knowledge_validation.py -q`，确认因模块不存在而失败。
+- [x] 创建两个冻结数据类和十三项 `CLAIMS`。十三项核心理论直接依据已核验原文及现有登记，不写成“低估值会涨”式口号。
+- [x] 删除六个通用实现、`studies.yaml` 和四个旧测试；`__init__.py` 只导出 `CLAIMS`、`HistoricalEvidence`、`KnowledgeClaim`、`validate_all_claims`。
+- [x] 运行新测试和 `tests/test_knowledge_migration.py tests/test_knowledge_registry.py`，确认通过。
+- [x] 提交 `refactor: simplify direct knowledge validation contracts`。
 
 ### Task 2: Add only the shared historical evidence helpers
 
@@ -85,11 +91,11 @@ def describe_ordered_groups(frame: pd.DataFrame, group: str, value: str) -> str
 def concentration_description(frame: pd.DataFrame, date_col: str, value: str) -> str
 ```
 
-- [ ] 写失败测试：复权同时使用前后因子；按日期排序后较早和较晚历史不可随机切分；有序分组描述保留每组方向；驱动检查能够指出结果是否集中在少数日期或微小市值股票。
-- [ ] 实现上述四个短函数。`chronological_views` 只返回完整、较早、较晚的描述性结果，不产生通过线；`concentration_description` 只报告集中现象，不打分。
-- [ ] 增加只读仓库打开函数，继承现有 `ResearchWarehouse` 的读取方法但不执行其写入初始化；用仓库 SHA-256 测试证明打开和读取不改变数据库。
-- [ ] 运行直接验证测试和 `tests/test_research_as_of.py`，确认通过。
-- [ ] 提交 `feat: add minimal historical evidence helpers`。
+- [x] 写失败测试：复权同时使用前后因子；按日期排序后较早和较晚历史不可随机切分；有序分组描述保留每组方向；驱动检查能够指出结果是否集中在少数日期或微小市值股票。
+- [x] 实现上述四个短函数。`chronological_views` 只返回完整、较早、较晚的描述性结果，不产生通过线；`concentration_description` 只报告集中现象，不打分。
+- [x] 增加只读仓库打开函数，继承现有 `ResearchWarehouse` 的读取方法但不执行其写入初始化；用仓库 SHA-256 测试证明打开和读取不改变数据库。
+- [x] 运行直接验证测试和 `tests/test_research_as_of.py`，确认通过。
+- [x] 提交 `feat: add minimal historical evidence helpers`。
 
 ### Task 3: Implement seven named calculations without a framework
 
@@ -108,22 +114,22 @@ def validate_financial_improvement(query: ResearchQuery) -> dict[str, Historical
 def validate_all_claims(warehouse_root: Path) -> tuple[HistoricalEvidence, ...]
 ```
 
-- [ ] 分别写七个小型失败测试，使用手算数据确认：规模与估值分组、过去收益与随后反转、共同因子扣除前后、市场调整公告窗口、业绩公告反应、正式公告匹配措辞、六项财务变化方向。
-- [ ] 实现前三个价格类函数。只展示完整历史、时间前后、有序关系和驱动来源；未来结果与形成变量分开。
-- [ ] 实现三个事件类函数。公告按正式发布时间映射交易日；盘后映射下一交易日；只写“未匹配本地正式公告”。
-- [ ] 实现财务改善函数。保持 Dechow、Sloan、Piotroski、Novy-Marx 各自理论差异，不能用一个总分使四项知识自动一起通过。
-- [ ] 实现 `validate_all_claims`，固定七函数顺序，把七组证据展开回十三项并按迁移表顺序返回；同一输入输出顺序和文本稳定。
-- [ ] 运行直接验证测试、知识治理测试和研究时点测试，确认通过。
-- [ ] 提交 `feat: implement seven direct historical validations`。
+- [x] 分别写七个小型失败测试，使用手算数据确认：规模与估值分组、过去收益与随后反转、共同因子扣除前后、市场调整公告窗口、业绩公告反应、正式公告匹配措辞、六项财务变化方向。
+- [x] 实现前三个价格类函数。只展示完整历史、时间前后、有序关系和驱动来源；未来结果与形成变量分开。
+- [x] 实现三个事件类函数。公告按正式发布时间映射交易日；盘后映射下一交易日；只写“未匹配本地正式公告”。
+- [x] 实现财务改善函数。保持 Dechow、Sloan、Piotroski、Novy-Marx 各自理论差异，不能用一个总分使四项知识自动一起通过。
+- [x] 实现 `validate_all_claims`，固定七函数顺序，把七组证据展开回十三项并按迁移表顺序返回；同一输入输出顺序和文本稳定。
+- [x] 运行直接验证测试、知识治理测试和研究时点测试，确认通过。
+- [x] 提交 `feat: implement seven direct historical validations`。
 
 ### Task 4: Run once and decide thirteen use/discard results
 
 **Files:** Create `direct_validation_results.yaml`; modify migration and registry YAML。
 
-- [ ] 记录运行前 `local_warehouse/research.duckdb` SHA-256，确认工作区只含本计划变更。
-- [ ] 对当前仓库运行 `validate_all_claims(Path("local_warehouse"))`，只将紧凑证据打印到终端；不保存历史面板。
-- [ ] 对每项回到原理论核对六类证据：总体方向、时间前后、关系形态、驱动来源、反证和数据可执行性。不得根据单个均值或 p 值裁决。
-- [ ] 创建唯一结果文件，格式固定为：
+- [x] 记录运行前 `local_warehouse/research.duckdb` SHA-256，确认工作区只含本计划变更。
+- [x] 对当前仓库运行 `validate_all_claims(Path("local_warehouse"))`，只将紧凑证据打印到终端；不保存历史面板。
+- [x] 对每项回到原理论核对六类证据：总体方向、时间前后、关系形态、驱动来源、反证和数据可执行性。不得根据单个均值或 p 值裁决。
+- [x] 创建唯一结果文件，格式固定为：
 
 ```yaml
 schema_version: v3-direct-validation-v1
@@ -137,19 +143,19 @@ results:
     reason: 为什么现有历史足以或不足以支持直接用于分析
 ```
 
-- [ ] 逐项复核十三行：只允许 `use/discard`；无执行失败；理论保留原文对象、变量关系、方向或时序和适用边界；相同计算组的知识允许不同结论。
-- [ ] 对 `use`：迁移 action 改为 `update` 并保留 target；对应目标登记的 `local_validation.status` 改为 `validated`，引用该结果文件。对 `discard`：迁移 action 改为 `retire`、清空 target，理由引用本地反证或不可执行性。若同一目标仍被其他 `use` 项支持，不退出目标登记。
-- [ ] 运行知识迁移和登记测试，确认最终迁移表不存在 `revalidate`。
-- [ ] 提交 `data: decide thirteen direct knowledge validations`。
+- [x] 逐项复核十三行：只允许 `use/discard`；无执行失败；理论保留原文对象、变量关系、方向或时序和适用边界；相同计算组的知识允许不同结论。
+- [x] 对 `use`：迁移 action 改为 `update` 并保留 target；对应目标登记的 `local_validation.status` 改为 `validated`，引用该结果文件。对 `discard`：迁移 action 改为 `retire`、清空 target，理由引用本地反证或不可执行性。若同一目标仍被其他 `use` 项支持，不退出目标登记。
+- [x] 运行知识迁移和登记测试，确认最终迁移表不存在 `revalidate`。
+- [x] 提交 `data: decide thirteen direct knowledge validations`。
 
 ### Task 5: Final minimality and safety verification
 
 **Files:** Modify本计划和必要验收测试，不创建额外报告。
 
-- [ ] 运行直接验证、迁移、登记、治理验收和研究时点测试。
-- [ ] 运行全量测试 `PYTHONPATH=src .venv/bin/python -m pytest -q`。
-- [ ] 校验研究仓库 SHA-256 与 Task 4 前完全相同。
-- [ ] 使用 `rg` 确认生产分析、报告和任务目录没有导入 `knowledge_validation`。
-- [ ] 使用 `rg` 确认最终实现不存在 `MethodStatus`、`RelevanceStatus`、`ValidationRegistry`、`moving_block_bootstrap`、`benjamini_hochberg`、`score`、`weight` 或 `recommend` 等旧实验平台与评分字段。
-- [ ] 检查最终版本化产物只有一个直接验证模块、一个测试文件和一个十三行结果文件；无历史面板和重复报告。
-- [ ] 提交 `chore: verify minimal direct knowledge validation`。
+- [x] 运行直接验证、迁移、登记、治理验收和研究时点测试。
+- [x] 运行全量测试 `PYTHONPATH=src .venv/bin/python -m pytest -q`。
+- [x] 校验研究仓库 SHA-256 与 Task 4 前完全相同。
+- [x] 使用 `rg` 确认生产分析、报告和任务目录没有导入 `knowledge_validation`。
+- [x] 使用 `rg` 确认最终实现不存在 `MethodStatus`、`RelevanceStatus`、`ValidationRegistry`、`moving_block_bootstrap`、`benjamini_hochberg`、`score`、`weight` 或 `recommend` 等旧实验平台与评分字段。
+- [x] 检查最终版本化产物只有一个直接验证模块、一个测试文件和一个十三行结果文件；无历史面板和重复报告。
+- [x] 提交 `chore: verify minimal direct knowledge validation`。

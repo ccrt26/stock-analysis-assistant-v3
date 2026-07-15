@@ -1,5 +1,7 @@
 # V3 Second-Round Knowledge Expansion Implementation Plan
 
+> **Current status authority:** This plan does not prove production activation; current status is authoritative only in [`docs/operations/production-capability-matrix.md`](../../operations/production-capability-matrix.md).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:executing-plans` task-by-task. The user selected inline execution and does not authorize subagents unless later stated. Use `superpowers:test-driven-development` for every behavior or schema change and `superpowers:verification-before-completion` before completion.
 
 **Goal:** Add the approved high-authority A-share knowledge supplements, including nine concise factor perspectives, while using only the frozen data foundation and keeping all new empirical knowledge non-scoring and locally bounded.

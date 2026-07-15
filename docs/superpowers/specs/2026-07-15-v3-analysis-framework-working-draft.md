@@ -1,5 +1,7 @@
 # 股票分析助手 V3 分析框架共同设计草案
 
+> **当前状态权威：** 本文只记录共同设计，不证明生产能力或激活状态；当前状态只以 [`docs/operations/production-capability-matrix.md`](../../operations/production-capability-matrix.md) 为准。
+
 > **日期：** 2026-07-15
 > **状态：** 共同设计中，未完成，未批准为正式设计
 > **用途：** 持续记录本轮对话中已经由用户确认的分析目标、原则和模块
