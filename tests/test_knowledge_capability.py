@@ -32,6 +32,7 @@ from stock_analyzer.knowledge.governance_models import (
     SourceKind,
     SourceRecord,
 )
+from stock_analyzer.knowledge.registry import load_knowledge_registry
 from stock_analyzer.storage.research_schema import connect_research_warehouse
 from stock_analyzer.storage.research_warehouse import ResearchWarehouse
 
@@ -498,3 +499,139 @@ def test_audit_report_order_and_hash_are_deterministic():
 
     assert first.model_dump_json() == second.model_dump_json()
     assert first.audit_hash == second.audit_hash
+
+
+def official_registry_capability_fixture() -> CapabilitySnapshot:
+    fields = {
+        ("derived", "stock_trading_context"): (
+            "analysis_date",
+            "trader_identity_status",
+            "ts_code",
+        ),
+        ("fact", "equity_daily"): (
+            "amount",
+            "available_at",
+            "close",
+            "trade_date",
+            "ts_code",
+        ),
+        ("fact", "announcement"): (
+            "announcement_id",
+            "announcement_time",
+            "available_at",
+            "title",
+            "ts_code",
+        ),
+        ("fact", "company_profile"): (
+            "available_at",
+            "business_scope",
+            "main_business",
+            "ts_code",
+            "valid_from",
+        ),
+        ("fact", "main_business"): (
+            "available_at",
+            "classification",
+            "item_name",
+            "report_period",
+            "ts_code",
+        ),
+        ("fact", "security_master"): (
+            "available_at",
+            "exchange",
+            "list_status",
+            "market",
+            "ts_code",
+            "valid_from",
+        ),
+        ("fact", "stock_limit"): (
+            "available_at",
+            "down_limit",
+            "trade_date",
+            "ts_code",
+            "up_limit",
+        ),
+        ("fact", "suspension"): (
+            "available_at",
+            "suspend_type",
+            "trade_date",
+            "ts_code",
+        ),
+        ("fact", "holder_trade"): (
+            "ann_date",
+            "available_at",
+            "change_vol",
+            "holder_name",
+            "in_de",
+            "ts_code",
+        ),
+        ("fact", "share_float"): (
+            "ann_date",
+            "available_at",
+            "float_date",
+            "float_share",
+            "ts_code",
+        ),
+        ("fact", "repurchase"): (
+            "amount",
+            "announcement_date",
+            "available_at",
+            "process",
+            "ts_code",
+            "vol",
+        ),
+        ("fact", "income_statement"): (
+            "ann_date",
+            "available_at",
+            "n_income_attr_p",
+            "report_period",
+            "revenue",
+            "ts_code",
+        ),
+        ("fact", "balance_sheet"): (
+            "ann_date",
+            "available_at",
+            "report_period",
+            "total_assets",
+            "total_liab",
+            "ts_code",
+        ),
+    }
+    return CapabilitySnapshot(
+        analysis_date=date(2026, 7, 14),
+        items=tuple(
+            CapabilityItem(
+                kind=kind,
+                name=name,
+                fields=field_names,
+                partition_count=1,
+                row_count=1,
+                formula_versions=("stock-trading-context-v1",)
+                if kind == "derived"
+                else (),
+                quality_statuses=("complete",),
+                as_of_supported=True,
+                structurally_ready=True,
+            )
+            for (kind, name), field_names in sorted(fields.items())
+        ),
+        snapshot_hash="official-capability-fixture-v1",
+    )
+
+
+def test_active_registry_has_no_blocked_entry():
+    registry = load_knowledge_registry(
+        Path("src/stock_analyzer/knowledge/research_registry.yaml")
+    )
+    snapshot = official_registry_capability_fixture()
+
+    assessments = [
+        assess_entry_capability(entry, snapshot)
+        for entry in registry.entries
+        if entry.version_status == "current"
+    ]
+
+    assert assessments
+    assert all(
+        assessment.status.value == "complete" for assessment in assessments
+    ), assessments

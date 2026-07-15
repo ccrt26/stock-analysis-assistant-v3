@@ -1,0 +1,437 @@
+schema_version: v3-knowledge-governance-v1
+generated_on: 2026-07-15
+sources:
+  - source_id: official-csrc-program-trading-2024
+    grade: S
+    kind: official_rule
+    title: 证券市场程序化交易管理规定（试行）
+    publisher: 中国证券监督管理委员会
+    url: https://www.csrc.gov.cn/csrc/c100028/c7480577/content.shtml
+    document_number: 证监会公告〔2024〕8号
+    publication_date: 2024-05-15
+    effective_from: 2024-10-08
+    last_verified_on: 2026-07-15
+    jurisdiction: 中国大陆
+    market_scope: [A股]
+    method_summary: 规定程序化交易的定义、报告、监测、风险控制和高频交易监管要求。
+    limitations:
+      - 该规定约束程序化交易活动，但公开日线、分钟线本身不能识别具体账户或交易主体。
+
+  - source_id: official-sse-program-trading-2025
+    grade: S
+    kind: official_rule
+    title: 上海证券交易所程序化交易管理实施细则
+    publisher: 上海证券交易所
+    url: https://www.sse.com.cn/lawandrules/sselawsrules2025/trade/universal/c/c_20250612_10781696.shtml
+    document_number: 上证发〔2025〕52号
+    publication_date: 2025-04-03
+    effective_from: 2025-07-07
+    last_verified_on: 2026-07-15
+    jurisdiction: 中国大陆
+    market_scope: [上海证券交易所]
+    method_summary: 细化上交所程序化交易报告、交易管理、信息系统管理、监测和高频交易安排。
+    limitations:
+      - 实施细则用于确定监管边界，不能把普通行情数据转换为机构、主力或账户身份事实。
+
+  - source_id: official-csrc-disclosure-2025
+    grade: S
+    kind: official_rule
+    title: 上市公司信息披露管理办法
+    publisher: 中国证券监督管理委员会
+    url: https://www.csrc.gov.cn/shanghai/c105565/c7549909/content.shtml
+    document_number: 证监会令第226号
+    publication_date: 2025-04-08
+    effective_from: 2025-07-01
+    last_verified_on: 2026-07-15
+    jurisdiction: 中国大陆
+    market_scope: [A股]
+    method_summary: 规定上市公司信息披露的真实、准确、完整、及时、公平要求及责任边界。
+    limitations:
+      - 披露规则确定证据和时点边界，不证明某项政策或业务事项必然给特定公司带来收益。
+
+  - source_id: official-sse-trading-rules-2026
+    grade: S
+    kind: official_rule
+    title: 上海证券交易所交易规则（2026年修订）
+    publisher: 上海证券交易所
+    url: https://www.sse.com.cn/lawandrules/sselawsrules2025/stocks/exchange/c/c_20260424_10816482.shtml
+    document_number: 上证发〔2026〕41号
+    publication_date: 2026-04-24
+    effective_from: 2026-07-06
+    last_verified_on: 2026-07-15
+    jurisdiction: 中国大陆
+    market_scope: [上海证券交易所]
+    method_summary: 规定上交所证券交易、申报、竞价、价格限制、停复牌和异常交易等基础约束。
+    limitations:
+      - 部分修订条文暂缓实施，必须按分析日期和证券品种核对实际生效安排。
+
+  - source_id: official-szse-trading-rules-2026
+    grade: S
+    kind: official_rule
+    title: 深圳证券交易所交易规则（2026年修订）
+    publisher: 深圳证券交易所
+    url: https://docs.static.szse.cn/www/lawrules/rule/trade/W020260424690713155663.pdf
+    document_number: 深证上〔2026〕267号附件
+    publication_date: 2026-04-24
+    effective_from: 2026-07-06
+    last_verified_on: 2026-07-15
+    jurisdiction: 中国大陆
+    market_scope: [深圳证券交易所]
+    method_summary: 规定深交所证券交易、申报、竞价、价格限制、停复牌和异常交易等基础约束。
+    limitations:
+      - 必须结合分析日期、板块、证券品种以及另行通知的实施安排使用。
+
+  - source_id: official-bse-trading-rules-2026
+    grade: S
+    kind: official_rule
+    title: 北京证券交易所交易规则
+    publisher: 北京证券交易所
+    url: https://www.bse.cn/jygl_list/200028217.html
+    document_number: 北证公告〔2026〕17号
+    publication_date: 2026-04-24
+    effective_from: 2026-07-06
+    last_verified_on: 2026-07-15
+    jurisdiction: 中国大陆
+    market_scope: [北京证券交易所]
+    method_summary: 规定北交所股票交易、申报、竞价、价格限制和异常交易等基础约束。
+    limitations:
+      - 若干条款另行确定实施时间，不能脱离分析日期和具体证券适用范围机械套用。
+
+  - source_id: official-csrc-delisting-enforcement-2024
+    grade: S
+    kind: official_rule
+    title: 关于严格执行退市制度的意见
+    publisher: 中国证券监督管理委员会
+    url: https://www.csrc.gov.cn/csrc/c100028/c7473605/content.shtml
+    publication_date: 2024-04-12
+    effective_from: 2024-04-12
+    last_verified_on: 2026-07-15
+    jurisdiction: 中国大陆
+    market_scope: [A股]
+    method_summary: 明确严格强制退市标准、多元退市渠道、投资者保护和退市监管执行方向。
+    limitations:
+      - 政策意见不是对单一公司的退市认定，具体风险必须由时点有效的规则和公司事实支持。
+
+  - source_id: official-csrc-share-reduction-2024
+    grade: S
+    kind: official_rule
+    title: 上市公司股东减持股份管理暂行办法
+    publisher: 中国证券监督管理委员会
+    url: https://www.csrc.gov.cn/csrc/c101953/c7483190/content.shtml
+    document_number: 证监会令第224号
+    publication_date: 2024-05-24
+    effective_from: 2024-05-24
+    last_verified_on: 2026-07-15
+    jurisdiction: 中国大陆
+    market_scope: [A股]
+    method_summary: 规定大股东及特定股东减持的披露、限制、比例、方式和监管责任。
+    limitations:
+      - 已披露计划、实际实施和计划结束是不同事实；规则与公告不能证明股东未来一定卖出。
+
+  - source_id: official-csrc-buyback-2023
+    grade: S
+    kind: official_rule
+    title: 上市公司股份回购规则
+    publisher: 中国证券监督管理委员会
+    url: https://www.csrc.gov.cn/csrc/c100028/c7449681/content.shtml
+    document_number: 证监会公告〔2023〕63号
+    publication_date: 2023-12-15
+    effective_from: 2023-12-15
+    last_verified_on: 2026-07-15
+    jurisdiction: 中国大陆
+    market_scope: [A股]
+    method_summary: 规定上市公司回购股份的条件、程序、实施约束、信息披露和监管责任。
+    limitations:
+      - 回购提议、方案、实施进度和完成不能混为一谈，回购公告也不保证股价上涨。
+
+  - source_id: official-csrc-restructuring-2023
+    grade: S
+    kind: official_rule
+    title: 上市公司重大资产重组管理办法（2023年修订）
+    publisher: 中国证券监督管理委员会
+    url: https://www.csrc.gov.cn/csrc/c101953/c7121862/content.shtml
+    document_number: 证监会令第214号
+    publication_date: 2023-02-17
+    effective_from: 2023-02-17
+    effective_to: 2025-05-15
+    last_verified_on: 2026-07-15
+    jurisdiction: 中国大陆
+    market_scope: [A股]
+    method_summary: 规定重大资产重组的认定、原则、披露、审核注册、实施和监管要求。
+    limitations:
+      - 该版本已由2025年修改决定修正，历史分析必须使用当时有效条文。
+
+  - source_id: official-csrc-restructuring-amendment-2025
+    grade: S
+    kind: official_rule
+    title: 关于修改《上市公司重大资产重组管理办法》的决定
+    publisher: 中国证券监督管理委员会
+    url: https://www.csrc.gov.cn/csrc/c101953/c7558586/content.shtml
+    document_number: 证监会令第230号
+    publication_date: 2025-05-16
+    effective_from: 2025-05-16
+    last_verified_on: 2026-07-15
+    jurisdiction: 中国大陆
+    market_scope: [A股]
+    method_summary: 修正重大资产重组管理办法并形成自2025年5月16日起适用的现行规则版本。
+    limitations:
+      - 规则生效、方案披露、审核注册、资产交割和业绩实现是不同阶段，不能相互替代。
+
+entries:
+  - knowledge_id: src_cn_program_trading_rules_2025
+    title: 价量结果不得推断交易主体身份
+    primary_source_id: official-csrc-program-trading-2024
+    supporting_source_ids: [official-sse-program-trading-2025]
+    source_grade: S
+    version_status: current
+    effective_from: 2025-07-07
+    effect: hard_boundary
+    modules: [price_trading, risk]
+    opportunity_types: [general]
+    topics: [trader_identity_boundary]
+    claim_summary: 日线和分钟线可以描述成交、价格路径和相对强弱，但不能识别机构、主力、游资或账户身份。
+    allowed_uses:
+      - 描述成交放大、上涨放量、收在日内较高位置等可观察交易结果。
+      - 明确说明现有数据不能识别交易主体。
+    forbidden_uses:
+      - 把价量现象翻译成机构买入、主力吸筹、游资拉升或主力未出货。
+      - 把第三方黑箱资金流标签当成账户身份事实。
+    prerequisites:
+      - 使用分析时点已经可得的日线或分钟线事实。
+      - 将事实、复算观察、模型判断和用户表达分层记录。
+    counter_evidence:
+      - 经核验的逐笔委托、订单簿和账户身份数据可能支持更窄的主体判断。
+      - 仅有行情柱或成交额变化不构成主体证据。
+    data_requirements:
+      - kind: derived
+        name: stock_trading_context
+        required_fields: [analysis_date, ts_code, trader_identity_status]
+      - kind: fact
+        name: equity_daily
+        required_fields: [available_at, trade_date, ts_code, amount, close]
+    local_validation:
+      status: not_required
+      reason: 这是官方规则支持的表达边界，不是经验阈值。
+
+  - knowledge_id: src_csrc_disclosure_rules_2025
+    title: 公司业务联系必须由时点有效的正式披露支持
+    primary_source_id: official-csrc-disclosure-2025
+    source_grade: S
+    version_status: current
+    effective_from: 2025-07-01
+    effect: hard_boundary
+    modules: [company_business, events]
+    opportunity_types: [general]
+    topics: [business_transmission, official_publication_timing]
+    claim_summary: 公司与行业或主题的真实联系必须基于分析时点已经公开的公司业务和公告事实，政策方向本身不能证明公司受益。
+    allowed_uses:
+      - 核对公司主营业务、业务分部和正式公告的发布时间与内容。
+      - 区分行业政策、公司声明、已签合同、收入贡献和利润贡献。
+    forbidden_uses:
+      - 用行业标签、媒体转述或政策关键词替代公司正式披露。
+      - 把政策鼓励直接写成公司订单、收入或利润已经增长。
+    prerequisites:
+      - 只使用分析时点之前已经公开且能够追溯来源的披露。
+      - 同时核对公司概况、主营业务分部和公告。
+    counter_evidence:
+      - 最新正式披露否认相关业务或显示收入贡献很低。
+      - 公告发布时间晚于分析时点。
+    data_requirements:
+      - kind: fact
+        name: announcement
+        required_fields: [announcement_id, announcement_time, available_at, title, ts_code]
+      - kind: fact
+        name: company_profile
+        required_fields: [available_at, business_scope, main_business, ts_code, valid_from]
+      - kind: fact
+        name: main_business
+        required_fields: [available_at, classification, item_name, report_period, ts_code]
+    local_validation:
+      status: not_required
+      reason: 这是正式披露的证据和时点边界，不是收益预测阈值。
+
+  - knowledge_id: src_cn_exchange_trading_rules_2026
+    title: 按市场、板块和日期适用交易约束
+    primary_source_id: official-sse-trading-rules-2026
+    supporting_source_ids:
+      - official-szse-trading-rules-2026
+      - official-bse-trading-rules-2026
+    source_grade: S
+    version_status: current
+    effective_from: 2026-07-06
+    effect: hard_boundary
+    modules: [price_trading, risk]
+    opportunity_types: [general]
+    topics: [exchange_constraints]
+    claim_summary: 涨跌幅、停复牌和交易申报等约束必须根据分析日期、交易所、板块和证券状态使用当时有效的规则。
+    allowed_uses:
+      - 核对证券所属交易所、板块、当日涨跌停价格和停复牌事实。
+      - 说明规则约束对目标涨幅可达性和交易行动的直接影响。
+    forbidden_uses:
+      - 把一个交易所或板块的规则机械套到另一市场。
+      - 忽略暂缓实施条文或使用分析日期之后才生效的规则。
+    prerequisites:
+      - 确认证券、市场、板块和分析日期。
+      - 使用当日证券状态、涨跌停价格和停复牌事实。
+    counter_evidence:
+      - 证券品种另有特别规定或条文尚未实施。
+      - 公司当日停牌、风险状态或交易安排改变通常约束。
+    data_requirements:
+      - kind: fact
+        name: security_master
+        required_fields: [available_at, exchange, list_status, market, ts_code, valid_from]
+      - kind: fact
+        name: stock_limit
+        required_fields: [available_at, down_limit, trade_date, ts_code, up_limit]
+      - kind: fact
+        name: suspension
+        required_fields: [available_at, suspend_type, trade_date, ts_code]
+      - kind: fact
+        name: equity_daily
+        required_fields: [available_at, close, trade_date, ts_code]
+    local_validation:
+      status: not_required
+      reason: 这是交易规则适用边界，不是经验阈值。
+
+  - knowledge_id: src_cn_delisting_enforcement_2024
+    title: 退市风险必须由适用规则和公司事实共同确认
+    primary_source_id: official-csrc-delisting-enforcement-2024
+    source_grade: S
+    version_status: current
+    effective_from: 2024-04-12
+    effect: hard_boundary
+    modules: [risk]
+    opportunity_types: [turnaround]
+    topics: [delisting_risk]
+    claim_summary: 严格退市政策是风险审查边界，不能脱离现行规则、公司公告和证券状态直接认定个股退市。
+    allowed_uses:
+      - 检查证券状态、退市风险公告和停复牌事实。
+      - 在困境反转分析中优先说明可能导致永久损失的风险。
+    forbidden_uses:
+      - 仅凭亏损、低价或政策意见认定公司必然退市。
+      - 以壳价值猜想替代现行退市指标和正式公告。
+    prerequisites:
+      - 核对分析时点适用的交易所退市规则和公司正式公告。
+    counter_evidence:
+      - 公司尚未触发适用标准或正式公告显示风险已经消除。
+      - 证券状态和停复牌事实与传闻不一致。
+    data_requirements:
+      - kind: fact
+        name: security_master
+        required_fields: [available_at, list_status, market, ts_code]
+      - kind: fact
+        name: announcement
+        required_fields: [announcement_id, available_at, title, ts_code]
+      - kind: fact
+        name: suspension
+        required_fields: [available_at, suspend_type, trade_date, ts_code]
+    local_validation:
+      status: not_required
+      reason: 这是政策与事实适用边界，不是个股预测阈值。
+
+  - knowledge_id: src_cn_share_reduction_rules_2024
+    title: 区分减持计划、实际减持和限制条件
+    primary_source_id: official-csrc-share-reduction-2024
+    source_grade: S
+    version_status: current
+    effective_from: 2024-05-24
+    effect: observation_only
+    modules: [events, risk]
+    opportunity_types: [company_event]
+    topics: [share_reduction]
+    claim_summary: 减持分析只能描述已披露计划、已经发生的持股变化和适用限制，不能由计划推断未来一定卖出。
+    allowed_uses:
+      - 区分拟减持数量、时间区间、实际变动、剩余计划和限制条件。
+      - 说明公告事实可能形成的供给压力或不确定性，但保留条件语气。
+    forbidden_uses:
+      - 把减持计划写成已经卖出或未来必然全部卖出。
+      - 仅凭股东身份推断其主观出售意图。
+    prerequisites:
+      - 核对公告、股东变动记录和股份解禁时间表。
+    counter_evidence:
+      - 计划到期未实施、提前终止、实际减持显著低于计划或存在禁止减持条件。
+    data_requirements:
+      - kind: fact
+        name: holder_trade
+        required_fields: [ann_date, available_at, change_vol, holder_name, in_de, ts_code]
+      - kind: fact
+        name: share_float
+        required_fields: [ann_date, available_at, float_date, float_share, ts_code]
+      - kind: fact
+        name: announcement
+        required_fields: [announcement_id, available_at, title, ts_code]
+    local_validation:
+      status: not_required
+      reason: 只记录披露事实与规则约束，不生成价格预测阈值。
+
+  - knowledge_id: src_cn_buyback_rules_2023
+    title: 回购必须按计划、进展和完成阶段分别判断
+    primary_source_id: official-csrc-buyback-2023
+    source_grade: S
+    version_status: current
+    effective_from: 2023-12-15
+    effect: observation_only
+    modules: [events]
+    opportunity_types: [company_event]
+    topics: [buyback_stage]
+    claim_summary: 回购方案、实施进度和完成是不同事实，公告方案不等于股份已经买入，也不保证价格上涨。
+    allowed_uses:
+      - 分别记录回购方案、价格区间、实施金额、实施数量和完成状态。
+      - 把实际执行与公司财务承受能力一起分析。
+    forbidden_uses:
+      - 把董事会提议或方案公告写成回购已经完成。
+      - 把回购公告单独作为上涨保证。
+    prerequisites:
+      - 核对回购结构化记录和原始公告的阶段与日期。
+    counter_evidence:
+      - 尚未实施、实施比例低、期限临近、方案调整或终止。
+    data_requirements:
+      - kind: fact
+        name: repurchase
+        required_fields: [amount, announcement_date, available_at, process, ts_code, vol]
+      - kind: fact
+        name: announcement
+        required_fields: [announcement_id, available_at, title, ts_code]
+    local_validation:
+      status: not_required
+      reason: 只记录回购阶段和事实，不生成价格预测阈值。
+
+  - knowledge_id: src_cn_restructuring_rules_2025
+    title: 重组按披露、审核、交割和经营实现分阶段判断
+    primary_source_id: official-csrc-restructuring-amendment-2025
+    supporting_source_ids: [official-csrc-restructuring-2023]
+    source_grade: S
+    version_status: current
+    effective_from: 2025-05-16
+    effect: hard_boundary
+    modules: [events, fundamentals]
+    opportunity_types: [company_event]
+    topics: [restructuring_stage]
+    claim_summary: 重组方案、审核注册、资产交割和经营业绩实现是不同阶段，方案披露不能当作并表利润已经实现。
+    allowed_uses:
+      - 核对重组阶段、交易对价、标的业务、财务影响和正式进展公告。
+      - 将已披露交易经济性与公司现有财务规模对比。
+    forbidden_uses:
+      - 把预案、受理或注册写成资产已经交割或利润已经并表。
+      - 把监管注册解释为对投资价值或收益的保证。
+    prerequisites:
+      - 使用分析时点已经公开的公告和财务报表。
+      - 区分意向、预案、审核注册、交割、并表和承诺兑现阶段。
+    counter_evidence:
+      - 方案终止、审核中止、交易条件未满足、交割延期或标的业绩低于披露假设。
+    data_requirements:
+      - kind: fact
+        name: announcement
+        required_fields: [announcement_id, announcement_time, available_at, title, ts_code]
+      - kind: fact
+        name: income_statement
+        required_fields: [ann_date, available_at, n_income_attr_p, report_period, revenue, ts_code]
+      - kind: fact
+        name: balance_sheet
+        required_fields: [ann_date, available_at, report_period, total_assets, total_liab, ts_code]
+      - kind: fact
+        name: main_business
+        required_fields: [available_at, classification, item_name, report_period, ts_code]
+    local_validation:
+      status: not_required
+      reason: 这是重组阶段和证据边界，不是收益预测阈值。

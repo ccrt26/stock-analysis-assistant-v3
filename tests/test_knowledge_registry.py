@@ -13,6 +13,24 @@ from stock_analyzer.knowledge.registry import (
 )
 
 
+REAL_REGISTRY_PATH = Path(
+    "src/stock_analyzer/knowledge/research_registry.yaml"
+)
+MANDATORY_S_SOURCE_IDS = {
+    "official-csrc-program-trading-2024",
+    "official-sse-program-trading-2025",
+    "official-csrc-disclosure-2025",
+    "official-sse-trading-rules-2026",
+    "official-szse-trading-rules-2026",
+    "official-bse-trading-rules-2026",
+    "official-csrc-delisting-enforcement-2024",
+    "official-csrc-share-reduction-2024",
+    "official-csrc-buyback-2023",
+    "official-csrc-restructuring-2023",
+    "official-csrc-restructuring-amendment-2025",
+}
+
+
 def source_payload(*, source_id: str = "official-program-trading") -> dict:
     return {
         "source_id": source_id,
@@ -209,3 +227,32 @@ def test_legacy_migration_loader_validates_fixed_schema(tmp_path):
         write_yaml(tmp_path / "migration.yaml", payload)
     )
     assert migration.entries[0].legacy_knowledge_id == "legacy-rule"
+
+
+def test_real_registry_contains_exact_mandatory_official_source_floor():
+    registry = load_knowledge_registry(REAL_REGISTRY_PATH)
+    sources = {source.source_id: source for source in registry.sources}
+
+    assert MANDATORY_S_SOURCE_IDS <= set(sources)
+    for source_id in sorted(MANDATORY_S_SOURCE_IDS):
+        source = sources[source_id]
+        assert source.grade.value == "S"
+        assert source.effective_from is not None
+        assert source.last_verified_on.isoformat() == "2026-07-15"
+        assert source.url.host in {
+            "www.csrc.gov.cn",
+            "www.sse.com.cn",
+            "docs.static.szse.cn",
+            "www.bse.cn",
+        }
+
+
+def test_official_entries_never_claim_automatic_price_rise():
+    registry = load_knowledge_registry(REAL_REGISTRY_PATH)
+    forbidden_claims = ("必然上涨", "自动上涨", "保证上涨", "必涨")
+
+    for entry in registry.entries:
+        if entry.source_grade.value != "S":
+            continue
+        searchable = " ".join((entry.claim_summary, *entry.allowed_uses))
+        assert not any(claim in searchable for claim in forbidden_claims)
