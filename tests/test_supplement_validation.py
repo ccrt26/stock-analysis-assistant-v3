@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pandas as pd
 import pytest
+import yaml
 
 from stock_analyzer.knowledge_validation.supplement_validation import (
     SOURCE_REFS,
@@ -453,3 +454,41 @@ def test_real_validation_is_exact_deterministic_and_read_only():
     )
     assert first == second
     assert before == after
+
+
+def test_results_are_exact_binary_and_complete():
+    payload = yaml.safe_load(
+        Path(
+            "src/stock_analyzer/knowledge/supplement_validation_results.yaml"
+        ).read_text()
+    )
+    rows = payload["results"]
+
+    assert payload["schema_version"] == "v3-supplement-validation-v1"
+    assert tuple(row["knowledge_id"] for row in rows) == tuple(
+        item.knowledge_id for item in SUPPLEMENT_CLAIMS
+    )
+    assert all(row["decision"] in {"use", "discard"} for row in rows)
+    assert all(
+        row["core_theory"]
+        and row["evidence_summary"]
+        and row["counter_evidence"]
+        and row["reason"]
+        for row in rows
+    )
+    assert all(
+        row["source_verification"] in {"verified", "failed"} for row in rows
+    )
+
+
+def test_holder_trade_is_discarded_and_all_other_supplements_are_usable():
+    rows = yaml.safe_load(
+        Path(
+            "src/stock_analyzer/knowledge/supplement_validation_results.yaml"
+        ).read_text()
+    )["results"]
+    decisions = {row["knowledge_id"]: row["decision"] for row in rows}
+
+    assert decisions["src_cn_disclosed_holder_trade"] == "discard"
+    assert sum(value == "use" for value in decisions.values()) == 14
+    assert sum(value == "discard" for value in decisions.values()) == 1

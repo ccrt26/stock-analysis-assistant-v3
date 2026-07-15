@@ -1,0 +1,228 @@
+schema_version: v3-supplement-validation-v1
+generated_on: 2026-07-15
+warehouse_sha256: 6da3469d3346ec23c4afa6bd72ab8673df37932048b79e3feb1d5d6288f3da5a
+results:
+  - knowledge_id: src_cn_factor_momentum_2023
+    action: enhance
+    validation_kind: empirical
+    source_verification: verified
+    core_theory: >-
+      中国股票的趋势延续会随上涨、下跌及市场状态切换而改变；市场环境只能改变趋势证据的可信程度，不能把市场上涨直接写成强势行业或个股必然继续上涨。
+    required_data: [index_daily, equity_daily, industry_daily, theme_daily]
+    evidence_summary: >-
+      292112个股票形成日观察中，20日相对强弱与后续20日超额收益总体秩相关为-0.0543，较早期-0.0937、较晚期-0.0304；分状态后，连续上涨为0.0102，其余三种状态为-0.0517至-0.0807，说明市场状态确实改变趋势延续的可信程度，而且A股不能套用“上涨市场追强更可靠”的简单直觉。
+    counter_evidence: >-
+      全样本关系偏反转，连续上涨状态也仅接近零；该知识不能被写成动量买入规则。
+    decision: use
+    reason: >-
+      原始A股论文已核对，现有价格和指数数据能直接形成状态与相对强弱；只用于调整趋势证据可信度，不预测必涨，也不复制论文固定形成期和收益幅度。
+
+  - knowledge_id: src_cn_return_dispersion_risk
+    action: new
+    validation_kind: empirical
+    source_verification: verified
+    core_theory: >-
+      市场或行业成员收益分化扩大说明共同上涨程度下降，并可能对应更高的不确定性和后续波动；分化是风险证据，但不能单独证明市场即将下跌。
+    required_data: [equity_daily, index_daily, industry_member]
+    evidence_summary: >-
+      1767个行业形成日观察中，成员日收益样本标准差与后续20日实现波动总体秩相关为0.6010，较早期0.6025、较晚期0.5502，方向强且前后时期一致。
+    counter_evidence: >-
+      分化与未来波动相关，但没有给出指数或行业下一步上涨还是下跌。
+    decision: use
+    reason: >-
+      来源和本地变量等价，现有行业成员与价格数据可稳定复算；用于热点内部一致性和脆弱性判断，不作为方向信号。
+
+  - knowledge_id: src_cn_turnover_momentum_boundary
+    action: new
+    validation_kind: empirical
+    source_verification: verified
+    core_theory: >-
+      高换手特征可能削弱中国股票的价格延续关系，因此成交放大必须与换手稳定性和价格波动共同检查；高换手本身既不证明趋势可靠，也不能识别资金或账户身份。
+    required_data: [daily_basic, equity_daily, adj_factor, index_daily]
+    evidence_summary: >-
+      292112个观察中，相对强弱与后续超额收益总体为负；按过去20日换手分为低、中、高三组后，关系依次为-0.0231、-0.0490、-0.0593，高换手组没有显示更可靠的趋势延续。
+    counter_evidence: >-
+      该结果说明高换手不是正向确认，但不能据此识别散户、机构、游资或所谓主力。
+    decision: use
+    reason: >-
+      A股论文、换手和复权价格数据均可直接执行；只作为成交放大解释的限制条件，不建立高换手加减分。
+
+  - knowledge_id: src_cn_profitability_valuation_support
+    action: new
+    validation_kind: empirical
+    source_verification: verified
+    core_theory: >-
+      盈利能力与估值需要共同比较，ROE、ROA、毛利能力和资产使用效率回答不同问题；这些盈利事实可以检查高估值是否有经营支撑，但不能直接预测未来二至六周上涨。
+    required_data: [income_statement, balance_sheet, financial_indicator, daily_basic, equity_daily, adj_factor, index_daily]
+    evidence_summary: >-
+      约2.6万个财务形成日观察可分别复算ROE、ROA、毛利除资产和资产周转，并同步取得PE、PB、PS。与20日超额收益的关系整体较弱且部分前后时期反向，证明这些维度不适合直接变成短期收益分数，但可以稳定回答盈利与估值是否匹配。
+    counter_evidence: >-
+      毛利能力的收益关系由较早期0.1389转为较晚期-0.0546，ROE、ROA同样不稳定；盈利高不能写成未来二至六周必涨。
+    decision: use
+    reason: >-
+      核心用途是基本面与估值的独立比较而非收益预测，所有核心字段均可按时点复算；使用时必须保留各维度和行业可比性，不合成盈利总分。
+
+  - knowledge_id: src_cn_cash_accrual_quality
+    action: new
+    validation_kind: empirical
+    source_verification: verified
+    core_theory: >-
+      利润增长需要拆分经营现金支持和应计成分，以识别利润与现金流同步改善还是依赖应收、存货或一次性项目；当前使用不得复制原研究时期的退市制度和历史阈值。
+    required_data: [income_statement, balance_sheet, cash_flow, financial_indicator, equity_daily, adj_factor, index_daily]
+    evidence_summary: >-
+      26326个观察中，按期初资产缩放的经营现金成分与下一年同季盈利总体秩相关0.4540，较早期0.4480、较晚期0.4744；应计成分与下一年盈利仅0.0234。现金和应计对20日收益的关系较弱，符合“判断利润持续性、不直接预测短期价格”的用途。
+    counter_evidence: >-
+      原论文受旧退市制度和亏损公司会计行为影响，本地不能继承其固定分组、阈值或收益策略。
+    decision: use
+    reason: >-
+      现金与应计的核心变量、时点和方向均可直接复算，前后时期的盈利持续性关系一致；只用于利润质量和反证分析。
+
+  - knowledge_id: src_cn_illiquidity_operability
+    action: new
+    validation_kind: empirical
+    source_verification: verified
+    core_theory: >-
+      日收益相对成交额可以形成粗粒度非流动性观察，识别较小成交即可造成较大价格变化的股票；该观察用于风险和可操作性，不是订单簿冲击，也不表示流动性差就有更高未来收益。
+    required_data: [equity_daily, daily_basic, adj_factor, index_daily]
+    evidence_summary: >-
+      292112个观察均可按明确公式复算绝对复权日收益除以成交额。它与后续回撤的总体关系较弱，且较早期0.0795、较晚期-0.0049，不能形成收益或风险方向信号；但作为日线级价格冲击和可交易性描述可直接执行。
+    counter_evidence: >-
+      前后时期关系不稳定，且缺少买卖价差、逐笔成交和订单簿，不能声称测得真实市场冲击。
+    decision: use
+    reason: >-
+      使用范围明确限定为粗粒度流动性和操作风险比较，不依赖未来收益方向；公式和数据完整，可直接用于候选淘汰与风险说明。
+
+  - knowledge_id: src_cn_max_overextension
+    action: new
+    validation_kind: empirical
+    source_verification: verified
+    core_theory: >-
+      近期最大单日上涨和连续快速拉升可能表现出彩票型追涨与价格透支风险；MAX只能作为强势股的风险反证，不能机械淘汰所有近期上涨股票。
+    required_data: [equity_daily, adj_factor, daily_basic, index_daily]
+    evidence_summary: >-
+      292112个观察中，过去20日最大单日收益与后续20日超额收益总体秩相关-0.0538，较早期-0.0793、较晚期-0.0192，方向前后一致但强度下降，适合作为追涨透支反证而非硬淘汰线。
+    counter_evidence: >-
+      关系不强且随时期减弱，部分真正启动的强势股仍可能继续上涨。
+    decision: use
+    reason: >-
+      A股来源与现有复权日线可直接对应，前后方向基本一致；仅提供过度延伸风险证据，不设固定MAX阈值。
+
+  - knowledge_id: src_cn_earnings_disclosure_hierarchy
+    action: new
+    validation_kind: official_semantics
+    source_verification: verified
+    core_theory: >-
+      业绩预告、业绩快报、正式定期报告和更正公告处于不同披露阶段，具有不同确定性；预告不是正式实现结果，快报也可能被正式财报或更正改变。
+    required_data: [earnings_forecast, earnings_express, income_statement, announcement]
+    evidence_summary: >-
+      沪深交易所2026年现行规则已核对；预告类型与区间、快报同比、正式报告类型和公告标题时间均在现有事实表中独立存在，可按公开时点区分四个阶段。
+    counter_evidence: >-
+      预告和快报仍可能被修正，任何阶段都不能仅凭名称当作已实现业绩。
+    decision: use
+    reason: >-
+      这是官方语义边界而非收益预测，规则有效且字段完整，可以直接约束事件分析和用户表达。
+
+  - knowledge_id: src_cn_margin_semantics
+    action: new
+    validation_kind: mixed
+    source_verification: verified
+    core_theory: >-
+      融资余额、融资买入、融资偿还和融券余量具有正式定义，可用于观察杠杆交易变化和潜在拥挤；融资买入增加不等于机构看多，也不能单独成为未来收益预测。
+    required_data: [margin_detail, equity_daily, index_daily]
+    evidence_summary: >-
+      40130个观察可分别计算融资买入减偿还和融资余额变化。融资净流量与后续回撤总体关系0.0062，较早期-0.0449、较晚期0.0222，方向不稳定，恰好说明它不能作为收益或风险方向信号。
+    counter_evidence: >-
+      数据是全体信用交易汇总，既不能识别机构，也不能说明交易动机；经验关系前后反向。
+    decision: use
+    reason: >-
+      官方定义和现有字段完整，可直接描述杠杆变化与拥挤背景；使用边界明确禁止主体推断和单独预测。
+
+  - knowledge_id: src_cn_share_reduction_rules_2024
+    action: enhance
+    validation_kind: official_semantics
+    source_verification: verified
+    core_theory: >-
+      限售股份取得流通资格、股东提出减持计划和正式披露的实际减持是三个不同事实阶段；只有解禁事实时不能写成股东已经出售股份。
+    required_data: [share_float, holder_trade, announcement]
+    evidence_summary: >-
+      证监会减持规则和沪深上市规则已核对；现有数据分别具有解禁日期、实际增减持方向与数量、公告标题与时间，可以直接区分资格、计划和已执行事实。
+    counter_evidence: >-
+      解禁只增加可流通资格，未出现计划或实际交易时没有证据证明股东抛售。
+    decision: use
+    reason: >-
+      这是高优先级官方表达边界，数据字段完整，能够直接修正旧知识中可能混淆的阶段含义。
+
+  - knowledge_id: src_cn_pledge_conditional_risk
+    action: new
+    validation_kind: mixed
+    source_verification: verified
+    core_theory: >-
+      股票质押是融资担保安排，风险是否升级取决于质押比例、股价变化、流动性、财务状况及履约处置条件；质押事实本身不等于爆仓，也不能据此推算具体平仓价格。
+    required_data: [pledge, equity_daily, daily_basic, balance_sheet, cash_flow]
+    evidence_summary: >-
+      45393个观察可将质押比例、价格变化、成交额、负债率和经营现金流分开呈现。质押比例与后续回撤总体关系-0.0353，较早期-0.0323、较晚期-0.0528，风险方向一致但不强，适合条件性风险审查。
+    counter_evidence: >-
+      公共数据没有合同维持担保比例和处置条款，无法计算具体预警线或平仓价；已有论文也不支持“有质押必然崩盘”。
+    decision: use
+    reason: >-
+      官方规则、A股研究和现有数据共同支持条件式表达，且前后风险方向基本一致；禁止把质押率单独转换为利空结论。
+
+  - knowledge_id: src_cn_disclosed_holder_trade
+    action: new
+    validation_kind: empirical
+    source_verification: verified
+    core_theory: >-
+      依法披露的董监高或重要股东实际增减持包含公司相关信息，应与后续经营变化共同观察；单次增持不能证明股价上涨，内部人交易在这里不表示违法内幕交易。
+    required_data: [holder_trade, income_statement, earnings_forecast, equity_daily, adj_factor, index_daily]
+    evidence_summary: >-
+      47998个已披露增减持观察中，带方向的变动数量与下一报告经营变化总体秩相关-0.0072，较早期-0.0107、较晚期0.0083，接近零且前后时期反向，未形成可复用的增量经营识别能力。
+    counter_evidence: >-
+      股东交易可能受个人资金、合规窗口、股权安排等多种原因影响；现有数据无法证明单次交易反映经营信心。
+    decision: discard
+    reason: >-
+      来源可信、数据可算，但本地核心关系不连贯，直接使用会把披露行为过度解释成经营或价格信号；本轮不入库，也不保留有限使用状态。
+
+  - knowledge_id: src_cn_buyback_rules_2023
+    action: enhance
+    validation_kind: mixed
+    source_verification: verified
+    core_theory: >-
+      股份回购的提议、预案、股东大会通过、实施、完成、停止和未通过是不同阶段，实际执行比计划公告提供更多行动事实；回购仍不能单独证明公司被低估或未来上涨。
+    required_data: [repurchase, equity_daily, adj_factor, index_daily]
+    evidence_summary: >-
+      43729个观察完整保留七种提供方阶段；实施和完成阶段的后续20日平均超额收益分别约1.53%和1.02%，但实际执行与计划状态的总体秩关系接近零且前后反向，不能形成收益信号。阶段事实本身可稳定执行。
+    counter_evidence: >-
+      提议、预案等阶段平均收益也为正，实际执行没有稳定的独立短期预测力；停止样本等极端小组不能扩大解释。
+    decision: use
+    reason: >-
+      增强用途是区分计划与实际行动，而不是给回购加分；来源和阶段字段完整，可直接约束事件表达。
+
+  - knowledge_id: src_csrc_disclosure_rules_2025
+    action: enhance
+    validation_kind: official_semantics
+    source_verification: verified
+    core_theory: >-
+      上市公司不得迎合市场热点或夸大业务影响，公司与主题的真实联系必须由主营范围、分部收入利润或正式公告支持；没有正式业务和收入证据时不能写成公司将明显受益。
+    required_data: [company_profile, main_business, announcement]
+    evidence_summary: >-
+      上交所2026年规范运作指引已核对；现有数据具有经营范围、主营业务、分部分类、项目名称、收入、利润及正式公告时间，可以形成从概念名称到真实经营证据的逐层核对。
+    counter_evidence: >-
+      互动平台回复、战略愿景、公司简称和概念标签不能替代正式业务、收入或项目证据。
+    decision: use
+    reason: >-
+      官方规则有效且字段完整，直接服务于“热点怎样传导到公司”和“为什么不是其他股票”，应作为强制表达边界。
+
+  - knowledge_id: src_portfolio_common_exposure
+    action: new
+    validation_kind: portfolio_method
+    source_verification: verified
+    core_theory: >-
+      组合风险取决于候选之间的共同收益变化和集中暴露，五只股票若属于同一行业、主题或高度同步就不是五个独立机会；当前只做透明集中度和相关性检查，不估计最优权重。
+    required_data: [industry_member, theme_member, equity_daily, adj_factor]
+    evidence_summary: >-
+      现有行业、主题成员和复权收益可对恰好五只候选直接执行。在确定性真实样例中，最大行业集中2只、最大主题集中4只、最高两两相关性0.6492，能够识别“五只股票实际押同一主题”的情况。
+    counter_evidence: >-
+      历史相关性会变化，主题成员关系也不等于未来共同涨跌；小样本下复杂最优权重估计不稳定。
+    decision: use
+    reason: >-
+      理论与方法来源已核对，现有数据完整；只输出透明集中度和相关性提醒，不引入优化器、仓位或评分。

@@ -846,6 +846,8 @@ def _load_price_panel(root: Path) -> pd.DataFrame:
             "future_excess_return_20d",
             "adjusted_return_1d",
         ]
+    ).sort_values(
+        ["formation_date", "ts_code"], kind="mergesort"
     ).reset_index(drop=True)
 
 
