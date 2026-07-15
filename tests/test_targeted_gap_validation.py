@@ -6,6 +6,7 @@ import math
 from pathlib import Path
 
 import pandas as pd
+import yaml
 
 from stock_analyzer.data.research_contracts import ResearchDatasetId
 from stock_analyzer.knowledge_validation.targeted_gap_validation import (
@@ -39,6 +40,9 @@ EXPECTED_SOURCE_REFS = frozenset(
         "10.1016/j.irfa.2023.102770",
         "10.1016/j.jacceco.2010.09.001",
     }
+)
+RESULT_PATH = Path(
+    "src/stock_analyzer/knowledge/targeted_gap_validation_results.yaml"
 )
 
 
@@ -636,3 +640,40 @@ def test_targeted_validation_is_deterministic_exactly_four_and_read_only(tmp_pat
     assert first == second
     json.dumps([asdict(item) for item in first], ensure_ascii=False)
     assert _file_hashes(root) == before
+
+
+def test_targeted_result_records_exact_binary_scientific_decisions():
+    payload = yaml.safe_load(RESULT_PATH.read_text(encoding="utf-8"))
+    results = payload["results"]
+    required_keys = {
+        "knowledge_id",
+        "source_verification",
+        "core_theory",
+        "formula",
+        "required_data",
+        "sample_period",
+        "observation_count",
+        "overall_observation",
+        "earlier_observation",
+        "later_observation",
+        "counter_evidence",
+        "decision",
+        "decision_reason",
+    }
+
+    assert tuple(item["knowledge_id"] for item in results) == EXPECTED_IDS
+    assert len(results) == 4
+    assert all(set(item) == required_keys for item in results)
+    assert {item["decision"] for item in results} <= {"use", "discard"}
+    assert {
+        item["knowledge_id"]: item["decision"] for item in results
+    } == {
+        "src_cn_business_segment_materiality": "use",
+        "src_cn_earnings_growth_persistence": "discard",
+        "src_cn_relative_valuation_context": "use",
+        "src_cn_turnaround_financial_consistency": "use",
+    }
+    forbidden = {"limited", "pending", "defer", "blocked"}
+    assert not forbidden.intersection(
+        json.dumps(payload, ensure_ascii=False, default=str).lower().split()
+    )

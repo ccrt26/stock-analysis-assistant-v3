@@ -1,0 +1,101 @@
+schema_version: v3-targeted-gap-validation-v1
+analysis_date: 2026-07-14
+warehouse_sha256_at_run: 6e1a33a60aa24cc2cd527a73f054fdb5c33880e78d8ff4800d53a197f739afa1
+results:
+  - knowledge_id: src_cn_business_segment_materiality
+    source_verification: >-
+      已核对财政部《企业会计准则第35号——分部报告》官方原文和财会〔2006〕3号实施信息；
+      准则支持分部收入、费用、利润及其与企业整体报表衔接，但不支持把披露门槛改成选股阈值。
+    core_theory: >-
+      热点业务是否足以影响公司，必须同时核对业务存在、同口径分部收入成本利润及其占公司整体经营的比例；
+      概念、规划、研发或小额业务不能直接表述为公司整体明显受益。
+    formula: >-
+      在同公司、同报告期、同classification内分别计算bz_sales/company_revenue、
+      bz_profit/company_operating_profit及(bz_sales-bz_cost)/bz_sales；分类不交叉相加，
+      币种不一致或分母无效时不计算。
+    required_data: [company_profile, main_business, income_statement, announcement]
+    sample_period: 2021-12-31至2026-03-31
+    observation_count: 435382
+    overall_observation: >-
+      435382条分部记录中431470条能够按明确币种和有效公司总额形成可复算比例，
+      产品、地区、行业和未注明分类仍保持各自口径，没有交叉汇总。
+    earlier_observation: 较早时期存在大规模可比记录，能够执行收入、利润和毛利口径核对。
+    later_observation: 较晚时期同样存在大规模可比记录，执行方向与较早时期一致。
+    counter_evidence: >-
+      classification可能代表产品、地区或行业等重叠视角；部分分部缺少利润成本，外币记录或公司利润为零时不能计算相应比例。
+    decision: use
+    decision_reason: >-
+      官方含义、现有字段、时点和口径边界均可直接执行；该知识只判断业务联系的重要程度，不预测股价。
+
+  - knowledge_id: src_cn_earnings_growth_persistence
+    source_verification: >-
+      已从Elsevier原始出版页核对题名、作者、期刊、DOI、中国股票市场及行业共同/公司特有盈利和现金流分解；
+      但原始可访问出版信息未能核实完整样本起止，不能满足A级经验来源登记的样本元数据要求。
+    core_theory: >-
+      单期利润增长不能证明趋势成立，应在连续同季报告中同时检查收入、营业利润、归母净利润、经营现金、利润率、费用和行业共同变化。
+    formula: >-
+      按公司同季lag4计算收入、营业利润、归母净利润和经营现金相对上年总资产的变化，
+      毛利率和费用率保留原单位变化，再减同报告期同行业中位数；lead4仅作为历史验证标签。
+    required_data: [income_statement, balance_sheet, cash_flow, financial_indicator, industry_member]
+    sample_period: 2021-12-31至2026-03-31
+    observation_count: 70275
+    overall_observation: >-
+      26426条记录能够同时观察当前同季利润变化与下一年同季变化；两者相关系数为-0.100413906027，
+      说明单期改善总体上不能被直接外推为持续改善。
+    earlier_observation: 较早时期当前变化与下一年同季变化方向为负，未显示稳定延续。
+    later_observation: 较晚时期同样为负，未出现可支持持续性主张的方向修复。
+    counter_evidence: >-
+      本地结果总体及前后期均更接近均值回归；同时来源样本起止无法从原始出版信息完整核实。
+    decision: discard
+    decision_reason: >-
+      虽然现有数据可以运行多期财务观察，但候选所依赖的A级来源元数据未达登记要求，
+      本地历史方向也不支持把“增长持续性”作为已验证知识；多期核对仍由已通过的盈余质量知识承担。
+
+  - knowledge_id: src_cn_relative_valuation_context
+    source_verification: >-
+      已核对Jansen、Swinkels、Zhou（2021）Elsevier原始页，A股样本为2000—2019；
+      已核对Li、Liu、Liu、Wei（2024）INFORMS原始页和论文材料，样本为2000-07至2019-06，
+      并明确指出等权微盘污染和大量异常不可复现问题。
+    core_theory: >-
+      PE、PB和PS必须在同日、同行业、同盈利状态和公司自身历史中比较，并同时展示盈利、成长、现金和规模背景；
+      估值位置只说明兑现要求，不单独预测收益。
+    formula: >-
+      非正PE/PB/PS明确标为无效；有效值按同日同行业同盈利状态计算百分位，
+      自身历史百分位只使用形成日及此前记录，另列市值、ROE、收入增长和现金质量，不合成总分。
+    required_data: [daily_basic, industry_member, income_statement, balance_sheet, cash_flow, financial_indicator]
+    sample_period: 2021-07-14至2026-07-14
+    observation_count: 320079
+    overall_observation: >-
+      320079条抽样估值记录中247088条可形成同行PE位置，占77.1959422518%；
+      无效估值、亏损状态和自身历史位置均能被分别表达。
+    earlier_observation: 较早时期能够形成同日同行业同盈利状态的估值背景。
+    later_observation: 较晚时期同样可执行，且点时历史测试证明未来记录不会改变过去百分位。
+    counter_evidence: >-
+      亏损、负净资产、估值非正、可比组过窄和极小市值会降低可比性；任何百分位都不能证明低估或未来上涨。
+    decision: use
+    decision_reason: >-
+      两项A级A股复现研究元数据完整，当前数据能直接执行可比组、时点、无效值和微盘边界；用途被限制为估值语境而非因子收益预测。
+
+  - knowledge_id: src_cn_turnaround_financial_consistency
+    source_verification: >-
+      已核对Zhao、Xu、Ji（2023）Elsevier原始页：超过18000个中国上市公司firm-year，
+      财务年度2011—2018、ST结果年度2013—2020；并复用已登记且验证通过的Dechow、Ge、Schrand（2010）多维盈余质量方法。
+    core_theory: >-
+      困境改善不能只看利润转正，必须把经营结果、经营现金、流动性、短债、应收存货、减值和非经营项目分开检查；
+      一项改善与其他维度恶化并存时只能称局部改善。
+    formula: >-
+      按同季lag4分别计算营业利润和经营现金相对上年总资产的变化、流动比率变化、
+      净短债压力变化、应收存货占资产变化及减值减非经营收入占资产变化；仅记录反证数量，不合成评分或困境概率。
+    required_data: [income_statement, balance_sheet, cash_flow, financial_indicator]
+    sample_period: 2021-12-31至2026-03-31
+    observation_count: 70275
+    overall_observation: >-
+      21407条营业利润改善记录可以同时核对其他财务维度，其中91.9792591208%至少存在一项未同步或相反方向，
+      证明只看利润改善会遗漏大量反证。
+    earlier_observation: 较早时期大量营业利润改善记录同时存在现金、流动性、短债或营运资产反证。
+    later_observation: 较晚时期同样存在多表不一致，方法在前后时期均能揭示局部改善。
+    counter_evidence: >-
+      字段缺失或零变化不能被写成确认改善；本知识不复制机器学习模型、权重、AUC、ST概率或Piotroski分数。
+    decision: use
+    decision_reason: >-
+      A级中国上市公司研究和既有盈余质量方法完整，现有多张财务表可直接分维度执行；本地结果显示该反证检查具有明确必要性。
