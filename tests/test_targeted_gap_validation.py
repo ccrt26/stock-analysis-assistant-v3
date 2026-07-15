@@ -1,4 +1,9 @@
+from datetime import date
+from dataclasses import asdict
+import hashlib
+import json
 import math
+from pathlib import Path
 
 import pandas as pd
 
@@ -8,8 +13,12 @@ from stock_analyzer.knowledge_validation.targeted_gap_validation import (
     TARGETED_SOURCE_REFS,
     business_segment_materiality_observations,
     earnings_growth_persistence_observations,
+    load_business_segment_panel,
+    load_financial_history_panel,
+    load_valuation_history_panel,
     relative_valuation_context_observations,
     turnaround_financial_consistency_observations,
+    validate_targeted_gap_claims,
 )
 
 
@@ -408,3 +417,222 @@ def test_turnaround_observations_are_not_a_score_or_distress_probability():
         "contradiction_count",
     } <= set(result.columns)
     assert not ({"score", "distress_probability", "prediction"} & set(result.columns))
+
+
+def _write_fact(root: Path, name: str, rows: list[dict[str, object]]) -> None:
+    target = root / "facts" / name / "fixture=data" / "data.parquet"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    frame = pd.DataFrame(rows)
+    if "available_at" in frame:
+        frame["available_at"] = pd.to_datetime(frame["available_at"])
+    if "report_period" in frame:
+        frame["report_period"] = pd.to_datetime(frame["report_period"])
+    if "trade_date" in frame:
+        frame["trade_date"] = pd.to_datetime(frame["trade_date"])
+    if "valid_from" in frame:
+        frame["valid_from"] = pd.to_datetime(frame["valid_from"])
+    if "valid_to" in frame:
+        frame["valid_to"] = pd.to_datetime(frame["valid_to"])
+    frame.to_parquet(target, index=False)
+
+
+def _warehouse_fixture(root: Path) -> Path:
+    periods = pd.date_range("2024-03-31", periods=5, freq="QE")
+    income: list[dict[str, object]] = []
+    balance: list[dict[str, object]] = []
+    cash: list[dict[str, object]] = []
+    indicators: list[dict[str, object]] = []
+    for company_index, ts_code in enumerate(
+        ("000001.SZ", "000002.SZ", "000003.SZ")
+    ):
+        for period_index, period in enumerate(periods):
+            available_at = period + pd.Timedelta(days=30)
+            revenue = 100.0 + company_index * 10.0 + period_index * 8.0
+            income.append(
+                {
+                    "ts_code": ts_code,
+                    "report_period": period,
+                    "report_type": "1",
+                    "statement_type": "comp=1;end=1",
+                    "revenue": revenue,
+                    "total_revenue": revenue,
+                    "operate_profit": 10.0 + period_index,
+                    "n_income_attr_p": 5.0 + period_index,
+                    "sell_exp": 2.0,
+                    "admin_exp": 3.0,
+                    "fin_exp": 1.0,
+                    "assets_impair_loss": 1.0,
+                    "non_oper_income": 0.5,
+                    "available_at": available_at,
+                    "revision_no": 1,
+                }
+            )
+            balance.append(
+                {
+                    "ts_code": ts_code,
+                    "report_period": period,
+                    "report_type": "1",
+                    "statement_type": "comp=1;end=1",
+                    "total_assets": 200.0 + period_index * 5.0,
+                    "total_cur_assets": 100.0,
+                    "total_cur_liab": 50.0,
+                    "total_liab": 90.0,
+                    "money_cap": 30.0,
+                    "st_borr": 20.0,
+                    "non_cur_liab_due_1y": 5.0,
+                    "accounts_receiv": 20.0,
+                    "acc_receivable": None,
+                    "inventories": 25.0,
+                    "available_at": available_at,
+                    "revision_no": 1,
+                }
+            )
+            cash.append(
+                {
+                    "ts_code": ts_code,
+                    "report_period": period,
+                    "report_type": "1",
+                    "statement_type": "comp=1;end=1",
+                    "n_cashflow_act": 7.0 + period_index,
+                    "available_at": available_at,
+                    "revision_no": 1,
+                }
+            )
+            indicators.append(
+                {
+                    "ts_code": ts_code,
+                    "report_period": period,
+                    "report_type": "1",
+                    "grossprofit_margin": 20.0 + period_index,
+                    "roe": 8.0 + company_index,
+                    "or_yoy": 5.0 + period_index,
+                    "available_at": available_at,
+                    "revision_no": 1,
+                }
+            )
+    income.append(
+        {
+            **income[-15],
+            "revenue": 9999.0,
+            "total_revenue": 9999.0,
+            "available_at": pd.Timestamp("2026-01-01"),
+            "revision_no": 2,
+        }
+    )
+    _write_fact(root, "income_statement", income)
+    _write_fact(root, "balance_sheet", balance)
+    _write_fact(root, "cash_flow", cash)
+    _write_fact(root, "financial_indicator", indicators)
+    _write_fact(
+        root,
+        "industry_member",
+        [
+            {
+                "ts_code": ts_code,
+                "industry_system": "SW2021",
+                "level": "L1",
+                "industry_code": "801010",
+                "valid_from": "2021-01-01",
+                "valid_to": None,
+                "available_at": "2021-01-01",
+                "revision_no": 1,
+            }
+            for ts_code in ("000001.SZ", "000002.SZ", "000003.SZ")
+        ],
+    )
+    main_rows = [
+        {
+            "ts_code": "000001.SZ",
+            "report_period": "2024-03-31",
+            "classification": "product",
+            "item_name": "机器人",
+            "bz_sales": 40.0,
+            "bz_cost": 30.0,
+            "bz_profit": 10.0,
+            "curr_type": "CNY",
+            "available_at": "2024-04-30",
+            "revision_no": 1,
+        },
+        {
+            "ts_code": "000001.SZ",
+            "report_period": "2024-03-31",
+            "classification": "product",
+            "item_name": "机器人",
+            "bz_sales": 45.0,
+            "bz_cost": 32.0,
+            "bz_profit": 13.0,
+            "curr_type": "CNY",
+            "available_at": "2024-05-15",
+            "revision_no": 2,
+        },
+        {
+            "ts_code": "000001.SZ",
+            "report_period": "2024-03-31",
+            "classification": "product",
+            "item_name": "机器人",
+            "bz_sales": 90.0,
+            "bz_cost": 50.0,
+            "bz_profit": 40.0,
+            "curr_type": "CNY",
+            "available_at": "2026-01-01",
+            "revision_no": 3,
+        },
+    ]
+    _write_fact(root, "main_business", main_rows)
+    daily_rows: list[dict[str, object]] = []
+    for trade_date in pd.date_range("2024-06-03", periods=41, freq="B"):
+        for company_index, ts_code in enumerate(
+            ("000001.SZ", "000002.SZ", "000003.SZ")
+        ):
+            daily_rows.append(
+                {
+                    "trade_date": trade_date,
+                    "ts_code": ts_code,
+                    "pe_ttm": 10.0 + company_index,
+                    "pb": 1.0 + company_index,
+                    "ps_ttm": 0.8 + company_index,
+                    "total_mv": 100.0 + company_index * 100.0,
+                    "available_at": trade_date + pd.Timedelta(days=1),
+                    "revision_no": 1,
+                }
+            )
+    _write_fact(root, "daily_basic", daily_rows)
+    return root
+
+
+def test_read_only_loaders_apply_as_of_and_latest_revision(tmp_path):
+    root = _warehouse_fixture(tmp_path / "warehouse")
+    analysis_date = date(2025, 6, 30)
+
+    business = load_business_segment_panel(root, analysis_date)
+    financial = load_financial_history_panel(root, analysis_date)
+    valuation = load_valuation_history_panel(root, analysis_date)
+
+    assert business.loc[0, "bz_sales"] == 45.0
+    assert business.loc[0, "company_revenue"] == 100.0
+    assert 9999.0 not in set(financial["revenue"])
+    assert set(financial["industry_code"]) == {"801010"}
+    assert valuation["formation_date"].nunique() == 3
+    assert set(valuation["industry_code"]) == {"801010"}
+    assert valuation["available_at"].max().date() <= analysis_date
+
+
+def _file_hashes(root: Path) -> dict[str, str]:
+    return {
+        str(path.relative_to(root)): hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in sorted(root.rglob("*"))
+        if path.is_file()
+    }
+
+
+def test_targeted_validation_is_deterministic_exactly_four_and_read_only(tmp_path):
+    root = _warehouse_fixture(tmp_path / "warehouse")
+    before = _file_hashes(root)
+
+    first = validate_targeted_gap_claims(root, analysis_date=date(2025, 6, 30))
+    second = validate_targeted_gap_claims(root, analysis_date=date(2025, 6, 30))
+
+    assert tuple(item.knowledge_id for item in first) == EXPECTED_IDS
+    assert first == second
+    json.dumps([asdict(item) for item in first], ensure_ascii=False)
+    assert _file_hashes(root) == before
