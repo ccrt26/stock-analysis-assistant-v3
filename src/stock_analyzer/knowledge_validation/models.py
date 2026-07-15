@@ -6,6 +6,7 @@ from hashlib import sha256
 import json
 from typing import Any, Generic, TypeVar
 
+import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator, model_validator
 
 
@@ -142,10 +143,21 @@ class ValidationResult(_FrozenModel):
 
 
 class StudySample(_FrozenModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        frozen=True,
+        validate_default=True,
+        arbitrary_types_allowed=True,
+    )
+
     study_id: str
     input_manifest_hashes: tuple[str, ...]
+    label_manifest_hashes: tuple[str, ...]
+    analysis_dates: tuple[date, ...]
     panel_row_count: int = Field(ge=0)
     exclusion_counts: dict[str, int] = Field(default_factory=dict)
+    signal_inputs: pd.DataFrame
+    future_labels: pd.DataFrame
 
 
 class ValidationRegistry(_FrozenModel):
