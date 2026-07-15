@@ -12,6 +12,8 @@
 
 **Approved Design:** [`docs/superpowers/specs/2026-07-15-v3-targeted-knowledge-gap-fill-design.md`](../specs/2026-07-15-v3-targeted-knowledge-gap-fill-design.md)
 
+**Execution Status:** 已按本计划完成。最终裁决为三项 `use`、一项 `discard`；科学复查另补上“缺失行业不得组成虚构同行组”和“支持维度不完整不得形成反证数量”两项回归边界。
+
 ## 1. 冻结范围与禁止事项
 
 - 工作目录固定为 `/Users/ccrt/Documents/股票分析助手`，直接使用当前本地 `main`，不创建分支或工作树。
@@ -575,12 +577,11 @@ git log --oneline ec45b888b9240c216524ee8f4f8104ad06209846..HEAD
 最终打印并人工复核：
 
 ```text
-原 74 项：3 保留 + 5 更新 + 4 本地验证通过 + 37 暂缓 + 25 退出/验证丢弃 = 12 个原有 current
-前轮新增并通过：12 个 current
-本轮冲突修正后的实施前 current：24
-本轮新增：四项中的 use 数
+原 74 项最终迁移记录：3 保留 + 9 更新 + 37 暂缓 + 25 退出/验证丢弃 = 74；其中12条旧记录继续生效并收敛为9个无重复 current 后继条目
+本轮实施前：9个旧知识后继 + 15个此前补充 = 24个 current
+本轮新增：3个 use，1个 discard
 本轮增强：2 类，不增加条目数
-最终 current：24 + 本轮 use 数
+最终 current：9个旧知识后继 + 18个补充知识 = 27
 ```
 
 若仓库实际统计与这组历史对账不同，以逐 ID 集合差异定位，不能改数字掩盖问题。

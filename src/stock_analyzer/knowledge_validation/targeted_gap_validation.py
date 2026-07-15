@@ -249,6 +249,8 @@ def earnings_growth_persistence_observations(
         result[median_name] = industry_groups[column].transform("median")
         relative_name = f"relative_{column.removesuffix('_scaled')}"
         result[relative_name] = result[column] - result[median_name]
+        missing_industry = result["industry_code"].isna()
+        result.loc[missing_industry, [median_name, relative_name]] = np.nan
 
     return result.replace([np.inf, -np.inf], np.nan)
 
@@ -308,7 +310,7 @@ def relative_valuation_context_observations(
     }
     peer_keys = ["formation_date", "industry_code", "profitability_state"]
     result["peer_group_size"] = result.groupby(
-        peer_keys, dropna=False, sort=False
+        peer_keys, dropna=True, sort=False
     )["ts_code"].transform("size")
     for source, label in metric_map.items():
         valid_column = f"_{label}_valid_value"
@@ -317,8 +319,13 @@ def relative_valuation_context_observations(
         )
         result[valid_column] = result[source].where(result[source].gt(0))
         result[f"peer_{label}_percentile"] = result.groupby(
-            peer_keys, dropna=False, sort=False
+            peer_keys, dropna=True, sort=False
         )[valid_column].rank(method="average", pct=True)
+        result.loc[
+            result["peer_group_size"].lt(2)
+            | result["peer_group_size"].isna(),
+            f"peer_{label}_percentile",
+        ] = np.nan
         result[f"history_{label}_percentile"] = result.groupby(
             "ts_code", sort=False, group_keys=False
         )[valid_column].transform(_expanding_percentile)
@@ -408,6 +415,16 @@ def turnaround_financial_consistency_observations(
         - quality_pressure.groupby(result["ts_code"], sort=False).shift(4)
     )
 
+    supporting_columns = (
+        "operating_cash_change",
+        "liquidity_change",
+        "debt_pressure_change",
+        "receivable_inventory_pressure_change",
+        "impairment_nonoperating_change",
+    )
+    result["observed_dimension_count"] = result.loc[
+        :, supporting_columns
+    ].notna().sum(axis=1)
     contradictions = pd.concat(
         [
             result["operating_cash_change"].le(0),
@@ -420,6 +437,7 @@ def turnaround_financial_consistency_observations(
     ).sum(axis=1)
     result["contradiction_count"] = contradictions.where(
         result["operating_result_change"].notna()
+        & result["observed_dimension_count"].eq(len(supporting_columns))
     ).astype("Int64")
     return result.replace([np.inf, -np.inf], np.nan)
 

@@ -243,6 +243,20 @@ def test_earnings_growth_preserves_components_and_future_label_without_score():
     assert math.isnan(early)
 
 
+def test_earnings_growth_never_treats_missing_industry_as_a_peer_group():
+    frame = _earnings_fixture()
+    frame.loc[frame["ts_code"] == "000001.SZ", "industry_code"] = None
+
+    result = earnings_growth_persistence_observations(frame)
+    unknown = result.loc[
+        (result["ts_code"] == "000001.SZ")
+        & result["net_income_change_scaled"].notna()
+    ]
+
+    assert unknown["industry_net_income_change_median"].isna().all()
+    assert unknown["relative_net_income_change"].isna().all()
+
+
 def _valuation_fixture() -> pd.DataFrame:
     rows: list[dict[str, object]] = []
     for date_index, formation_date in enumerate(
@@ -327,6 +341,25 @@ def test_relative_valuation_history_is_point_in_time_and_has_no_total_score():
         "cash_quality",
         "market_cap_percentile",
     } <= set(before.columns)
+
+
+def test_relative_valuation_requires_a_real_industry_and_more_than_one_peer():
+    frame = _valuation_fixture()
+    unknown = frame.iloc[[0]].copy()
+    unknown["ts_code"] = "000004.SZ"
+    unknown["industry_code"] = None
+    singleton = frame.iloc[[0]].copy()
+    singleton["ts_code"] = "000005.SZ"
+    singleton["industry_code"] = "809999"
+
+    result = relative_valuation_context_observations(
+        pd.concat([frame, unknown, singleton], ignore_index=True)
+    )
+
+    assert result.loc[
+        result["ts_code"].isin(["000004.SZ", "000005.SZ"]),
+        ["peer_pe_percentile", "peer_pb_percentile", "peer_ps_percentile"],
+    ].isna().all().all()
 
 
 def _turnaround_fixture() -> pd.DataFrame:
@@ -421,6 +454,24 @@ def test_turnaround_observations_are_not_a_score_or_distress_probability():
         "contradiction_count",
     } <= set(result.columns)
     assert not ({"score", "distress_probability", "prediction"} & set(result.columns))
+
+
+def test_turnaround_does_not_hide_a_missing_dimension_as_no_contradiction():
+    frame = _turnaround_fixture()
+    frame.loc[
+        (frame["ts_code"] == "000002.SZ")
+        & (frame["report_period"] == pd.Timestamp("2025-03-31")),
+        "n_cashflow_act",
+    ] = None
+
+    result = turnaround_financial_consistency_observations(frame)
+    final = result.loc[
+        (result["ts_code"] == "000002.SZ")
+        & (result["report_period"] == pd.Timestamp("2025-03-31"))
+    ].iloc[0]
+
+    assert final["observed_dimension_count"] == 4
+    assert pd.isna(final["contradiction_count"])
 
 
 def _write_fact(root: Path, name: str, rows: list[dict[str, object]]) -> None:

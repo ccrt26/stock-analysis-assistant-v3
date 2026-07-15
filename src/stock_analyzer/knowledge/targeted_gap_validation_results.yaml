@@ -1,6 +1,6 @@
 schema_version: v3-targeted-gap-validation-v1
 analysis_date: 2026-07-14
-warehouse_sha256_at_run: 6e1a33a60aa24cc2cd527a73f054fdb5c33880e78d8ff4800d53a197f739afa1
+warehouse_sha256_at_run: 574195ec9462acd31d765d041baf52b8ef7b33d9b6c85ceae1b0a9ebe861fbb9
 results:
   - knowledge_id: src_cn_business_segment_materiality
     source_verification: >-
@@ -66,7 +66,7 @@ results:
     sample_period: 2021-07-14至2026-07-14
     observation_count: 320079
     overall_observation: >-
-      320079条抽样估值记录中247088条可形成同行PE位置，占77.1959422518%；
+      320079条抽样估值记录中237741条在行业已知且可比组不止一家公司时可形成同行PE位置，占74.2757256802%；
       无效估值、亏损状态和自身历史位置均能被分别表达。
     earlier_observation: 较早时期能够形成同日同行业同盈利状态的估值背景。
     later_observation: 较晚时期同样可执行，且点时历史测试证明未来记录不会改变过去百分位。
@@ -90,7 +90,7 @@ results:
     sample_period: 2021-12-31至2026-03-31
     observation_count: 70275
     overall_observation: >-
-      21407条营业利润改善记录可以同时核对其他财务维度，其中91.9792591208%至少存在一项未同步或相反方向，
+      11794条营业利润改善记录具备完整的五项其他财务维度，其中95.3366118365%至少存在一项未同步或相反方向，
       证明只看利润改善会遗漏大量反证。
     earlier_observation: 较早时期大量营业利润改善记录同时存在现金、流动性、短债或营运资产反证。
     later_observation: 较晚时期同样存在多表不一致，方法在前后时期均能揭示局部改善。
