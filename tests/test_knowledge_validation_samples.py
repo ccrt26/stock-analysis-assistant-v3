@@ -52,6 +52,8 @@ def test_high_can_touch_without_close_earning_target():
     )
 
     assert labels["touch_20pct_10d"] is True
+    assert labels["close_return_1d"] == pytest.approx(0.01)
+    assert labels["close_return_5d"] == pytest.approx(0.01)
     assert labels["close_return_10d"] == pytest.approx(0.09)
     assert labels["first_touch_20pct_session_10d"] == 5
     assert labels["close_return_10d"] < 0.20
@@ -359,6 +361,7 @@ def test_build_price_study_sample_materializes_signal_and_future_paths_separatel
     assert "prior_return_20d" in sample.signal_inputs
     assert not any(column.startswith("future_") for column in sample.signal_inputs)
     assert sample.future_labels.loc[0, "close_return_30d"] is not None
+    assert "market_excess_return_20d" in sample.future_labels
     assert query.calls[1][1].astimezone(timezone.utc).hour == 7
 
 

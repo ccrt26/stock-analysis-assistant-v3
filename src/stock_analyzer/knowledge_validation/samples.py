@@ -107,6 +107,12 @@ def label_path(
     )
 
     labels: dict[str, float | int | bool | None] = {}
+    for auxiliary_horizon in (1, 5):
+        labels[f"close_return_{auxiliary_horizon}d"] = (
+            None
+            if len(future_close) < auxiliary_horizon or closes is None
+            else closes[auxiliary_horizon - 1] / float(base_close) - 1
+        )
     for horizon in _HORIZONS:
         suffix = f"{horizon}d"
         if len(future_close) < horizon or highs is None or closes is None:
@@ -456,6 +462,14 @@ def _future_stock_labels(
     )
     future["trade_date"] = pd.to_datetime(future["trade_date"], errors="raise")
     future = future.sort_values(["ts_code", "trade_date"], kind="mergesort")
+    indexes = (
+        snapshot.frame(ResearchDatasetId.INDEX_DAILY)
+        if ResearchDatasetId.INDEX_DAILY in requested
+        else pd.DataFrame()
+    )
+    if not indexes.empty:
+        indexes["trade_date"] = pd.to_datetime(indexes["trade_date"], errors="raise")
+        indexes = indexes.sort_values(["index_code", "trade_date"], kind="mergesort")
     base = current.set_index("ts_code")
     rows: list[dict[str, object]] = []
     for ts_code in identity["ts_code"]:
@@ -469,8 +483,68 @@ def _future_stock_labels(
             future_factors=path["adj_factor"].tolist(),
             base_factor=float(base_factor),
         )
+        index_code = (
+            base.loc[ts_code, "market_index_code"]
+            if "market_index_code" in base
+            else None
+        )
+        market_path = (
+            indexes[indexes["index_code"].astype(str) == str(index_code)]
+            if index_code is not None and not indexes.empty
+            else pd.DataFrame()
+        )
+        market_base = (
+            float(base.loc[ts_code, "market_base_close"])
+            if "market_base_close" in base and pd.notna(base.loc[ts_code, "market_base_close"])
+            else None
+        )
+        for horizon in (1, 5, 10, 20, 30):
+            market_return = (
+                None
+                if market_base is None or len(market_path) < horizon
+                else float(market_path.iloc[horizon - 1]["close"]) / market_base - 1
+            )
+            labels[f"market_return_{horizon}d"] = market_return
+            close_return = labels.get(f"close_return_{horizon}d")
+            labels[f"market_excess_return_{horizon}d"] = (
+                None
+                if close_return is None or market_return is None
+                else float(close_return) - market_return
+            )
         rows.append({"analysis_date": analysis_date, "ts_code": ts_code, **labels})
     return pd.DataFrame(rows)
+
+
+def _attach_market_benchmark(
+    current: pd.DataFrame,
+    snapshot: MaterializedResearchSnapshot,
+    analysis_date: date,
+) -> pd.DataFrame:
+    out = current.copy()
+
+    def benchmark(row: pd.Series) -> str:
+        exchange = str(row.get("exchange", ""))
+        market = str(row.get("market", ""))
+        if exchange == "BSE":
+            return "899050.BJ"
+        if exchange == "SSE" and market == "科创板":
+            return "000688.SH"
+        if exchange == "SSE":
+            return "000001.SH"
+        if exchange == "SZSE" and market == "创业板":
+            return "399006.SZ"
+        return "399001.SZ"
+
+    out["market_index_code"] = out.apply(benchmark, axis=1)
+    indexes = snapshot.frame(ResearchDatasetId.INDEX_DAILY)
+    if indexes.empty:
+        out["market_base_close"] = np.nan
+        return out
+    dates = pd.to_datetime(indexes["trade_date"], errors="raise").dt.date
+    base = indexes.loc[dates == analysis_date, ["index_code", "close"]].rename(
+        columns={"index_code": "market_index_code", "close": "market_base_close"}
+    )
+    return out.merge(base, on="market_index_code", how="left", validate="many_to_one")
 
 
 def _active_level_one_members(
@@ -658,6 +732,7 @@ def _build_price_study_sample(
             signal_request,
             history_dates,
         )
+        current = _attach_market_benchmark(current, signal_snapshot, analysis_date)
         industry_units = spec.study_id == "a_share_factor_industry_momentum"
         if spec.study_id in {
             "a_share_factor_industry_momentum",
