@@ -357,6 +357,298 @@ sources:
       - 中国A股本地时点验证前仅作方法，原研究的价值股前置筛选、会计口径、持有期和收益结论不能直接移植。
       - 财务质量是困境反转的证据之一，不等于公司已完成经营反转，也不能单独决定买入。
 
+  - source_id: paper-cheema-nartea-momentum-state-2017
+    grade: A
+    kind: peer_reviewed_paper
+    research_design: empirical
+    title: "Momentum Returns, Market States, and Market Dynamics: Is China Different?"
+    publisher: Elsevier
+    authors: [Munir A. Cheema, Gilbert V. Nartea]
+    journal_or_series: International Review of Economics & Finance 50, 85-97
+    url: https://www.sciencedirect.com/science/article/abs/pii/S1059056017302885
+    doi: 10.1016/j.iref.2017.04.003
+    publication_date: 2017-07-01
+    last_verified_on: 2026-07-15
+    jurisdiction: 中国大陆
+    market_scope: [A股]
+    sample_start: 1995-01-01
+    sample_end: 2014-12-31
+    method_summary: 比较中国股票动量在上涨、下跌及市场状态延续或切换条件下的差异。
+    limitations: [样本期和形成期不能直接移植，市场上涨不自动支持动量延续。]
+
+  - source_id: paper-fei-liu-wen-dispersion-2019
+    grade: A
+    kind: peer_reviewed_paper
+    research_design: empirical
+    title: Cross-sectional Return Dispersion and Volatility Prediction
+    publisher: Elsevier
+    authors: [Tianlun Fei, Xiaoquan Liu, Conghua Wen]
+    journal_or_series: Pacific-Basin Finance Journal 58, 101218
+    url: https://www.sciencedirect.com/science/article/pii/S0927538X19301830
+    doi: 10.1016/j.pacfin.2019.101218
+    publication_date: 2019-12-01
+    last_verified_on: 2026-07-15
+    jurisdiction: 中国大陆
+    market_scope: [A股]
+    sample_start: 2005-08-01
+    sample_end: 2017-09-30
+    method_summary: 用市场和行业横截面收益分化改善中国股票市场后续波动描述与预测。
+    limitations: [分化是波动与不确定性证据，不能单独预测涨跌方向。]
+
+  - source_id: paper-zhang-zhang-turnover-2022
+    grade: A
+    kind: peer_reviewed_paper
+    research_design: empirical
+    title: Characteristics of Turnover and Disappeared Momentum Effect in Chinese Stock Market
+    publisher: Tsinghua University Press
+    authors: [Bing Zhang, Ruiqi Zhang]
+    journal_or_series: China Journal of Economics 9(4), 124-143
+    url: https://www.sciopen.com/article/10.26599/CJE.2022.9300405
+    doi: 10.26599/CJE.2022.9300405
+    publication_date: 2022-12-01
+    last_verified_on: 2026-07-15
+    jurisdiction: 中国大陆
+    market_scope: [A股]
+    sample_start: 1997-01-01
+    sample_end: 2020-12-31
+    method_summary: 检验换手水平与稳定性如何改变中国股票月度动量关系。
+    limitations: [换手不能识别投资者或账户身份，也不能自动证明趋势可靠。]
+
+  - source_id: paper-jiang-qi-tang-profitability-2018
+    grade: A
+    kind: peer_reviewed_paper
+    research_design: empirical
+    title: "Q-theory, Mispricing, and Profitability Premium: Evidence from China"
+    publisher: Elsevier
+    authors: [Fuwei Jiang, Xinlin Qi, Guohao Tang]
+    journal_or_series: Journal of Banking & Finance 87, 135-149
+    url: https://www.sciencedirect.com/science/article/pii/S0378426617302480
+    doi: 10.1016/j.jbankfin.2017.10.001
+    publication_date: 2018-02-01
+    last_verified_on: 2026-07-15
+    jurisdiction: 中国大陆
+    market_scope: [A股]
+    sample_start: 1995-01-01
+    sample_end: 2014-12-31
+    method_summary: 分别用ROE、ROA和毛利能力研究中国股票盈利能力与后续收益的关系。
+    limitations: [长期横截面关系不能直接转换为未来二至六周收益预测。]
+
+  - source_id: paper-li-niuzhang-accrual-2011
+    grade: A
+    kind: peer_reviewed_paper
+    research_design: empirical
+    title: "Earnings Management and the Accrual Anomaly: Evidence from China"
+    publisher: Wiley
+    authors: [Yuanpeng Li, Jianjun Niu, Ran Zhang, James A. Largay III]
+    journal_or_series: Journal of International Financial Management & Accounting 22, 205-245
+    url: https://onlinelibrary.wiley.com/doi/10.1111/j.1467-646X.2011.01050.x
+    doi: 10.1111/j.1467-646X.2011.01050.x
+    publication_date: 2011-09-13
+    last_verified_on: 2026-07-15
+    jurisdiction: 中国大陆
+    market_scope: [A股]
+    sample_start: 1998-01-01
+    sample_end: 2002-12-31
+    method_summary: 拆分盈利中的现金和应计成分，并分析旧退市制度对中国样本的影响。
+    limitations: [旧退市制度、历史分组和收益阈值不能移植到当前A股。]
+
+  - source_id: paper-amihud-illiquidity-2002
+    grade: A
+    kind: peer_reviewed_paper
+    research_design: empirical
+    title: "Illiquidity and Stock Returns: Cross-section and Time-series Effects"
+    publisher: Elsevier
+    authors: [Yakov Amihud]
+    journal_or_series: Journal of Financial Markets 5, 31-56
+    url: https://www.sciencedirect.com/science/article/pii/S1386418101000246
+    doi: 10.1016/S1386-4181(01)00024-6
+    publication_date: 2002-01-01
+    last_verified_on: 2026-07-15
+    jurisdiction: 美国
+    market_scope: [美国股票]
+    sample_start: 1963-01-01
+    sample_end: 1997-12-31
+    method_summary: 用绝对日收益除以成交金额构造粗粒度非流动性代理。
+    limitations: [中国A股本地时点验证前仅作方法，日线代理不是订单簿价格冲击。]
+
+  - source_id: paper-gao-han-xiong-max-2021
+    grade: A
+    kind: peer_reviewed_paper
+    research_design: empirical
+    title: "Loss from the Chasing of MAX Stocks: Evidence from China"
+    publisher: Elsevier
+    authors: [Ya Gao, Xing Han, Xiong Xiong]
+    journal_or_series: North American Journal of Economics and Finance, 101475
+    url: https://www.sciencedirect.com/science/article/abs/pii/S1062940821000966
+    doi: 10.1016/j.najef.2021.101475
+    publication_date: 2021-01-01
+    last_verified_on: 2026-07-15
+    jurisdiction: 中国大陆
+    market_scope: [A股]
+    sample_start: 1997-01-01
+    sample_end: 2019-12-31
+    method_summary: 检验过去一个月最大日收益所代表的彩票型追涨及后续表现。
+    limitations: [MAX效应随时期和投资者类型变化，不能机械淘汰全部强势股票。]
+
+  - source_id: official-sse-listing-2026
+    grade: S
+    kind: official_rule
+    title: 上海证券交易所股票上市规则（2026年4月修订）
+    publisher: 上海证券交易所
+    url: https://www.sse.com.cn/lawandrules/sselawsrules2025/stocks/mainipo/c/c_20260424_10816589.shtml
+    document_number: 上证发〔2026〕42号
+    publication_date: 2026-04-24
+    effective_from: 2026-04-24
+    last_verified_on: 2026-07-15
+    jurisdiction: 中国大陆
+    market_scope: [上海证券交易所]
+    method_summary: 规定业绩信息、定期报告、股份变动等上市公司披露义务与阶段。
+    limitations: [规则定义披露事实与时点，不提供股票收益方向。]
+
+  - source_id: official-szse-listing-2026
+    grade: S
+    kind: official_rule
+    title: 深圳证券交易所股票上市规则（2026年修订）
+    publisher: 深圳证券交易所
+    url: https://www.szse.cn/lawrules/rule/allrules/bussiness/t20260424_620193.html
+    document_number: 深证上〔2026〕549号
+    publication_date: 2026-04-24
+    effective_from: 2026-04-24
+    last_verified_on: 2026-07-15
+    jurisdiction: 中国大陆
+    market_scope: [深圳证券交易所]
+    method_summary: 规定深市业绩信息、定期报告、股份变动等披露义务与阶段。
+    limitations: [规则定义披露事实与时点，不提供股票收益方向。]
+
+  - source_id: official-csrc-margin-2015
+    grade: S
+    kind: official_rule
+    title: 证券公司融资融券业务管理办法
+    publisher: 中国证券监督管理委员会
+    url: https://www.csrc.gov.cn/csrc/c106256/c1654005/content.shtml
+    document_number: 证监会令第117号
+    publication_date: 2015-07-01
+    effective_from: 2015-07-01
+    last_verified_on: 2026-07-15
+    jurisdiction: 中国大陆
+    market_scope: [A股]
+    method_summary: 定义融资、融券、担保物、偿还和风险控制安排。
+    limitations: [公开汇总数据不能识别客户身份、交易动机或未来收益。]
+
+  - source_id: official-sse-pledge-repo-2025
+    grade: S
+    kind: official_rule
+    title: 股票质押式回购交易及登记结算业务办法（2025年3月修订）
+    publisher: 上海证券交易所与中国证券登记结算有限责任公司
+    url: https://www.sse.com.cn/lawandrules/sselawsrules2025/trade/specific/repo/c/c_20250617_10782110.shtml
+    publication_date: 2025-03-01
+    effective_from: 2025-03-01
+    last_verified_on: 2026-07-15
+    jurisdiction: 中国大陆
+    market_scope: [A股]
+    method_summary: 规定股票质押式回购的交易、履约保障和违约处置边界。
+    limitations: [公共质押数据不能还原私有合同的预警线或平仓价。]
+
+  - source_id: paper-markowitz-portfolio-1952
+    grade: A
+    kind: peer_reviewed_paper
+    research_design: theoretical
+    title: Portfolio Selection
+    publisher: Wiley
+    authors: [Harry Markowitz]
+    journal_or_series: Journal of Finance 7(1), 77-91
+    url: https://onlinelibrary.wiley.com/doi/10.1111/j.1540-6261.1952.tb01525.x
+    doi: 10.1111/j.1540-6261.1952.tb01525.x
+    publication_date: 1952-03-01
+    last_verified_on: 2026-07-15
+    jurisdiction: 理论研究
+    market_scope: [全球证券]
+    method_summary: 说明组合风险取决于资产共同变化而非单项风险的简单相加。
+    limitations: [中国A股本地时点验证前仅作方法，该理论不声明A股实证结果，也不决定本系统仓位。]
+
+  - source_id: paper-huang-tian-buyback-2025
+    grade: A
+    kind: peer_reviewed_paper
+    research_design: empirical
+    title: "Actual Share Repurchases, Private Information, and Stock Price Crash Risk"
+    publisher: Springer Nature
+    authors: [Chenghao Huang, Siyang Tian]
+    journal_or_series: Review of Quantitative Finance and Accounting 66, 831-866
+    url: https://link.springer.com/article/10.1007/s11156-025-01419-z
+    doi: 10.1007/s11156-025-01419-z
+    publication_date: 2025-05-13
+    last_verified_on: 2026-07-15
+    jurisdiction: 中国大陆
+    market_scope: [A股]
+    sample_start: 2018-01-01
+    sample_end: 2023-12-31
+    method_summary: 区分回购计划与实际执行并研究中国公开市场回购的公司信息。
+    limitations: [实际回购不能单独证明低估或未来上涨。]
+
+  - source_id: official-sse-standard-operation-2026
+    grade: S
+    kind: official_rule
+    title: 上海证券交易所上市公司自律监管指引第1号——规范运作（2026年4月修订）
+    publisher: 上海证券交易所
+    url: https://www.sse.com.cn/lawandrules/sselawsrules2025/stocks/mainipo/c/c_20260424_10816605.shtml
+    document_number: 上证发〔2026〕44号
+    publication_date: 2026-04-24
+    effective_from: 2026-04-24
+    last_verified_on: 2026-07-15
+    jurisdiction: 中国大陆
+    market_scope: [上海证券交易所]
+    method_summary: 约束上市公司规范运作、真实披露和不得误导投资者的表达边界。
+    limitations: [概念名称、愿景或互动回复不能代替正式业务与收入证据。]
+
+  - source_id: paper-dechow-ge-schrand-2010
+    grade: A
+    kind: peer_reviewed_paper
+    research_design: methodological
+    title: Understanding Earnings Quality
+    publisher: American Accounting Association
+    authors: [Patricia Dechow, Weili Ge, Catherine Schrand]
+    journal_or_series: Journal of Accounting and Economics 50, 344-401
+    url: https://www.sciencedirect.com/science/article/pii/S0165410110000418
+    doi: 10.1016/j.jacceco.2010.09.001
+    publication_date: 2010-12-01
+    last_verified_on: 2026-07-15
+    jurisdiction: 方法研究
+    market_scope: [全球上市公司]
+    method_summary: 说明盈余质量取决于决策用途，应拆分持续性、应计、现金实现和外部重述等维度。
+    limitations: [中国A股本地时点验证前仅作方法，该综述不提供单一通用质量分数。]
+
+  - source_id: paper-fama-fisher-jensen-roll-1969
+    grade: A
+    kind: peer_reviewed_paper
+    research_design: methodological
+    title: The Adjustment of Stock Prices to New Information
+    publisher: Wiley
+    authors: [Eugene F. Fama, Lawrence Fisher, Michael C. Jensen, Richard Roll]
+    journal_or_series: International Economic Review 10(1), 1-21
+    url: https://www.jstor.org/stable/2525569
+    publication_date: 1969-02-01
+    last_verified_on: 2026-07-15
+    jurisdiction: 美国
+    market_scope: [美国股票]
+    method_summary: 通过市场调整残差和事件时间对齐研究价格对新信息的调整。
+    limitations: [中国A股本地时点验证前仅作方法，拆股样本结论不能移植到其他事件。]
+
+  - source_id: paper-mackinlay-event-study-1997
+    grade: A
+    kind: peer_reviewed_paper
+    research_design: methodological
+    title: Event Studies in Economics and Finance
+    publisher: American Economic Association
+    authors: [A. Craig MacKinlay]
+    journal_or_series: Journal of Economic Literature 35(1), 13-39
+    url: https://www.jstor.org/stable/2729691
+    publication_date: 1997-03-01
+    last_verified_on: 2026-07-15
+    jurisdiction: 方法研究
+    market_scope: [全球证券]
+    method_summary: 系统说明事件时点、正常收益、异常收益、窗口和重叠事件处理。
+    limitations: [中国A股本地时点验证前仅作方法，事件研究不自动证明因果或未来收益。]
+
 entries:
   - knowledge_id: src_cn_program_trading_rules_2025
     title: 价量结果不得推断交易主体身份
@@ -396,6 +688,7 @@ entries:
   - knowledge_id: src_csrc_disclosure_rules_2025
     title: 公司业务联系必须由时点有效的正式披露支持
     primary_source_id: official-csrc-disclosure-2025
+    supporting_source_ids: [official-sse-standard-operation-2026]
     source_grade: S
     version_status: current
     effective_from: 2025-07-01
@@ -512,6 +805,7 @@ entries:
   - knowledge_id: src_cn_share_reduction_rules_2024
     title: 区分减持计划、实际减持和限制条件
     primary_source_id: official-csrc-share-reduction-2024
+    supporting_source_ids: [official-sse-listing-2026, official-szse-listing-2026]
     source_grade: S
     version_status: current
     effective_from: 2024-05-24
@@ -547,6 +841,7 @@ entries:
   - knowledge_id: src_cn_buyback_rules_2023
     title: 回购必须按计划、进展和完成阶段分别判断
     primary_source_id: official-csrc-buyback-2023
+    supporting_source_ids: [paper-huang-tian-buyback-2025]
     source_grade: S
     version_status: current
     effective_from: 2023-12-15
@@ -727,12 +1022,13 @@ entries:
   - knowledge_id: src_cn_factor_momentum_2023
     title: 用A股行业或因子相对表现观察趋势是否延续
     primary_source_id: paper-ma-liao-jiang-factor-momentum-2024
+    supporting_source_ids: [paper-cheema-nartea-momentum-state-2017]
     source_grade: A
     version_status: current
-    effect: method_only
+    effect: analysis_evidence
     modules: [market_environment, sector_theme]
     opportunity_types: [general]
-    topics: [market_price_persistence, sector_price_persistence]
+    topics: [market_price_persistence, sector_price_persistence, market_state_reliability]
     claim_summary: A股行业或因子层面的相对表现可能具有阶段性延续，热点判断应观察一组股票的共同表现而不是只看单一个股。
     allowed_uses:
       - 比较行业相对收益、上涨面和成员共同表现是否相互支持。
@@ -757,8 +1053,9 @@ entries:
         name: sector_hotspot
         required_fields: [analysis_date, group_code, group_type, relative_return_20d]
     local_validation:
-      status: required_before_threshold
-      reason: 板块延续窗口、强度和拥挤边界必须基于本地连续复盘验证。
+      status: validated
+      reason: 本地验证确认不同市场状态下趋势延续关系明显不同，连续上涨也不能自动支持追强。
+      validation_reference: supplement_validation_results.yaml#src_cn_factor_momentum_2023
 
   - knowledge_id: src_moskowitz_grinblatt_1999
     title: 用行业共同表现解释个股动量时先做A股本地验证
@@ -799,6 +1096,7 @@ entries:
   - knowledge_id: src_brown_warner_1985
     title: 用事件研究区分公告前后价格变化与市场共同变化
     primary_source_id: paper-brown-warner-1985
+    supporting_source_ids: [paper-fama-fisher-jensen-roll-1969, paper-mackinlay-event-study-1997]
     source_grade: A
     version_status: current
     effect: method_only
@@ -831,7 +1129,7 @@ entries:
     local_validation:
       status: validated
       reason: 本地正式公告和日收益验证显示，使用全A股同日基准后伪事件平均异常收益接近零，事件时间与市场调整方法可直接使用；仍不得推断因果或未来保证。
-      validation_reference: src/stock_analyzer/knowledge/direct_validation_results.yaml
+      validation_reference: src/stock_analyzer/knowledge/direct_validation_results.yaml#src_brown_warner_1985
 
   - knowledge_id: src_sun_wen_earnings_car_2023
     title: 用业绩公告窗口相对反应观察后续重估条件
@@ -946,3 +1244,248 @@ entries:
     local_validation:
       status: required_before_threshold
       reason: 财务方向可执行，但评分、阈值和预测权重必须按A股本地样本验证。
+
+  - knowledge_id: src_cn_return_dispersion_risk
+    title: 用市场与行业收益分化识别内部脆弱性
+    primary_source_id: paper-fei-liu-wen-dispersion-2019
+    source_grade: A
+    version_status: current
+    effect: analysis_evidence
+    modules: [market_environment, sector_theme, risk]
+    opportunity_types: [general, industry_trend]
+    topics: [return_dispersion]
+    claim_summary: 收益分化扩大可作为共同上涨程度下降和后续波动上升的风险证据，但不决定涨跌方向。
+    allowed_uses: [比较市场或行业成员日收益分化及其前后变化。]
+    forbidden_uses: [仅凭分化扩大断言市场即将下跌。]
+    prerequisites: [使用分析时点有效的行业成员和复权日收益。]
+    counter_evidence: [分化上升但后续波动未扩大，或关系仅由少数异常股票造成。]
+    data_requirements:
+      - {kind: fact, name: equity_daily, required_fields: [trade_date, ts_code, close, available_at]}
+      - {kind: fact, name: industry_member, required_fields: [ts_code, industry_code, valid_from, valid_to, available_at]}
+    local_validation:
+      status: validated
+      reason: 本地行业分化与后续波动关系总体和前后时期同向，且不设收益方向阈值。
+      validation_reference: supplement_validation_results.yaml#src_cn_return_dispersion_risk
+
+  - knowledge_id: src_cn_turnover_momentum_boundary
+    title: 高换手不能自动确认趋势延续
+    primary_source_id: paper-zhang-zhang-turnover-2022
+    source_grade: A
+    version_status: current
+    effect: analysis_evidence
+    modules: [price_trading, risk]
+    opportunity_types: [general, industry_trend, company_event]
+    topics: [liquidity_trading_activity, market_price_persistence]
+    claim_summary: 成交放大必须与换手稳定性和价格波动共同检查，高换手本身不证明趋势可靠。
+    allowed_uses: [比较候选的过去二十日换手水平、稳定性和价格延续关系。]
+    forbidden_uses: [把高换手写成机构买入、主力认可或趋势增强。]
+    prerequisites: [只使用时点有效的复权价格、成交和换手事实。]
+    counter_evidence: [高换手组的趋势延续没有改善，或波动和回撤同步放大。]
+    data_requirements:
+      - {kind: fact, name: daily_basic, required_fields: [trade_date, ts_code, turnover_rate_f, available_at]}
+      - {kind: fact, name: equity_daily, required_fields: [trade_date, ts_code, close, amount, available_at]}
+    local_validation:
+      status: validated
+      reason: 本地低中高换手组没有显示高换手增强趋势延续，知识作为限制边界直接使用。
+      validation_reference: supplement_validation_results.yaml#src_cn_turnover_momentum_boundary
+
+  - knowledge_id: src_cn_profitability_valuation_support
+    title: 分开比较盈利能力与估值支撑
+    primary_source_id: paper-jiang-qi-tang-profitability-2018
+    source_grade: A
+    version_status: current
+    effect: analysis_evidence
+    modules: [fundamentals, valuation]
+    opportunity_types: [general, earnings_rerating, turnaround]
+    topics: [profitability_quality, valuation_method]
+    claim_summary: ROE、ROA、毛利能力、资产周转与PE、PB、PS回答不同问题，应分别比较而不合成短期收益分数。
+    allowed_uses: [检查高估值是否有真实盈利能力和资产使用效率支撑。]
+    forbidden_uses: [把盈利能力直接转换成未来二至六周上涨预测。]
+    prerequisites: [使用分析时点已披露的可比财务报告和同行业估值。]
+    counter_evidence: [盈利维度恶化、现金不足，或估值扩张已明显快于经营改善。]
+    data_requirements:
+      - {kind: fact, name: income_statement, required_fields: [report_period, ts_code, revenue, oper_cost, n_income_attr_p, available_at]}
+      - {kind: fact, name: balance_sheet, required_fields: [report_period, ts_code, total_assets, total_hldr_eqy_exc_min_int, available_at]}
+      - {kind: fact, name: daily_basic, required_fields: [trade_date, ts_code, pe_ttm, pb, ps_ttm, available_at]}
+    local_validation:
+      status: validated
+      reason: 各盈利和估值维度均可独立复算；短期收益关系不稳定，因此只作经营与估值支撑证据。
+      validation_reference: supplement_validation_results.yaml#src_cn_profitability_valuation_support
+
+  - knowledge_id: src_cn_cash_accrual_quality
+    title: 用现金和应计成分核对利润持续性
+    primary_source_id: paper-li-niuzhang-accrual-2011
+    source_grade: A
+    version_status: current
+    effect: analysis_evidence
+    modules: [fundamentals, risk]
+    opportunity_types: [general, earnings_rerating, turnaround]
+    topics: [profitability_quality, financial_turnaround]
+    claim_summary: 利润增长应拆分经营现金支持和应计成分，以检查改善是否具有现金含量和持续性。
+    allowed_uses: [比较利润、经营现金流和按期初资产缩放的现金与应计成分。]
+    forbidden_uses: [复制旧退市制度、历史分组或把现金增长写成股价保证。]
+    prerequisites: [使用同一报告期口径和分析时点已经披露的三张财务报表。]
+    counter_evidence: [利润增长而经营现金流恶化，或应收、存货与一次性项目异常扩大。]
+    data_requirements:
+      - {kind: fact, name: income_statement, required_fields: [report_period, ts_code, n_income_attr_p, available_at]}
+      - {kind: fact, name: cash_flow, required_fields: [report_period, ts_code, n_cashflow_act, available_at]}
+      - {kind: fact, name: balance_sheet, required_fields: [report_period, ts_code, total_assets, available_at]}
+    local_validation:
+      status: validated
+      reason: 现金成分与下一年同季盈利关系在总体和前后时期一致，应计成分明显较弱。
+      validation_reference: supplement_validation_results.yaml#src_cn_cash_accrual_quality
+
+  - knowledge_id: src_cn_illiquidity_operability
+    title: 用日线价格冲击观察流动性与可操作性
+    primary_source_id: paper-amihud-illiquidity-2002
+    source_grade: A
+    version_status: current
+    effect: analysis_evidence
+    modules: [price_trading, risk]
+    opportunity_types: [general]
+    topics: [liquidity_trading_activity]
+    claim_summary: 绝对复权日收益除以成交额是粗粒度非流动性代理，只用于比较价格冲击和实际可操作性。
+    allowed_uses: [识别较小成交即可造成较大日价格变化的候选。]
+    forbidden_uses: [声称得到订单簿冲击、投资者身份或流动性收益溢价。]
+    prerequisites: [使用正成交额和时点有效的复权日收益。]
+    counter_evidence: [日线代理与真实买卖价差和订单簿流动性可能不一致。]
+    data_requirements:
+      - {kind: fact, name: equity_daily, required_fields: [trade_date, ts_code, close, amount, available_at]}
+      - {kind: fact, name: adj_factor, required_fields: [trade_date, ts_code, adj_factor, available_at]}
+    local_validation:
+      status: validated
+      reason: 公式可直接复算，收益和回撤关系不稳定，因此严格限定为可操作性比较。
+      validation_reference: supplement_validation_results.yaml#src_cn_illiquidity_operability
+
+  - knowledge_id: src_cn_max_overextension
+    title: 用近期最大单日上涨检查追涨透支
+    primary_source_id: paper-gao-han-xiong-max-2021
+    source_grade: A
+    version_status: current
+    effect: analysis_evidence
+    modules: [price_trading, risk]
+    opportunity_types: [general, industry_trend, company_event]
+    topics: [risk_overextension]
+    claim_summary: 过去二十日最大单日上涨可作为彩票型追涨和价格透支的反证，但不能机械淘汰全部强势股。
+    allowed_uses: [比较近期最大单日收益、连续拉升和后续回撤风险。]
+    forbidden_uses: [设置固定MAX淘汰线或认定强势股必然反转。]
+    prerequisites: [使用复权日收益并同时检查事件和基本面是否发生变化。]
+    counter_evidence: [正式经营或事件催化仍在强化，价格回撤后重新形成有效结构。]
+    data_requirements:
+      - {kind: fact, name: equity_daily, required_fields: [trade_date, ts_code, close, available_at]}
+      - {kind: fact, name: adj_factor, required_fields: [trade_date, ts_code, adj_factor, available_at]}
+    local_validation:
+      status: validated
+      reason: MAX与后续超额收益在总体和前后时期均为负，但关系不强，只作反证。
+      validation_reference: supplement_validation_results.yaml#src_cn_max_overextension
+
+  - knowledge_id: src_cn_earnings_disclosure_hierarchy
+    title: 严格区分业绩预告、快报、正式财报和更正
+    primary_source_id: official-sse-listing-2026
+    supporting_source_ids: [official-szse-listing-2026]
+    source_grade: S
+    version_status: current
+    effective_from: 2026-04-24
+    effect: hard_boundary
+    modules: [events, fundamentals]
+    opportunity_types: [earnings_rerating, turnaround]
+    topics: [earnings_disclosure_hierarchy, official_publication_timing]
+    claim_summary: 预告、快报、正式定期报告和更正公告是确定性不同的披露阶段，不得互相替代。
+    allowed_uses: [说明当前信息阶段、方向变化和是否发生重大修正。]
+    forbidden_uses: [把预告或快报写成已经正式实现的业绩。]
+    prerequisites: [按公告公开时间使用对应事实，晚于分析时点的信息不得回填。]
+    counter_evidence: [后续正式财报或更正公告改变此前数字与方向。]
+    data_requirements:
+      - {kind: fact, name: earnings_forecast, required_fields: [type, p_change_min, p_change_max, available_at]}
+      - {kind: fact, name: earnings_express, required_fields: [announcement_type, yoy_net_profit, available_at]}
+      - {kind: fact, name: income_statement, required_fields: [report_type, ann_date, available_at]}
+    local_validation: {status: not_required, reason: 这是现行交易所披露语义边界，现有字段完整，不需要收益检验。}
+
+  - knowledge_id: src_cn_margin_semantics
+    title: 正确解释融资融券变化而不推断主体
+    primary_source_id: official-csrc-margin-2015
+    source_grade: S
+    version_status: current
+    effective_from: 2015-07-01
+    effect: observation_only
+    modules: [price_trading, risk]
+    opportunity_types: [general]
+    topics: [margin_financing, liquidity_trading_activity]
+    claim_summary: 融资余额、融资买入、融资偿还和融券余量只描述信用交易变化，不等于机构观点或收益信号。
+    allowed_uses: [观察融资净流量、余额变化和潜在杠杆拥挤。]
+    forbidden_uses: [把融资买入增加写成机构看多、主力买入或未来必涨。]
+    prerequisites: [分别保留买入、偿还、余额和融券字段。]
+    counter_evidence: [融资净流量与后续风险关系前后反向，不能单独预测。]
+    data_requirements:
+      - {kind: fact, name: margin_detail, required_fields: [trade_date, ts_code, rzye, rzmre, rzche, rqye, rqyl, available_at]}
+    local_validation: {status: not_required, reason: 官方定义用于语义边界；本地观察进一步证明其不能作为收益方向信号。}
+
+  - knowledge_id: src_cn_pledge_conditional_risk
+    title: 把股票质押作为条件性风险而非自动利空
+    primary_source_id: official-sse-pledge-repo-2025
+    source_grade: S
+    version_status: current
+    effective_from: 2025-03-01
+    effect: analysis_evidence
+    modules: [risk, fundamentals, price_trading]
+    opportunity_types: [general, turnaround]
+    topics: [pledge_conditional_risk]
+    claim_summary: 质押风险应结合质押比例、价格、流动性、负债和现金流判断，有质押不等于爆仓。
+    allowed_uses: [分别呈现质押比例、价格下跌、成交、负债率和经营现金流。]
+    forbidden_uses: [根据公共质押比例推算具体平仓价或断言必然强制处置。]
+    prerequisites: [使用分析时点已公开的质押、价格和财务事实。]
+    counter_evidence: [质押比例较低、流动性和财务状况稳定，或公共数据缺少合同条件。]
+    data_requirements:
+      - {kind: fact, name: pledge, required_fields: [end_date, ts_code, pledge_ratio, available_at]}
+      - {kind: fact, name: balance_sheet, required_fields: [report_period, ts_code, total_assets, total_liab, available_at]}
+      - {kind: fact, name: cash_flow, required_fields: [report_period, ts_code, n_cashflow_act, available_at]}
+    local_validation:
+      status: validated
+      reason: 风险方向总体和前后时期一致，但强度有限，严格按条件组合使用。
+      validation_reference: supplement_validation_results.yaml#src_cn_pledge_conditional_risk
+
+  - knowledge_id: src_portfolio_common_exposure
+    title: 检查五只候选是否重复暴露于同一风险
+    primary_source_id: paper-markowitz-portfolio-1952
+    source_grade: A
+    version_status: current
+    effect: analysis_evidence
+    modules: [portfolio]
+    opportunity_types: [general, industry_trend, earnings_rerating, company_event, turnaround]
+    topics: [portfolio_relationship]
+    claim_summary: 五只候选若行业、主题集中或历史收益高度同步，就不是五个独立机会。
+    allowed_uses: [计算行业和主题集中数及两两历史收益相关性。]
+    forbidden_uses: [建立复杂优化器、自动仓位或最优权重。]
+    prerequisites: [输入恰好五只候选并使用时点有效成员关系和复权收益。]
+    counter_evidence: [历史相关性会变化，主题相同也不保证未来同步。]
+    data_requirements:
+      - {kind: fact, name: industry_member, required_fields: [ts_code, industry_code, valid_from, valid_to, available_at]}
+      - {kind: fact, name: theme_member, required_fields: [ts_code, theme_code, valid_from, valid_to, available_at]}
+      - {kind: fact, name: equity_daily, required_fields: [trade_date, ts_code, close, available_at]}
+    local_validation:
+      status: validated
+      reason: 当前仓库可对恰好五只候选稳定复算行业、主题集中度和相关性，不涉及权重。
+      validation_reference: supplement_validation_results.yaml#src_portfolio_common_exposure
+
+  - knowledge_id: src_dechow_ge_schrand_2010
+    title: 多维拆解盈余质量而不建立通用总分
+    primary_source_id: paper-dechow-ge-schrand-2010
+    source_grade: A
+    version_status: current
+    effect: analysis_evidence
+    modules: [fundamentals, risk]
+    opportunity_types: [general, earnings_rerating, turnaround]
+    topics: [profitability_quality, financial_turnaround]
+    claim_summary: 盈余质量取决于决策用途，应分别观察持续性、现金实现、应计和基本经营，不能用单一总分替代。
+    allowed_uses: [拆分现金、应计、盈利持续性和经营改善，并明确各维度含义。]
+    forbidden_uses: [复制通用质量分数或把任一代理直接转成买入信号。]
+    prerequisites: [使用同口径、时点正确的损益表、资产负债表和现金流量表。]
+    counter_evidence: [不同质量代理给出相反结果，或一次性项目改变报告期可比性。]
+    data_requirements:
+      - {kind: fact, name: income_statement, required_fields: [report_period, ts_code, n_income_attr_p, available_at]}
+      - {kind: fact, name: balance_sheet, required_fields: [report_period, ts_code, total_assets, available_at]}
+      - {kind: fact, name: cash_flow, required_fields: [report_period, ts_code, n_cashflow_act, available_at]}
+    local_validation:
+      status: validated
+      reason: 十三项本地验证确认多维现金、应计和经营方向可执行，而单一历史评分不保留。
+      validation_reference: src/stock_analyzer/knowledge/direct_validation_results.yaml#src_dechow_ge_schrand_2010

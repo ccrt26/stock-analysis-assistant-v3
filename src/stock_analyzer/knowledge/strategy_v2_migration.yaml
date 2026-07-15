@@ -218,9 +218,9 @@ entries:
 
   - legacy_knowledge_id: src_dechow_ge_schrand_2010
     action: update
-    target_knowledge_ids: [src_piotroski_2000]
+    target_knowledge_ids: [src_dechow_ge_schrand_2010]
     source_verified: true
-    current_a_share_applicability: method_only
+    current_a_share_applicability: direct
     data_gate: complete
     local_validation_required: false
     reason: 本地多项财务质量观察方向混合且不单调，支持该综述关于盈余质量必须按决策情境多维核对、不得压成单一指标的完整理论。

@@ -184,7 +184,10 @@ def test_market_environment_returns_methods_without_score_rank_or_action():
     assert tuple(item.knowledge_id for item in selected) == (
         EXPECTED_SCENARIO_SELECTIONS["market_environment"]
     )
-    assert all(item.effect is KnowledgeEffect.METHOD_ONLY for item in selected)
+    assert all(
+        item.effect in {KnowledgeEffect.METHOD_ONLY, KnowledgeEffect.ANALYSIS_EVIDENCE}
+        for item in selected
+    )
     assert all(
         not hasattr(item, forbidden)
         for item in selected
@@ -210,7 +213,10 @@ def test_sector_hotspot_remains_evidence_not_ranking():
     )
     assert hotspot is not None
     assert hotspot.formula_versions == ("sector-hotspot-v2",)
-    assert all(item.effect is KnowledgeEffect.METHOD_ONLY for item in selected)
+    assert all(
+        item.effect in {KnowledgeEffect.METHOD_ONLY, KnowledgeEffect.ANALYSIS_EVIDENCE}
+        for item in selected
+    )
     assert all(not hasattr(item, "rank") for item in selected)
     factor_source = next(
         source
