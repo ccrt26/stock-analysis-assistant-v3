@@ -132,6 +132,30 @@ def test_s_official_rule_requires_effective_date_and_official_host():
         SourceRecord.model_validate(payload)
 
 
+def test_s_official_accounting_standard_accepts_only_exact_mof_host():
+    payload = valid_s_source().model_dump()
+    payload.update(
+        {
+            "source_id": "official-mof-cas-35",
+            "title": "企业会计准则第35号——分部报告",
+            "publisher": "中华人民共和国财政部",
+            "url": (
+                "https://kjs.mof.gov.cn/zt/kjzzss/kuaijizhunzeshishi/"
+                "200806/t20080618_46246.htm"
+            ),
+            "publication_date": date(2006, 2, 15),
+            "effective_from": date(2007, 1, 1),
+        }
+    )
+
+    source = SourceRecord.model_validate(payload)
+
+    assert source.url.host == "kjs.mof.gov.cn"
+    payload["url"] = "https://mof-gov.example.com/cas35"
+    with pytest.raises(ValidationError, match="official host"):
+        SourceRecord.model_validate(payload)
+
+
 @pytest.mark.parametrize("effect", ["hard_boundary", "analysis_evidence"])
 def test_b_source_cannot_create_hard_boundary_or_analysis_evidence(effect):
     with pytest.raises(ValidationError, match="B source"):

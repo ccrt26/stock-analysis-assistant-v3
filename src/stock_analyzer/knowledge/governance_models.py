@@ -120,6 +120,7 @@ OFFICIAL_HOSTS = frozenset(
         "www.gov.cn",
         "big5.www.gov.cn",
         "www.miit.gov.cn",
+        "kjs.mof.gov.cn",
     }
 )
 
