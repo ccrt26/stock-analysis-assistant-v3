@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from datetime import date
+import hashlib
+from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -12,9 +14,20 @@ from stock_analyzer.knowledge_validation.direct_validation import (
     chronological_views,
     describe_ordered_groups,
     financial_improvement_observations,
+    formal_announcement_shock_observations,
+    momentum_observations,
     map_announcement_sessions,
     market_adjusted_event_observations,
+    earnings_reaction_observations,
     size_value_observations,
+    validate_common_factor_momentum,
+    validate_daily_event_method,
+    validate_earnings_reaction,
+    validate_financial_improvement,
+    validate_formal_announcement_shocks,
+    validate_short_reversal,
+    validate_size_value,
+    validate_all_claims,
 )
 
 
@@ -92,6 +105,7 @@ def test_size_value_observation_compares_value_within_size_group():
             "ts_code": list("ABCDEF"),
             "total_mv": [10, 10, 10, 100, 100, 100],
             "pe_ttm": [20, 10, 5, 20, 10, 5],
+            "pb": [5, 2, 1, 5, 2, 1],
             "future_excess_return": [0.01, 0.02, 0.04, 0.00, 0.03, 0.05],
         }
     )
@@ -99,6 +113,7 @@ def test_size_value_observation_compares_value_within_size_group():
     out = size_value_observations(frame)
 
     assert out.groupby("size_group")["value_spread"].first().tolist() == pytest.approx([0.03, 0.05])
+    assert out.groupby("size_group")["book_value_spread"].first().tolist() == pytest.approx([0.03, 0.05])
 
 
 def test_market_adjusted_event_observation_subtracts_market_return():
@@ -148,8 +163,8 @@ def test_financial_improvement_keeps_six_directions_separate():
             "prior_leverage": [0.5],
             "current_ratio": [1.5],
             "prior_current_ratio": [1.2],
-            "gross_profitability": [0.12],
-            "prior_gross_profitability": [0.10],
+            "gross_margin": [0.12],
+            "prior_gross_margin": [0.10],
             "asset_turnover": [0.8],
             "prior_asset_turnover": [0.7],
         }
@@ -163,6 +178,141 @@ def test_financial_improvement_keeps_six_directions_separate():
         "cash_flow_improved",
         "leverage_improved",
         "liquidity_improved",
-        "gross_profitability_improved",
+        "gross_margin_improved",
         "asset_turnover_improved",
     ]
+
+
+def test_momentum_observation_keeps_industry_component_separate():
+    frame = pd.DataFrame(
+        {
+            "date": [date(2026, 1, 1)] * 5,
+            "ts_code": list("ABCDE"),
+            "prior_return": [-0.2, -0.1, 0.0, 0.1, 0.2],
+            "industry_prior_return": [-0.1, -0.05, 0.0, 0.05, 0.1],
+            "future_excess_return": [-0.1, -0.05, 0.0, 0.05, 0.1],
+        }
+    )
+
+    out = momentum_observations(frame)
+
+    assert out.loc[out["ts_code"] == "A", "prior_group"].iat[0] == 1
+    assert out.loc[out["ts_code"] == "E", "prior_group"].iat[0] == 5
+    assert out["industry_subtracted_prior"].tolist() == pytest.approx(
+        [-0.1, -0.05, 0.0, 0.05, 0.1]
+    )
+
+
+def test_earnings_reaction_orders_actual_surprise_not_announcement_day_return():
+    frame = pd.DataFrame(
+        {
+            "event_date": [date(2026, 1, 1)] * 5,
+            "ts_code": list("ABCDE"),
+            "earnings_surprise": [-2, -1, 0, 1, 2],
+            "event_car": [2, 1, 0, -1, -2],
+            "future_excess_return": [-0.2, -0.1, 0.0, 0.1, 0.2],
+        }
+    )
+
+    out = earnings_reaction_observations(frame)
+
+    assert out.set_index("ts_code").loc["A", "surprise_group"] == 1
+    assert out.set_index("ts_code").loc["E", "surprise_group"] == 5
+
+
+def test_formal_announcement_shock_uses_narrow_no_match_wording():
+    frame = pd.DataFrame(
+        {
+            "market_adjusted_return": [0.08, -0.08],
+            "future_excess_return": [0.02, 0.02],
+            "local_formal_announcement_match": [True, False],
+        }
+    )
+
+    out = formal_announcement_shock_observations(frame)
+
+    assert out["information_match_status"].tolist() == [
+        "local_formal_announcement_match",
+        "no_local_formal_announcement_match",
+    ]
+    assert out["directional_follow_through"].tolist() == pytest.approx([0.02, -0.02])
+    assert "no_public" not in " ".join(out["information_match_status"])
+
+
+def test_seven_validations_return_descriptive_relationships_without_pass_line():
+    price = pd.DataFrame(
+        {
+            "date": [date(2025, 1, 1)] * 5 + [date(2026, 1, 1)] * 5,
+            "ts_code": list("ABCDE") * 2,
+            "prior_return": [-2, -1, 0, 1, 2] * 2,
+            "industry_prior_return": [-1, -0.5, 0, 0.5, 1] * 2,
+            "future_excess_return": [-0.2, -0.1, 0, 0.1, 0.2] * 2,
+            "total_mv": [10, 20, 30, 40, 50] * 2,
+            "pe_ttm": [20, 15, 10, 8, 5] * 2,
+            "pb": [5, 4, 3, 2, 1] * 2,
+        }
+    )
+    events = pd.DataFrame(
+        {
+            "event_date": [date(2025, 1, 1), date(2026, 1, 1)],
+            "car_0_1": [0.04, -0.02],
+            "is_event": [True, False],
+        }
+    )
+    earnings = pd.DataFrame(
+        {
+            "event_date": [date(2025, 1, 1)] * 5,
+            "earnings_surprise": [-2, -1, 0, 1, 2],
+            "event_car": [-0.2, -0.1, 0, 0.1, 0.2],
+            "future_excess_return": [-0.1, -0.05, 0, 0.05, 0.1],
+        }
+    )
+    shocks = pd.DataFrame(
+        {
+            "date": [date(2025, 1, 1), date(2026, 1, 1)],
+            "market_adjusted_return": [0.08, -0.08],
+            "future_excess_return": [0.02, 0.02],
+            "local_formal_announcement_match": [True, False],
+        }
+    )
+    financial = pd.DataFrame(
+        {
+            "report_period": [date(2025, 3, 31), date(2026, 3, 31)],
+            "improvement_count": [1, 6],
+            "future_excess_return": [-0.1, 0.1],
+            "cash_component": [0.1, 0.2],
+            "accrual_component": [0.2, 0.1],
+            "future_profitability": [0.1, 0.2],
+            "gross_profitability": [0.1, 0.2],
+        }
+    )
+
+    results = (
+        validate_size_value(size_value_observations(price.rename(columns={"date": "date"}))),
+        validate_short_reversal(momentum_observations(price)),
+        validate_common_factor_momentum(momentum_observations(price)),
+        validate_daily_event_method(events),
+        validate_earnings_reaction(earnings_reaction_observations(earnings)),
+        validate_formal_announcement_shocks(formal_announcement_shock_observations(shocks)),
+        validate_financial_improvement(financial),
+    )
+
+    for result in results:
+        assert result
+        assert not ({"pass", "score", "weight", "recommend"} & set(result))
+
+
+def test_current_warehouse_validation_returns_thirteen_and_is_read_only():
+    root = Path(__file__).parents[1] / "local_warehouse"
+    database = root / "research.duckdb"
+    before = hashlib.sha256(database.read_bytes()).hexdigest()
+
+    evidence = validate_all_claims(root)
+
+    after = hashlib.sha256(database.read_bytes()).hexdigest()
+    assert tuple(item.legacy_id for item in evidence) == LEGACY_IDS
+    assert all(isinstance(item.data_usable, bool) for item in evidence)
+    assert not next(item for item in evidence if item.legacy_id == "src_ball_brown_1968").data_usable
+    assert not next(item for item in evidence if item.legacy_id == "src_bernard_thomas_1989").data_usable
+    assert not next(item for item in evidence if item.legacy_id == "src_chan_2003").data_usable
+    assert before == after

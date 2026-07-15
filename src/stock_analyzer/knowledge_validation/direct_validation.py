@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, time
+import json
+from pathlib import Path
 
+import duckdb
 import pandas as pd
 
 from stock_analyzer.data.research_contracts import ResearchDatasetId
@@ -176,22 +179,47 @@ def describe_ordered_groups(frame: pd.DataFrame, group: str, value: str) -> str:
 
 
 def size_value_observations(frame: pd.DataFrame) -> pd.DataFrame:
-    required = {"date", "ts_code", "total_mv", "pe_ttm", "future_excess_return"}
+    required = {"date", "ts_code", "total_mv", "pe_ttm", "pb", "future_excess_return"}
     missing = required - set(frame)
     if missing:
         raise ValueError(f"size/value frame missing columns: {sorted(missing)}")
-    out = frame[(frame["total_mv"] > 0) & (frame["pe_ttm"] > 0)].copy()
+    out = frame[(frame["total_mv"] > 0) & (frame["pe_ttm"] > 0) & (frame["pb"] > 0)].copy()
     out["earnings_price"] = 1.0 / out["pe_ttm"]
+    out["book_to_market"] = 1.0 / out["pb"]
     out["size_group"] = out.groupby("date", group_keys=False)["total_mv"].transform(
         lambda values: pd.qcut(values.rank(method="first"), 2, labels=[1, 2])
     )
 
-    def spread(group: pd.DataFrame) -> float:
-        ordered = group.sort_values(["earnings_price", "ts_code"], kind="mergesort")
-        return float(ordered.iloc[-1]["future_excess_return"] - ordered.iloc[0]["future_excess_return"])
+    def spread(group: pd.DataFrame, signal: str, outcome: str) -> float:
+        ordered = group.sort_values([signal, "ts_code"], kind="mergesort")
+        return float(ordered.iloc[-1][outcome] - ordered.iloc[0][outcome])
 
-    spreads = out.groupby(["date", "size_group"], observed=True).apply(spread, include_groups=False)
+    groups = out.groupby(["date", "size_group"], observed=True)
+    spreads = groups.apply(
+        lambda group: spread(group, "earnings_price", "future_excess_return"),
+        include_groups=False,
+    )
+    book_spreads = groups.apply(
+        lambda group: spread(group, "book_to_market", "future_excess_return"),
+        include_groups=False,
+    )
     out["value_spread"] = [spreads.loc[(row.date, row.size_group)] for row in out.itertuples()]
+    out["book_value_spread"] = [
+        book_spreads.loc[(row.date, row.size_group)] for row in out.itertuples()
+    ]
+    if "future_excess_return_60" in out:
+        sixty = groups.apply(
+            lambda group: spread(group, "earnings_price", "future_excess_return_60"),
+            include_groups=False,
+        )
+        book_sixty = groups.apply(
+            lambda group: spread(group, "book_to_market", "future_excess_return_60"),
+            include_groups=False,
+        )
+        out["value_spread_60"] = [sixty.loc[(row.date, row.size_group)] for row in out.itertuples()]
+        out["book_value_spread_60"] = [
+            book_sixty.loc[(row.date, row.size_group)] for row in out.itertuples()
+        ]
     return out.reset_index(drop=True)
 
 
@@ -223,7 +251,7 @@ def financial_improvement_observations(frame: pd.DataFrame) -> pd.DataFrame:
         ("cash_flow_improved", "operating_cash_flow", "prior_operating_cash_flow", "up"),
         ("leverage_improved", "leverage", "prior_leverage", "down"),
         ("liquidity_improved", "current_ratio", "prior_current_ratio", "up"),
-        ("gross_profitability_improved", "gross_profitability", "prior_gross_profitability", "up"),
+        ("gross_margin_improved", "gross_margin", "prior_gross_margin", "up"),
         ("asset_turnover_improved", "asset_turnover", "prior_asset_turnover", "up"),
     )
     for result, current, prior, direction in comparisons:
@@ -233,5 +261,702 @@ def financial_improvement_observations(frame: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def validate_all_claims(*_args: object, **_kwargs: object) -> tuple[HistoricalEvidence, ...]:
-    raise NotImplementedError("historical warehouse execution is added after formula tests")
+def momentum_observations(frame: pd.DataFrame) -> pd.DataFrame:
+    out = frame.copy()
+    out["prior_group"] = out.groupby("date", group_keys=False)["prior_return"].transform(
+        lambda values: pd.qcut(values.rank(method="first"), 5, labels=[1, 2, 3, 4, 5])
+    )
+    out["industry_subtracted_prior"] = out["prior_return"] - out["industry_prior_return"]
+    return out
+
+
+def earnings_reaction_observations(frame: pd.DataFrame) -> pd.DataFrame:
+    out = frame.copy()
+    out["surprise_group"] = pd.qcut(
+        out["earnings_surprise"].rank(method="first"),
+        5,
+        labels=[1, 2, 3, 4, 5],
+    )
+    return out
+
+
+def formal_announcement_shock_observations(frame: pd.DataFrame) -> pd.DataFrame:
+    out = frame.copy()
+    out["information_match_status"] = out["local_formal_announcement_match"].map(
+        {
+            True: "local_formal_announcement_match",
+            False: "no_local_formal_announcement_match",
+        }
+    )
+    direction = out["market_adjusted_return"].map(lambda value: 1.0 if value >= 0 else -1.0)
+    out["directional_follow_through"] = direction * out["future_excess_return"]
+    return out
+
+
+def _dated_spread(
+    frame: pd.DataFrame,
+    *,
+    date_col: str,
+    group_col: str,
+    value_col: str,
+) -> pd.DataFrame:
+    means = frame.groupby([date_col, group_col], observed=True)[value_col].mean().unstack()
+    return pd.DataFrame(
+        {
+            date_col: means.index,
+            "spread": means.iloc[:, -1].to_numpy() - means.iloc[:, 0].to_numpy(),
+        }
+    )
+
+
+def validate_size_value(frame: pd.DataFrame) -> dict[str, int | float | str]:
+    unique = frame[["date", "size_group", "value_spread"]].drop_duplicates()
+    views = chronological_views(unique, date_col="date", value="value_spread")
+    book = frame[["date", "size_group", "book_value_spread"]].drop_duplicates()
+    book_views = chronological_views(book, date_col="date", value="book_value_spread")
+    size_rank = frame.groupby("date")["total_mv"].rank(pct=True, method="first")
+    smallest = frame.assign(_smallest=size_rank <= 0.30).groupby(["date", "_smallest"])[
+        "future_excess_return"
+    ].mean().unstack()
+    result: dict[str, int | float | str] = {
+        "stock_observations": int(len(frame)),
+        "formation_dates": int(frame["date"].nunique()),
+        "earnings_price_spread_overall": views["overall"],
+        "earnings_price_spread_earlier": views["earlier"],
+        "earnings_price_spread_later": views["later"],
+        "book_to_market_spread_overall": book_views["overall"],
+        "book_to_market_spread_earlier": book_views["earlier"],
+        "book_to_market_spread_later": book_views["later"],
+        "smallest_30_minus_others": float((smallest[True] - smallest[False]).mean()),
+    }
+    if "value_spread_60" in frame:
+        ep60 = frame[["date", "size_group", "value_spread_60"]].drop_duplicates()
+        bm60 = frame[["date", "size_group", "book_value_spread_60"]].drop_duplicates()
+        result["earnings_price_spread_60"] = chronological_views(
+            ep60, date_col="date", value="value_spread_60"
+        )["overall"]
+        result["book_to_market_spread_60"] = chronological_views(
+            bm60, date_col="date", value="book_value_spread_60"
+        )["overall"]
+    return result
+
+
+def validate_short_reversal(frame: pd.DataFrame) -> dict[str, int | float | str]:
+    spreads = _dated_spread(
+        frame, date_col="date", group_col="prior_group", value_col="future_excess_return"
+    )
+    views = chronological_views(spreads, date_col="date", value="spread")
+    result: dict[str, int | float | str] = {
+        "stock_observations": int(len(frame)),
+        "winner_minus_loser_overall": views["overall"],
+        "winner_minus_loser_earlier": views["earlier"],
+        "winner_minus_loser_later": views["later"],
+    }
+    if "future_excess_return_60" in frame:
+        sixty = _dated_spread(
+            frame,
+            date_col="date",
+            group_col="prior_group",
+            value_col="future_excess_return_60",
+        )
+        result["winner_minus_loser_60"] = float(sixty["spread"].mean())
+    return result
+
+
+def validate_common_factor_momentum(frame: pd.DataFrame) -> dict[str, int | float | str]:
+    out = frame.copy()
+    out["residual_group"] = out.groupby("date", group_keys=False)[
+        "industry_subtracted_prior"
+    ].transform(
+        lambda values: pd.qcut(values.rank(method="first"), 5, labels=[1, 2, 3, 4, 5])
+    )
+    raw = _dated_spread(
+        out, date_col="date", group_col="prior_group", value_col="future_excess_return"
+    )
+    residual = _dated_spread(
+        out, date_col="date", group_col="residual_group", value_col="future_excess_return"
+    )
+    result: dict[str, int | float | str] = {
+        "formation_dates": int(out["date"].nunique()),
+        "raw_winner_minus_loser": float(raw["spread"].mean()),
+        "industry_subtracted_winner_minus_loser": float(residual["spread"].mean()),
+    }
+    if "future_excess_return_60" in out:
+        residual60 = _dated_spread(
+            out,
+            date_col="date",
+            group_col="residual_group",
+            value_col="future_excess_return_60",
+        )
+        result["industry_subtracted_winner_minus_loser_60"] = float(
+            residual60["spread"].mean()
+        )
+    return result
+
+
+def validate_daily_event_method(frame: pd.DataFrame) -> dict[str, int | float | str]:
+    events = frame[frame["is_event"].astype(bool)]["car_0_1"]
+    pseudo = frame[~frame["is_event"].astype(bool)]["car_0_1"]
+    return {
+        "event_observations": int(events.count()),
+        "pseudo_observations": int(pseudo.count()),
+        "event_mean_absolute_car": float(events.abs().mean()),
+        "pseudo_mean_car": float(pseudo.mean()),
+        "pseudo_mean_absolute_car": float(pseudo.abs().mean()),
+    }
+
+
+def validate_earnings_reaction(frame: pd.DataFrame) -> dict[str, int | float | str]:
+    ordered = frame.sort_values("event_date", kind="mergesort")
+    split = (len(ordered) + 1) // 2
+
+    def spread(part: pd.DataFrame, value: str) -> float:
+        means = part.groupby("surprise_group", observed=True)[value].mean()
+        return float(means.iloc[-1] - means.iloc[0])
+
+    return {
+        "events": int(len(frame)),
+        "surprise_event_car_top_minus_bottom": spread(ordered, "event_car"),
+        "surprise_future_return_top_minus_bottom": spread(ordered, "future_excess_return"),
+        "future_spread_earlier": spread(ordered.iloc[:split], "future_excess_return"),
+        "future_spread_later": spread(ordered.iloc[split:], "future_excess_return"),
+    }
+
+
+def validate_formal_announcement_shocks(frame: pd.DataFrame) -> dict[str, int | float | str]:
+    grouped = frame.groupby("information_match_status")["directional_follow_through"].agg(
+        ["count", "mean"]
+    )
+    matched = grouped.loc["local_formal_announcement_match"]
+    unmatched = grouped.loc["no_local_formal_announcement_match"]
+    return {
+        "matched_shocks": int(matched["count"]),
+        "locally_unmatched_shocks": int(unmatched["count"]),
+        "matched_directional_follow_through": float(matched["mean"]),
+        "locally_unmatched_directional_follow_through": float(unmatched["mean"]),
+    }
+
+
+def validate_financial_improvement(frame: pd.DataFrame) -> dict[str, int | float | str]:
+    usable = frame.dropna(
+        subset=[
+            "improvement_count",
+            "future_excess_return",
+            "cash_component",
+            "accrual_component",
+            "future_profitability",
+            "gross_profitability",
+        ]
+    )
+    periods = sorted(usable["report_period"].unique())
+    midpoint = periods[(len(periods) - 1) // 2]
+    earlier = usable[usable["report_period"] <= midpoint]
+    later = usable[usable["report_period"] > midpoint]
+
+    def rank_correlation(part: pd.DataFrame, signal: str) -> float:
+        if len(part) < 2:
+            return float("nan")
+        return float(part[signal].rank().corr(part["future_excess_return"].rank()))
+
+    result: dict[str, int | float | str] = {
+        "company_periods": int(len(usable)),
+        "improvement_return_rank_correlation": rank_correlation(usable, "improvement_count"),
+        "improvement_return_correlation_earlier": rank_correlation(earlier, "improvement_count"),
+        "improvement_return_correlation_later": rank_correlation(later, "improvement_count"),
+        "improvement_group_returns": describe_ordered_groups(
+            usable, "improvement_count", "future_excess_return"
+        ),
+        "cash_future_profitability_correlation": float(
+            usable["cash_component"].corr(usable["future_profitability"])
+        ),
+        "accrual_future_profitability_correlation": float(
+            usable["accrual_component"].corr(usable["future_profitability"])
+        ),
+        "gross_profitability_return_rank_correlation": rank_correlation(
+            usable, "gross_profitability"
+        ),
+        "gross_profitability_correlation_earlier": rank_correlation(
+            earlier, "gross_profitability"
+        ),
+        "gross_profitability_correlation_later": rank_correlation(
+            later, "gross_profitability"
+        ),
+        "report_periods": int(usable["report_period"].nunique()),
+    }
+    return result
+
+
+def _fact_paths(root: Path, name: str) -> list[str]:
+    paths = [str(path) for path in sorted((root / "facts" / name).glob("*/data.parquet"))]
+    if not paths:
+        raise ValueError(f"no current fact partitions for {name}")
+    return paths
+
+
+def _query_frame(sql: str, parameters: list[object]) -> pd.DataFrame:
+    with duckdb.connect() as connection:
+        return connection.execute(sql, parameters).fetchdf()
+
+
+def _load_price_panel(root: Path) -> pd.DataFrame:
+    sql = """
+        with market as (
+            select trade_date, close,
+                   row_number() over (order by trade_date) as session_no,
+                   count(*) over () as session_count
+            from read_parquet(?, union_by_name=true, hive_partitioning=false)
+            where index_code = '000300.SH'
+        ), formation as (
+            select * from market
+            where session_no > 60 and session_no + 60 <= session_count
+              and session_no % 20 = 0
+        ), members as (
+            select ts_code, industry_code, valid_from, valid_to
+            from read_parquet(?, union_by_name=true, hive_partitioning=false)
+            where level = 'L1'
+        )
+        select f.trade_date as date, e.ts_code, b.total_mv, b.pe_ttm, b.pb,
+               (e.close * a.adj_factor) / (prior.close * prior_a.adj_factor) - 1
+                   as prior_return,
+               (future.close * future_a.adj_factor) / (e.close * a.adj_factor) - 1
+                   - (future_market.close / f.close - 1) as future_excess_return,
+               (future60.close * future60_a.adj_factor) / (e.close * a.adj_factor) - 1
+                   - (future_market60.close / f.close - 1) as future_excess_return_60,
+               members.industry_code
+        from formation f
+        join market prior_market on prior_market.session_no = f.session_no - 60
+        join market future_market on future_market.session_no = f.session_no + 20
+        join market future_market60 on future_market60.session_no = f.session_no + 60
+        join read_parquet(?, union_by_name=true, hive_partitioning=false) e
+          on e.trade_date = f.trade_date
+        join read_parquet(?, union_by_name=true, hive_partitioning=false) a
+          on a.trade_date = e.trade_date and a.ts_code = e.ts_code
+        join read_parquet(?, union_by_name=true, hive_partitioning=false) b
+          on b.trade_date = e.trade_date and b.ts_code = e.ts_code
+        join read_parquet(?, union_by_name=true, hive_partitioning=false) prior
+          on prior.trade_date = prior_market.trade_date and prior.ts_code = e.ts_code
+        join read_parquet(?, union_by_name=true, hive_partitioning=false) prior_a
+          on prior_a.trade_date = prior.trade_date and prior_a.ts_code = e.ts_code
+        join read_parquet(?, union_by_name=true, hive_partitioning=false) future
+          on future.trade_date = future_market.trade_date and future.ts_code = e.ts_code
+        join read_parquet(?, union_by_name=true, hive_partitioning=false) future_a
+          on future_a.trade_date = future.trade_date and future_a.ts_code = e.ts_code
+        join read_parquet(?, union_by_name=true, hive_partitioning=false) future60
+          on future60.trade_date = future_market60.trade_date and future60.ts_code = e.ts_code
+        join read_parquet(?, union_by_name=true, hive_partitioning=false) future60_a
+          on future60_a.trade_date = future60.trade_date and future60_a.ts_code = e.ts_code
+        left join members
+          on members.ts_code = e.ts_code
+         and cast(members.valid_from as date) <= cast(e.trade_date as date)
+         and (members.valid_to is null or cast(members.valid_to as date) >= cast(e.trade_date as date))
+        where e.close > 0 and prior.close > 0 and future.close > 0 and future60.close > 0
+          and a.adj_factor > 0 and prior_a.adj_factor > 0 and future_a.adj_factor > 0
+          and future60_a.adj_factor > 0
+          and b.total_mv > 0
+    """
+    index_paths = _fact_paths(root, "index_daily")
+    equity_paths = _fact_paths(root, "equity_daily")
+    factor_paths = _fact_paths(root, "adj_factor")
+    frame = _query_frame(
+        sql,
+        [
+            index_paths,
+            _fact_paths(root, "industry_member"),
+            equity_paths,
+            factor_paths,
+            _fact_paths(root, "daily_basic"),
+            equity_paths,
+            factor_paths,
+            equity_paths,
+            factor_paths,
+            equity_paths,
+            factor_paths,
+        ],
+    )
+    frame["date"] = pd.to_datetime(frame["date"]).dt.date
+    frame["industry_prior_return"] = frame.groupby(
+        ["date", "industry_code"], dropna=False
+    )["prior_return"].transform("mean")
+    return frame.dropna(subset=["future_excess_return", "prior_return"])
+
+
+def _announcement_events_sql(candidate_only: bool) -> str:
+    predicate = "and cast(candidate_event_types as varchar) <> '[]'" if candidate_only else ""
+    return f"""
+        select distinct a.ts_code,
+          case
+            when same_day.trade_date is not null and a.ann_time <= '15:00:00'
+              then a.ann_date
+            else (select min(c2.trade_date) from calendar c2 where c2.trade_date > a.ann_date)
+          end as event_date
+        from (
+          select ts_code,
+                 cast(substr(cast(announcement_time as varchar), 1, 10) as date) ann_date,
+                 substr(cast(announcement_time as varchar), 12, 8) ann_time
+          from announcements
+          where ts_code is not null {predicate}
+        ) a
+        left join calendar same_day on same_day.trade_date = a.ann_date
+    """
+
+
+def _load_event_panel(root: Path) -> pd.DataFrame:
+    event_sql = _announcement_events_sql(candidate_only=True)
+    sql = f"""
+        with calendar as (
+          select trade_date, row_number() over (order by trade_date) session_no
+          from read_parquet(?, union_by_name=true, hive_partitioning=false)
+          where index_code = '000300.SH'
+        ), announcements as (
+          select * from read_parquet(?, union_by_name=true, hive_partitioning=false)
+        ), event_dates as ({event_sql}), stock_returns as (
+          select ts_code, trade_date, pct_chg / 100.0 stock_return
+          from read_parquet(?, union_by_name=true, hive_partitioning=false)
+          where pct_chg is not null
+        ), market_returns as (
+          select trade_date, avg(stock_return) market_return
+          from stock_returns group by trade_date
+        ), daily as (
+          select s.ts_code, c.trade_date, c.session_no,
+                 s.stock_return - m.market_return abnormal_return
+          from calendar c
+          join stock_returns s on s.trade_date = c.trade_date
+          join market_returns m on m.trade_date = c.trade_date
+        ), event_rows as (
+          select d.ts_code, d.trade_date event_date,
+                 d.abnormal_return + next_day.abnormal_return car_0_1,
+                 true is_event
+          from event_dates ev
+          join daily d on d.ts_code = ev.ts_code and d.trade_date = ev.event_date
+          join daily next_day on next_day.ts_code = d.ts_code
+                             and next_day.session_no = d.session_no + 1
+        ), pseudo_rows as (
+          select d.ts_code, d.trade_date event_date,
+                 d.abnormal_return + next_day.abnormal_return car_0_1,
+                 false is_event
+          from daily d
+          join daily next_day on next_day.ts_code = d.ts_code
+                             and next_day.session_no = d.session_no + 1
+          where d.session_no % 20 = 7
+            and d.trade_date >= (select min(event_date) from event_dates)
+            and not exists (
+              select 1 from event_dates ev
+              where ev.ts_code = d.ts_code and ev.event_date = d.trade_date
+            )
+        )
+        select * from event_rows
+        union all
+        select * from pseudo_rows
+    """
+    frame = _query_frame(
+        sql,
+        [
+            _fact_paths(root, "index_daily"),
+            _fact_paths(root, "announcement"),
+            _fact_paths(root, "equity_daily"),
+        ],
+    )
+    frame["event_date"] = pd.to_datetime(frame["event_date"]).dt.date
+    return frame.dropna(subset=["car_0_1"])
+
+
+def _load_earnings_panel(root: Path) -> pd.DataFrame:
+    sql = """
+        with calendar as (
+          select trade_date, pct_chg / 100.0 market_return, close market_close,
+                 row_number() over (order by trade_date) session_no
+          from read_parquet(?, union_by_name=true, hive_partitioning=false)
+          where index_code = '000300.SH'
+        ), raw_events as (
+          select ts_code, ann_date,
+                 (coalesce(p_change_min, p_change_max) + coalesce(p_change_max, p_change_min)) / 2.0
+                   earnings_surprise
+          from read_parquet(?, union_by_name=true, hive_partitioning=false)
+          where coalesce(p_change_min, p_change_max) is not null
+          union all
+          select ts_code, ann_date, yoy_net_profit earnings_surprise
+          from read_parquet(?, union_by_name=true, hive_partitioning=false)
+          where yoy_net_profit is not null
+        ), event_day_map as (
+          select dates.ann_date, min(c.trade_date) event_date
+          from (select distinct ann_date from raw_events) dates
+          join calendar c on c.trade_date > dates.ann_date
+          group by dates.ann_date
+        ), events as (
+          select r.ts_code, r.ann_date, avg(r.earnings_surprise) earnings_surprise,
+                 max(m.event_date) event_date
+          from raw_events r join event_day_map m on m.ann_date = r.ann_date
+          group by r.ts_code, r.ann_date
+        )
+        select ev.event_date, ev.ts_code, ev.earnings_surprise,
+               (day0.pct_chg / 100.0 - c0.market_return)
+                 + (day1.pct_chg / 100.0 - c1.market_return) event_car,
+               (future.close * future_a.adj_factor) / (day0.close * day0_a.adj_factor) - 1
+                 - (c20.market_close / c0.market_close - 1) future_excess_return
+        from events ev
+        join calendar c0 on c0.trade_date = ev.event_date
+        join calendar c1 on c1.session_no = c0.session_no + 1
+        join calendar c20 on c20.session_no = c0.session_no + 20
+        join read_parquet(?, union_by_name=true, hive_partitioning=false) day0
+          on day0.ts_code = ev.ts_code and day0.trade_date = c0.trade_date
+        join read_parquet(?, union_by_name=true, hive_partitioning=false) day1
+          on day1.ts_code = ev.ts_code and day1.trade_date = c1.trade_date
+        join read_parquet(?, union_by_name=true, hive_partitioning=false) future
+          on future.ts_code = ev.ts_code and future.trade_date = c20.trade_date
+        join read_parquet(?, union_by_name=true, hive_partitioning=false) day0_a
+          on day0_a.ts_code = ev.ts_code and day0_a.trade_date = c0.trade_date
+        join read_parquet(?, union_by_name=true, hive_partitioning=false) future_a
+          on future_a.ts_code = ev.ts_code and future_a.trade_date = c20.trade_date
+        where day0.close > 0 and future.close > 0
+          and day0_a.adj_factor > 0 and future_a.adj_factor > 0
+    """
+    equity = _fact_paths(root, "equity_daily")
+    factor = _fact_paths(root, "adj_factor")
+    frame = _query_frame(
+        sql,
+        [
+            _fact_paths(root, "index_daily"),
+            _fact_paths(root, "earnings_forecast"),
+            _fact_paths(root, "earnings_express"),
+            equity,
+            equity,
+            equity,
+            factor,
+            factor,
+        ],
+    )
+    frame["event_date"] = pd.to_datetime(frame["event_date"]).dt.date
+    return frame.dropna()
+
+
+def _load_shock_panel(root: Path) -> pd.DataFrame:
+    event_sql = _announcement_events_sql(candidate_only=False)
+    sql = f"""
+        with calendar as (
+          select trade_date, pct_chg / 100.0 market_return, close market_close,
+                 row_number() over (order by trade_date) session_no
+          from read_parquet(?, union_by_name=true, hive_partitioning=false)
+          where index_code = '000300.SH'
+        ), announcements as (
+          select * from read_parquet(?, union_by_name=true, hive_partitioning=false)
+        ), event_dates as ({event_sql}), daily as (
+          select c.trade_date date, c.session_no, e.ts_code,
+                 e.pct_chg / 100.0 - c.market_return market_adjusted_return,
+                 (future.close * future_a.adj_factor) / (e.close * base_a.adj_factor) - 1
+                   - (future_market.market_close / c.market_close - 1) future_excess_return
+          from calendar c
+          join calendar future_market on future_market.session_no = c.session_no + 20
+          join read_parquet(?, union_by_name=true, hive_partitioning=false) e
+            on e.trade_date = c.trade_date
+          join read_parquet(?, union_by_name=true, hive_partitioning=false) future
+            on future.trade_date = future_market.trade_date and future.ts_code = e.ts_code
+          join read_parquet(?, union_by_name=true, hive_partitioning=false) base_a
+            on base_a.trade_date = e.trade_date and base_a.ts_code = e.ts_code
+          join read_parquet(?, union_by_name=true, hive_partitioning=false) future_a
+            on future_a.trade_date = future.trade_date and future_a.ts_code = e.ts_code
+          where c.trade_date >= (select min(event_date) from event_dates)
+            and e.close > 0 and future.close > 0 and base_a.adj_factor > 0 and future_a.adj_factor > 0
+        ), ranked as (
+          select *, percent_rank() over (
+            partition by date order by abs(market_adjusted_return) desc
+          ) move_rank
+          from daily
+        )
+        select r.date, r.market_adjusted_return, r.future_excess_return,
+               ev.ts_code is not null local_formal_announcement_match
+        from ranked r
+        left join event_dates ev on ev.ts_code = r.ts_code and ev.event_date = r.date
+        where r.move_rank <= 0.05
+    """
+    equity = _fact_paths(root, "equity_daily")
+    factor = _fact_paths(root, "adj_factor")
+    frame = _query_frame(
+        sql,
+        [
+            _fact_paths(root, "index_daily"),
+            _fact_paths(root, "announcement"),
+            equity,
+            equity,
+            factor,
+            factor,
+        ],
+    )
+    frame["date"] = pd.to_datetime(frame["date"]).dt.date
+    return frame.dropna(subset=["market_adjusted_return", "future_excess_return"])
+
+
+def _load_financial_panel(root: Path) -> pd.DataFrame:
+    sql = """
+        with calendar as (
+          select trade_date, close market_close,
+                 row_number() over (order by trade_date) session_no
+          from read_parquet(?, union_by_name=true, hive_partitioning=false)
+          where index_code = '000300.SH'
+        ), income as (
+          select ts_code, report_period,
+                 coalesce(
+                   try_cast(ann_date as date),
+                   cast(try_strptime(cast(ann_date as varchar), '%Y%m%d') as date)
+                 ) ann_date,
+                 revenue, oper_cost, n_income_attr_p
+          from read_parquet(?, union_by_name=true, hive_partitioning=false)
+        ), balance as (
+          select ts_code, report_period, total_assets
+          from read_parquet(?, union_by_name=true, hive_partitioning=false)
+        ), cash as (
+          select ts_code, report_period, n_cashflow_act
+          from read_parquet(?, union_by_name=true, hive_partitioning=false)
+        ), indicators as (
+          select ts_code, report_period, roe, current_ratio, debt_to_assets,
+                 grossprofit_margin, assets_turn
+          from read_parquet(?, union_by_name=true, hive_partitioning=false)
+        ), combined as (
+          select i.ts_code, i.report_period, i.ann_date, i.n_income_attr_p,
+                 i.revenue, i.oper_cost, b.total_assets, cf.n_cashflow_act,
+                 fi.roe, fi.current_ratio, fi.debt_to_assets,
+                 fi.grossprofit_margin, fi.assets_turn
+          from income i
+          join balance b using (ts_code, report_period)
+          join cash cf using (ts_code, report_period)
+          join indicators fi using (ts_code, report_period)
+          where b.total_assets > 0
+        ), compared as (
+          select *,
+            lag(roe, 4) over company as prior_roe,
+            lag(n_cashflow_act, 4) over company as prior_operating_cash_flow,
+            lag(debt_to_assets, 4) over company as prior_leverage,
+            lag(current_ratio, 4) over company as prior_current_ratio,
+            lag(grossprofit_margin, 4) over company as prior_gross_margin,
+            lag(assets_turn, 4) over company as prior_asset_turnover,
+            lead(n_income_attr_p / total_assets, 4) over company as future_profitability
+          from combined
+          window company as (partition by ts_code order by report_period)
+        ), event_day_map as (
+          select dates.ann_date, min(c.trade_date) event_date
+          from (select distinct ann_date from compared where ann_date is not null) dates
+          join calendar c on c.trade_date > dates.ann_date
+          group by dates.ann_date
+        ), dated as (
+          select compared.*, event_day_map.event_date
+          from compared join event_day_map using (ann_date)
+        )
+        select d.report_period, d.roe, d.prior_roe,
+               d.n_cashflow_act operating_cash_flow,
+               d.prior_operating_cash_flow,
+               d.debt_to_assets leverage, d.prior_leverage,
+               d.current_ratio, d.prior_current_ratio,
+               d.grossprofit_margin gross_margin, d.prior_gross_margin,
+               (d.revenue - d.oper_cost) / d.total_assets gross_profitability,
+               d.assets_turn asset_turnover, d.prior_asset_turnover,
+               d.n_cashflow_act / d.total_assets cash_component,
+               (d.n_income_attr_p - d.n_cashflow_act) / d.total_assets accrual_component,
+               d.future_profitability,
+               (future.close * future_a.adj_factor) / (base.close * base_a.adj_factor) - 1
+                 - (future_market.market_close / base_market.market_close - 1) future_excess_return
+        from dated d
+        join calendar base_market on base_market.trade_date = d.event_date
+        join calendar future_market on future_market.session_no = base_market.session_no + 20
+        join read_parquet(?, union_by_name=true, hive_partitioning=false) base
+          on base.ts_code = d.ts_code and base.trade_date = base_market.trade_date
+        join read_parquet(?, union_by_name=true, hive_partitioning=false) future
+          on future.ts_code = d.ts_code and future.trade_date = future_market.trade_date
+        join read_parquet(?, union_by_name=true, hive_partitioning=false) base_a
+          on base_a.ts_code = d.ts_code and base_a.trade_date = base_market.trade_date
+        join read_parquet(?, union_by_name=true, hive_partitioning=false) future_a
+          on future_a.ts_code = d.ts_code and future_a.trade_date = future_market.trade_date
+        where base.close > 0 and future.close > 0 and base_a.adj_factor > 0 and future_a.adj_factor > 0
+    """
+    equity = _fact_paths(root, "equity_daily")
+    factor = _fact_paths(root, "adj_factor")
+    frame = _query_frame(
+        sql,
+        [
+            _fact_paths(root, "index_daily"),
+            _fact_paths(root, "income_statement"),
+            _fact_paths(root, "balance_sheet"),
+            _fact_paths(root, "cash_flow"),
+            _fact_paths(root, "financial_indicator"),
+            equity,
+            equity,
+            factor,
+            factor,
+        ],
+    )
+    frame["report_period"] = pd.to_datetime(frame["report_period"]).dt.date
+    frame = financial_improvement_observations(frame)
+    return frame.dropna(
+        subset=[
+            "prior_roe",
+            "prior_operating_cash_flow",
+            "prior_leverage",
+            "prior_current_ratio",
+            "prior_gross_margin",
+            "prior_asset_turnover",
+            "future_profitability",
+            "future_excess_return",
+        ]
+    )
+
+
+def validate_all_claims(warehouse_root: Path) -> tuple[HistoricalEvidence, ...]:
+    root = Path(warehouse_root)
+    price = _load_price_panel(root)
+    size = validate_size_value(size_value_observations(price))
+    momentum = momentum_observations(price.dropna(subset=["industry_prior_return"]))
+    reversal = validate_short_reversal(momentum)
+    common = validate_common_factor_momentum(momentum)
+    event = validate_daily_event_method(_load_event_panel(root))
+    earnings = validate_earnings_reaction(
+        earnings_reaction_observations(_load_earnings_panel(root))
+    )
+    shocks = validate_formal_announcement_shocks(
+        formal_announcement_shock_observations(_load_shock_panel(root))
+    )
+    financial = validate_financial_improvement(_load_financial_panel(root))
+    calculations = {
+        "size_value": size,
+        "short_reversal": reversal,
+        "common_factor_momentum": common,
+        "daily_event_method": event,
+        "earnings_reaction": earnings,
+        "formal_announcement_shocks": shocks,
+        "financial_improvement": financial,
+    }
+    unavailable_core_variable = {
+        "src_ball_brown_1968": "现有数据没有可与市场预期比较的非预期盈余。",
+        "src_bernard_thomas_1989": "现有数据没有标准化非预期盈余，不能用同比增长替代。",
+        "src_chan_2003": "现有数据只覆盖本地正式公告，不是论文所需的完整公开新闻标题库。",
+    }
+    evidence: list[HistoricalEvidence] = []
+    for claim in CLAIMS:
+        combined = {name: calculations[name] for name in claim.calculations}
+        flattened = {
+            f"{name}.{key}": value
+            for name, metrics in combined.items()
+            for key, value in metrics.items()
+        }
+        serialized = json.dumps(flattened, ensure_ascii=False, sort_keys=True)
+        evidence.append(
+            HistoricalEvidence(
+                legacy_id=claim.legacy_id,
+                calculations=claim.calculations,
+                data_usable=claim.legacy_id not in unavailable_core_variable,
+                overall_direction=serialized,
+                earlier_direction=str(
+                    {key: value for key, value in flattened.items() if "earlier" in key}
+                ),
+                later_direction=str(
+                    {key: value for key, value in flattened.items() if "later" in key}
+                ),
+                relationship_shape=serialized,
+                main_drivers=str(
+                    {key: value for key, value in flattened.items() if "observ" in key or "dates" in key or "period" in key}
+                ),
+                counter_evidence=unavailable_core_variable.get(
+                    claim.legacy_id,
+                    "由逐项复核根据相反方向、时期变化和数据边界填写。",
+                ),
+                observations=flattened,
+            )
+        )
+    return tuple(evidence)
