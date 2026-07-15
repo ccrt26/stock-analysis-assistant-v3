@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import numpy as np
+import pandas as pd
+
 from stock_analyzer.data.research_contracts import ResearchDatasetId
 
 
@@ -109,9 +112,148 @@ TARGETED_GAP_CLAIMS = (
 )
 
 
+def business_segment_materiality_observations(
+    frame: pd.DataFrame,
+) -> pd.DataFrame:
+    required = {
+        "ts_code",
+        "report_period",
+        "classification",
+        "item_name",
+        "curr_type",
+        "company_curr_type",
+        "bz_sales",
+        "bz_cost",
+        "bz_profit",
+        "company_revenue",
+        "company_operating_profit",
+    }
+    missing = sorted(required.difference(frame.columns))
+    if missing:
+        raise ValueError(f"missing business segment columns: {', '.join(missing)}")
+
+    result = frame.copy()
+    result["report_period"] = pd.to_datetime(result["report_period"])
+    numeric = (
+        "bz_sales",
+        "bz_cost",
+        "bz_profit",
+        "company_revenue",
+        "company_operating_profit",
+    )
+    for column in numeric:
+        result[column] = pd.to_numeric(result[column], errors="coerce")
+
+    currency_comparable = (
+        result["curr_type"].notna()
+        & result["company_curr_type"].notna()
+        & result["curr_type"].eq(result["company_curr_type"])
+    )
+    valid_sales = currency_comparable & result["company_revenue"].gt(0)
+    valid_profit = currency_comparable & result["company_operating_profit"].ne(0)
+    valid_margin = currency_comparable & result["bz_sales"].gt(0)
+
+    result["sales_share"] = np.where(
+        valid_sales,
+        result["bz_sales"] / result["company_revenue"],
+        np.nan,
+    )
+    result["profit_share"] = np.where(
+        valid_profit,
+        result["bz_profit"] / result["company_operating_profit"],
+        np.nan,
+    )
+    result["gross_margin"] = np.where(
+        valid_margin,
+        (result["bz_sales"] - result["bz_cost"]) / result["bz_sales"],
+        np.nan,
+    )
+    result["ratio_status"] = np.select(
+        [~currency_comparable, valid_sales & valid_profit & valid_margin],
+        ["currency_mismatch", "comparable"],
+        default="invalid_denominator",
+    )
+    return result.sort_values(
+        ["ts_code", "report_period", "classification", "item_name"],
+        kind="mergesort",
+    ).reset_index(drop=True)
+
+
+def earnings_growth_persistence_observations(
+    frame: pd.DataFrame,
+) -> pd.DataFrame:
+    required = {
+        "ts_code",
+        "report_period",
+        "industry_code",
+        "revenue",
+        "operate_profit",
+        "n_income_attr_p",
+        "n_cashflow_act",
+        "total_assets",
+        "grossprofit_margin",
+        "expense_rate",
+    }
+    missing = sorted(required.difference(frame.columns))
+    if missing:
+        raise ValueError(f"missing earnings history columns: {', '.join(missing)}")
+
+    result = frame.copy()
+    result["report_period"] = pd.to_datetime(result["report_period"])
+    numeric = required.difference(
+        {"ts_code", "report_period", "industry_code"}
+    )
+    for column in numeric:
+        result[column] = pd.to_numeric(result[column], errors="coerce")
+    result = result.sort_values(
+        ["ts_code", "report_period"], kind="mergesort"
+    ).reset_index(drop=True)
+    company = result.groupby("ts_code", sort=False)
+    prior_assets = company["total_assets"].shift(4)
+
+    component_map = {
+        "revenue": "revenue_change_scaled",
+        "operate_profit": "operating_profit_change_scaled",
+        "n_income_attr_p": "net_income_change_scaled",
+        "n_cashflow_act": "operating_cash_change_scaled",
+    }
+    for source, target in component_map.items():
+        prior = company[source].shift(4)
+        result[target] = (result[source] - prior) / prior_assets.where(
+            prior_assets.gt(0)
+        )
+    result["gross_margin_change"] = (
+        result["grossprofit_margin"] - company["grossprofit_margin"].shift(4)
+    )
+    result["expense_rate_change"] = (
+        result["expense_rate"] - company["expense_rate"].shift(4)
+    )
+    future_income = company["n_income_attr_p"].shift(-4)
+    result["next_year_net_income_change_scaled"] = (
+        future_income - result["n_income_attr_p"]
+    ) / result["total_assets"].where(result["total_assets"].gt(0))
+
+    comparison_columns = tuple(component_map.values()) + (
+        "gross_margin_change",
+        "expense_rate_change",
+    )
+    industry_groups = result.groupby(
+        ["report_period", "industry_code"], dropna=False, sort=False
+    )
+    for column in comparison_columns:
+        median_name = f"industry_{column.removesuffix('_scaled')}_median"
+        result[median_name] = industry_groups[column].transform("median")
+        relative_name = f"relative_{column.removesuffix('_scaled')}"
+        result[relative_name] = result[column] - result[median_name]
+
+    return result.replace([np.inf, -np.inf], np.nan)
+
+
 __all__ = [
     "TARGETED_GAP_CLAIMS",
     "TARGETED_SOURCE_REFS",
     "TargetedGapClaim",
     "TargetedGapEvidence",
+    "business_segment_materiality_observations",
+    "earnings_growth_persistence_observations",
 ]
