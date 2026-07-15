@@ -48,7 +48,9 @@ class SampleSufficiency(_FrozenModel):
     minimum_confirmation_units: int = Field(ge=0)
     minimum_time_blocks: int = Field(ge=0)
     minimum_companies: int = Field(ge=0)
+    minimum_confirmation_companies: int = Field(ge=0)
     minimum_calendar_quarters: int = Field(ge=0)
+    minimum_year_over_year_comparisons: int = Field(ge=0)
 
 
 class ValidationSpec(_FrozenModel):
