@@ -10,11 +10,16 @@ from stock_analyzer.knowledge_validation.supplement_validation import (
     SUPPLEMENT_CLAIMS,
     chronological_relation,
     cash_accrual_observations,
+    buyback_stage_observations,
+    check_official_semantic_fields,
     dispersion_observations,
     illiquidity_observations,
+    holder_trade_observations,
+    margin_observations,
     market_state_observations,
     max_overextension_observations,
     profitability_valuation_observations,
+    pledge_observations,
     turnover_observations,
     validate_cash_accrual,
     validate_profitability_valuation,
@@ -268,3 +273,126 @@ def test_financial_validators_report_separate_relations_without_decisions():
     }
     assert not ({"pass", "score", "weight", "recommend"} & set(profitability))
     assert not ({"pass", "score", "weight", "recommend"} & set(cash_accrual))
+
+
+def test_margin_net_flow_has_no_identity_claim():
+    out = margin_observations(
+        pd.DataFrame(
+            {
+                "rzmre": [100.0],
+                "rzche": [70.0],
+                "rzye": [500.0],
+                "rqye": [5.0],
+                "rqyl": [2.0],
+            }
+        )
+    )
+
+    assert out.loc[0, "financing_net_flow"] == pytest.approx(30.0)
+    assert not ({"institutional_buy", "main_force"} & set(out.columns))
+
+
+def test_holder_trade_uses_disclosed_direction():
+    out = holder_trade_observations(
+        pd.DataFrame(
+            {
+                "in_de": ["IN", "DE"],
+                "change_vol": [100.0, 40.0],
+            }
+        )
+    )
+
+    assert out["signed_change_vol"].tolist() == [100.0, -40.0]
+
+
+def test_holder_trade_rejects_unknown_disclosed_direction():
+    with pytest.raises(ValueError, match="unknown holder trade directions"):
+        holder_trade_observations(
+            pd.DataFrame({"in_de": ["UNKNOWN"], "change_vol": [10.0]})
+        )
+
+
+def test_buyback_preserves_provider_stages():
+    stages = ["提议", "预案", "股东大会通过", "实施", "完成", "停止", "未通过"]
+
+    out = buyback_stage_observations(pd.DataFrame({"process": stages}))
+
+    assert out["buyback_stage"].tolist() == stages
+    assert out["actual_execution"].tolist() == [
+        False,
+        False,
+        False,
+        True,
+        True,
+        False,
+        False,
+    ]
+
+
+def test_pledge_never_calculates_liquidation_price_or_total_score():
+    out = pledge_observations(
+        pd.DataFrame(
+            {
+                "pledge_ratio": [0.4],
+                "return_20d": [-0.2],
+                "amount_20d": [2e9],
+                "debt_to_assets": [0.6],
+                "n_cashflow_act": [-10.0],
+            }
+        )
+    )
+
+    assert out.loc[0, "pledge_ratio"] == pytest.approx(0.4)
+    assert "liquidation_price" not in out
+    assert "pledge_risk_score" not in out
+
+
+def test_official_semantic_field_check_uses_only_existing_fact_fields():
+    field_map = {
+        "earnings_forecast": (
+            "available_at",
+            "p_change_max",
+            "p_change_min",
+            "type",
+        ),
+        "earnings_express": (
+            "announcement_type",
+            "available_at",
+            "yoy_net_profit",
+        ),
+        "income_statement": ("ann_date", "available_at", "report_type"),
+        "announcement": ("announcement_time", "title"),
+        "share_float": ("float_date",),
+        "holder_trade": ("change_vol", "in_de"),
+        "company_profile": ("business_scope", "main_business"),
+        "main_business": (
+            "bz_profit",
+            "bz_sales",
+            "classification",
+            "item_name",
+        ),
+    }
+
+    result = check_official_semantic_fields(field_map)
+
+    assert result == {
+        "src_cn_earnings_disclosure_hierarchy": True,
+        "src_cn_share_reduction_rules_2024": True,
+        "src_csrc_disclosure_rules_2025": True,
+    }
+
+
+def test_official_semantic_field_check_names_missing_field():
+    field_map = {
+        "earnings_forecast": ("available_at",),
+        "earnings_express": (),
+        "income_statement": (),
+        "announcement": (),
+        "share_float": (),
+        "holder_trade": (),
+        "company_profile": (),
+        "main_business": (),
+    }
+
+    with pytest.raises(ValueError, match="earnings_forecast.p_change_min"):
+        check_official_semantic_fields(field_map)

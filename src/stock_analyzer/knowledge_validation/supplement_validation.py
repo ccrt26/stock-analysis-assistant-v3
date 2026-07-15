@@ -591,18 +591,129 @@ def validate_cash_accrual(
     }
 
 
+def margin_observations(frame: pd.DataFrame) -> pd.DataFrame:
+    out = frame.copy()
+    financing_buy = pd.to_numeric(out["rzmre"], errors="coerce")
+    financing_repayment = pd.to_numeric(out["rzche"], errors="coerce")
+    out["financing_net_flow"] = financing_buy - financing_repayment
+    for column in ("rzye", "rqye", "rqyl"):
+        out[column] = pd.to_numeric(out[column], errors="coerce")
+    return out
+
+
+def pledge_observations(frame: pd.DataFrame) -> pd.DataFrame:
+    out = frame.copy()
+    for column in (
+        "pledge_ratio",
+        "return_20d",
+        "amount_20d",
+        "debt_to_assets",
+        "n_cashflow_act",
+    ):
+        out[column] = pd.to_numeric(out[column], errors="coerce")
+    return out
+
+
+def holder_trade_observations(frame: pd.DataFrame) -> pd.DataFrame:
+    out = frame.copy()
+    allowed = {"IN", "DE"}
+    observed = set(out["in_de"].dropna().astype(str))
+    unknown = observed - allowed
+    if unknown:
+        raise ValueError(f"unknown holder trade directions: {sorted(unknown)}")
+    sign = out["in_de"].map({"IN": 1.0, "DE": -1.0})
+    change = pd.to_numeric(out["change_vol"], errors="coerce").abs()
+    out["signed_change_vol"] = sign * change
+    return out
+
+
+def buyback_stage_observations(frame: pd.DataFrame) -> pd.DataFrame:
+    out = frame.copy()
+    allowed = {
+        "提议",
+        "预案",
+        "股东大会通过",
+        "实施",
+        "完成",
+        "停止",
+        "未通过",
+    }
+    observed = set(out["process"].dropna().astype(str))
+    unknown = observed - allowed
+    if unknown:
+        raise ValueError(f"unknown repurchase stages: {sorted(unknown)}")
+    out["buyback_stage"] = out["process"]
+    out["actual_execution"] = out["process"].isin({"实施", "完成"})
+    return out
+
+
+_OFFICIAL_SEMANTIC_REQUIREMENTS = {
+    "src_cn_earnings_disclosure_hierarchy": {
+        "earnings_forecast": (
+            "p_change_min",
+            "p_change_max",
+            "type",
+            "available_at",
+        ),
+        "earnings_express": (
+            "announcement_type",
+            "yoy_net_profit",
+            "available_at",
+        ),
+        "income_statement": ("report_type", "ann_date", "available_at"),
+        "announcement": ("title", "announcement_time"),
+    },
+    "src_cn_share_reduction_rules_2024": {
+        "share_float": ("float_date",),
+        "holder_trade": ("in_de", "change_vol"),
+        "announcement": ("title", "announcement_time"),
+    },
+    "src_csrc_disclosure_rules_2025": {
+        "company_profile": ("business_scope", "main_business"),
+        "main_business": (
+            "classification",
+            "item_name",
+            "bz_sales",
+            "bz_profit",
+        ),
+        "announcement": ("title", "announcement_time"),
+    },
+}
+
+
+def check_official_semantic_fields(
+    field_map: dict[str, tuple[str, ...]],
+) -> dict[str, bool]:
+    result: dict[str, bool] = {}
+    for knowledge_id, datasets in _OFFICIAL_SEMANTIC_REQUIREMENTS.items():
+        for dataset, required_fields in datasets.items():
+            available = set(field_map.get(dataset, ()))
+            for field in required_fields:
+                if field not in available:
+                    raise ValueError(
+                        f"missing official semantic field: {dataset}.{field}"
+                    )
+        result[knowledge_id] = True
+    return result
+
+
 __all__ = [
     "SOURCE_REFS",
     "SUPPLEMENT_CLAIMS",
     "SupplementClaim",
     "SupplementEvidence",
+    "buyback_stage_observations",
     "cash_accrual_observations",
+    "check_official_semantic_fields",
     "chronological_relation",
     "dispersion_observations",
     "illiquidity_observations",
+    "holder_trade_observations",
+    "margin_observations",
     "market_state_observations",
     "max_overextension_observations",
     "profitability_valuation_observations",
+    "pledge_observations",
     "turnover_observations",
     "validate_cash_accrual",
     "validate_profitability_valuation",
