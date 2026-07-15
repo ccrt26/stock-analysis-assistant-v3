@@ -19,7 +19,7 @@ from stock_analyzer.analysis.stock_context_features import (
 )
 from stock_analyzer.storage.research_schema import connect_research_warehouse
 
-from .governance_models import CapabilityStatus
+from .governance_models import CapabilityStatus, KnowledgeEntry
 
 
 _EXPECTED_DERIVED_FORMULAS = {
@@ -304,9 +304,38 @@ def inspect_warehouse_capabilities(
     return _build_snapshot(root, analysis_date, facts, derived)
 
 
+def assess_entry_capability(
+    entry: KnowledgeEntry,
+    snapshot: CapabilitySnapshot,
+) -> CapabilityAssessment:
+    missing: list[str] = []
+    limitations: list[str] = []
+    for requirement in entry.data_requirements:
+        capability = snapshot.lookup(requirement.kind, requirement.name)
+        if capability is None or not capability.structurally_ready:
+            missing.append(f"{requirement.kind}:{requirement.name}")
+            continue
+        absent_fields = sorted(
+            set(requirement.required_fields) - set(capability.fields)
+        )
+        missing.extend(
+            f"{requirement.kind}:{requirement.name}.{field}"
+            for field in absent_fields
+        )
+        limitations.extend(capability.limitations)
+    status = CapabilityStatus.COMPLETE if not missing else CapabilityStatus.BLOCKED
+    return CapabilityAssessment(
+        knowledge_id=entry.knowledge_id,
+        status=status,
+        missing_requirements=tuple(sorted(missing)),
+        limitations=tuple(sorted(set(limitations))),
+    )
+
+
 __all__ = [
     "CapabilityAssessment",
     "CapabilityItem",
     "CapabilitySnapshot",
+    "assess_entry_capability",
     "inspect_warehouse_capabilities",
 ]

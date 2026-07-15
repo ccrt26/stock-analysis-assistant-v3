@@ -11,7 +11,27 @@ from stock_analyzer.analysis.market_context_features import (
     MARKET_CONTEXT_FORMULA_VERSION,
 )
 from stock_analyzer.knowledge import capability as capability_module
-from stock_analyzer.knowledge.capability import inspect_warehouse_capabilities
+from stock_analyzer.knowledge.capability import (
+    CapabilityItem,
+    CapabilitySnapshot,
+    assess_entry_capability,
+    inspect_warehouse_capabilities,
+)
+from stock_analyzer.knowledge.governance_audit import audit_knowledge_governance
+from stock_analyzer.knowledge.governance_models import (
+    AnalysisModule,
+    DataRequirement,
+    KnowledgeEffect,
+    KnowledgeEntry,
+    KnowledgeRegistry,
+    KnowledgeTopic,
+    LegacyMigrationRegistry,
+    LocalValidation,
+    OpportunityType,
+    SourceGrade,
+    SourceKind,
+    SourceRecord,
+)
 from stock_analyzer.storage.research_schema import connect_research_warehouse
 from stock_analyzer.storage.research_warehouse import ResearchWarehouse
 
@@ -244,3 +264,237 @@ def test_inspection_does_not_change_duckdb_sha256(tmp_path):
     inspect_warehouse_capabilities(root, ANALYSIS_DATE)
 
     assert sha256_file(database) == before
+
+
+def capability_item(
+    *,
+    kind: str = "fact",
+    name: str = "equity_daily",
+    fields: tuple[str, ...] = ("available_at", "close", "trade_date", "ts_code"),
+    limitations: tuple[str, ...] = (),
+    structurally_ready: bool = True,
+) -> CapabilityItem:
+    return CapabilityItem(
+        kind=kind,
+        name=name,
+        fields=fields,
+        partition_count=1,
+        row_count=100,
+        formula_versions=("test-v1",) if kind == "derived" else (),
+        quality_statuses=(
+            "complete_with_declared_gaps" if limitations else "complete",
+        ),
+        limitations=limitations,
+        as_of_supported=True,
+        structurally_ready=structurally_ready,
+    )
+
+
+def capability_snapshot(*items: CapabilityItem) -> CapabilitySnapshot:
+    return CapabilitySnapshot(
+        analysis_date=ANALYSIS_DATE,
+        items=items,
+        snapshot_hash="snapshot-hash",
+    )
+
+
+def governance_source(source_id: str = "official-source") -> SourceRecord:
+    return SourceRecord(
+        source_id=source_id,
+        grade=SourceGrade.S,
+        kind=SourceKind.OFFICIAL_RULE,
+        title="Official rule",
+        publisher="中国证券监督管理委员会",
+        url="https://www.csrc.gov.cn/csrc/c100028/c7480577/content.shtml",
+        publication_date=date(2024, 5, 15),
+        effective_from=date(2024, 10, 8),
+        last_verified_on=date(2026, 7, 15),
+        jurisdiction="中国大陆",
+        market_scope=("A股",),
+        method_summary="Sets a binding market-analysis boundary.",
+        limitations=("Does not replace company-specific evidence.",),
+    )
+
+
+def governance_entry(
+    *,
+    knowledge_id: str = "governed-entry",
+    primary_source_id: str = "official-source",
+    requirements: tuple[DataRequirement, ...] | None = None,
+) -> KnowledgeEntry:
+    if requirements is None:
+        requirements = (
+            DataRequirement(
+                kind="fact",
+                name="equity_daily",
+                required_fields=("available_at", "close"),
+            ),
+        )
+    return KnowledgeEntry(
+        knowledge_id=knowledge_id,
+        title="Governed entry",
+        primary_source_id=primary_source_id,
+        source_grade=SourceGrade.S,
+        version_status="current",
+        effective_from=date(2024, 10, 8),
+        effect=KnowledgeEffect.HARD_BOUNDARY,
+        modules=(AnalysisModule.RISK,),
+        opportunity_types=(OpportunityType.GENERAL,),
+        topics=(KnowledgeTopic.EXCHANGE_CONSTRAINTS,),
+        claim_summary="Use time-valid official rules.",
+        allowed_uses=("Apply the official boundary.",),
+        forbidden_uses=("Invent unavailable evidence.",),
+        prerequisites=("Check the rule version.",),
+        counter_evidence=("A later official rule.",),
+        data_requirements=requirements,
+        local_validation=LocalValidation(
+            status="not_required",
+            reason="Official boundary, not an empirical threshold.",
+        ),
+    )
+
+
+def test_entry_is_complete_only_when_every_required_field_is_available():
+    entry = governance_entry(
+        requirements=(
+            DataRequirement(
+                kind="fact",
+                name="equity_daily",
+                required_fields=("available_at", "close", "amount"),
+            ),
+        )
+    )
+    complete = capability_snapshot(
+        capability_item(fields=("amount", "available_at", "close"))
+    )
+    missing = capability_snapshot(
+        capability_item(fields=("available_at", "close"))
+    )
+
+    assert assess_entry_capability(entry, complete).status.value == "complete"
+    blocked = assess_entry_capability(entry, missing)
+    assert blocked.status.value == "blocked"
+    assert blocked.missing_requirements == ("fact:equity_daily.amount",)
+
+
+@pytest.mark.parametrize("name", ["product_price", "inventory", "industry_sales"])
+def test_globally_missing_core_dataset_is_blocked_not_limited(name):
+    entry = governance_entry(
+        requirements=(
+            DataRequirement(
+                kind="derived",
+                name=name,
+                required_fields=("analysis_date", "value"),
+            ),
+        )
+    )
+
+    assessment = assess_entry_capability(entry, capability_snapshot())
+
+    assert assessment.status.value == "blocked"
+    assert assessment.status.value != "limited"
+    assert assessment.missing_requirements == (f"derived:{name}",)
+
+
+def test_declared_derived_gap_is_complete_only_when_required_fields_exist():
+    entry = governance_entry(
+        requirements=(
+            DataRequirement(
+                kind="derived",
+                name="sector_hotspot",
+                required_fields=("analysis_date", "relative_return_20d"),
+            ),
+        )
+    )
+    limitation = "minute history unavailable"
+    usable = capability_snapshot(
+        capability_item(
+            kind="derived",
+            name="sector_hotspot",
+            fields=("analysis_date", "relative_return_20d"),
+            limitations=(limitation,),
+        )
+    )
+    missing_field = capability_snapshot(
+        capability_item(
+            kind="derived",
+            name="sector_hotspot",
+            fields=("analysis_date",),
+            limitations=(limitation,),
+        )
+    )
+
+    complete = assess_entry_capability(entry, usable)
+    blocked = assess_entry_capability(entry, missing_field)
+    assert complete.status.value == "complete"
+    assert complete.limitations == (limitation,)
+    assert blocked.status.value == "blocked"
+
+
+def test_active_registry_audit_rejects_any_blocked_entry():
+    registry = KnowledgeRegistry(
+        schema_version="v3-knowledge-governance-v1",
+        generated_on=date(2026, 7, 15),
+        sources=(governance_source(),),
+        entries=(governance_entry(),),
+        registry_hash="registry-hash",
+    )
+    migration = LegacyMigrationRegistry(
+        schema_version="v3-legacy-migration-v1",
+        entries=(),
+    )
+
+    report = audit_knowledge_governance(
+        registry,
+        migration,
+        legacy_ids=set(),
+        capabilities=capability_snapshot(),
+    )
+
+    assert report.passed is False
+    assert report.blocked_active_entry_count == 1
+
+
+def test_audit_report_order_and_hash_are_deterministic():
+    source_a = governance_source("official-a")
+    source_b = governance_source("official-b")
+    entry_a = governance_entry(
+        knowledge_id="entry-a", primary_source_id="official-a"
+    )
+    entry_b = governance_entry(
+        knowledge_id="entry-b", primary_source_id="official-b"
+    )
+    registry = KnowledgeRegistry(
+        schema_version="v3-knowledge-governance-v1",
+        generated_on=date(2026, 7, 15),
+        sources=(source_a, source_b),
+        entries=(entry_a, entry_b),
+        registry_hash="registry-hash",
+    )
+    reversed_registry = registry.model_copy(
+        update={
+            "sources": tuple(reversed(registry.sources)),
+            "entries": tuple(reversed(registry.entries)),
+        }
+    )
+    snapshot = capability_snapshot(capability_item())
+    reversed_snapshot = snapshot.model_copy(
+        update={"items": tuple(reversed(snapshot.items))}
+    )
+    migration = LegacyMigrationRegistry(
+        schema_version="v3-legacy-migration-v1",
+        entries=(),
+    )
+
+    first = audit_knowledge_governance(
+        registry, migration, legacy_ids=set(), capabilities=snapshot
+    )
+    second = audit_knowledge_governance(
+        reversed_registry,
+        migration,
+        legacy_ids=set(),
+        capabilities=reversed_snapshot,
+    )
+
+    assert first.model_dump_json() == second.model_dump_json()
+    assert first.audit_hash == second.audit_hash
