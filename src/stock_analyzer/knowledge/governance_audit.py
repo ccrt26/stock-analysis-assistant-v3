@@ -19,6 +19,7 @@ from .governance_models import (
     CapabilityStatus,
     KnowledgeRegistry,
     LegacyMigrationRegistry,
+    MigrationAction,
 )
 from .registry import load_knowledge_registry, load_legacy_migration
 
@@ -53,6 +54,31 @@ class GovernanceAuditReport(BaseModel):
             separators=(",", ":"),
         ).encode("utf-8")
         return hashlib.sha256(canonical).hexdigest()
+
+
+def decide_migration_action(
+    *,
+    source_verified: bool,
+    current_a_share_applicability: str,
+    data_gate: str,
+    local_validation_required: bool,
+    target_knowledge_ids: tuple[str, ...],
+    same_identity: bool,
+) -> MigrationAction:
+    """Apply the V3 decision order without consulting legacy data flags."""
+    if (
+        not source_verified
+        or current_a_share_applicability == "unsupported"
+        or data_gate != "complete"
+    ):
+        return MigrationAction.DEFER
+    if not target_knowledge_ids:
+        return MigrationAction.RETIRE
+    if local_validation_required:
+        return MigrationAction.REVALIDATE
+    if same_identity:
+        return MigrationAction.RETAIN
+    return MigrationAction.UPDATE
 
 
 def audit_knowledge_governance(
@@ -96,6 +122,63 @@ def audit_knowledge_governance(
         errors.append("unmapped legacy IDs: " + ", ".join(unmapped))
     if unexpected:
         errors.append("unknown legacy migration IDs: " + ", ".join(unexpected))
+
+    active_by_id = {entry.knowledge_id: entry for entry in active_entries}
+    active_actions = {
+        MigrationAction.RETAIN,
+        MigrationAction.UPDATE,
+        MigrationAction.REVALIDATE,
+    }
+    inactive_actions = {MigrationAction.DEFER, MigrationAction.RETIRE}
+    for record in sorted(
+        migration.entries, key=lambda item: item.legacy_knowledge_id
+    ):
+        if record.action in active_actions:
+            if not record.target_knowledge_ids:
+                errors.append(
+                    f"active migration has no target: {record.legacy_knowledge_id}"
+                )
+            if not record.source_verified:
+                errors.append(
+                    f"active migration has unverified source: "
+                    f"{record.legacy_knowledge_id}"
+                )
+            if record.current_a_share_applicability == "unsupported":
+                errors.append(
+                    f"active migration is unsupported for A shares: "
+                    f"{record.legacy_knowledge_id}"
+                )
+            if record.data_gate != "complete":
+                errors.append(
+                    f"active migration failed data gate: "
+                    f"{record.legacy_knowledge_id}"
+                )
+            for target_id in record.target_knowledge_ids:
+                target = active_by_id.get(target_id)
+                if target is None:
+                    errors.append(
+                        f"migration target is not a current entry: "
+                        f"{record.legacy_knowledge_id} -> {target_id}"
+                    )
+                    continue
+                assessment = assess_entry_capability(target, capabilities)
+                if assessment.status is not CapabilityStatus.COMPLETE:
+                    missing = ", ".join(assessment.missing_requirements) or "not ready"
+                    errors.append(
+                        f"migration target is blocked: {record.legacy_knowledge_id} "
+                        f"-> {target_id}: {missing}"
+                    )
+        elif record.action in inactive_actions:
+            if record.target_knowledge_ids:
+                errors.append(
+                    f"inactive migration has active target: "
+                    f"{record.legacy_knowledge_id}"
+                )
+            if len("".join(record.reason.split())) < 20:
+                errors.append(
+                    f"inactive migration reason is not concrete: "
+                    f"{record.legacy_knowledge_id}"
+                )
 
     return GovernanceAuditReport(
         analysis_date=capabilities.analysis_date,
@@ -164,4 +247,9 @@ if __name__ == "__main__":
     raise SystemExit(main())
 
 
-__all__ = ["GovernanceAuditReport", "audit_knowledge_governance", "main"]
+__all__ = [
+    "GovernanceAuditReport",
+    "audit_knowledge_governance",
+    "decide_migration_action",
+    "main",
+]
