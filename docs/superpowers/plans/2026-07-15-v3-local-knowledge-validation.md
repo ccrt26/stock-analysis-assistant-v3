@@ -1,5 +1,7 @@
 # V3 Local Knowledge Validation Implementation Plan
 
+> **已被替代：** 本计划不再执行。当前计划为 [`2026-07-15-v3-thirteen-knowledge-direct-validation.md`](./2026-07-15-v3-thirteen-knowledge-direct-validation.md)。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:executing-plans` task-by-task. The user selected inline execution and does not authorize subagents unless they later say otherwise. Every behavior change requires `superpowers:test-driven-development`; completion requires `superpowers:verification-before-completion`.
 
 **Goal:** Complete reproducible point-in-time A-share validation for the nine existing empirical method families and attach final results to all thirteen legacy `revalidate` records without changing the data foundation or production analysis.
