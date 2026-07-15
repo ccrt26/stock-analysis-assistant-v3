@@ -1253,6 +1253,15 @@ def validate_all_supplement_claims(
         outcome="future_excess_return_20d",
         date_col="formation_date",
     )
+    market_state_relations = {
+        str(state): chronological_relation(
+            rows,
+            signal="prior_relative_return_20d",
+            outcome="future_excess_return_20d",
+            date_col="formation_date",
+        )["overall"]
+        for state, rows in market.groupby("market_state", observed=True)
+    }
 
     dispersion = dispersion_observations(
         price.dropna(subset=["industry_code"])
@@ -1347,7 +1356,29 @@ def validate_all_supplement_claims(
     )
 
     usable_counts = price.groupby("ts_code").size().sort_values(ascending=False)
-    candidates = sorted(usable_counts[usable_counts >= 10].index.astype(str))[:5]
+    latest_formation = max(price["formation_date"])
+    current_themes = _query_frame(
+        """
+        select distinct ts_code, theme_code
+        from read_parquet(?, union_by_name=true, hive_partitioning=false)
+        where cast(valid_from as date) <= ?
+          and (valid_to is null or cast(valid_to as date) >= ?)
+        """,
+        [
+            _fact_paths(root, "theme_member"),
+            latest_formation,
+            latest_formation,
+        ],
+    )
+    themed_codes = set(current_themes["ts_code"].astype(str))
+    eligible_codes = [
+        str(code)
+        for code in usable_counts[usable_counts >= 10].index
+        if str(code) in themed_codes
+    ]
+    candidates = sorted(eligible_codes)[:5]
+    if len(candidates) != 5:
+        raise ValueError("fewer than five price-complete stocks have current theme data")
     portfolio_returns = price[price["ts_code"].isin(candidates)].pivot_table(
         index="formation_date",
         columns="ts_code",
@@ -1360,7 +1391,15 @@ def validate_all_supplement_claims(
         )
         for code in candidates
     }
-    themes = {code: set() for code in candidates}
+    themes = {
+        code: set(
+            current_themes.loc[
+                current_themes["ts_code"].astype(str) == code,
+                "theme_code",
+            ].astype(str)
+        )
+        for code in candidates
+    }
     portfolio = portfolio_common_exposure(
         portfolio_returns,
         industries=industries,
@@ -1374,6 +1413,16 @@ def validate_all_supplement_claims(
             market_relation,
             relationship_shape="市场状态分组中的20日相对强弱与后续超额收益关系",
             counter_evidence="上涨市场不自动产生更可靠的个股延续。",
+            extra={
+                "market_state_relations": json.dumps(
+                    {
+                        key: _stable(value)
+                        for key, value in market_state_relations.items()
+                    },
+                    ensure_ascii=False,
+                    sort_keys=True,
+                )
+            },
         ),
         "src_cn_return_dispersion_risk": _relation_evidence(
             "src_cn_return_dispersion_risk",
