@@ -492,15 +492,118 @@ def chronological_relation(
     }
 
 
+def _numeric_ratio(numerator: pd.Series, denominator: pd.Series) -> pd.Series:
+    top = pd.to_numeric(numerator, errors="coerce")
+    bottom = pd.to_numeric(denominator, errors="coerce").mask(
+        lambda values: values.eq(0)
+    )
+    return top / bottom
+
+
+def profitability_valuation_observations(frame: pd.DataFrame) -> pd.DataFrame:
+    out = frame.copy()
+    out["roe_recomputed"] = _numeric_ratio(
+        out["n_income_attr_p"], out["total_hldr_eqy_exc_min_int"]
+    )
+    out["roa_recomputed"] = _numeric_ratio(
+        out["n_income_attr_p"], out["total_assets"]
+    )
+    out["gross_profitability"] = _numeric_ratio(
+        pd.to_numeric(out["revenue"], errors="coerce")
+        - pd.to_numeric(out["oper_cost"], errors="coerce"),
+        out["total_assets"],
+    )
+    out["asset_turnover"] = pd.to_numeric(
+        out["assets_turn"], errors="coerce"
+    )
+    for column in ("pe_ttm", "pb", "ps_ttm"):
+        out[column] = pd.to_numeric(out[column], errors="coerce")
+    return out
+
+
+def cash_accrual_observations(frame: pd.DataFrame) -> pd.DataFrame:
+    out = frame.copy()
+    out["cash_component"] = _numeric_ratio(
+        out["n_cashflow_act"], out["prior_total_assets"]
+    )
+    out["accrual_component"] = _numeric_ratio(
+        pd.to_numeric(out["n_income_attr_p"], errors="coerce")
+        - pd.to_numeric(out["n_cashflow_act"], errors="coerce"),
+        out["prior_total_assets"],
+    )
+    return out
+
+
+def validate_profitability_valuation(
+    frame: pd.DataFrame,
+) -> dict[str, dict[str, float | int | None]]:
+    observations = profitability_valuation_observations(frame)
+    signals = (
+        "roe_recomputed",
+        "roa_recomputed",
+        "gross_profitability",
+        "asset_turnover",
+        "pe_ttm",
+        "pb",
+        "ps_ttm",
+    )
+    return {
+        signal: chronological_relation(
+            observations,
+            signal=signal,
+            outcome="future_excess_return_20d",
+            date_col="formation_date",
+        )
+        for signal in signals
+    }
+
+
+def validate_cash_accrual(
+    frame: pd.DataFrame,
+) -> dict[str, dict[str, float | int | None]]:
+    observations = cash_accrual_observations(frame)
+    relations = {
+        "cash_to_future_profitability": (
+            "cash_component",
+            "future_profitability",
+        ),
+        "accrual_to_future_profitability": (
+            "accrual_component",
+            "future_profitability",
+        ),
+        "cash_to_future_excess_return": (
+            "cash_component",
+            "future_excess_return_20d",
+        ),
+        "accrual_to_future_excess_return": (
+            "accrual_component",
+            "future_excess_return_20d",
+        ),
+    }
+    return {
+        name: chronological_relation(
+            observations,
+            signal=signal,
+            outcome=outcome,
+            date_col="formation_date",
+        )
+        for name, (signal, outcome) in relations.items()
+    }
+
+
 __all__ = [
     "SOURCE_REFS",
     "SUPPLEMENT_CLAIMS",
     "SupplementClaim",
     "SupplementEvidence",
+    "cash_accrual_observations",
     "chronological_relation",
     "dispersion_observations",
     "illiquidity_observations",
     "market_state_observations",
     "max_overextension_observations",
+    "profitability_valuation_observations",
     "turnover_observations",
+    "validate_cash_accrual",
+    "validate_profitability_valuation",
 ]

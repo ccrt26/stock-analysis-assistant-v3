@@ -9,11 +9,15 @@ from stock_analyzer.knowledge_validation.supplement_validation import (
     SOURCE_REFS,
     SUPPLEMENT_CLAIMS,
     chronological_relation,
+    cash_accrual_observations,
     dispersion_observations,
     illiquidity_observations,
     market_state_observations,
     max_overextension_observations,
+    profitability_valuation_observations,
     turnover_observations,
+    validate_cash_accrual,
+    validate_profitability_valuation,
 )
 
 
@@ -178,3 +182,89 @@ def test_price_formulas_create_no_score_or_identity():
     )
 
     assert not (forbidden & set(illiquidity_observations(frame).columns))
+
+
+def test_profitability_dimensions_remain_separate():
+    frame = pd.DataFrame(
+        {
+            "n_income_attr_p": [12.0],
+            "total_hldr_eqy_exc_min_int": [100.0],
+            "total_assets": [200.0],
+            "revenue": [120.0],
+            "oper_cost": [80.0],
+            "assets_turn": [0.6],
+            "pe_ttm": [20.0],
+            "pb": [2.0],
+            "ps_ttm": [3.0],
+        }
+    )
+
+    out = profitability_valuation_observations(frame)
+
+    assert out.loc[0, "roe_recomputed"] == pytest.approx(0.12)
+    assert out.loc[0, "roa_recomputed"] == pytest.approx(0.06)
+    assert out.loc[0, "gross_profitability"] == pytest.approx(0.20)
+    assert out.loc[0, "asset_turnover"] == pytest.approx(0.6)
+    assert "profitability_score" not in out
+
+
+def test_cash_and_accrual_use_prior_assets():
+    frame = pd.DataFrame(
+        {
+            "n_income_attr_p": [30.0],
+            "n_cashflow_act": [18.0],
+            "prior_total_assets": [120.0],
+        }
+    )
+
+    out = cash_accrual_observations(frame)
+
+    assert out.loc[0, "cash_component"] == pytest.approx(0.15)
+    assert out.loc[0, "accrual_component"] == pytest.approx(0.10)
+
+
+def test_financial_validators_report_separate_relations_without_decisions():
+    frame = pd.DataFrame(
+        {
+            "formation_date": [
+                date(2025, 1, 1),
+                date(2025, 1, 1),
+                date(2026, 1, 1),
+                date(2026, 1, 1),
+            ],
+            "n_income_attr_p": [10.0, 20.0, 30.0, 40.0],
+            "n_cashflow_act": [8.0, 14.0, 20.0, 22.0],
+            "prior_total_assets": [100.0] * 4,
+            "total_hldr_eqy_exc_min_int": [100.0] * 4,
+            "total_assets": [200.0] * 4,
+            "revenue": [100.0, 110.0, 120.0, 130.0],
+            "oper_cost": [80.0] * 4,
+            "assets_turn": [0.4, 0.5, 0.6, 0.7],
+            "pe_ttm": [30.0, 25.0, 20.0, 15.0],
+            "pb": [3.0, 2.5, 2.0, 1.5],
+            "ps_ttm": [4.0, 3.5, 3.0, 2.5],
+            "future_profitability": [0.1, 0.2, 0.3, 0.4],
+            "future_excess_return_20d": [0.01, 0.02, 0.03, 0.04],
+        }
+    )
+
+    profitability = validate_profitability_valuation(frame)
+    cash_accrual = validate_cash_accrual(frame)
+
+    assert set(profitability) == {
+        "roe_recomputed",
+        "roa_recomputed",
+        "gross_profitability",
+        "asset_turnover",
+        "pe_ttm",
+        "pb",
+        "ps_ttm",
+    }
+    assert set(cash_accrual) == {
+        "cash_to_future_profitability",
+        "accrual_to_future_profitability",
+        "cash_to_future_excess_return",
+        "accrual_to_future_excess_return",
+    }
+    assert not ({"pass", "score", "weight", "recommend"} & set(profitability))
+    assert not ({"pass", "score", "weight", "recommend"} & set(cash_accrual))
