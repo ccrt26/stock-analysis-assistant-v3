@@ -1,4 +1,5 @@
 from datetime import date
+from pathlib import Path
 
 from stock_analyzer.knowledge.capability import CapabilityItem, CapabilitySnapshot
 from stock_analyzer.knowledge.governance_models import (
@@ -16,6 +17,7 @@ from stock_analyzer.knowledge.governance_models import (
     SourceRecord,
 )
 from stock_analyzer.knowledge.selector import select_knowledge
+from stock_analyzer.knowledge.registry import load_knowledge_registry
 
 
 ANALYSIS_DATE = date(2026, 7, 14)
@@ -328,3 +330,46 @@ def test_no_matching_knowledge_returns_empty_tuple_with_no_fallback():
     )
 
     assert selections == ()
+
+
+def test_real_empirical_selection_keeps_method_only_effect_and_exact_ids():
+    fixture = load_knowledge_registry(
+        Path("src/stock_analyzer/knowledge/research_registry.yaml")
+    )
+    requirements: dict[tuple[str, str], set[str]] = {}
+    for entry_item in fixture.entries:
+        for required in entry_item.data_requirements:
+            requirements.setdefault((required.kind, required.name), set()).update(
+                required.required_fields
+            )
+    snapshot = CapabilitySnapshot(
+        analysis_date=ANALYSIS_DATE,
+        items=tuple(
+            CapabilityItem(
+                kind=kind,
+                name=name,
+                fields=tuple(sorted(fields)),
+                partition_count=1,
+                row_count=1,
+                quality_statuses=("complete",),
+                as_of_supported=True,
+                structurally_ready=True,
+            )
+            for (kind, name), fields in sorted(requirements.items())
+        ),
+        snapshot_hash="real-registry-selector-fixture",
+    )
+    scene = context(
+        AnalysisModule.EVENTS,
+        OpportunityType.EARNINGS_RERATING,
+        KnowledgeTopic.EVENT_PRICE_REACTION,
+    )
+
+    selections = select_knowledge(fixture, scene, snapshot)
+
+    assert selected_ids(selections) == (
+        "src_brown_warner_1985",
+        "src_chan_2003",
+        "src_sun_wen_earnings_car_2023",
+    )
+    assert all(item.effect is KnowledgeEffect.METHOD_ONLY for item in selections)

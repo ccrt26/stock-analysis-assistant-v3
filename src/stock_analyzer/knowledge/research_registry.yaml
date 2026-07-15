@@ -177,6 +177,186 @@ sources:
     limitations:
       - 规则生效、方案披露、审核注册、资产交割和业绩实现是不同阶段，不能相互替代。
 
+  - source_id: paper-liu-stambaugh-yuan-2019
+    grade: A
+    kind: peer_reviewed_paper
+    title: Size and Value in China
+    publisher: Elsevier
+    authors: [Jianan Liu, Robert F. Stambaugh, Yu Yuan]
+    journal_or_series: Journal of Financial Economics 134(1), 48-69
+    url: https://hub.hku.hk/handle/10722/273695
+    doi: 10.1016/j.jfineco.2019.03.008
+    publication_date: 2019-10-01
+    last_verified_on: 2026-07-15
+    jurisdiction: 中国大陆
+    market_scope: [A股]
+    sample_start: 2000-01-01
+    sample_end: 2016-12-31
+    method_summary: 基于中国A股构造规模和价值因子，剔除壳价值显著的最小市值股票，并比较盈利市值比等价值度量的解释力。
+    limitations:
+      - 样本止于2016年，壳价值、注册制、退市制度和市场结构此后均有变化，不能直接继承历史收益或分组阈值。
+      - 论文用于指导规模与估值的比较方法，不证明低估值或特定规模股票必然上涨。
+
+  - source_id: paper-zhang-zhu-t1-2024
+    grade: A
+    kind: peer_reviewed_paper
+    title: "Only strong short-term contrarian effect exists in Chinese stock market: The role of the T+1 trading mechanism"
+    publisher: Elsevier
+    authors: [Bing Zhang, Hongbing Zhu]
+    journal_or_series: International Review of Economics & Finance 96(B), 103653
+    url: https://www.sciencedirect.com/science/article/abs/pii/S1059056024006452
+    doi: 10.1016/j.iref.2024.103653
+    publication_date: 2024-11-01
+    last_verified_on: 2026-07-15
+    jurisdiction: 中国大陆
+    market_scope: [A股]
+    sample_start: 2010-01-01
+    sample_end: 2020-12-31
+    method_summary: 通过不同收益形成区间和持有区间检验中国A股短期反转，并讨论T加一交易机制与波动的影响。
+    limitations:
+      - 样本未覆盖近年的完整市场结构，历史反转强度和形成持有区间必须在本地按时点重新验证。
+      - 研究结论不能脱离交易成本、涨跌停、停牌和可交易性直接转化为买入规则。
+
+  - source_id: paper-zhang-zhang-price-limit-2025
+    grade: A
+    kind: peer_reviewed_paper
+    title: Price Limit and Daily Momentum Effect in Chinese Stock Market
+    publisher: 中央财经大学学报编辑部
+    authors: [张瑞琦, 张兵]
+    journal_or_series: 中央财经大学学报 2025年第1期, 59-74
+    url: https://xbbjb.cufe.edu.cn/EN/Y2025/V0/I1/59
+    publication_date: 2025-01-15
+    last_verified_on: 2026-07-15
+    jurisdiction: 中国大陆
+    market_scope: [A股]
+    sample_start: 2011-01-01
+    sample_end: 2020-12-31
+    method_summary: 比较全样本与剔除触及涨跌停股票后的日度动量，分解隔夜和日内收益，并利用涨跌幅制度调整和A加H样本进行检验。
+    limitations:
+      - 论文识别的是样本中的制度相关现象，不能把触及涨停本身写成后续继续上涨的保证。
+      - 交易板块、涨跌幅制度和分析日期必须逐股核对，历史阈值需要本地时点验证。
+
+  - source_id: paper-ma-liao-jiang-factor-momentum-2024
+    grade: A
+    kind: peer_reviewed_paper
+    title: Factor momentum in the Chinese stock market
+    publisher: Elsevier
+    authors: [Tian Ma, Cunfei Liao, Fuwei Jiang]
+    journal_or_series: Journal of Empirical Finance 75, 101458
+    url: https://www.sciencedirect.com/science/article/abs/pii/S0927539823001251
+    doi: 10.1016/j.jempfin.2023.101458
+    publication_date: 2024-01-01
+    last_verified_on: 2026-07-15
+    jurisdiction: 中国大陆
+    market_scope: [A股]
+    sample_start: 2001-01-01
+    sample_end: 2019-12-31
+    method_summary: 在中国A股多个非动量因子组合上检验因子收益的时间延续性，并区分因子动量与个股动量的关系。
+    limitations:
+      - 样本止于2019年，因子定义、可交易性和拥挤程度需要在当前数据和分析时点重新验证。
+      - 因子或行业的历史延续性只提供比较方法，不能直接生成热点排名或固定阈值。
+
+  - source_id: paper-moskowitz-grinblatt-1999
+    grade: A
+    kind: peer_reviewed_paper
+    title: Do Industries Explain Momentum?
+    publisher: Wiley
+    authors: [Tobias J. Moskowitz, Mark Grinblatt]
+    journal_or_series: The Journal of Finance 54(4), 1249-1290
+    url: https://onlinelibrary.wiley.com/doi/10.1111/0022-1082.00146
+    doi: 10.1111/0022-1082.00146
+    publication_date: 1999-08-01
+    last_verified_on: 2026-07-15
+    jurisdiction: 美国
+    market_scope: [美国股票]
+    sample_start: 1963-07-01
+    sample_end: 1995-07-31
+    method_summary: 构造行业组合并比较行业动量、个股动量以及规模和账面市值比调整后的收益延续性。
+    limitations:
+      - 中国A股本地时点验证前仅作方法，不能继承美国历史样本中的行业划分、形成期、持有期或收益结论。
+      - 中国A股的行业制度、涨跌停、停牌和投资者结构不同，必须结合本地可复算板块证据使用。
+
+  - source_id: paper-brown-warner-1985
+    grade: A
+    kind: peer_reviewed_paper
+    title: "Using daily stock returns: The case of event studies"
+    publisher: Elsevier
+    authors: [Stephen J. Brown, Jerold B. Warner]
+    journal_or_series: Journal of Financial Economics 14(1), 3-31
+    url: https://www.sciencedirect.com/science/article/pii/0304405X8590042X
+    doi: 10.1016/0304-405X(85)90042-X
+    publication_date: 1985-03-01
+    last_verified_on: 2026-07-15
+    jurisdiction: 美国
+    market_scope: [美国股票]
+    sample_start: 1962-01-01
+    sample_end: 1979-12-31
+    method_summary: 用真实日收益反复抽样检验事件研究中均值调整、市场调整和市场模型等异常收益方法的统计性质。
+    limitations:
+      - 中国A股本地时点验证前仅作方法，论文不提供中国市场事件窗口、显著性或交易阈值。
+      - 日收益事件研究仍需处理停牌、涨跌停、事件重叠、公告时点和横截面相关性。
+
+  - source_id: paper-sun-wen-earnings-car-2023
+    grade: A
+    kind: peer_reviewed_paper
+    title: "Stock return predictability of the cumulative abnormal returns around the earnings announcement date: Evidence from China"
+    publisher: Wiley
+    authors: [Ping-Wen Sun, Zipeng Wen]
+    journal_or_series: International Review of Finance 23(1), 58-86
+    url: https://onlinelibrary.wiley.com/doi/full/10.1111/irfi.12380
+    doi: 10.1111/irfi.12380
+    publication_date: 2023-03-01
+    last_verified_on: 2026-07-15
+    jurisdiction: 中国大陆
+    market_scope: [A股]
+    sample_start: 2005-05-01
+    sample_end: 2020-10-31
+    method_summary: 以规模、账面市值比和动量调整后的业绩公告窗口累计异常收益，检验其对中国A股后续收益的解释力及市场效率边界。
+    limitations:
+      - 论文观察期长于本系统目标区间，不能把历史收益幅度、分组或持有期直接用于当前候选。
+      - 机构持仓变化只是论文机制检验的一部分，当前数据不能据此推断具体交易主体。
+      - 该来源替代无法完整核验样本区间的SSRN工作论文；不保留后者的结论或阈值。
+
+  - source_id: paper-chan-2003
+    grade: A
+    kind: peer_reviewed_paper
+    title: "Stock price reaction to news and no-news: Drift and reversal after headlines"
+    publisher: Elsevier
+    authors: [Wesley S. Chan]
+    journal_or_series: Journal of Financial Economics 70(2), 223-260
+    url: https://www.sciencedirect.com/science/article/abs/pii/S0304405X03001466
+    doi: 10.1016/S0304-405X(03)00146-6
+    publication_date: 2003-11-01
+    last_verified_on: 2026-07-15
+    jurisdiction: 美国
+    market_scope: [美国股票]
+    sample_start: 1980-01-01
+    sample_end: 2000-12-31
+    method_summary: 比较有公开新闻与无可识别公开新闻但价格变动相近的股票，区分信息后的延续与无新闻价格冲击后的反转。
+    limitations:
+      - 中国A股本地时点验证前仅作方法，新闻数据库、卖空约束、流动性和市场制度均不可直接移植。
+      - 当前公告数据不等于论文中的完整新闻标题库，只能用于更窄的正式事件对照，不能声称覆盖所有新闻。
+
+  - source_id: paper-piotroski-2000
+    grade: A
+    kind: peer_reviewed_paper
+    title: "Value Investing: The Use of Historical Financial Statement Information to Separate Winners from Losers"
+    publisher: Wiley
+    authors: [Joseph D. Piotroski]
+    journal_or_series: Journal of Accounting Research 38 Supplement, 1-41
+    url: https://www.jstor.org/stable/2672906
+    doi: 10.2307/2672906
+    publication_date: 2000-01-01
+    last_verified_on: 2026-07-15
+    jurisdiction: 美国
+    market_scope: [美国股票]
+    sample_start: 1976-01-01
+    sample_end: 1996-12-31
+    method_summary: 在高账面市值比股票中使用盈利、现金流、杠杆、流动性和经营效率的财务报表变化区分财务质量。
+    limitations:
+      - 中国A股本地时点验证前仅作方法，原研究的价值股前置筛选、会计口径、持有期和收益结论不能直接移植。
+      - 财务质量是困境反转的证据之一，不等于公司已完成经营反转，也不能单独决定买入。
+
 entries:
   - knowledge_id: src_cn_program_trading_rules_2025
     title: 价量结果不得推断交易主体身份
@@ -435,3 +615,333 @@ entries:
     local_validation:
       status: not_required
       reason: 这是重组阶段和证据边界，不是收益预测阈值。
+
+  - knowledge_id: src_liu_stambaugh_yuan_2019
+    title: 用A股本地规模和估值信息比较候选而非照搬海外因子
+    primary_source_id: paper-liu-stambaugh-yuan-2019
+    source_grade: A
+    version_status: current
+    effect: method_only
+    modules: [fundamentals, valuation]
+    opportunity_types: [general, turnaround]
+    topics: [valuation_method]
+    claim_summary: A股的规模、壳价值和估值关系具有本地特征，规模与价值比较应剔除明显失真的极小市值样本并结合盈利质量。
+    allowed_uses:
+      - 比较候选公司的市值、盈利估值、账面估值和盈利质量是否相互支持。
+      - 提醒低估值可能来自壳价值、持续亏损或退市风险，需要先检查基本面与证券状态。
+    forbidden_uses:
+      - 直接继承论文历史分组、历史收益或固定阈值作为买入条件。
+      - 把低估值、小市值或因子归属写成未来上涨保证。
+    prerequisites:
+      - 使用分析时点已可得的市值、估值、财务指标和证券状态。
+      - 在同市场、同机会类型和可比业务之间比较候选。
+    counter_evidence:
+      - 估值数据缺失或因亏损、净资产异常而失去可比性。
+      - 低估值同时伴随盈利恶化、现金流压力、退市风险或持续稀释。
+    data_requirements:
+      - kind: fact
+        name: daily_basic
+        required_fields: [available_at, trade_date, ts_code, total_mv, pe_ttm, pb]
+      - kind: fact
+        name: financial_indicator
+        required_fields: [available_at, report_period, ts_code, roe, grossprofit_margin, debt_to_assets]
+      - kind: derived
+        name: stock_trading_context
+        required_fields: [analysis_date, ts_code, pe_ttm, pb, valuation_data_status]
+    local_validation:
+      status: required_before_threshold
+      reason: 方法可用于组织比较，但任何分组、阈值和预测权重都必须在A股本地时点样本中验证。
+
+  - knowledge_id: src_cn_t1_contrarian_2024
+    title: 区分A股短期反转与中期趋势延续
+    primary_source_id: paper-zhang-zhu-t1-2024
+    source_grade: A
+    version_status: current
+    effect: method_only
+    modules: [market_environment, price_trading]
+    opportunity_types: [general]
+    topics: [market_price_persistence]
+    claim_summary: A股短期价格路径可能受交易制度影响而出现反转，近期上涨不能自动外推为未来数周继续上涨。
+    allowed_uses:
+      - 对照个股与市场近期收益，判断当前更像极短期反转、趋势延续还是尚无清晰状态。
+      - 把交易制度、可交易性和市场环境列为解释价格路径的必要条件。
+    forbidden_uses:
+      - 直接套用论文形成期、持有期、历史收益或固定反转阈值。
+      - 因短期下跌就判定必然反弹，或因短期上涨就判定趋势必然延续。
+    prerequisites:
+      - 使用时点有效的个股和市场日线，并核对停牌、涨跌停和上市状态。
+      - 将价格观察与公司、行业和事件证据分开记录。
+    counter_evidence:
+      - 公司出现新的基本面恶化、正式风险公告或流动性约束。
+      - 价格变化由除权、复牌或不可交易状态主导，无法与普通样本比较。
+    data_requirements:
+      - kind: fact
+        name: equity_daily
+        required_fields: [available_at, trade_date, ts_code, close]
+      - kind: fact
+        name: index_daily
+        required_fields: [available_at, trade_date, index_code, close]
+      - kind: derived
+        name: stock_trading_context
+        required_fields: [analysis_date, ts_code, return_20d, countertrend_status]
+    local_validation:
+      status: required_before_threshold
+      reason: 反转区间和强度随市场制度与样本变化，必须按当前A股目标期限重新验证。
+
+  - knowledge_id: src_cn_price_limit_momentum_2025
+    title: 涨停是制度约束下的价格结果而非后续上涨保证
+    primary_source_id: paper-zhang-zhang-price-limit-2025
+    source_grade: A
+    version_status: current
+    effect: method_only
+    modules: [market_environment, price_trading]
+    opportunity_types: [general]
+    topics: [market_price_persistence]
+    claim_summary: A股日度收益延续与涨跌幅制度有关，触及涨停后应继续检查次日和后续价格表现而不能只看涨停事实。
+    allowed_uses:
+      - 区分涨停当日、隔夜、次日和后续交易日的价格表现。
+      - 将不同板块的涨跌幅规则和可交易性纳入价格结构解释。
+    forbidden_uses:
+      - 把涨停、连板或封板写成机构行为、筹码稳定或继续上涨保证。
+      - 直接继承论文样本中的收益幅度、窗口或交易阈值。
+    prerequisites:
+      - 核对分析日期、交易板块、涨停价格和实际成交价格。
+      - 使用时点可得日线和已复算的涨停后行为观察。
+    counter_evidence:
+      - 涨停后快速回落、成交受限、停牌或公司出现相反公告。
+      - 证券适用不同涨跌幅规则，或样本处于上市初期等特殊交易阶段。
+    data_requirements:
+      - kind: fact
+        name: equity_daily
+        required_fields: [available_at, trade_date, ts_code, close, high]
+      - kind: fact
+        name: stock_limit
+        required_fields: [available_at, trade_date, ts_code, up_limit]
+      - kind: derived
+        name: stock_trading_context
+        required_fields: [analysis_date, ts_code, latest_limit_up_date, post_limit_behavior_status, return_20d]
+    local_validation:
+      status: required_before_threshold
+      reason: 后续窗口和条件只能通过本地时点历史验证确定，论文不直接提供当前决策阈值。
+
+  - knowledge_id: src_cn_factor_momentum_2023
+    title: 用A股行业或因子相对表现观察趋势是否延续
+    primary_source_id: paper-ma-liao-jiang-factor-momentum-2024
+    source_grade: A
+    version_status: current
+    effect: method_only
+    modules: [market_environment, sector_theme]
+    opportunity_types: [general]
+    topics: [market_price_persistence, sector_price_persistence]
+    claim_summary: A股行业或因子层面的相对表现可能具有阶段性延续，热点判断应观察一组股票的共同表现而不是只看单一个股。
+    allowed_uses:
+      - 比较行业相对收益、上涨面和成员共同表现是否相互支持。
+      - 区分板块共同趋势、单一龙头带动和已经拥挤的价格表现。
+    forbidden_uses:
+      - 直接把历史因子组合收益、形成期或阈值写入正式选择规则。
+      - 仅凭板块名称、单只强势股或第三方热度标签认定持续热点。
+    prerequisites:
+      - 使用按分析时点有效的行业成分和行业日线。
+      - 与可复算板块热度证据共同使用，并保留拥挤和失效观察。
+    counter_evidence:
+      - 相对收益由少数成员贡献、上涨面收窄或成交拥挤显著上升。
+      - 行业成分映射失效，或个股业务与板块主题缺乏正式披露联系。
+    data_requirements:
+      - kind: fact
+        name: industry_daily
+        required_fields: [available_at, trade_date, industry_code, close]
+      - kind: fact
+        name: industry_member
+        required_fields: [available_at, industry_code, ts_code, valid_from, valid_to]
+      - kind: derived
+        name: sector_hotspot
+        required_fields: [analysis_date, group_code, group_type, relative_return_20d]
+    local_validation:
+      status: required_before_threshold
+      reason: 板块延续窗口、强度和拥挤边界必须基于本地连续复盘验证。
+
+  - knowledge_id: src_moskowitz_grinblatt_1999
+    title: 用行业共同表现解释个股动量时先做A股本地验证
+    primary_source_id: paper-moskowitz-grinblatt-1999
+    source_grade: A
+    version_status: current
+    effect: method_only
+    modules: [sector_theme]
+    opportunity_types: [general, industry_trend]
+    topics: [sector_price_persistence]
+    claim_summary: 个股价格延续可能包含行业共同成分，比较候选时应拆分行业趋势与公司自身表现。
+    allowed_uses:
+      - 将个股收益与所属行业相对收益、成员上涨面和强势股集中度对照。
+      - 识别候选是受板块普遍推动还是主要依赖自身公司事件。
+    forbidden_uses:
+      - 在A股本地验证前继承海外行业分类、历史窗口、组合收益或固定阈值。
+      - 用海外行业动量论文证明当前A股某行业必然继续上涨。
+    prerequisites:
+      - 使用时点有效的A股行业成分、行业日线和可复算板块观察。
+      - 结合公司业务披露确认热点能否传导到具体候选。
+    counter_evidence:
+      - 行业相对收益转弱、上涨面收窄或强势集中于极少数股票。
+      - 个股主营业务与行业上涨原因不一致。
+    data_requirements:
+      - kind: fact
+        name: industry_daily
+        required_fields: [available_at, trade_date, industry_code, close]
+      - kind: fact
+        name: industry_member
+        required_fields: [available_at, industry_code, ts_code, valid_from, valid_to]
+      - kind: derived
+        name: sector_hotspot
+        required_fields: [analysis_date, group_code, group_type, relative_return_20d]
+    local_validation:
+      status: required_before_threshold
+      reason: 海外方法只能提供拆分思路，必须在中国A股本地时点验证前保持方法用途。
+
+  - knowledge_id: src_brown_warner_1985
+    title: 用事件研究区分公告前后价格变化与市场共同变化
+    primary_source_id: paper-brown-warner-1985
+    source_grade: A
+    version_status: current
+    effect: method_only
+    modules: [events]
+    opportunity_types: [company_event, earnings_rerating]
+    topics: [event_price_reaction]
+    claim_summary: 公司事件后的价格反应需要与市场共同变化对照，并严格使用分析时点已经公开的事件时间。
+    allowed_uses:
+      - 以公告时点为边界，对照事件窗口内个股与市场价格变化。
+      - 提醒停牌、涨跌停、事件重叠和公告时段可能改变窗口解释。
+    forbidden_uses:
+      - 在A股本地验证前套用海外事件窗口、显著性标准或收益阈值。
+      - 仅凭公告后上涨就认定事件产生因果收益或未来继续上涨。
+    prerequisites:
+      - 有可追溯公告时点、个股日线、市场日线和交易状态。
+      - 公告必须在分析时点已经公开，盘后公告不得当作当日盘中已知信息。
+    counter_evidence:
+      - 同期市场或行业出现相似变化，个股没有可区分的相对反应。
+      - 事件窗口与其他重大公告重叠，或价格因停牌和涨跌停无法正常形成。
+    data_requirements:
+      - kind: fact
+        name: announcement
+        required_fields: [announcement_id, announcement_time, available_at, ts_code]
+      - kind: fact
+        name: equity_daily
+        required_fields: [available_at, trade_date, ts_code, close]
+      - kind: fact
+        name: index_daily
+        required_fields: [available_at, trade_date, index_code, close]
+    local_validation:
+      status: required_before_threshold
+      reason: 事件窗口和比较口径必须针对A股交易制度与当前目标期限验证。
+
+  - knowledge_id: src_sun_wen_earnings_car_2023
+    title: 用业绩公告窗口相对反应观察后续重估条件
+    primary_source_id: paper-sun-wen-earnings-car-2023
+    source_grade: A
+    version_status: current
+    effect: method_only
+    modules: [events, fundamentals]
+    opportunity_types: [earnings_rerating]
+    topics: [event_price_reaction, earnings_drift]
+    claim_summary: 中国A股业绩公告窗口的相对价格反应可以作为后续重估研究线索，但需要结合规模、估值和当前基本面重新判断。
+    allowed_uses:
+      - 比较业绩公告前后个股相对市场表现，并检查后续价格是否继续确认。
+      - 将公告内容、估值状态和近期价格反应共同用于判断业绩重估是否仍有空间。
+    forbidden_uses:
+      - 继承论文历史分组、收益幅度、持有期或机构行为解释作为当前结论。
+      - 把公告窗口上涨直接写成未来数周必然延续。
+    prerequisites:
+      - 有准确公告时点、个股日线、规模估值和交易背景数据。
+      - 区分业绩预告、快报和正式财务报告的内容与披露阶段。
+    counter_evidence:
+      - 公告内容低于此前市场预期、估值已经显著扩张或公告后价格快速转弱。
+      - 相对表现主要来自同期市场和行业共同上涨，或公告发生在不可正常交易期间。
+    data_requirements:
+      - kind: fact
+        name: announcement
+        required_fields: [announcement_id, announcement_time, available_at, ts_code]
+      - kind: fact
+        name: equity_daily
+        required_fields: [available_at, trade_date, ts_code, open, close]
+      - kind: fact
+        name: daily_basic
+        required_fields: [available_at, trade_date, ts_code, total_mv, pb]
+      - kind: derived
+        name: stock_trading_context
+        required_fields: [analysis_date, ts_code, return_20d, valuation_data_status]
+    local_validation:
+      status: required_before_threshold
+      reason: 论文支持A股方法方向，但当前目标期限、候选范围和决策阈值仍需本地时点验证。
+
+  - knowledge_id: src_chan_2003
+    title: 区分正式事件后的价格延续与无事件价格冲击
+    primary_source_id: paper-chan-2003
+    source_grade: A
+    version_status: current
+    effect: method_only
+    modules: [events]
+    opportunity_types: [company_event, earnings_rerating]
+    topics: [event_price_reaction]
+    claim_summary: 相近的价格变动在有正式事件和没有可识别事件时可能含义不同，分析应先确认时点有效的信息来源。
+    allowed_uses:
+      - 将正式公告支持的价格变化与没有对应正式事件的价格冲击分开解释。
+      - 对事件后延续、无事件反转和信息覆盖不足分别保留条件判断。
+    forbidden_uses:
+      - 在A股本地验证前套用海外新闻样本、持有期、收益或固定阈值。
+      - 把公告库当成完整新闻库，或把未找到公告写成市场上没有任何信息。
+    prerequisites:
+      - 有时点可追溯的正式公告、个股日线和市场日线。
+      - 明确当前数据只覆盖正式公告，不能覆盖所有媒体和投资者信息。
+    counter_evidence:
+      - 存在尚未纳入本地库但分析时点已公开的重大消息。
+      - 价格变化可由市场共同波动、停复牌或涨跌停约束解释。
+    data_requirements:
+      - kind: fact
+        name: announcement
+        required_fields: [announcement_id, announcement_time, available_at, ts_code]
+      - kind: fact
+        name: equity_daily
+        required_fields: [available_at, trade_date, ts_code, close]
+      - kind: fact
+        name: index_daily
+        required_fields: [available_at, trade_date, index_code, close]
+    local_validation:
+      status: required_before_threshold
+      reason: 海外研究仅提供信息分类思路，A股事件覆盖和价格窗口必须另行验证。
+
+  - knowledge_id: src_piotroski_2000
+    title: 用财务报表变化核对困境公司是否出现经营改善
+    primary_source_id: paper-piotroski-2000
+    source_grade: A
+    version_status: current
+    effect: method_only
+    modules: [fundamentals]
+    opportunity_types: [turnaround]
+    topics: [financial_turnaround]
+    claim_summary: 困境反转需要从盈利、经营现金流、杠杆、流动性和经营效率等多个财务方向寻找一致改善，而不能只看单项利润增长。
+    allowed_uses:
+      - 比较相邻报告期盈利、现金流、负债、流动性、毛利率和资产周转的变化方向。
+      - 将多项改善作为反转证据，并继续核对业务原因和一次性项目。
+    forbidden_uses:
+      - 在A股本地验证前复制原论文打分、价值股前置阈值、持有期或历史收益。
+      - 因财务指标改善就直接认定经营反转已经完成或股票应当买入。
+    prerequisites:
+      - 使用分析时点已经披露的损益表、资产负债表、现金流量表和财务指标。
+      - 保持报告期可比，并检查会计政策、并购和非经常性项目影响。
+    counter_evidence:
+      - 利润改善但经营现金流恶化、杠杆上升、流动性下降或周转效率持续走弱。
+      - 改善主要来自资产处置、公允价值变动、政府补助或不可持续项目。
+    data_requirements:
+      - kind: fact
+        name: income_statement
+        required_fields: [ann_date, available_at, report_period, revenue, n_income_attr_p, ts_code]
+      - kind: fact
+        name: balance_sheet
+        required_fields: [ann_date, available_at, report_period, total_assets, total_cur_assets, total_cur_liab, total_liab, ts_code]
+      - kind: fact
+        name: cash_flow
+        required_fields: [ann_date, available_at, report_period, n_cashflow_act, ts_code]
+      - kind: fact
+        name: financial_indicator
+        required_fields: [available_at, report_period, current_ratio, grossprofit_margin, assets_turn, debt_to_assets, roe, ts_code]
+    local_validation:
+      status: required_before_threshold
+      reason: 财务方向可执行，但评分、阈值和预测权重必须按A股本地样本验证。

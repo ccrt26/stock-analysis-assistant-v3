@@ -1174,7 +1174,7 @@ MANDATORY_METHOD_IDS = {
     "src_cn_factor_momentum_2023": "factor_or_industry_momentum",
     "src_moskowitz_grinblatt_1999": "factor_or_industry_momentum",
     "src_brown_warner_1985": "event_study",
-    "src_cn_earnings_drift_2025": "earnings_announcement_drift",
+    "src_sun_wen_earnings_car_2023": "earnings_announcement_drift",
     "src_chan_2003": "news_price_reaction",
     "src_piotroski_2000": "financial_quality_turnaround",
 }
@@ -1208,12 +1208,12 @@ The research floor is fixed to these originals; add no lower-quality substitute:
 - Price limits and daily momentum in China: `https://xbbjb.cufe.edu.cn/EN/Y2025/V0/I1/59`
 - Factor momentum in China: `https://www.sciencedirect.com/science/article/abs/pii/S0927539823001251`
 - Industry momentum method: `https://onlinelibrary.wiley.com/doi/pdf/10.1111/0022-1082.00146`
-- China earnings-announcement drift working paper: `https://papers.ssrn.com/sol3/papers.cfm?abstract_id=5493686`
+- China earnings-announcement return method: Sun and Wen (2023), DOI `10.1111/irfi.12380`, `https://onlinelibrary.wiley.com/doi/full/10.1111/irfi.12380`.
 - News versus no-news price reaction method: `https://www.sciencedirect.com/science/article/abs/pii/S0304405X03001466`
 - Event-study method: Brown and Warner (1985), DOI `10.1016/0304-405X(85)90042-X`.
 - Financial-quality/turnaround method: Piotroski (2000), `https://www.sciencedirect.com/science/article/abs/pii/S0165410100000086`.
 
-For each paper, record authors, publication venue, DOI or original URL, exact market, sample start/end, method summary and limitations after reading the original abstract/method information. SSRN-only work is grade B unless a peer-reviewed publication is found at the same DOI/title.
+For each paper, record authors, publication venue, DOI or original URL, exact market, sample start/end, method summary and limitations after reading the original abstract/method information. The inaccessible SSRN working paper formerly proposed for this family is not admitted: its abstract omits the exact sample interval and its original PDF could not be verified on 2026-07-15. This replacement is an A-grade peer-reviewed China A-share study with verifiable metadata and sample coverage.
 
 - [ ] **Step 4: Map methods only to existing capabilities**
 
@@ -1226,7 +1226,7 @@ Use only these existing requirements:
 | Price-limit/T+1 | `equity_daily`, `stock_limit`, `stock_trading_context` |
 | Factor/industry momentum | `industry_daily`, `industry_member`, `sector_hotspot` |
 | Event study | `announcement`, `equity_daily`, `index_daily` |
-| Earnings drift | `earnings_forecast`, `earnings_express`, `income_statement`, `financial_indicator`, `equity_daily` |
+| Earnings drift | `announcement`, `equity_daily`, `daily_basic`, `stock_trading_context` |
 | News reaction | `announcement`, `equity_daily`, `index_daily` |
 | Financial quality/turnaround | `income_statement`, `balance_sheet`, `cash_flow`, `financial_indicator` |
 
@@ -1240,7 +1240,7 @@ Freeze entry metadata as follows:
 | `src_cn_factor_momentum_2023` | `method_only` | `market_environment`, `sector_theme` | `general` | `market_price_persistence`, `sector_price_persistence` |
 | `src_moskowitz_grinblatt_1999` | `method_only` | `sector_theme` | `general`, `industry_trend` | `sector_price_persistence` |
 | `src_brown_warner_1985` | `method_only` | `events` | `company_event`, `earnings_rerating` | `event_price_reaction` |
-| `src_cn_earnings_drift_2025` | `method_only` | `events`, `fundamentals` | `earnings_rerating` | `event_price_reaction`, `earnings_drift` |
+| `src_sun_wen_earnings_car_2023` | `method_only` | `events`, `fundamentals` | `earnings_rerating` | `event_price_reaction`, `earnings_drift` |
 | `src_chan_2003` | `method_only` | `events` | `company_event`, `earnings_rerating` | `event_price_reaction` |
 | `src_piotroski_2000` | `method_only` | `fundamentals` | `turnaround` | `financial_turnaround` |
 
@@ -1410,7 +1410,7 @@ EXPECTED_SCENARIO_SELECTIONS = {
     "earnings_event": (
         "src_brown_warner_1985",
         "src_chan_2003",
-        "src_cn_earnings_drift_2025",
+        "src_sun_wen_earnings_car_2023",
     ),
     "unavailable_cycle_data": (),
 }

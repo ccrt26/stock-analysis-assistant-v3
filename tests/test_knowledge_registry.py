@@ -29,6 +29,17 @@ MANDATORY_S_SOURCE_IDS = {
     "official-csrc-restructuring-2023",
     "official-csrc-restructuring-amendment-2025",
 }
+MANDATORY_METHOD_IDS = {
+    "src_liu_stambaugh_yuan_2019": "a_share_size_value",
+    "src_cn_t1_contrarian_2024": "a_share_momentum_reversal",
+    "src_cn_price_limit_momentum_2025": "price_limit_t_plus_one",
+    "src_cn_factor_momentum_2023": "factor_or_industry_momentum",
+    "src_moskowitz_grinblatt_1999": "factor_or_industry_momentum",
+    "src_brown_warner_1985": "event_study",
+    "src_sun_wen_earnings_car_2023": "earnings_announcement_drift",
+    "src_chan_2003": "news_price_reaction",
+    "src_piotroski_2000": "financial_quality_turnaround",
+}
 
 
 def source_payload(*, source_id: str = "official-program-trading") -> dict:
@@ -256,3 +267,66 @@ def test_official_entries_never_claim_automatic_price_rise():
             continue
         searchable = " ".join((entry.claim_summary, *entry.allowed_uses))
         assert not any(claim in searchable for claim in forbidden_claims)
+
+
+def test_real_registry_contains_exact_mandatory_research_method_families():
+    registry = load_knowledge_registry(REAL_REGISTRY_PATH)
+    entries = {entry.knowledge_id: entry for entry in registry.entries}
+
+    assert set(MANDATORY_METHOD_IDS) <= set(entries)
+    assert set(MANDATORY_METHOD_IDS.values()) == {
+        "a_share_size_value",
+        "a_share_momentum_reversal",
+        "price_limit_t_plus_one",
+        "factor_or_industry_momentum",
+        "event_study",
+        "earnings_announcement_drift",
+        "news_price_reaction",
+        "financial_quality_turnaround",
+    }
+
+
+def test_empirical_methods_remain_bounded_and_contain_no_numeric_buy_threshold():
+    registry = load_knowledge_registry(REAL_REGISTRY_PATH)
+    entries = {entry.knowledge_id: entry for entry in registry.entries}
+
+    for knowledge_id in MANDATORY_METHOD_IDS:
+        entry = entries[knowledge_id]
+        assert entry.source_grade.value in {"A", "B"}
+        assert entry.effect.value in {"method_only", "observation_only"}
+        assert entry.effect.value != "hard_boundary"
+        if entry.source_grade.value == "B":
+            assert entry.effect.value in {"method_only", "observation_only"}
+        searchable = " ".join((entry.claim_summary, *entry.allowed_uses))
+        assert not any(character.isdigit() for character in searchable)
+
+
+def test_every_active_source_has_complete_review_metadata():
+    registry = load_knowledge_registry(REAL_REGISTRY_PATH)
+    sources = {source.source_id: source for source in registry.sources}
+
+    for entry in registry.entries:
+        if entry.version_status != "current":
+            continue
+        source = sources[entry.primary_source_id]
+        assert source.publisher.strip()
+        assert source.publication_date
+        assert source.last_verified_on.isoformat() == "2026-07-15"
+        assert source.market_scope
+        assert source.method_summary.strip()
+        assert source.limitations
+        assert source.url or source.doi
+        if source.grade.value in {"A", "B"}:
+            assert source.authors
+            assert source.sample_start
+            assert source.sample_end
+            assert source.journal_or_series
+        if (
+            source.grade.value in {"A", "B"}
+            and "A股" not in source.market_scope
+            and "中国" not in source.market_scope
+        ):
+            assert any(
+                "中国A股本地时点验证前仅作方法" in limitation
+                for limitation in source.limitations
+            )
