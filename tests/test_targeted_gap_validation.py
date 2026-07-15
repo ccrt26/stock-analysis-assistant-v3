@@ -8,6 +8,8 @@ from stock_analyzer.knowledge_validation.targeted_gap_validation import (
     TARGETED_SOURCE_REFS,
     business_segment_materiality_observations,
     earnings_growth_persistence_observations,
+    relative_valuation_context_observations,
+    turnaround_financial_consistency_observations,
 )
 
 
@@ -226,3 +228,183 @@ def test_earnings_growth_preserves_components_and_future_label_without_score():
         "net_income_change_scaled",
     ].iloc[0]
     assert math.isnan(early)
+
+
+def _valuation_fixture() -> pd.DataFrame:
+    rows: list[dict[str, object]] = []
+    for date_index, formation_date in enumerate(
+        pd.to_datetime(["2025-01-31", "2025-02-28", "2025-03-31"])
+    ):
+        for company_index, ts_code in enumerate(
+            ("000001.SZ", "000002.SZ", "000003.SZ")
+        ):
+            rows.append(
+                {
+                    "formation_date": formation_date,
+                    "ts_code": ts_code,
+                    "industry_code": "801010",
+                    "pe_ttm": 10.0 + company_index * 10.0 + date_index * 5.0,
+                    "pb": 1.0 + company_index + date_index * 0.2,
+                    "ps_ttm": 0.8 + company_index * 0.5 + date_index * 0.1,
+                    "total_mv": 100.0 + company_index * 100.0,
+                    "n_income_attr_p": 5.0 + company_index,
+                    "roe": 8.0 + company_index,
+                    "revenue_growth": 5.0 + company_index,
+                    "cash_quality": 0.8 + company_index * 0.1,
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def test_relative_valuation_uses_comparable_peers_and_marks_invalid_values():
+    frame = _valuation_fixture()
+    invalid = frame.iloc[[0]].copy()
+    invalid["ts_code"] = "000004.SZ"
+    invalid["pe_ttm"] = -5.0
+    invalid["pb"] = -1.0
+    invalid["ps_ttm"] = 0.0
+    invalid["n_income_attr_p"] = -3.0
+
+    result = relative_valuation_context_observations(
+        pd.concat([frame, invalid], ignore_index=True)
+    )
+    first = result.loc[
+        (result["formation_date"] == pd.Timestamp("2025-01-31"))
+        & (result["ts_code"] == "000001.SZ")
+    ].iloc[0]
+    loss = result.loc[result["ts_code"] == "000004.SZ"].iloc[0]
+
+    assert math.isclose(first["peer_pe_percentile"], 1.0 / 3.0)
+    assert first["peer_group_size"] == 3
+    assert first["profitability_state"] == "profitable"
+    assert loss["profitability_state"] == "loss"
+    assert loss["pe_status"] == "invalid_nonpositive"
+    assert loss["pb_status"] == "invalid_nonpositive"
+    assert loss["ps_status"] == "invalid_nonpositive"
+    assert math.isnan(loss["peer_pe_percentile"])
+
+
+def test_relative_valuation_history_is_point_in_time_and_has_no_total_score():
+    frame = _valuation_fixture()
+    before = relative_valuation_context_observations(frame)
+    target_before = before.loc[
+        (before["formation_date"] == pd.Timestamp("2025-02-28"))
+        & (before["ts_code"] == "000001.SZ"),
+        "history_pe_percentile",
+    ].iloc[0]
+    future = frame.iloc[[0]].copy()
+    future["formation_date"] = pd.Timestamp("2026-01-31")
+    future["pe_ttm"] = 1.0
+    after = relative_valuation_context_observations(
+        pd.concat([frame, future], ignore_index=True)
+    )
+    target_after = after.loc[
+        (after["formation_date"] == pd.Timestamp("2025-02-28"))
+        & (after["ts_code"] == "000001.SZ"),
+        "history_pe_percentile",
+    ].iloc[0]
+
+    assert target_before == target_after == 1.0
+    assert not (
+        {"score", "rank", "buy_probability", "prediction"} & set(before.columns)
+    )
+    assert {
+        "roe",
+        "revenue_growth",
+        "cash_quality",
+        "market_cap_percentile",
+    } <= set(before.columns)
+
+
+def _turnaround_fixture() -> pd.DataFrame:
+    periods = pd.date_range("2024-03-31", periods=5, freq="QE")
+    rows: list[dict[str, object]] = []
+    for ts_code, consistent in (("000001.SZ", False), ("000002.SZ", True)):
+        for index, period in enumerate(periods):
+            final = index == 4
+            row = {
+                "ts_code": ts_code,
+                "report_period": period,
+                "revenue": 100.0 + (20.0 if final else 0.0),
+                "operate_profit": 5.0 + (5.0 if final else 0.0),
+                "n_income_attr_p": -2.0 + (5.0 if final else 0.0),
+                "n_cashflow_act": 8.0,
+                "total_assets": 200.0,
+                "total_cur_assets": 100.0,
+                "total_cur_liab": 50.0,
+                "total_liab": 90.0,
+                "money_cap": 30.0,
+                "st_borr": 20.0,
+                "non_cur_liab_due_1y": 5.0,
+                "accounts_receiv": 20.0,
+                "inventories": 25.0,
+                "assets_impair_loss": 2.0,
+                "non_oper_income": 1.0,
+            }
+            if final and consistent:
+                row.update(
+                    {
+                        "n_cashflow_act": 15.0,
+                        "total_cur_assets": 120.0,
+                        "total_cur_liab": 45.0,
+                        "money_cap": 40.0,
+                        "st_borr": 12.0,
+                        "non_cur_liab_due_1y": 2.0,
+                        "accounts_receiv": 15.0,
+                        "inventories": 20.0,
+                        "assets_impair_loss": 1.0,
+                        "non_oper_income": 0.5,
+                    }
+                )
+            elif final:
+                row.update(
+                    {
+                        "n_cashflow_act": 3.0,
+                        "total_cur_assets": 85.0,
+                        "total_cur_liab": 60.0,
+                        "money_cap": 15.0,
+                        "st_borr": 35.0,
+                        "non_cur_liab_due_1y": 10.0,
+                        "accounts_receiv": 35.0,
+                        "inventories": 40.0,
+                        "assets_impair_loss": 6.0,
+                        "non_oper_income": 4.0,
+                    }
+                )
+            rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def test_turnaround_financial_consistency_exposes_cross_statement_contradictions():
+    result = turnaround_financial_consistency_observations(_turnaround_fixture())
+    final = result.loc[result["report_period"] == pd.Timestamp("2025-03-31")]
+    inconsistent = final.loc[final["ts_code"] == "000001.SZ"].iloc[0]
+    consistent = final.loc[final["ts_code"] == "000002.SZ"].iloc[0]
+
+    assert inconsistent["operating_result_change"] > 0
+    assert inconsistent["operating_cash_change"] < 0
+    assert inconsistent["liquidity_change"] < 0
+    assert inconsistent["debt_pressure_change"] > 0
+    assert inconsistent["receivable_inventory_pressure_change"] > 0
+    assert inconsistent["contradiction_count"] >= 4
+    assert consistent["operating_result_change"] > 0
+    assert consistent["operating_cash_change"] > 0
+    assert consistent["liquidity_change"] > 0
+    assert consistent["debt_pressure_change"] < 0
+    assert consistent["receivable_inventory_pressure_change"] < 0
+    assert consistent["contradiction_count"] == 0
+
+
+def test_turnaround_observations_are_not_a_score_or_distress_probability():
+    result = turnaround_financial_consistency_observations(_turnaround_fixture())
+
+    assert {
+        "operating_result_change",
+        "operating_cash_change",
+        "liquidity_change",
+        "debt_pressure_change",
+        "receivable_inventory_pressure_change",
+        "impairment_nonoperating_change",
+        "contradiction_count",
+    } <= set(result.columns)
+    assert not ({"score", "distress_probability", "prediction"} & set(result.columns))

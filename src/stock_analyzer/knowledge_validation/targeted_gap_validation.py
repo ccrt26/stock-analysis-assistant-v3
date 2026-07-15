@@ -249,6 +249,177 @@ def earnings_growth_persistence_observations(
     return result.replace([np.inf, -np.inf], np.nan)
 
 
+def _expanding_percentile(series: pd.Series) -> pd.Series:
+    values = pd.to_numeric(series, errors="coerce")
+    output: list[float] = []
+    for index, value in enumerate(values):
+        history = values.iloc[: index + 1].dropna()
+        if pd.isna(value) or history.empty:
+            output.append(np.nan)
+        else:
+            output.append(float(history.le(value).sum() / len(history)))
+    return pd.Series(output, index=series.index, dtype="float64")
+
+
+def relative_valuation_context_observations(
+    frame: pd.DataFrame,
+) -> pd.DataFrame:
+    required = {
+        "formation_date",
+        "ts_code",
+        "industry_code",
+        "pe_ttm",
+        "pb",
+        "ps_ttm",
+        "total_mv",
+        "n_income_attr_p",
+        "roe",
+        "revenue_growth",
+        "cash_quality",
+    }
+    missing = sorted(required.difference(frame.columns))
+    if missing:
+        raise ValueError(f"missing valuation context columns: {', '.join(missing)}")
+
+    result = frame.copy()
+    result["formation_date"] = pd.to_datetime(result["formation_date"])
+    numeric = required.difference(
+        {"formation_date", "ts_code", "industry_code"}
+    )
+    for column in numeric:
+        result[column] = pd.to_numeric(result[column], errors="coerce")
+    result = result.sort_values(
+        ["ts_code", "formation_date"], kind="mergesort"
+    ).reset_index(drop=True)
+    result["profitability_state"] = np.select(
+        [result["n_income_attr_p"].gt(0), result["n_income_attr_p"].le(0)],
+        ["profitable", "loss"],
+        default="unknown",
+    )
+
+    metric_map = {
+        "pe_ttm": "pe",
+        "pb": "pb",
+        "ps_ttm": "ps",
+    }
+    peer_keys = ["formation_date", "industry_code", "profitability_state"]
+    result["peer_group_size"] = result.groupby(
+        peer_keys, dropna=False, sort=False
+    )["ts_code"].transform("size")
+    for source, label in metric_map.items():
+        valid_column = f"_{label}_valid_value"
+        result[f"{label}_status"] = np.where(
+            result[source].gt(0), "valid", "invalid_nonpositive"
+        )
+        result[valid_column] = result[source].where(result[source].gt(0))
+        result[f"peer_{label}_percentile"] = result.groupby(
+            peer_keys, dropna=False, sort=False
+        )[valid_column].rank(method="average", pct=True)
+        result[f"history_{label}_percentile"] = result.groupby(
+            "ts_code", sort=False, group_keys=False
+        )[valid_column].transform(_expanding_percentile)
+        result = result.drop(columns=valid_column)
+
+    result["market_cap_percentile"] = result.groupby(
+        "formation_date", sort=False
+    )["total_mv"].rank(method="average", pct=True)
+    return result.sort_values(
+        ["formation_date", "ts_code"], kind="mergesort"
+    ).reset_index(drop=True)
+
+
+def turnaround_financial_consistency_observations(
+    frame: pd.DataFrame,
+) -> pd.DataFrame:
+    required = {
+        "ts_code",
+        "report_period",
+        "revenue",
+        "operate_profit",
+        "n_income_attr_p",
+        "n_cashflow_act",
+        "total_assets",
+        "total_cur_assets",
+        "total_cur_liab",
+        "total_liab",
+        "money_cap",
+        "st_borr",
+        "non_cur_liab_due_1y",
+        "accounts_receiv",
+        "inventories",
+        "assets_impair_loss",
+        "non_oper_income",
+    }
+    missing = sorted(required.difference(frame.columns))
+    if missing:
+        raise ValueError(f"missing turnaround columns: {', '.join(missing)}")
+
+    result = frame.copy()
+    result["report_period"] = pd.to_datetime(result["report_period"])
+    numeric = required.difference({"ts_code", "report_period"})
+    for column in numeric:
+        result[column] = pd.to_numeric(result[column], errors="coerce")
+    result = result.sort_values(
+        ["ts_code", "report_period"], kind="mergesort"
+    ).reset_index(drop=True)
+    company = result.groupby("ts_code", sort=False)
+    prior_assets = company["total_assets"].shift(4).where(lambda value: value.gt(0))
+
+    result["operating_result_change"] = (
+        result["operate_profit"] - company["operate_profit"].shift(4)
+    ) / prior_assets
+    result["operating_cash_change"] = (
+        result["n_cashflow_act"] - company["n_cashflow_act"].shift(4)
+    ) / prior_assets
+
+    current_ratio = result["total_cur_assets"] / result["total_cur_liab"].where(
+        result["total_cur_liab"].gt(0)
+    )
+    result["liquidity_change"] = current_ratio - current_ratio.groupby(
+        result["ts_code"], sort=False
+    ).shift(4)
+
+    debt_pressure = (
+        result["st_borr"]
+        + result["non_cur_liab_due_1y"]
+        - result["money_cap"]
+    ) / result["total_assets"].where(result["total_assets"].gt(0))
+    result["debt_pressure_change"] = debt_pressure - debt_pressure.groupby(
+        result["ts_code"], sort=False
+    ).shift(4)
+
+    working_capital_pressure = (
+        result["accounts_receiv"] + result["inventories"]
+    ) / result["total_assets"].where(result["total_assets"].gt(0))
+    result["receivable_inventory_pressure_change"] = (
+        working_capital_pressure
+        - working_capital_pressure.groupby(result["ts_code"], sort=False).shift(4)
+    )
+
+    quality_pressure = (
+        result["assets_impair_loss"] - result["non_oper_income"]
+    ) / result["total_assets"].where(result["total_assets"].gt(0))
+    result["impairment_nonoperating_change"] = (
+        quality_pressure
+        - quality_pressure.groupby(result["ts_code"], sort=False).shift(4)
+    )
+
+    contradictions = pd.concat(
+        [
+            result["operating_cash_change"].le(0),
+            result["liquidity_change"].le(0),
+            result["debt_pressure_change"].ge(0),
+            result["receivable_inventory_pressure_change"].ge(0),
+            result["impairment_nonoperating_change"].ge(0),
+        ],
+        axis=1,
+    ).sum(axis=1)
+    result["contradiction_count"] = contradictions.where(
+        result["operating_result_change"].notna()
+    ).astype("Int64")
+    return result.replace([np.inf, -np.inf], np.nan)
+
+
 __all__ = [
     "TARGETED_GAP_CLAIMS",
     "TARGETED_SOURCE_REFS",
@@ -256,4 +427,6 @@ __all__ = [
     "TargetedGapEvidence",
     "business_segment_materiality_observations",
     "earnings_growth_persistence_observations",
+    "relative_valuation_context_observations",
+    "turnaround_financial_consistency_observations",
 ]
