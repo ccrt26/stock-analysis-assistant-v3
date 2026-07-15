@@ -658,7 +658,7 @@ Use only if source/data pass and relevant evidence is broadly coherent without d
 ```yaml
 schema_version: v3-supplement-validation-v1
 generated_on: 2026-07-15
-warehouse_sha256: b988c0bee9c99356eca602d3d6ec33c875ab471a3c3e4051e440f91d5c685747
+warehouse_sha256: 6da3469d3346ec23c4afa6bd72ab8673df37932048b79e3feb1d5d6288f3da5a
 results:
   - knowledge_id: src_cn_factor_momentum_2023
     action: enhance
