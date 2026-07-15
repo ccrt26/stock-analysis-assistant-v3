@@ -267,7 +267,7 @@ Harvey、Liu、Zhu 与 Hou、Xue、Zhang 通过代码和结果检查验证其边
 
 任一关键条件不满足即为 `discard`。淘汰项只在简短结果文件中保留原因，不进入活动来源或活动知识登记。来源与知识按同一候选主张共同准入：不存在“先把论文放进活动来源库，以后再看是否能用”的状态。
 
-现有登记中仍处于 `method_only` 的候选也必须在本轮完成二元决策：通过后改成与其用途一致的 `analysis_evidence`、`observation_only` 或 `hard_boundary`；不通过则退出活动知识。不得继续停留在 `method_only`。
+本轮十五项中涉及的现有 `method_only` 候选必须完成二元决策：通过后改成与其用途一致的 `analysis_evidence`、`observation_only` 或 `hard_boundary`；不通过则不应用本次增强。其他不在十五项范围内的既有知识不因本轮自动改状态，避免借知识补充扩大成另一轮旧库治理。
 
 新增知识仍遵守以下表达边界：
 
