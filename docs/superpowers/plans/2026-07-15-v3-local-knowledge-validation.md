@@ -10,7 +10,7 @@
 
 **Approved Design:** [`docs/superpowers/specs/2026-07-15-v3-local-validation-and-knowledge-expansion-design.md`](../specs/2026-07-15-v3-local-validation-and-knowledge-expansion-design.md)
 
-**Approved Baseline:** local `main` commit `774b14e`.
+**Execution Baseline:** local `main` commit `9df13de` (`docs: plan local validation and knowledge expansion`). Commit `774b14e` remains the approved design baseline.
 
 ## Global Constraints
 
@@ -285,7 +285,7 @@ PYTHONPATH=src .venv/bin/python -m pytest \
 ```bash
 PYTHONPATH=src .venv/bin/python -m pytest -q
 shasum -a 256 -c /private/tmp/v3-local-validation.before.sha256
-git diff --name-only 774b14e..HEAD
+git diff --name-only 9df13de..HEAD
 rg -n "knowledge_validation" src/stock_analyzer/analysis src/stock_analyzer/ops src/stock_analyzer/reports ops || true
 ```
 
