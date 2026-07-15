@@ -59,12 +59,16 @@ def test_limit_touch_uses_high_and_up_limit():
                 "high": [10.0],
                 "close": [9.8],
                 "up_limit": [10.0],
+                "circ_mv": [100.0],
+                "prior_return_20d": [0.05],
             }
         )
     )
 
     assert bool(out.loc[0, "limit_touched"])
     assert not bool(out.loc[0, "closed_at_limit"])
+    assert out.loc[0, "cap_tercile"] == 1
+    assert out.loc[0, "prior_return_quintile"] == 1
 
 
 def test_industry_momentum_keeps_breadth_and_concentration_as_separate_conditions():
@@ -100,6 +104,8 @@ def test_overseas_industry_method_only_subtracts_industry_component():
     )
 
     assert out.loc[0, "industry_subtracted_return_20d"] == pytest.approx(0.05)
+    assert out.loc[0, "individual_return_quintile"] == 1
+    assert out.loc[0, "industry_subtracted_quintile"] == 1
 
 
 def test_daily_event_car_is_market_adjusted_and_uses_narrow_no_match_wording():

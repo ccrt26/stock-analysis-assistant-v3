@@ -90,13 +90,36 @@ def reversal_signal(frame: pd.DataFrame) -> pd.DataFrame:
 
 def limit_signal(frame: pd.DataFrame) -> pd.DataFrame:
     _reject_future_labels(frame)
-    _require(frame, {"analysis_date", "ts_code", "high", "close", "up_limit"})
+    _require(
+        frame,
+        {
+            "analysis_date",
+            "ts_code",
+            "high",
+            "close",
+            "up_limit",
+            "circ_mv",
+            "prior_return_20d",
+        },
+    )
     out = frame.copy()
     high = pd.to_numeric(out["high"], errors="coerce")
     close = pd.to_numeric(out["close"], errors="coerce")
     upper = pd.to_numeric(out["up_limit"], errors="coerce")
     out["limit_touched"] = high.notna() & upper.notna() & (high >= upper)
     out["closed_at_limit"] = close.notna() & upper.notna() & (close >= upper)
+    out["cap_tercile"] = _stable_groups(
+        out,
+        value_column="circ_mv",
+        group_columns=("analysis_date",),
+        bins=3,
+    )
+    out["prior_return_quintile"] = _stable_groups(
+        out,
+        value_column="prior_return_20d",
+        group_columns=("analysis_date",),
+        bins=5,
+    )
     return out
 
 
@@ -137,6 +160,18 @@ def industry_component_signal(frame: pd.DataFrame) -> pd.DataFrame:
     out["industry_subtracted_return_20d"] = (
         pd.to_numeric(out["prior_return_20d"], errors="coerce")
         - pd.to_numeric(out["industry_return_20d"], errors="coerce")
+    )
+    out["individual_return_quintile"] = _stable_groups(
+        out,
+        value_column="prior_return_20d",
+        group_columns=("analysis_date",),
+        bins=5,
+    )
+    out["industry_subtracted_quintile"] = _stable_groups(
+        out,
+        value_column="industry_subtracted_return_20d",
+        group_columns=("analysis_date",),
+        bins=5,
     )
     return out
 

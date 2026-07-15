@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from math import ceil
+from statistics import NormalDist
 from typing import Mapping, Sequence
 
 import numpy as np
@@ -101,6 +102,201 @@ def aggregate_independent_units(
     return result.sort_values(list(unit_columns), kind="mergesort").reset_index(drop=True)
 
 
+def _top_minus_bottom(
+    panel: pd.DataFrame,
+    *,
+    unit: str,
+    group: str,
+    value: str,
+    top: int = 5,
+    bottom: int = 1,
+) -> pd.DataFrame:
+    required = {unit, group, value}
+    missing = required - set(panel.columns)
+    if missing:
+        raise ValueError(f"primary study panel missing columns: {sorted(missing)}")
+    grouped = (
+        panel.groupby([unit, group], dropna=False, sort=True)[value]
+        .mean()
+        .unstack(group)
+    )
+    if top not in grouped or bottom not in grouped:
+        return pd.DataFrame(columns=[unit, "primary_value"])
+    result = (grouped[top] - grouped[bottom]).dropna().rename("primary_value")
+    return result.reset_index()
+
+
+def primary_study_series(study_id: str, panel: pd.DataFrame) -> pd.DataFrame:
+    if study_id == "a_share_size_value":
+        return _top_minus_bottom(
+            panel,
+            unit="analysis_date",
+            group="signal_quintile",
+            value="market_excess_return_20d",
+        )
+    if study_id == "a_share_momentum_reversal":
+        spread = _top_minus_bottom(
+            panel,
+            unit="analysis_date",
+            group="signal_quintile",
+            value="market_excess_return_5d",
+        )
+        spread["primary_value"] = -spread["primary_value"]
+        return spread
+    if study_id == "price_limit_t_plus_one":
+        required = {
+            "analysis_date",
+            "limit_touched",
+            "cap_tercile",
+            "prior_return_quintile",
+            "market_excess_return_1d",
+        }
+        missing = required - set(panel.columns)
+        if missing:
+            raise ValueError(f"primary study panel missing columns: {sorted(missing)}")
+        strata = (
+            panel.groupby(
+                [
+                    "analysis_date",
+                    "cap_tercile",
+                    "prior_return_quintile",
+                    "limit_touched",
+                ],
+                sort=True,
+            )["market_excess_return_1d"]
+            .mean()
+            .unstack("limit_touched")
+        )
+        if True not in strata or False not in strata:
+            return pd.DataFrame(columns=["analysis_date", "primary_value"])
+        differences = (strata[True] - strata[False]).dropna()
+        return (
+            differences.groupby(level="analysis_date")
+            .mean()
+            .rename("primary_value")
+            .reset_index()
+        )
+    if study_id == "a_share_factor_industry_momentum":
+        return _top_minus_bottom(
+            panel,
+            unit="analysis_date",
+            group="signal_quintile",
+            value="close_return_20d",
+        )
+    if study_id == "overseas_industry_momentum_method":
+        raw = _top_minus_bottom(
+            panel,
+            unit="analysis_date",
+            group="individual_return_quintile",
+            value="market_excess_return_20d",
+        ).rename(columns={"primary_value": "raw_spread"})
+        residual = _top_minus_bottom(
+            panel,
+            unit="analysis_date",
+            group="industry_subtracted_quintile",
+            value="market_excess_return_20d",
+        ).rename(columns={"primary_value": "residual_spread"})
+        result = raw.merge(residual, on="analysis_date", how="inner")
+        result["primary_value"] = result["raw_spread"].abs() - result[
+            "residual_spread"
+        ].abs()
+        return result[["analysis_date", "primary_value"]]
+    if study_id == "daily_event_study":
+        required = {"event_date", "car_0_1", "is_pseudo_event"}
+        missing = required - set(panel.columns)
+        if missing:
+            raise ValueError(f"primary study panel missing columns: {sorted(missing)}")
+        return panel.loc[panel["is_pseudo_event"].astype(bool), ["event_date", "car_0_1"]].rename(
+            columns={"car_0_1": "primary_value"}
+        )
+    if study_id == "a_share_earnings_announcement_drift":
+        return _top_minus_bottom(
+            panel,
+            unit="event_date",
+            group="car_quintile",
+            value="market_excess_return_20d",
+        )
+    if study_id == "formal_announcement_price_reaction":
+        required = {
+            "analysis_date",
+            "local_formal_announcement_match",
+            "market_excess_return_20d",
+        }
+        missing = required - set(panel.columns)
+        if missing:
+            raise ValueError(f"primary study panel missing columns: {sorted(missing)}")
+        grouped = (
+            panel.groupby(
+                ["analysis_date", "local_formal_announcement_match"], sort=True
+            )["market_excess_return_20d"]
+            .mean()
+            .unstack("local_formal_announcement_match")
+        )
+        if True not in grouped or False not in grouped:
+            return pd.DataFrame(columns=["analysis_date", "primary_value"])
+        return (grouped[True] - grouped[False]).dropna().rename("primary_value").reset_index()
+    if study_id == "financial_quality_turnaround":
+        required = {
+            "report_period",
+            "improvement_count",
+            "market_excess_return_20d",
+        }
+        missing = required - set(panel.columns)
+        if missing:
+            raise ValueError(f"primary study panel missing columns: {sorted(missing)}")
+        rows: list[dict[str, object]] = []
+        for report_period, group in panel.groupby("report_period", sort=True):
+            usable = group[["improvement_count", "market_excess_return_20d"]].dropna()
+            correlation = (
+                np.nan
+                if len(usable) < 2
+                else usable["improvement_count"].rank().corr(
+                    usable["market_excess_return_20d"].rank()
+                )
+            )
+            if pd.notna(correlation):
+                rows.append(
+                    {"report_period": report_period, "primary_value": float(correlation)}
+                )
+        return pd.DataFrame(rows, columns=["report_period", "primary_value"])
+    raise ValueError(f"unsupported validation study: {study_id}")
+
+
+def tost_equivalence(
+    values: Sequence[float] | np.ndarray,
+    *,
+    lower: float,
+    upper: float,
+) -> dict[str, float | int | bool]:
+    if not lower < upper:
+        raise ValueError("equivalence lower bound must be below upper bound")
+    array = np.asarray(values, dtype=float)
+    array = array[np.isfinite(array)]
+    if array.size < 2:
+        raise ValueError("TOST requires at least two finite observations")
+    mean = float(np.mean(array))
+    standard_error = float(np.std(array, ddof=1) / np.sqrt(array.size))
+    if standard_error == 0:
+        p_lower = 0.0 if mean > lower else 1.0
+        p_upper = 0.0 if mean < upper else 1.0
+    else:
+        normal = NormalDist()
+        p_lower = 1 - normal.cdf((mean - lower) / standard_error)
+        p_upper = 1 - normal.cdf((upper - mean) / standard_error)
+    p_value = float(max(p_lower, p_upper))
+    return {
+        "mean": mean,
+        "standard_error": standard_error,
+        "lower_bound": float(lower),
+        "upper_bound": float(upper),
+        "p_value_lower": float(p_lower),
+        "p_value_upper": float(p_upper),
+        "p_value": p_value,
+        "equivalent": bool(p_value <= 0.05),
+        "sample_size": int(array.size),
+    }
+
+
 @dataclass(frozen=True)
 class ClassifiedLayers:
     method: LayerResult[MethodStatus]
@@ -195,4 +391,6 @@ __all__ = [
     "benjamini_hochberg",
     "classify_layers",
     "moving_block_bootstrap",
+    "primary_study_series",
+    "tost_equivalence",
 ]
