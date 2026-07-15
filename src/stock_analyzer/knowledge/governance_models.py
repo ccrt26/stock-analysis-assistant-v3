@@ -60,6 +60,16 @@ class KnowledgeTopic(str, Enum):
     EARNINGS_DRIFT = "earnings_drift"
     FINANCIAL_TURNAROUND = "financial_turnaround"
     CYCLE_SUPPLY_DEMAND = "cycle_supply_demand"
+    MARKET_STATE_RELIABILITY = "market_state_reliability"
+    RETURN_DISPERSION = "return_dispersion"
+    LIQUIDITY_TRADING_ACTIVITY = "liquidity_trading_activity"
+    PROFITABILITY_QUALITY = "profitability_quality"
+    RISK_OVEREXTENSION = "risk_overextension"
+    EARNINGS_DISCLOSURE_HIERARCHY = "earnings_disclosure_hierarchy"
+    MARGIN_FINANCING = "margin_financing"
+    PLEDGE_CONDITIONAL_RISK = "pledge_conditional_risk"
+    DISCLOSED_HOLDER_TRADE = "disclosed_holder_trade"
+    PORTFOLIO_RELATIONSHIP = "portfolio_relationship"
 
 
 class KnowledgeUseStatus(str, Enum):
@@ -91,6 +101,12 @@ class SourceKind(str, Enum):
     PEER_REVIEWED_PAPER = "peer_reviewed_paper"
     WORKING_PAPER = "working_paper"
     INDUSTRY_RESEARCH = "industry_research"
+
+
+class ResearchDesign(str, Enum):
+    EMPIRICAL = "empirical"
+    THEORETICAL = "theoretical"
+    METHODOLOGICAL = "methodological"
 
 
 OFFICIAL_HOSTS = frozenset(
@@ -132,6 +148,7 @@ class SourceRecord(_FrozenGovernanceModel):
     source_id: str
     grade: SourceGrade
     kind: SourceKind
+    research_design: ResearchDesign = ResearchDesign.EMPIRICAL
     title: str
     publisher: str
     authors: tuple[str, ...] = ()
@@ -168,7 +185,10 @@ class SourceRecord(_FrozenGovernanceModel):
                 raise ValueError("an A paper requires authors")
             if not self.market_scope:
                 raise ValueError("an A paper requires market metadata")
-            if self.sample_start is None or self.sample_end is None:
+            if (
+                self.research_design is ResearchDesign.EMPIRICAL
+                and (self.sample_start is None or self.sample_end is None)
+            ):
                 raise ValueError("an A paper requires sample metadata")
             if self.doi is None and self.url is None:
                 raise ValueError("an A paper requires a DOI or original publisher URL")

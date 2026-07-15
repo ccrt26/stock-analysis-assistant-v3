@@ -15,6 +15,7 @@ from stock_analyzer.knowledge.governance_models import (
     KnowledgeUseStatus,
     LocalValidation,
     OpportunityType,
+    ResearchDesign,
     SourceGrade,
     SourceKind,
     SourceRecord,
@@ -154,6 +155,47 @@ def test_a_paper_requires_authors_method_market_and_sample_metadata():
         payload[field] = invalid
         with pytest.raises(ValidationError):
             SourceRecord.model_validate(payload)
+
+
+def test_theoretical_a_source_does_not_fake_sample_dates():
+    payload = valid_a_source().model_dump()
+    payload.update(
+        research_design="theoretical",
+        sample_start=None,
+        sample_end=None,
+        limitations=(
+            "This source is theoretical and claims no empirical A-share result.",
+        ),
+    )
+
+    source = SourceRecord.model_validate(payload)
+
+    assert source.research_design is ResearchDesign.THEORETICAL
+
+
+def test_empirical_a_source_still_requires_sample_dates():
+    payload = valid_a_source().model_dump()
+    payload.update(sample_start=None, sample_end=None)
+
+    with pytest.raises(ValidationError, match="sample"):
+        SourceRecord.model_validate(payload)
+
+
+def test_supplement_topics_are_available():
+    expected = {
+        "market_state_reliability",
+        "return_dispersion",
+        "liquidity_trading_activity",
+        "profitability_quality",
+        "risk_overextension",
+        "earnings_disclosure_hierarchy",
+        "margin_financing",
+        "pledge_conditional_risk",
+        "disclosed_holder_trade",
+        "portfolio_relationship",
+    }
+
+    assert expected <= {topic.value for topic in KnowledgeTopic}
 
 
 def test_empirical_threshold_requires_completed_local_validation():
