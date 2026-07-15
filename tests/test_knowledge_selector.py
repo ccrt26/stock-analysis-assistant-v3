@@ -267,6 +267,29 @@ def test_selector_uses_rule_version_valid_on_analysis_date():
     assert selected_ids(after) == ("exchange-rule-new",)
 
 
+def test_selector_never_returns_historical_only_entry():
+    historical = entry(
+        "retired-company-business",
+        AnalysisModule.COMPANY_BUSINESS,
+        OpportunityType.INDUSTRY_TREND,
+        KnowledgeTopic.BUSINESS_TRANSMISSION,
+        version_status="historical_only",
+    )
+    fixture = registry().model_copy(update={"entries": (historical,)})
+
+    selections = select_knowledge(
+        fixture,
+        context(
+            AnalysisModule.COMPANY_BUSINESS,
+            OpportunityType.INDUSTRY_TREND,
+            KnowledgeTopic.BUSINESS_TRANSMISSION,
+        ),
+        capabilities(),
+    )
+
+    assert selections == ()
+
+
 def test_selector_excludes_blocked_knowledge_instead_of_returning_all_entries():
     selections = select_knowledge(
         registry(),
@@ -369,7 +392,6 @@ def test_real_empirical_selection_keeps_method_only_effect_and_exact_ids():
 
     assert selected_ids(selections) == (
         "src_brown_warner_1985",
-        "src_chan_2003",
         "src_sun_wen_earnings_car_2023",
     )
     assert all(item.effect is KnowledgeEffect.METHOD_ONLY for item in selections)

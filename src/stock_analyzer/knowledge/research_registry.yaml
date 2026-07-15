@@ -915,7 +915,7 @@ entries:
     title: 用A股本地规模和估值信息比较候选而非照搬海外因子
     primary_source_id: paper-liu-stambaugh-yuan-2019
     source_grade: A
-    version_status: current
+    version_status: historical_only
     effect: method_only
     modules: [fundamentals, valuation]
     opportunity_types: [general, turnaround]
@@ -1174,7 +1174,7 @@ entries:
     title: 区分正式事件后的价格延续与无事件价格冲击
     primary_source_id: paper-chan-2003
     source_grade: A
-    version_status: current
+    version_status: historical_only
     effect: method_only
     modules: [events]
     opportunity_types: [company_event, earnings_rerating]
@@ -1210,7 +1210,7 @@ entries:
     title: 用财务报表变化核对困境公司是否出现经营改善
     primary_source_id: paper-piotroski-2000
     source_grade: A
-    version_status: current
+    version_status: historical_only
     effect: method_only
     modules: [fundamentals]
     opportunity_types: [turnaround]

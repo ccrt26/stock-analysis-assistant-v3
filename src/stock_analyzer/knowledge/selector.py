@@ -52,6 +52,8 @@ def select_knowledge(
 ) -> tuple[KnowledgeSelection, ...]:
     selections: list[KnowledgeSelection] = []
     for entry in registry.entries:
+        if entry.version_status == "historical_only":
+            continue
         if not _effective_on(entry, context.analysis_date):
             continue
         if context.module not in entry.modules:

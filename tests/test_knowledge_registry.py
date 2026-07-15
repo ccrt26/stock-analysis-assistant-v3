@@ -43,6 +43,11 @@ MANDATORY_METHOD_IDS = {
     "src_chan_2003": "news_price_reaction",
     "src_piotroski_2000": "financial_quality_turnaround",
 }
+HISTORICAL_ONLY_IDS = {
+    "src_liu_stambaugh_yuan_2019",
+    "src_piotroski_2000",
+    "src_chan_2003",
+}
 
 
 def source_payload(*, source_id: str = "official-program-trading") -> dict:
@@ -287,6 +292,16 @@ def test_real_registry_contains_exact_mandatory_research_method_families():
         "news_price_reaction",
         "financial_quality_turnaround",
     }
+
+
+def test_discarded_methods_remain_auditable_but_are_historical_only():
+    registry = load_knowledge_registry(REAL_REGISTRY_PATH)
+    entries = {entry.knowledge_id: entry for entry in registry.entries}
+
+    assert all(
+        entries[knowledge_id].version_status == "historical_only"
+        for knowledge_id in HISTORICAL_ONLY_IDS
+    )
 
 
 def test_empirical_methods_remain_bounded_and_contain_no_numeric_buy_threshold():

@@ -46,7 +46,6 @@ EXPECTED_SCENARIO_SELECTIONS = {
     "company_business": ("src_csrc_disclosure_rules_2025",),
     "earnings_event": (
         "src_brown_warner_1985",
-        "src_chan_2003",
         "src_sun_wen_earnings_car_2023",
     ),
     "unavailable_cycle_data": (),
