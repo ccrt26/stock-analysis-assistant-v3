@@ -1,23 +1,13 @@
-from .models import (
-    LayerResult,
-    MethodStatus,
-    RelevanceStatus,
-    SampleSufficiency,
-    StudySample,
-    ValidationRegistry,
-    ValidationResult,
-    ValidationRun,
-    ValidationSpec,
+from .direct_validation import (
+    CLAIMS,
+    HistoricalEvidence,
+    KnowledgeClaim,
+    validate_all_claims,
 )
 
 __all__ = [
-    "LayerResult",
-    "MethodStatus",
-    "RelevanceStatus",
-    "SampleSufficiency",
-    "StudySample",
-    "ValidationRegistry",
-    "ValidationResult",
-    "ValidationRun",
-    "ValidationSpec",
+    "CLAIMS",
+    "HistoricalEvidence",
+    "KnowledgeClaim",
+    "validate_all_claims",
 ]
