@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:executing-plans` to implement this plan task-by-task in the current session. Do not use subagents unless the user later explicitly authorizes them. Every behavior change also requires `superpowers:test-driven-development`; completion requires `superpowers:verification-before-completion`.
 
+> **Current status authority:** This plan records implementation and verification work; it does not prove production activation. Current capability status is authoritative only in [`docs/operations/production-capability-matrix.md`](../../operations/production-capability-matrix.md).
+
 **Goal:** Build a data-first, versioned and auditable A-share knowledge-governance layer that admits only high-quality knowledge executable by the existing research warehouse, without changing the data foundation, recommendation logic, report output or production behavior.
 
 **Architecture:** Add a new isolated package under `stock_analyzer.knowledge` containing strict Pydantic models, a versioned YAML registry, a read-only warehouse capability inspector, an admission gate, a scene selector and a four-state usage audit. The new package reads the existing DuckDB/Parquet manifests and schemas but never writes them. The legacy Strategy V2 knowledge map remains untouched and quarantined; the new registry is not connected to recommendations, narratives, reports, schedules or deployment in this plan.

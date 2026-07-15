@@ -5,6 +5,7 @@
 > **阶段：** 设计，不是实施计划
 > **适用范围：** 中国大陆 A 股分析知识的获取、登记、版本管理、适用性判断和使用审计
 > **禁止用途：** 本文不得直接驱动评分、推荐、正式报告、激活、部署或自动交易
+> **当前状态权威：** 本文只定义知识治理设计，不证明生产能力或激活状态；当前状态只以 [`docs/operations/production-capability-matrix.md`](../../operations/production-capability-matrix.md) 为准。
 
 ## 1. 目的
 
