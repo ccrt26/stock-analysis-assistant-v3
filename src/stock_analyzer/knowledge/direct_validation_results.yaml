@@ -1,0 +1,105 @@
+schema_version: v3-direct-validation-v1
+results:
+  - legacy_knowledge_id: src_fama_french_1992
+    core_theory: 在美国股票样本中，公司规模与账面市值比共同解释平均收益的横截面差异；控制规模后市场贝塔与平均收益的关系很弱。该关系不能脱离市场和时期直接移植。
+    calculation: size_value
+    evidence_summary: 当前A股54个形成日中，账面市值比高组未来20日相对收益总体仅略高，但较早时期为正、较晚时期转负；未来60日差异也接近于零，时间方向不稳定。
+    counter_evidence: 较晚时期账面市值比关系与原理论方向相反，且最小市值组并未表现为持续劣势，不能形成当前可直接调用的稳定关系。
+    decision: discard
+    reason: 核心变量能够复算，但当前A股历史没有给出前后时期基本一致的规模价值关系。
+
+  - legacy_knowledge_id: src_liu_stambaugh_yuan_2019
+    core_theory: 在论文所研究的A股时期，规模和价值与平均收益差异有关；最小市值股票受壳价值影响，剔除后盈利市值比比账面市值比更适合表达本地价值关系。
+    calculation: size_value
+    evidence_summary: 当前A股样本中，高盈利市值比组未来20日相对收益总体为负，未来60日负向更明显；较早时期为负、较晚时期仅小幅转正，未形成连续价值方向。
+    counter_evidence: 盈利市值比的总体和较长观察期均与论文方向相反，最小市值组反而总体较强，原样本关系没有延续到当前历史。
+    decision: discard
+    reason: 估值字段齐全，但当前样本不支持把该历史关系直接用于分析。
+
+  - legacy_knowledge_id: src_jegadeesh_titman_1993
+    core_theory: 在美国样本中，过去赢家相对过去输家在随后3至12个月存在收益延续，且论文认为该结果不能由系统风险或对共同因子的延迟反应解释；更长期又有部分回吐。
+    calculation: short_reversal+common_factor_momentum
+    evidence_summary: 当前A股54个形成日中，过去赢家未来20日和60日相对收益均低于过去输家；较早和较晚时期的20日方向也都表现为反转，扣除行业共同成分后仍为负。
+    counter_evidence: 总体、前后时期和较长窗口都与原论文的赢家延续方向相反。
+    decision: discard
+    reason: 当前数据可以执行，但证据支持A股阶段性反转而不是该海外个股动量理论。
+
+  - legacy_knowledge_id: src_ball_brown_1968
+    core_theory: 年度会计盈余包含公司价值信息，非预期盈余方向与市场调整后的异常收益相关，且部分信息会在正式公告前进入价格。
+    calculation: earnings_reaction
+    evidence_summary: 本地业绩增长与公告窗口相对反应存在同向观察，但现有字段只有同比变化、预告和快报，没有可与市场预期比较的非预期盈余。
+    counter_evidence: 用同比增长替代非预期盈余会改变论文核心变量；替代观察的公告后20日方向也为负，不能补足该缺口。
+    decision: discard
+    reason: 当前数据不能直接表达核心理论变量，不能用相似字段冒充。
+
+  - legacy_knowledge_id: src_dechow_ge_schrand_2010
+    core_theory: 盈余质量没有脱离用途的单一指标；持续性、应计、现金实现、及时性等代理回答不同问题，质量还取决于决策情境和公司的基本经营表现。
+    calculation: financial_improvement
+    evidence_summary: 25958个公司报告期观察中，应计、现金流、毛利能力和多项改善与未来结果呈现不同方向，改善项数量的组间结果不单调，前后时期也有变化。
+    counter_evidence: 本地结果不支持任何单一质量指标稳定代表全部盈余质量；这正是该综述明确要求避免的做法。
+    decision: use
+    reason: 当前数据可以逐项观察多个质量维度，混合结果支持完整的情境化、多维核对理论；使用时不得转成单一质量分数。
+
+  - legacy_knowledge_id: src_sloan_1996
+    core_theory: 当前盈余中现金流成分通常比应计成分具有更高的未来盈余持续性，而价格可能没有及时区分二者，直到其影响未来盈余。
+    calculation: financial_improvement
+    evidence_summary: 当前A股公司报告期中，现金流成分与下一年同季度盈利能力的相关方向略为负，应计成分略为正，未出现现金流持续性高于应计的总体方向。
+    counter_evidence: 两项关系均接近零且相对次序与原理论相反。
+    decision: discard
+    reason: 核心变量能够复算，但当前历史没有支持原理论的相对持续性方向。
+
+  - legacy_knowledge_id: src_piotroski_2000
+    core_theory: 在美国高账面市值比公司范围内，盈利、现金流、杠杆、流动性和经营效率等历史财务信号能够区分后续赢家与输家；原始信号和价值股前提不能直接变成A股固定评分。
+    calculation: financial_improvement
+    evidence_summary: 当前A股中，多项财务改善与未来20日相对收益仅呈很弱总体正向，较早时期略正、较晚时期转负；从零到六项改善的组均收益不单调，六项组并不优于中间组。
+    counter_evidence: 时间方向反转且有序关系缺失，不能证明更多改善方向对应更好的后续表现。
+    decision: discard
+    reason: 报表方向可执行，但当前历史不支持把该理论直接用于候选判断。
+
+  - legacy_knowledge_id: src_novy_marx_2013
+    core_theory: 在美国样本中，以毛利润除以总资产衡量的毛利能力可以预测平均收益横截面，并在控制估值后补充价值判断。
+    calculation: size_value+financial_improvement
+    evidence_summary: 当前A股中毛利润除以总资产与未来20日相对收益总体略正，但较早时期正向、较晚时期转为负向；同期估值关系也不稳定。
+    counter_evidence: 毛利能力关系在前后时期改变方向，无法证明它是当前可直接使用的稳定补充因素。
+    decision: discard
+    reason: 核心公式可复算，但时间一致性不足，不能因总体小幅正向就正式化。
+
+  - legacy_knowledge_id: src_fama_fisher_jensen_roll_1969
+    core_theory: 对齐特定事件时间并扣除市场共同变化得到残差收益，可以观察价格对新信息的调整过程；特定拆股样本结论不能证明其他事件有相同反应或因果效果。
+    calculation: daily_event_method
+    evidence_summary: 以全A股同日平均收益作正常变化后，36589个伪事件的两日平均异常收益接近零；21890个正式候选事件的平均绝对异常收益高于伪事件。
+    counter_evidence: 本地公告覆盖期只有一年，事件重叠和事件条件方差仍需在具体公司分析时检查。
+    decision: use
+    reason: 市场调整和事件时间对齐在当前数据中能够正常工作，完整方法边界可直接用于事件分析。
+
+  - legacy_knowledge_id: src_brown_warner_1985
+    core_theory: 日收益通常可以用于事件研究，但异常收益自相关、事件发生时方差变化和事件横截面相关可能影响检验；方法不提供任何公告的收益方向。
+    calculation: daily_event_method
+    evidence_summary: 本地伪事件两日平均异常收益接近零，正式候选事件的绝对异常变化高于伪事件，说明日收益和市场调整能够分离事件窗口观察。
+    counter_evidence: 事件聚集、方差改变和公告重叠仍可能影响个别结论，不能把公告后上涨写成因果或后续保证。
+    decision: use
+    reason: 当前日线和公告时点可以执行该方法，且伪事件结果没有暴露系统性偏移。
+
+  - legacy_knowledge_id: src_mackinlay_1997
+    core_theory: 事件研究用事件附近实际收益减去没有该事件时的正常收益，在短事件窗口衡量事件与公司价值变化的联系；必须明确事件时点、正常收益模型和重叠事件。
+    calculation: daily_event_method
+    evidence_summary: 当前A股正式公告能够映射到可交易事件日，市场调整后的伪事件均值接近零，正式候选事件呈现更大的绝对窗口变化。
+    counter_evidence: 结果只能说明事件窗口存在可区分变化，不能自动识别因果或预测未来收益。
+    decision: use
+    reason: 方法的核心步骤和限制都能由当前数据直接执行。
+
+  - legacy_knowledge_id: src_bernard_thomas_1989
+    core_theory: 按标准化非预期盈余区分好坏消息后，公告后异常收益可能沿盈余意外方向延续；论文比较延迟价格反应与风险补偿解释。
+    calculation: earnings_reaction
+    evidence_summary: 当前数据没有标准化非预期盈余；以同比业绩变化作非等价观察时，公告窗口方向为正，但随后20日高增长组反而低于低增长组，且前后时期均为负。
+    counter_evidence: 核心变量缺失，替代观察又与公告后漂移方向相反。
+    decision: discard
+    reason: 数据不能直接执行原理论，也没有相邻证据支持其当前用途。
+
+  - legacy_knowledge_id: src_chan_2003
+    core_theory: 在完整公开新闻标题样本中，相似价格冲击在有新闻与无可识别新闻时后续路径不同；坏消息后更常见延续，无新闻极端波动更常见反转，且主要集中于较小、低流动性股票。
+    calculation: formal_announcement_shocks
+    evidence_summary: 本地正式公告匹配冲击的方向延续强于未匹配冲击，但33732个未匹配冲击总体仍为轻微延续，没有出现原论文所述的总体反转。
+    counter_evidence: 本地库只有正式公告而非完整公开新闻，未匹配公告不能解释为无公开新闻；替代观察方向也不符合原理论。
+    decision: discard
+    reason: 核心信息分类数据不齐全且本地替代结果不支持，不能直接使用。

@@ -829,8 +829,9 @@ entries:
         name: index_daily
         required_fields: [available_at, trade_date, index_code, close]
     local_validation:
-      status: required_before_threshold
-      reason: 事件窗口和比较口径必须针对A股交易制度与当前目标期限验证。
+      status: validated
+      reason: 本地正式公告和日收益验证显示，使用全A股同日基准后伪事件平均异常收益接近零，事件时间与市场调整方法可直接使用；仍不得推断因果或未来保证。
+      validation_reference: src/stock_analyzer/knowledge/direct_validation_results.yaml
 
   - knowledge_id: src_sun_wen_earnings_car_2023
     title: 用业绩公告窗口相对反应观察后续重估条件

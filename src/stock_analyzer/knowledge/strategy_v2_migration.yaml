@@ -109,31 +109,31 @@ entries:
     reason: 未核验到固定版本的原始规则，现有底座也缺少融资融券余额与标的资格时点，暂不形成正式知识。
 
   - legacy_knowledge_id: src_fama_french_1992
-    action: revalidate
-    target_knowledge_ids: [src_liu_stambaugh_yuan_2019]
+    action: retire
+    target_knowledge_ids: []
     source_verified: true
     current_a_share_applicability: method_only
     data_gate: complete
-    local_validation_required: true
-    reason: 海外规模价值方法改由A股研究和本地估值字段承接，任何分组、阈值与收益结论均需重新验证。
+    local_validation_required: false
+    reason: 本地账面市值比关系前后时期方向相反，较长窗口也接近零，不能作为当前A股可直接调用的稳定知识。
 
   - legacy_knowledge_id: src_liu_stambaugh_yuan_2019
-    action: revalidate
-    target_knowledge_ids: [src_liu_stambaugh_yuan_2019]
+    action: retire
+    target_knowledge_ids: []
     source_verified: true
     current_a_share_applicability: direct
     data_gate: complete
-    local_validation_required: true
-    reason: 原始A股研究已核验且字段齐全，但样本期后的制度变化要求所有比较阈值在本地时点重新验证。
+    local_validation_required: false
+    reason: 当前历史中盈利市值比总体和较长窗口均与论文方向相反，旧样本关系不再作为可调用结论。
 
   - legacy_knowledge_id: src_jegadeesh_titman_1993
-    action: revalidate
-    target_knowledge_ids: [src_cn_t1_contrarian_2024, src_cn_factor_momentum_2023]
+    action: retire
+    target_knowledge_ids: []
     source_verified: true
     current_a_share_applicability: method_only
     data_gate: complete
-    local_validation_required: true
-    reason: 海外个股动量结论不直接移植，改由A股短期反转和因子延续方法分别承接并做本地时点验证。
+    local_validation_required: false
+    reason: 当前A股总体、前后时期及较长窗口均表现为过去赢家相对反转，海外个股动量理论退出可调用范围。
 
   - legacy_knowledge_id: src_cn_timeseries_momentum_2017
     action: defer
@@ -208,49 +208,49 @@ entries:
     reason: 虽已有停复牌事实，但旧论文出处和样本边界未完成核验，不能把历史短期反应直接恢复为正式方法。
 
   - legacy_knowledge_id: src_ball_brown_1968
-    action: revalidate
-    target_knowledge_ids: [src_sun_wen_earnings_car_2023]
+    action: retire
+    target_knowledge_ids: []
     source_verified: true
     current_a_share_applicability: method_only
     data_gate: complete
-    local_validation_required: true
-    reason: 海外盈余信息研究改由已核验的中国A股公告窗口研究承接，历史幅度、窗口和收益结论不继承。
+    local_validation_required: false
+    reason: 当前数据没有可与市场预期比较的非预期盈余，不能用同比增长替代论文核心变量，旧知识退出。
 
   - legacy_knowledge_id: src_dechow_ge_schrand_2010
-    action: revalidate
+    action: update
     target_knowledge_ids: [src_piotroski_2000]
     source_verified: true
     current_a_share_applicability: method_only
     data_gate: complete
-    local_validation_required: true
-    reason: 盈利质量综述不直接成为评分，改由当前报表能执行的多方向财务改善方法承接并做A股验证。
+    local_validation_required: false
+    reason: 本地多项财务质量观察方向混合且不单调，支持该综述关于盈余质量必须按决策情境多维核对、不得压成单一指标的完整理论。
 
   - legacy_knowledge_id: src_sloan_1996
-    action: revalidate
-    target_knowledge_ids: [src_piotroski_2000]
+    action: retire
+    target_knowledge_ids: []
     source_verified: true
     current_a_share_applicability: method_only
     data_gate: complete
-    local_validation_required: true
-    reason: 应计与现金流思想保留在多项财务改善核对中，但不继承海外组合阈值、持有期和异常收益结论。
+    local_validation_required: false
+    reason: 本地现金流成分与未来盈利持续性的相对方向未优于应计成分，核心关系未获支持，退出可调用知识。
 
   - legacy_knowledge_id: src_piotroski_2000
-    action: revalidate
-    target_knowledge_ids: [src_piotroski_2000]
+    action: retire
+    target_knowledge_ids: []
     source_verified: true
     current_a_share_applicability: method_only
     data_gate: complete
-    local_validation_required: true
-    reason: 新底座已有所需报表方向，因此由旧版无数据改为可执行方法，但原始打分和阈值仍不得照搬。
+    local_validation_required: false
+    reason: 多项财务改善与后续表现缺少单调关系且较晚时期方向转负，不能把该理论直接用于当前候选判断。
 
   - legacy_knowledge_id: src_novy_marx_2013
-    action: revalidate
-    target_knowledge_ids: [src_liu_stambaugh_yuan_2019, src_piotroski_2000]
+    action: retire
+    target_knowledge_ids: []
     source_verified: true
     current_a_share_applicability: method_only
     data_gate: complete
-    local_validation_required: true
-    reason: 毛利能力只作为估值与财务质量的组成观察，由现有A股估值和财务改善方法承接并重新验证。
+    local_validation_required: false
+    reason: 毛利润除以总资产与后续表现的关系在前后时期改变方向，不能因总体小幅正向就作为正式知识。
 
   - legacy_knowledge_id: src_ohlson_1995
     action: retire
@@ -280,49 +280,49 @@ entries:
     reason: 财报不透明度与崩盘风险方法需要当前底座没有的专门构造和本地验证，不能用普通报表字段替代，暂缓。
 
   - legacy_knowledge_id: src_fama_fisher_jensen_roll_1969
-    action: revalidate
+    action: update
     target_knowledge_ids: [src_brown_warner_1985]
     source_verified: true
     current_a_share_applicability: method_only
     data_gate: complete
-    local_validation_required: true
-    reason: 经典事件反应思想由更明确的日收益事件研究方法承接，A股公告时点和窗口必须重新验证。
+    local_validation_required: false
+    reason: 本地伪事件平均异常收益接近零，正式事件绝对反应更大，市场调整与事件时间对齐方法可直接使用。
 
   - legacy_knowledge_id: src_brown_warner_1985
-    action: revalidate
+    action: update
     target_knowledge_ids: [src_brown_warner_1985]
     source_verified: true
     current_a_share_applicability: method_only
     data_gate: complete
-    local_validation_required: true
-    reason: 原文和样本已核验，现有公告及行情可执行，但海外事件窗口和显著性不能直接用于A股。
+    local_validation_required: false
+    reason: 本地日收益事件研究伪事件没有系统偏移，方法与其自相关、方差和横截面相关边界可以直接使用。
 
   - legacy_knowledge_id: src_mackinlay_1997
-    action: revalidate
+    action: update
     target_knowledge_ids: [src_brown_warner_1985]
     source_verified: true
     current_a_share_applicability: method_only
     data_gate: complete
-    local_validation_required: true
-    reason: 事件研究综述作为方法背景归并到已核验事件研究条目，不再作为单独可调用结论，窗口需本地验证。
+    local_validation_required: false
+    reason: 当前数据能够执行事件时点、正常收益和短窗口异常收益步骤，完整方法边界可直接使用。
 
   - legacy_knowledge_id: src_bernard_thomas_1989
-    action: revalidate
-    target_knowledge_ids: [src_sun_wen_earnings_car_2023]
+    action: retire
+    target_knowledge_ids: []
     source_verified: true
     current_a_share_applicability: method_only
     data_gate: complete
-    local_validation_required: true
-    reason: 海外业绩公告后漂移改由中国A股公告窗口研究承接，不继承原样本的盈余意外定义和收益结论。
+    local_validation_required: false
+    reason: 当前没有标准化非预期盈余，非等价替代观察的后续方向又与漂移理论相反，旧知识退出。
 
   - legacy_knowledge_id: src_chan_2003
-    action: revalidate
-    target_knowledge_ids: [src_chan_2003]
+    action: retire
+    target_knowledge_ids: []
     source_verified: true
     current_a_share_applicability: method_only
     data_gate: complete
-    local_validation_required: true
-    reason: 方法和原文已核验，但本地只有正式公告而非完整新闻库，因此仅作较窄的信息分类并需A股验证。
+    local_validation_required: false
+    reason: 本地正式公告不是完整公开新闻库，未匹配冲击也未出现原论文所述总体反转，不能直接使用。
 
   - legacy_knowledge_id: src_tetlock_2007
     action: defer

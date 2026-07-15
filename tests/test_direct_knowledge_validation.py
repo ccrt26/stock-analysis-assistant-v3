@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pandas as pd
 import pytest
+import yaml
 
 from stock_analyzer.knowledge_validation.direct_validation import (
     CALCULATION_NAMES,
@@ -316,3 +317,29 @@ def test_current_warehouse_validation_returns_thirteen_and_is_read_only():
     assert not next(item for item in evidence if item.legacy_id == "src_bernard_thomas_1989").data_usable
     assert not next(item for item in evidence if item.legacy_id == "src_chan_2003").data_usable
     assert before == after
+
+
+def test_final_results_are_binary_and_migration_has_no_revalidate():
+    root = Path(__file__).parents[1]
+    result_path = root / "src/stock_analyzer/knowledge/direct_validation_results.yaml"
+    migration_path = root / "src/stock_analyzer/knowledge/strategy_v2_migration.yaml"
+    results = yaml.safe_load(result_path.read_text(encoding="utf-8"))["results"]
+    migration = yaml.safe_load(migration_path.read_text(encoding="utf-8"))["entries"]
+
+    assert tuple(row["legacy_knowledge_id"] for row in results) == LEGACY_IDS
+    assert {row["decision"] for row in results} == {"use", "discard"}
+    assert {
+        row["legacy_knowledge_id"] for row in results if row["decision"] == "use"
+    } == {
+        "src_dechow_ge_schrand_2010",
+        "src_fama_fisher_jensen_roll_1969",
+        "src_brown_warner_1985",
+        "src_mackinlay_1997",
+    }
+    by_id = {row["legacy_knowledge_id"]: row for row in migration}
+    assert all(by_id[legacy_id]["action"] != "revalidate" for legacy_id in LEGACY_IDS)
+    for row in results:
+        expected = "update" if row["decision"] == "use" else "retire"
+        assert by_id[row["legacy_knowledge_id"]]["action"] == expected
+        if expected == "retire":
+            assert by_id[row["legacy_knowledge_id"]]["target_knowledge_ids"] == []
