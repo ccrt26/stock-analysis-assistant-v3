@@ -9,7 +9,7 @@ studies:
     primary_hypothesis: 同一市值组内高盈利收益率组未来二十个交易日的市场超额收盘收益高于低盈利收益率组。
     primary_statistic: ep_top_minus_bottom_20d_market_excess_return
     horizons: [10, 20, 30]
-    required_datasets: [trade_calendar, security_master, equity_daily, adj_factor, daily_basic, index_daily]
+    required_datasets: [trade_calendar, security_master, equity_daily, adj_factor, daily_basic, index_daily, suspension]
     sufficiency:
       minimum_overall_units: 720
       minimum_confirmation_units: 180
@@ -49,7 +49,7 @@ studies:
     primary_hypothesis: 触及涨停股票的下一交易日收盘收益与同日匹配未触及股票存在可重复差异。
     primary_statistic: next_session_return_minus_same_date_matched_non_touch
     horizons: [10, 20, 30]
-    required_datasets: [trade_calendar, security_master, equity_daily, stock_limit, daily_basic, index_daily, suspension]
+    required_datasets: [trade_calendar, security_master, equity_daily, adj_factor, stock_limit, daily_basic, index_daily, suspension]
     sufficiency:
       minimum_overall_units: 720
       minimum_confirmation_units: 180
@@ -69,7 +69,7 @@ studies:
     primary_hypothesis: 过去二十日相对收益最高行业组未来二十日的行业相对收益高于最低组。
     primary_statistic: industry_relative_top_minus_bottom_20d_return
     horizons: [10, 20, 30]
-    required_datasets: [trade_calendar, industry_member, industry_daily, equity_daily, index_daily]
+    required_datasets: [trade_calendar, security_master, industry_member, industry_daily, equity_daily, adj_factor, index_daily, suspension]
     sufficiency:
       minimum_overall_units: 480
       minimum_confirmation_units: 120
@@ -89,7 +89,7 @@ studies:
     primary_hypothesis: 扣除所属行业收益后，按个股过去二十日收益形成的组间差异显著缩小。
     primary_statistic: individual_spread_reduction_after_industry_subtraction
     horizons: [10, 20, 30]
-    required_datasets: [trade_calendar, industry_member, industry_daily, equity_daily, index_daily]
+    required_datasets: [trade_calendar, security_master, industry_member, industry_daily, equity_daily, adj_factor, index_daily, suspension]
     sufficiency:
       minimum_overall_units: 480
       minimum_confirmation_units: 120
@@ -109,7 +109,7 @@ studies:
     primary_hypothesis: 伪事件平均累计异常收益在正负百分之零点二五的等价区间内，且经验百分之九十五区间覆盖率位于百分之九十二至百分之九十八。
     primary_statistic: pseudo_event_tost_and_empirical_interval_coverage
     horizons: [10, 20, 30]
-    required_datasets: [trade_calendar, announcement, equity_daily, index_daily, suspension]
+    required_datasets: [trade_calendar, security_master, announcement, equity_daily, adj_factor, index_daily, suspension]
     sufficiency:
       minimum_overall_units: 120
       minimum_confirmation_units: 40
@@ -129,7 +129,7 @@ studies:
     primary_hypothesis: 事件累计异常收益最高组随后二十个交易日的市场超额收盘收益高于最低组。
     primary_statistic: event_car_top_minus_bottom_20d_post_event_excess_return
     horizons: [10, 20, 30]
-    required_datasets: [trade_calendar, earnings_forecast, earnings_express, announcement, equity_daily, daily_basic, index_daily]
+    required_datasets: [trade_calendar, security_master, earnings_forecast, earnings_express, announcement, equity_daily, adj_factor, daily_basic, index_daily, suspension]
     sufficiency:
       minimum_overall_units: 80
       minimum_confirmation_units: 30
@@ -149,7 +149,7 @@ studies:
     primary_hypothesis: 匹配到正式公告的极端波动与本地未匹配冲击在随后二十个交易日的市场超额收盘收益存在可重复差异。
     primary_statistic: announced_minus_locally_unmatched_shock_20d_return
     horizons: [10, 20, 30]
-    required_datasets: [trade_calendar, announcement, equity_daily, daily_basic, index_daily]
+    required_datasets: [trade_calendar, security_master, announcement, equity_daily, adj_factor, daily_basic, index_daily, suspension]
     sufficiency:
       minimum_overall_units: 120
       minimum_confirmation_units: 40
@@ -169,7 +169,7 @@ studies:
     primary_hypothesis: 六个财务改善方向成立数量与随后二十个交易日的市场超额收盘收益在报告期层面呈正向秩相关。
     primary_statistic: report_period_spearman_improvement_count_vs_20d_excess_return
     horizons: [10, 20, 30]
-    required_datasets: [trade_calendar, income_statement, balance_sheet, cash_flow, financial_indicator, equity_daily, adj_factor, index_daily]
+    required_datasets: [trade_calendar, security_master, income_statement, balance_sheet, cash_flow, financial_indicator, equity_daily, adj_factor, index_daily, suspension]
     sufficiency:
       minimum_overall_units: 8
       minimum_confirmation_units: 2

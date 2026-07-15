@@ -198,6 +198,21 @@ def test_real_registry_has_unique_knowledge_ids_and_known_datasets():
         assert all(ResearchDatasetId(value) for value in study.required_datasets)
 
 
+def test_every_study_declares_common_point_in_time_universe_and_path_facts():
+    registry = load_validation_registry(REAL_SPEC_PATH)
+    common = {
+        ResearchDatasetId.TRADE_CALENDAR.value,
+        ResearchDatasetId.SECURITY_MASTER.value,
+        ResearchDatasetId.EQUITY_DAILY.value,
+        ResearchDatasetId.ADJ_FACTOR.value,
+        ResearchDatasetId.INDEX_DAILY.value,
+        ResearchDatasetId.SUSPENSION.value,
+    }
+
+    for study in registry.studies:
+        assert common <= set(study.required_datasets), study.study_id
+
+
 def test_financial_study_preserves_both_company_and_yoy_sample_floors():
     registry = load_validation_registry(REAL_SPEC_PATH)
     study = next(
