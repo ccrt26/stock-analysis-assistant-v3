@@ -1,5 +1,7 @@
 # V3 Direct Knowledge Supplement Implementation Plan
 
+> **当前状态权威：** 本计划只记录知识补充实施方法，不证明生产能力或激活状态；当前状态只以 [`docs/operations/production-capability-matrix.md`](../../operations/production-capability-matrix.md) 为准。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. The user selected inline execution on local `main`; do not use subagents, a branch, a worktree, activation or deployment.
 
 **Goal:** Directly verify the frozen fifteen knowledge candidates against primary sources and the existing A-share warehouse, admit only `use` candidates, and keep every admitted item usable without building a factor engine or changing the data foundation.
