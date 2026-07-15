@@ -19,6 +19,9 @@ from stock_analyzer.knowledge_validation.supplement_validation import (
 REAL_REGISTRY_PATH = Path(
     "src/stock_analyzer/knowledge/research_registry.yaml"
 )
+TARGETED_RESULT_PATH = Path(
+    "src/stock_analyzer/knowledge/targeted_gap_validation_results.yaml"
+)
 MANDATORY_S_SOURCE_IDS = {
     "official-csrc-program-trading-2024",
     "official-sse-program-trading-2025",
@@ -302,6 +305,112 @@ def test_discarded_methods_remain_auditable_but_are_historical_only():
         entries[knowledge_id].version_status == "historical_only"
         for knowledge_id in HISTORICAL_ONLY_IDS
     )
+
+
+def test_targeted_decisions_and_registry_are_exactly_aligned():
+    registry = load_knowledge_registry(REAL_REGISTRY_PATH)
+    results = yaml.safe_load(
+        TARGETED_RESULT_PATH.read_text(encoding="utf-8")
+    )["results"]
+    entries = {entry.knowledge_id: entry for entry in registry.entries}
+    current_ids = {
+        entry.knowledge_id
+        for entry in registry.entries
+        if entry.version_status == "current"
+    }
+    use_ids = {
+        item["knowledge_id"] for item in results if item["decision"] == "use"
+    }
+    discard_ids = {
+        item["knowledge_id"] for item in results if item["decision"] == "discard"
+    }
+
+    assert use_ids == {
+        "src_cn_business_segment_materiality",
+        "src_cn_relative_valuation_context",
+        "src_cn_turnaround_financial_consistency",
+    }
+    assert use_ids <= current_ids
+    assert not (discard_ids & current_ids)
+    assert len(current_ids) == 27
+    for knowledge_id in use_ids:
+        entry = entries[knowledge_id]
+        assert entry.local_validation.status == "validated"
+        assert entry.local_validation.validation_reference == (
+            f"targeted_gap_validation_results.yaml#{knowledge_id}"
+        )
+
+
+def test_targeted_sources_are_official_or_complete_a_grade_originals():
+    registry = load_knowledge_registry(REAL_REGISTRY_PATH)
+    sources = {source.source_id: source for source in registry.sources}
+    expected = {
+        "official-mof-cas-35",
+        "paper-jansen-swinkels-zhou-2021",
+        "paper-li-liu-liu-wei-2024",
+        "paper-zhao-xu-ji-2023",
+    }
+
+    assert expected <= set(sources)
+    assert sources["official-mof-cas-35"].grade.value == "S"
+    assert sources["official-mof-cas-35"].url.host == "kjs.mof.gov.cn"
+    for source_id in expected - {"official-mof-cas-35"}:
+        source = sources[source_id]
+        assert source.grade.value == "A"
+        assert source.authors
+        assert source.sample_start is not None
+        assert source.sample_end is not None
+
+
+def test_hotspot_entry_uses_full_existing_evidence_without_becoming_a_ranking():
+    registry = load_knowledge_registry(REAL_REGISTRY_PATH)
+    entry = next(
+        item
+        for item in registry.entries
+        if item.knowledge_id == "src_cn_factor_momentum_2023"
+    )
+    hotspot = next(
+        item for item in entry.data_requirements if item.name == "sector_hotspot"
+    )
+    required = set(hotspot.required_fields)
+
+    assert {
+        "relative_return_1d",
+        "relative_return_5d",
+        "relative_return_20d",
+        "breadth_1d",
+        "breadth_20d",
+        "median_return_20d",
+        "turnover_share_average_20d",
+        "turnover_share_change_5d",
+        "top3_positive_contribution_1d",
+        "new_high_20d_share",
+        "limit_up_share",
+        "high_volume_low_progress_flag",
+        "narrow_participation_flag",
+        "turnover_return_divergence_flag",
+        "upper_wick_reversal_flag",
+    } <= required
+    searchable = " ".join(
+        (
+            *entry.allowed_uses,
+            *entry.forbidden_uses,
+            *entry.prerequisites,
+            *entry.counter_evidence,
+        )
+    )
+    for phrase in (
+        "分析时点",
+        "同行业",
+        "稳健",
+        "微盘",
+        "机械相加",
+        "论文历史",
+        "反证",
+        "交易可行性",
+        "不是最终热点排名",
+    ):
+        assert phrase in searchable
 
 
 def test_empirical_methods_remain_bounded_and_contain_no_numeric_buy_threshold():

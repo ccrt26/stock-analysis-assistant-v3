@@ -43,7 +43,10 @@ EXPECTED_SCENARIO_SELECTIONS = {
         "src_cn_factor_momentum_2023",
         "src_moskowitz_grinblatt_1999",
     ),
-    "company_business": ("src_csrc_disclosure_rules_2025",),
+    "company_business": (
+        "src_cn_business_segment_materiality",
+        "src_csrc_disclosure_rules_2025",
+    ),
     "earnings_event": (
         "src_brown_warner_1985",
         "src_sun_wen_earnings_car_2023",

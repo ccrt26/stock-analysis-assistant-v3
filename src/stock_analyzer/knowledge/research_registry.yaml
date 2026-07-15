@@ -649,6 +649,87 @@ sources:
     method_summary: 系统说明事件时点、正常收益、异常收益、窗口和重叠事件处理。
     limitations: [中国A股本地时点验证前仅作方法，事件研究不自动证明因果或未来收益。]
 
+  - source_id: official-mof-cas-35
+    grade: S
+    kind: official_rule
+    research_design: methodological
+    title: 企业会计准则第35号——分部报告
+    publisher: 中华人民共和国财政部
+    url: https://kjs.mof.gov.cn/zt/kjzzss/kuaijizhunzeshishi/200806/t20080618_46246.htm
+    document_number: 财会〔2006〕3号
+    publication_date: 2006-03-09
+    effective_from: 2007-01-01
+    last_verified_on: 2026-07-15
+    jurisdiction: 中国大陆
+    market_scope: [中国上市公司]
+    method_summary: 规范业务和地区分部的收入、费用、利润、资产负债披露，并要求分部信息与企业整体财务报表相衔接。
+    limitations:
+      - 准则中的报告分部披露门槛不能转换成选股阈值或上涨概率。
+      - 产品、地区和行业分类可能是重叠披露视角，不能跨分类机械相加。
+
+  - source_id: paper-jansen-swinkels-zhou-2021
+    grade: A
+    kind: peer_reviewed_paper
+    research_design: empirical
+    title: Anomalies in the China A-share Market
+    publisher: Elsevier
+    authors: [Maarten Jansen, Laurens Swinkels, Weili Zhou]
+    journal_or_series: Pacific-Basin Finance Journal 68, 101607
+    url: https://www.sciencedirect.com/science/article/pii/S0927538X21001141
+    doi: 10.1016/j.pacfin.2021.101607
+    publication_date: 2021-09-01
+    last_verified_on: 2026-07-15
+    jurisdiction: 中国大陆
+    market_scope: [A股]
+    sample_start: 2000-01-01
+    sample_end: 2019-12-31
+    method_summary: 在A股复现多类异常并检查行业、规模、交易成本和市场制度影响，用于约束估值因子可比性和稳健解释。
+    limitations:
+      - 价值类历史关系不能直接转成当前二至六周收益预测。
+      - 论文样本止于2019年，当前使用只能保留可比组和稳健处理方法。
+
+  - source_id: paper-li-liu-liu-wei-2024
+    grade: A
+    kind: peer_reviewed_paper
+    research_design: empirical
+    title: Replicating and Digesting Anomalies in the Chinese A-Share Market
+    publisher: INFORMS
+    authors: [Zhibing Li, Laura Xiaolei Liu, Xiaoyu Liu, K. C. John Wei]
+    journal_or_series: Management Science 70(8), 5066-5090
+    url: https://pubsonline.informs.org/doi/10.1287/mnsc.2023.4904
+    doi: 10.1287/mnsc.2023.4904
+    publication_date: 2023-12-07
+    last_verified_on: 2026-07-15
+    jurisdiction: 中国大陆
+    market_scope: [A股]
+    sample_start: 2000-07-01
+    sample_end: 2019-06-30
+    method_summary: 使用主板断点和市值加权复现A股异常，揭示等权微盘污染、投资容量不足和大量异常不可复现问题。
+    limitations:
+      - 复现失败率用于约束因子治理，不能据此宣称任一当前估值位置必然有效或无效。
+      - 不复制论文组合、固定断点、收益或因子模型作为当前选择规则。
+
+  - source_id: paper-zhao-xu-ji-2023
+    grade: A
+    kind: peer_reviewed_paper
+    research_design: empirical
+    title: "Predicting financial distress of Chinese listed companies using machine learning: To what extent does textual disclosure matter?"
+    publisher: Elsevier
+    authors: [Qi Zhao, Weijun Xu, Yucheng Ji]
+    journal_or_series: International Review of Financial Analysis 89, 102770
+    url: https://www.sciencedirect.com/science/article/pii/S1057521923002867
+    doi: 10.1016/j.irfa.2023.102770
+    publication_date: 2023-10-01
+    last_verified_on: 2026-07-15
+    jurisdiction: 中国大陆
+    market_scope: [A股]
+    sample_start: 2011-01-01
+    sample_end: 2018-12-31
+    method_summary: 以超过一万八千个中国上市公司年度样本比较详细财务报表、财务比率和文本信息对财务困境识别的作用。
+    limitations:
+      - 当前系统只使用详细财务项目需要多维核对的方法，不复制机器学习模型、变量权重、AUC或ST概率。
+      - 财务困境证据不能直接转换成股票未来收益预测。
+
 entries:
   - knowledge_id: src_cn_program_trading_rules_2025
     title: 价量结果不得推断交易主体身份
@@ -1031,17 +1112,21 @@ entries:
     topics: [market_price_persistence, sector_price_persistence, market_state_reliability]
     claim_summary: A股行业或因子层面的相对表现可能具有阶段性延续，热点判断应观察一组股票的共同表现而不是只看单一个股。
     allowed_uses:
-      - 比较行业相对收益、上涨面和成员共同表现是否相互支持。
-      - 区分板块共同趋势、单一龙头带动和已经拥挤的价格表现。
+      - 比较一日、五日和二十日相对收益、上涨面、中位数收益、成交占比变化、新高和涨停是否相互支持。
+      - 用前三强贡献和参与宽度区分板块共同趋势、少数龙头带动和已经拥挤的价格表现。
+      - 因子观察优先在同分析日期、同行业和同盈利状态中比较，并保留交易可行性。
     forbidden_uses:
-      - 直接把历史因子组合收益、形成期或阈值写入正式选择规则。
+      - 直接把论文历史因子组合收益、形成期、阈值或权重写入正式选择规则。
       - 仅凭板块名称、单只强势股或第三方热度标签认定持续热点。
+      - 把多个因子观察机械相加成总分，或把板块热度证据写成最终热点排名。
     prerequisites:
-      - 使用按分析时点有效的行业成分和行业日线。
-      - 与可复算板块热度证据共同使用，并保留拥挤和失效观察。
+      - 只使用分析时点已经公开、按当日有效的行业成分、行业日线和sector-hotspot-v2观察。
+      - 极端值采用排序、分位或缩尾等稳健处理，并检查行业、规模和微盘股污染。
+      - 与可复算板块热度证据共同使用；这些证据不是最终热点排名。
     counter_evidence:
-      - 相对收益由少数成员贡献、上涨面收窄或成交拥挤显著上升。
+      - 反证包括相对收益由少数成员贡献、上涨面收窄、高成交低进展、量价背离、冲高回落或成交拥挤显著上升。
       - 行业成分映射失效，或个股业务与板块主题缺乏正式披露联系。
+      - 交易可行性不足、极小市值污染或稳健处理后观察消失。
     data_requirements:
       - kind: fact
         name: industry_daily
@@ -1051,7 +1136,25 @@ entries:
         required_fields: [available_at, industry_code, ts_code, valid_from, valid_to]
       - kind: derived
         name: sector_hotspot
-        required_fields: [analysis_date, group_code, group_type, relative_return_20d]
+        required_fields:
+          - analysis_date
+          - group_code
+          - group_type
+          - relative_return_1d
+          - relative_return_5d
+          - relative_return_20d
+          - breadth_1d
+          - breadth_20d
+          - median_return_20d
+          - turnover_share_average_20d
+          - turnover_share_change_5d
+          - top3_positive_contribution_1d
+          - new_high_20d_share
+          - limit_up_share
+          - high_volume_low_progress_flag
+          - narrow_participation_flag
+          - turnover_return_divergence_flag
+          - upper_wick_reversal_flag
     local_validation:
       status: validated
       reason: 本地验证确认不同市场状态下趋势延续关系明显不同，连续上涨也不能自动支持追强。
@@ -1489,3 +1592,103 @@ entries:
       status: validated
       reason: 十三项本地验证确认多维现金、应计和经营方向可执行，而单一历史评分不保留。
       validation_reference: src/stock_analyzer/knowledge/direct_validation_results.yaml#src_dechow_ge_schrand_2010
+
+  - knowledge_id: src_cn_business_segment_materiality
+    title: 核对热点业务对公司整体经营的实质贡献
+    primary_source_id: official-mof-cas-35
+    source_grade: S
+    version_status: current
+    effective_from: 2007-01-01
+    effect: analysis_evidence
+    modules: [company_business, fundamentals]
+    opportunity_types: [general, industry_trend, company_event]
+    topics: [business_transmission]
+    claim_summary: 公司与热点存在真实联系后，还要分别核对相关产品或业务分部对收入、成本和利润的实际贡献，概念或小额业务不能自动代表公司整体受益。
+    allowed_uses:
+      - 在同报告期和同分类口径内复算分部收入占公司收入、分部利润占营业利润及分部毛利率。
+      - 结合公司资料和正式公告解释该业务对公司今天的实际意义。
+    forbidden_uses:
+      - 把会计准则的报告分部门槛改成选股阈值、评分或上涨概率。
+      - 跨产品、地区和行业分类机械相加，或在无金额证据时写成重要业绩驱动。
+    prerequisites:
+      - 只使用分析时点已公开且报告期、币种和分类口径可比的公司资料、分部事实和财务总额。
+      - 分部事实与公司总收入和营业利润能够衔接；无效分母必须明确标记。
+    counter_evidence:
+      - 相关业务只停留在规划、研发、概念名称或互动回复，尚无正式产品、项目或经营金额。
+      - 分部收入利润占比较小、持续下降、币种不可比或分部披露口径发生变化。
+    data_requirements:
+      - {kind: fact, name: company_profile, required_fields: [ts_code, main_business, business_scope, valid_from, available_at]}
+      - {kind: fact, name: main_business, required_fields: [ts_code, report_period, classification, item_name, bz_sales, bz_cost, bz_profit, curr_type, available_at]}
+      - {kind: fact, name: income_statement, required_fields: [ts_code, report_period, revenue, operate_profit, available_at]}
+      - {kind: fact, name: announcement, required_fields: [announcement_id, announcement_time, ts_code, title, available_at]}
+    local_validation:
+      status: validated
+      reason: 当前仓库能在分离分类和币种边界后复算分部收入、利润和毛利贡献，不把披露门槛当成选股规则。
+      validation_reference: targeted_gap_validation_results.yaml#src_cn_business_segment_materiality
+
+  - knowledge_id: src_cn_relative_valuation_context
+    title: 在同行、自身历史和盈利背景中解释估值兑现要求
+    primary_source_id: paper-jansen-swinkels-zhou-2021
+    supporting_source_ids: [paper-li-liu-liu-wei-2024]
+    source_grade: A
+    version_status: current
+    effect: analysis_evidence
+    modules: [valuation, fundamentals, target_conditions]
+    opportunity_types: [general, industry_trend, earnings_rerating, cycle_inflection, company_event, turnaround]
+    topics: [valuation_method, profitability_quality]
+    claim_summary: PE、PB和PS只有在同日、同行业、同盈利状态和公司自身历史可比时才说明预期兑现要求，估值位置本身不能预测未来收益。
+    allowed_uses:
+      - 分别展示同行估值位置、公司自身历史位置、盈利成长现金质量和市值背景。
+      - 解释候选当前价格要求公司兑现哪些经营条件，以及为什么估值不可比。
+    forbidden_uses:
+      - 因低估值、小市值或某个因子分位就加分、买入或承诺未来收益。
+      - 把多个估值与质量观察机械相加，或复制论文历史组合、收益和固定阈值。
+    prerequisites:
+      - 只使用分析时点已公开数据，并优先在同日、同行业和同盈利状态中比较。
+      - 极端值采用稳健百分位处理，检查行业、规模、微盘污染和交易可行性。
+    counter_evidence:
+      - 亏损、负净资产、非正估值、可比组过窄或会计口径变化使估值失去可比性。
+      - 盈利、成长或现金质量恶化，说明表面低估值可能对应更高经营风险。
+    data_requirements:
+      - {kind: fact, name: daily_basic, required_fields: [trade_date, ts_code, pe_ttm, pb, ps_ttm, total_mv, available_at]}
+      - {kind: fact, name: industry_member, required_fields: [ts_code, industry_code, valid_from, valid_to, available_at]}
+      - {kind: fact, name: income_statement, required_fields: [ts_code, report_period, n_income_attr_p, available_at]}
+      - {kind: fact, name: cash_flow, required_fields: [ts_code, report_period, n_cashflow_act, available_at]}
+      - {kind: fact, name: financial_indicator, required_fields: [ts_code, report_period, roe, or_yoy, available_at]}
+    local_validation:
+      status: validated
+      reason: 当前仓库能执行时点正确的同行、自身历史、盈利状态和规模背景比较，并明确无效估值而不生成因子分数。
+      validation_reference: targeted_gap_validation_results.yaml#src_cn_relative_valuation_context
+
+  - knowledge_id: src_cn_turnaround_financial_consistency
+    title: 用多张财务报表的方向一致性核对困境改善
+    primary_source_id: paper-zhao-xu-ji-2023
+    supporting_source_ids: [paper-dechow-ge-schrand-2010]
+    source_grade: A
+    version_status: current
+    effect: analysis_evidence
+    modules: [fundamentals, risk]
+    opportunity_types: [turnaround]
+    topics: [financial_turnaround, profitability_quality]
+    claim_summary: 困境改善不能只看利润转正，经营结果、现金、流动性、短债、应收存货、减值和非经营项目必须分别核对并保留相反方向。
+    allowed_uses:
+      - 按同季可比口径分别观察营业利润、经营现金、流动比率、短债压力、应收存货和减值非经营项目变化。
+      - 将多表不一致表达为局部改善或反证，并继续核对业务原因和正式风险公告。
+    forbidden_uses:
+      - 复制机器学习模型、变量权重、AUC、ST概率、Piotroski分数或固定淘汰门槛。
+      - 因多项财务改善就直接预测股价上涨、反转完成或买入行动。
+    prerequisites:
+      - 只使用分析时点已公开、报告期和报表口径可比的损益表、资产负债表、现金流量表和财务指标。
+      - 各维度分别保留，缺失或零变化不能写成已经确认改善。
+    counter_evidence:
+      - 利润改善但经营现金、流动性、短债或应收存货压力继续恶化。
+      - 改善主要依赖资产处置、非经营收入、减值转回或其他不可持续项目。
+    data_requirements:
+      - {kind: fact, name: income_statement, required_fields: [ts_code, report_period, revenue, operate_profit, n_income_attr_p, assets_impair_loss, non_oper_income, available_at]}
+      - {kind: fact, name: balance_sheet, required_fields: [ts_code, report_period, total_assets, total_cur_assets, total_cur_liab, total_liab, money_cap, st_borr, non_cur_liab_due_1y, accounts_receiv, inventories, available_at]}
+      - {kind: fact, name: cash_flow, required_fields: [ts_code, report_period, n_cashflow_act, available_at]}
+      - {kind: fact, name: financial_indicator, required_fields: [ts_code, report_period, current_ratio, debt_to_assets, available_at]}
+    local_validation:
+      status: validated
+      reason: 当前仓库能逐项复算多表方向，历史上大量利润改善同时存在其他维度反证，说明该核对可直接使用但不能形成困境概率。
+      validation_reference: targeted_gap_validation_results.yaml#src_cn_turnaround_financial_consistency
