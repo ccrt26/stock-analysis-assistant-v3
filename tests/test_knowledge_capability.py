@@ -6,6 +6,7 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
+import yaml
 
 from stock_analyzer.analysis.market_context_features import (
     MARKET_CONTEXT_FORMULA_VERSION,
@@ -20,6 +21,7 @@ from stock_analyzer.knowledge.capability import (
 from stock_analyzer.knowledge.governance_audit import audit_knowledge_governance
 from stock_analyzer.knowledge.governance_models import (
     AnalysisModule,
+    CapabilityStatus,
     DataRequirement,
     KnowledgeEffect,
     KnowledgeEntry,
@@ -501,6 +503,31 @@ def test_audit_report_order_and_hash_are_deterministic():
     assert first.audit_hash == second.audit_hash
 
 
+def test_every_accepted_supplement_entry_is_complete_on_current_warehouse():
+    registry = load_knowledge_registry(
+        Path("src/stock_analyzer/knowledge/research_registry.yaml")
+    )
+    rows = yaml.safe_load(
+        Path(
+            "src/stock_analyzer/knowledge/supplement_validation_results.yaml"
+        ).read_text()
+    )["results"]
+    accepted = {
+        row["knowledge_id"] for row in rows if row["decision"] == "use"
+    }
+    snapshot = inspect_warehouse_capabilities(
+        Path("local_warehouse"), date(2026, 7, 14)
+    )
+    entries = {entry.knowledge_id: entry for entry in registry.entries}
+
+    for knowledge_id in accepted:
+        assessment = assess_entry_capability(entries[knowledge_id], snapshot)
+        assert assessment.status is CapabilityStatus.COMPLETE, (
+            knowledge_id,
+            assessment,
+        )
+
+
 def official_registry_capability_fixture() -> CapabilitySnapshot:
     fields = {
         ("derived", "stock_trading_context"): (
@@ -540,9 +567,11 @@ def official_registry_capability_fixture() -> CapabilitySnapshot:
             "available_at",
             "pb",
             "pe_ttm",
+            "ps_ttm",
             "total_mv",
             "trade_date",
             "ts_code",
+            "turnover_rate_f",
         ),
         ("fact", "announcement"): (
             "announcement_id",
@@ -613,7 +642,9 @@ def official_registry_capability_fixture() -> CapabilitySnapshot:
             "ann_date",
             "available_at",
             "n_income_attr_p",
+            "oper_cost",
             "report_period",
+            "report_type",
             "revenue",
             "ts_code",
         ),
@@ -624,6 +655,7 @@ def official_registry_capability_fixture() -> CapabilitySnapshot:
             "total_assets",
             "total_cur_assets",
             "total_cur_liab",
+            "total_hldr_eqy_exc_min_int",
             "total_liab",
             "ts_code",
         ),
@@ -653,6 +685,53 @@ def official_registry_capability_fixture() -> CapabilitySnapshot:
         ("fact", "industry_member"): (
             "available_at",
             "industry_code",
+            "ts_code",
+            "valid_from",
+            "valid_to",
+        ),
+        ("fact", "adj_factor"): (
+            "adj_factor",
+            "available_at",
+            "trade_date",
+            "ts_code",
+        ),
+        ("fact", "earnings_express"): (
+            "ann_date",
+            "announcement_type",
+            "available_at",
+            "report_period",
+            "ts_code",
+            "yoy_net_profit",
+        ),
+        ("fact", "earnings_forecast"): (
+            "ann_date",
+            "available_at",
+            "p_change_max",
+            "p_change_min",
+            "report_period",
+            "ts_code",
+            "type",
+        ),
+        ("fact", "margin_detail"): (
+            "available_at",
+            "rqye",
+            "rqyl",
+            "rzche",
+            "rzmre",
+            "rzye",
+            "trade_date",
+            "ts_code",
+        ),
+        ("fact", "pledge"): (
+            "ann_date",
+            "available_at",
+            "end_date",
+            "pledge_ratio",
+            "ts_code",
+        ),
+        ("fact", "theme_member"): (
+            "available_at",
+            "theme_code",
             "ts_code",
             "valid_from",
             "valid_to",

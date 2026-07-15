@@ -25,7 +25,7 @@ from stock_analyzer.knowledge.governance_models import (
     OpportunityType,
 )
 from stock_analyzer.knowledge.registry import load_knowledge_registry
-from stock_analyzer.knowledge.selector import select_knowledge
+from stock_analyzer.knowledge.selector import KnowledgeSelection, select_knowledge
 from stock_analyzer.knowledge.use_audit import build_program_trading_use_record
 from stock_analyzer.knowledge.usage_policy import MarketMicrostructureWordingError
 
@@ -224,6 +224,91 @@ def test_sector_hotspot_remains_evidence_not_ranking():
         if source.source_id == "paper-ma-liao-jiang-factor-momentum-2024"
     )
     assert any("不能直接生成热点排名" in text for text in factor_source.limitations)
+
+
+def accepted_supplement_ids() -> set[str]:
+    import yaml
+
+    rows = yaml.safe_load(
+        Path(
+            "src/stock_analyzer/knowledge/supplement_validation_results.yaml"
+        ).read_text()
+    )["results"]
+    return {row["knowledge_id"] for row in rows if row["decision"] == "use"}
+
+
+@pytest.mark.parametrize(
+    ("module", "opportunity", "topics"),
+    [
+        (
+            AnalysisModule.MARKET_ENVIRONMENT,
+            OpportunityType.GENERAL,
+            (
+                KnowledgeTopic.MARKET_STATE_RELIABILITY,
+                KnowledgeTopic.RETURN_DISPERSION,
+            ),
+        ),
+        (
+            AnalysisModule.FUNDAMENTALS,
+            OpportunityType.EARNINGS_RERATING,
+            (
+                KnowledgeTopic.PROFITABILITY_QUALITY,
+                KnowledgeTopic.VALUATION_METHOD,
+            ),
+        ),
+        (
+            AnalysisModule.RISK,
+            OpportunityType.GENERAL,
+            (KnowledgeTopic.PLEDGE_CONDITIONAL_RISK,),
+        ),
+        (
+            AnalysisModule.COMPANY_BUSINESS,
+            OpportunityType.INDUSTRY_TREND,
+            (KnowledgeTopic.BUSINESS_TRANSMISSION,),
+        ),
+        (
+            AnalysisModule.PORTFOLIO,
+            OpportunityType.GENERAL,
+            (KnowledgeTopic.PORTFOLIO_RELATIONSHIP,),
+        ),
+    ],
+)
+def test_supplement_selection_is_scene_specific(
+    module, opportunity, topics
+):
+    registry = load_knowledge_registry(REGISTRY_PATH)
+    accepted = accepted_supplement_ids()
+    scene = context(module, opportunity, topics)
+
+    selected = select_knowledge(registry, scene, complete_capabilities(registry))
+    actual = {item.knowledge_id for item in selected} & accepted
+    expected = {
+        entry.knowledge_id
+        for entry in registry.entries
+        if entry.knowledge_id in accepted
+        and module in entry.modules
+        and (
+            OpportunityType.GENERAL in entry.opportunity_types
+            or opportunity in entry.opportunity_types
+        )
+        and set(topics).intersection(entry.topics)
+    }
+
+    assert expected
+    assert actual == expected
+    assert actual != accepted
+
+
+def test_selection_has_no_factor_score_or_identity_claim():
+    forbidden = {"score", "weight", "rank", "buy_probability", "position"}
+    assert not (forbidden & set(KnowledgeSelection.model_fields))
+    registry = load_knowledge_registry(REGISTRY_PATH)
+
+    for entry in registry.entries:
+        if KnowledgeTopic.LIQUIDITY_TRADING_ACTIVITY in entry.topics:
+            searchable = " ".join((entry.claim_summary, *entry.allowed_uses))
+            assert "机构买入" not in searchable
+            assert "主力" not in searchable
 
 
 def test_company_business_requires_main_business_evidence():
