@@ -219,22 +219,38 @@ def primary_study_series(study_id: str, panel: pd.DataFrame) -> pd.DataFrame:
     if study_id == "formal_announcement_price_reaction":
         required = {
             "analysis_date",
+            "is_extreme_move",
             "local_formal_announcement_match",
+            "cap_tercile",
+            "move_magnitude_quintile",
             "market_excess_return_20d",
         }
         missing = required - set(panel.columns)
         if missing:
             raise ValueError(f"primary study panel missing columns: {sorted(missing)}")
+        extreme = panel[panel["is_extreme_move"].astype(bool)]
         grouped = (
-            panel.groupby(
-                ["analysis_date", "local_formal_announcement_match"], sort=True
+            extreme.groupby(
+                [
+                    "analysis_date",
+                    "cap_tercile",
+                    "move_magnitude_quintile",
+                    "local_formal_announcement_match",
+                ],
+                sort=True,
             )["market_excess_return_20d"]
             .mean()
             .unstack("local_formal_announcement_match")
         )
         if True not in grouped or False not in grouped:
             return pd.DataFrame(columns=["analysis_date", "primary_value"])
-        return (grouped[True] - grouped[False]).dropna().rename("primary_value").reset_index()
+        differences = (grouped[True] - grouped[False]).dropna()
+        return (
+            differences.groupby(level="analysis_date")
+            .mean()
+            .rename("primary_value")
+            .reset_index()
+        )
     if study_id == "financial_quality_turnaround":
         required = {
             "report_period",

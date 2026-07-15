@@ -191,11 +191,15 @@ def test_announcement_reaction_does_not_claim_no_public_information():
                 "ts_code": ["A"],
                 "market_adjusted_return": [0.08],
                 "local_formal_announcement_match": [False],
+                "circ_mv": [100.0],
             }
         )
     )
 
     assert out.loc[0, "information_match_status"] == "no_local_formal_announcement_match"
+    assert bool(out.loc[0, "is_extreme_move"])
+    assert out.loc[0, "cap_tercile"] == 1
+    assert out.loc[0, "move_magnitude_quintile"] == 1
     assert "no_public" not in " ".join(map(str, out.iloc[0].tolist()))
 
 

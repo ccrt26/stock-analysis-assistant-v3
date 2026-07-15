@@ -272,9 +272,32 @@ def announcement_reaction_signal(frame: pd.DataFrame) -> pd.DataFrame:
             "ts_code",
             "market_adjusted_return",
             "local_formal_announcement_match",
+            "circ_mv",
         },
     )
     out = frame.copy()
+    out["absolute_market_adjusted_return"] = pd.to_numeric(
+        out["market_adjusted_return"], errors="coerce"
+    ).abs()
+    percentile = out.groupby("analysis_date", dropna=False)[
+        "absolute_market_adjusted_return"
+    ].rank(method="first", pct=True)
+    out["is_extreme_move"] = percentile > 0.95
+    out["cap_tercile"] = _stable_groups(
+        out,
+        value_column="circ_mv",
+        group_columns=("analysis_date",),
+        bins=3,
+    )
+    out["extreme_move_magnitude"] = out[
+        "absolute_market_adjusted_return"
+    ].where(out["is_extreme_move"])
+    out["move_magnitude_quintile"] = _stable_groups(
+        out,
+        value_column="extreme_move_magnitude",
+        group_columns=("analysis_date",),
+        bins=5,
+    )
     out["information_match_status"] = np.where(
         out["local_formal_announcement_match"].astype(bool),
         "local_formal_announcement_match",

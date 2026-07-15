@@ -145,7 +145,7 @@ studies:
     knowledge_ids: [src_chan_2003]
     migration_ids: [src_chan_2003]
     theory_claim: 极端价格波动是否伴随本地正式公告，能够帮助区分已知信息冲击与未在本地公告库匹配到的冲击，但不能声称不存在其他公开信息。
-    signal_definition: 识别极端市场调整交易日，按同日、市值组和波动幅度匹配，并记录是否匹配到本地正式公告。
+    signal_definition: 以同日绝对市场调整收益最高百分之五识别极端交易日，再按同日、市值三组和极端波动幅度五组匹配，并记录是否匹配到本地正式公告。
     primary_hypothesis: 匹配到正式公告的极端波动与本地未匹配冲击在随后二十个交易日的市场超额收盘收益存在可重复差异。
     primary_statistic: announced_minus_locally_unmatched_shock_20d_return
     horizons: [10, 20, 30]

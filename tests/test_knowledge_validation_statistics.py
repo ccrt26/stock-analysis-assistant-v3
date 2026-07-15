@@ -193,6 +193,23 @@ def test_financial_primary_series_is_report_period_spearman():
     assert series.loc[0, "primary_value"] == pytest.approx(1.0)
 
 
+def test_announcement_reaction_matches_date_size_and_move_strata():
+    panel = pd.DataFrame(
+        {
+            "analysis_date": [date(2026, 7, 10)] * 4,
+            "is_extreme_move": [True] * 4,
+            "local_formal_announcement_match": [True, False, True, False],
+            "cap_tercile": [1, 1, 2, 2],
+            "move_magnitude_quintile": [5, 5, 4, 4],
+            "market_excess_return_20d": [0.05, 0.01, -0.01, -0.03],
+        }
+    )
+
+    series = primary_study_series("formal_announcement_price_reaction", panel)
+
+    assert series.loc[0, "primary_value"] == pytest.approx(0.03)
+
+
 def test_tost_equivalence_requires_both_one_sided_tests():
     result = tost_equivalence(np.zeros(200), lower=-0.0025, upper=0.0025)
 
