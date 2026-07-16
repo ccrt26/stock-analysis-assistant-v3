@@ -414,7 +414,39 @@ def _resolve_as_of(
             ]
         )
     )
+    best = _mask_future_validity_edges(dataset, best, cutoff)
     return best.sort_values(list(contract.business_key)).reset_index(drop=True)
+
+
+def _mask_future_validity_edges(
+    dataset: ResearchDatasetId,
+    frame: pd.DataFrame,
+    cutoff: datetime,
+) -> pd.DataFrame:
+    if frame.empty:
+        return frame
+    contract = research_contract(dataset)
+    if contract.business_time_field != "valid_from":
+        return frame
+
+    cutoff_day = pd.Timestamp(_utc(cutoff)).tz_convert(
+        ZoneInfo("Asia/Shanghai")
+    ).tz_localize(None).normalize()
+    result = frame.copy()
+    valid_from = pd.to_datetime(
+        result["valid_from"], errors="raise"
+    ).dt.normalize()
+    result = result.loc[valid_from <= cutoff_day].copy()
+    if (
+        contract.mask_future_valid_to
+        and not result.empty
+        and "valid_to" in result
+    ):
+        valid_to = pd.to_datetime(
+            result["valid_to"], errors="coerce"
+        ).dt.normalize()
+        result.loc[valid_to > cutoff_day, "valid_to"] = None
+    return result
 
 
 def _assert_unique_current_hashes(

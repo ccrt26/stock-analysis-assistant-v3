@@ -365,7 +365,7 @@ Run the command from Step 3. Expected: PASS.
 
 Expected: PASS; official CNInfo millisecond timestamps remain unchanged.
 
-- [ ] **Step 8: Commit Task 2**
+- [x] **Step 8: Commit Task 2**
 
 ```bash
 git add src/stock_analyzer/storage/research_warehouse.py src/stock_analyzer/data/research_backfill.py src/stock_analyzer/data/classification_backfill.py src/stock_analyzer/data/fundamental_backfill.py src/stock_analyzer/data/event_backfill.py src/stock_analyzer/data/trading_structure_backfill.py tests/test_research_warehouse.py tests/test_research_market_backfill.py tests/test_classification_backfill.py tests/test_fundamental_backfill.py tests/test_event_backfill.py tests/test_trading_structure_backfill.py
@@ -383,7 +383,7 @@ git commit -m "fix: enforce fact availability semantics"
 - Produces `_mask_future_validity_edges(dataset, frame, cutoff) -> pd.DataFrame`.
 - `_resolve_as_of()` applies the mask after selecting the correct version and before returning public facts.
 
-- [ ] **Step 1: Write a failing relationship test**
+- [x] **Step 1: Write a failing relationship test**
 
 ```python
 def test_historical_relationship_hides_future_end_boundary(tmp_path):
@@ -417,7 +417,7 @@ def test_historical_relationship_hides_future_end_boundary(tmp_path):
 
 Also assert a row with `valid_from=2025-09-01` is absent at the 2025-08-15 cutoff.
 
-- [ ] **Step 2: Run and verify RED**
+- [x] **Step 2: Run and verify RED**
 
 ```bash
 .venv/bin/pytest tests/test_research_partition_query.py::test_historical_relationship_hides_future_end_boundary -q
@@ -425,11 +425,11 @@ Also assert a row with `valid_from=2025-09-01` is absent at the 2025-08-15 cutof
 
 Expected: FAIL because `valid_to` is exposed before it occurs.
 
-- [ ] **Step 3: Implement validity masking**
+- [x] **Step 3: Implement validity masking**
 
 Use contract `mask_future_valid_to`. Convert cutoff to Asia/Shanghai date, copy the frame, and set `valid_to` to `None` only where parsed `valid_to > cutoff_date`. Do not mutate the warehouse frame and do not remove historical closed relationships needed for past window calculations.
 
-- [ ] **Step 4: Run strict-query tests and verify GREEN**
+- [x] **Step 4: Run strict-query tests and verify GREEN**
 
 ```bash
 .venv/bin/pytest tests/test_research_partition_query.py tests/test_research_as_of.py tests/test_classification_backfill.py -q

@@ -144,6 +144,48 @@ def test_partition_query_applies_cutoff_and_recovers_the_known_revision(tmp_path
     assert int(result.iloc[0]["revision_no"]) == 1
 
 
+def test_historical_relationship_hides_future_end_boundary(tmp_path):
+    warehouse = ResearchWarehouse(tmp_path)
+    warehouse.commit_batch(
+        FactBatch(
+            dataset_id=ResearchDatasetId.THEME_MEMBER,
+            partition_value="official-theme-v1",
+            source_name="tushare",
+            source_endpoint="index_weight",
+            ingestion_run_id="theme-members",
+            ingested_at=datetime(2026, 7, 14, tzinfo=timezone.utc),
+            records=[
+                {
+                    "theme_code": "000019.SH",
+                    "ts_code": "000001.SZ",
+                    "valid_from": date(2025, 7, 31),
+                    "valid_to": date(2025, 8, 28),
+                },
+                {
+                    "theme_code": "000019.SH",
+                    "ts_code": "000002.SZ",
+                    "valid_from": date(2025, 9, 1),
+                    "valid_to": None,
+                },
+            ],
+        )
+    )
+    query = ResearchQuery(warehouse)
+
+    before_end = query.dataset_as_of(
+        ResearchDatasetId.THEME_MEMBER,
+        datetime(2025, 8, 15, 15, 59, tzinfo=timezone.utc),
+    )
+    after_end = query.dataset_as_of(
+        ResearchDatasetId.THEME_MEMBER,
+        datetime(2025, 8, 29, 15, 59, tzinfo=timezone.utc),
+    )
+
+    assert before_end["ts_code"].tolist() == ["000001.SZ"]
+    assert pd.isna(before_end.iloc[0]["valid_to"])
+    assert pd.Timestamp(after_end.iloc[0]["valid_to"]).date() == date(2025, 8, 28)
+
+
 def test_partition_query_never_admits_a_future_partition_at_historical_cutoff(
     tmp_path,
 ):
