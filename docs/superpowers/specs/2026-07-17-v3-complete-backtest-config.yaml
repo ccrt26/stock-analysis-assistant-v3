@@ -51,6 +51,34 @@ attention_limits:
   focus_cap: 5
   fill_to_cap: false
 
+discovery_recall:
+  hotspot:
+    universe: all_effective_industries_and_controlled_themes
+    required_observations:
+      - relative_return_20d
+      - median_return_20d
+      - breadth_20d
+      - turnover_share_average_20d
+      - top3_positive_contribution_1d
+      - retreat_counterevidence
+    common_positive_change: positive_relative_positive_median_majority_breadth
+  earnings:
+    report_period_policy: latest_four_ended_plus_next_two_quarter_ends
+    disclosure_types: [earnings_forecast, earnings_express, income_statement]
+  company_event:
+    lookback_calendar_days: 45
+    title_is_recall_only: true
+    incomplete_deep_read_decision_use: forbidden
+  price_anomaly:
+    universe: all_formation_day_complete_stock_trading_context
+    metric: abs_relative_return_20d
+    tail_fraction: 0.05
+    role: recall_only_not_score
+  industry_cycle:
+    incomplete_inputs: record_manifest_and_fail_closed
+  distress_repair:
+    incomplete_inputs: record_manifest_and_fail_closed
+
 sample_policy:
   date_selection_inputs: [trade_calendar, frozen_plan_dates]
   date_selection_must_not_use: [future_prices, future_returns, hotspots, outcomes]
