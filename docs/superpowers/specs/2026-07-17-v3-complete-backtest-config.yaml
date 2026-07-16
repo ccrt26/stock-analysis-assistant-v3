@@ -1,0 +1,58 @@
+schema_version: 1
+experiment_id: 2026-07-17-v3-complete-backtest
+experiment_class: isolated_design_sample_backtest
+frozen_on: '2026-07-17'
+
+data_cutoff:
+  trade_calendar_end: '2026-07-16'
+  equity_daily_end: '2026-07-16'
+  maturity_end: '2026-07-16'
+  formation_cutoff_time: '23:59:59'
+  formation_cutoff_timezone: Asia/Shanghai
+  facts_as_of: strict_available_at
+
+samples:
+  primary:
+    start: '2025-10-30'
+    end: '2026-06-03'
+    origin_count: 143
+    reporting: comparable_primary_only
+  extension:
+    start: '2025-08-15'
+    end: '2025-10-29'
+    origin_count: 48
+    reporting: separate_limited_coverage
+    limited_history_flag: limited_theme_history
+    pool_with_primary: false
+  blocks:
+    - id: A
+      start: '2025-10-30'
+      end: '2026-01-07'
+      origin_count: 48
+    - id: B
+      start: '2026-01-08'
+      end: '2026-03-24'
+      origin_count: 48
+    - id: C
+      start: '2026-03-25'
+      end: '2026-06-03'
+      origin_count: 47
+
+evaluation:
+  target_return: 0.20
+  horizons: [10, 20, 30]
+  drawdown_sensitivities: [0.05, 0.10]
+
+knowledge:
+  allowed_statuses: [current]
+
+attention_limits:
+  candidate_cap: 10
+  focus_cap: 5
+  fill_to_cap: false
+
+sample_policy:
+  date_selection_inputs: [trade_calendar, frozen_plan_dates]
+  date_selection_must_not_use: [future_prices, future_returns, hotspots, outcomes]
+  primary_extension_pooling: forbidden
+  outcome_reveal_before_formation_freeze: forbidden
