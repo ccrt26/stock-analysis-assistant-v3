@@ -283,12 +283,20 @@ def run_research_features(
         indexes = snapshot.frame(ResearchDatasetId.INDEX_DAILY)
         limits = snapshot.frame(ResearchDatasetId.STOCK_LIMIT)
         securities = snapshot.frame(ResearchDatasetId.SECURITY_MASTER)
+        if securities.empty:
+            limitations.append(
+                "历史证券主数据不可严格回放，市场覆盖分母使用当日已可见行情证券集合"
+            )
         return compute_market_context_features(
             _equity_with_adjustment(equity, adjustments),
             indexes,
             limits,
             analysis_date=analysis_day,
-            expected_current_rows=_expected_current_rows(securities, analysis_day),
+            expected_current_rows=_expected_current_rows(
+                securities,
+                equity,
+                analysis_day,
+            ),
         )
 
     execute(
@@ -517,7 +525,30 @@ def _open_sessions(calendar: pd.DataFrame, through: date) -> list[date]:
     )
 
 
-def _expected_current_rows(securities: pd.DataFrame, analysis_date: date) -> int:
+def _expected_current_rows(
+    securities: pd.DataFrame,
+    equity: pd.DataFrame,
+    analysis_date: date,
+) -> int:
+    if securities.empty:
+        required_equity = {"trade_date", "ts_code"}
+        missing_equity = sorted(required_equity - set(equity.columns))
+        if missing_equity:
+            raise ValueError(
+                "equity daily lacks required fields for historical universe: "
+                + ", ".join(missing_equity)
+            )
+        trade_dates = pd.to_datetime(equity["trade_date"], errors="raise").dt.date
+        count = int(
+            equity.loc[trade_dates == analysis_date, "ts_code"]
+            .astype(str)
+            .nunique()
+        )
+        if count <= 0:
+            raise ValueError(
+                "historical market facts have no securities on analysis date"
+            )
+        return count
     required = {"ts_code", "valid_from", "valid_to"}
     missing = sorted(required - set(securities.columns))
     if missing:

@@ -592,7 +592,7 @@ Expected: PASS.
 
 Expected: PASS.
 
-- [ ] **Step 9: Commit Task 4**
+- [x] **Step 9: Commit Task 4**
 
 ```bash
 git add src/stock_analyzer/storage/research_time_migration.py src/stock_analyzer/cli.py tests/test_research_time_migration.py tests/test_cli.py
@@ -602,14 +602,19 @@ git commit -m "feat: migrate historical fact availability safely"
 ### Task 5: Prove strict historical feature computation without a business-date bypass
 
 **Files:**
+- Modify: `src/stock_analyzer/ops/research_features.py`
 - Modify: `tests/test_research_feature_job.py`
 - Create: `tests/test_research_historical_availability.py`
 
 **Interfaces:**
 - The real `ResearchQuery` and `run_research_features()` must consume migrated facts with a historical cutoff.
 - No fake query may select market facts solely by `trade_date`.
+- When `security_master` is correctly hidden before its ingestion cutoff, the
+  historical market coverage denominator uses only securities with visible
+  same-day market facts and records that conservative universe limitation; it
+  never backfills current descriptive security attributes.
 
-- [ ] **Step 1: Write a failing end-to-end historical test**
+- [x] **Step 1: Write a failing end-to-end historical test**
 
 Build a minimal but real `ResearchWarehouse` containing enough open sessions and fact partitions for a historical analysis date. Seed calendar, equity, adjustment, valuation, limits, broad index, industry/theme catalog/member/daily facts with current defective backfill availability, run the migration, then run `run_research_features(..., analysis_date=date(2025, 8, 15), as_of=2025-08-15 23:59:59 Asia/Shanghai)`.
 
@@ -624,7 +629,7 @@ assert summary.as_of.year == 2025
 
 Add future disclosure and future relationship rows and assert direct strict queries exclude them.
 
-- [ ] **Step 2: Run and verify RED before migration behavior is wired**
+- [x] **Step 2: Run and verify RED before migration behavior is wired**
 
 ```bash
 .venv/bin/pytest tests/test_research_historical_availability.py -q
@@ -632,11 +637,11 @@ Add future disclosure and future relationship rows and assert direct strict quer
 
 Expected: FAIL at the calendar or strict cutoff assertion before the complete migration path exists.
 
-- [ ] **Step 3: Make only the minimal integration adjustments**
+- [x] **Step 3: Make only the minimal integration adjustments**
 
 If the Task 1–4 code already satisfies the test, prove the regression test is meaningful by temporarily constructing the fixture without migration and observing the expected calendar failure, then restore the migration call and rerun. Do not add any `trade_date` query fallback.
 
-- [ ] **Step 4: Run feature and contract regressions**
+- [x] **Step 4: Run feature and contract regressions**
 
 ```bash
 .venv/bin/pytest tests/test_research_historical_availability.py tests/test_research_feature_job.py tests/test_research_contracts.py tests/test_research_as_of.py -q
