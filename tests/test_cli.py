@@ -995,6 +995,50 @@ def test_data_derive_uses_only_local_warehouse_and_prints_business_summary(
     assert "已复算市场、板块和个股观察" in result.output
 
 
+def test_time_semantics_audit_and_migration_commands_use_local_warehouse(
+    tmp_path, monkeypatch
+):
+    warehouse_root = tmp_path / "warehouse"
+    output = tmp_path / "audit" / "time-semantics.json"
+    monkeypatch.setattr(
+        AppConfig,
+        "load",
+        classmethod(
+            lambda cls: SimpleNamespace(local_warehouse_dir=warehouse_root)
+        ),
+    )
+
+    audit = CliRunner().invoke(
+        app,
+        ["data", "audit-time-semantics", "--output", str(output)],
+    )
+    migration = CliRunner().invoke(
+        app,
+        [
+            "data",
+            "migrate-time-semantics",
+            "--migration-id",
+            "cli-time-semantics-v1",
+        ],
+    )
+    repeated = CliRunner().invoke(
+        app,
+        [
+            "data",
+            "migrate-time-semantics",
+            "--migration-id",
+            "cli-time-semantics-v1",
+        ],
+    )
+
+    assert audit.exit_code == 0, audit.output
+    assert len(json.loads(output.read_text(encoding="utf-8"))) == 29
+    assert migration.exit_code == 0, migration.output
+    assert "changed=0" in migration.output
+    assert repeated.exit_code == 0, repeated.output
+    assert "already_completed=true" in repeated.output
+
+
 def test_data_stage_exits_nonzero_and_explains_derived_failure(
     tmp_path, monkeypatch
 ):

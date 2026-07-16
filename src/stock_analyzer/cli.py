@@ -307,6 +307,54 @@ def data_normalize_share_float(
     )
 
 
+@data_app.command("audit-time-semantics")
+def data_audit_time_semantics(
+    output: Path = typer.Option(..., "--output"),
+) -> None:
+    from stock_analyzer.storage.research_time_migration import (
+        audit_research_time_semantics,
+    )
+    from stock_analyzer.storage.research_warehouse import ResearchWarehouse
+
+    config = AppConfig.load()
+    audit = audit_research_time_semantics(
+        ResearchWarehouse(config.local_warehouse_dir)
+    )
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(
+        json.dumps(
+            [item.model_dump(mode="json") for item in audit],
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    typer.echo(
+        f"time semantics audit: datasets={len(audit)} output={output}"
+    )
+
+
+@data_app.command("migrate-time-semantics")
+def data_migrate_time_semantics(
+    migration_id: str = typer.Option(..., "--migration-id"),
+) -> None:
+    from stock_analyzer.storage.research_time_migration import (
+        migrate_research_time_semantics,
+    )
+    from stock_analyzer.storage.research_warehouse import ResearchWarehouse
+
+    config = AppConfig.load()
+    report = migrate_research_time_semantics(
+        ResearchWarehouse(config.local_warehouse_dir),
+        migration_id=migration_id,
+    )
+    typer.echo(
+        f"time semantics migration {report.migration_id}: "
+        f"changed={len(report.changed_datasets)} "
+        f"already_completed={str(report.already_completed).lower()}"
+    )
+
+
 @data_app.command("run-stage")
 def data_run_stage(
     stage: str = typer.Option(..., "--stage"),

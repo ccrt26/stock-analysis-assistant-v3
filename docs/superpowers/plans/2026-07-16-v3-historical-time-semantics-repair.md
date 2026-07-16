@@ -437,7 +437,7 @@ Use contract `mask_future_valid_to`. Convert cutoff to Asia/Shanghai date, copy 
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit Task 3**
+- [x] **Step 5: Commit Task 3**
 
 ```bash
 git add src/stock_analyzer/storage/research_query.py tests/test_research_partition_query.py tests/test_research_as_of.py
@@ -459,7 +459,7 @@ git commit -m "fix: hide future classification validity edges"
 - Adds CLI `python -m stock_analyzer data audit-time-semantics --output ...`.
 - Adds CLI `python -m stock_analyzer data migrate-time-semantics --migration-id ...`.
 
-- [ ] **Step 1: Write a failing migration conservation test**
+- [x] **Step 1: Write a failing migration conservation test**
 
 Create a tiny warehouse with:
 
@@ -473,11 +473,8 @@ Assert after migration:
 
 ```python
 assert set(report.changed_datasets) == {
-    "balance_sheet", "cash_flow", "company_profile", "earnings_express",
-    "earnings_forecast", "financial_indicator", "holder_trade",
-    "income_statement", "industry_daily", "main_business", "pledge",
-    "repurchase", "security_master", "share_float", "theme_daily",
-    "trade_calendar",
+    "company_profile", "income_statement", "industry_daily", "pledge",
+    "security_master", "theme_daily", "trade_calendar",
 }
 assert before_business_hashes == after_business_hashes
 assert before_partition_keys == after_partition_keys
@@ -488,11 +485,16 @@ assert company_profile_available == company_profile_ingested
 assert pledge_available == pledge_ingested
 ```
 
-- [ ] **Step 2: Write failing rollback and idempotence tests**
+The fixture contains only the seven changed datasets above plus an unchanged
+announcement control. The real populated warehouse is expected to report the
+applicable subset of the 16 migration-policy datasets; empty or already correct
+datasets must not be rewritten merely to satisfy a fixed count.
+
+- [x] **Step 2: Write failing rollback and idempotence tests**
 
 Monkeypatch the metadata transaction method to raise after the staged directory swap; assert the original file SHA-256 and manifest row remain visible. Run the migration twice and assert the second report has `already_completed=True` and changes no file hashes.
 
-- [ ] **Step 3: Run migration tests and verify RED**
+- [x] **Step 3: Run migration tests and verify RED**
 
 ```bash
 .venv/bin/pytest tests/test_research_time_migration.py -q
@@ -500,7 +502,7 @@ Monkeypatch the metadata transaction method to raise after the staged directory 
 
 Expected: collection FAIL because the migration module is absent.
 
-- [ ] **Step 4: Implement audit and row transforms**
+- [x] **Step 4: Implement audit and row transforms**
 
 The current-row transform may alter only governance fields:
 
@@ -520,7 +522,7 @@ For `MAIN_BUSINESS`, use ingestion cutoff only when `availability_limitation` sa
 
 Transform revision `row_payload` with the same precision-only rules. Change `valid_from/valid_to` only if the corresponding row payload `available_at` actually changes; no affected real dataset currently combines bad backfilled time with revisions, but the implementation must remain correct for test fixtures.
 
-- [ ] **Step 5: Implement per-dataset staged atomic replacement**
+- [x] **Step 5: Implement per-dataset staged atomic replacement**
 
 For one dataset at a time:
 
@@ -534,7 +536,7 @@ For one dataset at a time:
 
 Record one row in existing `research_migrations` with the fixed migration id, source root, pre-migration manifest hash, `completed` status, and the full JSON report.
 
-- [ ] **Step 6: Add the audit and migration CLI commands and test them**
+- [x] **Step 6: Add the audit and migration CLI commands and test them**
 
 Add:
 
@@ -574,7 +576,7 @@ def data_migrate_time_semantics(
     )
 ```
 
-- [ ] **Step 7: Run tests and verify GREEN**
+- [x] **Step 7: Run tests and verify GREEN**
 
 ```bash
 .venv/bin/pytest tests/test_research_time_migration.py tests/test_cli.py -q
@@ -582,7 +584,7 @@ def data_migrate_time_semantics(
 
 Expected: PASS.
 
-- [ ] **Step 8: Run storage regression tests**
+- [x] **Step 8: Run storage regression tests**
 
 ```bash
 .venv/bin/pytest tests/test_research_schema.py tests/test_research_warehouse.py tests/test_research_migration.py tests/test_research_partition_query.py -q
