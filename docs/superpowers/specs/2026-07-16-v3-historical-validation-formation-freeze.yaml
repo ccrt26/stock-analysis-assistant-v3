@@ -1,0 +1,106 @@
+schema_version: 1
+frozen_at: 2026-07-16
+formation_generator_commit: 34a7b4480e96f50ee0115d88591c09b5b4eeeacb
+temporary_formation_pack_sha256: f6a37c77c12a86aa8f2a2967ac4b3962c3db4f422f288f73f89e00b0a8a54dbe
+validation_class: pseudo_out_of_sample_business_date_reconstruction
+human_framework_status: not_executable
+human_framework_reason: >-
+  公告正文的经济实质和逐公司完整证据卡尚无可重复的历史压缩协议；本批不得用模型事后判断补齐。
+probe_warning: >-
+  以下名单只用于比较发现架构，不是生产评分、推荐名单或买卖规则。
+probe_order:
+  - hotspot_probe
+  - earnings_probe
+  - price_probe
+  - parallel_round_robin_probe
+formation_dates:
+  '2025-08-15':
+    universe_count: 5186
+    stock_context_count: 5178
+    hotspot_group_count: 685
+    route_counts: {hotspot: 30, earnings: 30, event: 30, cycle: 30, distress: 30, price: 30}
+    hotspot_probe: [601606.SH, 301357.SZ, 002097.SZ, 920942.BJ, 603256.SH, 300706.SZ, 688025.SH, 300486.SZ, 300731.SZ, 603757.SH]
+    earnings_probe: [002553.SZ, 002645.SZ, 688511.SH, 688696.SH, 688768.SH, 000789.SZ, 002778.SZ, 002931.SZ, 002058.SZ, 002370.SZ]
+    price_probe: [688108.SH, 688110.SH, 603516.SH, 920942.BJ, 002097.SZ, 300436.SZ, 301489.SZ, 301038.SZ, 600749.SH, 601929.SH]
+    parallel_round_robin_probe: [601606.SH, 002553.SZ, 301389.SZ, 002645.SZ, 000876.SZ, 688108.SH, 688511.SH, 002402.SZ, 000789.SZ, 002624.SZ]
+  '2025-09-12':
+    universe_count: 5192
+    stock_context_count: 5189
+    hotspot_group_count: 685
+    route_counts: {hotspot: 30, earnings: 6, event: 30, cycle: 1, distress: 0, price: 30}
+    hotspot_probe: [605188.SH, 300450.SZ, 920274.BJ, 000603.SZ, 002759.SZ, 688006.SH, 300014.SZ, 002378.SZ, 000988.SZ, 300528.SZ]
+    earnings_probe: [300746.SZ, 300435.SZ, 002475.SZ, 603370.SH, 301575.SZ, 002636.SZ]
+    price_probe: [920274.BJ, 301488.SZ, 300450.SZ, 300475.SZ, 688577.SH, 600376.SH, 301617.SZ, 688195.SH, 605298.SH, 603083.SH]
+    parallel_round_robin_probe: [605188.SH, 300746.SZ, 688521.SH, 002636.SZ, 920274.BJ, 300435.SZ, 300997.SZ, 301488.SZ, 300450.SZ, 300859.SZ]
+  '2025-10-20':
+    universe_count: 5203
+    stock_context_count: 5197
+    hotspot_group_count: 685
+    route_counts: {hotspot: 30, earnings: 30, event: 30, cycle: 30, distress: 7, price: 30}
+    hotspot_probe: [601011.SH, 600408.SH, 600403.SH, 600121.SH, 601699.SH, 688072.SH, 601212.SH, 600758.SH, 600635.SH, 600617.SH]
+    earnings_probe: [603086.SH, 002171.SZ, 002846.SZ, 300322.SZ, 688768.SH, 600382.SH, 600392.SH, 002734.SZ, 300138.SZ, 000970.SZ]
+    price_probe: [600629.SH, 603301.SH, 600403.SH, 300959.SZ, 002208.SZ, 688691.SH, 002320.SZ, 001309.SZ, 688123.SH, 301308.SZ]
+    parallel_round_robin_probe: [601011.SH, 603086.SH, 300588.SZ, 002171.SZ, 300533.SZ, 600629.SH, 002846.SZ, 301468.SZ, 688768.SH, 600022.SH]
+  '2025-11-17':
+    universe_count: 5214
+    stock_context_count: 5207
+    hotspot_group_count: 685
+    route_counts: {hotspot: 30, earnings: 19, event: 30, cycle: 10, distress: 3, price: 30}
+    hotspot_probe: [688353.SH, 001203.SZ, 002240.SZ, 600408.SH, 600792.SH, 002407.SZ, 300390.SZ, 002895.SZ, 301358.SZ, 002083.SZ]
+    earnings_probe: [688768.SH, 688183.SH, 688322.SH, 002669.SZ, 688522.SH, 688213.SH, 600259.SH, 003035.SZ, 600150.SH, 600183.SH]
+    price_probe: [300300.SZ, 000592.SZ, 688353.SH, 300390.SZ, 301292.SZ, 001203.SZ, 000620.SZ, 002451.SZ, 600408.SH, 002083.SZ]
+    parallel_round_robin_probe: [688353.SH, 688768.SH, 603353.SH, 688322.SH, 600259.SH, 300300.SZ, 688183.SH, 002868.SZ, 002669.SZ, 000592.SZ]
+  '2025-12-15':
+    universe_count: 5224
+    stock_context_count: 5215
+    hotspot_group_count: 685
+    route_counts: {hotspot: 30, earnings: 1, event: 30, cycle: 1, distress: 0, price: 30}
+    hotspot_probe: [688523.SH, 600879.SH, 300102.SZ, 002792.SZ, 603601.SH, 920576.BJ, 000547.SZ, 002413.SZ, 688205.SH, 300900.SZ]
+    earnings_probe: [688796.SH]
+    price_probe: [301232.SZ, 300456.SZ, 920576.BJ, 600343.SH, 002565.SZ, 000547.SZ, 301005.SZ, 600151.SH, 603601.SH, 002149.SZ]
+    parallel_round_robin_probe: [688523.SH, 688796.SH, 301468.SZ, 301232.SZ, 688291.SH, 300456.SZ, 600879.SH, 603993.SH, 920576.BJ, 300102.SZ]
+  '2026-01-14':
+    universe_count: 5239
+    stock_context_count: 5223
+    hotspot_group_count: 685
+    route_counts: {hotspot: 30, earnings: 30, event: 30, cycle: 30, distress: 5, price: 30}
+    hotspot_probe: [600118.SH, 601698.SH, 300058.SZ, 688387.SH, 300785.SZ, 301171.SZ, 002131.SZ, 600776.SH, 002195.SZ, 300253.SZ]
+    earnings_probe: [300871.SZ, 300435.SZ, 688332.SH, 300138.SZ, 002010.SZ, 603590.SH, 300773.SZ, 002846.SZ, 301200.SZ, 300620.SZ]
+    price_probe: [002361.SZ, 300058.SZ, 688258.SH, 688031.SH, 688125.SH, 301171.SZ, 600783.SH, 688387.SH, 300342.SZ, 002788.SZ]
+    parallel_round_robin_probe: [600118.SH, 300871.SZ, 920116.BJ, 300138.SZ, 300435.SZ, 002361.SZ, 688332.SH, 000691.SZ, 002010.SZ, 002757.SZ]
+  '2026-02-11':
+    universe_count: 5253
+    stock_context_count: 5246
+    hotspot_group_count: 685
+    route_counts: {hotspot: 30, earnings: 30, event: 30, cycle: 30, distress: 30, price: 30}
+    hotspot_probe: [920368.BJ, 603256.SH, 002440.SZ, 301526.SZ, 601869.SH, 300191.SZ, 002623.SZ, 688516.SH, 300164.SZ, 002842.SZ]
+    earnings_probe: [002058.SZ, 603268.SH, 600768.SH, 600867.SH, 688498.SH, 600382.SH, 688108.SH, 688629.SH, 603585.SH, 300899.SZ]
+    price_probe: [300461.SZ, 920368.BJ, 002455.SZ, 601869.SH, 002842.SZ, 300749.SZ, 688516.SH, 002440.SZ, 603103.SH, 603629.SH]
+    parallel_round_robin_probe: [920368.BJ, 002058.SZ, 002623.SZ, 603268.SH, 000656.SZ, 300461.SZ, 600768.SH, 002358.SZ, 600382.SH, 600841.SH]
+  '2026-03-19':
+    universe_count: 5260
+    stock_context_count: 5257
+    hotspot_group_count: 685
+    route_counts: {hotspot: 30, earnings: 5, event: 30, cycle: 2, distress: 1, price: 30}
+    hotspot_probe: [600227.SH, 601016.SH, 600722.SH, 300164.SZ, 001896.SZ, 920088.BJ, 600821.SH, 300317.SZ, 600726.SH, 000601.SZ]
+    earnings_probe: [688678.SH, 688378.SH, 605068.SH, 688578.SH, 688041.SH]
+    price_probe: [000890.SZ, 688295.SH, 001896.SZ, 600726.SH, 301373.SZ, 301396.SZ, 600821.SH, 600396.SH, 600227.SH, 300164.SZ]
+    parallel_round_robin_probe: [600227.SH, 688678.SH, 600714.SH, 688041.SH, 605068.SH, 000890.SZ, 688378.SH, 688519.SH, 688295.SH, 601016.SH]
+  '2026-04-17':
+    universe_count: 5279
+    stock_context_count: 5274
+    hotspot_group_count: 685
+    route_counts: {hotspot: 30, earnings: 30, event: 30, cycle: 30, distress: 10, price: 30}
+    hotspot_probe: [002192.SZ, 601869.SH, 603256.SH, 002580.SZ, 300548.SZ, 002008.SZ, 300489.SZ, 300390.SZ, 600152.SH, 000762.SZ]
+    earnings_probe: [300390.SZ, 002297.SZ, 300475.SZ, 001309.SZ, 002439.SZ, 688308.SH, 300497.SZ, 603032.SH, 000973.SZ, 601069.SH]
+    price_probe: [002580.SZ, 688677.SH, 603538.SH, 300668.SZ, 002328.SZ, 300868.SZ, 002980.SZ, 300390.SZ, 301189.SZ, 688628.SH]
+    parallel_round_robin_probe: [002192.SZ, 300390.SZ, 300548.SZ, 002297.SZ, 001309.SZ, 002580.SZ, 300475.SZ, 301055.SZ, 688308.SH, 603026.SH]
+  '2026-05-20':
+    universe_count: 5294
+    stock_context_count: 5288
+    hotspot_group_count: 685
+    route_counts: {hotspot: 30, earnings: 15, event: 30, cycle: 4, distress: 5, price: 30}
+    hotspot_probe: [688409.SH, 688146.SH, 688449.SH, 688268.SH, 301319.SZ, 688008.SH, 688478.SH, 688515.SH, 002008.SZ, 002484.SZ]
+    earnings_probe: [002466.SZ, 000603.SZ, 603516.SH, 002838.SZ, 002769.SZ, 300169.SZ, 002131.SZ, 300746.SZ, 603936.SH, 600378.SH]
+    price_probe: [001259.SZ, 300302.SZ, 300721.SZ, 688146.SH, 301511.SZ, 300632.SZ, 300959.SZ, 300209.SZ, 603115.SH, 688143.SH]
+    parallel_round_robin_probe: [688409.SH, 002466.SZ, 300069.SZ, 000603.SZ, 002769.SZ, 001259.SZ, 603516.SH, 300820.SZ, 600378.SH, 002131.SZ]
