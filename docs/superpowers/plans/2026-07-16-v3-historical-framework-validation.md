@@ -1,5 +1,7 @@
 # V3 Historical Framework Validation Implementation Plan
 
+> **Current status authority:** This plan records historical execution work and does not prove current production capability; current status is authoritative only in `docs/operations/production-capability-matrix.md`.
+>
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Execute a reproducible first historical validation batch for the repaired V3 discovery framework and report what is supported, rejected, or still untestable.

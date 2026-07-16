@@ -159,6 +159,34 @@ def test_effective_membership_is_applied_on_each_historical_session() -> None:
     assert row["turnover_share_change_3d"] == pytest.approx(0.0)
 
 
+def test_new_high_is_unavailable_when_no_member_spans_the_full_window() -> None:
+    dates = pd.bdate_range(end=ANALYSIS_DATE, periods=61)
+    equity = _daily(dates, {"A.SZ": (10.0, 0.1)})
+    catalog = _catalog().query("group_code == 'T1'").reset_index(drop=True)
+    members = pd.DataFrame(
+        [
+            {
+                "group_type": "theme",
+                "group_code": "T1",
+                "ts_code": "A.SZ",
+                "valid_from": dates[-1].date(),
+                "valid_to": None,
+            }
+        ]
+    )
+
+    row = _compute(
+        equity,
+        dates,
+        catalog=catalog,
+        members=members,
+    ).iloc[0]
+
+    assert row["new_high_observed_member_count_60d"] == 0
+    assert row["new_high_member_coverage_ratio_60d"] == 0.0
+    assert np.isnan(row["new_high_60d_share"])
+
+
 def test_sector_returns_use_adjusted_member_prices() -> None:
     dates = pd.bdate_range(end=ANALYSIS_DATE, periods=2)
     equity = _daily(dates, {"A.SZ": (10.0, -5.0)})

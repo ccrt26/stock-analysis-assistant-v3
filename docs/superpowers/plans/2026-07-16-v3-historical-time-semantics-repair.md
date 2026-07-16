@@ -649,7 +649,7 @@ If the Task 1–4 code already satisfies the test, prove the regression test is 
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit Task 5**
+- [x] **Step 5: Commit Task 5**
 
 ```bash
 git add tests/test_research_historical_availability.py tests/test_research_feature_job.py
@@ -667,7 +667,7 @@ git commit -m "test: prove strict historical research availability"
 - Fixed migration id: `2026-07-16-historical-time-semantics-v1`.
 - Formal audit records pre/post coverage, changed datasets, conservation results, migration receipt, derived recomputations, and strict replay limitations.
 
-- [ ] **Step 1: Capture the real pre-migration audit**
+- [x] **Step 1: Capture the real pre-migration audit**
 
 Run:
 
@@ -677,7 +677,7 @@ Run:
 
 The JSON must record all 29 datasets, partition/row coverage, min/max business time, min/max `available_at`, min/max `ingested_at`, revision count, policy, and strict replay level.
 
-- [ ] **Step 2: Run the real temporal migration**
+- [x] **Step 2: Run the real temporal migration**
 
 ```bash
 .venv/bin/python -m stock_analyzer data migrate-time-semantics --migration-id 2026-07-16-historical-time-semantics-v1
@@ -685,11 +685,11 @@ The JSON must record all 29 datasets, partition/row coverage, min/max business t
 
 Expected: exit 0 and a non-empty changed dataset count.
 
-- [ ] **Step 3: Verify idempotence immediately**
+- [x] **Step 3: Verify idempotence immediately**
 
 Run the same command again. Expected: exit 0 and `already_completed=true`.
 
-- [ ] **Step 4: Run post-migration read-only invariants**
+- [x] **Step 4: Run post-migration read-only invariants**
 
 Run:
 
@@ -706,7 +706,7 @@ Verify:
 - `security_master`, `company_profile`, and `pledge` are unavailable before their actual ingestion;
 - future official announcements and financial revisions remain excluded at historical cutoffs.
 
-- [ ] **Step 5: Recompute affected current derived partitions**
+- [x] **Step 5: Recompute affected current derived partitions**
 
 Read `research_derived_partitions.input_manifest_json`, select analysis dates whose fact snapshots reference changed file SHA-256 values, and invoke:
 
@@ -718,11 +718,11 @@ Read `research_derived_partitions.input_manifest_json`, select analysis dates wh
 
 Only run dates that exist in the current derived manifest. Verify the stored fact snapshot hashes now match the migrated fact files and the three feature sets read back successfully.
 
-- [ ] **Step 6: Execute one real strict historical recomputation**
+- [x] **Step 6: Execute one real strict historical recomputation**
 
 Run `run_research_features()` for 2025-08-15 with an explicit 2025-08-15 23:59:59 Asia/Shanghai cutoff. It must complete without the historical validation module's trade-date reconstruction path. Preserve the resulting derived partition as migration verification evidence, not as a new selection result.
 
-- [ ] **Step 7: Write the formal operations record**
+- [x] **Step 7: Write the formal operations record**
 
 `docs/operations/2026-07-16-v3-historical-time-semantics-repair.md` must contain:
 
@@ -745,7 +745,7 @@ Run `run_research_features()` for 2025-08-15 with an explicit 2025-08-15 23:59:5
 - Update: `docs/operations/2026-07-16-v3-historical-time-semantics-repair.md`
 - Update plan checkboxes in this file.
 
-- [ ] **Step 1: Run the focused temporal suite**
+- [x] **Step 1: Run the focused temporal suite**
 
 ```bash
 .venv/bin/pytest tests/test_research_time.py tests/test_research_time_migration.py tests/test_research_historical_availability.py tests/test_research_as_of.py tests/test_research_partition_query.py tests/test_research_warehouse.py tests/test_research_market_backfill.py tests/test_classification_backfill.py tests/test_fundamental_backfill.py tests/test_event_backfill.py tests/test_trading_structure_backfill.py tests/test_research_feature_job.py -q
@@ -753,7 +753,7 @@ Run `run_research_features()` for 2025-08-15 with an explicit 2025-08-15 23:59:5
 
 Expected: all pass.
 
-- [ ] **Step 2: Run all research data and feature contract tests**
+- [x] **Step 2: Run all research data and feature contract tests**
 
 ```bash
 .venv/bin/pytest tests/test_research_contracts.py tests/test_research_schema.py tests/test_research_migration.py tests/test_research_derived_store.py tests/test_research_health.py tests/test_research_data_job.py tests/test_research_gap_repair.py tests/test_market_context_features.py tests/test_hotspot_features.py tests/test_stock_context_features.py -q
@@ -761,7 +761,7 @@ Expected: all pass.
 
 Expected: all pass.
 
-- [ ] **Step 3: Run the full suite**
+- [x] **Step 3: Run the full suite**
 
 ```bash
 .venv/bin/pytest -q
@@ -769,7 +769,7 @@ Expected: all pass.
 
 Expected: zero failures.
 
-- [ ] **Step 4: Verify current real health and derived state**
+- [x] **Step 4: Verify current real health and derived state**
 
 ```bash
 .venv/bin/python -m stock_analyzer data health --data-date 2026-07-15 --full-history
@@ -777,7 +777,7 @@ Expected: zero failures.
 
 Expected: command exits 0, current core facts remain complete, and affected derived partitions validate against their new input manifests.
 
-- [ ] **Step 5: Run repository and scope checks**
+- [x] **Step 5: Run repository and scope checks**
 
 ```bash
 git diff --check
@@ -788,11 +788,11 @@ git status --short
 
 Expected: no whitespace errors, no query bypass, no out-of-scope feature logic, and only task files plus expected local data artifacts changed.
 
-- [ ] **Step 6: Re-read the design and check every acceptance criterion**
+- [x] **Step 6: Re-read the design and check every acceptance criterion**
 
 Create a line-by-line checklist against `docs/superpowers/specs/2026-07-16-v3-historical-time-semantics-repair-design.md`. Add any missing evidence to the operations document before claiming completion.
 
-- [ ] **Step 7: Stage and inspect the final code/document scope**
+- [x] **Step 7: Stage and inspect the final code/document scope**
 
 ```bash
 git add src tests docs/superpowers/plans/2026-07-16-v3-historical-time-semantics-repair.md docs/operations/2026-07-16-v3-historical-time-semantics-repair.md docs/operations/production-capability-matrix.md docs/operations/runbook.md
@@ -800,13 +800,13 @@ git diff --cached --check
 git diff --cached --stat
 ```
 
-- [ ] **Step 8: Commit the completed repair on current main**
+- [x] **Step 8: Commit the completed repair on current main**
 
 ```bash
 git commit -m "fix: restore strict historical fact availability"
 ```
 
-- [ ] **Step 9: Report in plain language**
+- [x] **Step 9: Report in plain language**
 
 Report:
 

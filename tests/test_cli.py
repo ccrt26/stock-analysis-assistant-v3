@@ -1019,6 +1019,8 @@ def test_time_semantics_audit_and_migration_commands_use_local_warehouse(
             "migrate-time-semantics",
             "--migration-id",
             "cli-time-semantics-v1",
+            "--output",
+            str(tmp_path / "audit" / "migration.json"),
         ],
     )
     repeated = CliRunner().invoke(
@@ -1035,6 +1037,9 @@ def test_time_semantics_audit_and_migration_commands_use_local_warehouse(
     assert len(json.loads(output.read_text(encoding="utf-8"))) == 29
     assert migration.exit_code == 0, migration.output
     assert "changed=0" in migration.output
+    assert json.loads(
+        (tmp_path / "audit" / "migration.json").read_text(encoding="utf-8")
+    )["conservation_passed"] is True
     assert repeated.exit_code == 0, repeated.output
     assert "already_completed=true" in repeated.output
 

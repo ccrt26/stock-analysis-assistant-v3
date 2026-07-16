@@ -229,32 +229,33 @@ def _seed_historical_feature_facts(warehouse: ResearchWarehouse) -> tuple[date, 
                 for code in _INDEX_CODES
             ],
         )
-        _commit(
-            warehouse,
-            ResearchDatasetId.INDUSTRY_DAILY,
-            partition,
-            [
-                {
-                    "trade_date": trading_date,
-                    "industry_code": "801010.SI",
-                    "close": 100.0 + sequence * 0.1,
-                    "available_at": _BAD_BACKFILL,
-                }
-            ],
-        )
-        _commit(
-            warehouse,
-            ResearchDatasetId.THEME_DAILY,
-            partition,
-            [
-                {
-                    "trade_date": trading_date,
-                    "theme_code": "000802.SH",
-                    "close": 100.0 + sequence * 0.1,
-                    "available_at": _BAD_BACKFILL,
-                }
-            ],
-        )
+        if trading_date >= date(2025, 7, 2):
+            _commit(
+                warehouse,
+                ResearchDatasetId.INDUSTRY_DAILY,
+                partition,
+                [
+                    {
+                        "trade_date": trading_date,
+                        "industry_code": "801010.SI",
+                        "close": 100.0 + sequence * 0.1,
+                        "available_at": _BAD_BACKFILL,
+                    }
+                ],
+            )
+            _commit(
+                warehouse,
+                ResearchDatasetId.THEME_DAILY,
+                partition,
+                [
+                    {
+                        "trade_date": trading_date,
+                        "theme_code": "000802.SH",
+                        "close": 100.0 + sequence * 0.1,
+                        "available_at": _BAD_BACKFILL,
+                    }
+                ],
+            )
     future_announcement = datetime(
         2025, 8, 20, 9, tzinfo=ZoneInfo("Asia/Shanghai")
     )

@@ -176,6 +176,10 @@ def test_historical_relationship_hides_future_end_boundary(tmp_path):
         ResearchDatasetId.THEME_MEMBER,
         datetime(2025, 8, 15, 15, 59, tzinfo=timezone.utc),
     )
+    on_end_day = query.dataset_as_of(
+        ResearchDatasetId.THEME_MEMBER,
+        datetime(2025, 8, 28, 15, 59, tzinfo=timezone.utc),
+    )
     after_end = query.dataset_as_of(
         ResearchDatasetId.THEME_MEMBER,
         datetime(2025, 8, 29, 15, 59, tzinfo=timezone.utc),
@@ -183,6 +187,7 @@ def test_historical_relationship_hides_future_end_boundary(tmp_path):
 
     assert before_end["ts_code"].tolist() == ["000001.SZ"]
     assert pd.isna(before_end.iloc[0]["valid_to"])
+    assert pd.isna(on_end_day.iloc[0]["valid_to"])
     assert pd.Timestamp(after_end.iloc[0]["valid_to"]).date() == date(2025, 8, 28)
 
 

@@ -449,6 +449,8 @@ def _new_high_observations(
     continuous = set(current_codes)
     for trading_day in window_dates:
         continuous &= set(_effective_codes(group_members, trading_day))
+    if not continuous:
+        return empty
     sample = equity_close.reindex(index=window_dates, columns=sorted(continuous))
     valid_columns = sample.columns[
         sample.apply(lambda values: bool(_finite_positive(values).all()), axis=0)

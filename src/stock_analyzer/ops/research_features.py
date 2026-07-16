@@ -307,6 +307,25 @@ def run_research_features(
         calculate=calculate_market,
     )
 
+    industry_daily_dates = _optional_date_partitions(
+        warehouse,
+        ResearchDatasetId.INDUSTRY_DAILY,
+        price_dates,
+    )
+    theme_daily_dates = _optional_date_partitions(
+        warehouse,
+        ResearchDatasetId.THEME_DAILY,
+        price_dates,
+    )
+    if len(industry_daily_dates) < len(price_dates):
+        limitations.append(
+            "行业指数日线历史短于价格窗口，仅使用截止时点已存在分区"
+        )
+    if len(theme_daily_dates) < len(price_dates):
+        limitations.append(
+            "主题指数日线历史短于价格窗口，仅使用截止时点已存在分区"
+        )
+
     def sector_inputs() -> dict[ResearchDatasetId, Iterable[str]]:
         inputs: dict[ResearchDatasetId, Iterable[str]] = {
             **calendar_input,
@@ -320,14 +339,14 @@ def run_research_features(
             ResearchDatasetId.INDUSTRY_MEMBER: partitions(
                 ResearchDatasetId.INDUSTRY_MEMBER
             ),
-            ResearchDatasetId.INDUSTRY_DAILY: price_dates,
+            ResearchDatasetId.INDUSTRY_DAILY: industry_daily_dates,
             ResearchDatasetId.THEME_CATALOG: partitions(
                 ResearchDatasetId.THEME_CATALOG
             ),
             ResearchDatasetId.THEME_MEMBER: partitions(
                 ResearchDatasetId.THEME_MEMBER
             ),
-            ResearchDatasetId.THEME_DAILY: price_dates,
+            ResearchDatasetId.THEME_DAILY: theme_daily_dates,
         }
         if minute_partitions:
             inputs[ResearchDatasetId.MINUTE_BAR] = minute_partitions

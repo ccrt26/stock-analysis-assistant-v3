@@ -337,6 +337,7 @@ def data_audit_time_semantics(
 @data_app.command("migrate-time-semantics")
 def data_migrate_time_semantics(
     migration_id: str = typer.Option(..., "--migration-id"),
+    output: Path | None = typer.Option(None, "--output"),
 ) -> None:
     from stock_analyzer.storage.research_time_migration import (
         migrate_research_time_semantics,
@@ -348,6 +349,9 @@ def data_migrate_time_semantics(
         ResearchWarehouse(config.local_warehouse_dir),
         migration_id=migration_id,
     )
+    if output is not None:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(report.model_dump_json(indent=2), encoding="utf-8")
     typer.echo(
         f"time semantics migration {report.migration_id}: "
         f"changed={len(report.changed_datasets)} "

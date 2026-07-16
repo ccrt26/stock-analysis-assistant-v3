@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import shutil
 from datetime import date, datetime, timezone
+from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -330,6 +332,163 @@ def test_temporal_migration_rolls_back_files_when_metadata_update_fails(
     ] == before_available
 
 
+def test_temporal_migration_restores_original_when_promotion_rename_fails(
+    tmp_path, monkeypatch
+):
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    _commit(
+        warehouse,
+        ResearchDatasetId.TRADE_CALENDAR,
+        "2025",
+        [{
+            "exchange": "SSE",
+            "cal_date": date(2025, 8, 15),
+            "is_open": True,
+            "available_at": _BACKFILL,
+        }],
+        run_id="calendar",
+    )
+    path = warehouse.root / str(
+        warehouse.partition_manifest(ResearchDatasetId.TRADE_CALENDAR).iloc[0][
+            "relative_path"
+        ]
+    )
+    before_sha = sha256_file(path)
+    original_replace = Path.replace
+
+    def fail_staged_promotion(source: Path, target: Path):
+        if source.name == "next" and "time-semantics" in source.parts:
+            raise OSError("simulated promotion rename failure")
+        return original_replace(source, target)
+
+    monkeypatch.setattr(Path, "replace", fail_staged_promotion)
+
+    with pytest.raises(OSError, match="simulated promotion rename failure"):
+        migrate_research_time_semantics(
+            warehouse,
+            migration_id="temporal-promotion-failure-v1",
+        )
+
+    assert path.is_file()
+    assert sha256_file(path) == before_sha
+
+
+@pytest.mark.parametrize("failed_rename", ["displace-current", "restore-backup"])
+def test_temporal_migration_preserves_backup_when_rollback_rename_fails(
+    tmp_path, monkeypatch, failed_rename
+):
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    _commit(
+        warehouse,
+        ResearchDatasetId.TRADE_CALENDAR,
+        "2025",
+        [{
+            "exchange": "SSE",
+            "cal_date": date(2025, 8, 15),
+            "is_open": True,
+            "available_at": _BACKFILL,
+        }],
+        run_id="calendar",
+    )
+    target_dataset = warehouse.facts_root / "trade_calendar"
+    path = warehouse.root / str(
+        warehouse.partition_manifest(ResearchDatasetId.TRADE_CALENDAR).iloc[0][
+            "relative_path"
+        ]
+    )
+    relative_partition = path.relative_to(target_dataset)
+    before_sha = sha256_file(path)
+    migration_id = f"temporal-{failed_rename}-v1"
+    backup_dataset = (
+        warehouse.staging_root
+        / "time-semantics"
+        / migration_id
+        / "trade_calendar"
+        / "previous"
+    )
+    original_replace = Path.replace
+
+    def fail_selected_rollback(source: Path, target: Path):
+        if (
+            failed_rename == "displace-current"
+            and source == target_dataset
+            and target.name.startswith("failed-")
+        ):
+            raise OSError("simulated rollback displacement failure")
+        if failed_rename == "restore-backup" and source == backup_dataset:
+            raise OSError("simulated backup restoration failure")
+        return original_replace(source, target)
+
+    monkeypatch.setattr(Path, "replace", fail_selected_rollback)
+    monkeypatch.setattr(
+        migration_module,
+        "_update_dataset_metadata",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            RuntimeError("simulated metadata failure")
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="rollback failed"):
+        migrate_research_time_semantics(warehouse, migration_id=migration_id)
+
+    preserved = backup_dataset / relative_partition
+    assert preserved.is_file()
+    assert sha256_file(preserved) == before_sha
+
+    monkeypatch.undo()
+    with pytest.raises(
+        migration_module.TemporalMigrationRecoveryError,
+        match="preserved recovery artifacts",
+    ):
+        migrate_research_time_semantics(warehouse, migration_id=migration_id)
+    assert preserved.is_file()
+    assert sha256_file(preserved) == before_sha
+
+
+def test_temporal_migration_verification_failure_restores_files_and_metadata(
+    tmp_path, monkeypatch
+):
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    _commit(
+        warehouse,
+        ResearchDatasetId.TRADE_CALENDAR,
+        "2025",
+        [{
+            "exchange": "SSE",
+            "cal_date": date(2025, 8, 15),
+            "is_open": True,
+            "available_at": _BACKFILL,
+        }],
+        run_id="calendar",
+    )
+    manifest_before = warehouse.partition_manifest(
+        ResearchDatasetId.TRADE_CALENDAR
+    ).iloc[0]
+    path = warehouse.root / str(manifest_before["relative_path"])
+    before_sha = sha256_file(path)
+
+    monkeypatch.setattr(
+        migration_module,
+        "_verify_promoted_dataset",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            RuntimeError("simulated verification failure")
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="simulated verification failure"):
+        migrate_research_time_semantics(
+            warehouse,
+            migration_id="temporal-verification-failure-v1",
+        )
+
+    assert sha256_file(path) == before_sha
+    manifest_after = warehouse.partition_manifest(
+        ResearchDatasetId.TRADE_CALENDAR
+    ).iloc[0]
+    assert manifest_after["file_sha256"] == manifest_before["file_sha256"]
+    assert manifest_after["min_available_at"] == manifest_before["min_available_at"]
+
+
 def test_temporal_migration_is_idempotent_and_audit_covers_registry(tmp_path):
     warehouse = _seed_affected_warehouse(tmp_path / "warehouse")
     first = migrate_research_time_semantics(
@@ -349,6 +508,7 @@ def test_temporal_migration_is_idempotent_and_audit_covers_registry(tmp_path):
     )
 
     assert first.already_completed is False
+    assert first.result_manifest_hash
     assert second.already_completed is True
     assert {
         dataset: tuple(
@@ -361,3 +521,46 @@ def test_temporal_migration_is_idempotent_and_audit_covers_registry(tmp_path):
     assert {item.dataset_id for item in audit} == {
         dataset.value for dataset in ResearchDatasetId
     }
+
+
+def test_completed_temporal_migration_fails_closed_when_warehouse_drifts(tmp_path):
+    warehouse = _seed_affected_warehouse(tmp_path / "warehouse")
+    migrate_research_time_semantics(
+        warehouse,
+        migration_id="temporal-drift-v1",
+    )
+    _commit(
+        warehouse,
+        ResearchDatasetId.TRADE_CALENDAR,
+        "2025",
+        [{
+            "exchange": "SSE",
+            "cal_date": date(2025, 8, 17),
+            "is_open": False,
+        }],
+        run_id="calendar-after-migration",
+        ingested_at=datetime(2026, 7, 14, tzinfo=timezone.utc),
+    )
+
+    with pytest.raises(ValueError, match="completed migration receipt.*drift"):
+        migrate_research_time_semantics(
+            warehouse,
+            migration_id="temporal-drift-v1",
+        )
+
+
+def test_completed_temporal_migration_receipt_is_bound_to_warehouse_root(tmp_path):
+    source_root = tmp_path / "warehouse"
+    warehouse = _seed_affected_warehouse(source_root)
+    migrate_research_time_semantics(
+        warehouse,
+        migration_id="temporal-root-v1",
+    )
+    relocated_root = tmp_path / "relocated"
+    shutil.copytree(source_root, relocated_root)
+
+    with pytest.raises(ValueError, match="completed migration receipt.*root"):
+        migrate_research_time_semantics(
+            ResearchWarehouse(relocated_root),
+            migration_id="temporal-root-v1",
+        )

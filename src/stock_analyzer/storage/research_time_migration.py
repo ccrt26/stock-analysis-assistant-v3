@@ -92,6 +92,7 @@ class TemporalDatasetAudit(BaseModel):
 class TemporalMigrationReport(BaseModel):
     migration_id: str
     source_manifest_hash: str
+    result_manifest_hash: str | None = None
     changed_datasets: tuple[str, ...]
     partition_count: int
     row_count: int
@@ -100,6 +101,10 @@ class TemporalMigrationReport(BaseModel):
     already_completed: bool = False
     before_audit: tuple[TemporalDatasetAudit, ...]
     after_audit: tuple[TemporalDatasetAudit, ...]
+
+
+class TemporalMigrationRecoveryError(RuntimeError):
+    """Raised when automatic rollback cannot safely restore the canonical path."""
 
 
 def audit_research_time_semantics(
@@ -147,12 +152,16 @@ def migrate_research_time_semantics(
     cleaned_id = migration_id.strip()
     if not cleaned_id:
         raise ValueError("migration_id must not be blank")
+    _assert_no_preserved_recovery_artifacts(warehouse, cleaned_id)
     completed = _completed_report(warehouse, cleaned_id)
     if completed is not None:
         return completed.model_copy(update={"already_completed": True})
 
     before = audit_research_time_semantics(warehouse)
     source_manifest_hash = _manifest_hash(warehouse)
+    for dataset in ResearchDatasetId:
+        if dataset in _MIGRATION_DATASETS:
+            _preflight_dataset_revisions(warehouse, dataset)
     changed: list[str] = []
     for dataset in ResearchDatasetId:
         if dataset not in _MIGRATION_DATASETS:
@@ -161,9 +170,11 @@ def migrate_research_time_semantics(
             changed.append(dataset.value)
     after = audit_research_time_semantics(warehouse)
     _assert_audit_conservation(before, after)
+    result_manifest_hash = _validated_manifest_hash(warehouse)
     report = TemporalMigrationReport(
         migration_id=cleaned_id,
         source_manifest_hash=source_manifest_hash,
+        result_manifest_hash=result_manifest_hash,
         changed_datasets=tuple(changed),
         partition_count=sum(item.partition_count for item in after),
         row_count=sum(item.row_count for item in after),
@@ -174,6 +185,62 @@ def migrate_research_time_semantics(
     )
     _record_completed_migration(warehouse, report)
     return report
+
+
+def _assert_no_preserved_recovery_artifacts(
+    warehouse: ResearchWarehouse,
+    migration_id: str,
+) -> None:
+    recovery_root = (
+        warehouse.staging_root / "time-semantics" / migration_id
+    )
+    if not recovery_root.exists():
+        return
+    backups = sorted(
+        path for path in recovery_root.glob("*/previous") if path.is_dir()
+    )
+    if backups:
+        locations = ", ".join(str(path) for path in backups)
+        raise TemporalMigrationRecoveryError(
+            "preserved recovery artifacts require explicit restoration before "
+            f"retrying migration {migration_id}: {locations}"
+        )
+
+
+def _preflight_dataset_revisions(
+    warehouse: ResearchWarehouse,
+    dataset: ResearchDatasetId,
+) -> None:
+    revisions = _revision_records(warehouse, dataset)
+    if not revisions:
+        return
+    if dataset in _RECONSTRUCT_DATASETS:
+        raise ValueError(
+            f"{dataset.value} has revisions; deterministic initial-time "
+            "migration refuses to backdate later versions"
+        )
+    keys_by_partition: dict[str, set[str]] = defaultdict(set)
+    for revision in revisions:
+        keys_by_partition[str(revision["partition_value"])].add(
+            str(revision["business_key_hash"])
+        )
+    current_by_key: dict[str, dict[str, Any]] = {}
+    original_current_by_key: dict[str, dict[str, Any]] = {}
+    for partition, key_hashes in keys_by_partition.items():
+        current = warehouse.read_current(dataset, partition_value=partition)
+        selected = current[
+            current["business_key_hash"].astype(str).isin(key_hashes)
+        ]
+        for row in selected.to_dict(orient="records"):
+            original_current_by_key[str(row["business_key_hash"])] = row
+        for row in _transform_frame(dataset, selected).to_dict(orient="records"):
+            current_by_key[str(row["business_key_hash"])] = row
+    _transform_revisions(
+        dataset,
+        revisions,
+        current_by_key,
+        original_current_by_key,
+    )
 
 
 def _migrate_dataset(
@@ -204,7 +271,9 @@ def _migrate_dataset(
     metadata_updates: list[dict[str, Any]] = []
     original_partition_updates: list[dict[str, Any]] = []
     current_by_key: dict[str, dict[str, Any]] = {}
+    original_current_by_key: dict[str, dict[str, Any]] = {}
     changed = False
+    cleanup_stage = True
 
     try:
         for metadata in manifest.to_dict(orient="records"):
@@ -215,6 +284,8 @@ def _migrate_dataset(
             changed = changed or not _temporal_columns_equal(
                 before_frame, after_frame
             )
+            for row in before_frame.to_dict(orient="records"):
+                original_current_by_key[str(row["business_key_hash"])] = row
             for row in after_frame.to_dict(orient="records"):
                 current_by_key[str(row["business_key_hash"])] = row
             staged_path = staged_dataset / source_path.relative_to(target_dataset)
@@ -247,6 +318,7 @@ def _migrate_dataset(
             dataset,
             revisions,
             current_by_key,
+            original_current_by_key,
         )
         changed = changed or revision_changed
         if not changed:
@@ -256,7 +328,22 @@ def _migrate_dataset(
         if not target_dataset.is_dir():
             raise FileNotFoundError(target_dataset)
         target_dataset.replace(backup_dataset)
-        staged_dataset.replace(target_dataset)
+        try:
+            staged_dataset.replace(target_dataset)
+        except Exception as promotion_error:
+            try:
+                _restore_dataset_directory(
+                    target_dataset,
+                    backup_dataset,
+                    stage_root / "failed-promotion",
+                )
+            except Exception as rollback_error:
+                cleanup_stage = False
+                raise TemporalMigrationRecoveryError(
+                    "temporal migration rollback failed after promotion rename; "
+                    f"original backup preserved at {backup_dataset}"
+                ) from rollback_error
+            raise promotion_error
         try:
             _update_dataset_metadata(
                 warehouse,
@@ -264,29 +351,68 @@ def _migrate_dataset(
                 metadata_updates,
                 revision_updates,
             )
-        except Exception:
-            failed_dataset = stage_root / "failed-next"
-            if target_dataset.exists():
-                target_dataset.replace(failed_dataset)
-            backup_dataset.replace(target_dataset)
-            raise
+        except Exception as metadata_error:
+            try:
+                _restore_dataset_directory(
+                    target_dataset,
+                    backup_dataset,
+                    stage_root / "failed-next",
+                )
+            except Exception as rollback_error:
+                cleanup_stage = False
+                raise TemporalMigrationRecoveryError(
+                    "temporal migration rollback failed after metadata update; "
+                    f"original backup preserved at {backup_dataset}"
+                ) from rollback_error
+            raise metadata_error
         try:
             _verify_promoted_dataset(warehouse, dataset, metadata_updates)
-        except Exception:
-            failed_dataset = stage_root / "failed-verification"
-            target_dataset.replace(failed_dataset)
-            backup_dataset.replace(target_dataset)
-            _update_dataset_metadata(
-                warehouse,
-                dataset,
-                original_partition_updates,
-                revisions,
-            )
-            raise
+        except Exception as verification_error:
+            try:
+                _restore_dataset_directory(
+                    target_dataset,
+                    backup_dataset,
+                    stage_root / "failed-verification",
+                )
+                _update_dataset_metadata(
+                    warehouse,
+                    dataset,
+                    original_partition_updates,
+                    revisions,
+                )
+            except Exception as rollback_error:
+                cleanup_stage = False
+                recovery_location = (
+                    backup_dataset
+                    if backup_dataset.exists()
+                    else target_dataset
+                )
+                raise TemporalMigrationRecoveryError(
+                    "temporal migration rollback failed after verification; "
+                    f"original data preserved at {recovery_location}"
+                ) from rollback_error
+            raise verification_error
         shutil.rmtree(backup_dataset, ignore_errors=True)
         return True
     finally:
-        shutil.rmtree(stage_root, ignore_errors=True)
+        if cleanup_stage:
+            shutil.rmtree(stage_root, ignore_errors=True)
+
+
+def _restore_dataset_directory(
+    target_dataset: Path,
+    backup_dataset: Path,
+    failed_dataset: Path,
+) -> None:
+    if not backup_dataset.is_dir():
+        raise FileNotFoundError(
+            f"temporal migration backup is unavailable: {backup_dataset}"
+        )
+    if target_dataset.exists():
+        if failed_dataset.exists():
+            raise FileExistsError(failed_dataset)
+        target_dataset.replace(failed_dataset)
+    backup_dataset.replace(target_dataset)
 
 
 def _transform_frame(
@@ -344,10 +470,12 @@ def _transform_revisions(
     dataset: ResearchDatasetId,
     revisions: list[dict[str, Any]],
     current_by_key: dict[str, dict[str, Any]],
+    original_current_by_key: dict[str, dict[str, Any]],
 ) -> tuple[list[dict[str, Any]], bool]:
     if not revisions:
         return [], False
     grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    availability_changed: dict[str, bool] = defaultdict(bool)
     changed = False
     for revision in revisions:
         payload = dict(revision["row_payload"])
@@ -358,6 +486,11 @@ def _transform_revisions(
         ):
             raise ValueError(f"revision business payload changed for {dataset.value}")
         changed = changed or not _payload_temporal_equal(payload, transformed_payload)
+        availability_changed[str(revision["business_key_hash"])] = (
+            availability_changed[str(revision["business_key_hash"])]
+            or _as_utc(payload["available_at"])
+            != _as_utc(transformed_payload["available_at"])
+        )
         prepared = dict(revision)
         prepared["row_payload"] = transformed_payload
         grouped[str(revision["business_key_hash"])].append(prepared)
@@ -366,18 +499,49 @@ def _transform_revisions(
     for key_hash, versions in grouped.items():
         versions.sort(key=lambda item: int(item["revision_no"]))
         current = current_by_key.get(key_hash)
-        if current is None:
+        original_current = original_current_by_key.get(key_hash)
+        if current is None or original_current is None:
             raise ValueError(
                 f"revision current row missing for {dataset.value}:{key_hash}"
             )
+        availability_changed[key_hash] = (
+            availability_changed[key_hash]
+            or _as_utc(current["available_at"])
+            != _as_utc(original_current["available_at"])
+        )
+        if not availability_changed[key_hash]:
+            updates.extend(versions)
+            continue
+        nodes = [
+            {
+                "available_at": _as_utc(item["row_payload"]["available_at"]),
+                "revision_no": int(item["revision_no"]),
+                "revision": item,
+            }
+            for item in versions
+        ]
+        nodes.append(
+            {
+                "available_at": _as_utc(current["available_at"]),
+                "revision_no": int(current.get("revision_no", len(versions) + 1)),
+                "revision": None,
+            }
+        )
+        nodes.sort(key=lambda item: (item["available_at"], item["revision_no"]))
+        following_by_revision: dict[int, datetime] = {}
+        for index, node in enumerate(nodes[:-1]):
+            if node["revision"] is not None:
+                following_by_revision[int(node["revision_no"])] = nodes[index + 1][
+                    "available_at"
+                ]
         for index, revision in enumerate(versions):
-            following = (
-                versions[index + 1]["row_payload"]
-                if index + 1 < len(versions)
-                else current
-            )
             valid_from = _as_utc(revision["row_payload"]["available_at"])
-            valid_to = _as_utc(following["available_at"])
+            valid_to = following_by_revision.get(int(revision["revision_no"]))
+            if valid_to is None:
+                raise ValueError(
+                    f"revision has no later current version for "
+                    f"{dataset.value}:{key_hash}"
+                )
             if valid_to < valid_from:
                 raise ValueError(
                     f"revision availability regressed for {dataset.value}:{key_hash}"
@@ -660,12 +824,111 @@ def _completed_report(
         warehouse.duckdb_path, read_only=True
     ) as connection:
         row = connection.execute(
-            "select report_json from research_migrations where migration_id = ?",
+            """
+            select source_root, report_json
+            from research_migrations
+            where migration_id = ?
+            """,
             [migration_id],
         ).fetchone()
     if row is None:
         return None
-    return TemporalMigrationReport.model_validate(_json_object(row[0]))
+    receipt_root = Path(str(row[0])).resolve()
+    warehouse_root = warehouse.root.resolve()
+    if receipt_root != warehouse_root:
+        raise ValueError(
+            "completed migration receipt root drift: "
+            f"receipt={receipt_root} warehouse={warehouse_root}"
+        )
+    report = TemporalMigrationReport.model_validate(_json_object(row[1]))
+    current_audit = audit_research_time_semantics(warehouse)
+    if _audit_digest(current_audit) != _audit_digest(report.after_audit):
+        raise ValueError(
+            "completed migration receipt audit drift; "
+            "use a new reviewed migration instead of reusing this id"
+        )
+    current_manifest_hash = _validated_manifest_hash(warehouse)
+    if report.result_manifest_hash is None:
+        _assert_temporal_migration_applied(warehouse)
+        report = report.model_copy(
+            update={"result_manifest_hash": current_manifest_hash}
+        )
+        _update_completed_report(warehouse, report)
+    elif current_manifest_hash != report.result_manifest_hash:
+        raise ValueError(
+            "completed migration receipt manifest drift; "
+            "use a new reviewed migration instead of reusing this id"
+        )
+    return report
+
+
+def _validated_manifest_hash(warehouse: ResearchWarehouse) -> str:
+    for dataset in ResearchDatasetId:
+        manifest = warehouse.partition_manifest(dataset)
+        if manifest.empty:
+            continue
+        warehouse.validated_partition_manifest(
+            dataset,
+            manifest["partition_value"].astype(str).tolist(),
+        )
+    return _manifest_hash(warehouse)
+
+
+def _audit_digest(audit: tuple[TemporalDatasetAudit, ...]) -> str:
+    return _stable_hash(
+        [item.model_dump(mode="json") for item in audit]
+    )
+
+
+def _assert_temporal_migration_applied(
+    warehouse: ResearchWarehouse,
+) -> None:
+    for dataset in ResearchDatasetId:
+        if dataset not in _MIGRATION_DATASETS:
+            continue
+        manifest = warehouse.partition_manifest(dataset)
+        current_by_key: dict[str, dict[str, Any]] = {}
+        original_current_by_key: dict[str, dict[str, Any]] = {}
+        for metadata in manifest.to_dict(orient="records"):
+            frame = pd.read_parquet(
+                warehouse.root / str(metadata["relative_path"])
+            )
+            transformed = _transform_frame(dataset, frame)
+            if not _temporal_columns_equal(frame, transformed):
+                raise ValueError(
+                    "completed migration receipt temporal drift for "
+                    f"{dataset.value}"
+                )
+            for row in frame.to_dict(orient="records"):
+                key_hash = str(row["business_key_hash"])
+                current_by_key[key_hash] = row
+                original_current_by_key[key_hash] = row
+        _, revision_changed = _transform_revisions(
+            dataset,
+            _revision_records(warehouse, dataset),
+            current_by_key,
+            original_current_by_key,
+        )
+        if revision_changed:
+            raise ValueError(
+                "completed migration receipt revision drift for "
+                f"{dataset.value}"
+            )
+
+
+def _update_completed_report(
+    warehouse: ResearchWarehouse,
+    report: TemporalMigrationReport,
+) -> None:
+    with connect_research_warehouse(warehouse.duckdb_path) as connection:
+        connection.execute(
+            """
+            update research_migrations
+            set report_json = ?
+            where migration_id = ? and status = 'completed'
+            """,
+            [report.model_dump_json(), report.migration_id],
+        )
 
 
 def _record_completed_migration(

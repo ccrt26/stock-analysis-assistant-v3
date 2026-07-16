@@ -445,7 +445,7 @@ def _mask_future_validity_edges(
         valid_to = pd.to_datetime(
             result["valid_to"], errors="coerce"
         ).dt.normalize()
-        result.loc[valid_to > cutoff_day, "valid_to"] = None
+        result.loc[valid_to >= cutoff_day, "valid_to"] = None
     return result
 
 
