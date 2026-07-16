@@ -52,8 +52,48 @@ def _announcement_batch(
         ingestion_run_id=run_id,
         ingested_at=datetime(2026, 7, 13, 10, tzinfo=timezone.utc),
         default_available_at=datetime(2026, 7, 13, 10, tzinfo=timezone.utc),
-        records=[{"announcement_id": announcement_id, "title": title}],
+        records=[{
+            "announcement_id": announcement_id,
+            "title": title,
+            "available_at": datetime(2026, 7, 13, 10, tzinfo=timezone.utc),
+        }],
     )
+
+
+def test_calendar_batch_uses_each_rows_business_date(tmp_path):
+    warehouse = ResearchWarehouse(tmp_path)
+    warehouse.commit_batch(
+        FactBatch(
+            dataset_id=ResearchDatasetId.TRADE_CALENDAR,
+            partition_value="2025",
+            source_name="tushare",
+            source_endpoint="trade_cal",
+            ingestion_run_id="calendar-backfill",
+            ingested_at=datetime(2026, 7, 13, 16, tzinfo=timezone.utc),
+            default_available_at=datetime(2026, 7, 13, 7, 1, tzinfo=timezone.utc),
+            records=[
+                {
+                    "exchange": "SSE",
+                    "cal_date": date(2025, 8, 15),
+                    "is_open": True,
+                },
+                {
+                    "exchange": "SSE",
+                    "cal_date": date(2025, 8, 16),
+                    "is_open": False,
+                },
+            ],
+        )
+    )
+
+    rows = warehouse.read_current(ResearchDatasetId.TRADE_CALENDAR)
+    assert pd.to_datetime(rows["available_at"], utc=True).dt.date.tolist() == [
+        date(2025, 8, 15),
+        date(2025, 8, 16),
+    ]
+    assert set(rows["availability_precision"]) == {
+        "inferred_from_endpoint_policy"
+    }
 
 
 def test_identical_retry_is_idempotent_and_keeps_one_business_fact(tmp_path):
@@ -86,6 +126,32 @@ def test_changed_fact_replaces_current_and_preserves_revision(tmp_path):
     assert current.iloc[0]["close"] == pytest.approx(10.4)
     assert int(current.iloc[0]["revision_no"]) == 2
     assert warehouse.revision_count(ResearchDatasetId.EQUITY_DAILY) == 1
+
+
+def test_later_market_revision_uses_observed_ingestion_not_trade_date(tmp_path):
+    warehouse = ResearchWarehouse(tmp_path)
+    warehouse.commit_batch(_batch(close=10.2))
+    changed = _batch(close=10.4).model_copy(
+        update={
+            "ingestion_run_id": "late-correction",
+            "ingested_at": datetime(2026, 7, 12, 3, tzinfo=timezone.utc),
+            "default_available_at": datetime(
+                2026, 7, 10, 7, 1, tzinfo=timezone.utc
+            ),
+        }
+    )
+
+    warehouse.commit_batch(changed)
+
+    current = warehouse.read_current(ResearchDatasetId.EQUITY_DAILY)
+    assert pd.Timestamp(current.iloc[0]["available_at"]) == pd.Timestamp(
+        datetime(2026, 7, 12, 3, tzinfo=timezone.utc)
+    )
+    assert current.iloc[0]["availability_precision"] == "ingestion_cutoff"
+    revision = warehouse.revision_rows(ResearchDatasetId.EQUITY_DAILY)[0]
+    assert revision["valid_to"] == datetime(
+        2026, 7, 12, 3, tzinfo=timezone.utc
+    )
 
 
 def test_duplicate_business_key_fails_without_changing_committed_partition(tmp_path):
@@ -173,7 +239,11 @@ def test_same_business_key_cannot_silently_move_to_another_partition(tmp_path):
         ingestion_run_id="a1",
         ingested_at=datetime(2026, 7, 10, 10, tzinfo=timezone.utc),
         default_available_at=datetime(2026, 7, 10, 10, tzinfo=timezone.utc),
-        records=[{"announcement_id": "A1", "title": "公告"}],
+        records=[{
+            "announcement_id": "A1",
+            "title": "公告",
+            "available_at": datetime(2026, 7, 10, 10, tzinfo=timezone.utc),
+        }],
     )
     warehouse.commit_batch(first)
     moved = first.model_copy(
@@ -251,6 +321,7 @@ def test_replace_dataset_batches_removes_obsolete_current_keys(tmp_path):
                 "provider_record_id": "obsolete-record",
                 "ts_code": "000001.SZ",
                 "float_date": date(2026, 7, 10),
+                "available_at": datetime(2026, 7, 10, tzinfo=timezone.utc),
             }],
         )
     )
@@ -267,6 +338,7 @@ def test_replace_dataset_batches_removes_obsolete_current_keys(tmp_path):
             "provider_record_id": "current-record",
             "ts_code": "000001.SZ",
             "float_date": date(2026, 7, 10),
+            "available_at": datetime(2026, 7, 10, tzinfo=timezone.utc),
         }],
     )
 

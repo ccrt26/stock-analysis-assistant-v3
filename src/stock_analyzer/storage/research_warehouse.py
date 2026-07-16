@@ -18,6 +18,10 @@ from stock_analyzer.data.research_contracts import (
     research_contract,
     research_contract_registry,
 )
+from stock_analyzer.data.research_time import (
+    resolve_initial_availability,
+    resolve_revision_availability,
+)
 from stock_analyzer.storage.research_parquet import (
     atomic_promote,
     discard_backup,
@@ -545,9 +549,12 @@ class ResearchWarehouse:
                     f"missing business key fields for {batch.dataset_id.value}: {missing}"
                 )
             row = {key: _parquet_safe(value) for key, value in raw.items()}
-            available_at = raw.get("available_at", batch.default_available_at)
-            if available_at is None:
-                raise ValueError("available_at is required for every fact")
+            resolved_availability = resolve_initial_availability(
+                batch.dataset_id,
+                raw,
+                batch_ingested_at=batch.ingested_at,
+                explicit_available_at=raw.get("available_at"),
+            )
             key_payload = {field: _json_safe(raw[field]) for field in contract.business_key}
             business_payload = {
                 key: _json_safe(value)
@@ -562,10 +569,8 @@ class ResearchWarehouse:
                         "source_record_id", _stable_hash(key_payload)
                     ),
                     "source_updated_at": _parquet_safe(raw.get("source_updated_at")),
-                    "available_at": _as_utc(available_at),
-                    "availability_precision": raw.get(
-                        "availability_precision", batch.availability_precision.value
-                    ),
+                    "available_at": resolved_availability.available_at,
+                    "availability_precision": resolved_availability.precision.value,
                     "ingested_at": _as_utc(batch.ingested_at),
                     "ingestion_run_id": batch.ingestion_run_id,
                     "payload_hash": _stable_hash(business_payload),
@@ -657,6 +662,14 @@ class ResearchWarehouse:
                 merged_by_hash[key_hash] = old_row
                 continue
             changed_rows += 1
+            revision_availability = resolve_revision_availability(
+                research_contract(batch.dataset_id),
+                new_row,
+                batch_ingested_at=batch.ingested_at,
+                old_available_at=old_row["available_at"],
+            )
+            new_row["available_at"] = revision_availability.available_at
+            new_row["availability_precision"] = revision_availability.precision.value
             old_revision = int(old_row.get("revision_no", 1))
             new_row["revision_no"] = old_revision + 1
             revisions.append(

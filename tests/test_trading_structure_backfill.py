@@ -1,4 +1,5 @@
 from datetime import date
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
@@ -79,6 +80,12 @@ def test_trading_structure_records_margin_lag_and_freezes_minute_scope(tmp_path)
     minute = warehouse.read_current(ResearchDatasetId.MINUTE_BAR)
     assert len(margin) == 1
     assert margin.iloc[0]["exchange"] == "SZSE"
+    assert pd.Timestamp(margin.iloc[0]["available_at"]).tz_convert(
+        ZoneInfo("Asia/Shanghai")
+    ) == pd.Timestamp("2026-07-11 08:00:00", tz="Asia/Shanghai")
+    assert margin.iloc[0]["availability_precision"] == (
+        "inferred_from_endpoint_policy"
+    )
     assert summary.waiting_upstream == 1
     assert len(minute) == 2
     assert set(minute["instrument_code"]) == {"000001.SZ"}

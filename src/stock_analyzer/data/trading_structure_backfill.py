@@ -11,7 +11,11 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 
 from stock_analyzer.data.research_backfill import BackfillSummary
-from stock_analyzer.data.research_contracts import FactBatch, ResearchDatasetId
+from stock_analyzer.data.research_contracts import (
+    AvailabilityPrecision,
+    FactBatch,
+    ResearchDatasetId,
+)
 from stock_analyzer.data.tushare_research_client import (
     ResearchSourceError,
     TushareResearchClient,
@@ -106,6 +110,9 @@ class TradingStructureBackfillService:
                 row["trade_date"] = _date(raw["trade_date"])
                 row["exchange"] = _exchange(str(raw["ts_code"]))
                 row["available_at"] = _next_morning(trading_date)
+                row["availability_precision"] = (
+                    AvailabilityPrecision.INFERRED_FROM_ENDPOINT_POLICY.value
+                )
                 rows.append(row)
             self._commit(
                 ResearchDatasetId.MARGIN_DETAIL,
@@ -183,6 +190,9 @@ class TradingStructureBackfillService:
                         "volume": _number(raw["vol"]),
                         "amount": _number(raw["amount"]),
                         "available_at": _post_close(trading_date),
+                        "availability_precision": (
+                            AvailabilityPrecision.INFERRED_FROM_ENDPOINT_POLICY.value
+                        ),
                     }
                 )
             for partition, rows in sorted(grouped.items()):

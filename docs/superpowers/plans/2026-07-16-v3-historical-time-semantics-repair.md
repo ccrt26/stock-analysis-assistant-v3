@@ -211,7 +211,7 @@ Run:
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit Task 1**
+- [x] **Step 7: Commit Task 1**
 
 ```bash
 git add src/stock_analyzer/data/research_contracts.py src/stock_analyzer/data/research_time.py tests/test_research_contracts.py tests/test_research_time.py
@@ -239,7 +239,7 @@ git commit -m "feat: define research temporal contracts"
 - `ResearchWarehouse._merge()` applies `resolve_revision_availability()` only when payloads differ.
 - Backfill services write row-level `available_at` and `availability_precision` when a source publication date exists.
 
-- [ ] **Step 1: Write failing warehouse tests for batch backfill and later corrections**
+- [x] **Step 1: Write failing warehouse tests for batch backfill and later corrections**
 
 Add to `tests/test_research_warehouse.py`:
 
@@ -280,7 +280,7 @@ def test_later_market_revision_uses_observed_ingestion_not_trade_date(tmp_path):
     )
 ```
 
-- [ ] **Step 2: Add failing service-level regression tests**
+- [x] **Step 2: Add failing service-level regression tests**
 
 Add these behaviors:
 
@@ -293,7 +293,7 @@ Add these behaviors:
 
 Each test must assert the stored `available_at`, `ingested_at`, and `availability_precision`, not only row counts.
 
-- [ ] **Step 3: Run tests and verify RED**
+- [x] **Step 3: Run tests and verify RED**
 
 Run:
 
@@ -303,7 +303,7 @@ Run:
 
 Expected: new assertions FAIL because batch defaults still win and later market changes remain backdated.
 
-- [ ] **Step 4: Implement warehouse enforcement**
+- [x] **Step 4: Implement warehouse enforcement**
 
 In `_normalize_batch()`:
 
@@ -337,7 +337,7 @@ new_row["availability_precision"] = revision_availability.precision.value
 
 For `OBSERVED_CHANGE`, use `source_updated_at` only when it is present and not before the old version's `available_at`; otherwise use `batch.ingested_at`. For `SOURCE_PUBLISHED`, keep the row publication time and reject missing evidence.
 
-- [ ] **Step 5: Make collectors explicit and remove unsafe defaults from production paths**
+- [x] **Step 5: Make collectors explicit and remove unsafe defaults from production paths**
 
 Change calendar records before `FactBatch` creation:
 
@@ -353,11 +353,11 @@ Keep `default_available_at` in `FactBatch` for compatibility with controlled tes
 
 Update announcement and financial test helpers in `tests/test_research_warehouse.py`, `tests/test_research_as_of.py`, and `tests/test_research_partition_query.py` so source-published fixtures put `available_at` on each record. Do not weaken `SOURCE_PUBLISHED` by silently accepting a batch default as publication evidence.
 
-- [ ] **Step 6: Run focused tests and verify GREEN**
+- [x] **Step 6: Run focused tests and verify GREEN**
 
 Run the command from Step 3. Expected: PASS.
 
-- [ ] **Step 7: Run adjacent source tests**
+- [x] **Step 7: Run adjacent source tests**
 
 ```bash
 .venv/bin/pytest tests/test_tushare_research_client.py tests/test_cninfo_research_client.py tests/test_research_as_of.py -q

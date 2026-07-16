@@ -8,7 +8,11 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 
 from stock_analyzer.data.research_backfill import BackfillSummary
-from stock_analyzer.data.research_contracts import FactBatch, ResearchDatasetId
+from stock_analyzer.data.research_contracts import (
+    AvailabilityPrecision,
+    FactBatch,
+    ResearchDatasetId,
+)
 from stock_analyzer.data.tushare_research_client import (
     ResearchSourceError,
     TushareResearchClient,
@@ -637,7 +641,12 @@ class ClassificationBackfillService:
     ) -> None:
         grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
         for row in records:
-            grouped[str(row["trade_date"])].append(row)
+            prepared = dict(row)
+            prepared["available_at"] = _post_close_utc(row["trade_date"])
+            prepared["availability_precision"] = (
+                AvailabilityPrecision.INFERRED_FROM_ENDPOINT_POLICY.value
+            )
+            grouped[str(row["trade_date"])].append(prepared)
         for partition, rows in sorted(grouped.items()):
             self._commit(dataset, partition, endpoint, rows, through, resume, summary)
 

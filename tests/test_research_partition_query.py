@@ -52,6 +52,11 @@ def _daily_batch(
                 "pct_chg": (close / 10.0 - 1.0) * 100.0,
                 "volume": 100.0,
                 "amount": 1000.0,
+                **(
+                    {"available_at": available_at}
+                    if available_at is not None
+                    else {}
+                ),
             }
         ],
     )
@@ -523,7 +528,14 @@ def _financial_batch(
         ingestion_run_id=run_id,
         ingested_at=available_at,
         default_available_at=available_at,
-        records=rows,
+        records=[
+            {
+                **row,
+                "available_at": row.get("available_at", available_at),
+                "availability_precision": "date_conservative",
+            }
+            for row in rows
+        ],
     )
 
 
@@ -657,9 +669,11 @@ def test_statement_comparable_selection_tolerates_optional_update_and_end_type(
                     "ts_code": "000001.SZ",
                     "report_period": date(2025, 12, 31),
                     "report_type": "1",
-                    "statement_type": "consolidated",
-                    "revenue": 100.0,
-                }
+                        "statement_type": "consolidated",
+                        "revenue": 100.0,
+                        "available_at": available,
+                        "availability_precision": "date_conservative",
+                    }
             ],
         )
     )

@@ -1,5 +1,7 @@
 from datetime import date, datetime, timezone
 
+import pandas as pd
+
 from stock_analyzer.data.research_contracts import FactBatch, ResearchDatasetId
 from stock_analyzer.data.research_backfill import ResearchBackfillService
 from stock_analyzer.storage.research_warehouse import ResearchWarehouse
@@ -75,6 +77,14 @@ def test_market_backfill_repairs_committed_partition_with_incomplete_vendor_sche
         ResearchDatasetId.EQUITY_DAILY, partition_value="2026-07-09"
     )
     assert repaired[["pre_close", "change", "pct_chg"]].notna().all().all()
+    calendar = warehouse.read_current(ResearchDatasetId.TRADE_CALENDAR)
+    assert pd.to_datetime(calendar["available_at"], utc=True).dt.date.tolist() == [
+        date(2026, 7, 9),
+        date(2026, 7, 10),
+    ]
+    assert set(calendar["availability_precision"]) == {
+        "inferred_from_endpoint_policy"
+    }
 
 
 def test_empty_required_daily_response_is_recorded_as_waiting_not_complete(tmp_path):

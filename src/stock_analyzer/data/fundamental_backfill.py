@@ -15,6 +15,7 @@ import pyarrow.parquet as pq
 
 from stock_analyzer.data.research_backfill import BackfillSummary
 from stock_analyzer.data.research_contracts import (
+    AvailabilityPrecision,
     FactBatch,
     ResearchDatasetId,
     research_contract,
@@ -206,7 +207,6 @@ class FundamentalBackfillService:
                     "valid_to": None,
                     "profile_snapshot_date": through,
                     "registered_capital_unit": "provider_10k_cny",
-                    "available_at": _conservative_date_available(through),
                 }
             )
             records.append(record)
@@ -346,12 +346,16 @@ class FundamentalBackfillService:
         elif publication is not None and str(publication).strip():
             publication_date = _date(publication)
         else:
-            publication_date = through
+            publication_date = None
             row["availability_limitation"] = (
                 "provider_has_no_announcement_date; usable only from ingestion cutoff"
             )
-        row["available_at"] = _conservative_date_available(publication_date)
-        row["source_updated_at"] = row["available_at"]
+        if publication_date is not None:
+            row["available_at"] = _conservative_date_available(publication_date)
+            row["source_updated_at"] = row["available_at"]
+            row["availability_precision"] = (
+                AvailabilityPrecision.DATE_CONSERVATIVE.value
+            )
         row.pop("_report_ann_date", None)
         return row
 
@@ -371,7 +375,7 @@ class FundamentalBackfillService:
             grouped[key].append(row)
         levels: dict[int, list[dict[str, Any]]] = defaultdict(list)
         for rows in grouped.values():
-            rows.sort(key=lambda item: str(item["available_at"]))
+            rows.sort(key=lambda item: str(item.get("available_at") or ""))
             seen: set[str] = set()
             rank = 0
             for row in rows:
@@ -384,6 +388,34 @@ class FundamentalBackfillService:
         for rank, level_rows in sorted(levels.items()):
             if not level_rows:
                 continue
+            ingested_at = datetime.now(timezone.utc)
+            prepared_rows: list[dict[str, Any]] = []
+            current = self.warehouse.read_current(
+                dataset,
+                partition_value=partition,
+            )
+            current_by_key = {
+                tuple(str(row.get(field)) for field in contract.business_key): row
+                for row in current.to_dict(orient="records")
+            }
+            for row in level_rows:
+                prepared = dict(row)
+                if prepared.get("available_at") is None:
+                    prepared["available_at"] = ingested_at
+                    prepared["availability_precision"] = (
+                        AvailabilityPrecision.INGESTION_CUTOFF.value
+                    )
+                key = tuple(
+                    str(prepared.get(field)) for field in contract.business_key
+                )
+                existing = current_by_key.get(key)
+                if existing is not None and pd.Timestamp(
+                    existing["available_at"]
+                ) > pd.Timestamp(prepared["available_at"]):
+                    continue
+                prepared_rows.append(prepared)
+            if not prepared_rows:
+                continue
             self.warehouse.commit_batch(
                 FactBatch(
                     dataset_id=dataset,
@@ -393,9 +425,9 @@ class FundamentalBackfillService:
                     ingestion_run_id=(
                         f"fundamentals:{dataset.value}:{partition}:revision-{rank}"
                     ),
-                    ingested_at=datetime.now(timezone.utc),
+                    ingested_at=ingested_at,
                     default_available_at=_conservative_date_available(through),
-                    records=level_rows,
+                    records=prepared_rows,
                 )
             )
             summary.committed += 1

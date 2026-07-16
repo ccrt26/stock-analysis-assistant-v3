@@ -19,6 +19,7 @@ def _announcement_batch(*, title: str, available_at: datetime, run_id: str):
                 "announcement_id": "ANN-1",
                 "ts_code": "000001.SZ",
                 "announcement_time": available_at,
+                "available_at": available_at,
                 "title": title,
                 "url": "https://example.invalid/ANN-1.pdf",
             }

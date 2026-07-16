@@ -10,6 +10,7 @@ import pandas as pd
 from pydantic import BaseModel, Field
 
 from stock_analyzer.data.research_contracts import (
+    AvailabilityPrecision,
     FactBatch,
     ResearchDatasetId,
     research_contract,
@@ -72,6 +73,11 @@ class ResearchBackfillService:
         for year, frame in calendar.groupby("cal_year"):
             partition = str(year)
             records = frame.drop(columns=["cal_year"]).to_dict(orient="records")
+            for record in records:
+                record["available_at"] = _post_close_utc(record["cal_date"])
+                record["availability_precision"] = (
+                    AvailabilityPrecision.INFERRED_FROM_ENDPOINT_POLICY.value
+                )
             self.warehouse.commit_batch(
                 FactBatch(
                     dataset_id=ResearchDatasetId.TRADE_CALENDAR,

@@ -94,6 +94,15 @@ def test_event_backfill_stores_official_announcement_and_structured_actions(tmp_
     assert len(warehouse.read_current(ResearchDatasetId.HOLDER_TRADE)) == 1
     assert len(warehouse.read_current(ResearchDatasetId.SHARE_FLOAT)) == 1
     assert len(warehouse.read_current(ResearchDatasetId.REPURCHASE)) == 1
+    pledge = warehouse.read_current(ResearchDatasetId.PLEDGE)
+    assert not pledge.empty
+    assert pledge.iloc[0]["available_at"] == pledge.iloc[0]["ingested_at"]
+    assert pledge.iloc[0]["availability_precision"] == "ingestion_cutoff"
+    assert set(
+        warehouse.read_current(ResearchDatasetId.HOLDER_TRADE)[
+            "availability_precision"
+        ]
+    ) == {"date_conservative"}
     assert summary.failed == 0
 
 
@@ -444,8 +453,11 @@ def test_long_backfill_limits_share_float_history_and_fetches_known_future(tmp_p
                         "provider_record_id": "old-lot",
                         "variant_group_id": "old-fact",
                         "ts_code": "000001.SZ",
-                    "float_date": date(2024, 1, 31),
-                }
+                        "float_date": date(2024, 1, 31),
+                        "available_at": datetime(
+                            2024, 1, 31, tzinfo=timezone.utc
+                        ),
+                    }
             ],
         )
     )

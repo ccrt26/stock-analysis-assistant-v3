@@ -114,6 +114,14 @@ def test_classification_backfill_builds_all_sw_levels_and_traceable_themes(tmp_p
         if method == "index_daily" and kwargs["ts_code"].endswith(".SI")
     ]
     assert industry_daily_calls == ["801010.SI"]
+    industry_daily = warehouse.read_current(ResearchDatasetId.INDUSTRY_DAILY)
+    theme_daily = warehouse.read_current(ResearchDatasetId.THEME_DAILY)
+    assert set(industry_daily["availability_precision"]) == {
+        "inferred_from_endpoint_policy"
+    }
+    assert set(theme_daily["availability_precision"]) == {
+        "inferred_from_endpoint_policy"
+    }
 
 
 def test_classification_history_uses_latest_250_actual_trading_days(tmp_path):

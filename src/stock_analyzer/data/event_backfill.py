@@ -9,7 +9,11 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 
 from stock_analyzer.data.research_backfill import BackfillSummary
-from stock_analyzer.data.research_contracts import FactBatch, ResearchDatasetId
+from stock_analyzer.data.research_contracts import (
+    AvailabilityPrecision,
+    FactBatch,
+    ResearchDatasetId,
+)
 from stock_analyzer.data.tushare_research_client import (
     ResearchSourceError,
     TushareResearchClient,
@@ -191,9 +195,6 @@ class EventBackfillService:
             for row in frame.to_dict(orient="records"):
                 normalized = _clean(row)
                 normalized["end_date"] = _date(row["end_date"])
-                normalized["available_at"] = _conservative_available(
-                    actual_snapshot
-                )
                 pledge_rows.append(normalized)
             self._commit(
                 ResearchDatasetId.PLEDGE,
@@ -231,6 +232,9 @@ class EventBackfillService:
                 row = _clean(raw)
                 row["trade_date"] = _date(raw["trade_date"])
                 row["available_at"] = _post_close(trading_date)
+                row["availability_precision"] = (
+                    AvailabilityPrecision.INFERRED_FROM_ENDPOINT_POLICY.value
+                )
                 rows.append(row)
             self._commit(
                 ResearchDatasetId.SUSPENSION,
@@ -564,6 +568,7 @@ def _holder_row(raw: dict[str, Any]) -> dict[str, Any]:
     )
     row["ann_date"] = _date(raw["ann_date"])
     row["available_at"] = _conservative_available(row["ann_date"])
+    row["availability_precision"] = AvailabilityPrecision.DATE_CONSERVATIVE.value
     return row
 
 
@@ -580,6 +585,11 @@ def _float_row(raw: dict[str, Any]) -> dict[str, Any]:
     row["float_date"] = _date(raw["float_date"])
     publication = row["ann_date"] or row["float_date"]
     row["available_at"] = _conservative_available(publication)
+    row["availability_precision"] = AvailabilityPrecision.DATE_CONSERVATIVE.value
+    if row["ann_date"] is None:
+        row["availability_limitation"] = (
+            "provider_has_no_announcement_date; usable only after float_date"
+        )
     return row
 
 
@@ -749,6 +759,7 @@ def _repurchase_row(raw: dict[str, Any]) -> dict[str, Any]:
         }
     )
     row["available_at"] = _conservative_available(ann_date)
+    row["availability_precision"] = AvailabilityPrecision.DATE_CONSERVATIVE.value
     return row
 
 

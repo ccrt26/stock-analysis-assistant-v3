@@ -108,6 +108,10 @@ def test_fundamental_backfill_preserves_statement_revision_and_full_business_con
         ResearchDatasetId.EARNINGS_EXPRESS
     )
     assert express_manifest["partition_value"].tolist() == ["2026-04"]
+    company = warehouse.read_current(ResearchDatasetId.COMPANY_PROFILE)
+    assert company.iloc[0]["available_at"] == company.iloc[0]["ingested_at"]
+    assert company.iloc[0]["availability_precision"] == "ingestion_cutoff"
+    assert set(income["availability_precision"]) == {"date_conservative"}
     assert summary.failed == 0
 
 
