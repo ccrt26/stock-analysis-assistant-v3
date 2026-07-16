@@ -18,6 +18,9 @@ from stock_analyzer.data.research_contracts import (
     research_contract_registry,
 )
 from stock_analyzer.storage.research_query import ResearchQuery
+from stock_analyzer.storage.research_contract_audit import (
+    audit_fact_partition_contract,
+)
 from stock_analyzer.storage.research_schema import connect_research_warehouse
 from stock_analyzer.storage.research_warehouse import ResearchWarehouse
 
@@ -41,6 +44,12 @@ class DatasetHealth(BaseModel):
     missing_files: int
     hash_mismatches: int
     row_count_mismatches: int
+    schema_mismatch_partitions: int
+    coverage_failure_partitions: int
+    missing_required_columns: tuple[str, ...]
+    required_field_min_coverage: dict[str, float]
+    contract_valid: bool
+    physical_valid: bool
 
 
 class DerivedFeatureHealth(BaseModel):
@@ -99,7 +108,7 @@ def build_research_health_report(
                 manifest["partition_value"].astype(str) == data_date.isoformat()
             ]
             selected = same_day if not same_day.empty else manifest.tail(1)
-        file_audit = _audit_partition_files(warehouse, selected)
+        file_audit = _audit_partition_files(warehouse, selected, contract)
         duplicates = 0
         if full_history and file_audit["paths"]:
             with duckdb.connect() as connection:
@@ -124,6 +133,20 @@ def build_research_health_report(
                 missing_files=file_audit["missing"],
                 hash_mismatches=file_audit["hash_mismatches"],
                 row_count_mismatches=file_audit["row_count_mismatches"],
+                schema_mismatch_partitions=file_audit[
+                    "schema_mismatch_partitions"
+                ],
+                coverage_failure_partitions=file_audit[
+                    "coverage_failure_partitions"
+                ],
+                missing_required_columns=tuple(
+                    file_audit["missing_required_columns"]
+                ),
+                required_field_min_coverage=file_audit[
+                    "required_field_min_coverage"
+                ],
+                contract_valid=file_audit["contract_valid"],
+                physical_valid=file_audit["physical_valid"],
             )
         )
         if contract.required_for_close_screen:
@@ -135,9 +158,12 @@ def build_research_health_report(
                 "theme_catalog",
                 "theme_member",
             }:
-                core_complete &= partitions > 0
+                core_complete &= partitions > 0 and file_audit["physical_valid"]
             else:
-                core_complete &= data_date.isoformat() in set(values)
+                core_complete &= (
+                    data_date.isoformat() in set(values)
+                    and file_audit["physical_valid"]
+                )
     with connect_research_warehouse(
         warehouse.duckdb_path, read_only=True
     ) as connection:
@@ -372,12 +398,20 @@ def _as_utc_datetime(value: Any) -> datetime:
     return stamp.astimezone(timezone.utc)
 
 
-def _audit_partition_files(warehouse: ResearchWarehouse, manifest) -> dict[str, Any]:
+def _audit_partition_files(
+    warehouse: ResearchWarehouse,
+    manifest,
+    contract,
+) -> dict[str, Any]:
     paths: list[str] = []
     rows = 0
     missing = 0
     hash_mismatches = 0
     row_count_mismatches = 0
+    schema_mismatch_partitions = 0
+    coverage_failure_partitions = 0
+    missing_required_columns: set[str] = set()
+    required_field_min_coverage: dict[str, float] = {}
     for item in manifest.to_dict(orient="records"):
         path = warehouse.root / str(item["relative_path"])
         if not path.is_file():
@@ -390,12 +424,39 @@ def _audit_partition_files(warehouse: ResearchWarehouse, manifest) -> dict[str, 
             row_count_mismatches += 1
         if _sha256(path) != str(item["file_sha256"]):
             hash_mismatches += 1
+        contract_audit = audit_fact_partition_contract(path, contract)
+        if contract_audit.missing_required_columns:
+            schema_mismatch_partitions += 1
+            missing_required_columns.update(
+                contract_audit.missing_required_columns
+            )
+        if contract_audit.coverage_failures:
+            coverage_failure_partitions += 1
+        for column, ratio in contract_audit.required_field_coverage.items():
+            required_field_min_coverage[column] = min(
+                required_field_min_coverage.get(column, 1.0), ratio
+            )
     return {
         "paths": paths,
         "rows": rows,
         "missing": missing,
         "hash_mismatches": hash_mismatches,
         "row_count_mismatches": row_count_mismatches,
+        "schema_mismatch_partitions": schema_mismatch_partitions,
+        "coverage_failure_partitions": coverage_failure_partitions,
+        "missing_required_columns": sorted(missing_required_columns),
+        "required_field_min_coverage": required_field_min_coverage,
+        "contract_valid": (
+            schema_mismatch_partitions == 0
+            and coverage_failure_partitions == 0
+        ),
+        "physical_valid": (
+            missing == 0
+            and hash_mismatches == 0
+            and row_count_mismatches == 0
+            and schema_mismatch_partitions == 0
+            and coverage_failure_partitions == 0
+        ),
     }
 
 
@@ -421,16 +482,34 @@ def write_health_report(
         "",
         f"收盘核心数据是否完整：{'是' if report.complete_core_date else '否'}",
         "",
-        "| 数据 | 分区 | 记录 | 本次核对分区 | 重复业务事实 | 缺文件 | 校验不符 |",
-        "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+        "| 数据 | 分区 | 记录 | 本次核对分区 | 重复业务事实 | 缺文件 | 校验不符 | 契约异常 |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     for item in report.datasets:
         lines.append(
             f"| {item.dataset_id} | {item.partitions} | {item.rows} | "
             f"{item.checked_partitions} | {item.duplicate_business_keys} | "
             f"{item.missing_files} | "
-            f"{item.hash_mismatches + item.row_count_mismatches} |"
+            f"{item.hash_mismatches + item.row_count_mismatches} | "
+            f"{item.schema_mismatch_partitions + item.coverage_failure_partitions} |"
         )
+        if item.missing_required_columns:
+            lines.append(
+                f"- {item.dataset_id} 缺少契约必需列："
+                + "、".join(item.missing_required_columns)
+                + "。"
+            )
+        if item.coverage_failure_partitions:
+            coverage = "、".join(
+                f"{field}={ratio:.2%}"
+                for field, ratio in sorted(
+                    item.required_field_min_coverage.items()
+                )
+            )
+            lines.append(
+                f"- {item.dataset_id} 有 {item.coverage_failure_partitions} 个分区"
+                f"未达到核心字段覆盖阈值：{coverage}。"
+            )
     lines.extend(
         [
             "",

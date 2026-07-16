@@ -14,7 +14,7 @@ import numpy as np
 import pandas as pd
 
 
-MARKET_CONTEXT_FORMULA_VERSION = "market-context-v1"
+MARKET_CONTEXT_FORMULA_VERSION = "market-context-v2"
 BROAD_INDEX_CODES = (
     "000001.SH",
     "399001.SZ",
@@ -62,11 +62,11 @@ def compute_market_context_features(
     analysis_date = _as_date(analysis_date)
     equity = _prepare_frame(
         equity_daily,
-        required={"trade_date", "ts_code", "close", "amount"},
+        required={"trade_date", "ts_code", "close", "adj_factor", "amount"},
         key=("trade_date", "ts_code"),
         analysis_date=analysis_date,
         label="equity daily",
-        numeric=("close", "amount"),
+        numeric=("close", "adj_factor", "amount"),
     )
     indexes = _prepare_frame(
         index_daily,
@@ -97,11 +97,31 @@ def compute_market_context_features(
         limitation_notes.append(
             f"current equity coverage {coverage_ratio:.2%} is below required 95%"
         )
+    adjustment_valid = current_core_valid[
+        _finite_positive(current_core_valid["adj_factor"])
+    ]
+    adjustment_observed = int(adjustment_valid["ts_code"].nunique())
+    adjustment_coverage_ratio = adjustment_observed / int(expected_current_rows)
+    adjustment_coverage_complete = (
+        adjustment_coverage_ratio >= MINIMUM_CURRENT_COVERAGE
+    )
+    if not adjustment_coverage_complete:
+        limitation_notes.append(
+            "current adjustment-factor coverage "
+            f"{adjustment_coverage_ratio:.2%} is below required 95%"
+        )
 
     market_dates = sorted(equity["trade_date"].unique())
     eligible_codes = set(current_core_valid["ts_code"].astype(str))
     price_equity = equity[equity["ts_code"].astype(str).isin(eligible_codes)].copy()
-    price_equity.loc[~_finite_positive(price_equity["close"]), "close"] = np.nan
+    adjusted_valid = _finite_positive(price_equity["close"]) & _finite_positive(
+        price_equity["adj_factor"]
+    )
+    price_equity["adjusted_close"] = np.where(
+        adjusted_valid,
+        price_equity["close"] * price_equity["adj_factor"],
+        np.nan,
+    )
     pivot = _close_pivot(price_equity) if observed_current_rows else pd.DataFrame()
     row: dict[str, object] = {
         "analysis_date": analysis_date,
@@ -109,6 +129,9 @@ def compute_market_context_features(
         "observed_current_rows": observed_current_rows,
         "expected_current_rows": int(expected_current_rows),
         "coverage_ratio": float(coverage_ratio),
+        "adjustment_observed_current_rows": adjustment_observed,
+        "adjustment_coverage_ratio": float(adjustment_coverage_ratio),
+        "equity_return_price_basis": "close_times_adj_factor",
         "interpretation_limit": "observable market facts only",
     }
 
@@ -189,6 +212,7 @@ def compute_market_context_features(
     row["coverage_status"] = (
         "complete"
         if equity_coverage_complete
+        and adjustment_coverage_complete
         and index_coverage_complete
         and limit_coverage_complete
         else "limited"
@@ -223,7 +247,9 @@ def _prepare_frame(
 
 def _close_pivot(equity: pd.DataFrame) -> pd.DataFrame:
     return (
-        equity.pivot(index="trade_date", columns="ts_code", values="close")
+        equity.pivot(
+            index="trade_date", columns="ts_code", values="adjusted_close"
+        )
         .sort_index()
         .astype(float)
     )

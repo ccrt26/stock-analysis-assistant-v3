@@ -29,6 +29,7 @@ def _daily(dates: pd.DatetimeIndex, specs: dict[str, tuple[float, float]]) -> pd
                     "high": close + 0.5,
                     "low": close - 0.5,
                     "close": close,
+                    "adj_factor": 1.0,
                     "amount": 100.0,
                 }
             )
@@ -156,6 +157,24 @@ def test_effective_membership_is_applied_on_each_historical_session() -> None:
     assert row["horizon_observed_member_count_5d"] == 0
     assert row["turnover_share_average_5d"] == pytest.approx(1 / 3)
     assert row["turnover_share_change_3d"] == pytest.approx(0.0)
+
+
+def test_sector_returns_use_adjusted_member_prices() -> None:
+    dates = pd.bdate_range(end=ANALYSIS_DATE, periods=2)
+    equity = _daily(dates, {"A.SZ": (10.0, -5.0)})
+    equity.loc[:, "adj_factor"] = [1.0, 2.0]
+    catalog = pd.DataFrame(
+        [{"group_type": "theme", "group_code": "T", "group_name": "T", "level": "theme", "official_index_code": None}]
+    )
+    members = pd.DataFrame(
+        [{"group_type": "theme", "group_code": "T", "ts_code": "A.SZ", "valid_from": dates[0].date(), "valid_to": None}]
+    )
+
+    row = _compute(equity, dates, catalog=catalog, members=members).iloc[0]
+
+    assert row["equal_weight_return_1d"] == pytest.approx(0.0)
+    assert row["relative_return_1d"] == pytest.approx(0.0)
+    assert row["equity_return_price_basis"] == "close_times_adj_factor"
 
 
 def test_horizon_median_and_breadth_use_each_stocks_endpoint_return() -> None:

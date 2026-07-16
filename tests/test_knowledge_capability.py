@@ -546,6 +546,7 @@ def official_registry_capability_fixture() -> CapabilitySnapshot:
             "analysis_date",
             "breadth_1d",
             "breadth_20d",
+            "equity_return_price_basis",
             "group_code",
             "group_type",
             "high_volume_low_progress_flag",
@@ -773,7 +774,7 @@ def official_registry_capability_fixture() -> CapabilitySnapshot:
                 fields=field_names,
                 partition_count=1,
                 row_count=1,
-                formula_versions=("stock-trading-context-v1",)
+                formula_versions=("stock-trading-context-v2",)
                 if kind == "derived"
                 else (),
                 quality_statuses=("complete",),

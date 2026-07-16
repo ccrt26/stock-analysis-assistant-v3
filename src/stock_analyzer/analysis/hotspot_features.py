@@ -15,7 +15,7 @@ import numpy as np
 import pandas as pd
 
 
-HOTSPOT_FORMULA_VERSION = "sector-hotspot-v2"
+HOTSPOT_FORMULA_VERSION = "sector-hotspot-v3"
 HORIZONS = (1, 3, 5, 20)
 NEW_HIGH_WINDOWS = (20, 60)
 MINIMUM_MEMBER_COVERAGE = 0.80
@@ -47,9 +47,12 @@ def compute_hotspot_features(
     analysis_date = pd.Timestamp(analysis_date).date()
     equity = _prepare(
         equity_daily,
-        {"trade_date", "ts_code", "open", "high", "low", "close", "amount"},
+        {
+            "trade_date", "ts_code", "open", "high", "low", "close",
+            "adj_factor", "amount",
+        },
         ("trade_date", "ts_code"),
-        ("open", "high", "low", "close", "amount"),
+        ("open", "high", "low", "close", "adj_factor", "amount"),
         "equity daily",
         analysis_date,
     )
@@ -85,7 +88,14 @@ def compute_hotspot_features(
     if not session_dates:
         session_dates = sorted(equity["trade_date"].unique())
     sessions = pd.Index(session_dates, name="trade_date")
-    equity_close = equity.pivot(index="trade_date", columns="ts_code", values="close").reindex(sessions)
+    equity["adjusted_close"] = np.where(
+        _finite_positive(equity["close"]) & _finite_positive(equity["adj_factor"]),
+        equity["close"] * equity["adj_factor"],
+        np.nan,
+    )
+    equity_close = equity.pivot(
+        index="trade_date", columns="ts_code", values="adjusted_close"
+    ).reindex(sessions)
     equity_returns = equity_close.pct_change(fill_method=None).replace([np.inf, -np.inf], np.nan)
     benchmark_close = benchmark.set_index("trade_date")["close"].reindex(sessions)
     market_amount = _strict_market_amount(equity, sessions)
@@ -151,6 +161,7 @@ def _group_row(
         "official_index_code": item.get("official_index_code"),
         "member_count": len(current_codes),
         "interpretation_limit": "observable sector price, participation and turnover facts only",
+        "equity_return_price_basis": "close_times_adj_factor",
     }
     base.update(_blank_observations())
     if not current_codes:

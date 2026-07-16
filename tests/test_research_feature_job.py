@@ -34,6 +34,7 @@ class FakeWarehouse:
         }
         for dataset in (
             ResearchDatasetId.EQUITY_DAILY,
+            ResearchDatasetId.ADJ_FACTOR,
             ResearchDatasetId.DAILY_BASIC,
             ResearchDatasetId.STOCK_LIMIT,
             ResearchDatasetId.INDEX_DAILY,
@@ -220,6 +221,13 @@ def test_job_uses_calendar_windows_strict_manifests_and_exact_contracts(
         if ResearchDatasetId.DAILY_BASIC in mapping
     ]
     assert equity_windows and max(map(len, equity_windows)) == 82
+    adjustment_windows = [
+        mapping[ResearchDatasetId.ADJ_FACTOR]
+        for mapping in snapshots
+        if ResearchDatasetId.ADJ_FACTOR in mapping
+    ]
+    assert len(adjustment_windows) == 3
+    assert all(len(window) == 82 for window in adjustment_windows)
     assert index_windows and max(map(len, index_windows)) == 250
     assert valuation_windows and len(max(valuation_windows, key=len)) == 300
     assert summary.as_of.isoformat() == "2026-07-13T23:59:59+08:00"
@@ -230,9 +238,9 @@ def test_job_uses_calendar_windows_strict_manifests_and_exact_contracts(
         "stock_trading_context",
     )
     assert [call["formula_version"] for call in warehouse.commits] == [
-        "market-context-v1",
-        "sector-hotspot-v2",
-        "stock-trading-context-v1",
+        "market-context-v2",
+        "sector-hotspot-v3",
+        "stock-trading-context-v2",
     ]
     assert [call["entity_key"] for call in warehouse.commits] == [
         "analysis_date",
@@ -257,6 +265,30 @@ def test_job_uses_calendar_windows_strict_manifests_and_exact_contracts(
         if item["dataset"] == ResearchDatasetId.INDEX_DAILY.value
     ]
     assert len(stock_index_partitions) == 250
+
+
+def test_job_normalizes_equity_and_adjustment_trade_date_types(
+    tmp_path: Path, monkeypatch
+) -> None:
+    import stock_analyzer.ops.research_features as job
+
+    dates = [value.date() for value in pd.bdate_range(end=ANALYSIS_DATE, periods=300)]
+    warehouse = FakeWarehouse(tmp_path, dates)
+    warehouse.frames[ResearchDatasetId.ADJ_FACTOR]["trade_date"] = pd.to_datetime(
+        warehouse.frames[ResearchDatasetId.ADJ_FACTOR]["trade_date"]
+    )
+    _WAREHOUSES[tmp_path] = warehouse
+    captured: dict[str, tuple] = {}
+    monkeypatch.setattr(job, "ResearchQuery", FakeQuery)
+    monkeypatch.setattr(job, "DerivedFeatureStore", FakeStore)
+    monkeypatch.setattr(job, "compute_market_context_features", _capture_market(captured))
+    monkeypatch.setattr(job, "compute_hotspot_features", _capture_sector(captured))
+    monkeypatch.setattr(job, "compute_stock_context_features", _capture_stock(captured))
+
+    summary = job.run_research_features(warehouse, ANALYSIS_DATE)
+
+    assert summary.failed_feature_sets == ()
+    assert set(captured["market"][0]["adj_factor"]) == {1.0}
 
 
 def test_job_is_idempotent_and_only_related_manifest_changes_recompute(
@@ -309,7 +341,7 @@ def test_later_feature_failure_preserves_prior_commits_and_continues(
     monkeypatch.setattr(job, "compute_stock_context_features", _simple_stock)
     job.run_research_features(warehouse, ANALYSIS_DATE)
     previous_sector = warehouse.current[
-        ("sector_hotspot", ANALYSIS_DATE, "sector-hotspot-v2")
+        ("sector_hotspot", ANALYSIS_DATE, "sector-hotspot-v3")
     ]["frame"].copy()
     warehouse.revisions[ResearchDatasetId.EQUITY_DAILY.value] = "new-equity"
 
@@ -322,7 +354,7 @@ def test_later_feature_failure_preserves_prior_commits_and_continues(
     assert summary.failed_feature_sets == ("sector_hotspot",)
     assert "sector formula failed" in summary.plain_language_summary
     pd.testing.assert_frame_equal(
-        warehouse.current[("sector_hotspot", ANALYSIS_DATE, "sector-hotspot-v2")]["frame"],
+        warehouse.current[("sector_hotspot", ANALYSIS_DATE, "sector-hotspot-v3")]["frame"],
         previous_sector,
     )
     assert summary.committed_feature_sets == ("market_context", "stock_trading_context")
@@ -449,6 +481,10 @@ def _fact_frames(dates: list[date]) -> dict[ResearchDatasetId, pd.DataFrame]:
         [{"trade_date": day, "ts_code": "000001.SZ", "open": 10.0, "high": 10.5,
           "low": 9.8, "close": 10.2, "amount": 1_000_000.0} for day in dates]
     )
+    adjustments = pd.DataFrame(
+        [{"trade_date": day, "ts_code": "000001.SZ", "adj_factor": 1.0}
+         for day in dates]
+    )
     daily_basic = pd.DataFrame(
         [{"trade_date": day, "ts_code": "000001.SZ", "pe_ttm": 8.0, "pb": 0.8}
          for day in dates]
@@ -479,6 +515,7 @@ def _fact_frames(dates: list[date]) -> dict[ResearchDatasetId, pd.DataFrame]:
              "list_status": "L"}
         ]),
         ResearchDatasetId.EQUITY_DAILY: equity,
+        ResearchDatasetId.ADJ_FACTOR: adjustments,
         ResearchDatasetId.DAILY_BASIC: daily_basic,
         ResearchDatasetId.STOCK_LIMIT: limits,
         ResearchDatasetId.INDEX_DAILY: indexes,

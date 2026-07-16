@@ -9,13 +9,20 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 from pydantic import BaseModel, Field
 
-from stock_analyzer.data.research_contracts import FactBatch, ResearchDatasetId
+from stock_analyzer.data.research_contracts import (
+    FactBatch,
+    ResearchDatasetId,
+    research_contract,
+)
 from stock_analyzer.data.tushare_research_client import (
     ResearchSourceError,
     TushareResearchClient,
 )
 from stock_analyzer.storage.research_schema import connect_research_warehouse
 from stock_analyzer.storage.research_warehouse import ResearchWarehouse
+from stock_analyzer.storage.research_contract_audit import (
+    audit_fact_partition_contract,
+)
 
 
 class BackfillSummary(BaseModel):
@@ -220,12 +227,19 @@ class ResearchBackfillService:
         manifest = self.warehouse.partition_manifest(dataset)
         if manifest.empty:
             return False
-        return bool(
+        complete = bool(
             (
                 (manifest["partition_value"].astype(str) == partition)
                 & (manifest["quality_status"] == "passed")
             ).any()
         )
+        if not complete:
+            return False
+        selected = manifest[manifest["partition_value"].astype(str) == partition]
+        path = self.warehouse.root / str(selected.iloc[0]["relative_path"])
+        return path.is_file() and audit_fact_partition_contract(
+            path, research_contract(dataset)
+        ).valid
 
     def _record_gap(
         self,

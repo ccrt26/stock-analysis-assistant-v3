@@ -107,3 +107,51 @@ def test_history_windows_are_tiered_by_business_value():
     assert registry[ResearchDatasetId.SUSPENSION].history_window == "one_year"
     assert registry[ResearchDatasetId.MARGIN_DETAIL].history_window == "250_sessions"
     assert registry[ResearchDatasetId.MINUTE_BAR].history_window.startswith("20_sessions")
+
+
+def test_equity_daily_contract_requires_complete_vendor_daily_schema_without_mixing_returns():
+    contract = research_contract_registry()[ResearchDatasetId.EQUITY_DAILY]
+
+    assert {
+        "trade_date",
+        "ts_code",
+        "open",
+        "high",
+        "low",
+        "close",
+        "pre_close",
+        "change",
+        "pct_chg",
+        "volume",
+        "amount",
+    } <= set(contract.required_columns)
+    assert contract.minimum_required_field_coverage == 0.99
+
+
+def test_adjustment_factor_contract_requires_the_factor_used_by_derived_returns():
+    contract = research_contract_registry()[ResearchDatasetId.ADJ_FACTOR]
+
+    assert {"trade_date", "ts_code", "adj_factor"} <= set(
+        contract.required_columns
+    )
+    assert contract.coverage_columns == ("adj_factor",)
+    assert contract.minimum_required_field_coverage == 0.99
+
+
+def test_financial_indicator_contract_does_not_invent_cash_flow_update_flag():
+    registry = research_contract_registry()
+
+    assert registry[ResearchDatasetId.FINANCIAL_INDICATOR].business_key == (
+        "ts_code",
+        "report_period",
+        "report_type",
+    )
+    assert "update_flag" not in registry[
+        ResearchDatasetId.FINANCIAL_INDICATOR
+    ].required_columns
+    assert registry[ResearchDatasetId.CASH_FLOW].business_key == (
+        "ts_code",
+        "report_period",
+        "report_type",
+        "statement_type",
+    )

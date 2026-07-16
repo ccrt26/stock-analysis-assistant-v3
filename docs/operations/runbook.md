@@ -59,6 +59,18 @@ PYTHONPATH=src .venv/bin/python -m stock_analyzer data derive \
 
 健康报告会把“收盘核心事实是否完整”和“三类研究观察是否可用”分开展示。研究观察还会核对公式版本、文件指纹、行数和原始输入清单；`complete_with_declared_gaps` 只表示“可以使用，但有明确限制”，不会被说成没有缺口。
 
+### 日线字段与收益口径
+
+- `equity_daily.pre_close/change/pct_chg` 是 Tushare `daily` 的供应商事实，和原始 OHLC、成交量、成交额一起构成稳定物理契约。每个日分区必须存在这些列，三个字段的逐分区非空覆盖率不得低于 99%；缺列或低于阈值时，即使旧清单写着 `passed`，健康检查也必须失败，续传回填也必须重取该分区。
+- 供应商 `pct_chg` 不等于本地跨日可比收益。市场、热点和个股研究观察使用 `close * adj_factor` 生成本地复权价格，并在结果中记录 `equity_return_price_basis=close_times_adj_factor`。原始事实不被复权值覆盖或混写。
+- 当前正式公式版本是 `market-context-v2`、`sector-hotspot-v3`、`stock-trading-context-v2`。三类输入清单都必须包含与股票日线相同窗口的 `adj_factor` 分区；复权因子修订会使输入清单变更并触发重算。
+
+### 财务事实键与可比查询
+
+- `financial_indicator` 的正式业务键是 `(ts_code, report_period, report_type)`。该端点不提供 `update_flag`，仓库修订依赖 `available_at`、`payload_hash`、`revision_no` 和 `research_fact_revisions`；不得为了和报表端点表面一致而补造 `update_flag`。
+- `income_statement`、`balance_sheet` 和 `cash_flow` 的正式业务键是 `(ts_code, report_period, report_type, statement_type)`。不同 `comp_type`、`end_type` 或报表类型是需要保留的正式事实变体，不得按 `(ts_code, report_period)` 粗暴删除。
+- 需要一行可比报表时，使用 `ResearchQuery.comparable_financials_as_of`。它先按 `as_of` 解析修订，再按报告期应有的 `end_type`、`update_flag`、合并报表优先级、`available_at` 和稳定的 `statement_type` 依次选择；该规则只生成查询视图，不修改事实层。
+
 只修补已记录的精确缺口：
 
 ```bash

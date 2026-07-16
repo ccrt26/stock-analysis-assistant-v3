@@ -32,6 +32,7 @@ def _equity_rows(
                     "high": close + 1.0,
                     "low": close - 1.0,
                     "close": close,
+                    "adj_factor": 1.0,
                     "amount": amounts[code][offset] if amounts else 100.0,
                 }
             )
@@ -124,6 +125,36 @@ def test_returns_and_relative_returns_use_exact_market_sessions() -> None:
     ] = np.nan
     missing_row = _compute(missing_session, _benchmark(dates, broad)).iloc[0]
     assert np.isnan(missing_row["return_5d"])
+
+
+def test_stock_returns_and_cross_day_risk_use_adjusted_prices() -> None:
+    dates = pd.bdate_range(end=ANALYSIS_DATE, periods=2)
+    equity = _equity_rows(dates, {"A.SZ": [10.0, 5.0]})
+    equity.loc[:, "adj_factor"] = [1.0, 2.0]
+
+    row = _compute(equity, _benchmark(dates, [100.0, 100.0])).iloc[0]
+
+    assert row["return_1d"] == pytest.approx(0.0)
+    assert row["relative_return_1d"] == pytest.approx(0.0)
+    assert row["equity_return_price_basis"] == "close_times_adj_factor"
+
+
+def test_post_limit_return_is_limited_when_adjustment_factor_is_missing() -> None:
+    dates = pd.bdate_range(end=ANALYSIS_DATE, periods=3)
+    equity = _equity_rows(dates, {"A.SZ": [10.0, 11.0, 10.5]})
+    equity.loc[equity["trade_date"] == dates[-2].date(), "adj_factor"] = np.nan
+    limits = _all_limits(equity)
+    limits.loc[limits["trade_date"] == dates[-2].date(), "up_limit"] = 11.0
+
+    row = _compute(
+        equity,
+        _benchmark(dates, [100.0, 100.0, 100.0]),
+        limits=limits,
+    ).iloc[0]
+
+    assert row["latest_limit_up_date"] == dates[-2].date()
+    assert row["post_limit_behavior_status"] == "limited"
+    assert np.isnan(row["post_limit_next_return"])
 
 
 def test_beta_correlation_volatility_and_atr_are_hand_calculated() -> None:

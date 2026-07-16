@@ -18,7 +18,10 @@ def _batch(*, close: float = 10.2, records: list[dict] | None = None) -> FactBat
                 "high": max(10.5, close),
                 "low": min(9.8, close),
                 "close": close,
-                "vol": 100.0,
+                "pre_close": 10.0,
+                "change": close - 10.0,
+                "pct_chg": (close / 10.0 - 1.0) * 100.0,
+                "volume": 100.0,
                 "amount": 1000.0,
             }
         ]
@@ -127,7 +130,10 @@ def test_ohlc_quality_failure_is_rejected(tmp_path):
                 "high": 9.0,
                 "low": 9.8,
                 "close": 10.2,
-                "vol": 100.0,
+                "pre_close": 10.0,
+                "change": 0.2,
+                "pct_chg": 2.0,
+                "volume": 100.0,
                 "amount": 1000.0,
             }
         ]
@@ -135,6 +141,26 @@ def test_ohlc_quality_failure_is_rejected(tmp_path):
     with pytest.raises(ValueError, match="OHLC"):
         warehouse.commit_batch(bad)
     assert warehouse.read_current(ResearchDatasetId.EQUITY_DAILY).empty
+
+
+def test_equity_daily_missing_vendor_fields_is_rejected_before_manifest_passes(tmp_path):
+    warehouse = ResearchWarehouse(tmp_path)
+    incomplete = _batch().model_copy(
+        update={
+            "records": [
+                {
+                    key: value
+                    for key, value in _batch().records[0].items()
+                    if key not in {"pre_close", "change", "pct_chg"}
+                }
+            ]
+        }
+    )
+
+    with pytest.raises(ValueError, match="required columns.*change.*pct_chg.*pre_close"):
+        warehouse.commit_batch(incomplete)
+
+    assert warehouse.partition_manifest(ResearchDatasetId.EQUITY_DAILY).empty
 
 
 def test_same_business_key_cannot_silently_move_to_another_partition(tmp_path):

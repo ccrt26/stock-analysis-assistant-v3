@@ -34,6 +34,10 @@ def _daily_batch(partition: str, code: str) -> FactBatch:
                 "high": 10.5,
                 "low": 9.8,
                 "close": 10.2,
+                "pre_close": 10.0,
+                "change": 0.2,
+                "pct_chg": 2.0,
+                "volume": 100.0,
                 "amount": 1000.0,
             }
         ],
@@ -81,6 +85,57 @@ def test_fast_health_checks_latest_partition_only(tmp_path):
     assert daily.partitions == 2
     assert daily.checked_partitions == 1
     assert daily.checked_rows == 1
+
+
+def test_health_rejects_passed_manifest_when_required_vendor_columns_are_absent(
+    tmp_path,
+):
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    warehouse.commit_batch(_daily_batch("2026-07-10", "000001.SZ"))
+    manifest = warehouse.partition_manifest(ResearchDatasetId.EQUITY_DAILY).iloc[0]
+    path = warehouse.root / str(manifest["relative_path"])
+    legacy = pd.read_parquet(path).drop(
+        columns=["pre_close", "change", "pct_chg"]
+    )
+    legacy.to_parquet(path, index=False)
+
+    report = build_research_health_report(
+        warehouse, date(2026, 7, 10), full_history=False
+    )
+    daily = next(
+        item for item in report.datasets if item.dataset_id == "equity_daily"
+    )
+
+    assert daily.schema_mismatch_partitions == 1
+    assert set(daily.missing_required_columns) == {
+        "change",
+        "pct_chg",
+        "pre_close",
+    }
+    assert daily.contract_valid is False
+    assert report.complete_core_date is False
+
+
+def test_core_health_rejects_fact_file_hash_mismatch(tmp_path):
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    warehouse.commit_batch(_daily_batch("2026-07-10", "000001.SZ"))
+    manifest = warehouse.partition_manifest(ResearchDatasetId.EQUITY_DAILY).iloc[0]
+    path = warehouse.root / str(manifest["relative_path"])
+    changed = pd.read_parquet(path)
+    changed.loc[:, "close"] = 10.3
+    changed.to_parquet(path, index=False)
+
+    report = build_research_health_report(
+        warehouse, date(2026, 7, 10), full_history=False
+    )
+    daily = next(
+        item for item in report.datasets if item.dataset_id == "equity_daily"
+    )
+
+    assert daily.hash_mismatches == 1
+    assert daily.contract_valid is True
+    assert daily.physical_valid is False
+    assert report.complete_core_date is False
 
 
 def _commit_derived_set(
@@ -272,9 +327,13 @@ def test_derived_health_detects_row_hash_and_input_manifest_changes(tmp_path):
                         "ts_code": "000001.SZ",
                         "open": 10.0,
                         "high": 11.0,
-                        "low": 9.8,
-                        "close": 10.8,
-                        "amount": 2000.0,
+                            "low": 9.8,
+                            "close": 10.8,
+                            "pre_close": 10.2,
+                            "change": 0.6,
+                            "pct_chg": 100.0 * (10.8 / 10.2 - 1.0),
+                            "volume": 100.0,
+                            "amount": 2000.0,
                     }
                 ],
             }

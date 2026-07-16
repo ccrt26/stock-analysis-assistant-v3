@@ -40,10 +40,14 @@ def test_gap_is_marked_resolved_only_after_partition_is_committed(tmp_path):
                     "trade_date": date(2026, 7, 10),
                     "ts_code": "000001.SZ",
                     "open": 10.0,
-                    "high": 10.5,
-                    "low": 9.8,
-                    "close": 10.2,
-                    "amount": 1000.0,
+                        "high": 10.5,
+                        "low": 9.8,
+                        "close": 10.2,
+                        "pre_close": 10.0,
+                        "change": 0.2,
+                        "pct_chg": 2.0,
+                        "volume": 100.0,
+                        "amount": 1000.0,
                 }
             ],
         )

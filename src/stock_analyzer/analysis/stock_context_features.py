@@ -15,7 +15,7 @@ import numpy as np
 import pandas as pd
 
 
-STOCK_CONTEXT_FORMULA_VERSION = "stock-trading-context-v1"
+STOCK_CONTEXT_FORMULA_VERSION = "stock-trading-context-v2"
 RETURN_HORIZONS = (1, 5, 10, 20, 60)
 RISK_WINDOW = 60
 VOLATILITY_WINDOW = 20
@@ -54,9 +54,12 @@ def compute_stock_context_features(
     analysis_date = _as_date(analysis_date)
     equity = _prepare_frame(
         equity_daily,
-        required={"trade_date", "ts_code", "open", "high", "low", "close", "amount"},
+        required={
+            "trade_date", "ts_code", "open", "high", "low", "close",
+            "adj_factor", "amount",
+        },
         key=("trade_date", "ts_code"),
-        numeric=("open", "high", "low", "close", "amount"),
+        numeric=("open", "high", "low", "close", "adj_factor", "amount"),
         label="equity daily",
         analysis_date=analysis_date,
     )
@@ -139,7 +142,12 @@ def _compute_stock_row(
     analysis_date: date,
 ) -> dict[str, object]:
     stock = stock_values.set_index("trade_date").reindex(session_index)
-    closes = stock["close"].astype(float)
+    adjustment = stock["adj_factor"].astype(float)
+    adjusted_stock = stock.copy()
+    for field in ("open", "high", "low", "close"):
+        adjusted_stock[field] = stock[field].astype(float) * adjustment
+    adjusted_stock.loc[~_finite_positive(adjustment), ["open", "high", "low", "close"]] = np.nan
+    closes = adjusted_stock["close"].astype(float)
     amounts = stock["amount"].astype(float)
     benchmark = benchmark.reindex(session_index)
     stock_returns = closes.pct_change(fill_method=None).replace([np.inf, -np.inf], np.nan)
@@ -147,7 +155,9 @@ def _compute_stock_row(
         [np.inf, -np.inf], np.nan
     )
     current = stock.loc[analysis_date]
-    current_core_valid = _valid_ohlc_amount(current)
+    current_core_valid = _valid_ohlc_amount(current) and _finite_positive_scalar(
+        current["adj_factor"]
+    )
     benchmark_current_valid = _finite_positive_scalar(benchmark.loc[analysis_date])
     trailing_price = closes.tail(82)
     available_price_sessions = int(_finite_positive(trailing_price).sum())
@@ -168,6 +178,7 @@ def _compute_stock_row(
         "available_price_sessions": available_price_sessions,
         "trader_identity_status": "unavailable",
         "interpretation_limit": "observable daily price, turnover and valuation facts only",
+        "equity_return_price_basis": "close_times_adj_factor",
     }
     for horizon in RETURN_HORIZONS:
         stock_return = _exact_return(closes, horizon, analysis_date)
@@ -201,7 +212,7 @@ def _compute_stock_row(
             f"{risk_observations['downside_risk_observation_count_60d']} downside pairs"
         )
     row["realized_volatility_20d_annualized"] = _realized_volatility(stock_returns)
-    row["atr_ratio_20d"] = _atr_ratio(stock)
+    row["atr_ratio_20d"] = _atr_ratio(adjusted_stock)
     for window in PRICE_LOCATION_WINDOWS:
         row[f"price_location_{window}d"] = _price_location(closes, window)
     price_required = (
@@ -251,7 +262,7 @@ def _compute_stock_row(
         )
 
     limit_observations, limit_complete = _limit_observations(
-        stock, code_limits, session_index
+        stock, adjusted_stock, code_limits, session_index
     )
     row.update(limit_observations)
     if not limit_complete:
@@ -603,6 +614,7 @@ def _countertrend_observations(
 
 def _limit_observations(
     stock: pd.DataFrame,
+    adjusted_stock: pd.DataFrame,
     code_limit_values: pd.DataFrame,
     session_index: pd.Index,
 ) -> tuple[dict[str, object], bool]:
@@ -659,15 +671,19 @@ def _limit_observations(
         and _finite_positive_scalar(next_row["close"])
         and _finite_nonnegative_scalar(next_row["amount"])
         and _finite_positive_scalar(next_row["high"])
+        and _finite_positive_scalar(adjusted_stock.loc[latest, "close"])
+        and _finite_positive_scalar(adjusted_stock.loc[next_date, "close"])
     )
     result["post_limit_behavior_status"] = (
         "complete" if behavior_complete else "limited"
     )
-    if _finite_positive_scalar(hit_row["close"]) and _finite_positive_scalar(
-        next_row["close"]
+    adjusted_hit = adjusted_stock.loc[latest]
+    adjusted_next = adjusted_stock.loc[next_date]
+    if _finite_positive_scalar(adjusted_hit["close"]) and _finite_positive_scalar(
+        adjusted_next["close"]
     ):
         result["post_limit_next_return"] = float(
-            next_row["close"] / hit_row["close"] - 1.0
+            adjusted_next["close"] / adjusted_hit["close"] - 1.0
         )
     if _finite_positive_scalar(hit_row["amount"]) and _finite_nonnegative_scalar(
         next_row["amount"]

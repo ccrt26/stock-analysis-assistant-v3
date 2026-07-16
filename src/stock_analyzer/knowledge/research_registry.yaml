@@ -1120,7 +1120,7 @@ entries:
       - 仅凭板块名称、单只强势股或第三方热度标签认定持续热点。
       - 把多个因子观察机械相加成总分，或把板块热度证据写成最终热点排名。
     prerequisites:
-      - 只使用分析时点已经公开、按当日有效的行业成分、行业日线和sector-hotspot-v2观察。
+      - 只使用分析时点已经公开、按当日有效的行业成分、行业日线和sector-hotspot-v3观察。
       - 极端值采用排序、分位或缩尾等稳健处理，并检查行业、规模和微盘股污染。
       - 与可复算板块热度证据共同使用；这些证据不是最终热点排名。
     counter_evidence:
@@ -1138,6 +1138,7 @@ entries:
         name: sector_hotspot
         required_fields:
           - analysis_date
+          - equity_return_price_basis
           - group_code
           - group_type
           - relative_return_1d
@@ -1191,7 +1192,7 @@ entries:
         required_fields: [available_at, industry_code, ts_code, valid_from, valid_to]
       - kind: derived
         name: sector_hotspot
-        required_fields: [analysis_date, group_code, group_type, relative_return_20d]
+        required_fields: [analysis_date, equity_return_price_basis, group_code, group_type, relative_return_20d]
     local_validation:
       status: required_before_threshold
       reason: 海外方法只能提供拆分思路，必须在中国A股本地时点验证前保持方法用途。

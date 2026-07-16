@@ -585,6 +585,13 @@ class ResearchWarehouse:
     ) -> None:
         if frame.empty:
             return
+        contract = research_contract(dataset_id)
+        missing_columns = sorted(set(contract.required_columns) - set(frame.columns))
+        if missing_columns:
+            raise ValueError(
+                f"{dataset_id.value} lacks required columns: "
+                + ", ".join(missing_columns)
+            )
         duplicates = frame.duplicated(subset=list(business_key), keep=False)
         if duplicates.any():
             raise ValueError(

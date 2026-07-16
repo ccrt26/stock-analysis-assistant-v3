@@ -104,7 +104,7 @@ def complete_capabilities(registry=None) -> CapabilitySnapshot:
                 partition_count=1,
                 row_count=1,
                 formula_versions=(
-                    ("sector-hotspot-v2",)
+                    ("sector-hotspot-v3",)
                     if name == "sector_hotspot"
                     else (("acceptance-fixture-v1",) if kind == "derived" else ())
                 ),
@@ -214,7 +214,7 @@ def test_sector_hotspot_remains_evidence_not_ranking():
         EXPECTED_SCENARIO_SELECTIONS["sector_hotspot"]
     )
     assert hotspot is not None
-    assert hotspot.formula_versions == ("sector-hotspot-v2",)
+    assert hotspot.formula_versions == ("sector-hotspot-v3",)
     assert all(
         item.effect in {KnowledgeEffect.METHOD_ONLY, KnowledgeEffect.ANALYSIS_EVIDENCE}
         for item in selected

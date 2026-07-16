@@ -272,17 +272,19 @@ def run_research_features(
                 ResearchDatasetId.SECURITY_MASTER
             ),
             ResearchDatasetId.EQUITY_DAILY: price_dates,
+            ResearchDatasetId.ADJ_FACTOR: price_dates,
             ResearchDatasetId.INDEX_DAILY: context_dates,
             ResearchDatasetId.STOCK_LIMIT: (analysis_day.isoformat(),),
         }
 
     def calculate_market(snapshot: MaterializedResearchSnapshot) -> pd.DataFrame:
         equity = snapshot.frame(ResearchDatasetId.EQUITY_DAILY)
+        adjustments = snapshot.frame(ResearchDatasetId.ADJ_FACTOR)
         indexes = snapshot.frame(ResearchDatasetId.INDEX_DAILY)
         limits = snapshot.frame(ResearchDatasetId.STOCK_LIMIT)
         securities = snapshot.frame(ResearchDatasetId.SECURITY_MASTER)
         return compute_market_context_features(
-            equity,
+            _equity_with_adjustment(equity, adjustments),
             indexes,
             limits,
             analysis_date=analysis_day,
@@ -301,6 +303,7 @@ def run_research_features(
         inputs: dict[ResearchDatasetId, Iterable[str]] = {
             **calendar_input,
             ResearchDatasetId.EQUITY_DAILY: price_dates,
+            ResearchDatasetId.ADJ_FACTOR: price_dates,
             ResearchDatasetId.INDEX_DAILY: price_dates,
             ResearchDatasetId.STOCK_LIMIT: (analysis_day.isoformat(),),
             ResearchDatasetId.INDUSTRY_CATALOG: partitions(
@@ -324,6 +327,7 @@ def run_research_features(
 
     def calculate_sector(snapshot: MaterializedResearchSnapshot) -> pd.DataFrame:
         equity = snapshot.frame(ResearchDatasetId.EQUITY_DAILY)
+        adjustments = snapshot.frame(ResearchDatasetId.ADJ_FACTOR)
         indexes = snapshot.frame(ResearchDatasetId.INDEX_DAILY)
         benchmark = _benchmark(indexes)
         limits = snapshot.frame(ResearchDatasetId.STOCK_LIMIT)
@@ -339,7 +343,7 @@ def run_research_features(
             else _empty_minutes()
         )
         return compute_hotspot_features(
-            equity,
+            _equity_with_adjustment(equity, adjustments),
             _sector_catalog(industry_catalog, theme_catalog, analysis_day),
             _sector_memberships(industry_members, theme_members, analysis_day),
             benchmark,
@@ -361,6 +365,7 @@ def run_research_features(
         return {
             **calendar_input,
             ResearchDatasetId.EQUITY_DAILY: price_dates,
+            ResearchDatasetId.ADJ_FACTOR: price_dates,
             ResearchDatasetId.INDEX_DAILY: context_dates,
             ResearchDatasetId.STOCK_LIMIT: recent_limit_dates,
             ResearchDatasetId.DAILY_BASIC: valuation_dates,
@@ -368,11 +373,12 @@ def run_research_features(
 
     def calculate_stock(snapshot: MaterializedResearchSnapshot) -> pd.DataFrame:
         equity = snapshot.frame(ResearchDatasetId.EQUITY_DAILY)
+        adjustments = snapshot.frame(ResearchDatasetId.ADJ_FACTOR)
         indexes = snapshot.frame(ResearchDatasetId.INDEX_DAILY)
         limits = snapshot.frame(ResearchDatasetId.STOCK_LIMIT)
         valuations = snapshot.frame(ResearchDatasetId.DAILY_BASIC)
         return compute_stock_context_features(
-            equity,
+            _equity_with_adjustment(equity, adjustments),
             _benchmark(indexes),
             limits,
             valuations,
@@ -543,6 +549,34 @@ def _benchmark(indexes: pd.DataFrame) -> pd.DataFrame:
         .sort_values("trade_date")
         .reset_index(drop=True)
     )
+
+
+def _equity_with_adjustment(
+    equity: pd.DataFrame,
+    adjustments: pd.DataFrame,
+) -> pd.DataFrame:
+    _require_columns(equity, {"trade_date", "ts_code"}, "equity daily")
+    _require_columns(
+        adjustments,
+        {"trade_date", "ts_code", "adj_factor"},
+        "adjustment factor",
+    )
+    equity = equity.copy()
+    adjustments = adjustments.copy()
+    for frame in (equity, adjustments):
+        frame["trade_date"] = pd.to_datetime(
+            frame["trade_date"], errors="raise"
+        ).dt.date
+        frame["ts_code"] = frame["ts_code"].astype(str)
+    if adjustments.duplicated(["trade_date", "ts_code"]).any():
+        raise ValueError("duplicate adjustment-factor business fact")
+    merged = equity.merge(
+        adjustments[["trade_date", "ts_code", "adj_factor"]],
+        on=["trade_date", "ts_code"],
+        how="left",
+        validate="one_to_one",
+    )
+    return merged
 
 
 def _sector_catalog(

@@ -47,7 +47,10 @@ def _daily_batch(
                 "high": max(10.5, close),
                 "low": min(9.8, close),
                 "close": close,
-                "vol": 100.0,
+                "pre_close": 10.0,
+                "change": close - 10.0,
+                "pct_chg": (close / 10.0 - 1.0) * 100.0,
+                "volume": 100.0,
                 "amount": 1000.0,
             }
         ],
@@ -499,3 +502,172 @@ def test_manifest_groups_resolved_rows_once_instead_of_rescanning_per_partition(
 
     assert len(snapshot.input_manifest["partitions"]) == len(partitions)
     assert comparisons <= 1
+
+
+def _financial_batch(
+    dataset: ResearchDatasetId,
+    *,
+    available_at: datetime,
+    rows: list[dict[str, object]],
+    run_id: str,
+) -> FactBatch:
+    return FactBatch(
+        dataset_id=dataset,
+        partition_value="2025-12-31",
+        source_name="tushare",
+        source_endpoint=(
+            "fina_indicator"
+            if dataset is ResearchDatasetId.FINANCIAL_INDICATOR
+            else "cashflow"
+        ),
+        ingestion_run_id=run_id,
+        ingested_at=available_at,
+        default_available_at=available_at,
+        records=rows,
+    )
+
+
+def test_financial_indicator_as_of_uses_repository_revisions_without_update_flag(
+    tmp_path,
+):
+    warehouse = ResearchWarehouse(tmp_path)
+    first = datetime(2026, 3, 31, 16, tzinfo=timezone.utc)
+    revised = datetime(2026, 4, 30, 16, tzinfo=timezone.utc)
+    base = {
+        "ts_code": "000001.SZ",
+        "report_period": date(2025, 12, 31),
+        "report_type": "indicator",
+        "ann_date": date(2026, 3, 31),
+        "roe": 10.0,
+    }
+    warehouse.commit_batch(
+        _financial_batch(
+            ResearchDatasetId.FINANCIAL_INDICATOR,
+            available_at=first,
+            rows=[base],
+            run_id="indicator-first",
+        )
+    )
+    warehouse.commit_batch(
+        _financial_batch(
+            ResearchDatasetId.FINANCIAL_INDICATOR,
+            available_at=revised,
+            rows=[{**base, "roe": 11.0, "available_at": revised}],
+            run_id="indicator-revised",
+        )
+    )
+
+    early = ResearchQuery(warehouse).comparable_financials_as_of(
+        ResearchDatasetId.FINANCIAL_INDICATOR,
+        datetime(2026, 4, 15, tzinfo=timezone.utc),
+    )
+    late = ResearchQuery(warehouse).comparable_financials_as_of(
+        ResearchDatasetId.FINANCIAL_INDICATOR,
+        datetime(2026, 5, 1, tzinfo=timezone.utc),
+    )
+
+    assert early.iloc[0]["roe"] == pytest.approx(10.0)
+    assert late.iloc[0]["roe"] == pytest.approx(11.0)
+    assert "update_flag" not in late.columns
+
+
+def test_cash_flow_comparable_selection_preserves_variants_and_is_time_point_safe(
+    tmp_path,
+):
+    warehouse = ResearchWarehouse(tmp_path)
+    early_time = datetime(2026, 3, 7, 16, tzinfo=timezone.utc)
+    final_time = datetime(2026, 5, 15, 16, tzinfo=timezone.utc)
+    early = {
+        "ts_code": "603049.SH",
+        "report_period": date(2024, 12, 31),
+        "report_type": "1",
+        "statement_type": "comp=1;end=unknown",
+        "comp_type": "1",
+        "end_type": None,
+        "update_flag": "0",
+        "ann_date": date(2026, 3, 7),
+        "f_ann_date": date(2026, 3, 7),
+        "n_cashflow_act": 100.0,
+    }
+    warehouse.commit_batch(
+        _financial_batch(
+            ResearchDatasetId.CASH_FLOW,
+            available_at=early_time,
+            rows=[early],
+            run_id="cash-early",
+        )
+    )
+    warehouse.commit_batch(
+        _financial_batch(
+            ResearchDatasetId.CASH_FLOW,
+            available_at=final_time,
+            rows=[
+                {
+                    **early,
+                    "statement_type": "comp=1;end=4",
+                    "end_type": "4",
+                    "update_flag": "1",
+                    "ann_date": date(2026, 5, 15),
+                    "n_cashflow_act": 120.0,
+                    "available_at": final_time,
+                }
+            ],
+            run_id="cash-final",
+        )
+    )
+    query = ResearchQuery(warehouse)
+
+    raw = query.dataset_as_of(
+        ResearchDatasetId.CASH_FLOW,
+        datetime(2026, 5, 16, tzinfo=timezone.utc),
+    )
+    early_selected = query.comparable_financials_as_of(
+        ResearchDatasetId.CASH_FLOW,
+        datetime(2026, 4, 1, tzinfo=timezone.utc),
+    )
+    final_selected = query.comparable_financials_as_of(
+        ResearchDatasetId.CASH_FLOW,
+        datetime(2026, 5, 16, tzinfo=timezone.utc),
+    )
+
+    assert len(raw) == 2
+    assert early_selected.iloc[0]["statement_type"] == "comp=1;end=unknown"
+    assert final_selected.iloc[0]["statement_type"] == "comp=1;end=4"
+    assert final_selected.iloc[0]["n_cashflow_act"] == pytest.approx(120.0)
+    assert final_selected.iloc[0]["comparable_candidate_count"] == 2
+    assert "end_type_match" in final_selected.iloc[0]["comparable_selection_rule"]
+
+
+def test_statement_comparable_selection_tolerates_optional_update_and_end_type(
+    tmp_path,
+):
+    warehouse = ResearchWarehouse(tmp_path)
+    available = datetime(2026, 3, 31, 16, tzinfo=timezone.utc)
+    warehouse.commit_batch(
+        FactBatch(
+            dataset_id=ResearchDatasetId.INCOME_STATEMENT,
+            partition_value="2025-12-31",
+            source_name="tushare",
+            source_endpoint="income",
+            ingestion_run_id="income-without-optional-ranking-fields",
+            ingested_at=available,
+            default_available_at=available,
+            records=[
+                {
+                    "ts_code": "000001.SZ",
+                    "report_period": date(2025, 12, 31),
+                    "report_type": "1",
+                    "statement_type": "consolidated",
+                    "revenue": 100.0,
+                }
+            ],
+        )
+    )
+
+    selected = ResearchQuery(warehouse).comparable_financials_as_of(
+        ResearchDatasetId.INCOME_STATEMENT,
+        datetime(2026, 4, 1, tzinfo=timezone.utc),
+    )
+
+    assert len(selected) == 1
+    assert selected.iloc[0]["revenue"] == pytest.approx(100.0)

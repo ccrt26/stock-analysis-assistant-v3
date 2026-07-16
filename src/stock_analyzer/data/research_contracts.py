@@ -70,6 +70,9 @@ class DatasetContract(BaseModel):
     lagged: bool = False
     history_window: str
     availability_notes: str
+    required_columns: tuple[str, ...] = ()
+    coverage_columns: tuple[str, ...] = ()
+    minimum_required_field_coverage: float = Field(default=0.0, ge=0.0, le=1.0)
 
 
 class FactBatch(BaseModel):
@@ -116,6 +119,9 @@ def _contract(
     lagged: bool = False,
     window: str = "incremental",
     availability: str = "use provider publication semantics",
+    required_columns: tuple[str, ...] | None = None,
+    coverage_columns: tuple[str, ...] = (),
+    minimum_coverage: float = 0.0,
 ) -> DatasetContract:
     return DatasetContract(
         dataset_id=dataset_id,
@@ -126,6 +132,9 @@ def _contract(
         lagged=lagged,
         history_window=window,
         availability_notes=availability,
+        required_columns=required_columns or key,
+        coverage_columns=coverage_columns,
+        minimum_required_field_coverage=minimum_coverage,
     )
 
 
@@ -134,8 +143,29 @@ def research_contract_registry() -> dict[ResearchDatasetId, DatasetContract]:
     items = (
         _contract(ResearchDatasetId.TRADE_CALENDAR, ("exchange", "cal_date"), "cal_year", required=True, window="five_years_plus_buffer"),
         _contract(ResearchDatasetId.SECURITY_MASTER, ("ts_code", "valid_from"), "catalog_version", required=True, window="all_effective_securities"),
-        _contract(ResearchDatasetId.EQUITY_DAILY, ("trade_date", "ts_code"), "trade_date", required=True, window="five_years"),
-        _contract(ResearchDatasetId.ADJ_FACTOR, ("trade_date", "ts_code"), "trade_date", required=True, window="five_years"),
+        _contract(
+            ResearchDatasetId.EQUITY_DAILY,
+            ("trade_date", "ts_code"),
+            "trade_date",
+            required=True,
+            window="five_years",
+            required_columns=(
+                "trade_date", "ts_code", "open", "high", "low", "close",
+                "pre_close", "change", "pct_chg", "volume", "amount",
+            ),
+            coverage_columns=("pre_close", "change", "pct_chg"),
+            minimum_coverage=0.99,
+        ),
+        _contract(
+            ResearchDatasetId.ADJ_FACTOR,
+            ("trade_date", "ts_code"),
+            "trade_date",
+            required=True,
+            window="five_years",
+            required_columns=("trade_date", "ts_code", "adj_factor"),
+            coverage_columns=("adj_factor",),
+            minimum_coverage=0.99,
+        ),
         _contract(ResearchDatasetId.DAILY_BASIC, ("trade_date", "ts_code"), "trade_date", required=True, window="five_years"),
         _contract(ResearchDatasetId.STOCK_LIMIT, ("trade_date", "ts_code"), "trade_date", required=True, window="five_years"),
         _contract(ResearchDatasetId.INDEX_DAILY, ("trade_date", "index_code"), "trade_date", required=True, window="five_years"),
@@ -148,8 +178,25 @@ def research_contract_registry() -> dict[ResearchDatasetId, DatasetContract]:
         _contract(ResearchDatasetId.COMPANY_PROFILE, ("ts_code", "valid_from"), "catalog_version", window="all_listed_companies"),
         _contract(ResearchDatasetId.INCOME_STATEMENT, ("ts_code", "report_period", "report_type", "statement_type"), "report_period", window="12_quarters_and_5_years", availability="announcement time, never report-period end"),
         _contract(ResearchDatasetId.BALANCE_SHEET, ("ts_code", "report_period", "report_type", "statement_type"), "report_period", window="12_quarters_and_5_years", availability="announcement time, never report-period end"),
-        _contract(ResearchDatasetId.CASH_FLOW, ("ts_code", "report_period", "report_type", "statement_type"), "report_period", window="12_quarters_and_5_years", availability="announcement time, never report-period end"),
-        _contract(ResearchDatasetId.FINANCIAL_INDICATOR, ("ts_code", "report_period", "report_type"), "report_period", window="12_quarters_and_5_years", availability="announcement time, never report-period end"),
+        _contract(
+            ResearchDatasetId.CASH_FLOW,
+            ("ts_code", "report_period", "report_type", "statement_type"),
+            "report_period",
+            window="12_quarters_and_5_years",
+            availability="announcement time, never report-period end",
+            required_columns=(
+                "ts_code", "report_period", "report_type", "statement_type",
+                "comp_type", "end_type", "ann_date", "f_ann_date", "update_flag",
+            ),
+        ),
+        _contract(
+            ResearchDatasetId.FINANCIAL_INDICATOR,
+            ("ts_code", "report_period", "report_type"),
+            "report_period",
+            window="12_quarters_and_5_years",
+            availability="announcement time, never report-period end",
+            required_columns=("ts_code", "report_period", "report_type", "ann_date"),
+        ),
         _contract(ResearchDatasetId.MAIN_BUSINESS, ("ts_code", "report_period", "classification", "item_name"), "report_period", window="12_quarters_and_5_years"),
         _contract(ResearchDatasetId.EARNINGS_FORECAST, ("ts_code", "report_period", "announcement_type", "ann_date"), "ann_month", lagged=True, window="five_years"),
         _contract(ResearchDatasetId.EARNINGS_EXPRESS, ("ts_code", "report_period", "announcement_type", "ann_date"), "ann_month", lagged=True, window="five_years"),

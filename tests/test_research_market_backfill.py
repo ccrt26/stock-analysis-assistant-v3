@@ -35,7 +35,7 @@ class CalendarPro(FakePro):
         )
 
 
-def test_market_backfill_skips_already_committed_partition_and_fills_other_datasets(tmp_path):
+def test_market_backfill_repairs_committed_partition_with_incomplete_vendor_schema(tmp_path):
     warehouse = ResearchWarehouse(tmp_path / "warehouse")
     existing = FactBatch(
         dataset_id=ResearchDatasetId.EQUITY_DAILY,
@@ -48,6 +48,7 @@ def test_market_backfill_skips_already_committed_partition_and_fills_other_datas
         records=[{
             "trade_date": date(2026, 7, 9), "ts_code": "000001.SZ",
             "open": 10.0, "high": 10.5, "low": 9.8, "close": 10.2,
+            "pre_close": None, "change": None, "pct_chg": None,
             "volume": 100.0, "amount": 1000.0,
         }],
     )
@@ -63,10 +64,17 @@ def test_market_backfill_skips_already_committed_partition_and_fills_other_datas
     )
 
     daily_calls = [kwargs for method, kwargs in pro.calls if method == "daily"]
-    assert daily_calls == [{"trade_date": "20260710"}]
+    assert daily_calls == [
+        {"trade_date": "20260709"},
+        {"trade_date": "20260710"},
+    ]
     assert summary.failed == 0
     assert warehouse.read_current(ResearchDatasetId.EQUITY_DAILY).shape[0] == 2
     assert warehouse.read_current(ResearchDatasetId.ADJ_FACTOR).shape[0] == 2
+    repaired = warehouse.read_current(
+        ResearchDatasetId.EQUITY_DAILY, partition_value="2026-07-09"
+    )
+    assert repaired[["pre_close", "change", "pct_chg"]].notna().all().all()
 
 
 def test_empty_required_daily_response_is_recorded_as_waiting_not_complete(tmp_path):

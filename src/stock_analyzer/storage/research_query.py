@@ -65,6 +65,115 @@ class ResearchQuery:
         )
         return _public_fact_frame(resolved)
 
+    def comparable_financials_as_of(
+        self,
+        dataset_id: ResearchDatasetId | str,
+        as_of: datetime,
+    ) -> pd.DataFrame:
+        """Return one deterministic, time-point-safe row per company/period.
+
+        The fact store keeps every formal business-key variant.  This selector
+        is a query view only: it never deletes a statement variant or treats a
+        provider ``update_flag`` as the repository revision mechanism.
+        """
+
+        dataset = ResearchDatasetId(dataset_id)
+        supported = {
+            ResearchDatasetId.INCOME_STATEMENT,
+            ResearchDatasetId.BALANCE_SHEET,
+            ResearchDatasetId.CASH_FLOW,
+            ResearchDatasetId.FINANCIAL_INDICATOR,
+        }
+        if dataset not in supported:
+            raise ValueError(
+                f"comparable financial selection does not support {dataset.value}"
+            )
+        resolved = self.dataset_as_of(dataset, as_of)
+        if resolved.empty:
+            return resolved
+        group_key = ["ts_code", "report_period"]
+        if dataset is ResearchDatasetId.FINANCIAL_INDICATOR:
+            if resolved.duplicated(group_key).any():
+                raise ValueError(
+                    "financial_indicator has duplicate formal business facts "
+                    "after as_of resolution"
+                )
+            result = resolved.copy()
+            result["comparable_candidate_count"] = 1
+            result["comparable_selection_rule"] = (
+                "formal_key_revision_by_available_at"
+            )
+            return result.sort_values(group_key).reset_index(drop=True)
+
+        frame = resolved.copy()
+        frame["__candidate_count"] = frame.groupby(group_key)[
+            "business_key_hash"
+        ].transform("size")
+        periods = pd.to_datetime(frame["report_period"], errors="raise")
+        expected_end_type = periods.dt.month.map({3: "1", 6: "2", 9: "3", 12: "4"})
+        actual_end_type = frame.get(
+            "end_type", pd.Series(index=frame.index, dtype=object)
+        ).astype("string")
+        frame["__end_type_match"] = actual_end_type.eq(expected_end_type)
+        update_flag = frame.get(
+            "update_flag",
+            pd.Series(0, index=frame.index, dtype=int),
+        )
+        frame["__update_rank"] = pd.to_numeric(
+            update_flag, errors="coerce"
+        ).fillna(0)
+        report_priority = {
+            "1": 0,
+            "4": 1,
+            "2": 2,
+            "3": 3,
+            "5": 4,
+            "6": 5,
+            "9": 6,
+            "7": 7,
+            "8": 8,
+            "10": 9,
+        }
+        frame["__report_priority"] = (
+            frame["report_type"].astype(str).map(report_priority).fillna(99)
+        )
+        frame["__available_rank"] = pd.to_datetime(
+            frame["available_at"], utc=True, errors="raise"
+        )
+        frame["__statement_rank"] = frame["statement_type"].astype(str)
+        selected = (
+            frame.sort_values(
+                group_key
+                + [
+                    "__end_type_match",
+                    "__update_rank",
+                    "__report_priority",
+                    "__available_rank",
+                    "__statement_rank",
+                ],
+                ascending=[True, True, False, False, True, False, True],
+                kind="mergesort",
+            )
+            .drop_duplicates(group_key, keep="first")
+            .copy()
+        )
+        selected["comparable_candidate_count"] = selected.pop(
+            "__candidate_count"
+        ).astype(int)
+        selected["comparable_selection_rule"] = (
+            "as_of_then_end_type_match_then_update_flag_then_"
+            "consolidated_report_then_available_at_then_statement_type"
+        )
+        return selected.drop(
+            columns=[
+                "__end_type_match",
+                "__update_rank",
+                "__report_priority",
+                "__available_rank",
+                "__statement_rank",
+            ]
+        ).sort_values(group_key).reset_index(drop=True)
+
     def input_manifest(
         self,
         dataset_partitions: Mapping[

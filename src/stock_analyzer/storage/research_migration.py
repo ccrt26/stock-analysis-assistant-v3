@@ -247,6 +247,10 @@ def migrate_legacy_market(
                     for key, value in row.items()
                     if key not in _INTERNAL_COLUMNS
                 }
+                if "volume" not in record and "vol" in record:
+                    record["volume"] = record.pop("vol")
+                for vendor_field in ("pre_close", "change", "pct_chg"):
+                    record.setdefault(vendor_field, None)
                 records.append(record)
             run_date = _version_target_date(version_id)
             availability_date = (

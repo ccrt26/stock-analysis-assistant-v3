@@ -30,6 +30,7 @@ def _equity_frame(
                     "trade_date": trading_day.date(),
                     "ts_code": code,
                     "close": close,
+                    "adj_factor": 1.0,
                     "amount": amounts[code][offset] if amounts else 100.0,
                 }
             )
@@ -459,3 +460,22 @@ def test_duplicate_index_and_limit_facts_fail_before_calculation() -> None:
             analysis_date=ANALYSIS_DATE,
             expected_current_rows=1,
         )
+
+
+def test_equity_returns_use_adjusted_close_while_vendor_pct_chg_stays_outside_formula() -> None:
+    dates = pd.bdate_range(end=ANALYSIS_DATE, periods=2)
+    equity = _equity_frame(dates, {"EX.SZ": [10.0, 5.0], "NORMAL.SZ": [10.0, 11.0]})
+    equity.loc[equity["ts_code"] == "EX.SZ", "adj_factor"] = [1.0, 2.0]
+
+    row = compute_market_context_features(
+        equity,
+        _index_frame(dates),
+        _limits_for(equity),
+        analysis_date=ANALYSIS_DATE,
+        expected_current_rows=2,
+    ).iloc[0]
+
+    assert row["equal_weight_return_1d"] == pytest.approx(0.05)
+    assert row["median_return_1d"] == pytest.approx(0.05)
+    assert row["breadth_1d"] == pytest.approx(0.5)
+    assert row["equity_return_price_basis"] == "close_times_adj_factor"
