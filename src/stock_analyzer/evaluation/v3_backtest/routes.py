@@ -75,6 +75,7 @@ _ATTESTATION_REGISTRY: weakref.WeakKeyDictionary[Any, _AttestationRegistration] 
 @dataclass(frozen=True)
 class _ScanBatchRegistration:
     batch_hash: str
+    receipt_record_identity: int
     snapshot_content_hash: str
     snapshot_identity: int
     policy_identity: int
@@ -226,6 +227,7 @@ class VerifiedRouteScanBatch:
         "__hypotheses",
         "__lead_ledger",
         "__snapshot_content_hash",
+        "__batch_receipt_record",
         "__batch_hash",
         "__weakref__",
     )
@@ -263,7 +265,7 @@ class VerifiedRouteScanBatch:
             hypotheses=hypotheses,
             lead_members=lead_members,
         )
-        self.__batch_hash = _route_scan_batch_hash(
+        self.__batch_receipt_record = _route_scan_batch_receipt_record(
             snapshot_content_hash=snapshot_content_hash,
             window_policy=window_policy,
             manifests=manifests,
@@ -271,8 +273,12 @@ class VerifiedRouteScanBatch:
             hypotheses=hypotheses,
             lead_members=lead_members,
         )
+        self.__batch_hash = canonical_batch_receipt_hash(
+            self.__batch_receipt_record
+        )
         _SCAN_BATCH_REGISTRY[self] = _ScanBatchRegistration(
             batch_hash=self.__batch_hash,
+            receipt_record_identity=id(self.__batch_receipt_record),
             snapshot_content_hash=snapshot_content_hash,
             snapshot_identity=id(snapshot),
             policy_identity=id(window_policy),
@@ -313,6 +319,11 @@ class VerifiedRouteScanBatch:
 
     @property
     def batch_hash(self) -> str:
+        require_verified_route_scan_batch(self)
+        return self.__batch_hash
+
+    @property
+    def receipt_hash(self) -> str:
         require_verified_route_scan_batch(self)
         return self.__batch_hash
 
@@ -1361,6 +1372,7 @@ def require_verified_route_scan_batch(value: Any) -> VerifiedRouteScanBatch:
     manifest_input_records = value._VerifiedRouteScanBatch__manifest_input_records
     hypotheses = value._VerifiedRouteScanBatch__hypotheses
     lead_members = value._VerifiedRouteScanBatch__lead_ledger
+    receipt_record = value._VerifiedRouteScanBatch__batch_receipt_record
     identities = (
         id(snapshot),
         id(window_policy),
@@ -1372,6 +1384,7 @@ def require_verified_route_scan_batch(value: Any) -> VerifiedRouteScanBatch:
         tuple(id(item) for item in manifest_input_records),
         tuple(id(item) for item in hypotheses),
         tuple(id(item) for item in lead_members),
+        id(receipt_record),
     )
     registered_identities = (
         registration.snapshot_identity,
@@ -1384,6 +1397,7 @@ def require_verified_route_scan_batch(value: Any) -> VerifiedRouteScanBatch:
         registration.manifest_record_identities,
         registration.hypothesis_item_identities,
         registration.lead_item_identities,
+        registration.receipt_record_identity,
     )
     if identities != registered_identities:
         raise ValueError("route scan batch component identity mismatch")
@@ -1407,7 +1421,7 @@ def require_verified_route_scan_batch(value: Any) -> VerifiedRouteScanBatch:
         hypotheses=hypotheses,
         lead_members=lead_members,
     )
-    batch_hash = _route_scan_batch_hash(
+    expected_receipt_record = _route_scan_batch_receipt_record(
         snapshot_content_hash=snapshot_content_hash,
         window_policy=window_policy,
         manifests=manifests,
@@ -1415,12 +1429,22 @@ def require_verified_route_scan_batch(value: Any) -> VerifiedRouteScanBatch:
         hypotheses=hypotheses,
         lead_members=lead_members,
     )
+    if receipt_record != expected_receipt_record:
+        raise ValueError("route scan batch receipt record mismatch")
+    batch_hash = canonical_batch_receipt_hash(receipt_record)
     if (
         batch_hash != registration.batch_hash
         or batch_hash != value._VerifiedRouteScanBatch__batch_hash
     ):
         raise ValueError("route scan batch canonical hash mismatch")
     return value
+
+
+def batch_receipt_record(value: Any) -> Mapping[str, Any]:
+    """Return the exact frozen canonical preimage of a verified scan receipt."""
+
+    batch = require_verified_route_scan_batch(value)
+    return batch._VerifiedRouteScanBatch__batch_receipt_record
 
 
 class _SnapshotView:
@@ -2894,7 +2918,7 @@ def _validate_route_scan_components(
             raise ValueError("route scan lead evidence does not match merged hypothesis")
 
 
-def _route_scan_batch_hash(
+def _route_scan_batch_receipt_record(
     *,
     snapshot_content_hash: str,
     window_policy: RouteWindowPolicy,
@@ -2902,10 +2926,15 @@ def _route_scan_batch_hash(
     manifest_input_records: tuple[Mapping[str, Any], ...],
     hypotheses: tuple[ResearchHypothesis, ...],
     lead_members: tuple[VerifiedRouteLead, ...],
-) -> str:
-    return _stable_hash(
+) -> Mapping[str, Any]:
+    return _freeze_canonical_record(
         {
+            "receipt_version": "v3-route-scan-receipt-v1",
             "snapshot_content_hash": snapshot_content_hash,
+            "snapshot_scope": {
+                "feature_sets": _SNAPSHOT_FEATURE_SETS,
+                "limitations_bound": True,
+            },
             "policy": {
                 "policy_hash": window_policy.policy_hash,
                 "universe_source_manifest_hash": (
@@ -2946,15 +2975,19 @@ def _route_scan_batch_hash(
 def _research_hypothesis_record(item: ResearchHypothesis) -> Mapping[str, Any]:
     return {
         "security_id": item.security_id,
-        "formation_date": item.formation_date,
-        "cutoff": item.cutoff,
+        "formation_date": item.formation_date.isoformat(),
+        "cutoff": item.cutoff.isoformat(),
         "discovery_routes": tuple(route.value for route in item.discovery_routes),
         "evidence": tuple(
             {
                 "evidence_id": evidence.evidence_id,
                 "route": evidence.route.value,
                 "dataset": evidence.dataset,
-                "available_at": evidence.available_at,
+                "available_at": (
+                    evidence.available_at.isoformat()
+                    if evidence.available_at is not None
+                    else None
+                ),
                 "fact_summary": evidence.fact_summary,
                 "needs_deep_read": evidence.needs_deep_read,
                 "usable_for_decision": evidence.usable_for_decision,
@@ -2988,6 +3021,14 @@ def canonical_route_manifest_input_hash(record: Mapping[str, Any]) -> str:
 
     if not isinstance(record, Mapping):
         raise TypeError("route manifest input record must be a mapping")
+    return _stable_hash(record)
+
+
+def canonical_batch_receipt_hash(record: Mapping[str, Any]) -> str:
+    """Independently hash a persisted canonical route-scan receipt preimage."""
+
+    if not isinstance(record, Mapping):
+        raise TypeError("batch receipt record must be a mapping")
     return _stable_hash(record)
 
 
@@ -3039,6 +3080,8 @@ __all__ = [
     "build_route_fact_plan",
     "build_route_window_policy",
     "build_source_catalog_attestation",
+    "batch_receipt_record",
+    "canonical_batch_receipt_hash",
     "canonical_route_input_hash",
     "canonical_route_manifest_input_hash",
     "derive_declared_route_windows",

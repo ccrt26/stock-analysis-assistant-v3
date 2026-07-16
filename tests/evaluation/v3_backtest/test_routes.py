@@ -5,6 +5,7 @@ import json
 import tempfile
 import copy
 import shutil
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
 from functools import lru_cache
@@ -363,6 +364,14 @@ def manifest_for(manifests, route: DiscoveryRoute):
     return next(item for item in manifests if item.route is route)
 
 
+def _plain_record(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {str(key): _plain_record(item) for key, item in value.items()}
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        return [_plain_record(item) for item in value]
+    return value
+
+
 def test_scan_returns_opaque_verified_batch_with_security_scoped_lead_ledger():
     formation = snapshot()
     frozen = policy()
@@ -420,6 +429,65 @@ def test_scan_returns_opaque_verified_batch_with_security_scoped_lead_ledger():
         )
         for item in hypothesis.evidence
     }
+
+
+def test_batch_exports_complete_frozen_recomputable_receipt_without_provenance():
+    batch = scan_routes(snapshot(), policy())
+    record = routes_module.batch_receipt_record(batch)
+
+    assert record["receipt_version"] == "v3-route-scan-receipt-v1"
+    assert len(record["snapshot_content_hash"]) == 64
+    assert record["snapshot_scope"] == {
+        "feature_sets": (
+            "market_context",
+            "sector_hotspot",
+            "stock_trading_context",
+        ),
+        "limitations_bound": True,
+    }
+    assert len(record["manifests"]) == 6
+    assert len(record["manifest_input_records"]) == 6
+    assert record["hypotheses"]
+    assert record["lead_ledger"]
+    assert batch.receipt_hash == batch.batch_hash
+    assert batch.receipt_hash == routes_module.canonical_batch_receipt_hash(record)
+    json.dumps(_plain_record(record), ensure_ascii=False, sort_keys=True)
+    with pytest.raises(TypeError):
+        record["policy"]["policy_hash"] = "0" * 64
+    with pytest.raises(ValueError, match="registered scan provenance"):
+        require_verified_route_scan_batch(record)
+
+
+def test_each_batch_receipt_section_changes_the_independent_canonical_hash():
+    batch = scan_routes(snapshot(), policy())
+    record = routes_module.batch_receipt_record(batch)
+    expected_hash = batch.receipt_hash
+
+    mutations = (
+        lambda item: item.__setitem__("snapshot_content_hash", "0" * 64),
+        lambda item: item["snapshot_scope"].__setitem__(
+            "limitations_bound", False
+        ),
+        lambda item: item["policy"].__setitem__(
+            "universe_catalog_hash", "0" * 64
+        ),
+        lambda item: item["manifests"][0].__setitem__(
+            "triggered_records", item["manifests"][0]["triggered_records"] + 1
+        ),
+        lambda item: item["manifest_input_records"][0]["datasets"].__setitem__(
+            0, "0" * 64
+        ),
+        lambda item: item["hypotheses"][0].__setitem__(
+            "security_id", "ALTERED"
+        ),
+        lambda item: item["lead_ledger"][0].__setitem__(
+            "input_hash", "0" * 64
+        ),
+    )
+    for mutate in mutations:
+        altered = _plain_record(record)
+        mutate(altered)
+        assert routes_module.canonical_batch_receipt_hash(altered) != expected_hash
 
 
 def test_verified_batch_cannot_be_handcrafted_or_copied():
