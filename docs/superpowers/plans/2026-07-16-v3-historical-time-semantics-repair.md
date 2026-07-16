@@ -38,7 +38,7 @@
 - Produces `resolve_revision_availability(contract, normalized_row, *, batch_ingested_at, old_available_at) -> ResolvedAvailability`.
 - `ResolvedAvailability` contains `available_at: datetime` and `precision: AvailabilityPrecision`.
 
-- [ ] **Step 1: Write failing registry coverage tests**
+- [x] **Step 1: Write failing registry coverage tests**
 
 Add assertions to `tests/test_research_contracts.py` that all 29 datasets declare one policy and one strict replay level, and freeze the critical assignments:
 
@@ -69,7 +69,7 @@ def test_temporal_contract_separates_reconstructible_and_disclosure_facts():
     )
 ```
 
-- [ ] **Step 2: Run the registry tests and verify RED**
+- [x] **Step 2: Run the registry tests and verify RED**
 
 Run:
 
@@ -79,7 +79,7 @@ Run:
 
 Expected: FAIL because the enums and contract fields do not exist.
 
-- [ ] **Step 3: Write failing availability resolution tests**
+- [x] **Step 3: Write failing availability resolution tests**
 
 Create `tests/test_research_time.py` with direct, timezone-aware expectations:
 
@@ -118,7 +118,7 @@ def test_source_published_fact_requires_row_level_evidence():
         )
 ```
 
-- [ ] **Step 4: Run the new tests and verify RED**
+- [x] **Step 4: Run the new tests and verify RED**
 
 Run:
 
@@ -128,7 +128,7 @@ Run:
 
 Expected: collection or assertion FAIL because `research_time.py` is absent.
 
-- [ ] **Step 5: Implement the minimal temporal model**
+- [x] **Step 5: Implement the minimal temporal model**
 
 In `research_contracts.py`, add:
 
@@ -182,17 +182,26 @@ def resolve_initial_availability(...):
     if explicit_available_at is not None:
         return ResolvedAvailability(_utc(explicit_available_at), _record_precision(record))
     if contract.availability_policy is AvailabilityPolicy.BUSINESS_CLOSE:
-        return ResolvedAvailability(_post_close(record[contract.business_time_field]), EXACT)
+        return ResolvedAvailability(
+            _post_close(record[contract.business_time_field]),
+            INFERRED_FROM_ENDPOINT_POLICY,
+        )
     if contract.availability_policy is AvailabilityPolicy.VALID_FROM_CLOSE:
-        return ResolvedAvailability(_post_close(record[contract.business_time_field]), EXACT)
+        return ResolvedAvailability(
+            _post_close(record[contract.business_time_field]),
+            INFERRED_FROM_ENDPOINT_POLICY,
+        )
     if contract.availability_policy is AvailabilityPolicy.NEXT_MORNING:
-        return ResolvedAvailability(_next_morning(record[contract.business_time_field]), EXACT)
+        return ResolvedAvailability(
+            _next_morning(record[contract.business_time_field]),
+            INFERRED_FROM_ENDPOINT_POLICY,
+        )
     raise AssertionError(contract.availability_policy)
 ```
 
 For source-published records, `_record_precision` respects explicit row precision; otherwise exact timestamps remain `EXACT`, while callers that use date-conservative rules must write `DATE_CONSERVATIVE` explicitly.
 
-- [ ] **Step 6: Run tests and verify GREEN**
+- [x] **Step 6: Run tests and verify GREEN**
 
 Run:
 

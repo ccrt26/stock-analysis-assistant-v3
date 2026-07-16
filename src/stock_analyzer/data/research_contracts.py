@@ -53,6 +53,26 @@ class AvailabilityPrecision(str, Enum):
     MINUTE = "minute"
     DATE_CONSERVATIVE = "date_conservative"
     INFERRED_FROM_ENDPOINT_POLICY = "inferred_from_endpoint_policy"
+    INGESTION_CUTOFF = "ingestion_cutoff"
+
+
+class AvailabilityPolicy(str, Enum):
+    BUSINESS_CLOSE = "business_close"
+    VALID_FROM_CLOSE = "valid_from_close"
+    NEXT_MORNING = "next_morning"
+    SOURCE_PUBLISHED = "source_published"
+    INGESTION_CUTOFF = "ingestion_cutoff"
+
+
+class RevisionAvailabilityPolicy(str, Enum):
+    OBSERVED_CHANGE = "observed_change"
+    SOURCE_PUBLISHED = "source_published"
+
+
+class StrictReplayLevel(str, Enum):
+    STRICT = "strict"
+    RECONSTRUCTED_CONSERVATIVE = "reconstructed_conservative"
+    INGESTION_ONLY = "ingestion_only"
 
 
 class SourcePolicy(BaseModel):
@@ -73,6 +93,12 @@ class DatasetContract(BaseModel):
     required_columns: tuple[str, ...] = ()
     coverage_columns: tuple[str, ...] = ()
     minimum_required_field_coverage: float = Field(default=0.0, ge=0.0, le=1.0)
+    business_time_field: str | None
+    availability_policy: AvailabilityPolicy
+    revision_availability_policy: RevisionAvailabilityPolicy
+    strict_replay_level: StrictReplayLevel
+    source_published_fields: tuple[str, ...] = ()
+    mask_future_valid_to: bool = False
 
 
 class FactBatch(BaseModel):
@@ -109,6 +135,95 @@ _TUSHARE = ("tushare",)
 _OFFICIAL_DISCLOSURE = ("cninfo", "sse", "szse", "bse", "csrc")
 
 
+_BUSINESS_CLOSE_DATASETS = {
+    ResearchDatasetId.TRADE_CALENDAR: "cal_date",
+    ResearchDatasetId.EQUITY_DAILY: "trade_date",
+    ResearchDatasetId.ADJ_FACTOR: "trade_date",
+    ResearchDatasetId.DAILY_BASIC: "trade_date",
+    ResearchDatasetId.STOCK_LIMIT: "trade_date",
+    ResearchDatasetId.INDEX_DAILY: "trade_date",
+    ResearchDatasetId.INDUSTRY_DAILY: "trade_date",
+    ResearchDatasetId.THEME_DAILY: "trade_date",
+    ResearchDatasetId.SUSPENSION: "trade_date",
+    ResearchDatasetId.MINUTE_BAR: "trade_date",
+}
+
+_VALID_FROM_DATASETS = {
+    ResearchDatasetId.INDUSTRY_CATALOG,
+    ResearchDatasetId.INDUSTRY_MEMBER,
+    ResearchDatasetId.THEME_CATALOG,
+    ResearchDatasetId.THEME_MEMBER,
+}
+
+_INGESTION_ONLY_DATASETS = {
+    ResearchDatasetId.SECURITY_MASTER,
+    ResearchDatasetId.COMPANY_PROFILE,
+    ResearchDatasetId.PLEDGE,
+}
+
+_SOURCE_PUBLISHED_FIELDS = {
+    ResearchDatasetId.INCOME_STATEMENT: ("f_ann_date", "ann_date", "available_at"),
+    ResearchDatasetId.BALANCE_SHEET: ("f_ann_date", "ann_date", "available_at"),
+    ResearchDatasetId.CASH_FLOW: ("f_ann_date", "ann_date", "available_at"),
+    ResearchDatasetId.FINANCIAL_INDICATOR: ("ann_date", "available_at"),
+    ResearchDatasetId.MAIN_BUSINESS: ("ann_date", "available_at"),
+    ResearchDatasetId.EARNINGS_FORECAST: ("ann_date", "available_at"),
+    ResearchDatasetId.EARNINGS_EXPRESS: ("ann_date", "available_at"),
+    ResearchDatasetId.ANNOUNCEMENT: ("available_at",),
+    ResearchDatasetId.HOLDER_TRADE: ("ann_date", "available_at"),
+    ResearchDatasetId.SHARE_FLOAT: ("ann_date", "available_at"),
+    ResearchDatasetId.REPURCHASE: ("ann_date", "available_at"),
+}
+
+
+def _temporal_contract(dataset_id: ResearchDatasetId) -> dict[str, Any]:
+    if dataset_id in _BUSINESS_CLOSE_DATASETS:
+        return {
+            "business_time_field": _BUSINESS_CLOSE_DATASETS[dataset_id],
+            "availability_policy": AvailabilityPolicy.BUSINESS_CLOSE,
+            "revision_availability_policy": RevisionAvailabilityPolicy.OBSERVED_CHANGE,
+            "strict_replay_level": StrictReplayLevel.RECONSTRUCTED_CONSERVATIVE,
+        }
+    if dataset_id in _VALID_FROM_DATASETS:
+        return {
+            "business_time_field": "valid_from",
+            "availability_policy": AvailabilityPolicy.VALID_FROM_CLOSE,
+            "revision_availability_policy": RevisionAvailabilityPolicy.OBSERVED_CHANGE,
+            "strict_replay_level": StrictReplayLevel.RECONSTRUCTED_CONSERVATIVE,
+            "mask_future_valid_to": dataset_id in {
+                ResearchDatasetId.INDUSTRY_MEMBER,
+                ResearchDatasetId.THEME_MEMBER,
+            },
+        }
+    if dataset_id in _INGESTION_ONLY_DATASETS:
+        return {
+            "business_time_field": None,
+            "availability_policy": AvailabilityPolicy.INGESTION_CUTOFF,
+            "revision_availability_policy": RevisionAvailabilityPolicy.OBSERVED_CHANGE,
+            "strict_replay_level": StrictReplayLevel.INGESTION_ONLY,
+        }
+    if dataset_id is ResearchDatasetId.MARGIN_DETAIL:
+        return {
+            "business_time_field": "trade_date",
+            "availability_policy": AvailabilityPolicy.NEXT_MORNING,
+            "revision_availability_policy": RevisionAvailabilityPolicy.OBSERVED_CHANGE,
+            "strict_replay_level": StrictReplayLevel.RECONSTRUCTED_CONSERVATIVE,
+        }
+    if dataset_id in _SOURCE_PUBLISHED_FIELDS:
+        return {
+            "business_time_field": None,
+            "availability_policy": AvailabilityPolicy.SOURCE_PUBLISHED,
+            "revision_availability_policy": RevisionAvailabilityPolicy.SOURCE_PUBLISHED,
+            "strict_replay_level": (
+                StrictReplayLevel.STRICT
+                if dataset_id is ResearchDatasetId.ANNOUNCEMENT
+                else StrictReplayLevel.RECONSTRUCTED_CONSERVATIVE
+            ),
+            "source_published_fields": _SOURCE_PUBLISHED_FIELDS[dataset_id],
+        }
+    raise AssertionError(f"missing temporal contract for {dataset_id.value}")
+
+
 def _contract(
     dataset_id: ResearchDatasetId,
     key: tuple[str, ...],
@@ -135,6 +250,7 @@ def _contract(
         required_columns=required_columns or key,
         coverage_columns=coverage_columns,
         minimum_required_field_coverage=minimum_coverage,
+        **_temporal_contract(dataset_id),
     )
 
 
@@ -217,13 +333,16 @@ def research_contract(dataset_id: ResearchDatasetId | str) -> DatasetContract:
 
 
 __all__ = [
+    "AvailabilityPolicy",
     "AvailabilityPrecision",
     "BatchQualityResult",
     "CompletenessStatus",
     "DatasetContract",
     "FactBatch",
     "ResearchDatasetId",
+    "RevisionAvailabilityPolicy",
     "SourcePolicy",
+    "StrictReplayLevel",
     "research_contract",
     "research_contract_registry",
 ]

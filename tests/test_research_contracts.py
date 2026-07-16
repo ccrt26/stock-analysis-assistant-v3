@@ -4,9 +4,13 @@ import pytest
 from pydantic import ValidationError
 
 from stock_analyzer.data.research_contracts import (
+    AvailabilityPolicy,
     CompletenessStatus,
     FactBatch,
     ResearchDatasetId,
+    RevisionAvailabilityPolicy,
+    StrictReplayLevel,
+    research_contract,
     research_contract_registry,
 )
 
@@ -53,6 +57,43 @@ def test_registry_covers_the_approved_research_scope_without_web_wrapper_fallbac
         for contract in registry.values()
         for source in contract.source_policy.approved_sources
     }.isdisjoint({"akshare", "baostock"})
+
+
+def test_every_research_dataset_has_an_explicit_temporal_contract():
+    registry = research_contract_registry()
+
+    assert set(registry) == set(ResearchDatasetId)
+    for dataset, contract in registry.items():
+        assert contract.availability_policy is not None, dataset.value
+        assert contract.revision_availability_policy is not None, dataset.value
+        assert contract.strict_replay_level is not None, dataset.value
+
+
+def test_temporal_contract_separates_reconstructible_and_disclosure_facts():
+    assert research_contract(ResearchDatasetId.TRADE_CALENDAR).availability_policy == (
+        AvailabilityPolicy.BUSINESS_CLOSE
+    )
+    assert (
+        research_contract(ResearchDatasetId.TRADE_CALENDAR).business_time_field
+        == "cal_date"
+    )
+    assert (
+        research_contract(ResearchDatasetId.INDUSTRY_DAILY).business_time_field
+        == "trade_date"
+    )
+    assert research_contract(ResearchDatasetId.ANNOUNCEMENT).availability_policy == (
+        AvailabilityPolicy.SOURCE_PUBLISHED
+    )
+    assert (
+        research_contract(ResearchDatasetId.ANNOUNCEMENT).revision_availability_policy
+        == RevisionAvailabilityPolicy.SOURCE_PUBLISHED
+    )
+    assert research_contract(ResearchDatasetId.COMPANY_PROFILE).availability_policy == (
+        AvailabilityPolicy.INGESTION_CUTOFF
+    )
+    assert research_contract(ResearchDatasetId.PLEDGE).strict_replay_level == (
+        StrictReplayLevel.INGESTION_ONLY
+    )
 
 
 def test_fact_batch_requires_one_partition_and_governance_metadata():
