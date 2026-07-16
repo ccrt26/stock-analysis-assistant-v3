@@ -1,0 +1,21 @@
+{
+  "commitment_version": "v3-judge-run-config-v1",
+  "committed_at": "2026-07-17T07:17:27+08:00",
+  "experiment_config_sha256": "a2cb8e9f327af9d8edd1b4de3d9251fbc1cb81510a1910bf33170f7d76ee69ce",
+  "config": {
+    "run_id": "2026-07-17-v3-complete-backtest",
+    "binary_path": "/Applications/ChatGPT.app/Contents/Resources/codex",
+    "binary_sha256": "69c5b16c3e2b0373ed97f3142bfc78c7d27b7b4e0209c2d1c1f528b03181c326",
+    "cli_version": "codex-cli 0.144.0-alpha.4",
+    "model": "gpt-5.6-sol",
+    "reasoning_effort": "high",
+    "prompt_sha256": "01887b3e75f24d839d4f25edbf9d7ba2067c59f096dce779e086457d6e47b6e8",
+    "schema_sha256": "ef5051f229b45ce3f5017adf3efe73969ca67912007f999d770b4666b8e9d810",
+    "command_sha256": "b601ca0afbf22d648d56c8f0de6540cc8a9a2192367f808574b407e7771a255a",
+    "environment_sha256": "53d71ccd30060f082752772a86d6ae3cc537c5c3e91e36620425763f4fc62ba7",
+    "max_request_bytes": 5000000,
+    "runtime_attestation": "production",
+    "config_hash": "1bd8e40dc219dae1159c0ca4fdbd7c820e16f897fc8c0c09ef60a1cc046debb5"
+  },
+  "commitment_hash": "c1369741947edf0efe34e4a3591b76ffca5edc14496f89f64e1c64fa03b70c84"
+}
