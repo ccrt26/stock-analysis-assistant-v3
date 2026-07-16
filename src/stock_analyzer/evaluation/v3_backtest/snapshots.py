@@ -362,10 +362,41 @@ def _filter_effective_relationships(
         return frame.reset_index(drop=True)
     if "valid_from" not in frame or "valid_to" not in frame:
         raise ValueError(f"classification relationship lacks validity fields: {dataset.value}")
-    valid_from = pd.to_datetime(frame["valid_from"], errors="raise").dt.date
-    valid_to = pd.to_datetime(frame["valid_to"], errors="coerce").dt.date
-    active = (valid_from <= origin) & (valid_to.isna() | (valid_to >= origin))
+    origin_stamp = (
+        pd.Timestamp(origin, tz=_SHANGHAI).tz_localize(None).normalize()
+    )
+    valid_from = _shanghai_naive_dates(frame["valid_from"], errors="raise")
+    valid_to = _shanghai_naive_dates(frame["valid_to"], errors="coerce")
+    active = (valid_from <= origin_stamp) & (
+        valid_to.isna() | (valid_to >= origin_stamp)
+    )
     return frame.loc[active].reset_index(drop=True)
+
+
+def _shanghai_naive_dates(
+    values: pd.Series,
+    *,
+    errors: str,
+) -> pd.Series:
+    normalized: list[object] = []
+    for value in values:
+        if pd.isna(value):
+            normalized.append(pd.NaT)
+            continue
+        try:
+            stamp = pd.Timestamp(value)
+            stamp = (
+                stamp.tz_localize(_SHANGHAI)
+                if stamp.tzinfo is None
+                else stamp.tz_convert(_SHANGHAI)
+            )
+        except (TypeError, ValueError, OverflowError):
+            if errors == "coerce":
+                normalized.append(pd.NaT)
+                continue
+            raise
+        normalized.append(stamp.tz_localize(None).normalize())
+    return pd.Series(normalized, index=values.index, dtype="datetime64[ns]")
 
 
 def _existing_feature_summary(

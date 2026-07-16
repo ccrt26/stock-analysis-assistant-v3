@@ -24,6 +24,7 @@ from stock_analyzer.evaluation.v3_backtest.snapshots import (
     tree_fingerprint,
 )
 from stock_analyzer.storage.research_derived import DerivedFeatureStore
+from stock_analyzer.storage.research_query import ResearchQuery
 from stock_analyzer.storage.research_warehouse import ResearchWarehouse
 
 
@@ -331,6 +332,49 @@ def test_snapshot_exposes_fixed_cutoff_fact_and_feature_views_not_internal_root(
         "formation-time title"
     ]
     assert len(snapshot.features.read("stock_trading_context")) == 1
+
+
+def test_snapshot_keeps_relationship_whose_future_valid_to_is_masked_as_open(
+    tmp_path: Path,
+    temp_root: Path,
+):
+    warehouse = _warehouse(tmp_path)
+    known_at = datetime(2025, 10, 29, 12, tzinfo=SHANGHAI)
+    _commit(
+        warehouse,
+        ResearchDatasetId.THEME_MEMBER,
+        "official-theme-v1",
+        [
+            {
+                "theme_code": "T1",
+                "ts_code": "000001.SZ",
+                "valid_from": date(2020, 1, 1),
+                "valid_to": date(2025, 12, 31),
+            }
+        ],
+        ingested_at=known_at,
+    )
+
+    query_frame = ResearchQuery(warehouse).dataset_partitions_as_of(
+        ResearchDatasetId.THEME_MEMBER,
+        ("official-theme-v1",),
+        formation_cutoff(ORIGIN),
+    )
+    assert pd.isna(query_frame.iloc[0]["valid_to"])
+
+    snapshot = materialize_formation_snapshot(
+        warehouse,
+        ORIGIN,
+        temp_root,
+        fact_plan={
+            ResearchDatasetId.THEME_MEMBER: ("official-theme-v1",),
+        },
+        feature_runner=_feature_runner(),
+    )
+
+    members = snapshot.facts.dataset(ResearchDatasetId.THEME_MEMBER)
+    assert members["ts_code"].tolist() == ["000001.SZ"]
+    assert pd.isna(members.iloc[0]["valid_to"])
 
 
 def test_materialization_does_not_mutate_any_source_warehouse_tree(
