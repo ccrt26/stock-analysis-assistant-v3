@@ -5,7 +5,7 @@ import json
 import tempfile
 import copy
 import shutil
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
 from functools import lru_cache
 from pathlib import Path
@@ -26,10 +26,13 @@ from stock_analyzer.data.research_contracts import FactBatch, ResearchDatasetId
 from stock_analyzer.evaluation.v3_backtest.contracts import DiscoveryRoute
 from stock_analyzer.evaluation.v3_backtest import routes as routes_module
 from stock_analyzer.evaluation.v3_backtest.routes import (
+    VerifiedRouteScanBatch,
     build_frozen_universe_catalog,
     build_route_fact_plan,
     build_route_window_policy,
+    canonical_route_input_hash,
     derive_declared_route_windows,
+    require_verified_route_scan_batch,
     scan_routes,
 )
 from stock_analyzer.evaluation.v3_backtest.snapshots import (
@@ -199,6 +202,13 @@ def fact_rows() -> dict[str, tuple[dict[str, Any], ...]]:
 
 def feature_rows() -> dict[str, tuple[dict[str, Any], ...]]:
     return {
+        "market_context": (
+            {
+                "analysis_date": FORMATION_DATE,
+                "market_regime": "balanced",
+                "coverage_status": "complete_with_declared_gaps",
+            },
+        ),
         "sector_hotspot": (
             hotspot_row("industry", "I1"),
             hotspot_row("theme", "T1"),
@@ -327,8 +337,10 @@ class PublicSnapshot:
     features: PublicFeatures
     analysis_date: date = FORMATION_DATE
     as_of: datetime = CUTOFF
+    market_rows: int = 1
     sector_rows: int = 3
     stock_rows: int = 5
+    limitations: tuple[str, ...] = ("fixture limitation",)
     cache_key: str = SHA256
 
 
@@ -349,6 +361,209 @@ def snapshot(
 
 def manifest_for(manifests, route: DiscoveryRoute):
     return next(item for item in manifests if item.route is route)
+
+
+def test_scan_returns_opaque_verified_batch_with_security_scoped_lead_ledger():
+    formation = snapshot()
+    frozen = policy()
+
+    batch = scan_routes(formation, frozen)
+    manifests, hypotheses = batch
+    verified = require_verified_route_scan_batch(batch)
+    hypothesis = verified.hypothesis_for_security("000003.SZ")
+    security_manifests = verified.manifests_for_security("000003.SZ")
+    lead_members = verified.lead_members("000003.SZ")
+
+    assert isinstance(batch, VerifiedRouteScanBatch)
+    assert len(manifests) == 6
+    assert len({item.security_id for item in hypotheses}) == len(hypotheses)
+    assert verified is batch
+    assert verified.snapshot is formation
+    assert verified.window_policy is frozen
+    assert hypothesis.security_id == "000003.SZ"
+    assert len(security_manifests) == 6
+    assert {item.route for item in security_manifests} == set(DiscoveryRoute)
+    assert lead_members
+    assert all(item.security_id == "000003.SZ" for item in lead_members)
+    assert len(
+        {
+            (item.route, item.evidence_id, item.security_id)
+            for item in lead_members
+        }
+    ) == len(lead_members)
+    assert all(len(item.input_hash) == 64 for item in lead_members)
+    assert all(
+        item.input_hash == canonical_route_input_hash(item.route_input_record)
+        for item in lead_members
+    )
+    assert all(
+        item.route_manifest_input_hash
+        == manifest_for(manifests, item.route).input_hash
+        for item in lead_members
+    )
+    with pytest.raises(TypeError):
+        lead_members[0].route_input_record["evidence"]["evidence_id"] = "altered"
+    assert {
+        (
+            item.route,
+            item.evidence_id,
+            item.usable_for_decision,
+            item.needs_deep_read,
+        )
+        for item in lead_members
+    } == {
+        (
+            item.route,
+            item.evidence_id,
+            item.usable_for_decision,
+            item.needs_deep_read,
+        )
+        for item in hypothesis.evidence
+    }
+
+
+def test_verified_batch_cannot_be_handcrafted_or_copied():
+    manifests, hypotheses = scan_routes(snapshot(), policy())
+
+    with pytest.raises(ValueError, match="scan_routes"):
+        VerifiedRouteScanBatch(
+            snapshot=snapshot(),
+            window_policy=policy(),
+            manifests=manifests,
+            hypotheses=hypotheses,
+            lead_members=(),
+        )
+
+    copied = copy.copy(scan_routes(snapshot(), policy()))
+    with pytest.raises(ValueError, match="registered scan provenance"):
+        require_verified_route_scan_batch(copied)
+
+
+@pytest.mark.parametrize("mutation", ("route", "evidence", "count", "input_hash"))
+def test_verified_batch_rejects_altered_manifest_hypothesis_or_receipt_fields(
+    mutation: str,
+):
+    batch = scan_routes(snapshot(), policy())
+    manifests, hypotheses = batch
+    if mutation == "route":
+        altered = manifests[0].model_copy(update={"route": DiscoveryRoute.EARNINGS})
+        object.__setattr__(
+            batch,
+            "_VerifiedRouteScanBatch__manifests",
+            (altered, *manifests[1:]),
+        )
+    elif mutation == "count":
+        altered = manifests[0].model_copy(
+            update={"triggered_records": manifests[0].triggered_records + 1}
+        )
+        object.__setattr__(
+            batch,
+            "_VerifiedRouteScanBatch__manifests",
+            (altered, *manifests[1:]),
+        )
+    elif mutation == "input_hash":
+        altered = manifests[0].model_copy(update={"input_hash": "0" * 64})
+        object.__setattr__(
+            batch,
+            "_VerifiedRouteScanBatch__manifests",
+            (altered, *manifests[1:]),
+        )
+    else:
+        hypothesis = hypotheses[0]
+        altered_evidence = replace(
+            hypothesis.evidence[0],
+            evidence_id=f"altered:{hypothesis.evidence[0].evidence_id}",
+        )
+        altered_hypothesis = replace(
+            hypothesis,
+            evidence=(altered_evidence, *hypothesis.evidence[1:]),
+        )
+        object.__setattr__(
+            batch,
+            "_VerifiedRouteScanBatch__hypotheses",
+            (altered_hypothesis, *hypotheses[1:]),
+        )
+
+    with pytest.raises(ValueError, match="scan batch .* mismatch"):
+        require_verified_route_scan_batch(batch)
+
+
+def test_verified_batch_rejects_cross_scan_component_mixing_even_when_values_match():
+    first = scan_routes(snapshot(), policy())
+    second = scan_routes(snapshot(), policy())
+    _, second_hypotheses = second
+
+    object.__setattr__(
+        first,
+        "_VerifiedRouteScanBatch__hypotheses",
+        second_hypotheses,
+    )
+
+    with pytest.raises(ValueError, match="scan batch component identity mismatch"):
+        require_verified_route_scan_batch(first)
+
+
+@pytest.mark.parametrize("mutation", ("market_context", "limitations"))
+def test_verified_batch_binds_all_downstream_snapshot_content(mutation: str):
+    formation = snapshot()
+    batch = scan_routes(formation, policy())
+
+    if mutation == "market_context":
+        row = formation.features.rows["market_context"][0]
+        formation.features.rows["market_context"] = (
+            {**row, "market_regime": "altered-after-scan"},
+        )
+    else:
+        formation.limitations = ("altered-after-scan",)
+
+    with pytest.raises(ValueError, match="route scan batch snapshot hash mismatch"):
+        require_verified_route_scan_batch(batch)
+
+
+def test_each_route_manifest_exports_a_canonical_recomputable_input_record():
+    batch = scan_routes(snapshot(), policy())
+    manifests, _ = batch
+
+    for manifest in manifests:
+        record = batch.route_manifest_input_record(manifest)
+        assert record["route"] == manifest.route.value
+        assert record["cutoff"] == manifest.cutoff.isoformat()
+        assert manifest.input_hash == (
+            routes_module.canonical_route_manifest_input_hash(record)
+        )
+        assert record["datasets"]
+        assert all(len(value) == 64 for value in record["datasets"])
+        with pytest.raises(TypeError):
+            record["policy"]["forged"] = ()
+
+
+@pytest.mark.parametrize(
+    ("security_id", "field_name", "altered"),
+    (
+        (
+            "000103.SZ",
+            "available_at",
+            datetime(2020, 1, 1, tzinfo=SHANGHAI),
+        ),
+        (
+            "000003.SZ",
+            "fact_summary",
+            "altered summary outside canonical record",
+        ),
+    ),
+)
+def test_verified_lead_rejects_public_field_divergence_from_canonical_record(
+    security_id: str,
+    field_name: str,
+    altered: Any,
+):
+    batch = scan_routes(snapshot(), policy())
+    member = batch.lead_members(security_id)[0]
+    assert getattr(member, field_name) is None
+    object.__setattr__(member, field_name, altered)
+
+    with pytest.raises(ValueError, match="route scan lead canonical record mismatch"):
+        require_verified_route_scan_batch(batch)
 
 
 def test_plan_builder_freezes_real_datasets_and_derives_complete_month_windows():
@@ -847,7 +1062,7 @@ def test_task3_dataframe_backed_public_views_run_all_route_interfaces():
         as_of=CUTOFF,
         facts=fact_view,
         features=feature_view,
-        market_rows=0,
+        market_rows=1,
         sector_rows=3,
         stock_rows=5,
         limitations=(),
@@ -1808,7 +2023,9 @@ def test_real_task3_snapshot_scans_all_routes_across_four_plus_two_boundaries(
             fact_plan=plan,
             feature_runner=_real_feature_runner,
         )
-        manifests, _ = scan_routes(formation, frozen)
+        batch = scan_routes(formation, frozen)
+        assert require_verified_route_scan_batch(batch) is batch
+        manifests, _ = batch
     finally:
         shutil.rmtree(temp_root, ignore_errors=True)
 

@@ -32,10 +32,16 @@ from stock_analyzer.storage.research_warehouse import ResearchWarehouse
 _ROUTE_ORDER = tuple(DiscoveryRoute)
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
 _FEATURE_DATASETS = {"sector_hotspot", "stock_trading_context"}
+_SNAPSHOT_FEATURE_SETS = (
+    "market_context",
+    "sector_hotspot",
+    "stock_trading_context",
+)
 _POLICY_TOKEN = object()
 _CATALOG_TOKEN = object()
 _FACT_PLAN_TOKEN = object()
 _ATTESTATION_TOKEN = object()
+_SCAN_BATCH_TOKEN = object()
 _CONTROLLED_UNIVERSE_DATASETS = (
     "industry_member",
     "theme_member",
@@ -62,6 +68,27 @@ class _AttestationRegistration:
 
 
 _ATTESTATION_REGISTRY: weakref.WeakKeyDictionary[Any, _AttestationRegistration] = (
+    weakref.WeakKeyDictionary()
+)
+
+
+@dataclass(frozen=True)
+class _ScanBatchRegistration:
+    batch_hash: str
+    snapshot_content_hash: str
+    snapshot_identity: int
+    policy_identity: int
+    manifests_identity: int
+    manifest_records_identity: int
+    hypotheses_identity: int
+    lead_ledger_identity: int
+    manifest_item_identities: tuple[int, ...]
+    manifest_record_identities: tuple[int, ...]
+    hypothesis_item_identities: tuple[int, ...]
+    lead_item_identities: tuple[int, ...]
+
+
+_SCAN_BATCH_REGISTRY: weakref.WeakKeyDictionary[Any, _ScanBatchRegistration] = (
     weakref.WeakKeyDictionary()
 )
 
@@ -168,6 +195,160 @@ class _Lead:
     question: str
     internal_only: bool = False
     preliminary_opportunity: OpportunityType | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class VerifiedRouteLead:
+    """One immutable security/evidence member bound to its route input hash."""
+
+    route: DiscoveryRoute
+    evidence_id: str
+    security_id: str
+    usable_for_decision: bool
+    needs_deep_read: bool
+    route_input_record: Mapping[str, Any]
+    input_hash: str
+    route_manifest_input_hash: str
+    dataset: str
+    available_at: datetime | None
+    fact_summary: str | None
+    deep_read_input_hash: str | None
+
+
+class VerifiedRouteScanBatch:
+    """Opaque trusted receipt for one complete six-route scan."""
+
+    __slots__ = (
+        "__snapshot",
+        "__window_policy",
+        "__manifests",
+        "__manifest_input_records",
+        "__hypotheses",
+        "__lead_ledger",
+        "__snapshot_content_hash",
+        "__batch_hash",
+        "__weakref__",
+    )
+
+    def __init__(
+        self,
+        *,
+        snapshot: Any,
+        window_policy: RouteWindowPolicy,
+        manifests: tuple[RouteScanManifest, ...],
+        hypotheses: tuple[ResearchHypothesis, ...],
+        lead_members: tuple[VerifiedRouteLead, ...],
+        manifest_input_records: tuple[Mapping[str, Any], ...] | None = None,
+        _token: object | None = None,
+    ) -> None:
+        if _token is not _SCAN_BATCH_TOKEN:
+            raise ValueError(
+                "VerifiedRouteScanBatch must be created by scan_routes"
+            )
+        if manifest_input_records is None:
+            raise ValueError("verified route scan lacks manifest input records")
+        snapshot_content_hash = _route_scan_snapshot_hash(snapshot, window_policy)
+        self.__snapshot = snapshot
+        self.__window_policy = window_policy
+        self.__manifests = manifests
+        self.__manifest_input_records = manifest_input_records
+        self.__hypotheses = hypotheses
+        self.__lead_ledger = lead_members
+        self.__snapshot_content_hash = snapshot_content_hash
+        _validate_route_scan_components(
+            snapshot=snapshot,
+            window_policy=window_policy,
+            manifests=manifests,
+            manifest_input_records=manifest_input_records,
+            hypotheses=hypotheses,
+            lead_members=lead_members,
+        )
+        self.__batch_hash = _route_scan_batch_hash(
+            snapshot_content_hash=snapshot_content_hash,
+            window_policy=window_policy,
+            manifests=manifests,
+            manifest_input_records=manifest_input_records,
+            hypotheses=hypotheses,
+            lead_members=lead_members,
+        )
+        _SCAN_BATCH_REGISTRY[self] = _ScanBatchRegistration(
+            batch_hash=self.__batch_hash,
+            snapshot_content_hash=snapshot_content_hash,
+            snapshot_identity=id(snapshot),
+            policy_identity=id(window_policy),
+            manifests_identity=id(manifests),
+            manifest_records_identity=id(manifest_input_records),
+            hypotheses_identity=id(hypotheses),
+            lead_ledger_identity=id(lead_members),
+            manifest_item_identities=tuple(id(item) for item in manifests),
+            manifest_record_identities=tuple(
+                id(item) for item in manifest_input_records
+            ),
+            hypothesis_item_identities=tuple(id(item) for item in hypotheses),
+            lead_item_identities=tuple(id(item) for item in lead_members),
+        )
+
+    def __iter__(self):
+        require_verified_route_scan_batch(self)
+        yield self.__manifests
+        yield self.__hypotheses
+
+    def __len__(self) -> int:
+        require_verified_route_scan_batch(self)
+        return 2
+
+    def __getitem__(self, index: int):
+        require_verified_route_scan_batch(self)
+        return (self.__manifests, self.__hypotheses)[index]
+
+    @property
+    def snapshot(self) -> Any:
+        require_verified_route_scan_batch(self)
+        return self.__snapshot
+
+    @property
+    def window_policy(self) -> RouteWindowPolicy:
+        require_verified_route_scan_batch(self)
+        return self.__window_policy
+
+    @property
+    def batch_hash(self) -> str:
+        require_verified_route_scan_batch(self)
+        return self.__batch_hash
+
+    def hypothesis_for_security(self, security_id: str) -> ResearchHypothesis:
+        require_verified_route_scan_batch(self)
+        normalized = _security_lookup_key(security_id)
+        for hypothesis in self.__hypotheses:
+            if hypothesis.security_id == normalized:
+                return hypothesis
+        raise KeyError(f"security is absent from verified route scan: {normalized}")
+
+    def manifests_for_security(
+        self,
+        security_id: str,
+    ) -> tuple[RouteScanManifest, ...]:
+        self.hypothesis_for_security(security_id)
+        return self.__manifests
+
+    def route_manifest_input_record(
+        self,
+        manifest: RouteScanManifest,
+    ) -> Mapping[str, Any]:
+        require_verified_route_scan_batch(self)
+        for index, registered_manifest in enumerate(self.__manifests):
+            if manifest is registered_manifest:
+                return self.__manifest_input_records[index]
+        raise ValueError("route manifest does not belong to this verified scan batch")
+
+    def lead_members(self, security_id: str) -> tuple[VerifiedRouteLead, ...]:
+        require_verified_route_scan_batch(self)
+        normalized = _security_lookup_key(security_id)
+        if not any(item.security_id == normalized for item in self.__hypotheses):
+            raise KeyError(f"security is absent from verified route scan: {normalized}")
+        return tuple(
+            item for item in self.__lead_ledger if item.security_id == normalized
+        )
 
 
 class FrozenUniverseCatalog:
@@ -1116,7 +1297,7 @@ def build_route_window_policy(
 def scan_routes(
     snapshot: Any,
     window_policy: RouteWindowPolicy,
-) -> tuple[tuple[RouteScanManifest, ...], tuple[ResearchHypothesis, ...]]:
+) -> VerifiedRouteScanBatch:
     """Scan all six frozen universes and merge leads by security without voting."""
 
     if not isinstance(window_policy, RouteWindowPolicy):
@@ -1150,10 +1331,96 @@ def scan_routes(
         for route in _ROUTE_ORDER
     )
     manifests = tuple(item[0] for item in scans)
-    leads = tuple(lead for _, route_leads in scans for lead in route_leads)
+    leads = tuple(lead for _, route_leads, _ in scans for lead in route_leads)
+    manifest_input_records = tuple(item[2] for item in scans)
     hypotheses = _merge_leads(leads, formation_date, cutoff)
+    lead_members = _verified_lead_ledger(leads, manifests)
     _require_registered_attestation(window_policy._source_attestation)
-    return manifests, hypotheses
+    return VerifiedRouteScanBatch(
+        snapshot=snapshot,
+        window_policy=window_policy,
+        manifests=manifests,
+        manifest_input_records=manifest_input_records,
+        hypotheses=hypotheses,
+        lead_members=lead_members,
+        _token=_SCAN_BATCH_TOKEN,
+    )
+
+
+def require_verified_route_scan_batch(value: Any) -> VerifiedRouteScanBatch:
+    """Fail closed unless ``value`` is the exact registered scan receipt."""
+
+    if type(value) is not VerifiedRouteScanBatch:
+        raise ValueError("route scan batch lacks registered scan provenance")
+    registration = _SCAN_BATCH_REGISTRY.get(value)
+    if registration is None:
+        raise ValueError("route scan batch lacks registered scan provenance")
+    snapshot = value._VerifiedRouteScanBatch__snapshot
+    window_policy = value._VerifiedRouteScanBatch__window_policy
+    manifests = value._VerifiedRouteScanBatch__manifests
+    manifest_input_records = value._VerifiedRouteScanBatch__manifest_input_records
+    hypotheses = value._VerifiedRouteScanBatch__hypotheses
+    lead_members = value._VerifiedRouteScanBatch__lead_ledger
+    identities = (
+        id(snapshot),
+        id(window_policy),
+        id(manifests),
+        id(manifest_input_records),
+        id(hypotheses),
+        id(lead_members),
+        tuple(id(item) for item in manifests),
+        tuple(id(item) for item in manifest_input_records),
+        tuple(id(item) for item in hypotheses),
+        tuple(id(item) for item in lead_members),
+    )
+    registered_identities = (
+        registration.snapshot_identity,
+        registration.policy_identity,
+        registration.manifests_identity,
+        registration.manifest_records_identity,
+        registration.hypotheses_identity,
+        registration.lead_ledger_identity,
+        registration.manifest_item_identities,
+        registration.manifest_record_identities,
+        registration.hypothesis_item_identities,
+        registration.lead_item_identities,
+    )
+    if identities != registered_identities:
+        raise ValueError("route scan batch component identity mismatch")
+    if not isinstance(window_policy, RouteWindowPolicy):
+        raise ValueError("route scan batch policy identity mismatch")
+    if window_policy.policy_hash != _route_policy_hash(window_policy):
+        raise ValueError("route scan batch policy hash mismatch")
+    _require_registered_attestation(window_policy._source_attestation)
+    snapshot_content_hash = _route_scan_snapshot_hash(snapshot, window_policy)
+    if (
+        snapshot_content_hash != registration.snapshot_content_hash
+        or snapshot_content_hash
+        != value._VerifiedRouteScanBatch__snapshot_content_hash
+    ):
+        raise ValueError("route scan batch snapshot hash mismatch")
+    _validate_route_scan_components(
+        snapshot=snapshot,
+        window_policy=window_policy,
+        manifests=manifests,
+        manifest_input_records=manifest_input_records,
+        hypotheses=hypotheses,
+        lead_members=lead_members,
+    )
+    batch_hash = _route_scan_batch_hash(
+        snapshot_content_hash=snapshot_content_hash,
+        window_policy=window_policy,
+        manifests=manifests,
+        manifest_input_records=manifest_input_records,
+        hypotheses=hypotheses,
+        lead_members=lead_members,
+    )
+    if (
+        batch_hash != registration.batch_hash
+        or batch_hash != value._VerifiedRouteScanBatch__batch_hash
+    ):
+        raise ValueError("route scan batch canonical hash mismatch")
+    return value
 
 
 class _SnapshotView:
@@ -1479,7 +1746,7 @@ def _scan_route(
     policy: RouteWindowPolicy,
     formation_date: date,
     cutoff: datetime,
-) -> tuple[RouteScanManifest, tuple[_Lead, ...]]:
+) -> tuple[RouteScanManifest, tuple[_Lead, ...], Mapping[str, Any]]:
     datasets = tuple(
         view.read(dataset, partitions)
         for dataset, partitions in policy.route_partitions[route].items()
@@ -1543,6 +1810,15 @@ def _scan_route(
         and not lead.evidence.needs_deep_read
         for lead in leads
     )
+    route_input_record = _freeze_canonical_record(
+        {
+            "route": route.value,
+            "cutoff": cutoff.isoformat(),
+            "datasets": tuple(item.input_hash for item in datasets),
+            "policy": dict(policy.route_partitions[route]),
+            "price_tail": policy.price_absolute_tail_fraction,
+        }
+    )
     manifest = RouteScanManifest(
         route=route,
         formation_date=formation_date,
@@ -1558,17 +1834,9 @@ def _scan_route(
         manual_boundaries=_manual_boundaries(route, policy),
         deep_read_required=deep_required,
         deep_read_completed=deep_completed,
-        input_hash=_stable_hash(
-            {
-                "route": route,
-                "cutoff": cutoff,
-                "datasets": [item.input_hash for item in datasets],
-                "policy": policy.route_partitions[route],
-                "price_tail": policy.price_absolute_tail_fraction,
-            }
-        ),
+        input_hash=canonical_route_manifest_input_hash(route_input_record),
     )
-    return manifest, leads
+    return manifest, leads, route_input_record
 
 
 def _hotspot_leads(
@@ -1969,6 +2237,67 @@ def _merge_leads(
             )
         )
     return tuple(hypotheses)
+
+
+def _verified_lead_ledger(
+    leads: tuple[_Lead, ...],
+    manifests: tuple[RouteScanManifest, ...],
+) -> tuple[VerifiedRouteLead, ...]:
+    manifest_hashes = {item.route: item.input_hash for item in manifests}
+    members: list[VerifiedRouteLead] = []
+    seen: set[tuple[str, DiscoveryRoute, str]] = set()
+    for lead in leads:
+        key = (lead.security_id, lead.route, lead.evidence.evidence_id)
+        if key in seen:
+            raise ValueError(
+                "duplicate route lead evidence identity: "
+                f"{lead.security_id}/{lead.route.value}/{lead.evidence.evidence_id}"
+            )
+        seen.add(key)
+        record = {
+            "security_id": lead.security_id,
+            "route": lead.route.value,
+            "evidence": {
+                "evidence_id": lead.evidence.evidence_id,
+                "route": lead.evidence.route.value,
+                "dataset": lead.evidence.dataset,
+                "available_at": (
+                    lead.evidence.available_at.isoformat()
+                    if lead.evidence.available_at is not None
+                    else None
+                ),
+                "fact_summary": lead.evidence.fact_summary,
+                "needs_deep_read": lead.evidence.needs_deep_read,
+                "usable_for_decision": lead.evidence.usable_for_decision,
+                "deep_read_input_hash": lead.evidence.deep_read_input_hash,
+            },
+            "transmission": lead.transmission,
+            "question": lead.question,
+            "internal_only": lead.internal_only,
+            "preliminary_opportunity": (
+                lead.preliminary_opportunity.value
+                if lead.preliminary_opportunity is not None
+                else None
+            ),
+        }
+        frozen_record = _freeze_canonical_record(record)
+        members.append(
+            VerifiedRouteLead(
+                route=lead.route,
+                evidence_id=lead.evidence.evidence_id,
+                security_id=lead.security_id,
+                usable_for_decision=lead.evidence.usable_for_decision,
+                needs_deep_read=lead.evidence.needs_deep_read,
+                route_input_record=frozen_record,
+                input_hash=canonical_route_input_hash(record),
+                route_manifest_input_hash=manifest_hashes[lead.route],
+                dataset=lead.evidence.dataset,
+                available_at=lead.evidence.available_at,
+                fact_summary=lead.evidence.fact_summary,
+                deep_read_input_hash=lead.evidence.deep_read_input_hash,
+            )
+        )
+    return tuple(members)
 
 
 def _missing_hotspot_fields(row: Mapping[str, Any]) -> tuple[str, ...]:
@@ -2388,6 +2717,290 @@ def _require_registered_attestation(
     return registration
 
 
+def _security_lookup_key(value: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("security_id must be a non-blank string")
+    return value.strip()
+
+
+def _route_scan_snapshot_hash(
+    snapshot: Any,
+    policy: RouteWindowPolicy,
+) -> str:
+    facts_manifest = getattr(getattr(snapshot, "facts", None), "manifest", None)
+    if not isinstance(facts_manifest, Mapping):
+        raise TypeError("snapshot facts view must expose its materialized manifest")
+    fact_datasets = sorted(
+        {
+            dataset
+            for route_datasets in policy.route_partitions.values()
+            for dataset in route_datasets
+            if dataset not in _FEATURE_DATASETS
+        }
+    )
+    fact_rows = {
+        dataset: tuple(
+            dict(row)
+            for row in _records(snapshot.facts.dataset(dataset), dataset)
+        )
+        for dataset in fact_datasets
+    }
+    feature_rows = {
+        feature_set: tuple(
+            dict(row)
+            for row in _records(snapshot.features.read(feature_set), feature_set)
+        )
+        for feature_set in _SNAPSHOT_FEATURE_SETS
+    }
+    return _stable_hash(
+        {
+            "analysis_date": snapshot.analysis_date,
+            "as_of": snapshot.as_of,
+            "cache_key": getattr(snapshot, "cache_key", None),
+            "fact_manifest_hashes": getattr(snapshot, "fact_manifest_hashes", None),
+            "formula_versions": getattr(snapshot, "formula_versions", None),
+            "limitations": getattr(snapshot, "limitations", None),
+            "facts_manifest": dict(facts_manifest),
+            "fact_rows": fact_rows,
+            "feature_rows": feature_rows,
+            "market_rows": getattr(snapshot, "market_rows", None),
+            "sector_rows": getattr(snapshot, "sector_rows", None),
+            "stock_rows": getattr(snapshot, "stock_rows", None),
+        }
+    )
+
+
+def _validate_route_scan_components(
+    *,
+    snapshot: Any,
+    window_policy: RouteWindowPolicy,
+    manifests: tuple[RouteScanManifest, ...],
+    manifest_input_records: tuple[Mapping[str, Any], ...],
+    hypotheses: tuple[ResearchHypothesis, ...],
+    lead_members: tuple[VerifiedRouteLead, ...],
+) -> None:
+    if (
+        type(manifests) is not tuple
+        or tuple(item.route for item in manifests) != _ROUTE_ORDER
+    ):
+        raise ValueError("route scan batch must contain all six ordered manifests")
+    if type(manifest_input_records) is not tuple or len(manifest_input_records) != len(
+        manifests
+    ):
+        raise ValueError("route scan batch manifest input records are incomplete")
+    if any(
+        type(item) is not RouteScanManifest
+        or item.formation_date != snapshot.analysis_date
+        or item.cutoff != snapshot.as_of
+        for item in manifests
+    ):
+        raise ValueError("route scan manifest identity mismatch")
+    for manifest, record in zip(manifests, manifest_input_records, strict=True):
+        if not isinstance(record, Mapping) or (
+            record.get("route") != manifest.route.value
+            or record.get("cutoff") != manifest.cutoff.isoformat()
+            or record.get("policy")
+            != dict(window_policy.route_partitions[manifest.route])
+            or record.get("price_tail")
+            != window_policy.price_absolute_tail_fraction
+        ):
+            raise ValueError("route scan manifest canonical input record mismatch")
+        dataset_hashes = record.get("datasets")
+        if (
+            not isinstance(dataset_hashes, Sequence)
+            or isinstance(dataset_hashes, (str, bytes, bytearray))
+            or not dataset_hashes
+            or any(
+                not isinstance(value, str) or not _is_sha256(value)
+                for value in dataset_hashes
+            )
+        ):
+            raise ValueError("route scan manifest dataset input hashes are invalid")
+        if manifest.input_hash != canonical_route_manifest_input_hash(record):
+            raise ValueError("route scan manifest canonical input hash mismatch")
+    if type(hypotheses) is not tuple or any(
+        type(item) is not ResearchHypothesis for item in hypotheses
+    ):
+        raise ValueError("route scan hypotheses must be frozen scanner outputs")
+    security_ids = tuple(item.security_id for item in hypotheses)
+    if security_ids != tuple(sorted(set(security_ids))):
+        raise ValueError("route scan hypotheses are not deduplicated by security")
+    if any(
+        item.formation_date != snapshot.analysis_date
+        or item.cutoff != snapshot.as_of
+        for item in hypotheses
+    ):
+        raise ValueError("route scan hypothesis formation identity mismatch")
+    if window_policy.formation_date != snapshot.analysis_date:
+        raise ValueError("route scan policy formation identity mismatch")
+    manifest_by_route = {item.route: item for item in manifests}
+    ledger_keys: set[tuple[str, DiscoveryRoute, str]] = set()
+    ledger_by_evidence: dict[
+        tuple[str, DiscoveryRoute, str], VerifiedRouteLead
+    ] = {}
+    for member in lead_members:
+        if type(member) is not VerifiedRouteLead:
+            raise ValueError("route scan lead ledger contains an untrusted member")
+        key = (member.security_id, member.route, member.evidence_id)
+        if key in ledger_keys:
+            raise ValueError("route scan lead ledger contains duplicate evidence identity")
+        ledger_keys.add(key)
+        ledger_by_evidence[key] = member
+        if member.route_manifest_input_hash != manifest_by_route[member.route].input_hash:
+            raise ValueError("route scan lead manifest input hash mismatch")
+        if member.input_hash != canonical_route_input_hash(member.route_input_record):
+            raise ValueError("route scan lead input hash mismatch")
+        record = member.route_input_record
+        evidence = record.get("evidence") if isinstance(record, Mapping) else None
+        if not isinstance(evidence, Mapping) or (
+            record.get("security_id") != member.security_id
+            or record.get("route") != member.route.value
+            or evidence.get("evidence_id") != member.evidence_id
+            or evidence.get("route") != member.route.value
+            or evidence.get("dataset") != member.dataset
+            or evidence.get("available_at")
+            != (
+                member.available_at.isoformat()
+                if member.available_at is not None
+                else None
+            )
+            or evidence.get("fact_summary") != member.fact_summary
+            or evidence.get("usable_for_decision") != member.usable_for_decision
+            or evidence.get("needs_deep_read") != member.needs_deep_read
+            or evidence.get("deep_read_input_hash") != member.deep_read_input_hash
+        ):
+            raise ValueError("route scan lead canonical record mismatch")
+    hypothesis_evidence: dict[
+        tuple[str, DiscoveryRoute, str], RouteEvidence
+    ] = {}
+    for hypothesis in hypotheses:
+        for evidence in hypothesis.evidence:
+            key = (hypothesis.security_id, evidence.route, evidence.evidence_id)
+            if key in hypothesis_evidence:
+                raise ValueError("route scan hypothesis contains duplicate route evidence")
+            hypothesis_evidence[key] = evidence
+    if set(hypothesis_evidence) != ledger_keys:
+        raise ValueError("route scan lead ledger does not match merged hypotheses")
+    for key, evidence in hypothesis_evidence.items():
+        member = ledger_by_evidence[key]
+        if (
+            member.dataset != evidence.dataset
+            or member.available_at != evidence.available_at
+            or member.fact_summary != evidence.fact_summary
+            or member.needs_deep_read != evidence.needs_deep_read
+            or member.usable_for_decision != evidence.usable_for_decision
+            or member.deep_read_input_hash != evidence.deep_read_input_hash
+        ):
+            raise ValueError("route scan lead evidence does not match merged hypothesis")
+
+
+def _route_scan_batch_hash(
+    *,
+    snapshot_content_hash: str,
+    window_policy: RouteWindowPolicy,
+    manifests: tuple[RouteScanManifest, ...],
+    manifest_input_records: tuple[Mapping[str, Any], ...],
+    hypotheses: tuple[ResearchHypothesis, ...],
+    lead_members: tuple[VerifiedRouteLead, ...],
+) -> str:
+    return _stable_hash(
+        {
+            "snapshot_content_hash": snapshot_content_hash,
+            "policy": {
+                "policy_hash": window_policy.policy_hash,
+                "universe_source_manifest_hash": (
+                    window_policy.universe_source_manifest_hash
+                ),
+                "universe_source_view_manifest_hash": (
+                    window_policy.universe_source_view_manifest_hash
+                ),
+                "universe_source_attestation_hash": (
+                    window_policy.universe_source_attestation_hash
+                ),
+                "universe_catalog_hash": window_policy.universe_catalog_hash,
+            },
+            "manifests": tuple(
+                item.model_dump(mode="json") for item in manifests
+            ),
+            "manifest_input_records": manifest_input_records,
+            "hypotheses": tuple(
+                _research_hypothesis_record(item) for item in hypotheses
+            ),
+            "lead_ledger": tuple(
+                {
+                    "route": item.route.value,
+                    "evidence_id": item.evidence_id,
+                    "security_id": item.security_id,
+                    "usable_for_decision": item.usable_for_decision,
+                    "needs_deep_read": item.needs_deep_read,
+                    "route_input_record": item.route_input_record,
+                    "input_hash": item.input_hash,
+                    "route_manifest_input_hash": item.route_manifest_input_hash,
+                }
+                for item in lead_members
+            ),
+        }
+    )
+
+
+def _research_hypothesis_record(item: ResearchHypothesis) -> Mapping[str, Any]:
+    return {
+        "security_id": item.security_id,
+        "formation_date": item.formation_date,
+        "cutoff": item.cutoff,
+        "discovery_routes": tuple(route.value for route in item.discovery_routes),
+        "evidence": tuple(
+            {
+                "evidence_id": evidence.evidence_id,
+                "route": evidence.route.value,
+                "dataset": evidence.dataset,
+                "available_at": evidence.available_at,
+                "fact_summary": evidence.fact_summary,
+                "needs_deep_read": evidence.needs_deep_read,
+                "usable_for_decision": evidence.usable_for_decision,
+                "deep_read_input_hash": evidence.deep_read_input_hash,
+            }
+            for evidence in item.evidence
+        ),
+        "transmission_hypotheses": item.transmission_hypotheses,
+        "questions_to_verify": item.questions_to_verify,
+        "needs_deep_read": item.needs_deep_read,
+        "eligible_for_ten": item.eligible_for_ten,
+        "internal_review_only": item.internal_review_only,
+        "preliminary_opportunity": (
+            item.preliminary_opportunity.value
+            if item.preliminary_opportunity is not None
+            else None
+        ),
+    }
+
+
+def canonical_route_input_hash(record: Mapping[str, Any]) -> str:
+    """Return the canonical SHA-256 used by verified raw route-lead records."""
+
+    if not isinstance(record, Mapping):
+        raise TypeError("route input record must be a mapping")
+    return _stable_hash(record)
+
+
+def canonical_route_manifest_input_hash(record: Mapping[str, Any]) -> str:
+    """Return the canonical SHA-256 for one route manifest input record."""
+
+    if not isinstance(record, Mapping):
+        raise TypeError("route manifest input record must be a mapping")
+    return _stable_hash(record)
+
+
+def _freeze_canonical_record(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return MappingProxyType(
+            {str(key): _freeze_canonical_record(item) for key, item in value.items()}
+        )
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        return tuple(_freeze_canonical_record(item) for item in value)
+    return value
+
+
 def _stable_hash(value: Any) -> str:
     payload = json.dumps(
         value,
@@ -2420,10 +3033,15 @@ __all__ = [
     "RouteDataset",
     "RouteEvidence",
     "RouteWindowPolicy",
+    "VerifiedRouteLead",
+    "VerifiedRouteScanBatch",
     "build_frozen_universe_catalog",
     "build_route_fact_plan",
     "build_route_window_policy",
     "build_source_catalog_attestation",
+    "canonical_route_input_hash",
+    "canonical_route_manifest_input_hash",
     "derive_declared_route_windows",
+    "require_verified_route_scan_batch",
     "scan_routes",
 ]
