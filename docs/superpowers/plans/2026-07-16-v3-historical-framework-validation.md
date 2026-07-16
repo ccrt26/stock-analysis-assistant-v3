@@ -50,11 +50,11 @@ Run `git diff --check`, stage the batch-freeze document, and commit it with mess
 ### Task 2: Build tested formation-only probe and outcome utilities
 
 **Files:**
-- Create: `src/stock_analyzer/validation/historical_framework_validation.py`
+- Create: `src/stock_analyzer/evaluation/historical_framework_validation.py`
 - Create: `tests/test_historical_framework_validation.py`
 
 **Interfaces:**
-- Produces: `select_spaced_origins()`, `validate_formation_cutoff()`, `round_robin_union()`, `compute_forward_outcomes()`, and `summarize_outcomes()`.
+- Produces: `select_spaced_origins()`, `validate_formation_cutoff()`, `round_robin_union()`, `compute_forward_outcomes()`, and `summarize_outcomes()` under the existing evaluation package.
 - `round_robin_union(route_lists: Mapping[str, Sequence[str]], limit: int) -> tuple[str, ...]` interleaves route-native lists without adding weights.
 - `compute_forward_outcomes(prices: DataFrame, selections: DataFrame, horizons: tuple[int, ...], target_return: float) -> DataFrame` uses formation adjusted close, future adjusted high/low/close, and never reads dates before validating frozen formation rows.
 
