@@ -54,6 +54,28 @@ REPORT_PERIOD = date(2026, 6, 30)
 SHA256 = "a" * 64
 
 
+def test_singleton_manifest_partition_can_supply_omitted_physical_partition_column():
+    records = ({"ts_code": "000001.SZ", "industry_system": "SW2021"},)
+
+    grouped, error = routes_module._partition_records(
+        "industry_member", records, ("SW2021",)
+    )
+
+    assert error is None
+    assert grouped == {"SW2021": records}
+
+
+def test_omitted_physical_partition_column_still_fails_for_multiple_partitions():
+    records = ({"ts_code": "000001.SZ", "industry_system": "SW2021"},)
+
+    grouped, error = routes_module._partition_records(
+        "industry_member", records, ("SW2021", "SW2024")
+    )
+
+    assert grouped == {}
+    assert error == "industry_member: missing partition field classification_version"
+
+
 def universe_catalog():
     return _default_controlled_bundle(FORMATION_DATE)[2]
 

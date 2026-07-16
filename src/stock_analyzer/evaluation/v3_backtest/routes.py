@@ -2477,13 +2477,16 @@ def _partition_records(
     requested: tuple[str, ...],
 ) -> tuple[dict[str, tuple[Mapping[str, Any], ...]], str | None]:
     field_name = research_contract(ResearchDatasetId(dataset)).partition_field
+    missing_partition = tuple(row.get(field_name) is None for row in records)
+    if any(missing_partition):
+        if len(requested) == 1 and all(missing_partition):
+            return {requested[0]: tuple(records)}, None
+        return {}, f"{dataset}: missing partition field {field_name}"
     grouped: dict[str, list[Mapping[str, Any]]] = {
         partition: [] for partition in requested
     }
     for row in records:
         raw_partition = row.get(field_name)
-        if raw_partition is None:
-            return {}, f"{dataset}: missing partition field {field_name}"
         if isinstance(raw_partition, datetime):
             partition = raw_partition.date().isoformat()
         elif isinstance(raw_partition, date):
