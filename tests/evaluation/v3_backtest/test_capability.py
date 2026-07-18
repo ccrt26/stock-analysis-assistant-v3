@@ -3,16 +3,18 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import replace
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
+from stock_analyzer.evaluation.v3_backtest import capability as capability_module
 from stock_analyzer.evaluation.v3_backtest.capability import (
     CapabilityMatrix,
     RouteCapability,
+    WorkspacePaths,
     assert_warehouse_unchanged,
     audit_local_capability_matrix,
     fingerprint_mac_warehouse,
@@ -26,6 +28,45 @@ from stock_analyzer.evaluation.v3_backtest.contracts import DiscoveryRoute
 SHA256 = "a" * 64
 FORMATION_START = date(2025, 10, 30)
 FORMATION_END = date(2026, 6, 4)
+
+
+def test_prepare_rejects_root_other_than_frozen_usb(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    root = tmp_path / "mac-experiment"
+    monkeypatch.setenv("V3_BACKTEST_ROOT", str(root))
+    monkeypatch.setenv("TMPDIR", str(root / "tmp"))
+    monkeypatch.setenv("DUCKDB_TMPDIR", str(root / "duckdb-tmp"))
+
+    with pytest.raises(ValueError, match="approved U-disk experiment root"):
+        prepare_backtest_workspace(root)
+
+    assert not root.exists()
+
+
+def test_workspace_paths_rejects_forged_mac_root(tmp_path: Path):
+    root = tmp_path / "forged"
+
+    with pytest.raises(ValueError, match="approved U-disk experiment root"):
+        WorkspacePaths(root=root, directories=(root / "preflight",))
+
+
+def test_both_preflight_write_layers_reject_paths_outside_usb_root(
+    tmp_path: Path,
+):
+    root = tmp_path / "forged"
+    workspace = object.__new__(WorkspacePaths)
+    object.__setattr__(workspace, "root", root)
+    object.__setattr__(workspace, "directories", (root / "preflight",))
+    fingerprint = fingerprint_mac_warehouse(_minimal_warehouse(tmp_path))
+
+    with pytest.raises(ValueError, match="approved U-disk experiment root"):
+        write_preflight_receipts(workspace, object(), fingerprint)
+    with pytest.raises(ValueError, match="approved U-disk experiment root"):
+        capability_module._atomic_write_json(root / "escape.json", {"bad": True})
+
+    assert not root.exists()
 
 
 def _capability(
@@ -51,6 +92,8 @@ def _capability(
         missing_fields=missing_fields,
         coverage_start=FORMATION_START,
         coverage_end=FORMATION_END,
+        covers_required_formations=True,
+        internal_recall_only=internal_recall,
         evidence_hashes=evidence_hashes,
     )
 
@@ -61,17 +104,8 @@ def _full_matrix() -> CapabilityMatrix:
     )
 
 
-def test_any_structurally_missing_required_route_forces_partial():
-    matrix = _full_matrix()
-    routes = dict(matrix.routes)
-    routes[DiscoveryRoute.INDUSTRY_CYCLE] = _capability(
-        DiscoveryRoute.INDUSTRY_CYCLE,
-        can_form_ready_card=False,
-        can_enter_ten=False,
-        missing_fields=("industry_cycle.lead_implementation",),
-    )
-
-    receipt = freeze_capability_matrix(CapabilityMatrix(routes=routes))
+def test_any_structurally_missing_required_route_forces_partial(tmp_path: Path):
+    receipt = freeze_capability_matrix(_audited_matrix(tmp_path))
 
     assert receipt.experiment_scope == "partial"
     assert receipt.full_v3_status == "not_executable"
@@ -82,11 +116,11 @@ def test_any_structurally_missing_required_route_forces_partial():
     )
 
 
-def test_intentional_internal_recall_routes_do_not_make_full_matrix_partial():
-    receipt = _full_matrix().freeze()
+def test_intentional_internal_recall_routes_are_attested_from_source(tmp_path: Path):
+    receipt = _audited_matrix(tmp_path).freeze()
 
-    assert receipt.experiment_scope == "full"
-    assert receipt.full_v3_status == "executable"
+    assert receipt.experiment_scope == "partial"
+    assert receipt.full_v3_status == "not_executable"
     assert receipt.routes["hotspot"].execution_status == "executable_internal_recall"
     assert receipt.routes["price_anomaly"].can_enter_ten is False
 
@@ -109,8 +143,59 @@ def test_internal_only_hypothesis_cannot_be_declared_ready():
         )
 
 
-def test_missing_evidence_hash_prevents_freeze():
-    matrix = _full_matrix()
+def test_ready_or_enter_ten_requires_exhaustive_enumeration():
+    with pytest.raises(ValueError, match="enumerate"):
+        _capability(
+            DiscoveryRoute.EARNINGS,
+            can_enumerate_all=False,
+            can_form_ready_card=True,
+            can_enter_ten=True,
+        )
+
+
+def test_structural_missing_fields_cannot_be_marked_ready():
+    with pytest.raises(ValueError, match="missing_fields"):
+        _capability(
+            DiscoveryRoute.EARNINGS,
+            can_form_ready_card=True,
+            can_enter_ten=True,
+            missing_fields=("earnings.operating_value",),
+        )
+
+
+def test_synthetic_full_matrix_cannot_freeze_from_arbitrary_hashes():
+    with pytest.raises(ValueError, match="audit-produced evidence"):
+        _full_matrix().freeze()
+
+
+def test_audit_seal_rejects_route_evidence_replacement(tmp_path: Path):
+    warehouse = _minimal_warehouse(tmp_path)
+    route_source = tmp_path / "routes-audited.py"
+    route_source.write_text(
+        _admission_source(
+            DiscoveryRoute.EARNINGS,
+            "_earnings_leads",
+            "EARNINGS_REVALUATION",
+        ),
+        encoding="utf-8",
+    )
+    matrix = audit_local_capability_matrix(
+        warehouse,
+        routes_source=route_source,
+        warehouse_fingerprint=fingerprint_mac_warehouse(warehouse),
+    )
+    routes = dict(matrix.routes)
+    routes[DiscoveryRoute.EARNINGS] = replace(
+        routes[DiscoveryRoute.EARNINGS],
+        evidence_hashes=("b" * 64,),
+    )
+
+    with pytest.raises(ValueError, match="audit evidence changed"):
+        replace(matrix, routes=routes).freeze()
+
+
+def test_missing_evidence_hash_prevents_freeze(tmp_path: Path):
+    matrix = _audited_matrix(tmp_path)
     routes = dict(matrix.routes)
     routes[DiscoveryRoute.EARNINGS] = replace(
         routes[DiscoveryRoute.EARNINGS],
@@ -118,27 +203,24 @@ def test_missing_evidence_hash_prevents_freeze():
     )
 
     with pytest.raises(ValueError, match="evidence hash"):
-        CapabilityMatrix(routes=routes).freeze()
+        replace(matrix, routes=routes).freeze()
 
 
-def test_freeze_requires_exactly_six_routes():
-    routes = dict(_full_matrix().routes)
+def test_freeze_requires_exactly_six_routes(tmp_path: Path):
+    matrix = _audited_matrix(tmp_path)
+    routes = dict(matrix.routes)
     routes.pop(DiscoveryRoute.DISTRESS_REPAIR)
 
     with pytest.raises(ValueError, match="exactly the six"):
-        CapabilityMatrix(routes=routes).freeze()
+        replace(matrix, routes=routes).freeze()
 
 
 def test_prepare_workspace_requires_pinned_temp_environment(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    root = tmp_path / "experiment"
-    monkeypatch.setenv("V3_BACKTEST_ROOT", str(root))
-    monkeypatch.setenv("TMPDIR", str(root / "tmp"))
-    monkeypatch.setenv("DUCKDB_TMPDIR", str(root / "duckdb-tmp"))
-
-    workspace = prepare_backtest_workspace()
+    workspace = _approved_workspace(tmp_path, monkeypatch)
+    root = workspace.root
 
     expected = {
         "preflight",
@@ -168,7 +250,8 @@ def test_prepare_workspace_fails_closed_when_tmpdir_is_elsewhere(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    root = tmp_path / "experiment"
+    root = (tmp_path / "approved-experiment").resolve()
+    monkeypatch.setattr(capability_module, "_APPROVED_EXPERIMENT_ROOT", root)
     monkeypatch.setenv("V3_BACKTEST_ROOT", str(root))
     monkeypatch.setenv("TMPDIR", str(tmp_path / "mac-tmp"))
     monkeypatch.setenv("DUCKDB_TMPDIR", str(root / "duckdb-tmp"))
@@ -210,30 +293,65 @@ def test_warehouse_fingerprint_is_read_only_and_detects_change(tmp_path: Path):
         assert_warehouse_unchanged(before, after)
 
 
-def test_local_audit_uses_real_route_branches_and_deep_read_fields(tmp_path: Path):
+def test_phase_guard_recomputes_fingerprint_after_read_only_work(tmp_path: Path):
     warehouse = _minimal_warehouse(tmp_path)
-    route_source = tmp_path / "routes.py"
+    guard = capability_module.WarehousePhaseGuard.capture(warehouse)
+
+    def mutate_warehouse() -> str:
+        (warehouse / "facts" / "mutation.txt").write_text("changed", encoding="utf-8")
+        return "untrusted"
+
+    with pytest.raises(RuntimeError, match="warehouse fingerprint changed"):
+        guard.run_phase("mutating-phase", mutate_warehouse)
+
+
+def test_preflight_guard_rechecks_before_publishing_any_receipt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    workspace = _approved_workspace(tmp_path, monkeypatch)
+    warehouse = _minimal_warehouse(tmp_path)
+    route_source = tmp_path / "routes-guarded.py"
     route_source.write_text(
-        """
-def _scan_route(route):
-    if route is DiscoveryRoute.HOTSPOT:
-        return _hotspot_leads()
-    elif route is DiscoveryRoute.EARNINGS:
-        return _earnings_leads()
-    elif route is DiscoveryRoute.COMPANY_EVENT:
-        return _event_leads()
-    elif route is DiscoveryRoute.PRICE_ANOMALY:
-        return _price_leads()
-    return ()
-""".strip(),
+        _admission_source(
+            DiscoveryRoute.EARNINGS,
+            "_earnings_leads",
+            "EARNINGS_REVALUATION",
+        ),
         encoding="utf-8",
     )
+    guard = capability_module.WarehousePhaseGuard.capture(warehouse)
+    matrix = guard.run_phase(
+        "capability-audit",
+        lambda: audit_local_capability_matrix(
+            warehouse,
+            routes_source=route_source,
+            warehouse_fingerprint=guard.before,
+        ),
+    )
+    (warehouse / "derived" / "post-audit-mutation.txt").write_text(
+        "changed",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(RuntimeError, match="warehouse fingerprint changed"):
+        guard.publish_preflight(workspace, matrix.freeze())
+
+    assert not (workspace.preflight / "capability-matrix.json").exists()
+    assert not (
+        workspace.preflight / "mac-warehouse-fingerprint-before.json"
+    ).exists()
+
+
+def test_local_audit_uses_real_route_branches_and_deep_read_fields(tmp_path: Path):
+    warehouse = _minimal_warehouse(tmp_path)
     fingerprint = fingerprint_mac_warehouse(warehouse)
 
     receipt = audit_local_capability_matrix(
         warehouse,
-        routes_source=route_source,
+        routes_source=_real_routes_source(),
         warehouse_fingerprint=fingerprint,
+        formation_sessions=_formation_sessions(),
     ).freeze()
 
     assert receipt.experiment_scope == "partial"
@@ -250,7 +368,7 @@ def _scan_route(route):
         "announcement.subject",
         "announcement.execution_conditions",
     }
-    assert receipt.routes["industry_cycle"].can_enumerate_all is False
+    assert receipt.routes["industry_cycle"].can_enumerate_all is True
     assert receipt.routes["industry_cycle"].missing_fields[0] == (
         "industry_cycle.lead_implementation"
     )
@@ -260,23 +378,249 @@ def _scan_route(route):
     assert all(item.evidence_hashes for item in receipt.routes.values())
 
 
+@pytest.mark.parametrize(
+    ("route", "helper", "opportunity"),
+    (
+        (
+            DiscoveryRoute.INDUSTRY_CYCLE,
+            "_cycle_leads",
+            "SUPPLY_DEMAND_CYCLE",
+        ),
+        (
+            DiscoveryRoute.DISTRESS_REPAIR,
+            "_repair_leads",
+            "DISTRESS_REVERSAL",
+        ),
+    ),
+)
+def test_new_admission_branch_and_local_evidence_can_become_executable(
+    tmp_path: Path,
+    route: DiscoveryRoute,
+    helper: str,
+    opportunity: str,
+):
+    warehouse = _minimal_warehouse(tmp_path)
+    if route is DiscoveryRoute.INDUSTRY_CYCLE:
+        _add_cycle_ready_evidence(warehouse)
+    else:
+        _add_distress_ready_evidence(warehouse)
+    route_source = tmp_path / f"routes-{route.value}.py"
+    route_source.write_text(
+        _admission_source(route, helper, opportunity),
+        encoding="utf-8",
+    )
+
+    receipt = audit_local_capability_matrix(
+        warehouse,
+        routes_source=route_source,
+        warehouse_fingerprint=fingerprint_mac_warehouse(warehouse),
+    ).freeze()
+
+    assert receipt.routes[route.value].can_form_ready_card is True
+    assert receipt.routes[route.value].can_enter_ten is True
+    assert receipt.routes[route.value].execution_status == "executable_ready"
+
+
+def test_hotspot_status_follows_non_internal_admission_not_route_name(tmp_path: Path):
+    warehouse = _minimal_warehouse(tmp_path)
+    route_source = tmp_path / "routes-hotspot-ready.py"
+    route_source.write_text(
+        _admission_source(
+            DiscoveryRoute.HOTSPOT,
+            "_hotspot_leads",
+            "INDUSTRY_TREND",
+        ),
+        encoding="utf-8",
+    )
+
+    receipt = audit_local_capability_matrix(
+        warehouse,
+        routes_source=route_source,
+        warehouse_fingerprint=fingerprint_mac_warehouse(warehouse),
+    ).freeze()
+
+    assert receipt.routes["hotspot"].can_form_ready_card is True
+    assert receipt.routes["hotspot"].can_enter_ten is True
+
+
+def test_ready_route_requires_attested_usable_non_internal_eligibility_path(
+    tmp_path: Path,
+):
+    warehouse = _minimal_warehouse(tmp_path)
+    route_source = tmp_path / "routes-forged-eligibility.py"
+    source = _admission_source(
+        DiscoveryRoute.EARNINGS,
+        "_earnings_leads",
+        "EARNINGS_REVALUATION",
+    ).replace(
+        "eligible_for_ten=any(not item.internal_only for item in usable)",
+        "eligible_for_ten=True",
+    )
+    route_source.write_text(source, encoding="utf-8")
+
+    receipt = audit_local_capability_matrix(
+        warehouse,
+        routes_source=route_source,
+        warehouse_fingerprint=fingerprint_mac_warehouse(warehouse),
+    ).freeze()
+
+    assert receipt.routes["earnings"].can_enter_ten is False
+    assert "routes.eligible_for_ten_attestation" in receipt.routes[
+        "earnings"
+    ].missing_fields
+
+
+def test_daily_route_coverage_requires_every_one_of_144_formation_sessions(
+    tmp_path: Path,
+):
+    sessions = _formation_sessions()
+    warehouse = _minimal_warehouse(tmp_path)
+    _write_rows(
+        warehouse / "derived" / "sector_hotspot" / "unpartitioned",
+        _hotspot_rows(tuple(day for day in sessions if day != sessions[72])),
+    )
+    route_source = tmp_path / "routes-hotspot-internal.py"
+    route_source.write_text(
+        _admission_source(
+            DiscoveryRoute.HOTSPOT,
+            "_hotspot_leads",
+            "INDUSTRY_TREND",
+            internal_only=True,
+        ),
+        encoding="utf-8",
+    )
+
+    receipt = audit_local_capability_matrix(
+        warehouse,
+        routes_source=route_source,
+        warehouse_fingerprint=fingerprint_mac_warehouse(warehouse),
+        formation_sessions=sessions,
+    ).freeze()
+    hotspot = receipt.routes["hotspot"]
+
+    assert hotspot.coverage_start == sessions[0]
+    assert hotspot.coverage_end == sessions[-1]
+    assert hotspot.covers_required_formations is False
+    assert hotspot.can_enumerate_all is False
+    assert "sector_hotspot.formation_session_coverage" in hotspot.missing_fields
+
+
+def test_available_at_values_not_partition_names_define_route_coverage(tmp_path: Path):
+    sessions = _formation_sessions()
+    warehouse = _minimal_warehouse(tmp_path)
+    for dataset, value_field in (
+        ("earnings_forecast", "p_change_min"),
+        ("earnings_express", "revenue"),
+        ("income_statement", "revenue"),
+    ):
+        _write_rows(
+            warehouse / "facts" / dataset / "unpartitioned",
+            (
+                {
+                    "ts_code": "000001.SZ",
+                    "report_period": "2025-09-30",
+                    "available_at": "2026-07-01T18:00:00+08:00",
+                    value_field: 100.0,
+                },
+                {
+                    "ts_code": "000001.SZ",
+                    "report_period": "2026-03-31",
+                    "available_at": "2026-07-02T18:00:00+08:00",
+                    value_field: 110.0,
+                },
+            ),
+        )
+    route_source = tmp_path / "routes-earnings.py"
+    route_source.write_text(
+        _admission_source(
+            DiscoveryRoute.EARNINGS,
+            "_earnings_leads",
+            "EARNINGS_REVALUATION",
+        ),
+        encoding="utf-8",
+    )
+
+    receipt = audit_local_capability_matrix(
+        warehouse,
+        routes_source=route_source,
+        warehouse_fingerprint=fingerprint_mac_warehouse(warehouse),
+        formation_sessions=sessions,
+    ).freeze()
+    earnings = receipt.routes["earnings"]
+
+    assert earnings.coverage_start == date(2026, 7, 1)
+    assert earnings.coverage_end == date(2026, 7, 2)
+    assert earnings.covers_required_formations is False
+    assert earnings.can_enter_ten is False
+
+
+def test_appledouble_parquet_sidecar_is_never_opened_by_pyarrow(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    warehouse = _minimal_warehouse(tmp_path)
+    sidecar = (
+        warehouse
+        / "facts"
+        / "earnings_forecast"
+        / "unpartitioned"
+        / "._data.parquet"
+    )
+    sidecar.write_bytes(b"AppleDouble, not parquet")
+    fingerprint = fingerprint_mac_warehouse(warehouse)
+    route_source = tmp_path / "routes-appledouble.py"
+    route_source.write_text(
+        _admission_source(
+            DiscoveryRoute.EARNINGS,
+            "_earnings_leads",
+            "EARNINGS_REVALUATION",
+        ),
+        encoding="utf-8",
+    )
+    opened: list[Path] = []
+    real_parquet_file = pq.ParquetFile
+
+    def record_open(path: Path, *args: object, **kwargs: object):
+        opened.append(Path(path))
+        return real_parquet_file(path, *args, **kwargs)
+
+    monkeypatch.setattr(capability_module.pq, "ParquetFile", record_open)
+
+    audit_local_capability_matrix(
+        warehouse,
+        routes_source=route_source,
+        warehouse_fingerprint=fingerprint,
+        formation_sessions=_formation_sessions(),
+    ).freeze()
+
+    assert opened
+    assert sidecar not in opened
+    assert all(not path.name.startswith("._") for path in opened)
+
+
 def test_preflight_receipts_are_written_only_under_experiment_root(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    root = tmp_path / "experiment"
-    monkeypatch.setenv("V3_BACKTEST_ROOT", str(root))
-    monkeypatch.setenv("TMPDIR", str(root / "tmp"))
-    monkeypatch.setenv("DUCKDB_TMPDIR", str(root / "duckdb-tmp"))
-    workspace = prepare_backtest_workspace()
+    workspace = _approved_workspace(tmp_path, monkeypatch)
+    root = workspace.root
     warehouse = _minimal_warehouse(tmp_path)
-    fingerprint = fingerprint_mac_warehouse(warehouse)
-    receipt = _full_matrix().freeze()
+    guard = capability_module.WarehousePhaseGuard.capture(warehouse)
+    receipt = guard.run_phase(
+        "capability-audit",
+        lambda: audit_local_capability_matrix(
+            warehouse,
+            routes_source=_real_routes_source(),
+            warehouse_fingerprint=guard.before,
+            formation_sessions=_formation_sessions(),
+        ),
+    ).freeze()
 
     capability_path, fingerprint_path = write_preflight_receipts(
         workspace,
         receipt,
-        fingerprint,
+        guard.before,
+        guard=guard,
     )
 
     assert capability_path == root / "preflight" / "capability-matrix.json"
@@ -285,10 +629,10 @@ def test_preflight_receipts_are_written_only_under_experiment_root(
     )
     assert json.loads(capability_path.read_text(encoding="utf-8"))[
         "full_v3_status"
-    ] == "executable"
+    ] == "not_executable"
     assert json.loads(fingerprint_path.read_text(encoding="utf-8"))[
         "research_duckdb"
-    ]["sha256"] == fingerprint.research_duckdb.sha256
+    ]["sha256"] == guard.before.research_duckdb.sha256
 
 
 def _minimal_warehouse(tmp_path: Path) -> Path:
@@ -296,28 +640,23 @@ def _minimal_warehouse(tmp_path: Path) -> Path:
     (warehouse / "facts").mkdir(parents=True, exist_ok=True)
     (warehouse / "derived").mkdir(parents=True, exist_ok=True)
     (warehouse / "research.duckdb").write_bytes(b"database")
+    sessions = _formation_sessions()
 
-    _write_parquet(
-        warehouse / "derived" / "sector_hotspot" / "analysis_date=2025-10-30",
-        group_type="industry",
-        group_code="I1",
-        relative_return_20d=0.1,
-        median_return_20d=0.1,
-        breadth_20d=0.7,
-        turnover_share_average_20d=0.1,
-        top3_positive_contribution_1d=0.2,
-        high_volume_low_progress_flag=False,
-        upper_wick_reversal_flag=False,
-        narrow_participation_flag=False,
-        turnover_return_divergence_flag=False,
-        coverage_status="complete",
+    _write_rows(
+        warehouse / "derived" / "sector_hotspot" / "unpartitioned",
+        _hotspot_rows(sessions),
     )
-    _write_parquet(
-        warehouse / "derived" / "stock_trading_context" / "analysis_date=2026-06-04",
-        ts_code="000001.SZ",
-        analysis_date="2026-06-04",
-        relative_return_20d=0.1,
-        coverage_status="complete",
+    _write_rows(
+        warehouse / "derived" / "stock_trading_context" / "unpartitioned",
+        tuple(
+            {
+                "ts_code": "000001.SZ",
+                "analysis_date": day.isoformat(),
+                "relative_return_20d": 0.1,
+                "coverage_status": "complete",
+            }
+            for day in sessions
+        ),
     )
     _write_parquet(
         warehouse / "facts" / "industry_member" / "classification_version=SW2021",
@@ -335,70 +674,63 @@ def _minimal_warehouse(tmp_path: Path) -> Path:
         valid_to=None,
         available_at="2020-01-01T00:00:00+08:00",
     )
-    _write_parquet(
-        warehouse / "facts" / "earnings_forecast" / "ann_month=2025-10",
-        ts_code="000001.SZ",
-        report_period="2025-09-30",
-        available_at="2025-10-30T18:00:00+08:00",
-        p_change_min=10.0,
+    for dataset, value_field in (
+        ("earnings_forecast", "p_change_min"),
+        ("earnings_express", "revenue"),
+        ("income_statement", "revenue"),
+    ):
+        _write_rows(
+            warehouse / "facts" / dataset / "unpartitioned",
+            _periodic_rows(value_field),
+        )
+    _write_rows(
+        warehouse / "facts" / "announcement" / "unpartitioned",
+        tuple(
+            {
+                "announcement_id": f"A{index}",
+                "ts_code": "000001.SZ",
+                "announcement_time": f"{day.isoformat()}T18:00:00+08:00",
+                "available_at": f"{day.isoformat()}T18:00:00+08:00",
+                "title": "重大合同公告",
+                "url": "https://example.invalid/a",
+                "candidate_event_types": "major_contract",
+            }
+            for index, day in enumerate((sessions[0], sessions[-1]))
+        ),
     )
-    _write_parquet(
-        warehouse / "facts" / "earnings_express" / "ann_month=2026-04",
-        ts_code="000001.SZ",
-        report_period="2026-03-31",
-        available_at="2026-04-30T18:00:00+08:00",
-        revenue=100.0,
+    _write_rows(
+        warehouse / "facts" / "industry_daily" / "unpartitioned",
+        tuple(
+            {
+                "industry_code": "I1",
+                "trade_date": day.isoformat(),
+                "available_at": f"{day.isoformat()}T18:00:00+08:00",
+                "close": 100.0,
+            }
+            for day in sessions
+        ),
     )
-    _write_parquet(
-        warehouse / "facts" / "income_statement" / "report_period=2026-03-31",
-        ts_code="000001.SZ",
-        report_period="2026-03-31",
-        available_at="2026-04-30T18:00:00+08:00",
-        revenue=100.0,
-    )
-    _write_parquet(
-        warehouse / "facts" / "announcement" / "announcement_month=2026-04",
-        announcement_id="A1",
-        ts_code="000001.SZ",
-        announcement_time="2026-04-30T18:00:00+08:00",
-        available_at="2026-04-30T18:00:00+08:00",
-        title="重大合同公告",
-        url="https://example.invalid/a",
-        candidate_event_types="major_contract",
-    )
-    _write_parquet(
-        warehouse / "facts" / "industry_daily" / "trade_date=2026-06-04",
-        industry_code="I1",
-        trade_date="2026-06-04",
-        available_at="2026-06-04T18:00:00+08:00",
-        close=100.0,
-    )
-    _write_parquet(
-        warehouse / "facts" / "main_business" / "report_period=2026-03-31",
-        ts_code="000001.SZ",
-        report_period="2026-03-31",
-        available_at="2026-04-30T18:00:00+08:00",
-        bz_sales=100.0,
-    )
-    _write_parquet(
-        warehouse / "facts" / "repurchase" / "announcement_month=2026-04",
-        ts_code="000001.SZ",
-        available_at="2026-04-30T18:00:00+08:00",
-        amount=100.0,
-    )
-    _write_parquet(
-        warehouse / "facts" / "balance_sheet" / "report_period=2026-03-31",
-        ts_code="000001.SZ",
-        report_period="2026-03-31",
-        available_at="2026-04-30T18:00:00+08:00",
-        total_assets=100.0,
-    )
-    _write_parquet(
-        warehouse / "facts" / "cash_flow" / "report_period=2026-03-31",
-        ts_code="000001.SZ",
-        report_period="2026-03-31",
-        available_at="2026-04-30T18:00:00+08:00",
-        n_cashflow_act=10.0,
+    for dataset, value_field in (
+        ("main_business", "bz_sales"),
+        ("repurchase", "amount"),
+        ("balance_sheet", "total_assets"),
+        ("cash_flow", "n_cashflow_act"),
+    ):
+        _write_rows(
+            warehouse / "facts" / dataset / "unpartitioned",
+            _periodic_rows(value_field),
+        )
+    _write_rows(
+        warehouse / "facts" / "trade_calendar" / "unpartitioned",
+        tuple(
+            {
+                "exchange": "SSE",
+                "cal_date": day.isoformat(),
+                "is_open": True,
+                "available_at": "2020-01-01T00:00:00+08:00",
+            }
+            for day in sessions
+        ),
     )
     return warehouse
 
@@ -407,3 +739,184 @@ def _write_parquet(directory: Path, **values: object) -> None:
     directory.mkdir(parents=True, exist_ok=True)
     table = pa.table({name: [value] for name, value in values.items()})
     pq.write_table(table, directory / "data.parquet")
+
+
+def _write_rows(directory: Path, rows: tuple[dict[str, object], ...]) -> None:
+    assert rows
+    directory.mkdir(parents=True, exist_ok=True)
+    pq.write_table(pa.Table.from_pylist(list(rows)), directory / "data.parquet")
+
+
+def _formation_sessions() -> tuple[date, ...]:
+    values: list[date] = []
+    current = FORMATION_START
+    while current <= FORMATION_END:
+        if current.weekday() < 5:
+            values.append(current)
+        current += timedelta(days=1)
+    indexes = tuple(round(index * (len(values) - 1) / 143) for index in range(144))
+    sessions = tuple(values[index] for index in indexes)
+    assert len(sessions) == 144
+    assert sessions[0] == FORMATION_START
+    assert sessions[-1] == FORMATION_END
+    return sessions
+
+
+def _hotspot_rows(sessions: tuple[date, ...]) -> tuple[dict[str, object], ...]:
+    return tuple(
+        {
+            "analysis_date": day.isoformat(),
+            "group_type": "industry",
+            "group_code": "I1",
+            "relative_return_20d": 0.1,
+            "median_return_20d": 0.1,
+            "breadth_20d": 0.7,
+            "turnover_share_average_20d": 0.1,
+            "top3_positive_contribution_1d": 0.2,
+            "high_volume_low_progress_flag": False,
+            "upper_wick_reversal_flag": False,
+            "narrow_participation_flag": False,
+            "turnover_return_divergence_flag": False,
+            "coverage_status": "complete",
+        }
+        for day in sessions
+    )
+
+
+def _periodic_rows(value_field: str) -> tuple[dict[str, object], ...]:
+    return tuple(
+        {
+            "ts_code": "000001.SZ",
+            "report_period": (
+                "2025-09-30" if day == FORMATION_START else "2026-03-31"
+            ),
+            "available_at": f"{day.isoformat()}T18:00:00+08:00",
+            value_field: value,
+        }
+        for day, value in ((FORMATION_START, 100.0), (FORMATION_END, 110.0))
+    )
+
+
+def _approved_workspace(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> WorkspacePaths:
+    root = (tmp_path / "approved-experiment").resolve()
+    monkeypatch.setattr(
+        capability_module,
+        "_APPROVED_EXPERIMENT_ROOT",
+        root,
+        raising=False,
+    )
+    monkeypatch.setenv("V3_BACKTEST_ROOT", str(root))
+    monkeypatch.setenv("TMPDIR", str(root / "tmp"))
+    monkeypatch.setenv("DUCKDB_TMPDIR", str(root / "duckdb-tmp"))
+    return prepare_backtest_workspace(root)
+
+
+def _real_routes_source() -> Path:
+    return Path(capability_module.__file__).with_name("routes.py")
+
+
+def _audited_matrix(tmp_path: Path) -> CapabilityMatrix:
+    warehouse = _minimal_warehouse(tmp_path)
+    return audit_local_capability_matrix(
+        warehouse,
+        routes_source=_real_routes_source(),
+        warehouse_fingerprint=fingerprint_mac_warehouse(warehouse),
+        formation_sessions=_formation_sessions(),
+    )
+
+
+def _add_cycle_ready_evidence(warehouse: Path) -> None:
+    _write_rows(
+        warehouse / "facts" / "industry_daily" / "unpartitioned",
+        tuple(
+            {
+                "industry_code": "I1",
+                "trade_date": day.isoformat(),
+                "available_at": f"{day.isoformat()}T18:00:00+08:00",
+                "demand_change": 1.0,
+                "supply_change": -1.0,
+                "price_change": 1.0,
+                "inventory_change": -1.0,
+                "policy_change": "supportive",
+                "peer_evidence": "broad",
+            }
+            for day in _formation_sessions()
+        ),
+    )
+    _write_rows(
+        warehouse / "facts" / "main_business" / "unpartitioned",
+        tuple(
+            {**row, "company_sensitivity": "material"}
+            for row in _periodic_rows("bz_sales")
+        ),
+    )
+
+
+def _add_distress_ready_evidence(warehouse: Path) -> None:
+    _write_rows(
+        warehouse / "facts" / "repurchase" / "unpartitioned",
+        tuple(
+            {**row, "core_risk_mitigated": True}
+            for row in _periodic_rows("amount")
+        ),
+    )
+    for dataset, field in (
+        ("income_statement", "revenue"),
+        ("balance_sheet", "total_assets"),
+        ("cash_flow", "n_cashflow_act"),
+    ):
+        _write_rows(
+            warehouse / "facts" / dataset / "unpartitioned",
+            tuple(
+                {**row, "statement_improved": True}
+                for row in _periodic_rows(field)
+            ),
+        )
+
+
+def _admission_source(
+    route: DiscoveryRoute,
+    helper: str,
+    opportunity: str,
+    *,
+    internal_only: bool = False,
+) -> str:
+    return f"""
+def _lead(security_id, route, *, internal_only=False, usable=True, preliminary_opportunity=None):
+    return Lead(
+        security_id=security_id,
+        route=route,
+        internal_only=internal_only,
+        usable=usable,
+        preliminary_opportunity=preliminary_opportunity,
+    )
+
+def {helper}():
+    return (_lead(
+        "000001.SZ",
+        DiscoveryRoute.{route.name},
+        internal_only={internal_only!r},
+        usable=True,
+        preliminary_opportunity=OpportunityType.{opportunity},
+    ),)
+
+def _scan_route(route, view, policy):
+    datasets = tuple(
+        view.read(dataset, partitions)
+        for dataset, partitions in policy.route_partitions[route].items()
+    )
+    if route is DiscoveryRoute.{route.name}:
+        return {helper}()
+    return ()
+
+def _merge_leads(items):
+    usable = tuple(
+        item for item in items if item.evidence.usable_for_decision
+    )
+    return ResearchHypothesis(
+        eligible_for_ten=any(not item.internal_only for item in usable),
+    )
+""".strip()
