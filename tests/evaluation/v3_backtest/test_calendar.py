@@ -27,44 +27,49 @@ def open_sessions() -> tuple[date, ...]:
     return tuple(row[0] for row in rows)
 
 
-def test_frozen_calendar_has_143_primary_and_48_extension_origins(open_sessions):
-    calendar = build_frozen_calendar(open_sessions, data_end=date(2026, 7, 16))
+def test_calendar_has_174_operational_and_144_mature_sessions(open_sessions):
+    calendar = build_frozen_calendar(open_sessions, data_end=date(2026, 7, 17))
 
-    assert calendar.primary[0] == date(2025, 10, 30)
-    assert calendar.primary[-1] == date(2026, 6, 3)
-    assert len(calendar.primary) == 143
-    assert tuple(map(len, calendar.blocks)) == (48, 48, 47)
-    assert len(calendar.extension) == 48
-    assert calendar.maturity_end == date(2026, 7, 16)
+    assert calendar.operational[0] == date(2025, 10, 30)
+    assert calendar.operational[-1] == date(2026, 7, 17)
+    assert calendar.mature[-1] == date(2026, 6, 4)
+    assert len(calendar.operational) == 174
+    assert len(calendar.mature) == 144
+    assert len(calendar.maintenance_tail) == 30
+    assert tuple(map(len, calendar.blocks)) == (30, 30, 30, 30, 24)
 
 
-def test_frozen_calendar_keeps_extension_and_primary_disjoint(open_sessions):
-    calendar = build_frozen_calendar(open_sessions, data_end=date(2026, 7, 16))
+def test_calendar_preserves_mature_and_operational_contracts(open_sessions):
+    calendar = build_frozen_calendar(open_sessions, data_end=date(2026, 7, 17))
 
-    assert calendar.extension[0] == date(2025, 8, 15)
-    assert calendar.extension[-1] == date(2025, 10, 29)
-    assert not set(calendar.extension).intersection(calendar.primary)
-    assert tuple(origin for block in calendar.blocks for origin in block) == calendar.primary
+    assert calendar.mature[0] == date(2025, 10, 30)
+    assert calendar.mature[-1] == date(2026, 6, 4)
+    assert calendar.maintenance_tail[0] == date(2026, 6, 5)
+    assert calendar.maintenance_tail[-1] == date(2026, 7, 17)
+    assert calendar.operational == calendar.mature + calendar.maintenance_tail
+    assert tuple(origin for block in calendar.blocks for origin in block) == calendar.mature
+    assert calendar.primary == calendar.mature
+    assert calendar.maturity_end == date(2026, 7, 17)
 
 
 def test_frozen_calendar_fails_closed_before_all_outcomes_mature(open_sessions):
     with pytest.raises(ValueError, match="maturity end"):
-        build_frozen_calendar(open_sessions, data_end=date(2026, 7, 15))
+        build_frozen_calendar(open_sessions, data_end=date(2026, 7, 16))
 
 
 def test_frozen_calendar_fails_when_a_frozen_origin_is_not_open(open_sessions):
     incomplete = tuple(
-        session for session in open_sessions if session != date(2026, 1, 8)
+        session for session in open_sessions if session != date(2026, 1, 26)
     )
 
-    with pytest.raises(ValueError, match="block B"):
-        build_frozen_calendar(incomplete, data_end=date(2026, 7, 16))
+    with pytest.raises(ValueError, match="block C"):
+        build_frozen_calendar(incomplete, data_end=date(2026, 7, 17))
 
 
 def test_frozen_calendar_requires_thirty_future_sessions(open_sessions):
     incomplete = tuple(
-        session for session in open_sessions if session != date(2026, 6, 10)
+        session for session in open_sessions if session != date(2026, 6, 11)
     )
 
-    with pytest.raises(ValueError, match="30 future open sessions"):
-        build_frozen_calendar(incomplete, data_end=date(2026, 7, 16))
+    with pytest.raises(ValueError, match="maintenance tail"):
+        build_frozen_calendar(incomplete, data_end=date(2026, 7, 17))

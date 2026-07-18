@@ -1,4 +1,4 @@
-"""Frozen formation calendar for the complete V3 backtest experiment.
+"""Frozen operating calendar for the continuous V3 backtest experiment.
 
 The dates in this module are preregistered inputs.  The builder only validates
 them against an open-session calendar; it never derives dates from outcomes or
@@ -12,24 +12,32 @@ from dataclasses import dataclass
 from datetime import date
 
 
-_EXTENSION_RANGE = (date(2025, 8, 15), date(2025, 10, 29), 48)
 _BLOCK_RANGES = (
-    ("A", date(2025, 10, 30), date(2026, 1, 7), 48),
-    ("B", date(2026, 1, 8), date(2026, 3, 24), 48),
-    ("C", date(2026, 3, 25), date(2026, 6, 3), 47),
+    ("A", date(2025, 10, 30), date(2025, 12, 10), 30),
+    ("B", date(2025, 12, 11), date(2026, 1, 23), 30),
+    ("C", date(2026, 1, 26), date(2026, 3, 16), 30),
+    ("D", date(2026, 3, 17), date(2026, 4, 28), 30),
+    ("E", date(2026, 4, 29), date(2026, 6, 4), 24),
 )
-_MATURITY_END = date(2026, 7, 16)
-_MAX_HORIZON = 30
+_MAINTENANCE_RANGE = (date(2026, 6, 5), date(2026, 7, 17), 30)
+_MATURITY_END = _MAINTENANCE_RANGE[1]
 
 
 @dataclass(frozen=True)
 class BacktestCalendar:
-    """Immutable, non-overlapping formation samples and maturity boundary."""
+    """Immutable operational and mature samples with their maturity boundary."""
 
-    primary: tuple[date, ...]
-    extension: tuple[date, ...]
+    operational: tuple[date, ...]
+    mature: tuple[date, ...]
+    maintenance_tail: tuple[date, ...]
     blocks: tuple[tuple[date, ...], ...]
     maturity_end: date
+
+    @property
+    def primary(self) -> tuple[date, ...]:
+        """Compatibility alias for the mature formation sample."""
+
+        return self.mature
 
 
 def build_frozen_calendar(
@@ -53,13 +61,6 @@ def build_frozen_calendar(
             f"{_MATURITY_END.isoformat()}"
         )
 
-    extension = _validated_slice(
-        sessions,
-        start=_EXTENSION_RANGE[0],
-        end=_EXTENSION_RANGE[1],
-        expected_count=_EXTENSION_RANGE[2],
-        label="extension",
-    )
     blocks = tuple(
         _validated_slice(
             sessions,
@@ -70,22 +71,25 @@ def build_frozen_calendar(
         )
         for label, start, end, expected_count in _BLOCK_RANGES
     )
-    primary = tuple(origin for block in blocks for origin in block)
-
-    future_sessions = tuple(
-        session for session in sessions if primary[-1] < session <= _MATURITY_END
+    mature = tuple(origin for block in blocks for origin in block)
+    maintenance_tail = _validated_slice(
+        sessions,
+        start=_MAINTENANCE_RANGE[0],
+        end=_MAINTENANCE_RANGE[1],
+        expected_count=_MAINTENANCE_RANGE[2],
+        label="maintenance tail",
     )
-    if len(future_sessions) != _MAX_HORIZON:
-        raise ValueError(
-            "frozen maturity window must contain exactly 30 future open sessions; "
-            f"found {len(future_sessions)}"
-        )
-    if future_sessions[-1] != _MATURITY_END:
-        raise ValueError("maturity end is not an open session")
+    if mature + maintenance_tail != tuple(
+        session
+        for session in sessions
+        if mature[0] <= session <= _MATURITY_END
+    ):
+        raise ValueError("operational calendar must be mature sessions plus maintenance tail")
 
     return BacktestCalendar(
-        primary=primary,
-        extension=extension,
+        operational=mature + maintenance_tail,
+        mature=mature,
+        maintenance_tail=maintenance_tail,
         blocks=blocks,
         maturity_end=_MATURITY_END,
     )
