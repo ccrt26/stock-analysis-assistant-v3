@@ -198,3 +198,13 @@ def test_deterministic_membership_hash_is_order_independent():
 
     assert first.receipt_hash == second.receipt_hash
     pd.testing.assert_frame_equal(first.memberships, second.memberships)
+
+
+def test_frozen_receipt_does_not_expose_mutable_membership_state():
+    receipt = freeze_daily_controls(_universe(), _routes(), _candidates())
+    original_hash = receipt.receipt_hash
+    exposed = receipt.memberships
+    exposed.loc[0, "security_id"] = "MUTATED"
+
+    assert receipt.memberships.loc[0, "security_id"] != "MUTATED"
+    assert receipt.receipt_hash == original_hash

@@ -41,12 +41,39 @@ class MatchingAudit:
     status: str
 
 
-@dataclass(frozen=True, slots=True)
 class ControlMembershipReceipt:
-    formation_date: date
-    memberships: pd.DataFrame
-    matching_audit: tuple[MatchingAudit, ...]
-    receipt_hash: str
+    """Immutable-by-interface formation membership receipt."""
+
+    __slots__ = ("__formation_date", "__memberships", "__matching_audit", "__receipt_hash")
+
+    def __init__(
+        self,
+        *,
+        formation_date: date,
+        memberships: pd.DataFrame,
+        matching_audit: tuple[MatchingAudit, ...],
+        receipt_hash: str,
+    ) -> None:
+        self.__formation_date = formation_date
+        self.__memberships = memberships.copy(deep=True)
+        self.__matching_audit = tuple(matching_audit)
+        self.__receipt_hash = receipt_hash
+
+    @property
+    def formation_date(self) -> date:
+        return self.__formation_date
+
+    @property
+    def memberships(self) -> pd.DataFrame:
+        return self.__memberships.copy(deep=True)
+
+    @property
+    def matching_audit(self) -> tuple[MatchingAudit, ...]:
+        return self.__matching_audit
+
+    @property
+    def receipt_hash(self) -> str:
+        return self.__receipt_hash
 
 
 def freeze_daily_controls(
