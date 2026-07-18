@@ -278,6 +278,17 @@ def test_module_classification_distinguishes_insufficient_and_not_testable():
     ) == "not_testable"
 
 
+def test_module_classification_marks_operational_failure_as_inaccurate():
+    assert classify_module(
+        block_effects=[],
+        combined_effect=None,
+        observations=3,
+        concentration_ok=True,
+        path_ok=False,
+        operational_failure=True,
+    ) == "inaccuracy_supported"
+
+
 def test_route_limit_filters_non_tradable_names_before_applying_cap():
     ranked = ["SUSPENDED", "A", "B", "C"]
 

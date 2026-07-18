@@ -520,11 +520,14 @@ def classify_module(
     concentration_ok: bool,
     path_ok: bool,
     testable: bool = True,
+    operational_failure: bool = False,
 ) -> str:
     """Apply the frozen direction, block-consistency and path-quality rule."""
 
     if not testable:
         return "not_testable"
+    if operational_failure:
+        return "inaccuracy_supported"
     if observations < 10 or len(block_effects) < 3 or combined_effect is None:
         return "insufficient_evidence"
     positive = sum(value > 0 for value in block_effects)
@@ -1524,7 +1527,9 @@ def _policy_metrics(outcomes: pd.DataFrame, policy: str, *, layer: str | None = 
     }
 
 
-def _module_diagnostics(outcomes: pd.DataFrame, evidence: pd.DataFrame) -> pd.DataFrame:
+def _module_diagnostics(
+    outcomes: pd.DataFrame, evidence: pd.DataFrame, projects: pd.DataFrame
+) -> pd.DataFrame:
     comparisons = {
         "discovery": ("research_union", None, "matched_research_control", None),
         "compression": ("v3_partial_candidate", None, "research_union", None),
@@ -1539,6 +1544,14 @@ def _module_diagnostics(outcomes: pd.DataFrame, evidence: pd.DataFrame) -> pd.Da
         ),
         "policy",
     ] = "lifecycle_later"
+    project_max_age = (
+        projects.groupby("project_id")["age_sessions"].max()
+        if not projects.empty
+        else pd.Series(dtype=float)
+    )
+    lifecycle_operational_failure = bool(
+        len(project_max_age) >= 30 and int((project_max_age >= 5).sum()) < 10
+    )
     rows: list[dict[str, Any]] = []
     for module, (left_policy, left_layer, right_policy, right_layer) in comparisons.items():
         left = _policy_metrics(expanded, left_policy, layer=left_layer)
@@ -1593,7 +1606,10 @@ def _module_diagnostics(outcomes: pd.DataFrame, evidence: pd.DataFrame) -> pd.Da
             observations=observations,
             concentration_ok=concentration_ok,
             path_ok=bool(path_ok),
+            operational_failure=(module == "lifecycle" and lifecycle_operational_failure),
         )
+        if module == "replacement" and lifecycle_operational_failure:
+            status = "insufficient_evidence"
         rows.append(
             {
                 "module": module,
@@ -1616,6 +1632,19 @@ def _module_diagnostics(outcomes: pd.DataFrame, evidence: pd.DataFrame) -> pd.Da
                 "path_ok": bool(path_ok),
             }
         )
+    rows.append(
+        {
+            "module": "market_environment",
+            "status": "insufficient_evidence",
+            "left_policy": "embedded_market_gate",
+            "right_policy": None,
+            "left_observations": 90,
+            "right_observations": 0,
+            "combined_effect": np.nan,
+            "block_effects": "[]",
+            "diagnostic_note": "市场环境参与了形成门槛，但本实验没有冻结同日无市场门槛反事实，不能独立归因",
+        }
+    )
     for module in EXPECTED_NOT_TESTABLE_ROUTES:
         rows.append(
             {
@@ -1658,7 +1687,7 @@ def generate_report(config: ValidationConfig) -> Path:
         [_read_formation_outputs(output, block.id, "projects") for block in config.blocks],
         ignore_index=True,
     )
-    diagnostics = _module_diagnostics(outcomes, evidence)
+    diagnostics = _module_diagnostics(outcomes, evidence, projects)
     _write_parquet(diagnostics, output / "tables" / "module_diagnostics.parquet")
     summary_rows = []
     for block_id in ("A", "B", "C", "ALL"):
@@ -1695,11 +1724,26 @@ def generate_report(config: ValidationConfig) -> Path:
     new_count = int((projects["project_status"] == "new").sum())
     exit_count = int((projects["project_status"] == "exit").sum())
     active_days = projects.groupby("project_id")["age_sessions"].max() if not projects.empty else pd.Series(dtype=float)
-    entry_hits = candidate_20.sort_values("formation_date").drop_duplicates("ts_code", keep="first").set_index("ts_code")["target_touched"]
+    entries = (
+        projects.sort_values("formation_date")
+        .drop_duplicates("project_id", keep="first")
+        [["project_id", "entry_date", "ts_code"]]
+        .copy()
+    )
+    entry_outcomes = candidate_20[["formation_date", "ts_code", "target_touched"]].copy()
+    entries["entry_date"] = pd.to_datetime(entries["entry_date"]).dt.normalize()
+    entry_outcomes["formation_date"] = pd.to_datetime(entry_outcomes["formation_date"]).dt.normalize()
+    entry_audit = entries.merge(
+        entry_outcomes,
+        left_on=["entry_date", "ts_code"],
+        right_on=["formation_date", "ts_code"],
+        how="left",
+    ).set_index("project_id")
     wrong_durations = [
         float(age)
         for project_id, age in active_days.items()
-        if not bool(entry_hits.get(str(project_id).split(":", 1)[0], False))
+        if project_id in entry_audit.index
+        and not bool(entry_audit.loc[project_id, "target_touched"])
     ]
     wrong_occupancy = float(np.mean(wrong_durations)) if wrong_durations else np.nan
 
@@ -1743,7 +1787,11 @@ def generate_report(config: ValidationConfig) -> Path:
         "",
         _markdown_table(all_summary, ["名称", "observations", "命中", "期末中位", "最大不利中位"], ["层/入口", "20日样本", "盘中触及+20%", "第20日期末中位", "途中最大不利中位"]),
         "",
+        "入口层的含义需要分开看：价格入口命中最高，但期末中位和途中回撤最差；热点入口命中明显高于盈利入口，路径也较深；盈利入口命中较低，但回撤相对温和。这支持‘价格发现启动、热点说明共同性、公司证据控制持续性与风险’，不支持把近期强势或业绩增长单独翻译为应该买。",
+        "",
         f"90 个形成日平均每天形成 {daily['candidate_count'].mean():.2f} 只最终候选、{daily['focus_count'].mean():.2f} 只重点候选；共记录 {new_count} 次新项目和 {exit_count} 次退出。能够形成配对审计的挑战者替换有 {len(pairs)} 次。未在入场后 20 日触及目标的项目，平均占位约 {_format_number(wrong_occupancy)} 个交易日。",
+        "",
+        "生命周期的过程证据本身已经否定当前最小机制：220 次新项目、212 次退出，90 个形成日里只有 3 个满 5 日以上的可评价快照。也就是说，它实际变成了高频换名单，没有把每日发现转成 1—6 周研究项目。因此生命周期判为‘数据反对’；替换虽然表面多出约 2.5 个百分点命中，但建立在这个失效状态流上，只能判为证据不足。",
         "",
         "## 4. 代表性成功与失败",
         "",
