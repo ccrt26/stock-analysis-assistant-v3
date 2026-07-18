@@ -114,6 +114,8 @@ def test_contextual_judgment_enums_are_closed_and_exact() -> None:
     ContextEffect = contracts_module.ContextEffect
     ValidationDisposition = contracts_module.ValidationDisposition
     ComparisonStage = contracts_module.ComparisonStage
+    PriceRole = contracts_module.PriceRole
+    ProjectDayCheckpoint = contracts_module.ProjectDayCheckpoint
     assert tuple(item.value for item in EvidenceCardStatus) == (
         "ready",
         "insufficient_as_of_cutoff",
@@ -137,6 +139,18 @@ def test_contextual_judgment_enums_are_closed_and_exact() -> None:
         "same_hotspot_opportunity_role",
         "same_opportunity_cross_context",
         "cross_opportunity",
+    )
+    assert tuple(item.value for item in PriceRole) == (
+        "strong_leader",
+        "balanced_start",
+        "other_tradable",
+    )
+    assert tuple(item.value for item in ProjectDayCheckpoint) == (
+        "ordinary",
+        "day_5",
+        "day_10",
+        "day_20",
+        "day_30",
     )
 
 

@@ -100,6 +100,24 @@ class ComparisonStage(StrEnum):
     CROSS_OPPORTUNITY = "cross_opportunity"
 
 
+class PriceRole(StrEnum):
+    """Closed formation-date price roles used by stage-one comparison."""
+
+    STRONG_LEADER = "strong_leader"
+    BALANCED_START = "balanced_start"
+    OTHER_TRADABLE = "other_tradable"
+
+
+class ProjectDayCheckpoint(StrEnum):
+    """Closed cache/lifecycle checkpoint vocabulary; arbitrary spellings are invalid."""
+
+    ORDINARY = "ordinary"
+    DAY_5 = "day_5"
+    DAY_10 = "day_10"
+    DAY_20 = "day_20"
+    DAY_30 = "day_30"
+
+
 class _FrozenContract(BaseModel):
     model_config = ConfigDict(
         extra="forbid",

@@ -13,6 +13,7 @@ import pytest
 from pydantic import ValidationError
 
 import stock_analyzer.evaluation.v3_backtest.judge as judge_module
+import stock_analyzer.evaluation.v3_backtest.contracts as contracts_module
 from stock_analyzer.evaluation.v3_backtest.contracts import CandidateLayer, OpportunityType
 from stock_analyzer.evaluation.v3_backtest.judge import (
     CandidateJudgment,
@@ -77,6 +78,129 @@ def _text(text, ids):
     return {"text": text, "evidence_ids": list(ids)}
 
 
+def _context_effect(section, effect, *, consequence_ids=()):
+    source_ids = tuple(section.evidence_ids[:1])
+    consequences = {
+        "company_evidence_bar": "standard",
+        "company_evidence_bar_satisfied": True,
+        "focus_eligible": True,
+        "invalidation_check": "normal",
+        "causal_chain": "neutral",
+    }
+    if effect == "supports_current_opportunity":
+        consequences["causal_chain"] = "supported"
+    elif effect == "raises_company_evidence_bar":
+        consequences["company_evidence_bar"] = "raised"
+    elif effect == "limits_focus":
+        consequences["focus_eligible"] = False
+    elif effect == "accelerates_invalidation_check":
+        consequences["invalidation_check"] = "accelerated"
+    elif effect == "opposes_causal_chain":
+        consequences.update(
+            focus_eligible=False,
+            invalidation_check="accelerated",
+            causal_chain="opposed",
+        )
+    return {
+        "effect": effect,
+        "source_section": section.name.value,
+        "section_availability": section.availability.value,
+        "source_section_hash": judge_module._stable_hash(section.model_dump(mode="json")),
+        "judgment": _text("the dedicated context section changes the decision gate", source_ids),
+        "consequence_evidence_ids": list(consequence_ids),
+        **consequences,
+    }
+
+
+def _singleton_stage_receipts(candidate):
+    security_id = candidate["security_id"]
+    cited = candidate["decisive_comparison"]["judgment"]
+    reversal = candidate["decisive_comparison"]["reversal_fact"]
+    receipts = [
+        {
+            "stage": stage,
+            "eligible_security_ids": [security_id],
+            "cohorts": [
+                {
+                    "cohort_id": f"{stage}:singleton",
+                    "security_ids": [security_id],
+                    "decisive_edges": [],
+                    "indistinguishable_groups": [],
+                    "judgment": cited,
+                    "reversal_fact": reversal,
+                    "completed": True,
+                }
+            ],
+        }
+        for stage in (
+            "same_hotspot_opportunity_role",
+            "same_opportunity_cross_context",
+            "cross_opportunity",
+        )
+    ]
+    receipts[-1]["cross_opportunity_assessments"] = [
+        {
+            "security_id": security_id,
+            "current_action_eligible": candidate["suggested_layer"] != "internal",
+            "independent_role_supported": candidate["suggested_layer"] != "internal",
+            "independent_role": cited,
+            "reversal_fact": reversal,
+        }
+    ]
+    receipts[-1]["common_risk_clusters"] = []
+    return receipts
+
+
+def _edge(winner, dominated, stage, cited, reversal=None):
+    return {
+        "winner_security_id": winner,
+        "dominated_security_id": dominated,
+        "stage": stage,
+        "judgment": cited,
+        "reversal_fact": reversal or cited,
+    }
+
+
+def _cohort(stage, security_ids, cited, *, edges=(), groups=(), cohort_id="cohort"):
+    return {
+        "cohort_id": f"{stage}:{cohort_id}",
+        "security_ids": list(security_ids),
+        "decisive_edges": list(edges),
+        "indistinguishable_groups": [list(group) for group in groups],
+        "judgment": cited,
+        "reversal_fact": cited,
+        "completed": True,
+    }
+
+
+def _stage(stage, eligible, cohorts):
+    receipt = {
+        "stage": stage,
+        "eligible_security_ids": list(eligible),
+        "cohorts": list(cohorts),
+    }
+    if stage == "cross_opportunity":
+        cited = cohorts[0]["judgment"] if cohorts else _text("no cross-stage candidate remains", ())
+        receipt["cross_opportunity_assessments"] = [
+            {
+                "security_id": security_id,
+                "current_action_eligible": False,
+                "independent_role_supported": False,
+                "independent_role": cited,
+                "reversal_fact": cited,
+            }
+            for security_id in eligible
+        ]
+        receipt["common_risk_clusters"] = []
+    return receipt
+
+
+def _copy_candidate(candidate, security_id):
+    copied = json.loads(json.dumps(candidate))
+    copied["security_id"] = security_id
+    return copied
+
+
 def _valid_candidate(day_packet, *, layer=CandidateLayer.INTERNAL.value):
     packet = _selected_packet(day_packet)
     card = _selected_card(packet)
@@ -116,27 +240,36 @@ def _valid_candidate(day_packet, *, layer=CandidateLayer.INTERNAL.value):
     cited.update(counter_ids)
     cited.update(unknown_ids)
     cited.update(evidence_id for item in prepared_inputs for evidence_id in item.evidence_ids)
+    market = sections["market_constraints"]
+    hotspot = sections["hotspot_panorama"]
+    hotspot_ids = tuple(hotspot.evidence_ids[:1])
+    cited.update(hotspot_ids)
     return {
         "security_id": packet.security_id,
         "judgment_kind": "model_judgment",
         "primary_opportunity": card.opportunity.value,
         "overall_disposition": "counterevidence",
         "supporting_factors": [],
-        "market_effect": {
-            "effect": "raises_company_evidence_bar",
-            "judgment": _text("the market context raises the company evidence bar", ids),
-        },
-        "hotspot_effect": {
-            "effect": "not_applicable",
-            "judgment": _text("the hotspot context does not supply the opportunity source", ids),
-        },
+        "market_effect": _context_effect(
+            market, "raises_company_evidence_bar", consequence_ids=ids
+        ),
+        "hotspot_effect": _context_effect(hotspot, "not_applicable"),
         "card_status": "ready",
+        "card_status_source": {
+            "opportunity": card.opportunity.value,
+            "status": "ready",
+            "upstream_status": card.status.value,
+            "missing_requirements": [],
+            "coverage_statuses": [],
+            "source_card_hash": judge_module._stable_hash(card.model_dump(mode="json")),
+        },
         "price_role": {
             "role": "other_tradable",
             "judgment": _text("price is an observed role rather than the opportunity source", ids),
         },
         "next_validation_state": {
             "disposition": "not_observable_as_of_date",
+            "next_check": "ordinary",
             "judgment": _text("the next formal validation is not observable as of this date", ids),
         },
         "proposition": proposition,
@@ -162,17 +295,10 @@ def _valid_candidate(day_packet, *, layer=CandidateLayer.INTERNAL.value):
         "decisive_comparison": {
             "comparator_security_ids": [],
             "comparison_role": "no_same_opportunity_peer",
-            "comparison_stages": [
-                "same_hotspot_opportunity_role",
-                "same_opportunity_cross_context",
-                "cross_opportunity",
-            ],
             "judgment": _text("there is no decisive positive advantage", ids),
             "reversal_fact": _text("a new supportive operating disclosure would reverse this comparison", ids),
-            "decisive_edges": [],
-            "indistinguishable_groups": [],
-            "capacity_tie_abstention": False,
         },
+        "capacity_tie_abstention": False,
         "counterevidence": [
             {
                 "disposition": "present",
@@ -204,10 +330,22 @@ def _valid_candidate(day_packet, *, layer=CandidateLayer.INTERNAL.value):
     }
 
 
-def _output(day_packet, candidate=None):
+def _output(day_packet, candidate=None, *, stage_receipts=None, capacity_ties=()):
+    selected = candidate or _valid_candidate(day_packet)
     return {
         "formation_date": day_packet.formation_date.isoformat(),
-        "candidates": [candidate or _valid_candidate(day_packet)],
+        "candidates": [selected],
+        "comparison_stage_receipts": stage_receipts or _singleton_stage_receipts(selected),
+        "capacity_tie_abstentions": list(capacity_ties),
+    }
+
+
+def _multi_output(day_packet, candidates, stage_receipts, capacity_ties=()):
+    return {
+        "formation_date": day_packet.formation_date.isoformat(),
+        "candidates": list(candidates),
+        "comparison_stage_receipts": list(stage_receipts),
+        "capacity_tie_abstentions": list(capacity_ties),
     }
 
 
@@ -284,6 +422,13 @@ def test_output_schema_has_no_score_probability_or_confidence_fields():
         assert forbidden not in schema
 
 
+def test_candidate_accepts_closed_context_card_price_and_validation_receipts(trusted_chain):
+    candidate = CandidateJudgment.model_validate(_valid_candidate(trusted_chain.day_packet))
+    assert candidate.price_role.role.value == "other_tradable"
+    assert candidate.card_status_source.status.value == "ready"
+    assert candidate.market_effect.source_section.value == "market_constraints"
+
+
 @pytest.mark.parametrize("missing", ["market_effect", "hotspot_effect"])
 def test_candidate_requires_cited_market_and_hotspot_effects(trusted_chain, missing):
     candidate = _valid_candidate(trusted_chain.day_packet)
@@ -339,41 +484,272 @@ def test_context_effect_evidence_is_bound_to_direction_and_accelerated_invalidat
         CandidateJudgment.model_validate(accelerated)
 
 
-def test_decisive_edge_cannot_reference_a_security_outside_its_group(trusted_chain):
+def test_market_and_hotspot_effects_are_bound_to_their_dedicated_sections(trusted_chain):
     candidate = _valid_candidate(trusted_chain.day_packet)
-    candidate["decisive_comparison"]["decisive_edges"] = [
-        {
-            "winner_security_id": candidate["security_id"],
-            "dominated_security_id": "outside-group",
-            "stage": "same_hotspot_opportunity_role",
-            "judgment": candidate["decisive_comparison"]["judgment"],
-            "reversal_fact": candidate["decisive_comparison"]["reversal_fact"],
-        }
-    ]
+    hotspot_ids = candidate["hotspot_effect"]["judgment"]["evidence_ids"]
+    assert hotspot_ids
+    candidate["market_effect"]["judgment"]["evidence_ids"] = hotspot_ids
+    with pytest.raises(ValueError, match="market|section|context"):
+        judge_module._validate_output(
+            DailyJudgeOutput.model_validate(_output(trusted_chain.day_packet, candidate)),
+            trusted_chain.day_packet,
+        )
 
-    with pytest.raises(ValidationError, match="group|cohort|comparison"):
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        {"effect": "limits_focus"},
+        {"effect": "raises_company_evidence_bar", "company_evidence_bar_satisfied": False},
+        {"effect": "accelerates_invalidation_check", "invalidation_check": "normal"},
+    ],
+)
+def test_every_context_effect_has_the_matching_structured_consequence(
+    trusted_chain, mutation
+):
+    candidate = _valid_candidate(trusted_chain.day_packet)
+    candidate["market_effect"].update(mutation)
+    with pytest.raises(ValidationError, match="effect|consequence|evidence bar|invalidation"):
         CandidateJudgment.model_validate(candidate)
 
 
-def test_decisive_edge_requires_a_cited_reversal_fact(trusted_chain):
+def test_price_role_is_closed_and_cannot_be_free_text(trusted_chain):
     candidate = _valid_candidate(trusted_chain.day_packet)
-    candidate["decisive_comparison"]["comparator_security_ids"] = ["peer-a"]
-    candidate["decisive_comparison"]["decisive_edges"] = [
-        {
-            "winner_security_id": candidate["security_id"],
-            "dominated_security_id": "peer-a",
-            "stage": "same_hotspot_opportunity_role",
-            "judgment": candidate["decisive_comparison"]["judgment"],
-            "reversal_fact": _text("a reversal must remain falsifiable", ()),
-        }
-    ]
-
-    with pytest.raises(ValidationError, match="reversal|evidence"):
+    candidate["price_role"]["role"] = "custom_momentum_label"
+    with pytest.raises(ValidationError, match="price_role|role"):
         CandidateJudgment.model_validate(candidate)
+
+
+def test_verified_day_preserves_three_state_card_status_sources(trusted_chain):
+    packet = _selected_packet(trusted_chain.day_packet)
+    receipts = trusted_chain.day_packet.card_statuses_for(packet.security_id)
+    assert {item.status.value for item in receipts}.issuperset(
+        {"ready", "not_executable_with_local_data"}
+    )
+    assert all(item.source_card_hash and item.upstream_status for item in receipts)
+    incomplete = next(card for card in packet.opportunity_cards if card.missing_requirements)
+    insufficient_packet = packet.model_copy(
+        update={
+            "input_coverage": tuple(
+                item
+                for item in packet.input_coverage
+                if item.status.value in {"candidate_has_no_row", "coverage_gap", "not_available_as_of"}
+            )
+        }
+    )
+    insufficient = judge_module._derive_card_status_source(insufficient_packet, incomplete)
+    assert insufficient.status.value == "insufficient_as_of_cutoff"
+    assert insufficient.missing_requirements == incomplete.missing_requirements
+
+
+def test_verified_internal_judgment_can_preserve_a_nonexecutable_card(trusted_chain):
+    packet = _selected_packet(trusted_chain.day_packet)
+    card = next(card for card in packet.opportunity_cards if card.missing_requirements)
+    source = next(
+        item
+        for item in trusted_chain.day_packet.card_statuses_for(packet.security_id)
+        if item.opportunity is card.opportunity
+    )
+    assert source.status.value == "not_executable_with_local_data"
+    candidate = _valid_candidate(trusted_chain.day_packet)
+    candidate["primary_opportunity"] = card.opportunity.value
+    candidate["proposition"]["primary_opportunity"] = card.opportunity.value
+    candidate["card_status"] = source.status.value
+    candidate["card_status_source"] = source.model_dump(mode="json")
+    candidate["overall_disposition"] = "unknown"
+    candidate["requirement_dispositions"] = [
+        {
+            "requirement": requirement,
+            "disposition": "unknown",
+            "judgment": _text(
+                "the required input is unavailable in the verified local evidence path",
+                (),
+            ),
+        }
+        for requirement in card.missing_requirements
+    ]
+    output = DailyJudgeOutput.model_validate(
+        _output(trusted_chain.day_packet, candidate)
+    )
+    judge_module._validate_output(output, trusted_chain.day_packet)
+    assert output.candidates[0].suggested_layer is CandidateLayer.INTERNAL
+
+
+def test_three_stage_receipts_are_complete_and_only_advance_nondominated_candidates(
+    trusted_chain,
+):
+    left = _valid_candidate(trusted_chain.day_packet)
+    right = _copy_candidate(left, "peer-a")
+    cited = left["decisive_comparison"]["judgment"]
+    first_stage = "same_hotspot_opportunity_role"
+    stages = [
+        _stage(
+            first_stage,
+            (left["security_id"], right["security_id"]),
+            (
+                _cohort(
+                    first_stage,
+                    (left["security_id"], right["security_id"]),
+                    cited,
+                    edges=(
+                        _edge(left["security_id"], right["security_id"], first_stage, cited),
+                    ),
+                ),
+            ),
+        ),
+        _stage(
+            "same_opportunity_cross_context",
+            (left["security_id"],),
+            (_cohort("same_opportunity_cross_context", (left["security_id"],), cited),),
+        ),
+        _stage(
+            "cross_opportunity",
+            (left["security_id"],),
+            (_cohort("cross_opportunity", (left["security_id"],), cited),),
+        ),
+    ]
+    output = DailyJudgeOutput.model_validate(
+        _multi_output(trusted_chain.day_packet, (left, right), stages)
+    )
+    assert output.comparison_stage_receipts[1].eligible_security_ids == (
+        left["security_id"],
+    )
+
+
+@pytest.mark.parametrize("failure", ["incomplete", "opposite_edges", "cycle"])
+def test_daily_dominance_graph_rejects_incomplete_contradictory_or_cyclic_receipts(
+    trusted_chain, failure
+):
+    first = _valid_candidate(trusted_chain.day_packet)
+    second = _copy_candidate(first, "peer-a")
+    third = _copy_candidate(first, "peer-b")
+    candidates = (first, second) if failure != "cycle" else (first, second, third)
+    ids = tuple(item["security_id"] for item in candidates)
+    cited = first["decisive_comparison"]["judgment"]
+    stage = "same_hotspot_opportunity_role"
+    if failure == "incomplete":
+        edges = ()
+    elif failure == "opposite_edges":
+        edges = (
+            _edge(ids[0], ids[1], stage, cited),
+            _edge(ids[1], ids[0], stage, cited),
+        )
+    else:
+        edges = (
+            _edge(ids[0], ids[1], stage, cited),
+            _edge(ids[1], ids[2], stage, cited),
+            _edge(ids[2], ids[0], stage, cited),
+        )
+    receipts = (
+        _stage(stage, ids, (_cohort(stage, ids, cited, edges=edges),)),
+        _stage("same_opportunity_cross_context", (), ()),
+        _stage("cross_opportunity", (), ()),
+    )
+    with pytest.raises(ValidationError, match="complete|contradict|cycle|dominance"):
+        DailyJudgeOutput.model_validate(
+            _multi_output(trusted_chain.day_packet, candidates, receipts)
+        )
+
+
+def test_cross_stage_receipt_rejects_a_previously_dominated_entrant(trusted_chain):
+    left = _valid_candidate(trusted_chain.day_packet)
+    right = _copy_candidate(left, "peer-a")
+    cited = left["decisive_comparison"]["judgment"]
+    first = "same_hotspot_opportunity_role"
+    receipts = (
+        _stage(
+            first,
+            (left["security_id"], right["security_id"]),
+            (
+                _cohort(
+                    first,
+                    (left["security_id"], right["security_id"]),
+                    cited,
+                    edges=(_edge(left["security_id"], right["security_id"], first, cited),),
+                ),
+            ),
+        ),
+        _stage(
+            "same_opportunity_cross_context",
+            (left["security_id"], right["security_id"]),
+            (
+                _cohort(
+                    "same_opportunity_cross_context",
+                    (left["security_id"], right["security_id"]),
+                    cited,
+                    edges=(
+                        _edge(
+                            left["security_id"],
+                            right["security_id"],
+                            "same_opportunity_cross_context",
+                            cited,
+                        ),
+                    ),
+                ),
+            ),
+        ),
+        _stage("cross_opportunity", (left["security_id"],), (_cohort("cross_opportunity", (left["security_id"],), cited),)),
+    )
+    with pytest.raises(ValidationError, match="eligible|dominated|prior stage"):
+        DailyJudgeOutput.model_validate(
+            _multi_output(trusted_chain.day_packet, (left, right), receipts)
+        )
+
+
+def test_cross_opportunity_stage_requires_action_role_and_risk_receipts(trusted_chain):
+    candidate = _valid_candidate(
+        trusted_chain.day_packet, layer=CandidateLayer.EARLY_VALIDATION.value
+    )
+    complete = _output(trusted_chain.day_packet, candidate)
+    DailyJudgeOutput.model_validate(complete)
+
+    missing_role = json.loads(json.dumps(complete))
+    missing_role["comparison_stage_receipts"][-1][
+        "cross_opportunity_assessments"
+    ] = []
+    with pytest.raises(ValidationError, match="cross-opportunity|assess|eligible"):
+        DailyJudgeOutput.model_validate(missing_role)
+
+    unsupported_role = json.loads(json.dumps(complete))
+    unsupported_role["comparison_stage_receipts"][-1][
+        "cross_opportunity_assessments"
+    ][0]["independent_role_supported"] = False
+    with pytest.raises(ValidationError, match="action|independent role"):
+        DailyJudgeOutput.model_validate(unsupported_role)
+
+
+def test_capacity_tie_is_cross_candidate_and_returns_the_whole_group_internal(trusted_chain):
+    left = _valid_candidate(trusted_chain.day_packet)
+    right = _copy_candidate(left, "peer-a")
+    left["capacity_tie_abstention"] = True
+    right["capacity_tie_abstention"] = True
+    ids = (left["security_id"], right["security_id"])
+    cited = left["decisive_comparison"]["judgment"]
+    first = "same_hotspot_opportunity_role"
+    receipts = (
+        _stage(first, ids, (_cohort(first, ids, cited, groups=(ids,)),)),
+        _stage("same_opportunity_cross_context", (), ()),
+        _stage("cross_opportunity", (), ()),
+    )
+    tie = {
+        "source_stage": first,
+        "security_ids": list(ids),
+        "judgment": cited,
+        "reversal_fact": cited,
+    }
+    DailyJudgeOutput.model_validate(
+        _multi_output(trusted_chain.day_packet, (left, right), receipts, (tie,))
+    )
+    right["suggested_layer"] = CandidateLayer.FOCUS.value
+    with pytest.raises(ValidationError, match="capacity|internal|tie"):
+        DailyJudgeOutput.model_validate(
+            _multi_output(trusted_chain.day_packet, (left, right), receipts, (tie,))
+        )
 
 
 def test_judgment_cache_key_binds_every_context_and_forces_checkpoints():
     JudgmentCacheKey = judge_module.JudgmentCacheKey
+    Checkpoint = contracts_module.ProjectDayCheckpoint
     values = {
         "origin": date(2026, 1, 8),
         "cutoff": "2026-01-08T23:59:59+08:00",
@@ -382,7 +758,7 @@ def test_judgment_cache_key_binds_every_context_and_forces_checkpoints():
         "knowledge_version": "knowledge-v1",
         "prompt_version": "prompt-v1",
         "project_state_hash": "2" * 64,
-        "checkpoint": "ordinary_day",
+        "checkpoint": Checkpoint.ORDINARY,
         "comparator_cohort_hash": "3" * 64,
         "portfolio_exposure_hash": "4" * 64,
         "previous_judgment_hash": "5" * 64,
@@ -390,11 +766,24 @@ def test_judgment_cache_key_binds_every_context_and_forces_checkpoints():
     key = JudgmentCacheKey(**values)
     assert tuple(item.name for item in fields(JudgmentCacheKey)) == tuple(values)
     for name in values:
+        if name == "checkpoint":
+            continue
         replacement = date(2026, 1, 9) if name == "origin" else f"changed-{name}"
         assert replace(key, **{name: replacement}).cache_hash != key.cache_hash
-    for checkpoint in ("5", "10", "20", "30", "day_5", "day_10", "day_20", "day_30"):
-        assert replace(key, checkpoint=checkpoint).force_rejudgment is True
+    for checkpoint in (
+        Checkpoint.DAY_5,
+        Checkpoint.DAY_10,
+        Checkpoint.DAY_20,
+        Checkpoint.DAY_30,
+    ):
+        forced = replace(key, checkpoint=checkpoint)
+        assert forced.force_rejudgment is True
+        with pytest.raises(JudgeError, match="checkpoint|rejudgment|reuse"):
+            judge_module.lookup_judgment_cache({forced: "stale"}, forced)
     assert key.force_rejudgment is False
+    assert judge_module.lookup_judgment_cache({key: "cached"}, key) == "cached"
+    with pytest.raises((TypeError, ValueError), match="checkpoint"):
+        replace(key, checkpoint="project_day_5")
 
 
 def test_prompt_freezes_three_stage_order_and_context_boundaries():
@@ -799,36 +1188,33 @@ def test_consistency_audit_keeps_both_verified_outputs_and_security_diagnostics(
         judge_module._require_audit(audit, allow_test_only=True)
 
 
-def test_consistency_signature_names_edge_and_indistinguishable_group_changes(trusted_chain):
+def test_consistency_signature_covers_stage_receipts_and_new_candidate_contracts(trusted_chain):
     base = _valid_candidate(trusted_chain.day_packet)
-    base["decisive_comparison"]["comparator_security_ids"] = ["peer-a"]
-    first = DailyJudgeOutput.model_validate(_output(trusted_chain.day_packet, base))
+    first_raw = _output(trusted_chain.day_packet, base)
+    first = DailyJudgeOutput.model_validate(first_raw)
 
-    edge_changed = json.loads(json.dumps(base))
-    edge_changed["decisive_comparison"]["decisive_edges"] = [
-        {
-            "winner_security_id": base["security_id"],
-            "dominated_security_id": "peer-a",
-            "stage": "same_hotspot_opportunity_role",
-            "judgment": base["decisive_comparison"]["judgment"],
-            "reversal_fact": base["decisive_comparison"]["reversal_fact"],
-        }
-    ]
-    edge_mismatches = judge_module._consistency_mismatches(
-        first,
-        DailyJudgeOutput.model_validate(_output(trusted_chain.day_packet, edge_changed)),
+    stage_changed = json.loads(json.dumps(first_raw))
+    stage_changed["comparison_stage_receipts"][0]["cohorts"][0]["judgment"]["text"] = (
+        "the complete stage receipt has a changed auditable judgment"
     )
-    assert any("decisive_edges" in item for item in edge_mismatches)
+    stage_mismatches = judge_module._consistency_mismatches(
+        first, DailyJudgeOutput.model_validate(stage_changed)
+    )
+    assert "daily:comparison_stage_receipts" in stage_mismatches
 
-    group_changed = json.loads(json.dumps(base))
-    group_changed["decisive_comparison"]["indistinguishable_groups"] = [
-        [base["security_id"], "peer-a"]
-    ]
-    group_mismatches = judge_module._consistency_mismatches(
+    candidate_changed = json.loads(json.dumps(base))
+    candidate_changed["market_effect"]["source_section_hash"] = "0" * 64
+    candidate_changed["hotspot_effect"]["source_section_hash"] = "1" * 64
+    candidate_changed["card_status_source"]["source_card_hash"] = "2" * 64
+    candidate_changed["price_role"]["role"] = "balanced_start"
+    candidate_changed["next_validation_state"]["next_check"] = "day_5"
+    candidate_mismatches = judge_module._consistency_mismatches(
         first,
-        DailyJudgeOutput.model_validate(_output(trusted_chain.day_packet, group_changed)),
+        DailyJudgeOutput.model_validate(
+            _output(trusted_chain.day_packet, candidate_changed)
+        ),
     )
-    assert any("indistinguishable_groups" in item for item in group_mismatches)
+    assert any("directional_signature" in item for item in candidate_mismatches)
 
 
 def test_three_date_gate_rejects_missing_or_forged_audits():
