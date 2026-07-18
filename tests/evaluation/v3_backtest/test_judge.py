@@ -243,6 +243,22 @@ def _copy_candidate(candidate, security_id):
     return copied
 
 
+def _set_hotspot_memberships(candidate, memberships):
+    evidence_id = candidate["evidence_refs"][0]
+    candidate["hotspot_memberships"] = [
+        {
+            "group_type": group_type,
+            "group_code": group_code,
+            "membership_evidence_ids": [evidence_id],
+            "hotspot_evidence_ids": [evidence_id],
+            "source_identity_hash": judge_module._stable_hash(
+                (group_type, group_code, evidence_id)
+            ),
+        }
+        for group_type, group_code in memberships
+    ]
+
+
 def _valid_candidate(day_packet, *, layer=CandidateLayer.INTERNAL.value):
     global _ACTIVE_HOTSPOT_IDENTITY
     packet = _selected_packet(day_packet)
@@ -632,11 +648,37 @@ def test_verified_hotspot_identity_uses_membership_codes_not_candidate_section_h
     section = next(item for item in packet.sections if item.name.value == "hotspot_panorama")
     assert memberships
     assert all(item.group_code and item.source_identity_hash for item in memberships)
+    assert all(item.membership_evidence_ids for item in memberships)
+    assert all(item.hotspot_evidence_ids for item in memberships)
     assert all(
         item.source_identity_hash
         != judge_module._stable_hash(section.model_dump(mode="json"))
         for item in memberships
     )
+
+
+def test_hotspot_identity_requires_matching_membership_and_hotspot_rows(trusted_chain):
+    packet = _selected_packet(trusted_chain.day_packet)
+    joined = judge_module._derive_hotspot_memberships(packet)
+    assert joined
+    without_hotspot = packet.model_copy(
+        update={
+            "local_observations": tuple(
+                item for item in packet.local_observations if item.dataset != "sector_hotspot"
+            )
+        }
+    )
+    assert judge_module._derive_hotspot_memberships(without_hotspot) == ()
+    without_membership = packet.model_copy(
+        update={
+            "api_facts": tuple(
+                item
+                for item in packet.api_facts
+                if item.dataset not in {"industry_member", "theme_member"}
+            )
+        }
+    )
+    assert judge_module._derive_hotspot_memberships(without_membership) == ()
 
 
 def test_unavailable_context_cannot_assert_a_directional_effect(trusted_chain):
@@ -806,6 +848,80 @@ def test_daily_dominance_graph_rejects_incomplete_contradictory_or_cyclic_receip
         )
 
 
+@pytest.mark.parametrize("failure", ["opposite", "edge_tie", "global_cycle"])
+def test_overlapping_hotspot_cohorts_share_one_stage_wide_pair_dag(
+    trusted_chain, failure
+):
+    first = _valid_candidate(trusted_chain.day_packet)
+    second = _copy_candidate(first, "peer-a")
+    candidates = [first, second]
+    cited = first["decisive_comparison"]["judgment"]
+    stage = "same_hotspot_opportunity_role"
+    capacity_ties = ()
+    if failure in {"opposite", "edge_tie"}:
+        for candidate in candidates:
+            _set_hotspot_memberships(
+                candidate, (("industry", "I-shared"), ("theme", "T-shared"))
+            )
+        ids = tuple(item["security_id"] for item in candidates)
+        first_outcome = _cohort(
+            stage,
+            ids,
+            cited,
+            edges=(_edge(ids[0], ids[1], stage, cited),),
+            cohort_id="industry",
+            hotspot_identity={"group_type": "industry", "group_code": "I-shared"},
+        )
+        second_outcome = _cohort(
+            stage,
+            ids,
+            cited,
+            edges=(
+                (_edge(ids[1], ids[0], stage, cited),)
+                if failure == "opposite" else ()
+            ),
+            groups=((ids,) if failure == "edge_tie" else ()),
+            cohort_id="theme",
+            hotspot_identity={"group_type": "theme", "group_code": "T-shared"},
+        )
+        if failure == "edge_tie":
+            for candidate in candidates:
+                candidate["capacity_tie_abstention"] = True
+            capacity_ties = ({
+                "source_stage": stage,
+                "security_ids": list(ids),
+                "judgment": cited,
+                "reversal_fact": cited,
+            },)
+        cohorts = (first_outcome, second_outcome)
+    else:
+        third = _copy_candidate(first, "peer-b")
+        candidates.append(third)
+        _set_hotspot_memberships(first, (("industry", "I-one"), ("industry", "I-two")))
+        _set_hotspot_memberships(second, (("industry", "I-one"), ("theme", "T-one")))
+        _set_hotspot_memberships(third, (("theme", "T-one"), ("industry", "I-two")))
+        ids = tuple(item["security_id"] for item in candidates)
+        cohorts = (
+            _cohort(stage, (ids[0], ids[1]), cited, edges=(_edge(ids[0], ids[1], stage, cited),), cohort_id="i1", hotspot_identity={"group_type": "industry", "group_code": "I-one"}),
+            _cohort(stage, (ids[1], ids[2]), cited, edges=(_edge(ids[1], ids[2], stage, cited),), cohort_id="t1", hotspot_identity={"group_type": "theme", "group_code": "T-one"}),
+            _cohort(stage, (ids[2], ids[0]), cited, edges=(_edge(ids[2], ids[0], stage, cited),), cohort_id="i2", hotspot_identity={"group_type": "industry", "group_code": "I-two"}),
+        )
+    receipts = (
+        _stage(stage, ids, cohorts),
+        _stage("same_opportunity_cross_context", (), ()),
+        _stage("cross_opportunity", (), ()),
+    )
+    with pytest.raises(ValidationError, match="stage-wide|contradict|cycle|outcome"):
+        DailyJudgeOutput.model_validate(
+            _multi_output(
+                trusted_chain.day_packet,
+                tuple(candidates),
+                receipts,
+                capacity_ties,
+            )
+        )
+
+
 def test_cross_stage_receipt_rejects_a_previously_dominated_entrant(trusted_chain):
     left = _valid_candidate(trusted_chain.day_packet)
     right = _copy_candidate(left, "peer-a")
@@ -922,6 +1038,55 @@ def test_nonready_card_is_outside_every_dominance_stage(trusted_chain):
     raw = _output(trusted_chain.day_packet, candidate)
     output = DailyJudgeOutput.model_validate(raw)
     assert all(not stage.eligible_security_ids for stage in output.comparison_stage_receipts)
+
+
+def test_ready_action_candidate_accepts_same_opportunity_nonready_internal_peer(
+    trusted_chain,
+):
+    raw = _valid_candidate(
+        trusted_chain.day_packet, layer=CandidateLayer.FOCUS.value
+    )
+    raw["overall_disposition"] = "supportive"
+    raw["requirement_dispositions"] = [
+        {**item, "disposition": "supportive"}
+        for item in raw["requirement_dispositions"]
+    ]
+    driver = raw["requirement_dispositions"][0]["judgment"]["evidence_ids"][0]
+    raw["new_driver_evidence_ids"] = [driver]
+    raw["decisive_advantages"] = [raw["proposition"]["why_now"]]
+    for item in raw["counterevidence"]:
+        if driver in item["judgment"]["evidence_ids"]:
+            item["disposition"] = "none_supported_as_of_cutoff"
+    complete = set(raw["proposition"]["why_now"]["evidence_ids"])
+    complete.update(
+        evidence_id
+        for item in raw["counterevidence"]
+        if item["disposition"] == "present"
+        for evidence_id in item["judgment"]["evidence_ids"]
+    )
+    complete.update(
+        evidence_id
+        for item in raw["unknowns"]
+        for evidence_id in item["judgment"]["evidence_ids"]
+    )
+    raw["directional_thesis"] = _text(
+        "the ready candidate remains actionable after the nonready peer is excluded",
+        sorted(complete),
+    )
+    ready = CandidateJudgment.model_validate(raw)
+    nonready = ready.model_copy(update={
+        "security_id": "peer-nonready",
+        "card_status": contracts_module.EvidenceCardStatus.INSUFFICIENT_AS_OF_CUTOFF,
+        "suggested_layer": CandidateLayer.INTERNAL,
+    })
+    packet = _selected_packet(trusted_chain.day_packet)
+    judge_module._validate_candidate(
+        ready,
+        packet,
+        {ready.security_id: ready, nonready.security_id: nonready},
+        trusted_chain.day_packet,
+        {ready.security_id: packet, nonready.security_id: packet},
+    )
 
 
 def test_cross_opportunity_stage_requires_action_role_and_risk_receipts(trusted_chain):
@@ -1549,7 +1714,9 @@ def test_consistency_signature_covers_stage_receipts_and_new_candidate_contracts
     candidate_changed["market_effect"]["source_section_hash"] = "0" * 64
     candidate_changed["hotspot_effect"]["source_section_hash"] = "1" * 64
     candidate_changed["card_status_source"]["source_card_hash"] = "2" * 64
-    candidate_changed["price_role"]["role"] = "balanced_start"
+    candidate_changed["price_role"]["judgment"]["text"] = (
+        "the price-role receipt has a changed auditable judgment"
+    )
     candidate_changed["next_validation_state"]["next_check"] = "day_5"
     candidate_mismatches = judge_module._consistency_mismatches(
         first,

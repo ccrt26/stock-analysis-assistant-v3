@@ -728,8 +728,19 @@ class HotspotGroupType(StrEnum):
 class HotspotMembershipReceipt(_FrozenModel):
     group_type: HotspotGroupType
     group_code: NonEmptyStr
-    evidence_ids: Annotated[tuple[NonEmptyStr, ...], Field(min_length=1)]
+    membership_evidence_ids: Annotated[tuple[NonEmptyStr, ...], Field(min_length=1)]
+    hotspot_evidence_ids: Annotated[tuple[NonEmptyStr, ...], Field(min_length=1)]
     source_identity_hash: Sha256
+
+    @model_validator(mode="after")
+    def require_distinct_evidence_receipts(self) -> Self:
+        for evidence_ids in (
+            self.membership_evidence_ids,
+            self.hotspot_evidence_ids,
+        ):
+            if len(evidence_ids) != len(set(evidence_ids)):
+                raise ValueError("hotspot identity evidence receipts must be unique")
+        return self
 
 
 class CandidateJudgment(_FrozenModel):
@@ -934,20 +945,70 @@ class DailyJudgeOutput(_FrozenModel):
                 or observed_groups != expected_groups
             ):
                 raise ValueError("stage cohorts do not expose the complete eligible grouping")
+            pair_outcomes: dict[
+                frozenset[str], tuple[str, str | None, str | None]
+            ] = {}
+            stage_adjacency = {
+                security_id: set() for security_id in receipt.eligible_security_ids
+            }
+            for cohort in receipt.cohorts:
+                for edge in cohort.decisive_edges:
+                    pair = frozenset(
+                        (edge.winner_security_id, edge.dominated_security_id)
+                    )
+                    outcome = (
+                        "edge",
+                        edge.winner_security_id,
+                        edge.dominated_security_id,
+                    )
+                    existing = pair_outcomes.get(pair)
+                    if existing is not None and existing != outcome:
+                        raise ValueError(
+                            "stage-wide contradictory comparison pair outcome"
+                        )
+                    pair_outcomes[pair] = outcome
+                for group in cohort.indistinguishable_groups:
+                    for group_index, left in enumerate(group):
+                        for right in group[group_index + 1:]:
+                            pair = frozenset((left, right))
+                            outcome = ("tie", None, None)
+                            existing = pair_outcomes.get(pair)
+                            if existing is not None and existing != outcome:
+                                raise ValueError(
+                                    "stage-wide comparison pair cannot be both tied and dominated"
+                                )
+                            pair_outcomes[pair] = outcome
+                    observed_ties.add((receipt.stage, frozenset(group)))
+            for outcome in pair_outcomes.values():
+                if outcome[0] == "edge":
+                    stage_adjacency[outcome[1]].add(outcome[2])
+            visiting: set[str] = set()
+            visited: set[str] = set()
+
+            def visit_stage(node: str) -> None:
+                if node in visiting:
+                    raise ValueError("stage-wide dominance graph contains a cycle")
+                if node in visited:
+                    return
+                visiting.add(node)
+                for child in stage_adjacency[node]:
+                    visit_stage(child)
+                visiting.remove(node)
+                visited.add(node)
+
+            for security_id in receipt.eligible_security_ids:
+                visit_stage(security_id)
             dominated = {
-                edge.dominated_security_id
-                for cohort in receipt.cohorts
-                for edge in cohort.decisive_edges
+                outcome[2]
+                for outcome in pair_outcomes.values()
+                if outcome[0] == "edge"
             }
             tied = {
                 security_id
-                for cohort in receipt.cohorts
-                for group in cohort.indistinguishable_groups
-                for security_id in group
+                for pair, outcome in pair_outcomes.items()
+                if outcome[0] == "tie"
+                for security_id in pair
             }
-            for cohort in receipt.cohorts:
-                for group in cohort.indistinguishable_groups:
-                    observed_ties.add((receipt.stage, frozenset(group)))
             dominated_all.update(dominated)
             eligible.difference_update(dominated | tied)
         cross_stage = self.comparison_stage_receipts[-1]
@@ -1212,7 +1273,7 @@ def _derive_card_status_source(packet, card) -> CardStatusSourceReceipt:
 
 
 def _derive_hotspot_memberships(packet) -> tuple[HotspotMembershipReceipt, ...]:
-    sources: dict[tuple[HotspotGroupType, str], list[Any]] = {}
+    membership_sources: dict[tuple[HotspotGroupType, str], list[Any]] = {}
     data = (*packet.api_facts, *packet.local_observations)
     for item in data:
         if item.dataset == "industry_member" and item.field == "industry_code":
@@ -1221,11 +1282,12 @@ def _derive_hotspot_memberships(packet) -> tuple[HotspotMembershipReceipt, ...]:
             key = (HotspotGroupType.THEME, str(item.value))
         else:
             continue
-        sources.setdefault(key, []).append(item)
+        membership_sources.setdefault(key, []).append(item)
     sector_rows: dict[str, dict[str, Any]] = {}
     for item in data:
         if item.dataset == "sector_hotspot" and item.field in {"group_type", "group_code"}:
             sector_rows.setdefault(item.row_key, {})[item.field] = item
+    hotspot_sources: dict[tuple[HotspotGroupType, str], list[Any]] = {}
     for row in sector_rows.values():
         if set(row) != {"group_type", "group_code"}:
             continue
@@ -1234,22 +1296,45 @@ def _derive_hotspot_memberships(packet) -> tuple[HotspotMembershipReceipt, ...]:
         except ValueError:
             continue
         key = (group_type, str(row["group_code"].value))
-        sources.setdefault(key, []).extend((row["group_type"], row["group_code"]))
+        hotspot_sources.setdefault(key, []).extend(
+            (row["group_type"], row["group_code"])
+        )
     return tuple(
         HotspotMembershipReceipt(
             group_type=group_type,
             group_code=group_code,
-            evidence_ids=tuple(sorted({item.evidence_id for item in items})),
+            membership_evidence_ids=tuple(
+                sorted({item.evidence_id for item in membership_sources[key]})
+            ),
+            hotspot_evidence_ids=tuple(
+                sorted({item.evidence_id for item in hotspot_sources[key]})
+            ),
             source_identity_hash=_stable_hash(
-                [
-                    item.model_dump(mode="json")
-                    for item in sorted(items, key=lambda value: value.evidence_id)
-                ]
+                {
+                    "group_type": group_type,
+                    "group_code": group_code,
+                    "membership_evidence": [
+                        item.model_dump(mode="json")
+                        for item in sorted(
+                            membership_sources[key],
+                            key=lambda value: value.evidence_id,
+                        )
+                    ],
+                    "hotspot_evidence": [
+                        item.model_dump(mode="json")
+                        for item in sorted(
+                            hotspot_sources[key],
+                            key=lambda value: value.evidence_id,
+                        )
+                    ],
+                }
             ),
         )
-        for (group_type, group_code), items in sorted(
-            sources.items(), key=lambda value: (value[0][0].value, value[0][1])
+        for key in sorted(
+            set(membership_sources).intersection(hotspot_sources),
+            key=lambda value: (value[0].value, value[1]),
         )
+        for group_type, group_code in (key,)
     )
 
 
@@ -2093,11 +2178,19 @@ def _validate_candidate(candidate, packet, outputs, day, packets=None):
     for factor in candidate.supporting_factors:
         if factor not in (DiscoveryRoute.HOTSPOT, DiscoveryRoute.PRICE_ANOMALY) or factor not in packet.discovery_routes: raise ValueError("invalid supporting factor")
     comparator_ids = set(candidate.decisive_comparison.comparator_security_ids)
-    if not comparator_ids.issubset(set(outputs).difference({candidate.security_id})): raise ValueError("comparison cites unknown candidate")
+    ready_comparator_ids = {
+        security_id
+        for security_id, other in outputs.items()
+        if security_id != candidate.security_id
+        and other.card_status is JudgmentCardStatus.READY
+    }
+    if not comparator_ids.issubset(ready_comparator_ids):
+        raise ValueError("comparison cites an unknown or nonready candidate")
     same_opportunity = {
         security_id
         for security_id, other in outputs.items()
         if security_id != candidate.security_id
+        and other.card_status is JudgmentCardStatus.READY
         and other.primary_opportunity is candidate.primary_opportunity
     }
     comparison_evidence = dict(evidence)
