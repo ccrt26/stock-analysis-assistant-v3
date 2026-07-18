@@ -11,6 +11,7 @@ import pyarrow.parquet as pq
 import pytest
 
 from stock_analyzer.evaluation.v3_backtest import capability as capability_module
+from stock_analyzer.evaluation.v3_backtest.calendar import build_frozen_calendar
 from stock_analyzer.evaluation.v3_backtest.capability import (
     CapabilityMatrix,
     RouteCapability,
@@ -93,6 +94,7 @@ def _capability(
         coverage_start=FORMATION_START,
         coverage_end=FORMATION_END,
         covers_required_formations=True,
+        coverage_semantics={"synthetic": "formation_sessions"},
         internal_recall_only=internal_recall,
         evidence_hashes=evidence_hashes,
     )
@@ -305,6 +307,22 @@ def test_phase_guard_recomputes_fingerprint_after_read_only_work(tmp_path: Path)
         guard.run_phase("mutating-phase", mutate_warehouse)
 
 
+def test_phase_guard_rechecks_after_operation_mutates_then_raises(tmp_path: Path):
+    warehouse = _minimal_warehouse(tmp_path)
+    guard = capability_module.WarehousePhaseGuard.capture(warehouse)
+
+    def mutate_then_raise() -> None:
+        (warehouse / "facts" / "mutation.txt").write_text("changed", encoding="utf-8")
+        raise ValueError("operation exploded")
+
+    with pytest.raises(ExceptionGroup) as caught:
+        guard.run_phase("raising-mutating-phase", mutate_then_raise)
+
+    messages = tuple(str(error) for error in caught.value.exceptions)
+    assert any("operation exploded" in message for message in messages)
+    assert any("warehouse fingerprint changed" in message for message in messages)
+
+
 def test_preflight_guard_rechecks_before_publishing_any_receipt(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -343,6 +361,41 @@ def test_preflight_guard_rechecks_before_publishing_any_receipt(
     ).exists()
 
 
+def test_preflight_pair_publish_failure_leaves_neither_receipt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    workspace = _approved_workspace(tmp_path, monkeypatch)
+    warehouse = _minimal_warehouse(tmp_path)
+    guard = capability_module.WarehousePhaseGuard.capture(warehouse)
+    receipt = guard.run_phase(
+        "capability-audit",
+        lambda: audit_local_capability_matrix(
+            warehouse,
+            routes_source=_real_routes_source(),
+            warehouse_fingerprint=guard.before,
+            _test_formation_sessions=_formation_sessions(),
+        ),
+    ).freeze()
+    real_replace = capability_module.os.replace
+
+    def fail_second_receipt(source: object, destination: object) -> None:
+        if Path(destination).name == "mac-warehouse-fingerprint-before.json":
+            raise OSError("injected second receipt publish failure")
+        real_replace(source, destination)
+
+    monkeypatch.setattr(capability_module.os, "replace", fail_second_receipt)
+
+    with pytest.raises(OSError, match="second receipt publish failure"):
+        guard.publish_preflight(workspace, receipt)
+
+    assert not (workspace.preflight / "capability-matrix.json").exists()
+    assert not (
+        workspace.preflight / "mac-warehouse-fingerprint-before.json"
+    ).exists()
+    assert not tuple(workspace.preflight.glob(".receipt-pair.*"))
+
+
 def test_local_audit_uses_real_route_branches_and_deep_read_fields(tmp_path: Path):
     warehouse = _minimal_warehouse(tmp_path)
     fingerprint = fingerprint_mac_warehouse(warehouse)
@@ -351,7 +404,7 @@ def test_local_audit_uses_real_route_branches_and_deep_read_fields(tmp_path: Pat
         warehouse,
         routes_source=_real_routes_source(),
         warehouse_fingerprint=fingerprint,
-        formation_sessions=_formation_sessions(),
+        _test_formation_sessions=_formation_sessions(),
     ).freeze()
 
     assert receipt.experiment_scope == "partial"
@@ -470,6 +523,56 @@ def test_ready_route_requires_attested_usable_non_internal_eligibility_path(
     ].missing_fields
 
 
+def test_unknown_usable_expression_fails_closed(tmp_path: Path):
+    warehouse = _minimal_warehouse(tmp_path)
+    route_source = tmp_path / "routes-unknown-usable.py"
+    source = _admission_source(
+        DiscoveryRoute.EARNINGS,
+        "_earnings_leads",
+        "EARNINGS_REVALUATION",
+    ).replace(
+        "        usable=True,\n",
+        "        usable=runtime_value_that_is_always_false,\n",
+    )
+    route_source.write_text(source, encoding="utf-8")
+
+    receipt = audit_local_capability_matrix(
+        warehouse,
+        routes_source=route_source,
+        warehouse_fingerprint=fingerprint_mac_warehouse(warehouse),
+        _test_formation_sessions=_formation_sessions(),
+    ).freeze()
+
+    earnings = receipt.routes["earnings"]
+    assert earnings.can_form_ready_card is False
+    assert "earnings.usable_for_decision_attestation" in earnings.missing_fields
+
+
+def test_unreachable_lead_call_fails_closed(tmp_path: Path):
+    warehouse = _minimal_warehouse(tmp_path)
+    route_source = tmp_path / "routes-unreachable-lead.py"
+    source = _admission_source(
+        DiscoveryRoute.EARNINGS,
+        "_earnings_leads",
+        "EARNINGS_REVALUATION",
+    ).replace(
+        "def _earnings_leads():\n    return (_lead(",
+        "def _earnings_leads():\n    if False:\n        return (_lead(",
+    )
+    route_source.write_text(source, encoding="utf-8")
+
+    receipt = audit_local_capability_matrix(
+        warehouse,
+        routes_source=route_source,
+        warehouse_fingerprint=fingerprint_mac_warehouse(warehouse),
+        _test_formation_sessions=_formation_sessions(),
+    ).freeze()
+
+    earnings = receipt.routes["earnings"]
+    assert earnings.can_form_ready_card is False
+    assert "earnings.lead_implementation" in earnings.missing_fields
+
+
 def test_daily_route_coverage_requires_every_one_of_144_formation_sessions(
     tmp_path: Path,
 ):
@@ -494,7 +597,7 @@ def test_daily_route_coverage_requires_every_one_of_144_formation_sessions(
         warehouse,
         routes_source=route_source,
         warehouse_fingerprint=fingerprint_mac_warehouse(warehouse),
-        formation_sessions=sessions,
+        _test_formation_sessions=sessions,
     ).freeze()
     hotspot = receipt.routes["hotspot"]
 
@@ -544,7 +647,7 @@ def test_available_at_values_not_partition_names_define_route_coverage(tmp_path:
         warehouse,
         routes_source=route_source,
         warehouse_fingerprint=fingerprint_mac_warehouse(warehouse),
-        formation_sessions=sessions,
+        _test_formation_sessions=sessions,
     ).freeze()
     earnings = receipt.routes["earnings"]
 
@@ -552,6 +655,38 @@ def test_available_at_values_not_partition_names_define_route_coverage(tmp_path:
     assert earnings.coverage_end == date(2026, 7, 2)
     assert earnings.covers_required_formations is False
     assert earnings.can_enter_ten is False
+
+
+def test_non_daily_coverage_is_labeled_as_observed_range(tmp_path: Path):
+    receipt = audit_local_capability_matrix(
+        _minimal_warehouse(tmp_path),
+        routes_source=_real_routes_source(),
+        _test_formation_sessions=_formation_sessions(),
+    ).freeze()
+
+    earnings = receipt.routes["earnings"].to_record()
+    assert earnings["coverage_semantics"] == {
+        "earnings_express": "observed_range",
+        "earnings_forecast": "observed_range",
+        "income_statement": "observed_range",
+    }
+
+
+def test_correct_endpoints_but_wrong_calendar_member_is_rejected(tmp_path: Path):
+    warehouse = _minimal_warehouse(tmp_path)
+    wrong = list(_formation_sessions())
+    wrong[45] = date(2026, 1, 3)
+    wrong = sorted(wrong)
+    assert len(wrong) == 144
+    assert wrong[0] == FORMATION_START
+    assert wrong[-1] == FORMATION_END
+
+    with pytest.raises(ValueError, match="authoritative frozen calendar"):
+        audit_local_capability_matrix(
+            warehouse,
+            routes_source=_real_routes_source(),
+            _test_formation_sessions=wrong,
+        )
 
 
 def test_appledouble_parquet_sidecar_is_never_opened_by_pyarrow(
@@ -590,7 +725,7 @@ def test_appledouble_parquet_sidecar_is_never_opened_by_pyarrow(
         warehouse,
         routes_source=route_source,
         warehouse_fingerprint=fingerprint,
-        formation_sessions=_formation_sessions(),
+        _test_formation_sessions=_formation_sessions(),
     ).freeze()
 
     assert opened
@@ -612,7 +747,7 @@ def test_preflight_receipts_are_written_only_under_experiment_root(
             warehouse,
             routes_source=_real_routes_source(),
             warehouse_fingerprint=guard.before,
-            formation_sessions=_formation_sessions(),
+            _test_formation_sessions=_formation_sessions(),
         ),
     ).freeze()
 
@@ -729,7 +864,7 @@ def _minimal_warehouse(tmp_path: Path) -> Path:
                 "is_open": True,
                 "available_at": "2020-01-01T00:00:00+08:00",
             }
-            for day in sessions
+            for day in _open_sessions()
         ),
     )
     return warehouse
@@ -748,17 +883,36 @@ def _write_rows(directory: Path, rows: tuple[dict[str, object], ...]) -> None:
 
 
 def _formation_sessions() -> tuple[date, ...]:
+    return build_frozen_calendar(
+        _open_sessions(),
+        data_end=date(2026, 7, 17),
+    ).mature
+
+
+def _open_sessions() -> tuple[date, ...]:
+    closed = {
+        date(2026, 1, 1),
+        date(2026, 1, 2),
+        date(2026, 2, 16),
+        date(2026, 2, 17),
+        date(2026, 2, 18),
+        date(2026, 2, 19),
+        date(2026, 2, 20),
+        date(2026, 2, 23),
+        date(2026, 4, 6),
+        date(2026, 5, 1),
+        date(2026, 5, 4),
+        date(2026, 5, 5),
+        date(2026, 6, 19),
+    }
     values: list[date] = []
     current = FORMATION_START
-    while current <= FORMATION_END:
-        if current.weekday() < 5:
+    while current <= date(2026, 7, 17):
+        if current.weekday() < 5 and current not in closed:
             values.append(current)
         current += timedelta(days=1)
-    indexes = tuple(round(index * (len(values) - 1) / 143) for index in range(144))
-    sessions = tuple(values[index] for index in indexes)
-    assert len(sessions) == 144
-    assert sessions[0] == FORMATION_START
-    assert sessions[-1] == FORMATION_END
+    sessions = tuple(values)
+    assert len(sessions) == 174
     return sessions
 
 
@@ -824,7 +978,7 @@ def _audited_matrix(tmp_path: Path) -> CapabilityMatrix:
         warehouse,
         routes_source=_real_routes_source(),
         warehouse_fingerprint=fingerprint_mac_warehouse(warehouse),
-        formation_sessions=_formation_sessions(),
+        _test_formation_sessions=_formation_sessions(),
     )
 
 

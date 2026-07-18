@@ -17,6 +17,7 @@ from zoneinfo import ZoneInfo
 
 import pyarrow.parquet as pq
 
+from stock_analyzer.evaluation.v3_backtest.calendar import build_frozen_calendar
 from stock_analyzer.evaluation.v3_backtest.contracts import DiscoveryRoute
 from stock_analyzer.evaluation.v3_backtest.snapshots import tree_fingerprint
 
@@ -196,6 +197,11 @@ ExecutionStatus = Literal[
     "executable_internal_recall",
     "not_executable_with_local_data",
 ]
+CoverageSemantics = Literal[
+    "formation_sessions",
+    "effective_intervals",
+    "observed_range",
+]
 _T = TypeVar("_T")
 
 
@@ -211,6 +217,7 @@ class RouteCapability:
     coverage_start: date | None
     coverage_end: date | None
     covers_required_formations: bool
+    coverage_semantics: Mapping[str, CoverageSemantics]
     internal_recall_only: bool
     evidence_hashes: tuple[str, ...]
 
@@ -256,6 +263,20 @@ class RouteCapability:
             raise ValueError("missing_fields must contain non-blank strings")
         if len(self.missing_fields) != len(set(self.missing_fields)):
             raise ValueError("missing_fields must be unique")
+        semantics = dict(self.coverage_semantics)
+        if not semantics or any(
+            not isinstance(dataset, str)
+            or not dataset.strip()
+            or value
+            not in {"formation_sessions", "effective_intervals", "observed_range"}
+            for dataset, value in semantics.items()
+        ):
+            raise ValueError("coverage_semantics must label every audited dataset")
+        object.__setattr__(
+            self,
+            "coverage_semantics",
+            MappingProxyType(dict(sorted(semantics.items()))),
+        )
 
     @property
     def execution_status(self) -> ExecutionStatus:
@@ -281,6 +302,7 @@ class RouteCapability:
             "coverage_start": self.coverage_start.isoformat() if self.coverage_start else None,
             "coverage_end": self.coverage_end.isoformat() if self.coverage_end else None,
             "covers_required_formations": self.covers_required_formations,
+            "coverage_semantics": dict(self.coverage_semantics),
             "internal_recall_only": self.internal_recall_only,
             "evidence_hashes": list(self.evidence_hashes),
         }
@@ -565,7 +587,17 @@ class WarehousePhaseGuard:
         if not isinstance(phase, str) or not phase.strip():
             raise ValueError("phase must not be blank")
         self.verify_current()
-        result = operation()
+        try:
+            result = operation()
+        except BaseException as operation_error:
+            try:
+                self.verify_current()
+            except BaseException as integrity_error:
+                raise BaseExceptionGroup(
+                    f"{phase} failed and changed the Mac warehouse",
+                    (operation_error, integrity_error),
+                )
+            raise
         self.verify_current()
         return result
 
@@ -603,6 +635,7 @@ class _DatasetCoverage:
     start: date | None
     end: date | None
     covers_required_formations: bool
+    semantics: CoverageSemantics
 
 
 @dataclass(frozen=True, slots=True)
@@ -629,9 +662,13 @@ def audit_local_capability_matrix(
     *,
     routes_source: Path | None = None,
     warehouse_fingerprint: WarehouseFingerprint | None = None,
-    formation_sessions: Sequence[date] | None = None,
+    _test_formation_sessions: Sequence[date] | None = None,
 ) -> CapabilityMatrix:
-    """Audit actual admission code, local values and all 144 formation sessions."""
+    """Audit actual admission code, local values and the authoritative calendar.
+
+    ``_test_formation_sessions`` is a verification seam only.  When supplied,
+    it must match the warehouse-derived frozen mature calendar exactly.
+    """
 
     root = Path(warehouse_root).expanduser().resolve(strict=True)
     if routes_source is None:
@@ -643,9 +680,14 @@ def audit_local_capability_matrix(
     fingerprint = warehouse_fingerprint or fingerprint_mac_warehouse(root)
     if Path(fingerprint.warehouse_root) != root:
         raise ValueError("warehouse fingerprint does not belong to warehouse_root")
-    sessions = _validated_formation_sessions(
-        formation_sessions or _load_formation_sessions(root)
-    )
+    authoritative_sessions = _load_formation_sessions(root)
+    if _test_formation_sessions is not None:
+        injected = _validated_formation_sessions(_test_formation_sessions)
+        if injected != authoritative_sessions:
+            raise ValueError(
+                "test formation sessions must exactly match the authoritative frozen calendar"
+            )
+    sessions = authoritative_sessions
     session_hash = _canonical_hash([value.isoformat() for value in sessions])
 
     inventories: dict[tuple[str, str], _DatasetInventory] = {}
@@ -668,7 +710,12 @@ def audit_local_capability_matrix(
         }
         for dataset, coverage in coverages.items():
             if not coverage.covers_required_formations:
-                missing.append(f"{dataset}.formation_session_coverage")
+                commitment = (
+                    "observed_range"
+                    if coverage.semantics == "observed_range"
+                    else "formation_session_coverage"
+                )
+                missing.append(f"{dataset}.{commitment}")
         coverage_start, coverage_end = _route_coverage(tuple(coverages.values()))
         covers_required = all(
             coverage.covers_required_formations for coverage in coverages.values()
@@ -697,6 +744,12 @@ def audit_local_capability_matrix(
             and not admission.has_preliminary_opportunity
         ):
             missing.append(f"{route.value}.preliminary_opportunity")
+        if (
+            admission.emits_route_lead
+            and admission.has_non_internal_lead
+            and not admission.usable_for_decision_possible
+        ):
+            missing.append(f"{route.value}.usable_for_decision_attestation")
         can_enumerate = (
             source_audit.generic_enumeration
             and not _enumeration_missing_fields(route_inventories)
@@ -731,6 +784,10 @@ def audit_local_capability_matrix(
             coverage_start=coverage_start,
             coverage_end=coverage_end,
             covers_required_formations=covers_required,
+            coverage_semantics={
+                dataset: coverage.semantics
+                for dataset, coverage in coverages.items()
+            },
             internal_recall_only=internal_recall,
             evidence_hashes=tuple(dict.fromkeys(evidence_hashes)),
         )
@@ -759,7 +816,6 @@ def run_capability_preflight(
     warehouse_root: Path,
     *,
     routes_source: Path | None = None,
-    formation_sessions: Sequence[date] | None = None,
 ) -> tuple[CapabilityReceipt, tuple[Path, Path], WarehousePhaseGuard]:
     """Own the before/audit/after/publish sequence as one fail-closed preflight."""
 
@@ -771,7 +827,6 @@ def run_capability_preflight(
             warehouse_root,
             routes_source=routes_source,
             warehouse_fingerprint=guard.before,
-            formation_sessions=formation_sessions,
         ),
     )
     receipt = matrix.freeze()
@@ -793,13 +848,55 @@ def write_preflight_receipts(
         raise ValueError("preflight write requires WarehousePhaseGuard")
     if guard.before != warehouse:
         raise ValueError("warehouse receipt must equal the phase guard before fingerprint")
-    guard.verify_current()
     capability_path = workspace.preflight / "capability-matrix.json"
     fingerprint_path = workspace.preflight / "mac-warehouse-fingerprint-before.json"
-    _atomic_write_json(capability_path, capability.to_record())
+    destinations = (
+        (capability_path, capability.to_record()),
+        (fingerprint_path, warehouse.to_record()),
+    )
     guard.verify_current()
-    _atomic_write_json(fingerprint_path, warehouse.to_record())
+    with tempfile.TemporaryDirectory(
+        dir=workspace.preflight,
+        prefix=".receipt-pair.",
+    ) as staging_raw:
+        staging = Path(staging_raw)
+        staged: dict[Path, Path] = {}
+        for destination, payload in destinations:
+            staged_path = staging / destination.name
+            _write_json_file(staged_path, payload)
+            if json.loads(staged_path.read_text(encoding="utf-8")) != payload:
+                raise RuntimeError("staged preflight receipt failed verification")
+            staged[destination] = staged_path
+        guard.verify_current()
+        _publish_staged_pair(staged, staging, guard)
     return capability_path, fingerprint_path
+
+
+def _publish_staged_pair(
+    staged: Mapping[Path, Path],
+    staging: Path,
+    guard: WarehousePhaseGuard,
+) -> None:
+    backups: dict[Path, Path] = {}
+    published: list[Path] = []
+    try:
+        for destination in staged:
+            if destination.exists():
+                backup = staging / f"backup-{destination.name}"
+                os.replace(destination, backup)
+                backups[destination] = backup
+        for destination, staged_path in staged.items():
+            os.replace(staged_path, destination)
+            published.append(destination)
+        guard.verify_current()
+    except BaseException:
+        for destination in reversed(published):
+            if destination.exists():
+                destination.unlink()
+        for destination, backup in backups.items():
+            if backup.exists():
+                os.replace(backup, destination)
+        raise
 
 
 def _audit_route_source(source: str) -> _RouteSourceAudit:
@@ -842,18 +939,13 @@ def _audit_route_source(source: str) -> _RouteSourceAudit:
     for route in DiscoveryRoute:
         helper_name = helpers.get(route)
         helper = functions.get(helper_name or "")
-        lead_calls = (
-            [
-                node
-                for node in ast.walk(helper)
-                if isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Name)
-                and node.func.id == "_lead"
-                and _lead_call_route(node) is route
-            ]
-            if helper is not None
-            else []
-        )
+        lead_calls = [
+            node
+            for node in _reachable_calls(helper)
+            if isinstance(node.func, ast.Name)
+            and node.func.id == "_lead"
+            and _lead_call_route(node) is route
+        ]
         internal_states = [
             _call_keyword_bool(call, "internal_only", lead_defaults.get("internal_only"))
             for call in lead_calls
@@ -877,8 +969,10 @@ def _audit_route_source(source: str) -> _RouteSourceAudit:
             internal_only=bool(internal_states) and all(
                 value is True for value in internal_states
             ),
-            has_preliminary_opportunity=any(preliminary_states),
-            usable_for_decision_possible=any(usable_states),
+            has_preliminary_opportunity=any(
+                value is True for value in preliminary_states
+            ),
+            usable_for_decision_possible=any(value is True for value in usable_states),
         )
     eligible = _eligible_path_attested(functions.get("_merge_leads"))
     source_hash = hashlib.sha256(source.encode("utf-8")).hexdigest()
@@ -968,25 +1062,110 @@ def _call_keyword_not_false(
     call: ast.Call,
     name: str,
     default: ast.AST | None,
-) -> bool:
+) -> bool | None:
     value = _call_keyword_value(call, name, default)
-    return not (isinstance(value, ast.Constant) and value.value is False)
+    if isinstance(value, ast.Constant) and type(value.value) is bool:
+        return value.value
+    return None
 
 
 def _call_keyword_not_none(
     call: ast.Call,
     name: str,
     default: ast.AST | None,
-) -> bool:
+) -> bool | None:
     value = _call_keyword_value(call, name, default)
     if value is None or (isinstance(value, ast.Constant) and value.value is None):
         return False
+    if isinstance(value, ast.Constant):
+        return True
+    if (
+        isinstance(value, ast.Attribute)
+        and isinstance(value.value, ast.Name)
+        and value.value.id == "OpportunityType"
+    ):
+        return True
     if isinstance(value, ast.IfExp):
-        return any(
-            not (isinstance(branch, ast.Constant) and branch.value is None)
+        states = tuple(
+            _expression_proven_not_none(branch)
             for branch in (value.body, value.orelse)
         )
-    return True
+        return True if all(state is True for state in states) else False
+    return None
+
+
+def _expression_proven_not_none(value: ast.AST) -> bool | None:
+    if isinstance(value, ast.Constant):
+        return value.value is not None
+    if (
+        isinstance(value, ast.Attribute)
+        and isinstance(value.value, ast.Name)
+        and value.value.id == "OpportunityType"
+    ):
+        return True
+    return None
+
+
+class _ReachableCallVisitor(ast.NodeVisitor):
+    """Collect calls while pruning source branches proven unreachable."""
+
+    def __init__(self) -> None:
+        self.calls: list[ast.Call] = []
+
+    def visit_block(self, statements: Sequence[ast.stmt]) -> None:
+        for statement in statements:
+            self.visit(statement)
+            if isinstance(statement, (ast.Return, ast.Raise, ast.Break, ast.Continue)):
+                break
+
+    def visit_Call(self, node: ast.Call) -> None:  # noqa: N802
+        self.calls.append(node)
+        self.generic_visit(node)
+
+    def visit_If(self, node: ast.If) -> None:  # noqa: N802
+        state = _literal_boolean(node.test)
+        if state is True:
+            self.visit_block(node.body)
+        elif state is False:
+            self.visit_block(node.orelse)
+        else:
+            self.visit(node.test)
+            self.visit_block(node.body)
+            self.visit_block(node.orelse)
+
+    def visit_While(self, node: ast.While) -> None:  # noqa: N802
+        state = _literal_boolean(node.test)
+        if state is False:
+            self.visit_block(node.orelse)
+            return
+        self.visit(node.test)
+        self.visit_block(node.body)
+        self.visit_block(node.orelse)
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:  # noqa: N802
+        return
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:  # noqa: N802
+        return
+
+    def visit_Lambda(self, node: ast.Lambda) -> None:  # noqa: N802
+        return
+
+
+def _reachable_calls(
+    function: ast.FunctionDef | ast.AsyncFunctionDef | None,
+) -> tuple[ast.Call, ...]:
+    if function is None:
+        return ()
+    visitor = _ReachableCallVisitor()
+    visitor.visit_block(function.body)
+    return tuple(visitor.calls)
+
+
+def _literal_boolean(value: ast.AST) -> bool | None:
+    if isinstance(value, ast.Constant) and type(value.value) is bool:
+        return value.value
+    return None
 
 
 def _eligible_path_attested(
@@ -1104,6 +1283,7 @@ def _dataset_coverage(
             start=min(observed) if observed else None,
             end=max(observed) if observed else None,
             covers_required_formations=set(sessions).issubset(observed),
+            semantics="formation_sessions",
         )
     if inventory.dataset in _RELATIONSHIP_DATASETS:
         covered = tuple(
@@ -1120,6 +1300,7 @@ def _dataset_coverage(
             start=min(covered) if covered else None,
             end=max(covered) if covered else None,
             covers_required_formations=len(covered) == len(sessions),
+            semantics="effective_intervals",
         )
     observed = inventory.available_dates
     return _DatasetCoverage(
@@ -1128,6 +1309,7 @@ def _dataset_coverage(
         covers_required_formations=(
             bool(observed) and min(observed) <= sessions[0] and max(observed) >= sessions[-1]
         ),
+        semantics="observed_range",
     )
 
 
@@ -1264,9 +1446,15 @@ def _load_formation_sessions(root: Path) -> tuple[date, ...]:
             raise ValueError("trade_calendar lacks cal_date/is_open")
         for row in parquet.read(columns=["cal_date", "is_open"]).to_pylist():
             value = _as_local_date(row["cal_date"])
-            if row["is_open"] is True and value is not None and _FORMATION_START <= value <= _FORMATION_END:
+            if row["is_open"] is True and value is not None:
                 sessions.add(value)
-    return tuple(sorted(sessions))
+    if not sessions:
+        raise ValueError("trade_calendar contains no open sessions")
+    calendar = build_frozen_calendar(
+        tuple(sorted(sessions)),
+        data_end=max(sessions),
+    )
+    return _validated_formation_sessions(calendar.mature)
 
 
 def _validated_formation_sessions(values: Sequence[date]) -> tuple[date, ...]:
@@ -1352,7 +1540,6 @@ def _atomic_write_json(path: Path, payload: Mapping[str, Any]) -> None:
         raise ValueError("write path must be an approved U-disk experiment root preflight receipt")
     if not resolved.parent.is_dir():
         raise ValueError("approved preflight directory does not exist")
-    encoded = (json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2) + "\n").encode("utf-8")
     temporary: Path | None = None
     try:
         with tempfile.NamedTemporaryFile(
@@ -1363,13 +1550,26 @@ def _atomic_write_json(path: Path, payload: Mapping[str, Any]) -> None:
             delete=False,
         ) as handle:
             temporary = Path(handle.name)
-            handle.write(encoded)
+            handle.write(_encoded_json(payload))
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(temporary, resolved)
     finally:
         if temporary is not None and temporary.exists():
             temporary.unlink()
+
+
+def _write_json_file(path: Path, payload: Mapping[str, Any]) -> None:
+    with path.open("wb") as handle:
+        handle.write(_encoded_json(payload))
+        handle.flush()
+        os.fsync(handle.fileno())
+
+
+def _encoded_json(payload: Mapping[str, Any]) -> bytes:
+    return (
+        json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2) + "\n"
+    ).encode("utf-8")
 
 
 def _routes_hash(routes: Mapping[Any, RouteCapability]) -> str:
