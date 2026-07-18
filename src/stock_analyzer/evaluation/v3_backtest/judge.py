@@ -86,6 +86,28 @@ _RATIO = re.compile(r"\d+(?:\.\d+)?\s*[:：比]\s*\d+(?:\.\d+)?")
 _EMPTY_COUNTEREVIDENCE_TEXT = "no counterevidence was available as of the formation cutoff"
 _EMPTY_UNKNOWNS_TEXT = "no unknown-section evidence was available as of the formation cutoff"
 
+_CARD_REQUIREMENT_DATASETS: dict[str | tuple[OpportunityType, str], tuple[str, ...]] = {
+    "complete related hotspot input": ("sector_hotspot",),
+    "effective company membership": ("industry_member", "theme_member"),
+    "business contribution numerator and company denominator inputs": ("main_business", "income_statement"),
+    "two formation-time industry demand or adoption input periods": ("industry_daily",),
+    "formal disclosure hierarchy": ("earnings_forecast", "earnings_express", "income_statement"),
+    "aligned profit inputs": ("income_statement",),
+    "aligned cash inputs": ("income_statement", "cash_flow"),
+    "own-history and peer valuation inputs": ("daily_basic",),
+    (OpportunityType.EARNINGS_REVALUATION, "event-aligned relative price response"): ("earnings_forecast", "earnings_express", "event_price_response"),
+    "two-period industry supply demand price and inventory inputs": ("industry_daily",),
+    "company sensitivity inputs": ("main_business", "income_statement"),
+    "two-period profit inputs": ("income_statement",),
+    "two-period cash inputs": ("cash_flow",),
+    "auditable event body amount subject stage conditions and failure inputs": ("announcement",),
+    "business transmission inputs": ("company_profile", "main_business"),
+    (OpportunityType.COMPANY_EVENT_REVALUATION, "event-aligned relative price response"): ("announcement", "event_price_response"),
+    "raw distress and financing-risk inputs": ("security_master", "repurchase", "holder_trade", "share_float", "pledge"),
+    "two aligned multi-statement periods": ("income_statement", "balance_sheet", "cash_flow", "financial_indicator"),
+    "event-aligned relative price response input": ("repurchase", "holder_trade", "share_float", "pledge", "event_price_response"),
+}
+
 NonEmptyStr = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 Sha256 = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
 
@@ -274,19 +296,35 @@ class CitedContextEffect(_FrozenModel):
         if self.section_availability is EvidenceAvailability.EVIDENCE_READY_FOR_JUDGMENT:
             if not self.judgment.evidence_ids:
                 raise ValueError("available context section requires cited evidence")
-        elif self.judgment.evidence_ids:
-            raise ValueError("unavailable context section cannot cite fabricated evidence")
+        elif (
+            self.effect is not ContextEffect.NOT_APPLICABLE
+            or self.judgment.evidence_ids
+            or self.consequence_evidence_ids
+        ):
+            raise ValueError("unavailable context must be not-applicable without directional evidence")
         return self
 
 
 class CitedPriceRole(_FrozenModel):
     role: PriceRole
+    source_section: EvidenceSectionName
+    section_availability: EvidenceAvailability
+    source_section_hash: Sha256
     judgment: CitedJudgmentText
 
     @model_validator(mode="after")
     def require_evidence(self) -> Self:
-        if not self.judgment.evidence_ids:
+        if self.source_section is not EvidenceSectionName.PRICE_VOLUME_LIQUIDITY:
+            raise ValueError("price role must use the dedicated price section")
+        if (
+            self.section_availability is EvidenceAvailability.EVIDENCE_READY_FOR_JUDGMENT
+            and not self.judgment.evidence_ids
+        ):
             raise ValueError("price role requires evidence")
+        if self.section_availability is EvidenceAvailability.NOT_AVAILABLE_AS_OF and (
+            self.role is not PriceRole.OTHER_TRADABLE or self.judgment.evidence_ids
+        ):
+            raise ValueError("unavailable price section permits only an uncited other-tradable role")
         return self
 
 
@@ -355,9 +393,15 @@ class DecisiveComparison(_FrozenModel):
         return self
 
 
+class HotspotCohortIdentity(_FrozenModel):
+    group_type: Literal["industry", "theme"]
+    group_code: NonEmptyStr
+
+
 class ComparisonCohortReceipt(_FrozenModel):
     cohort_id: NonEmptyStr
     security_ids: Annotated[tuple[NonEmptyStr, ...], Field(min_length=1)]
+    hotspot_identity: HotspotCohortIdentity | None = None
     decisive_edges: tuple[DecisiveEdge, ...] = ()
     indistinguishable_groups: tuple[tuple[NonEmptyStr, ...], ...] = ()
     judgment: CitedJudgmentText
@@ -396,9 +440,6 @@ class ComparisonCohortReceipt(_FrozenModel):
                     if pair in pairs:
                         raise ValueError("comparison pair cannot be both tied and dominated")
                     pairs[pair] = "tie"
-        expected_pairs = len(self.security_ids) * (len(self.security_ids) - 1) // 2
-        if len(pairs) != expected_pairs:
-            raise ValueError("comparison cohort is incomplete; every pair needs one outcome")
         visiting: set[str] = set()
         visited: set[str] = set()
 
@@ -434,18 +475,27 @@ class CrossOpportunityAssessment(_FrozenModel):
         return self
 
 
-class CommonRiskClusterReceipt(_FrozenModel):
-    cluster_id: NonEmptyStr
-    security_ids: Annotated[tuple[NonEmptyStr, ...], Field(min_length=2)]
+class ExposureRelationship(StrEnum):
+    SHARED_RISK = "shared_risk"
+    INDEPENDENT = "independent"
+
+
+class ExposurePairReceipt(_FrozenModel):
+    left_security_id: NonEmptyStr
+    right_security_id: NonEmptyStr
+    relationship: ExposureRelationship
+    capacity_compatible: bool
     judgment: CitedJudgmentText
     reversal_fact: CitedJudgmentText
 
     @model_validator(mode="after")
-    def require_unique_cited_cluster(self) -> Self:
-        if len(self.security_ids) != len(set(self.security_ids)):
-            raise ValueError("common-risk cluster identities must be unique")
+    def require_distinct_cited_pair(self) -> Self:
+        if self.left_security_id == self.right_security_id:
+            raise ValueError("exposure pair endpoints must differ")
         if not self.judgment.evidence_ids or not self.reversal_fact.evidence_ids:
-            raise ValueError("common-risk cluster judgment and reversal require evidence")
+            raise ValueError("exposure pair judgment and reversal require evidence")
+        if self.relationship is ExposureRelationship.INDEPENDENT and not self.capacity_compatible:
+            raise ValueError("an independent exposure pair must be capacity compatible")
         return self
 
 
@@ -454,7 +504,7 @@ class ComparisonStageReceipt(_FrozenModel):
     eligible_security_ids: tuple[NonEmptyStr, ...]
     cohorts: tuple[ComparisonCohortReceipt, ...]
     cross_opportunity_assessments: tuple[CrossOpportunityAssessment, ...] = ()
-    common_risk_clusters: tuple[CommonRiskClusterReceipt, ...] = ()
+    exposure_pair_receipts: tuple[ExposurePairReceipt, ...] = ()
 
     @model_validator(mode="after")
     def require_exact_eligible_partition(self) -> Self:
@@ -467,8 +517,20 @@ class ComparisonStageReceipt(_FrozenModel):
         flattened = tuple(
             security_id for cohort in self.cohorts for security_id in cohort.security_ids
         )
-        if len(flattened) != len(set(flattened)) or set(flattened) != eligible:
+        if self.stage is ComparisonStage.SAME_HOTSPOT_OPPORTUNITY_ROLE:
+            if set(flattened) != eligible:
+                raise ValueError("stage-one hotspot cohorts must cover every eligible candidate")
+            if any(
+                cohort.hotspot_identity is None and len(cohort.security_ids) != 1
+                for cohort in self.cohorts
+            ):
+                raise ValueError("only a no-hotspot singleton may omit stage-one hotspot identity")
+        elif len(flattened) != len(set(flattened)) or set(flattened) != eligible:
             raise ValueError("comparison cohorts must exactly partition stage eligibility")
+        if self.stage is not ComparisonStage.SAME_HOTSPOT_OPPORTUNITY_ROLE and any(
+            cohort.hotspot_identity is not None for cohort in self.cohorts
+        ):
+            raise ValueError("hotspot cohort identity belongs only to stage one")
         if any(edge.stage is not self.stage for cohort in self.cohorts for edge in cohort.decisive_edges):
             raise ValueError("dominance edge stage differs from its receipt stage")
         assessment_ids = tuple(
@@ -477,14 +539,54 @@ class ComparisonStageReceipt(_FrozenModel):
         if self.stage is ComparisonStage.CROSS_OPPORTUNITY:
             if len(assessment_ids) != len(set(assessment_ids)) or set(assessment_ids) != eligible:
                 raise ValueError("cross-opportunity stage must assess every eligible candidate")
-            cluster_ids = tuple(item.cluster_id for item in self.common_risk_clusters)
-            if len(cluster_ids) != len(set(cluster_ids)) or any(
-                not set(item.security_ids).issubset(eligible)
-                for item in self.common_risk_clusters
+            exposure_pairs = tuple(
+                frozenset((item.left_security_id, item.right_security_id))
+                for item in self.exposure_pair_receipts
+            )
+            expected_pairs = {
+                frozenset((left, right))
+                for index, left in enumerate(self.eligible_security_ids)
+                for right in self.eligible_security_ids[index + 1:]
+            }
+            if (
+                len(exposure_pairs) != len(set(exposure_pairs))
+                or set(exposure_pairs) != expected_pairs
             ):
-                raise ValueError("common-risk clusters must be unique and cross-stage eligible")
-        elif self.cross_opportunity_assessments or self.common_risk_clusters:
+                raise ValueError("stage-three exposure disposition must cover every eligible pair")
+        elif (
+            self.cross_opportunity_assessments
+            or self.exposure_pair_receipts
+        ):
             raise ValueError("cross-opportunity role/risk receipts belong only to stage three")
+        exposure_by_pair = {
+            frozenset((item.left_security_id, item.right_security_id)): item
+            for item in self.exposure_pair_receipts
+        }
+        for cohort in self.cohorts:
+            expected_cohort_pairs = {
+                frozenset((left, right))
+                for index, left in enumerate(cohort.security_ids)
+                for right in cohort.security_ids[index + 1:]
+            }
+            decided_pairs = {
+                frozenset((edge.winner_security_id, edge.dominated_security_id))
+                for edge in cohort.decisive_edges
+            }
+            decided_pairs.update(
+                frozenset((left, right))
+                for group in cohort.indistinguishable_groups
+                for index, left in enumerate(group)
+                for right in group[index + 1:]
+            )
+            unresolved = expected_cohort_pairs.difference(decided_pairs)
+            if self.stage is not ComparisonStage.CROSS_OPPORTUNITY and unresolved:
+                raise ValueError("comparison cohort is incomplete; every pair needs one outcome")
+            if self.stage is ComparisonStage.CROSS_OPPORTUNITY and any(
+                pair not in exposure_by_pair
+                or not exposure_by_pair[pair].capacity_compatible
+                for pair in unresolved
+            ):
+                raise ValueError("cross-stage unresolved pairs require capacity-compatible exposure independence")
         return self
 
 
@@ -539,12 +641,41 @@ class PreparedKnowledgeInput(_FrozenModel):
     evidence_ids: Annotated[tuple[NonEmptyStr, ...], Field(min_length=1)]
 
 
+class CoverageCauseReceipt(_FrozenModel):
+    dataset: NonEmptyStr
+    status: EvidenceInputStatus
+    coverage_hash: Sha256
+
+
+class RequirementGapSourceReceipt(_FrozenModel):
+    opportunity: OpportunityType
+    requirement: NonEmptyStr
+    governed_datasets: Annotated[tuple[NonEmptyStr, ...], Field(min_length=1)]
+    coverage_causes: Annotated[tuple[CoverageCauseReceipt, ...], Field(min_length=1)]
+    mapping_hash: Sha256
+
+    @model_validator(mode="after")
+    def validate_gap_mapping(self) -> Self:
+        if tuple(item.dataset for item in self.coverage_causes) != self.governed_datasets:
+            raise ValueError("requirement gap causes must cover every governed dataset")
+        if self.mapping_hash != _stable_hash(
+            {
+                "opportunity": self.opportunity,
+                "requirement": self.requirement,
+                "datasets": self.governed_datasets,
+            }
+        ):
+            raise ValueError("requirement gap mapping hash differs")
+        return self
+
+
 class CardStatusSourceReceipt(_FrozenModel):
     opportunity: OpportunityType
     status: JudgmentCardStatus
     upstream_status: EvidenceCardStatus
     missing_requirements: tuple[NonEmptyStr, ...] = ()
     coverage_statuses: tuple[EvidenceInputStatus, ...] = ()
+    requirement_gap_sources: tuple[RequirementGapSourceReceipt, ...] = ()
     source_card_hash: Sha256
 
     @model_validator(mode="after")
@@ -554,14 +685,51 @@ class CardStatusSourceReceipt(_FrozenModel):
                 self.upstream_status is not EvidenceCardStatus.EVIDENCE_READY_FOR_JUDGMENT
                 or self.missing_requirements
                 or self.coverage_statuses
+                or self.requirement_gap_sources
             ):
                 raise ValueError("ready card status source differs from upstream card")
         elif (
             self.upstream_status is not EvidenceCardStatus.INCOMPLETE
             or not self.missing_requirements
+            or tuple(item.requirement for item in self.requirement_gap_sources)
+            != self.missing_requirements
         ):
             raise ValueError("nonready card status source requires upstream gaps")
+        if self.status is not JudgmentCardStatus.READY:
+            if any(item.opportunity is not self.opportunity for item in self.requirement_gap_sources):
+                raise ValueError("requirement gap source belongs to another opportunity")
+            expected_statuses = tuple(dict.fromkeys(
+                cause.status
+                for gap in self.requirement_gap_sources
+                for cause in gap.coverage_causes
+                if cause.status is not EvidenceInputStatus.READY
+            ))
+            if self.coverage_statuses != expected_statuses:
+                raise ValueError("card coverage statuses differ from requirement-specific causes")
+            local_failure = any(
+                status in {EvidenceInputStatus.NOT_MATERIALIZED, EvidenceInputStatus.INVALID_SCHEMA}
+                for status in expected_statuses
+            )
+            expected = (
+                JudgmentCardStatus.NOT_EXECUTABLE_WITH_LOCAL_DATA
+                if local_failure
+                else JudgmentCardStatus.INSUFFICIENT_AS_OF_CUTOFF
+            )
+            if self.status is not expected:
+                raise ValueError("card status differs from its opportunity-specific gap causes")
         return self
+
+
+class HotspotGroupType(StrEnum):
+    INDUSTRY = "industry"
+    THEME = "theme"
+
+
+class HotspotMembershipReceipt(_FrozenModel):
+    group_type: HotspotGroupType
+    group_code: NonEmptyStr
+    evidence_ids: Annotated[tuple[NonEmptyStr, ...], Field(min_length=1)]
+    source_identity_hash: Sha256
 
 
 class CandidateJudgment(_FrozenModel):
@@ -572,6 +740,7 @@ class CandidateJudgment(_FrozenModel):
     supporting_factors: Annotated[tuple[DiscoveryRoute, ...], Field(max_length=1)] = ()
     market_effect: CitedContextEffect
     hotspot_effect: CitedContextEffect
+    hotspot_memberships: tuple[HotspotMembershipReceipt, ...] = ()
     card_status: JudgmentCardStatus
     card_status_source: CardStatusSourceReceipt
     price_role: CitedPriceRole
@@ -606,6 +775,10 @@ class CandidateJudgment(_FrozenModel):
             self.new_driver_evidence_ids,
             self.evidence_refs,
             self.decisive_comparison.comparator_security_ids,
+            tuple(
+                (item.group_type, item.group_code)
+                for item in self.hotspot_memberships
+            ),
         ):
             if len(values) != len(set(values)):
                 raise ValueError("receipt identities must be unique")
@@ -693,27 +866,73 @@ class DailyJudgeOutput(_FrozenModel):
         if tuple(item.stage for item in self.comparison_stage_receipts) != expected_stages:
             raise ValueError("comparison stages must use the frozen three-stage order")
         candidate_by = {item.security_id: item for item in self.candidates}
-        eligible = set(ids)
-        expected_partitions = (
-            lambda item: (
-                item.primary_opportunity,
-                item.price_role.role,
-                item.hotspot_effect.source_section_hash,
-                item.hotspot_effect.effect,
-            ),
-            lambda item: item.primary_opportunity,
-            lambda item: "all_remaining_candidates",
-        )
+        eligible = {
+            item.security_id
+            for item in self.candidates
+            if item.card_status is JudgmentCardStatus.READY
+        }
+        dominated_all: set[str] = set()
         observed_ties: set[tuple[ComparisonStage, frozenset[str]]] = set()
         for index, receipt in enumerate(self.comparison_stage_receipts):
             if set(receipt.eligible_security_ids) != eligible:
                 raise ValueError("stage eligibility must equal nondominated prior-stage survivors")
             grouped: dict[Any, set[str]] = {}
-            for security_id in eligible:
-                grouped.setdefault(expected_partitions[index](candidate_by[security_id]), set()).add(security_id)
-            observed_groups = {frozenset(item.security_ids) for item in receipt.cohorts}
-            expected_groups = {frozenset(item) for item in grouped.values()}
-            if observed_groups != expected_groups:
+            if index == 0:
+                for security_id in eligible:
+                    candidate = candidate_by[security_id]
+                    if not candidate.hotspot_memberships:
+                        grouped[("no_verified_hotspot", security_id)] = {security_id}
+                        continue
+                    for membership in candidate.hotspot_memberships:
+                        key = (
+                            membership.group_type,
+                            membership.group_code,
+                            candidate.primary_opportunity,
+                            candidate.price_role.role,
+                        )
+                        grouped.setdefault(key, set()).add(security_id)
+            elif index == 1:
+                for security_id in eligible:
+                    candidate = candidate_by[security_id]
+                    grouped.setdefault(candidate.primary_opportunity, set()).add(security_id)
+            elif eligible:
+                grouped["all_remaining_candidates"] = set(eligible)
+            if index == 0:
+                observed_groups = {
+                    (
+                        (
+                            cohort.hotspot_identity.group_type,
+                            cohort.hotspot_identity.group_code,
+                            candidate_by[cohort.security_ids[0]].primary_opportunity,
+                            candidate_by[cohort.security_ids[0]].price_role.role,
+                        )
+                        if cohort.hotspot_identity is not None
+                        else ("no_verified_hotspot", cohort.security_ids[0])
+                    ): frozenset(cohort.security_ids)
+                    for cohort in receipt.cohorts
+                }
+                expected_groups = {
+                    key: frozenset(members) for key, members in grouped.items()
+                }
+                uniform = all(
+                    all(
+                        candidate_by[security_id].primary_opportunity
+                        is candidate_by[cohort.security_ids[0]].primary_opportunity
+                        and candidate_by[security_id].price_role.role
+                        is candidate_by[cohort.security_ids[0]].price_role.role
+                        for security_id in cohort.security_ids
+                    )
+                    for cohort in receipt.cohorts
+                )
+            else:
+                observed_groups = {frozenset(item.security_ids) for item in receipt.cohorts}
+                expected_groups = {frozenset(item) for item in grouped.values()}
+                uniform = True
+            if (
+                not uniform
+                or (index == 0 and len(observed_groups) != len(receipt.cohorts))
+                or observed_groups != expected_groups
+            ):
                 raise ValueError("stage cohorts do not expose the complete eligible grouping")
             dominated = {
                 edge.dominated_security_id
@@ -729,24 +948,28 @@ class DailyJudgeOutput(_FrozenModel):
             for cohort in receipt.cohorts:
                 for group in cohort.indistinguishable_groups:
                     observed_ties.add((receipt.stage, frozenset(group)))
+            dominated_all.update(dominated)
             eligible.difference_update(dominated | tied)
         cross_stage = self.comparison_stage_receipts[-1]
         for assessment in cross_stage.cross_opportunity_assessments:
             candidate = candidate_by[assessment.security_id]
-            expected_action_eligible = candidate.suggested_layer is not CandidateLayer.INTERNAL
+            expected_action_eligible = (
+                assessment.security_id in eligible
+                and candidate.suggested_layer is not CandidateLayer.INTERNAL
+            )
             if assessment.current_action_eligible is not expected_action_eligible:
-                raise ValueError("cross-opportunity action eligibility differs from candidate layer")
+                raise ValueError("cross-opportunity action eligibility must come from final survivors")
         assessments = {
             item.security_id: item for item in cross_stage.cross_opportunity_assessments
         }
-        for cluster in cross_stage.common_risk_clusters:
-            action_members = [
-                assessments[security_id]
-                for security_id in cluster.security_ids
-                if assessments[security_id].current_action_eligible
-            ]
-            if any(not item.independent_role_supported for item in action_members):
-                raise ValueError("common-risk members without an independent role cannot share action capacity")
+        for pair in cross_stage.exposure_pair_receipts:
+            if not pair.capacity_compatible:
+                pair_actions = sum(
+                    assessments[security_id].current_action_eligible
+                    for security_id in (pair.left_security_id, pair.right_security_id)
+                )
+                if pair_actions > 1:
+                    raise ValueError("shared-risk exposure pair cannot consume duplicate action capacity")
         declared_ties = {
             (item.source_stage, frozenset(item.security_ids))
             for item in self.capacity_tie_abstentions
@@ -760,6 +983,22 @@ class DailyJudgeOutput(_FrozenModel):
                 raise ValueError("candidate capacity-tie flag differs from the daily graph")
             if expected_tie and candidate.suggested_layer is not CandidateLayer.INTERNAL:
                 raise ValueError("a whole capacity tie group must remain internal")
+            if candidate.security_id in dominated_all and candidate.suggested_layer is not CandidateLayer.INTERNAL:
+                raise ValueError("every dominated candidate must return to internal research")
+            if (
+                candidate.card_status is not JudgmentCardStatus.READY
+                and candidate.security_id in {
+                    security_id
+                    for stage in self.comparison_stage_receipts
+                    for security_id in stage.eligible_security_ids
+                }
+            ):
+                raise ValueError("nonready card cannot enter comparison eligibility")
+            if (
+                candidate.suggested_layer is not CandidateLayer.INTERNAL
+                and candidate.security_id not in eligible
+            ):
+                raise ValueError("only final nondominated survivors may retain an action layer")
         return self
 
 
@@ -865,12 +1104,13 @@ class JudgeReceipt(_FrozenModel):
 class _DayRegistration:
     __slots__ = (
         "batch_id", "bundle_id", "receipt_hash", "candidate_ids", "knowledge_ids",
-        "card_status_ids",
+        "card_status_ids", "hotspot_membership_ids",
     )
-    def __init__(self, batch_id, bundle_id, receipt_hash, candidate_ids, knowledge_ids, card_status_ids):
+    def __init__(self, batch_id, bundle_id, receipt_hash, candidate_ids, knowledge_ids, card_status_ids, hotspot_membership_ids):
         self.batch_id = batch_id; self.bundle_id = bundle_id; self.receipt_hash = receipt_hash
         self.candidate_ids = candidate_ids; self.knowledge_ids = knowledge_ids
         self.card_status_ids = card_status_ids
+        self.hotspot_membership_ids = hotspot_membership_ids
 
 
 _DAY_REGISTRY: WeakKeyDictionary["JudgeDayPacket", _DayRegistration] = WeakKeyDictionary()
@@ -880,7 +1120,7 @@ class JudgeDayPacket:
     __slots__ = (
         "__batch", "__bundle", "formation_date", "cutoff", "route_batch_hash",
         "evidence_bundle_hash", "candidates", "exclusions", "__knowledge",
-        "__card_statuses",
+        "__card_statuses", "__hotspot_memberships",
         "__receipt_preimage", "__receipt_hash", "__weakref__",
     )
 
@@ -893,6 +1133,7 @@ class JudgeDayPacket:
     def receipt_preimage(self): return dict(self.__receipt_preimage)
     def prepared_knowledge_for(self, security_id): return self.__knowledge[security_id]
     def card_statuses_for(self, security_id): return self.__card_statuses[security_id]
+    def hotspot_memberships_for(self, security_id): return self.__hotspot_memberships[security_id]
 
 
 def _bundle_hash(bundle: Any) -> str:
@@ -908,9 +1149,47 @@ def _derive_card_status_source(packet, card) -> CardStatusSourceReceipt:
     if card.status is EvidenceCardStatus.EVIDENCE_READY_FOR_JUDGMENT:
         status = JudgmentCardStatus.READY
         coverage_statuses: tuple[EvidenceInputStatus, ...] = ()
+        gap_sources: tuple[RequirementGapSourceReceipt, ...] = ()
     else:
+        coverage_by = {item.dataset: item for item in packet.input_coverage}
+        gaps: list[RequirementGapSourceReceipt] = []
+        for requirement in card.missing_requirements:
+            datasets = _CARD_REQUIREMENT_DATASETS.get(
+                (card.opportunity, requirement),
+                _CARD_REQUIREMENT_DATASETS.get(requirement),
+            )
+            if not datasets:
+                raise JudgeError("incomplete card has an unmapped governed requirement")
+            try:
+                causes = tuple(
+                    CoverageCauseReceipt(
+                        dataset=dataset,
+                        status=coverage_by[dataset].status,
+                        coverage_hash=_stable_hash(coverage_by[dataset].model_dump(mode="json")),
+                    )
+                    for dataset in datasets
+                )
+            except KeyError as exc:
+                raise JudgeError("card gap lacks a governed coverage record") from exc
+            gaps.append(RequirementGapSourceReceipt(
+                opportunity=card.opportunity,
+                requirement=requirement,
+                governed_datasets=datasets,
+                coverage_causes=causes,
+                mapping_hash=_stable_hash({
+                    "opportunity": card.opportunity,
+                    "requirement": requirement,
+                    "datasets": datasets,
+                }),
+            ))
+        gap_sources = tuple(gaps)
         coverage_statuses = tuple(
-            dict.fromkeys(item.status for item in packet.input_coverage if item.status is not EvidenceInputStatus.READY)
+            dict.fromkeys(
+                cause.status
+                for gap in gap_sources
+                for cause in gap.coverage_causes
+                if cause.status is not EvidenceInputStatus.READY
+            )
         )
         local_execution_failures = {
             EvidenceInputStatus.NOT_MATERIALIZED,
@@ -927,7 +1206,50 @@ def _derive_card_status_source(packet, card) -> CardStatusSourceReceipt:
         upstream_status=card.status,
         missing_requirements=card.missing_requirements,
         coverage_statuses=coverage_statuses,
+        requirement_gap_sources=gap_sources,
         source_card_hash=_stable_hash(card.model_dump(mode="json")),
+    )
+
+
+def _derive_hotspot_memberships(packet) -> tuple[HotspotMembershipReceipt, ...]:
+    sources: dict[tuple[HotspotGroupType, str], list[Any]] = {}
+    data = (*packet.api_facts, *packet.local_observations)
+    for item in data:
+        if item.dataset == "industry_member" and item.field == "industry_code":
+            key = (HotspotGroupType.INDUSTRY, str(item.value))
+        elif item.dataset == "theme_member" and item.field == "theme_code":
+            key = (HotspotGroupType.THEME, str(item.value))
+        else:
+            continue
+        sources.setdefault(key, []).append(item)
+    sector_rows: dict[str, dict[str, Any]] = {}
+    for item in data:
+        if item.dataset == "sector_hotspot" and item.field in {"group_type", "group_code"}:
+            sector_rows.setdefault(item.row_key, {})[item.field] = item
+    for row in sector_rows.values():
+        if set(row) != {"group_type", "group_code"}:
+            continue
+        try:
+            group_type = HotspotGroupType(str(row["group_type"].value))
+        except ValueError:
+            continue
+        key = (group_type, str(row["group_code"].value))
+        sources.setdefault(key, []).extend((row["group_type"], row["group_code"]))
+    return tuple(
+        HotspotMembershipReceipt(
+            group_type=group_type,
+            group_code=group_code,
+            evidence_ids=tuple(sorted({item.evidence_id for item in items})),
+            source_identity_hash=_stable_hash(
+                [
+                    item.model_dump(mode="json")
+                    for item in sorted(items, key=lambda value: value.evidence_id)
+                ]
+            ),
+        )
+        for (group_type, group_code), items in sorted(
+            sources.items(), key=lambda value: (value[0][0].value, value[0][1])
+        )
     )
 
 
@@ -937,11 +1259,14 @@ def _build_day_components(batch, bundle):
     exclusions = []
     knowledge = {}
     card_statuses = {}
+    hotspot_memberships = {}
     for hypothesis in sorted(hypotheses, key=lambda item: item.security_id):
         packet = build_candidate_packet(batch, bundle, hypothesis.security_id)
         receipts = tuple(
             _derive_card_status_source(packet, card) for card in packet.opportunity_cards
         )
+        card_statuses[packet.security_id] = receipts
+        hotspot_memberships[packet.security_id] = _derive_hotspot_memberships(packet)
         if not any(item.status is JudgmentCardStatus.READY for item in receipts):
             exclusions.append(JudgeInputExclusion(
                 security_id=packet.security_id,
@@ -950,14 +1275,13 @@ def _build_day_components(batch, bundle):
             continue
         candidates.append(packet)
         knowledge[packet.security_id] = _prepared_knowledge_inputs(packet)
-        card_statuses[packet.security_id] = receipts
-    return tuple(candidates), tuple(exclusions), knowledge, card_statuses
+    return tuple(candidates), tuple(exclusions), knowledge, card_statuses, hotspot_memberships
 
 
 def build_judge_day_packet(route_scan_batch: VerifiedRouteScanBatch, evidence_snapshot_bundle: VerifiedEvidenceSnapshotBundle) -> JudgeDayPacket:
     batch = require_verified_route_scan_batch(route_scan_batch)
     bundle = require_verified_evidence_snapshot_bundle(evidence_snapshot_bundle, batch)
-    candidates, exclusions, knowledge, card_statuses = _build_day_components(batch, bundle)
+    candidates, exclusions, knowledge, card_statuses, hotspot_memberships = _build_day_components(batch, bundle)
     value = object.__new__(JudgeDayPacket)
     object.__setattr__(value, "_JudgeDayPacket__batch", batch)
     object.__setattr__(value, "_JudgeDayPacket__bundle", bundle)
@@ -969,6 +1293,7 @@ def build_judge_day_packet(route_scan_batch: VerifiedRouteScanBatch, evidence_sn
     object.__setattr__(value, "exclusions", exclusions)
     object.__setattr__(value, "_JudgeDayPacket__knowledge", knowledge)
     object.__setattr__(value, "_JudgeDayPacket__card_statuses", card_statuses)
+    object.__setattr__(value, "_JudgeDayPacket__hotspot_memberships", hotspot_memberships)
     preimage = _day_receipt_preimage(value)
     receipt_hash = _stable_hash(preimage)
     object.__setattr__(value, "_JudgeDayPacket__receipt_preimage", preimage)
@@ -977,6 +1302,7 @@ def build_judge_day_packet(route_scan_batch: VerifiedRouteScanBatch, evidence_sn
         id(batch), id(bundle), receipt_hash, tuple(id(item) for item in candidates),
         tuple((key, tuple(id(item) for item in values)) for key, values in sorted(knowledge.items())),
         tuple((key, tuple(id(item) for item in values)) for key, values in sorted(card_statuses.items())),
+        tuple((key, tuple(id(item) for item in values)) for key, values in sorted(hotspot_memberships.items())),
     )
     return value
 
@@ -992,10 +1318,18 @@ def _day_input(value: JudgeDayPacket) -> dict[str, Any]:
                 "evidence_packet": packet.model_dump(mode="json"),
                 "prepared_knowledge": [item.model_dump(mode="json") for item in value.prepared_knowledge_for(packet.security_id)],
                 "card_status_sources": [item.model_dump(mode="json") for item in value.card_statuses_for(packet.security_id)],
+                "hotspot_memberships": [item.model_dump(mode="json") for item in value.hotspot_memberships_for(packet.security_id)],
             }
             for packet in value.candidates
         ],
         "exclusions": [item.model_dump(mode="json") for item in value.exclusions],
+        "excluded_card_status_sources": {
+            item.security_id: [
+                source.model_dump(mode="json")
+                for source in value.card_statuses_for(item.security_id)
+            ]
+            for item in value.exclusions
+        },
     }
 
 
@@ -1016,7 +1350,7 @@ def require_verified_judge_day_packet(value: Any) -> JudgeDayPacket:
         raise JudgeError("judge day packet upstream bundle provenance failed") from exc
     if id(batch) != reg.batch_id or id(bundle) != reg.bundle_id:
         raise JudgeError("judge day packet upstream identity changed")
-    candidates, exclusions, knowledge, card_statuses = _build_day_components(verified_batch, verified_bundle)
+    candidates, exclusions, knowledge, card_statuses, hotspot_memberships = _build_day_components(verified_batch, verified_bundle)
     if tuple(id(item) for item in value.candidates) != reg.candidate_ids:
         raise JudgeError("judge day packet candidate identity changed")
     if tuple(_stable_hash(item.model_dump(mode="json")) for item in candidates) != tuple(_stable_hash(item.model_dump(mode="json")) for item in value.candidates):
@@ -1044,6 +1378,18 @@ def require_verified_judge_day_packet(value: Any) -> JudgeDayPacket:
             item.model_dump(mode="json") for item in current
         ):
             raise JudgeError("judge day packet card-status content differs from upstream")
+    observed_hotspots = tuple(
+        (key, tuple(id(item) for item in value.hotspot_memberships_for(key)))
+        for key in sorted(hotspot_memberships)
+    )
+    if observed_hotspots != reg.hotspot_membership_ids:
+        raise JudgeError("judge day packet hotspot-membership identity changed")
+    for security_id, rebuilt in hotspot_memberships.items():
+        current = value.hotspot_memberships_for(security_id)
+        if tuple(item.model_dump(mode="json") for item in rebuilt) != tuple(
+            item.model_dump(mode="json") for item in current
+        ):
+            raise JudgeError("judge day packet hotspot membership differs from evidence")
     preimage = _day_receipt_preimage(value)
     if preimage != getattr(value, "_JudgeDayPacket__receipt_preimage", None) or _stable_hash(preimage) != reg.receipt_hash or value.receipt_hash != reg.receipt_hash:
         raise JudgeError("judge day packet receipt hash mismatch")
@@ -1667,16 +2013,15 @@ def _validate_daily_comparison_evidence(output, packets):
                 if not set(item.evidence_ids).issubset(evidence):
                     raise ValueError("independent-role receipt cites another candidate's evidence")
                 _validate_numeric_text(item, evidence)
-        for cluster in stage.common_risk_clusters:
+        for pair in stage.exposure_pair_receipts:
             evidence = {
-                evidence_id: datum
-                for security_id in cluster.security_ids
-                for evidence_id, datum in evidence_by[security_id].items()
+                **evidence_by[pair.left_security_id],
+                **evidence_by[pair.right_security_id],
             }
-            for item in (cluster.judgment, cluster.reversal_fact):
+            for item in (pair.judgment, pair.reversal_fact):
                 _validate_judgment_language(item.text)
                 if not set(item.evidence_ids).issubset(evidence):
-                    raise ValueError("common-risk receipt cites evidence outside its cluster")
+                    raise ValueError("exposure-pair receipt cites evidence outside its pair")
                 _validate_numeric_text(item, evidence)
     for tie in output.capacity_tie_abstentions:
         evidence = {
@@ -1706,6 +2051,8 @@ def _validate_candidate(candidate, packet, outputs, day, packets=None):
     )
     if source is None or candidate.card_status_source != source or candidate.card_status is not source.status:
         raise ValueError("judgment card status provenance differs from the verified formation input")
+    if candidate.hotspot_memberships != day.hotspot_memberships_for(packet.security_id):
+        raise ValueError("candidate hotspot identity differs from verified membership evidence")
     bindings = dict(card.requirement_evidence_ids)
     dispositions = {item.requirement: item for item in candidate.requirement_dispositions}
     if candidate.card_status is JudgmentCardStatus.READY:
@@ -1811,6 +2158,18 @@ def _validate_candidate(candidate, packet, outputs, day, packets=None):
             raise ValueError("unavailable context section cannot cite evidence")
         if not set(receipt.consequence_evidence_ids).issubset(evidence):
             raise ValueError("context consequence cites unknown company evidence")
+    price_section = sections[EvidenceSectionName.PRICE_VOLUME_LIQUIDITY]
+    if (
+        candidate.price_role.source_section is not EvidenceSectionName.PRICE_VOLUME_LIQUIDITY
+        or candidate.price_role.section_availability is not price_section.availability
+        or candidate.price_role.source_section_hash
+        != _stable_hash(price_section.model_dump(mode="json"))
+    ):
+        raise ValueError("price role differs from the dedicated price section")
+    if not set(candidate.price_role.judgment.evidence_ids).issubset(
+        price_section.evidence_ids
+    ):
+        raise ValueError("price role cites evidence outside the dedicated price section")
     if any(item.source_section is not EvidenceSectionName.COUNTEREVIDENCE for item in candidate.counterevidence):
         raise ValueError("counterevidence must identify the counterevidence section")
     if any(item.source_section is not EvidenceSectionName.UNKNOWNS for item in candidate.unknowns):
@@ -2035,6 +2394,7 @@ def _consistency_mismatches(first, second):
             or left.proposition.invalidation_condition != right.proposition.invalidation_condition
             or left.market_effect != right.market_effect
             or left.hotspot_effect != right.hotspot_effect
+            or left.hotspot_memberships != right.hotspot_memberships
             or left.card_status != right.card_status
             or left.card_status_source != right.card_status_source
             or left.price_role != right.price_role
@@ -2098,9 +2458,11 @@ def _jsonable(value):
 
 __all__ = [
     "CandidateJudgment", "CapacityTieAbstention", "CardStatusSourceReceipt",
+    "CoverageCauseReceipt", "RequirementGapSourceReceipt",
     "CitedContextEffect", "CitedPriceRole", "CitedValidationState",
-    "CommonRiskClusterReceipt", "ComparisonCohortReceipt", "ComparisonStageReceipt",
-    "CrossOpportunityAssessment", "DailyJudgeOutput",
+    "ComparisonCohortReceipt", "ComparisonStageReceipt",
+    "CrossOpportunityAssessment", "ExposurePairReceipt", "HotspotMembershipReceipt",
+    "DailyJudgeOutput",
     "DecisiveComparison", "DecisiveEdge",
     "FrozenDecisionJudge", "FrozenJudgeConfig", "JudgmentCacheKey",
     "JudgeConsistencyAudit", "JudgeDayPacket", "JudgeError", "JudgeInstabilityError",
