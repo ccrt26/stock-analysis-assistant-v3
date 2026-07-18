@@ -1765,6 +1765,17 @@ def generate_report(config: ValidationConfig) -> Path:
     all_summary["命中"] = all_summary["precision"].map(_format_pct)
     all_summary["期末中位"] = all_summary["median_terminal_return"].map(_format_pct)
     all_summary["最大不利中位"] = all_summary["median_max_adverse_return"].map(_format_pct)
+    block_summary = summaries[
+        (summaries["block"] != "ALL")
+        & (
+            summaries["policy"].isin(
+                ["research_union", "v3_partial_candidate", "matched_candidate_control"]
+            )
+        )
+    ].copy()
+    block_summary["层级"] = block_summary["policy"] + "/" + block_summary["layer"]
+    block_summary["样本"] = block_summary["observations"].astype(int)
+    block_summary["命中"] = block_summary["precision"].map(_format_pct)
 
     lines = [
         "# 股票分析助手 V3：轻量分层历史验证结果",
@@ -1788,6 +1799,12 @@ def generate_report(config: ValidationConfig) -> Path:
         _markdown_table(all_summary, ["名称", "observations", "命中", "期末中位", "最大不利中位"], ["层/入口", "20日样本", "盘中触及+20%", "第20日期末中位", "途中最大不利中位"]),
         "",
         "入口层的含义需要分开看：价格入口命中最高，但期末中位和途中回撤最差；热点入口命中明显高于盈利入口，路径也较深；盈利入口命中较低，但回撤相对温和。这支持‘价格发现启动、热点说明共同性、公司证据控制持续性与风险’，不支持把近期强势或业绩增长单独翻译为应该买。",
+        "",
+        "三个独立区块的中心窗口结果如下：",
+        "",
+        _markdown_table(block_summary, ["block", "层级", "样本", "命中"], ["区块", "层级", "20日样本", "盘中触及+20%"]),
+        "",
+        "最终候选 27.50% 的命中仍略高于同日、同市场/行业与流动性匹配对照的 24.45%，但明显低于它所来自的研究池 34.50%；且三个区块里候选相对研究池分别少约 8.99、3.67、8.22 个百分点。因此问题不是框架完全没有发现能力，而是当前公司证据硬门槛、Pareto 淘汰和容量决胜没有把研究池里的机会正确压缩出来。平均每天只留下 3.58 只也说明协议很保守，但‘少而精’并没有兑现为更高命中。",
         "",
         f"90 个形成日平均每天形成 {daily['candidate_count'].mean():.2f} 只最终候选、{daily['focus_count'].mean():.2f} 只重点候选；共记录 {new_count} 次新项目和 {exit_count} 次退出。能够形成配对审计的挑战者替换有 {len(pairs)} 次。未在入场后 20 日触及目标的项目，平均占位约 {_format_number(wrong_occupancy)} 个交易日。",
         "",
