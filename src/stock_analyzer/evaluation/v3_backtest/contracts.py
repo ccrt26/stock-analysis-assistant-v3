@@ -64,6 +64,42 @@ class EvidenceKind(StrEnum):
     MODEL_JUDGMENT = "model_judgment"
 
 
+class EvidenceCardStatus(StrEnum):
+    """Formation-date executability of an opportunity evidence card."""
+
+    READY = "ready"
+    INSUFFICIENT_AS_OF_CUTOFF = "insufficient_as_of_cutoff"
+    NOT_EXECUTABLE_WITH_LOCAL_DATA = "not_executable_with_local_data"
+
+
+class ContextEffect(StrEnum):
+    """How market or hotspot context changes a candidate judgment."""
+
+    SUPPORTS_CURRENT_OPPORTUNITY = "supports_current_opportunity"
+    RAISES_COMPANY_EVIDENCE_BAR = "raises_company_evidence_bar"
+    LIMITS_FOCUS = "limits_focus"
+    ACCELERATES_INVALIDATION_CHECK = "accelerates_invalidation_check"
+    NOT_APPLICABLE = "not_applicable"
+    OPPOSES_CAUSAL_CHAIN = "opposes_causal_chain"
+
+
+class ValidationDisposition(StrEnum):
+    """As-of-date state of the project's preregistered next validation."""
+
+    SATISFIED = "satisfied"
+    UNMET = "unmet"
+    NEGATED = "negated"
+    NOT_OBSERVABLE_AS_OF_DATE = "not_observable_as_of_date"
+
+
+class ComparisonStage(StrEnum):
+    """Frozen order for non-scoring candidate comparisons."""
+
+    SAME_HOTSPOT_OPPORTUNITY_ROLE = "same_hotspot_opportunity_role"
+    SAME_OPPORTUNITY_CROSS_CONTEXT = "same_opportunity_cross_context"
+    CROSS_OPPORTUNITY = "cross_opportunity"
+
+
 class _FrozenContract(BaseModel):
     model_config = ConfigDict(
         extra="forbid",

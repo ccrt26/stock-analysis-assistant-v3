@@ -11,6 +11,7 @@ import subprocess
 import tempfile
 import unicodedata
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import asdict, dataclass
 from datetime import date, datetime
 from decimal import Decimal
 from enum import StrEnum
@@ -20,7 +21,15 @@ from weakref import WeakKeyDictionary
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError, field_validator, model_validator
 
-from stock_analyzer.evaluation.v3_backtest.contracts import CandidateLayer, DiscoveryRoute, OpportunityType
+from stock_analyzer.evaluation.v3_backtest.contracts import (
+    CandidateLayer,
+    ComparisonStage,
+    ContextEffect,
+    DiscoveryRoute,
+    EvidenceCardStatus as JudgmentCardStatus,
+    OpportunityType,
+    ValidationDisposition,
+)
 from stock_analyzer.evaluation.v3_backtest.evidence import (
     CandidateEvidencePacket,
     EvidenceCardStatus,
@@ -75,6 +84,42 @@ _EMPTY_UNKNOWNS_TEXT = "no unknown-section evidence was available as of the form
 
 NonEmptyStr = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 Sha256 = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
+
+
+@dataclass(frozen=True)
+class JudgmentCacheKey:
+    """Complete context identity for a reusable structured judgment."""
+
+    origin: date
+    cutoff: str
+    fact_manifest_hash: str
+    formula_version: str
+    knowledge_version: str
+    prompt_version: str
+    project_state_hash: str
+    checkpoint: str
+    comparator_cohort_hash: str
+    portfolio_exposure_hash: str
+    previous_judgment_hash: str
+
+    def __post_init__(self) -> None:
+        for name, value in asdict(self).items():
+            if name == "origin":
+                continue
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"judgment cache key {name} must be non-empty")
+
+    @property
+    def cache_hash(self) -> str:
+        return _stable_hash(asdict(self))
+
+    @property
+    def force_rejudgment(self) -> bool:
+        normalized = self.checkpoint.strip().casefold()
+        return bool(re.fullmatch(r"(?:(?:day|checkpoint)_?)?(?:5|10|20|30)", normalized))
+
+    def is_reusable_with(self, other: "JudgmentCacheKey") -> bool:
+        return self == other and not other.force_rejudgment
 
 
 class JudgeError(RuntimeError):
@@ -139,6 +184,39 @@ class CitedJudgmentText(_FrozenModel):
         return value
 
 
+class CitedContextEffect(_FrozenModel):
+    effect: ContextEffect
+    judgment: CitedJudgmentText
+
+    @model_validator(mode="after")
+    def require_evidence(self) -> Self:
+        if not self.judgment.evidence_ids:
+            raise ValueError("context effect requires evidence")
+        return self
+
+
+class CitedPriceRole(_FrozenModel):
+    role: NonEmptyStr
+    judgment: CitedJudgmentText
+
+    @model_validator(mode="after")
+    def require_evidence(self) -> Self:
+        if not self.judgment.evidence_ids:
+            raise ValueError("price role requires evidence")
+        return self
+
+
+class CitedValidationState(_FrozenModel):
+    disposition: ValidationDisposition
+    judgment: CitedJudgmentText
+
+    @model_validator(mode="after")
+    def require_evidence(self) -> Self:
+        if not self.judgment.evidence_ids:
+            raise ValueError("next validation state requires evidence")
+        return self
+
+
 class SelectionPropositionJudgment(_FrozenModel):
     primary_opportunity: OpportunityType
     why_now: CitedJudgmentText
@@ -161,11 +239,57 @@ class ConsideredEvidence(_FrozenModel):
     judgment: CitedJudgmentText
 
 
+class DecisiveEdge(_FrozenModel):
+    winner_security_id: NonEmptyStr
+    dominated_security_id: NonEmptyStr
+    stage: ComparisonStage
+    judgment: CitedJudgmentText
+    reversal_fact: CitedJudgmentText
+
+    @model_validator(mode="after")
+    def require_distinct_cited_endpoints(self) -> Self:
+        if self.winner_security_id == self.dominated_security_id:
+            raise ValueError("comparison edge endpoints must differ")
+        if not self.judgment.evidence_ids or not self.reversal_fact.evidence_ids:
+            raise ValueError("decisive edge judgment and reversal fact require evidence")
+        return self
+
+
 class DecisiveComparison(_FrozenModel):
     comparator_security_ids: tuple[NonEmptyStr, ...]
     comparison_role: ComparisonRole
+    comparison_stages: Annotated[
+        tuple[ComparisonStage, ...], Field(min_length=3, max_length=3)
+    ]
     judgment: CitedJudgmentText
     reversal_fact: CitedJudgmentText
+    decisive_edges: tuple[DecisiveEdge, ...]
+    indistinguishable_groups: tuple[tuple[NonEmptyStr, ...], ...]
+    capacity_tie_abstention: bool
+
+    @model_validator(mode="after")
+    def enforce_frozen_comparison_contract(self) -> Self:
+        expected_stages = (
+            ComparisonStage.SAME_HOTSPOT_OPPORTUNITY_ROLE,
+            ComparisonStage.SAME_OPPORTUNITY_CROSS_CONTEXT,
+            ComparisonStage.CROSS_OPPORTUNITY,
+        )
+        if self.comparison_stages != expected_stages:
+            raise ValueError("comparison stages must use the frozen three-stage order")
+        if len(self.comparator_security_ids) != len(set(self.comparator_security_ids)):
+            raise ValueError("comparison cohort identities must be unique")
+        if not self.judgment.evidence_ids or not self.reversal_fact.evidence_ids:
+            raise ValueError("decisive comparison and reversal fact require evidence")
+        flattened: list[str] = []
+        for group in self.indistinguishable_groups:
+            if len(group) < 2 or len(group) != len(set(group)):
+                raise ValueError("indistinguishable comparison groups require unique peers")
+            flattened.extend(group)
+        if len(flattened) != len(set(flattened)):
+            raise ValueError("a security cannot appear in multiple indistinguishable groups")
+        if self.capacity_tie_abstention and not self.indistinguishable_groups:
+            raise ValueError("capacity tie abstention requires an indistinguishable group")
+        return self
 
 
 class KnowledgeUseReceipt(_FrozenModel):
@@ -210,6 +334,11 @@ class CandidateJudgment(_FrozenModel):
     primary_opportunity: OpportunityType
     overall_disposition: RequirementDispositionType
     supporting_factors: Annotated[tuple[DiscoveryRoute, ...], Field(max_length=1)] = ()
+    market_effect: CitedContextEffect
+    hotspot_effect: CitedContextEffect
+    card_status: JudgmentCardStatus
+    price_role: CitedPriceRole
+    next_validation_state: CitedValidationState
     proposition: SelectionPropositionJudgment
     directional_thesis: CitedJudgmentText
     new_driver_evidence_ids: tuple[NonEmptyStr, ...] = ()
@@ -246,6 +375,58 @@ class CandidateJudgment(_FrozenModel):
         unused = {item.knowledge_id for item in self.unused_prepared_knowledge}
         if used.intersection(unused):
             raise ValueError("prepared knowledge cannot be both used and unused")
+        if (
+            self.card_status is not JudgmentCardStatus.READY
+            and self.suggested_layer is not CandidateLayer.INTERNAL
+        ):
+            raise ValueError("only a ready card may enter a ten-candidate layer")
+        context_effects = {self.market_effect.effect, self.hotspot_effect.effect}
+        if (
+            ContextEffect.LIMITS_FOCUS in context_effects
+            and self.suggested_layer is CandidateLayer.FOCUS
+        ):
+            raise ValueError("a limits-focus context effect forbids the focus layer")
+        if (
+            ContextEffect.OPPOSES_CAUSAL_CHAIN in context_effects
+            and self.suggested_layer is not CandidateLayer.INTERNAL
+        ):
+            raise ValueError("a context effect that opposes the causal chain requires internal research")
+        context_ids = {
+            evidence_id
+            for receipt in (self.market_effect, self.hotspot_effect)
+            for evidence_id in receipt.judgment.evidence_ids
+        }
+        if (
+            self.suggested_layer is not CandidateLayer.INTERNAL
+            and not context_ids.issubset(self.directional_thesis.evidence_ids)
+        ):
+            raise ValueError("non-internal direction must cite both context effects")
+        accelerated_ids = {
+            evidence_id
+            for receipt in (self.market_effect, self.hotspot_effect)
+            if receipt.effect is ContextEffect.ACCELERATES_INVALIDATION_CHECK
+            for evidence_id in receipt.judgment.evidence_ids
+        }
+        if not accelerated_ids.issubset(self.invalidation.evidence_ids):
+            raise ValueError("accelerated invalidation must cite the triggering context effect")
+        comparison = self.decisive_comparison
+        cohort = {self.security_id, *comparison.comparator_security_ids}
+        if self.security_id in comparison.comparator_security_ids:
+            raise ValueError("comparison cohort cannot include the candidate itself")
+        endpoints = {
+            security_id
+            for edge in comparison.decisive_edges
+            for security_id in (edge.winner_security_id, edge.dominated_security_id)
+        }
+        if not endpoints.issubset(cohort):
+            raise ValueError("comparison edge references a security outside its group")
+        grouped = {
+            security_id
+            for group in comparison.indistinguishable_groups
+            for security_id in group
+        }
+        if not grouped.issubset(cohort):
+            raise ValueError("indistinguishable group references a security outside its cohort")
         return self
 
 
@@ -1075,6 +1256,8 @@ def _validate_candidate(candidate, packet, outputs, day, packets=None):
     evidence = {item.evidence_id: item for item in (*packet.api_facts, *packet.local_observations)}
     card = next((item for item in packet.opportunity_cards if item.opportunity is candidate.primary_opportunity), None)
     if card is None or card.status is not EvidenceCardStatus.EVIDENCE_READY_FOR_JUDGMENT: raise ValueError("primary opportunity lacks a ready card")
+    if candidate.card_status is not JudgmentCardStatus.READY:
+        raise ValueError("judgment card status differs from the ready formation input")
     bindings = dict(card.requirement_evidence_ids); dispositions = {item.requirement: item for item in candidate.requirement_dispositions}
     if set(bindings) != set(dispositions): raise ValueError("selected opportunity requirement bindings are incomplete")
     all_bound = set()
@@ -1118,13 +1301,13 @@ def _validate_candidate(candidate, packet, outputs, day, packets=None):
             (
                 item
                 for item in comparator_packet.opportunity_cards
-                if item.opportunity is candidate.primary_opportunity
+                if item.opportunity is outputs[security_id].primary_opportunity
                 and item.status is EvidenceCardStatus.EVIDENCE_READY_FOR_JUDGMENT
             ),
             None,
         )
         if comparator_card is None:
-            raise ValueError("comparison candidate lacks the same ready opportunity card")
+            raise ValueError("comparison candidate lacks its selected ready opportunity card")
         comparator_bound.update(
             evidence_id
             for _, evidence_ids in comparator_card.requirement_evidence_ids
@@ -1133,16 +1316,11 @@ def _validate_candidate(candidate, packet, outputs, day, packets=None):
     if same_opportunity and candidate.suggested_layer in (
         CandidateLayer.FOCUS, CandidateLayer.HIGH_ELASTICITY
     ):
-        if comparator_ids != same_opportunity:
+        if not same_opportunity.issubset(comparator_ids):
             raise ValueError("comparison must include the full same-opportunity cohort")
         if candidate.decisive_comparison.comparison_role is not ComparisonRole.SAME_OPPORTUNITY_PEER:
             raise ValueError("comparison role differs from same-opportunity cohort")
-    elif comparator_ids and not comparator_ids.issubset(same_opportunity):
-        raise ValueError("comparison cites a candidate outside the same opportunity")
-    elif not same_opportunity and (
-        comparator_ids
-        or candidate.decisive_comparison.comparison_role is not ComparisonRole.NO_SAME_OPPORTUNITY_PEER
-    ):
+    elif not same_opportunity and candidate.decisive_comparison.comparison_role is not ComparisonRole.NO_SAME_OPPORTUNITY_PEER:
         raise ValueError("comparison role must state that no same-opportunity peer exists")
     if comparator_ids and not comparator_bound.issubset(
         candidate.decisive_comparison.judgment.evidence_ids
@@ -1242,10 +1420,16 @@ def _validate_candidate(candidate, packet, outputs, day, packets=None):
                 raise ValueError("non-internal thesis does not bind driver, target, and invalidation")
     _validate_knowledge(candidate, packet, day)
     _validate_judgment_language(candidate.decisive_comparison.comparison_role)
+    _validate_judgment_language(candidate.price_role.role)
     texts = _all_texts(candidate); cited = set()
     comparison_texts = {
         id(candidate.decisive_comparison.judgment),
         id(candidate.decisive_comparison.reversal_fact),
+        *(
+            id(item)
+            for edge in candidate.decisive_comparison.decisive_edges
+            for item in (edge.judgment, edge.reversal_fact)
+        ),
     }
     for item in texts:
         _validate_judgment_language(item.text)
@@ -1318,10 +1502,17 @@ def _validate_knowledge(candidate, packet, day):
 def _all_texts(candidate):
     proposition = candidate.proposition
     return (
+        candidate.market_effect.judgment, candidate.hotspot_effect.judgment,
+        candidate.price_role.judgment, candidate.next_validation_state.judgment,
         proposition.why_now, proposition.next_validation, proposition.post_fact_price_response,
         proposition.price_confirmation, proposition.target_conditions, proposition.invalidation_condition,
         *(item.judgment for item in candidate.requirement_dispositions), *candidate.decisive_advantages,
         candidate.decisive_comparison.judgment, candidate.decisive_comparison.reversal_fact,
+        *(
+            item
+            for edge in candidate.decisive_comparison.decisive_edges
+            for item in (edge.judgment, edge.reversal_fact)
+        ),
         *(item.judgment for item in candidate.counterevidence), *(item.judgment for item in candidate.unknowns),
         candidate.directional_thesis, candidate.next_fact, candidate.invalidation,
         *(item.use_summary for item in candidate.actually_used_knowledge),
@@ -1361,7 +1552,20 @@ def _consistency_mismatches(first, second):
             or left.proposition.invalidation_condition != right.proposition.invalidation_condition
         ):
             mismatches.append(f"{security_id}:directional_signature")
-        if left.decisive_advantages != right.decisive_advantages or left.decisive_comparison != right.decisive_comparison: mismatches.append(f"{security_id}:decisive_comparison")
+        left_comparison = left.decisive_comparison
+        right_comparison = right.decisive_comparison
+        if left_comparison.decisive_edges != right_comparison.decisive_edges:
+            mismatches.append(f"{security_id}:decisive_edges")
+        if left_comparison.indistinguishable_groups != right_comparison.indistinguishable_groups:
+            mismatches.append(f"{security_id}:indistinguishable_groups")
+        comparable_left = left_comparison.model_copy(
+            update={"decisive_edges": (), "indistinguishable_groups": ()}
+        )
+        comparable_right = right_comparison.model_copy(
+            update={"decisive_edges": (), "indistinguishable_groups": ()}
+        )
+        if left.decisive_advantages != right.decisive_advantages or comparable_left != comparable_right:
+            mismatches.append(f"{security_id}:decisive_comparison")
     return tuple(mismatches)
 
 
@@ -1412,7 +1616,9 @@ def _jsonable(value):
 
 
 __all__ = [
-    "CandidateJudgment", "DailyJudgeOutput", "FrozenDecisionJudge", "FrozenJudgeConfig",
+    "CandidateJudgment", "CitedContextEffect", "CitedPriceRole",
+    "CitedValidationState", "DailyJudgeOutput", "DecisiveComparison", "DecisiveEdge",
+    "FrozenDecisionJudge", "FrozenJudgeConfig", "JudgmentCacheKey",
     "JudgeConsistencyAudit", "JudgeDayPacket", "JudgeError", "JudgeInstabilityError",
     "JudgePreflightReceipt", "PreparedKnowledgeInput", "SelectionPropositionJudgment",
     "ThreeDateConsistencyGate", "VerifiedJudgmentBatch", "build_judge_day_packet",

@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 import pytest
 from pydantic import ValidationError
 
+import stock_analyzer.evaluation.v3_backtest.contracts as contracts_module
 from stock_analyzer.evaluation.v3_backtest.contracts import (
     CandidateLayer,
     CandidateProject,
@@ -106,6 +107,37 @@ def test_valid_contracts_preserve_route_opportunity_and_evidence_layers() -> Non
     assert candidate.primary_opportunity is OpportunityType.EARNINGS_REVALUATION
     assert candidate.evidence_refs[0].kind is EvidenceKind.API_FACT
     assert candidate.layer is CandidateLayer.EARLY_VALIDATION
+
+
+def test_contextual_judgment_enums_are_closed_and_exact() -> None:
+    EvidenceCardStatus = contracts_module.EvidenceCardStatus
+    ContextEffect = contracts_module.ContextEffect
+    ValidationDisposition = contracts_module.ValidationDisposition
+    ComparisonStage = contracts_module.ComparisonStage
+    assert tuple(item.value for item in EvidenceCardStatus) == (
+        "ready",
+        "insufficient_as_of_cutoff",
+        "not_executable_with_local_data",
+    )
+    assert tuple(item.value for item in ContextEffect) == (
+        "supports_current_opportunity",
+        "raises_company_evidence_bar",
+        "limits_focus",
+        "accelerates_invalidation_check",
+        "not_applicable",
+        "opposes_causal_chain",
+    )
+    assert tuple(item.value for item in ValidationDisposition) == (
+        "satisfied",
+        "unmet",
+        "negated",
+        "not_observable_as_of_date",
+    )
+    assert tuple(item.value for item in ComparisonStage) == (
+        "same_hotspot_opportunity_role",
+        "same_opportunity_cross_context",
+        "cross_opportunity",
+    )
 
 
 def test_project_rejects_evidence_available_after_formation_cutoff() -> None:
