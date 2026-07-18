@@ -14,6 +14,7 @@ from stock_analyzer.evaluation.v3_layered_validation import (
     classify_module,
     compress_candidates,
     load_config,
+    limit_to_tradable_route,
     prepare_output_root,
     select_latest_available_financials,
     update_project_states,
@@ -275,3 +276,15 @@ def test_module_classification_distinguishes_insufficient_and_not_testable():
         path_ok=False,
         testable=False,
     ) == "not_testable"
+
+
+def test_route_limit_filters_non_tradable_names_before_applying_cap():
+    ranked = ["SUSPENDED", "A", "B", "C"]
+
+    selected = limit_to_tradable_route(
+        ranked,
+        tradable_codes={"A", "B", "C"},
+        limit=2,
+    )
+
+    assert selected == ["A", "B"]

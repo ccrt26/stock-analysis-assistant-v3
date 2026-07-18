@@ -854,6 +854,26 @@ def _active_memberships(
     ].copy()
 
 
+def limit_to_tradable_route(
+    ranked_codes: list[str], *, tradable_codes: set[str], limit: int
+) -> list[str]:
+    """Apply the route cap only after removing names absent from today's stock pool."""
+
+    if limit < 0:
+        raise ValueError("route limit must be non-negative")
+    selected: list[str] = []
+    seen: set[str] = set()
+    for raw_code in ranked_codes:
+        code = str(raw_code)
+        if code in seen or code not in tradable_codes:
+            continue
+        seen.add(code)
+        selected.append(code)
+        if len(selected) >= limit:
+            break
+    return selected
+
+
 def _build_route_evidence(
     *,
     config: ValidationConfig,
@@ -865,6 +885,7 @@ def _build_route_evidence(
     company_facts: pd.DataFrame,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     stock = stocks.copy().set_index("ts_code", drop=False)
+    tradable_codes = set(stock.index.astype(str))
     complete_groups = hotspots[
         hotspots["coverage_status"].astype(str).str.startswith("complete")
         & (pd.to_numeric(hotspots["breadth_5d"], errors="coerce") >= 0.50)
@@ -895,9 +916,11 @@ def _build_route_evidence(
         ascending=[True, False, False],
         na_position="last",
     )
-    hotspot_codes = hotspot_members.drop_duplicates("ts_code")["ts_code"].astype(str).head(
-        config.route_recall_cap
-    ).tolist()
+    hotspot_codes = limit_to_tradable_route(
+        hotspot_members.drop_duplicates("ts_code")["ts_code"].astype(str).tolist(),
+        tradable_codes=tradable_codes,
+        limit=config.route_recall_cap,
+    )
 
     company = company_facts.copy()
     company["report_age_days"] = (
@@ -920,7 +943,11 @@ def _build_route_evidence(
         ascending=[False, False, False, False],
         na_position="last",
     )
-    earnings_codes = earnings["ts_code"].astype(str).head(config.route_recall_cap).tolist()
+    earnings_codes = limit_to_tradable_route(
+        earnings["ts_code"].astype(str).tolist(),
+        tradable_codes=tradable_codes,
+        limit=config.route_recall_cap,
+    )
 
     price = stocks[
         (pd.to_numeric(stocks["relative_return_20d"], errors="coerce") > 0)
@@ -932,7 +959,11 @@ def _build_route_evidence(
         ascending=False,
         na_position="last",
     )
-    price_codes = price["ts_code"].astype(str).head(config.route_recall_cap).tolist()
+    price_codes = limit_to_tradable_route(
+        price["ts_code"].astype(str).tolist(),
+        tradable_codes=tradable_codes,
+        limit=config.route_recall_cap,
+    )
     route_lists = {
         "hotspot": hotspot_codes,
         "earnings": earnings_codes,
