@@ -202,6 +202,43 @@ class ForwardLedger:
             bundles.append(FormationBundle(path, payload, candidates, manifest))
         return tuple(bundles)
 
+    def load_bundle_result(self, path: Path) -> BundleWriteResult:
+        path = Path(path)
+        manifest = json.loads((path / "manifest.json").read_text(encoding="utf-8"))
+        self._verify_manifest(path, manifest)
+        return BundleWriteResult(
+            path=path,
+            bundle_content_hash=str(manifest["bundle_content_hash"]),
+            idempotent=True,
+        )
+
+    def write_report_projection(self, relative_path: Path, content: str) -> Path:
+        relative = Path(relative_path)
+        if relative.is_absolute() or ".." in relative.parts:
+            raise ValueError("report projection path must be relative")
+        final = self.root / "reports" / relative
+        final.parent.mkdir(parents=True, exist_ok=True)
+        encoded = content.encode("utf-8")
+        try:
+            descriptor = os.open(final, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+        except FileExistsError:
+            if final.read_bytes() != encoded:
+                raise ImmutableEvidenceConflict(
+                    f"immutable report conflict for {final}"
+                )
+            return final
+        try:
+            with os.fdopen(descriptor, "wb") as handle:
+                handle.write(encoded)
+                handle.flush()
+                os.fsync(handle.fileno())
+            _fsync_directory(final.parent)
+        except Exception:
+            if final.exists():
+                final.unlink()
+            raise
+        return final
+
     def _write_bundle(
         self,
         final: Path,

@@ -22,11 +22,14 @@ from stock_analyzer.evaluation.v3_forward.ledger import (
 from stock_analyzer.evaluation.v3_forward.reports import (
     render_entry_report,
     render_formation_report,
+    render_snapshot_report,
 )
 from stock_analyzer.evaluation.v3_forward.rules import (
+    OBSERVATION_WINDOWS,
     RULE_VERSION,
     TARGET_RETURN,
     classify_entry,
+    compute_window_snapshot,
     rule_manifest,
     rule_manifest_hash,
 )
@@ -115,6 +118,10 @@ def form_observation(
     }
     report = render_formation_report(payload, candidates)
     bundle = ledger.write_formation_bundle(payload, candidates, report)
+    ledger.write_report_projection(
+        Path(f"formation_date={formation_date.isoformat()}") / "formation.md",
+        report,
+    )
     return FormationRunResult(bundle, len(candidates), int(payload["action_count"]))
 
 
@@ -251,6 +258,104 @@ def _entry_rows(
     return pd.DataFrame(rows, columns=columns)
 
 
+def _entry_bundle_path(
+    output_root: Path, formation_date: date, entry_date: date
+) -> Path:
+    return (
+        Path(output_root)
+        / "entries"
+        / f"entry_date={entry_date.isoformat()}"
+        / f"formation_date={formation_date.isoformat()}"
+    )
+
+
+def _stock_window(
+    warehouse_root: Path, sessions: list[date], ts_code: str
+) -> pd.DataFrame:
+    rows: list[dict[str, Any]] = []
+    for session in sessions:
+        prices = _read_partition(warehouse_root, "equity_daily", session)
+        factors = _read_partition(warehouse_root, "adj_factor", session)
+        stock = prices[prices["ts_code"].astype(str).eq(str(ts_code))] if not prices.empty else prices
+        factor = factors[factors["ts_code"].astype(str).eq(str(ts_code))] if not factors.empty else factors
+        row: dict[str, Any] = {
+            "trade_date": session,
+            "open": None,
+            "high": None,
+            "low": None,
+            "close": None,
+            "adj_factor": None,
+        }
+        if not stock.empty:
+            for field in ("open", "high", "low", "close"):
+                row[field] = stock.iloc[0].get(field)
+        if not factor.empty:
+            row["adj_factor"] = factor.iloc[0].get("adj_factor")
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def _append_mature_snapshots(
+    *,
+    ledger: ForwardLedger,
+    warehouse_root: Path,
+    output_root: Path,
+    formation_date: date,
+    entry_date: date,
+    entries: pd.DataFrame,
+    sessions: list[date],
+) -> list[BundleWriteResult]:
+    observation_sessions = [value for value in sessions if value >= entry_date]
+    results: list[BundleWriteResult] = []
+    executable = entries[entries["executable_entry"].fillna(False).astype(bool)].copy()
+    for horizon in OBSERVATION_WINDOWS:
+        if len(observation_sessions) < horizon:
+            continue
+        maturity_date = observation_sessions[horizon - 1]
+        final = (
+            Path(output_root)
+            / "snapshots"
+            / f"as_of_date={maturity_date.isoformat()}"
+            / f"formation_date={formation_date.isoformat()}"
+            / f"horizon={horizon}"
+        )
+        if final.exists():
+            results.append(ledger.load_bundle_result(final))
+            continue
+        rows: list[dict[str, Any]] = []
+        for entry in executable.to_dict(orient="records"):
+            path = _stock_window(
+                warehouse_root,
+                observation_sessions[:horizon],
+                str(entry["ts_code"]),
+            )
+            metrics = compute_window_snapshot(path, entry, horizon=horizon)
+            rows.append(
+                {
+                    "formation_date": formation_date,
+                    "entry_date": entry_date,
+                    "ts_code": str(entry["ts_code"]),
+                    **metrics,
+                }
+            )
+        snapshots = pd.DataFrame(rows)
+        report = render_snapshot_report(
+            formation_date.isoformat(), maturity_date.isoformat(), horizon, snapshots
+        )
+        result = ledger.write_snapshot_bundle(
+            formation_date, maturity_date, horizon, snapshots, report
+        )
+        ledger.write_report_projection(
+            Path(f"as_of_date={maturity_date.isoformat()}")
+            / f"formation_date={formation_date.isoformat()}"
+            / f"horizon={horizon}"
+            / "snapshot.md",
+            report,
+        )
+        results.append(result)
+    return results
+
+
 def update_observations(
     *,
     warehouse_root: Path,
@@ -263,6 +368,7 @@ def update_observations(
     sessions = _market_sessions(warehouse_root, as_of_date)
     observed_at = now or datetime.now(timezone.utc)
     entry_results: list[BundleWriteResult] = []
+    snapshot_results: list[BundleWriteResult] = []
     waiting: list[date] = []
     for formation in ledger.load_formations():
         formation_date = date.fromisoformat(str(formation.payload["formation_date"]))
@@ -271,22 +377,45 @@ def update_observations(
             waiting.append(formation_date)
             continue
         entry_date = future_sessions[0]
-        entries = _entry_rows(
-            Path(warehouse_root),
-            formation_date,
-            entry_date,
-            formation.candidates,
-            observed_at,
-        )
-        report = render_entry_report(
-            formation_date.isoformat(), entry_date.isoformat(), entries
-        )
-        entry_results.append(
-            ledger.write_entry_bundle(
+        entry_path = _entry_bundle_path(output_root, formation_date, entry_date)
+        if entry_path.exists():
+            entry_result = ledger.load_bundle_result(entry_path)
+            entries = pd.read_parquet(entry_path / "entries.parquet")
+        else:
+            entries = _entry_rows(
+                Path(warehouse_root),
+                formation_date,
+                entry_date,
+                formation.candidates,
+                observed_at,
+            )
+            report = render_entry_report(
+                formation_date.isoformat(), entry_date.isoformat(), entries
+            )
+            entry_result = ledger.write_entry_bundle(
                 formation_date, entry_date, entries, report
             )
+            ledger.write_report_projection(
+                Path(f"entry_date={entry_date.isoformat()}")
+                / f"formation_date={formation_date.isoformat()}"
+                / "entries.md",
+                report,
+            )
+        entry_results.append(entry_result)
+        snapshot_results.extend(
+            _append_mature_snapshots(
+                ledger=ledger,
+                warehouse_root=Path(warehouse_root),
+                output_root=Path(output_root),
+                formation_date=formation_date,
+                entry_date=entry_date,
+                entries=entries,
+                sessions=sessions,
+            )
         )
-    return UpdateRunResult(tuple(entry_results), (), tuple(waiting))
+    return UpdateRunResult(
+        tuple(entry_results), tuple(snapshot_results), tuple(waiting)
+    )
 
 
 __all__ = [

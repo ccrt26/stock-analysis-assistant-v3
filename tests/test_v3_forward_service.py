@@ -10,6 +10,7 @@ import pandas as pd
 from stock_analyzer.evaluation.v3_forward.inputs import FormationInputs
 from stock_analyzer.evaluation.v3_forward.ledger import ForwardLedger, sha256_file
 from stock_analyzer.evaluation.v3_forward.reports import render_formation_report
+from stock_analyzer.evaluation.v3_forward.__main__ import build_parser
 from stock_analyzer.evaluation.v3_forward.service import (
     form_observation,
     update_observations,
@@ -134,6 +135,8 @@ def test_form_records_honest_times_hashes_waiting_and_is_idempotent(
     assert {
         path.name: sha256_file(path) for path in first.bundle.path.iterdir() if path.is_file()
     } == before
+    projected = output / "reports" / "formation_date=2026-07-17" / "formation.md"
+    assert projected.read_bytes() == (first.bundle.path / "report.md").read_bytes()
 
 
 def test_update_without_later_market_session_keeps_waiting(tmp_path: Path):
@@ -188,6 +191,83 @@ def test_update_uses_first_market_session_and_only_confirmed_items(tmp_path: Pat
     assert bool(entries.iloc[0]["executable_entry"]) is True
     assert entries.iloc[0]["action_price"] == 10.0
 
+    rerun = update_observations(
+        warehouse_root=warehouse,
+        output_root=tmp_path / "forward",
+        as_of_date=ENTRY_DATE,
+        now=NOW.replace(hour=18),
+        enforce_real_root=False,
+    )
+    assert rerun.entry_bundles[0].idempotent is True
+
+
+def test_snapshot_is_written_only_when_exact_horizon_is_mature(tmp_path: Path):
+    ledger = ForwardLedger(tmp_path / "forward", enforce_real_root=False)
+    payload = {
+        "formation_date": FORMATION_DATE.isoformat(),
+        "rule_version": "v3-forward-baseline-01",
+        "generated_at": NOW.isoformat(),
+    }
+    ledger.write_formation_bundle(payload, _candidates(), "形成报告")
+    formation_hash = sha256_file(
+        tmp_path
+        / "forward"
+        / "formations"
+        / "formation_date=2026-07-17"
+        / "formation.json"
+    )
+    warehouse = tmp_path / "warehouse"
+    sessions = [date(2026, 7, 17), date(2026, 7, 20), date(2026, 7, 21), date(2026, 7, 22), date(2026, 7, 23), date(2026, 7, 24)]
+    for position, session in enumerate(sessions):
+        prices = _market_partition(session)
+        prices.loc[:, "close"] = 10.0 + position * 0.6
+        prices.loc[:, "high"] = 10.2 + position * 0.6
+        prices.loc[:, "low"] = 9.8 + position * 0.5
+        _write_partition(warehouse, "equity_daily", session, prices)
+        _write_partition(
+            warehouse,
+            "adj_factor",
+            session,
+            pd.DataFrame({"trade_date": [session], "ts_code": ["A"], "adj_factor": [1.0]}),
+        )
+        _write_partition(
+            warehouse,
+            "stock_limit",
+            session,
+            pd.DataFrame({"trade_date": [session], "ts_code": ["A"], "up_limit": [20.0]}),
+        )
+
+    immature = update_observations(
+        warehouse_root=warehouse,
+        output_root=tmp_path / "forward",
+        as_of_date=date(2026, 7, 23),
+        now=NOW,
+        enforce_real_root=False,
+    )
+    assert immature.snapshot_bundles == ()
+
+    mature = update_observations(
+        warehouse_root=warehouse,
+        output_root=tmp_path / "forward",
+        as_of_date=date(2026, 7, 24),
+        now=NOW,
+        enforce_real_root=False,
+    )
+    assert len(mature.snapshot_bundles) == 1
+    snapshot = pd.read_parquet(mature.snapshot_bundles[0].path / "snapshots.parquet")
+    assert snapshot.iloc[0]["horizon"] == 5
+    assert snapshot.iloc[0]["observed_market_sessions"] == 5
+    assert sha256_file(
+        tmp_path
+        / "forward"
+        / "formations"
+        / "formation_date=2026-07-17"
+        / "formation.json"
+    ) == formation_hash
+    report = (mature.snapshot_bundles[0].path / "report.md").read_text(encoding="utf-8")
+    assert "阶段快照" in report
+    assert "不能作为 20/30 日最终验证" in report
+
 
 def test_formation_report_distinguishes_attention_action_and_future():
     report = render_formation_report(
@@ -206,3 +286,12 @@ def test_formation_report_distinguishes_attention_action_and_future():
     assert "未来结果尚未到达" in report
     assert "不构成买卖建议" in report
     assert "市场仍有不确定性" in report
+
+
+def test_manual_parser_exposes_only_form_and_update():
+    parser = build_parser()
+    subparsers = next(
+        action for action in parser._actions if getattr(action, "choices", None)
+    )
+
+    assert set(subparsers.choices) == {"form", "update"}
