@@ -64,6 +64,9 @@ class FormationInputs:
     names: Mapping[str, str]
     health_report: Mapping[str, Any]
     input_manifest: Mapping[str, Any]
+    sector_catalogs: pd.DataFrame
+    company_profiles: pd.DataFrame
+    announcements: pd.DataFrame
 
 
 @dataclass(frozen=True)
@@ -242,7 +245,7 @@ def load_formation_inputs(
         "theme_member": fact_frames[ResearchDatasetId.THEME_MEMBER],
     }
     formation_stamp = pd.Timestamp(formation_date)
-    _, memberships = _as_of_sector_inputs(data, formation_stamp)
+    sector_catalogs, memberships = _as_of_sector_inputs(data, formation_stamp)
     company_facts = _latest_company_facts(data, formation_stamp)
     input_manifest = {
         "health_report": {
@@ -264,6 +267,9 @@ def load_formation_inputs(
         names=_names(fact_frames),
         health_report=health,
         input_manifest=input_manifest,
+        sector_catalogs=sector_catalogs,
+        company_profiles=fact_frames[ResearchDatasetId.COMPANY_PROFILE],
+        announcements=fact_frames[ResearchDatasetId.ANNOUNCEMENT],
     )
 
 

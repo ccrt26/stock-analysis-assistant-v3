@@ -67,6 +67,9 @@ def _inputs() -> FormationInputs:
         names={"A": "甲公司", "B": "乙公司"},
         health_report={"data_date": "2026-07-17", "complete_core_date": True},
         input_manifest={"health_report": {"sha256": "h"}, "facts": {"input_manifest_hash": "f"}},
+        sector_catalogs=pd.DataFrame(),
+        company_profiles=pd.DataFrame(),
+        announcements=pd.DataFrame(),
     )
 
 
