@@ -39,6 +39,21 @@ def test_formation_inputs_exposes_strict_explanation_frames():
             "available_at": ["2026-07-01T16:00:00Z"],
         }
     )
+    financial_history = pd.DataFrame(
+        {
+            "ts_code": ["301257.SZ"],
+            "report_period": ["2026-03-31"],
+            "available_at": ["2026-04-29T16:00:00Z"],
+        }
+    )
+    cashflow_history = pd.DataFrame(
+        {
+            "ts_code": ["301257.SZ"],
+            "report_period": ["2026-03-31"],
+            "available_at": ["2026-04-29T16:00:00Z"],
+            "n_cashflow_act": [-31_587_210.93],
+        }
+    )
     inputs = FormationInputs(
         formation_date=FORMATION_DATE,
         cutoff=CUTOFF,
@@ -53,11 +68,20 @@ def test_formation_inputs_exposes_strict_explanation_frames():
         sector_catalogs=pd.DataFrame(),
         company_profiles=profiles,
         announcements=announcements,
+        financial_history=financial_history,
+        cashflow_history=cashflow_history,
     )
 
     assert inputs.company_profiles.equals(profiles)
     assert inputs.announcements.equals(announcements)
-    for frame in (inputs.company_profiles, inputs.announcements):
+    assert inputs.financial_history.equals(financial_history)
+    assert inputs.cashflow_history.equals(cashflow_history)
+    for frame in (
+        inputs.company_profiles,
+        inputs.announcements,
+        inputs.financial_history,
+        inputs.cashflow_history,
+    ):
         visible = pd.to_datetime(frame["available_at"], utc=True)
         assert (visible <= pd.Timestamp(inputs.cutoff).tz_convert("UTC")).all()
 

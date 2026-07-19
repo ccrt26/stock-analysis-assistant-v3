@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime, time
 from pathlib import Path
 from typing import Any, Mapping
@@ -67,6 +67,8 @@ class FormationInputs:
     sector_catalogs: pd.DataFrame
     company_profiles: pd.DataFrame
     announcements: pd.DataFrame
+    financial_history: pd.DataFrame = field(default_factory=pd.DataFrame)
+    cashflow_history: pd.DataFrame = field(default_factory=pd.DataFrame)
 
 
 @dataclass(frozen=True)
@@ -270,6 +272,8 @@ def load_formation_inputs(
         sector_catalogs=sector_catalogs,
         company_profiles=fact_frames[ResearchDatasetId.COMPANY_PROFILE],
         announcements=fact_frames[ResearchDatasetId.ANNOUNCEMENT],
+        financial_history=fact_frames[ResearchDatasetId.FINANCIAL_INDICATOR],
+        cashflow_history=fact_frames[ResearchDatasetId.CASH_FLOW],
     )
 
 
