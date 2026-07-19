@@ -9,7 +9,7 @@ from stock_analyzer.evaluation.v3_forward.explanations import build_decision_car
 from stock_analyzer.evaluation.v3_forward.inputs import FormationInputs
 
 
-DOSSIER_SCHEMA_VERSION = "v3-forward-research-dossier-01"
+DOSSIER_SCHEMA_VERSION = "v3-forward-research-dossier-02"
 
 _FINANCIAL_FIELDS = (
     "tr_yoy",
@@ -91,6 +91,8 @@ _GLOSSARY = (
     ("净利率", "归属于利润相对收入的比例，受费用、税费和非经常项目共同影响。"),
     ("ROE", "净利润相对股东权益的收益水平；季度累计口径不能擅自当作全年水平。"),
     ("资产负债率", "总负债相对总资产的比例，只描述资本结构，不单独等同风险高低。"),
+    ("流动比率", "流动资产相对流动负债的倍数，用于观察短期偿债覆盖；行业与经营模式不同，不能机械套统一阈值。"),
+    ("每股经营现金流", "经营活动现金净额除以股本，用于把现金创造能力换算到每股口径。"),
 )
 
 
@@ -158,22 +160,58 @@ def _industry_and_themes(
     groups = _active_group_rows(inputs, code)
     themes = groups[groups.get("group_type", pd.Series(dtype=str)).astype(str).eq("theme")]
     hotspot_text = hotspot if hotspot and hotspot != "本地严格时点数据缺失" else None
+    context = inputs.hotspots.copy()
+    if not context.empty and "analysis_date" in context:
+        context = context[
+            pd.to_datetime(context["analysis_date"], errors="raise")
+            .dt.date.eq(inputs.formation_date)
+        ]
+    eligibility = {"coverage_status", "breadth_5d", "relative_return_5d"}
+    if not context.empty and eligibility <= set(context):
+        context = context[
+            context["coverage_status"].astype(str).str.startswith("complete")
+            & (pd.to_numeric(context["breadth_5d"], errors="coerce") >= 0.50)
+            & (pd.to_numeric(context["relative_return_5d"], errors="coerce") > 0)
+        ].copy()
+        sort_fields = [
+            field
+            for field in ("relative_return_20d", "breadth_5d", "turnover_share_change_5d")
+            if field in context
+        ]
+        if sort_fields:
+            context = context.sort_values(sort_fields, ascending=False, na_position="last")
+        context = context.head(10)
+    context_keys = set(
+        zip(
+            context.get("group_type", pd.Series(dtype=str)).astype(str),
+            context.get("group_code", pd.Series(dtype=str)).astype(str),
+        )
+    )
     rows: list[dict[str, str]] = []
     for item in themes.to_dict(orient="records"):
         name = str(item["group_name"])
+        group_key = (str(item["group_type"]), str(item["group_code"]))
+        if hotspot_text and name == hotspot_text:
+            evidence_role = "selection_relevant"
+        elif group_key in context_keys:
+            evidence_role = "same_day_hotspot_context"
+        else:
+            evidence_role = "index_membership_only"
         rows.append(
             {
                 "code": str(item["group_code"]),
                 "name": name,
                 "level": str(item["level"]),
-                "evidence_role": (
-                    "selection_relevant" if hotspot_text and name == hotspot_text else "index_membership_only"
-                ),
+                "evidence_role": evidence_role,
             }
         )
     rows.sort(
         key=lambda row: (
-            0 if row["evidence_role"] == "selection_relevant" else 1,
+            {
+                "selection_relevant": 0,
+                "same_day_hotspot_context": 1,
+                "index_membership_only": 2,
+            }[row["evidence_role"]],
             row["name"],
             row["code"],
         )
@@ -298,10 +336,20 @@ def _action_confirmation(card: Mapping[str, Any]) -> dict[str, Any]:
 def _summary(card: Mapping[str, Any], theme_info: Mapping[str, Any]) -> dict[str, Any]:
     opposition = str(card.get("opposition_evidence", ""))
     missing = str(card.get("missing_confirmations", ""))
+    route_names = {
+        "price": "价格路线",
+        "hotspot": "热点路线",
+        "earnings": "业绩路线",
+    }
+    routes = "、".join(
+        route_names.get(item, item)
+        for item in str(card["routes"]).split("|")
+        if item
+    )
     return {
         "30秒读懂": (
             f"{card['stock_name']}（{card['ts_code']}）属于{card['industry_l1_name']}，"
-            f"主营{card['main_business']}；本次由{card['routes']}路线进入观察并满足三项量价确认。"
+            f"主营{card['main_business']}；本次由{routes}进入观察并满足三项量价确认。"
         ),
         "why_research_now": str(card.get("selection_explanation", "")),
         "selection_hotspot": theme_info.get("selection_hotspot"),
@@ -417,12 +465,12 @@ def _num(value: Any, digits: int = 2) -> str:
 
 def _financial_table(history: list[dict[str, Any]]) -> list[str]:
     lines = [
-        "| 报告期 | 营收同比 | 净利润同比 | 扣非同比 | 经营现金流同比 | EPS | 毛利率 | 净利率 | ROE | 资产负债率 | 经营现金流 |",
-        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        "| 报告期 | 营收同比 | 净利润同比 | 扣非同比 | 经营现金流同比 | EPS | 毛利率 | 净利率 | ROE | 资产负债率 | 流动比率 | 每股经营现金流 | 经营现金流 |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     for row in history:
         lines.append(
-            "| {period} | {tr} | {profit} | {deduct} | {ocf} | {eps} | {gross} | {net} | {roe} | {debt} | {cash} |".format(
+            "| {period} | {tr} | {profit} | {deduct} | {ocf} | {eps} | {gross} | {net} | {roe} | {debt} | {current} | {ocfps} | {cash} |".format(
                 period=row["report_period"],
                 tr=_pct(row.get("tr_yoy"), ratio=False),
                 profit=_pct(row.get("netprofit_yoy"), ratio=False),
@@ -433,11 +481,13 @@ def _financial_table(history: list[dict[str, Any]]) -> list[str]:
                 net=_pct(row.get("netprofit_margin"), ratio=False),
                 roe=_pct(row.get("roe"), ratio=False),
                 debt=_pct(row.get("debt_to_assets"), ratio=False),
+                current=_num(row.get("current_ratio")),
+                ocfps=_num(row.get("ocfps")),
                 cash=_num(row.get("n_cashflow_act"), 0),
             )
         )
     if not history:
-        lines.append("| 本地严格时点数据缺失 | — | — | — | — | — | — | — | — | — | — |")
+        lines.append("| 本地严格时点数据缺失 | — | — | — | — | — | — | — | — | — | — | — | — |")
     return lines
 
 
@@ -484,7 +534,11 @@ def _render_one(row: Mapping[str, Any], payload: Mapping[str, Any]) -> str:
         f"- 正式主题成员总数：{themes['formal_theme_membership_count']}",
     ]
     for item in themes["formal_theme_memberships"]:
-        role = "本次选择直接相关" if item["evidence_role"] == "selection_relevant" else "仅正式成员事实"
+        role = {
+            "selection_relevant": "本次选择直接相关",
+            "same_day_hotspot_context": "同日热点背景，非本次直接入选组",
+            "index_membership_only": "仅正式成员事实",
+        }[item["evidence_role"]]
         lines.append(f"  - {item['name']}（{item['code']}）：{role}")
     lines.extend(["", f"> 证据边界：{themes['boundary']}", "", "## 三、为什么进入名单、为什么此刻确认", ""])
     lines.append(f"- 形成路线：{row['routes']}")

@@ -8,6 +8,8 @@
 
 **Tech Stack:** Python 3.12, pandas, PyArrow, pytest, existing V3 strict-as-of snapshot and immutable ledger infrastructure.
 
+**Execution note:** Real-reader inspection of schema 01 exposed a presentation-order issue, so the immutable delivery schema is `v3-forward-research-dossier-02`. Schema 01 remains preserved; V02 prioritizes the selection hotspot and same-day eligible hotspot context, translates route labels to Chinese, and renders current ratio plus operating cash flow per share.
+
 ## Global Constraints
 
 - All real runtime artifacts must be written under `/Volumes/ZHUTONG/股票分析助手-V3回测/2026-07-19-v3-forward-observation/`.
@@ -325,4 +327,3 @@ Search new modules and real dossiers for `supabase`, `cloudflare`, `launchctl`, 
 - [ ] **Step 4: Verify frozen outputs**
 
 Require all real new artifacts to resolve under the frozen USB root, both real dossiers to pass manifest hash verification, both source bundles to remain byte-identical, and no production task or remote system state to have changed.
-

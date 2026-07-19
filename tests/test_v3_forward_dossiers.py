@@ -118,15 +118,28 @@ def _inputs() -> FormationInputs:
                 ],
             }
         ),
-        hotspots=pd.DataFrame(),
+        hotspots=pd.DataFrame(
+            {
+                "analysis_date": [FORMATION_DATE, FORMATION_DATE],
+                "group_type": ["theme", "theme"],
+                "group_code": ["000814.SH", "399394.SZ"],
+                "group_name": ["细分医药", "国证医药"],
+                "coverage_status": ["complete", "complete"],
+                "breadth_5d": [0.80, 0.70],
+                "relative_return_5d": [0.08, 0.07],
+                "relative_return_20d": [0.18, 0.16],
+                "turnover_share_change_5d": [0.02, 0.01],
+            }
+        ),
         memberships=pd.DataFrame(
             {
-                "group_type": ["industry", "industry", "theme", "theme", "theme"],
+                "group_type": ["industry", "industry", "theme", "theme", "theme", "theme"],
                 "group_code": [
                     "801150.SI",
                     "801150.SI",
                     "000814.SH",
                     "399394.SZ",
+                    "399802.SZ",
                     "399999.SZ",
                 ],
                 "ts_code": [
@@ -135,9 +148,10 @@ def _inputs() -> FormationInputs:
                     "002603.SZ",
                     "002603.SZ",
                     "002603.SZ",
+                    "002603.SZ",
                 ],
-                "valid_from": ["2020-01-01", "2020-01-01", "2026-06-30", "2026-06-30", "2025-01-01"],
-                "valid_to": [None, None, None, None, "2025-12-31"],
+                "valid_from": ["2020-01-01", "2020-01-01", "2026-06-30", "2026-06-30", "2026-06-30", "2025-01-01"],
+                "valid_to": [None, None, None, None, None, "2025-12-31"],
             }
         ),
         company_facts=pd.DataFrame(),
@@ -146,10 +160,10 @@ def _inputs() -> FormationInputs:
         input_manifest={"facts": {"identity": "same-as-formation"}},
         sector_catalogs=pd.DataFrame(
             {
-                "group_type": ["industry", "theme", "theme", "theme"],
-                "group_code": ["801150.SI", "000814.SH", "399394.SZ", "399999.SZ"],
-                "group_name": ["医药生物", "细分医药", "国证医药", "过期概念"],
-                "level": ["L1", "主题指数", "主题指数", "主题指数"],
+                "group_type": ["industry", "theme", "theme", "theme", "theme"],
+                "group_code": ["801150.SI", "000814.SH", "399394.SZ", "399802.SZ", "399999.SZ"],
+                "group_name": ["医药生物", "细分医药", "国证医药", "500深市", "过期概念"],
+                "level": ["L1", "主题指数", "主题指数", "主题指数", "主题指数"],
             }
         ),
         company_profiles=pd.DataFrame(
@@ -225,13 +239,14 @@ def _payload() -> dict[str, object]:
 def test_dossiers_only_include_confirmed_stocks_and_onboard_new_reader():
     dossiers = build_research_dossiers(_payload(), _candidates(), _inputs())
 
-    assert DOSSIER_SCHEMA_VERSION == "v3-forward-research-dossier-01"
+    assert DOSSIER_SCHEMA_VERSION == "v3-forward-research-dossier-02"
     assert dossiers["ts_code"].tolist() == ["301257.SZ", "002603.SZ"]
     puruisi = dossiers[dossiers["ts_code"].eq("301257.SZ")].iloc[0]
     assert puruisi["company_name"] == "普蕊斯(上海)医药科技开发股份有限公司"
     assert puruisi["main_business"] == "临床试验现场管理服务"
     assert puruisi["industry_l1_name"] == "医药生物"
     assert "30秒读懂" in puruisi["summary_json"]
+    assert "价格路线" in puruisi["summary_json"]
     assert "本次不是因热点入选" in puruisi["industry_and_themes_json"]
     assert "不编写业务占比" in puruisi["business_composition_status"]
 
@@ -246,11 +261,13 @@ def test_dossier_theme_memberships_are_active_and_not_business_proof():
     assert [item["name"] for item in themes["formal_theme_memberships"]] == [
         "细分医药",
         "国证医药",
+        "500深市",
     ]
-    assert all(
-        item["evidence_role"] in {"selection_relevant", "index_membership_only"}
-        for item in themes["formal_theme_memberships"]
-    )
+    assert [item["evidence_role"] for item in themes["formal_theme_memberships"]] == [
+        "selection_relevant",
+        "same_day_hotspot_context",
+        "index_membership_only",
+    ]
     assert "指数或主题成员不等于业务收入证据" in themes["boundary"]
 
 
@@ -323,6 +340,8 @@ def test_dossier_contains_trading_metrics_glossary_and_evidence_boundaries():
         "PB",
         "ROE",
         "资产负债率",
+        "流动比率",
+        "每股经营现金流",
         "已确认事实",
         "谨慎解释",
         "当前未知",
@@ -401,7 +420,7 @@ def test_dossier_service_is_immutable_and_preserves_existing_bundles(
     assert first.bundle.path.parts[-3:] == (
         "formation_date=2026-07-17",
         "rule_version=v3-forward-baseline-01",
-        "schema_version=v3-forward-research-dossier-01",
+        "schema_version=v3-forward-research-dossier-02",
     )
     assert (first.bundle.path / "stocks" / "301257.SZ.md").is_file()
     assert (first.bundle.path / "stocks" / "002603.SZ.md").is_file()
