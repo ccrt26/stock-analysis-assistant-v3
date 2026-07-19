@@ -306,4 +306,10 @@ def test_manual_parser_exposes_only_forward_observation_commands():
         action for action in parser._actions if getattr(action, "choices", None)
     )
 
-    assert set(subparsers.choices) == {"form", "form-v2", "explain", "update"}
+    assert set(subparsers.choices) == {
+        "form",
+        "form-v2",
+        "explain",
+        "dossier",
+        "update",
+    }
