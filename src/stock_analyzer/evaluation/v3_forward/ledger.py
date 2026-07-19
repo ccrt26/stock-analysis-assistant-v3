@@ -102,6 +102,7 @@ class ForwardLedger:
         for child in (
             "formations",
             "decision-cards",
+            "research-dossiers",
             "entries",
             "snapshots",
             "tables",
@@ -132,6 +133,48 @@ class ForwardLedger:
             table_name="cards.parquet",
             frame=cards,
             report=report,
+        )
+
+    def write_research_dossier_bundle(
+        self,
+        formation_date: date,
+        rule_version: str,
+        schema_version: str,
+        payload: Mapping[str, Any],
+        dossiers: pd.DataFrame,
+        report: str,
+        stock_reports: Mapping[str, str],
+    ) -> BundleWriteResult:
+        if "ts_code" not in dossiers:
+            raise ValueError("research dossiers lack ts_code")
+        if dossiers["ts_code"].astype(str).duplicated().any():
+            raise ValueError("research dossiers contain duplicate stock codes")
+        extras: dict[Path, str] = {}
+        for code, content in stock_reports.items():
+            normalized = str(code)
+            if not normalized or any(
+                character not in "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ."
+                for character in normalized
+            ):
+                raise ValueError(f"unsafe dossier stock code: {normalized}")
+            extras[Path("stocks") / f"{normalized}.md"] = str(content)
+        if set(dossiers["ts_code"].astype(str)) != set(map(str, stock_reports)):
+            raise ValueError("research dossier rows and stock reports differ")
+        final = (
+            self.root
+            / "research-dossiers"
+            / f"formation_date={formation_date.isoformat()}"
+            / f"rule_version={rule_version}"
+            / f"schema_version={schema_version}"
+        )
+        return self._write_bundle(
+            final,
+            json_name="dossiers.json",
+            payload=payload,
+            table_name="dossiers.parquet",
+            frame=dossiers,
+            report=report,
+            extra_texts=extras,
         )
 
     def write_formation_bundle(
@@ -279,12 +322,23 @@ class ForwardLedger:
         table_name: str,
         frame: pd.DataFrame,
         report: str,
+        extra_texts: Mapping[Path, str] | None = None,
     ) -> BundleWriteResult:
         canonical = {
             "payload": _json_safe(payload),
             "frame": _frame_payload(frame),
             "report": str(report),
         }
+        normalized_extras: dict[str, str] = {}
+        for relative_path, content in (extra_texts or {}).items():
+            relative = Path(relative_path)
+            if relative.is_absolute() or ".." in relative.parts:
+                raise ValueError("bundle extra path must be relative")
+            normalized_extras[relative.as_posix()] = str(content)
+        if normalized_extras:
+            canonical["extra_texts"] = {
+                name: normalized_extras[name] for name in sorted(normalized_extras)
+            }
         bundle_hash = hashlib.sha256(_canonical_json(canonical).encode("utf-8")).hexdigest()
         if final.exists():
             return self._existing_result(final, bundle_hash)
@@ -300,14 +354,24 @@ class ForwardLedger:
             frame.to_parquet(table_path, index=False)
             report_path = stage / "report.md"
             report_path.write_text(str(report), encoding="utf-8")
-            for path in (json_path, table_path, report_path):
+            extra_paths: list[Path] = []
+            for name, content in sorted(normalized_extras.items()):
+                extra_path = stage / name
+                extra_path.parent.mkdir(parents=True, exist_ok=True)
+                extra_path.write_text(content, encoding="utf-8")
+                extra_paths.append(extra_path)
+            written_paths = [json_path, table_path, report_path, *extra_paths]
+            for path in written_paths:
                 _fsync_file(path)
             manifest = {
                 "schema_version": "v3-forward-bundle-manifest-01",
                 "bundle_content_hash": bundle_hash,
                 "files": {
-                    path.name: {"sha256": sha256_file(path), "bytes": path.stat().st_size}
-                    for path in (json_path, table_path, report_path)
+                    path.relative_to(stage).as_posix(): {
+                        "sha256": sha256_file(path),
+                        "bytes": path.stat().st_size,
+                    }
+                    for path in written_paths
                 },
             }
             manifest_path = stage / "manifest.json"

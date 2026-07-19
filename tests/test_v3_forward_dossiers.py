@@ -13,7 +13,13 @@ from stock_analyzer.evaluation.v3_forward.dossiers import (
     build_research_dossiers,
     render_research_dossiers,
 )
+from stock_analyzer.evaluation.v3_forward.explanations import (
+    build_decision_cards,
+    render_decision_cards,
+)
 from stock_analyzer.evaluation.v3_forward.inputs import FormationInputs
+from stock_analyzer.evaluation.v3_forward.ledger import ForwardLedger, sha256_file
+from stock_analyzer.evaluation.v3_forward.service import _stable_hash
 
 
 FORMATION_DATE = date(2026, 7, 17)
@@ -324,3 +330,81 @@ def test_dossier_contains_trading_metrics_glossary_and_evidence_boundaries():
     for prohibited in ("目标价", "仓位建议", "止损", "止盈", "自动买入", "自动交易"):
         assert prohibited not in combined
 
+
+def _tree_hashes(path: Path) -> dict[str, str]:
+    return {
+        str(item.relative_to(path)): sha256_file(item)
+        for item in sorted(path.rglob("*"))
+        if item.is_file()
+    }
+
+
+def test_dossier_service_is_immutable_and_preserves_existing_bundles(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    from stock_analyzer.evaluation.v3_forward.dossier_service import (
+        build_research_dossier,
+    )
+
+    output = tmp_path / "forward"
+    ledger = ForwardLedger(output, enforce_real_root=False)
+    inputs = _inputs()
+    payload = {
+        **_payload(),
+        "generated_at": "2026-07-19T16:00:00+08:00",
+        "input_manifest_hash": _stable_hash(inputs.input_manifest),
+    }
+    formation = ledger.write_formation_bundle(payload, _candidates(), "原始形成报告\n")
+    cards = build_decision_cards(payload, _candidates(), inputs)
+    card_report = render_decision_cards(payload, cards)
+    card_payload = {
+        "schema_version": "v3-forward-decision-cards-01",
+        "formation_date": FORMATION_DATE.isoformat(),
+        "rule_version": payload["rule_version"],
+        "generated_at": payload["generated_at"],
+        "source_formation_content_hash": formation.bundle_content_hash,
+        "input_manifest_hash": payload["input_manifest_hash"],
+        "card_count": 2,
+    }
+    cards_bundle = ledger.write_decision_card_bundle(
+        FORMATION_DATE, str(payload["rule_version"]), card_payload, cards, card_report
+    )
+    before_formation = _tree_hashes(formation.path)
+    before_cards = _tree_hashes(cards_bundle.path)
+    monkeypatch.setattr(
+        "stock_analyzer.evaluation.v3_forward.dossier_service.load_formation_inputs",
+        lambda *_args, **_kwargs: inputs,
+    )
+
+    first = build_research_dossier(
+        warehouse_root=tmp_path / "warehouse",
+        archive_root=tmp_path / "archive",
+        output_root=output,
+        formation_date=FORMATION_DATE,
+        now=CUTOFF,
+        enforce_real_root=False,
+    )
+    second = build_research_dossier(
+        warehouse_root=tmp_path / "warehouse",
+        archive_root=tmp_path / "archive",
+        output_root=output,
+        formation_date=FORMATION_DATE,
+        now=CUTOFF,
+        enforce_real_root=False,
+    )
+
+    assert first.dossier_count == 2
+    assert not first.bundle.idempotent
+    assert second.bundle.idempotent
+    assert first.bundle.bundle_content_hash == second.bundle.bundle_content_hash
+    assert first.bundle.path.parts[-3:] == (
+        "formation_date=2026-07-17",
+        "rule_version=v3-forward-baseline-01",
+        "schema_version=v3-forward-research-dossier-01",
+    )
+    assert (first.bundle.path / "stocks" / "301257.SZ.md").is_file()
+    assert (first.bundle.path / "stocks" / "002603.SZ.md").is_file()
+    manifest = json.loads((first.bundle.path / "manifest.json").read_text(encoding="utf-8"))
+    assert "stocks/301257.SZ.md" in manifest["files"]
+    assert _tree_hashes(formation.path) == before_formation
+    assert _tree_hashes(cards_bundle.path) == before_cards
