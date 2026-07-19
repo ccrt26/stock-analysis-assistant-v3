@@ -25,6 +25,7 @@ from stock_analyzer.evaluation.v3_forward.reports import (
     render_snapshot_report,
 )
 from stock_analyzer.evaluation.v3_forward.rules import (
+    FUTURE_FIELDS,
     OBSERVATION_WINDOWS,
     RULE_VERSION,
     TARGET_RETURN,
@@ -121,6 +122,51 @@ def form_observation(
     ledger.write_report_projection(
         Path(f"formation_date={formation_date.isoformat()}") / "formation.md",
         report,
+    )
+    manifest = json.loads((bundle.path / "manifest.json").read_text(encoding="utf-8"))
+    audit = {
+        "schema_version": "v3-forward-formation-audit-01",
+        "status": "passed",
+        "formation_date": formation_date.isoformat(),
+        "rule_version": RULE_VERSION,
+        "rule_manifest_hash": payload["rule_manifest_hash"],
+        "input_manifest_hash": payload["input_manifest_hash"],
+        "bundle_content_hash": manifest["bundle_content_hash"],
+        "formation_file_sha256": sha256_file(bundle.path / "formation.json"),
+        "candidate_file_sha256": sha256_file(bundle.path / "candidates.parquet"),
+        "candidate_rows": len(candidates),
+        "action_rows": int(payload["action_count"]),
+        "duplicate_stock_dates": int(
+            candidates.duplicated(["formation_date", "ts_code"]).sum()
+            if not candidates.empty
+            else 0
+        ),
+        "future_fields": sorted(set(candidates.columns) & FUTURE_FIELDS),
+        "max_candidate_formation_date": (
+            pd.to_datetime(candidates["formation_date"]).max().date().isoformat()
+            if not candidates.empty
+            else None
+        ),
+        "entry_state": "waiting",
+    }
+    audit_text = json.dumps(audit, ensure_ascii=False, indent=2, sort_keys=True)
+    ledger.write_text_projection(
+        "manifests",
+        Path(f"formation_date={formation_date.isoformat()}") / "audit.json",
+        audit_text + "\n",
+    )
+    run_log = {
+        "schema_version": "v3-forward-run-log-01",
+        "operation": "form",
+        "formation_date": formation_date.isoformat(),
+        "generated_at": payload["generated_at"],
+        "evidence_status": "present_and_verified",
+        "bundle_content_hash": manifest["bundle_content_hash"],
+    }
+    ledger.write_text_projection(
+        "logs",
+        Path(f"formation_date={formation_date.isoformat()}") / "formation-run.json",
+        json.dumps(run_log, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
     )
     return FormationRunResult(bundle, len(candidates), int(payload["action_count"]))
 

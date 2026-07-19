@@ -137,6 +137,15 @@ def test_form_records_honest_times_hashes_waiting_and_is_idempotent(
     } == before
     projected = output / "reports" / "formation_date=2026-07-17" / "formation.md"
     assert projected.read_bytes() == (first.bundle.path / "report.md").read_bytes()
+    audit_path = output / "manifests" / "formation_date=2026-07-17" / "audit.json"
+    audit = json.loads(audit_path.read_text(encoding="utf-8"))
+    assert audit["status"] == "passed"
+    assert audit["candidate_rows"] == 2
+    assert audit["duplicate_stock_dates"] == 0
+    assert audit["future_fields"] == []
+    assert (
+        output / "logs" / "formation_date=2026-07-17" / "formation-run.json"
+    ).is_file()
 
 
 def test_update_without_later_market_session_keeps_waiting(tmp_path: Path):

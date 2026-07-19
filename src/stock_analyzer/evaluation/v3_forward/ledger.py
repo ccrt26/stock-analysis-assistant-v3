@@ -213,10 +213,17 @@ class ForwardLedger:
         )
 
     def write_report_projection(self, relative_path: Path, content: str) -> Path:
+        return self.write_text_projection("reports", relative_path, content)
+
+    def write_text_projection(
+        self, area: str, relative_path: Path, content: str
+    ) -> Path:
+        if area not in {"reports", "manifests", "logs"}:
+            raise ValueError("immutable text area is not allowed")
         relative = Path(relative_path)
         if relative.is_absolute() or ".." in relative.parts:
-            raise ValueError("report projection path must be relative")
-        final = self.root / "reports" / relative
+            raise ValueError("immutable projection path must be relative")
+        final = self.root / area / relative
         final.parent.mkdir(parents=True, exist_ok=True)
         encoded = content.encode("utf-8")
         try:
@@ -224,7 +231,7 @@ class ForwardLedger:
         except FileExistsError:
             if final.read_bytes() != encoded:
                 raise ImmutableEvidenceConflict(
-                    f"immutable report conflict for {final}"
+                    f"immutable projection conflict for {final}"
                 )
             return final
         try:
