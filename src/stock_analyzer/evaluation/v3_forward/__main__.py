@@ -12,6 +12,7 @@ from stock_analyzer.evaluation.v3_forward.service import (
     form_observation,
     update_observations,
 )
+from stock_analyzer.evaluation.v3_forward.v2_service import form_observation_v2
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -25,6 +26,17 @@ def build_parser() -> argparse.ArgumentParser:
     form.add_argument("--warehouse-root", type=Path, default=project_root / "local_warehouse")
     form.add_argument("--archive-root", type=Path, default=project_root / "local_archive")
     form.add_argument("--output-root", type=Path, default=FROZEN_OUTPUT_ROOT)
+    form_v2 = subparsers.add_parser(
+        "form-v2", help="按 V02 路线隔离规则形成后续真实交易日批次"
+    )
+    form_v2.add_argument("--formation-date", required=True)
+    form_v2.add_argument(
+        "--warehouse-root", type=Path, default=project_root / "local_warehouse"
+    )
+    form_v2.add_argument(
+        "--archive-root", type=Path, default=project_root / "local_archive"
+    )
+    form_v2.add_argument("--output-root", type=Path, default=FROZEN_OUTPUT_ROOT)
     explain = subparsers.add_parser(
         "explain", help="为已有不可变形成批次追加严格时点详细决策卡"
     )
@@ -55,6 +67,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         payload = {
             "status": "idempotent" if result.bundle.idempotent else "formed",
             "path": str(result.bundle.path),
+            "attention_count": result.attention_count,
+            "action_count": result.action_count,
+        }
+    elif args.command == "form-v2":
+        result = form_observation_v2(
+            warehouse_root=args.warehouse_root,
+            archive_root=args.archive_root,
+            output_root=args.output_root,
+            formation_date=date.fromisoformat(args.formation_date),
+        )
+        payload = {
+            "status": "idempotent" if result.bundle.idempotent else "formed",
+            "path": str(result.bundle.path),
+            "card_path": str(result.cards.bundle.path),
             "attention_count": result.attention_count,
             "action_count": result.action_count,
         }
