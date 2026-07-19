@@ -30,15 +30,15 @@
 - Produces: `analyze_dossier_facts(card, theme_info, history, metrics, announcements, supplements) -> dict[str, Any]`
 - Produces sections: `top_conclusion`, `company_analysis`, `industry_theme_analysis`, `selection_analysis`, `financial_analysis`, `trading_valuation_analysis`, `announcement_analysis`, `data_gaps`
 
-- [ ] Write a failing test asserting the Purui price route becomes a numeric plain-language conclusion and contains no `召回条件`.
-- [ ] Run the focused test and verify the failure is caused by the missing module.
-- [ ] Implement route translation and top conclusion using `return_5d`, `relative_return_20d`, `current_amount_ratio_20d`, route and hotspot state.
-- [ ] Write a failing test asserting `return_1d < 0` plus `amount_ratio >= 1` becomes a “形成日放量下跌” contradiction.
-- [ ] Implement selection conflict analysis and evidence references.
-- [ ] Write failing tests for financial repair vs cash-flow support, valuation percentile strength, volatility/ATR path stability, and announcement driver categories.
-- [ ] Implement one pure analyzer per section; each returns `headline`, `meaning`, `selection_link`, `counterpoint`, `boundary`, and `evidence`.
-- [ ] Run `PYTHONPATH=src .venv/bin/python -m pytest tests/test_v3_forward_dossier_analysis.py -q` and require all tests pass.
-- [ ] Commit with `git commit -m "feat: analyze V3 dossier facts into conclusions"`.
+- [x] Write a failing test asserting the Purui price route becomes a numeric plain-language conclusion and contains no `召回条件`.
+- [x] Run the focused test and verify the failure is caused by the missing module.
+- [x] Implement route translation and top conclusion using `return_5d`, `relative_return_20d`, `current_amount_ratio_20d`, route and hotspot state.
+- [x] Write a failing test asserting `return_1d < 0` plus `amount_ratio >= 1` becomes a “形成日放量下跌” contradiction.
+- [x] Implement selection conflict analysis and evidence references.
+- [x] Write failing tests for financial repair vs cash-flow support, valuation percentile strength, volatility/ATR path stability, and announcement driver categories.
+- [x] Implement one pure analyzer per section; each returns `headline`, `meaning`, `selection_link`, `counterpoint`, `boundary`, and `evidence`.
+- [x] Run `PYTHONPATH=src .venv/bin/python -m pytest tests/test_v3_forward_dossier_analysis.py -q` and require all tests pass.
+- [x] Commit with `git commit -m "feat: analyze V3 dossier facts into conclusions"`.
 
 ### Task 2: Frozen Official Supplements
 
@@ -52,13 +52,13 @@
 - Produces: `ForwardLedger.write_official_supplement_bundle(...) -> BundleWriteResult`
 - Produces: `load_official_supplements(output_root, formation_date) -> tuple[pd.DataFrame, str | None]`
 
-- [ ] Write a failing test with official CNINFO facts, a nonofficial-domain fact, and a post-cutoff fact.
-- [ ] Verify the test fails because validation is missing.
-- [ ] Implement required fields, official-domain allowlist, URL validation and published-at cutoff.
-- [ ] Write a failing immutable-bundle test for same-content idempotence and changed-content conflict.
-- [ ] Implement the schema-versioned supplement writer and loader.
-- [ ] Run the supplement suite and existing ledger tests.
-- [ ] Commit with `git commit -m "feat: freeze official V3 dossier supplements"`.
+- [x] Write a failing test with official CNINFO facts, a nonofficial-domain fact, and a post-cutoff fact.
+- [x] Verify the test fails because validation is missing.
+- [x] Implement required fields, official-domain allowlist, URL validation and published-at cutoff.
+- [x] Write a failing immutable-bundle test for same-content idempotence and changed-content conflict.
+- [x] Implement the schema-versioned supplement writer and loader.
+- [x] Run the supplement suite and existing ledger tests.
+- [x] Commit with `git commit -m "feat: freeze official V3 dossier supplements"`.
 
 ### Task 3: V03 Fact Rows and Rendering
 
@@ -71,15 +71,15 @@
 - Updates: `build_research_dossiers(..., supplements=pd.DataFrame())`
 - Stores: `analysis_json`, `supplement_facts_json`, `supplement_status`, `supplement_bundle_hash`
 
-- [ ] Write a failing test asserting V03 top contains core judgment, plain why-now, main conflict, next validation and boundary, with no data-gap text.
-- [ ] Verify RED against V02 rendering.
-- [ ] Integrate `analyze_dossier_facts` into row construction and render the top conclusion.
-- [ ] Write failing tests requiring sections two through six to contain `本节结论`, `为什么`, `与本次入选的关系`, `主要矛盾`, and `不能推出`.
-- [ ] Render each structured analysis block before its raw evidence table/list.
-- [ ] Write a failing test asserting missing local and official facts appear only in the final data-availability section.
-- [ ] Implement isolated `data_gaps` rendering.
-- [ ] Run dossier and analysis suites.
-- [ ] Commit with `git commit -m "feat: render conclusion-first V3 dossiers"`.
+- [x] Write a failing test asserting V03 top contains core judgment, plain why-now, main conflict, next validation and boundary, with no data-gap text.
+- [x] Verify RED against V02 rendering.
+- [x] Integrate `analyze_dossier_facts` into row construction and render the top conclusion.
+- [x] Write failing tests requiring sections two through six to contain `本节结论`, `为什么`, `与本次入选的关系`, `主要矛盾`, and `不能推出`.
+- [x] Render each structured analysis block before its raw evidence table/list.
+- [x] Write a failing test asserting missing local and official facts appear only in the final data-availability section.
+- [x] Implement isolated `data_gaps` rendering.
+- [x] Run dossier and analysis suites.
+- [x] Commit with `git commit -m "feat: render conclusion-first V3 dossiers"`.
 
 ### Task 4: Service and Manual Supplement Input
 
@@ -93,32 +93,32 @@
 - Adds manual command: `supplement-dossier --formation-date --facts-json --output-root`
 - Existing `dossier` command automatically reads the immutable supplement bundle when present.
 
-- [ ] Write a failing parser and service test for `supplement-dossier`.
-- [ ] Verify the parser rejects the new command.
-- [ ] Implement JSON argument parsing, supplement validation and immutable write.
-- [ ] Write a failing V03 service test proving supplement hash enters the dossier payload and V02 remains unchanged.
-- [ ] Implement supplement loading and V03 service identity.
-- [ ] Run CLI, service, dossier, supplement and ledger tests.
-- [ ] Commit with `git commit -m "feat: wire official supplements into V3 dossiers"`.
+- [x] Write a failing parser and service test for `supplement-dossier`.
+- [x] Verify the parser rejects the new command.
+- [x] Implement JSON argument parsing, supplement validation and immutable write.
+- [x] Write a failing V03 service test proving supplement hash enters the dossier payload and V02 remains unchanged.
+- [x] Implement supplement loading and V03 service identity.
+- [x] Run CLI, service, dossier, supplement and ledger tests.
+- [x] Commit with `git commit -m "feat: wire official supplements into V3 dossiers"`.
 
 ### Task 5: Real Official Facts and V03 Generation
 
 **Runtime only:** all artifacts under the frozen USB root.
 
-- [ ] Read the official 2025 annual reports published 2026-04-28/29 from CNINFO for 002603.SZ and 301257.SZ.
-- [ ] Record only company/business/segment facts that are directly stated, with official URL and publication time.
-- [ ] Run `supplement-dossier` with a single JSON payload containing both stocks; require two official sources and cutoff pass.
-- [ ] Record all source formation, decision-card and V02 dossier hashes.
-- [ ] Run the V03 `dossier` command for 2026-07-17.
-- [ ] Read both full reports and check every top and section conclusion against its evidence.
-- [ ] Rerun and require `idempotent`.
-- [ ] Recompute original hashes and require exact equality.
+- [x] Read the official 2025 annual reports published 2026-04-28/29 from CNINFO for 002603.SZ and 301257.SZ.
+- [x] Record only company/business/segment facts that are directly stated, with official URL and publication time.
+- [x] Run `supplement-dossier` with a single JSON payload containing both stocks; require two official sources and cutoff pass.
+- [x] Record all source formation, decision-card and V02 dossier hashes.
+- [x] Run the V03 `dossier` command for 2026-07-17.
+- [x] Read both full reports and check every top and section conclusion against its evidence.
+- [x] Rerun and require `idempotent`.
+- [x] Recompute original hashes and require exact equality.
 
 ### Task 6: Final Verification
 
-- [ ] Run `PYTHONPATH=src .venv/bin/python -m pytest tests/test_v3_*.py -q`.
-- [ ] Verify V03 manifest hashes with `ForwardLedger.load_bundle_result`.
-- [ ] Scan code and real reports for prohibited capabilities and directives.
-- [ ] Run `git diff --check` and require a clean `git status --short` after commits.
-- [ ] Confirm no real artifact exists outside the frozen USB root and no remote operation occurred.
+- [x] Run `PYTHONPATH=src .venv/bin/python -m pytest tests/test_v3_*.py -q`.
+- [x] Verify V03 manifest hashes with `ForwardLedger.load_bundle_result`.
+- [x] Scan code and real reports for prohibited capabilities and directives.
+- [x] Run `git diff --check` and require a clean `git status --short` after commits.
+- [x] Confirm no real artifact exists outside the frozen USB root and no remote operation occurred.
 
