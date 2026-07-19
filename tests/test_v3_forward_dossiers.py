@@ -389,6 +389,17 @@ def test_dossier_service_is_immutable_and_preserves_existing_bundles(
     cards_bundle = ledger.write_decision_card_bundle(
         FORMATION_DATE, str(payload["rule_version"]), card_payload, cards, card_report
     )
+    ledger.write_report_projection(
+        Path("formation_date=2026-07-17")
+        / "research-dossier-v3-forward-baseline-01.md",
+        "旧架构投影，必须保持不变。\n",
+    )
+    ledger.write_text_projection(
+        "manifests",
+        Path("formation_date=2026-07-17")
+        / "research-dossier-v3-forward-baseline-01-audit.json",
+        "{\"schema_version\":\"v3-forward-research-dossier-audit-01\"}\n",
+    )
     before_formation = _tree_hashes(formation.path)
     before_cards = _tree_hashes(cards_bundle.path)
     monkeypatch.setattr(
@@ -424,6 +435,18 @@ def test_dossier_service_is_immutable_and_preserves_existing_bundles(
     )
     assert (first.bundle.path / "stocks" / "301257.SZ.md").is_file()
     assert (first.bundle.path / "stocks" / "002603.SZ.md").is_file()
+    assert (
+        output
+        / "reports"
+        / "formation_date=2026-07-17"
+        / "research-dossier-v3-forward-baseline-01-v3-forward-research-dossier-02.md"
+    ).is_file()
+    assert (
+        output
+        / "manifests"
+        / "formation_date=2026-07-17"
+        / "research-dossier-v3-forward-baseline-01-v3-forward-research-dossier-02-audit.json"
+    ).is_file()
     manifest = json.loads((first.bundle.path / "manifest.json").read_text(encoding="utf-8"))
     assert "stocks/301257.SZ.md" in manifest["files"]
     assert _tree_hashes(formation.path) == before_formation

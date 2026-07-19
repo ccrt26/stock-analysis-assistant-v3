@@ -139,7 +139,7 @@ def build_research_dossier(
     )
     ledger.write_report_projection(
         Path(f"formation_date={formation_date.isoformat()}")
-        / f"research-dossier-{rule_version}.md",
+        / f"research-dossier-{rule_version}-{DOSSIER_SCHEMA_VERSION}.md",
         report,
     )
     audit = {
@@ -169,7 +169,7 @@ def build_research_dossier(
     ledger.write_text_projection(
         "manifests",
         Path(f"formation_date={formation_date.isoformat()}")
-        / f"research-dossier-{rule_version}-audit.json",
+        / f"research-dossier-{rule_version}-{DOSSIER_SCHEMA_VERSION}-audit.json",
         json.dumps(audit, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
     )
     return DossierRunResult(bundle=bundle, dossier_count=len(dossiers))
