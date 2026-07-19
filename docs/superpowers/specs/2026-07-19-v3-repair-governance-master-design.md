@@ -8,6 +8,8 @@
 
 **当前目标：** 恢复“基于形成日前证据进行公司级研究和选股判断”的能力，同时保留可复现、可审计和不使用未来数据的底座。
 
+**状态权威：** 本文件不声明当前生产能力；生产能力现状唯一以 `docs/operations/production-capability-matrix.md` 为准。
+
 关联文件：
 
 - 根因审计：`docs/superpowers/specs/2026-07-19-v3-upstream-analysis-intelligence-audit.md`

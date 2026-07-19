@@ -8,6 +8,8 @@
 
 **Tech Stack:** Markdown、JSON、SHA-256、现有本地事实库和 U 盘不可变产物、形成日前官方公告/年报、现有知识库、Codex 受证据约束分析。
 
+**Status Authority:** 本计划不声明当前生产能力；生产能力现状唯一以 `docs/operations/production-capability-matrix.md` 为准。
+
 ## Global Constraints
 
 - 最高级合同：`docs/superpowers/specs/2026-07-19-v3-repair-governance-master-design.md`。
