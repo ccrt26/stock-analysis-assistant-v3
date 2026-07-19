@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Sequence
 
 from stock_analyzer.evaluation.v3_forward.ledger import FROZEN_OUTPUT_ROOT
+from stock_analyzer.evaluation.v3_forward.explanation_service import explain_observation
 from stock_analyzer.evaluation.v3_forward.service import (
     form_observation,
     update_observations,
@@ -24,6 +25,17 @@ def build_parser() -> argparse.ArgumentParser:
     form.add_argument("--warehouse-root", type=Path, default=project_root / "local_warehouse")
     form.add_argument("--archive-root", type=Path, default=project_root / "local_archive")
     form.add_argument("--output-root", type=Path, default=FROZEN_OUTPUT_ROOT)
+    explain = subparsers.add_parser(
+        "explain", help="为已有不可变形成批次追加严格时点详细决策卡"
+    )
+    explain.add_argument("--formation-date", required=True)
+    explain.add_argument(
+        "--warehouse-root", type=Path, default=project_root / "local_warehouse"
+    )
+    explain.add_argument(
+        "--archive-root", type=Path, default=project_root / "local_archive"
+    )
+    explain.add_argument("--output-root", type=Path, default=FROZEN_OUTPUT_ROOT)
     update = subparsers.add_parser("update", help="追加真实开盘和成熟窗口")
     update.add_argument("--as-of-date", required=True)
     update.add_argument("--warehouse-root", type=Path, default=project_root / "local_warehouse")
@@ -45,6 +57,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             "path": str(result.bundle.path),
             "attention_count": result.attention_count,
             "action_count": result.action_count,
+        }
+    elif args.command == "explain":
+        result = explain_observation(
+            warehouse_root=args.warehouse_root,
+            archive_root=args.archive_root,
+            output_root=args.output_root,
+            formation_date=date.fromisoformat(args.formation_date),
+        )
+        payload = {
+            "status": "idempotent" if result.bundle.idempotent else "explained",
+            "path": str(result.bundle.path),
+            "card_count": result.card_count,
         }
     else:
         result = update_observations(

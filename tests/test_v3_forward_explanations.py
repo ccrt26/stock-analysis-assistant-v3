@@ -1,15 +1,25 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pandas as pd
+import pytest
 
+from stock_analyzer.evaluation.v3_forward.__main__ import build_parser
+from stock_analyzer.evaluation.v3_forward.explanation_service import explain_observation
 from stock_analyzer.evaluation.v3_forward.explanations import (
     build_decision_cards,
     render_decision_cards,
 )
 from stock_analyzer.evaluation.v3_forward.inputs import FormationInputs
+from stock_analyzer.evaluation.v3_forward.ledger import (
+    ForwardLedger,
+    ImmutableEvidenceConflict,
+    sha256_file,
+)
+from stock_analyzer.evaluation.v3_forward.service import _stable_hash
 
 
 FORMATION_DATE = date(2026, 7, 17)
@@ -188,3 +198,101 @@ def test_build_decision_cards_includes_only_confirmed_stocks_and_full_context():
     ):
         assert heading in report
     assert "动作确认不是自动买入" in report
+
+
+def test_explain_writes_immutable_bundle_without_changing_formation(
+    tmp_path: Path, monkeypatch
+):
+    output = tmp_path / "forward"
+    ledger = ForwardLedger(output, enforce_real_root=False)
+    inputs = _explanation_inputs()
+    formation_payload = {
+        "formation_date": FORMATION_DATE.isoformat(),
+        "rule_version": "v3-forward-baseline-01",
+        "data_cutoff_at": CUTOFF.isoformat(),
+        "input_manifest_hash": _stable_hash(inputs.input_manifest),
+        "generated_at": "2026-07-19T16:00:00+08:00",
+    }
+    formation = ledger.write_formation_bundle(
+        formation_payload, _explanation_candidates(), "原始形成报告\n"
+    )
+    before = {
+        path.name: sha256_file(path)
+        for path in formation.path.iterdir()
+        if path.is_file()
+    }
+    monkeypatch.setattr(
+        "stock_analyzer.evaluation.v3_forward.explanation_service.load_formation_inputs",
+        lambda *_args, **_kwargs: inputs,
+    )
+
+    first = explain_observation(
+        warehouse_root=tmp_path / "warehouse",
+        archive_root=tmp_path / "archive",
+        output_root=output,
+        formation_date=FORMATION_DATE,
+        now=CUTOFF,
+        enforce_real_root=False,
+    )
+    second = explain_observation(
+        warehouse_root=tmp_path / "warehouse",
+        archive_root=tmp_path / "archive",
+        output_root=output,
+        formation_date=FORMATION_DATE,
+        now=CUTOFF,
+        enforce_real_root=False,
+    )
+
+    assert first.bundle.path == (
+        output
+        / "decision-cards"
+        / "formation_date=2026-07-17"
+        / "rule_version=v3-forward-baseline-01"
+    )
+    assert first.card_count == 2
+    assert second.bundle.idempotent is True
+    assert {
+        path.name: sha256_file(path)
+        for path in formation.path.iterdir()
+        if path.is_file()
+    } == before
+    assert (
+        output
+        / "reports"
+        / "formation_date=2026-07-17"
+        / "decision-cards-v3-forward-baseline-01.md"
+    ).is_file()
+    assert (
+        output
+        / "manifests"
+        / "formation_date=2026-07-17"
+        / "decision-cards-v3-forward-baseline-01-audit.json"
+    ).is_file()
+
+    changed = _explanation_inputs()
+    changed.company_profiles.loc[
+        changed.company_profiles["ts_code"].eq("301257.SZ"), "main_business"
+    ] = "被修改的主营"
+    monkeypatch.setattr(
+        "stock_analyzer.evaluation.v3_forward.explanation_service.load_formation_inputs",
+        lambda *_args, **_kwargs: changed,
+    )
+    with pytest.raises(ImmutableEvidenceConflict):
+        explain_observation(
+            warehouse_root=tmp_path / "warehouse",
+            archive_root=tmp_path / "archive",
+            output_root=output,
+            formation_date=FORMATION_DATE,
+            now=CUTOFF,
+            enforce_real_root=False,
+        )
+
+
+def test_explain_cli_is_manual_and_uses_frozen_output_default():
+    args = build_parser().parse_args(
+        ["explain", "--formation-date", "2026-07-17"]
+    )
+
+    assert args.command == "explain"
+    assert args.formation_date == "2026-07-17"
+    assert str(args.output_root).endswith("2026-07-19-v3-forward-observation")

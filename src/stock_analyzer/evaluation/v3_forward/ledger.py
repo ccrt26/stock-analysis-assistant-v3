@@ -101,6 +101,7 @@ class ForwardLedger:
             raise ValueError("输出路径必须是冻结的U盘专用目录")
         for child in (
             "formations",
+            "decision-cards",
             "entries",
             "snapshots",
             "tables",
@@ -109,6 +110,29 @@ class ForwardLedger:
             "logs",
         ):
             (self.root / child).mkdir(parents=True, exist_ok=True)
+
+    def write_decision_card_bundle(
+        self,
+        formation_date: date,
+        rule_version: str,
+        payload: Mapping[str, Any],
+        cards: pd.DataFrame,
+        report: str,
+    ) -> BundleWriteResult:
+        final = (
+            self.root
+            / "decision-cards"
+            / f"formation_date={formation_date.isoformat()}"
+            / f"rule_version={rule_version}"
+        )
+        return self._write_bundle(
+            final,
+            json_name="cards.json",
+            payload=payload,
+            table_name="cards.parquet",
+            frame=cards,
+            report=report,
+        )
 
     def write_formation_bundle(
         self,

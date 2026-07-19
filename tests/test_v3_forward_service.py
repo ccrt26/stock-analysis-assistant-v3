@@ -300,10 +300,10 @@ def test_formation_report_distinguishes_attention_action_and_future():
     assert "市场仍有不确定性" in report
 
 
-def test_manual_parser_exposes_only_form_and_update():
+def test_manual_parser_exposes_only_forward_observation_commands():
     parser = build_parser()
     subparsers = next(
         action for action in parser._actions if getattr(action, "choices", None)
     )
 
-    assert set(subparsers.choices) == {"form", "update"}
+    assert set(subparsers.choices) == {"form", "explain", "update"}
