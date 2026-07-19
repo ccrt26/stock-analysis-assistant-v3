@@ -57,15 +57,36 @@ def _company_analysis(
     else:
         headline = f"公司的严格主营事实是：{business}。"
         meaning = "当前只能依据公司正式画像理解其经营活动，不扩写未结构化的业务模式。"
-    supplemented = [str(item.get("fact_text")) for item in supplements if item.get("fact_text")]
+    categories = {
+        str(item.get("fact_category")) for item in supplements if item.get("fact_category")
+    }
+    supplemented = [
+        str(item.get("fact_text")).rstrip("。；; ")
+        for item in supplements
+        if item.get("fact_text")
+    ]
     if supplemented:
         meaning += " 官方资料补充确认：" + "；".join(supplemented) + "。"
+    if "revenue_composition" in categories and "customer_structure" in categories:
+        counterpoint = "收入构成和前五大客户占比已经补足；主要矛盾转为业务集中度与客户集中度是否会放大经营波动。"
+    elif "revenue_composition" in categories:
+        counterpoint = "主要收入构成已经补足，但客户贡献结构仍不完整，尚不能判断客户变化对收入的影响。"
+    elif "customer_structure" in categories:
+        counterpoint = "前五大客户占比已经补足，但主要收入构成仍不完整，尚不能判断增长来自哪项业务。"
+    else:
+        counterpoint = "当前缺少可复核的分业务收入和客户贡献时，不能判断哪项业务是主要增长来源。"
+    if "临床试验现场管理" in business:
+        boundary = "公司属于医药服务行业，不等于药品制造商，也不能据主营描述推断未来订单。"
+    elif "药品" in business:
+        boundary = "业务和产品结构只说明公司如何经营，不能据此推断产品销量、研发成功或未来增长。"
+    else:
+        boundary = "主营描述只说明公司如何经营，不能据此推断未来订单或利润。"
     return _section(
         headline=headline,
         meaning=meaning,
         selection_link="公司做什么用于判断量价异动是否有业务事实支撑，但不直接决定本次入选。",
-        counterpoint="当前缺少可复核的分业务收入和客户贡献时，不能判断哪项业务是主要增长来源。",
-        boundary="公司属于医药行业，不等于它就是药品制造商，也不能据主营描述推断未来订单。",
+        counterpoint=counterpoint,
+        boundary=boundary,
         evidence={"main_business": business, "official_supplement_count": len(supplemented)},
     )
 
@@ -310,7 +331,7 @@ def analyze_dossier_facts(
     supplement_categories = {
         str(item.get("fact_category")) for item in supplements if item.get("fact_category")
     }
-    missing = []
+    missing = ["可复核的市场份额", "严格同口径的同业估值比较"]
     if "revenue_composition" not in supplement_categories:
         missing.append("分业务收入与毛利构成")
     if "customer_structure" not in supplement_categories:

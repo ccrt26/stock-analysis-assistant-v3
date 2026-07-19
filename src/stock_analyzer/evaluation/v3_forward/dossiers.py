@@ -423,6 +423,15 @@ def build_research_dossiers(
             announcements,
             stock_supplements,
         )
+        supplement_categories = {
+            str(item.get("fact_category")) for item in stock_supplements
+        }
+        revenue_facts = [
+            str(item["fact_text"])
+            for item in stock_supplements
+            if item.get("fact_category") == "revenue_composition"
+        ]
+        gap_text = str(analysis["data_gaps"]["local_and_official_missing"])
         evidence = {
             "已确认事实": [
                 f"公司主营：{card.get('main_business')}",
@@ -435,10 +444,8 @@ def build_research_dossiers(
                 "多期同比指标可用于观察方向；季度、半年度和年度累计口径不可直接当作等长周期比较。",
             ],
             "当前未知": [
-                "分业务收入与毛利构成",
-                "可复核的客户收入贡献和市场份额",
+                *[item for item in gap_text.split("；") if item],
                 "公告事项的最终收入、利润或订单影响",
-                "严格同口径的同业估值比较",
             ],
         }
         opposition = {
@@ -466,7 +473,9 @@ def build_research_dossiers(
                 "routes": routes,
                 "hotspot_group_name": hotspot,
                 "business_composition_status": (
-                    "本地严格时点快照没有可复核的分业务收入与毛利构成，因此不编写业务占比。"
+                    "形成日前官方年报已补充收入构成：" + "；".join(revenue_facts)
+                    if "revenue_composition" in supplement_categories
+                    else "本地和形成日前官方资料没有可复核的分业务收入与毛利构成，因此不编写业务占比。"
                 ),
                 "summary_json": _stable_json(_summary(card, theme_info)),
                 "industry_and_themes_json": _stable_json(theme_info),

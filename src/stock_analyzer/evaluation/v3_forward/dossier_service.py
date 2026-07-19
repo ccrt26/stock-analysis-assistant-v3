@@ -4,7 +4,7 @@ import json
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 import pandas as pd
 
@@ -56,6 +56,23 @@ def _decision_card_identity(
     return payload, pd.read_parquet(path / "cards.parquet")
 
 
+def _resolve_dossier_input_hash(
+    expected: Mapping[str, Any], actual: Mapping[str, Any]
+) -> str:
+    expected_payload = dict(expected)
+    actual_payload = dict(actual)
+    if expected_payload == actual_payload:
+        return _stable_hash(expected_payload)
+    stable_keys = {"derived", "facts"}
+    if (
+        set(expected_payload) != {"health_report", *stable_keys}
+        or set(actual_payload) != {"health_report", *stable_keys}
+        or any(expected_payload.get(key) != actual_payload.get(key) for key in stable_keys)
+    ):
+        raise ValueError("research dossier input identity differs from formation")
+    return _stable_hash(expected_payload)
+
+
 def build_research_dossier(
     *,
     warehouse_root: Path,
@@ -91,7 +108,12 @@ def build_research_dossier(
     inputs = load_formation_inputs(
         Path(warehouse_root), Path(archive_root), formation_date
     )
-    actual_input_hash = _stable_hash(dict(inputs.input_manifest))
+    frozen_manifest = formation.payload.get("input_manifest")
+    actual_input_hash = (
+        _resolve_dossier_input_hash(frozen_manifest, inputs.input_manifest)
+        if isinstance(frozen_manifest, Mapping)
+        else _stable_hash(dict(inputs.input_manifest))
+    )
     if actual_input_hash != input_manifest_hash:
         raise ValueError("research dossier input identity differs from formation")
     supplements, supplement_bundle_hash = read_official_supplements(

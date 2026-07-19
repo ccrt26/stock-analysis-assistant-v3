@@ -403,6 +403,16 @@ def test_official_supplements_add_company_facts_without_changing_selection_reaso
     assert puruisi["supplement_bundle_hash"] == "official-bundle-hash"
     assert "近5个交易日上涨8.50%" in analysis["selection_analysis"]["meaning"]
     assert "SMO服务" not in analysis["selection_analysis"]["meaning"]
+    assert "缺少可复核的分业务收入" not in analysis["company_analysis"]["counterpoint"]
+    assert "官方年报已补充" in puruisi["business_composition_status"]
+
+    _, reports = render_research_dossiers(_payload(), dossiers)
+    report = reports["301257.SZ"]
+    assert "。；" not in report
+    assert "。。" not in report
+    assert "分业务收入与毛利构成" not in json.loads(
+        puruisi["evidence_matrix_json"]
+    )["当前未知"]
 
 
 def _tree_hashes(path: Path) -> dict[str, str]:
@@ -558,3 +568,25 @@ def test_manual_official_supplement_command_is_available(tmp_path):
     assert args.command == "supplement-dossier"
     assert args.formation_date == "2026-07-17"
     assert args.facts_json == tmp_path / "facts.json"
+
+
+def test_dossier_identity_allows_only_regenerated_health_gate_metadata():
+    from stock_analyzer.evaluation.v3_forward.dossier_service import (
+        _resolve_dossier_input_hash,
+    )
+
+    expected = {
+        "health_report": {"path": "/old/health.json", "sha256": "old", "generated_at": "old"},
+        "derived": {"stock": {"content_hash": "same"}},
+        "facts": {"input_manifest_hash": "same"},
+    }
+    refreshed_health = {
+        **expected,
+        "health_report": {"path": "/new/health.json", "sha256": "new", "generated_at": "new"},
+    }
+
+    assert _resolve_dossier_input_hash(expected, refreshed_health) == _stable_hash(expected)
+
+    changed_facts = {**refreshed_health, "facts": {"input_manifest_hash": "changed"}}
+    with pytest.raises(ValueError, match="input identity differs"):
+        _resolve_dossier_input_hash(expected, changed_facts)
