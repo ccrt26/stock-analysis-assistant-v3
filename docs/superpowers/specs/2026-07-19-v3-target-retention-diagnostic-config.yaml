@@ -1,0 +1,22 @@
+experiment_id: 2026-07-19-v3-target-retention-diagnostic
+source_experiment_root: /Volumes/ZHUTONG/股票分析助手-V3回测/2026-07-18-v3-layered-validation
+warehouse_root: /Users/ccrt/Documents/股票分析助手/local_warehouse
+output_root: /Volumes/ZHUTONG/股票分析助手-V3回测/2026-07-19-v3-target-retention-diagnostic
+blocks:
+  - {id: A, start: 2025-10-30, end: 2025-12-10}
+  - {id: B, start: 2026-01-26, end: 2026-03-16}
+  - {id: C, start: 2026-04-20, end: 2026-06-03}
+horizons: [10, 20, 30]
+target_return: 0.20
+retention_windows: [1, 2, 3, 5]
+primary_horizon: 20
+runtime_stop_minutes: 20
+supported_policies:
+  - route_hotspot
+  - route_earnings
+  - route_price
+  - research_union
+  - matched_research_control
+  - v3_partial_candidate
+  - matched_candidate_control
+rule_optimization_allowed: false

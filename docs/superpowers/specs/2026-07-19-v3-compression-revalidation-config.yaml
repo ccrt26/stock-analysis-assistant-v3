@@ -1,0 +1,10 @@
+experiment_id: 2026-07-19-v3-compression-revalidation
+source_layered_root: /Volumes/ZHUTONG/股票分析助手-V3回测/2026-07-18-v3-layered-validation
+source_action_root: /Volumes/ZHUTONG/股票分析助手-V3回测/2026-07-19-v3-next-day-entry-validation
+output_root: /Volumes/ZHUTONG/股票分析助手-V3回测/2026-07-19-v3-compression-revalidation
+blocks: [A, B, C]
+horizons: [20, 30]
+candidate_cap: 10
+focus_cap: 5
+user_layers: [关注]
+runtime_stop_minutes: 10
