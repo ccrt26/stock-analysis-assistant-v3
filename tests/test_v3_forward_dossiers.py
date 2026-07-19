@@ -13,6 +13,7 @@ from stock_analyzer.evaluation.v3_forward.dossiers import (
     build_research_dossiers,
     render_research_dossiers,
 )
+from stock_analyzer.evaluation.v3_forward.__main__ import build_parser
 from stock_analyzer.evaluation.v3_forward.explanations import (
     build_decision_cards,
     render_decision_cards,
@@ -408,3 +409,14 @@ def test_dossier_service_is_immutable_and_preserves_existing_bundles(
     assert "stocks/301257.SZ.md" in manifest["files"]
     assert _tree_hashes(formation.path) == before_formation
     assert _tree_hashes(cards_bundle.path) == before_cards
+
+
+def test_manual_dossier_command_is_available():
+    args = build_parser().parse_args(
+        ["dossier", "--formation-date", FORMATION_DATE.isoformat()]
+    )
+
+    assert args.command == "dossier"
+    assert args.formation_date == "2026-07-17"
+    assert args.warehouse_root.name == "local_warehouse"
+    assert args.archive_root.name == "local_archive"
