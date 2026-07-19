@@ -5,11 +5,12 @@ from typing import Any, Mapping
 
 import pandas as pd
 
+from stock_analyzer.evaluation.v3_forward.dossier_analysis import analyze_dossier_facts
 from stock_analyzer.evaluation.v3_forward.explanations import build_decision_cards
 from stock_analyzer.evaluation.v3_forward.inputs import FormationInputs
 
 
-DOSSIER_SCHEMA_VERSION = "v3-forward-research-dossier-02"
+DOSSIER_SCHEMA_VERSION = "v3-forward-research-dossier-03"
 
 _FINANCIAL_FIELDS = (
     "tr_yoy",
@@ -72,6 +73,10 @@ _DOSSIER_COLUMNS = (
     "announcements_json",
     "evidence_matrix_json",
     "opposition_and_unknowns_json",
+    "analysis_json",
+    "supplement_facts_json",
+    "supplement_status",
+    "supplement_bundle_hash",
 )
 
 _GLOSSARY = (
@@ -360,7 +365,12 @@ def _summary(card: Mapping[str, Any], theme_info: Mapping[str, Any]) -> dict[str
 
 
 def build_research_dossiers(
-    payload: Mapping[str, Any], candidates: pd.DataFrame, inputs: FormationInputs
+    payload: Mapping[str, Any],
+    candidates: pd.DataFrame,
+    inputs: FormationInputs,
+    *,
+    supplements: pd.DataFrame | None = None,
+    supplement_bundle_hash: str | None = None,
 ) -> pd.DataFrame:
     cutoff = pd.Timestamp(payload.get("data_cutoff_at", inputs.cutoff))
     if cutoff.tzinfo is None:
@@ -370,6 +380,17 @@ def build_research_dossiers(
     if cards.empty:
         return pd.DataFrame(columns=_DOSSIER_COLUMNS)
     profiles = _latest_profiles(inputs)
+    supplements = supplements.copy() if supplements is not None else pd.DataFrame()
+    if not supplements.empty:
+        required = {"formation_date", "schema_version", "ts_code", "fact_text"}
+        if not required <= set(supplements):
+            raise ValueError("official supplements lack dossier identity fields")
+        if not supplements["formation_date"].astype(str).eq(inputs.formation_date.isoformat()).all():
+            raise ValueError("official supplements formation date differs")
+        if not supplements["schema_version"].astype(str).eq(
+            "v3-forward-official-supplement-01"
+        ).all():
+            raise ValueError("official supplements schema differs")
     rows: list[dict[str, Any]] = []
     for card in cards.to_dict(orient="records"):
         code = str(card["ts_code"])
@@ -387,6 +408,21 @@ def build_research_dossiers(
         announcements = json.loads(str(card.get("recent_announcements_json", "[]")))
         history = _financial_history(inputs, code, cutoff)
         metrics = _trading_metrics(inputs, code)
+        stock_supplements = (
+            supplements[supplements["ts_code"].astype(str).eq(code)]
+            .sort_values(["fact_category", "source_url", "fact_text"])
+            .to_dict(orient="records")
+            if not supplements.empty
+            else []
+        )
+        analysis = analyze_dossier_facts(
+            card,
+            theme_info,
+            history,
+            metrics,
+            announcements,
+            stock_supplements,
+        )
         evidence = {
             "已确认事实": [
                 f"公司主营：{card.get('main_business')}",
@@ -440,6 +476,10 @@ def build_research_dossiers(
                 "announcements_json": _stable_json(announcements),
                 "evidence_matrix_json": _stable_json(evidence),
                 "opposition_and_unknowns_json": _stable_json(opposition),
+                "analysis_json": _stable_json(analysis),
+                "supplement_facts_json": _stable_json(stock_supplements),
+                "supplement_status": "present" if stock_supplements else "not_present",
+                "supplement_bundle_hash": supplement_bundle_hash,
             }
         )
     result = pd.DataFrame(rows, columns=_DOSSIER_COLUMNS)
@@ -491,8 +531,17 @@ def _financial_table(history: list[dict[str, Any]]) -> list[str]:
     return lines
 
 
+def _render_analysis_block(section: Mapping[str, Any]) -> list[str]:
+    return [
+        f"- **本节结论：** {section['headline']}",
+        f"- **为什么：** {section['meaning']}",
+        f"- **与本次入选的关系：** {section['selection_link']}",
+        f"- **主要矛盾：** {section['counterpoint']}",
+        f"- **不能推出：** {section['boundary']}",
+    ]
+
+
 def _render_one(row: Mapping[str, Any], payload: Mapping[str, Any]) -> str:
-    summary = json.loads(str(row["summary_json"]))
     themes = json.loads(str(row["industry_and_themes_json"]))
     action = json.loads(str(row["action_confirmation_json"]))
     history = json.loads(str(row["financial_history_json"]))
@@ -500,6 +549,9 @@ def _render_one(row: Mapping[str, Any], payload: Mapping[str, Any]) -> str:
     announcements = json.loads(str(row["announcements_json"]))
     evidence = json.loads(str(row["evidence_matrix_json"]))
     opposition = json.loads(str(row["opposition_and_unknowns_json"]))
+    analysis = json.loads(str(row["analysis_json"]))
+    supplements = json.loads(str(row["supplement_facts_json"]))
+    top = analysis["top_conclusion"]
     lines = [
         f"# {row['stock_name']}（{row['ts_code']}）研究档案",
         "",
@@ -509,30 +561,48 @@ def _render_one(row: Mapping[str, Any], payload: Mapping[str, Any]) -> str:
         f"- 档案版本：{DOSSIER_SCHEMA_VERSION}",
         "- 用途：解释为何值得继续研究，不构成买卖指令或收益承诺。",
         "",
-        "## 30秒读懂",
+        "## 先看结论",
         "",
-        summary["30秒读懂"],
-        "",
-        f"- 为什么现在看：{summary['why_research_now']}",
-        f"- 当前主要反对证据：{summary['largest_counterevidence']}",
-        f"- 当前最大缺口：{summary['largest_unknown']}",
+        f"- **核心判断：** {top['headline']}",
+        f"- **为什么现在看：** {top['meaning']}",
+        f"- **当前主要矛盾：** {top['counterpoint']}",
+        f"- **本次入选依据：** {top['selection_link']}",
+        "- **后续重点验证：** 量价分歧能否收敛，经营改善能否得到现金流或正式公司事实支持。",
+        f"- **结论边界：** {top['boundary']}",
         "",
         "## 一、公司与业务",
+        "",
+    ]
+    lines.extend(_render_analysis_block(analysis["company_analysis"]))
+    lines.extend([
+        "",
+        "### 事实底稿",
         "",
         f"- 公司全称：{row['company_name']}",
         f"- 一级行业：{row['industry_l1_name']}",
         f"- 主营业务：{row['main_business']}",
         f"- 公司介绍：{row['company_introduction']}",
         f"- 业务构成边界：{row['business_composition_status']}",
+    ])
+    if supplements:
+        lines.extend(["", "### 形成日前官方补充事实", ""])
+        for item in supplements:
+            lines.append(
+                f"- {item['fact_text']}（[{item['source_title']}]({item['source_url']})，"
+                f"发布时间 {item['published_at']}）"
+            )
+    lines.extend(["", "## 二、行业、板块与概念", ""])
+    lines.extend(_render_analysis_block(analysis["industry_theme_analysis"]))
+    lines.extend([
         "",
-        "## 二、行业、板块与概念",
+        "### 事实底稿",
         "",
         f"- 一级行业：{themes['industry_l1']}",
         f"- 本次发现路线：{themes['routes']}",
         f"- 本次选择热点：{themes['selection_hotspot'] or '无'}",
         f"- 路线说明：{themes['route_explanation']}",
         f"- 正式主题成员总数：{themes['formal_theme_membership_count']}",
-    ]
+    ])
     for item in themes["formal_theme_memberships"]:
         role = {
             "selection_relevant": "本次选择直接相关",
@@ -541,6 +611,8 @@ def _render_one(row: Mapping[str, Any], payload: Mapping[str, Any]) -> str:
         }[item["evidence_role"]]
         lines.append(f"  - {item['name']}（{item['code']}）：{role}")
     lines.extend(["", f"> 证据边界：{themes['boundary']}", "", "## 三、为什么进入名单、为什么此刻确认", ""])
+    lines.extend(_render_analysis_block(analysis["selection_analysis"]))
+    lines.extend(["", "### 三项确认原始值", ""])
     lines.append(f"- 形成路线：{row['routes']}")
     for item in action["items"]:
         value = _pct(item["raw_value"]) if "收益" in item["name"] else _num(item["raw_value"])
@@ -548,6 +620,8 @@ def _render_one(row: Mapping[str, Any], payload: Mapping[str, Any]) -> str:
             f"- {item['name']}：原始值 {value}，阈值 {item['threshold']}，结果 {'满足' if item['satisfied'] else '不满足'}。{item['meaning']}"
         )
     lines.extend(["", f"> {action['boundary']}", "", "## 四、多报告期业绩与财务质量", ""])
+    lines.extend(_render_analysis_block(analysis["financial_analysis"]))
+    lines.extend(["", "### 多期原始数据", ""])
     lines.extend(_financial_table(history))
     lines.extend(
         [
@@ -555,6 +629,14 @@ def _render_one(row: Mapping[str, Any], payload: Mapping[str, Any]) -> str:
             "> 口径提醒：季度、半年度和年度累计指标不可擅自当作等长周期绝对值比较；同比增速还可能受低基数影响。",
             "",
             "## 五、交易、风险与估值指标",
+            "",
+        ]
+    )
+    lines.extend(_render_analysis_block(analysis["trading_valuation_analysis"]))
+    lines.extend(
+        [
+            "",
+            "### 原始指标",
             "",
             "| 指标 | 当前值 |",
             "| --- | ---: |",
@@ -575,6 +657,8 @@ def _render_one(row: Mapping[str, Any], payload: Mapping[str, Any]) -> str:
             "",
         ]
     )
+    lines.extend(_render_analysis_block(analysis["announcement_analysis"]))
+    lines.extend(["", "### 公告事实底稿", ""])
     if announcements:
         for item in announcements:
             event_types = "、".join(item.get("event_types", [])) or "未分类"
@@ -600,18 +684,26 @@ def _render_one(row: Mapping[str, Any], payload: Mapping[str, Any]) -> str:
         lines.append("")
     lines.extend(
         [
-            "## 八、反对证据与下一步验证",
+            "## 八、反对证据复核",
             "",
-            f"- 反对证据：{opposition['opposition_evidence']}",
-            f"- 尚缺确认：{opposition['missing_confirmations']}",
-            "- 下一步只验证以下事实：",
+            f"- 原始反对证据：{opposition['opposition_evidence']}",
+            f"- 分析后的影响：{top['counterpoint']}",
         ]
     )
-    for item in opposition["next_facts_to_verify"]:
-        lines.append(f"  - {item}")
     lines.extend(["", "## 九、术语词典", ""])
     for term, explanation in _GLOSSARY:
         lines.append(f"- {term}：{explanation}")
+    gaps = analysis["data_gaps"]
+    lines.extend(
+        [
+            "",
+            "## 十、数据缺口与后续验证",
+            "",
+            f"- 本地与形成日前官方资料仍未确认：{gaps['local_and_official_missing']}。",
+            f"- 未来形成后才能观察：{gaps['future_validations']}。",
+            "- 数据缺失只降低结论强度，不会被猜测或市场传闻填补。",
+        ]
+    )
     lines.extend(["", "---", "", "本档案是严格时点研究材料，不是收益承诺或交易指令。", ""])
     return "\n".join(lines)
 

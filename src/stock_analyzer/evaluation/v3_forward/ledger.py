@@ -103,6 +103,7 @@ class ForwardLedger:
             "formations",
             "decision-cards",
             "research-dossiers",
+            "official-supplements",
             "entries",
             "snapshots",
             "tables",
@@ -175,6 +176,29 @@ class ForwardLedger:
             frame=dossiers,
             report=report,
             extra_texts=extras,
+        )
+
+    def write_official_supplement_bundle(
+        self,
+        formation_date: date,
+        schema_version: str,
+        payload: Mapping[str, Any],
+        facts: pd.DataFrame,
+        report: str,
+    ) -> BundleWriteResult:
+        final = (
+            self.root
+            / "official-supplements"
+            / f"formation_date={formation_date.isoformat()}"
+            / f"schema_version={schema_version}"
+        )
+        return self._write_bundle(
+            final,
+            json_name="supplements.json",
+            payload=payload,
+            table_name="supplements.parquet",
+            frame=facts,
+            report=report,
         )
 
     def write_formation_bundle(

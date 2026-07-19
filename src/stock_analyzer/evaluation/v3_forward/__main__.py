@@ -9,6 +9,9 @@ from typing import Sequence
 from stock_analyzer.evaluation.v3_forward.ledger import FROZEN_OUTPUT_ROOT
 from stock_analyzer.evaluation.v3_forward.explanation_service import explain_observation
 from stock_analyzer.evaluation.v3_forward.dossier_service import build_research_dossier
+from stock_analyzer.evaluation.v3_forward.supplement_service import (
+    add_official_dossier_supplements,
+)
 from stock_analyzer.evaluation.v3_forward.service import (
     form_observation,
     update_observations,
@@ -60,6 +63,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--archive-root", type=Path, default=project_root / "local_archive"
     )
     dossier.add_argument("--output-root", type=Path, default=FROZEN_OUTPUT_ROOT)
+    supplement = subparsers.add_parser(
+        "supplement-dossier", help="为动作确认对象追加形成日前官方静态事实"
+    )
+    supplement.add_argument("--formation-date", required=True)
+    supplement.add_argument("--facts-json", type=Path, required=True)
+    supplement.add_argument("--output-root", type=Path, default=FROZEN_OUTPUT_ROOT)
     update = subparsers.add_parser("update", help="追加真实开盘和成熟窗口")
     update.add_argument("--as-of-date", required=True)
     update.add_argument("--warehouse-root", type=Path, default=project_root / "local_warehouse")
@@ -107,6 +116,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             "status": "idempotent" if result.bundle.idempotent else "explained",
             "path": str(result.bundle.path),
             "card_count": result.card_count,
+        }
+    elif args.command == "supplement-dossier":
+        result = add_official_dossier_supplements(
+            output_root=args.output_root,
+            formation_date=date.fromisoformat(args.formation_date),
+            facts_json=args.facts_json,
+        )
+        payload = {
+            "status": "idempotent" if result.bundle.idempotent else "supplemented",
+            "path": str(result.bundle.path),
+            "fact_count": result.fact_count,
+            "schema_version": result.schema_version,
         }
     elif args.command == "dossier":
         result = build_research_dossier(

@@ -14,6 +14,9 @@ from stock_analyzer.evaluation.v3_forward.dossiers import (
     render_research_dossiers,
 )
 from stock_analyzer.evaluation.v3_forward.__main__ import build_parser
+from stock_analyzer.evaluation.v3_forward.dossier_supplements import (
+    write_official_supplements,
+)
 from stock_analyzer.evaluation.v3_forward.explanations import (
     build_decision_cards,
     render_decision_cards,
@@ -239,7 +242,7 @@ def _payload() -> dict[str, object]:
 def test_dossiers_only_include_confirmed_stocks_and_onboard_new_reader():
     dossiers = build_research_dossiers(_payload(), _candidates(), _inputs())
 
-    assert DOSSIER_SCHEMA_VERSION == "v3-forward-research-dossier-02"
+    assert DOSSIER_SCHEMA_VERSION == "v3-forward-research-dossier-03"
     assert dossiers["ts_code"].tolist() == ["301257.SZ", "002603.SZ"]
     puruisi = dossiers[dossiers["ts_code"].eq("301257.SZ")].iloc[0]
     assert puruisi["company_name"] == "普蕊斯(上海)医药科技开发股份有限公司"
@@ -249,6 +252,10 @@ def test_dossiers_only_include_confirmed_stocks_and_onboard_new_reader():
     assert "价格路线" in puruisi["summary_json"]
     assert "本次不是因热点入选" in puruisi["industry_and_themes_json"]
     assert "不编写业务占比" in puruisi["business_composition_status"]
+    analysis = json.loads(puruisi["analysis_json"])
+    assert "量价驱动" in analysis["top_conclusion"]["headline"]
+    assert "近5个交易日上涨8.50%" in analysis["selection_analysis"]["meaning"]
+    assert "召回条件" not in puruisi["analysis_json"]
 
 
 def test_dossier_theme_memberships_are_active_and_not_business_proof():
@@ -350,6 +357,53 @@ def test_dossier_contains_trading_metrics_glossary_and_evidence_boundaries():
     for prohibited in ("目标价", "仓位建议", "止损", "止盈", "自动买入", "自动交易"):
         assert prohibited not in combined
 
+    report = per_stock["301257.SZ"]
+    assert "## 先看结论" in report
+    assert "本节结论" in report
+    assert "为什么" in report
+    assert "与本次入选的关系" in report
+    assert "主要矛盾" in report
+    assert "不能推出" in report
+    assert "形成日单日下跌10.00%" in report
+    assert "放量下跌" in report
+    assert report.index("## 十、数据缺口与后续验证") > report.index("## 六、形成日前正式公告")
+    top = report.split("## 一、公司与业务", 1)[0]
+    assert "当前最大缺口" not in top
+    assert "下一真实交易日" not in top
+
+
+def test_official_supplements_add_company_facts_without_changing_selection_reason():
+    supplements = pd.DataFrame(
+        [
+            {
+                "formation_date": FORMATION_DATE.isoformat(),
+                "schema_version": "v3-forward-official-supplement-01",
+                "ts_code": "301257.SZ",
+                "fact_category": "revenue_composition",
+                "fact_text": "SMO服务是公司主要业务构成。",
+                "source_title": "普蕊斯2025年年度报告",
+                "source_url": "https://www.cninfo.com.cn/finalpage/2026-04-29/1225226898.PDF",
+                "published_at": "2026-04-28T16:00:00+00:00",
+                "observed_at": "2026-07-19T01:00:00+00:00",
+            }
+        ]
+    )
+    dossiers = build_research_dossiers(
+        _payload(),
+        _candidates(),
+        _inputs(),
+        supplements=supplements,
+        supplement_bundle_hash="official-bundle-hash",
+    )
+    puruisi = dossiers[dossiers["ts_code"].eq("301257.SZ")].iloc[0]
+    analysis = json.loads(puruisi["analysis_json"])
+    supplement_facts = json.loads(puruisi["supplement_facts_json"])
+
+    assert supplement_facts[0]["fact_text"] == "SMO服务是公司主要业务构成。"
+    assert puruisi["supplement_bundle_hash"] == "official-bundle-hash"
+    assert "近5个交易日上涨8.50%" in analysis["selection_analysis"]["meaning"]
+    assert "SMO服务" not in analysis["selection_analysis"]["meaning"]
+
 
 def _tree_hashes(path: Path) -> dict[str, str]:
     return {
@@ -388,6 +442,25 @@ def test_dossier_service_is_immutable_and_preserves_existing_bundles(
     }
     cards_bundle = ledger.write_decision_card_bundle(
         FORMATION_DATE, str(payload["rule_version"]), card_payload, cards, card_report
+    )
+    supplement = write_official_supplements(
+        output_root=output,
+        formation_date=FORMATION_DATE,
+        cutoff=pd.Timestamp(CUTOFF),
+        facts=pd.DataFrame(
+            [
+                {
+                    "ts_code": "301257.SZ",
+                    "fact_category": "business_model",
+                    "fact_text": "公司提供临床试验现场管理服务。",
+                    "source_title": "普蕊斯2025年年度报告",
+                    "source_url": "https://www.cninfo.com.cn/finalpage/2026-04-29/1225226898.PDF",
+                    "published_at": "2026-04-29T00:00:00+08:00",
+                    "observed_at": "2026-07-19T09:00:00+08:00",
+                }
+            ]
+        ),
+        enforce_real_root=False,
     )
     ledger.write_report_projection(
         Path("formation_date=2026-07-17")
@@ -431,7 +504,7 @@ def test_dossier_service_is_immutable_and_preserves_existing_bundles(
     assert first.bundle.path.parts[-3:] == (
         "formation_date=2026-07-17",
         "rule_version=v3-forward-baseline-01",
-        "schema_version=v3-forward-research-dossier-02",
+        "schema_version=v3-forward-research-dossier-03",
     )
     assert (first.bundle.path / "stocks" / "301257.SZ.md").is_file()
     assert (first.bundle.path / "stocks" / "002603.SZ.md").is_file()
@@ -439,16 +512,23 @@ def test_dossier_service_is_immutable_and_preserves_existing_bundles(
         output
         / "reports"
         / "formation_date=2026-07-17"
-        / "research-dossier-v3-forward-baseline-01-v3-forward-research-dossier-02.md"
+        / "research-dossier-v3-forward-baseline-01-v3-forward-research-dossier-03.md"
     ).is_file()
     assert (
         output
         / "manifests"
         / "formation_date=2026-07-17"
-        / "research-dossier-v3-forward-baseline-01-v3-forward-research-dossier-02-audit.json"
+        / "research-dossier-v3-forward-baseline-01-v3-forward-research-dossier-03-audit.json"
     ).is_file()
     manifest = json.loads((first.bundle.path / "manifest.json").read_text(encoding="utf-8"))
+    dossier_payload = json.loads(
+        (first.bundle.path / "dossiers.json").read_text(encoding="utf-8")
+    )
     assert "stocks/301257.SZ.md" in manifest["files"]
+    assert dossier_payload["source_official_supplement_content_hash"] == supplement.bundle_content_hash
+    assert "公司提供临床试验现场管理服务" in (
+        first.bundle.path / "stocks" / "301257.SZ.md"
+    ).read_text(encoding="utf-8")
     assert _tree_hashes(formation.path) == before_formation
     assert _tree_hashes(cards_bundle.path) == before_cards
 
@@ -462,3 +542,19 @@ def test_manual_dossier_command_is_available():
     assert args.formation_date == "2026-07-17"
     assert args.warehouse_root.name == "local_warehouse"
     assert args.archive_root.name == "local_archive"
+
+
+def test_manual_official_supplement_command_is_available(tmp_path):
+    args = build_parser().parse_args(
+        [
+            "supplement-dossier",
+            "--formation-date",
+            FORMATION_DATE.isoformat(),
+            "--facts-json",
+            str(tmp_path / "facts.json"),
+        ]
+    )
+
+    assert args.command == "supplement-dossier"
+    assert args.formation_date == "2026-07-17"
+    assert args.facts_json == tmp_path / "facts.json"

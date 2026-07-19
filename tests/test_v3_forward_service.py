@@ -311,5 +311,6 @@ def test_manual_parser_exposes_only_forward_observation_commands():
         "form-v2",
         "explain",
         "dossier",
+        "supplement-dossier",
         "update",
     }

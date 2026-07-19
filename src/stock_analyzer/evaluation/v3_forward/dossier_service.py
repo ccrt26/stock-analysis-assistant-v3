@@ -13,6 +13,9 @@ from stock_analyzer.evaluation.v3_forward.dossiers import (
     build_research_dossiers,
     render_research_dossiers,
 )
+from stock_analyzer.evaluation.v3_forward.dossier_supplements import (
+    read_official_supplements,
+)
 from stock_analyzer.evaluation.v3_forward.inputs import load_formation_inputs
 from stock_analyzer.evaluation.v3_forward.ledger import (
     BundleWriteResult,
@@ -91,8 +94,17 @@ def build_research_dossier(
     actual_input_hash = _stable_hash(dict(inputs.input_manifest))
     if actual_input_hash != input_manifest_hash:
         raise ValueError("research dossier input identity differs from formation")
+    supplements, supplement_bundle_hash = read_official_supplements(
+        output_root,
+        formation_date=formation_date,
+        enforce_real_root=enforce_real_root,
+    )
     dossiers = build_research_dossiers(
-        formation.payload, formation.candidates, inputs
+        formation.payload,
+        formation.candidates,
+        inputs,
+        supplements=supplements,
+        supplement_bundle_hash=supplement_bundle_hash,
     )
     if set(dossiers["ts_code"].astype(str)) != set(
         existing_cards.get("ts_code", pd.Series(dtype=str)).astype(str)
@@ -123,6 +135,7 @@ def build_research_dossier(
         "source_formation_content_hash": formation.manifest["bundle_content_hash"],
         "source_decision_card_content_hash": cards_bundle.bundle_content_hash,
         "source_decision_card_generated_at": card_payload.get("generated_at"),
+        "source_official_supplement_content_hash": supplement_bundle_hash,
         "input_manifest_hash": actual_input_hash,
         "dossier_count": len(dossiers),
         "scope_statement": "strict-as-of explanatory projection for action-confirmed stocks only",
@@ -151,6 +164,7 @@ def build_research_dossier(
         "dossier_count": len(dossiers),
         "source_formation_content_hash": formation.manifest["bundle_content_hash"],
         "source_decision_card_content_hash": cards_bundle.bundle_content_hash,
+        "source_official_supplement_content_hash": supplement_bundle_hash,
         "input_manifest_hash": actual_input_hash,
         "data_cutoff_at": formation.payload.get("data_cutoff_at"),
         "dossiers_file_sha256": sha256_file(bundle.path / "dossiers.parquet"),
