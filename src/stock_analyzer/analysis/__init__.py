@@ -1,1 +1,1 @@
-"""Analysis primitives for pool filtering and downstream ranking logic."""
+"""Deterministic market, sector, and stock context measurements."""

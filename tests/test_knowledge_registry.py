@@ -11,9 +11,6 @@ from stock_analyzer.knowledge.registry import (
     load_knowledge_registry,
     load_legacy_migration,
 )
-from stock_analyzer.knowledge_validation.supplement_validation import (
-    SUPPLEMENT_CLAIMS,
-)
 
 
 REAL_REGISTRY_PATH = Path(
@@ -481,7 +478,12 @@ def test_registry_admits_exactly_accepted_new_supplement_results():
 def test_supplement_candidates_never_use_method_only_as_escape():
     registry = load_knowledge_registry(REAL_REGISTRY_PATH)
     entries = {entry.knowledge_id: entry for entry in registry.entries}
+    rows = yaml.safe_load(
+        Path(
+            "src/stock_analyzer/knowledge/supplement_validation_results.yaml"
+        ).read_text(encoding="utf-8")
+    )["results"]
 
-    for claim in SUPPLEMENT_CLAIMS:
-        if claim.knowledge_id in entries:
-            assert entries[claim.knowledge_id].effect.value != "method_only"
+    for row in rows:
+        if row["knowledge_id"] in entries:
+            assert entries[row["knowledge_id"]].effect.value != "method_only"

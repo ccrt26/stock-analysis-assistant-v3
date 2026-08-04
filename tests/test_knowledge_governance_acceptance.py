@@ -453,13 +453,14 @@ def test_governance_package_has_no_network_or_ingestion_dependency():
         }, (path, imported)
 
 
-def test_governance_is_not_imported_by_production_paths():
+def test_governance_is_not_imported_by_scheduled_data_paths():
     roots = (
         Path("src/stock_analyzer/analysis"),
+        Path("src/stock_analyzer/data"),
         Path("src/stock_analyzer/ops"),
-        Path("src/stock_analyzer/reports"),
+        Path("src/stock_analyzer/storage"),
     )
-    paths = [Path("src/stock_analyzer/pipeline.py"), Path("src/stock_analyzer/cli.py")]
+    paths = [Path("src/stock_analyzer/cli.py")]
     for root in roots:
         paths.extend(sorted(root.rglob("*.py")))
 
