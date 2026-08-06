@@ -50,30 +50,6 @@ def data_backfill(
         raise typer.Exit(code=2)
 
 
-@data_app.command("repair-gaps")
-def data_repair_gaps(
-    through: str = typer.Option(..., "--through"),
-) -> None:
-    from stock_analyzer.ops.research_data_job import (
-        build_research_data_runtime,
-        repair_research_gaps,
-    )
-
-    runtime = build_research_data_runtime(AppConfig.load())
-    summaries = repair_research_gaps(
-        runtime,
-        through=date.fromisoformat(through),
-    )
-    for item in summaries:
-        typer.echo(
-            f"repair/{item.scope}: committed={item.committed} "
-            f"skipped={item.skipped} waiting={item.waiting_upstream} "
-            f"limited={item.limited} failed={item.failed}"
-        )
-    if any(item.failed for item in summaries):
-        raise typer.Exit(code=2)
-
-
 @data_app.command("run-stage")
 def data_run_stage(
     stage: str = typer.Option(..., "--stage"),
@@ -121,7 +97,10 @@ def data_run_stage(
         f"stage health: core_complete={str(health.complete_core_date).lower()} "
         f"output={health_path}"
     )
-    if any(item.failed for item in summaries):
+    if (
+        any(item.failed or item.waiting_upstream for item in summaries)
+        or not health.complete_core_date
+    ):
         raise typer.Exit(code=2)
 
 

@@ -1,11 +1,13 @@
 from datetime import date, datetime, timedelta, timezone
 
 import pandas as pd
+import pytest
 
 from stock_analyzer.data.classification_backfill import ClassificationBackfillService
 from stock_analyzer.data.research_contracts import FactBatch, ResearchDatasetId
 from stock_analyzer.data.tushare_research_client import TushareResearchClient
 from stock_analyzer.storage.research_query import ResearchQuery
+from stock_analyzer.storage.research_schema import connect_research_warehouse
 from stock_analyzer.storage.research_warehouse import ResearchWarehouse
 
 
@@ -68,6 +70,55 @@ class ClassificationPro:
             "change": 15.0, "pct_chg": 1.5, "vol": 10.0, "amount": 20.0,
         }])
 
+
+class MissingListDateClassificationPro(ClassificationPro):
+    def __init__(self):
+        super().__init__()
+        self.l3_name = "L3"
+        self.l3_list_date = None
+
+    def index_classify(self, **kwargs):
+        frame = super().index_classify(**kwargs)
+        if kwargs["level"] == "L3":
+            frame.loc[:, "industry_name"] = self.l3_name
+        return frame
+
+    def index_basic(self, **kwargs):
+        frame = super().index_basic(**kwargs)
+        if kwargs["market"] == "SW":
+            frame.loc[
+                frame["ts_code"] == "850113.SI", "list_date"
+            ] = self.l3_list_date
+        return frame
+
+
+class MutableMemberClassificationPro(ClassificationPro):
+    def __init__(self):
+        super().__init__()
+        self.member_valid_from = "20220101"
+        self.member_valid_to = None
+        self.member_is_new = "Y"
+        self.member_codes = {
+            "L1": ("801010.SI", "L1"),
+            "L2": ("801016.SI", "L2"),
+            "L3": ("850113.SI", "L3"),
+        }
+
+    def index_member_all(self, **kwargs):
+        self.calls.append(("index_member_all", kwargs))
+        return pd.DataFrame([{
+            "l1_code": self.member_codes["L1"][0],
+            "l1_name": self.member_codes["L1"][1],
+            "l2_code": self.member_codes["L2"][0],
+            "l2_name": self.member_codes["L2"][1],
+            "l3_code": self.member_codes["L3"][0],
+            "l3_name": self.member_codes["L3"][1],
+            "ts_code": "000001.SZ",
+            "name": "平安银行",
+            "in_date": self.member_valid_from,
+            "out_date": self.member_valid_to,
+            "is_new": self.member_is_new,
+        }])
 
 def test_classification_backfill_builds_all_sw_levels_and_traceable_themes(tmp_path):
     pro = ClassificationPro()
@@ -431,3 +482,378 @@ def test_classification_resume_skips_all_complete_catalog_and_member_requests(
     )
 
     assert pro.calls == []
+
+
+def test_missing_sw_list_date_reuses_first_observed_effective_date(tmp_path):
+    pro = MissingListDateClassificationPro()
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    service = ClassificationBackfillService(
+        TushareResearchClient(pro, pacer=lambda method: None), warehouse
+    )
+
+    service.backfill(
+        start=date(2026, 7, 13), through=date(2026, 7, 13), resume=False
+    )
+    pro.l3_list_date = "20200101"
+    service.backfill(
+        start=date(2026, 8, 3), through=date(2026, 8, 3), resume=False
+    )
+
+    catalog = warehouse.read_current(ResearchDatasetId.INDUSTRY_CATALOG)
+    target = catalog[catalog["industry_code"].astype(str) == "850113.SI"]
+    active = target[pd.to_datetime(target["valid_to"], errors="coerce").isna()]
+
+    assert len(target) == 1
+    assert len(active) == 1
+    assert pd.Timestamp(active.iloc[0]["valid_from"]).date() == date(2026, 7, 13)
+
+
+def test_missing_sw_list_date_closes_prior_definition_when_attributes_change(
+    tmp_path,
+):
+    pro = MissingListDateClassificationPro()
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    service = ClassificationBackfillService(
+        TushareResearchClient(pro, pacer=lambda method: None), warehouse
+    )
+    service.backfill(
+        start=date(2026, 7, 13), through=date(2026, 7, 13), resume=False
+    )
+
+    pro.l3_name = "更新后的L3"
+    pro.l3_list_date = "20200101"
+    service.backfill(
+        start=date(2026, 8, 3), through=date(2026, 8, 3), resume=False
+    )
+
+    catalog = warehouse.read_current(ResearchDatasetId.INDUSTRY_CATALOG)
+    target = catalog[
+        catalog["industry_code"].astype(str) == "850113.SI"
+    ].sort_values("valid_from")
+
+    assert target["industry_name"].tolist() == ["L3", "更新后的L3"]
+    assert pd.Timestamp(target.iloc[0]["valid_from"]).date() == date(2026, 7, 13)
+    assert pd.Timestamp(target.iloc[0]["valid_to"]).date() == date(2026, 8, 2)
+    assert pd.Timestamp(target.iloc[1]["valid_from"]).date() == date(2026, 8, 3)
+    assert pd.isna(target.iloc[1]["valid_to"])
+
+
+def _refresh_mutable_membership(
+    service: ClassificationBackfillService,
+    data_date: date,
+) -> None:
+    service.backfill(start=data_date, through=data_date, resume=False)
+
+
+def _member_rows(
+    warehouse: ResearchWarehouse,
+    *,
+    level: str = "L1",
+) -> pd.DataFrame:
+    frame = warehouse.read_current(ResearchDatasetId.INDUSTRY_MEMBER)
+    return frame[
+        (frame["ts_code"].astype(str) == "000001.SZ")
+        & (frame["level"].astype(str) == level)
+    ].sort_values("valid_from").reset_index(drop=True)
+
+
+def test_identical_industry_member_refresh_is_idempotent(tmp_path):
+    pro = MutableMemberClassificationPro()
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    service = ClassificationBackfillService(
+        TushareResearchClient(pro, pacer=lambda method: None), warehouse
+    )
+
+    _refresh_mutable_membership(service, date(2026, 7, 10))
+    before = _member_rows(warehouse)
+    revision_count = warehouse.revision_count(ResearchDatasetId.INDUSTRY_MEMBER)
+    _refresh_mutable_membership(service, date(2026, 8, 3))
+    after = _member_rows(warehouse)
+
+    assert len(after) == 1
+    assert after.iloc[0]["business_key_hash"] == before.iloc[0]["business_key_hash"]
+    assert after.iloc[0]["available_at"] == before.iloc[0]["available_at"]
+    assert warehouse.revision_count(ResearchDatasetId.INDUSTRY_MEMBER) == revision_count
+
+
+def test_later_same_industry_member_start_closes_old_version_and_repeat_converges(
+    tmp_path,
+):
+    pro = MutableMemberClassificationPro()
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    service = ClassificationBackfillService(
+        TushareResearchClient(pro, pacer=lambda method: None), warehouse
+    )
+    _refresh_mutable_membership(service, date(2026, 7, 10))
+
+    pro.member_valid_from = "20260701"
+    receipt_lower_bound = datetime.now(timezone.utc)
+    _refresh_mutable_membership(service, date(2026, 8, 3))
+    first = _member_rows(warehouse)
+    first_revision_count = warehouse.revision_count(
+        ResearchDatasetId.INDUSTRY_MEMBER
+    )
+
+    assert len(first) == 2
+    assert pd.Timestamp(first.iloc[0]["valid_to"]).date() == date(2026, 6, 30)
+    assert bool(first.iloc[0]["is_current"]) is False
+    assert pd.isna(first.iloc[1]["valid_to"])
+    assert pd.Timestamp(first.iloc[1]["available_at"]).to_pydatetime() >= (
+        receipt_lower_bound
+    )
+    transition_available_at = pd.Timestamp(
+        first.iloc[1]["available_at"]
+    ).to_pydatetime()
+    with connect_research_warehouse(
+        warehouse.duckdb_path, read_only=True
+    ) as connection:
+        revision_valid_to = connection.execute(
+            "select cast(valid_to as varchar) from research_fact_revisions "
+            "where dataset_id = 'industry_member'"
+        ).fetchone()[0]
+    assert pd.Timestamp(revision_valid_to).to_pydatetime() == transition_available_at
+
+    _refresh_mutable_membership(service, date(2026, 8, 3))
+    repeated = _member_rows(warehouse)
+    assert len(repeated) == 2
+    assert warehouse.revision_count(
+        ResearchDatasetId.INDUSTRY_MEMBER
+    ) == first_revision_count
+
+
+def test_industry_change_is_visible_only_after_local_receipt(tmp_path):
+    pro = MutableMemberClassificationPro()
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    service = ClassificationBackfillService(
+        TushareResearchClient(pro, pacer=lambda method: None), warehouse
+    )
+    _refresh_mutable_membership(service, date(2026, 7, 10))
+
+    pro.member_valid_from = "20260701"
+    pro.member_codes["L1"] = ("801020.SI", "采掘")
+    _refresh_mutable_membership(service, date(2026, 8, 3))
+
+    query = ResearchQuery(warehouse)
+    before_receipt = query.dataset_as_of(
+        ResearchDatasetId.INDUSTRY_MEMBER,
+        datetime(2026, 7, 15, 12, tzinfo=timezone.utc),
+    )
+    after_receipt = query.dataset_as_of(
+        ResearchDatasetId.INDUSTRY_MEMBER,
+        datetime.now(timezone.utc) + timedelta(minutes=1),
+    )
+    before_l1 = before_receipt[
+        (before_receipt["ts_code"].astype(str) == "000001.SZ")
+        & (before_receipt["level"].astype(str) == "L1")
+    ]
+    after_l1 = after_receipt[
+        (after_receipt["ts_code"].astype(str) == "000001.SZ")
+        & (after_receipt["level"].astype(str) == "L1")
+    ].sort_values("valid_from")
+
+    assert before_l1["industry_code"].astype(str).tolist() == ["801010.SI"]
+    assert pd.isna(before_l1.iloc[0]["valid_to"])
+    assert after_l1["industry_code"].astype(str).tolist() == [
+        "801010.SI",
+        "801020.SI",
+    ]
+    assert pd.Timestamp(after_l1.iloc[0]["valid_to"]).date() == date(2026, 6, 30)
+
+
+def test_real_exit_and_reentry_preserve_two_non_overlapping_member_versions(
+    tmp_path,
+):
+    pro = MutableMemberClassificationPro()
+    pro.member_valid_to = "20260630"
+    pro.member_is_new = "N"
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    service = ClassificationBackfillService(
+        TushareResearchClient(pro, pacer=lambda method: None), warehouse
+    )
+    _refresh_mutable_membership(service, date(2026, 7, 10))
+
+    pro.member_valid_from = "20260701"
+    pro.member_valid_to = None
+    pro.member_is_new = "Y"
+    receipt_lower_bound = datetime.now(timezone.utc)
+    _refresh_mutable_membership(service, date(2026, 8, 3))
+    rows = _member_rows(warehouse)
+
+    assert len(rows) == 2
+    assert pd.Timestamp(rows.iloc[0]["valid_to"]).date() == date(2026, 6, 30)
+    assert pd.Timestamp(rows.iloc[1]["valid_from"]).date() == date(2026, 7, 1)
+    assert pd.Timestamp(rows.iloc[1]["available_at"]).to_pydatetime() >= (
+        receipt_lower_bound
+    )
+
+
+def test_later_observed_exit_and_reentry_preserve_the_real_gap(tmp_path):
+    class ExitAndReentryPro(MutableMemberClassificationPro):
+        def __init__(self):
+            super().__init__()
+            self.include_reentry = False
+
+        def index_member_all(self, **kwargs):
+            frame = super().index_member_all(**kwargs)
+            if not self.include_reentry:
+                return frame
+            exited = frame.iloc[0].copy()
+            exited["out_date"] = "20260630"
+            exited["is_new"] = "N"
+            reentry = exited.copy()
+            reentry["in_date"] = "20260715"
+            reentry["out_date"] = None
+            reentry["is_new"] = "Y"
+            return pd.DataFrame([exited, reentry])
+
+    pro = ExitAndReentryPro()
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    service = ClassificationBackfillService(
+        TushareResearchClient(pro, pacer=lambda method: None), warehouse
+    )
+    _refresh_mutable_membership(service, date(2026, 7, 10))
+    pro.include_reentry = True
+    _refresh_mutable_membership(service, date(2026, 8, 3))
+
+    rows = _member_rows(warehouse)
+    transition_time = pd.Timestamp(rows.iloc[1]["available_at"]).to_pydatetime()
+    query = ResearchQuery(warehouse)
+    before = query.dataset_as_of(
+        ResearchDatasetId.INDUSTRY_MEMBER,
+        transition_time - timedelta(microseconds=1),
+    )
+    before = before[
+        (before["ts_code"].astype(str) == "000001.SZ")
+        & (before["level"].astype(str) == "L1")
+    ]
+
+    assert len(rows) == 2
+    assert pd.Timestamp(rows.iloc[0]["valid_to"]).date() == date(2026, 6, 30)
+    assert pd.Timestamp(rows.iloc[1]["valid_from"]).date() == date(2026, 7, 15)
+    assert pd.isna(rows.iloc[1]["valid_to"])
+    assert pd.Timestamp(rows.iloc[0]["available_at"]) == pd.Timestamp(
+        transition_time
+    )
+    assert len(before) == 1
+    assert pd.isna(before.iloc[0]["valid_to"])
+
+
+@pytest.mark.parametrize("conflicting_start", ["20210101", "20220101"])
+def test_conflicting_member_start_does_not_silently_rewrite_history(
+    tmp_path,
+    conflicting_start,
+):
+    pro = MutableMemberClassificationPro()
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    service = ClassificationBackfillService(
+        TushareResearchClient(pro, pacer=lambda method: None), warehouse
+    )
+    _refresh_mutable_membership(service, date(2026, 7, 10))
+
+    pro.member_valid_from = conflicting_start
+    pro.member_codes["L1"] = ("801020.SI", "采掘")
+
+    with pytest.raises(ValueError, match="industry member.*conflict"):
+        _refresh_mutable_membership(service, date(2026, 8, 3))
+
+
+def test_same_member_effective_date_with_changed_name_is_rejected(tmp_path):
+    pro = MutableMemberClassificationPro()
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    service = ClassificationBackfillService(
+        TushareResearchClient(pro, pacer=lambda method: None), warehouse
+    )
+    _refresh_mutable_membership(service, date(2026, 7, 10))
+
+    pro.member_codes["L1"] = ("801010.SI", "被篡改的行业名")
+
+    with pytest.raises(ValueError, match="industry member.*conflict"):
+        _refresh_mutable_membership(service, date(2026, 8, 3))
+
+
+def test_conflicting_duplicate_member_rows_from_source_are_rejected(tmp_path):
+    class ConflictingDuplicateMemberPro(MutableMemberClassificationPro):
+        def index_member_all(self, **kwargs):
+            frame = super().index_member_all(**kwargs)
+            conflicting = frame.copy()
+            conflicting.loc[:, "l1_name"] = "冲突的行业名"
+            return pd.concat([frame, conflicting], ignore_index=True)
+
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    service = ClassificationBackfillService(
+        TushareResearchClient(
+            ConflictingDuplicateMemberPro(), pacer=lambda method: None
+        ),
+        warehouse,
+    )
+
+    with pytest.raises(ValueError, match="conflicting industry member source rows"):
+        _refresh_mutable_membership(service, date(2026, 7, 10))
+
+
+def test_exact_duplicate_member_rows_from_source_converge(tmp_path):
+    class ExactDuplicateMemberPro(MutableMemberClassificationPro):
+        def index_member_all(self, **kwargs):
+            frame = super().index_member_all(**kwargs)
+            return pd.concat([frame, frame.copy()], ignore_index=True)
+
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    service = ClassificationBackfillService(
+        TushareResearchClient(
+            ExactDuplicateMemberPro(), pacer=lambda method: None
+        ),
+        warehouse,
+    )
+
+    _refresh_mutable_membership(service, date(2026, 7, 10))
+
+    members = warehouse.read_current(ResearchDatasetId.INDUSTRY_MEMBER)
+    assert len(members) == 3
+    assert set(members["level"].astype(str)) == {"L1", "L2", "L3"}
+
+
+def test_new_member_slot_with_two_source_versions_is_reconciled_in_one_batch(
+    tmp_path,
+):
+    class NewSlotHistoryPro(MutableMemberClassificationPro):
+        def __init__(self):
+            super().__init__()
+            self.include_history = False
+
+        def index_member_all(self, **kwargs):
+            frame = super().index_member_all(**kwargs)
+            if not self.include_history:
+                return frame
+            older = frame.iloc[0].copy()
+            older["ts_code"] = "000002.SZ"
+            older["name"] = "万科A"
+            older["in_date"] = "20200101"
+            newer = older.copy()
+            newer["in_date"] = "20260701"
+            return pd.concat(
+                [frame, pd.DataFrame([older, newer])],
+                ignore_index=True,
+            )
+
+    pro = NewSlotHistoryPro()
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    service = ClassificationBackfillService(
+        TushareResearchClient(pro, pacer=lambda method: None), warehouse
+    )
+    _refresh_mutable_membership(service, date(2026, 7, 10))
+    pro.include_history = True
+    receipt_lower_bound = datetime.now(timezone.utc)
+
+    _refresh_mutable_membership(service, date(2026, 8, 3))
+
+    members = warehouse.read_current(ResearchDatasetId.INDUSTRY_MEMBER)
+    target = members[
+        (members["ts_code"].astype(str) == "000002.SZ")
+        & (members["level"].astype(str) == "L1")
+    ].sort_values("valid_from")
+    assert len(target) == 2
+    assert pd.Timestamp(target.iloc[0]["valid_to"]).date() == date(2026, 6, 30)
+    assert pd.isna(target.iloc[1]["valid_to"])
+    assert pd.Timestamp(target.iloc[1]["available_at"]).to_pydatetime() >= (
+        receipt_lower_bound
+    )

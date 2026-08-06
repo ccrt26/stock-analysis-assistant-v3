@@ -1,12 +1,15 @@
 from __future__ import annotations
 
-import hashlib
+import fcntl
 import json
+import re
+from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, timedelta
 from functools import partial
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import httpx
 import pandas as pd
@@ -34,6 +37,11 @@ BROAD_INDEX_CODES = (
     "000905.SH",
     "000852.SH",
     "899050.BJ",
+)
+
+_FINANCIAL_REPORT_TITLE = re.compile(
+    r"\d{4}年(?:年度|半年度|第一季度|第三季度)报告"
+    r"(?:摘要)?(?:[（(](?:修订|更正|更新)[^）)]*[）)])?$"
 )
 
 
@@ -102,7 +110,6 @@ def run_research_backfill(
     through: date,
     scope: str,
     resume: bool,
-    record_outcomes: bool = True,
 ) -> tuple[BackfillSummary, ...]:
     valid = {
         "all",
@@ -159,133 +166,8 @@ def run_research_backfill(
                 resume=resume,
             )
         )
-    if record_outcomes:
-        for summary in summaries:
-            _record_scope_outcome(runtime.warehouse, summary)
-        reconcile_research_gaps(runtime.warehouse)
-    return tuple(summaries)
-
-
-def repair_research_gaps(
-    runtime: ResearchDataRuntime,
-    *,
-    through: date,
-) -> tuple[BackfillSummary, ...]:
-    with connect_research_warehouse(
-        runtime.warehouse.duckdb_path, read_only=True
-    ) as connection:
-        rows = connection.execute(
-            """
-            select gap_id, dataset_id, partition_value, detail_json
-            from research_data_gaps
-            where status in ('waiting_upstream', 'failed', 'validation_failed')
-            order by first_seen_at
-            """
-        ).fetchall()
-    if not rows:
-        return ()
-    scopes: dict[str, date] = {}
-    retry_codes: dict[str, set[str]] = {}
-    gap_ids: dict[str, list[str]] = {}
-    dataset_scope = {
-        "equity_daily": "market-core",
-        "adj_factor": "market-core",
-        "daily_basic": "market-core",
-        "stock_limit": "market-core",
-        "index_daily": "market-core",
-    }
-    for gap_id, dataset_id, partition_value, detail_json in rows:
-        dataset_text = str(dataset_id)
-        if dataset_text.startswith("scope:"):
-            scope = dataset_text.split(":", 1)[1]
-        else:
-            scope = dataset_scope.get(dataset_text)
-        if scope is None:
-            continue
-        if scope == "classification-daily":
-            scope = "classifications"
-        first_partition = str(partition_value).split(":", 1)[0]
-        try:
-            start = date.fromisoformat(first_partition)
-        except ValueError:
-            start = through - timedelta(days=5 * 366)
-        scopes[scope] = min(scopes.get(scope, start), start)
-        gap_ids.setdefault(scope, []).append(str(gap_id))
-        if scope == "fundamentals" and detail_json:
-            payload = (
-                json.loads(detail_json)
-                if isinstance(detail_json, str)
-                else detail_json
-            )
-            retry_codes.setdefault(scope, set()).update(
-                str(code) for code in payload.get("retry_codes", [])
-            )
-    summaries: list[BackfillSummary] = []
-    for scope, start in sorted(scopes.items()):
-        scope_summaries: list[BackfillSummary] = []
-        codes = tuple(sorted(retry_codes.get(scope, set())))
-        if scope == "fundamentals":
-            if not codes:
-                continue
-            summary = FundamentalBackfillService(
-                runtime.tushare, runtime.warehouse
-            ).backfill(
-                    start=start,
-                    through=through,
-                    codes=codes,
-                    resume=True,
-                )
-            scope_summaries.append(summary)
-        else:
-            scope_summaries.extend(
-                run_research_backfill(
-                    runtime,
-                    start=start,
-                    through=through,
-                    scope=scope,
-                    resume=True,
-                    record_outcomes=False,
-                )
-            )
-        for summary in scope_summaries:
-            _record_repair_outcome(
-                runtime.warehouse, gap_ids.get(scope, []), summary
-            )
-        summaries.extend(scope_summaries)
     reconcile_research_gaps(runtime.warehouse)
     return tuple(summaries)
-
-
-def _record_repair_outcome(
-    warehouse: ResearchWarehouse,
-    gap_ids: list[str],
-    summary: BackfillSummary,
-) -> None:
-    if not gap_ids:
-        return
-    _record_scope_limitation(warehouse, summary)
-    status = (
-        "failed"
-        if summary.failed
-        else "waiting_upstream"
-        if summary.waiting_upstream
-        else "resolved"
-    )
-    placeholders = ",".join("?" for _ in gap_ids)
-    with connect_research_warehouse(warehouse.duckdb_path) as connection:
-        connection.execute(
-            f"""
-            update research_data_gaps
-            set status = ?, last_checked_at = now(), next_retry_at = null,
-                detail_json = ?
-            where gap_id in ({placeholders})
-            """,
-            [
-                status,
-                json.dumps(summary.model_dump(mode="json"), ensure_ascii=False),
-                *gap_ids,
-            ],
-        )
 
 
 def reconcile_research_gaps(warehouse: ResearchWarehouse) -> int:
@@ -321,120 +203,31 @@ def reconcile_research_gaps(warehouse: ResearchWarehouse) -> int:
     return resolved
 
 
-def _record_scope_outcome(
-    warehouse: ResearchWarehouse,
-    summary: BackfillSummary,
-) -> None:
-    _record_scope_limitation(warehouse, summary)
-    scope_partition = f"{summary.start.isoformat()}:{summary.through.isoformat()}"
-    gap_id = hashlib.sha256(
-        f"scope|{summary.scope}|{scope_partition}".encode("utf-8")
-    ).hexdigest()
-    if summary.failed == 0 and summary.waiting_upstream == 0:
-        with connect_research_warehouse(warehouse.duckdb_path) as connection:
-            connection.execute(
-                """
-                update research_data_gaps
-                set status = 'resolved', last_checked_at = now(), next_retry_at = null
-                where gap_id = ?
-                """,
-                [gap_id],
-            )
-        return
-    status = "failed" if summary.failed else "waiting_upstream"
-    impact = {
-        "market-core": "核心行情不完整，不能进行全市场横向筛选。",
-        "classifications": "板块归属或板块行情不完整，热点判断需要降级。",
-        "fundamentals": "部分公司财务或主营资料不完整，基本面判断需要标注缺口。",
-        "events": "部分公告或公司行动不完整，事件与风险判断需要标注缺口。",
-        "trading-structure": "融资融券或分钟数据不完整，不能据此证明资金身份。",
-    }.get(summary.scope, "该范围数据不完整，相关结论需要降级。")
-    now = datetime.now(timezone.utc)
-    with connect_research_warehouse(warehouse.duckdb_path) as connection:
-        connection.execute(
-            """
-            insert into research_data_gaps
-            (gap_id, dataset_id, partition_value, status, reason_category,
-             source_name, first_seen_at, last_checked_at, next_retry_at,
-             impact_text, detail_json)
-            values (?, ?, ?, ?, ?, null, ?, ?, null, ?, ?)
-            on conflict(dataset_id, partition_value, reason_category)
-            do update set status=excluded.status,
-                          last_checked_at=excluded.last_checked_at,
-                          impact_text=excluded.impact_text,
-                          detail_json=excluded.detail_json
-            """,
-            [
-                gap_id,
-                f"scope:{summary.scope}",
-                scope_partition,
-                status,
-                "scope_incomplete",
-                now,
-                now,
-                impact,
-                json.dumps(summary.model_dump(mode="json"), ensure_ascii=False),
-            ],
-        )
-
-
-def _record_scope_limitation(
-    warehouse: ResearchWarehouse,
-    summary: BackfillSummary,
-) -> None:
-    if not summary.limitations_checked:
-        return
-    gap_id = hashlib.sha256(
-        f"limitation|{summary.scope}".encode("utf-8")
-    ).hexdigest()
-    if summary.limited == 0:
-        with connect_research_warehouse(warehouse.duckdb_path) as connection:
-            connection.execute(
-                """
-                update research_data_gaps
-                set status = 'resolved', last_checked_at = now(), next_retry_at = null
-                where gap_id = ?
-                """,
-                [gap_id],
-            )
-        return
-    impact = {
-        "trading-structure": (
-            "当前官方来源或账号不提供分钟数据，不能据此判断盘中成交路径或资金身份。"
-        ),
-    }.get(summary.scope, "当前来源能力受限，相关结论必须降级。")
-    now = datetime.now(timezone.utc)
-    limited_issues = list(summary.issues)
-    with connect_research_warehouse(warehouse.duckdb_path) as connection:
-        connection.execute(
-            """
-            insert into research_data_gaps
-            (gap_id, dataset_id, partition_value, status, reason_category,
-             source_name, first_seen_at, last_checked_at, next_retry_at,
-             impact_text, detail_json)
-            values (?, ?, 'provider-capability', 'limited', 'source_limited',
-                    null, ?, ?, null, ?, ?)
-            on conflict(dataset_id, partition_value, reason_category)
-            do update set status=excluded.status,
-                          last_checked_at=excluded.last_checked_at,
-                          impact_text=excluded.impact_text,
-                          detail_json=excluded.detail_json
-            """,
-            [
-                gap_id,
-                f"scope:{summary.scope}",
-                now,
-                now,
-                impact,
-                json.dumps(
-                    {"limited": summary.limited, "issues": limited_issues},
-                    ensure_ascii=False,
-                ),
-            ],
-        )
-
-
 def run_research_stage(
+    runtime: ResearchDataRuntime,
+    *,
+    stage: str,
+    data_date: date,
+) -> tuple[BackfillSummary, ...]:
+    warehouse = getattr(runtime, "warehouse", None)
+    if warehouse is None or not hasattr(warehouse, "duckdb_path"):
+        return _run_research_stage_impl(runtime, stage=stage, data_date=data_date)
+    with _research_stage_lock(warehouse):
+        run_id = _begin_stage_run(warehouse, stage, data_date)
+        try:
+            summaries = _run_research_stage_impl(
+                runtime,
+                stage=stage,
+                data_date=data_date,
+            )
+        except BaseException as exc:
+            _finish_failed_stage_run(warehouse, run_id, exc)
+            raise
+        _finish_stage_run(warehouse, run_id, summaries)
+        return summaries
+
+
+def _run_research_stage_impl(
     runtime: ResearchDataRuntime,
     *,
     stage: str,
@@ -455,14 +248,13 @@ def run_research_stage(
                 through=data_date,
                 skipped=1,
             )
-            _record_scope_outcome(runtime.warehouse, summary)
             return (summary,)
         return run_research_backfill(
             runtime,
             start=data_date,
             through=data_date,
             scope="market-core",
-            resume=True,
+            resume=False,
         )
     trading_dates = _trading_dates(
         runtime.warehouse, data_date - timedelta(days=10), data_date
@@ -474,7 +266,7 @@ def run_research_stage(
             start=data_date,
             through=data_date,
             trading_dates=(data_date,) if data_date in trading_dates else (),
-            resume=True,
+            resume=False,
         )
         classification_summary = ClassificationBackfillService(
             runtime.tushare, runtime.warehouse
@@ -482,18 +274,10 @@ def run_research_stage(
         announcements = runtime.warehouse.read_current(
             ResearchDatasetId.ANNOUNCEMENT
         )
-        affected_codes: tuple[str, ...] = ()
-        if not announcements.empty:
-            published = pd.to_datetime(
-                announcements["announcement_time"], utc=True
-            ).dt.tz_convert("Asia/Shanghai")
-            affected_codes = tuple(
-                sorted(
-                    announcements.loc[
-                        published.dt.date == data_date, "ts_code"
-                    ].astype(str).unique()
-                )
-            )
+        affected_codes = select_fundamental_refresh_codes(
+            announcements,
+            data_date,
+        )
         summaries: list[BackfillSummary] = [event_summary, classification_summary]
         if affected_codes:
             summaries.append(
@@ -503,21 +287,20 @@ def run_research_stage(
                     start=data_date - timedelta(days=5 * 366),
                     through=data_date,
                     codes=affected_codes,
-                    resume=True,
+                    resume=False,
                 )
             )
         return _finalize_stage_with_research_features(
             runtime, summaries, data_date=data_date
         )
     if stage == "next-morning":
-        repaired = list(repair_research_gaps(runtime, through=data_date))
         late_event_summary = EventBackfillService(
             runtime.tushare, runtime.cninfo, runtime.warehouse
         ).backfill(
             start=data_date,
             through=data_date,
             trading_dates=(),
-            resume=True,
+            resume=False,
         )
         candidates = select_minute_candidate_scope(runtime.warehouse, data_date)
         summary = TradingStructureBackfillService(
@@ -529,22 +312,137 @@ def run_research_stage(
             through=data_date,
             candidate_codes=candidates,
             index_codes=BROAD_INDEX_CODES,
-            resume=True,
+            resume=False,
         )
         return _finalize_stage_with_research_features(
             runtime,
-            [*repaired, late_event_summary, summary],
+            [late_event_summary, summary],
             data_date=data_date,
         )
     raise ValueError(f"unsupported research data stage: {stage}")
+
+
+def select_fundamental_refresh_codes(
+    announcements: pd.DataFrame,
+    data_date: date,
+) -> tuple[str, ...]:
+    if announcements.empty or not {
+        "announcement_time",
+        "title",
+        "ts_code",
+    } <= set(announcements.columns):
+        return ()
+    published = pd.to_datetime(
+        announcements["announcement_time"], utc=True, errors="coerce"
+    ).dt.tz_convert("Asia/Shanghai")
+    titles = announcements["title"].fillna("").astype(str).str.strip()
+    financial = titles.map(
+        lambda title: (
+            "业绩预告" in title
+            or "业绩快报" in title
+            or _FINANCIAL_REPORT_TITLE.search(title) is not None
+        )
+    )
+    selected = announcements.loc[
+        (published.dt.date == data_date) & financial,
+        "ts_code",
+    ]
+    return tuple(sorted(selected.dropna().astype(str).unique()))
+
+
+@contextmanager
+def _research_stage_lock(warehouse: ResearchWarehouse):
+    lock_path = warehouse.root / ".research-jobs.lock"
+    with lock_path.open("a+b") as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+def _begin_stage_run(
+    warehouse: ResearchWarehouse,
+    stage: str,
+    data_date: date,
+) -> str:
+    run_id = f"{stage}:{data_date}:{uuid4().hex}"
+    idempotency_key = f"research-stage:{run_id}"
+    with connect_research_warehouse(warehouse.duckdb_path) as connection:
+        connection.execute(
+            """
+            insert into research_ingestion_runs
+            (run_id, idempotency_key, stage, data_date, status,
+             started_at, finished_at, summary_json)
+            values (?, ?, ?, ?, 'running', now(), null, null)
+            """,
+            [run_id, idempotency_key, stage, data_date],
+        )
+    return run_id
+
+
+def _summary_status(summary: BackfillSummary) -> str:
+    if summary.failed:
+        return "failed"
+    if summary.waiting_upstream:
+        return "waiting_upstream"
+    if summary.limited:
+        return "limited"
+    return "succeeded"
+
+
+def _finish_stage_run(
+    warehouse: ResearchWarehouse,
+    run_id: str,
+    summaries: tuple[BackfillSummary, ...],
+) -> None:
+    statuses = [_summary_status(summary) for summary in summaries]
+    if "failed" in statuses:
+        status = "failed"
+    elif "waiting_upstream" in statuses:
+        status = "waiting_upstream"
+    elif "limited" in statuses:
+        status = "limited"
+    else:
+        status = "succeeded"
+    payload = {
+        "summaries": [summary.model_dump(mode="json") for summary in summaries]
+    }
+    with connect_research_warehouse(warehouse.duckdb_path) as connection:
+        connection.execute(
+            """
+            update research_ingestion_runs
+            set status = ?, finished_at = now(), summary_json = ?
+            where run_id = ?
+            """,
+            [status, json.dumps(payload, ensure_ascii=False), run_id],
+        )
+
+
+def _finish_failed_stage_run(
+    warehouse: ResearchWarehouse,
+    run_id: str,
+    exc: BaseException,
+) -> None:
+    payload = {
+        "error_type": type(exc).__name__,
+        "message": str(exc),
+    }
+    with connect_research_warehouse(warehouse.duckdb_path) as connection:
+        connection.execute(
+            """
+            update research_ingestion_runs
+            set status = 'failed', finished_at = now(), summary_json = ?
+            where run_id = ?
+            """,
+            [json.dumps(payload, ensure_ascii=False), run_id],
+        )
 
 
 def _finalize_stage_summaries(
     runtime: ResearchDataRuntime,
     summaries: list[BackfillSummary],
 ) -> tuple[BackfillSummary, ...]:
-    for summary in summaries:
-        _record_scope_outcome(runtime.warehouse, summary)
     reconcile_research_gaps(runtime.warehouse)
     return tuple(summaries)
 
@@ -658,7 +556,6 @@ __all__ = [
     "build_research_data_runtime",
     "run_research_backfill",
     "run_research_stage",
-    "repair_research_gaps",
     "reconcile_research_gaps",
     "select_minute_candidate_scope",
 ]

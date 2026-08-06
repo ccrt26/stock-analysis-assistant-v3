@@ -93,20 +93,31 @@ class ResearchBackfillService:
             summary.committed += 1
 
         snapshot = "security-master"
-        if not (resume and self._complete(ResearchDatasetId.SECURITY_MASTER, snapshot)):
-            securities = self.client.fetch_security_master(through)
-            self.warehouse.commit_batch(
-                FactBatch(
-                    dataset_id=ResearchDatasetId.SECURITY_MASTER,
-                    partition_value=snapshot,
-                    source_name="tushare",
-                    source_endpoint="stock_basic",
-                    ingestion_run_id=f"market-core:security:{snapshot}",
-                    ingested_at=datetime.now(timezone.utc),
-                    default_available_at=_post_close_utc(through),
-                    records=securities.to_dict(orient="records"),
-                )
+        securities = self.client.fetch_security_master(through)
+        security_records = _preserve_unchanged_snapshot_date(
+            securities.to_dict(orient="records"),
+            self.warehouse.read_current(
+                ResearchDatasetId.SECURITY_MASTER,
+                partition_value=snapshot,
+            ),
+            key_fields=research_contract(
+                ResearchDatasetId.SECURITY_MASTER
+            ).business_key,
+            snapshot_field="snapshot_date",
+        )
+        result = self.warehouse.commit_batch(
+            FactBatch(
+                dataset_id=ResearchDatasetId.SECURITY_MASTER,
+                partition_value=snapshot,
+                source_name="tushare",
+                source_endpoint="stock_basic",
+                ingestion_run_id=f"market-core:security:{through.isoformat()}",
+                ingested_at=datetime.now(timezone.utc),
+                default_available_at=_post_close_utc(through),
+                records=security_records,
             )
+        )
+        if result.new_rows or result.changed_rows:
             summary.committed += 1
         else:
             summary.skipped += 1
@@ -300,6 +311,64 @@ def _optional_number(value, multiplier: float = 1.0) -> float | None:
     if value is None or pd.isna(value):
         return None
     return float(value) * multiplier
+
+
+_GOVERNANCE_FIELDS = {
+    "source_name",
+    "source_endpoint",
+    "source_record_id",
+    "source_updated_at",
+    "available_at",
+    "availability_precision",
+    "ingested_at",
+    "ingestion_run_id",
+    "payload_hash",
+    "business_key_hash",
+    "quality_status",
+    "revision_no",
+}
+
+
+def _preserve_unchanged_snapshot_date(
+    records: list[dict],
+    existing: pd.DataFrame,
+    *,
+    key_fields: tuple[str, ...],
+    snapshot_field: str,
+) -> list[dict]:
+    if existing.empty:
+        return records
+    old_by_key = {
+        tuple(_comparable_value(row.get(field)) for field in key_fields): row
+        for row in existing.to_dict(orient="records")
+    }
+    stabilized: list[dict] = []
+    for raw in records:
+        row = dict(raw)
+        key = tuple(_comparable_value(row.get(field)) for field in key_fields)
+        old = old_by_key.get(key)
+        if old is not None and _business_values(row, snapshot_field) == _business_values(
+            old, snapshot_field
+        ):
+            row[snapshot_field] = old.get(snapshot_field)
+        stabilized.append(row)
+    return stabilized
+
+
+def _business_values(row: dict, snapshot_field: str) -> dict[str, object]:
+    return {
+        key: _comparable_value(value)
+        for key, value in row.items()
+        if key not in _GOVERNANCE_FIELDS and key != snapshot_field
+    }
+
+
+def _comparable_value(value):
+    if value is None or (not isinstance(value, (list, dict)) and pd.isna(value)):
+        return None
+    if isinstance(value, (date, datetime, pd.Timestamp)):
+        return pd.Timestamp(value).isoformat()
+    return value
 
 
 __all__ = ["BackfillSummary", "ResearchBackfillService"]

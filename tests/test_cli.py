@@ -1,6 +1,10 @@
+from datetime import date
+from types import SimpleNamespace
+
 from typer.testing import CliRunner
 
 from stock_analyzer.cli import app
+from stock_analyzer.data.research_backfill import BackfillSummary
 
 
 runner = CliRunner()
@@ -28,7 +32,6 @@ def test_data_cli_exposes_only_current_warehouse_commands():
     assert result.exit_code == 0, result.output
     for current_command in (
         "backfill",
-        "repair-gaps",
         "run-stage",
         "derive",
         "health",
@@ -61,3 +64,56 @@ def test_health_command_still_loads():
     assert result.exit_code == 0, result.output
     assert "--data-date" in result.output
     assert "--full-history" in result.output
+
+
+def test_scheduled_stage_returns_nonzero_when_required_facts_are_incomplete(
+    tmp_path, monkeypatch
+):
+    import stock_analyzer.ops.research_data_job as job
+    import stock_analyzer.ops.research_health as health
+
+    config = SimpleNamespace(local_archive_dir=tmp_path / "archive")
+    runtime = SimpleNamespace(config=config, warehouse=object())
+    monkeypatch.setattr(job, "build_research_data_runtime", lambda config: runtime)
+    monkeypatch.setattr(
+        job,
+        "run_research_stage",
+        lambda runtime, *, stage, data_date: (
+            BackfillSummary(
+                scope="market-core",
+                start=date(2026, 8, 4),
+                through=date(2026, 8, 4),
+                waiting_upstream=1,
+            ),
+        ),
+    )
+    monkeypatch.setattr(
+        "stock_analyzer.config.AppConfig.load", lambda: config
+    )
+    monkeypatch.setattr(
+        health,
+        "build_research_health_report",
+        lambda warehouse, data_date, full_history: SimpleNamespace(
+            complete_core_date=True
+        ),
+    )
+    monkeypatch.setattr(
+        health,
+        "write_health_report",
+        lambda report, output_dir: (output_dir / "health.json", None),
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "data",
+            "run-stage",
+            "--stage",
+            "close",
+            "--data-date",
+            "2026-08-04",
+        ],
+    )
+
+    assert result.exit_code == 2, result.output
+    assert "core_complete=true" in result.output

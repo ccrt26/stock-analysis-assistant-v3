@@ -43,6 +43,24 @@ _STATEMENTS = {
     ResearchDatasetId.CASH_FLOW,
 }
 _CORE_FINANCIALS = _STATEMENTS | {ResearchDatasetId.FINANCIAL_INDICATOR}
+_GOVERNANCE_FIELDS = {
+    "source_name",
+    "source_endpoint",
+    "source_record_id",
+    "source_updated_at",
+    "available_at",
+    "availability_precision",
+    "ingested_at",
+    "ingestion_run_id",
+    "payload_hash",
+    "business_key_hash",
+    "quality_status",
+    "revision_no",
+}
+
+
+class AmbiguousProviderVariantError(ValueError):
+    pass
 
 
 class FundamentalBackfillService:
@@ -79,7 +97,13 @@ class FundamentalBackfillService:
         except ResearchSourceError:
             summary.failed += 1
 
-        staging = self.warehouse.root / ".backfill_staging" / "fundamentals"
+        staging_scope = hashlib.sha256(scope_key.encode("utf-8")).hexdigest()[:24]
+        staging = (
+            self.warehouse.root
+            / ".backfill_staging"
+            / "fundamentals"
+            / staging_scope
+        )
         staging.mkdir(parents=True, exist_ok=True)
         for code in effective_codes:
             income_announcement_map: dict[str, str] = {}
@@ -171,11 +195,6 @@ class FundamentalBackfillService:
         summary: BackfillSummary,
     ) -> None:
         partition = "company-profile"
-        if resume and self._partition_complete(
-            ResearchDatasetId.COMPANY_PROFILE, partition
-        ):
-            summary.skipped += 1
-            return
         frames: list[pd.DataFrame] = []
         for exchange in ("SSE", "SZSE", "BSE"):
             frame = self.client.call("stock_company", exchange=exchange)
@@ -196,33 +215,86 @@ class FundamentalBackfillService:
                 category="schema",
                 endpoint="stock_company",
             )
-        records = []
+        existing = self.warehouse.read_current(
+            ResearchDatasetId.COMPANY_PROFILE,
+            partition_value=partition,
+        )
+        active_by_code: dict[str, dict[str, Any]] = {}
+        if not existing.empty:
+            active = existing.loc[existing["valid_to"].isna()]
+            duplicated = active["ts_code"].astype(str).duplicated(keep=False)
+            if duplicated.any():
+                codes = sorted(active.loc[duplicated, "ts_code"].astype(str).unique())
+                raise ValueError(
+                    "company_profile has overlapping active entities: "
+                    + ", ".join(codes[:10])
+                )
+            active_by_code = {
+                str(row["ts_code"]): row
+                for row in active.to_dict(orient="records")
+            }
+
+        records: list[dict[str, Any]] = []
         for raw in combined.drop_duplicates("ts_code", keep="last").to_dict(
             orient="records"
         ):
-            record = _clean_row(raw)
-            record.update(
-                {
-                    "valid_from": through,
-                    "valid_to": None,
-                    "profile_snapshot_date": through,
-                    "registered_capital_unit": "provider_10k_cny",
-                }
-            )
-            records.append(record)
-        self.warehouse.commit_batch(
+            profile = _clean_row(raw)
+            profile["registered_capital_unit"] = "provider_10k_cny"
+            code = str(profile["ts_code"])
+            current = active_by_code.get(code)
+            if current is None:
+                records.append(
+                    {
+                        **profile,
+                        "valid_from": through,
+                        "valid_to": None,
+                        "profile_snapshot_date": through,
+                    }
+                )
+                continue
+            if _profile_content(current) == _profile_content(profile):
+                continue
+            current_start = pd.Timestamp(current["valid_from"]).date()
+            if current_start < through:
+                closure = _profile_record_from_fact(current)
+                closure["valid_to"] = through - timedelta(days=1)
+                records.append(closure)
+                records.append(
+                    {
+                        **profile,
+                        "valid_from": through,
+                        "valid_to": None,
+                        "profile_snapshot_date": through,
+                    }
+                )
+            else:
+                records.append(
+                    {
+                        **profile,
+                        "valid_from": current_start,
+                        "valid_to": None,
+                        "profile_snapshot_date": through,
+                    }
+                )
+        if not records:
+            summary.skipped += 1
+            return
+        result = self.warehouse.commit_batch(
             FactBatch(
                 dataset_id=ResearchDatasetId.COMPANY_PROFILE,
                 partition_value=partition,
                 source_name="tushare",
                 source_endpoint="stock_company",
-                ingestion_run_id=f"fundamentals:company:{partition}",
+                ingestion_run_id=f"fundamentals:company:{through.isoformat()}",
                 ingested_at=datetime.now(timezone.utc),
                 default_available_at=_conservative_date_available(through),
                 records=records,
             )
         )
-        summary.committed += 1
+        if result.new_rows or result.changed_rows:
+            summary.committed += 1
+        else:
+            summary.skipped += 1
 
     def _materialize_staged_dataset(
         self,
@@ -327,7 +399,10 @@ class FundamentalBackfillService:
             row["report_type"] = "indicator"
         elif dataset is ResearchDatasetId.MAIN_BUSINESS:
             item = str(row.get("bz_item") or "").strip()
-            row["classification"] = _main_business_classification(item)
+            row["classification"] = _main_business_classification(
+                item,
+                row.get("bz_code"),
+            )
             row["item_name"] = item
         elif dataset is ResearchDatasetId.EARNINGS_FORECAST:
             row["announcement_type"] = str(row.get("type") or "forecast")
@@ -373,64 +448,126 @@ class FundamentalBackfillService:
         for row in records:
             key = tuple(str(row.get(field)) for field in contract.business_key)
             grouped[key].append(row)
-        levels: dict[int, list[dict[str, Any]]] = defaultdict(list)
-        for rows in grouped.values():
-            rows.sort(key=lambda item: str(item.get("available_at") or ""))
-            seen: set[str] = set()
-            rank = 0
-            for row in rows:
-                payload_hash = _business_hash(row)
-                if payload_hash in seen:
-                    continue
-                seen.add(payload_hash)
-                levels[rank].append(row)
-                rank += 1
-        for rank, level_rows in sorted(levels.items()):
+        initial_current = self.warehouse.read_current(
+            dataset,
+            partition_value=partition,
+        )
+        initial_keys = {
+            tuple(str(row.get(field)) for field in contract.business_key)
+            for row in initial_current.to_dict(orient="records")
+        }
+        current_hashes = {
+            tuple(str(row.get(field)) for field in contract.business_key): str(
+                row["payload_hash"]
+            )
+            for row in initial_current.to_dict(orient="records")
+        }
+        known_hashes: dict[tuple[str, ...], set[str]] = defaultdict(set)
+        for row in initial_current.to_dict(orient="records"):
+            key = tuple(str(row.get(field)) for field in contract.business_key)
+            known_hashes[key].add(str(row["payload_hash"]))
+        for revision in self.warehouse.revision_rows(
+            dataset,
+            partition_values=(partition,),
+        ):
+            payload = revision["row_payload"]
+            key = tuple(str(payload.get(field)) for field in contract.business_key)
+            known_hashes[key].add(str(revision["payload_hash"]))
+
+        reconstruction_levels: dict[int, list[dict[str, Any]]] = defaultdict(list)
+        observed_rows: list[dict[str, Any]] = []
+        for key, rows in grouped.items():
+            try:
+                timeline = _canonical_provider_timeline(
+                    dataset,
+                    key,
+                    rows,
+                    preferred_payload_hash=current_hashes.get(key),
+                )
+            except AmbiguousProviderVariantError:
+                summary.limited += 1
+                summary.limitations_checked = True
+                summary.issues.append(
+                    f"{dataset.value}:{'/'.join(key)}:"
+                    "同一公开时间存在多个无法排序的上游版本，未写入该业务键"
+                )
+                continue
+            if key in initial_keys:
+                unseen = [
+                    row for row in timeline
+                    if _business_hash(row) not in known_hashes[key]
+                ]
+                if unseen:
+                    # All unseen content was first observed in this run.  Only
+                    # the provider's final state is knowable at receipt time.
+                    observed_rows.append(unseen[-1])
+                continue
+            for rank, row in enumerate(timeline):
+                reconstruction_levels[rank].append(row)
+
+        for rank, level_rows in sorted(reconstruction_levels.items()):
             if not level_rows:
                 continue
-            ingested_at = datetime.now(timezone.utc)
-            prepared_rows: list[dict[str, Any]] = []
-            current = self.warehouse.read_current(
-                dataset,
+            self._commit_financial_rows(
+                dataset=dataset,
+                partition=partition,
+                endpoint=endpoint,
+                rows=level_rows,
+                through=through,
+                run_suffix=f"reconstruction-{rank}",
+                reconstruct_source_revisions=True,
+                summary=summary,
+            )
+        if observed_rows:
+            self._commit_financial_rows(
+                dataset=dataset,
+                partition=partition,
+                endpoint=endpoint,
+                rows=observed_rows,
+                through=through,
+                run_suffix="observed-change",
+                reconstruct_source_revisions=False,
+                summary=summary,
+            )
+
+    def _commit_financial_rows(
+        self,
+        *,
+        dataset: ResearchDatasetId,
+        partition: str,
+        endpoint: str,
+        rows: list[dict[str, Any]],
+        through: date,
+        run_suffix: str,
+        reconstruct_source_revisions: bool,
+        summary: BackfillSummary,
+    ) -> None:
+        ingested_at = datetime.now(timezone.utc)
+        prepared_rows: list[dict[str, Any]] = []
+        for row in rows:
+            prepared = dict(row)
+            if prepared.get("available_at") is None:
+                prepared["available_at"] = ingested_at
+                prepared["availability_precision"] = (
+                    AvailabilityPrecision.INGESTION_CUTOFF.value
+                )
+            prepared_rows.append(prepared)
+        self.warehouse.commit_batch(
+            FactBatch(
+                dataset_id=dataset,
                 partition_value=partition,
+                source_name="tushare",
+                source_endpoint=endpoint,
+                ingestion_run_id=(
+                    f"fundamentals:{dataset.value}:{partition}:{run_suffix}"
+                ),
+                ingested_at=ingested_at,
+                default_available_at=_conservative_date_available(through),
+                reconstruct_source_revisions=reconstruct_source_revisions,
+                records=prepared_rows,
             )
-            current_by_key = {
-                tuple(str(row.get(field)) for field in contract.business_key): row
-                for row in current.to_dict(orient="records")
-            }
-            for row in level_rows:
-                prepared = dict(row)
-                if prepared.get("available_at") is None:
-                    prepared["available_at"] = ingested_at
-                    prepared["availability_precision"] = (
-                        AvailabilityPrecision.INGESTION_CUTOFF.value
-                    )
-                key = tuple(
-                    str(prepared.get(field)) for field in contract.business_key
-                )
-                existing = current_by_key.get(key)
-                if existing is not None and pd.Timestamp(
-                    existing["available_at"]
-                ) > pd.Timestamp(prepared["available_at"]):
-                    continue
-                prepared_rows.append(prepared)
-            if not prepared_rows:
-                continue
-            self.warehouse.commit_batch(
-                FactBatch(
-                    dataset_id=dataset,
-                    partition_value=partition,
-                    source_name="tushare",
-                    source_endpoint=endpoint,
-                    ingestion_run_id=(
-                        f"fundamentals:{dataset.value}:{partition}:revision-{rank}"
-                    ),
-                    ingested_at=ingested_at,
-                    default_available_at=_conservative_date_available(through),
-                    records=prepared_rows,
-                )
-            )
-            summary.committed += 1
+        )
+        summary.committed += 1
 
     def _warehouse_codes(self) -> tuple[str, ...]:
         securities = self.warehouse.read_current(ResearchDatasetId.SECURITY_MASTER)
@@ -522,15 +659,135 @@ def _clean_row(raw: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+def _profile_content(row: dict[str, Any]) -> dict[str, Any]:
+    excluded = _GOVERNANCE_FIELDS | {
+        "valid_from",
+        "valid_to",
+        "profile_snapshot_date",
+    }
+    return {
+        key: _json_safe(value)
+        for key, value in row.items()
+        if key not in excluded
+    }
+
+
+def _profile_record_from_fact(row: dict[str, Any]) -> dict[str, Any]:
+    record = {
+        key: value
+        for key, value in row.items()
+        if key not in _GOVERNANCE_FIELDS
+    }
+    for field in ("valid_from", "valid_to", "profile_snapshot_date"):
+        value = record.get(field)
+        if value is not None and not pd.isna(value):
+            record[field] = pd.Timestamp(value).date()
+        elif field == "valid_to":
+            record[field] = None
+    return record
+
+
+def _canonical_provider_timeline(
+    dataset: ResearchDatasetId,
+    key: tuple[str, ...],
+    rows: list[dict[str, Any]],
+    *,
+    preferred_payload_hash: str | None = None,
+) -> list[dict[str, Any]]:
+    by_availability: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in rows:
+        value = row.get("available_at")
+        bucket = "~ingestion" if value is None else pd.Timestamp(value).isoformat()
+        by_availability[bucket].append(row)
+
+    result: list[dict[str, Any]] = []
+    for bucket in sorted(by_availability):
+        unique = {
+            _business_hash(row): row for row in by_availability[bucket]
+        }
+        candidates = list(unique.values())
+        if len(candidates) == 1:
+            result.append(candidates[0])
+            continue
+        ranked = [(_update_flag_rank(row.get("update_flag")), row) for row in candidates]
+        if any(rank is None for rank, _ in ranked):
+            preferred = [
+                row
+                for row in candidates
+                if _business_hash(row) == preferred_payload_hash
+            ]
+            if len(preferred) == 1:
+                result.append(preferred[0])
+                continue
+            raise AmbiguousProviderVariantError(
+                f"ambiguous same-time provider variants for {dataset.value} "
+                f"key={key} available_at={bucket}"
+            )
+        highest = max(rank for rank, _ in ranked if rank is not None)
+        winners = [row for rank, row in ranked if rank == highest]
+        if len(winners) != 1:
+            raise AmbiguousProviderVariantError(
+                f"ambiguous highest update_flag for {dataset.value} "
+                f"key={key} available_at={bucket}"
+            )
+        result.append(winners[0])
+    return result
+
+
+def _update_flag_rank(value: Any) -> float | None:
+    if value is None or pd.isna(value):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _business_hash(row: dict[str, Any]) -> str:
-    excluded = {"available_at", "source_updated_at", "source_name", "source_endpoint"}
-    payload = {key: value for key, value in row.items() if key not in excluded}
+    payload = {
+        key: _json_safe(value)
+        for key, value in row.items()
+        if key not in _GOVERNANCE_FIELDS
+    }
     return hashlib.sha256(
-        json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str).encode()
+        json.dumps(
+            payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
     ).hexdigest()
 
 
-def _main_business_classification(item: str) -> str:
+def _json_safe(value: Any) -> Any:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, (datetime, pd.Timestamp)):
+        timestamp = pd.Timestamp(value)
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.tz_localize("UTC")
+        else:
+            timestamp = timestamp.tz_convert("UTC")
+        return timestamp.to_pydatetime().isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_json_safe(item) for item in value]
+    if pd.isna(value):
+        return None
+    return str(value)
+
+
+def _main_business_classification(item: str, provider_code: Any = None) -> str:
+    mapped = {
+        "P": "product",
+        "D": "region",
+        "I": "industry",
+    }.get(str(provider_code or "").strip().upper())
+    if mapped is not None:
+        return mapped
     if item.endswith("(产品)") or item.endswith("（产品）"):
         return "product"
     if item.endswith("(地区)") or item.endswith("（地区）"):

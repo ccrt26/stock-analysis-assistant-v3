@@ -300,6 +300,35 @@ def test_share_float_variant_matches_the_latest_total_share_when_available():
     assert selected[0]["provider_variant_resolution"] == "matched_latest_total_share"
 
 
+def test_share_float_candidate_matching_uses_daily_basic_total_share_in_shares(
+    tmp_path,
+):
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    warehouse.commit_batch(
+        FactBatch(
+            dataset_id=ResearchDatasetId.DAILY_BASIC,
+            partition_value="2026-07-10",
+            source_name="tushare",
+            source_endpoint="daily_basic",
+            ingestion_run_id="market:2026-07-10",
+            ingested_at=datetime(2026, 7, 10, 8, tzinfo=timezone.utc),
+            records=[
+                {
+                    "trade_date": date(2026, 7, 10),
+                    "ts_code": "300779.SZ",
+                    "total_share": 297_300_000.0,
+                }
+            ],
+        )
+    )
+
+    total_shares = event_backfill_module._latest_total_shares(
+        warehouse, date(2026, 7, 10)
+    )
+
+    assert total_shares == {"300779.SZ": 297_300_000.0}
+
+
 def test_existing_share_float_is_rebuilt_on_the_stable_business_key(tmp_path):
     warehouse = ResearchWarehouse(tmp_path / "warehouse")
     contract = research_contract(ResearchDatasetId.SHARE_FLOAT)
@@ -664,3 +693,60 @@ def test_resume_skips_checked_historical_event_ranges_before_fetch(tmp_path):
         "20260710",
         "20260710",
     ]
+
+
+def test_first_week_refreshes_previous_month_for_late_event_arrivals(tmp_path):
+    class TrackingPro(ActionPro):
+        def __init__(self):
+            super().__init__()
+            self.holder_ranges = []
+            self.repurchase_ranges = []
+
+        def stk_holdertrade(self, **kwargs):
+            self.holder_ranges.append((kwargs["start_date"], kwargs["end_date"]))
+            return pd.DataFrame()
+
+        def repurchase(self, **kwargs):
+            self.repurchase_ranges.append(
+                (kwargs["start_date"], kwargs["end_date"])
+            )
+            return pd.DataFrame()
+
+        def pledge_stat(self, **kwargs):
+            return pd.DataFrame()
+
+    class TrackingAnnouncements:
+        def __init__(self):
+            self.ranges = []
+
+        def fetch_announcements(self, start, through):
+            self.ranges.append((start, through))
+            return []
+
+    pro = TrackingPro()
+    announcements = TrackingAnnouncements()
+    service = EventBackfillService(
+        TushareResearchClient(pro, pacer=lambda method: None),
+        announcements,
+        ResearchWarehouse(tmp_path / "warehouse"),
+    )
+
+    for _ in range(2):
+        service.backfill(
+            start=date(2026, 7, 1),
+            through=date(2026, 8, 4),
+            trading_dates=(),
+            resume=True,
+        )
+
+    expected = [
+        (date(2026, 7, 1), date(2026, 7, 31)),
+        (date(2026, 8, 1), date(2026, 8, 4)),
+    ] * 2
+    assert announcements.ranges == expected
+    expected_text = [
+        (start.strftime("%Y%m%d"), through.strftime("%Y%m%d"))
+        for start, through in expected
+    ]
+    assert pro.holder_ranges == expected_text
+    assert pro.repurchase_ranges == expected_text

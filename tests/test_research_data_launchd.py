@@ -6,7 +6,7 @@ def test_research_data_launchd_uses_one_fixed_data_only_service_per_stage():
     expected = {
         "close": {"Hour": 18, "Minute": 30},
         "evening": {"Hour": 21, "Minute": 30},
-        "next-morning": {"Hour": 8, "Minute": 0},
+        "next-morning": {"Hour": 9, "Minute": 0},
     }
     paths = sorted(Path("ops/launchd").glob(
         "com.ccrt.stock-analysis-assistant.research-data-*.plist.example"

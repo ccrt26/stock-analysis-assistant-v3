@@ -13,6 +13,7 @@ from stock_analyzer.data.research_contracts import (
     DatasetContract,
     ResearchDatasetId,
     RevisionAvailabilityPolicy,
+    StrictReplayLevel,
     research_contract,
 )
 
@@ -90,6 +91,12 @@ def resolve_revision_availability(
     previous = _as_utc(old_available_at)
     ingested = max(_as_utc(batch_ingested_at), previous)
 
+    if contract.dataset_id is ResearchDatasetId.ANNOUNCEMENT:
+        return ResolvedAvailability(
+            available_at=ingested,
+            precision=AvailabilityPrecision.INGESTION_CUTOFF,
+        )
+
     if (
         contract.revision_availability_policy
         is RevisionAvailabilityPolicy.SOURCE_PUBLISHED
@@ -100,13 +107,14 @@ def resolve_revision_availability(
                 f"{contract.dataset_id.value} revision requires row-level publication time"
             )
         published_at = _as_utc(published)
-        if published_at < previous:
-            raise ValueError(
-                f"{contract.dataset_id.value} revision publication precedes prior version"
-            )
+        available_at = max(published_at, ingested)
         return ResolvedAvailability(
-            available_at=published_at,
-            precision=_record_precision(normalized_row),
+            available_at=available_at,
+            precision=(
+                _record_precision(normalized_row)
+                if available_at == published_at
+                else AvailabilityPrecision.INGESTION_CUTOFF
+            ),
         )
 
     source_updated = normalized_row.get("source_updated_at")
@@ -120,6 +128,45 @@ def resolve_revision_availability(
     return ResolvedAvailability(
         available_at=ingested,
         precision=AvailabilityPrecision.INGESTION_CUTOFF,
+    )
+
+
+def resolve_reconstructed_revision_availability(
+    contract: DatasetContract,
+    normalized_row: Mapping[str, Any],
+    *,
+    old_available_at: Any,
+) -> ResolvedAvailability:
+    """Resolve a dated provider version seen during an initial reconstruction.
+
+    This deliberately excludes online corrections. Callers must explicitly mark
+    a batch as initial reconstruction, and only datasets whose contract permits
+    conservative reconstruction may use the source's version timeline.
+    """
+
+    if (
+        contract.strict_replay_level
+        is not StrictReplayLevel.RECONSTRUCTED_CONSERVATIVE
+        or contract.revision_availability_policy
+        is not RevisionAvailabilityPolicy.SOURCE_PUBLISHED
+    ):
+        raise ValueError(
+            f"{contract.dataset_id.value} does not permit source revision reconstruction"
+        )
+    previous = _as_utc(old_available_at)
+    published = normalized_row.get("available_at")
+    if _is_missing(published):
+        raise ValueError(
+            f"{contract.dataset_id.value} reconstruction requires publication time"
+        )
+    published_at = _as_utc(published)
+    if published_at < previous:
+        raise ValueError(
+            f"{contract.dataset_id.value} reconstructed publication time moved backwards"
+        )
+    return ResolvedAvailability(
+        available_at=published_at,
+        precision=_record_precision(normalized_row),
     )
 
 
@@ -156,9 +203,8 @@ def _at_market_time(value: date, clock: time) -> datetime:
 def _as_utc(value: Any) -> datetime:
     timestamp = pd.Timestamp(value)
     if timestamp.tzinfo is None:
-        timestamp = timestamp.tz_localize("UTC")
-    else:
-        timestamp = timestamp.tz_convert("UTC")
+        raise ValueError("datetime must be timezone-aware")
+    timestamp = timestamp.tz_convert("UTC")
     return timestamp.to_pydatetime()
 
 

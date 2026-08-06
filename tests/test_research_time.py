@@ -70,6 +70,35 @@ def test_source_published_date_can_declare_conservative_precision():
     assert resolved.precision is AvailabilityPrecision.DATE_CONSERVATIVE
 
 
+def test_non_announcement_source_revision_uses_observation_cutoff_not_old_publication():
+    received = datetime(2026, 7, 14, tzinfo=timezone.utc)
+    resolved = resolve_revision_availability(
+        research_contract(ResearchDatasetId.INCOME_STATEMENT),
+        {
+            "available_at": datetime(
+                2026, 4, 29, 15, 59, 59, tzinfo=timezone.utc
+            )
+        },
+        batch_ingested_at=received,
+        old_available_at=datetime(
+            2026, 4, 30, 15, 59, 59, tzinfo=timezone.utc
+        ),
+    )
+
+    assert resolved.available_at == received
+    assert resolved.precision is AvailabilityPrecision.INGESTION_CUTOFF
+
+
+def test_time_resolution_rejects_naive_ingestion_timestamp():
+    with pytest.raises(ValueError, match="timezone-aware"):
+        resolve_initial_availability(
+            ResearchDatasetId.COMPANY_PROFILE,
+            {"valid_from": date(2026, 7, 13)},
+            batch_ingested_at=datetime(2026, 7, 14, 1, 15),
+            explicit_available_at=None,
+        )
+
+
 def test_later_market_change_uses_ingestion_time_not_business_date():
     ingested = datetime(2026, 7, 12, 3, tzinfo=timezone.utc)
     resolved = resolve_revision_availability(

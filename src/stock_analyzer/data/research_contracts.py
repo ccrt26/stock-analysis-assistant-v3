@@ -112,6 +112,7 @@ class FactBatch(BaseModel):
     ingested_at: datetime
     default_available_at: datetime | None = None
     availability_precision: AvailabilityPrecision = AvailabilityPrecision.EXACT
+    reconstruct_source_revisions: bool = False
     records: list[dict[str, Any]]
 
     @field_validator("partition_value", "source_name", "source_endpoint", "ingestion_run_id")

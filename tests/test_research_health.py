@@ -87,6 +87,414 @@ def test_fast_health_checks_latest_partition_only(tmp_path):
     assert daily.checked_rows == 1
 
 
+def test_health_reports_each_stage_latest_real_run_status(tmp_path):
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    with connect_research_warehouse(warehouse.duckdb_path) as connection:
+        connection.execute(
+            """
+            insert into research_ingestion_runs values
+            ('old-close', 'old-close', 'close', '2026-08-03', 'succeeded',
+             now() - interval '1 hour', now() - interval '59 minutes', '{}')
+            """
+        )
+        connection.execute(
+            """
+            insert into research_ingestion_runs values
+            ('new-close', 'new-close', 'close', '2026-08-04', 'failed',
+             now(), now(), '{"message":"行情接口失败"}')
+            """
+        )
+
+    report = build_research_health_report(warehouse, date(2026, 8, 4))
+
+    assert len(report.latest_stage_runs) == 1
+    assert report.latest_stage_runs[0].run_id == "new-close"
+    assert report.latest_stage_runs[0].status == "failed"
+    assert report.latest_stage_runs[0].issues == ("行情接口失败",)
+
+
+def test_health_rejects_nonpositive_and_overlapping_revision_intervals(tmp_path):
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    first = datetime(2026, 8, 4, 7, 1, tzinfo=timezone.utc)
+    second = first + timedelta(hours=1)
+    initial = _daily_batch("2026-08-04", "000001.SZ")
+    initial.ingested_at = first
+    initial.default_available_at = first
+    warehouse.commit_batch(initial)
+    changed = _daily_batch("2026-08-04", "000001.SZ")
+    changed.ingested_at = second
+    changed.default_available_at = second
+    changed.records[0]["close"] = 10.3
+    warehouse.commit_batch(changed)
+    with connect_research_warehouse(warehouse.duckdb_path) as connection:
+        connection.execute(
+            """
+            update research_fact_revisions
+            set valid_to = valid_from - interval '1 second'
+            where dataset_id = 'equity_daily'
+            """
+        )
+
+    report = build_research_health_report(
+        warehouse, date(2026, 8, 4), full_history=False
+    )
+    daily = next(item for item in report.datasets if item.dataset_id == "equity_daily")
+
+    assert daily.invalid_revision_intervals == 1
+    assert daily.overlapping_revision_intervals == 0
+    assert daily.contract_valid is False
+    assert report.complete_core_date is False
+
+
+def test_health_reports_overlapping_industry_catalog_intervals(tmp_path):
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    observed_at = datetime(2026, 8, 3, 7, 1, tzinfo=timezone.utc)
+    warehouse.commit_batch(
+        FactBatch(
+            dataset_id=ResearchDatasetId.INDUSTRY_CATALOG,
+            partition_value="SW2021",
+            source_name="tushare",
+            source_endpoint="index_classify+index_basic",
+            ingestion_run_id="overlapping-industry-catalog",
+            ingested_at=observed_at,
+            default_available_at=observed_at,
+            records=[
+                {
+                    "industry_system": "SW2021",
+                    "level": "L3",
+                    "industry_code": "850401.SI",
+                    "classification_code": "230501",
+                    "industry_name": "特钢Ⅲ",
+                    "parent_code": "230500",
+                    "is_published": "1",
+                    "valid_from": date(2026, 7, 13),
+                    "valid_to": None,
+                    "available_at": datetime(
+                        2026, 7, 13, 7, 1, tzinfo=timezone.utc
+                    ),
+                },
+                {
+                    "industry_system": "SW2021",
+                    "level": "L3",
+                    "industry_code": "850401.SI",
+                    "classification_code": "230501",
+                    "industry_name": "特钢Ⅲ",
+                    "parent_code": "230500",
+                    "is_published": "1",
+                    "valid_from": date(2026, 8, 3),
+                    "valid_to": None,
+                    "available_at": observed_at,
+                },
+            ],
+        )
+    )
+
+    report = build_research_health_report(
+        warehouse, date(2026, 8, 3), full_history=False
+    )
+    industry = next(
+        item for item in report.datasets
+        if item.dataset_id == ResearchDatasetId.INDUSTRY_CATALOG.value
+    )
+    _, markdown = write_health_report(report, tmp_path / "health")
+    text = markdown.read_text(encoding="utf-8")
+
+    assert industry.duplicate_business_keys == 0
+    assert industry.effective_interval_overlaps == 1
+    assert any(
+        "SW2021/L3/850401.SI" in issue
+        for issue in industry.effective_interval_issues
+    )
+    assert industry.contract_valid is False
+    assert report.complete_core_date is False
+    assert "SW2021/L3/850401.SI" in text
+
+
+def test_health_reports_nested_industry_catalog_intervals(tmp_path):
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    observed_at = datetime(2026, 8, 3, 7, 1, tzinfo=timezone.utc)
+    base = {
+        "industry_system": "SW2021",
+        "level": "L3",
+        "industry_code": "850401.SI",
+        "classification_code": "230501",
+        "industry_name": "特钢Ⅲ",
+        "parent_code": "230500",
+        "is_published": "1",
+        "available_at": observed_at,
+    }
+    warehouse.commit_batch(
+        FactBatch(
+            dataset_id=ResearchDatasetId.INDUSTRY_CATALOG,
+            partition_value="SW2021",
+            source_name="test",
+            source_endpoint="index_classify",
+            ingestion_run_id="nested-catalog",
+            ingested_at=observed_at,
+            default_available_at=observed_at,
+            records=[
+                base | {
+                    "valid_from": date(2020, 1, 1),
+                    "valid_to": date(2025, 12, 31),
+                },
+                base | {
+                    "valid_from": date(2021, 1, 1),
+                    "valid_to": date(2021, 12, 31),
+                },
+                base | {
+                    "valid_from": date(2024, 1, 1),
+                    "valid_to": date(2024, 12, 31),
+                },
+            ],
+        )
+    )
+
+    report = build_research_health_report(
+        warehouse, date(2026, 8, 3), full_history=False
+    )
+    catalog = next(
+        item for item in report.datasets
+        if item.dataset_id == ResearchDatasetId.INDUSTRY_CATALOG.value
+    )
+
+    assert catalog.effective_interval_overlaps == 2
+    assert catalog.contract_valid is False
+
+
+def test_fast_health_audits_all_catalog_partitions_and_inverted_interval(
+    tmp_path,
+):
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    observed_at = datetime(2026, 8, 3, 7, 1, tzinfo=timezone.utc)
+    base = {
+        "industry_system": "SW2021",
+        "level": "L3",
+        "classification_code": "230501",
+        "industry_name": "特钢Ⅲ",
+        "parent_code": "230500",
+        "is_published": "1",
+        "available_at": observed_at,
+    }
+    for partition, code, start, end in (
+        ("SW2021-old", "850401.SI", date(2026, 7, 1), date(2026, 6, 30)),
+        ("SW2021-new", "850402.SI", date(2026, 7, 1), None),
+    ):
+        warehouse.commit_batch(
+            FactBatch(
+                dataset_id=ResearchDatasetId.INDUSTRY_CATALOG,
+                partition_value=partition,
+                source_name="test",
+                source_endpoint="index_classify",
+                ingestion_run_id=f"catalog-{partition}",
+                ingested_at=observed_at,
+                default_available_at=observed_at,
+                records=[
+                    base | {
+                        "industry_code": code,
+                        "valid_from": start,
+                        "valid_to": end,
+                    }
+                ],
+            )
+        )
+
+    report = build_research_health_report(
+        warehouse, date(2026, 8, 3), full_history=False
+    )
+    catalog = next(
+        item for item in report.datasets
+        if item.dataset_id == ResearchDatasetId.INDUSTRY_CATALOG.value
+    )
+
+    assert catalog.checked_partitions == 2
+    assert catalog.effective_interval_overlaps == 1
+    assert any(
+        "inverted" in issue and "850401.SI" in issue
+        for issue in catalog.effective_interval_issues
+    )
+
+
+def test_health_reports_overlapping_industry_member_slots_with_details(tmp_path):
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    observed_at = datetime(2026, 8, 3, 13, 30, tzinfo=timezone.utc)
+    warehouse.commit_batch(
+        FactBatch(
+            dataset_id=ResearchDatasetId.INDUSTRY_MEMBER,
+            partition_value="SW2021",
+            source_name="tushare",
+            source_endpoint="index_member_all",
+            ingestion_run_id="overlapping-industry-members",
+            ingested_at=observed_at,
+            default_available_at=observed_at,
+            records=[
+                {
+                    "ts_code": "000876.SZ",
+                    "security_name": "新希望",
+                    "industry_system": "SW2021",
+                    "level": "L1",
+                    "industry_code": "801010.SI",
+                    "industry_name": "农林牧渔",
+                    "valid_from": date(1998, 3, 11),
+                    "valid_to": None,
+                    "is_current": True,
+                    "available_at": datetime(
+                        2026, 7, 14, tzinfo=timezone.utc
+                    ),
+                },
+                {
+                    "ts_code": "000876.SZ",
+                    "security_name": "新希望",
+                    "industry_system": "SW2021",
+                    "level": "L1",
+                    "industry_code": "801010.SI",
+                    "industry_name": "农林牧渔",
+                    "valid_from": date(2026, 7, 1),
+                    "valid_to": None,
+                    "is_current": True,
+                    "available_at": observed_at,
+                },
+            ],
+        )
+    )
+
+    report = build_research_health_report(
+        warehouse, date(2026, 8, 3), full_history=False
+    )
+    members = next(
+        item for item in report.datasets
+        if item.dataset_id == ResearchDatasetId.INDUSTRY_MEMBER.value
+    )
+    _, markdown = write_health_report(report, tmp_path / "health")
+    text = markdown.read_text(encoding="utf-8")
+
+    assert members.duplicate_business_keys == 0
+    assert members.effective_interval_overlaps == 1
+    assert any(
+        all(token in issue for token in (
+            "industry_member",
+            "SW2021",
+            "L1",
+            "801010.SI",
+            "000876.SZ",
+            "1998-03-11..open",
+            "2026-07-01..open",
+        ))
+        for issue in members.effective_interval_issues
+    )
+    assert members.contract_valid is False
+    assert report.complete_core_date is False
+    assert "000876.SZ" in text
+
+
+def test_fast_health_audits_all_industry_member_partitions(tmp_path):
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    observed_at = datetime(2026, 8, 3, 13, 30, tzinfo=timezone.utc)
+    common = {
+        "ts_code": "000876.SZ",
+        "security_name": "新希望",
+        "industry_system": "SW2021",
+        "level": "L1",
+        "industry_name": "农林牧渔",
+        "valid_to": None,
+        "is_current": True,
+        "available_at": observed_at,
+    }
+    warehouse.commit_batch(
+        FactBatch(
+            dataset_id=ResearchDatasetId.INDUSTRY_MEMBER,
+            partition_value="SW2021-old",
+            source_name="test",
+            source_endpoint="index_member_all",
+            ingestion_run_id="old-overlap",
+            ingested_at=observed_at,
+            default_available_at=observed_at,
+            records=[
+                common | {
+                    "industry_code": "801010.SI",
+                    "valid_from": date(1998, 3, 11),
+                },
+                common | {
+                    "industry_code": "801020.SI",
+                    "valid_from": date(2026, 7, 1),
+                },
+            ],
+        )
+    )
+    warehouse.commit_batch(
+        FactBatch(
+            dataset_id=ResearchDatasetId.INDUSTRY_MEMBER,
+            partition_value="SW2021-new",
+            source_name="test",
+            source_endpoint="index_member_all",
+            ingestion_run_id="clean-latest",
+            ingested_at=observed_at,
+            default_available_at=observed_at,
+            records=[
+                common
+                | {
+                    "ts_code": "000001.SZ",
+                    "industry_code": "801010.SI",
+                    "valid_from": date(2020, 1, 1),
+                }
+            ],
+        )
+    )
+
+    report = build_research_health_report(
+        warehouse, date(2026, 8, 3), full_history=False
+    )
+    members = next(
+        item for item in report.datasets
+        if item.dataset_id == ResearchDatasetId.INDUSTRY_MEMBER.value
+    )
+
+    assert members.checked_partitions == 2
+    assert members.effective_interval_overlaps == 1
+    assert any("000876.SZ" in issue for issue in members.effective_interval_issues)
+
+
+def test_health_reports_inverted_industry_member_interval(tmp_path):
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    observed_at = datetime(2026, 8, 3, 13, 30, tzinfo=timezone.utc)
+    warehouse.commit_batch(
+        FactBatch(
+            dataset_id=ResearchDatasetId.INDUSTRY_MEMBER,
+            partition_value="SW2021",
+            source_name="test",
+            source_endpoint="index_member_all",
+            ingestion_run_id="inverted-member",
+            ingested_at=observed_at,
+            default_available_at=observed_at,
+            records=[{
+                "ts_code": "000876.SZ",
+                "security_name": "新希望",
+                "industry_system": "SW2021",
+                "level": "L1",
+                "industry_code": "801010.SI",
+                "industry_name": "农林牧渔",
+                "valid_from": date(2026, 7, 1),
+                "valid_to": date(2026, 6, 30),
+                "is_current": False,
+                "available_at": observed_at,
+            }],
+        )
+    )
+
+    report = build_research_health_report(
+        warehouse, date(2026, 8, 3), full_history=False
+    )
+    members = next(
+        item for item in report.datasets
+        if item.dataset_id == ResearchDatasetId.INDUSTRY_MEMBER.value
+    )
+
+    assert members.effective_interval_overlaps == 1
+    assert any(
+        "inverted" in issue and "000876.SZ" in issue
+        for issue in members.effective_interval_issues
+    )
+
+
 def test_health_rejects_passed_manifest_when_required_vendor_columns_are_absent(
     tmp_path,
 ):

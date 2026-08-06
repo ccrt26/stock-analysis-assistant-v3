@@ -10,6 +10,8 @@ from stock_analyzer.data.tushare_research_client import TushareResearchClient
 
 
 class CalendarPro(FakePro):
+    security_name = "平安银行"
+
     def trade_cal(self, **kwargs):
         self.calls.append(("trade_cal", kwargs))
         return __import__("pandas").DataFrame(
@@ -29,12 +31,63 @@ class CalendarPro(FakePro):
             ])
         return __import__("pandas").DataFrame(
             [{
-                "ts_code": "000001.SZ", "symbol": "000001", "name": "平安银行",
+                "ts_code": "000001.SZ", "symbol": "000001", "name": self.security_name,
                 "area": "深圳", "industry": "银行", "market": "主板",
                 "exchange": "SZSE", "list_status": "L", "list_date": "19910403",
                 "delist_date": None, "is_hs": "S"
             }]
         )
+
+
+def test_security_master_refreshes_with_resume_and_unchanged_snapshot_converges(
+    tmp_path,
+):
+    pro = CalendarPro()
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    service = ResearchBackfillService(
+        TushareResearchClient(pro, pacer=lambda method: None),
+        warehouse,
+        broad_index_codes=(),
+    )
+
+    service.backfill_market_core(
+        start=date(2026, 7, 10), through=date(2026, 7, 10), resume=True
+    )
+    service.backfill_market_core(
+        start=date(2026, 7, 11), through=date(2026, 7, 11), resume=True
+    )
+
+    stock_basic_calls = [method for method, _ in pro.calls if method == "stock_basic"]
+    master = warehouse.read_current(ResearchDatasetId.SECURITY_MASTER)
+    assert len(stock_basic_calls) == 6
+    assert len(master) == 1
+    assert pd.Timestamp(master.iloc[0]["snapshot_date"]).date() == date(2026, 7, 10)
+    assert warehouse.revision_count(ResearchDatasetId.SECURITY_MASTER) == 0
+
+
+def test_security_master_content_change_becomes_an_observed_revision(tmp_path):
+    pro = CalendarPro()
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    service = ResearchBackfillService(
+        TushareResearchClient(pro, pacer=lambda method: None),
+        warehouse,
+        broad_index_codes=(),
+    )
+    service.backfill_market_core(
+        start=date(2026, 7, 10), through=date(2026, 7, 10), resume=True
+    )
+    pro.security_name = "平安银行股份有限公司"
+
+    service.backfill_market_core(
+        start=date(2026, 7, 11), through=date(2026, 7, 11), resume=True
+    )
+
+    master = warehouse.read_current(ResearchDatasetId.SECURITY_MASTER)
+    revisions = warehouse.revision_rows(ResearchDatasetId.SECURITY_MASTER)
+    assert master.iloc[0]["name"] == "平安银行股份有限公司"
+    assert len(revisions) == 1
+    assert revisions[0]["row_payload"]["name"] == "平安银行"
+    assert revisions[0]["valid_to"] >= revisions[0]["valid_from"]
 
 
 def test_market_backfill_repairs_committed_partition_with_incomplete_vendor_schema(tmp_path):

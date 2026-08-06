@@ -56,6 +56,7 @@ class EventBackfillService:
                 ResearchDatasetId.ANNOUNCEMENT,
                 partition,
                 current_month=current_month,
+                through=through,
                 resume=resume,
             ):
                 summary.skipped += 1
@@ -81,6 +82,7 @@ class EventBackfillService:
                 ResearchDatasetId.HOLDER_TRADE,
                 partition,
                 current_month=current_month,
+                through=through,
                 resume=resume,
             ):
                 summary.skipped += 1
@@ -129,6 +131,7 @@ class EventBackfillService:
                 ResearchDatasetId.REPURCHASE,
                 partition,
                 current_month=current_month,
+                through=through,
                 resume=resume,
             ):
                 summary.skipped += 1
@@ -170,6 +173,7 @@ class EventBackfillService:
                 ResearchDatasetId.PLEDGE,
                 partition,
                 current_month=current_month,
+                through=through,
                 resume=resume,
             ):
                 summary.skipped += 1
@@ -444,11 +448,17 @@ class EventBackfillService:
         partition: str,
         *,
         current_month: str,
+        through: date,
         resume: bool,
     ) -> bool:
+        previous_month = (through.replace(day=1) - timedelta(days=1)).strftime(
+            "%Y-%m"
+        )
+        refresh_previous_month = through.day <= 7 and partition == previous_month
         return bool(
             resume
             and partition < current_month
+            and not refresh_previous_month
             and (
                 self._complete(dataset, partition)
                 or self._partition_checked(dataset, partition)
@@ -723,7 +733,10 @@ def _latest_total_shares(
     for raw in frame[["ts_code", "total_share"]].to_dict(orient="records"):
         value = pd.to_numeric(raw.get("total_share"), errors="coerce")
         if pd.notna(value) and float(value) > 0:
-            result[str(raw["ts_code"])] = float(value) * 10_000.0
+            # daily_basic is normalized by TushareResearchClient from ten-
+            # thousand shares to shares.  Event matching uses that internal
+            # unit directly; converting again would inflate the denominator.
+            result[str(raw["ts_code"])] = float(value)
     return result
 
 

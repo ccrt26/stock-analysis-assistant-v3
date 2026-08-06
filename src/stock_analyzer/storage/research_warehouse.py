@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import hashlib
+import fcntl
 import json
+import os
 import shutil
+from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable
 from uuid import uuid4
@@ -20,11 +23,13 @@ from stock_analyzer.data.research_contracts import (
 )
 from stock_analyzer.data.research_time import (
     resolve_initial_availability,
+    resolve_reconstructed_revision_availability,
     resolve_revision_availability,
 )
 from stock_analyzer.storage.research_parquet import (
     atomic_promote,
     discard_backup,
+    fsync_directory,
     restore_previous,
     sha256_file,
     write_staged_parquet,
@@ -77,26 +82,45 @@ class FactCommitResult:
     file_sha256: str
 
 
+@dataclass(frozen=True)
+class _FactPromotionState:
+    backup_path: Path | None
+    journal_path: Path
+
+
+class FactRecoveryError(RuntimeError):
+    pass
+
+
 class ResearchWarehouse:
     def __init__(self, root: Path) -> None:
         self.root = Path(root)
         self.facts_root = self.root / "facts"
         self.staging_root = self.root / ".staging"
+        self.journal_root = self.root / ".fact-promotions"
+        self.lock_path = self.root / ".facts.lock"
         self.duckdb_path = self.root / "research.duckdb"
         self.root.mkdir(parents=True, exist_ok=True)
-        with connect_research_warehouse(self.duckdb_path) as connection:
-            for dataset_id, contract in research_contract_registry().items():
-                connection.execute(
-                    """
-                    insert or replace into research_dataset_catalog
-                    (dataset_id, contract_json, updated_at)
-                    values (?, ?, now())
-                    """,
-                    [dataset_id.value, contract.model_dump_json()],
-                )
-        self._ensure_fact_key_index()
+        with self._file_lock(exclusive=True):
+            with connect_research_warehouse(self.duckdb_path) as connection:
+                for dataset_id, contract in research_contract_registry().items():
+                    connection.execute(
+                        """
+                        insert or replace into research_dataset_catalog
+                        (dataset_id, contract_json, updated_at)
+                        values (?, ?, now())
+                        """,
+                        [dataset_id.value, contract.model_dump_json()],
+                    )
+            self._recover_interrupted_promotions()
+            self._recover_unjournaled_backups()
+            self._ensure_fact_key_index()
 
     def commit_batch(self, batch: FactBatch) -> FactCommitResult:
+        with self._file_lock(exclusive=True):
+            return self._commit_batch_locked(batch)
+
+    def _commit_batch_locked(self, batch: FactBatch) -> FactCommitResult:
         contract = research_contract(batch.dataset_id)
         incoming = self._normalize_batch(batch)
         self._validate_frame(batch.dataset_id, incoming, contract.business_key)
@@ -140,9 +164,16 @@ class ResearchWarehouse:
         stage_dir = self.staging_root / batch.ingestion_run_id / batch.dataset_id.value
         staged_path = stage_dir / f"{_safe_partition(batch.partition_value)}.parquet"
         file_sha256 = write_staged_parquet(staged_path, merged)
-        backup_path: Path | None = None
+        promotion: _FactPromotionState | None = None
         try:
-            backup_path = self._promote_staged_partition(staged_path, final_path)
+            promotion = self._promote_staged_partition(
+                staged_path,
+                final_path,
+                old_metadata_sha256=(
+                    None if current_meta is None else current_meta[1]
+                ),
+                new_file_sha256=file_sha256,
+            )
             try:
                 self._commit_metadata(
                     batch,
@@ -153,9 +184,9 @@ class ResearchWarehouse:
                     revisions,
                 )
             except Exception:
-                restore_previous(final_path, backup_path)
+                self._rollback_promotion(final_path, promotion)
                 raise
-            discard_backup(backup_path)
+            self._finish_promotion(promotion)
         finally:
             shutil.rmtree(stage_dir.parent, ignore_errors=True)
 
@@ -170,8 +201,265 @@ class ResearchWarehouse:
             file_sha256=file_sha256,
         )
 
-    def _promote_staged_partition(self, staged_path: Path, final_path: Path) -> Path | None:
-        return atomic_promote(staged_path, final_path)
+    def _promote_staged_partition(
+        self,
+        staged_path: Path,
+        final_path: Path,
+        *,
+        old_metadata_sha256: str | None,
+        new_file_sha256: str,
+    ) -> _FactPromotionState:
+        backup_path = (
+            final_path.with_suffix(".parquet.previous")
+            if final_path.exists()
+            else None
+        )
+        if backup_path is not None and backup_path.exists():
+            raise FactRecoveryError(
+                f"unreconciled fact backup already exists: {backup_path}"
+            )
+        if final_path.exists() != (old_metadata_sha256 is not None):
+            raise FactRecoveryError(
+                f"fact metadata/file presence mismatch: {final_path}"
+            )
+        if old_metadata_sha256 is not None:
+            actual = sha256_file(final_path)
+            if actual != old_metadata_sha256:
+                raise FactRecoveryError(
+                    f"fact metadata/file hash mismatch: {final_path}"
+                )
+        journal_path = self._write_promotion_journal(
+            final_path=final_path,
+            backup_path=backup_path,
+            old_metadata_sha256=old_metadata_sha256,
+            new_file_sha256=new_file_sha256,
+        )
+        try:
+            promoted_backup = atomic_promote(staged_path, final_path)
+        except Exception:
+            self._delete_promotion_journal(journal_path)
+            raise
+        if promoted_backup != backup_path:
+            raise FactRecoveryError("fact promotion backup path changed unexpectedly")
+        return _FactPromotionState(
+            backup_path=backup_path,
+            journal_path=journal_path,
+        )
+
+    @contextmanager
+    def _file_lock(self, *, exclusive: bool):
+        with self.lock_path.open("a+b") as handle:
+            operation = fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH
+            fcntl.flock(handle.fileno(), operation)
+            try:
+                yield
+            finally:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+    def _rollback_promotion(
+        self,
+        final_path: Path,
+        promotion: _FactPromotionState | None,
+    ) -> None:
+        if promotion is None:
+            raise FactRecoveryError("missing fact promotion state")
+        restore_previous(final_path, promotion.backup_path)
+        self._delete_promotion_journal(promotion.journal_path)
+
+    def _finish_promotion(self, promotion: _FactPromotionState) -> None:
+        discard_backup(promotion.backup_path)
+        self._delete_promotion_journal(promotion.journal_path)
+
+    def _write_promotion_journal(
+        self,
+        *,
+        final_path: Path,
+        backup_path: Path | None,
+        old_metadata_sha256: str | None,
+        new_file_sha256: str,
+    ) -> Path:
+        payload = {
+            "backup_relative_path": (
+                None
+                if backup_path is None
+                else backup_path.relative_to(self.root).as_posix()
+            ),
+            "final_relative_path": final_path.relative_to(self.root).as_posix(),
+            "new_file_sha256": new_file_sha256,
+            "old_metadata_sha256": old_metadata_sha256,
+            "version": 1,
+        }
+        encoded = json.dumps(
+            payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        self.journal_root.mkdir(parents=True, exist_ok=True)
+        fsync_directory(self.root)
+        journal_path = self.journal_root / f"{uuid4().hex}.json"
+        temporary_path = journal_path.with_suffix(".json.tmp")
+        try:
+            with temporary_path.open("xb") as handle:
+                handle.write(encoded)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary_path, journal_path)
+            fsync_directory(self.journal_root)
+        except Exception:
+            if temporary_path.exists():
+                temporary_path.unlink()
+            raise
+        return journal_path
+
+    def _delete_promotion_journal(self, journal_path: Path) -> None:
+        if journal_path.exists():
+            journal_path.unlink()
+            fsync_directory(journal_path.parent)
+        try:
+            self.journal_root.rmdir()
+        except OSError:
+            return
+        fsync_directory(self.root)
+
+    def _recover_interrupted_promotions(self) -> None:
+        journal_paths = sorted(self.journal_root.glob("*.json"))
+        if not journal_paths:
+            self._discard_unpublished_journal_temps()
+            return
+        with connect_research_warehouse(
+            self.duckdb_path, read_only=True
+        ) as connection:
+            for journal_path in journal_paths:
+                try:
+                    payload = json.loads(journal_path.read_text(encoding="utf-8"))
+                    if payload.get("version") != 1:
+                        raise ValueError("unsupported journal version")
+                    final_relative = str(payload["final_relative_path"])
+                    final_path = self._fact_path_from_relative(final_relative)
+                    backup_relative = payload.get("backup_relative_path")
+                    backup_path = (
+                        None
+                        if backup_relative is None
+                        else self._fact_path_from_relative(str(backup_relative))
+                    )
+                    old_sha = payload.get("old_metadata_sha256")
+                    old_sha = None if old_sha is None else str(old_sha)
+                    new_sha = str(payload["new_file_sha256"])
+                except (KeyError, OSError, TypeError, ValueError) as exc:
+                    raise FactRecoveryError(
+                        f"cannot reconcile invalid fact journal: {journal_path}"
+                    ) from exc
+
+                row = connection.execute(
+                    """
+                    select file_sha256 from research_fact_partitions
+                    where relative_path = ?
+                    """,
+                    [final_relative],
+                ).fetchone()
+                metadata_sha = None if row is None else str(row[0])
+                final_sha = self._file_sha_or_none(final_path)
+                backup_sha = self._file_sha_or_none(backup_path)
+
+                if metadata_sha == new_sha and final_sha == new_sha:
+                    discard_backup(backup_path)
+                    self._delete_promotion_journal(journal_path)
+                    continue
+                if metadata_sha == old_sha and old_sha is not None:
+                    if final_sha == old_sha:
+                        discard_backup(backup_path)
+                        self._delete_promotion_journal(journal_path)
+                        continue
+                    if backup_sha == old_sha and backup_path is not None:
+                        os.replace(backup_path, final_path)
+                        fsync_directory(final_path.parent)
+                        self._delete_promotion_journal(journal_path)
+                        continue
+                if metadata_sha is None and old_sha is None:
+                    if backup_path is not None:
+                        raise self._unreconciled_promotion(final_relative)
+                    if final_sha == new_sha:
+                        final_path.unlink()
+                        fsync_directory(final_path.parent)
+                    elif final_sha is not None:
+                        raise self._unreconciled_promotion(final_relative)
+                    self._delete_promotion_journal(journal_path)
+                    continue
+                raise self._unreconciled_promotion(final_relative)
+        self._discard_unpublished_journal_temps()
+
+    def _discard_unpublished_journal_temps(self) -> None:
+        if not self.journal_root.exists():
+            return
+        removed = False
+        for temporary_path in self.journal_root.glob("*.json.tmp"):
+            temporary_path.unlink()
+            removed = True
+        if removed:
+            fsync_directory(self.journal_root)
+        try:
+            self.journal_root.rmdir()
+        except OSError:
+            return
+        fsync_directory(self.root)
+
+    def _recover_unjournaled_backups(self) -> None:
+        backups = sorted(self.facts_root.rglob("*.parquet.previous"))
+        if not backups:
+            return
+        with connect_research_warehouse(
+            self.duckdb_path, read_only=True
+        ) as connection:
+            for backup_path in backups:
+                final_path = backup_path.with_suffix("")
+                relative = final_path.relative_to(self.root).as_posix()
+                row = connection.execute(
+                    """
+                    select file_sha256 from research_fact_partitions
+                    where relative_path = ?
+                    """,
+                    [relative],
+                ).fetchone()
+                if row is None:
+                    raise FactRecoveryError(
+                        f"cannot reconcile unjournaled fact backup: {relative}"
+                    )
+                metadata_sha = str(row[0])
+                final_sha = self._file_sha_or_none(final_path)
+                backup_sha = self._file_sha_or_none(backup_path)
+                if final_sha == metadata_sha:
+                    discard_backup(backup_path)
+                    continue
+                if backup_sha == metadata_sha:
+                    os.replace(backup_path, final_path)
+                    fsync_directory(final_path.parent)
+                    continue
+                raise FactRecoveryError(
+                    f"cannot reconcile unjournaled fact backup: {relative}"
+                )
+
+    def _fact_path_from_relative(self, relative_path: str) -> Path:
+        relative = Path(relative_path)
+        if relative.is_absolute():
+            raise FactRecoveryError(f"fact path is not relative: {relative_path}")
+        root = self.root.resolve()
+        path = (self.root / relative).resolve()
+        if path != root and root not in path.parents:
+            raise FactRecoveryError(f"fact path escapes warehouse: {relative_path}")
+        return path
+
+    @staticmethod
+    def _file_sha_or_none(path: Path | None) -> str | None:
+        if path is None or not path.is_file():
+            return None
+        return sha256_file(path)
+
+    @staticmethod
+    def _unreconciled_promotion(relative_path: str) -> FactRecoveryError:
+        return FactRecoveryError(
+            f"cannot reconcile interrupted fact promotion: {relative_path}"
+        )
 
     def read_current(
         self,
@@ -317,8 +605,8 @@ class ResearchWarehouse:
         with connect_research_warehouse(self.duckdb_path, read_only=True) as connection:
             cursor = connection.execute(
                 f"""
-                select business_key_hash, revision_no, partition_value, row_payload,
-                       cast(valid_from as varchar), cast(valid_to as varchar)
+                select business_key_hash, revision_no, partition_value, payload_hash,
+                       row_payload, cast(valid_from as varchar), cast(valid_to as varchar)
                 from research_fact_revisions
                 where dataset_id = ?
                 {partition_filter}
@@ -332,9 +620,10 @@ class ResearchWarehouse:
                 "business_key_hash": row[0],
                 "revision_no": int(row[1]),
                 "partition_value": str(row[2]),
-                "row_payload": _from_json(row[3]),
-                "valid_from": _parse_datetime(row[4]),
-                "valid_to": _parse_datetime(row[5]),
+                "payload_hash": str(row[3]),
+                "row_payload": _from_json(row[4]),
+                "valid_from": _parse_datetime(row[5]),
+                "valid_to": _parse_datetime(row[6]),
             }
             for row in rows
         ]
@@ -367,6 +656,17 @@ class ResearchWarehouse:
             ).fetchdf()
 
     def prune_partitions_before(
+        self,
+        dataset_id: ResearchDatasetId | str,
+        keep_from_partition: str,
+    ) -> tuple[str, ...]:
+        with self._file_lock(exclusive=True):
+            return self._prune_partitions_before_locked(
+                dataset_id,
+                keep_from_partition,
+            )
+
+    def _prune_partitions_before_locked(
         self,
         dataset_id: ResearchDatasetId | str,
         keep_from_partition: str,
@@ -423,6 +723,14 @@ class ResearchWarehouse:
         batches: Iterable[FactBatch],
     ) -> None:
         """Atomically replace one dataset after rebuilding all current partitions."""
+        with self._file_lock(exclusive=True):
+            self._replace_dataset_batches_locked(dataset_id, batches)
+
+    def _replace_dataset_batches_locked(
+        self,
+        dataset_id: ResearchDatasetId | str,
+        batches: Iterable[FactBatch],
+    ) -> None:
         dataset = ResearchDatasetId(dataset_id)
         prepared = tuple(batches)
         if any(batch.dataset_id is not dataset for batch in prepared):
@@ -661,13 +969,29 @@ class ResearchWarehouse:
                 unchanged_rows += 1
                 merged_by_hash[key_hash] = old_row
                 continue
-            changed_rows += 1
-            revision_availability = resolve_revision_availability(
-                research_contract(batch.dataset_id),
+            jitter_row = _canonical_announcement_time_jitter(
+                batch.dataset_id,
+                old_row,
                 new_row,
-                batch_ingested_at=batch.ingested_at,
-                old_available_at=old_row["available_at"],
             )
+            if jitter_row is not None:
+                changed_rows += 1
+                merged_by_hash[key_hash] = jitter_row
+                continue
+            changed_rows += 1
+            if batch.reconstruct_source_revisions:
+                revision_availability = resolve_reconstructed_revision_availability(
+                    research_contract(batch.dataset_id),
+                    new_row,
+                    old_available_at=old_row["available_at"],
+                )
+            else:
+                revision_availability = resolve_revision_availability(
+                    research_contract(batch.dataset_id),
+                    new_row,
+                    batch_ingested_at=batch.ingested_at,
+                    old_available_at=old_row["available_at"],
+                )
             new_row["available_at"] = revision_availability.available_at
             new_row["availability_precision"] = revision_availability.precision.value
             old_revision = int(old_row.get("revision_no", 1))
@@ -928,6 +1252,25 @@ def _changed_business_fields(old: dict[str, Any], new: dict[str, Any]) -> list[s
     )
 
 
+def _canonical_announcement_time_jitter(
+    dataset_id: ResearchDatasetId,
+    old: dict[str, Any],
+    new: dict[str, Any],
+) -> dict[str, Any] | None:
+    if dataset_id is not ResearchDatasetId.ANNOUNCEMENT:
+        return None
+    if _changed_business_fields(old, new) != ["announcement_time"]:
+        return None
+    old_time = _as_utc(old["announcement_time"])
+    new_time = _as_utc(new["announcement_time"])
+    if abs(new_time - old_time) > timedelta(seconds=1):
+        return None
+    if old_time >= new_time:
+        return old
+    new["revision_no"] = int(old.get("revision_no", 1))
+    return new
+
+
 def _row_json(row: dict[str, Any]) -> dict[str, Any]:
     return {key: _json_safe(value) for key, value in row.items()}
 
@@ -997,4 +1340,4 @@ def _normalized_partition_values(values: Iterable[str]) -> tuple[str, ...]:
     return tuple(sorted({str(value) for value in values}))
 
 
-__all__ = ["FactCommitResult", "ResearchWarehouse"]
+__all__ = ["FactCommitResult", "FactRecoveryError", "ResearchWarehouse"]

@@ -42,7 +42,7 @@ logs/
 | --- | --- | --- |
 | 收盘 | 18:30 | `data run-stage --stage close --data-date auto` |
 | 晚间 | 21:30 | `data run-stage --stage evening --data-date auto` |
-| 次晨 | 08:00 | `data run-stage --stage next-morning --data-date auto` |
+| 次晨 | 09:00 | `data run-stage --stage next-morning --data-date auto` |
 
 模板位于 `ops/launchd/`。任务只更新本地事实、派生观察和健康摘要。
 

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 
 import numpy as np
 import pandas as pd
@@ -450,6 +450,23 @@ def test_missing_official_index_is_declared_and_overlapping_membership_fails() -
     members = pd.concat([members, overlap], ignore_index=True)
     with pytest.raises(ValueError, match="overlapping"):
         _compute(equity, dates, members=members)
+
+
+def test_adjacent_repaired_memberships_compute_unique_sector_output() -> None:
+    dates = pd.bdate_range(end=ANALYSIS_DATE, periods=61)
+    equity = _daily(dates, {"A.SZ": (10.0, 0.1), "B.SZ": (20.0, 0.1)})
+    members = _members(dates)
+    successor = members.iloc[[0]].copy()
+    successor_start = dates[20].date()
+    members.loc[members.index[0], "valid_to"] = successor_start - timedelta(days=1)
+    successor.loc[:, "valid_from"] = successor_start
+    successor.loc[:, "valid_to"] = None
+    repaired = pd.concat([members, successor], ignore_index=True)
+
+    result = _compute(equity, dates, members=repaired)
+
+    assert not result.empty
+    assert not result.duplicated(["analysis_date", "group_type", "group_code"]).any()
 
 
 def test_daily_turnover_uses_preindexed_sessions_without_rescanning_full_market() -> None:

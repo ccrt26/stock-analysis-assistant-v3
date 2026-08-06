@@ -149,10 +149,12 @@ class TradingStructureBackfillService:
                 category = _minute_failure_category(exc)
                 if category == "access_or_rate_limit":
                     summary.limited += 1
+                    summary.issues.append(f"minute_bar:{category}")
+                    break
                 else:
                     summary.failed += 1
-                summary.issues.append(f"minute_bar:{category}")
-                break
+                    summary.issues.append(f"minute_bar:{code}:{category}")
+                    continue
             if not isinstance(frame, pd.DataFrame):
                 summary.failed += 1
                 summary.issues.append("minute_bar:invalid_response")

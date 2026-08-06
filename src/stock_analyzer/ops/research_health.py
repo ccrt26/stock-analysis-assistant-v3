@@ -41,6 +41,10 @@ class DatasetHealth(BaseModel):
     checked_partitions: int
     checked_rows: int
     duplicate_business_keys: int
+    effective_interval_overlaps: int
+    effective_interval_issues: tuple[str, ...]
+    invalid_revision_intervals: int
+    overlapping_revision_intervals: int
     missing_files: int
     hash_mismatches: int
     row_count_mismatches: int
@@ -74,6 +78,16 @@ class DerivedFeatureHealth(BaseModel):
     ready: bool
 
 
+class StageRunHealth(BaseModel):
+    stage: str
+    data_date: date
+    run_id: str
+    status: str
+    started_at: datetime
+    finished_at: datetime | None
+    issues: tuple[str, ...]
+
+
 class ResearchHealthReport(BaseModel):
     data_date: date
     generated_at: datetime
@@ -83,6 +97,7 @@ class ResearchHealthReport(BaseModel):
     derived_features: tuple[DerivedFeatureHealth, ...]
     derived_ready_for_research: bool
     derived_has_declared_gaps: bool
+    latest_stage_runs: tuple[StageRunHealth, ...]
 
 
 def build_research_health_report(
@@ -93,6 +108,7 @@ def build_research_health_report(
 ) -> ResearchHealthReport:
     datasets: list[DatasetHealth] = []
     core_complete = True
+    revision_audit = _revision_interval_audit(warehouse)
     for dataset_id, contract in research_contract_registry().items():
         manifest = warehouse.partition_manifest(dataset_id)
         partitions = len(manifest)
@@ -103,12 +119,28 @@ def build_research_health_report(
             else []
         )
         selected = manifest
-        if not full_history and not manifest.empty:
+        interval_scoped_dataset = dataset_id in {
+            ResearchDatasetId.INDUSTRY_CATALOG,
+            ResearchDatasetId.INDUSTRY_MEMBER,
+        }
+        if (
+            not full_history
+            and not manifest.empty
+            and not interval_scoped_dataset
+        ):
             same_day = manifest[
                 manifest["partition_value"].astype(str) == data_date.isoformat()
             ]
             selected = same_day if not same_day.empty else manifest.tail(1)
         file_audit = _audit_partition_files(warehouse, selected, contract)
+        interval_audit = _effective_interval_audit(
+            dataset_id,
+            file_audit["paths"],
+        )
+        revision_issues = revision_audit.get(
+            dataset_id.value,
+            {"invalid": 0, "overlaps": 0},
+        )
         duplicates = 0
         if full_history and file_audit["paths"]:
             with duckdb.connect() as connection:
@@ -130,6 +162,10 @@ def build_research_health_report(
                 checked_partitions=len(selected),
                 checked_rows=file_audit["rows"],
                 duplicate_business_keys=duplicates,
+                effective_interval_overlaps=interval_audit["overlaps"],
+                effective_interval_issues=tuple(interval_audit["issues"]),
+                invalid_revision_intervals=revision_issues["invalid"],
+                overlapping_revision_intervals=revision_issues["overlaps"],
                 missing_files=file_audit["missing"],
                 hash_mismatches=file_audit["hash_mismatches"],
                 row_count_mismatches=file_audit["row_count_mismatches"],
@@ -145,7 +181,12 @@ def build_research_health_report(
                 required_field_min_coverage=file_audit[
                     "required_field_min_coverage"
                 ],
-                contract_valid=file_audit["contract_valid"],
+                contract_valid=(
+                    file_audit["contract_valid"]
+                    and interval_audit["overlaps"] == 0
+                    and revision_issues["invalid"] == 0
+                    and revision_issues["overlaps"] == 0
+                ),
                 physical_valid=file_audit["physical_valid"],
             )
         )
@@ -158,11 +199,19 @@ def build_research_health_report(
                 "theme_catalog",
                 "theme_member",
             }:
-                core_complete &= partitions > 0 and file_audit["physical_valid"]
+                core_complete &= (
+                    partitions > 0
+                    and file_audit["physical_valid"]
+                    and interval_audit["overlaps"] == 0
+                    and revision_issues["invalid"] == 0
+                    and revision_issues["overlaps"] == 0
+                )
             else:
                 core_complete &= (
                     data_date.isoformat() in set(values)
                     and file_audit["physical_valid"]
+                    and revision_issues["invalid"] == 0
+                    and revision_issues["overlaps"] == 0
                 )
     with connect_research_warehouse(
         warehouse.duckdb_path, read_only=True
@@ -184,7 +233,50 @@ def build_research_health_report(
             or bool(item.limitations)
             for item in derived
         ),
+        latest_stage_runs=_latest_stage_runs(warehouse),
     )
+
+
+def _latest_stage_runs(
+    warehouse: ResearchWarehouse,
+) -> tuple[StageRunHealth, ...]:
+    with connect_research_warehouse(
+        warehouse.duckdb_path, read_only=True
+    ) as connection:
+        rows = connection.execute(
+            """
+            select stage, cast(data_date as varchar), run_id, status,
+                   cast(started_at as varchar), cast(finished_at as varchar),
+                   cast(summary_json as varchar)
+            from research_ingestion_runs
+            qualify row_number() over (
+                partition by stage order by started_at desc, run_id desc
+            ) = 1
+            order by stage
+            """
+        ).fetchall()
+    result: list[StageRunHealth] = []
+    for row in rows:
+        payload = json.loads(row[6]) if row[6] else {}
+        issues: list[str] = []
+        if payload.get("message"):
+            issues.append(str(payload["message"]))
+        for summary in payload.get("summaries", []):
+            issues.extend(str(item) for item in summary.get("issues", []))
+        result.append(
+            StageRunHealth(
+                stage=str(row[0]),
+                data_date=date.fromisoformat(row[1]),
+                run_id=str(row[2]),
+                status=str(row[3]),
+                started_at=datetime.fromisoformat(row[4]),
+                finished_at=(
+                    datetime.fromisoformat(row[5]) if row[5] else None
+                ),
+                issues=tuple(dict.fromkeys(issues)),
+            )
+        )
+    return tuple(result)
 
 
 def _build_derived_health(
@@ -460,6 +552,133 @@ def _audit_partition_files(
     }
 
 
+def _revision_interval_audit(
+    warehouse: ResearchWarehouse,
+) -> dict[str, dict[str, int]]:
+    with connect_research_warehouse(
+        warehouse.duckdb_path, read_only=True
+    ) as connection:
+        rows = connection.execute(
+            """
+            with ordered as (
+                select dataset_id, valid_from, valid_to,
+                       lag(valid_to) over (
+                           partition by dataset_id, business_key_hash
+                           order by valid_from, valid_to, revision_no
+                       ) as prior_valid_to
+                from research_fact_revisions
+            )
+            select dataset_id,
+                   count(*) filter (where valid_to <= valid_from) as invalid,
+                   count(*) filter (
+                       where prior_valid_to > valid_from
+                   ) as overlaps
+            from ordered
+            group by dataset_id
+            """
+        ).fetchall()
+    return {
+        str(dataset_id): {
+            "invalid": int(invalid),
+            "overlaps": int(overlaps),
+        }
+        for dataset_id, invalid, overlaps in rows
+    }
+
+
+def _effective_interval_audit(
+    dataset_id: ResearchDatasetId,
+    paths: list[str],
+) -> dict[str, Any]:
+    if not paths or dataset_id not in {
+        ResearchDatasetId.INDUSTRY_CATALOG,
+        ResearchDatasetId.INDUSTRY_MEMBER,
+    }:
+        return {"overlaps": 0, "issues": []}
+    if dataset_id is ResearchDatasetId.INDUSTRY_MEMBER:
+        return _industry_member_interval_audit(paths)
+    with duckdb.connect() as connection:
+        rows = connection.execute(
+            """
+            select industry_system, level, industry_code, valid_from, valid_to
+            from read_parquet(?, union_by_name=true, hive_partitioning=false)
+            order by industry_system, level, industry_code, valid_from
+            """,
+            [paths],
+        ).fetchall()
+    issues: list[str] = []
+    active: dict[
+        tuple[str, str, str],
+        list[tuple[Any, Any]],
+    ] = {}
+    for system, level, code, valid_from, valid_to in rows:
+        key = (str(system), str(level), str(code))
+        if valid_to is not None and valid_to < valid_from:
+            issues.append(
+                f"{key[0]}/{key[1]}/{key[2]}: "
+                f"{_interval_text(valid_from, valid_to)} inverted"
+            )
+        still_active = [
+            interval
+            for interval in active.get(key, [])
+            if interval[1] is None or valid_from <= interval[1]
+        ]
+        for prior_from, prior_to in still_active:
+            issues.append(
+                f"{key[0]}/{key[1]}/{key[2]}: "
+                f"{_interval_text(prior_from, prior_to)} overlaps "
+                f"{_interval_text(valid_from, valid_to)}"
+            )
+        still_active.append((valid_from, valid_to))
+        active[key] = still_active
+    return {"overlaps": len(issues), "issues": issues}
+
+
+def _industry_member_interval_audit(paths: list[str]) -> dict[str, Any]:
+    with duckdb.connect() as connection:
+        rows = connection.execute(
+            """
+            select industry_system, level, ts_code, industry_code,
+                   valid_from, valid_to
+            from read_parquet(?, union_by_name=true, hive_partitioning=false)
+            order by industry_system, level, ts_code, valid_from, industry_code
+            """,
+            [paths],
+        ).fetchall()
+
+    issues: list[str] = []
+    active: dict[
+        tuple[str, str, str],
+        list[tuple[str, Any, Any]],
+    ] = {}
+    for system, level, ts_code, industry_code, valid_from, valid_to in rows:
+        slot = (str(system), str(level), str(ts_code))
+        if valid_to is not None and valid_to < valid_from:
+            issues.append(
+                f"industry_member {slot[0]}/{slot[1]}/{ts_code}: "
+                f"{industry_code} {_interval_text(valid_from, valid_to)} inverted"
+            )
+        still_active = [
+            item
+            for item in active.get(slot, [])
+            if item[2] is None or valid_from <= item[2]
+        ]
+        for prior_code, prior_from, prior_to in still_active:
+            issues.append(
+                f"industry_member {slot[0]}/{slot[1]}/{ts_code}: "
+                f"{prior_code} {_interval_text(prior_from, prior_to)} overlaps "
+                f"{industry_code} {_interval_text(valid_from, valid_to)}"
+            )
+        still_active.append((str(industry_code), valid_from, valid_to))
+        active[slot] = still_active
+    return {"overlaps": len(issues), "issues": issues}
+
+
+def _interval_text(valid_from: Any, valid_to: Any) -> str:
+    end = "open" if valid_to is None else str(valid_to)
+    return f"{valid_from}..{end}"
+
+
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -482,17 +701,41 @@ def write_health_report(
         "",
         f"收盘核心数据是否完整：{'是' if report.complete_core_date else '否'}",
         "",
+        "## 最近一次真实任务",
+        "",
+        "| 阶段 | 数据日期 | 状态 | 问题摘要 |",
+        "| --- | --- | --- | --- |",
+    ]
+    for run in report.latest_stage_runs:
+        lines.append(
+            f"| {run.stage} | {run.data_date.isoformat()} | {run.status} | "
+            f"{'；'.join(run.issues) or '-'} |"
+        )
+    if not report.latest_stage_runs:
+        lines.append("| - | - | 尚无运行记录 | - |")
+    lines.extend(
+        [
+        "",
         "| 数据 | 分区 | 记录 | 本次核对分区 | 重复业务事实 | 缺文件 | 校验不符 | 契约异常 |",
         "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
-    ]
+        ]
+    )
     for item in report.datasets:
         lines.append(
             f"| {item.dataset_id} | {item.partitions} | {item.rows} | "
             f"{item.checked_partitions} | {item.duplicate_business_keys} | "
             f"{item.missing_files} | "
             f"{item.hash_mismatches + item.row_count_mismatches} | "
-            f"{item.schema_mismatch_partitions + item.coverage_failure_partitions} |"
+            f"{item.schema_mismatch_partitions + item.coverage_failure_partitions + item.effective_interval_overlaps + item.invalid_revision_intervals + item.overlapping_revision_intervals} |"
         )
+        for issue in item.effective_interval_issues:
+            lines.append(f"- {item.dataset_id} 有效区间重叠：{issue}。")
+        if item.invalid_revision_intervals or item.overlapping_revision_intervals:
+            lines.append(
+                f"- {item.dataset_id} 修订链异常：非正区间 "
+                f"{item.invalid_revision_intervals} 条，重叠 "
+                f"{item.overlapping_revision_intervals} 条。"
+            )
         if item.missing_required_columns:
             lines.append(
                 f"- {item.dataset_id} 缺少契约必需列："
@@ -574,6 +817,7 @@ def write_health_report(
 __all__ = [
     "DatasetHealth",
     "DerivedFeatureHealth",
+    "StageRunHealth",
     "ResearchHealthReport",
     "build_research_health_report",
     "write_health_report",

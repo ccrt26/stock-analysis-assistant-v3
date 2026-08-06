@@ -1,4 +1,6 @@
 from datetime import date, datetime, timezone
+import threading
+import time
 
 import pandas as pd
 import pytest
@@ -57,6 +59,35 @@ def _announcement_batch(
             "title": title,
             "available_at": datetime(2026, 7, 13, 10, tzinfo=timezone.utc),
         }],
+    )
+
+
+def _announcement_time_batch(
+    *,
+    published_at: datetime,
+    ingested_at: datetime,
+    run_id: str,
+    title: str = "公告",
+) -> FactBatch:
+    return FactBatch(
+        dataset_id=ResearchDatasetId.ANNOUNCEMENT,
+        partition_value="2026-07",
+        source_name="cninfo",
+        source_endpoint="new/hisAnnouncement/query",
+        ingestion_run_id=run_id,
+        ingested_at=ingested_at,
+        default_available_at=published_at,
+        records=[
+            {
+                "announcement_id": "ANN-JITTER",
+                "ts_code": "000001.SZ",
+                "announcement_time": published_at,
+                "available_at": published_at,
+                "title": title,
+                "url": "https://example.invalid/ANN-JITTER.pdf",
+                "pdf_path": "finalpage/ANN-JITTER.pdf",
+            }
+        ],
     )
 
 
@@ -154,6 +185,98 @@ def test_later_market_revision_uses_observed_ingestion_not_trade_date(tmp_path):
     )
 
 
+def test_announcement_time_jitter_converges_without_revision(tmp_path):
+    warehouse = ResearchWarehouse(tmp_path)
+    later = datetime(2026, 7, 9, 9, 16, 29, tzinfo=timezone.utc)
+    earlier = later - pd.Timedelta(seconds=1)
+
+    first = warehouse.commit_batch(
+        _announcement_time_batch(
+            published_at=later,
+            ingested_at=datetime(2026, 7, 10, tzinfo=timezone.utc),
+            run_id="announcement-jitter-1",
+        )
+    )
+    second = warehouse.commit_batch(
+        _announcement_time_batch(
+            published_at=earlier,
+            ingested_at=datetime(2026, 7, 11, tzinfo=timezone.utc),
+            run_id="announcement-jitter-2",
+        )
+    )
+    third = warehouse.commit_batch(
+        _announcement_time_batch(
+            published_at=later,
+            ingested_at=datetime(2026, 7, 12, tzinfo=timezone.utc),
+            run_id="announcement-jitter-3",
+        )
+    )
+
+    current = warehouse.read_current(ResearchDatasetId.ANNOUNCEMENT)
+
+    assert pd.Timestamp(current.iloc[0]["announcement_time"]) == pd.Timestamp(later)
+    assert pd.Timestamp(current.iloc[0]["available_at"]) == pd.Timestamp(later)
+    assert int(current.iloc[0]["revision_no"]) == 1
+    assert warehouse.revision_count(ResearchDatasetId.ANNOUNCEMENT) == 0
+    assert first.content_hash == second.content_hash == third.content_hash
+
+
+def test_announcement_batch_keeps_normal_rows_when_one_timestamp_is_abnormal(
+    tmp_path,
+):
+    warehouse = ResearchWarehouse(tmp_path)
+    first_published = datetime(2026, 7, 9, 12, tzinfo=timezone.utc)
+
+    def batch(*, odd_time: datetime, run_id: str, ingested_at: datetime) -> FactBatch:
+        records = []
+        for announcement_id, published_at in (
+            ("ANN-ODD", odd_time),
+            ("ANN-NORMAL", first_published),
+        ):
+            records.append(
+                {
+                    "announcement_id": announcement_id,
+                    "announcement_time": published_at,
+                    "available_at": published_at,
+                    "title": f"{announcement_id} 公告",
+                    "url": f"https://example.invalid/{announcement_id}.pdf",
+                }
+            )
+        return FactBatch(
+            dataset_id=ResearchDatasetId.ANNOUNCEMENT,
+            partition_value="2026-07",
+            source_name="cninfo",
+            source_endpoint="new/hisAnnouncement/query",
+            ingestion_run_id=run_id,
+            ingested_at=ingested_at,
+            default_available_at=first_published,
+            records=records,
+        )
+
+    warehouse.commit_batch(
+        batch(
+            odd_time=first_published,
+            run_id="announcement-month-1",
+            ingested_at=datetime(2026, 7, 10, tzinfo=timezone.utc),
+        )
+    )
+    warehouse.commit_batch(
+        batch(
+            odd_time=first_published - pd.Timedelta(seconds=5),
+            run_id="announcement-month-2",
+            ingested_at=datetime(2026, 7, 11, tzinfo=timezone.utc),
+        )
+    )
+
+    current = warehouse.read_current(ResearchDatasetId.ANNOUNCEMENT)
+    revisions = warehouse.revision_rows(ResearchDatasetId.ANNOUNCEMENT)
+
+    assert set(current["announcement_id"]) == {"ANN-ODD", "ANN-NORMAL"}
+    assert len(revisions) == 1
+    assert revisions[0]["valid_from"] <= revisions[0]["valid_to"]
+    assert revisions[0]["row_payload"]["announcement_id"] == "ANN-ODD"
+
+
 def test_duplicate_business_key_fails_without_changing_committed_partition(tmp_path):
     warehouse = ResearchWarehouse(tmp_path)
     warehouse.commit_batch(_batch())
@@ -183,6 +306,111 @@ def test_failure_before_atomic_promote_leaves_previous_partition_visible(tmp_pat
     current = warehouse.read_current(ResearchDatasetId.EQUITY_DAILY)
     assert current.iloc[0]["close"] == pytest.approx(10.2)
     assert warehouse.revision_count(ResearchDatasetId.EQUITY_DAILY) == 0
+
+
+def test_restart_restores_old_fact_after_process_death_between_file_and_metadata(
+    tmp_path, monkeypatch
+):
+    class SimulatedProcessDeath(BaseException):
+        pass
+
+    warehouse = ResearchWarehouse(tmp_path)
+    warehouse.commit_batch(_batch(close=10.2))
+
+    def die_before_metadata(*args, **kwargs):
+        raise SimulatedProcessDeath()
+
+    monkeypatch.setattr(warehouse, "_commit_metadata", die_before_metadata)
+    with pytest.raises(SimulatedProcessDeath):
+        warehouse.commit_batch(
+            _batch(close=10.8).model_copy(
+                update={"ingestion_run_id": "run-process-death"}
+            )
+        )
+
+    recovered = ResearchWarehouse(tmp_path)
+    current = recovered.read_current(ResearchDatasetId.EQUITY_DAILY)
+    assert current.iloc[0]["close"] == pytest.approx(10.2)
+    assert not list(tmp_path.rglob("*.parquet.previous"))
+    assert not list((tmp_path / ".fact-promotions").glob("*.json"))
+
+
+def test_restart_removes_unregistered_first_fact_after_process_death(
+    tmp_path, monkeypatch
+):
+    class SimulatedProcessDeath(BaseException):
+        pass
+
+    warehouse = ResearchWarehouse(tmp_path)
+
+    def die_before_metadata(*args, **kwargs):
+        raise SimulatedProcessDeath()
+
+    monkeypatch.setattr(warehouse, "_commit_metadata", die_before_metadata)
+    with pytest.raises(SimulatedProcessDeath):
+        warehouse.commit_batch(_batch())
+
+    recovered = ResearchWarehouse(tmp_path)
+    assert recovered.read_current(ResearchDatasetId.EQUITY_DAILY).empty
+    assert recovered.partition_manifest(ResearchDatasetId.EQUITY_DAILY).empty
+    assert not list((tmp_path / "facts").rglob("data.parquet"))
+
+
+def test_restart_keeps_new_fact_when_metadata_committed_before_process_death(
+    tmp_path, monkeypatch
+):
+    class SimulatedProcessDeath(BaseException):
+        pass
+
+    warehouse = ResearchWarehouse(tmp_path)
+    warehouse.commit_batch(_batch(close=10.2))
+
+    def die_before_cleanup(*args, **kwargs):
+        raise SimulatedProcessDeath()
+
+    monkeypatch.setattr(warehouse, "_finish_promotion", die_before_cleanup)
+    with pytest.raises(SimulatedProcessDeath):
+        warehouse.commit_batch(
+            _batch(close=10.8).model_copy(
+                update={"ingestion_run_id": "run-after-metadata"}
+            )
+        )
+
+    recovered = ResearchWarehouse(tmp_path)
+    current = recovered.read_current(ResearchDatasetId.EQUITY_DAILY)
+    assert current.iloc[0]["close"] == pytest.approx(10.8)
+    assert recovered.revision_count(ResearchDatasetId.EQUITY_DAILY) == 1
+    assert not list(tmp_path.rglob("*.parquet.previous"))
+    assert not list((tmp_path / ".fact-promotions").glob("*.json"))
+
+
+def test_two_fact_warehouse_instances_serialize_writes(tmp_path):
+    first = ResearchWarehouse(tmp_path)
+    second = ResearchWarehouse(tmp_path)
+    lock_entered = threading.Event()
+    release_lock = threading.Event()
+    commit_finished = threading.Event()
+
+    def hold_lock():
+        with first._file_lock(exclusive=True):
+            lock_entered.set()
+            release_lock.wait(timeout=2)
+
+    def commit_from_second():
+        second.commit_batch(_batch())
+        commit_finished.set()
+
+    holder = threading.Thread(target=hold_lock)
+    holder.start()
+    assert lock_entered.wait(timeout=1)
+    committer = threading.Thread(target=commit_from_second)
+    committer.start()
+    time.sleep(0.05)
+    assert not commit_finished.is_set()
+    release_lock.set()
+    holder.join(timeout=2)
+    committer.join(timeout=2)
+    assert commit_finished.is_set()
 
 
 def test_ohlc_quality_failure_is_rejected(tmp_path):

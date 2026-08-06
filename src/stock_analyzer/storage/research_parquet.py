@@ -11,6 +11,7 @@ import pandas as pd
 def write_staged_parquet(path: Path, frame: pd.DataFrame) -> str:
     path.parent.mkdir(parents=True, exist_ok=True)
     frame.to_parquet(path, index=False)
+    fsync_file(path)
     return sha256_file(path)
 
 
@@ -32,9 +33,11 @@ def atomic_promote(staged_path: Path, final_path: Path) -> Path | None:
         os.replace(final_path, backup_path)
     try:
         os.replace(staged_path, final_path)
+        fsync_directory(final_path.parent)
     except Exception:
         if backup_path is not None and backup_path.exists():
             os.replace(backup_path, final_path)
+            fsync_directory(final_path.parent)
         raise
     return backup_path
 
@@ -44,11 +47,26 @@ def restore_previous(final_path: Path, backup_path: Path | None) -> None:
         final_path.unlink()
     if backup_path is not None and backup_path.exists():
         os.replace(backup_path, final_path)
+    fsync_directory(final_path.parent)
 
 
 def discard_backup(backup_path: Path | None) -> None:
     if backup_path is not None and backup_path.exists():
         backup_path.unlink()
+        fsync_directory(backup_path.parent)
+
+
+def fsync_file(path: Path) -> None:
+    with path.open("rb") as handle:
+        os.fsync(handle.fileno())
+
+
+def fsync_directory(path: Path) -> None:
+    descriptor = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
 
 
 def remove_tree_if_empty(path: Path) -> None:
@@ -59,6 +77,8 @@ def remove_tree_if_empty(path: Path) -> None:
 __all__ = [
     "atomic_promote",
     "discard_backup",
+    "fsync_directory",
+    "fsync_file",
     "remove_tree_if_empty",
     "restore_previous",
     "sha256_file",

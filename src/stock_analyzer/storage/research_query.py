@@ -137,9 +137,7 @@ class ResearchQuery:
         frame["__report_priority"] = (
             frame["report_type"].astype(str).map(report_priority).fillna(99)
         )
-        frame["__available_rank"] = pd.to_datetime(
-            frame["available_at"], utc=True, errors="raise"
-        )
+        frame["__available_rank"] = _parse_available_at(frame["available_at"])
         frame["__statement_rank"] = frame["statement_type"].astype(str)
         selected = (
             frame.sort_values(
@@ -363,18 +361,16 @@ def _resolve_as_of(
     frames: list[pd.DataFrame] = []
     cutoff_stamp = pd.Timestamp(_utc(cutoff))
     if not current.empty:
-        current_known = pd.to_datetime(
-            current["available_at"], utc=True, errors="raise"
-        ) <= cutoff_stamp
+        current_known = _parse_available_at(current["available_at"]) <= cutoff_stamp
         if current_known.any():
             frames.append(current.loc[current_known].copy())
 
     revision_payloads = [dict(revision["row_payload"]) for revision in revisions]
     if revision_payloads:
         revision_frame = pd.DataFrame.from_records(revision_payloads)
-        revision_known = pd.to_datetime(
-            revision_frame["available_at"], utc=True, errors="raise"
-        ) <= cutoff_stamp
+        revision_known = (
+            _parse_available_at(revision_frame["available_at"]) <= cutoff_stamp
+        )
         if revision_known.any():
             frames.append(revision_frame.loc[revision_known].copy())
 
@@ -382,8 +378,8 @@ def _resolve_as_of(
         return pd.DataFrame()
     contract = research_contract(dataset)
     candidates = pd.concat(frames, ignore_index=True, sort=False)
-    candidates["__available_rank"] = pd.to_datetime(
-        candidates["available_at"], utc=True, errors="raise"
+    candidates["__available_rank"] = _parse_available_at(
+        candidates["available_at"]
     )
     revision_values = (
         candidates["revision_no"]
@@ -445,6 +441,8 @@ def _mask_future_validity_edges(
         valid_to = pd.to_datetime(
             result["valid_to"], errors="coerce"
         ).dt.normalize()
+        if "is_current" in result:
+            result["is_current"] = valid_to.isna() | (valid_to >= cutoff_day)
         result.loc[valid_to >= cutoff_day, "valid_to"] = None
     return result
 
@@ -551,12 +549,20 @@ def _public_fact_frame(frame: pd.DataFrame) -> pd.DataFrame:
     ).reset_index(drop=True)
 
 
+def _parse_available_at(values: pd.Series) -> pd.Series:
+    return pd.to_datetime(
+        values,
+        format="mixed",
+        utc=True,
+        errors="raise",
+    )
+
+
 def _utc(value: Any) -> datetime:
     timestamp = pd.Timestamp(value)
     if timestamp.tzinfo is None:
-        timestamp = timestamp.tz_localize("UTC")
-    else:
-        timestamp = timestamp.tz_convert("UTC")
+        raise ValueError("datetime must be timezone-aware")
+    timestamp = timestamp.tz_convert("UTC")
     return timestamp.to_pydatetime()
 
 

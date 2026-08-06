@@ -2,12 +2,13 @@ from datetime import date
 from types import SimpleNamespace
 
 import pandas as pd
+import pytest
 
 from stock_analyzer.config import AppConfig
 from stock_analyzer.ops.research_data_job import (
     ResearchDataRuntime,
-    _record_scope_outcome,
     run_research_stage,
+    select_fundamental_refresh_codes,
     select_minute_candidate_scope,
 )
 from stock_analyzer.data.research_backfill import BackfillSummary
@@ -68,6 +69,92 @@ def test_close_stage_on_non_trading_day_does_not_request_market_endpoints(tmp_pa
     assert client.calls == [(date(2026, 7, 12), date(2026, 7, 12))]
 
 
+def test_stage_run_always_rechecks_source_and_records_each_real_execution(
+    tmp_path, monkeypatch
+):
+    import stock_analyzer.ops.research_data_job as job
+
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    runtime = SimpleNamespace(warehouse=warehouse)
+    calls = []
+    expected = BackfillSummary(
+        scope="events",
+        start=date(2026, 7, 13),
+        through=date(2026, 7, 13),
+        committed=2,
+    )
+
+    def execute(*args, **kwargs):
+        calls.append("run")
+        return (expected,)
+
+    monkeypatch.setattr(job, "_run_research_stage_impl", execute)
+
+    first = run_research_stage(
+        runtime, stage="evening", data_date=date(2026, 7, 13)
+    )
+    second = run_research_stage(
+        runtime, stage="evening", data_date=date(2026, 7, 13)
+    )
+
+    assert first == second == (expected,)
+    assert calls == ["run", "run"]
+    with connect_research_warehouse(
+        warehouse.duckdb_path, read_only=True
+    ) as connection:
+        runs = connection.execute(
+            """
+            select run_id, idempotency_key, status, finished_at is not null,
+                   summary_json
+            from research_ingestion_runs
+            order by started_at, run_id
+            """
+        ).fetchall()
+        outcomes = connection.execute(
+            """
+            select dataset_id, partition_value, status, actual_rows
+            from research_run_datasets
+            """
+        ).fetchall()
+    assert len(runs) == 2
+    assert len({row[0] for row in runs}) == 2
+    assert len({row[1] for row in runs}) == 2
+    assert all(row[2:4] == ("succeeded", True) for row in runs)
+    assert all(row[4] is not None for row in runs)
+    assert outcomes == []
+
+
+def test_stage_exception_is_recorded_as_failed_with_finished_time(
+    tmp_path, monkeypatch
+):
+    import stock_analyzer.ops.research_data_job as job
+
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    runtime = SimpleNamespace(warehouse=warehouse)
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("simulated stage failure")
+
+    monkeypatch.setattr(job, "_run_research_stage_impl", fail)
+
+    with pytest.raises(RuntimeError, match="simulated stage failure"):
+        run_research_stage(
+            runtime, stage="next-morning", data_date=date(2026, 7, 13)
+        )
+
+    with connect_research_warehouse(
+        warehouse.duckdb_path, read_only=True
+    ) as connection:
+        row = connection.execute(
+            """
+            select status, finished_at is not null, cast(summary_json as varchar)
+            from research_ingestion_runs
+            """
+        ).fetchone()
+    assert row[0:2] == ("failed", True)
+    assert "simulated stage failure" in row[2]
+
+
 def test_close_stage_never_derives_partial_research_features(monkeypatch):
     import stock_analyzer.ops.research_data_job as job
 
@@ -78,9 +165,12 @@ def test_close_stage_never_derives_partial_research_features(monkeypatch):
     expected = BackfillSummary(
         scope="market-core", start=date(2026, 7, 13), through=date(2026, 7, 13)
     )
-    monkeypatch.setattr(
-        job, "run_research_backfill", lambda *args, **kwargs: (expected,)
-    )
+
+    def run_backfill(*args, **kwargs):
+        assert kwargs["resume"] is False
+        return (expected,)
+
+    monkeypatch.setattr(job, "run_research_backfill", run_backfill)
     monkeypatch.setattr(
         job,
         "run_research_features",
@@ -118,6 +208,7 @@ def test_evening_derives_only_after_fact_commits_and_reconciliation(monkeypatch)
             pass
 
         def backfill(self, **kwargs):
+            assert kwargs["resume"] is False
             order.append("events")
             return BackfillSummary(
                 scope="events", start=date(2026, 7, 13), through=date(2026, 7, 13)
@@ -135,7 +226,6 @@ def test_evening_derives_only_after_fact_commits_and_reconciliation(monkeypatch)
 
     monkeypatch.setattr(job, "EventBackfillService", EventService)
     monkeypatch.setattr(job, "ClassificationBackfillService", ClassificationService)
-    monkeypatch.setattr(job, "_record_scope_outcome", lambda *args: order.append("record"))
     monkeypatch.setattr(
         job, "reconcile_research_gaps", lambda *args: order.append("reconcile")
     )
@@ -156,8 +246,6 @@ def test_evening_derives_only_after_fact_commits_and_reconciliation(monkeypatch)
     assert order == [
         "events",
         "classifications",
-        "record",
-        "record",
         "reconcile",
         "derive",
     ]
@@ -166,15 +254,48 @@ def test_evening_derives_only_after_fact_commits_and_reconciliation(monkeypatch)
     assert summaries[-1].issues == ["2026-07-13 已完成三类研究观察。"]
 
 
-def test_next_morning_derives_after_repairs_late_facts_and_reconciliation(
+def test_fundamental_refresh_scope_uses_actual_financial_disclosures_only():
+    announcements = pd.DataFrame(
+        [
+            {
+                "ts_code": "000001.SZ",
+                "announcement_time": "2026-08-04T12:00:00Z",
+                "title": "2026年半年度报告",
+            },
+            {
+                "ts_code": "000002.SZ",
+                "announcement_time": "2026-08-04T12:01:00Z",
+                "title": "关于2025年年度报告问询函的回复公告",
+            },
+            {
+                "ts_code": "000003.SZ",
+                "announcement_time": "2026-08-04T12:02:00Z",
+                "title": "2026年半年度业绩预告的自愿性披露公告",
+            },
+            {
+                "ts_code": "000004.SZ",
+                "announcement_time": "2026-08-04T12:03:00Z",
+                "title": "关于召开股东大会的通知",
+            },
+            {
+                "ts_code": "000005.SZ",
+                "announcement_time": "2026-08-03T12:03:00Z",
+                "title": "2026年半年度报告",
+            },
+        ]
+    )
+
+    assert select_fundamental_refresh_codes(
+        announcements, date(2026, 8, 4)
+    ) == ("000001.SZ", "000003.SZ")
+
+
+def test_next_morning_only_checks_current_date_facts_and_then_derives(
     monkeypatch,
 ):
     import stock_analyzer.ops.research_data_job as job
 
     order = []
-    repaired = BackfillSummary(
-        scope="repair", start=date(2026, 7, 13), through=date(2026, 7, 13)
-    )
     late = BackfillSummary(
         scope="events", start=date(2026, 7, 13), through=date(2026, 7, 13)
     )
@@ -189,6 +310,7 @@ def test_next_morning_derives_after_repairs_late_facts_and_reconciliation(
             pass
 
         def backfill(self, **kwargs):
+            assert kwargs["resume"] is False
             order.append("late-events")
             return late
 
@@ -197,6 +319,7 @@ def test_next_morning_derives_after_repairs_late_facts_and_reconciliation(
             pass
 
         def backfill(self, **kwargs):
+            assert kwargs["resume"] is False
             order.append("trading-structure")
             return trading
 
@@ -205,11 +328,6 @@ def test_next_morning_derives_after_repairs_late_facts_and_reconciliation(
         "_trading_dates",
         lambda *args: (date(2026, 7, 13),),
     )
-    monkeypatch.setattr(
-        job,
-        "repair_research_gaps",
-        lambda *args, **kwargs: order.append("repairs") or (repaired,),
-    )
     monkeypatch.setattr(job, "EventBackfillService", EventService)
     monkeypatch.setattr(job, "TradingStructureBackfillService", TradingService)
     monkeypatch.setattr(
@@ -217,7 +335,6 @@ def test_next_morning_derives_after_repairs_late_facts_and_reconciliation(
         "select_minute_candidate_scope",
         lambda *args, **kwargs: order.append("candidate-scope") or (),
     )
-    monkeypatch.setattr(job, "_record_scope_outcome", lambda *args: order.append("record"))
     monkeypatch.setattr(
         job, "reconcile_research_gaps", lambda *args: order.append("reconcile")
     )
@@ -239,13 +356,9 @@ def test_next_morning_derives_after_repairs_late_facts_and_reconciliation(
     )
 
     assert order == [
-        "repairs",
         "late-events",
         "candidate-scope",
         "trading-structure",
-        "record",
-        "record",
-        "record",
         "reconcile",
         "derive",
     ]
@@ -256,9 +369,6 @@ def test_feature_failure_is_returned_as_a_failed_data_stage(monkeypatch):
     import stock_analyzer.ops.research_data_job as job
 
     monkeypatch.setattr(job, "_trading_dates", lambda *args: (date(2026, 7, 13),))
-    monkeypatch.setattr(
-        job, "repair_research_gaps", lambda *args, **kwargs: ()
-    )
     monkeypatch.setattr(
         job,
         "EventBackfillService",
@@ -282,7 +392,6 @@ def test_feature_failure_is_returned_as_a_failed_data_stage(monkeypatch):
             )
         ),
     )
-    monkeypatch.setattr(job, "_record_scope_outcome", lambda *args: None)
     monkeypatch.setattr(job, "reconcile_research_gaps", lambda *args: None)
     monkeypatch.setattr(
         job,
@@ -400,54 +509,3 @@ def test_minute_candidate_scope_reads_only_latest_21_daily_partitions():
     assert warehouse.daily_partition_calls == [
         value.isoformat() for value in dates[-21:]
     ]
-
-
-def test_known_provider_limit_is_separate_from_temporary_upstream_wait(tmp_path):
-    warehouse = ResearchWarehouse(tmp_path / "warehouse")
-    summary = BackfillSummary(
-        scope="trading-structure",
-        start=date(2026, 7, 10),
-        through=date(2026, 7, 10),
-        waiting_upstream=1,
-        limited=1,
-        limitations_checked=True,
-        issues=[
-            "margin_detail:2026-07-10:waiting_upstream",
-            "minute_bar:access_or_rate_limit",
-        ],
-    )
-
-    _record_scope_outcome(warehouse, summary)
-
-    with connect_research_warehouse(
-        warehouse.duckdb_path, read_only=True
-    ) as connection:
-        rows = connection.execute(
-            """
-            select status, reason_category from research_data_gaps
-            where dataset_id = 'scope:trading-structure'
-            order by status
-            """
-        ).fetchall()
-    assert rows == [
-        ("limited", "source_limited"),
-        ("waiting_upstream", "scope_incomplete"),
-    ]
-
-    unchecked = BackfillSummary(
-        scope="trading-structure",
-        start=date(2026, 7, 11),
-        through=date(2026, 7, 11),
-    )
-    _record_scope_outcome(warehouse, unchecked)
-    with connect_research_warehouse(
-        warehouse.duckdb_path, read_only=True
-    ) as connection:
-        status = connection.execute(
-            """
-            select status from research_data_gaps
-            where dataset_id = 'scope:trading-structure'
-              and reason_category = 'source_limited'
-            """
-        ).fetchone()[0]
-    assert status == "limited"

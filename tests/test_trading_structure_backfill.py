@@ -237,3 +237,35 @@ def test_minute_permission_error_stops_remaining_scope_after_first_failure(tmp_p
     assert summary.limited == 1
     assert summary.limitations_checked
     assert summary.issues == ["minute_bar:access_or_rate_limit"]
+
+
+def test_minute_error_for_one_code_does_not_drop_remaining_codes(tmp_path):
+    calls = []
+
+    def partly_failing_fetcher(**kwargs):
+        calls.append(kwargs["ts_code"])
+        if kwargs["ts_code"] == "000001.SZ":
+            raise RuntimeError("该标的分钟数据不存在")
+        return minute_fetcher(**kwargs)
+
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    service = TradingStructureBackfillService(
+        TushareResearchClient(Pro(), pacer=lambda method: None),
+        warehouse,
+        minute_fetcher=partly_failing_fetcher,
+        minute_pacer=lambda: None,
+    )
+
+    summary = service.backfill(
+        trading_dates=(date(2026, 7, 10),),
+        through=date(2026, 7, 10),
+        candidate_codes=("000001.SZ", "000002.SZ"),
+        index_codes=(),
+        resume=True,
+    )
+
+    assert calls == ["000001.SZ", "000002.SZ"]
+    assert summary.failed == 1
+    assert summary.issues == ["minute_bar:000001.SZ:provider_error"]
+    minute = warehouse.read_current(ResearchDatasetId.MINUTE_BAR)
+    assert set(minute["instrument_code"]) == {"000002.SZ"}

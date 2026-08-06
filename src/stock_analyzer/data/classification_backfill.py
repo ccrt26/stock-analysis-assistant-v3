@@ -53,7 +53,7 @@ class ClassificationBackfillService:
             ).to_dict(orient="records")
             summary.skipped += 2
         else:
-            catalog, members = self._sw_catalog_and_members(through)
+            catalog, members, observed_at = self._sw_catalog_and_members(through)
             self._commit(
                 ResearchDatasetId.INDUSTRY_CATALOG,
                 "SW2021",
@@ -62,6 +62,7 @@ class ClassificationBackfillService:
                 through,
                 resume,
                 summary,
+                ingested_at=observed_at,
             )
             self._commit(
                 ResearchDatasetId.INDUSTRY_MEMBER,
@@ -71,6 +72,7 @@ class ClassificationBackfillService:
                 through,
                 resume,
                 summary,
+                ingested_at=observed_at,
             )
 
         industry_codes = sorted(
@@ -255,7 +257,7 @@ class ClassificationBackfillService:
             "index_daily",
             industry_rows,
             data_date,
-            True,
+            False,
             summary,
         )
         self._commit(
@@ -264,7 +266,7 @@ class ClassificationBackfillService:
             "index_daily",
             theme_rows,
             data_date,
-            True,
+            False,
             summary,
         )
         self._refresh_monthly_memberships(data_date, summary)
@@ -290,7 +292,7 @@ class ClassificationBackfillService:
         if done is not None:
             summary.skipped += 1
             return
-        catalog, members = self._sw_catalog_and_members(data_date)
+        catalog, members, observed_at = self._sw_catalog_and_members(data_date)
         self._commit(
             ResearchDatasetId.INDUSTRY_CATALOG,
             "SW2021",
@@ -299,6 +301,7 @@ class ClassificationBackfillService:
             data_date,
             False,
             summary,
+            ingested_at=observed_at,
         )
         self._commit(
             ResearchDatasetId.INDUSTRY_MEMBER,
@@ -308,6 +311,7 @@ class ClassificationBackfillService:
             data_date,
             False,
             summary,
+            ingested_at=observed_at,
         )
         themes = self._theme_catalog(data_date)
         self._commit(
@@ -384,13 +388,22 @@ class ClassificationBackfillService:
     def _sw_catalog_and_members(
         self,
         through: date,
-    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    ) -> tuple[
+        list[dict[str, Any]],
+        list[dict[str, Any]],
+        datetime,
+    ]:
         sw_basic = self.client.call_paged("index_basic", market="SW")
         list_dates = {
             str(row["ts_code"]): _optional_date(row.get("list_date"))
             for row in sw_basic.to_dict(orient="records")
         }
+        existing_catalog = self.warehouse.read_current(
+            ResearchDatasetId.INDUSTRY_CATALOG,
+            partition_value="SW2021",
+        )
         catalog: list[dict[str, Any]] = []
+        closures: list[dict[str, Any]] = []
         frames: dict[str, pd.DataFrame] = {}
         for level in ("L1", "L2", "L3"):
             frame = self.client.call("index_classify", level=level, src="SW2021")
@@ -410,16 +423,40 @@ class ClassificationBackfillService:
             frames[level] = frame
             for row in frame.to_dict(orient="records"):
                 index_code = str(row["index_code"])
-                valid_from = list_dates.get(index_code) or through
+                definition = {
+                    "industry_system": str(row["src"]),
+                    "level": str(row["level"]),
+                    "industry_code": index_code,
+                    "classification_code": str(row["industry_code"]),
+                    "industry_name": str(row["industry_name"]),
+                    "parent_code": str(row["parent_code"]),
+                    "is_published": str(row["is_pub"]),
+                }
+                source_valid_from = list_dates.get(index_code)
+                matching_valid_from = _matching_industry_valid_from(
+                    existing_catalog,
+                    definition,
+                )
+                identity_seen = _industry_identity_seen(
+                    existing_catalog,
+                    definition,
+                )
+                if matching_valid_from is not None:
+                    valid_from = matching_valid_from
+                elif identity_seen:
+                    valid_from = through
+                    closures.extend(
+                        _close_conflicting_industry_definitions(
+                            existing_catalog,
+                            definition,
+                            boundary=through,
+                        )
+                    )
+                else:
+                    valid_from = source_valid_from or through
                 catalog.append(
                     {
-                        "industry_system": str(row["src"]),
-                        "level": str(row["level"]),
-                        "industry_code": index_code,
-                        "classification_code": str(row["industry_code"]),
-                        "industry_name": str(row["industry_name"]),
-                        "parent_code": str(row["parent_code"]),
-                        "is_published": str(row["is_pub"]),
+                        **definition,
                         "valid_from": valid_from,
                         "valid_to": None,
                         "available_at": _post_close_utc(valid_from),
@@ -468,13 +505,18 @@ class ClassificationBackfillService:
                             "available_at": _post_close_utc(valid_from),
                         }
                     )
-        member_frame = pd.DataFrame(member_rows)
-        if not member_frame.empty:
-            member_frame = member_frame.drop_duplicates(
-                subset=["ts_code", "industry_system", "level", "valid_from"],
-                keep="last",
-            )
-        return catalog, member_frame.to_dict(orient="records")
+        member_rows = _deduplicate_industry_member_source_rows(member_rows)
+        observed_at = datetime.now(timezone.utc)
+        existing_members = self.warehouse.read_current(
+            ResearchDatasetId.INDUSTRY_MEMBER,
+            partition_value="SW2021",
+        )
+        reconciled_members = _reconcile_industry_member_versions(
+            existing_members,
+            member_rows,
+            observed_at=observed_at,
+        )
+        return closures + catalog, reconciled_members, observed_at
 
     def _theme_catalog(self, through: date) -> list[dict[str, Any]]:
         records: list[dict[str, Any]] = []
@@ -659,6 +701,8 @@ class ClassificationBackfillService:
         through: date,
         resume: bool,
         summary: BackfillSummary,
+        *,
+        ingested_at: datetime | None = None,
     ) -> None:
         if resume and self._complete(dataset, partition):
             summary.skipped += 1
@@ -673,7 +717,7 @@ class ClassificationBackfillService:
                 source_name="tushare",
                 source_endpoint=endpoint,
                 ingestion_run_id=f"classification:{dataset.value}:{partition}",
-                ingested_at=datetime.now(timezone.utc),
+                ingested_at=ingested_at or datetime.now(timezone.utc),
                 default_available_at=_post_close_utc(through),
                 records=records,
             )
@@ -699,6 +743,265 @@ class ClassificationBackfillService:
         completed = set(manifest["partition_value"].astype(str))
         expected = {value.isoformat() for value in trading_dates}
         return expected <= completed
+
+
+def _matching_industry_valid_from(
+    existing: pd.DataFrame,
+    definition: dict[str, str],
+) -> date | None:
+    if existing.empty:
+        return None
+    starts: list[date] = []
+    for row in existing.to_dict(orient="records"):
+        if pd.notna(row.get("valid_to")):
+            continue
+        if any(str(row.get(field)) != value for field, value in definition.items()):
+            continue
+        starts.append(pd.Timestamp(row["valid_from"]).date())
+    return min(starts) if starts else None
+
+
+def _industry_identity_seen(
+    existing: pd.DataFrame,
+    definition: dict[str, str],
+) -> bool:
+    if existing.empty:
+        return False
+    identity_fields = ("industry_system", "level", "industry_code")
+    return any(
+        all(
+            str(row.get(field)) == definition[field]
+            for field in identity_fields
+        )
+        for row in existing.to_dict(orient="records")
+    )
+
+
+def _close_conflicting_industry_definitions(
+    existing: pd.DataFrame,
+    definition: dict[str, str],
+    *,
+    boundary: date,
+) -> list[dict[str, Any]]:
+    if existing.empty:
+        return []
+    identity_fields = ("industry_system", "level", "industry_code")
+    closures: list[dict[str, Any]] = []
+    for row in existing.to_dict(orient="records"):
+        if any(
+            str(row.get(field)) != definition[field]
+            for field in identity_fields
+        ):
+            continue
+        if pd.notna(row.get("valid_to")):
+            continue
+        valid_from = pd.Timestamp(row["valid_from"]).date()
+        if valid_from >= boundary:
+            continue
+        closures.append(
+            {
+                field: str(row.get(field))
+                for field in definition
+            }
+            | {
+                "valid_from": valid_from,
+                "valid_to": boundary - timedelta(days=1),
+                "available_at": _post_close_utc(boundary),
+            }
+        )
+    return closures
+
+
+_INDUSTRY_MEMBER_SLOT = ("ts_code", "industry_system", "level")
+_INDUSTRY_MEMBER_KEY = (*_INDUSTRY_MEMBER_SLOT, "valid_from")
+_INDUSTRY_MEMBER_BUSINESS_FIELDS = (
+    "ts_code",
+    "security_name",
+    "industry_system",
+    "level",
+    "industry_code",
+    "industry_name",
+    "valid_from",
+    "valid_to",
+    "is_current",
+)
+
+
+def _deduplicate_industry_member_source_rows(
+    incoming: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Collapse only exact source duplicates and reject contradictory versions."""
+    prepared: dict[tuple[str, str, str, date], dict[str, Any]] = {}
+    signatures: dict[tuple[str, str, str, date], tuple[Any, ...]] = {}
+    for source_row in incoming:
+        row = dict(source_row)
+        row["valid_from"] = _member_date(row["valid_from"])
+        row["valid_to"] = _optional_member_date(row.get("valid_to"))
+        key = _member_version_key(row)
+        signature = _member_business_signature(row)
+        if key in signatures and signatures[key] != signature:
+            raise ValueError(
+                f"conflicting industry member source rows for {key}"
+            )
+        signatures[key] = signature
+        prepared[key] = row
+    return list(prepared.values())
+
+
+def _reconcile_industry_member_versions(
+    existing: pd.DataFrame,
+    incoming: list[dict[str, Any]],
+    *,
+    observed_at: datetime,
+) -> list[dict[str, Any]]:
+    """Close superseded membership slots without backdating local knowledge."""
+    if observed_at.tzinfo is None:
+        raise ValueError("industry member observation time must be timezone-aware")
+    if not incoming:
+        return incoming
+
+    prepared: dict[tuple[str, str, str, date], dict[str, Any]] = {}
+    incoming_by_slot: dict[tuple[str, str, str], list[dict[str, Any]]] = (
+        defaultdict(list)
+    )
+    for source_row in incoming:
+        row = dict(source_row)
+        row["valid_from"] = _member_date(row["valid_from"])
+        row["valid_to"] = _optional_member_date(row.get("valid_to"))
+        key = _member_version_key(row)
+        if key in prepared:
+            raise ValueError(f"duplicate industry member version in source: {key}")
+        prepared[key] = row
+        incoming_by_slot[_member_slot(row)].append(row)
+
+    existing_by_slot: dict[tuple[str, str, str], list[dict[str, Any]]] = (
+        defaultdict(list)
+    )
+    for source_row in existing.to_dict(orient="records"):
+        row = dict(source_row)
+        row["valid_from"] = _member_date(row["valid_from"])
+        row["valid_to"] = _optional_member_date(row.get("valid_to"))
+        existing_by_slot[_member_slot(row)].append(row)
+
+    for slot, source_rows in incoming_by_slot.items():
+        states = sorted(
+            existing_by_slot.get(slot, []),
+            key=lambda row: row["valid_from"],
+        )
+        for row in sorted(source_rows, key=lambda item: item["valid_from"]):
+            start = row["valid_from"]
+            exact = [item for item in states if item["valid_from"] == start]
+            if exact:
+                if any(
+                    any(
+                        str(item.get(field)) != str(row.get(field))
+                        for field in ("industry_code", "industry_name")
+                    )
+                    for item in exact
+                ):
+                    raise ValueError(
+                        "industry member effective-date conflict for "
+                        f"{slot}: {start}"
+                    )
+                if len(exact) != 1:
+                    raise ValueError(
+                        f"industry member slot has duplicate effective dates: {slot}"
+                    )
+                current = exact[0]
+                if _member_business_signature(current) != (
+                    _member_business_signature(row)
+                ):
+                    row["available_at"] = observed_at
+                    row["availability_precision"] = (
+                        AvailabilityPrecision.INGESTION_CUTOFF.value
+                    )
+                    state_index = next(
+                        index
+                        for index, item in enumerate(states)
+                        if item is current
+                    )
+                    states[state_index] = row
+                continue
+
+            if not states:
+                states.append(row)
+                continue
+            latest_start = max(item["valid_from"] for item in states)
+            if start <= latest_start:
+                raise ValueError(
+                    "industry member effective-date conflict for "
+                    f"{slot}: incoming {start} is not later than {latest_start}"
+                )
+
+            overlapping = [
+                item
+                for item in states
+                if item["valid_from"] < start
+                and (
+                    item.get("valid_to") is None
+                    or item["valid_to"] >= start
+                )
+            ]
+            if len(overlapping) > 1:
+                raise ValueError(
+                    f"industry member slot already has overlapping predecessors: {slot}"
+                )
+            if overlapping:
+                predecessor = overlapping[0]
+                predecessor_key = _member_version_key(predecessor)
+                closure = {
+                    field: predecessor.get(field)
+                    for field in _INDUSTRY_MEMBER_BUSINESS_FIELDS
+                }
+                closure["valid_from"] = predecessor["valid_from"]
+                closure["valid_to"] = start - timedelta(days=1)
+                closure["is_current"] = False
+                closure["available_at"] = observed_at
+                closure["availability_precision"] = (
+                    AvailabilityPrecision.INGESTION_CUTOFF.value
+                )
+                prepared[predecessor_key] = closure
+                predecessor["valid_to"] = closure["valid_to"]
+                predecessor["is_current"] = False
+
+            row["available_at"] = observed_at
+            row["availability_precision"] = (
+                AvailabilityPrecision.INGESTION_CUTOFF.value
+            )
+            states.append(row)
+
+    return sorted(
+        prepared.values(),
+        key=lambda row: tuple(
+            row[field] if field != "valid_from" else _member_date(row[field])
+            for field in _INDUSTRY_MEMBER_KEY
+        ),
+    )
+
+
+def _member_slot(row: dict[str, Any]) -> tuple[str, str, str]:
+    return tuple(str(row[field]) for field in _INDUSTRY_MEMBER_SLOT)
+
+
+def _member_version_key(row: dict[str, Any]) -> tuple[str, str, str, date]:
+    slot = _member_slot(row)
+    return (*slot, _member_date(row["valid_from"]))
+
+
+def _member_business_signature(row: dict[str, Any]) -> tuple[Any, ...]:
+    return tuple(
+        row.get(field) for field in _INDUSTRY_MEMBER_BUSINESS_FIELDS
+    )
+
+
+def _member_date(value: Any) -> date:
+    return pd.Timestamp(value).date()
+
+
+def _optional_member_date(value: Any) -> date | None:
+    if value is None or pd.isna(value):
+        return None
+    return _member_date(value)
 
 
 def _require(frame: pd.DataFrame, columns: tuple[str, ...], endpoint: str) -> None:
