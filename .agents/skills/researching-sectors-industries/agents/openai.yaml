@@ -1,0 +1,4 @@
+interface:
+  display_name: "板块与行业研究"
+  short_description: "按历史成员关系研究板块广度、集中、分化、领导方向与同类比较"
+  default_prompt: "使用 $researching-sectors-industries 研究形成日的板块与行业共同性、分化、同类比较和反证。"

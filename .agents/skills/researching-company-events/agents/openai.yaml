@@ -1,0 +1,4 @@
+interface:
+  display_name: "公司与事件研究"
+  short_description: "按历史时点研究公司事实、财务、公告事件、业务传导与反证"
+  default_prompt: "使用 $researching-company-events 按历史时点研究候选公司的业务、财务、事件、反证和未知。"

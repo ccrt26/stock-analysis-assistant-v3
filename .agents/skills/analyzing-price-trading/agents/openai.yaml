@@ -1,0 +1,4 @@
+interface:
+  display_name: "价格与交易研究"
+  short_description: "研究相对表现、成交变化、价格位置、透支风险与行动日可执行性"
+  default_prompt: "使用 $analyzing-price-trading 检查候选的量价确认、过度延伸、流动性、反证和参与条件。"

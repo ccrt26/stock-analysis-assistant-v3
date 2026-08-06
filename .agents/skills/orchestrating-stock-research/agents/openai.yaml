@@ -1,0 +1,4 @@
+interface:
+  display_name: "股票研究总控"
+  short_description: "组织四视角并冻结时间、证据、反证与未知的个人股票研究流程"
+  default_prompt: "使用 $orchestrating-stock-research 组织一次有时间边界、证据和反证的股票研究。"
