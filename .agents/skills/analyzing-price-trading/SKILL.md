@@ -102,10 +102,12 @@ description: Use when point-in-time A-share candidate selection or validation ne
 
 ## 输出合同
 
+每条关键事实同时保留统一的数据质量信息。`fact_as_of` 表示行情或交易状态对应的交易日，`available_at` 表示系统何时能够取得；两者不得互换。顶层 `as_of` 仍是本轮形成日决策截止时点。`quality` 使用 `complete | partial | unreliable`，`capability_status` 使用 `supported | partial | unsupported`。复权、基准、行业归属、成交状态或历史窗口缺失，以及查询失败、当前快照不可回放和真实无记录，必须分别写入 `missing_fields` 或 `unknowns`。这些字段只解释证据边界，不计分或投票。
+
 ```yaml
 phase: discovery | validation
 objective: ""
-facts: [{claim, value, source_or_dataset, available_at}]
+facts: [{claim, value, provider, dataset, fact_as_of, available_at, quality, missing_fields, capability_status}]
 primary_interpretation: ""
 alternative_interpretations: []
 supporting_evidence: []

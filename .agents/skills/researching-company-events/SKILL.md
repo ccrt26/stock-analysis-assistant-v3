@@ -72,11 +72,13 @@ description: Use when an A-share research task needs point-in-time company funda
 
 ## 输出合同
 
+每条关键事实同时保留统一的数据质量信息。`fact_as_of` 表示事件发生日、报告期或事实对应期间，`available_at` 表示系统何时能够取得；两者不得互换。顶层 `as_of` 仍是本轮形成日决策截止时点。`quality` 使用 `complete | partial | unreliable`，`capability_status` 使用 `supported | partial | unsupported`。正文缺失、历史覆盖不足、查询失败、只有当前快照和真实无记录必须分开写入 `missing_fields` 或 `unknowns`。这些字段只解释证据边界，不计分或投票；无法确认形成日前可得的事实不能支持候选命题。
+
 严格返回：
 
 ```yaml
 phase: discovery | validation
-facts: [{claim, value, source_or_dataset, available_at}]
+facts: [{claim, value, provider, dataset, fact_as_of, available_at, quality, missing_fields, capability_status}]
 primary_interpretation: ""
 alternative_interpretations: []
 supporting_evidence: []

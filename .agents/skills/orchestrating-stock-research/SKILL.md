@@ -94,6 +94,18 @@ ST、退市和重大官方风险使用 `rules.seed.yaml` 中的正式边界。�
 - 方向和板块不能由总控直接猜成股票，必须由对应专业 Skill 补出具体成员；
 - 第一轮不得为了完整感逐只读取全市场公告正文。
 
+### 2A. 保留候选链审计账
+
+在同一份研究回答中保留四个专业 Skill 实际输出的全部 `candidate_leads`；某个 Skill 没有线索时显式记录空输出。每条线索记录 `lead_id`、来源 Skill、类型、名称、股票代码和原始理由。
+
+- `stock` 线索按标准股票代码去重；只有名称且形成日无法可靠映射时记为未解决，不用当前身份信息倒填。
+- `direction`、`group` 和 `question` 线索逐条记录为已转换到哪些股票、有理由未转换或未解决。方向本身不能被总控猜成股票。
+- 去重后的每只股票保留全部 `source_lead_ids`，并在共同验证后记录市场、板块、公司和价格四个视角的支持、反证与未知。
+- 每只去重候选必须有且只有一个最终去向 `selected | rejected | unresolved`、去向阶段和一条主要原因。未解决只用于关键事实确实无法判断，不用来回避取舍。
+- 输出前核对：去重候选数 = 入选数 + 淘汰数 + 未解决数；每条股票线索可追到候选；每条非股票线索有去向；去重不丢失来源。
+
+该账只保留已发生的研究链，不产生新候选，不计分、排名或改变选股判断。
+
 ### 3. 按上涨因果链组织候选
 
 对每条股票线索建立：
@@ -163,6 +175,43 @@ action_date: YYYY-MM-DD
 as_of: ""
 selection_universe: ""
 market_search_context: ""
+candidate_chain:
+  skill_leads:
+    - lead_id: ""
+      source_skill: market | sector | company | price
+      lead_type: direction | group | stock | question
+      name: ""
+      ts_code: ""
+      rationale: ""
+  non_stock_lead_fates:
+    - lead_id: ""
+      fate: converted_to_stock | not_converted_with_reason | unresolved
+      mapped_ts_codes: []
+      reason: ""
+  candidate_ledger:
+    - ts_code: ""
+      name: ""
+      source_lead_ids: []
+      lens_reviews:
+        market: {support: "", counter: "", unknown: ""}
+        sector: {support: "", counter: "", unknown: ""}
+        company: {support: "", counter: "", unknown: ""}
+        price: {support: "", counter: "", unknown: ""}
+      final_fate: selected | rejected | unresolved
+      fate_stage: discovery | joint_validation | final_decision
+      primary_reason: ""
+  candidate_conservation:
+    deduped_candidates: 0
+    selected: 0
+    rejected: 0
+    unresolved: 0
+    stock_leads_traced: true | false
+    non_stock_leads_traced: true | false
+    sources_preserved: true | false
+data_quality_issues:
+  - fact_or_dataset: ""
+    status: missing | failed | unsupported | current_only | unavailable_at_cutoff | genuinely_absent
+    effect_on_decision: ""
 selected_stocks:
   - ts_code: ""
     name: ""
@@ -184,6 +233,8 @@ common_exposure_note: ""
 data_limitations: []
 ```
 
+`representative_non_selections` 不能代替 `candidate_chain`：前者帮助用户快速理解最典型的取舍，后者负责让所有已提交线索和候选可追溯。
+
 `target_thesis` 必须直接说明为什么形成日前的新变化可能在未来约 20 个交易日触发进一步重估。`why_this_over_alternatives` 必须体现实际比较，不能只重复支持证据。
 
 没有合适股票时，`selected_stocks` 返回空数组，并说明主要原因。不得用低质量候选补位。
@@ -193,6 +244,41 @@ data_limitations: []
 历史模拟中，先冻结研究简报、候选、理由、反证、未知和行动条件，再查询行动日及之后行情。未来 20 日结果只评价选择，不得回写形成日理由。
 
 评价由独立步骤完成，至少区分可执行的目标达成、最大涨幅路径、达到目标所需时间、20 日终点及相对市场收益、达标前最大不利变化。它们不进入形成日 Skill 的选股规则。
+
+历史调优时，在冻结形成日输出后，对当时完整合格范围生成一次 `selected / rejected / undiscovered` 三组对照：
+
+- `selected`：最终入选；
+- `rejected`：进入候选池但未入选，`unresolved` 保留其状态后归入本组；
+- `undiscovered`：属于当时合格范围但没有进入候选池。
+
+三组互斥且覆盖合格范围；候选链断裂、代码无法映射或处理错误单独报告，不能静默算作 `undiscovered`。三组使用相同入口、可执行性和收益口径，分别报告组内数量、目标达成比例、前 10 个交易日达标、第 11—20 个交易日才达标、最大收盘路径、20 日终点、相对市场收益及达标前最大不利变化。未发现组远大于候选组时，同时比较比例和逐形成日市场基准，不能用赢家绝对数量判定发现失败。
+
+只在开发样本中倒查后来达标但未入选的股票，并依次给出一个主要原因：
+
+- `non_executable`：行动日按既有口径不能正常参与；
+- `future_catalyst`：决定性事实形成日截止后才可获得；
+- `data_capability_miss`：当时外部已有关键事实，但系统历史能力没有取得；
+- `discovery_miss`：系统已有形成日证据，但股票没有进入候选池；
+- `decision_miss`：股票已进入候选，形成日证据达到绝对入选标准，且相对实际入选股票存在可说明的不对称取舍；
+- `no_point_in_time_case`：形成日前证据不足，只能依靠事后价格或未来叙事解释。
+
+未来结果只用于确定倒查对象和评价取舍，不能制造形成日理由。`decision_miss` 必须与当时实际入选股票作形成日证据对照；当日不足 5 只也不能因为有空位而降低标准。原因分类和三组报告是调优诊断，不增加候选、评分、Gate 或日常选股工作量。
+
+显式要求历史调优时，另返回紧凑诊断块；普通每日选股不返回：
+
+```yaml
+historical_tuning_diagnostics:
+  group_comparison:
+    selected: {stocks: 0, executable: 0, target_hits: 0, target_rate: null, day_1_10_hits: 0, day_11_20_hits: 0, terminal_relative_market: null, max_adverse_move: null}
+    rejected: {stocks: 0, executable: 0, target_hits: 0, target_rate: null, day_1_10_hits: 0, day_11_20_hits: 0, terminal_relative_market: null, max_adverse_move: null}
+    undiscovered: {stocks: 0, executable: 0, target_hits: 0, target_rate: null, day_1_10_hits: 0, day_11_20_hits: 0, terminal_relative_market: null, max_adverse_move: null}
+  integrity_errors: []
+  missed_winner_attribution:
+    - ts_code: ""
+      primary_reason: non_executable | future_catalyst | data_capability_miss | discovery_miss | decision_miss | no_point_in_time_case
+      formation_date_evidence: []
+      comparison_with_selected: ""
+```
 
 ## 边界
 
