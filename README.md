@@ -1,8 +1,23 @@
-# 股票分析助手：本地数据底座
+# 股票分析助手：本地数据底座与五 Skill 研究架构
 
-当前项目只维护股票研究所需的本地数据底座、知识库和读取能力。研究方法与后续建设方向以[SKILL先行架构设计](docs/superpowers/specs/2026-08-04-skill-first-stock-research-architecture-design.md)为准。
+当前项目维护股票研究所需的本地数据底座、治理知识库、确定性读取/计算能力，以及一个总控加四个专业研究 Skill。请先阅读[当前 V3 架构与实现状态](docs/architecture/current-v3-architecture.md)。2026-08-04 的[SKILL 先行架构设计](docs/superpowers/specs/2026-08-04-skill-first-stock-research-architecture-design.md)保留为历史过渡文档，不再单独代表当前实现。
 
 本项目不连接券商、不自动交易，也不承诺投资收益。
+
+## 让 ChatGPT Web 理解本项目
+
+将 ChatGPT Web 连接到本 GitHub 仓库或直接提供仓库链接后，建议要求它按顺序阅读：
+
+1. `AGENTS.md`；
+2. `docs/architecture/current-v3-architecture.md`；
+3. `.agents/skills/orchestrating-stock-research/SKILL.md`；
+4. 与问题相关的市场、板块、公司和价格专业 Skill。
+
+GitHub 不包含被忽略的 `local_warehouse/`、`local_archive/`、`logs/`、`.env*` 或其他本地运行数据。ChatGPT Web 可以理解架构和审查代码，但不能仅凭仓库假设自己已经取得真实本地事实。
+
+可直接使用以下开场语：
+
+> 请先阅读 `AGENTS.md`、`docs/architecture/current-v3-architecture.md` 和股票研究总控 Skill，再按需要阅读四个专业 Skill。请区分已实现的数据底座、Skill 研究流程和未实现的自动化能力，不要恢复旧 V3 的评分、Gate、报告发布或交易路径，也不要假设 GitHub 包含本地事实仓。
 
 ## 当前能力
 
@@ -14,8 +29,9 @@
 - 通过 `ResearchQuery` 按明确时点读取历史可见事实；
 - 生成每日数据健康摘要；
 - 读取和选择 `src/stock_analyzer/knowledge/` 中的本地知识。
+- 通过 `.agents/skills/` 中的五个 Skill 组织市场、板块、公司、价格和最终比较研究。
 
-截至本次清理基线，核心行情事实已保存到2026-08-03。最新可用日期应以健康检查和事实仓查询结果为准，不要依赖README中的固定日期。
+GitHub 不保存真实行情事实。最新可用日期应以本地健康检查和事实仓查询结果为准，不要依赖 README 中的固定日期。
 
 ## 本地目录
 
@@ -77,7 +93,6 @@ python3 -m pip install -e ".[dev,data]"
 
 ```bash
 python -m stock_analyzer data backfill --through YYYY-MM-DD
-python -m stock_analyzer data repair-gaps --through YYYY-MM-DD
 python -m stock_analyzer data run-stage --stage close --data-date auto
 python -m stock_analyzer data derive --data-date YYYY-MM-DD
 python -m stock_analyzer data health --data-date YYYY-MM-DD
@@ -113,14 +128,9 @@ Python代码可以使用：
 
 知识库不会由每日数据任务自动加载，也不会直接产生股票结论。
 
-## 当前已知问题
+## 历史问题状态
 
-2026-08-03仍有两个清理前已经存在的问题：
-
-1. 行业目录存在重叠有效记录，导致当日 `sector_hotspot` 未生成；
-2. 部分公告修订记录的发布时间早于已有版本，最近的晚间和次晨任务因此退出码为2。
-
-核心收盘事实仍可读取。这两个问题应作为独立的数据底座修复任务处理，不能通过绕过时间校验或删除健康检查解决。
+清理基线曾发现行业目录有效记录重叠和公告修订时间倒序问题；它们已由专用修复逻辑和回归测试处理，不再作为当前架构阻塞。运行时状态仍必须以 `data health`、任务退出码和事实仓清单为准，不能通过绕过时间校验或删除健康检查掩盖新问题。
 
 ## 验证
 
