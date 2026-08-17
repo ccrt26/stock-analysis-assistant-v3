@@ -1,0 +1,117 @@
+{
+  "base_commit": "ad7d1385dbeb1c91771af66a3294da74b857c2b0",
+  "code_commit": "15cf5cc7a77852f49d58bcff402a8fe21cdf0cfc",
+  "data_coverage": {
+    "data_through": "2026-08-14",
+    "derived_distinct_analysis_dates": 26,
+    "derived_partitions_per_feature_set": 29,
+    "equity_daily_first_date": "2025-08-15",
+    "security_master_earliest_available_at": "2026-07-13T23:38:30.798194+08:00"
+  },
+  "dataset_version": "selection-dataset-v1",
+  "feature_version": "selection-feature-v1",
+  "input_hashes": {
+    "feature_dictionary": "a3e396d998fd2627612f0d8b46f78f0dbb64328ac3b12a548f4af79602e711bb",
+    "previously_used_formation_dates": "9da137704fb2d2a702bddfbad949d17d9ee0ee6fd88b06f83e4c320161feef98",
+    "split_manifest": "b53f077e24a14a7260ea85b97d6f1a10b24139d89b7ff5042c8981ca85492ce0"
+  },
+  "label_reveal_state": {
+    "development_labels_opened": false,
+    "features_frozen": true,
+    "final_test_labels_opened": false,
+    "validation_labels_opened": false
+  },
+  "limitations": [
+    "No machine-readable frozen candidate chain proves a pre-future freeze.",
+    "Historical security identity and ST status do not cover the registered dates.",
+    "The deterministic research surface cannot upgrade the main conclusion."
+  ],
+  "main_conclusion": "实验阻塞",
+  "main_track": {
+    "candidate_rows": 0,
+    "positive_dates": null,
+    "positive_rows": null,
+    "reason_code": "no_frozen_candidate_chain",
+    "rows": 0,
+    "status": "unavailable"
+  },
+  "report_commit": null,
+  "report_commit_reason": "The report commit is recorded by the final verification follow-up commit to avoid self-reference.",
+  "skill_contract_commit": "3ddf3032c8c1ba8acbd7b806bd7317236f9898ce",
+  "splits": {
+    "development": {
+      "candidate_rows": 0,
+      "formation_dates": [
+        "2025-12-30",
+        "2026-01-05",
+        "2026-01-06",
+        "2026-01-07",
+        "2026-01-08",
+        "2026-01-09",
+        "2026-01-12",
+        "2026-01-13",
+        "2026-01-14",
+        "2026-01-15",
+        "2026-01-16",
+        "2026-01-19",
+        "2026-01-22",
+        "2026-01-23",
+        "2026-01-27",
+        "2026-01-28",
+        "2026-01-29",
+        "2026-01-30",
+        "2026-02-02",
+        "2026-02-03",
+        "2026-02-04",
+        "2026-02-05",
+        "2026-02-06",
+        "2026-02-10",
+        "2026-02-11",
+        "2026-02-12",
+        "2026-02-13",
+        "2026-02-26",
+        "2026-03-02",
+        "2026-03-04"
+      ],
+      "positive_dates": null,
+      "positive_rows": null,
+      "rows": 0
+    },
+    "final_test": {
+      "candidate_rows": 0,
+      "formation_dates": [
+        "2026-05-26",
+        "2026-06-02",
+        "2026-06-04",
+        "2026-06-05",
+        "2026-06-12",
+        "2026-06-16",
+        "2026-06-22",
+        "2026-06-29",
+        "2026-07-01",
+        "2026-07-02"
+      ],
+      "positive_dates": null,
+      "positive_rows": null,
+      "rows": 0
+    },
+    "validation": {
+      "candidate_rows": 0,
+      "formation_dates": [
+        "2026-04-02",
+        "2026-04-03",
+        "2026-04-09",
+        "2026-04-10",
+        "2026-04-13",
+        "2026-04-14",
+        "2026-04-15",
+        "2026-04-16",
+        "2026-04-17",
+        "2026-04-20"
+      ],
+      "positive_dates": null,
+      "positive_rows": null,
+      "rows": 0
+    }
+  }
+}

@@ -1,0 +1,61 @@
+{
+  "baselines": {
+    "ai_frozen_selection": {
+      "policy_precision_at_1": null,
+      "policy_precision_at_3": null,
+      "policy_precision_at_5": null,
+      "reason_code": "no_frozen_candidate_chain",
+      "status": "not_evaluable"
+    },
+    "candidate_pool_base_rate": {
+      "rate": null,
+      "reason_code": "no_frozen_candidate_chain",
+      "status": "not_evaluable"
+    },
+    "company_event_freshness": {
+      "policy_precision_at_1": null,
+      "policy_precision_at_3": null,
+      "policy_precision_at_5": null,
+      "reason_code": "no_evaluable_main_track_dataset",
+      "status": "not_evaluable"
+    },
+    "full_universe_base_rate": {
+      "rate": null,
+      "reason_code": "point_in_time_security_master_unavailable",
+      "status": "not_evaluable"
+    },
+    "random_1000_draws": {
+      "policy_precision_at_1": null,
+      "policy_precision_at_3": null,
+      "policy_precision_at_5": null,
+      "reason_code": "no_evaluable_main_track_dataset",
+      "seed": 20260817,
+      "status": "not_evaluable"
+    },
+    "relative_market_return_20d": {
+      "policy_precision_at_1": null,
+      "policy_precision_at_3": null,
+      "policy_precision_at_5": null,
+      "reason_code": "no_evaluable_main_track_dataset",
+      "status": "not_evaluable"
+    },
+    "relative_market_return_5d": {
+      "policy_precision_at_1": null,
+      "policy_precision_at_3": null,
+      "policy_precision_at_5": null,
+      "reason_code": "no_evaluable_main_track_dataset",
+      "status": "not_evaluable"
+    },
+    "volume_progress": {
+      "policy_precision_at_1": null,
+      "policy_precision_at_3": null,
+      "policy_precision_at_5": null,
+      "reason_code": "no_evaluable_main_track_dataset",
+      "status": "not_evaluable"
+    }
+  },
+  "main_conclusion": "实验阻塞",
+  "main_track_status": "unavailable",
+  "reason_code": "no_frozen_candidate_chain",
+  "secondary_track_metrics": null
+}

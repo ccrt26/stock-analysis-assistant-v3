@@ -1,0 +1,82 @@
+{
+  "ai_baseline": {
+    "reason_code": "no_frozen_candidate_chain",
+    "rejected_hit_rate": null,
+    "selected_hit_rate": null
+  },
+  "calibration": {
+    "brier": null,
+    "fixed_bins": null,
+    "reason_code": "no_validation_predictions"
+  },
+  "candidate_pool_lift": {
+    "lift_at_1": null,
+    "lift_at_3": null,
+    "lift_at_5": null,
+    "reason_code": "candidate_pool_base_rate_unavailable"
+  },
+  "conclusion": "实验阻塞",
+  "date_results": null,
+  "models": {
+    "with_opportunity_type": {
+      "C": null,
+      "reason_code": "no_trainable_main_track_dataset",
+      "splits": {
+        "development": null,
+        "final_test": null,
+        "validation": null
+      },
+      "status": "not_trainable"
+    },
+    "without_opportunity_type": {
+      "C": null,
+      "reason_code": "no_trainable_main_track_dataset",
+      "splits": {
+        "development": null,
+        "final_test": null,
+        "validation": null
+      },
+      "status": "not_trainable"
+    }
+  },
+  "opportunity_type_results": {
+    "company_catalyst": null,
+    "independent_price_anomaly": null,
+    "reason_code": "no_formation_date_type_samples",
+    "sector_diffusion": null
+  },
+  "path_quality": {
+    "first_hit_day": null,
+    "giveback_from_max_close_to_terminal": null,
+    "max_adverse_move_before_hit_or_end": null,
+    "max_close_return_20d": null,
+    "reason_code": "no_evaluable_main_track_labels",
+    "terminal_relative_market_20d": null,
+    "terminal_return_20d": null
+  },
+  "policy_metrics": {
+    "executable_precision_at_1": null,
+    "executable_precision_at_3": null,
+    "executable_precision_at_5": null,
+    "policy_precision_at_1": null,
+    "policy_precision_at_3": null,
+    "policy_precision_at_5": null,
+    "reason_code": "no_evaluable_main_track_dataset"
+  },
+  "selected_model_variant": null,
+  "selection_coverage": {
+    "average_daily_selections": null,
+    "empty_list_ratio": null,
+    "nonempty_dates": null,
+    "reason_code": "no_validation_predictions",
+    "total_selections": null
+  },
+  "threshold": null,
+  "top5_vs_remaining": null,
+  "walk_forward": {
+    "fold_1": null,
+    "fold_2": null,
+    "reason_code": "no_trainable_main_track_dataset"
+  },
+  "zero_to_five_status": "not_supported"
+}

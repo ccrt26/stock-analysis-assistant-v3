@@ -1,0 +1,10 @@
+{
+  "coefficients": [],
+  "features": [],
+  "hyperparameters": null,
+  "intercept": null,
+  "model_type": null,
+  "reason_code": "no_trainable_main_track_dataset",
+  "status": "not_available",
+  "training_version": null
+}

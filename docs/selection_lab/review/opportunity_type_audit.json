@@ -1,0 +1,41 @@
+{
+  "ai_fate_counts": {
+    "rejected": null,
+    "selected": null,
+    "unresolved": null
+  },
+  "auditable_candidate_chain_dates": 0,
+  "confidence_counts": {
+    "high": null,
+    "low": null,
+    "medium": null
+  },
+  "gate_audit_status": "not_evaluable",
+  "gate_conclusion": "not_evaluable",
+  "hit_rates": {
+    "company_catalyst": null,
+    "independent_price_anomaly": null,
+    "sector_diffusion": null
+  },
+  "opportunity_type_counts": {
+    "company_catalyst": null,
+    "independent_price_anomaly": null,
+    "null": null,
+    "sector_diffusion": null
+  },
+  "reason_code": "no_frozen_candidate_chain",
+  "rejection_reason_cross_tab": null,
+  "representative_cases": [],
+  "sole_company_gate_rejection": {
+    "company_catalyst": null,
+    "independent_price_anomaly": null,
+    "overall": null,
+    "sector_diffusion": null
+  },
+  "stable_evaluation": {
+    "company_catalyst": "not_evaluable",
+    "independent_price_anomaly": "not_evaluable",
+    "sector_diffusion": "not_evaluable"
+  },
+  "systematic_miskill_conclusion": "not_evaluable"
+}

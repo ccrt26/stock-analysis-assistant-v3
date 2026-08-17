@@ -1,0 +1,73 @@
+{
+  "cli_help": {
+    "commands_checked": 7,
+    "exit_codes": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "status": "passed"
+  },
+  "offline_workflows": {
+    "audit-opportunity-types": {
+      "exit_code": 2,
+      "reason_code": "no_evaluable_main_track_dataset"
+    },
+    "build-dataset": {
+      "exit_code": 2,
+      "reason_code": "no_frozen_candidate_chain"
+    },
+    "build-review-bundle": {
+      "exit_code": 0,
+      "reason_code": null
+    },
+    "evaluate-baselines": {
+      "exit_code": 2,
+      "reason_code": "no_evaluable_main_track_dataset"
+    },
+    "train-ranker": {
+      "exit_code": 2,
+      "reason_code": "no_trainable_main_track_dataset"
+    },
+    "walk-forward": {
+      "exit_code": 2,
+      "reason_code": "no_frozen_model_and_threshold"
+    }
+  },
+  "preimplementation_baseline": {
+    "command": ".venv/bin/python -m pytest -q",
+    "exit_code": 0,
+    "result": "361 passed"
+  },
+  "public_payload_audit": {
+    "findings": [],
+    "status": "passed"
+  },
+  "repeatability": {
+    "evidence": "test_bundle_is_byte_identical_across_runs",
+    "status": "passed"
+  },
+  "status": "pending_final_verification",
+  "targeted_tests": {
+    "selection_lab": {
+      "command": ".venv/bin/python -m pytest tests/selection_lab -q",
+      "exit_code": 0,
+      "result": "78 passed"
+    },
+    "skill_and_governance": {
+      "command": ".venv/bin/python -m pytest tests/selection_lab/test_skill_contracts.py tests/test_cli.py tests/test_knowledge_governance_acceptance.py -q",
+      "exit_code": 0,
+      "result": "25 passed"
+    }
+  },
+  "verification_pending": [
+    "fresh full pytest",
+    "fresh git diff --check",
+    "final staged scope and local-data exclusion audit",
+    "Git push and draft PR"
+  ]
+}
