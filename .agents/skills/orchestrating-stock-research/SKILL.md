@@ -56,6 +56,16 @@ exclusions: []
 
 四个视角不是四道 Gate，也不是四票表决。市场可以逆风、板块可以中性，只要独立公司变化和价格路径足够有说服力；反过来，市场和板块都强也不能替代公司联系与价格空间。
 
+## 机会类型合同
+
+总控在形成日证据内为每只候选记录一个主要机会类型：`company_catalyst | sector_diffusion | independent_price_anomaly | null`。主要类型表示去掉哪一条因果起点后，该股票便不再构成原机会命题；其他真实类型进入 `secondary_opportunity_types`，不得按来源 Skill 数量投票。无法形成因果命题时使用 `opportunity_type: null`，并把 `opportunity_type_status` 写为 `not_assignable | missing_evidence`，不得根据未来涨跌倒填或为 one-hot 强猜。
+
+- `company_catalyst` 的起点是公司自身新变化，必须有直接公司事实、阶段、材料性、传导和反证；
+- `sector_diffusion` 的起点是板块共同增强和有效成员扩散，不要求形成日存在新公司公告；
+- `independent_price_anomaly` 的起点是市场和板块共同变化不能充分解释的个股相对量价异常，可无新公司公告，但须严格检查流动性、透支、假突破和重大负面事实。
+
+机会类型不是 Gate、配额、评分、优先级、投票或补位规则；不得天然贬低某类机会，也不得把类型替代实际比较。
+
 ## 定向使用本地知识
 
 先识别候选机会类型和需要回答的问题，再从 `src/stock_analyzer/knowledge/research_registry.yaml` 调阅相关条目。知识只有实际改变研究问题、证据解释、候选比较或反证时才算使用。
@@ -192,6 +202,13 @@ candidate_chain:
     - ts_code: ""
       name: ""
       source_lead_ids: []
+      opportunity_type: company_catalyst | sector_diffusion | independent_price_anomaly | null
+      opportunity_type_status: assigned | not_assignable | missing_evidence
+      secondary_opportunity_types: []
+      opportunity_type_confidence: high | medium | low | null
+      opportunity_type_as_of: ""
+      opportunity_type_evidence: []
+      opportunity_type_assignment_reason: ""
       lens_reviews:
         market: {support: "", counter: "", unknown: ""}
         sector: {support: "", counter: "", unknown: ""}
@@ -215,6 +232,13 @@ data_quality_issues:
 selected_stocks:
   - ts_code: ""
     name: ""
+    opportunity_type: company_catalyst | sector_diffusion | independent_price_anomaly | null
+    opportunity_type_status: assigned | not_assignable | missing_evidence
+    secondary_opportunity_types: []
+    opportunity_type_confidence: high | medium | low | null
+    opportunity_type_as_of: ""
+    opportunity_type_evidence: []
+    opportunity_type_assignment_reason: ""
     new_change: ""
     target_thesis: ""
     causal_chain: ""

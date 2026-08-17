@@ -102,6 +102,10 @@ description: Use when point-in-time A-share candidate selection or validation ne
 
 ## 输出合同
 
+候选使用统一机会类型词汇 `company_catalyst | sector_diffusion | independent_price_anomaly | null`。本 Skill 主要负责 `independent_price_anomaly`：必须证明市场和板块共同变化不能充分解释个股相对价格与成交异常，并严格检查成交推进、高成交低推进、冲高回落、价格效率、波动、价格位置、涨停后行为、流动性、停牌状态、透支、假突破和重大负面事实。`independent_price_anomaly 可无新公司公告`；无公告不能单独否定这种量价命题。公司或板块起点分别交给 `company_catalyst` 或 `sector_diffusion` 的证据责任。
+
+机会类型不是 Gate、配额、评分、优先级、投票或补位规则。独立价格异常不天然低于其他类型，仍由总控结合因果、反证和剩余路径实际比较。
+
 每条关键事实同时保留统一的数据质量信息。`fact_as_of` 表示行情或交易状态对应的交易日，`available_at` 表示系统何时能够取得；两者不得互换。顶层 `as_of` 仍是本轮形成日决策截止时点。`quality` 使用 `complete | partial | unreliable`，`capability_status` 使用 `supported | partial | unsupported`。复权、基准、行业归属、成交状态或历史窗口缺失，以及查询失败、当前快照不可回放和真实无记录，必须分别写入 `missing_fields` 或 `unknowns`。这些字段只解释证据边界，不计分或投票。
 
 ```yaml

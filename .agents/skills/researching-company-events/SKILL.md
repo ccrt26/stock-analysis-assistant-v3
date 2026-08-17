@@ -72,6 +72,10 @@ description: Use when an A-share research task needs point-in-time company funda
 
 ## 输出合同
 
+候选使用统一机会类型词汇 `company_catalyst | sector_diffusion | independent_price_anomaly | null`。本 Skill 主要负责 `company_catalyst`：没有形成日可见的直接公司事实时不得归入该类型，而不只是降低置信度。对 `sector_diffusion` 和 `independent_price_anomaly`，本 Skill 验证公司身份、主营联系、核心传导和重大公司反证；没有当日新公司公告本身不构成淘汰理由，也不得把“没有新变化”写成“公司不相关”。
+
+机会类型不是 Gate、配额、评分、优先级、投票或补位规则。它不改变公司证据充分性判断，也不让公司视角成为所有类型的前置门槛。
+
 每条关键事实同时保留统一的数据质量信息。`fact_as_of` 表示事件发生日、报告期或事实对应期间，`available_at` 表示系统何时能够取得；两者不得互换。顶层 `as_of` 仍是本轮形成日决策截止时点。`quality` 使用 `complete | partial | unreliable`，`capability_status` 使用 `supported | partial | unsupported`。正文缺失、历史覆盖不足、查询失败、只有当前快照和真实无记录必须分开写入 `missing_fields` 或 `unknowns`。这些字段只解释证据边界，不计分或投票；无法确认形成日前可得的事实不能支持候选命题。
 
 严格返回：

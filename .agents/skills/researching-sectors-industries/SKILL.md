@@ -95,6 +95,10 @@ description: Use when point-in-time A-share candidate selection or validation ne
 
 ## 输出合同
 
+候选使用统一机会类型词汇 `company_catalyst | sector_diffusion | independent_price_anomaly | null`。本 Skill 主要负责 `sector_diffusion`：核心起点必须是形成日可见的板块共同增强和有效成员扩散，并检查成员关系、广度、中位数收益、集中、分化、退潮、同类增量和真实业务归属。`sector_diffusion 不要求形成日存在新公司公告`；公司 Skill 只需确认身份、主营联系和重大反证，不得把“没有新公告”本身当作淘汰理由。若核心起点实际来自公司变化或独立量价异常，则分别交由 `company_catalyst` 或 `independent_price_anomaly` 的证据责任处理。
+
+机会类型不是 Gate、配额、评分、优先级、投票或补位规则。该字段只描述因果起点，不改变本 Skill 的线索职责或最终取舍权。
+
 每条关键事实同时保留统一的数据质量信息。`fact_as_of` 表示事实对应的日期或期间，`available_at` 表示系统何时能够取得；两者不得互换。顶层 `as_of` 仍是本轮形成日决策截止时点。`quality` 使用 `complete | partial | unreliable`，`capability_status` 使用 `supported | partial | unsupported`。历史成员缺失、数据源不支持历史查询、查询失败、当前成员快照不可回放和真实无成员记录必须分开写入 `missing_fields` 或 `unknowns`。这些字段只解释证据边界，不计分或投票。
 
 ```yaml

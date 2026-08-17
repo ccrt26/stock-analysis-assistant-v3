@@ -30,6 +30,9 @@ GitHub 不包含被忽略的 `local_warehouse/`、`local_archive/`、`logs/`、`
 - 生成每日数据健康摘要；
 - 读取和选择 `src/stock_analyzer/knowledge/` 中的本地知识。
 - 通过 `.agents/skills/` 中的五个 Skill 组织市场、板块、公司、价格和最终比较研究。
+- 通过隔离的 `selection_lab` 冻结实验 split、构造时点安全标签/特征并生成聚合审阅包。
+
+`selection_lab` 当前因缺少机器可读的历史冻结候选链而处于“实验阻塞”；次级确定性研究面不得升级主结论。该实验程序不拥有自动选股权，不接入日常研究执行或交易。
 
 GitHub 不保存真实行情事实。最新可用日期应以本地健康检查和事实仓查询结果为准，不要依赖 README 中的固定日期。
 
@@ -96,6 +99,7 @@ python -m stock_analyzer data backfill --through YYYY-MM-DD
 python -m stock_analyzer data run-stage --stage close --data-date auto
 python -m stock_analyzer data derive --data-date YYYY-MM-DD
 python -m stock_analyzer data health --data-date YYYY-MM-DD
+python -m stock_analyzer selection-lab --help
 ```
 
 查看参数：
