@@ -20,6 +20,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest>=8.2", "pytest-cov>=5.0"]
 data = ["tushare>=1.4.19"]
+selection-lab = ["scikit-learn>=1.5,<2"]
 
 [project.scripts]
 stock-analyzer = "stock_analyzer.cli:app"

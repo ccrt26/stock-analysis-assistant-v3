@@ -10,11 +10,12 @@ from stock_analyzer.data.research_backfill import BackfillSummary
 runner = CliRunner()
 
 
-def test_root_cli_exposes_only_the_data_group():
+def test_root_cli_exposes_current_groups():
     result = runner.invoke(app, ["--help"])
 
     assert result.exit_code == 0, result.output
     assert "data" in result.output
+    assert "selection-lab" in result.output
     assert "ops" not in result.output
     for old_command in (
         "health-check",

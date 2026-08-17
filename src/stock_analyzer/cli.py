@@ -11,7 +11,57 @@ from stock_analyzer.config import AppConfig
 
 app = typer.Typer(no_args_is_help=True)
 data_app = typer.Typer(no_args_is_help=True)
+selection_lab_app = typer.Typer(no_args_is_help=True)
 app.add_typer(data_app, name="data")
+app.add_typer(selection_lab_app, name="selection-lab")
+
+
+def _run_selection_lab(command: str) -> None:
+    from stock_analyzer.selection_lab.reporting import run_local_workflow
+
+    status, output = run_local_workflow(command, AppConfig.load())
+    typer.echo(
+        f"status={status['status']} reason_code={status.get('reason_code')} "
+        f"output={output}"
+    )
+    if status["status"] == "blocked":
+        raise typer.Exit(code=2)
+
+
+@selection_lab_app.command("build-dataset")
+def selection_lab_build_dataset() -> None:
+    """Build registered formation inputs from local, point-in-time facts."""
+    _run_selection_lab("build-dataset")
+
+
+@selection_lab_app.command("audit-opportunity-types")
+def selection_lab_audit_opportunity_types() -> None:
+    """Audit opportunity-type assignments on an existing local dataset."""
+    _run_selection_lab("audit-opportunity-types")
+
+
+@selection_lab_app.command("evaluate-baselines")
+def selection_lab_evaluate_baselines() -> None:
+    """Evaluate registered deterministic baselines."""
+    _run_selection_lab("evaluate-baselines")
+
+
+@selection_lab_app.command("train-ranker")
+def selection_lab_train_ranker() -> None:
+    """Train the registered ranker when a trainable track exists."""
+    _run_selection_lab("train-ranker")
+
+
+@selection_lab_app.command("walk-forward")
+def selection_lab_walk_forward() -> None:
+    """Run the registered walk-forward evaluation after all freezes exist."""
+    _run_selection_lab("walk-forward")
+
+
+@selection_lab_app.command("build-review-bundle")
+def selection_lab_build_review_bundle() -> None:
+    """Write the aggregate-only public review bundle."""
+    _run_selection_lab("build-review-bundle")
 
 
 @data_app.command("backfill")
