@@ -1,0 +1,219 @@
+{
+  "base_commit": "ad7d1385dbeb1c91771af66a3294da74b857c2b0",
+  "dataset_version": "selection-dataset-v1",
+  "feature_groups": {
+    "company_categorical": {
+      "available_at_rule": "available_at <= formation_as_of",
+      "columns": [
+        "company_event_type",
+        "company_event_stage"
+      ],
+      "formula_version": "selection-company-v1",
+      "missing_semantics": "Use explicit missing category fitted on training data.",
+      "source_datasets": [
+        "announcement",
+        "earnings_forecast",
+        "earnings_express",
+        "repurchase"
+      ],
+      "type": "categorical"
+    },
+    "company_numeric": {
+      "available_at_rule": "available_at <= formation_as_of; first public version only",
+      "columns": [
+        "company_event_present",
+        "company_event_age_days",
+        "company_event_revised",
+        "company_earnings_forecast_midpoint",
+        "company_revenue_direction",
+        "company_profit_direction",
+        "company_operating_cash_flow_direction",
+        "company_three_way_improvement",
+        "company_nonrecurring_risk",
+        "company_matter_scale_ratio",
+        "company_repurchase_active",
+        "company_reduction_risk",
+        "company_unlock_risk",
+        "company_pledge_risk",
+        "company_debt_counterevidence",
+        "company_cashflow_counterevidence",
+        "company_body_complete"
+      ],
+      "formula_version": "selection-company-v1",
+      "missing_semantics": "Differentiate no record, missing body, unsupported history, query failure, and genuinely absent.",
+      "source_datasets": [
+        "announcement",
+        "earnings_forecast",
+        "earnings_express",
+        "income_statement",
+        "balance_sheet",
+        "cash_flow",
+        "repurchase",
+        "holder_trade",
+        "share_float",
+        "pledge"
+      ],
+      "type": "numeric"
+    },
+    "market": {
+      "available_at_rule": "available_at <= formation_as_of",
+      "columns": [
+        "market_equal_weight_return_1d",
+        "market_equal_weight_return_5d",
+        "market_equal_weight_return_20d",
+        "market_median_return_1d",
+        "market_median_return_5d",
+        "market_median_return_20d",
+        "market_breadth_1d",
+        "market_breadth_5d",
+        "market_breadth_20d",
+        "market_turnover_ratio_5d",
+        "market_turnover_ratio_20d",
+        "market_return_dispersion_1d",
+        "market_realized_volatility_20d_annualized",
+        "market_above_ma_20d_share",
+        "market_above_ma_60d_share",
+        "market_new_high_20d_share",
+        "market_new_high_60d_share",
+        "market_new_low_20d_share",
+        "market_new_low_60d_share",
+        "market_limit_up_share",
+        "market_near_limit_up_share",
+        "market_limit_down_share"
+      ],
+      "formula_version": "market-context-v2",
+      "missing_semantics": "Preserve null and add a training-fitted missing indicator.",
+      "source_datasets": [
+        "equity_daily",
+        "adj_factor",
+        "index_daily",
+        "stock_limit",
+        "trade_calendar"
+      ],
+      "type": "numeric"
+    },
+    "opportunity_type": {
+      "available_at_rule": "formation-date frozen causal thesis only",
+      "columns": [
+        "opportunity_type"
+      ],
+      "formula_version": "opportunity-type-v1",
+      "missing_semantics": "Null means not assignable or missing causal evidence; never infer from future return.",
+      "source_datasets": [
+        "frozen_candidate_chain"
+      ],
+      "type": "categorical_typed_model_only"
+    },
+    "price": {
+      "available_at_rule": "trade fact available_at <= formation_as_of",
+      "columns": [
+        "price_return_1d",
+        "price_return_5d",
+        "price_return_10d",
+        "price_return_20d",
+        "price_return_60d",
+        "price_relative_return_1d",
+        "price_relative_return_5d",
+        "price_relative_return_10d",
+        "price_relative_return_20d",
+        "price_relative_return_60d",
+        "price_beta_60d",
+        "price_downside_beta_60d",
+        "price_benchmark_correlation_60d",
+        "price_realized_volatility_20d_annualized",
+        "price_atr_ratio_20d",
+        "price_location_60d",
+        "price_location_82d",
+        "price_current_amount_ratio_20d",
+        "price_up_down_amount_ratio_60d",
+        "price_high_volume_close_location_median_60d",
+        "price_high_volume_body_efficiency_median_60d",
+        "price_high_volume_body_efficiency_min_60d",
+        "price_countertrend_up_count_60d",
+        "price_countertrend_up_recency_weighted_60d",
+        "price_recent_limit_up_count_5d",
+        "price_post_limit_next_return",
+        "price_post_limit_next_amount_ratio",
+        "price_post_limit_next_high_to_close_pullback",
+        "price_average_amount_20d",
+        "price_pe_ttm",
+        "price_pb",
+        "price_pe_ttm_percentile_250d",
+        "price_pb_percentile_250d"
+      ],
+      "formula_version": "stock-trading-context-v2",
+      "missing_semantics": "Preserve null with coverage indicator; never substitute future or action-day values.",
+      "source_datasets": [
+        "equity_daily",
+        "adj_factor",
+        "index_daily",
+        "stock_limit",
+        "daily_basic"
+      ],
+      "type": "numeric"
+    },
+    "sector": {
+      "available_at_rule": "membership and facts available_at <= formation_as_of",
+      "columns": [
+        "sector_relative_return_1d",
+        "sector_relative_return_5d",
+        "sector_relative_return_20d",
+        "sector_median_return_1d",
+        "sector_median_return_5d",
+        "sector_median_return_20d",
+        "sector_breadth_1d",
+        "sector_breadth_5d",
+        "sector_breadth_20d",
+        "sector_turnover_share_average_1d",
+        "sector_turnover_share_average_5d",
+        "sector_turnover_share_average_20d",
+        "sector_turnover_share_change_3d",
+        "sector_turnover_share_change_5d",
+        "sector_return_dispersion_1d",
+        "sector_top3_positive_contribution_1d",
+        "sector_new_high_20d_share",
+        "sector_new_high_60d_share",
+        "sector_limit_up_share",
+        "sector_high_volume_low_progress_flag",
+        "sector_upper_wick_reversal_flag",
+        "sector_narrow_participation_flag",
+        "sector_turnover_return_divergence_flag",
+        "stock_relative_return_to_sector_5d",
+        "stock_relative_return_to_sector_20d",
+        "sector_membership_coverage_ratio"
+      ],
+      "formula_version": "sector-hotspot-v3",
+      "missing_semantics": "Null means no point-in-time-safe membership or insufficient group coverage; do not infer current membership.",
+      "source_datasets": [
+        "industry_member",
+        "theme_member",
+        "industry_daily",
+        "theme_daily",
+        "equity_daily",
+        "adj_factor"
+      ],
+      "type": "numeric"
+    }
+  },
+  "forbidden_columns": [
+    "ts_code",
+    "input_order",
+    "current_ai_fate",
+    "candidate_status",
+    "executable_on_action_date",
+    "hit_20pct_close_within_20d",
+    "first_hit_day",
+    "max_close_return_20d",
+    "terminal_return_20d",
+    "terminal_relative_market_20d",
+    "max_adverse_move_before_hit_or_end",
+    "giveback_from_max_close_to_terminal",
+    "evidence_count",
+    "source_skill_count",
+    "document_length",
+    "research_text_length",
+    "report_complete"
+  ],
+  "missing_indicator_policy": "Numeric SimpleImputer(strategy=median, add_indicator=true) fitted on training data only.",
+  "random_seed": 20260817
+}
