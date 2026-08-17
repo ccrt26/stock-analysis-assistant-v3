@@ -35,8 +35,7 @@
     "rows": 0,
     "status": "unavailable"
   },
-  "report_commit": null,
-  "report_commit_reason": "The report commit is recorded by the final verification follow-up commit to avoid self-reference.",
+  "report_commit": "a53fff75984f3daa4f6021d6c67d999020845991",
   "skill_contract_commit": "3ddf3032c8c1ba8acbd7b806bd7317236f9898ce",
   "splits": {
     "development": {

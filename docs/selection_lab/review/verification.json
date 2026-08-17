@@ -1,4 +1,5 @@
 {
+  "branch": "feat/selection-lab-opportunity-types",
   "cli_help": {
     "commands_checked": 7,
     "exit_codes": [
@@ -11,6 +12,24 @@
       0
     ],
     "status": "passed"
+  },
+  "full_test_suite": {
+    "command": ".venv/bin/python -m pytest -q",
+    "exit_code": 0,
+    "result": "439 passed in 72.90s"
+  },
+  "git_checks": {
+    "branch_diff_check": "passed",
+    "changed_files": 51,
+    "diff_check": "passed",
+    "largest_review_or_selection_lab_blob_bytes": 39531,
+    "local_data_or_model_paths_tracked": false,
+    "preexisting_user_directories_staged": false,
+    "status_short": "preexisting untracked user directories only"
+  },
+  "github_delivery": {
+    "draft_pr": null,
+    "push": "pending"
   },
   "offline_workflows": {
     "audit-opportunity-types": {
@@ -41,9 +60,10 @@
   "preimplementation_baseline": {
     "command": ".venv/bin/python -m pytest -q",
     "exit_code": 0,
-    "result": "361 passed"
+    "result": "361 passed in 78.25s"
   },
   "public_payload_audit": {
+    "deterministic_json_files": 10,
     "findings": [],
     "status": "passed"
   },
@@ -51,23 +71,24 @@
     "evidence": "test_bundle_is_byte_identical_across_runs",
     "status": "passed"
   },
-  "status": "pending_final_verification",
+  "skill_validation": {
+    "analyzing-price-trading": "passed",
+    "interpreting-market-macro": "passed_unchanged",
+    "orchestrating-stock-research": "passed",
+    "researching-company-events": "passed",
+    "researching-sectors-industries": "passed"
+  },
+  "status": "passed",
   "targeted_tests": {
     "selection_lab": {
       "command": ".venv/bin/python -m pytest tests/selection_lab -q",
       "exit_code": 0,
-      "result": "78 passed"
+      "result": "78 passed in 1.44s"
     },
     "skill_and_governance": {
       "command": ".venv/bin/python -m pytest tests/selection_lab/test_skill_contracts.py tests/test_cli.py tests/test_knowledge_governance_acceptance.py -q",
       "exit_code": 0,
-      "result": "25 passed"
+      "result": "25 passed in 1.38s"
     }
-  },
-  "verification_pending": [
-    "fresh full pytest",
-    "fresh git diff --check",
-    "final staged scope and local-data exclusion audit",
-    "Git push and draft PR"
-  ]
+  }
 }
