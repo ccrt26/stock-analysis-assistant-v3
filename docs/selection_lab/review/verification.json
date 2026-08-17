@@ -28,8 +28,14 @@
     "status_short": "preexisting untracked user directories only"
   },
   "github_delivery": {
-    "draft_pr": null,
-    "push": "pending"
+    "draft_pr": {
+      "base": "main",
+      "head": "feat/selection-lab-opportunity-types",
+      "is_draft": true,
+      "number": 4,
+      "url": "https://github.com/ccrt26/stock-analysis-assistant-v3/pull/4"
+    },
+    "push": "passed"
   },
   "offline_workflows": {
     "audit-opportunity-types": {
