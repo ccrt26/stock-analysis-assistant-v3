@@ -1,0 +1,1078 @@
+{
+  "task_type": "historical_simulation",
+  "research_objective": "只使用形成日当时可见的信息，选择未来约20个交易日更可能形成可操作显著上涨路径、重点观察能否达到约20%涨幅的0—5只股票。",
+  "formation_date": "2026-07-16",
+  "action_date": "2026-07-17",
+  "as_of": "2026-07-16T23:59:59+08:00",
+  "selection_universe": "上海主板、深圳主板和创业板中，在形成日具有可靠报价、可核验历史身份并可正常研究的股票。",
+  "exclusions": [
+    "科创板",
+    "北交所",
+    "场内基金",
+    "ST/*ST",
+    "退市整理",
+    "形成日停牌",
+    "无可靠报价",
+    "行动日已明确无法正常参与"
+  ],
+  "research_brief": {
+    "market_question": "主要指数普遍回落且全市场中位数偏弱时，是否仍存在具有独立因果链、而非单日噪声的逆势机会。",
+    "sector_question": "医药生物等少数强势方向是多日扩散还是由少数高位股集中推动，最接近成员是否仍有剩余路径。",
+    "company_question": "形成日前的业绩预告是否来自主营经营变化，是否已经出现披露后价格识别，是否被一次性损益或反向价格反应削弱。",
+    "price_question": "候选的1、3、5、20日强势、成交激活、价格位置与可参与性是否仍支持后续路径，而非已经透支。",
+    "critical_missing_facts": [
+      "股票身份、形成日行情或行动日交易日无法可靠确认",
+      "公司催化无法确认主营联系或首次披露时间",
+      "板块成员身份无法历史回放",
+      "形成日收盘后新公告可能实质改变行动日可参与性"
+    ],
+    "main_falsifiers": [
+      "业绩增长主要来自一次性或公允价值收益",
+      "披露后价格与成交出现明确反向反应",
+      "短期涨幅和涨停已经显著消耗剩余路径",
+      "行动日一字涨跌停、停牌、报价失真或开盘跳空已经透支"
+    ]
+  },
+  "market_search_context": "形成日4366只合格股票中上涨占比47.32%，横截面1日中位数0.00%、5日中位数0.18%、20日中位数-7.53%；上证、沪深300、深证、创业板和中证1000近5日分别约-3.82%、-3.65%、-5.91%、-8.11%和-8.05%。市场不支持普遍追涨，只支持少量有明确增量事实且相对市场显著更强的机会。医药生物是最清晰的板块例外：一级行业5日中位数约8.68%，约89.5%成员5日上涨，但个股短期透支明显。",
+  "candidate_chain": {
+    "skill_leads": [
+      {
+        "lead_id": "M1",
+        "source_skill": "market",
+        "lead_type": "direction",
+        "name": "弱市场中的逆势经营改善",
+        "ts_code": null,
+        "rationale": "主要指数5日和20日均回落，市场层只支持有独立经营增量与相对强势的少量候选。"
+      },
+      {
+        "lead_id": "M2",
+        "source_skill": "market",
+        "lead_type": "group",
+        "name": "医药生物多日扩散",
+        "ts_code": null,
+        "rationale": "医药生物5日中位数约8.68%，约89.5%成员5日上涨，显著强于全市场。"
+      },
+      {
+        "lead_id": "M3",
+        "source_skill": "market",
+        "lead_type": "question",
+        "name": "行动日追涨与收盘后公告风险",
+        "ts_code": null,
+        "rationale": "弱市场中多只候选形成日已急涨，部分收盘后又披露诉讼或风险提示，须转为行动日条件。"
+      },
+      {
+        "lead_id": "S1",
+        "source_skill": "sector",
+        "lead_type": "stock",
+        "name": "人民同泰",
+        "ts_code": "600829.SH",
+        "rationale": "医药流通方向5日上涨面约95.8%，该股5日约+30.49%、连续5日上涨且成交明显激活。"
+      },
+      {
+        "lead_id": "S2",
+        "source_skill": "sector",
+        "lead_type": "stock",
+        "name": "上海凯宝",
+        "ts_code": "300039.SZ",
+        "rationale": "中药扩散强，该股5日约+28.70%、形成日约+5.61%，但价格已接近20日高位。"
+      },
+      {
+        "lead_id": "S3",
+        "source_skill": "sector",
+        "lead_type": "stock",
+        "name": "九芝堂",
+        "ts_code": "000989.SZ",
+        "rationale": "中药板块扩散与公司业绩预增重叠，形成日回撤后仍保持5日相对强势。"
+      },
+      {
+        "lead_id": "S4",
+        "source_skill": "sector",
+        "lead_type": "stock",
+        "name": "永安药业",
+        "ts_code": "002365.SZ",
+        "rationale": "原料药扩散与牛磺酸主营预增重叠，形成日出现明确价格反应。"
+      },
+      {
+        "lead_id": "S5",
+        "source_skill": "sector",
+        "lead_type": "stock",
+        "name": "普蕊斯",
+        "ts_code": "301257.SZ",
+        "rationale": "医疗研发外包5日中位数约18.44%，该股5日约+29.57%，但20日累计涨幅已高。"
+      },
+      {
+        "lead_id": "S6",
+        "source_skill": "sector",
+        "lead_type": "stock",
+        "name": "泰格医药",
+        "ts_code": "300347.SZ",
+        "rationale": "医疗研发外包扩散，5日约+24.26%，但20日约+34.71%，剩余路径受限。"
+      },
+      {
+        "lead_id": "S7",
+        "source_skill": "sector",
+        "lead_type": "stock",
+        "name": "哈三联",
+        "ts_code": "002900.SZ",
+        "rationale": "医药板块价格强，但公司预告仍为续亏，构成板块线索的公司层反证。"
+      },
+      {
+        "lead_id": "S8",
+        "source_skill": "sector",
+        "lead_type": "stock",
+        "name": "中恒集团",
+        "ts_code": "600252.SH",
+        "rationale": "中药板块价格强，但公司预告首亏且主营产品售价下降。"
+      },
+      {
+        "lead_id": "C1",
+        "source_skill": "company",
+        "lead_type": "stock",
+        "name": "西部矿业",
+        "ts_code": "601168.SH",
+        "rationale": "7月10日预告归母净利润同比增长114%—130%，原因是铜、金银产品价格上涨；披露后价格逆板块推进。"
+      },
+      {
+        "lead_id": "C2",
+        "source_skill": "company",
+        "lead_type": "stock",
+        "name": "九芝堂",
+        "ts_code": "000989.SZ",
+        "rationale": "7月11日预告增长67.63%—83.63%，来自并表公司经营、原有产品销量和成本效率改善。"
+      },
+      {
+        "lead_id": "C3",
+        "source_skill": "company",
+        "lead_type": "stock",
+        "name": "亚联机械",
+        "ts_code": "001395.SZ",
+        "rationale": "7月9日预告增长59.63%，高单价项目、境外生产线与钢带改造销售共同推动。"
+      },
+      {
+        "lead_id": "C4",
+        "source_skill": "company",
+        "lead_type": "stock",
+        "name": "永安药业",
+        "ts_code": "002365.SZ",
+        "rationale": "7月15日预告增长219.08%—289.99%，原因直接指向主营牛磺酸销量和售价增长。"
+      },
+      {
+        "lead_id": "C5",
+        "source_skill": "company",
+        "lead_type": "stock",
+        "name": "九安医疗",
+        "ts_code": "002432.SZ",
+        "rationale": "预告增长204.29%—269.50%，但主要来自科创投资底层标的估值上涨，非主营传导。"
+      },
+      {
+        "lead_id": "C6",
+        "source_skill": "company",
+        "lead_type": "stock",
+        "name": "德明利",
+        "ts_code": "001309.SZ",
+        "rationale": "存储景气与产品升级推动大幅扭亏，但形成日价格约-10%，披露后反向反应强。"
+      },
+      {
+        "lead_id": "C7",
+        "source_skill": "company",
+        "lead_type": "stock",
+        "name": "福达合金",
+        "ts_code": "603045.SH",
+        "rationale": "经营性高增预告有明确下游需求传导，但形成日约-7.82%、5日约-10.48%。"
+      },
+      {
+        "lead_id": "C8",
+        "source_skill": "company",
+        "lead_type": "stock",
+        "name": "长飞光纤",
+        "ts_code": "601869.SH",
+        "rationale": "算力数据中心需求驱动预告高增，但形成日约-5.57%、5日约-8.96%。"
+      },
+      {
+        "lead_id": "C9",
+        "source_skill": "company",
+        "lead_type": "stock",
+        "name": "长川科技",
+        "ts_code": "300604.SZ",
+        "rationale": "数字测试机需求和规模效应推动预增，但形成日约-3.72%、5日约-21.62%，且60日涨幅已高。"
+      },
+      {
+        "lead_id": "C10",
+        "source_skill": "company",
+        "lead_type": "stock",
+        "name": "通富微电",
+        "ts_code": "002156.SZ",
+        "rationale": "AI、存储与国产化推动预增，但形成日约-3.51%，公告后的识别不如最终入选者。"
+      },
+      {
+        "lead_id": "C11",
+        "source_skill": "company",
+        "lead_type": "stock",
+        "name": "东山精密",
+        "ts_code": "002384.SZ",
+        "rationale": "传统主业与光模块新增产能推动预增，形成日正收益，但估值和前期累计涨幅削弱剩余路径。"
+      },
+      {
+        "lead_id": "C12",
+        "source_skill": "company",
+        "lead_type": "stock",
+        "name": "哈三联",
+        "ts_code": "002900.SZ",
+        "rationale": "预告亏损收窄但仍续亏，不能支持板块价格强势的公司催化解释。"
+      },
+      {
+        "lead_id": "C13",
+        "source_skill": "company",
+        "lead_type": "stock",
+        "name": "中岩大地",
+        "ts_code": "003001.SZ",
+        "rationale": "预告首亏且订单落地不及预期，与短期价格异动方向相反。"
+      },
+      {
+        "lead_id": "C14",
+        "source_skill": "company",
+        "lead_type": "stock",
+        "name": "中恒集团",
+        "ts_code": "600252.SH",
+        "rationale": "预告首亏、主营售价下降并有减值影响，构成明确公司反证。"
+      },
+      {
+        "lead_id": "P1",
+        "source_skill": "price",
+        "lead_type": "stock",
+        "name": "中岩大地",
+        "ts_code": "003001.SZ",
+        "rationale": "5日约+37.62%、连续5日上涨，但高估值、公司首亏和短期透支削弱路径。"
+      },
+      {
+        "lead_id": "P2",
+        "source_skill": "price",
+        "lead_type": "stock",
+        "name": "银信科技",
+        "ts_code": "300231.SZ",
+        "rationale": "形成日约+10.79%、5日约+30.65%、成交激活约9.53倍，显著逆计算机板块。"
+      },
+      {
+        "lead_id": "P3",
+        "source_skill": "price",
+        "lead_type": "stock",
+        "name": "人民同泰",
+        "ts_code": "600829.SH",
+        "rationale": "5日连续上涨约30.49%，成交激活约12.83倍，兼有医药流通扩散。"
+      },
+      {
+        "lead_id": "P4",
+        "source_skill": "price",
+        "lead_type": "stock",
+        "name": "幸福蓝海",
+        "ts_code": "300528.SZ",
+        "rationale": "形成日约+5.89%、5日约+25.37%、成交激活约5.70倍，但收盘后发布异常波动及风险提示。"
+      },
+      {
+        "lead_id": "P5",
+        "source_skill": "price",
+        "lead_type": "stock",
+        "name": "常润股份",
+        "ts_code": "603201.SH",
+        "rationale": "5日约+28.25%且连续5日上涨，仍低于20日高位，但成交激活仅约1.23倍。"
+      },
+      {
+        "lead_id": "P6",
+        "source_skill": "price",
+        "lead_type": "stock",
+        "name": "普蕊斯",
+        "ts_code": "301257.SZ",
+        "rationale": "医药扩散中5日约+29.57%、20日约+53.11%，已有明显累计透支。"
+      },
+      {
+        "lead_id": "P7",
+        "source_skill": "price",
+        "lead_type": "stock",
+        "name": "亚联机械",
+        "ts_code": "001395.SZ",
+        "rationale": "形成日约+7.74%、5日约+24.59%、成交激活约13.35倍，但短期位置和换手偏高。"
+      },
+      {
+        "lead_id": "P8",
+        "source_skill": "price",
+        "lead_type": "stock",
+        "name": "西部矿业",
+        "ts_code": "601168.SH",
+        "rationale": "有色金属一级行业5日中位数约-6.41%时，该股5日约+16.73%、连续5日上涨且换手温和。"
+      },
+      {
+        "lead_id": "P9",
+        "source_skill": "price",
+        "lead_type": "stock",
+        "name": "永安药业",
+        "ts_code": "002365.SZ",
+        "rationale": "形成日约+10.02%、5日约+30.75%，确认催化但也形成行动日追涨风险。"
+      },
+      {
+        "lead_id": "P10",
+        "source_skill": "price",
+        "lead_type": "stock",
+        "name": "九芝堂",
+        "ts_code": "000989.SZ",
+        "rationale": "5日约+19.55%、20日约+22.90%，形成日回撤至20日高点约93.6%，仍保留条件性路径。"
+      },
+      {
+        "lead_id": "P11",
+        "source_skill": "price",
+        "lead_type": "stock",
+        "name": "上海凯宝",
+        "ts_code": "300039.SZ",
+        "rationale": "形成日与5日均强，但5日约+28.70%且接近20日高位，弱于有主营催化的医药候选。"
+      },
+      {
+        "lead_id": "P12",
+        "source_skill": "price",
+        "lead_type": "stock",
+        "name": "哈三联",
+        "ts_code": "002900.SZ",
+        "rationale": "5日约+27.34%、成交激活约9.62倍，但公司仍续亏。"
+      }
+    ],
+    "non_stock_lead_fates": [
+      {
+        "lead_id": "M1",
+        "fate": "converted_to_stock",
+        "mapped_ts_codes": [
+          "601168.SH",
+          "300231.SZ",
+          "300528.SZ",
+          "603201.SH"
+        ],
+        "reason": "由公司和价格专业视角补出弱市场中的逆势股票，不由市场方向直接猜股。"
+      },
+      {
+        "lead_id": "M2",
+        "fate": "converted_to_stock",
+        "mapped_ts_codes": [
+          "600829.SH",
+          "300039.SZ",
+          "000989.SZ",
+          "002365.SZ",
+          "301257.SZ",
+          "300347.SZ",
+          "002900.SZ",
+          "600252.SH"
+        ],
+        "reason": "由板块专业视角依据历史成员与横截面扩散补出具体成员。"
+      },
+      {
+        "lead_id": "M3",
+        "fate": "not_converted_with_reason",
+        "mapped_ts_codes": [],
+        "reason": "这是共同验证问题，不是股票方向；对所有深度候选检查后转入反证和行动日条件。"
+      }
+    ],
+    "candidate_ledger": [
+      {
+        "ts_code": "601168.SH",
+        "name": "西部矿业",
+        "opportunity_type": "company_catalyst",
+        "opportunity_type_reason": "主要传导来自铜、金银价格推动的半年度经营业绩预增，板块逆势价格是确认而非主因。",
+        "type_evidence": ["7月10日业绩预告", "预告增长114%—130%", "主营矿产价格传导"],
+        "type_confidence": "high",
+        "source_lead_ids": ["C1", "P8"],
+        "lens_reviews": {
+          "market": {"support": "弱市场中连续5日上涨。", "counter": "市场整体仍偏弱。", "unknown": "风险偏好何时企稳未知。"},
+          "sector": {"support": "显著跑赢有色金属一级行业。", "counter": "行业5日中位数约-6.41%，不是板块扩散。", "unknown": "铜价强势持续性未知。"},
+          "company": {"support": "业绩预增原因直接连接主营铜、金银价格。", "counter": "利润对商品价格敏感。", "unknown": "量价贡献拆分未知。"},
+          "price": {"support": "5日约+16.73%、形成日约+1.99%、换手约2.83%。", "counter": "已连续5日上涨。", "unknown": "行动日开盘跳空未知。"}
+        },
+        "final_fate": "selected",
+        "fate_stage": "final_decision",
+        "primary_reason": "经营催化、逆板块价格确认、流动性和剩余路径的组合优于其他公司催化。"
+      },
+      {
+        "ts_code": "000989.SZ",
+        "name": "九芝堂",
+        "opportunity_type": "company_catalyst",
+        "opportunity_type_reason": "并表公司经营、原有产品销量与成本效率改善是主要传导，医药扩散提供辅助确认。",
+        "type_evidence": ["7月11日业绩预告", "预告增长67.63%—83.63%", "主营销量与效率改善"],
+        "type_confidence": "high",
+        "source_lead_ids": ["S3", "C2", "P10"],
+        "lens_reviews": {
+          "market": {"support": "显著跑赢弱市场。", "counter": "行动日仍受弱市场拖累。", "unknown": "风险偏好未知。"},
+          "sector": {"support": "中药与医药生物多日扩散。", "counter": "医药短线整体偏拥挤。", "unknown": "扩散持续性未知。"},
+          "company": {"support": "预增同时来自并表经营与原有主营改善。", "counter": "并表贡献可能降低可比性。", "unknown": "并表与原业务贡献比例未知。"},
+          "price": {"support": "5日约+19.55%，形成日回撤后仍处20日高点约93.6%。", "counter": "形成日约-3.30%，且有异常波动公告。", "unknown": "回撤是换手还是趋势转弱未知。"}
+        },
+        "final_fate": "selected",
+        "fate_stage": "final_decision",
+        "primary_reason": "主营改善与板块扩散重叠，形成日回撤提供的剩余路径优于更拥挤的同类。"
+      },
+      {
+        "ts_code": "002365.SZ",
+        "name": "永安药业",
+        "opportunity_type": "company_catalyst",
+        "opportunity_type_reason": "形成日前最新增量是牛磺酸销量和售价共同增长所驱动的业绩预告。",
+        "type_evidence": ["7月15日业绩预告", "预告增长219.08%—289.99%", "牛磺酸量价增长"],
+        "type_confidence": "high",
+        "source_lead_ids": ["S4", "C4", "P9"],
+        "lens_reviews": {
+          "market": {"support": "弱市场中形成日涨停。", "counter": "弱市场会放大次日追涨风险。", "unknown": "行动日风险偏好未知。"},
+          "sector": {"support": "原料药方向多数成员5日上涨。", "counter": "个股涨幅远高于板块中位数。", "unknown": "板块能否继续扩散未知。"},
+          "company": {"support": "预增直接来自主营牛磺酸量价增长。", "counter": "净利润绝对规模仍不大。", "unknown": "售价持续性和成本变化未知。"},
+          "price": {"support": "形成日约+10.02%，披露后已有正向交易反应。", "counter": "5日约+30.75%且收于20日高位，剩余路径最紧。", "unknown": "次日能否正常成交未知。"}
+        },
+        "final_fate": "selected",
+        "fate_stage": "final_decision",
+        "primary_reason": "主营量价催化最直接且披露后确认明确，但只在严格行动日条件下保留。"
+      },
+      {
+        "ts_code": "001395.SZ",
+        "name": "亚联机械",
+        "opportunity_type": "company_catalyst",
+        "opportunity_type_reason": "高单价项目与产品销售推动业绩增长。",
+        "type_evidence": ["预告增长59.63%", "境外项目与钢带改造销售"],
+        "type_confidence": "high",
+        "source_lead_ids": ["C3", "P7"],
+        "lens_reviews": {
+          "market": {"support": "弱市场中逆势。", "counter": "小盘高换手受风险偏好影响大。", "unknown": "次日承接未知。"},
+          "sector": {"support": "独立强于机械设备。", "counter": "机械设备5日中位数约-4.09%。", "unknown": "无板块共振。"},
+          "company": {"support": "经营性增长原因清晰。", "counter": "项目验收节奏可能波动。", "unknown": "下半年订单延续性未知。"},
+          "price": {"support": "5日约+24.59%、成交激活约13.35倍。", "counter": "换手约16.83%、接近20日高位。", "unknown": "异常波动后的承接未知。"}
+        },
+        "final_fate": "rejected",
+        "fate_stage": "final_decision",
+        "primary_reason": "短期拥挤和项目节奏风险高于西部矿业、九芝堂，剩余路径不足以进入前三。"
+      },
+      {
+        "ts_code": "002432.SZ",
+        "name": "九安医疗",
+        "opportunity_type": "company_catalyst",
+        "opportunity_type_reason": "业绩预告是主要新变化，但收益主要来自投资估值而非医疗主业。",
+        "type_evidence": ["预告增长204.29%—269.50%", "科创投资估值上涨"],
+        "type_confidence": "medium",
+        "source_lead_ids": ["C5"],
+        "lens_reviews": {
+          "market": {"support": "形成日逆势上涨。", "counter": "弱市场压制估值型收益。", "unknown": "风险偏好未知。"},
+          "sector": {"support": "医药扩散。", "counter": "催化与医疗主业联系弱。", "unknown": "板块持续性未知。"},
+          "company": {"support": "利润增幅大。", "counter": "主要为底层标的估值上涨。", "unknown": "估值收益可持续性未知。"},
+          "price": {"support": "形成日约+7.48%、5日约+23.37%。", "counter": "短期涨幅较大、换手约14.13%。", "unknown": "员工持股事项影响未知。"}
+        },
+        "final_fate": "rejected",
+        "fate_stage": "joint_validation",
+        "primary_reason": "非主营投资收益的传导质量明显弱于永安药业。"
+      },
+      {
+        "ts_code": "600829.SH",
+        "name": "人民同泰",
+        "opportunity_type": "sector_diffusion",
+        "opportunity_type_reason": "主要依据医药流通多日扩散与板块内相对强势，无独立公司催化。",
+        "type_evidence": ["医药流通5日上涨面约95.8%", "5日连续上涨", "成交激活"],
+        "type_confidence": "high",
+        "source_lead_ids": ["S1", "P3"],
+        "lens_reviews": {
+          "market": {"support": "逆弱市场。", "counter": "风险偏好收缩。", "unknown": "行动日承接未知。"},
+          "sector": {"support": "医药流通扩散充分。", "counter": "医药短线拥挤。", "unknown": "扩散是否见顶未知。"},
+          "company": {"support": "医药经销业务与板块真实相关。", "counter": "没有形成日前独立公司增量。", "unknown": "基本面增量未知。"},
+          "price": {"support": "5日约+30.49%、成交激活约12.83倍。", "counter": "连续5日上涨并发布异常波动公告。", "unknown": "行动日是否冲高回落未知。"}
+        },
+        "final_fate": "rejected",
+        "fate_stage": "final_decision",
+        "primary_reason": "板块扩散真实，但短期累计涨幅和成交拥挤已显著压缩剩余路径。"
+      },
+      {
+        "ts_code": "300231.SZ",
+        "name": "银信科技",
+        "opportunity_type": "independent_price_anomaly",
+        "opportunity_type_reason": "无可确认公司催化，主要依据弱计算机板块中的连续价量异常。",
+        "type_evidence": ["形成日约+10.79%", "5日约+30.65%", "成交激活约9.53倍"],
+        "type_confidence": "high",
+        "source_lead_ids": ["P2"],
+        "lens_reviews": {
+          "market": {"support": "显著逆市场。", "counter": "弱市场中的高换手异动更脆弱。", "unknown": "行动日风险偏好未知。"},
+          "sector": {"support": "显著跑赢计算机板块。", "counter": "IT服务没有扩散。", "unknown": "独立强势持续性未知。"},
+          "company": {"support": "主营为数据中心IT基础设施服务。", "counter": "未找到形成日前公司经营增量。", "unknown": "7月16日收盘后控股股东、实际控制人诉讼影响未知。"},
+          "price": {"support": "1、3、5日均强且成交激活。", "counter": "3日约+34.67%、换手约18.88%，短期透支。", "unknown": "收盘后诉讼尚无价格反应。"}
+        },
+        "final_fate": "rejected",
+        "fate_stage": "joint_validation",
+        "primary_reason": "短期透支叠加收盘后诉讼未知，行动日前无法证明仍优于公司催化候选。"
+      },
+      {
+        "ts_code": "300528.SZ",
+        "name": "幸福蓝海",
+        "opportunity_type": "independent_price_anomaly",
+        "opportunity_type_reason": "主要依据影视院线方向中的独立价量推进。",
+        "type_evidence": ["形成日约+5.89%", "5日约+25.37%", "成交激活约5.70倍"],
+        "type_confidence": "medium",
+        "source_lead_ids": ["P4"],
+        "lens_reviews": {
+          "market": {"support": "逆市场上涨。", "counter": "弱市场中的小盘异动。", "unknown": "次日承接未知。"},
+          "sector": {"support": "院线小组价格较强。", "counter": "组内仅少量成员且成交高度集中。", "unknown": "扩散可靠性不足。"},
+          "company": {"support": "主营确属电影与电视剧。", "counter": "无形成日前可确认公司增量。", "unknown": "收盘后风险提示影响未知。"},
+          "price": {"support": "1、3、5日连续强。", "counter": "短期约+25%且接近20日高位。", "unknown": "风险提示后反应未知。"}
+        },
+        "final_fate": "rejected",
+        "fate_stage": "joint_validation",
+        "primary_reason": "收盘后风险提示尚无交易反应，且小组覆盖过窄。"
+      },
+      {
+        "ts_code": "003001.SZ",
+        "name": "中岩大地",
+        "opportunity_type": "independent_price_anomaly",
+        "opportunity_type_reason": "价格异动是唯一支持，行业和公司均不支持。",
+        "type_evidence": ["5日约+37.62%", "连续5日上涨"],
+        "type_confidence": "high",
+        "source_lead_ids": ["C13", "P1"],
+        "lens_reviews": {
+          "market": {"support": "逆市场。", "counter": "高波动。", "unknown": "承接未知。"},
+          "sector": {"support": "跑赢建筑装饰。", "counter": "行业5日中位数仅约+1.54%。", "unknown": "无扩散。"},
+          "company": {"support": "主营联系可确认。", "counter": "预告首亏且订单落地不及预期。", "unknown": "新项目启动时间未知。"},
+          "price": {"support": "强势连续。", "counter": "5日涨幅高、估值高、异常波动。", "unknown": "短期透支程度。"}
+        },
+        "final_fate": "rejected",
+        "fate_stage": "joint_validation",
+        "primary_reason": "公司首亏是直接反证，价格异动不足以覆盖。"
+      },
+      {
+        "ts_code": "603201.SH",
+        "name": "常润股份",
+        "opportunity_type": "independent_price_anomaly",
+        "opportunity_type_reason": "主要依据连续价格推进和较低的中期位置。",
+        "type_evidence": ["5日约+28.25%", "连续5日上涨", "20日位置约83.1%"],
+        "type_confidence": "medium",
+        "source_lead_ids": ["P5"],
+        "lens_reviews": {
+          "market": {"support": "逆市场。", "counter": "市场风险高。", "unknown": "行动日承接未知。"},
+          "sector": {"support": "跑赢汽车。", "counter": "其他汽车零部件未扩散。", "unknown": "无共同动力。"},
+          "company": {"support": "主营汽车维修设备与零部件可确认。", "counter": "无新增公司催化。", "unknown": "订单变化未知。"},
+          "price": {"support": "价格低于20日高位。", "counter": "成交激活仅约1.23倍，推进缺少量能增量。", "unknown": "异常波动后持续性未知。"}
+        },
+        "final_fate": "rejected",
+        "fate_stage": "joint_validation",
+        "primary_reason": "量能激活不足，不能超过价量和催化更完整的候选。"
+      },
+      {
+        "ts_code": "300039.SZ",
+        "name": "上海凯宝",
+        "opportunity_type": "sector_diffusion",
+        "opportunity_type_reason": "中药扩散是主要来源，目录调整仅有标题证据。",
+        "type_evidence": ["中药扩散", "5日约+28.70%"],
+        "type_confidence": "high",
+        "source_lead_ids": ["S2", "P11"],
+        "lens_reviews": {
+          "market": {"support": "逆市场。", "counter": "短线拥挤。", "unknown": "承接未知。"},
+          "sector": {"support": "中药上涨面广。", "counter": "个股已明显跑在板块前面。", "unknown": "扩散持续性未知。"},
+          "company": {"support": "主营痰热清等中成药。", "counter": "目录调整公告只有标题，材料性未知。", "unknown": "产品影响规模未知。"},
+          "price": {"support": "形成日约+5.61%。", "counter": "5日约+28.70%、接近20日高位。", "unknown": "剩余路径有限。"}
+        },
+        "final_fate": "rejected",
+        "fate_stage": "final_decision",
+        "primary_reason": "短期透支且公司增量材料性不足，弱于九芝堂。"
+      },
+      {
+        "ts_code": "301257.SZ",
+        "name": "普蕊斯",
+        "opportunity_type": "sector_diffusion",
+        "opportunity_type_reason": "医疗研发外包扩散是主要来源。",
+        "type_evidence": ["细分方向5日中位数约18.44%", "5日约+29.57%"],
+        "type_confidence": "high",
+        "source_lead_ids": ["S5", "P6"],
+        "lens_reviews": {
+          "market": {"support": "逆市场。", "counter": "高波动。", "unknown": "承接未知。"},
+          "sector": {"support": "医疗研发外包扩散强。", "counter": "细分离散度和集中度较高。", "unknown": "扩散是否持续未知。"},
+          "company": {"support": "主营临床试验现场管理。", "counter": "无新公司增量。", "unknown": "订单变化未知。"},
+          "price": {"support": "形成日约+14.02%。", "counter": "20日约+53.11%，已明显透支。", "unknown": "高换手持续性未知。"}
+        },
+        "final_fate": "rejected",
+        "fate_stage": "final_decision",
+        "primary_reason": "20日累计涨幅过高，剩余路径明显弱于医药公司催化。"
+      },
+      {
+        "ts_code": "300347.SZ",
+        "name": "泰格医药",
+        "opportunity_type": "sector_diffusion",
+        "opportunity_type_reason": "医疗研发外包扩散与流动性共同提供线索。",
+        "type_evidence": ["5日约+24.26%", "20日约+34.71%"],
+        "type_confidence": "high",
+        "source_lead_ids": ["S6"],
+        "lens_reviews": {
+          "market": {"support": "逆市场。", "counter": "市场弱。", "unknown": "风险偏好未知。"},
+          "sector": {"support": "医疗服务扩散。", "counter": "细分已有较大累计涨幅。", "unknown": "扩散持续性未知。"},
+          "company": {"support": "主营与细分真实相关。", "counter": "无新公司事件。", "unknown": "经营增量未知。"},
+          "price": {"support": "形成日约+4.03%。", "counter": "20日约+34.71%，剩余路径受限。", "unknown": "趋势延续未知。"}
+        },
+        "final_fate": "rejected",
+        "fate_stage": "final_decision",
+        "primary_reason": "累计涨幅高且缺少独立增量。"
+      },
+      {
+        "ts_code": "002900.SZ",
+        "name": "哈三联",
+        "opportunity_type": "sector_diffusion",
+        "opportunity_type_reason": "价格主要由医药扩散解释，公司层反而提供负面证据。",
+        "type_evidence": ["5日约+27.34%", "医药扩散"],
+        "type_confidence": "high",
+        "source_lead_ids": ["S7", "C12", "P12"],
+        "lens_reviews": {
+          "market": {"support": "逆市场。", "counter": "高换手。", "unknown": "承接未知。"},
+          "sector": {"support": "化学制剂扩散。", "counter": "跟随特征强。", "unknown": "扩散持续性未知。"},
+          "company": {"support": "亏损收窄。", "counter": "预告仍续亏且集采、价格低迷。", "unknown": "扭亏时间未知。"},
+          "price": {"support": "成交激活约9.62倍。", "counter": "5日涨幅高、换手约20.92%。", "unknown": "价格效率未知。"}
+        },
+        "final_fate": "rejected",
+        "fate_stage": "joint_validation",
+        "primary_reason": "公司仍续亏且高换手，板块跟涨不足以入选。"
+      },
+      {
+        "ts_code": "600252.SH",
+        "name": "中恒集团",
+        "opportunity_type": "sector_diffusion",
+        "opportunity_type_reason": "中药扩散是唯一正面来源。",
+        "type_evidence": ["5日约+18.95%", "中药扩散"],
+        "type_confidence": "high",
+        "source_lead_ids": ["S8", "C14"],
+        "lens_reviews": {
+          "market": {"support": "逆市场。", "counter": "市场弱。", "unknown": "承接未知。"},
+          "sector": {"support": "中药扩散。", "counter": "板块不能替代公司恶化。", "unknown": "扩散持续性未知。"},
+          "company": {"support": "无。", "counter": "预告首亏、售价下降和减值。", "unknown": "改善时间未知。"},
+          "price": {"support": "形成日约+3.20%。", "counter": "价格与公司事实背离。", "unknown": "背离持续性未知。"}
+        },
+        "final_fate": "rejected",
+        "fate_stage": "joint_validation",
+        "primary_reason": "公司首亏与主营售价下降足以否定板块跟涨。"
+      },
+      {
+        "ts_code": "001309.SZ",
+        "name": "德明利",
+        "opportunity_type": "company_catalyst",
+        "opportunity_type_reason": "存储景气和产品升级推动大幅扭亏。",
+        "type_evidence": ["7月15日扭亏预告", "存储需求与价格上行"],
+        "type_confidence": "high",
+        "source_lead_ids": ["C6"],
+        "lens_reviews": {
+          "market": {"support": "催化材料性高。", "counter": "电子板块和市场均弱。", "unknown": "风险偏好未知。"},
+          "sector": {"support": "存储逻辑明确。", "counter": "电子5日中位数约-15.44%。", "unknown": "行业价格持续性未知。"},
+          "company": {"support": "主营扭亏原因清晰。", "counter": "披露后价格未确认。", "unknown": "供给紧张持续性未知。"},
+          "price": {"support": "中期仍有历史识别。", "counter": "形成日约-10%、5日约-30.72%。", "unknown": "跌停后的流动性未知。"}
+        },
+        "final_fate": "rejected",
+        "fate_stage": "joint_validation",
+        "primary_reason": "披露后价格反向反应过强。"
+      },
+      {
+        "ts_code": "603045.SH",
+        "name": "福达合金",
+        "opportunity_type": "company_catalyst",
+        "opportunity_type_reason": "电力基建和新兴应用订单推动经营预增。",
+        "type_evidence": ["经营性高增预告", "订单与客户结构改善"],
+        "type_confidence": "high",
+        "source_lead_ids": ["C7"],
+        "lens_reviews": {
+          "market": {"support": "经营增量明确。", "counter": "弱市场。", "unknown": "风险偏好未知。"},
+          "sector": {"support": "下游需求逻辑明确。", "counter": "无形成日板块扩散支持。", "unknown": "订单持续性未知。"},
+          "company": {"support": "主营和订单传导清楚。", "counter": "披露后价格反向。", "unknown": "利润持续性未知。"},
+          "price": {"support": "中期回撤后位置较低。", "counter": "形成日约-7.82%、5日约-10.48%。", "unknown": "止跌时间未知。"}
+        },
+        "final_fate": "rejected",
+        "fate_stage": "joint_validation",
+        "primary_reason": "缺少价格确认。"
+      },
+      {
+        "ts_code": "601869.SH",
+        "name": "长飞光纤",
+        "opportunity_type": "company_catalyst",
+        "opportunity_type_reason": "算力数据中心需求推动高增。",
+        "type_evidence": ["经营性高增预告", "新型光纤需求"],
+        "type_confidence": "high",
+        "source_lead_ids": ["C8"],
+        "lens_reviews": {
+          "market": {"support": "公司增量明确。", "counter": "弱市场。", "unknown": "风险偏好未知。"},
+          "sector": {"support": "算力需求传导。", "counter": "通信5日中位数约-6.84%。", "unknown": "行业修复时间未知。"},
+          "company": {"support": "主营需求与业绩传导明确。", "counter": "披露后价格反向。", "unknown": "产品结构贡献未知。"},
+          "price": {"support": "60日仍为正。", "counter": "形成日约-5.57%、5日约-8.96%。", "unknown": "止跌未知。"}
+        },
+        "final_fate": "rejected",
+        "fate_stage": "joint_validation",
+        "primary_reason": "披露后缺乏必要价格识别。"
+      },
+      {
+        "ts_code": "300604.SZ",
+        "name": "长川科技",
+        "opportunity_type": "company_catalyst",
+        "opportunity_type_reason": "高端测试机需求与规模效应推动预增。",
+        "type_evidence": ["预告增长110.76%—134.18%", "数字测试机需求"],
+        "type_confidence": "high",
+        "source_lead_ids": ["C9"],
+        "lens_reviews": {
+          "market": {"support": "经营增量。", "counter": "市场弱。", "unknown": "风险偏好未知。"},
+          "sector": {"support": "半导体需求。", "counter": "电子板块急跌。", "unknown": "板块企稳时间未知。"},
+          "company": {"support": "主营增长原因清晰。", "counter": "前期涨幅已大。", "unknown": "订单持续性未知。"},
+          "price": {"support": "20日仍约+11.03%。", "counter": "5日约-21.62%、60日约+94.60%。", "unknown": "去拥挤时间未知。"}
+        },
+        "final_fate": "rejected",
+        "fate_stage": "joint_validation",
+        "primary_reason": "中期过度上涨后短期急跌，剩余路径与参与性均不如入选者。"
+      },
+      {
+        "ts_code": "002156.SZ",
+        "name": "通富微电",
+        "opportunity_type": "company_catalyst",
+        "opportunity_type_reason": "AI、存储与国产化带动产能利用率和中高端收入。",
+        "type_evidence": ["7月15日预增", "主营与产业需求传导"],
+        "type_confidence": "high",
+        "source_lead_ids": ["C10"],
+        "lens_reviews": {
+          "market": {"support": "公司增量明确。", "counter": "弱市场。", "unknown": "风险偏好未知。"},
+          "sector": {"support": "存储景气逻辑。", "counter": "电子板块5日大幅回落。", "unknown": "板块企稳未知。"},
+          "company": {"support": "经营性预增。", "counter": "含产业投资收益增厚。", "unknown": "经营与投资贡献拆分未知。"},
+          "price": {"support": "20日约+12.99%。", "counter": "形成日约-3.51%，未确认新预告。", "unknown": "承接未知。"}
+        },
+        "final_fate": "rejected",
+        "fate_stage": "joint_validation",
+        "primary_reason": "新预告后的价格确认弱于西部矿业和永安药业。"
+      },
+      {
+        "ts_code": "002384.SZ",
+        "name": "东山精密",
+        "opportunity_type": "company_catalyst",
+        "opportunity_type_reason": "传统主业与光模块产能共同推动预增。",
+        "type_evidence": ["7月15日预增", "光模块新增产能和客户"],
+        "type_confidence": "high",
+        "source_lead_ids": ["C11"],
+        "lens_reviews": {
+          "market": {"support": "形成日逆势上涨。", "counter": "弱市场。", "unknown": "风险偏好未知。"},
+          "sector": {"support": "AI相关业务传导。", "counter": "电子板块大幅下跌。", "unknown": "板块企稳未知。"},
+          "company": {"support": "经营性增长与新业务明确。", "counter": "产业投资也增厚利润。", "unknown": "光模块贡献比例未知。"},
+          "price": {"support": "形成日约+2.40%。", "counter": "60日约+65.82%、估值较高。", "unknown": "剩余路径未知。"}
+        },
+        "final_fate": "rejected",
+        "fate_stage": "final_decision",
+        "primary_reason": "中期累计涨幅和估值压缩了剩余路径。"
+      }
+    ],
+    "candidate_conservation": {
+      "deduped_candidates": 21,
+      "selected": 3,
+      "rejected": 18,
+      "unresolved": 0,
+      "stock_leads_traced": true,
+      "non_stock_leads_traced": true,
+      "sources_preserved": true
+    }
+  },
+  "data_quality_issues": [
+    {
+      "fact_or_dataset": "trade_calendar",
+      "status": "failed",
+      "effect_on_decision": "最初按日分区查找未命中，因为该数据集按年份分区；随后仅读取2026年分区中7月17—23日开市字段，确认7月17日为行动日。"
+    },
+    {
+      "fact_or_dataset": "research_fact_partitions metadata",
+      "status": "failed",
+      "effect_on_decision": "一次元数据查询引用不存在的partition_key列，未返回事实行；改用已存在字段后继续。"
+    },
+    {
+      "fact_or_dataset": "DuckDB timezone result conversion",
+      "status": "failed",
+      "effect_on_decision": "两次直接向Python返回带时区时间戳时因运行环境缺少pytz失败，均未返回事实行；随后在SQL中转为文本。"
+    },
+    {
+      "fact_or_dataset": "earnings_forecast multi-partition schema",
+      "status": "failed",
+      "effect_on_decision": "首次跨分区读取因空类型与DOUBLE类型不一致而在返回事实行前失败；随后仅选2026-06和2026-07分区并按列合并。"
+    },
+    {
+      "fact_or_dataset": "earnings_express.yoy_net_profit",
+      "status": "unsupported",
+      "effect_on_decision": "该列返回值呈现绝对金额量级而非可解释同比百分比，未用于候选选择或比较。"
+    },
+    {
+      "fact_or_dataset": "announcement",
+      "status": "unsupported",
+      "effect_on_decision": "只读取形成日前公告标题和结构化候选类型，没有读取PDF正文；标题可确认，材料性保持未知。"
+    },
+    {
+      "fact_or_dataset": "action-day tradability",
+      "status": "unavailable_at_cutoff",
+      "effect_on_decision": "行动日是否停牌、一字涨跌停、跳空或流动性异常在形成日不可知，全部转为参与条件。"
+    },
+    {
+      "fact_or_dataset": "local research registry",
+      "status": "unsupported",
+      "effect_on_decision": "白名单不允许读取且无法确认不含历史验证或调优内容；未使用任何本地历史关系或验证结果。"
+    }
+  ],
+  "selected_stocks": [
+    {
+      "priority": 1,
+      "ts_code": "601168.SH",
+      "name": "西部矿业",
+      "opportunity_type": "company_catalyst",
+      "opportunity_type_reason": "半年度业绩预增的主要传导来自主营铜、金银产品价格上涨；有色板块逆势价格表现只作为确认。",
+      "type_evidence": [
+        "2026-07-10披露半年度业绩预告，形成日前已可知",
+        "预计归母净利润同比增长114%—130%",
+        "公司说明铜类、金银类产品价格上涨推动业绩",
+        "有色金属一级行业5日中位数约-6.41%时，该股5日约+16.73%"
+      ],
+      "type_confidence": "high",
+      "new_change": "半年度业绩由商品价格改善推动大幅预增，披露后股价在弱市场和弱有色板块中继续推进。",
+      "target_thesis": "主营矿产品价格改善带来的盈利重估若延续，叠加披露后逆板块的温和价格识别，未来约20个交易日仍可能出现进一步可操作上涨路径。",
+      "causal_chain": "铜、金银产品价格同比上涨 → 矿产主营利润预增114%—130% → 弱有色板块中个股连续5日相对强势 → 换手温和且尚未远离20日高位 → 条件性保留后续重估空间。",
+      "evidence_by_lens": {
+        "market": ["主要指数5日普遍下跌，该股连续5日上涨。"],
+        "sector": ["有色金属一级行业5日中位数约-6.41%，该股约+16.73%，强势不是板块普涨替代。"],
+        "company": ["预告增长114%—130%，原因直接指向铜类、金银类产品价格上涨。"],
+        "price": ["形成日约+1.99%，5日约+16.73%，20日约+7.50%，换手约2.83%，收盘约为20日高点的97.6%。"]
+      },
+      "why_this_over_alternatives": "同为公司催化，亚联机械虽有经营预增，但5日约+24.59%、成交激活约13.35倍且换手约16.83%，拥挤度更高；西部矿业的业绩绝对规模、流动性和温和价格推进更优。跨类型比较，人民同泰和银信科技虽更强势，但前者5日已约+30.49%，后者有收盘后诉讼未知，剩余路径均更差。",
+      "strongest_counter_evidence": "有色金属板块整体仍弱，且个股已连续5日上涨；若商品价格回落或形成日强势只是短期避险集中，盈利重估和相对强势都可能迅速消失。",
+      "key_unknowns": [
+        "铜、金银价格改善在后续20个交易日是否延续",
+        "量、价对预增的具体贡献拆分",
+        "行动日开盘是否跳空消耗剩余路径"
+      ],
+      "secondary_unknowns": ["公告正文未读取，预告区间之外的成本与套保影响未知。"],
+      "action_day_participation_conditions": [
+        "行动日未停牌且不存在一字涨停或一字跌停，报价和成交可靠",
+        "开盘跳空未明显消耗相对20日高位的剩余路径，不追逐失去流动性的高开",
+        "开盘后价格和成交未立即否定形成日的相对强势"
+      ],
+      "abandonment_conditions": [
+        "行动日出现无法正常参与的停牌或单一价格封板",
+        "公司对预增原因作出实质性下修或商品价格传导被否定",
+        "相对有色板块强势快速消失并跌破形成日前推进区间"
+      ]
+    },
+    {
+      "priority": 2,
+      "ts_code": "000989.SZ",
+      "name": "九芝堂",
+      "opportunity_type": "company_catalyst",
+      "opportunity_type_reason": "半年度预增同时来自并表公司经营、原有产品销量和成本效率改善；中药与医药扩散为辅助确认。",
+      "type_evidence": [
+        "2026-07-11披露半年度业绩预告",
+        "预计归母净利润同比增长67.63%—83.63%",
+        "原有主营产品销量提升并加强成本管控",
+        "中药与医药生物多日扩散"
+      ],
+      "type_confidence": "high",
+      "new_change": "并表公司经营良好，同时原有主营的产品销量、营销和成本效率改善，形成经营性预增。",
+      "target_thesis": "并表与原有主营改善若能共同延续，在医药扩散背景下，形成日回撤后的未完全透支位置仍可能支持未来约20个交易日继续重估。",
+      "causal_chain": "并表经营贡献加原有产品销量和效率改善 → 半年度净利润预增67.63%—83.63% → 中药板块扩散并推动前期识别 → 形成日回撤但仍保持5日相对强势 → 条件性保留再推进空间。",
+      "evidence_by_lens": {
+        "market": ["全市场20日中位数约-7.53%，该股20日约+22.90%。"],
+        "sector": ["医药生物5日中位数约+8.68%、约89.5%成员5日上涨，中药细分扩散同样明显。"],
+        "company": ["预告增长67.63%—83.63%，同时说明并表公司经营、原有产品销量和成本效率改善。"],
+        "price": ["5日约+19.55%，形成日约-3.30%，成交激活约8.47倍，收盘约为20日高点的93.6%。"]
+      },
+      "why_this_over_alternatives": "同为公司催化，亚联机械的项目验收节奏更集中、短期换手和成交激活更高；九芝堂有更宽的医药扩散支撑，形成日回撤后价格位置更低。跨类型比较，人民同泰缺少独立公司增量且5日涨幅约30.49%，银信科技则有形成日收盘后诉讼未知。",
+      "strongest_counter_evidence": "形成日约-3.30%，此前已发布股票交易异常波动公告；若回撤代表获利盘退潮而非健康换手，板块扩散和公司预增都不足以保证剩余路径。",
+      "key_unknowns": [
+        "并表公司与原有主营对利润增量的具体比例",
+        "形成日回撤是换手还是趋势转弱",
+        "5%以上股东质押变化是否影响行动日风险偏好"
+      ],
+      "secondary_unknowns": ["预告正文之外的产品结构和毛利率拆分未知。"],
+      "action_day_participation_conditions": [
+        "行动日未停牌且报价、成交正常",
+        "不得大幅低开并快速跌破形成日前上涨结构，也不得高开至明显透支位置",
+        "异常波动和股东质押事项未出现新的实质不利披露"
+      ],
+      "abandonment_conditions": [
+        "行动日出现放量下跌并确认形成日回撤为趋势反转",
+        "医药和中药扩散快速坍缩且个股相对强势消失",
+        "业绩预增被下修或主营改善被否定"
+      ]
+    },
+    {
+      "priority": 3,
+      "ts_code": "002365.SZ",
+      "name": "永安药业",
+      "opportunity_type": "company_catalyst",
+      "opportunity_type_reason": "最新增量直接来自主营牛磺酸销量和销售价格共同增长；医药与原料药扩散是重叠来源。",
+      "type_evidence": [
+        "2026-07-15披露半年度业绩预告，2026-07-16 00:00已可用",
+        "预计归母净利润同比增长219.08%—289.99%",
+        "增长原因直接指向牛磺酸销量和售价",
+        "形成日约+10.02%，已有披露后交易反应"
+      ],
+      "type_confidence": "high",
+      "new_change": "主营牛磺酸量价共同增长推动半年度利润大幅预增，形成日价格立即确认。",
+      "target_thesis": "若牛磺酸量价改善具有持续性，形成日的明确价格识别可能触发进一步盈利重估；但只有行动日提供正常流动性且未高开透支时才具有可操作路径。",
+      "causal_chain": "牛磺酸销量和售价增长 → 半年度净利润预增219.08%—289.99% → 形成日涨停确认 → 原料药扩散提供辅助 → 仅在次日不一字封板、不高开透支时保留后续路径。",
+      "evidence_by_lens": {
+        "market": ["弱市场中形成日约+10.02%，公司增量得到明显识别。"],
+        "sector": ["原料药细分5日中位数约+8.44%，多数成员上涨，但该股涨幅远高于板块。"],
+        "company": ["预告增长219.08%—289.99%，原因是主营牛磺酸销量和售价增长，不依赖投资估值。"],
+        "price": ["形成日约+10.02%，5日约+30.75%，20日约+22.72%，60日约-2.49%，成交激活约2.69倍，收于20日高位。"]
+      },
+      "why_this_over_alternatives": "同类最接近的九安医疗预告增幅也高，但主要来自科创投资底层标的估值上涨，主营传导明显更弱；哈三联仍续亏。跨类型比较，人民同泰虽有板块扩散，但缺少公司增量；银信科技有更高成交激活，却存在收盘后诉讼未知。永安药业只因短期透支而排在第三。",
+      "strongest_counter_evidence": "公告前后5日已上涨约30.75%，形成日涨停并收于20日高位，预告带来的短期重估可能已被大幅消化。",
+      "key_unknowns": [
+        "牛磺酸售价与销量改善能否持续",
+        "成本变化是否抵消量价贡献",
+        "行动日是否一字涨停或高开至不可参与位置"
+      ],
+      "secondary_unknowns": ["预告净利润绝对规模不大，后续业绩弹性的持续时间未知。"],
+      "action_day_participation_conditions": [
+        "行动日不得停牌、不得一字涨停或一字跌停，必须有正常双向成交",
+        "若大幅高开或开盘即快速封板导致无法以合理价格参与，则放弃而不是追涨",
+        "若开板，价格和成交需能守住形成日突破而非放量冲高回落"
+      ],
+      "abandonment_conditions": [
+        "行动日无法正常成交或开盘涨幅已明显透支未来路径",
+        "形成日涨停次日出现放量长上影或快速跌回突破前区间",
+        "牛磺酸量价增长被公司后续披露否定"
+      ]
+    }
+  ],
+  "priority_is_contiguous": true,
+  "representative_non_selections": [
+    {
+      "ts_code": "001395.SZ",
+      "name": "亚联机械",
+      "opportunity_type": "company_catalyst",
+      "reason_not_selected": "预告增长59.63%且经营原因清楚，但5日约+24.59%、成交激活约13.35倍、换手约16.83%并接近20日高位；项目验收节奏也比西部矿业的流动性与盈利规模更不稳定。"
+    },
+    {
+      "ts_code": "600829.SH",
+      "name": "人民同泰",
+      "opportunity_type": "sector_diffusion",
+      "reason_not_selected": "医药流通扩散真实，5日上涨面约95.8%，但该股已连续5日上涨约30.49%、成交激活约12.83倍并发布异常波动公告，剩余路径弱于有主营催化的入选者。"
+    },
+    {
+      "ts_code": "300231.SZ",
+      "name": "银信科技",
+      "opportunity_type": "independent_price_anomaly",
+      "reason_not_selected": "1、3、5日价量异常都强，但3日约+34.67%、换手约18.88%；形成日收盘后又披露控股股东、实际控制人涉及诉讼，尚无披露后交易反应，关键行动日风险未能消除。"
+    }
+  ],
+  "common_exposure_note": "3只入选中九芝堂和永安药业都暴露于医药风险偏好，但一个是中药及并表与原有主营改善，另一个是牛磺酸原料药量价催化；西部矿业属于商品价格驱动。重复医药暴露是排序和行动日条件中的风险，不建立行业配额、优化器或仓位权重。",
+  "data_limitations": [
+    "未读取公告PDF正文；只有标题或结构化业绩字段时，超出这些字段的材料性保持未知。",
+    "earnings_express的yoy_net_profit字段语义异常，未参与选择。",
+    "行动日停牌、涨跌停形态、开盘跳空和流动性只有在行动日才能确认。",
+    "本地知识注册表不在白名单且可能含历史验证内容，完全未读取。",
+    "本地事实仓只能代表其已入库且满足知识时间的覆盖；无记录不等于现实中不存在。",
+    "未读取任何形成日之后的行情、公告、身份变化、评价或结果。"
+  ],
+  "future_data_opened": false,
+  "sources_read": {
+    "allowed_method_files": [
+      "AGENTS.md",
+      "docs/architecture/current-v3-architecture.md",
+      ".agents/skills/orchestrating-stock-research/SKILL.md",
+      ".agents/skills/interpreting-market-macro/SKILL.md",
+      ".agents/skills/researching-sectors-industries/SKILL.md",
+      ".agents/skills/researching-company-events/SKILL.md",
+      ".agents/skills/analyzing-price-trading/SKILL.md",
+      "system skill: superpowers:using-superpowers"
+    ],
+    "warehouse_metadata": [
+      {
+        "source": "research.duckdb.research_fact_partitions",
+        "columns_used": ["dataset_id", "partition_value", "relative_path", "min_available_at", "max_available_at"],
+        "purpose": "只用于安全构造分区路径和读取schema；不作为股票事实或未来结果。"
+      }
+    ],
+    "fact_datasets": [
+      {
+        "dataset": "trade_calendar",
+        "columns_used": ["exchange", "cal_date", "is_open", "pretrade_date"],
+        "business_date_filter": "cal_date between 2026-07-17 and 2026-07-23；只用2026-07-17确定下一真实交易日",
+        "knowledge_time_filter": "交易所日历唯一例外；未作为市场或股票证据"
+      },
+      {
+        "dataset": "equity_daily",
+        "columns_used": ["trade_date", "ts_code", "open", "high", "low", "close", "pre_close", "pct_chg", "amount", "available_at", "revision_no"],
+        "business_date_filter": "2026-04-01 <= trade_date <= 2026-07-16",
+        "knowledge_time_filter": "available_at <= 2026-07-16T23:59:59+08:00"
+      },
+      {
+        "dataset": "adj_factor",
+        "columns_used": ["trade_date", "ts_code", "adj_factor", "available_at", "revision_no"],
+        "business_date_filter": "2026-04-01 <= trade_date <= 2026-07-16",
+        "knowledge_time_filter": "available_at <= as_of"
+      },
+      {
+        "dataset": "daily_basic",
+        "columns_used": ["trade_date", "ts_code", "turnover_rate", "volume_ratio", "pe_ttm", "pb", "total_mv", "circ_mv", "available_at", "revision_no"],
+        "business_date_filter": "trade_date = 2026-07-16",
+        "knowledge_time_filter": "available_at <= as_of"
+      },
+      {
+        "dataset": "stock_limit",
+        "columns_used": ["trade_date", "ts_code", "up_limit", "down_limit", "available_at", "revision_no"],
+        "business_date_filter": "trade_date = 2026-07-16",
+        "knowledge_time_filter": "available_at <= as_of"
+      },
+      {
+        "dataset": "suspension",
+        "columns_used": ["trade_date", "ts_code", "suspend_type", "available_at"],
+        "business_date_filter": "trade_date = 2026-07-16",
+        "knowledge_time_filter": "available_at <= as_of"
+      },
+      {
+        "dataset": "index_daily",
+        "columns_used": ["trade_date", "index_code", "close", "pct_chg", "amount", "available_at", "revision_no"],
+        "business_date_filter": "2026-06-01 <= trade_date <= 2026-07-16",
+        "knowledge_time_filter": "available_at <= as_of"
+      },
+      {
+        "dataset": "security_master",
+        "columns_used": ["ts_code", "name", "market", "exchange", "list_status", "valid_from", "valid_to", "snapshot_date", "available_at", "revision_no"],
+        "business_date_filter": "valid_from <= 2026-07-16 and (valid_to is null or valid_to >= 2026-07-16)",
+        "knowledge_time_filter": "available_at <= as_of"
+      },
+      {
+        "dataset": "industry_member",
+        "columns_used": ["ts_code", "security_name", "industry_system", "level", "industry_name", "valid_from", "valid_to", "available_at", "revision_no"],
+        "business_date_filter": "valid_from <= 2026-07-16 and (valid_to is null or valid_to >= 2026-07-16)",
+        "knowledge_time_filter": "available_at <= as_of"
+      },
+      {
+        "dataset": "company_profile",
+        "columns_used": ["ts_code", "com_name", "province", "city", "main_business", "business_scope", "valid_from", "valid_to", "profile_snapshot_date", "available_at", "revision_no"],
+        "business_date_filter": "valid_from <= 2026-07-16 and (valid_to is null or valid_to >= 2026-07-16)",
+        "knowledge_time_filter": "available_at <= as_of"
+      },
+      {
+        "dataset": "earnings_forecast",
+        "columns_used": ["ts_code", "ann_date", "type", "p_change_min", "p_change_max", "net_profit_min", "net_profit_max", "summary", "change_reason", "report_period", "available_at", "revision_no"],
+        "business_date_filter": "2026-06-15 <= ann_date <= 2026-07-16 and report_period <= 2026-07-16",
+        "knowledge_time_filter": "available_at <= as_of"
+      },
+      {
+        "dataset": "earnings_express",
+        "columns_used": ["ts_code", "ann_date", "revenue", "n_income", "yoy_net_profit", "diluted_eps", "diluted_roe", "report_period", "available_at", "revision_no"],
+        "business_date_filter": "2026-07-08 <= ann_date <= 2026-07-16 and report_period <= 2026-07-16",
+        "knowledge_time_filter": "available_at <= as_of；因字段语义异常未用于选择"
+      },
+      {
+        "dataset": "announcement",
+        "columns_used": ["announcement_id", "ts_code", "security_name", "announcement_time", "title", "candidate_event_types", "classification_is_fact", "hard_risk_candidate", "available_at", "revision_no"],
+        "business_date_filter": "2026-06-15 <= date(announcement_time) <= 2026-07-16；候选联合验证另限精确股票代码",
+        "knowledge_time_filter": "available_at <= as_of"
+      }
+    ]
+  },
+  "max_trade_date_used": "2026-07-16",
+  "max_available_at_used": "2026-07-16T17:26:28+08:00",
+  "max_business_dates_used": {
+    "cal_date_used_for_action_date": "2026-07-17",
+    "trade_date": "2026-07-16",
+    "announcement_time": "2026-07-16T17:26:28+08:00",
+    "ann_date": "2026-07-15",
+    "report_period": "2026-06-30",
+    "security_master_snapshot_date": "2026-07-13",
+    "company_profile_snapshot_date": "2026-07-13",
+    "company_profile_valid_from": "2026-07-13",
+    "industry_member_valid_from_for_cross_section": "2026-06-05"
+  },
+  "coverage_summary": {
+    "market": "合格股票横截面、主要指数与1/5/20日结构可回放。",
+    "sector": "SW2021历史有效成员、一级与相关细分扩散可回放；成员均独立满足知识时间和有效期。",
+    "company": "结构化业绩预告、公告标题与形成日有效公司简介可用；公告正文和部分材料性拆分不可用。",
+    "price": "复权1/3/5/10/20/60日价格、成交激活、换手和价格位置可计算；行动日实际可参与性未知。",
+    "query_failures": 5,
+    "unresolved_candidates": 0
+  }
+}

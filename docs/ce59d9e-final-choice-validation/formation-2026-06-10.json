@@ -1,0 +1,165 @@
+{
+  "task_type": "historical_simulation",
+  "research_objective": "只使用形成日当时可见的信息，从合格A股范围中选择0—5只未来约20个交易日更可能形成可操作显著上涨路径、重点观察能否达到约20%涨幅的股票；约20%仅是研究目标，不是阈值、评分或收益承诺。",
+  "formation_date": "2026-06-10",
+  "action_date": "2026-06-11",
+  "as_of": "2026-06-10T23:59:59+08:00",
+  "selection_universe": "上海主板、深圳主板和创业板；形成日有可靠收盘报价和正常成交，并能用形成日有效的代码、历史行业名称、涨跌停带和停牌事实核对身份与可交易性。",
+  "exclusions": ["科创板", "北交所", "场内基金", "ST或*ST", "退市整理", "形成日停牌或无可靠报价", "行动日明确无法正常参与的股票"],
+  "frozen_research_brief": {
+    "market_question": "广泛下跌环境中是否存在真实防御扩散，还是只有少数深跌反弹。",
+    "sector_question": "唯一5日中位收益为正的银行行业能否提供可参与、未透支且优于同类的成员。",
+    "company_question": "近期重大合同或重组标题是否具有形成日前可确认的材料性，并得到公告后价格确认。",
+    "price_question": "弱市相对强势能否体现连续独立增量，而不是单日涨停、低位反弹或高成交反转。",
+    "critical_unknowns": ["行动日开盘与实际交易状态未知", "security_master和company_profile在截止时点没有可用历史版本", "重大合同和重组正文未在全市场发现阶段读取，标题不能证明金额与材料性"],
+    "principal_refutations": ["市场下跌继续扩大并拖累防御板块", "候选强势只由形成日单日大涨贡献", "放量上涨后行动日高开透支或长上影回落"]
+  },
+  "market_search_context": {
+    "primary_interpretation": "市场处于广泛下跌和风险偏好收缩状态，削弱依赖普遍上涨的命题；只保留银行防御扩散和少量相对市场、相对行业均清晰的独立路径。",
+    "facts": [
+      "合格范围4377只；形成日上涨占比29.77%，单日收益中位数-1.28%，5日中位数-4.24%，20日中位数-14.07%。",
+      "合格范围成交额约2.206万亿元，前10只成交额占8.60%，接近20日高点的股票仅2.38%。",
+      "上证综指、深证成指、中证1000、沪深300和创业板指5日分别约-2.22%、-4.78%、-2.77%、-3.85%和-6.50%。",
+      "创业板指形成日下跌2.70%，深证成指下跌2.06%，弱势集中在成长方向。"
+    ],
+    "strongest_counter_evidence": "少数股票在5日内上涨30%—50%以上，但市场中位数显著为负；这更像孤立拥挤而非可广泛依赖的风险偏好。",
+    "unknowns": ["下跌是否在行动日继续扩大", "银行防御扩散能否转化为达到研究目标所需的显著上涨路径"]
+  },
+  "lens_findings": {
+    "market": {"phase": "discovery_and_validation", "primary_interpretation": "整体环境明显逆风，降低板块普涨和追逐极端强股的可信度，但不否定直接公司变化和连续独立价量增量。", "strongest_counter_evidence": "上涨股票不足三成且20日中位跌幅超过14%。", "evidence_sufficiency": "sufficient"},
+    "sector": {"phase": "discovery_and_validation", "primary_interpretation": "银行是唯一5日中位收益为正的一级行业，42只成员全部在形成日上涨、92.9%成员5日上涨，属于防御扩散；其他行业5日中位收益均为负。", "facts": ["银行5日中位收益2.03%、20日中位收益1.80%", "银行形成日上涨面100%，5日上涨面92.9%", "银行5日收益分化仅1.97%，明显低于多数行业"], "strongest_counter_evidence": "银行20日累计中位涨幅仅1.80%，防御性强不等于必然形成20%路径。", "evidence_sufficiency": "sufficient"},
+    "company": {"phase": "discovery_and_validation", "primary_interpretation": "5月15日至6月10日没有新的正向结构化业绩预告或快报线索；重大合同和重组标题众多，但多数缺少正文材料性或价格确认。", "strongest_counter_evidence": "只凭中标或重组标题无法确认金额、条件、完成阶段和利润传导。", "evidence_sufficiency": "partial"},
+    "price": {"phase": "discovery_and_validation", "primary_interpretation": "极端强股大多5日上涨30%以上且含涨停，剩余路径不足；同星科技在20日仍深跌背景下出现4个上涨日和显著相对增量，银行候选则体现低波动连续扩散。", "strongest_counter_evidence": "同星科技形成日上涨7.81%，且此前经历6.68%回撤；银行领涨者形成日也出现加速。", "evidence_sufficiency": "sufficient"}
+  },
+  "candidate_chain": {
+    "skill_leads": [
+      {"lead_id": "M1", "source_skill": "market", "lead_type": "direction", "name": "弱市中的防御扩散", "ts_code": "", "rationale": "上涨面不足三成，只研究不依赖普遍风险偏好的路径。"},
+      {"lead_id": "M2", "source_skill": "market", "lead_type": "group", "name": "银行防御轮动", "ts_code": "", "rationale": "银行是唯一5日中位收益为正且成员广泛上涨的一级行业。"},
+      {"lead_id": "M3", "source_skill": "market", "lead_type": "question", "name": "弱市强股是否只是拥挤反弹", "ts_code": "", "rationale": "多数价格领涨者5日涨幅30%—50%，需要排除透支。"},
+      {"lead_id": "S1", "source_skill": "sector", "lead_type": "group", "name": "银行扩散", "ts_code": "", "rationale": "42只成员形成日全部上涨、5日上涨面92.9%，收益分化低。"},
+      {"lead_id": "S2", "source_skill": "sector", "lead_type": "stock", "name": "青岛银行", "ts_code": "002948.SZ", "rationale": "银行内5日涨幅第一且一季度利润增速最高；反证为解禁和股东减持预披露。"},
+      {"lead_id": "S3", "source_skill": "sector", "lead_type": "stock", "name": "齐鲁银行", "ts_code": "601665.SH", "rationale": "5日6.23%、20日1.25%，成交激活且一季度收入利润双增，无同期结构化供给风险标题。"},
+      {"lead_id": "S4", "source_skill": "sector", "lead_type": "stock", "name": "宁波银行", "ts_code": "002142.SZ", "rationale": "一季度收入利润增长、流动性充足、5日4.67%；价格领导弱于齐鲁银行。"},
+      {"lead_id": "S5", "source_skill": "sector", "lead_type": "stock", "name": "南京银行", "ts_code": "601009.SH", "rationale": "5日4.58%、20日4.11%，连续性较稳；相对增量低于齐鲁和青岛银行。"},
+      {"lead_id": "C1", "source_skill": "company", "lead_type": "stock", "name": "中天科技", "ts_code": "600522.SH", "rationale": "6月6日披露数据中心用耗材项目中标标题；形成日下跌7.86%，价格确认反转。"},
+      {"lead_id": "C2", "source_skill": "company", "lead_type": "stock", "name": "中贝通信", "ts_code": "603220.SH", "rationale": "形成日披露中标通知书标题并当日涨停；正文金额与材料性未知，且只有一个披露后交易日。"},
+      {"lead_id": "C3", "source_skill": "company", "lead_type": "stock", "name": "华峰化学", "ts_code": "002064.SZ", "rationale": "6月6日出现交易相关重组说明，形成日上涨3.40%；交易材料性与主营传导未由标题确认。"},
+      {"lead_id": "C4", "source_skill": "company", "lead_type": "stock", "name": "锐新科技", "ts_code": "300828.SZ", "rationale": "6月9日出现重组说明，形成日仅上涨0.16%，没有必要价格确认。"},
+      {"lead_id": "P1", "source_skill": "price", "lead_type": "stock", "name": "同星科技", "ts_code": "301252.SZ", "rationale": "20日-14.63%而5日+10.69%，5日有4个上涨日并显著跑赢家电和市场。"},
+      {"lead_id": "P2", "source_skill": "price", "lead_type": "stock", "name": "神马股份", "ts_code": "600810.SH", "rationale": "20日-15.78%、5日+6.17%，成交激活；形成日回落1.75%削弱连续性。"},
+      {"lead_id": "P3", "source_skill": "price", "lead_type": "stock", "name": "晨曦航空", "ts_code": "300581.SZ", "rationale": "弱市形成日上涨5.37%，但5日仅1.85%，主要增量集中于单日。"},
+      {"lead_id": "P4", "source_skill": "price", "lead_type": "stock", "name": "中天科技", "ts_code": "600522.SH", "rationale": "5日11.61%、20日15.14%，但形成日放量下跌7.86%，上涨路径出现强反证。"},
+      {"lead_id": "P5", "source_skill": "price", "lead_type": "stock", "name": "中贝通信", "ts_code": "603220.SH", "rationale": "20日-21.75%、形成日涨停，早期路径可能存在；单日贡献和公告材料性未知阻断选择。"}
+    ],
+    "non_stock_lead_fates": [
+      {"lead_id": "M1", "fate": "converted_to_stock", "mapped_ts_codes": ["601665.SH", "002948.SZ", "002142.SZ", "601009.SH", "301252.SZ", "600810.SH", "300581.SZ"], "reason": "映射到银行扩散和弱市独立价量候选。"},
+      {"lead_id": "M2", "fate": "converted_to_stock", "mapped_ts_codes": ["002948.SZ", "601665.SH", "002142.SZ", "601009.SH"], "reason": "由板块Skill从形成日有效银行成员中比较。"},
+      {"lead_id": "M3", "fate": "not_converted_with_reason", "mapped_ts_codes": [], "reason": "作为所有价量候选的拥挤和透支验证问题。"},
+      {"lead_id": "S1", "fate": "converted_to_stock", "mapped_ts_codes": ["002948.SZ", "601665.SH", "002142.SZ", "601009.SH"], "reason": "保留价格领导、基本面和供给风险不同的四个银行对照。"}
+    ],
+    "candidate_ledger": [
+      {"ts_code": "301252.SZ", "name": "同星科技", "opportunity_type": "independent_price_anomaly", "opportunity_type_reason": "主要证据是相对市场和家电板块的连续价量增量，不依赖公司催化。", "type_evidence": ["5日10.69%、20日-14.63%", "5日4个上涨日", "形成日上涨7.81%且成交激活"], "type_confidence": "medium", "source_lead_ids": ["P1"], "lens_reviews": {"market": {"support": "弱市相对强势辨识度高", "counter": "市场继续下跌会放大反转风险", "unknown": "行动日环境"}, "sector": {"support": "5日显著跑赢家电中位-4.34%", "counter": "家电并非扩散方向", "unknown": "独立性持续"}, "company": {"support": "一季度收入同比增长16.29%且仍盈利", "counter": "净利润同比下降38.55%、经营现金流为负", "unknown": "缺少新公司催化"}, "price": {"support": "回撤后连续两日上涨4.51%和7.81%", "counter": "形成日涨幅较大且5日前曾跌6.68%", "unknown": "反弹还是突破"}}, "final_fate": "selected", "fate_stage": "final_decision", "primary_reason": "弱市中相对市场与行业的多日增量最清晰，且没有依赖单日涨停。"},
+      {"ts_code": "601665.SH", "name": "齐鲁银行", "opportunity_type": "sector_diffusion", "opportunity_type_reason": "银行成员广泛上涨是主要来源，个股增长和价格领导提供具体承接。", "type_evidence": ["银行形成日上涨面100%、5日上涨面92.9%", "一季度收入同比13.02%、净利润同比14.01%", "5日6.23%、20日1.25%"], "type_confidence": "high", "source_lead_ids": ["M2", "S1", "S3"], "lens_reviews": {"market": {"support": "弱市防御轮动", "counter": "大盘继续下跌", "unknown": "防御持续性"}, "sector": {"support": "银行唯一正5日中位且分化低", "counter": "银行目标涨幅弹性未知", "unknown": "扩散持续"}, "company": {"support": "收入利润双增", "counter": "银行资产质量细节未在本轮展开", "unknown": "增长可持续性"}, "price": {"support": "回撤后连续三日+1.00%、+2.64%、+4.01%，成交激活", "counter": "形成日加速并接近日内高点", "unknown": "行动日是否高开透支"}}, "final_fate": "selected", "fate_stage": "final_decision", "primary_reason": "相较青岛银行，基本面和价格仍强但没有同期解禁与减持标题；相较宁波银行，板块内增量更清晰。"},
+      {"ts_code": "002948.SZ", "name": "青岛银行", "opportunity_type": "sector_diffusion", "opportunity_type_reason": "银行扩散中的价格领导与盈利增长。", "type_evidence": ["5日7.82%、一季度净利润同比21.16%"], "type_confidence": "high", "source_lead_ids": ["S1", "S2"], "lens_reviews": {"market": {"support": "防御轮动", "counter": "市场弱", "unknown": "持续性"}, "sector": {"support": "银行内价格第一", "counter": "形成日加速", "unknown": "扩散持续"}, "company": {"support": "利润增长最高", "counter": "5月解禁且6月3日披露股东减持计划", "unknown": "供给规模"}, "price": {"support": "连续三日推进", "counter": "形成日上涨4.96%", "unknown": "行动日跳空"}}, "final_fate": "rejected", "fate_stage": "final_decision", "primary_reason": "解禁和减持供给反证使其相对齐鲁银行不占优。"},
+      {"ts_code": "002142.SZ", "name": "宁波银行", "opportunity_type": "sector_diffusion", "opportunity_type_reason": "银行扩散和公司盈利增长。", "type_evidence": ["一季度收入利润约增长10%", "5日4.67%、20日2.03%"], "type_confidence": "high", "source_lead_ids": ["S1", "S4"], "lens_reviews": {"market": {"support": "防御轮动", "counter": "市场弱", "unknown": "持续性"}, "sector": {"support": "银行广度强", "counter": "涨幅低于齐鲁银行", "unknown": "领导性"}, "company": {"support": "收入利润双增", "counter": "无新增公司催化", "unknown": "资产质量"}, "price": {"support": "流动性高且回撤后修复", "counter": "相对增量较低", "unknown": "弹性"}}, "final_fate": "rejected", "fate_stage": "final_decision", "primary_reason": "质量较稳但价格增量与目标弹性弱于齐鲁银行。"},
+      {"ts_code": "601009.SH", "name": "南京银行", "opportunity_type": "sector_diffusion", "opportunity_type_reason": "银行扩散和稳定价格路径。", "type_evidence": ["5日4.58%、20日4.11%", "一季度收入同比13.54%"], "type_confidence": "high", "source_lead_ids": ["S1", "S5"], "lens_reviews": {"market": {"support": "防御轮动", "counter": "市场弱", "unknown": "持续性"}, "sector": {"support": "银行广度", "counter": "价格领导弱", "unknown": "弹性"}, "company": {"support": "收入增长", "counter": "利润增速低于齐鲁和青岛银行", "unknown": "资产质量"}, "price": {"support": "近期连续推进", "counter": "增量较小", "unknown": "突破能力"}}, "final_fate": "rejected", "fate_stage": "final_decision", "primary_reason": "同类比较中利润和价格增量均不及齐鲁银行。"},
+      {"ts_code": "600522.SH", "name": "中天科技", "opportunity_type": "company_catalyst", "opportunity_type_reason": "数据中心耗材项目中标标题是主要公司变化来源。", "type_evidence": ["6月6日中标公告标题", "5日11.61%但形成日-7.86%"], "type_confidence": "low", "source_lead_ids": ["C1", "P4"], "lens_reviews": {"market": {"support": "独立公司事件可对抗弱市", "counter": "市场逆风", "unknown": "持续性"}, "sector": {"support": "通信相对部分行业较强", "counter": "通信5日中位仍为负", "unknown": "共同动力"}, "company": {"support": "公告存在", "counter": "正文金额和利润材料性未确认", "unknown": "合同规模"}, "price": {"support": "此前上涨", "counter": "形成日放量下跌7.86%", "unknown": "止跌"}}, "final_fate": "rejected", "fate_stage": "joint_validation", "primary_reason": "形成日反转和正文缺失共同推翻剩余路径。"},
+      {"ts_code": "603220.SH", "name": "中贝通信", "opportunity_type": "company_catalyst", "opportunity_type_reason": "形成日中标通知书标题是主要变化。", "type_evidence": ["6月10日公告标题", "形成日涨停、20日-21.75%"], "type_confidence": "low", "source_lead_ids": ["C2", "P5"], "lens_reviews": {"market": {"support": "弱市独立事件", "counter": "市场逆风", "unknown": "持续性"}, "sector": {"support": "通信业务联系", "counter": "板块无广泛扩散", "unknown": "同类反应"}, "company": {"support": "中标公告存在", "counter": "金额和材料性未知", "unknown": "正文"}, "price": {"support": "形成日涨停", "counter": "只有一个披露后交易日且单日贡献过大", "unknown": "行动日可参与性"}}, "final_fate": "rejected", "fate_stage": "joint_validation", "primary_reason": "形成日单日涨停只能转为行动日条件，不能当成持续确认。"},
+      {"ts_code": "002064.SZ", "name": "华峰化学", "opportunity_type": "company_catalyst", "opportunity_type_reason": "重组相关说明是主要变化来源。", "type_evidence": ["6月6日重组说明标题", "形成日+3.40%、5日+0.51%"], "type_confidence": "low", "source_lead_ids": ["C3"], "lens_reviews": {"market": {"support": "公司事件独立", "counter": "市场弱", "unknown": "持续性"}, "sector": {"support": "基础化工相对市场略好", "counter": "5日中位仍-3.15%", "unknown": "同类反应"}, "company": {"support": "交易文件存在", "counter": "交易材料性和传导未由标题确认", "unknown": "正文"}, "price": {"support": "形成日相对强", "counter": "5日确认很弱", "unknown": "持续性"}}, "final_fate": "rejected", "fate_stage": "joint_validation", "primary_reason": "公司传导与价格持续性均不足。"},
+      {"ts_code": "300828.SZ", "name": "锐新科技", "opportunity_type": "company_catalyst", "opportunity_type_reason": "重组说明是主要变化来源。", "type_evidence": ["6月9日重组说明标题", "形成日仅+0.16%"], "type_confidence": "low", "source_lead_ids": ["C4"], "lens_reviews": {"market": {"support": "公司事件可独立", "counter": "市场弱", "unknown": "持续性"}, "sector": {"support": "无", "counter": "机械设备5日中位-3.28%", "unknown": "同类"}, "company": {"support": "交易文件存在", "counter": "材料性未知", "unknown": "正文"}, "price": {"support": "无必要确认", "counter": "形成日几乎未推进", "unknown": "后续反应"}}, "final_fate": "rejected", "fate_stage": "joint_validation", "primary_reason": "形成日前尚无必要价格识别，且正文材料性未知。"},
+      {"ts_code": "600810.SH", "name": "神马股份", "opportunity_type": "independent_price_anomaly", "opportunity_type_reason": "弱市中相对基础化工和市场的短期价量增量。", "type_evidence": ["5日6.17%、20日-15.78%", "成交激活2.38倍"], "type_confidence": "medium", "source_lead_ids": ["P2"], "lens_reviews": {"market": {"support": "相对强", "counter": "市场弱", "unknown": "持续性"}, "sector": {"support": "跑赢基础化工", "counter": "板块仍负", "unknown": "独立性"}, "company": {"support": "尼龙化工业务真实", "counter": "一季度归母亏损", "unknown": "扭亏"}, "price": {"support": "6月8至9日推进", "counter": "形成日回落1.75%", "unknown": "是否继续"}}, "final_fate": "rejected", "fate_stage": "final_decision", "primary_reason": "形成日回落与公司亏损使连续性弱于同星科技。"},
+      {"ts_code": "300581.SZ", "name": "晨曦航空", "opportunity_type": "independent_price_anomaly", "opportunity_type_reason": "形成日弱市相对上涨。", "type_evidence": ["形成日+5.37%", "5日仅+1.85%"], "type_confidence": "low", "source_lead_ids": ["P3"], "lens_reviews": {"market": {"support": "单日相对强", "counter": "市场弱", "unknown": "持续性"}, "sector": {"support": "军工相对增量", "counter": "无广泛扩散", "unknown": "共同动力"}, "company": {"support": "航空机电业务真实", "counter": "一季度仍亏损且现金流为负", "unknown": "改善"}, "price": {"support": "形成日放量上涨", "counter": "主要增量集中单日", "unknown": "连续性"}}, "final_fate": "rejected", "fate_stage": "joint_validation", "primary_reason": "不满足多日连续独立增量。"}
+    ],
+    "candidate_conservation": {"deduped_candidates": 11, "selected": 2, "rejected": 9, "unresolved": 0, "stock_leads_traced": true, "non_stock_leads_traced": true, "sources_preserved": true}
+  },
+  "selected_stocks": [
+    {
+      "ts_code": "301252.SZ",
+      "name": "同星科技",
+      "priority": 1,
+      "opportunity_type": "independent_price_anomaly",
+      "opportunity_type_reason": "主要依据是相对市场和家用电器板块的连续价量增量，没有公司事件也不强行补成公司催化。",
+      "type_evidence": ["5日10.69%、20日-14.63%", "5日4个上涨日", "形成日上涨7.81%、换手6.01%"],
+      "type_confidence": "medium",
+      "new_change": "在市场和家电板块普遍下跌时，形成日前5日出现4个上涨日；经历6.68%回撤后连续两日上涨4.51%和7.81%。",
+      "target_thesis": "多日相对增量和回撤后的再次推进说明价格正在独立修复；若行动日不跳空透支，20日累计仍低的位置可能转为持续突破路径。",
+      "causal_chain": "市场与家电板块下跌 → 个股5日多数交易日上涨并显著跑赢 → 回撤后两日连续放量推进 → 若非极短期反转，可能形成独立重估路径。",
+      "evidence_by_lens": {"market": ["市场5日中位-4.24%、20日中位-14.07%"], "sector": ["家电5日中位-4.34%，个股5日+10.69%"], "company": ["一季度收入同比增长16.29%且归母净利润仍为正"], "price": ["形成日前两日+4.51%和+7.81%，5日4个上涨日，未依赖涨停"]},
+      "why_same_type_alternative": "优于神马股份：同星科技形成日继续推进而非回落，5日相对增量更大，且公司一季度仍盈利。",
+      "why_cross_type_alternative": "优于中贝通信等公司事件替代：同星科技有多日价格连续性；中贝通信只有形成日涨停且合同材料性未知。",
+      "why_this_over_alternatives": "它是弱市中少数同时具备相对市场、相对行业和多日连续性的早期路径，不靠低位本身证明空间。",
+      "remaining_upside_path": "若行动日仍能正常双向成交，形成日大涨没有变成高开长上影，且成交继续带来收盘推进，20日累计仍为负的背景可保留进一步突破空间。",
+      "strongest_counter_evidence": "形成日已上涨7.81%，此前一个交易日序列中出现6.68%回撤；一季度净利润同比下降38.55%且经营现金流为负。",
+      "key_unknowns": ["相对强势是持续突破还是深跌反弹", "缺少形成日前可确认的新公司催化"],
+      "secondary_unknowns": ["通用设备业务增长能否改善利润和现金流"],
+      "action_day_participation_conditions": ["正常双向成交，不出现不可参与的一字涨停", "不因形成日大涨出现明显跳空透支", "成交增加继续带来收盘推进，不出现长上影或跌回两日修复区间"],
+      "abandonment_conditions": ["快速跌回6月8日回撤低位附近", "放量但价格不再推进", "市场继续急跌并使相对强势消失"]
+    },
+    {
+      "ts_code": "601665.SH",
+      "name": "齐鲁银行",
+      "priority": 2,
+      "opportunity_type": "sector_diffusion",
+      "opportunity_type_reason": "银行是唯一形成日前5日广泛正收益的一级行业，齐鲁银行以盈利增长和价格领导承接该扩散。",
+      "type_evidence": ["银行形成日上涨面100%、5日上涨面92.9%", "一季度收入同比13.02%、净利润同比14.01%", "个股5日6.23%、20日1.25%"],
+      "type_confidence": "high",
+      "new_change": "市场广泛下跌时银行成员共同转强，齐鲁银行在两日回撤后连续三日上涨1.00%、2.64%和4.01%，成交同步放大。",
+      "target_thesis": "银行扩散不是单一大盘股拉动，齐鲁银行又具备公司盈利增长和更高价格弹性；若防御轮动延续，较低20日累计涨幅仍可能继续重估。",
+      "causal_chain": "市场风险偏好下降 → 银行成为唯一广泛正收益行业 → 齐鲁银行收入利润增长并处于板块价格前列 → 回撤后连续三日放量推进 → 保留防御扩散延续路径。",
+      "evidence_by_lens": {"market": ["全市场上涨面仅29.77%，银行提供逆势防御方向"], "sector": ["银行5日中位+2.03%、20日中位+1.80%，92.9%成员5日上涨"], "company": ["一季度收入约35.77亿元、归母净利润约15.64亿元，同比增幅13.02%和14.01%"], "price": ["5日6.23%、20日1.25%，形成日成交约5.82亿元、换手1.48%"]},
+      "why_same_type_alternative": "优于青岛银行：齐鲁银行价格与盈利增量仍强，但没有形成日前可见的A股解禁和持股5%以上股东减持预披露。",
+      "why_cross_type_alternative": "优于中贝通信：齐鲁银行有完整板块广度和多日推进，后者只有一个涨停日且合同金额与材料性未知。",
+      "why_this_over_alternatives": "在唯一真实扩散的行业中，它兼顾增长、价格领导和较少供给反证，未把低波动防御机械当作入选理由。",
+      "remaining_upside_path": "若行动日银行上涨面仍广、齐鲁银行不跳空透支且成交继续伴随价格推进，20日仅1.25%的累计涨幅仍保留继续扩散的空间。",
+      "strongest_counter_evidence": "银行防御性不自动意味着20日可实现显著涨幅；形成日已上涨4.01%并接近日内高点，行动日追涨风险上升。",
+      "key_unknowns": ["银行扩散能否从防御轮动演化为显著上涨", "形成日前未展开资产质量细项比较"],
+      "secondary_unknowns": ["净息差和信用成本的后续变化"],
+      "action_day_participation_conditions": ["银行行业上涨面不快速坍缩", "正常双向成交且不明显跳空透支", "成交增加继续带来收盘推进"],
+      "abandonment_conditions": ["银行行业由全面上涨转为少数大行拉动", "形成日加速后放量冲高回落", "出现新的资产质量或股东供给风险事实"]
+    }
+  ],
+  "representative_non_selections": [
+    {"ts_code": "002948.SZ", "name": "青岛银行", "opportunity_type": "sector_diffusion", "reason_not_selected": "盈利和价格领导更强，但5月29日解禁、6月3日持股5%以上股东减持预披露构成直接供给反证，且形成日上涨4.96%。"},
+    {"ts_code": "002142.SZ", "name": "宁波银行", "opportunity_type": "sector_diffusion", "reason_not_selected": "一季度增长和流动性较稳，但5日价格增量低于齐鲁银行，目标弹性不足。"},
+    {"ts_code": "600810.SH", "name": "神马股份", "opportunity_type": "independent_price_anomaly", "reason_not_selected": "5日相对强势和成交激活成立，但形成日回落1.75%，一季度仍亏损，连续性弱于同星科技。"}
+  ],
+  "common_exposure_note": "最终两只分别来自独立价量异常和银行扩散；没有因弱市而设置市场Gate，也没有为分散行业而补位。",
+  "data_quality_issues": [
+    {"fact_or_dataset": "security_master", "status": "unavailable_at_cutoff", "effect_on_decision": "最早available_at晚于形成日，未读取事实行；用形成日代码、历史行业名称、涨跌停带、停牌和报价交叉核对。"},
+    {"fact_or_dataset": "company_profile", "status": "unavailable_at_cutoff", "effect_on_decision": "未用当前快照反填；业务联系只用形成日前主营分部和财务事实。"},
+    {"fact_or_dataset": "industry_member", "status": "partial", "effect_on_decision": "按available_at和形成日有效区间回放SW2021成员，未使用形成日后可用行。"},
+    {"fact_or_dataset": "earnings_forecast_and_express", "status": "genuinely_absent", "effect_on_decision": "2026-05-15至2026-06-10在合格范围内没有满足边界的正向新结构化业绩线索。"},
+    {"fact_or_dataset": "announcement_body", "status": "missing", "effect_on_decision": "重大合同和重组仅能确认公告标题与时间，无法确认金额和材料性，相关候选均未正式入选。"},
+    {"fact_or_dataset": "local_knowledge_registry", "status": "unsupported", "effect_on_decision": "为避免盲化任务读取可能含历史验证结果的注册表，只使用五个Skill正文方法。"}
+  ],
+  "data_limitations": ["行动日真实交易状态未知", "银行资产质量细项未在本轮形成日事实中展开", "只有标题的公司事件不能支持材料性传导"],
+  "sources_read": {
+    "allowed_files": ["AGENTS.md", "docs/architecture/current-v3-architecture.md", ".agents/skills/orchestrating-stock-research/SKILL.md", ".agents/skills/interpreting-market-macro/SKILL.md", ".agents/skills/researching-sectors-industries/SKILL.md", ".agents/skills/researching-company-events/SKILL.md", ".agents/skills/analyzing-price-trading/SKILL.md"],
+    "warehouse_metadata": [
+      {"table": "research_dataset_catalog", "columns": ["dataset_id", "contract_json"], "purpose": "字段与时间语义"},
+      {"table": "research_fact_partitions", "columns": ["dataset_id", "partition_value", "relative_path", "min_available_at", "max_available_at", "quality_status"], "purpose": "只构造截止时点内路径"},
+      {"table": "information_schema.columns", "columns": ["table_name", "column_name", "data_type"], "purpose": "安全构造查询"}
+    ],
+    "fact_tables": [
+      {"dataset": "trade_calendar", "time_fields": ["cal_date"], "filter_boundary": "仅查询2026-06-10之后至2026-06-17的SSE开闭市标志以确定action_date"},
+      {"dataset": "equity_daily", "time_fields": ["trade_date", "available_at"], "filter_boundary": "trade_date<=2026-06-10且available_at<=as_of，窗口自2026-01-01"},
+      {"dataset": "adj_factor", "time_fields": ["trade_date", "available_at"], "filter_boundary": "trade_date<=2026-06-10且available_at<=as_of"},
+      {"dataset": "daily_basic", "time_fields": ["trade_date", "available_at"], "filter_boundary": "trade_date<=2026-06-10且available_at<=as_of"},
+      {"dataset": "stock_limit", "time_fields": ["trade_date", "available_at"], "filter_boundary": "trade_date=2026-06-10且available_at<=as_of"},
+      {"dataset": "suspension", "time_fields": ["trade_date", "available_at"], "filter_boundary": "trade_date=2026-06-10且available_at<=as_of"},
+      {"dataset": "index_daily", "time_fields": ["trade_date", "available_at"], "filter_boundary": "trade_date<=2026-06-10且available_at<=as_of，窗口自2026-01-01"},
+      {"dataset": "industry_member", "time_fields": ["valid_from", "valid_to", "available_at"], "filter_boundary": "available_at<=as_of且形成日处于有效区间"},
+      {"dataset": "announcement", "time_fields": ["announcement_time", "available_at"], "filter_boundary": "announcement_time日期在2026-05-01至2026-06-10且available_at<=as_of；事件发现主窗口自2026-05-15"},
+      {"dataset": "earnings_forecast", "time_fields": ["ann_date", "report_period", "available_at"], "filter_boundary": "2026-05-15至2026-06-10，ann_date和report_period不晚于formation_date且available_at<=as_of"},
+      {"dataset": "earnings_express", "time_fields": ["ann_date", "report_period", "available_at"], "filter_boundary": "2026-05-15至2026-06-10，ann_date和report_period不晚于formation_date且available_at<=as_of"},
+      {"dataset": "main_business", "time_fields": ["report_period", "available_at"], "filter_boundary": "深度候选代码，report_period<=2026-06-10且available_at<=as_of"},
+      {"dataset": "financial_indicator", "time_fields": ["ann_date", "report_period", "available_at"], "filter_boundary": "深度候选代码，report_period<=2026-06-10且available_at<=as_of"},
+      {"dataset": "income_statement", "time_fields": ["ann_date", "f_ann_date", "report_period", "available_at"], "filter_boundary": "深度候选代码，report_period<=2026-06-10且available_at<=as_of"},
+      {"dataset": "cash_flow", "time_fields": ["ann_date", "f_ann_date", "report_period", "available_at"], "filter_boundary": "深度候选代码，report_period<=2026-06-10且available_at<=as_of"}
+    ]
+  },
+  "max_trade_date_used": "2026-06-10",
+  "max_available_at_used": "2026-06-10T18:24:09+08:00",
+  "max_business_dates_used": {"trade_date": "2026-06-10", "cal_date_for_action_date_only": "2026-06-17", "announcement_time": "2026-06-10T18:24:09+08:00", "ann_date": null, "report_period": "2026-03-31", "industry_member_valid_from": "2026-06-10"},
+  "future_data_opened": false
+}

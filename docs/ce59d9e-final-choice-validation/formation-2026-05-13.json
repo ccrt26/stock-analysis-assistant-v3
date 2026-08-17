@@ -1,0 +1,299 @@
+{
+  "task_type": "historical_simulation",
+  "research_objective": "只使用形成日当时可见的信息，从合格A股范围中选择0—5只未来约20个交易日更可能形成可操作显著上涨路径、重点观察能否达到约20%涨幅的股票；约20%仅是研究目标，不是阈值、评分或收益承诺。",
+  "formation_date": "2026-05-13",
+  "action_date": "2026-05-14",
+  "as_of": "2026-05-13T23:59:59+08:00",
+  "selection_universe": "上海主板、深圳主板和创业板；形成日有可靠收盘报价和正常成交，并能用形成日有效的代码、历史行业名称、涨跌停带和停牌事实核对身份与可交易性。",
+  "exclusions": [
+    "科创板",
+    "北交所",
+    "场内基金",
+    "ST或*ST",
+    "退市整理",
+    "形成日停牌或无可靠报价",
+    "行动日明确无法正常参与的股票"
+  ],
+  "frozen_research_brief": {
+    "market_question": "市场上涨是否有足够广度和流动性支持板块扩散，而不是少数股票拉动。",
+    "sector_question": "电子、通信、公用事业和电力设备的共同增强能否落实到可参与且未显著透支的具体成员。",
+    "company_question": "近期业绩或事件变化是否有直接业务传导，且公告后的价格仍在有效推进。",
+    "price_question": "相对市场和同类的连续价量增量是否仍保留约20个交易日的现实路径。",
+    "critical_unknowns": [
+      "行动日实际开盘、停牌和涨跌停状态在形成日未知，只能转为参与条件。",
+      "security_master与company_profile在截止时点没有可用历史版本；身份用形成日代码、历史行业名称、涨跌停带、停牌和报价交叉核对，公司业务用形成日前已发布的主营分部与财务事实核对。"
+    ],
+    "principal_refutations": [
+      "市场或板块上涨面快速收窄且成交放大不再带来价格推进。",
+      "候选近期上涨主要由单个涨停日贡献，或高换手后出现停滞、长上影和回落。",
+      "公司催化属于非经常性、重复披露或已被价格充分反映。"
+    ]
+  },
+  "market_search_context": {
+    "primary_interpretation": "市场处于广度和多指数同步增强的风险偏好环境，优先寻找真实成员扩散和仍有剩余路径的公司；创业板20日涨幅较高，同时要求更严格检查透支。",
+    "facts": [
+      "合格范围4345只；形成日上涨占比58.11%，横截面中位单日收益0.33%，5日收益1.00%，20日收益4.14%。",
+      "形成日合格范围成交额约2.766万亿元，前10只成交额占7.49%，未表现为极端少数成交集中。",
+      "上证综指、深证成指、中证1000、沪深300和创业板指5日分别约上涨1.98%、4.08%、4.44%、2.49%和6.89%。",
+      "创业板指20日约上涨17.09%，显著高于上证综指约6.43%，成长方向虽强但追涨透支风险同步上升。"
+    ],
+    "strongest_counter_evidence": "接近20日高点的股票约占17.97%，且创业板20日已显著上涨；广泛风险偏好并不保证高位强股仍有足够剩余路径。",
+    "unknowns": [
+      "没有形成日前可回放的账户身份数据，且不得从成交推断机构或主力。",
+      "行动日开盘是否出现普遍跳空透支未知。"
+    ]
+  },
+  "lens_findings": {
+    "market": {
+      "phase": "discovery_and_validation",
+      "primary_interpretation": "广度、指数与成交共同支持扩散型搜索，同时削弱已经连续涨停或20日大幅拉升的追强命题。",
+      "strongest_counter_evidence": "成长指数20日涨幅较大，若行动日高开且成交效率下降，剩余路径可能迅速消失。",
+      "evidence_sufficiency": "sufficient"
+    },
+    "sector": {
+      "phase": "discovery_and_validation",
+      "primary_interpretation": "电子、通信、公用事业和电力设备均有成员中位数和上涨面支持，其中公用事业的广度与低集中度更均衡，通信扩散较强但成交集中更高。",
+      "facts": [
+        "电子311只成员，5日中位收益6.58%，5日上涨成员占90.7%，前3只成交占11.9%。",
+        "通信98只成员，5日中位收益6.53%，5日上涨成员占92.9%，前3只成交占31.3%，集中度反证更强。",
+        "公用事业126只成员，5日中位收益4.50%，20日中位收益10.25%，5日上涨成员占83.3%，前3只成交占12.5%。",
+        "电力设备292只成员，5日中位收益3.19%，20日中位收益8.82%，5日上涨成员占71.2%。"
+      ],
+      "strongest_counter_evidence": "各强板块最强个股5日涨幅远高于成员中位数，局部领导已明显透支，不能把板块扩散等同于追逐涨幅第一。",
+      "evidence_sufficiency": "sufficient"
+    },
+    "company": {
+      "phase": "discovery_and_validation",
+      "primary_interpretation": "近期业绩预告产生了多条真实公司线索，但多数在形成日前已出现价格回落；瑞达期货的核心业务增长、正式一季报与近期价格确认形成更完整传导。",
+      "strongest_counter_evidence": "高增预告中存在并表、投资收益或非经常性损益，且若公告后价格持续回落，故事完整度不能替代剩余路径。",
+      "evidence_sufficiency": "partial"
+    },
+    "price": {
+      "phase": "discovery_and_validation",
+      "primary_interpretation": "优先保留多日推进、成交激活但20日累计涨幅仍有限的路径；淘汰短期上涨几乎由涨停贡献、亏损公司高换手加速或高成交低进展的路径。",
+      "strongest_counter_evidence": "部分板块领涨者5日上涨40%—60%以上，显示极端价格线索已大幅消耗预期。",
+      "evidence_sufficiency": "sufficient"
+    }
+  },
+  "candidate_chain": {
+    "skill_leads": [
+      {"lead_id": "M1", "source_skill": "market", "lead_type": "direction", "name": "广度支持的板块扩散", "ts_code": "", "rationale": "上涨面、多个指数和成交共同增强，优先寻找成员共同推进而非孤立涨停。"},
+      {"lead_id": "M2", "source_skill": "market", "lead_type": "group", "name": "成长与中小盘相对强势", "ts_code": "", "rationale": "创业板与中证1000的5日、20日表现领先，但需检查高位透支。"},
+      {"lead_id": "M3", "source_skill": "market", "lead_type": "question", "name": "强势是否已经透支", "ts_code": "", "rationale": "成长指数和多只领涨股20日涨幅较大，要求比较剩余路径与成交效率。"},
+      {"lead_id": "S1", "source_skill": "sector", "lead_type": "group", "name": "电子扩散", "ts_code": "", "rationale": "5日中位收益6.58%，90.7%成员上涨，成交并未极端集中。"},
+      {"lead_id": "S2", "source_skill": "sector", "lead_type": "stock", "name": "骏亚科技", "ts_code": "603386.SH", "rationale": "PCB业务真实，5日上涨12.76%且成交激活，较板块中位数有增量；反证为一季度亏损。"},
+      {"lead_id": "S3", "source_skill": "sector", "lead_type": "stock", "name": "长电科技", "ts_code": "600584.SH", "rationale": "芯片封测业务与一季度利润、现金流改善直接支持电子扩散；反证为20日上涨33.64%。"},
+      {"lead_id": "S4", "source_skill": "sector", "lead_type": "group", "name": "通信扩散", "ts_code": "", "rationale": "5日中位收益6.53%，92.9%成员上涨，但成交集中度高于其他强板块。"},
+      {"lead_id": "S5", "source_skill": "sector", "lead_type": "stock", "name": "大唐电信", "ts_code": "600198.SH", "rationale": "特种通信与集成电路业务真实，连续5日上涨且显著跑赢通信同类；反证为亏损、高负债和高成交低推进。"},
+      {"lead_id": "S6", "source_skill": "sector", "lead_type": "stock", "name": "数据港", "ts_code": "603881.SH", "rationale": "IDC业务真实，5日上涨12.75%、20日上涨8.96%，在通信扩散中仍有相对增量。"},
+      {"lead_id": "S7", "source_skill": "sector", "lead_type": "group", "name": "公用事业扩散", "ts_code": "", "rationale": "成员5日与20日共同增强、上涨面83.3%，成交集中度较低。"},
+      {"lead_id": "S8", "source_skill": "sector", "lead_type": "stock", "name": "江苏国信", "ts_code": "002608.SZ", "rationale": "电力业务占主导，连续5日上涨、成交逐步放大，累计涨幅低于更激进同类。"},
+      {"lead_id": "S9", "source_skill": "sector", "lead_type": "stock", "name": "天富能源", "ts_code": "600509.SH", "rationale": "电力业务真实且5日上涨13.00%；反证为路径较江苏国信消耗更多。"},
+      {"lead_id": "S10", "source_skill": "sector", "lead_type": "stock", "name": "太阳能", "ts_code": "000591.SZ", "rationale": "太阳能发电与售电业务真实，板块内价格强；反证为5日已上涨18.96%且一季度利润下滑。"},
+      {"lead_id": "S11", "source_skill": "sector", "lead_type": "group", "name": "电力设备扩散", "ts_code": "", "rationale": "5日、20日成员中位收益为正且上涨面超过七成。"},
+      {"lead_id": "S12", "source_skill": "sector", "lead_type": "stock", "name": "众智科技", "ts_code": "301361.SZ", "rationale": "控制器业务真实且收入利润增长，5日连续推进；反证为换手率升至28.83%和经营现金流为负。"},
+      {"lead_id": "S13", "source_skill": "sector", "lead_type": "stock", "name": "TCL中环", "ts_code": "002129.SZ", "rationale": "光伏硅片业务真实且价格强于电力设备中位数；反证为主业分部亏损和一季度仍亏损。"},
+      {"lead_id": "C1", "source_skill": "company", "lead_type": "stock", "name": "天齐锂业", "ts_code": "002466.SZ", "rationale": "一季度预增1530%—1818%，锂产品售价与联营投资收益共同驱动；形成日前5日价格下跌约8.97%。"},
+      {"lead_id": "C2", "source_skill": "company", "lead_type": "stock", "name": "赣锋锂业", "ts_code": "002460.SZ", "rationale": "锂盐需求、售价和产能释放支持扭亏，亦含公允价值收益；形成日前5日价格下跌约9.25%。"},
+      {"lead_id": "C3", "source_skill": "company", "lead_type": "stock", "name": "龙蟠科技", "ts_code": "603906.SH", "rationale": "磷酸铁锂销量与规模效益支持扭亏；形成日前5日下跌约12.65%，价格确认失效。"},
+      {"lead_id": "C4", "source_skill": "company", "lead_type": "stock", "name": "深圳华强", "ts_code": "000062.SZ", "rationale": "AI、存储分销和长尾采购推动一季度预增80%—120%；20日已上涨29.12%而5日基本停滞。"},
+      {"lead_id": "C5", "source_skill": "company", "lead_type": "stock", "name": "瑞达期货", "ts_code": "002961.SZ", "rationale": "资产管理与风险管理业务推动一季度预增135.64%—165.25%，正式财务数据和近期价格继续确认。"},
+      {"lead_id": "P1", "source_skill": "price", "lead_type": "stock", "name": "江苏国信", "ts_code": "002608.SZ", "rationale": "连续5个交易日上涨，5日9.90%、20日6.34%，形成日成交较前期显著激活且无单日极端贡献。"},
+      {"lead_id": "P2", "source_skill": "price", "lead_type": "stock", "name": "数据港", "ts_code": "603881.SH", "rationale": "5日12.75%、20日8.96%，四个上涨日且形成日放量修复；反证为日内波动与换手较高。"},
+      {"lead_id": "P3", "source_skill": "price", "lead_type": "stock", "name": "联科科技", "ts_code": "001207.SZ", "rationale": "20日仍为-2.80%而近3日上涨13.36%，涨停后两日继续推进，呈早期独立价量异常。"},
+      {"lead_id": "P4", "source_skill": "price", "lead_type": "stock", "name": "百达精工", "ts_code": "603331.SH", "rationale": "5日13.81%、20日3.72%且成交激活；反证为形成日回落、高换手和一季度利润接近归零。"},
+      {"lead_id": "P5", "source_skill": "price", "lead_type": "stock", "name": "大唐电信", "ts_code": "600198.SH", "rationale": "连续5日上涨、5日18.69%；反证为涨停后高成交但形成日仅上涨0.59%。"},
+      {"lead_id": "P6", "source_skill": "price", "lead_type": "stock", "name": "众智科技", "ts_code": "301361.SZ", "rationale": "5日15.98%且五日均上涨；反证为连续两日换手接近或超过27%。"},
+      {"lead_id": "P7", "source_skill": "price", "lead_type": "stock", "name": "长电科技", "ts_code": "600584.SH", "rationale": "量价推进和盈利改善一致；反证为5日19.27%、20日33.64%且含涨停日。"}
+    ],
+    "non_stock_lead_fates": [
+      {"lead_id": "M1", "fate": "converted_to_stock", "mapped_ts_codes": ["603386.SH", "600584.SH", "600198.SH", "603881.SH", "002608.SZ", "600509.SH", "000591.SZ", "301361.SZ", "002129.SZ"], "reason": "由板块Skill用历史成员和同类表现映射。"},
+      {"lead_id": "M2", "fate": "converted_to_stock", "mapped_ts_codes": ["603386.SH", "600584.SH", "600198.SH", "603881.SH", "301361.SZ", "002129.SZ"], "reason": "映射到电子、通信和电力设备的具体有效成员。"},
+      {"lead_id": "M3", "fate": "not_converted_with_reason", "mapped_ts_codes": [], "reason": "作为所有深度候选的透支验证问题，不单独生成股票。"},
+      {"lead_id": "S1", "fate": "converted_to_stock", "mapped_ts_codes": ["603386.SH", "600584.SH"], "reason": "保留电子板块中价格与公司证据不同的两个对照。"},
+      {"lead_id": "S4", "fate": "converted_to_stock", "mapped_ts_codes": ["600198.SH", "603881.SH"], "reason": "保留通信板块中价格最强与基本面更稳的对照。"},
+      {"lead_id": "S7", "fate": "converted_to_stock", "mapped_ts_codes": ["002608.SZ", "600509.SH", "000591.SZ"], "reason": "保留公用事业中不同累计涨幅和成交推进路径。"},
+      {"lead_id": "S11", "fate": "converted_to_stock", "mapped_ts_codes": ["301361.SZ", "002129.SZ"], "reason": "保留电力设备中小盘高换手与大盘亏损修复两个对照。"}
+    ],
+    "candidate_ledger": [
+      {"ts_code": "002608.SZ", "name": "江苏国信", "opportunity_type": "sector_diffusion", "opportunity_type_reason": "电力板块共同增强是主要来源，公司电力业务与价格路径提供具体承接。", "type_evidence": ["公用事业5日中位上涨4.50%且83.3%成员上涨", "电力业务2025年收入约298.88亿元", "个股5日9.90%、20日6.34%且连续5日上涨"], "type_confidence": "high", "source_lead_ids": ["S7", "S8", "P1"], "lens_reviews": {"market": {"support": "广度与成交支持扩散", "counter": "行动日普遍高开可能压缩空间", "unknown": "行动日开盘"}, "sector": {"support": "公用事业扩散且集中度低", "counter": "板块20日已上涨", "unknown": "扩散能否延续"}, "company": {"support": "电力业务真实且一季度盈利、经营现金流为正", "counter": "一季度净利润同比下降9.73%", "unknown": "后续电价与燃料成本"}, "price": {"support": "连续推进、成交激活、累计涨幅相对温和", "counter": "最后两日加速", "unknown": "行动日是否跳空透支"}}, "final_fate": "selected", "fate_stage": "final_decision", "primary_reason": "同类中兼具真实业务、板块共同性、连续价格确认与更大剩余路径。"},
+      {"ts_code": "002961.SZ", "name": "瑞达期货", "opportunity_type": "company_catalyst", "opportunity_type_reason": "一季度核心业务增长与利润大增是主要传导，板块并非主要依据。", "type_evidence": ["预告归母净利润同比增长135.64%—165.25%", "一季报收入同比108.42%、净利润同比151.19%", "近5日约上涨3.97%、20日16.41%"], "type_confidence": "high", "source_lead_ids": ["C5"], "lens_reviews": {"market": {"support": "市场成交活跃与风险偏好有利于期货业务叙事", "counter": "非银板块5日中位仅0.06%", "unknown": "市场活跃度能否持续"}, "sector": {"support": "不依赖板块扩散", "counter": "板块共同动力弱", "unknown": "同行是否同步改善"}, "company": {"support": "资产管理、风险管理与正式财务数据相互支持", "counter": "经营现金流为负且金融企业现金流口径波动大", "unknown": "利润增长的可持续季度长度"}, "price": {"support": "四个近5日交易日上涨，回撤后形成日修复，未出现短期暴涨", "counter": "20日已上涨16.41%且接近20日高位", "unknown": "行动日能否继续有效推进"}}, "final_fate": "selected", "fate_stage": "final_decision", "primary_reason": "公司催化比其他高增预告更具核心业务支持，价格未像锂业候选那样在形成日前转弱。"},
+      {"ts_code": "603881.SH", "name": "数据港", "opportunity_type": "sector_diffusion", "opportunity_type_reason": "通信板块扩散提供主要共同动力，IDC业务和盈利现金流验证真实联系。", "type_evidence": ["通信5日中位上涨6.53%且92.9%成员上涨", "IDC服务业2025年收入约16.96亿元", "个股5日12.75%、20日8.96%"], "type_confidence": "high", "source_lead_ids": ["S4", "S6", "P2"], "lens_reviews": {"market": {"support": "成长方向强", "counter": "成长20日已显著上涨", "unknown": "风险偏好持续性"}, "sector": {"support": "通信扩散广", "counter": "通信前3只成交占31.3%，集中风险较高", "unknown": "板块成交集中是否继续恶化"}, "company": {"support": "IDC业务真实，一季度净利润与经营现金流为正", "counter": "一季度收入同比下降3.76%", "unknown": "订单和利用率细节缺失"}, "price": {"support": "回撤后形成日放量修复且累计涨幅仍低于极端领涨者", "counter": "近三日+5.25%、-4.92%、+7.90%，波动与换手较高", "unknown": "行动日是否高开后失去推进效率"}}, "final_fate": "selected", "fate_stage": "final_decision", "primary_reason": "相较大唐电信，基本面和现金流更稳，累计涨幅更低，虽波动较大但剩余路径更可信。"},
+      {"ts_code": "001207.SZ", "name": "联科科技", "opportunity_type": "independent_price_anomaly", "opportunity_type_reason": "主要证据是相对市场和基础化工板块的早期连续价量增量，不依赖公司催化。", "type_evidence": ["20日-2.80%而3日+13.36%", "涨停后连续两日上涨1.51%和1.54%", "形成日换手5.27%，低于百达精工17.45%"], "type_confidence": "medium", "source_lead_ids": ["P3"], "lens_reviews": {"market": {"support": "广度环境降低孤立异动失败风险", "counter": "整体市场强可能解释部分上涨", "unknown": "相对强势能否在行动日延续"}, "sector": {"support": "5日显著超过基础化工同类中位", "counter": "板块本身不是最强扩散方向", "unknown": "独立成分能否持续"}, "company": {"support": "2025年主营分部盈利、2026一季度经营现金流为正", "counter": "一季度收入和净利润分别同比下降7.07%和21.50%", "unknown": "未找到形成日前可确认的新公司催化"}, "price": {"support": "低20日累计位置上出现成交激活，涨停后仍连续推进", "counter": "近3日上涨包含一个涨停日，且3月已有定增股份解禁", "unknown": "涨停贡献是否会转为短期反转"}}, "final_fate": "selected", "fate_stage": "final_decision", "primary_reason": "在独立异常同类中，剩余路径、涨停后连续性和换手压力优于百达精工。"},
+      {"ts_code": "603386.SH", "name": "骏亚科技", "opportunity_type": "sector_diffusion", "opportunity_type_reason": "电子扩散与PCB业务联系。", "type_evidence": ["5日12.76%", "PCB收入约21.81亿元"], "type_confidence": "medium", "source_lead_ids": ["S1", "S2"], "lens_reviews": {"market": {"support": "成长强", "counter": "追高风险", "unknown": "持续性"}, "sector": {"support": "电子广度强", "counter": "同类更强者多", "unknown": "扩散延续"}, "company": {"support": "PCB联系直接", "counter": "一季度亏损约2045万元", "unknown": "亏损改善时点"}, "price": {"support": "5日连续性较好", "counter": "形成日回落", "unknown": "能否再推进"}}, "final_fate": "rejected", "fate_stage": "joint_validation", "primary_reason": "公司亏损削弱板块扩散向盈利重估的传导。"},
+      {"ts_code": "600584.SH", "name": "长电科技", "opportunity_type": "sector_diffusion", "opportunity_type_reason": "电子扩散与芯片封测盈利改善。", "type_evidence": ["一季度净利润同比42.74%", "5日19.27%、20日33.64%"], "type_confidence": "high", "source_lead_ids": ["S1", "S3", "P7"], "lens_reviews": {"market": {"support": "成长强", "counter": "成长已高", "unknown": "持续性"}, "sector": {"support": "电子扩散", "counter": "领涨已集中", "unknown": "同行追赶"}, "company": {"support": "盈利现金流改善", "counter": "收入同比略降", "unknown": "改善持续性"}, "price": {"support": "量价确认强", "counter": "20日33.64%且含涨停", "unknown": "剩余路径"}}, "final_fate": "rejected", "fate_stage": "final_decision", "primary_reason": "质量较高但价格已显著消耗预期，跨类型比较不如入选候选。"},
+      {"ts_code": "600198.SH", "name": "大唐电信", "opportunity_type": "sector_diffusion", "opportunity_type_reason": "通信扩散与特种通信、集成电路业务联系。", "type_evidence": ["5日18.69%", "连续5日上涨"], "type_confidence": "medium", "source_lead_ids": ["S4", "S5", "P5"], "lens_reviews": {"market": {"support": "风险偏好强", "counter": "追强风险", "unknown": "持续性"}, "sector": {"support": "通信广度强", "counter": "板块成交集中", "unknown": "扩散延续"}, "company": {"support": "业务联系真实且收入增长", "counter": "一季度亏损、负债率79.77%", "unknown": "扭亏时点"}, "price": {"support": "相对强", "counter": "涨停后高成交低推进", "unknown": "供给压力"}}, "final_fate": "rejected", "fate_stage": "joint_validation", "primary_reason": "公司反证和形成日高成交低推进均强于数据港。"},
+      {"ts_code": "600509.SH", "name": "天富能源", "opportunity_type": "sector_diffusion", "opportunity_type_reason": "公用事业扩散与电力业务联系。", "type_evidence": ["5日13.00%、20日16.65%", "电力业务收入约55.86亿元"], "type_confidence": "high", "source_lead_ids": ["S7", "S9"], "lens_reviews": {"market": {"support": "扩散环境", "counter": "高开风险", "unknown": "行动日"}, "sector": {"support": "公用事业广度强", "counter": "同类已有较大累计涨幅", "unknown": "持续性"}, "company": {"support": "盈利与现金流为正", "counter": "一季度收入利润小幅下降", "unknown": "成本变化"}, "price": {"support": "回撤后再推进", "counter": "5日与20日涨幅高于江苏国信", "unknown": "剩余空间"}}, "final_fate": "rejected", "fate_stage": "final_decision", "primary_reason": "同类比较中累计涨幅和单日加速更高，剩余路径不如江苏国信。"},
+      {"ts_code": "000591.SZ", "name": "太阳能", "opportunity_type": "sector_diffusion", "opportunity_type_reason": "公用事业扩散与太阳能发电业务联系。", "type_evidence": ["5日18.96%", "发电业务收入约42.72亿元"], "type_confidence": "high", "source_lead_ids": ["S7", "S10"], "lens_reviews": {"market": {"support": "扩散环境", "counter": "追强风险", "unknown": "行动日"}, "sector": {"support": "板块强", "counter": "个股显著领先中位", "unknown": "扩散持续"}, "company": {"support": "业务真实", "counter": "一季度净利润同比下降36.51%", "unknown": "盈利修复"}, "price": {"support": "连续5日上涨", "counter": "5日近19%且换手12.57%", "unknown": "透支程度"}}, "final_fate": "rejected", "fate_stage": "joint_validation", "primary_reason": "价格消耗和盈利反证均大于江苏国信。"},
+      {"ts_code": "301361.SZ", "name": "众智科技", "opportunity_type": "sector_diffusion", "opportunity_type_reason": "电力设备扩散与控制器业务联系。", "type_evidence": ["收入同比25.60%、净利润同比8.89%", "5日15.98%且五日上涨"], "type_confidence": "high", "source_lead_ids": ["S11", "S12", "P6"], "lens_reviews": {"market": {"support": "成长强", "counter": "拥挤风险", "unknown": "行动日"}, "sector": {"support": "电力设备扩散", "counter": "板块不如电子通信广", "unknown": "持续性"}, "company": {"support": "盈利增长、负债率低", "counter": "经营现金流为负", "unknown": "回款"}, "price": {"support": "连续推进", "counter": "连续两日换手27%—29%", "unknown": "供给压力"}}, "final_fate": "rejected", "fate_stage": "final_decision", "primary_reason": "高换手加速和负现金流使剩余路径弱于入选组合。"},
+      {"ts_code": "002129.SZ", "name": "TCL中环", "opportunity_type": "sector_diffusion", "opportunity_type_reason": "电力设备扩散与光伏硅片业务联系。", "type_evidence": ["5日14.49%", "光伏硅片业务真实"], "type_confidence": "medium", "source_lead_ids": ["S11", "S13"], "lens_reviews": {"market": {"support": "成长强", "counter": "修复可能仅是风险偏好", "unknown": "持续性"}, "sector": {"support": "板块扩散", "counter": "光伏内部差异", "unknown": "子行业广度"}, "company": {"support": "收入同比增长", "counter": "2025分部亏损且一季度归母亏损约16.47亿元", "unknown": "扭亏"}, "price": {"support": "成交激活", "counter": "基本面反证强", "unknown": "重估依据"}}, "final_fate": "rejected", "fate_stage": "joint_validation", "primary_reason": "缺少足以支持价格继续重估的盈利传导。"},
+      {"ts_code": "002466.SZ", "name": "天齐锂业", "opportunity_type": "company_catalyst", "opportunity_type_reason": "锂产品与联营收益推动一季度预增。", "type_evidence": ["预增1530%—1818%", "形成日前5日下跌8.97%"], "type_confidence": "high", "source_lead_ids": ["C1"], "lens_reviews": {"market": {"support": "风险偏好", "counter": "无", "unknown": "持续性"}, "sector": {"support": "有色20日较强", "counter": "5日中位仅1.32%", "unknown": "锂子行业"}, "company": {"support": "产品售价与联营收益", "counter": "部分依赖联营预测", "unknown": "SQM最终数据"}, "price": {"support": "20日仍强", "counter": "5日明显转弱", "unknown": "重新确认"}}, "final_fate": "rejected", "fate_stage": "joint_validation", "primary_reason": "形成日前价格转弱，催化未继续被有效识别。"},
+      {"ts_code": "002460.SZ", "name": "赣锋锂业", "opportunity_type": "company_catalyst", "opportunity_type_reason": "锂盐需求、售价、产能与部分公允价值收益推动扭亏。", "type_evidence": ["预告扭亏并增长549%—690%", "形成日前5日下跌9.25%"], "type_confidence": "high", "source_lead_ids": ["C2"], "lens_reviews": {"market": {"support": "风险偏好", "counter": "无", "unknown": "持续性"}, "sector": {"support": "有色20日较强", "counter": "短期扩散一般", "unknown": "锂子行业"}, "company": {"support": "经营与产能传导", "counter": "含公允价值收益", "unknown": "持续性"}, "price": {"support": "成交可靠", "counter": "5日转弱", "unknown": "重新确认"}}, "final_fate": "rejected", "fate_stage": "joint_validation", "primary_reason": "公告后剩余价格路径缺少确认。"},
+      {"ts_code": "603906.SH", "name": "龙蟠科技", "opportunity_type": "company_catalyst", "opportunity_type_reason": "磷酸铁锂业务销量与规模效益推动扭亏。", "type_evidence": ["预告扭亏870%—1063%", "5日下跌12.65%"], "type_confidence": "high", "source_lead_ids": ["C3"], "lens_reviews": {"market": {"support": "成长强", "counter": "无", "unknown": "持续性"}, "sector": {"support": "电力设备扩散", "counter": "个股逆势", "unknown": "子行业"}, "company": {"support": "主营恢复", "counter": "规模细节有限", "unknown": "利润持续性"}, "price": {"support": "20日仍高", "counter": "5日显著回落", "unknown": "止跌确认"}}, "final_fate": "rejected", "fate_stage": "joint_validation", "primary_reason": "价格已从此前上涨转为明显回撤。"},
+      {"ts_code": "000062.SZ", "name": "深圳华强", "opportunity_type": "company_catalyst", "opportunity_type_reason": "AI与存储分销、长尾采购推动一季度高增。", "type_evidence": ["预增80%—120%", "20日29.12%而5日-0.22%"], "type_confidence": "high", "source_lead_ids": ["C4"], "lens_reviews": {"market": {"support": "电子强", "counter": "成长已高", "unknown": "持续性"}, "sector": {"support": "电子扩散", "counter": "同类更强", "unknown": "分销子行业"}, "company": {"support": "存储出货与长尾采购直接增长", "counter": "催化已披露近一月", "unknown": "毛利持续性"}, "price": {"support": "20日确认", "counter": "5日停滞且距高点回落", "unknown": "二次推进"}}, "final_fate": "rejected", "fate_stage": "joint_validation", "primary_reason": "公告后价格进入停滞，剩余路径弱于瑞达期货。"},
+      {"ts_code": "603331.SH", "name": "百达精工", "opportunity_type": "independent_price_anomaly", "opportunity_type_reason": "20日低累计基础上的5日成交激活。", "type_evidence": ["5日13.81%、20日3.72%", "形成日换手17.45%"], "type_confidence": "medium", "source_lead_ids": ["P4"], "lens_reviews": {"market": {"support": "广度环境", "counter": "异动可由市场解释部分", "unknown": "持续性"}, "sector": {"support": "机械设备中有相对增量", "counter": "板块中位仅2.31%", "unknown": "独立性"}, "company": {"support": "压缩机和汽车零部件业务真实", "counter": "一季度净利润同比下降97.18%且股东减持", "unknown": "改善"}, "price": {"support": "成交激活", "counter": "形成日回落且高换手", "unknown": "反转风险"}}, "final_fate": "rejected", "fate_stage": "joint_validation", "primary_reason": "相较联科科技，换手、公司反证和减持供给压力更大。"}
+    ],
+    "candidate_conservation": {
+      "deduped_candidates": 16,
+      "selected": 4,
+      "rejected": 12,
+      "unresolved": 0,
+      "stock_leads_traced": true,
+      "non_stock_leads_traced": true,
+      "sources_preserved": true
+    }
+  },
+  "selected_stocks": [
+    {
+      "ts_code": "002608.SZ",
+      "name": "江苏国信",
+      "priority": 1,
+      "opportunity_type": "sector_diffusion",
+      "opportunity_type_reason": "主要上涨因果来自公用事业成员共同增强，公司电力业务和个股连续价量推进提供具体承接。",
+      "type_evidence": ["公用事业5日中位上涨4.50%、83.3%成员上涨", "电力业务2025年收入约298.88亿元", "形成日前5日上涨9.90%、20日上涨6.34%"],
+      "type_confidence": "high",
+      "new_change": "形成日前公用事业板块持续扩散，江苏国信在5个交易日内每日上涨，最后两日成交与价格同步加速。",
+      "target_thesis": "板块共同动力仍广、个股业务联系真实且累计涨幅低于更激进同类，使行动日后仍可能沿连续重估路径推进。",
+      "causal_chain": "公用事业广度与中位收益增强 → 公司电力业务直接受板块重估承接 → 个股连续5日上涨且成交放大 → 20日累计仅6.34%，仍有相对剩余路径。",
+      "evidence_by_lens": {"market": ["上涨占比58.11%，成交集中度不高"], "sector": ["公用事业5日中位4.50%、20日中位10.25%、83.3%成员5日上涨"], "company": ["电力业务收入约298.88亿元，一季度盈利与经营现金流为正"], "price": ["5日9.90%、20日6.34%，连续5日上涨，形成日换手1.99%"]},
+      "why_same_type_alternative": "优于天富能源：江苏国信5日和20日累计涨幅更低、没有6%以上单日跳升，同时成交激活更晚，剩余路径更完整。",
+      "why_cross_type_alternative": "优于长电科技等跨类型最终替代：公司盈利虽非高增，但价格尚未像电子强股那样在20日内消耗30%以上。",
+      "why_this_over_alternatives": "同类扩散、真实业务、可交易性和剩余路径四者更均衡，不依赖单日涨停或新故事。",
+      "remaining_upside_path": "若行动日仍能正常双向成交、板块上涨面不快速收窄且放量继续带来价格推进，形成日前温和累计涨幅可为后续约20日重估留下空间。",
+      "strongest_counter_evidence": "一季度净利润同比下降9.73%，且形成日前最后两日已加速上涨；若板块热度降温，价格可能先于基本面回落。",
+      "key_unknowns": ["行动日是否高开透支", "电价、燃料成本与后续盈利改善的持续性"],
+      "secondary_unknowns": ["公用事业子行业间的收益驱动差异"],
+      "action_day_participation_conditions": ["存在正常双向成交，不停牌、不一字涨停", "不出现明显脱离板块与原命题的跳空透支", "成交增加仍带来有效价格推进，而非高成交停滞"],
+      "abandonment_conditions": ["公用事业上涨面和中位收益快速转弱", "放量冲高回落并跌回本轮连续推进区间", "出现形成日前未知的重大经营或交易风险"]
+    },
+    {
+      "ts_code": "002961.SZ",
+      "name": "瑞达期货",
+      "priority": 2,
+      "opportunity_type": "company_catalyst",
+      "opportunity_type_reason": "一季度核心经营增长和利润改善是主要传导来源，非银板块本身并不强。",
+      "type_evidence": ["一季度预增135.64%—165.25%", "一季报收入同比108.42%、净利润同比151.19%", "资产管理和风险管理业务被预告直接指认为利润来源"],
+      "type_confidence": "high",
+      "new_change": "4月19日前可见的一季度预告显示期货市场活跃度与资产管理、风险管理业务推动利润显著增长，4月29日前可见的正式财务数据继续确认。",
+      "target_thesis": "核心业务高增已获正式财务确认，而形成日前5日仅温和上涨并在回撤后修复，仍可能存在从业绩确认向估值重估传导的剩余路径。",
+      "causal_chain": "期货交易活跃 → 资产管理与风险管理业务利润增长 → 一季度收入和利润大增 → 价格20日确认但5日未加速透支 → 后续仍可能继续重估。",
+      "evidence_by_lens": {"market": ["市场成交活跃支持经纪和风险管理业务环境"], "sector": ["非银5日中位仅0.06%，个股更偏独立公司催化"], "company": ["一季报收入约3.98亿元、归母净利润约2.04亿元，同比增幅分别108.42%和151.19%"], "price": ["5日3.97%、20日16.41%，近5日四涨一跌，形成日从回撤中上涨3.52%修复"]},
+      "why_same_type_alternative": "优于深圳华强、天齐锂业和赣锋锂业：瑞达期货的正式财务与核心业务传导更直接，且形成日前价格仍在推进，而这些替代要么5日停滞、要么已明显回落。",
+      "why_cross_type_alternative": "优于高换手的众智科技等跨类型替代：价格确认更温和，未出现连续两日接近30%的换手。",
+      "why_this_over_alternatives": "公司变化、业务传导、正式财务和价格确认相互支持，且没有依赖板块强势补足公司证据。",
+      "remaining_upside_path": "若行动日价格不跳空透支，且回撤后的放量修复继续有效，核心业务高增仍可支持后续估值继续重估。",
+      "strongest_counter_evidence": "20日已上涨16.41%并接近20日高位；经营现金流为负，且金融企业现金流与负债率口径不能简单等同一般工业公司。",
+      "key_unknowns": ["一季度高增能否跨季度持续", "行动日是否直接高开消耗剩余空间"],
+      "secondary_unknowns": ["资产管理与风险管理利润的具体可重复程度"],
+      "action_day_participation_conditions": ["正常双向成交且无异常停牌", "不出现与形成日收盘显著脱节的跳空透支", "回撤后的成交增加继续带来收盘推进"],
+      "abandonment_conditions": ["价格跌破近期修复区间且放量", "市场交易活跃度显著下降并削弱核心业务命题", "出现对业绩口径或持续性的重大更正"]
+    },
+    {
+      "ts_code": "603881.SH",
+      "name": "数据港",
+      "priority": 3,
+      "opportunity_type": "sector_diffusion",
+      "opportunity_type_reason": "通信成员共同增强是主要来源，IDC主营、盈利和现金流验证公司确实能承接该方向。",
+      "type_evidence": ["通信5日中位上涨6.53%、92.9%成员上涨", "IDC服务业2025年收入约16.96亿元", "5日12.75%、20日8.96%"],
+      "type_confidence": "high",
+      "new_change": "通信板块广泛扩散，数据港在形成日前多日上涨，经历一次4.92%回撤后于形成日放量上涨7.90%。",
+      "target_thesis": "IDC业务与通信扩散真实相连，个股累计涨幅低于通信极端领涨者，回撤后恢复推进为后续约20日延续提供了价格确认。",
+      "causal_chain": "通信成员广泛增强 → IDC业务获得方向承接 → 多日上涨与回撤后放量修复 → 20日累计仍为8.96% → 若波动不演变成高成交低进展，仍有剩余路径。",
+      "evidence_by_lens": {"market": ["成长与中小盘相对强"], "sector": ["通信5日上涨成员占92.9%，但成交集中度31.3%是反证"], "company": ["IDC主营直接，一季度盈利和经营现金流为正"], "price": ["5日12.75%、20日8.96%，形成日成交约50.07亿元、换手16.36%并收涨7.90%"]},
+      "why_same_type_alternative": "优于大唐电信：数据港一季度盈利与现金流为正、20日累计更低；大唐电信亏损且涨停后出现高成交低推进。",
+      "why_cross_type_alternative": "优于长电科技：数据港20日累计8.96%，未像长电科技那样达到33.64%并包含涨停日。",
+      "why_this_over_alternatives": "在通信扩散中，公司质量与剩余路径的组合优于价格更强但亏损、负债高的同类。",
+      "remaining_upside_path": "若行动日不因形成日大涨而直接跳空透支，通信广度继续且回撤后放量修复转为持续推进，仍可能延伸本轮重估。",
+      "strongest_counter_evidence": "近三日收益为+5.25%、-4.92%、+7.90%，换手和波动明显升高；通信成交集中度也高于其他强板块。",
+      "key_unknowns": ["高波动是换手确认还是供给压力", "IDC订单和利用率的形成日前细节不足"],
+      "secondary_unknowns": ["通信板块内部不同子方向的持续性"],
+      "action_day_participation_conditions": ["正常双向成交，不因形成日大涨出现不可参与的一字涨停", "开盘不明显跳空透支", "高成交继续换来收盘推进，不出现长上影和低效率"],
+      "abandonment_conditions": ["高换手后连续冲高回落", "通信上涨面快速收窄且成交继续向少数股票集中", "形成日前业务命题被新公告否定"]
+    },
+    {
+      "ts_code": "001207.SZ",
+      "name": "联科科技",
+      "priority": 4,
+      "opportunity_type": "independent_price_anomaly",
+      "opportunity_type_reason": "主要依据是低20日累计位置上出现相对市场和板块的连续价量增量，没有把缺少公司事件误写成公司催化。",
+      "type_evidence": ["20日-2.80%、5日11.08%、3日13.36%", "5月11日涨停后5月12日和13日分别上涨1.51%和1.54%", "形成日换手5.27%、成交约3.12亿元"],
+      "type_confidence": "medium",
+      "new_change": "在20日累计仍为负的基础上，形成日前三个交易日出现涨停、随后两日继续收盘推进和成交激活。",
+      "target_thesis": "若涨停只是早期识别而非单日透支，随后连续推进和相对基础化工同类的显著增量可能演化为独立的20日价格路径。",
+      "causal_chain": "此前20日未上涨 → 形成日前出现相对市场与板块的涨停突破 → 两日继续推进而非立即回吐 → 换手仍低于高拥挤替代 → 保留早期独立价量路径。",
+      "evidence_by_lens": {"market": ["广度环境降低孤立异动立即失败的风险"], "sector": ["基础化工不是最强扩散方向，个股5日表现主要为独立增量"], "company": ["2025年主营分部盈利、2026一季度经营现金流为正；但收入和利润同比下降"], "price": ["3日13.36%、20日-2.80%，涨停后连续两日小幅推进"]},
+      "why_same_type_alternative": "优于百达精工：联科科技形成日仍上涨、换手5.27%远低于百达精工17.45%，且没有同期股东减持和利润接近归零的组合反证。",
+      "why_cross_type_alternative": "优于众智科技：联科科技20日累计更低、换手压力更小，尽管公司基本面较弱，独立价格路径的剩余空间更大。",
+      "why_this_over_alternatives": "它是候选中最清晰的早期独立异常，选择依据不依赖行业标签或虚构公司催化。",
+      "remaining_upside_path": "若行动日保持正常成交，涨停后的连续推进没有被跳空和长上影打断，低20日累计位置仍可能转化为持续突破。",
+      "strongest_counter_evidence": "近3日涨幅仍高度受5月11日涨停贡献；一季度收入、净利润下降，且3月已有定增股份解禁。",
+      "key_unknowns": ["独立价量异常背后的可持续需求是否存在", "涨停贡献是否会触发极短期反转"],
+      "secondary_unknowns": ["公司未出现形成日前可确认的新催化"],
+      "action_day_participation_conditions": ["正常双向成交，不一字涨停", "不出现明显高开后长上影或收盘失去推进", "成交增加继续伴随价格有效突破而非仅扩大波动"],
+      "abandonment_conditions": ["快速跌回5月11日突破前区间", "放量但价格连续停滞或回落", "出现新的减持、解禁或经营风险事实推翻路径"]
+    }
+  ],
+  "representative_non_selections": [
+    {"ts_code": "600509.SH", "name": "天富能源", "opportunity_type": "sector_diffusion", "reason_not_selected": "公用事业扩散与电力业务均成立，但5日13.00%、20日16.65%和单日6.37%的价格消耗高于江苏国信，剩余路径相对较小。"},
+    {"ts_code": "600198.SH", "name": "大唐电信", "opportunity_type": "sector_diffusion", "reason_not_selected": "通信扩散和相对强势成立，但一季度亏损、负债率79.77%，且涨停后形成日高成交仅上涨0.59%，弱于数据港。"},
+    {"ts_code": "301361.SZ", "name": "众智科技", "opportunity_type": "sector_diffusion", "reason_not_selected": "收入利润增长与电力设备扩散成立，但形成日前两日换手27.46%和28.83%、经营现金流为负，拥挤与供给压力过强。"}
+  ],
+  "common_exposure_note": "江苏国信与众智科技曾共享电力链暴露，但众智科技已淘汰；最终四只分别以公用事业扩散、期货公司催化、通信扩散和独立化工价格异常为主，未以行业配额或优化器决定数量。",
+  "data_quality_issues": [
+    {"fact_or_dataset": "security_master", "status": "unavailable_at_cutoff", "effect_on_decision": "最早available_at为2026-07-13，未读取其事实行；股票范围改用形成日代码板块规则、历史行业名称、形成日涨跌停带、停牌和可靠报价交叉核对，仍保留身份覆盖的次要限制。"},
+    {"fact_or_dataset": "company_profile", "status": "unavailable_at_cutoff", "effect_on_decision": "最早available_at为2026-07-14，未用当前快照反填；公司联系仅使用形成日前已发布的主营分部、业绩与财务事实。"},
+    {"fact_or_dataset": "industry_member", "status": "partial", "effect_on_decision": "使用available_at和历史有效区间回放SW2021成员；未使用形成日后可用的成员行，主题成员未参与判断。"},
+    {"fact_or_dataset": "announcement_body", "status": "missing", "effect_on_decision": "全市场发现只用结构化业绩事实和公告标题；标题不能证明合同金额或材料性，因此形成日刚披露且无正文的事件未入选。"},
+    {"fact_or_dataset": "local_knowledge_registry", "status": "unsupported", "effect_on_decision": "知识注册表可能含本地历史验证结果，无法在盲化白名单下安全读取；只执行五个Skill正文中的方法，不把该能力缺失转为评分。"},
+    {"fact_or_dataset": "query_runtime", "status": "failed", "effect_on_decision": "一次时区参数转换因运行时缺少pytz、一次候选SQL因别名解析、一次shell引号解析在返回事实前失败；均以显式TIMESTAMPTZ和修正别名重跑，没有返回或使用越界事实。"}
+  ],
+  "data_limitations": [
+    "没有读取security_master或company_profile的形成日后当前快照。",
+    "公告正文未用于全市场扫描，只有标题的事件材料性保持未知。",
+    "行动日真实交易状态未知，所有选择均为带参与条件的形成日结论。"
+  ],
+  "sources_read": {
+    "allowed_files": [
+      "AGENTS.md",
+      "docs/architecture/current-v3-architecture.md",
+      ".agents/skills/orchestrating-stock-research/SKILL.md",
+      ".agents/skills/interpreting-market-macro/SKILL.md",
+      ".agents/skills/researching-sectors-industries/SKILL.md",
+      ".agents/skills/researching-company-events/SKILL.md",
+      ".agents/skills/analyzing-price-trading/SKILL.md"
+    ],
+    "warehouse_metadata": [
+      {"table": "research_dataset_catalog", "columns": ["dataset_id", "contract_json"], "purpose": "字段、业务时间、available_at策略和回放级别"},
+      {"table": "research_fact_partitions", "columns": ["dataset_id", "partition_value", "relative_path", "min_available_at", "max_available_at", "quality_status"], "purpose": "只构造形成日范围内的Parquet路径"},
+      {"table": "information_schema.columns", "columns": ["table_name", "column_name", "data_type"], "purpose": "安全构造查询"}
+    ],
+    "fact_tables": [
+      {"dataset": "trade_calendar", "time_fields": ["cal_date"], "filter_boundary": "仅查询2026-05-13之后至2026-05-20的SSE开闭市标志以确定首个真实交易日；未作研究证据"},
+      {"dataset": "equity_daily", "time_fields": ["trade_date", "available_at"], "filter_boundary": "trade_date<=2026-05-13且available_at<=as_of，研究窗口自2026-01-01"},
+      {"dataset": "adj_factor", "time_fields": ["trade_date", "available_at"], "filter_boundary": "trade_date<=2026-05-13且available_at<=as_of"},
+      {"dataset": "daily_basic", "time_fields": ["trade_date", "available_at"], "filter_boundary": "trade_date<=2026-05-13且available_at<=as_of"},
+      {"dataset": "stock_limit", "time_fields": ["trade_date", "available_at"], "filter_boundary": "trade_date=2026-05-13且available_at<=as_of"},
+      {"dataset": "suspension", "time_fields": ["trade_date", "available_at"], "filter_boundary": "trade_date=2026-05-13且available_at<=as_of"},
+      {"dataset": "index_daily", "time_fields": ["trade_date", "available_at"], "filter_boundary": "trade_date<=2026-05-13且available_at<=as_of，研究窗口自2026-01-01"},
+      {"dataset": "industry_member", "time_fields": ["valid_from", "valid_to", "available_at"], "filter_boundary": "available_at<=as_of，valid_from<=formation_date且形成日处于有效区间"},
+      {"dataset": "announcement", "time_fields": ["announcement_time", "available_at"], "filter_boundary": "announcement_time日期<=2026-05-13且available_at<=as_of；全市场结构化事件窗口自2026-05-01，候选风险窗口自2026-03-01"},
+      {"dataset": "earnings_forecast", "time_fields": ["ann_date", "report_period", "available_at"], "filter_boundary": "ann_date<=2026-05-13、report_period<=2026-05-13、available_at<=as_of，发现窗口自2026-04-15"},
+      {"dataset": "earnings_express", "time_fields": ["ann_date", "report_period", "available_at"], "filter_boundary": "ann_date<=2026-05-13、report_period<=2026-05-13、available_at<=as_of，发现窗口自2026-04-15"},
+      {"dataset": "main_business", "time_fields": ["report_period", "available_at"], "filter_boundary": "候选代码，report_period<=2026-05-13且available_at<=as_of"},
+      {"dataset": "financial_indicator", "time_fields": ["ann_date", "report_period", "available_at"], "filter_boundary": "候选代码，report_period<=2026-05-13且available_at<=as_of"},
+      {"dataset": "income_statement", "time_fields": ["ann_date", "f_ann_date", "report_period", "available_at"], "filter_boundary": "候选代码，report_period<=2026-05-13且available_at<=as_of"},
+      {"dataset": "cash_flow", "time_fields": ["ann_date", "f_ann_date", "report_period", "available_at"], "filter_boundary": "候选代码，report_period<=2026-05-13且available_at<=as_of"}
+    ]
+  },
+  "max_trade_date_used": "2026-05-13",
+  "max_available_at_used": "2026-05-13T18:38:09+08:00",
+  "max_business_dates_used": {
+    "trade_date": "2026-05-13",
+    "cal_date_for_action_date_only": "2026-05-20",
+    "announcement_time": "2026-05-13T18:38:09+08:00",
+    "ann_date": "2026-04-28",
+    "report_period": "2026-03-31",
+    "industry_member_valid_from": "2026-05-13"
+  },
+  "future_data_opened": false
+}
