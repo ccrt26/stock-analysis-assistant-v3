@@ -74,7 +74,6 @@ class DerivedFeatureHealth(BaseModel):
     row_count_mismatches: int
     stale_formula: bool
     stale_input_manifest: bool
-    unresolved_failed_runs: int
     ready: bool
 
 
@@ -294,14 +293,6 @@ def _build_derived_health(
             """,
             [data_date],
         ).fetchdf()
-        failed_runs = connection.execute(
-            """
-            select feature_set, formula_version, started_at
-            from research_derived_runs
-            where analysis_date = ? and status = 'failed'
-            """,
-            [data_date],
-        ).fetchdf()
 
     result: list[DerivedFeatureHealth] = []
     for feature_set, expected_formula in _EXPECTED_DERIVED_FORMULAS.items():
@@ -327,7 +318,6 @@ def _build_derived_health(
         no_membership_themes = 0
         intraday_limited_entities = 0
         stale_input_manifest = False
-        committed_at: datetime | None = None
 
         if not selected.empty:
             row = selected.iloc[0]
@@ -335,7 +325,6 @@ def _build_derived_health(
             quality_status = str(row["quality_status"])
             limitations = _json_text_tuple(row["limitations_json"])
             rows = int(row["row_count"])
-            committed_at = _as_utc_datetime(row["committed_at"])
             audit = _audit_derived_partition(warehouse, row)
             checked_rows = audit["rows"]
             missing_files = audit["missing"]
@@ -349,14 +338,6 @@ def _build_derived_health(
                 warehouse, row["input_manifest_json"]
             )
 
-        matching_failures = failed_runs[
-            (failed_runs["feature_set"].astype(str) == feature_set)
-            & (failed_runs["formula_version"].astype(str) == expected_formula)
-        ]
-        if committed_at is not None and not matching_failures.empty:
-            failure_times = matching_failures["started_at"].map(_as_utc_datetime)
-            matching_failures = matching_failures[failure_times > committed_at]
-        unresolved_failed_runs = len(matching_failures)
         ready = (
             present
             and quality_status in {"complete", "complete_with_declared_gaps"}
@@ -364,7 +345,6 @@ def _build_derived_health(
             and hash_mismatches == 0
             and row_count_mismatches == 0
             and not stale_input_manifest
-            and unresolved_failed_runs == 0
         )
         result.append(
             DerivedFeatureHealth(
@@ -385,7 +365,6 @@ def _build_derived_health(
                 row_count_mismatches=row_count_mismatches,
                 stale_formula=stale_formula,
                 stale_input_manifest=stale_input_manifest,
-                unresolved_failed_runs=unresolved_failed_runs,
                 ready=ready,
             )
         )
@@ -481,13 +460,6 @@ def _json_text_tuple(value: Any) -> tuple[str, ...]:
     if parsed is None:
         return ()
     return tuple(str(item) for item in parsed)
-
-
-def _as_utc_datetime(value: Any) -> datetime:
-    stamp = value if isinstance(value, datetime) else datetime.fromisoformat(str(value))
-    if stamp.tzinfo is None:
-        stamp = stamp.replace(tzinfo=timezone.utc)
-    return stamp.astimezone(timezone.utc)
 
 
 def _audit_partition_files(
@@ -780,7 +752,6 @@ def write_health_report(
             + item.row_count_mismatches
             + int(item.stale_formula)
             + int(item.stale_input_manifest)
-            + item.unresolved_failed_runs
         )
         lines.append(
             f"| {item.feature_set} | {item.rows} | "

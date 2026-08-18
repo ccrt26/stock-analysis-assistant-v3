@@ -655,9 +655,7 @@ def test_derived_health_preserves_declared_gaps_and_explains_them_plainly(
     assert "分钟数据不可用" in text
 
 
-def test_derived_health_reports_missing_stale_formula_and_unresolved_failure(
-    tmp_path,
-):
+def test_derived_health_reports_missing_and_stale_formula(tmp_path):
     warehouse = ResearchWarehouse(tmp_path / "warehouse")
     warehouse.commit_batch(_daily_batch("2026-07-10", "000001.SZ"))
     _commit_derived_set(warehouse, date(2026, 7, 10))
@@ -677,19 +675,6 @@ def test_derived_health_reports_missing_stale_formula_and_unresolved_failure(
             """,
             [date(2026, 7, 10)],
         )
-        connection.execute(
-            """
-            insert into research_derived_runs
-            values ('health-failed', 'stock_trading_context', ?, ?, '{}',
-                    'input', 'failed', '[]', 'failed', null, null, null, ?, ?)
-            """,
-            [
-                date(2026, 7, 10),
-                STOCK_CONTEXT_FORMULA_VERSION,
-                datetime.now(timezone.utc) + timedelta(days=2),
-                datetime.now(timezone.utc) + timedelta(days=2),
-            ],
-        )
 
     report = build_research_health_report(warehouse, date(2026, 7, 10))
     by_name = {item.feature_set: item for item in report.derived_features}
@@ -698,8 +683,6 @@ def test_derived_health_reports_missing_stale_formula_and_unresolved_failure(
     assert by_name["market_context"].ready is False
     assert by_name["sector_hotspot"].present is False
     assert by_name["sector_hotspot"].stale_formula is True
-    assert by_name["stock_trading_context"].unresolved_failed_runs == 1
-    assert by_name["stock_trading_context"].ready is False
     assert report.derived_ready_for_research is False
 
 

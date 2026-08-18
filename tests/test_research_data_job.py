@@ -110,18 +110,11 @@ def test_stage_run_always_rechecks_source_and_records_each_real_execution(
             order by started_at, run_id
             """
         ).fetchall()
-        outcomes = connection.execute(
-            """
-            select dataset_id, partition_value, status, actual_rows
-            from research_run_datasets
-            """
-        ).fetchall()
     assert len(runs) == 2
     assert len({row[0] for row in runs}) == 2
     assert len({row[1] for row in runs}) == 2
     assert all(row[2:4] == ("succeeded", True) for row in runs)
     assert all(row[4] is not None for row in runs)
-    assert outcomes == []
 
 
 def test_stage_exception_is_recorded_as_failed_with_finished_time(

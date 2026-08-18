@@ -129,18 +129,12 @@ def run_research_features(
     ) -> None:
         nonlocal sector_no_membership_count
         requested: Mapping[ResearchDatasetId, Iterable[str]] = {}
-        attempt_manifest: dict[str, object] = {
-            "as_of": cutoff.astimezone(ZoneInfo("UTC")).isoformat(),
-            "requested_partitions": [],
-        }
         try:
             requested = input_partitions()
-            attempt_manifest = _requested_attempt_manifest(requested, cutoff)
             snapshot = query.materialize_snapshot(
                 requested,
                 as_of=cutoff,
             )
-            attempt_manifest = {"fact_snapshot": snapshot.input_manifest}
             _assert_calendar_window(
                 snapshot,
                 analysis_day,
@@ -164,30 +158,6 @@ def run_research_features(
                         feature_set, analysis_day, formula_version
                     )
                     sector_no_membership_count = _no_membership_count(existing)
-                skipped_manifest = {
-                    "fact_snapshot": fact_snapshot,
-                    "plain_language_summary": (
-                        f"{analysis_day.isoformat()} {feature_set} 输入未变，"
-                        "已校验原有结果并跳过公式重算。"
-                    ),
-                }
-                store.record_attempt(
-                    feature_set,
-                    analysis_day,
-                    formula_version,
-                    input_manifest=skipped_manifest,
-                    quality_status=previous[2],
-                    limitations=previous[1],
-                    status="skipped",
-                    row_count=previous[0],
-                    run_id=_attempt_run_id(
-                        feature_set,
-                        analysis_day,
-                        formula_version,
-                        str(fact_snapshot["input_manifest_hash"]),
-                        "skipped",
-                    ),
-                )
                 return
             frame = calculate(snapshot)
             row_counts[feature_set] = len(frame)
@@ -234,34 +204,6 @@ def run_research_features(
             failed.append(feature_set)
             error_text = f"{feature_set}: {exc}"
             errors.append(error_text)
-            failed_manifest = {
-                "attempted_input": attempt_manifest,
-                "plain_language_summary": (
-                    f"{analysis_day.isoformat()} {feature_set} 计算失败：{exc}"
-                ),
-            }
-            try:
-                store.record_attempt(
-                    feature_set,
-                    analysis_day,
-                    formula_version,
-                    input_manifest=failed_manifest,
-                    quality_status="failed",
-                    limitations=(f"特征计算失败：{exc}",),
-                    status="failed",
-                    row_count=None,
-                    run_id=_attempt_run_id(
-                        feature_set,
-                        analysis_day,
-                        formula_version,
-                        _stable_payload_hash(failed_manifest),
-                        "failed",
-                    ),
-                )
-            except Exception as record_error:
-                errors.append(
-                    f"{feature_set} 失败尝试未能持久化：{record_error}"
-                )
 
     calendar_input = {ResearchDatasetId.TRADE_CALENDAR: calendar_partitions}
 
@@ -785,25 +727,6 @@ def _effective_rows(frame: pd.DataFrame, analysis_date: date) -> pd.DataFrame:
     ].copy()
 
 
-def _requested_attempt_manifest(
-    requested: Mapping[ResearchDatasetId, Iterable[str]],
-    cutoff: datetime,
-) -> dict[str, object]:
-    return {
-        "as_of": cutoff.astimezone(ZoneInfo("UTC")).isoformat(),
-        "requested_partitions": [
-            {
-                "dataset": ResearchDatasetId(dataset).value,
-                "partition": str(partition),
-            }
-            for dataset, values in sorted(
-                requested.items(), key=lambda item: ResearchDatasetId(item[0]).value
-            )
-            for partition in sorted(str(value) for value in values)
-        ],
-    }
-
-
 def _assert_calendar_window(
     snapshot: MaterializedResearchSnapshot,
     analysis_date: date,
@@ -970,37 +893,6 @@ def _run_id(
         ).encode("utf-8")
     ).hexdigest()
     return f"derived:{feature_set}:{digest[:24]}"
-
-
-def _attempt_run_id(
-    feature_set: str,
-    analysis_date: date,
-    formula_version: str,
-    input_identity: str,
-    status: str,
-) -> str:
-    digest = hashlib.sha256(
-        "|".join(
-            (
-                feature_set,
-                analysis_date.isoformat(),
-                formula_version,
-                input_identity,
-                status,
-            )
-        ).encode("utf-8")
-    ).hexdigest()
-    return f"derived-attempt:{feature_set}:{status}:{digest[:20]}"
-
-
-def _stable_payload_hash(value: Mapping[str, object]) -> str:
-    encoded = json.dumps(
-        value,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
 
 
 def _cutoff(analysis_date: date, as_of: datetime | None) -> datetime:

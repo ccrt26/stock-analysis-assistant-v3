@@ -157,15 +157,7 @@ def _row(**overrides: str) -> dict[str, str]:
 
 def _empty_result() -> dict:
     return {
-        "research_complete": True,
         "skills_used": sorted(SKILLS),
-        "market_context": "当日没有达到绝对机会质量的候选。",
-        "candidate_conservation": {
-            "deduped_candidates": 0,
-            "selected": 0,
-            "rejected": 0,
-            "unresolved": 0,
-        },
         "selected_stocks": [],
         "nearest_nonselections": [],
         "empty_reason": "未发现达到绝对机会质量的股票。",
@@ -174,12 +166,6 @@ def _empty_result() -> dict:
 
 def _one_stock_result() -> dict:
     result = _empty_result()
-    result["candidate_conservation"] = {
-        "deduped_candidates": 1,
-        "selected": 1,
-        "rejected": 0,
-        "unresolved": 0,
-    }
     result["selected_stocks"] = [
         {
             "ts_code": "000001.SZ",
@@ -210,7 +196,6 @@ def _run(
         Path(__file__).resolve().parents[1] / "ops/forward-selection-prompt.md"
     )
     summary = run_daily_forward(
-        project_root=tmp_path,
         csv_path=csv_path,
         prompt_path=prompt_path,
         data=data,

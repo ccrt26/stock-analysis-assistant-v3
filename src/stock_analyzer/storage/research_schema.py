@@ -5,7 +5,7 @@ from pathlib import Path
 import duckdb
 
 
-RESEARCH_SCHEMA_VERSION = 3
+RESEARCH_SCHEMA_VERSION = 4
 
 
 _SCHEMA_SQL = """
@@ -29,18 +29,6 @@ create table if not exists research_ingestion_runs (
     started_at timestamptz not null,
     finished_at timestamptz,
     summary_json json
-);
-
-create table if not exists research_run_datasets (
-    run_id varchar not null,
-    dataset_id varchar not null,
-    partition_value varchar not null,
-    status varchar not null,
-    expected_rows bigint,
-    actual_rows bigint,
-    error_category varchar,
-    detail_json json,
-    primary key(run_id, dataset_id, partition_value)
 );
 
 create table if not exists research_fact_partitions (
@@ -80,17 +68,6 @@ create table if not exists research_fact_revisions (
     primary key(dataset_id, business_key_hash, revision_no)
 );
 
-create table if not exists research_quality_checks (
-    run_id varchar not null,
-    dataset_id varchar not null,
-    partition_value varchar not null,
-    check_name varchar not null,
-    status varchar not null,
-    details_json json,
-    checked_at timestamptz not null,
-    primary key(run_id, dataset_id, partition_value, check_name)
-);
-
 create table if not exists research_data_gaps (
     gap_id varchar primary key,
     dataset_id varchar not null,
@@ -115,48 +92,6 @@ create table if not exists research_watermarks (
     primary key(dataset_id, scope_key)
 );
 
-create table if not exists research_candidate_scopes (
-    scope_id varchar primary key,
-    analysis_date date not null,
-    formula_version varchar not null,
-    created_at timestamptz not null,
-    codes_json json not null,
-    input_manifest_json json not null
-);
-
-create table if not exists research_analysis_snapshots (
-    snapshot_id varchar primary key,
-    analysis_date date not null,
-    as_of timestamptz not null,
-    formula_versions_json json not null,
-    fact_manifest_json json not null,
-    gap_summary_json json not null,
-    created_at timestamptz not null
-);
-
-create table if not exists research_derived_runs (
-    run_id varchar primary key,
-    feature_set varchar not null,
-    analysis_date date not null,
-    formula_version varchar not null,
-    input_manifest_json json not null,
-    input_manifest_hash varchar not null,
-    quality_status varchar not null check(
-        quality_status in (
-            'complete', 'complete_with_declared_gaps', 'limited', 'failed'
-        )
-    ),
-    limitations_json json not null,
-    status varchar not null check(
-        status in ('running', 'committed', 'skipped', 'failed')
-    ),
-    row_count bigint check(row_count >= 0),
-    content_hash varchar,
-    file_sha256 varchar,
-    started_at timestamptz not null,
-    finished_at timestamptz
-);
-
 create table if not exists research_derived_partitions (
     feature_set varchar not null,
     analysis_date date not null,
@@ -178,15 +113,6 @@ create table if not exists research_derived_partitions (
     primary key(feature_set, analysis_date, formula_version)
 );
 
-create table if not exists research_migrations (
-    migration_id varchar primary key,
-    source_root varchar not null,
-    source_manifest_hash varchar not null,
-    status varchar not null,
-    report_json json not null,
-    completed_at timestamptz not null
-);
-
 create index if not exists research_partitions_dataset_idx
     on research_fact_partitions(dataset_id, partition_value);
 create index if not exists research_revisions_lookup_idx
@@ -195,10 +121,6 @@ create index if not exists research_gaps_status_idx
     on research_data_gaps(status, dataset_id);
 create index if not exists research_fact_keys_partition_idx
     on research_fact_keys(dataset_id, partition_value);
-create index if not exists research_derived_runs_lookup_idx
-    on research_derived_runs(
-        feature_set, analysis_date, formula_version, started_at
-    );
 create index if not exists research_derived_partitions_feature_date_idx
     on research_derived_partitions(feature_set, analysis_date);
 """

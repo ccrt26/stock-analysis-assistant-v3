@@ -89,7 +89,6 @@ def test_trading_structure_records_margin_lag_and_freezes_minute_scope(tmp_path)
     assert summary.waiting_upstream == 1
     assert len(minute) == 2
     assert set(minute["instrument_code"]) == {"000001.SZ"}
-    assert service.frozen_scope_codes(date(2026, 7, 13)) == ("000001.SZ",)
 
 
 def test_resume_refetches_a_minute_day_when_only_a_partial_row_is_stored(tmp_path):

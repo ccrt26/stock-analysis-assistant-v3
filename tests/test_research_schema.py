@@ -5,7 +5,7 @@ from stock_analyzer.storage.research_schema import (
 )
 
 
-def test_research_schema_initialization_is_idempotent_and_has_governance_tables(tmp_path):
+def test_research_schema_initialization_is_idempotent_and_has_live_tables(tmp_path):
     path = tmp_path / "research.duckdb"
     with connect_research_warehouse(path) as connection:
         assert research_schema_version(connection) == RESEARCH_SCHEMA_VERSION
@@ -18,16 +18,11 @@ def test_research_schema_initialization_is_idempotent_and_has_governance_tables(
     assert {
         "research_dataset_catalog",
         "research_ingestion_runs",
-        "research_run_datasets",
         "research_fact_partitions",
         "research_fact_keys",
         "research_fact_revisions",
-        "research_quality_checks",
         "research_data_gaps",
         "research_watermarks",
-        "research_candidate_scopes",
-        "research_analysis_snapshots",
-        "research_derived_runs",
         "research_derived_partitions",
     } <= table_names
 

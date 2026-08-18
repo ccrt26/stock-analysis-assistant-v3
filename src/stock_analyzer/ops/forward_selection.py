@@ -26,11 +26,6 @@ READINESS_POLL_SECONDS = 30
 MARKET_OPEN = time(9, 30)
 DEFAULT_CODEX_TIMEOUT_SECONDS = 18 * 60
 FINALIZE_BUFFER_SECONDS = 30
-OPPORTUNITY_TYPES = {
-    "company_catalyst",
-    "sector_diffusion",
-    "independent_price_anomaly",
-}
 REQUIRED_SKILLS = {
     "orchestrating-stock-research",
     "interpreting-market-macro",
@@ -94,22 +89,10 @@ class SelectedCandidateResult(CandidateResult):
     priority: int = Field(ge=1, le=5)
 
 
-class CandidateConservation(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    deduped_candidates: int = Field(ge=0)
-    selected: int = Field(ge=0)
-    rejected: int = Field(ge=0)
-    unresolved: int = Field(ge=0)
-
-
 class ResearchResult(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
-    research_complete: Literal[True]
     skills_used: list[SkillName] = Field(min_length=5, max_length=5)
-    market_context: str = Field(min_length=1)
-    candidate_conservation: CandidateConservation
     selected_stocks: list[SelectedCandidateResult] = Field(max_length=5)
     nearest_nonselections: list[CandidateResult] = Field(max_length=3)
     empty_reason: str
@@ -317,7 +300,6 @@ class CodexResearch:
 
 def run_daily_forward(
     *,
-    project_root: Path,
     csv_path: Path,
     prompt_path: Path,
     data: ForwardData,
@@ -591,24 +573,6 @@ def _validate_result(
         name = str(item.get("name", "")).strip()
         if eligible.get(code) != name:
             raise ValueError("ineligible_security")
-        if item.get("opportunity_type") not in OPPORTUNITY_TYPES:
-            raise ValueError("invalid_opportunity_type")
-        for field in (
-            "selection_reason",
-            "strongest_counterevidence",
-            "nearest_comparison",
-        ):
-            if not str(item.get(field, "")).strip():
-                raise ValueError(f"missing_{field}")
-    conservation = payload["candidate_conservation"]
-    deduped = conservation["deduped_candidates"]
-    selected_count = conservation["selected"]
-    rejected = conservation["rejected"]
-    unresolved = conservation["unresolved"]
-    if deduped != selected_count + rejected + unresolved:
-        raise ValueError("candidate_conservation_failed")
-    if selected_count != len(selected) or rejected < len(nearest):
-        raise ValueError("candidate_counts_do_not_match_output")
     return payload
 
 
@@ -820,7 +784,6 @@ def main() -> int:
     )
     try:
         summary = run_daily_forward(
-            project_root=project_root,
             csv_path=csv_path,
             prompt_path=prompt_path,
             data=data,

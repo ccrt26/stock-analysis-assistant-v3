@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import os
-import shutil
 from pathlib import Path
 
 import pandas as pd
@@ -69,17 +68,11 @@ def fsync_directory(path: Path) -> None:
         os.close(descriptor)
 
 
-def remove_tree_if_empty(path: Path) -> None:
-    if path.exists():
-        shutil.rmtree(path, ignore_errors=True)
-
-
 __all__ = [
     "atomic_promote",
     "discard_backup",
     "fsync_directory",
     "fsync_file",
-    "remove_tree_if_empty",
     "restore_previous",
     "sha256_file",
     "write_staged_parquet",

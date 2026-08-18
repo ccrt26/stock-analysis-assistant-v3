@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import hashlib
-import json
 import time as system_time
 from collections import defaultdict
 from datetime import date, datetime, time, timedelta, timezone
@@ -20,7 +18,6 @@ from stock_analyzer.data.tushare_research_client import (
     ResearchSourceError,
     TushareResearchClient,
 )
-from stock_analyzer.storage.research_schema import connect_research_warehouse
 from stock_analyzer.storage.research_warehouse import ResearchWarehouse
 
 
@@ -125,7 +122,6 @@ class TradingStructureBackfillService:
 
         codes = tuple(sorted(set(candidate_codes) | set(index_codes)))
         summary.limitations_checked = bool(codes)
-        self._freeze_scope(through, candidate_codes, index_codes)
         minute_dates = margin_dates[-20:]
         existing_minute = self.warehouse.read_current(ResearchDatasetId.MINUTE_BAR)
         covered_pairs = _complete_minute_pairs(existing_minute)
@@ -207,61 +203,6 @@ class TradingStructureBackfillService:
                 )
                 summary.committed += 1
         return summary
-
-    def frozen_scope_codes(self, analysis_date: date) -> tuple[str, ...]:
-        with connect_research_warehouse(
-            self.warehouse.duckdb_path, read_only=True
-        ) as connection:
-            row = connection.execute(
-                """
-                select codes_json from research_candidate_scopes
-                where analysis_date = ? order by created_at desc limit 1
-                """,
-                [analysis_date],
-            ).fetchone()
-        if row is None:
-            return ()
-        payload = row[0]
-        if isinstance(payload, str):
-            payload = json.loads(payload)
-        return tuple(payload["candidate_codes"])
-
-    def _freeze_scope(
-        self,
-        through: date,
-        candidate_codes: tuple[str, ...],
-        index_codes: tuple[str, ...],
-    ) -> None:
-        payload = {
-            "candidate_codes": sorted(set(candidate_codes)),
-            "index_codes": sorted(set(index_codes)),
-        }
-        scope_id = hashlib.sha256(
-            f"{through.isoformat()}|{json.dumps(payload, sort_keys=True)}".encode()
-        ).hexdigest()
-        with connect_research_warehouse(self.warehouse.duckdb_path) as connection:
-            connection.execute(
-                """
-                insert into research_candidate_scopes
-                (scope_id, analysis_date, formula_version, created_at,
-                 codes_json, input_manifest_json)
-                values (?, ?, 'frozen-explicit-v1', now(), ?, ?)
-                on conflict(scope_id) do nothing
-                """,
-                [
-                    scope_id,
-                    through,
-                    json.dumps(payload, ensure_ascii=False, sort_keys=True),
-                    json.dumps(
-                        {
-                            "selection": "explicit frozen scope; no future performance",
-                            "created_for": "minute data coverage",
-                        },
-                        ensure_ascii=False,
-                        sort_keys=True,
-                    ),
-                ],
-            )
 
     def _commit(
         self,

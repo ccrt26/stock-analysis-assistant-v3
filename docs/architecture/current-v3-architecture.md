@@ -10,7 +10,7 @@
 
 ## 1. 一句话结论
 
-这是一个面向个人 A 股研究的“确定性本地数据底座 + 治理知识库 + 五个研究 Skill”项目：
+这是一个面向个人 A 股研究的“确定性本地数据底座 + 本地研究知识 + 五个研究 Skill”项目：
 
 > 程序负责取得、保存、回放和计算事实；AI/Skill 负责提出研究问题、解释证据、比较候选、寻找反证并作出 0—5 只的条件化取舍。
 
@@ -24,7 +24,7 @@
 2. 本文：当前系统结构、实现状态和历史设计的去留；
 3. `.agents/skills/orchestrating-stock-research/SKILL.md`：最终研究流程和输出合同；
 4. 四个专业 Skill：市场、板块、公司、价格各自的方法和边界；
-5. `src/stock_analyzer/`：已经实现的事实、存储、查询、派生观察和知识能力；
+5. `src/stock_analyzer/`：已经实现的事实、存储、查询和派生观察能力，以及供 Skill 调阅的 YAML 知识内容；
 6. `docs/` 下的诊断报告：历史模拟和调优证据，不是永久规则。
 
 `docs/superpowers/specs/2026-08-04-skill-first-stock-research-architecture-design.md` 记录从旧 V3 清理到 Skill 先行架构的过渡过程，具有历史价值，但其中“尚未创建 Skill”等状态已经过时。出现冲突时，以当前代码、当前五个 Skill 和本文为准。
@@ -64,7 +64,7 @@ flowchart TD
     B --> C["本地事实仓<br/>DuckDB 元数据 + Parquet 事实"]
     C --> D["时点安全查询<br/>ResearchQuery"]
     D --> E["确定性观察与输入清单<br/>市场、板块、个股交易上下文"]
-    C --> F["治理知识库<br/>registry + capability + selector"]
+    C --> F["本地研究知识<br/>YAML"]
     E --> G["股票研究总控 Skill"]
     F --> G
     G --> H["市场与宏观 Skill"]
@@ -124,9 +124,9 @@ flowchart TD
 
 派生任务记录公式版本与输入清单；输入未变时可以校验并跳过重算。这是数据与计算层的增量复用，不等同于已经实现了 AI 研究结果缓存。
 
-### 5.5 知识治理
+### 5.5 本地研究知识
 
-`src/stock_analyzer/knowledge/` 保存研究方法、适用范围、禁止用途、反证、本地验证结果和数据能力要求。选择器只返回与当前模块、机会类型、主题、研究期限和本地能力匹配的知识。
+`src/stock_analyzer/knowledge/` 保存研究方法、适用范围、禁止用途、反证和本地验证结果。五个 Skill 按当前问题直接调阅相关 YAML，不经过程序化选择器、评分或 Gate。
 
 知识条目帮助 AI 决定如何研究，不直接产生股票结论。标记为历史、能力不完整或禁止用于收益方向的知识，不能换一种表述重新成为评分规则。
 
@@ -193,7 +193,7 @@ data health
 | DuckDB + Parquet 事实仓、修订、哈希和恢复 | 已实现 | `storage/research_warehouse.py` |
 | 带 `as_of` 的形成日查询和输入清单 | 已实现 | `storage/research_query.py` |
 | 市场、板块、个股交易三类确定性观察 | 已实现 | `analysis/`、`ops/research_features.py` |
-| 知识注册、能力核对、定向选择和使用治理 | 已实现 | `knowledge/` |
+| 本地研究知识与 Skill 定向调阅 | 已实现 | `knowledge/*.yaml`、五个 Skill |
 | 一个总控 + 四个专业研究 Skill | 已实现 | `.agents/skills/` |
 | 候选链追溯、历史形成日模拟和调优诊断方法 | 已实现为 Skill 合同和研究流程 | 通过 Codex/ChatGPT 执行并在 `docs/` 留下诊断报告，不是常驻 Python 服务 |
 | 每日自动端到端 AI 选股运行器 | 已实现为本机轻量任务 | 约 09:05 启动并等待次晨数据至约 09:15，复用 `codex exec` 与五个 Skill；运行记录只写本地归档，数据仍未就绪、重复形成日、AI 失败或错过 09:30 时不写正式 forward，D20 到期一次性结算 |

@@ -1,6 +1,6 @@
 # 股票分析助手：本地数据底座与五 Skill 研究架构
 
-当前项目维护股票研究所需的本地数据底座、治理知识库、确定性读取/计算能力，以及一个总控加四个专业研究 Skill。请先阅读[当前 V3 架构与实现状态](docs/architecture/current-v3-architecture.md)。2026-08-04 的[SKILL 先行架构设计](docs/superpowers/specs/2026-08-04-skill-first-stock-research-architecture-design.md)保留为历史过渡文档，不再单独代表当前实现。
+当前项目维护股票研究所需的本地数据底座、本地研究知识、确定性读取/计算能力，以及一个总控加四个专业研究 Skill。请先阅读[当前 V3 架构与实现状态](docs/architecture/current-v3-architecture.md)。2026-08-04 的[SKILL 先行架构设计](docs/superpowers/specs/2026-08-04-skill-first-stock-research-architecture-design.md)保留为历史过渡文档，不再单独代表当前实现。
 
 本项目不连接券商、不自动交易，也不承诺投资收益。
 
@@ -28,7 +28,7 @@ GitHub 不包含被忽略的 `local_warehouse/`、`local_archive/`、`logs/`、`
 - 将当前三类确定性观察保存在 `local_warehouse/derived/`；
 - 通过 `ResearchQuery` 按明确时点读取历史可见事实；
 - 生成每日数据健康摘要；
-- 读取和选择 `src/stock_analyzer/knowledge/` 中的本地知识。
+- 由五个 Skill 按当前研究问题调阅 `src/stock_analyzer/knowledge/` 中的本地知识。
 - 通过 `.agents/skills/` 中的五个 Skill 组织市场、板块、公司、价格和最终比较研究。
 
 GitHub 不保存真实行情事实。最新可用日期应以本地健康检查和事实仓查询结果为准，不要依赖 README 中的固定日期。
@@ -119,18 +119,11 @@ Python代码可以使用：
 
 ## 知识库
 
-知识内容位于 `src/stock_analyzer/knowledge/*.yaml`。当前保留的程序能力包括：
-
-- 注册表读取；
-- 数据能力核对；
-- 按研究问题选择相关知识；
-- 使用边界和治理检查。
-
-知识库不会由每日数据任务自动加载，也不会直接产生股票结论。
+知识内容位于 `src/stock_analyzer/knowledge/*.yaml`。五个 Skill 先确定当前问题，再直接调阅相关条目；知识不由每日数据任务加载，不经过程序化评分或 Gate，也不直接产生股票结论。
 
 ## 历史问题状态
 
-清理基线曾发现行业目录有效记录重叠和公告修订时间倒序问题；它们已由专用修复逻辑和回归测试处理，不再作为当前架构阻塞。运行时状态仍必须以 `data health`、任务退出码和事实仓清单为准，不能通过绕过时间校验或删除健康检查掩盖新问题。
+清理基线曾发现行业目录有效记录重叠和公告修订时间倒序问题；这些历史数据已一次性修复，当前运行链不再保留专用迁移程序。运行时状态仍必须以 `data health`、任务退出码和事实仓清单为准，不能通过绕过时间校验或删除健康检查掩盖新问题。
 
 ## 验证
 
@@ -138,4 +131,4 @@ Python代码可以使用：
 python -m pytest -q
 ```
 
-测试覆盖当前数据获取、事实仓、时点查询、派生观察、健康检查、三个任务模板和知识库读取能力。
+测试覆盖当前数据获取、事实仓、时点查询、派生观察、健康检查、三个数据任务和每日 Forward 的业务边界。

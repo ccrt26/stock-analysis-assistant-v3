@@ -19,7 +19,6 @@ class FakeWarehouse:
         self.root = root
         self.calls: list[tuple[str, object]] = []
         self.commits: list[dict[str, object]] = []
-        self.attempts: list[dict[str, object]] = []
         self.current: dict[tuple[str, date, str], dict[str, object]] = {}
         self.revisions: dict[str, str] = {}
         self.hidden_datasets: set[ResearchDatasetId] = set()
@@ -173,17 +172,6 @@ class FakeStore:
             }
         ])
 
-    def record_attempt(self, feature_set, analysis_date, formula_version, **kwargs):
-        self.warehouse.attempts.append(
-            {
-                "feature_set": feature_set,
-                "analysis_date": analysis_date,
-                "formula_version": formula_version,
-                **kwargs,
-            }
-        )
-
-
 _WAREHOUSES: dict[Path, FakeWarehouse] = {}
 
 
@@ -320,10 +308,6 @@ def test_job_is_idempotent_and_only_related_manifest_changes_recompute(
     assert third.committed_feature_sets == ("sector_hotspot",)
     assert third.skipped_feature_sets == ("market_context", "stock_trading_context")
     assert counts == {"market": 1, "sector": 2, "stock": 1}
-    assert any(
-        attempt["status"] == "skipped"
-        for attempt in warehouse.attempts
-    )
 
 
 def test_later_feature_failure_preserves_prior_commits_and_continues(
@@ -358,12 +342,6 @@ def test_later_feature_failure_preserves_prior_commits_and_continues(
         previous_sector,
     )
     assert summary.committed_feature_sets == ("market_context", "stock_trading_context")
-    assert any(
-        attempt["feature_set"] == "sector_hotspot"
-        and attempt["status"] == "failed"
-        and "sector formula failed" in " ".join(attempt["limitations"])
-        for attempt in warehouse.attempts
-    )
 
 
 def test_each_feature_uses_its_own_exact_materialized_snapshot(
