@@ -1,6 +1,6 @@
 # 股票分析助手 V3：当前架构与实现状态
 
-**更新日期：** 2026-08-17
+**更新日期：** 2026-08-18
 
 **适用范围：** GitHub `main` 分支
 
@@ -143,6 +143,8 @@ data health
 
 `ops/launchd/` 保留收盘、晚间和次晨三个数据任务模板。它们只更新本地事实、派生观察和健康摘要，不运行最终选股、不发布报告、不交易。
 
+`src/stock_analyzer/ops/forward_selection.py` 与对应 launchd 模板在交易日上午 09:10 做一层很薄的编排：确认次晨数据已就绪后，以只读方式调用本机 `codex exec` 和当前五个 Skill，把开盘前完成的 0—5 只结果原子冻结到 `docs/forward-selection-log.csv`；历史记录只在 D1—D20 行情完整时由程序一次性结算。它不复制 Skill 规则，不形成程序化评分器，也不修改现有三个数据任务。
+
 `select_minute_candidate_scope` 中的确定性排序只用于限制可选分钟数据的采集范围，属于数据成本控制，不是投资评分或最终候选排名；分钟数据也不是目标架构的每日必需输入。
 
 ## 6. AI 层：五个仓库 Skill
@@ -194,7 +196,7 @@ data health
 | 知识注册、能力核对、定向选择和使用治理 | 已实现 | `knowledge/` |
 | 一个总控 + 四个专业研究 Skill | 已实现 | `.agents/skills/` |
 | 候选链追溯、历史形成日模拟和调优诊断方法 | 已实现为 Skill 合同和研究流程 | 通过 Codex/ChatGPT 执行并在 `docs/` 留下诊断报告，不是常驻 Python 服务 |
-| 每日自动端到端 AI 选股运行器 | 未实现 | 当前 CLI 没有 selection/recommend 命令 |
+| 每日自动端到端 AI 选股运行器 | 已实现为本机轻量任务 | 09:10 runner 复用 `codex exec` 与五个 Skill；数据未就绪、重复形成日、AI 失败或错过 09:30 时不写正式 forward |
 | AI 调用前的研究结果缓存、候选 memo 缓存和断点恢复 | 未实现 | 目前只有事实/派生层哈希、清单与跳过重算 |
 | 自动报告渲染、云端发布、Supabase 和交易执行 | 有意不存在 | 旧 V3 路径已从 `main` 删除，不得当作备用能力 |
 | GitHub 中的真实本地研究数据 | 有意不存在 | `local_warehouse/`、`local_archive/`、`logs/`、`.env*` 被忽略 |
