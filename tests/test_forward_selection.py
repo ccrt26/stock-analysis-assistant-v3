@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import plistlib
+import subprocess
 from datetime import date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -11,6 +12,7 @@ import pytest
 from stock_analyzer.ops.forward_selection import (
     PricePoint,
     apply_mature_settlements,
+    prepare_runtime_log,
     run_daily_forward,
 )
 
@@ -53,24 +55,34 @@ class FakeData:
         *,
         open_dates: list[date],
         ready: bool = True,
+        ready_states: list[bool] | None = None,
         prices: dict[str, list[PricePoint] | None] | None = None,
     ) -> None:
         self._open_dates = open_dates
         self.ready = ready
+        self.ready_states = iter(ready_states) if ready_states is not None else None
+        self.health_calls = 0
         self.prices = prices or {}
 
     def trading_dates(self, start: date, end: date) -> list[date]:
         return [day for day in self._open_dates if start <= day <= end]
 
     def health_report(self, formation_date: date) -> dict:
+        self.health_calls += 1
+        ready = self.ready
+        if self.ready_states is not None:
+            try:
+                ready = next(self.ready_states)
+            except StopIteration:
+                pass
         finished = datetime.combine(
             formation_date.replace(day=formation_date.day + 1),
             datetime.min.time(),
             SHANGHAI,
         ).replace(hour=9, minute=2)
         return {
-            "complete_core_date": self.ready,
-            "derived_ready_for_research": self.ready,
+            "complete_core_date": ready,
+            "derived_ready_for_research": ready,
             "latest_stage_runs": [
                 {
                     "stage": "next-morning",
@@ -190,6 +202,7 @@ def _run(
     data: FakeData,
     research: FakeResearch,
     rows: list[dict[str, str]] | None = None,
+    sleep: callable = lambda _seconds: None,
 ):
     csv_path = tmp_path / "forward.csv"
     _write_csv(csv_path, rows or [])
@@ -203,6 +216,7 @@ def _run(
         data=data,
         research=research,
         clock=now,
+        sleep=sleep,
     )
     return summary, csv_path
 
@@ -223,19 +237,55 @@ def test_non_trading_day_does_not_call_codex_or_write(tmp_path: Path) -> None:
     assert _read_csv(csv_path) == original
 
 
-def test_unready_next_morning_data_does_not_freeze(tmp_path: Path) -> None:
+def test_next_morning_data_becoming_ready_during_wait_continues(
+    tmp_path: Path,
+) -> None:
     research = FakeResearch(_empty_result())
+    data = FakeData(
+        open_dates=[date(2026, 8, 18), date(2026, 8, 19)],
+        ready_states=[False, True],
+    )
+    start = datetime(2026, 8, 19, 9, 5, tzinfo=SHANGHAI)
+    later = start.replace(second=30)
+    sleeps: list[float] = []
+
     summary, csv_path = _run(
         tmp_path,
-        now=_clock(datetime(2026, 8, 19, 9, 10, tzinfo=SHANGHAI)),
-        data=FakeData(
-            open_dates=[date(2026, 8, 18), date(2026, 8, 19)],
-            ready=False,
-        ),
+        now=_clock(start, start, later, later, later, later),
+        data=data,
         research=research,
+        sleep=sleeps.append,
+    )
+
+    assert summary.status == "forward_frozen"
+    assert data.health_calls == 2
+    assert sleeps == [30]
+    assert research.calls == 1
+    assert len(_read_csv(csv_path)) == 1
+
+
+def test_unready_next_morning_data_stops_waiting_at_0915(tmp_path: Path) -> None:
+    research = FakeResearch(_empty_result())
+    checks = [
+        datetime(2026, 8, 19, 9, 5 + second // 60, second % 60, tzinfo=SHANGHAI)
+        for second in range(0, 10 * 60 + 1, 30)
+    ]
+    sleeps: list[float] = []
+    data = FakeData(
+        open_dates=[date(2026, 8, 18), date(2026, 8, 19)],
+        ready=False,
+    )
+    summary, csv_path = _run(
+        tmp_path,
+        now=_clock(checks[0], *checks),
+        data=data,
+        research=research,
+        sleep=sleeps.append,
     )
 
     assert summary.status == "data_not_ready"
+    assert data.health_calls == 20
+    assert sleeps == [30] * 20
     assert research.calls == 0
     assert _read_csv(csv_path) == []
 
@@ -402,7 +452,36 @@ def test_d20_settles_once_from_adjusted_open_and_closes() -> None:
     assert repeated == updated
 
 
-def test_forward_launchd_runs_weekdays_at_0910_without_touching_data_jobs() -> None:
+def test_runtime_log_is_initialized_once_from_docs_history(tmp_path: Path) -> None:
+    docs_log = tmp_path / "docs/forward-selection-log.csv"
+    docs_log.parent.mkdir()
+    _write_csv(
+        docs_log,
+        [
+            _row(
+                formation_date="2026-08-17",
+                ts_code="300548.SZ",
+                name="长芯博创",
+                validation_mode="reconstructed",
+            )
+        ],
+    )
+
+    runtime_log = prepare_runtime_log(tmp_path)
+
+    assert runtime_log == (
+        tmp_path / "local_archive/forward_selection/forward-selection-log.csv"
+    )
+    assert _read_csv(runtime_log) == _read_csv(docs_log)
+
+    _write_csv(runtime_log, [_row(formation_date="keep-local")])
+    prepare_runtime_log(tmp_path)
+    assert _read_csv(runtime_log) == [_row(formation_date="keep-local")]
+
+
+def test_forward_launchd_loads_env_and_runs_weekdays_at_0905(
+    tmp_path: Path,
+) -> None:
     root = Path(__file__).resolve().parents[1]
     forward_path = root / "ops/launchd/com.ccrt.stock-analysis-assistant.forward-selection.plist.example"
     with forward_path.open("rb") as handle:
@@ -410,11 +489,28 @@ def test_forward_launchd_runs_weekdays_at_0910_without_touching_data_jobs() -> N
 
     intervals = payload["StartCalendarInterval"]
     assert {(item["Weekday"], item["Hour"], item["Minute"]) for item in intervals} == {
-        (weekday, 9, 10) for weekday in range(2, 7)
+        (weekday, 9, 5) for weekday in range(2, 7)
     }
-    assert "stock_analyzer.ops.forward_selection" in " ".join(
-        payload["ProgramArguments"]
+    project = tmp_path / "project"
+    python_bin = project / ".venv/bin/python"
+    python_bin.parent.mkdir(parents=True)
+    output = project / "observed-env.txt"
+    python_bin.write_text(
+        "#!/bin/zsh\nprint -r -- \"$FORWARD_SMOKE_VALUE\" > \"$FORWARD_SMOKE_OUTPUT\"\n",
+        encoding="utf-8",
     )
+    python_bin.chmod(0o755)
+    (project / ".env.local").write_text(
+        f"FORWARD_SMOKE_VALUE=loaded\nFORWARD_SMOKE_OUTPUT='{output}'\n",
+        encoding="utf-8",
+    )
+    command = list(payload["ProgramArguments"])
+    command[-1] = command[-1].replace("__PROJECT_ROOT__", str(project))
+
+    completed = subprocess.run(command, check=False, capture_output=True, text=True)
+
+    assert completed.returncode == 0
+    assert output.read_text(encoding="utf-8").strip() == "loaded"
 
     expected = {"close", "evening", "next-morning"}
     actual = {

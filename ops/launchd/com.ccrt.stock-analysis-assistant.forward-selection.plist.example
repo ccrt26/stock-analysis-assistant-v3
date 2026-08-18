@@ -13,17 +13,20 @@
     <string>-lc</string>
     <string><![CDATA[
 cd "__PROJECT_ROOT__"
+set -a
+source .env.local >/dev/null 2>&1
+set +a
 export PROJECT_ROOT="$PWD"
 exec .venv/bin/python -m stock_analyzer.ops.forward_selection
     ]]></string>
   </array>
   <key>StartCalendarInterval</key>
   <array>
-    <dict><key>Weekday</key><integer>2</integer><key>Hour</key><integer>9</integer><key>Minute</key><integer>10</integer></dict>
-    <dict><key>Weekday</key><integer>3</integer><key>Hour</key><integer>9</integer><key>Minute</key><integer>10</integer></dict>
-    <dict><key>Weekday</key><integer>4</integer><key>Hour</key><integer>9</integer><key>Minute</key><integer>10</integer></dict>
-    <dict><key>Weekday</key><integer>5</integer><key>Hour</key><integer>9</integer><key>Minute</key><integer>10</integer></dict>
-    <dict><key>Weekday</key><integer>6</integer><key>Hour</key><integer>9</integer><key>Minute</key><integer>10</integer></dict>
+    <dict><key>Weekday</key><integer>2</integer><key>Hour</key><integer>9</integer><key>Minute</key><integer>5</integer></dict>
+    <dict><key>Weekday</key><integer>3</integer><key>Hour</key><integer>9</integer><key>Minute</key><integer>5</integer></dict>
+    <dict><key>Weekday</key><integer>4</integer><key>Hour</key><integer>9</integer><key>Minute</key><integer>5</integer></dict>
+    <dict><key>Weekday</key><integer>5</integer><key>Hour</key><integer>9</integer><key>Minute</key><integer>5</integer></dict>
+    <dict><key>Weekday</key><integer>6</integer><key>Hour</key><integer>9</integer><key>Minute</key><integer>5</integer></dict>
   </array>
   <key>RunAtLoad</key><false/>
   <key>KeepAlive</key><false/>

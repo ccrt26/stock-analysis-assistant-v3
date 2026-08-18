@@ -11,6 +11,7 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
+from time import sleep as system_sleep
 from typing import Any, Literal, Protocol
 from zoneinfo import ZoneInfo
 
@@ -19,6 +20,9 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
+SELECTION_START = time(9, 5)
+READINESS_DEADLINE = time(9, 15)
+READINESS_POLL_SECONDS = 30
 MARKET_OPEN = time(9, 30)
 DEFAULT_CODEX_TIMEOUT_SECONDS = 18 * 60
 FINALIZE_BUFFER_SECONDS = 30
@@ -319,10 +323,11 @@ def run_daily_forward(
     data: ForwardData,
     research: ResearchExecutor,
     clock: Callable[[], datetime],
+    sleep: Callable[[float], None] = system_sleep,
 ) -> RunSummary:
     started = _shanghai(clock())
     summary_base = {"started_at": started.isoformat(timespec="seconds")}
-    if started.time() < time(9, 0) or started.time() >= MARKET_OPEN:
+    if started.time() < SELECTION_START or started.time() >= MARKET_OPEN:
         return RunSummary(status="outside_selection_window", **summary_base)
 
     fieldnames, rows = _read_forward_log(csv_path)
@@ -341,9 +346,13 @@ def run_daily_forward(
     formation_date = prior_dates[-1]
     formation_text = formation_date.isoformat()
 
-    readiness_cutoff = _shanghai(clock())
-    report = data.health_report(formation_date)
-    if not _data_ready(report, formation_date, readiness_cutoff):
+    if not _wait_until_data_ready(
+        data=data,
+        formation_date=formation_date,
+        action_date=started.date(),
+        clock=clock,
+        sleep=sleep,
+    ):
         return RunSummary(
             status="data_not_ready",
             formation_date=formation_text,
@@ -502,6 +511,26 @@ def apply_mature_settlements(
         row["terminal_return_20d"] = _format_percent(close_returns[-1] * 100.0)
         settled += 1
     return updated, settled
+
+
+def _wait_until_data_ready(
+    *,
+    data: ForwardData,
+    formation_date: date,
+    action_date: date,
+    clock: Callable[[], datetime],
+    sleep: Callable[[float], None],
+) -> bool:
+    deadline = datetime.combine(action_date, READINESS_DEADLINE, SHANGHAI)
+    while True:
+        checked_at = _shanghai(clock())
+        if checked_at >= deadline:
+            return False
+        report = data.health_report(formation_date)
+        if _data_ready(report, formation_date, checked_at):
+            return True
+        remaining = (deadline - checked_at).total_seconds()
+        sleep(min(float(READINESS_POLL_SECONDS), remaining))
 
 
 def _data_ready(
@@ -767,9 +796,23 @@ def _resolve_codex_bin() -> Path:
     raise FileNotFoundError("Codex CLI is not available")
 
 
+def prepare_runtime_log(project_root: Path) -> Path:
+    project_root = Path(project_root)
+    runtime_log = (
+        project_root
+        / "local_archive/forward_selection/forward-selection-log.csv"
+    )
+    if runtime_log.is_file():
+        return runtime_log
+    source_log = project_root / "docs/forward-selection-log.csv"
+    runtime_log.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(source_log, runtime_log)
+    return runtime_log
+
+
 def main() -> int:
     project_root = Path(__file__).resolve().parents[3]
-    csv_path = project_root / "docs/forward-selection-log.csv"
+    csv_path = prepare_runtime_log(project_root)
     prompt_path = project_root / "ops/forward-selection-prompt.md"
     data = LocalForwardData(
         project_root / "local_warehouse",
