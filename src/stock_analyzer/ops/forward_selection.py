@@ -119,6 +119,8 @@ class RunSummary:
 
 
 class ForwardData(Protocol):
+    def trading_day_status(self, on_date: date) -> bool | None: ...
+
     def trading_dates(self, start: date, end: date) -> list[date]: ...
 
     def health_report(self, formation_date: date) -> dict[str, Any]: ...
@@ -140,6 +142,28 @@ class LocalForwardData:
     def __init__(self, warehouse_root: Path, archive_root: Path) -> None:
         self.warehouse_root = Path(warehouse_root)
         self.archive_root = Path(archive_root)
+
+    def trading_day_status(self, on_date: date) -> bool | None:
+        paths = sorted(
+            (self.warehouse_root / "facts/trade_calendar").glob(
+                "cal_year=*/data.parquet"
+            )
+        )
+        if not paths:
+            return None
+        with duckdb.connect() as connection:
+            row = connection.execute(
+                """
+                select is_open
+                from read_parquet(?, union_by_name=true, hive_partitioning=false)
+                where cal_date = ?
+                limit 1
+                """,
+                [[str(path) for path in paths], on_date],
+            ).fetchone()
+        if row is None:
+            return None
+        return bool(row[0])
 
     def trading_dates(self, start: date, end: date) -> list[date]:
         paths = sorted(
@@ -313,11 +337,19 @@ def run_daily_forward(
         return RunSummary(status="outside_selection_window", **summary_base)
 
     fieldnames, rows = _read_forward_log(csv_path)
+    action_date_status = data.trading_day_status(started.date())
+    if action_date_status is None:
+        return RunSummary(
+            status="data_not_ready",
+            error="action_date_calendar_missing",
+            **summary_base,
+        )
+    if not action_date_status:
+        return RunSummary(status="non_trading_day", **summary_base)
+
     calendar_start = started.date() - timedelta(days=730)
     calendar_end = started.date() + timedelta(days=60)
     open_dates = sorted(set(data.trading_dates(calendar_start, calendar_end)))
-    if started.date() not in open_dates:
-        return RunSummary(status="non_trading_day", **summary_base)
     prior_dates = [day for day in open_dates if day < started.date()]
     if not prior_dates:
         return RunSummary(

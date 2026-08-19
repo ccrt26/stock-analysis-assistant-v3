@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -69,7 +69,10 @@ class ResearchBackfillService:
         resume: bool = True,
     ) -> BackfillSummary:
         summary = BackfillSummary(scope="market-core", start=start, through=through)
-        calendar = self.client.fetch_trade_calendar(start, through)
+        calendar = self.client.fetch_trade_calendar(
+            start,
+            through + timedelta(days=60),
+        )
         for year, frame in calendar.groupby("cal_year"):
             partition = str(year)
             records = frame.drop(columns=["cal_year"]).to_dict(orient="records")

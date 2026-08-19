@@ -39,6 +39,33 @@ class CalendarPro(FakePro):
         )
 
 
+class CalendarHorizonPro(CalendarPro):
+    def trade_cal(self, **kwargs):
+        self.calls.append(("trade_cal", kwargs))
+        return pd.DataFrame(
+            [
+                {
+                    "exchange": "SSE",
+                    "cal_date": "20260710",
+                    "is_open": 1,
+                    "pretrade_date": "20260709",
+                },
+                {
+                    "exchange": "SSE",
+                    "cal_date": "20260711",
+                    "is_open": 0,
+                    "pretrade_date": "20260710",
+                },
+                {
+                    "exchange": "SSE",
+                    "cal_date": "20260713",
+                    "is_open": 1,
+                    "pretrade_date": "20260710",
+                },
+            ]
+        )
+
+
 def test_security_master_refreshes_with_resume_and_unchanged_snapshot_converges(
     tmp_path,
 ):
@@ -138,6 +165,47 @@ def test_market_backfill_repairs_committed_partition_with_incomplete_vendor_sche
     assert set(calendar["availability_precision"]) == {
         "inferred_from_endpoint_policy"
     }
+
+
+def test_market_backfill_prefetches_calendar_without_fetching_future_market_data(
+    tmp_path,
+):
+    pro = CalendarHorizonPro()
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    service = ResearchBackfillService(
+        TushareResearchClient(pro, pacer=lambda method: None),
+        warehouse,
+        broad_index_codes=(),
+    )
+
+    service.backfill_market_core(
+        start=date(2026, 7, 10),
+        through=date(2026, 7, 10),
+        resume=True,
+    )
+
+    trade_calendar_calls = [
+        kwargs for method, kwargs in pro.calls if method == "trade_cal"
+    ]
+    assert trade_calendar_calls == [
+        {
+            "exchange": "SSE",
+            "start_date": "20260710",
+            "end_date": "20260908",
+        }
+    ]
+    calendar = warehouse.read_current(ResearchDatasetId.TRADE_CALENDAR)
+    assert pd.to_datetime(calendar["cal_date"]).dt.date.tolist() == [
+        date(2026, 7, 10),
+        date(2026, 7, 11),
+        date(2026, 7, 13),
+    ]
+    market_calls = [
+        kwargs
+        for method, kwargs in pro.calls
+        if method in {"daily", "adj_factor", "daily_basic", "stk_limit"}
+    ]
+    assert {kwargs["trade_date"] for kwargs in market_calls} == {"20260710"}
 
 
 def test_empty_required_daily_response_is_recorded_as_waiting_not_complete(tmp_path):

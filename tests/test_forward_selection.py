@@ -54,11 +54,13 @@ class FakeData:
         self,
         *,
         open_dates: list[date],
+        action_date_status: bool | None = True,
         ready: bool = True,
         ready_states: list[bool] | None = None,
         prices: dict[str, list[PricePoint] | None] | None = None,
     ) -> None:
         self._open_dates = open_dates
+        self.action_date_status = action_date_status
         self.ready = ready
         self.ready_states = iter(ready_states) if ready_states is not None else None
         self.health_calls = 0
@@ -66,6 +68,9 @@ class FakeData:
 
     def trading_dates(self, start: date, end: date) -> list[date]:
         return [day for day in self._open_dates if start <= day <= end]
+
+    def trading_day_status(self, on_date: date) -> bool | None:
+        return self.action_date_status
 
     def health_report(self, formation_date: date) -> dict:
         self.health_calls += 1
@@ -212,12 +217,37 @@ def test_non_trading_day_does_not_call_codex_or_write(tmp_path: Path) -> None:
     summary, csv_path = _run(
         tmp_path,
         now=_clock(datetime(2026, 8, 22, 9, 10, tzinfo=SHANGHAI)),
-        data=FakeData(open_dates=[date(2026, 8, 21)]),
+        data=FakeData(
+            open_dates=[date(2026, 8, 21)],
+            action_date_status=False,
+        ),
         research=research,
         rows=original,
     )
 
     assert summary.status == "non_trading_day"
+    assert research.calls == 0
+    assert _read_csv(csv_path) == original
+
+
+def test_missing_action_date_calendar_is_data_not_ready_not_non_trading(
+    tmp_path: Path,
+) -> None:
+    original = [_row(formation_date="2026-08-14", validation_mode="reconstructed")]
+    research = FakeResearch(_empty_result())
+    summary, csv_path = _run(
+        tmp_path,
+        now=_clock(datetime(2026, 8, 19, 9, 5, tzinfo=SHANGHAI)),
+        data=FakeData(
+            open_dates=[date(2026, 8, 18)],
+            action_date_status=None,
+        ),
+        research=research,
+        rows=original,
+    )
+
+    assert summary.status == "data_not_ready"
+    assert summary.error == "action_date_calendar_missing"
     assert research.calls == 0
     assert _read_csv(csv_path) == original
 
