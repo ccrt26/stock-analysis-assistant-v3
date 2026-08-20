@@ -14,17 +14,23 @@ import numpy as np
 import pandas as pd
 
 
-MARKET_CONTEXT_FORMULA_VERSION = "market-context-v2"
-BROAD_INDEX_CODES = (
+MARKET_CONTEXT_FORMULA_VERSION = "market-context-v3"
+SCOPE_ANCHOR_INDEX_CODES = (
     "000001.SH",
     "399001.SZ",
     "399006.SZ",
-    "000688.SH",
+)
+SIZE_STYLE_INDEX_CODES = (
     "000300.SH",
     "000905.SH",
     "000852.SH",
+)
+REQUIRED_INDEX_CODES = SCOPE_ANCHOR_INDEX_CODES + SIZE_STYLE_INDEX_CODES
+AUXILIARY_INDEX_CODES = (
+    "000688.SH",
     "899050.BJ",
 )
+BROAD_INDEX_CODES = REQUIRED_INDEX_CODES + AUXILIARY_INDEX_CODES
 RETURN_HORIZONS = (1, 3, 5, 20)
 LONG_WINDOWS = (20, 60)
 MINIMUM_CURRENT_COVERAGE = 0.95
@@ -47,6 +53,11 @@ def compute_market_context_features(
     5/20-session average including the current session.  Realized volatility is
     the sample standard deviation of the last 20 equal-weight daily returns,
     annualized with :math:`sqrt(252)`.
+
+    Scope-anchor returns are the strict equal-weight mean of SSE Composite,
+    Shenzhen Component and ChiNext index returns.  Required index coverage is
+    separate from STAR and BSE auxiliary context because the default research
+    universe excludes those two markets.
 
     Actual limit-price facts are required to count limit hits.  A near hit is
     exclusive of an actual hit and lies within 2% of the supplied daily limit.
@@ -146,15 +157,34 @@ def compute_market_context_features(
         current_indexes["index_code"].astype(str).isin(BROAD_INDEX_CODES)
         & _finite_positive(current_indexes["close"])
     ]
-    index_current_count = int(current_indexes["index_code"].nunique())
+    current_index_codes = set(current_indexes["index_code"].astype(str))
+    index_current_count = len(current_index_codes)
     index_coverage_ratio = index_current_count / len(BROAD_INDEX_CODES)
-    index_coverage_complete = index_current_count == len(BROAD_INDEX_CODES)
+    required_index_count = len(current_index_codes.intersection(REQUIRED_INDEX_CODES))
+    required_index_coverage_ratio = required_index_count / len(REQUIRED_INDEX_CODES)
+    required_index_coverage_complete = required_index_count == len(REQUIRED_INDEX_CODES)
+    auxiliary_index_count = len(current_index_codes.intersection(AUXILIARY_INDEX_CODES))
+    auxiliary_index_coverage_ratio = auxiliary_index_count / len(AUXILIARY_INDEX_CODES)
     row["broad_index_current_count"] = index_current_count
     row["broad_index_current_coverage_ratio"] = float(index_coverage_ratio)
-    if not index_coverage_complete:
+    row["required_index_current_count"] = required_index_count
+    row["required_index_current_coverage_ratio"] = float(
+        required_index_coverage_ratio
+    )
+    row["auxiliary_index_current_count"] = auxiliary_index_count
+    row["auxiliary_index_current_coverage_ratio"] = float(
+        auxiliary_index_coverage_ratio
+    )
+    if not required_index_coverage_complete:
         limitation_notes.append(
-            "broad index current coverage "
-            f"{index_current_count}/{len(BROAD_INDEX_CODES)} is incomplete"
+            "required index current coverage "
+            f"{required_index_count}/{len(REQUIRED_INDEX_CODES)} is incomplete"
+        )
+    if auxiliary_index_count != len(AUXILIARY_INDEX_CODES):
+        limitation_notes.append(
+            "auxiliary index current coverage "
+            f"{auxiliary_index_count}/{len(AUXILIARY_INDEX_CODES)} is incomplete; "
+            "default-scope coverage is unaffected"
         )
 
     for code in BROAD_INDEX_CODES:
@@ -170,6 +200,42 @@ def compute_market_context_features(
             row[f"index_{_code_slug(code)}_return_{horizon}d"] = _dated_series_return(
                 code_series, horizon, analysis_date
             )
+
+    required_return_fields = [
+        f"index_{_code_slug(code)}_return_{horizon}d"
+        for code in REQUIRED_INDEX_CODES
+        for horizon in RETURN_HORIZONS
+    ]
+    required_return_observed = sum(
+        bool(np.isfinite(row[field])) for field in required_return_fields
+    )
+    required_return_coverage_complete = (
+        required_return_observed == len(required_return_fields)
+    )
+    row["required_index_return_observed_count"] = required_return_observed
+    row["required_index_return_coverage_ratio"] = float(
+        required_return_observed / len(required_return_fields)
+    )
+    if not required_return_coverage_complete:
+        limitation_notes.append(
+            "required index return-window coverage "
+            f"{required_return_observed}/{len(required_return_fields)} is incomplete"
+        )
+
+    for horizon in RETURN_HORIZONS:
+        scope_anchor_return = _strict_finite_mean(
+            [
+                row[f"index_{_code_slug(code)}_return_{horizon}d"]
+                for code in SCOPE_ANCHOR_INDEX_CODES
+            ]
+        )
+        row[f"scope_anchor_return_{horizon}d"] = scope_anchor_return
+        equity_return = row[f"equal_weight_return_{horizon}d"]
+        row[f"breadth_index_return_gap_{horizon}d"] = (
+            float(equity_return) - scope_anchor_return
+            if np.isfinite(equity_return) and np.isfinite(scope_anchor_return)
+            else np.nan
+        )
 
     turnover_by_date = _strict_turnover_by_date(equity)
     current_turnover = (
@@ -194,7 +260,31 @@ def compute_market_context_features(
     row["return_dispersion_1d"] = (
         float(one_day_returns.std(ddof=0)) if not one_day_returns.empty else np.nan
     )
-    row["realized_volatility_20d_annualized"] = _realized_market_volatility(pivot)
+    daily_market_returns = _daily_market_returns(pivot)
+    daily_return_dispersion = _daily_return_dispersion(pivot)
+    dispersion_average_20d = _strict_trailing_mean(daily_return_dispersion, 20)
+    row["return_dispersion_20d_average"] = dispersion_average_20d
+    row["return_dispersion_ratio_20d"] = _safe_ratio(
+        row["return_dispersion_1d"], dispersion_average_20d
+    )
+    realized_volatility_20d = _realized_market_volatility(
+        daily_market_returns, 20
+    )
+    realized_volatility_60d = _realized_market_volatility(
+        daily_market_returns, 60
+    )
+    row["realized_volatility_20d_annualized"] = realized_volatility_20d
+    row["realized_volatility_60d_annualized"] = realized_volatility_60d
+    row["realized_volatility_ratio_20d_to_60d"] = _safe_ratio(
+        realized_volatility_20d, realized_volatility_60d
+    )
+    positive_returns = one_day_returns[one_day_returns > 0.0]
+    row["positive_return_count_1d"] = int(len(positive_returns))
+    row["top20_positive_return_contribution_1d"] = (
+        float(positive_returns.nlargest(20).sum() / positive_returns.sum())
+        if not positive_returns.empty and positive_returns.sum() > 0.0
+        else np.nan
+    )
     limit_observations, limit_coverage_complete = _limit_observations(
         current_core_valid,
         limits,
@@ -213,7 +303,8 @@ def compute_market_context_features(
         "complete"
         if equity_coverage_complete
         and adjustment_coverage_complete
-        and index_coverage_complete
+        and required_index_coverage_complete
+        and required_return_coverage_complete
         and limit_coverage_complete
         else "limited"
     )
@@ -330,18 +421,61 @@ def _new_extreme_share(pivot: pd.DataFrame, window: int, extreme: str) -> float:
     return float((latest <= sample.min(axis=0)).mean())
 
 
-def _realized_market_volatility(pivot: pd.DataFrame) -> float:
+def _daily_market_returns(pivot: pd.DataFrame) -> pd.Series:
     if pivot.empty:
-        return np.nan
-    equal_weight_daily = (
+        return pd.Series(dtype=float)
+    return (
         pivot.pct_change(fill_method=None)
         .replace([np.inf, -np.inf], np.nan)
         .mean(axis=1)
-        .dropna()
     )
-    if len(equal_weight_daily) < 20:
+
+
+def _daily_return_dispersion(pivot: pd.DataFrame) -> pd.Series:
+    if pivot.empty:
+        return pd.Series(dtype=float)
+    returns = pivot.pct_change(fill_method=None).replace([np.inf, -np.inf], np.nan)
+    counts = returns.notna().sum(axis=1)
+    dispersion = returns.std(axis=1, ddof=0)
+    return dispersion.where(counts >= 2)
+
+
+def _realized_market_volatility(daily_returns: pd.Series, window: int) -> float:
+    values = pd.to_numeric(daily_returns, errors="coerce")
+    if len(values) < window + 1:
         return np.nan
-    return float(equal_weight_daily.tail(20).std(ddof=1) * sqrt(252.0))
+    trailing = values.tail(window)
+    if len(trailing) != window or not np.isfinite(trailing).all():
+        return np.nan
+    return float(trailing.std(ddof=1) * sqrt(252.0))
+
+
+def _strict_trailing_mean(values: pd.Series, window: int) -> float:
+    numeric = pd.to_numeric(values, errors="coerce")
+    if len(numeric) < window + 1:
+        return np.nan
+    trailing = numeric.tail(window)
+    if len(trailing) != window or not np.isfinite(trailing).all():
+        return np.nan
+    return float(trailing.mean())
+
+
+def _strict_finite_mean(values: list[object]) -> float:
+    numeric = np.asarray(values, dtype=float)
+    return float(numeric.mean()) if np.isfinite(numeric).all() else np.nan
+
+
+def _safe_ratio(numerator: object, denominator: object) -> float:
+    try:
+        numerator_value = float(numerator)
+        denominator_value = float(denominator)
+    except (TypeError, ValueError):
+        return np.nan
+    if not np.isfinite(numerator_value) or not np.isfinite(denominator_value):
+        return np.nan
+    if denominator_value == 0.0:
+        return np.nan
+    return numerator_value / denominator_value
 
 
 def _limit_observations(
@@ -451,7 +585,11 @@ def _as_date(value: date) -> date:
 
 
 __all__ = [
+    "AUXILIARY_INDEX_CODES",
     "BROAD_INDEX_CODES",
     "MARKET_CONTEXT_FORMULA_VERSION",
+    "REQUIRED_INDEX_CODES",
+    "SCOPE_ANCHOR_INDEX_CODES",
+    "SIZE_STYLE_INDEX_CODES",
     "compute_market_context_features",
 ]

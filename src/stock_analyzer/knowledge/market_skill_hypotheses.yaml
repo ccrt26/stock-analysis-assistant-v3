@@ -1,0 +1,91 @@
+schema_version: market-skill-hypotheses-v1
+frozen_on: 2026-08-19
+design_status: retrospective_frozen_design_on_previously_exposed_history
+unit_of_analysis: formation_date
+production_target_horizon: approximately_20_trading_sessions
+sample:
+  source: local_archive/price_indicator_validation/2026-08-19-price-indicator-validation-v1/frozen-sample.parquet
+  first_formation_date: 2022-07-26
+  last_formation_date: 2026-07-21
+  development_end: 2024-12-31
+  validation_start: 2025-01-02
+  formation_step_sessions: 5
+  universe: [上海主板, 深圳主板, 创业板]
+  known_limitations:
+    - 历史 ST 名称快照不完整，冻结样本仅排除可由 5% 涨跌幅带明确识别的特别处理样本。
+    - 行业日线完整覆盖开始较晚，行业扩散不做本轮方向准入。
+    - 历史样本已在既有研究中被查看，所有结果只能标注为回顾性证据。
+outcomes:
+  opportunity_hit_rate_20d: 形成日合格股票从行动日开盘起 D1-D20 触及正20%的比例
+  equal_weight_return_close_20d: 形成日合格股票从行动日开盘到 D20 收盘的等权收益
+  future_market_volatility_20d: 行动日起20个交易日全市场等权日收益的样本标准差乘以sqrt(252)
+  trend_spread_return_20d: 形成日过去20日相对市场收益前20%减后20%的D20等权收益
+features:
+  breadth: [equal_weight_return_5d, median_return_5d, breadth_5d]
+  scope_anchor: 上证综指、深证成指和创业板指5日收益的等权平均
+  turnover: 当日默认股票范围总成交额除以含当日过去20日总成交额均值
+  dispersion: 当日默认股票范围复权日收益的总体标准差
+  market_state: [过去20日等权市场收益, 过去5日等权市场收益, breadth_20d]
+thresholds:
+  rule: 只用开发期形成日的有限值计算Q40和Q60，验证期不重新拟合
+  missing: 所需字段任一缺失即不分组，不用零或短窗口填充
+inference:
+  point_estimate: 验证期形成日等权差或Spearman秩相关
+  bootstrap: 4个相邻形成日为一块，固定种子20260819，1000次
+  confidence_interval: percentile_95
+  stability: [2025, 2026_through_2026-07-21]
+  minimum_coverage:
+    per_comparison_group_dates: 30
+    each_calendar_period_dates: 12
+  multiple_testing: Holm校正四个经验假设的预期方向p值
+  no_retuning_after_labels: true
+hypotheses:
+  - hypothesis_id: market_h1_breadth_index_alignment
+    claim: 指数、等权收益、中位数和上涨面共同为正时，未来20日显著上涨机会率高于指数上涨但中位数或上涨面偏弱的窄行情。
+    case: scope_anchor_return_5d大于0、equal_weight_return_5d大于0、median_return_5d大于0且breadth_5d不低于开发期Q60
+    control: scope_anchor_return_5d大于0，且median_return_5d不大于0或breadth_5d不高于开发期Q40
+    primary_outcome: opportunity_hit_rate_20d
+    expected_direction: case_greater_than_control
+    admission: 差至少正2个百分点、95%区间下界大于0、Holm后p小于0.05且2025与2026方向均为正
+    failure_use: 未通过时，广度与指数背离仍可作为一级描述事实，但不得预测未来机会率。
+
+  - hypothesis_id: market_h2_turnover_price_progress
+    claim: 同为高成交环境，价格与上涨面有推进的形成日比高成交低进展形成日具有更高的未来20日显著上涨机会率。
+    case: turnover_ratio_20d不低于开发期Q60、equal_weight_return_5d不低于Q60、breadth_5d不低于Q60
+    control: turnover_ratio_20d不低于开发期Q60，且equal_weight_return_5d绝对值不高于其开发期Q40、breadth_5d不高于Q40
+    primary_outcome: opportunity_hit_rate_20d
+    expected_direction: case_greater_than_control
+    admission: 差至少正2个百分点、95%区间下界大于0、Holm后p小于0.05且2025与2026方向均为正
+    failure_use: 无论结果如何，成交放大单独都不得解释为趋势确认、风险偏好或特定资金买入。
+
+  - hypothesis_id: market_h3_dispersion_future_volatility
+    claim: 形成日横截面收益分化越高，随后20日全市场等权实现波动越高。
+    comparison: 验证期形成日dispersion与future_market_volatility_20d的Spearman秩相关
+    primary_outcome: future_market_volatility_20d
+    expected_direction: positive
+    admission: 秩相关至少0.15、95%区间下界大于0、Holm后p小于0.05且2025与2026方向均为正
+    failure_use: 未通过时保留论文方法和行业级既有验证，只把市场级分化当当前结构事实，不声称预测市场波动。
+
+  - hypothesis_id: market_h4_state_changes_trend_reliability
+    claim: 市场状态会改变过去20日个股相对强弱的后续20日关系，因此不能在所有市场状态下把追强当作同一种证据。
+    groups:
+      continuous_rise: 过去20日等权市场收益大于0、过去5日等权市场收益大于0且breadth_20d不低于开发期Q60
+      other: 其余具有完整字段的形成日
+    primary_outcome: trend_spread_return_20d
+    expected_direction: group_difference_not_zero
+    admission: 两组差的绝对值至少2个百分点、95%区间不含0、Holm后双侧p小于0.05；每组内部结果仍分别报告，不将连续上涨自动解释为追强有效
+    failure_use: 未通过时只保留“既有论文与旧本地结果提示需验证”的能力，不改变候选可信度。
+
+non_empirical_capabilities:
+  - capability_id: market_h5_style_industry_diffusion
+    status_before_run: validation_capability
+    reason: 规模指数可作一级相对表现事实；行业完整历史不足，不能预设轮动或持续方向。
+  - capability_id: market_h6_t1_price_limits
+    status_before_run: level_1_direct
+    reason: 只采用形成日有效交易所规则解释可交易性、涨跌停和T加一边界，不产生收益方向。
+  - capability_id: market_h7_macro_policy_transmission
+    status_before_run: validation_capability
+    reason: 只有官方政策原文、明确传导链和候选暴露同时存在时才能形成问题；政策标题不能直接映射公司收益。
+  - capability_id: market_h8_candidate_dependency
+    status_before_run: level_1_reasoning_contract
+    reason: 验证阶段逐只披露依赖、所需条件、当前影响、反证和失效变化，不作为股票投票。

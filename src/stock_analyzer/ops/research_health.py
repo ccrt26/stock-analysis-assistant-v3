@@ -12,6 +12,9 @@ from pydantic import BaseModel
 
 from stock_analyzer.analysis.hotspot_features import HOTSPOT_FORMULA_VERSION
 from stock_analyzer.analysis.market_context_features import MARKET_CONTEXT_FORMULA_VERSION
+from stock_analyzer.analysis.price_analysis_features import (
+    PRICE_ANALYSIS_FORMULA_VERSION,
+)
 from stock_analyzer.analysis.stock_context_features import STOCK_CONTEXT_FORMULA_VERSION
 from stock_analyzer.data.research_contracts import (
     ResearchDatasetId,
@@ -29,6 +32,7 @@ _EXPECTED_DERIVED_FORMULAS = {
     "market_context": MARKET_CONTEXT_FORMULA_VERSION,
     "sector_hotspot": HOTSPOT_FORMULA_VERSION,
     "stock_trading_context": STOCK_CONTEXT_FORMULA_VERSION,
+    "price_analysis_context": PRICE_ANALYSIS_FORMULA_VERSION,
 }
 
 

@@ -1,6 +1,6 @@
 # 股票分析助手 V3：当前架构与实现状态
 
-**更新日期：** 2026-08-18
+**更新日期：** 2026-08-20
 
 **适用范围：** GitHub `main` 分支
 
@@ -63,7 +63,7 @@ flowchart TD
     A["正式数据源<br/>Tushare、巨潮等"] --> B["数据合同与增量任务<br/>data/ + ops/"]
     B --> C["本地事实仓<br/>DuckDB 元数据 + Parquet 事实"]
     C --> D["时点安全查询<br/>ResearchQuery"]
-    D --> E["确定性观察与输入清单<br/>市场、板块、个股交易上下文"]
+    D --> E["确定性观察与输入清单<br/>市场、板块、个股交易、价格场景输入"]
     C --> F["本地研究知识<br/>YAML"]
     E --> G["股票研究总控 Skill"]
     F --> G
@@ -116,13 +116,14 @@ flowchart TD
 
 ### 5.4 确定性派生观察
 
-`src/stock_analyzer/analysis/` 和 `src/stock_analyzer/ops/research_features.py` 当前生成三类无最终选股权的观察：
+`src/stock_analyzer/analysis/` 和 `src/stock_analyzer/ops/research_features.py` 当前生成四类无最终选股权的观察：
 
 - `market_context`：市场收益、广度、波动、集中等连续事实；
 - `sector_hotspot`：行业/主题共同表现、成员广度、集中和分化；
 - `stock_trading_context`：个股相对表现、价格位置、成交和交易质量。
+- `price_analysis_context`：按价格 Skill 六个信息维度和 11 个研究场景反查得到的完整场景就绪输入，包括原始路径、相对强弱、趋势方向、路径效率、振荡、波动、收盘/成交质量、长期位置和参与条件。
 
-派生任务记录公式版本与输入清单；输入未变时可以校验并跳过重算。这是数据与计算层的增量复用，不等同于已经实现了 AI 研究结果缓存。
+`price_analysis_context` 使用本地复权行情并严格截断在形成日，至少保留 251 个会话以计算前 250 日高点；它不自动给股票分配场景结论，也不把 MACD、RSI、K/D、BOLL、ADX/DMI、EMA 或其他观察变成评分和 Gate。派生任务记录公式版本与输入清单；输入未变时可以校验并跳过重算。这是数据与计算层的增量复用，不等同于已经实现了 AI 研究结果缓存。
 
 ### 5.5 本地研究知识
 
@@ -143,7 +144,7 @@ data health
 
 `ops/launchd/` 保留收盘、晚间和次晨三个数据任务模板。它们只更新本地事实、派生观察和健康摘要，不运行最终选股、不发布报告、不交易。
 
-`src/stock_analyzer/ops/forward_selection.py` 与对应 launchd 模板在交易日上午约 09:05 做一层很薄的编排：若次晨数据尚未就绪，就每约 30 秒检查一次并最晚在约 09:15 放弃；数据就绪后，以只读方式调用本机 `codex exec` 和当前五个 Skill，把 09:30 前完成的 0—5 只结果原子冻结到被 Git 忽略的 `local_archive/forward_selection/forward-selection-log.csv`。历史记录在首次启用时由 `docs/forward-selection-log.csv` 简单初始化，之后只在 D1—D20 行情完整时由程序一次性结算，不逐日更新 D1—D19。它不复制 Skill 规则，不形成程序化评分器，不自动交易或调优 Skill，也不修改现有三个数据任务。
+交易日上午约 09:05 的最终研究由 Codex 原生 Scheduled Task 在当前项目中直接调用 `$orchestrating-stock-research`，总控在同一个顶层会话内使用四个专业 Skill；仓库代码不再通过 Python 启动第二个 Codex，也没有第四个 AI LaunchAgent。`src/stock_analyzer/ops/forward_selection.py` 只保留两个确定性动作：`prepare` 冻结上一交易日、行动日和带时区的 `as_of`，等待次晨数据并结算到期 D20；`record` 校验顶层会话产生的结构化结果、股票资格和时间边界后原子归档。研究超过 18 分钟或 09:30 后完成仍可保存，只要冻结的 `as_of` 早于行动日 09:30，且所有行情交易日期不晚于形成日、所有事实满足 `available_at <= as_of`。合规结果统一按 `selection` 语义写入被 Git 忽略的 `local_archive/forward_selection/forward-selection-log.csv`；历史 `validation_mode` 只为 CSV 兼容保留，不再形成 forward/reconstructed 两套推荐。历史记录首次由 `docs/forward-selection-log.csv` 初始化，之后只在 D1—D20 行情完整时一次性结算。
 
 `select_minute_candidate_scope` 中的确定性排序只用于限制可选分钟数据的采集范围，属于数据成本控制，不是投资评分或最终候选排名；分钟数据也不是目标架构的每日必需输入。
 
@@ -192,11 +193,11 @@ data health
 | 正式数据增量获取、修复和健康检查 | 已实现 | `data/`、`ops/`、CLI 和测试 |
 | DuckDB + Parquet 事实仓、修订、哈希和恢复 | 已实现 | `storage/research_warehouse.py` |
 | 带 `as_of` 的形成日查询和输入清单 | 已实现 | `storage/research_query.py` |
-| 市场、板块、个股交易三类确定性观察 | 已实现 | `analysis/`、`ops/research_features.py` |
+| 市场、板块、个股交易、价格场景输入四类确定性观察 | 已实现 | `analysis/`、`ops/research_features.py`；价格输入按形成日截断并覆盖当前 Skill 场景字段 |
 | 本地研究知识与 Skill 定向调阅 | 已实现 | `knowledge/*.yaml`、五个 Skill |
 | 一个总控 + 四个专业研究 Skill | 已实现 | `.agents/skills/` |
 | 候选链追溯、历史形成日模拟和调优诊断方法 | 已实现为 Skill 合同和研究流程 | 通过 Codex/ChatGPT 执行并在 `docs/` 留下诊断报告，不是常驻 Python 服务 |
-| 每日自动端到端 AI 选股运行器 | 已实现为本机轻量任务 | 约 09:05 启动并等待次晨数据至约 09:15，复用 `codex exec` 与五个 Skill；运行记录只写本地归档，数据仍未就绪、重复形成日、AI 失败或错过 09:30 时不写正式 forward，D20 到期一次性结算 |
+| 每日自动端到端 AI 选股 | 仓库侧准备和归档已实现；触发由 Codex 原生 Scheduled Task 配置 | 约 09:05 顶层任务直接调用总控 Skill；`prepare`/`record` 不启动模型，只冻结边界、检查数据、校验归档和结算 D20；超过 09:30 完成不改变冻结 `as_of` |
 | AI 调用前的研究结果缓存、候选 memo 缓存和断点恢复 | 未实现 | 目前只有事实/派生层哈希、清单与跳过重算 |
 | 自动报告渲染、云端发布、Supabase 和交易执行 | 有意不存在 | 旧 V3 路径已从 `main` 删除，不得当作备用能力 |
 | GitHub 中的真实本地研究数据 | 有意不存在 | `local_warehouse/`、`local_archive/`、`logs/`、`.env*` 被忽略 |

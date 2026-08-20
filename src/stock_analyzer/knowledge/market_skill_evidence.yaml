@@ -1,0 +1,98 @@
+schema_version: market-skill-evidence-v1
+generated_on: 2026-08-19
+governance:
+  source_quality: [S_official, A_peer_reviewed_A_share, M_overseas_method]
+  maturity: [level_1_direct, level_2_direct, validation_capability, forbidden]
+  rule: 来源质量和使用成熟度分别判断；官方事实不自动产生收益方向，论文关系不经本地验证不进入二级。
+adopted_sources:
+  - source_id: official-sse-composite-methodology-2020
+    source_quality: S_official
+    adopted_for: [指数样本语义, 默认范围与指数不完全等价, 指数等权分布对照]
+    allowed_uses: [将000001作为沪市整体价格锚之一, 说明其含科创板且为市值加权]
+    forbidden_uses: [把上证综指当上海主板等权组合, 用指数上涨证明普通股票普涨或未来上涨]
+    data_needs: [index_daily, equity_daily, security_master]
+    local_validation: 不需要收益验证即可作为一级官方语义；任何方向用途仍需market_h1本地验证。
+
+  - source_id: official-szse-component-revision-2015
+    source_quality: S_official
+    adopted_for: [深市标尺语义, 成份指数与全体分布对照]
+    allowed_uses: [将399001作为深市价格锚之一]
+    forbidden_uses: [把500只成份等同深市全部股票, 单独据此判断机会宽度]
+    data_needs: [index_daily, equity_daily, security_master]
+    local_validation: 一级官方语义；方向用途引用market_h1。
+
+  - source_id: official-szse-chinext-index-2010
+    source_quality: S_official
+    adopted_for: [默认范围中创业板的价格锚]
+    allowed_uses: [将399006与上证综指、深证成指并列观察]
+    forbidden_uses: [把成份指数等同创业板全部股票, 用创业板指单独决定创业板候选]
+    data_needs: [index_daily, equity_daily, security_master]
+    local_validation: 一级官方语义；方向用途引用market_h1。
+
+  - source_id: official-csi300-methodology-current
+    source_quality: S_official
+    adopted_for: [大盘高流动性风格锚]
+    allowed_uses: [与中证500和中证1000比较规模风格相对表现]
+    forbidden_uses: [把沪深300当全A等权市场, 把大盘领先直接写成未来风格延续]
+    data_needs: [index_daily]
+    local_validation: 风格收益原值属于一级事实；延续或切换保持验证能力。
+
+  - source_id: paper-fei-liu-wen-dispersion-2019
+    source_quality: A_peer_reviewed_A_share
+    adopted_for: [分化公式, 分化与后续波动的待验证方向, 禁止推断涨跌]
+    allowed_uses: [复算横截面收益标准差, 在本地验证通过后调整波动风险解释]
+    forbidden_uses: [由分化扩大断言下跌, 由分化推断羊群主体或机构身份, 复制论文模型系数]
+    data_needs: [equity_daily, adj_factor, security_master, 后续20日市场日收益]
+    local_validation: market_skill_validation_results.yaml#market_h3_dispersion_future_volatility
+
+  - source_id: paper-narayan-zheng-liquidity-2011
+    source_quality: A_peer_reviewed_A_share
+    adopted_for: [成交单指标的反证边界]
+    allowed_uses: [要求成交与价格进展、上涨面共同解释, 以本地形成日结果判断条件关系]
+    forbidden_uses: [放量等于风险偏好提升, 放量等于机构或主力买入, 单凭成交预测方向]
+    data_needs: [equity_daily, formation_date_market_panel, 20日机会结果]
+    local_validation: market_skill_validation_results.yaml#market_h2_turnover_price_progress
+
+  - source_id: paper-ma-liao-jiang-factor-momentum-2024
+    source_quality: A_peer_reviewed_A_share
+    adopted_for: [因子层与个股层趋势的区分, 市场状态条件化问题]
+    allowed_uses: [提出趋势证据需按市场状态检验, 与现有本地结果共同限制追强解释]
+    forbidden_uses: [把因子动量当个股动量, 复制论文形成期收益或阈值, 直接生成热点排名]
+    data_needs: [equity_daily, index_daily, formation_date_trend_spread]
+    local_validation: [supplement_validation_results.yaml#src_cn_factor_momentum_2023, market_skill_validation_results.yaml#market_h4_state_changes_trend_reliability]
+
+  - source_id: paper-cheema-nartea-momentum-state-2017
+    source_quality: A_peer_reviewed_A_share
+    adopted_for: [市场状态改变趋势关系的研究先验]
+    allowed_uses: [比较不同状态下趋势证据的形成日级结果]
+    forbidden_uses: [上涨市场等于追强有效, 复制论文状态窗口和收益]
+    data_needs: [equity_daily, index_daily, formation_date_trend_spread]
+    local_validation: [supplement_validation_results.yaml#src_cn_factor_momentum_2023, market_skill_validation_results.yaml#market_h4_state_changes_trend_reliability]
+
+  - source_id: official-sse-trading-rules-2026
+    source_quality: S_official
+    adopted_for: [上交所T加一、价格限制、停复牌和交易时点边界]
+    allowed_uses: [按形成日有效版本解释行动日可交易性和价格限制]
+    forbidden_uses: [由制度事实预测收益, 把触及涨停写成可以成交]
+    data_needs: [stock_limit, suspension, equity_daily, action_date]
+    local_validation: 官方语义直接作为一级；形成日必须核对有效版本。
+
+  - source_id: official-szse-trading-rules-2026
+    source_quality: S_official
+    adopted_for: [深交所T加一、价格限制、停复牌和交易时点边界]
+    allowed_uses: [按板块和形成日解释可交易性]
+    forbidden_uses: [将主板和创业板涨跌幅规则混用, 由制度事实预测收益]
+    data_needs: [stock_limit, suspension, equity_daily, action_date]
+    local_validation: 官方语义直接作为一级；形成日必须核对有效版本。
+
+not_adopted:
+  - description: 海外横截面分化、市场宽度或技术择时论文
+    reason: A股已有更直接来源，且海外收益方向未经本地验证；本轮不需要为相同公式增加间接来源。
+  - description: 以投资者持股人数定义的ownership breadth研究
+    reason: 变量是持有人覆盖，不等于本Skill所说的上涨股票占比，概念不等价。
+  - description: 复杂综合流动性因子或PLS流动性指数
+    reason: 当前生产事实没有等价变量，增加指标汤会扩大范围；成交条件先用透明原值验证。
+  - description: 宏观、情绪和政策代理变量集合
+    reason: 当前仓库没有可回放且时点安全的统一宏观事实，本轮不凭叙事补建指标库。
+  - description: 仅凭摘要、二手综述或已撤稿研究
+    reason: 不满足原始来源和可审计要求，禁止进入Skill与知识结论。

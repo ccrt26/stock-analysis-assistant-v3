@@ -7,8 +7,11 @@ import pandas as pd
 import pytest
 
 from stock_analyzer.analysis.market_context_features import (
+    AUXILIARY_INDEX_CODES,
     BROAD_INDEX_CODES,
     MARKET_CONTEXT_FORMULA_VERSION,
+    REQUIRED_INDEX_CODES,
+    SCOPE_ANCHOR_INDEX_CODES,
     compute_market_context_features,
 )
 
@@ -137,6 +140,17 @@ def test_returns_indexes_and_turnover_are_hand_calculated() -> None:
         for horizon, expected in expected_by_horizon.items():
             assert row[f"index_{slug}_return_{horizon}d"] == pytest.approx(expected)
 
+    for horizon in (1, 3, 5, 20):
+        expected_anchor = np.mean(
+            [expected_index_returns[code][horizon] for code in SCOPE_ANCHOR_INDEX_CODES]
+        )
+        assert row[f"scope_anchor_return_{horizon}d"] == pytest.approx(
+            expected_anchor
+        )
+        assert row[f"breadth_index_return_gap_{horizon}d"] == pytest.approx(
+            expected_market[horizon][0] - expected_anchor
+        )
+
     assert row["market_turnover_amount"] == pytest.approx(2_000.0)
     assert row["turnover_ratio_5d"] == pytest.approx(2_000.0 / 1_200.0)
     assert row["turnover_ratio_20d"] == pytest.approx(2_000.0 / 1_050.0)
@@ -170,13 +184,90 @@ def test_long_window_breadth_extremes_dispersion_and_realized_volatility() -> No
     assert row["return_dispersion_1d"] == pytest.approx(
         np.std(latest_returns, ddof=0)
     )
-    daily_market_returns = pd.DataFrame(
+    daily_returns = pd.DataFrame(
         {"A.SZ": increasing, "B.SZ": decreasing}, index=dates
-    ).pct_change(fill_method=None).mean(axis=1).dropna().tail(20)
-    expected_realized_volatility = daily_market_returns.std(ddof=1) * np.sqrt(252.0)
+    ).pct_change(fill_method=None)
+    daily_market_returns = daily_returns.mean(axis=1).dropna()
+    expected_realized_volatility = daily_market_returns.tail(20).std(ddof=1) * np.sqrt(252.0)
+    expected_realized_volatility_60d = daily_market_returns.tail(60).std(ddof=1) * np.sqrt(252.0)
+    daily_dispersion = daily_returns.std(axis=1, ddof=0).dropna()
     assert row["realized_volatility_20d_annualized"] == pytest.approx(
         expected_realized_volatility
     )
+    assert row["realized_volatility_60d_annualized"] == pytest.approx(
+        expected_realized_volatility_60d
+    )
+    assert row["realized_volatility_ratio_20d_to_60d"] == pytest.approx(
+        expected_realized_volatility / expected_realized_volatility_60d
+    )
+    assert row["return_dispersion_20d_average"] == pytest.approx(
+        daily_dispersion.tail(20).mean()
+    )
+    assert row["return_dispersion_ratio_20d"] == pytest.approx(
+        daily_dispersion.iloc[-1] / daily_dispersion.tail(20).mean()
+    )
+
+
+def test_top20_positive_return_contribution_is_hand_calculated() -> None:
+    dates = pd.bdate_range(end=ANALYSIS_DATE, periods=2)
+    closes = {
+        f"{offset:02d}.SZ": [100.0, 100.0 + offset]
+        for offset in range(1, 22)
+    }
+    equity = _equity_frame(dates, closes)
+
+    row = compute_market_context_features(
+        equity,
+        _index_frame(dates),
+        _limits_for(equity),
+        analysis_date=ANALYSIS_DATE,
+        expected_current_rows=21,
+    ).iloc[0]
+
+    assert row["positive_return_count_1d"] == 21
+    assert row["top20_positive_return_contribution_1d"] == pytest.approx(
+        sum(range(2, 22)) / sum(range(1, 22))
+    )
+
+
+def test_auxiliary_market_indexes_do_not_limit_default_scope_coverage() -> None:
+    dates = pd.bdate_range(end=ANALYSIS_DATE, periods=21)
+    equity = _equity_frame(dates, {"A.SZ": [10.0] * 21})
+    indexes = _index_frame(dates)
+    indexes = indexes[~indexes["index_code"].isin(AUXILIARY_INDEX_CODES)]
+
+    row = compute_market_context_features(
+        equity,
+        indexes,
+        _limits_for(equity),
+        analysis_date=ANALYSIS_DATE,
+        expected_current_rows=1,
+    ).iloc[0]
+
+    assert row["required_index_current_count"] == len(REQUIRED_INDEX_CODES)
+    assert row["auxiliary_index_current_count"] == 0
+    assert row["coverage_status"] == "complete"
+    assert "auxiliary index current coverage" in row["limitation_notes"]
+    assert "required index current coverage" not in row["limitation_notes"]
+
+
+def test_missing_required_index_limits_default_scope_coverage() -> None:
+    dates = pd.bdate_range(end=ANALYSIS_DATE, periods=21)
+    equity = _equity_frame(dates, {"A.SZ": [10.0] * 21})
+    indexes = _index_frame(dates)
+    indexes = indexes[indexes["index_code"] != REQUIRED_INDEX_CODES[0]]
+
+    row = compute_market_context_features(
+        equity,
+        indexes,
+        _limits_for(equity),
+        analysis_date=ANALYSIS_DATE,
+        expected_current_rows=1,
+    ).iloc[0]
+
+    assert row["required_index_current_count"] == len(REQUIRED_INDEX_CODES) - 1
+    assert row["coverage_status"] == "limited"
+    assert "required index current coverage" in row["limitation_notes"]
 
 
 def test_actual_limit_prices_and_incomplete_market_coverage_are_explicit() -> None:
@@ -221,7 +312,7 @@ def test_actual_limit_prices_and_incomplete_market_coverage_are_explicit() -> No
     assert row["expected_current_rows"] == 5
     assert row["coverage_ratio"] == pytest.approx(1.0)
     assert row["coverage_status"] == "limited"
-    assert "broad index current coverage" in row["limitation_notes"]
+    assert "required index current coverage" in row["limitation_notes"]
     assert row["limit_observed_count"] == 5
     assert row["limit_up_count"] == 1
     assert row["near_limit_up_count"] == 1
@@ -323,9 +414,33 @@ def test_index_current_and_middle_gaps_are_not_compressed() -> None:
     ).iloc[0]
 
     assert row["coverage_status"] == "limited"
-    assert "broad index current coverage" in row["limitation_notes"]
+    assert "required index current coverage" in row["limitation_notes"]
     assert np.isnan(row["index_000001_sh_return_1d"])
     assert row["index_399001_sz_return_1d"] == pytest.approx(0.0)
+    assert np.isnan(row["index_399001_sz_return_3d"])
+
+
+def test_required_index_history_gap_limits_return_window_coverage() -> None:
+    dates = pd.bdate_range(end=ANALYSIS_DATE, periods=21)
+    equity = _equity_frame(dates, {"A.SZ": [10.0] * 21})
+    indexes = _index_frame(dates)
+    indexes.loc[
+        (indexes["index_code"] == "399001.SZ")
+        & (indexes["trade_date"] == dates[-3].date()),
+        "close",
+    ] = np.nan
+
+    row = compute_market_context_features(
+        equity,
+        indexes,
+        _limits_for(equity),
+        analysis_date=ANALYSIS_DATE,
+        expected_current_rows=1,
+    ).iloc[0]
+
+    assert row["required_index_current_count"] == len(REQUIRED_INDEX_CODES)
+    assert row["coverage_status"] == "limited"
+    assert "required index return-window coverage" in row["limitation_notes"]
     assert np.isnan(row["index_399001_sz_return_3d"])
 
 
@@ -392,7 +507,7 @@ def test_output_is_observational_and_never_assigns_identity_or_action() -> None:
     )
     assert row["interpretation_limit"] == "observable market facts only"
     assert row["coverage_status"] == "limited"
-    assert "broad index current coverage" in row["limitation_notes"]
+    assert "required index current coverage" in row["limitation_notes"]
     assert "stock limit coverage" in row["limitation_notes"]
 
 

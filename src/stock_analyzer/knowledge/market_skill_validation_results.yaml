@@ -1,0 +1,110 @@
+schema_version: market-skill-validation-results-v1
+generated_on: 2026-08-19
+run_id: 2026-08-19-market-skill-validation-v2
+validation_version: market-skill-formation-date-v1
+design_status: retrospective_frozen_design_on_previously_exposed_history
+hypothesis_sha256: 73cdedf56fd9aee2893ee86f44f6436ce3929f552be5b77789b88355bda1f7fe
+input_manifest_sha256: 85bb97991148e3381845567d078f3befbff75fcd73a342501c69b5ad5560be9a
+artifact_results_sha256: f8febd884acf219fc5cc9468827e65c0d976f63aa1ed1fbd8329c25ac000358f
+artifact_panel_sha256: 60a06d381ca47bcc65681a5c16fa67c199d60ecc04c829fd36da86d71bc9020c
+artifact_directory: local_archive/market_skill_validation/2026-08-19-market-skill-validation-v2
+unit_of_analysis: formation_date
+sample:
+  stock_row_count: 839594
+  stock_count: 4675
+  all_formation_date_count: 194
+  validation_formation_date_count: 75
+  first_formation_date: 2022-07-26
+  validation_first_formation_date: 2025-01-07
+  last_formation_date: 2026-07-21
+  development_end: 2024-12-31
+  validation_start_boundary: 2025-01-02
+  market_daily_start: 2022-07-26
+  market_daily_through: 2026-08-18
+  limitations:
+    - 历史数据此前已被研究，本轮不是独立盲测或因果证明。
+    - 历史ST名称快照不完整，沿用冻结价格样本可由5%涨跌幅带明确识别的特别处理排除。
+    - 每5个交易日一个形成日；区间和随机化检验按4个相邻形成日成块处理。
+method:
+  thresholds: 只用2024-12-31及以前形成日Q40/Q60，生产Skill不得复制这些研究阈值。
+  uncertainty: 1000次4形成日移动块bootstrap，报告95%区间。
+  testing: 1000次独立块随机化，四个假设使用Holm校正。
+  stability: 分别报告2025与2026截至2026-07-21的方向。
+execution_notes:
+  - 首次执行在读取验证结果前停止：成交聚合被错误实现为任一股票缺失即整日无效，导致开发期无阈值。
+  - 依据已冻结的95%市场覆盖规则修正为有效成交字段覆盖至少95%后才聚合；假设、分组、阈值来源、结果门槛和未来标签均未改变。
+  - V1在生成后复算发现市场日收益只从2024-12开始，旧实现又未核对行动日，导致开发期未来波动被压缩到较晚窗口；V1已在本地归档标记无效。
+  - V2把市场日收益起点提前到2022-07-25并强制未来窗口第一日等于行动日。四项假设只评价2025年后的完整日期，因此V2与V1的四项效应、区间、p值和准入结论完全一致；知识库只引用V2。
+results:
+  - hypothesis_id: market_h1_breadth_index_alignment
+    source_scope: [official-sse-composite-methodology-2020, official-szse-component-revision-2015, official-szse-chinext-index-2010]
+    maturity: validation_capability
+    decision: insufficient
+    effect: 0.010079816143405279
+    confidence_interval_95: [-0.0217485484106352, 0.03612244350030505]
+    holm_adjusted_p_value: 0.8541458541458542
+    group_date_counts: {case: 33, control: 12}
+    period_effects: {2025: 0.005651449807384884, 2026: 0.018219669644105735}
+    evidence_summary: 广度和三只范围锚定指数共同为正的形成日，未来20日显著上涨机会率点估计高约1.01个百分点，但区间跨零，且窄行情对照只有12个形成日，未达到覆盖与2个百分点效应要求。
+    allowed_use: 指数收益、等权收益、中位数和上涨面仍作为一级事实，用来描述“普遍参与”还是“指数与普通股票分化”。
+    forbidden_use: 不得据此声称广度一致会提高未来20日显著上涨概率，也不得设广度阈值或市场Gate。
+    next_validation: 积累新的前向形成日，保持公式与分组不变后再评估。
+
+  - hypothesis_id: market_h2_turnover_price_progress
+    source_scope: [paper-narayan-zheng-liquidity-2011]
+    maturity: validation_capability
+    decision: insufficient
+    effect: 0.018469454246109795
+    confidence_interval_95: [-0.02472487517995773, 0.060549155008575564]
+    holm_adjusted_p_value: 0.8541458541458542
+    group_date_counts: {case: 25, control: 3}
+    period_effects: {2025: 0.0017361081378472754, 2026: 0.051714527748071004}
+    evidence_summary: 高成交且价格和上涨面推进相对高成交低进展的机会率点估计高约1.85个百分点，但区间跨零，低进展对照仅3个形成日，不能升级为直接能力。
+    allowed_use: 同时展示成交相对基线、等权收益和上涨面，只描述当下是否出现量价共同推进或冲突。
+    forbidden_use: 成交放大单独不得解释为风险偏好、趋势确认、机构或主力买入；研究Q40/Q60不得进入生产规则。
+    next_validation: 只积累前向样本，不放宽低进展定义来补样本。
+
+  - hypothesis_id: market_h3_dispersion_future_volatility
+    source_scope: [paper-fei-liu-wen-dispersion-2019]
+    maturity: level_2_direct
+    decision: use_with_boundary
+    effect_spearman: 0.4771834992887624
+    confidence_interval_95: [0.17074076576909625, 0.6833351301659958]
+    holm_adjusted_p_value: 0.015984015984015984
+    available_date_count: 75
+    period_effects: {2025: 0.28484585323491096, 2026: 0.17887667887667885}
+    evidence_summary: 形成日横截面日收益分化与行动日起后续20日全市场等权实现波动的秩相关为0.4772，95%区间完全为正，Holm校正后仍通过，2025和2026均为正。
+    allowed_use: 分化相对20日基线明显偏高时，提高后续波动和路径不确定性的风险权重，并要求价格Skill检查候选承受能力和失效点。
+    forbidden_use: 不得由分化预测上涨或下跌，不得推断羊群、机构或任何账户身份，不得把历史相关系数变成分数。
+    invalidating_change: 新的前向样本使关系转负或稳定性消失，或当日分化覆盖不足、主要由错误复权和异常值造成。
+
+  - hypothesis_id: market_h4_state_changes_trend_reliability
+    source_scope: [paper-ma-liao-jiang-factor-momentum-2024, paper-cheema-nartea-momentum-state-2017]
+    maturity: validation_capability
+    decision: insufficient
+    effect: 0.01223528299550089
+    confidence_interval_95: [-0.02314009719130351, 0.03950361474009106]
+    holm_adjusted_p_value: 0.8541458541458542
+    group_date_counts: {continuous_rise: 28, other: 47}
+    period_effects: {2025: 0.009118753068405863, 2026: 0.030410856093920427}
+    evidence_summary: 连续上涨状态下相对强弱前后20%组合的后续收益差比其他状态高约1.22个百分点，但区间跨零，连续上涨只有28个形成日，未达到冻结覆盖和2个百分点要求。
+    allowed_use: 市场状态只能触发“当前候选的趋势证据是否仍需价格层验证”的问题，并引用既有A股论文说明关系可能变化。
+    forbidden_use: 不得把连续上涨、强市或风险偏好上升直接写成追强更可靠，也不得据此提高候选结论等级。
+    next_validation: 保持形成日单位和现有状态定义，积累前向样本；不得退回股票行数夸大市场样本量。
+non_empirical_decisions:
+  - capability_id: market_h5_style_industry_diffusion
+    maturity: validation_capability
+    allowed_use: 沪深300、中证500、中证1000原值可作为一级规模风格事实；行业扩散交由板块Skill按有效成员验证。
+    forbidden_use: 不得把当日领先称为未来风格延续或切换已经完成。
+  - capability_id: market_h6_t1_price_limits
+    maturity: level_1_direct
+    allowed_use: 使用形成日有效沪深交易规则解释T加一、涨跌停、停牌和行动日可交易性。
+    forbidden_use: 制度事实不预测收益，触及涨停不等于行动日可以成交。
+  - capability_id: market_h7_macro_policy_transmission
+    maturity: validation_capability
+    allowed_use: 只有形成日前官方原文、可说明传导链且候选有实际暴露时形成待核问题。
+    forbidden_use: 政策标题、宏观方向或市场叙事不得直接映射到公司收益。
+  - capability_id: market_h8_candidate_dependency
+    maturity: level_1_reasoning_contract
+    allowed_use: 逐只披露市场依赖、所需条件、当前影响、最强反证和失效变化。
+    forbidden_use: 不得把市场视角作为投票、固定加减分或一票否决。

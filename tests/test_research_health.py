@@ -6,6 +6,9 @@ from stock_analyzer.data.research_contracts import FactBatch, ResearchDatasetId
 from stock_analyzer.analysis.hotspot_features import HOTSPOT_FORMULA_VERSION
 from stock_analyzer.analysis.market_context_features import MARKET_CONTEXT_FORMULA_VERSION
 from stock_analyzer.analysis.stock_context_features import STOCK_CONTEXT_FORMULA_VERSION
+from stock_analyzer.analysis.price_analysis_features import (
+    PRICE_ANALYSIS_FORMULA_VERSION,
+)
 from stock_analyzer.ops.research_health import (
     build_research_health_report,
     write_health_report,
@@ -551,6 +554,7 @@ def _commit_derived_set(
     data_date: date,
     *,
     sector_quality: str = "complete_with_declared_gaps",
+    include_price: bool = True,
 ) -> DerivedFeatureStore:
     cutoff = datetime.now(timezone.utc) + timedelta(days=1)
     snapshot = ResearchQuery(warehouse).input_manifest(
@@ -624,7 +628,43 @@ def _commit_derived_set(
         limitations=("日线事实不能识别交易者身份",),
         run_id="health-stock",
     )
+    if include_price:
+        store.commit(
+            "price_analysis_context",
+            data_date,
+            PRICE_ANALYSIS_FORMULA_VERSION,
+            pd.DataFrame(
+                [
+                    {
+                        "analysis_date": data_date,
+                        "ts_code": "000001.SZ",
+                        "coverage_status": "complete",
+                    }
+                ]
+            ),
+            input_manifest=input_manifest,
+            entity_key=("analysis_date", "ts_code"),
+            quality_status="complete",
+            run_id="health-price",
+        )
     return store
+
+
+def test_derived_health_requires_price_analysis_context(tmp_path):
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    warehouse.commit_batch(_daily_batch("2026-07-10", "000001.SZ"))
+    _commit_derived_set(
+        warehouse,
+        date(2026, 7, 10),
+        include_price=False,
+    )
+
+    report = build_research_health_report(warehouse, date(2026, 7, 10))
+    by_name = {item.feature_set: item for item in report.derived_features}
+
+    assert by_name["price_analysis_context"].present is False
+    assert by_name["price_analysis_context"].ready is False
+    assert report.derived_ready_for_research is False
 
 
 def test_derived_health_preserves_declared_gaps_and_explains_them_plainly(
@@ -650,6 +690,12 @@ def test_derived_health_preserves_declared_gaps_and_explains_them_plainly(
     assert sector.no_membership_industries == 0
     assert sector.no_membership_themes == 1
     assert sector.intraday_limited_entities == 2
+    price = next(
+        item for item in report.derived_features
+        if item.feature_set == "price_analysis_context"
+    )
+    assert price.expected_formula_version == PRICE_ANALYSIS_FORMULA_VERSION
+    assert price.ready is True
     assert "可以使用，但有明确限制" in text
     assert "1 个主题没有公开成分股" in text
     assert "分钟数据不可用" in text

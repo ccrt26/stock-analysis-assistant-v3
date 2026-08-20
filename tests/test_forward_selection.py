@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import csv
-import plistlib
-import subprocess
 from datetime import date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -11,9 +9,11 @@ import pytest
 
 from stock_analyzer.ops.forward_selection import (
     PricePoint,
+    RunSummary,
     apply_mature_settlements,
+    prepare_daily_selection,
     prepare_runtime_log,
-    run_daily_forward,
+    record_daily_selection,
 )
 
 
@@ -120,7 +120,7 @@ class FakeResearch:
         self.calls = 0
         self.prompt = ""
 
-    def execute(self, *, prompt: str, timeout_seconds: int) -> dict:
+    def execute(self, *, prompt: str) -> dict:
         self.calls += 1
         self.prompt = prompt
         if isinstance(self.result, Exception):
@@ -162,6 +162,9 @@ def _row(**overrides: str) -> dict[str, str]:
 
 def _empty_result() -> dict:
     return {
+        "research_completed": True,
+        "point_in_time_evidence_verified": True,
+        "failure_reason": "",
         "skills_used": sorted(SKILLS),
         "selected_stocks": [],
         "nearest_nonselections": [],
@@ -194,19 +197,49 @@ def _run(
     research: FakeResearch,
     rows: list[dict[str, str]] | None = None,
     sleep: callable = lambda _seconds: None,
+    formation_date: date | None = None,
+    action_date: date | None = None,
+    selection_as_of: datetime | None = None,
 ):
     csv_path = tmp_path / "forward.csv"
     _write_csv(csv_path, rows or [])
-    prompt_path = (
-        Path(__file__).resolve().parents[1] / "ops/forward-selection-prompt.md"
-    )
-    summary = run_daily_forward(
+    request = {}
+    if formation_date is not None:
+        request["formation_date"] = formation_date
+    if action_date is not None:
+        request["action_date"] = action_date
+    if selection_as_of is not None:
+        request["selection_as_of"] = selection_as_of
+    prepared = prepare_daily_selection(
         csv_path=csv_path,
-        prompt_path=prompt_path,
         data=data,
-        research=research,
         clock=now,
         sleep=sleep,
+        **request,
+    )
+    if prepared.status != "ready_for_research":
+        return prepared, csv_path
+    try:
+        result = research.execute(prompt="top-level Codex result")
+    except Exception as error:
+        return RunSummary(
+            status="external_research_failed",
+            started_at=prepared.started_at,
+            formation_date=prepared.formation_date,
+            action_date=prepared.action_date,
+            selection_as_of=prepared.selection_as_of,
+            data_ready=True,
+            error=str(error),
+        ), csv_path
+    summary = record_daily_selection(
+        result,
+        csv_path=csv_path,
+        data=data,
+        clock=now,
+        sleep=sleep,
+        formation_date=date.fromisoformat(prepared.formation_date),
+        action_date=date.fromisoformat(prepared.action_date),
+        selection_as_of=datetime.fromisoformat(prepared.selection_as_of),
     )
     return summary, csv_path
 
@@ -272,23 +305,23 @@ def test_next_morning_data_becoming_ready_during_wait_continues(
         sleep=sleeps.append,
     )
 
-    assert summary.status == "forward_frozen"
-    assert data.health_calls == 2
+    assert summary.status == "selection_frozen"
+    assert data.health_calls == 3
     assert sleeps == [30]
     assert research.calls == 1
     assert len(_read_csv(csv_path)) == 1
 
 
-def test_unready_next_morning_data_stops_waiting_at_0915(tmp_path: Path) -> None:
+def test_unready_next_morning_data_keeps_waiting_past_0915(tmp_path: Path) -> None:
     research = FakeResearch(_empty_result())
     checks = [
         datetime(2026, 8, 19, 9, 5 + second // 60, second % 60, tzinfo=SHANGHAI)
-        for second in range(0, 10 * 60 + 1, 30)
+        for second in range(0, 11 * 60 + 1, 30)
     ]
     sleeps: list[float] = []
     data = FakeData(
         open_dates=[date(2026, 8, 18), date(2026, 8, 19)],
-        ready=False,
+        ready_states=[False] * 21 + [True],
     )
     summary, csv_path = _run(
         tmp_path,
@@ -298,11 +331,11 @@ def test_unready_next_morning_data_stops_waiting_at_0915(tmp_path: Path) -> None
         sleep=sleeps.append,
     )
 
-    assert summary.status == "data_not_ready"
-    assert data.health_calls == 20
-    assert sleeps == [30] * 20
-    assert research.calls == 0
-    assert _read_csv(csv_path) == []
+    assert summary.status == "selection_frozen"
+    assert data.health_calls == 23
+    assert sleeps == [30] * 21
+    assert research.calls == 1
+    assert len(_read_csv(csv_path)) == 1
 
 
 def test_existing_forward_empty_decision_is_idempotent(tmp_path: Path) -> None:
@@ -321,12 +354,12 @@ def test_existing_forward_empty_decision_is_idempotent(tmp_path: Path) -> None:
         rows=[existing],
     )
 
-    assert summary.status == "already_frozen"
+    assert summary.status == "already_selected"
     assert research.calls == 0
     assert _read_csv(csv_path) == [existing]
 
 
-def test_reconstructed_does_not_block_new_forward_and_prompt_uses_skills(
+def test_existing_reconstructed_decision_blocks_duplicate_selection(
     tmp_path: Path,
 ) -> None:
     reconstructed = _row(
@@ -348,23 +381,36 @@ def test_reconstructed_does_not_block_new_forward_and_prompt_uses_skills(
         rows=[reconstructed],
     )
 
+    assert summary.status == "already_selected"
+    assert research.calls == 0
+    assert _read_csv(csv_path) == [reconstructed]
+
+
+def test_top_level_result_uses_selection_semantics_and_frozen_context(
+    tmp_path: Path,
+) -> None:
+    research = FakeResearch(_one_stock_result())
+    moment = datetime(2026, 8, 19, 9, 10, tzinfo=SHANGHAI)
+
+    summary, csv_path = _run(
+        tmp_path,
+        now=_clock(moment, moment, moment),
+        data=FakeData(open_dates=[date(2026, 8, 18), date(2026, 8, 19)]),
+        research=research,
+    )
+
     rows = _read_csv(csv_path)
-    assert summary.status == "forward_frozen"
+    assert summary.status == "selection_frozen"
     assert research.calls == 1
-    assert {row["validation_mode"] for row in rows} == {"reconstructed", "forward"}
+    assert {row["validation_mode"] for row in rows} == {"selection"}
     assert rows[-1]["final_fate"] == "selected"
     assert rows[-1]["priority"] == "1"
     assert rows[-1]["selection_as_of"] == "2026-08-19T09:10:00+08:00"
-    assert "orchestrating-stock-research" in research.prompt
-    assert "2026-08-18" in research.prompt
-    assert "2026-08-19T09:10:00+08:00" in research.prompt
+    assert research.prompt == "top-level Codex result"
 
 
-@pytest.mark.parametrize(
-    "result",
-    [RuntimeError("codex failed"), {"research_complete": True}],
-)
-def test_codex_failure_or_invalid_output_never_writes(
+@pytest.mark.parametrize("result", [{"research_complete": True}])
+def test_invalid_top_level_output_never_writes(
     tmp_path: Path,
     result: dict | Exception,
 ) -> None:
@@ -377,20 +423,86 @@ def test_codex_failure_or_invalid_output_never_writes(
         research=research,
     )
 
-    assert summary.status == "research_failed"
+    assert summary.status == "invalid_result"
     assert _read_csv(csv_path) == []
 
 
-def test_result_finishing_at_open_is_discarded(tmp_path: Path) -> None:
+def test_incomplete_research_is_not_frozen_as_an_empty_selection(
+    tmp_path: Path,
+) -> None:
+    result = _empty_result()
+    result.update(
+        research_completed=False,
+        point_in_time_evidence_verified=False,
+        failure_reason="本地事实仓查询失败",
+    )
+    moment = datetime(2026, 8, 19, 9, 10, tzinfo=SHANGHAI)
+
+    summary, csv_path = _run(
+        tmp_path,
+        now=_clock(moment, moment, moment),
+        data=FakeData(open_dates=[date(2026, 8, 18), date(2026, 8, 19)]),
+        research=FakeResearch(result),
+    )
+
+    assert summary.status == "invalid_result"
+    assert summary.error == "research_incomplete"
+    assert _read_csv(csv_path) == []
+
+
+def test_result_finishing_after_open_is_still_written(tmp_path: Path) -> None:
     start = datetime(2026, 8, 19, 9, 10, tzinfo=SHANGHAI)
     summary, csv_path = _run(
         tmp_path,
-        now=_clock(start, start, start.replace(hour=9, minute=30)),
+        now=_clock(start, start, start.replace(hour=10, minute=30)),
         data=FakeData(open_dates=[date(2026, 8, 18), date(2026, 8, 19)]),
         research=FakeResearch(_one_stock_result()),
     )
 
-    assert summary.status == "missed_freeze_deadline"
+    assert summary.status == "selection_frozen"
+    assert len(_read_csv(csv_path)) == 1
+
+
+def test_retry_after_open_uses_explicit_preopen_selection_context(
+    tmp_path: Path,
+) -> None:
+    current = datetime(2026, 8, 20, 11, 0, tzinfo=SHANGHAI)
+    frozen = datetime(2026, 8, 20, 9, 5, 2, tzinfo=SHANGHAI)
+    summary, csv_path = _run(
+        tmp_path,
+        now=_clock(current, current, current),
+        data=FakeData(open_dates=[date(2026, 8, 19), date(2026, 8, 20)]),
+        research=FakeResearch(_one_stock_result()),
+        formation_date=date(2026, 8, 19),
+        action_date=date(2026, 8, 20),
+        selection_as_of=frozen,
+    )
+
+    rows = _read_csv(csv_path)
+    assert summary.status == "selection_frozen"
+    assert summary.formation_date == "2026-08-19"
+    assert summary.selection_as_of == "2026-08-20T09:05:02+08:00"
+    assert rows[0]["action_date"] == "2026-08-20"
+    assert rows[0]["as_of"] == "2026-08-20T09:05:02+08:00"
+    assert rows[0]["validation_mode"] == "selection"
+
+
+def test_retry_rejects_selection_cutoff_at_market_open(tmp_path: Path) -> None:
+    current = datetime(2026, 8, 20, 11, 0, tzinfo=SHANGHAI)
+    research = FakeResearch(_one_stock_result())
+    summary, csv_path = _run(
+        tmp_path,
+        now=_clock(current),
+        data=FakeData(open_dates=[date(2026, 8, 19), date(2026, 8, 20)]),
+        research=research,
+        formation_date=date(2026, 8, 19),
+        action_date=date(2026, 8, 20),
+        selection_as_of=datetime(2026, 8, 20, 9, 30, tzinfo=SHANGHAI),
+    )
+
+    assert summary.status == "invalid_selection_cutoff"
+    assert summary.error == "selection_as_of_must_precede_action_open"
+    assert research.calls == 0
     assert _read_csv(csv_path) == []
 
 
@@ -407,7 +519,7 @@ def test_empty_selection_is_explicitly_frozen(tmp_path: Path) -> None:
     assert summary.new_forward_rows == 1
     assert rows[0]["final_fate"] == "empty_selection"
     assert rows[0]["ts_code"] == ""
-    assert rows[0]["validation_mode"] == "forward"
+    assert rows[0]["validation_mode"] == "selection"
 
 
 def test_d20_is_unchanged_until_all_twenty_prices_exist() -> None:
@@ -494,39 +606,8 @@ def test_runtime_log_is_initialized_once_from_docs_history(tmp_path: Path) -> No
     assert _read_csv(runtime_log) == [_row(formation_date="keep-local")]
 
 
-def test_forward_launchd_loads_env_and_runs_weekdays_at_0905(
-    tmp_path: Path,
-) -> None:
+def test_repository_keeps_only_the_three_data_launchd_templates() -> None:
     root = Path(__file__).resolve().parents[1]
-    forward_path = root / "ops/launchd/com.ccrt.stock-analysis-assistant.forward-selection.plist.example"
-    with forward_path.open("rb") as handle:
-        payload = plistlib.load(handle)
-
-    intervals = payload["StartCalendarInterval"]
-    assert {(item["Weekday"], item["Hour"], item["Minute"]) for item in intervals} == {
-        (weekday, 9, 5) for weekday in range(2, 7)
-    }
-    project = tmp_path / "project"
-    python_bin = project / ".venv/bin/python"
-    python_bin.parent.mkdir(parents=True)
-    output = project / "observed-env.txt"
-    python_bin.write_text(
-        "#!/bin/zsh\nprint -r -- \"$FORWARD_SMOKE_VALUE\" > \"$FORWARD_SMOKE_OUTPUT\"\n",
-        encoding="utf-8",
-    )
-    python_bin.chmod(0o755)
-    (project / ".env.local").write_text(
-        f"FORWARD_SMOKE_VALUE=loaded\nFORWARD_SMOKE_OUTPUT='{output}'\n",
-        encoding="utf-8",
-    )
-    command = list(payload["ProgramArguments"])
-    command[-1] = command[-1].replace("__PROJECT_ROOT__", str(project))
-
-    completed = subprocess.run(command, check=False, capture_output=True, text=True)
-
-    assert completed.returncode == 0
-    assert output.read_text(encoding="utf-8").strip() == "loaded"
-
     expected = {"close", "evening", "next-morning"}
     actual = {
         path.name.removesuffix(".plist.example").removeprefix(
@@ -536,3 +617,7 @@ def test_forward_launchd_loads_env_and_runs_weekdays_at_0905(
         if "research-data" in path.name
     }
     assert actual == expected
+    assert not (
+        root
+        / "ops/launchd/com.ccrt.stock-analysis-assistant.forward-selection.plist.example"
+    ).exists()

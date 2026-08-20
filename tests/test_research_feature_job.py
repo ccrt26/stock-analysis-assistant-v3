@@ -175,6 +175,27 @@ class FakeStore:
 _WAREHOUSES: dict[Path, FakeWarehouse] = {}
 
 
+def test_market_scope_excludes_star_bse_and_special_treatment() -> None:
+    from stock_analyzer.ops.research_features import _default_market_scope_codes
+
+    securities = pd.DataFrame(
+        [
+            {"ts_code": "600001.SH", "market": "主板", "exchange": "SSE", "name": "沪主板", "valid_from": date(2020, 1, 1), "valid_to": None, "list_status": "L"},
+            {"ts_code": "000001.SZ", "market": "主板", "exchange": "SZSE", "name": "深主板", "valid_from": date(2020, 1, 1), "valid_to": None, "list_status": "L"},
+            {"ts_code": "300001.SZ", "market": "创业板", "exchange": "SZSE", "name": "创业板", "valid_from": date(2020, 1, 1), "valid_to": None, "list_status": "L"},
+            {"ts_code": "688001.SH", "market": "科创板", "exchange": "SSE", "name": "科创板", "valid_from": date(2020, 1, 1), "valid_to": None, "list_status": "L"},
+            {"ts_code": "830001.BJ", "market": "北交所", "exchange": "BSE", "name": "北证", "valid_from": date(2020, 1, 1), "valid_to": None, "list_status": "L"},
+            {"ts_code": "600002.SH", "market": "主板", "exchange": "SSE", "name": "ST风险", "valid_from": date(2020, 1, 1), "valid_to": None, "list_status": "L"},
+        ]
+    )
+
+    assert _default_market_scope_codes(securities, ANALYSIS_DATE) == {
+        "600001.SH",
+        "000001.SZ",
+        "300001.SZ",
+    }
+
+
 def test_job_uses_calendar_windows_strict_manifests_and_exact_contracts(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -189,6 +210,7 @@ def test_job_uses_calendar_windows_strict_manifests_and_exact_contracts(
     monkeypatch.setattr(job, "compute_market_context_features", _capture_market(captured))
     monkeypatch.setattr(job, "compute_hotspot_features", _capture_sector(captured))
     monkeypatch.setattr(job, "compute_stock_context_features", _capture_stock(captured))
+    monkeypatch.setattr(job, "compute_price_analysis_features", _capture_price(captured))
 
     summary = job.run_research_features(warehouse, ANALYSIS_DATE)
 
@@ -208,15 +230,14 @@ def test_job_uses_calendar_windows_strict_manifests_and_exact_contracts(
         for mapping in snapshots
         if ResearchDatasetId.DAILY_BASIC in mapping
     ]
-    assert equity_windows and max(map(len, equity_windows)) == 82
+    assert equity_windows and max(map(len, equity_windows)) == 251
     adjustment_windows = [
         mapping[ResearchDatasetId.ADJ_FACTOR]
         for mapping in snapshots
         if ResearchDatasetId.ADJ_FACTOR in mapping
     ]
-    assert len(adjustment_windows) == 3
-    assert all(len(window) == 82 for window in adjustment_windows)
-    assert index_windows and max(map(len, index_windows)) == 250
+    assert sorted(map(len, adjustment_windows)) == [82, 82, 82, 251]
+    assert index_windows and max(map(len, index_windows)) == 251
     assert valuation_windows and len(max(valuation_windows, key=len)) == 300
     assert summary.as_of.isoformat() == "2026-07-13T23:59:59+08:00"
     assert summary.failed_feature_sets == ()
@@ -224,19 +245,24 @@ def test_job_uses_calendar_windows_strict_manifests_and_exact_contracts(
         "market_context",
         "sector_hotspot",
         "stock_trading_context",
+        "price_analysis_context",
     )
     assert [call["formula_version"] for call in warehouse.commits] == [
-        "market-context-v2",
+        "market-context-v3",
         "sector-hotspot-v3",
         "stock-trading-context-v2",
+        "price-analysis-context-v1",
     ]
     assert [call["entity_key"] for call in warehouse.commits] == [
         "analysis_date",
         ("analysis_date", "group_type", "group_code"),
         ("analysis_date", "ts_code"),
+        ("analysis_date", "ts_code"),
     ]
     assert captured["sector"][6].empty
     assert captured["stock"][1]["trade_date"].nunique() == 250
+    assert captured["price"][0]["trade_date"].nunique() == 251
+    assert captured["price"][1]["trade_date"].nunique() == 251
     assert captured["sector"][1].columns.tolist() == [
         "group_type", "group_code", "group_name", "level", "official_index_code"
     ]
@@ -253,6 +279,60 @@ def test_job_uses_calendar_windows_strict_manifests_and_exact_contracts(
         if item["dataset"] == ResearchDatasetId.INDEX_DAILY.value
     ]
     assert len(stock_index_partitions) == 250
+    price_manifest = warehouse.commits[3]["input_manifest"]["fact_snapshot"]
+    price_index_partitions = [
+        item for item in price_manifest["partitions"]
+        if item["dataset"] == ResearchDatasetId.INDEX_DAILY.value
+    ]
+    assert len(price_index_partitions) == 251
+
+
+def test_job_persists_scenario_ready_price_context_from_251_sessions(
+    tmp_path: Path, monkeypatch
+) -> None:
+    import stock_analyzer.ops.research_features as job
+
+    dates = [value.date() for value in pd.bdate_range(end=ANALYSIS_DATE, periods=300)]
+    warehouse = FakeWarehouse(tmp_path, dates)
+    _WAREHOUSES[tmp_path] = warehouse
+    captured: dict[str, tuple] = {}
+    monkeypatch.setattr(job, "ResearchQuery", FakeQuery)
+    monkeypatch.setattr(job, "DerivedFeatureStore", FakeStore)
+    monkeypatch.setattr(job, "compute_market_context_features", _simple_market)
+    monkeypatch.setattr(job, "compute_hotspot_features", _simple_sector)
+    monkeypatch.setattr(job, "compute_stock_context_features", _simple_stock)
+    monkeypatch.setattr(
+        job,
+        "compute_price_analysis_features",
+        _capture_price(captured),
+    )
+
+    summary = job.run_research_features(warehouse, ANALYSIS_DATE)
+
+    price_commit = next(
+        call
+        for call in warehouse.commits
+        if call["feature_set"] == "price_analysis_context"
+    )
+    price_snapshot = next(
+        call[1]
+        for call in warehouse.calls
+        if call[0] == "snapshot"
+        and len(call[1].get(ResearchDatasetId.EQUITY_DAILY, ())) == 251
+    )
+    assert summary.price_rows == 1
+    assert price_commit["formula_version"] == "price-analysis-context-v1"
+    assert price_commit["entity_key"] == ("analysis_date", "ts_code")
+    assert len(price_snapshot[ResearchDatasetId.EQUITY_DAILY]) == 251
+    assert len(price_snapshot[ResearchDatasetId.ADJ_FACTOR]) == 251
+    assert len(price_snapshot[ResearchDatasetId.INDEX_DAILY]) == 251
+    assert price_snapshot[ResearchDatasetId.STOCK_LIMIT] == tuple(
+        value.isoformat() for value in dates[-251:]
+    )
+    price_equity, price_benchmark = captured["price"]
+    assert price_equity["trade_date"].max() == ANALYSIS_DATE
+    assert price_equity["up_limit"].notna().all()
+    assert price_benchmark["trade_date"].nunique() == 251
 
 
 def test_job_normalizes_equity_and_adjustment_trade_date_types(
@@ -289,10 +369,11 @@ def test_job_is_idempotent_and_only_related_manifest_changes_recompute(
     _WAREHOUSES[tmp_path] = warehouse
     monkeypatch.setattr(job, "ResearchQuery", FakeQuery)
     monkeypatch.setattr(job, "DerivedFeatureStore", FakeStore)
-    counts = {"market": 0, "sector": 0, "stock": 0}
+    counts = {"market": 0, "sector": 0, "stock": 0, "price": 0}
     monkeypatch.setattr(job, "compute_market_context_features", _counted(counts, "market", _simple_market))
     monkeypatch.setattr(job, "compute_hotspot_features", _counted(counts, "sector", _simple_sector))
     monkeypatch.setattr(job, "compute_stock_context_features", _counted(counts, "stock", _simple_stock))
+    monkeypatch.setattr(job, "compute_price_analysis_features", _counted(counts, "price", _simple_price))
 
     first = job.run_research_features(warehouse, ANALYSIS_DATE)
     second = job.run_research_features(warehouse, ANALYSIS_DATE)
@@ -300,14 +381,18 @@ def test_job_is_idempotent_and_only_related_manifest_changes_recompute(
     third = job.run_research_features(warehouse, ANALYSIS_DATE)
 
     assert first.committed_feature_sets == (
-        "market_context", "sector_hotspot", "stock_trading_context"
+        "market_context", "sector_hotspot", "stock_trading_context",
+        "price_analysis_context"
     )
     assert second.skipped_feature_sets == (
-        "market_context", "sector_hotspot", "stock_trading_context"
+        "market_context", "sector_hotspot", "stock_trading_context",
+        "price_analysis_context"
     )
     assert third.committed_feature_sets == ("sector_hotspot",)
-    assert third.skipped_feature_sets == ("market_context", "stock_trading_context")
-    assert counts == {"market": 1, "sector": 2, "stock": 1}
+    assert third.skipped_feature_sets == (
+        "market_context", "stock_trading_context", "price_analysis_context"
+    )
+    assert counts == {"market": 1, "sector": 2, "stock": 1, "price": 1}
 
 
 def test_later_feature_failure_preserves_prior_commits_and_continues(
@@ -341,7 +426,9 @@ def test_later_feature_failure_preserves_prior_commits_and_continues(
         warehouse.current[("sector_hotspot", ANALYSIS_DATE, "sector-hotspot-v3")]["frame"],
         previous_sector,
     )
-    assert summary.committed_feature_sets == ("market_context", "stock_trading_context")
+    assert summary.committed_feature_sets == (
+        "market_context", "stock_trading_context", "price_analysis_context"
+    )
 
 
 def test_each_feature_uses_its_own_exact_materialized_snapshot(
@@ -490,7 +577,7 @@ def _fact_frames(dates: list[date]) -> dict[ResearchDatasetId, pd.DataFrame]:
         ResearchDatasetId.TRADE_CALENDAR: pd.DataFrame(rows),
         ResearchDatasetId.SECURITY_MASTER: pd.DataFrame([
             {"ts_code": "000001.SZ", "valid_from": date(1991, 4, 3), "valid_to": None,
-             "list_status": "L"}
+             "list_status": "L", "market": "主板", "exchange": "SZSE", "name": "平安银行"}
         ]),
         ResearchDatasetId.EQUITY_DAILY: equity,
         ResearchDatasetId.ADJ_FACTOR: adjustments,
@@ -543,6 +630,13 @@ def _capture_stock(captured):
     return compute
 
 
+def _capture_price(captured):
+    def compute(equity, benchmark, **kwargs):
+        captured["price"] = (equity, benchmark)
+        return _simple_price(equity, benchmark, **kwargs)
+    return compute
+
+
 def _simple_market(*args, **kwargs):
     return pd.DataFrame([{"analysis_date": ANALYSIS_DATE, "coverage_status": "complete"}])
 
@@ -565,6 +659,13 @@ def _simple_stock(*args, **kwargs):
         {"analysis_date": ANALYSIS_DATE, "ts_code": "000001.SZ",
          "coverage_status": "complete_with_declared_gaps",
          "limitation_notes": "trader identity unavailable"}
+    ])
+
+
+def _simple_price(*args, **kwargs):
+    return pd.DataFrame([
+        {"analysis_date": ANALYSIS_DATE, "ts_code": "000001.SZ",
+         "coverage_status": "complete"}
     ])
 
 

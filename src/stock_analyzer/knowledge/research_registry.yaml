@@ -1,5 +1,5 @@
 schema_version: v3-knowledge-governance-v1
-generated_on: 2026-07-15
+generated_on: 2026-08-19
 sources:
   - source_id: official-csrc-program-trading-2024
     grade: S
@@ -54,6 +54,7 @@ sources:
     kind: official_rule
     title: 上海证券交易所交易规则（2026年修订）
     publisher: 上海证券交易所
+    authors: [上海证券交易所]
     url: https://www.sse.com.cn/lawandrules/sselawsrules2025/stocks/exchange/c/c_20260424_10816482.shtml
     document_number: 上证发〔2026〕41号
     publication_date: 2026-04-24
@@ -61,7 +62,9 @@ sources:
     last_verified_on: 2026-07-15
     jurisdiction: 中国大陆
     market_scope: [上海证券交易所]
+    variables: [T加一, 申报, 竞价, 价格限制, 停复牌, 异常交易]
     method_summary: 规定上交所证券交易、申报、竞价、价格限制、停复牌和异常交易等基础约束。
+    proof_boundary: 只证明形成日有效的制度与参与约束，不预测证券收益，也不证明触及涨停后可以成交。
     limitations:
       - 部分修订条文暂缓实施，必须按分析日期和证券品种核对实际生效安排。
 
@@ -70,6 +73,7 @@ sources:
     kind: official_rule
     title: 深圳证券交易所交易规则（2026年修订）
     publisher: 深圳证券交易所
+    authors: [深圳证券交易所]
     url: https://docs.static.szse.cn/www/lawrules/rule/trade/W020260424690713155663.pdf
     document_number: 深证上〔2026〕267号附件
     publication_date: 2026-04-24
@@ -77,7 +81,9 @@ sources:
     last_verified_on: 2026-07-15
     jurisdiction: 中国大陆
     market_scope: [深圳证券交易所]
+    variables: [T加一, 申报, 竞价, 板块价格限制, 停复牌, 异常交易]
     method_summary: 规定深交所证券交易、申报、竞价、价格限制、停复牌和异常交易等基础约束。
+    proof_boundary: 只证明形成日和板块适用的制度与参与约束，不预测收益，也不能把主板和创业板价格限制混用。
     limitations:
       - 必须结合分析日期、板块、证券品种以及另行通知的实施安排使用。
 
@@ -96,6 +102,82 @@ sources:
     method_summary: 规定北交所股票交易、申报、竞价、价格限制和异常交易等基础约束。
     limitations:
       - 若干条款另行确定实施时间，不能脱离分析日期和具体证券适用范围机械套用。
+
+  - source_id: official-sse-composite-methodology-2020
+    grade: S
+    kind: official_index_methodology
+    title: 上证综合指数编制方案及2020年修订公告
+    publisher: 上海证券交易所、中证指数有限公司
+    authors: [上海证券交易所, 中证指数有限公司]
+    url: https://www.sse.com.cn/market/sseindex/diclosure/c/c_20200619_5130635.shtml
+    stable_document_url: https://www.sse.com.cn/market/sseindex/indexlist/indexdetails/indexmethods/c1/000001_000001_CN.pdf
+    publication_date: 2020-06-19
+    effective_from: 2020-07-22
+    last_verified_on: 2026-08-19
+    jurisdiction: 中国大陆
+    market_scope: [上海证券交易所, 上证综合指数]
+    variables: [指数代码000001, 样本空间, 风险警示排除, 新股计入, 市值加权]
+    method_summary: 上证综指选取上交所符合条件的股票与存托凭证，以总市值加权反映沪市上市公司的整体表现；2020年修订后科创板证券可纳入。
+    proof_boundary: 只证明指数样本与计算口径，可用于解释指数和默认股票范围并不完全相同；不证明指数上涨会带来个股未来收益。
+    limitations:
+      - 指数包含符合条件的科创板证券，而本系统默认选股范围排除科创板，不能把上证综指当作上海主板的精确等价组合。
+      - 市值加权指数可能与等权收益、中位数和上涨面明显不同。
+
+  - source_id: official-szse-component-revision-2015
+    grade: S
+    kind: official_index_methodology
+    title: 关于深证成份指数编制方案实施重要修订的公告
+    publisher: 深圳证券交易所、深圳证券信息有限公司
+    authors: [深圳证券交易所, 深圳证券信息有限公司]
+    url: https://www.szse.cn/disclosure/notice/general/t20150320_501397.html
+    publication_date: 2015-03-20
+    effective_from: 2015-05-20
+    last_verified_on: 2026-08-19
+    jurisdiction: 中国大陆
+    market_scope: [深圳证券交易所, 深证成份指数]
+    variables: [指数代码399001, 样本数量500, 深市标尺指数, 成份股]
+    method_summary: 将深证成指样本扩大到500只，定位为表征深交所上市公司整体股价走势的深市标尺指数。
+    proof_boundary: 只证明399001作为深市成份标尺的用途，不证明其收益等于所有深市股票的等权表现或预测未来方向。
+    limitations:
+      - 成份指数不是深市全部股票，必须与等权收益、中位数和上涨面同时观察。
+      - 当前成份和调样需按形成日有效版本解释。
+
+  - source_id: official-szse-chinext-index-2010
+    grade: S
+    kind: official_index_methodology
+    title: 关于编制和发布创业板指数的公告
+    publisher: 深圳证券交易所、深圳证券信息有限公司
+    authors: [深圳证券交易所, 深圳证券信息有限公司]
+    url: https://www.szse.cn/disclosure/notice/general/t20100531_500454.html
+    publication_date: 2010-05-31
+    effective_from: 2010-06-01
+    last_verified_on: 2026-08-19
+    jurisdiction: 中国大陆
+    market_scope: [创业板, 创业板指数]
+    variables: [指数代码399006, 创业板A股, 成份股, 价格指数]
+    method_summary: 发布代码399006的创业板价格指数，以符合条件的创业板A股样本反映创业板市场表现。
+    proof_boundary: 只证明399006是默认选股范围中创业板部分的市场锚，不证明创业板成份股或其他创业板股票未来收益。
+    limitations:
+      - 成份指数不等于创业板全部股票等权组合。
+      - 指数历史调样和编制修订需按形成日版本解释。
+
+  - source_id: official-csi300-methodology-current
+    grade: S
+    kind: official_index_methodology
+    title: CSI 300 Index Methodology
+    publisher: China Securities Index Co., Ltd.
+    authors: [China Securities Index Co., Ltd.]
+    url: https://oss-ch.csindex.com.cn/static/html/csindex/public/uploads/indices/detail/files/en/000300_Index_Methodology_en.pdf
+    publication_date_status: 当前PDF未显示可核验的单一发布日期
+    last_verified_on: 2026-08-19
+    jurisdiction: 中国大陆
+    market_scope: [沪深市场, 沪深300]
+    variables: [指数代码000300, 300只样本, 日均成交金额筛选, 日均总市值筛选, 半年调样]
+    method_summary: 从沪深市场合格证券中按流动性与市值选择300只样本，并按半年频率定期审议调整。
+    proof_boundary: 只证明沪深300是大盘和高流动性样本锚；不代表默认股票范围的普通股票，也不提供上涨预测。
+    limitations:
+      - 大盘成份指数必须与中证500、中证1000及全市场等权分布对照，不能单独代表A股机会宽度。
+      - 当前PDF未给出可核验的单一发布日期，因此保留访问日期而不猜测文档日期。
 
   - source_id: official-csrc-delisting-enforcement-2024
     grade: S
@@ -252,6 +334,9 @@ sources:
     sample_start: 2001-01-01
     sample_end: 2019-12-31
     method_summary: 在中国A股多个非动量因子组合上检验因子收益的时间延续性，并区分因子动量与个股动量的关系。
+    variables: [因子组合收益, 因子自相关, 个股动量, 市场状态, 套利限制]
+    proof_boundary: 证明论文样本中的因子层延续关系及状态差异；不能直接证明本系统的行业、个股或20日目标继续上涨。
+    counterevidence: 中国A股标准个股动量并不稳定，因子动量与个股动量不是同一变量。
     limitations:
       - 样本止于2019年，因子定义、可交易性和拥挤程度需要在当前数据和分析时点重新验证。
       - 因子或行业的历史延续性只提供比较方法，不能直接生成热点排名或固定阈值。
@@ -374,6 +459,9 @@ sources:
     sample_start: 1995-01-01
     sample_end: 2014-12-31
     method_summary: 比较中国股票动量在上涨、下跌及市场状态延续或切换条件下的差异。
+    variables: [过去市场收益, 当前市场收益, 市场状态延续或切换, 动量组合收益]
+    proof_boundary: 证明论文样本中动量关系依赖市场状态；不证明“上涨市场追强”或本系统的20日目标。
+    counterevidence: 市场状态切换会改变甚至反转动量关系，不能将状态名称当作固定买入信号。
     limitations: [样本期和形成期不能直接移植，市场上涨不自动支持动量延续。]
 
   - source_id: paper-fei-liu-wen-dispersion-2019
@@ -393,7 +481,40 @@ sources:
     sample_start: 2005-08-01
     sample_end: 2017-09-30
     method_summary: 用市场和行业横截面收益分化改善中国股票市场后续波动描述与预测。
-    limitations: [分化是波动与不确定性证据，不能单独预测涨跌方向。]
+    variables: [等权CSSD, 等权CSAD, 市值加权CSSD, 市值加权CSAD, 实现波动, GARCH, GJR-GARCH, HAR]
+    proof_boundary: 论文支持分化对市场和行业后续波动预测含有增量信息，并报告样本外与替代指数稳健性；不支持收益方向或主体身份判断。
+    counterevidence: 行业层短期预测效果混合，下一日效果较弱；不同分化口径和模型表现不完全相同。
+    data_needs: [形成日股票复权日收益, 后续市场日收益或日内实现波动, 时点有效样本范围]
+    local_validation_reference: market_skill_validation_results.yaml#market_h3_dispersion_future_volatility
+    limitations:
+      - 原文主要样本为沪深300成份，虽对上证和深证综合指数做稳健性检验，本系统默认范围仍需本地验证。
+      - 分化是波动与不确定性证据，不能单独预测涨跌方向。
+
+  - source_id: paper-narayan-zheng-liquidity-2011
+    grade: A
+    kind: peer_reviewed_paper
+    research_design: empirical_counterevidence
+    title: The relationship between liquidity and returns on the Chinese stock market
+    publisher: Elsevier
+    authors: [Paresh Kumar Narayan, Xinwei Zheng]
+    journal_or_series: Journal of Asian Economics 22(3), 259-266
+    url: https://www.sciencedirect.com/science/article/pii/S1049007811000200
+    doi: 10.1016/j.asieco.2011.02.005
+    publication_date: 2011-06-01
+    last_verified_on: 2026-08-19
+    jurisdiction: 中国大陆
+    market_scope: [上海证券交易所, 深圳证券交易所]
+    sample_start: 1997-01-01
+    sample_end: 2003-12-31
+    variables: [成交量, 换手率, 交易概率, 市场收益]
+    method_summary: 使用沪深市场日度数据和三种流动性代理检验流动性与收益关系，结论在交易所和代理变量之间混合且不稳健。
+    proof_boundary: 作为反证证明成交或流动性代理不能脱离价格进展和本地验证直接解释为未来收益方向。
+    counterevidence: 三种代理未得到稳健一致的收益关系，沪深市场结果也不同。
+    data_needs: [形成日总成交额, 历史成交基线, 同期等权收益与上涨面, 后续形成日级机会结果]
+    local_validation_reference: market_skill_validation_results.yaml#market_h2_turnover_price_progress
+    limitations:
+      - 样本较早，市场制度和结构已变化，不能继承效应大小或分组阈值。
+      - 论文研究流动性与收益关系，不识别机构、主力或账户身份。
 
   - source_id: paper-zhang-zhang-turnover-2022
     grade: A
@@ -1160,6 +1281,109 @@ entries:
       status: validated
       reason: 本地验证确认不同市场状态下趋势延续关系明显不同，连续上涨也不能自动支持追强。
       validation_reference: supplement_validation_results.yaml#src_cn_factor_momentum_2023
+      market_module_maturity: validation_capability
+      market_module_reason: 新的形成日级验证中状态差异为1.22个百分点但区间跨零且连续上涨仅28日，市场Skill不得据此提高追强命题等级。
+      market_validation_reference: market_skill_validation_results.yaml#market_h4_state_changes_trend_reliability
+
+  - knowledge_id: src_cn_market_breadth_alignment
+    title: 用指数、等权收益、中位数和上涨面描述参与宽度
+    primary_source_id: official-sse-composite-methodology-2020
+    supporting_source_ids: [official-szse-component-revision-2015, official-szse-chinext-index-2010]
+    source_grade: S
+    version_status: current
+    effect: descriptive_fact
+    maturity: level_1_direct
+    modules: [market_environment]
+    opportunity_types: [general, industry_trend, company_event]
+    topics: [market_breadth, index_distribution_divergence]
+    claim_summary: 市值或成份加权指数与全体股票等权收益、中位数和上涨面回答不同问题；它们可以直接描述参与是否广泛，但未证明未来20日机会率。
+    allowed_uses:
+      - 同时报告上证综指、深证成指、创业板指收益以及默认范围等权收益、中位数、上涨面和两者差值。
+      - 指数为正而中位数不正或上涨面偏弱时，准确写成指数与普通股票分化。
+    forbidden_uses:
+      - 把指数上涨写成普涨、风险偏好提升或未来20日显著上涨机会增加。
+      - 把回顾性Q40/Q60写成生产阈值、市场分数或Gate。
+    prerequisites:
+      - 三只范围锚定指数及默认股票范围当前覆盖完整。
+      - 个股收益使用复权价，指数与等权分布保留各自原值。
+    counter_evidence:
+      - 上涨集中于市值权重大的少数股票，中位数、上涨面和新高分布没有同步。
+      - 指数样本与默认股票范围不完全一致，尤其上证综指包含符合条件的科创板证券。
+    data_requirements:
+      - {kind: fact, name: index_daily, required_fields: [trade_date, index_code, close, available_at]}
+      - {kind: fact, name: equity_daily, required_fields: [trade_date, ts_code, close, available_at]}
+      - {kind: fact, name: adj_factor, required_fields: [trade_date, ts_code, adj_factor, available_at]}
+      - {kind: derived, name: market_context, required_fields: [scope_anchor_return_5d, equal_weight_return_5d, median_return_5d, breadth_5d, breadth_index_return_gap_5d]}
+    local_validation:
+      status: insufficient_for_direction
+      reason: 形成日级机会率差为1.01个百分点，95%区间跨零，窄行情对照仅12日；只允许一级描述用途。
+      validation_reference: market_skill_validation_results.yaml#market_h1_breadth_index_alignment
+
+  - knowledge_id: src_cn_market_turnover_price_progress
+    title: 成交变化必须与价格进展和上涨面共同解释
+    primary_source_id: paper-narayan-zheng-liquidity-2011
+    source_grade: A
+    version_status: current
+    effect: method_only
+    maturity: validation_capability
+    modules: [market_environment, risk]
+    opportunity_types: [general, industry_trend, company_event]
+    topics: [market_turnover, price_progress, liquidity_boundary]
+    claim_summary: 成交额相对基线、等权收益和上涨面可以共同描述当下量价是否一致；论文与本地结果都不支持成交放大单独预测收益。
+    allowed_uses:
+      - 并列展示当日总成交额、5/20日成交比、5日等权收益和上涨面，指出共同推进或冲突。
+      - 高成交低进展只作为待后续价格和供给压力验证的问题。
+    forbidden_uses:
+      - 把放量写成风险偏好提升、趋势确认、增量资金入场或机构/主力买入。
+      - 使用冻结研究分位数形成生产阈值或加减分。
+    prerequisites:
+      - 当前和历史成交额覆盖至少95%，收益与上涨面使用同一默认股票范围。
+      - 区分成交金额、换手率、买卖价差和价格冲击，不把不同流动性代理混为一谈。
+    counter_evidence:
+      - A股论文的成交量、换手率和交易概率结果不稳健且沪深市场不同。
+      - 形成日验证的低进展对照仅3日，效应区间跨零。
+    data_requirements:
+      - {kind: fact, name: equity_daily, required_fields: [trade_date, ts_code, close, amount, available_at]}
+      - {kind: fact, name: adj_factor, required_fields: [trade_date, ts_code, adj_factor, available_at]}
+      - {kind: derived, name: market_context, required_fields: [market_turnover_amount, turnover_ratio_5d, turnover_ratio_20d, equal_weight_return_5d, breadth_5d]}
+    local_validation:
+      status: insufficient_for_direction
+      reason: 条件效应为1.85个百分点但95%区间跨零，高成交低进展对照只有3个形成日；只能保留验证能力和单指标禁止边界。
+      validation_reference: market_skill_validation_results.yaml#market_h2_turnover_price_progress
+
+  - knowledge_id: src_cn_market_state_trend_reliability
+    title: 市场状态对20日追强可靠性的影响仍待形成日验证
+    primary_source_id: paper-cheema-nartea-momentum-state-2017
+    supporting_source_ids: [paper-ma-liao-jiang-factor-momentum-2024]
+    source_grade: A
+    version_status: current
+    effect: method_only
+    maturity: validation_capability
+    modules: [market_environment, price_trading]
+    opportunity_types: [general, industry_trend]
+    topics: [market_state_reliability, relative_strength]
+    claim_summary: A股论文提示趋势关系随市场状态变化，但本系统形成日级20日验证未达到覆盖、效应和区间要求。
+    allowed_uses:
+      - 市场状态只触发价格Skill进一步检查候选趋势是否有路径、量价和剩余空间支持。
+      - 引用论文和本地不足结果解释为什么不能跨状态套用同一追强叙事。
+    forbidden_uses:
+      - 把连续上涨、强市、风险偏好上升写成追强更可靠或提高候选结论等级。
+      - 用股票行数代替形成日数夸大市场状态证据。
+    prerequisites:
+      - 形成日级市场状态字段完整，候选后续结果先聚合到形成日。
+      - 保持当前冻结状态定义，只有新增前向样本才允许复验。
+    counter_evidence:
+      - 形成日级状态差只有1.22个百分点，95%区间跨零，连续上涨只有28日。
+      - 既有股票级结果总体偏反转，连续上涨关系也接近零。
+    data_requirements:
+      - {kind: fact, name: equity_daily, required_fields: [trade_date, ts_code, close, available_at]}
+      - {kind: fact, name: index_daily, required_fields: [trade_date, index_code, close, available_at]}
+      - {kind: derived, name: market_context, required_fields: [equal_weight_return_5d, equal_weight_return_20d, breadth_20d]}
+      - {kind: derived, name: stock_trading_context, required_fields: [relative_return_20d]}
+    local_validation:
+      status: insufficient
+      reason: 形成日级状态效应未达到预注册要求，只能保留验证问题。
+      validation_reference: market_skill_validation_results.yaml#market_h4_state_changes_trend_reliability
 
   - knowledge_id: src_moskowitz_grinblatt_1999
     title: 用行业共同表现解释个股动量时先做A股本地验证
@@ -1355,21 +1579,32 @@ entries:
     source_grade: A
     version_status: current
     effect: analysis_evidence
+    maturity: level_2_direct
     modules: [market_environment, sector_theme, risk]
     opportunity_types: [general, industry_trend]
     topics: [return_dispersion]
     claim_summary: 收益分化扩大可作为共同上涨程度下降和后续波动上升的风险证据，但不决定涨跌方向。
-    allowed_uses: [比较市场或行业成员日收益分化及其前后变化。]
-    forbidden_uses: [仅凭分化扩大断言市场即将下跌。]
-    prerequisites: [使用分析时点有效的行业成员和复权日收益。]
-    counter_evidence: [分化上升但后续波动未扩大，或关系仅由少数异常股票造成。]
+    allowed_uses:
+      - 比较市场或行业成员日收益分化及其相对过去20日基线的变化。
+      - 市场分化相对基线偏高时，提高未来约20日波动和路径不确定性的风险权重，并要求价格视角检查候选失效点。
+    forbidden_uses:
+      - 仅凭分化扩大断言市场即将上涨或下跌。
+      - 从分化推断羊群、机构、主力或账户身份，或把历史相关系数变成市场分数。
+    prerequisites:
+      - 使用默认股票范围、分析时点有效的行业成员和复权日收益。
+      - 当前复权与股票覆盖可靠，且当日分化与过去20日均值使用同一口径。
+    counter_evidence:
+      - 分化上升但后续波动未扩大，或新的前向样本使关系转负或稳定性消失。
+      - 分化主要由错误复权、覆盖变化或少数异常股票造成。
     data_requirements:
       - {kind: fact, name: equity_daily, required_fields: [trade_date, ts_code, close, available_at]}
       - {kind: fact, name: industry_member, required_fields: [ts_code, industry_code, valid_from, valid_to, available_at]}
+      - {kind: derived, name: market_context, required_fields: [return_dispersion_1d, return_dispersion_20d_average, return_dispersion_ratio_20d]}
     local_validation:
       status: validated
-      reason: 本地行业分化与后续波动关系总体和前后时期同向，且不设收益方向阈值。
+      reason: 行业级既有关系稳定；新的75个验证形成日中，市场分化与后续20日等权实现波动秩相关0.4772，95%区间为0.1707至0.6833，Holm校正后p为0.0160，2025与2026均为正。
       validation_reference: supplement_validation_results.yaml#src_cn_return_dispersion_risk
+      market_validation_reference: market_skill_validation_results.yaml#market_h3_dispersion_future_volatility
 
   - knowledge_id: src_cn_turnover_momentum_boundary
     title: 高换手不能自动确认趋势延续

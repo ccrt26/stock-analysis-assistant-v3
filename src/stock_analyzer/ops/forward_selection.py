@@ -1,11 +1,11 @@
 from __future__ import annotations
 
+import argparse
 import csv
 import json
 import math
 import os
 import shutil
-import subprocess
 import tempfile
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
@@ -21,11 +21,8 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 SELECTION_START = time(9, 5)
-READINESS_DEADLINE = time(9, 15)
 READINESS_POLL_SECONDS = 30
 MARKET_OPEN = time(9, 30)
-DEFAULT_CODEX_TIMEOUT_SECONDS = 18 * 60
-FINALIZE_BUFFER_SECONDS = 30
 REQUIRED_SKILLS = {
     "orchestrating-stock-research",
     "interpreting-market-macro",
@@ -92,6 +89,9 @@ class SelectedCandidateResult(CandidateResult):
 class ResearchResult(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
+    research_completed: bool
+    point_in_time_evidence_verified: bool
+    failure_reason: str
     skills_used: list[SkillName] = Field(min_length=5, max_length=5)
     selected_stocks: list[SelectedCandidateResult] = Field(max_length=5)
     nearest_nonselections: list[CandidateResult] = Field(max_length=3)
@@ -110,6 +110,7 @@ class RunSummary:
     status: str
     started_at: str
     formation_date: str = ""
+    action_date: str = ""
     selection_as_of: str = ""
     data_ready: bool = False
     new_forward_rows: int = 0
@@ -134,8 +135,16 @@ class ForwardData(Protocol):
     ) -> list[PricePoint] | None: ...
 
 
-class ResearchExecutor(Protocol):
-    def execute(self, *, prompt: str, timeout_seconds: int) -> dict[str, Any]: ...
+@dataclass(frozen=True)
+class _SelectionContext:
+    started_at: str
+    formation_date: date
+    action_date: date
+    selection_as_of: datetime
+    fieldnames: list[str]
+    rows: list[dict[str, str]]
+    open_dates: list[date]
+    settled_rows: int
 
 
 class LocalForwardData:
@@ -269,109 +278,194 @@ class LocalForwardData:
         ]
 
 
-class CodexResearch:
-    def __init__(self, project_root: Path, codex_bin: Path | None = None) -> None:
-        self.project_root = Path(project_root)
-        self.codex_bin = codex_bin or _resolve_codex_bin()
-
-    def execute(self, *, prompt: str, timeout_seconds: int) -> dict[str, Any]:
-        with tempfile.TemporaryDirectory(prefix="forward-selection-") as temp_dir:
-            temp_root = Path(temp_dir)
-            schema_path = temp_root / "schema.json"
-            output_path = temp_root / "result.json"
-            schema_path.write_text(
-                json.dumps(ResearchResult.model_json_schema(), ensure_ascii=False),
-                encoding="utf-8",
-            )
-            command = [
-                str(self.codex_bin),
-                "exec",
-                "--ephemeral",
-                "--sandbox",
-                "read-only",
-                "-C",
-                str(self.project_root),
-                "--output-schema",
-                str(schema_path),
-                "-o",
-                str(output_path),
-                "-",
-            ]
-            environment = dict(os.environ)
-            environment["TZ"] = "Asia/Shanghai"
-            try:
-                completed = subprocess.run(
-                    command,
-                    input=prompt,
-                    text=True,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.PIPE,
-                    env=environment,
-                    timeout=timeout_seconds,
-                    check=False,
-                )
-            except subprocess.TimeoutExpired as error:
-                raise RuntimeError("codex_timeout") from error
-            if completed.returncode != 0:
-                raise RuntimeError(f"codex_exit_{completed.returncode}")
-            if not output_path.is_file():
-                raise RuntimeError("codex_missing_output")
-            try:
-                return json.loads(output_path.read_text(encoding="utf-8"))
-            except (json.JSONDecodeError, OSError) as error:
-                raise RuntimeError("codex_invalid_json") from error
-
-
-def run_daily_forward(
+def prepare_daily_selection(
     *,
     csv_path: Path,
-    prompt_path: Path,
     data: ForwardData,
-    research: ResearchExecutor,
     clock: Callable[[], datetime],
     sleep: Callable[[float], None] = system_sleep,
+    formation_date: date | None = None,
+    action_date: date | None = None,
+    selection_as_of: datetime | None = None,
 ) -> RunSummary:
+    """Freeze and validate a point-in-time selection context without starting AI."""
+
+    context, failure = _prepare_selection_context(
+        csv_path=csv_path,
+        data=data,
+        clock=clock,
+        sleep=sleep,
+        formation_date=formation_date,
+        action_date=action_date,
+        selection_as_of=selection_as_of,
+    )
+    if failure is not None:
+        return failure
+    assert context is not None
+    formation_text = context.formation_date.isoformat()
+    if _has_selection_decision(context.rows, formation_text):
+        return _context_summary(context, status="already_selected")
+    return _context_summary(context, status="ready_for_research")
+
+
+def record_daily_selection(
+    result: dict[str, Any],
+    *,
+    csv_path: Path,
+    data: ForwardData,
+    clock: Callable[[], datetime],
+    formation_date: date,
+    action_date: date,
+    selection_as_of: datetime,
+    sleep: Callable[[float], None] = system_sleep,
+) -> RunSummary:
+    """Validate and archive a result produced by the top-level Codex task."""
+
+    context, failure = _prepare_selection_context(
+        csv_path=csv_path,
+        data=data,
+        clock=clock,
+        sleep=sleep,
+        formation_date=formation_date,
+        action_date=action_date,
+        selection_as_of=selection_as_of,
+    )
+    if failure is not None:
+        return failure
+    assert context is not None
+    formation_text = context.formation_date.isoformat()
+    if _has_selection_decision(context.rows, formation_text):
+        return _context_summary(context, status="already_selected")
+    try:
+        validated = _validate_result(
+            result,
+            data.eligible_securities(context.formation_date),
+        )
+        decision_rows = _decision_rows(
+            validated,
+            fieldnames=context.fieldnames,
+            formation_date=context.formation_date,
+            action_date=context.action_date,
+            selection_as_of=context.selection_as_of,
+        )
+    except Exception as error:
+        return _context_summary(
+            context,
+            status="invalid_result",
+            error=_safe_error(error),
+        )
+
+    latest_fieldnames, latest_rows = _read_forward_log(csv_path)
+    if _has_selection_decision(latest_rows, formation_text):
+        return _context_summary(context, status="already_selected")
+    if latest_fieldnames != context.fieldnames:
+        decision_rows = [
+            {field: row.get(field, "") for field in latest_fieldnames}
+            for row in decision_rows
+        ]
+    _atomic_write_csv(
+        csv_path,
+        latest_fieldnames,
+        [*latest_rows, *decision_rows],
+    )
+    return _context_summary(
+        context,
+        status="selection_frozen",
+        new_forward_rows=len(decision_rows),
+        selected_count=len(validated["selected_stocks"]),
+    )
+
+
+def _prepare_selection_context(
+    *,
+    csv_path: Path,
+    data: ForwardData,
+    clock: Callable[[], datetime],
+    sleep: Callable[[float], None],
+    formation_date: date | None,
+    action_date: date | None,
+    selection_as_of: datetime | None,
+) -> tuple[_SelectionContext | None, RunSummary | None]:
     started = _shanghai(clock())
     summary_base = {"started_at": started.isoformat(timespec="seconds")}
-    if started.time() < SELECTION_START or started.time() >= MARKET_OPEN:
-        return RunSummary(status="outside_selection_window", **summary_base)
+    explicit_context = any(
+        value is not None
+        for value in (formation_date, action_date, selection_as_of)
+    )
+    if explicit_context and not all(
+        value is not None
+        for value in (formation_date, action_date, selection_as_of)
+    ):
+        return None, RunSummary(
+            status="invalid_selection_context",
+            error="formation_date_action_date_and_as_of_are_required_together",
+            **summary_base,
+        )
+    if not explicit_context and (
+        started.time() < SELECTION_START or started.time() >= MARKET_OPEN
+    ):
+        return None, RunSummary(status="outside_selection_window", **summary_base)
+
+    if action_date is None:
+        action_date = started.date()
+    if selection_as_of is None:
+        selection_as_of = started
+    selection_as_of = _shanghai(selection_as_of)
+    market_open = datetime.combine(action_date, MARKET_OPEN, SHANGHAI)
+    if selection_as_of >= market_open:
+        return None, RunSummary(
+            status="invalid_selection_cutoff",
+            action_date=action_date.isoformat(),
+            selection_as_of=selection_as_of.isoformat(timespec="seconds"),
+            error="selection_as_of_must_precede_action_open",
+            **summary_base,
+        )
 
     fieldnames, rows = _read_forward_log(csv_path)
-    action_date_status = data.trading_day_status(started.date())
+    action_date_status = data.trading_day_status(action_date)
     if action_date_status is None:
-        return RunSummary(
+        return None, RunSummary(
             status="data_not_ready",
+            action_date=action_date.isoformat(),
             error="action_date_calendar_missing",
             **summary_base,
         )
     if not action_date_status:
-        return RunSummary(status="non_trading_day", **summary_base)
+        return None, RunSummary(
+            status="non_trading_day",
+            action_date=action_date.isoformat(),
+            **summary_base,
+        )
 
-    calendar_start = started.date() - timedelta(days=730)
-    calendar_end = started.date() + timedelta(days=60)
+    calendar_start = action_date - timedelta(days=730)
+    calendar_end = action_date + timedelta(days=60)
     open_dates = sorted(set(data.trading_dates(calendar_start, calendar_end)))
-    prior_dates = [day for day in open_dates if day < started.date()]
+    prior_dates = [day for day in open_dates if day < action_date]
     if not prior_dates:
-        return RunSummary(
+        return None, RunSummary(
             status="data_not_ready",
+            action_date=action_date.isoformat(),
             error="no_prior_trading_date",
             **summary_base,
         )
-    formation_date = prior_dates[-1]
-    formation_text = formation_date.isoformat()
-
-    if not _wait_until_data_ready(
-        data=data,
-        formation_date=formation_date,
-        action_date=started.date(),
-        clock=clock,
-        sleep=sleep,
-    ):
-        return RunSummary(
-            status="data_not_ready",
-            formation_date=formation_text,
+    expected_formation_date = prior_dates[-1]
+    if formation_date is None:
+        formation_date = expected_formation_date
+    elif formation_date != expected_formation_date:
+        return None, RunSummary(
+            status="invalid_selection_context",
+            formation_date=formation_date.isoformat(),
+            action_date=action_date.isoformat(),
+            selection_as_of=selection_as_of.isoformat(timespec="seconds"),
+            error="formation_date_is_not_prior_trading_date",
             **summary_base,
         )
+    _wait_until_data_ready(
+        data=data,
+        formation_date=formation_date,
+        clock=clock,
+        sleep=sleep,
+    )
 
     updated_rows, settled = apply_mature_settlements(
         rows,
@@ -382,108 +476,37 @@ def run_daily_forward(
         _atomic_write_csv(csv_path, fieldnames, updated_rows)
         rows = updated_rows
 
-    if _has_forward_decision(rows, formation_text):
-        return RunSummary(
-            status="already_frozen",
-            formation_date=formation_text,
-            data_ready=True,
-            settled_rows=settled,
-            **summary_base,
-        )
-
-    selection_as_of = _shanghai(clock())
-    market_open = datetime.combine(started.date(), MARKET_OPEN, SHANGHAI)
-    remaining = int((market_open - selection_as_of).total_seconds())
-    timeout_seconds = min(
-        DEFAULT_CODEX_TIMEOUT_SECONDS,
-        remaining - FINALIZE_BUFFER_SECONDS,
-    )
-    if timeout_seconds <= 0:
-        return RunSummary(
-            status="missed_freeze_deadline",
-            formation_date=formation_text,
-            selection_as_of=selection_as_of.isoformat(timespec="seconds"),
-            data_ready=True,
-            settled_rows=settled,
-            **summary_base,
-        )
-
-    action_date = started.date()
-    selection_text = selection_as_of.isoformat(timespec="seconds")
-    try:
-        prompt = _render_prompt(
-            prompt_path,
-            formation_date=formation_date,
-            action_date=action_date,
-            selection_as_of=selection_as_of,
-        )
-        result = research.execute(prompt=prompt, timeout_seconds=timeout_seconds)
-        completed_at = _shanghai(clock())
-        if completed_at >= market_open:
-            return RunSummary(
-                status="missed_freeze_deadline",
-                formation_date=formation_text,
-                selection_as_of=selection_text,
-                data_ready=True,
-                settled_rows=settled,
-                **summary_base,
-            )
-        eligible = data.eligible_securities(formation_date)
-        result = _validate_result(result, eligible)
-        decision_rows = _decision_rows(
-            result,
-            fieldnames=fieldnames,
-            formation_date=formation_date,
-            action_date=action_date,
-            selection_as_of=selection_as_of,
-        )
-    except Exception as error:
-        return RunSummary(
-            status="research_failed",
-            formation_date=formation_text,
-            selection_as_of=selection_text,
-            data_ready=True,
-            settled_rows=settled,
-            error=_safe_error(error),
-            **summary_base,
-        )
-
-    latest_fieldnames, latest_rows = _read_forward_log(csv_path)
-    if _has_forward_decision(latest_rows, formation_text):
-        return RunSummary(
-            status="already_frozen",
-            formation_date=formation_text,
-            selection_as_of=selection_text,
-            data_ready=True,
-            settled_rows=settled,
-            **summary_base,
-        )
-    if latest_fieldnames != fieldnames:
-        decision_rows = [
-            {field: row.get(field, "") for field in latest_fieldnames}
-            for row in decision_rows
-        ]
-        fieldnames = latest_fieldnames
-    finalization_time = _shanghai(clock())
-    if (market_open - finalization_time).total_seconds() <= 5:
-        return RunSummary(
-            status="missed_freeze_deadline",
-            formation_date=formation_text,
-            selection_as_of=selection_text,
-            data_ready=True,
-            settled_rows=settled,
-            **summary_base,
-        )
-    _atomic_write_csv(csv_path, fieldnames, [*latest_rows, *decision_rows])
-    return RunSummary(
-        status="forward_frozen",
-        formation_date=formation_text,
-        selection_as_of=selection_text,
-        data_ready=True,
-        new_forward_rows=len(decision_rows),
-        selected_count=len(result["selected_stocks"]),
+    return _SelectionContext(
+        started_at=summary_base["started_at"],
+        formation_date=formation_date,
+        action_date=action_date,
+        selection_as_of=selection_as_of,
+        fieldnames=fieldnames,
+        rows=rows,
+        open_dates=open_dates,
         settled_rows=settled,
-        **summary_base,
+    ), None
+
+
+def _context_summary(
+    context: _SelectionContext,
+    *,
+    status: str,
+    new_forward_rows: int = 0,
+    selected_count: int = 0,
+    error: str = "",
+) -> RunSummary:
+    return RunSummary(
+        status=status,
+        started_at=context.started_at,
+        formation_date=context.formation_date.isoformat(),
+        action_date=context.action_date.isoformat(),
+        selection_as_of=context.selection_as_of.isoformat(timespec="seconds"),
+        data_ready=True,
+        new_forward_rows=new_forward_rows,
+        selected_count=selected_count,
+        settled_rows=context.settled_rows,
+        error=error,
     )
 
 
@@ -531,20 +554,15 @@ def _wait_until_data_ready(
     *,
     data: ForwardData,
     formation_date: date,
-    action_date: date,
     clock: Callable[[], datetime],
     sleep: Callable[[float], None],
-) -> bool:
-    deadline = datetime.combine(action_date, READINESS_DEADLINE, SHANGHAI)
+) -> None:
     while True:
         checked_at = _shanghai(clock())
-        if checked_at >= deadline:
-            return False
         report = data.health_report(formation_date)
         if _data_ready(report, formation_date, checked_at):
-            return True
-        remaining = (deadline - checked_at).total_seconds()
-        sleep(min(float(READINESS_POLL_SECONDS), remaining))
+            return
+        sleep(float(READINESS_POLL_SECONDS))
 
 
 def _data_ready(
@@ -587,6 +605,12 @@ def _validate_result(
         payload = ResearchResult.model_validate(result).model_dump()
     except ValidationError as error:
         raise ValueError("invalid_structured_output") from error
+    if (
+        not payload["research_completed"]
+        or not payload["point_in_time_evidence_verified"]
+        or payload["failure_reason"]
+    ):
+        raise ValueError("research_incomplete")
     if set(payload["skills_used"]) != REQUIRED_SKILLS:
         raise ValueError("skills_not_complete")
     selected = payload["selected_stocks"]
@@ -624,7 +648,7 @@ def _decision_rows(
             "action_date": action_date.isoformat(),
             "as_of": selection_text,
             "selection_as_of": selection_text,
-            "validation_mode": "forward",
+            "validation_mode": "selection",
         }
     )
     rows: list[dict[str, str]] = []
@@ -716,25 +740,12 @@ def _atomic_write_csv(
         raise
 
 
-def _render_prompt(
-    path: Path,
-    *,
-    formation_date: date,
-    action_date: date,
-    selection_as_of: datetime,
-) -> str:
-    template = Path(path).read_text(encoding="utf-8")
-    return template.format(
-        formation_date=formation_date.isoformat(),
-        action_date=action_date.isoformat(),
-        selection_as_of=selection_as_of.isoformat(timespec="seconds"),
-    )
-
-
-def _has_forward_decision(rows: list[dict[str, str]], formation_date: str) -> bool:
+def _has_selection_decision(
+    rows: list[dict[str, str]], formation_date: str
+) -> bool:
     return any(
         row.get("formation_date") == formation_date
-        and row.get("validation_mode") == "forward"
+        and row.get("final_fate")
         for row in rows
     )
 
@@ -779,19 +790,6 @@ def _safe_error(error: Exception) -> str:
     return text[:160].replace("\n", " ")
 
 
-def _resolve_codex_bin() -> Path:
-    configured = os.environ.get("FORWARD_CODEX_BIN", "").strip()
-    candidates = [
-        Path(configured) if configured else None,
-        Path(shutil.which("codex")) if shutil.which("codex") else None,
-        Path("/Applications/ChatGPT.app/Contents/Resources/codex"),
-    ]
-    for candidate in candidates:
-        if candidate is not None and candidate.is_file():
-            return candidate
-    raise FileNotFoundError("Codex CLI is not available")
-
-
 def prepare_runtime_log(project_root: Path) -> Path:
     project_root = Path(project_root)
     runtime_log = (
@@ -806,22 +804,79 @@ def prepare_runtime_log(project_root: Path) -> Path:
     return runtime_log
 
 
-def main() -> int:
+def _parse_main_args(argv: list[str] | None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Prepare or record a top-level point-in-time stock selection."
+    )
+    commands = parser.add_subparsers(dest="command", required=True)
+    prepare = commands.add_parser("prepare")
+    prepare.add_argument("--formation-date")
+    prepare.add_argument("--action-date")
+    prepare.add_argument("--as-of")
+    record = commands.add_parser("record")
+    record.add_argument("--result-file", required=True)
+    record.add_argument("--formation-date", required=True)
+    record.add_argument("--action-date", required=True)
+    record.add_argument("--as-of", required=True)
+    args = parser.parse_args(argv)
+    supplied = [
+        getattr(args, "formation_date", None),
+        getattr(args, "action_date", None),
+        getattr(args, "as_of", None),
+    ]
+    if args.command == "prepare" and any(supplied) and not all(supplied):
+        parser.error(
+            "--formation-date, --action-date, and --as-of must be provided together"
+        )
+    return args
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _parse_main_args(argv)
     project_root = Path(__file__).resolve().parents[3]
     csv_path = prepare_runtime_log(project_root)
-    prompt_path = project_root / "ops/forward-selection-prompt.md"
     data = LocalForwardData(
         project_root / "local_warehouse",
         project_root / "local_archive",
     )
     try:
-        summary = run_daily_forward(
-            csv_path=csv_path,
-            prompt_path=prompt_path,
-            data=data,
-            research=CodexResearch(project_root),
-            clock=lambda: datetime.now(SHANGHAI),
+        formation_date = (
+            date.fromisoformat(args.formation_date)
+            if args.formation_date
+            else None
         )
+        action_date = (
+            date.fromisoformat(args.action_date) if args.action_date else None
+        )
+        selection_as_of = (
+            datetime.fromisoformat(args.as_of) if args.as_of else None
+        )
+        common = {
+            "csv_path": csv_path,
+            "data": data,
+            "clock": lambda: datetime.now(SHANGHAI),
+        }
+        if args.command == "prepare":
+            summary = prepare_daily_selection(
+                **common,
+                formation_date=formation_date,
+                action_date=action_date,
+                selection_as_of=selection_as_of,
+            )
+        else:
+            if formation_date is None or action_date is None or selection_as_of is None:
+                raise ValueError("record requires a complete selection context")
+            result_path = Path(args.result_file).expanduser().resolve()
+            result = json.loads(result_path.read_text(encoding="utf-8"))
+            if not isinstance(result, dict):
+                raise ValueError("result file must contain one JSON object")
+            summary = record_daily_selection(
+                result,
+                **common,
+                formation_date=formation_date,
+                action_date=action_date,
+                selection_as_of=selection_as_of,
+            )
     except Exception as error:
         now = datetime.now(SHANGHAI).isoformat(timespec="seconds")
         summary = RunSummary(
@@ -830,7 +885,12 @@ def main() -> int:
             error=_safe_error(error),
         )
     print(json.dumps(asdict(summary), ensure_ascii=False, sort_keys=True))
-    return 2 if summary.status in {"error", "research_failed"} else 0
+    return 2 if summary.status in {
+        "error",
+        "invalid_result",
+        "invalid_selection_context",
+        "invalid_selection_cutoff",
+    } else 0
 
 
 if __name__ == "__main__":

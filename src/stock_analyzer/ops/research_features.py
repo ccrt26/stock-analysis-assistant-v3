@@ -2,7 +2,7 @@
 
 This job has no data-source client.  It reads verified fact partitions through
 ``ResearchQuery`` at one explicit cutoff, normalizes the stored fact contracts
-for the three deterministic formula modules, and gives every feature set its
+for the deterministic formula modules, and gives every feature set its
 own atomic commit boundary.
 """
 
@@ -26,6 +26,10 @@ from stock_analyzer.analysis.market_context_features import (
     MARKET_CONTEXT_FORMULA_VERSION,
     compute_market_context_features,
 )
+from stock_analyzer.analysis.price_analysis_features import (
+    PRICE_ANALYSIS_FORMULA_VERSION,
+    compute_price_analysis_features,
+)
 from stock_analyzer.analysis.stock_context_features import (
     STOCK_CONTEXT_FORMULA_VERSION,
     compute_stock_context_features,
@@ -43,6 +47,7 @@ _SHANGHAI = ZoneInfo("Asia/Shanghai")
 _BENCHMARK_CODE = "000300.SH"
 _PRICE_WINDOW = 82
 _CONTEXT_WINDOW = 250
+_PRICE_ANALYSIS_WINDOW = 251
 
 
 @dataclass(frozen=True)
@@ -52,6 +57,7 @@ class DerivedFeatureSummary:
     market_rows: int
     sector_rows: int
     stock_rows: int
+    price_rows: int
     sector_no_membership_count: int
     committed_feature_sets: tuple[str, ...]
     skipped_feature_sets: tuple[str, ...]
@@ -66,7 +72,7 @@ def run_research_features(
     analysis_date: date | str,
     as_of: datetime | None = None,
 ) -> DerivedFeatureSummary:
-    """Compute and independently commit the three daily derived products."""
+    """Compute and independently commit the daily derived products."""
 
     analysis_day = _as_date(analysis_date)
     cutoff = _cutoff(analysis_day, as_of)
@@ -87,6 +93,9 @@ def run_research_features(
         )
     price_dates = tuple(value.isoformat() for value in sessions[-_PRICE_WINDOW:])
     context_dates = tuple(value.isoformat() for value in sessions[-_CONTEXT_WINDOW:])
+    price_analysis_dates = tuple(
+        value.isoformat() for value in sessions[-_PRICE_ANALYSIS_WINDOW:]
+    )
     recent_limit_dates = tuple(value.isoformat() for value in sessions[-5:])
     five_year_start = (pd.Timestamp(analysis_day) - pd.DateOffset(years=5)).date()
     valuation_dates = tuple(
@@ -115,6 +124,7 @@ def run_research_features(
         "market_context": 0,
         "sector_hotspot": 0,
         "stock_trading_context": 0,
+        "price_analysis_context": 0,
     }
 
     def execute(
@@ -140,6 +150,7 @@ def run_research_features(
                 analysis_day,
                 price_dates=price_dates,
                 context_dates=context_dates,
+                price_analysis_dates=price_analysis_dates,
             )
             fact_snapshot = snapshot.input_manifest
             previous = _unchanged_partition(
@@ -229,14 +240,28 @@ def run_research_features(
             limitations.append(
                 "历史证券主数据不可严格回放，市场覆盖分母使用当日已可见行情证券集合"
             )
+            scoped_equity = equity
+            scoped_adjustments = adjustments
+            scoped_limits = limits
+            scoped_securities = securities
+        else:
+            scope_codes = _default_market_scope_codes(securities, analysis_day)
+            scoped_equity = equity[equity["ts_code"].astype(str).isin(scope_codes)]
+            scoped_adjustments = adjustments[
+                adjustments["ts_code"].astype(str).isin(scope_codes)
+            ]
+            scoped_limits = limits[limits["ts_code"].astype(str).isin(scope_codes)]
+            scoped_securities = securities[
+                securities["ts_code"].astype(str).isin(scope_codes)
+            ]
         return compute_market_context_features(
-            _equity_with_adjustment(equity, adjustments),
+            _equity_with_adjustment(scoped_equity, scoped_adjustments),
             indexes,
-            limits,
+            scoped_limits,
             analysis_date=analysis_day,
             expected_current_rows=_expected_current_rows(
-                securities,
-                equity,
+                scoped_securities,
+                scoped_equity,
                 analysis_day,
             ),
         )
@@ -362,6 +387,40 @@ def run_research_features(
         calculate=calculate_stock,
     )
 
+    def price_analysis_inputs() -> dict[ResearchDatasetId, Iterable[str]]:
+        return {
+            **calendar_input,
+            ResearchDatasetId.EQUITY_DAILY: price_analysis_dates,
+            ResearchDatasetId.ADJ_FACTOR: price_analysis_dates,
+            ResearchDatasetId.INDEX_DAILY: price_analysis_dates,
+            ResearchDatasetId.STOCK_LIMIT: price_analysis_dates,
+        }
+
+    def calculate_price_analysis(
+        snapshot: MaterializedResearchSnapshot,
+    ) -> pd.DataFrame:
+        equity = _equity_with_adjustment(
+            snapshot.frame(ResearchDatasetId.EQUITY_DAILY),
+            snapshot.frame(ResearchDatasetId.ADJ_FACTOR),
+        )
+        equity = _equity_with_limit(
+            equity,
+            snapshot.frame(ResearchDatasetId.STOCK_LIMIT),
+        )
+        return compute_price_analysis_features(
+            equity,
+            _benchmark(snapshot.frame(ResearchDatasetId.INDEX_DAILY)),
+            analysis_date=analysis_day,
+        )
+
+    execute(
+        feature_set="price_analysis_context",
+        formula_version=PRICE_ANALYSIS_FORMULA_VERSION,
+        entity_key=("analysis_date", "ts_code"),
+        input_partitions=price_analysis_inputs,
+        calculate=calculate_price_analysis,
+    )
+
     unique_limitations = tuple(dict.fromkeys(limitations))
     plain = _job_summary(
         analysis_day,
@@ -379,6 +438,7 @@ def run_research_features(
         market_rows=row_counts["market_context"],
         sector_rows=row_counts["sector_hotspot"],
         stock_rows=row_counts["stock_trading_context"],
+        price_rows=row_counts["price_analysis_context"],
         sector_no_membership_count=sector_no_membership_count,
         committed_feature_sets=tuple(committed),
         skipped_feature_sets=tuple(skipped),
@@ -529,6 +589,50 @@ def _expected_current_rows(
     return count
 
 
+def _default_market_scope_codes(
+    securities: pd.DataFrame,
+    analysis_date: date,
+) -> set[str]:
+    required = {
+        "ts_code",
+        "market",
+        "exchange",
+        "name",
+        "valid_from",
+        "valid_to",
+    }
+    missing = sorted(required - set(securities.columns))
+    if missing:
+        raise ValueError(
+            "security master lacks required fields for default market scope: "
+            + ", ".join(missing)
+        )
+    frame = securities.copy()
+    boundary = pd.Timestamp(analysis_date)
+    valid_from = pd.to_datetime(frame["valid_from"], errors="raise")
+    valid_to = pd.to_datetime(frame["valid_to"], errors="coerce")
+    active = (valid_from <= boundary) & (
+        valid_to.isna() | (valid_to >= boundary)
+    )
+    if "list_status" in frame:
+        active &= frame["list_status"].astype(str).isin(("L", "P"))
+    default_board = (
+        (frame["market"].astype(str) == "主板")
+        & frame["exchange"].astype(str).isin(("SSE", "SZSE"))
+    ) | (
+        (frame["market"].astype(str) == "创业板")
+        & (frame["exchange"].astype(str) == "SZSE")
+    )
+    names = frame["name"].fillna("").astype(str).str.upper()
+    special_treatment = names.str.match(r"^\*?ST") | names.str.contains("退")
+    codes = set(
+        frame.loc[active & default_board & ~special_treatment, "ts_code"].astype(str)
+    )
+    if not codes:
+        raise ValueError("security master has no securities in the default market scope")
+    return codes
+
+
 def _benchmark(indexes: pd.DataFrame) -> pd.DataFrame:
     required = {"trade_date", "index_code", "close"}
     missing = sorted(required - set(indexes.columns))
@@ -569,6 +673,33 @@ def _equity_with_adjustment(
         validate="one_to_one",
     )
     return merged
+
+
+def _equity_with_limit(
+    equity: pd.DataFrame,
+    limits: pd.DataFrame,
+) -> pd.DataFrame:
+    _require_columns(equity, {"trade_date", "ts_code"}, "equity daily")
+    _require_columns(
+        limits,
+        {"trade_date", "ts_code", "up_limit"},
+        "stock limit",
+    )
+    equity = equity.copy()
+    limits = limits.copy()
+    for frame in (equity, limits):
+        frame["trade_date"] = pd.to_datetime(
+            frame["trade_date"], errors="raise"
+        ).dt.date
+        frame["ts_code"] = frame["ts_code"].astype(str)
+    if limits.duplicated(["trade_date", "ts_code"]).any():
+        raise ValueError("duplicate stock-limit business fact")
+    return equity.merge(
+        limits[["trade_date", "ts_code", "up_limit"]],
+        on=["trade_date", "ts_code"],
+        how="left",
+        validate="one_to_one",
+    )
 
 
 def _sector_catalog(
@@ -733,6 +864,7 @@ def _assert_calendar_window(
     *,
     price_dates: tuple[str, ...],
     context_dates: tuple[str, ...],
+    price_analysis_dates: tuple[str, ...],
 ) -> None:
     sessions = _open_sessions(
         snapshot.frame(ResearchDatasetId.TRADE_CALENDAR),
@@ -744,7 +876,14 @@ def _assert_calendar_window(
     resolved_context = tuple(
         value.isoformat() for value in sessions[-_CONTEXT_WINDOW:]
     )
-    if resolved_price != price_dates or resolved_context != context_dates:
+    resolved_price_analysis = tuple(
+        value.isoformat() for value in sessions[-_PRICE_ANALYSIS_WINDOW:]
+    )
+    if (
+        resolved_price != price_dates
+        or resolved_context != context_dates
+        or resolved_price_analysis != price_analysis_dates
+    ):
         raise RuntimeError(
             "fact trading calendar changed while materializing feature inputs"
         )
@@ -836,6 +975,7 @@ def _feature_summary(
         "market_context": "市场环境",
         "sector_hotspot": "行业和主题热点证据",
         "stock_trading_context": "个股交易背景",
+        "price_analysis_context": "价格场景输入",
     }
     status_text = {
         "complete": "核心观察完整",
@@ -862,7 +1002,8 @@ def _job_summary(
     text = (
         f"{analysis_date.isoformat()} 已处理市场环境 {row_counts['market_context']} 行、"
         f"行业/主题 {row_counts['sector_hotspot']} 行、个股背景 "
-        f"{row_counts['stock_trading_context']} 行；新落地 {len(committed)} 类，"
+        f"{row_counts['stock_trading_context']} 行、价格场景输入 "
+        f"{row_counts['price_analysis_context']} 行；新落地 {len(committed)} 类，"
         f"输入未变跳过 {len(skipped)} 类。"
     )
     text += (

@@ -1,4 +1,4 @@
 interface:
   display_name: "市场与宏观解释"
-  short_description: "解释历史市场广度、流动性、风险偏好、风格差异、政策背景与反证"
-  default_prompt: "使用 $interpreting-market-macro 解释形成日的连续市场状态、主要与备选解释、反证和未知。"
+  short_description: "用已入库证据解释市场参与、成交、分化、风格、制度与候选依赖"
+  default_prompt: "使用 $interpreting-market-macro 按形成日原值、比较基线和证据成熟度解释市场结构；只让已验证关系直接影响结论，其余输出待核问题、反证和未知。"
