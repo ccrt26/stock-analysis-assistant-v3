@@ -1,6 +1,6 @@
 # 股票分析助手 V3：当前架构与实现状态
 
-**更新日期：** 2026-08-20
+**更新日期：** 2026-08-21
 
 **适用范围：** GitHub `main` 分支
 
@@ -63,7 +63,7 @@ flowchart TD
     A["正式数据源<br/>Tushare、巨潮等"] --> B["数据合同与增量任务<br/>data/ + ops/"]
     B --> C["本地事实仓<br/>DuckDB 元数据 + Parquet 事实"]
     C --> D["时点安全查询<br/>ResearchQuery"]
-    D --> E["确定性观察与输入清单<br/>市场、板块、个股交易、价格场景输入"]
+    D --> E["确定性观察与输入清单<br/>市场、板块、个股、价格场景身份"]
     C --> F["本地研究知识<br/>YAML"]
     E --> G["股票研究总控 Skill"]
     F --> G
@@ -71,11 +71,11 @@ flowchart TD
     G --> I["板块与行业 Skill"]
     G --> J["公司与事件 Skill"]
     G --> K["价格与交易 Skill"]
-    H --> L["候选链、反证、未知与比较"]
+    H --> L["候选账、反证、未知与比较"]
     I --> L
     J --> L
     K --> L
-    L --> M["0—5 只条件化结论<br/>或空名单"]
+    L --> M["一份完整研究 trace<br/>0—5 只或空名单"]
     M -. "候选与理由冻结后" .-> N["独立未来路径评价"]
 ```
 
@@ -121,9 +121,9 @@ flowchart TD
 - `market_context`：市场收益、广度、波动、集中等连续事实；
 - `sector_hotspot`：行业/主题共同表现、成员广度、集中和分化；
 - `stock_trading_context`：个股相对表现、价格位置、成交和交易质量。
-- `price_analysis_context`：按价格 Skill 六个信息维度和 11 个研究场景反查得到的完整场景就绪输入，包括原始路径、相对强弱、趋势方向、路径效率、振荡、波动、收盘/成交质量、长期位置和参与条件。
+- `price_analysis_context`：按价格 Skill 六个信息维度生成原始路径、相对市场、相对形成日有效申万二级行业、趋势、路径效率、振荡、波动、收盘/成交质量、长期位置和参与条件，并用冻结阈值确定性分配 11 个场景的 case/control 身份与 20% 目标 ATR 距离。
 
-`price_analysis_context` 使用本地复权行情并严格截断在形成日，至少保留 251 个会话以计算前 250 日高点；它不自动给股票分配场景结论，也不把 MACD、RSI、K/D、BOLL、ADX/DMI、EMA 或其他观察变成评分和 Gate。派生任务记录公式版本与输入清单；输入未变时可以校验并跳过重算。这是数据与计算层的增量复用，不等同于已经实现了 AI 研究结果缓存。
+`price_analysis_context` 使用本地复权行情并严格截断在形成日，至少保留 251 个会话以计算前 250 日高点。程序只计算场景身份和原始值，不解释场景对候选的作用，也不把 MACD、RSI、K/D、BOLL、ADX/DMI、EMA、行业百分位或 ATR 距离变成评分、排名和 Gate。暂定场景的支持、反证和比较权限留在价格 Skill 中，不写成 Python 判断。派生任务记录公式版本与输入清单；输入未变时可以校验并跳过重算。
 
 ### 5.5 本地研究知识
 
@@ -144,7 +144,9 @@ data health
 
 `ops/launchd/` 保留收盘、晚间和次晨三个数据任务模板。它们只更新本地事实、派生观察和健康摘要，不运行最终选股、不发布报告、不交易。
 
-交易日上午约 09:05 的最终研究由 Codex 原生 Scheduled Task 在当前项目中直接调用 `$orchestrating-stock-research`，总控在同一个顶层会话内使用四个专业 Skill；仓库代码不再通过 Python 启动第二个 Codex，也没有第四个 AI LaunchAgent。`src/stock_analyzer/ops/forward_selection.py` 只保留两个确定性动作：`prepare` 冻结上一交易日、行动日和带时区的 `as_of`，等待次晨数据并结算到期 D20；`record` 校验顶层会话产生的结构化结果、股票资格和时间边界后原子归档。研究超过 18 分钟或 09:30 后完成仍可保存，只要冻结的 `as_of` 早于行动日 09:30，且所有行情交易日期不晚于形成日、所有事实满足 `available_at <= as_of`。合规结果统一按 `selection` 语义写入被 Git 忽略的 `local_archive/forward_selection/forward-selection-log.csv`；历史 `validation_mode` 只为 CSV 兼容保留，不再形成 forward/reconstructed 两套推荐。历史记录首次由 `docs/forward-selection-log.csv` 初始化，之后只在 D1—D20 行情完整时一次性结算。
+交易日上午约 09:05 的最终研究由 Codex 原生 Scheduled Task 在当前项目中直接调用 `$orchestrating-stock-research`，总控在同一个顶层会话内使用四个专业 Skill；仓库代码不通过 Python 启动第二个 Codex，也没有第四个 AI LaunchAgent。`prepare` 冻结上一交易日、行动日和带时区的 `as_of`，等待次晨数据并结算到期 D20；Codex 只生成 `pending-trace-<formation_date>.json` 一份完整轨迹；`record-trace` 只校验结构、日期、合格股票、候选守恒和引用一致性，从其中抽取现有 `ResearchResult` 调用 `record_daily_selection`，写入现有 Forward CSV 后将完整轨迹原子归档为 `research-trace-<formation_date>.json`。现有 `record` 命令、`ResearchResult`、Forward CSV 字段和 D20 结算保持不变；完整 trace 不写入 DuckDB。
+
+研究超过 18 分钟或 09:30 后完成仍可保存，只要冻结的 `as_of` 早于行动日 09:30，且所有行情交易日期不晚于形成日、所有事实满足 `available_at <= as_of`。合规结果统一按 `selection` 语义写入被 Git 忽略的 `local_archive/forward_selection/forward-selection-log.csv`；历史 `validation_mode` 只为 CSV 兼容保留，不再形成 forward/reconstructed 两套推荐。历史记录首次由 `docs/forward-selection-log.csv` 初始化，之后只在 D1—D20 行情完整时一次性结算。
 
 `select_minute_candidate_scope` 中的确定性排序只用于限制可选分钟数据的采集范围，属于数据成本控制，不是投资评分或最终候选排名；分钟数据也不是目标架构的每日必需输入。
 
@@ -157,7 +159,7 @@ data health
 - 冻结 `formation_date`、`action_date`、带时区 `as_of`、股票范围和研究目标；
 - 让四个专业 Skill 分别发现和验证线索；
 - 按上涨因果链合并候选，而不是按分数排序；
-- 维护 `candidate_chain`，保证每条线索、每只候选和最终去向可追溯；
+- 维护紧凑 `candidate_ledger` 和 `decision_trace`，保证实际候选、真正改变取舍的证据和最终去向可追溯；
 - 区分关键未知与次要未知；
 - 输出 0—5 只、同类比较、最强反证、行动日参与条件和放弃条件；
 - 历史模拟中先冻结形成日答卷，再打开未来行情评价。
@@ -171,20 +173,21 @@ data health
 | `researching-company-events` | 公司身份、主营、财务、公告阶段、业务传导和公司反证 | 判断价格是否透支或行动日能否参与 |
 | `analyzing-price-trading` | 相对表现、成交推进、价格位置、剩余路径、流动性和条件化可参与性 | 从量价证明公司业务或推断交易主体 |
 
-每个专业 Skill 都可在发现阶段提交线索，并在验证阶段围绕少量候选回答能够改变最终取舍的问题。第一轮不为完整感扫描所有公告正文，补证最多一轮。
+每个专业 Skill 都可在发现阶段提交线索，并在验证阶段围绕少量候选独立回答能够改变最终取舍的问题。市场直接读一行 `market_context`；板块和价格先用 DuckDB 投影、过滤派生表；公司第一轮只查新增结构化事实。不把全量派生表或公告正文送入模型，补证最多一轮。
 
 ## 7. 一次研究应如何运行
 
 1. **冻结边界**：确定形成日、行动日、`as_of`、研究目标和完整合格股票范围。
 2. **读取数据能力**：检查核心数据、历史版本和已知限制；关键数据不足时停止正式选择。
 3. **四视角发现**：市场给出搜索环境，板块、公司和价格独立提交方向、股票或待回答问题。
-4. **候选链归并**：保留全部来源线索；按股票代码去重；非股票线索必须有转换或未解决原因。
+4. **候选归并**：只保留实际提交的股票，按代码去重并保留真实来源 Skill。
 5. **建立因果链**：回答新变化、业务传导、市场识别、剩余路径和最强反证。
-6. **共同验证**：只对少量候选进行一轮能够改变结论的定向补证。
+6. **独立共同验证**：四个专业 Skill 分别对同一批少量候选进行一轮定向补证，提交前不读彼此结论。
 7. **最终取舍**：同因果链内比较，再跨机会比较；输出 0—5 只或空名单。
-8. **独立评价**：形成日答卷冻结后，才使用行动日及未来约 20 个交易日行情评价可执行性和路径。
+8. **单一轨迹记录**：只写一份完整 trace，程序校验后抽取现有 Forward 结果并归档 trace。
+9. **独立评价**：形成日答卷冻结后，才使用行动日及未来约 20 个交易日行情评价可执行性和路径。
 
-候选链必须满足：去重候选数 = 入选数 + 淘汰数 + 未决数。审计完整度不能给股票加分，也不能产生无来源候选。
+候选账必须满足：去重候选数 = 入选数 + 淘汰数 + 未决数。记录完整度不能给股票加分，也不能产生无来源候选。
 
 ## 8. 当前实现状态
 
@@ -193,11 +196,11 @@ data health
 | 正式数据增量获取、修复和健康检查 | 已实现 | `data/`、`ops/`、CLI 和测试 |
 | DuckDB + Parquet 事实仓、修订、哈希和恢复 | 已实现 | `storage/research_warehouse.py` |
 | 带 `as_of` 的形成日查询和输入清单 | 已实现 | `storage/research_query.py` |
-| 市场、板块、个股交易、价格场景输入四类确定性观察 | 已实现 | `analysis/`、`ops/research_features.py`；价格输入按形成日截断并覆盖当前 Skill 场景字段 |
+| 市场、板块、个股交易、价格上下文四类确定性观察 | 已实现 | `analysis/`、`ops/research_features.py`；价格上下文按形成日截断，含冻结场景身份、相对申万二级行业和 ATR 目标距离，不产生候选排名 |
 | 本地研究知识与 Skill 定向调阅 | 已实现 | `knowledge/*.yaml`、五个 Skill |
 | 一个总控 + 四个专业研究 Skill | 已实现 | `.agents/skills/` |
-| 候选链追溯、历史形成日模拟和调优诊断方法 | 已实现为 Skill 合同和研究流程 | 通过 Codex/ChatGPT 执行并在 `docs/` 留下诊断报告，不是常驻 Python 服务 |
-| 每日自动端到端 AI 选股 | 仓库侧准备和归档已实现；触发由 Codex 原生 Scheduled Task 配置 | 约 09:05 顶层任务直接调用总控 Skill；`prepare`/`record` 不启动模型，只冻结边界、检查数据、校验归档和结算 D20；超过 09:30 完成不改变冻结 `as_of` |
+| 候选与决定轨迹追溯、历史形成日模拟和调优诊断方法 | 已实现为单一 trace 合同与 Skill 流程 | 程序只校验结构和引用，AI 仍负责解释与取舍；手动 D20 复盘只有 Prompt，不是常驻 Python 服务 |
+| 每日自动端到端 AI 选股 | 仓库侧准备和归档已实现；触发由 Codex 原生 Scheduled Task 配置 | 约 09:05 顶层任务直接调用总控 Skill；`prepare`/`record-trace` 不启动模型，只冻结边界、检查数据、校验一份 trace、抽取现有 Forward 结果、归档和结算 D20 |
 | AI 调用前的研究结果缓存、候选 memo 缓存和断点恢复 | 未实现 | 目前只有事实/派生层哈希、清单与跳过重算 |
 | 自动报告渲染、云端发布、Supabase 和交易执行 | 有意不存在 | 旧 V3 路径已从 `main` 删除，不得当作备用能力 |
 | GitHub 中的真实本地研究数据 | 有意不存在 | `local_warehouse/`、`local_archive/`、`logs/`、`.env*` 被忽略 |
@@ -221,7 +224,7 @@ data health
 ### 9.2 已经演进
 
 - “一个研究 Skill”演进为一个总控 Skill 加四个专业 Skill；
-- 巨型固定模型合同演进为各 Skill 的轻量 YAML 输出合同和候选链审计；
+- 巨型固定模型合同演进为各 Skill 的轻量输出合同和一份完整每日 trace；
 - “程序预制完整证据包”演进为 AI 按问题调用时点查询、派生观察和临时 SQL/Python；外部资料只能在具体任务和专业 Skill 的证据边界允许时另行取得；
 - 研究目标从抽象的单次 V3 运行，演进为可重复的每日选择、历史形成日模拟和多视角验证流程。
 

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import csv
+import json
+from collections.abc import Callable
 from datetime import date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -13,6 +15,7 @@ from stock_analyzer.ops.forward_selection import (
     apply_mature_settlements,
     prepare_daily_selection,
     prepare_runtime_log,
+    record_daily_trace,
     record_daily_selection,
 )
 
@@ -187,6 +190,42 @@ def _one_stock_result() -> dict:
     ]
     result["empty_reason"] = ""
     return result
+
+
+def _one_stock_trace() -> dict:
+    return {
+        "trace_version": "daily-research-trace-v1",
+        "formation_date": "2026-08-18",
+        "action_date": "2026-08-19",
+        "as_of": "2026-08-19T09:10:00+08:00",
+        "market_search_context": "普通股票参与宽度与指数同步，继续比较个股增量。",
+        "candidate_ledger": [
+            {
+                "ts_code": "000001.SZ",
+                "name": "平安银行",
+                "opportunity_type": "independent_price_anomaly",
+                "source_skills": ["analyzing-price-trading"],
+                "final_fate": "selected",
+                "primary_reason": "相对市场和行业的连续增量仍在。",
+            }
+        ],
+        "decision_trace": [
+            {
+                "ts_code": "000001.SZ",
+                "source_skill": "analyzing-price-trading",
+                "evidence_id": "raw_price",
+                "evidence_version": "price-analysis-context-v2",
+                "evidence_status_at_use": "observation_only",
+                "decision_role": "support",
+                "decision_changed": "promoted",
+                "formation_values": {
+                    "return_5d": 0.05,
+                    "relative_industry_return_5d": 0.03,
+                },
+            }
+        ],
+        "research_result": _one_stock_result(),
+    }
 
 
 def _run(
@@ -407,6 +446,135 @@ def test_top_level_result_uses_selection_semantics_and_frozen_context(
     assert rows[-1]["priority"] == "1"
     assert rows[-1]["selection_as_of"] == "2026-08-19T09:10:00+08:00"
     assert research.prompt == "top-level Codex result"
+
+
+def test_complete_trace_records_the_same_forward_rows_and_is_archived(
+    tmp_path: Path,
+) -> None:
+    trace = _one_stock_trace()
+    pending = tmp_path / "pending-trace-2026-08-18.json"
+    pending.write_text(json.dumps(trace, ensure_ascii=False), encoding="utf-8")
+    direct_csv = tmp_path / "direct.csv"
+    trace_csv = tmp_path / "trace.csv"
+    _write_csv(direct_csv, [])
+    _write_csv(trace_csv, [])
+    archive_dir = tmp_path / "archive"
+    moment = datetime(2026, 8, 19, 9, 10, tzinfo=SHANGHAI)
+    data = FakeData(open_dates=[date(2026, 8, 18), date(2026, 8, 19)])
+
+    direct = record_daily_selection(
+        trace["research_result"],
+        csv_path=direct_csv,
+        data=data,
+        clock=_clock(moment, moment),
+        formation_date=date(2026, 8, 18),
+        action_date=date(2026, 8, 19),
+        selection_as_of=moment,
+    )
+    recorded = record_daily_trace(
+        trace,
+        pending_path=pending,
+        archive_dir=archive_dir,
+        csv_path=trace_csv,
+        data=data,
+        clock=_clock(moment, moment),
+        formation_date=date(2026, 8, 18),
+        action_date=date(2026, 8, 19),
+        selection_as_of=moment,
+    )
+
+    archive = archive_dir / "research-trace-2026-08-18.json"
+    assert direct.status == recorded.status == "selection_frozen"
+    assert _read_csv(trace_csv) == _read_csv(direct_csv)
+    assert not pending.exists()
+    assert json.loads(archive.read_text(encoding="utf-8")) == trace
+
+
+def test_trace_date_mismatch_is_rejected_without_writing_or_moving(
+    tmp_path: Path,
+) -> None:
+    trace = _one_stock_trace()
+    trace["formation_date"] = "2026-08-17"
+    pending = tmp_path / "pending.json"
+    pending.write_text(json.dumps(trace, ensure_ascii=False), encoding="utf-8")
+    csv_path = tmp_path / "forward.csv"
+    _write_csv(csv_path, [])
+    moment = datetime(2026, 8, 19, 9, 10, tzinfo=SHANGHAI)
+
+    summary = record_daily_trace(
+        trace,
+        pending_path=pending,
+        archive_dir=tmp_path / "archive",
+        csv_path=csv_path,
+        data=FakeData(open_dates=[date(2026, 8, 18), date(2026, 8, 19)]),
+        clock=_clock(moment),
+        formation_date=date(2026, 8, 18),
+        action_date=date(2026, 8, 19),
+        selection_as_of=moment,
+    )
+
+    assert summary.status == "invalid_result"
+    assert summary.error == "trace_formation_date_mismatch"
+    assert _read_csv(csv_path) == []
+    assert pending.exists()
+
+
+@pytest.mark.parametrize(
+    ("mutate", "expected_error"),
+    [
+        (
+            lambda trace: trace["candidate_ledger"].append(
+                dict(trace["candidate_ledger"][0])
+            ),
+            "duplicate_candidate_codes",
+        ),
+        (
+            lambda trace: trace["decision_trace"][0].update(
+                ts_code="600000.SH"
+            ),
+            "decision_trace_candidate_missing",
+        ),
+        (
+            lambda trace: trace["candidate_ledger"][0].update(
+                final_fate="rejected"
+            ),
+            "selected_candidate_fate_mismatch",
+        ),
+        (
+            lambda trace: trace.update(decision_trace=[]),
+            "price_evidence_count_invalid",
+        ),
+    ],
+)
+def test_trace_candidate_conservation_and_price_references_are_enforced(
+    tmp_path: Path,
+    mutate: Callable[[dict], None],
+    expected_error: str,
+) -> None:
+    trace = _one_stock_trace()
+    mutate(trace)
+    pending = tmp_path / "pending.json"
+    pending.write_text(json.dumps(trace, ensure_ascii=False), encoding="utf-8")
+    csv_path = tmp_path / "forward.csv"
+    _write_csv(csv_path, [])
+    moment = datetime(2026, 8, 19, 9, 10, tzinfo=SHANGHAI)
+
+    summary = record_daily_trace(
+        trace,
+        pending_path=pending,
+        archive_dir=tmp_path / "archive",
+        csv_path=csv_path,
+        data=FakeData(open_dates=[date(2026, 8, 18), date(2026, 8, 19)]),
+        clock=_clock(moment),
+        formation_date=date(2026, 8, 18),
+        action_date=date(2026, 8, 19),
+        selection_as_of=moment,
+    )
+
+    assert summary.status == "invalid_result"
+    assert summary.error == expected_error
+    assert _read_csv(csv_path) == []
+    assert pending.exists()
 
 
 @pytest.mark.parametrize("result", [{"research_complete": True}])

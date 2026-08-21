@@ -58,6 +58,12 @@ description: Use when point-in-time A-share candidate selection or validation ne
 
 查询失败、历史覆盖不足、当前快照不可回放和真实无记录必须分开写。核心事实不可靠时，不给正式市场解释。
 
+## 每日读取方式
+
+直接读取形成日的 `market_context` 一行，不再从全市场原始日线重算已有广度、收益、成交、分化、波动和集中字段。输入上下文只保留会改变后续搜索方向的少量原值、比较基线和质量状态，不复制整行无关字段。
+
+`broad_participation`、`index_stock_divergence`、`turnover_without_progress` 以及规模风格的含义仍由本 Skill 根据原值解释；它们不是 Python 分类字段、不预测指数方向，也不构成 Gate。
+
 ## 固定观察表
 
 不先贴“强市、弱市、风险偏好提升”等标签。依次报告原值、比较基线、证据等级和允许含义。

@@ -136,7 +136,7 @@ def run_research_features(
             [], Mapping[ResearchDatasetId, Iterable[str]]
         ],
         calculate: Callable[[MaterializedResearchSnapshot], pd.DataFrame],
-    ) -> None:
+    ) -> pd.DataFrame | None:
         nonlocal sector_no_membership_count
         requested: Mapping[ResearchDatasetId, Iterable[str]] = {}
         try:
@@ -164,12 +164,14 @@ def run_research_features(
                 row_counts[feature_set] = previous[0]
                 skipped.append(feature_set)
                 limitations.extend(previous[1])
+                existing = store.read(
+                    feature_set,
+                    analysis_day,
+                    formula_version,
+                )
                 if feature_set == "sector_hotspot":
-                    existing = store.read(
-                        feature_set, analysis_day, formula_version
-                    )
                     sector_no_membership_count = _no_membership_count(existing)
-                return
+                return existing
             frame = calculate(snapshot)
             row_counts[feature_set] = len(frame)
             if feature_set == "sector_hotspot":
@@ -211,10 +213,12 @@ def run_research_features(
             else:
                 committed.append(feature_set)
             limitations.extend(feature_limitations)
+            return frame
         except Exception as exc:  # each feature set has an independent boundary
             failed.append(feature_set)
             error_text = f"{feature_set}: {exc}"
             errors.append(error_text)
+            return None
 
     calendar_input = {ResearchDatasetId.TRADE_CALENDAR: calendar_partitions}
 
@@ -347,7 +351,7 @@ def run_research_features(
             analysis_date=analysis_day,
         )
 
-    execute(
+    sector_context = execute(
         feature_set="sector_hotspot",
         formula_version=HOTSPOT_FORMULA_VERSION,
         entity_key=("analysis_date", "group_type", "group_code"),
@@ -394,6 +398,12 @@ def run_research_features(
             ResearchDatasetId.ADJ_FACTOR: price_analysis_dates,
             ResearchDatasetId.INDEX_DAILY: price_analysis_dates,
             ResearchDatasetId.STOCK_LIMIT: price_analysis_dates,
+            ResearchDatasetId.INDUSTRY_CATALOG: partitions(
+                ResearchDatasetId.INDUSTRY_CATALOG
+            ),
+            ResearchDatasetId.INDUSTRY_MEMBER: partitions(
+                ResearchDatasetId.INDUSTRY_MEMBER
+            ),
         }
 
     def calculate_price_analysis(
@@ -411,6 +421,15 @@ def run_research_features(
             equity,
             _benchmark(snapshot.frame(ResearchDatasetId.INDEX_DAILY)),
             analysis_date=analysis_day,
+            industry_catalog=snapshot.frame(
+                ResearchDatasetId.INDUSTRY_CATALOG
+            ),
+            industry_memberships=snapshot.frame(
+                ResearchDatasetId.INDUSTRY_MEMBER
+            ),
+            sector_hotspot=(
+                sector_context if sector_context is not None else pd.DataFrame()
+            ),
         )
 
     execute(

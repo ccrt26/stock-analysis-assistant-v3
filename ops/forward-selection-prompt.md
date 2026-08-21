@@ -8,7 +8,7 @@
 ./.venv/bin/python -m stock_analyzer.ops.forward_selection prepare
 ```
 
-该命令只做确定性准备：确认交易日、等待现有 09:00 次晨数据任务就绪、冻结 `formation_date`、`action_date` 和带时区的 `selection_as_of`、检查四类派生结果并结算到期 D20；它不会运行 AI。只有返回 `status=ready_for_research` 才继续。若返回 `already_selected`、`non_trading_day`、数据缺口或错误，说明具体状态后停止，不补猜。
+该命令只做确定性准备：确认交易日、等待现有 09:00 次晨数据任务就绪、冻结 `formation_date`、`action_date` 和带时区的 `selection_as_of`、检查四类派生结果并结算到期 D20；它不运行 AI。只有返回 `status=ready_for_research` 才继续。若返回 `already_selected`、`non_trading_day`、数据缺口或错误，说明具体状态后停止，不补猜。
 
 把 prepare 返回的三个冻结字段作为本次唯一时间边界：
 
@@ -20,33 +20,33 @@
 
 在同一个顶层研究会话中按总控 Skill 的当前合同实际使用四个专业 Skill：
 
-1. `interpreting-market-macro` 冻结市场环境和搜索含义；
-2. `researching-sectors-industries` 面向完整合格范围提交板块/股票线索或明确空线索；
-3. `researching-company-events` 面向完整合格范围提交公司/事件线索或明确空线索；
-4. `analyzing-price-trading` 调阅 `price_analysis_context` 的完整场景就绪输入，结合原始路径、相对强弱、趋势方向、路径效率、振荡、波动、收盘/成交质量、长期位置和参与条件提交线索或明确空线索。
+1. `interpreting-market-macro` 直接读取当日 `market_context` 一行，冻结市场环境和搜索含义，不输出股票；
+2. `researching-sectors-industries` 先在 DuckDB 投影、过滤 `sector_hotspot`，再对少量板块查有效成员并提交线索或空线索；
+3. `researching-company-events` 第一轮只查形成日新增的结构化财务、业绩、回购、减持、解禁和公告元数据，原文只在少量候选验证中按需读取；
+4. `analyzing-price-trading` 先用 SQL 读取程序已生成的场景身份、相对市场/申万二级行业、量价推进、突破、涨停贡献、ATR 目标距离和流动性，缩小范围后再深度比较。
 
-总控必须保留实际候选来源并完成候选守恒、同因果链比较、跨机会比较、反证和未知检查。不得先做价格 Top N 再补故事；不得把场景、MACD、RSI、K/D、BOLL、ADX/DMI、EMA 或任何其他指标变成评分、权重、Gate 或投票。每日派生的 11 类场景只是可解释研究假设，同一股票可命中多个或一个都不命中。
+市场先输出搜索环境，板块、公司和价格独立发现；总控归并候选并冻结命题后，四个 Skill 独立验证同一批少量候选，提交前不读取彼此结论。总控解决冲突并最终选 0—5 只，不按专业 Skill 投票、证据数量、场景数量、固定分数或 Gate 排序。
 
-股票范围为上海主板、深圳主板和创业板；排除科创板、北交所、场内基金、ST/\*ST、退市整理、停牌、无可靠报价及行动日明确无法正常参与的股票。最终允许 0—5 只或空名单，不补位、不凑数。不要区分 forward 与 reconstructed；符合本次冻结边界和研究合同的结果就是正式推荐。
+股票范围为上海主板、深圳主板和创业板；排除科创板、北交所、场内基金、ST/\*ST、退市整理、停牌、无可靠报价及行动日明确无法正常参与的股票。最终允许 0—5 只或空名单，不补位、不凑数，不区分 forward 与 reconstructed。
 
-每只入选必须给出足够详细但不堆指标的理由：新变化及其传导、为什么市场可能继续识别、剩余价格路径、真正改变取舍的 1—2 个价格组合及原始数值、最强反证、关键未知，以及为什么优于最接近替代股。另保留最多 3 只最近未入选股并说明差距。价格 Skill 没有改变取舍时也要明确说明。
+只保留实际候选和最多 3 只最近未入选股。每个 Skill 对每只深度候选最多保留 1—2 条真正改变取舍的证据，不重复大段相同事实。每只入选必须说明新变化及传导、市场识别、剩余价格路径、最强反证、关键未知和为什么优于最接近替代股。入选股和实际 `nearest_nonselection` 每只保留 1—2 条价格证据；没有合适场景时使用 `raw_price`，场景暂定证据必须连同真正用到的原始数值。
 
-完成研究后，生成符合 `stock_analyzer.ops.forward_selection.ResearchResult` 的 JSON 对象：`skills_used` 必须是实际使用的五个 Skill；若 0 只，`selected_stocks=[]` 并填写真实 `empty_reason`；若研究或事实查询失败，两个完成布尔值相应为 false、填写 `failure_reason`，且两个候选数组为空。不要把执行失败伪装成空名单。
+完成研究后，只生成一份符合 `stock_analyzer.ops.forward_selection.DailyResearchTrace` 的 JSON。`research_result` 仍符合现有 `ResearchResult`，`skills_used` 必须是实际使用的五个 Skill；若 0 只，`selected_stocks=[]` 并填写真实 `empty_reason`；若研究或事实查询失败，按现有失败合同填写，不伪装成空名单。`formation_values` 只保存当时实际使用的少量数字、布尔值或简短状态，不保存整行派生数据。
 
-把 JSON 保存为：
+把这份唯一 JSON 保存为：
 
 ```text
-local_archive/forward_selection/pending-<formation_date>.json
+local_archive/forward_selection/pending-trace-<formation_date>.json
 ```
 
-然后用 prepare 返回的原值运行（不要重新生成时间）：
+然后使用 prepare 返回的原值运行（不要重新生成时间）：
 
 ```bash
-./.venv/bin/python -m stock_analyzer.ops.forward_selection record \
-  --result-file local_archive/forward_selection/pending-<formation_date>.json \
+./.venv/bin/python -m stock_analyzer.ops.forward_selection record-trace \
+  --trace-file local_archive/forward_selection/pending-trace-<formation_date>.json \
   --formation-date <formation_date> \
   --action-date <action_date> \
   --as-of <selection_as_of>
 ```
 
-只有 `record` 返回 `selection_frozen` 或 `already_selected` 才算完成。最终向用户直接给出正式推荐股票（或空名单）、排序和详细理由，不使用 forward/reconstructed 两套口径。
+只有 `record-trace` 返回 `selection_frozen` 或 `already_selected` 才算完成。程序会从完整 trace 抽取现有 ResearchResult 行写入原 Forward CSV，并把完整轨迹原子移动为 `research-trace-<formation_date>.json`；不再另外生成 pending ResearchResult JSON。最终向用户直接给出正式推荐股票（或空名单）、排序和详细理由。

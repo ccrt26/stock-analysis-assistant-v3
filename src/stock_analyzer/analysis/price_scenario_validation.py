@@ -7,8 +7,10 @@ columns are read exclusively by the evaluation helpers.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping, Sequence
 from datetime import date
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -16,6 +18,12 @@ import pandas as pd
 
 QUANTILES = (0.20, 0.40, 0.60, 0.80)
 QUANTILE_NAMES = ("q20", "q40", "q60", "q80")
+PRICE_SCENARIO_ASSIGNMENT_VERSION = "price-scenario-assignment-v1"
+_FROZEN_THRESHOLD_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "knowledge"
+    / "price_scenario_thresholds_v3.json"
+)
 
 SCENARIO_THRESHOLD_FIELDS = (
     "return_5d",
@@ -123,6 +131,17 @@ SCENARIO_SPECS: dict[str, dict[str, str]] = {
         "primary_metric": "d20",
     },
 }
+
+
+def load_frozen_price_scenario_thresholds() -> dict[str, object]:
+    """Load the committed development thresholds used by daily assignment."""
+
+    document = json.loads(_FROZEN_THRESHOLD_PATH.read_text(encoding="utf-8"))
+    if not isinstance(document, dict) or not isinstance(
+        document.get("thresholds"), dict
+    ):
+        raise ValueError("invalid frozen price scenario threshold document")
+    return document
 
 
 def fit_scenario_thresholds(
@@ -955,6 +974,7 @@ def _block_sign_flip_p_values(
 __all__ = [
     "ABSOLUTE_THRESHOLD_FIELDS",
     "POSITIVE_ONLY_THRESHOLD_FIELDS",
+    "PRICE_SCENARIO_ASSIGNMENT_VERSION",
     "SCENARIO_SPECS",
     "SCENARIO_THRESHOLD_FIELDS",
     "assign_price_scenarios",
@@ -963,4 +983,5 @@ __all__ = [
     "evaluate_price_scenarios",
     "fit_scenario_thresholds",
     "holm_adjust",
+    "load_frozen_price_scenario_thresholds",
 ]

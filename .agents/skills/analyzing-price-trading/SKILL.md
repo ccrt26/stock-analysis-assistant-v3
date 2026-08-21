@@ -61,11 +61,13 @@ description: Use when point-in-time A-share candidate selection or validation ne
 
 历史证据不再用 `supported | refuted | insufficient` 三个标签或任意 `3%` 效应门槛决定场景能否参与。必须分开读取效果方向与大小、不确定区间、跨形成日和年度稳定性、case/control/缺失覆盖、盘中与收盘触达、MFE、MAE 和 D20 收盘。多重检验用于表达不确定性，不自动改写场景合同。
 
-| 场景证据 | 当前允许的用法 |
-| --- | --- |
-| 既有趋势延续 | 形成日等权的 20% 触达差约 `+2.91` 个百分点，95% 区间约 `+1.74` 至 `+4.07`，2025/2026 方向一致；但 D20 收盘无明显改善，MAE 略差。可作正向历史关联参加发现和比较，但不得单独推荐，且必须同时披露回撤与 D20 限制。 |
-| 震荡噪声中的 MACD/K/D 上穿 | 负面历史关联且 2025/2026 方向一致。横盘、低 ADX/ER、弱 DMI、弱量价和居中收盘中的上穿不得提高优先级，可作反证。 |
-| 初步激活、健康回撤、有效/失败突破、强下跌超卖、真实反转尝试、趋势衰竭、单日脉冲、量价背离 | 作为待继续验证的假设，可改变搜索问题、验证重点、风险问题或替代股比较，但不得单独构成推荐或淘汰理由。 |
+| `evidence_id` | `evidence_status_at_use` | 当前允许的用法 |
+| --- | --- | --- |
+| `trend_continuation` | `supported_with_boundary` | 可作正向历史关联参加发现和比较，但不得单独推荐；同时披露回撤与 D20 收盘限制。 |
+| `range_cross_noise` | `supported_with_boundary` | 只能把横盘、弱趋势、弱量价语境中的上穿作受限反证，不得提高优先级。 |
+| `initial_activation`、`confirmed_breakout`、`failed_breakout`、`oversold_strong_downtrend`、`reversal_attempt`、`single_day_impulse` | `provisional` | 可改变发现、支持、反证或同类比较，但必须同时引用真正用到的原始价格与成交字段，不得仅凭场景名改变选择。 |
+| `healthy_pullback`、`trend_exhaustion`、`price_volume_divergence` | `observation_only` | 只作当日观察、风险问题或比较语境，不独立推荐或淘汰。 |
+| BOLL 窄带后上轨突破正面组合 | `prohibited` | 已失败，不得改名或作“辅助确认”恢复。 |
 
 已失败的 BOLL 窄带后上轨突破正面组合继续禁用，不得换名为“辅助确认”恢复。行动日停牌、无可靠报价或无法正常成交是事实约束，不由任何场景抵消。
 
@@ -77,15 +79,17 @@ BOLL 窄带后上轨突破的预设正面组合已失败，不得改名为“辅
 
 每次使用指标都要回答：“它相对已有原始事实改变了什么判断？”若删除指标名称后，解释没有原始价格、相对强弱、收盘路径和量能支撑，则该解释无效。
 
-形成日只为实际入选股和实际存在的 `nearest_nonselection` 保留真正改变当时取舍的 1—2 条价格判断；没有合适场景时写 `raw_price`，不强迫贴标签，也不罗列 11 个场景。优先复用现有的入选理由、最强反证和替代股比较字段；现有记录确实放不下时才写入当天被 Git 忽略的研究附件，不修改 Forward CSV、数据库或程序 schema。
+形成日只为实际入选股和实际存在的 `nearest_nonselection` 在当日完整 trace 中保留真正改变取舍的 1—2 条价格判断；没有合适场景时写 `raw_price`，不强迫贴标签，也不罗列 11 个场景。不再另建价格附件、数据表或新 schema。
 
-每条最少保留：`formation_date`、`action_date`、带时区 `as_of`、股票代码、决定去向；当时用到的 5/20 日收益和相对市场/板块表现；用到的收盘、量能、涨停贡献、长期位置及技术指标数值；场景或 `raw_price`；它是支持、反证、比较还是行动条件；它具体改变了什么；最强反证或未知；最接近替代股。未实际使用的指标不必保存，价格没有改变取舍时明确写“未改变”，不得事后补造当时的判断轨迹。
+每条 trace 价格证据写明场景或 `raw_price`、证据版本和当时权限，并用 `decision_role` 与 `decision_changed` 说明它的作用。`formation_values` 只保存真正使用的少量 5/20 日收益、相对市场/申万二级行业、收盘、成交、涨停贡献、位置或 ATR 数值，不保存整行派生数据。价格未改变取舍时可写 `decision_changed=no_change`；不得事后补造当时轨迹。
 
 D20 后按照 `docs/2026-08-19-price-skill-d20-audit-method.md` 复核。场景本身的历史关联与 AI 当时是否正确使用分开评价；盘中 20% 触达、收盘触达、MFE、MAE 和 D20 收盘分开看。效果大小、区间、跨日期稳定性和覆盖共同构成证据，不用单个 `3%` 或其他数字自动裁决去留。
 
 ## 判断方法
 
 只使用 `available_at <= as_of` 的复权日线、估值、成交额、换手、涨跌停、停牌和交易状态。分钟数据不是默认必需输入。
+
+每日先在 DuckDB 中投影并过滤程序已生成的 `price_analysis_context`，优先读取 `scenario_case_ids`、`scenario_assignment_status`、相对市场、相对申万二级行业、量价推进、突破、涨停贡献、`target_atr_distance_20pct` 和流动性，用 SQL 缩小需要深度比较的范围。不把全部价格表送入模型，不重算 11 个场景公式，也不把 SQL 过滤结果当成候选排名。
 
 ### 1. 拆分价格来源
 

@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from datetime import date
 
 import numpy as np
 import pandas as pd
 import pytest
+
+import stock_analyzer.analysis.price_scenario_validation as scenario_validation
 
 from stock_analyzer.analysis.price_scenario_validation import (
     SCENARIO_SPECS,
@@ -47,6 +51,35 @@ def test_development_thresholds_ignore_validation_period_values() -> None:
         "q60": 0.4,
         "q80": 1.2,
     })
+
+
+def test_frozen_price_scenario_thresholds_preserve_the_development_values() -> None:
+    loader = getattr(
+        scenario_validation,
+        "load_frozen_price_scenario_thresholds",
+        None,
+    )
+    assert callable(loader), "the production frozen-threshold loader is missing"
+
+    document = loader()
+    thresholds = document["thresholds"]
+    digest = hashlib.sha256(
+        json.dumps(
+            thresholds,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+
+    assert document["threshold_version"] == "price-scenario-thresholds-2026-08-19-v3"
+    assert document["source_run_id"] == "2026-08-19-price-scenario-validation-v3"
+    assert document["development_end"] == "2024-12-31"
+    assert document["scenario_formula_source"] == (
+        "stock_analyzer.analysis.price_scenario_validation.assign_price_scenarios"
+    )
+    assert len(thresholds) == 29
+    assert digest == "c519d822671f5b0dcefa4145ca03cc46a1a018d9d7ac67c77bfb3be29a3787b8"
 
 
 def test_indicator_cross_without_price_relative_and_volume_context_matches_nothing() -> None:

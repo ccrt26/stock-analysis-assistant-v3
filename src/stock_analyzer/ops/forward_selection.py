@@ -18,6 +18,8 @@ from zoneinfo import ZoneInfo
 import duckdb
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from stock_analyzer.analysis.price_scenario_validation import SCENARIO_SPECS
+
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 SELECTION_START = time(9, 5)
@@ -69,6 +71,12 @@ SkillName = Literal[
     "researching-company-events",
     "analyzing-price-trading",
 ]
+ProfessionalSkillName = Literal[
+    "interpreting-market-macro",
+    "researching-sectors-industries",
+    "researching-company-events",
+    "analyzing-price-trading",
+]
 
 
 class CandidateResult(BaseModel):
@@ -96,6 +104,59 @@ class ResearchResult(BaseModel):
     selected_stocks: list[SelectedCandidateResult] = Field(max_length=5)
     nearest_nonselections: list[CandidateResult] = Field(max_length=3)
     empty_reason: str
+
+
+class TraceCandidate(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    ts_code: str = Field(min_length=9)
+    name: str = Field(min_length=1)
+    opportunity_type: OpportunityType
+    source_skills: list[SkillName] = Field(min_length=1)
+    final_fate: Literal["selected", "rejected", "unresolved"]
+    primary_reason: str = Field(min_length=1)
+
+
+class TraceDecision(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    ts_code: str = Field(min_length=9)
+    source_skill: ProfessionalSkillName
+    evidence_id: str = Field(min_length=1)
+    evidence_version: str = Field(min_length=1)
+    evidence_status_at_use: Literal[
+        "supported_with_boundary",
+        "provisional",
+        "observation_only",
+    ]
+    decision_role: Literal[
+        "discovery",
+        "support",
+        "counter",
+        "comparison",
+        "action_condition",
+    ]
+    decision_changed: Literal[
+        "created_lead",
+        "promoted",
+        "demoted",
+        "rejected",
+        "no_change",
+    ]
+    formation_values: dict[str, bool | int | float | str]
+
+
+class DailyResearchTrace(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    trace_version: Literal["daily-research-trace-v1"]
+    formation_date: date
+    action_date: date
+    as_of: datetime
+    market_search_context: str = Field(min_length=1)
+    candidate_ledger: list[TraceCandidate]
+    decision_trace: list[TraceDecision]
+    research_result: ResearchResult
 
 
 @dataclass(frozen=True)
@@ -374,6 +435,134 @@ def record_daily_selection(
         new_forward_rows=len(decision_rows),
         selected_count=len(validated["selected_stocks"]),
     )
+
+
+def record_daily_trace(
+    trace: dict[str, Any],
+    *,
+    pending_path: Path,
+    archive_dir: Path,
+    csv_path: Path,
+    data: ForwardData,
+    clock: Callable[[], datetime],
+    formation_date: date,
+    action_date: date,
+    selection_as_of: datetime,
+    sleep: Callable[[float], None] = system_sleep,
+) -> RunSummary:
+    """Validate one complete trace, record its ResearchResult, and archive it."""
+
+    try:
+        validated = _validate_trace(
+            trace,
+            formation_date=formation_date,
+            action_date=action_date,
+            selection_as_of=selection_as_of,
+            eligible=data.eligible_securities(formation_date),
+        )
+    except Exception as error:
+        started = _shanghai(clock())
+        return RunSummary(
+            status="invalid_result",
+            started_at=started.isoformat(timespec="seconds"),
+            formation_date=formation_date.isoformat(),
+            action_date=action_date.isoformat(),
+            selection_as_of=_shanghai(selection_as_of).isoformat(
+                timespec="seconds"
+            ),
+            error=_safe_error(error),
+        )
+
+    summary = record_daily_selection(
+        validated.research_result.model_dump(),
+        csv_path=csv_path,
+        data=data,
+        clock=clock,
+        formation_date=formation_date,
+        action_date=action_date,
+        selection_as_of=selection_as_of,
+        sleep=sleep,
+    )
+    if summary.status not in {"selection_frozen", "already_selected"}:
+        return summary
+    archive_dir = Path(archive_dir)
+    archive_dir.mkdir(parents=True, exist_ok=True)
+    archive_path = archive_dir / f"research-trace-{formation_date.isoformat()}.json"
+    os.replace(Path(pending_path), archive_path)
+    return summary
+
+
+def _validate_trace(
+    trace: dict[str, Any],
+    *,
+    formation_date: date,
+    action_date: date,
+    selection_as_of: datetime,
+    eligible: dict[str, str],
+) -> DailyResearchTrace:
+    try:
+        payload = DailyResearchTrace.model_validate(trace)
+    except ValidationError as error:
+        raise ValueError("invalid_trace_structure") from error
+    if payload.formation_date != formation_date:
+        raise ValueError("trace_formation_date_mismatch")
+    if payload.action_date != action_date:
+        raise ValueError("trace_action_date_mismatch")
+    if payload.as_of.tzinfo is None or payload.as_of.utcoffset() is None:
+        raise ValueError("trace_as_of_timezone_missing")
+    if _shanghai(payload.as_of) != _shanghai(selection_as_of):
+        raise ValueError("trace_as_of_mismatch")
+
+    ledger_codes = [item.ts_code for item in payload.candidate_ledger]
+    if len(ledger_codes) != len(set(ledger_codes)):
+        raise ValueError("duplicate_candidate_codes")
+    ledger = {item.ts_code: item for item in payload.candidate_ledger}
+    for item in payload.candidate_ledger:
+        if eligible.get(item.ts_code) != item.name:
+            raise ValueError("ineligible_trace_candidate")
+        if len(item.source_skills) != len(set(item.source_skills)):
+            raise ValueError("duplicate_candidate_source_skills")
+
+    result = payload.research_result
+    failed = (
+        not result.research_completed
+        or not result.point_in_time_evidence_verified
+        or bool(result.failure_reason)
+    )
+    if failed and (result.selected_stocks or result.nearest_nonselections):
+        raise ValueError("failed_research_candidates_present")
+    validated_result = _validate_result(result.model_dump(), eligible)
+    selected_codes = {
+        str(item["ts_code"]) for item in validated_result["selected_stocks"]
+    }
+    ledger_selected = {
+        code for code, item in ledger.items() if item.final_fate == "selected"
+    }
+    if selected_codes != ledger_selected:
+        raise ValueError("selected_candidate_fate_mismatch")
+    nearest_codes = {
+        str(item["ts_code"])
+        for item in validated_result["nearest_nonselections"]
+    }
+    if any(code not in ledger or ledger[code].final_fate == "selected" for code in nearest_codes):
+        raise ValueError("nearest_candidate_fate_mismatch")
+
+    allowed_price_ids = set(SCENARIO_SPECS) | {"raw_price"}
+    price_counts: dict[str, int] = {}
+    for decision in payload.decision_trace:
+        if decision.ts_code not in ledger:
+            raise ValueError("decision_trace_candidate_missing")
+        for value in decision.formation_values.values():
+            if isinstance(value, float) and not math.isfinite(value):
+                raise ValueError("formation_value_non_finite")
+        if decision.source_skill == "analyzing-price-trading":
+            if decision.evidence_id not in allowed_price_ids:
+                raise ValueError("invalid_price_evidence_id")
+            price_counts[decision.ts_code] = price_counts.get(decision.ts_code, 0) + 1
+    for code in selected_codes | nearest_codes:
+        if price_counts.get(code, 0) not in {1, 2}:
+            raise ValueError("price_evidence_count_invalid")
+    return payload
 
 
 def _prepare_selection_context(
@@ -818,6 +1007,11 @@ def _parse_main_args(argv: list[str] | None) -> argparse.Namespace:
     record.add_argument("--formation-date", required=True)
     record.add_argument("--action-date", required=True)
     record.add_argument("--as-of", required=True)
+    record_trace = commands.add_parser("record-trace")
+    record_trace.add_argument("--trace-file", required=True)
+    record_trace.add_argument("--formation-date", required=True)
+    record_trace.add_argument("--action-date", required=True)
+    record_trace.add_argument("--as-of", required=True)
     args = parser.parse_args(argv)
     supplied = [
         getattr(args, "formation_date", None),
@@ -863,7 +1057,7 @@ def main(argv: list[str] | None = None) -> int:
                 action_date=action_date,
                 selection_as_of=selection_as_of,
             )
-        else:
+        elif args.command == "record":
             if formation_date is None or action_date is None or selection_as_of is None:
                 raise ValueError("record requires a complete selection context")
             result_path = Path(args.result_file).expanduser().resolve()
@@ -872,6 +1066,24 @@ def main(argv: list[str] | None = None) -> int:
                 raise ValueError("result file must contain one JSON object")
             summary = record_daily_selection(
                 result,
+                **common,
+                formation_date=formation_date,
+                action_date=action_date,
+                selection_as_of=selection_as_of,
+            )
+        else:
+            if formation_date is None or action_date is None or selection_as_of is None:
+                raise ValueError("record-trace requires a complete selection context")
+            trace_path = Path(args.trace_file).expanduser().resolve()
+            trace = json.loads(trace_path.read_text(encoding="utf-8"))
+            if not isinstance(trace, dict):
+                raise ValueError("trace file must contain one JSON object")
+            summary = record_daily_trace(
+                trace,
+                pending_path=trace_path,
+                archive_dir=(
+                    project_root / "local_archive" / "forward_selection"
+                ),
                 **common,
                 formation_date=formation_date,
                 action_date=action_date,

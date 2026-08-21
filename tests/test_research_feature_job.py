@@ -172,6 +172,12 @@ class FakeStore:
             }
         ])
 
+    def read(self, feature_set, analysis_date, formula_version):
+        current = self.warehouse.current.get(
+            (feature_set, analysis_date, formula_version)
+        )
+        return pd.DataFrame() if current is None else current["frame"].copy()
+
 _WAREHOUSES: dict[Path, FakeWarehouse] = {}
 
 
@@ -251,7 +257,7 @@ def test_job_uses_calendar_windows_strict_manifests_and_exact_contracts(
         "market-context-v3",
         "sector-hotspot-v3",
         "stock-trading-context-v2",
-        "price-analysis-context-v1",
+        "price-analysis-context-v2",
     ]
     assert [call["entity_key"] for call in warehouse.commits] == [
         "analysis_date",
@@ -263,6 +269,11 @@ def test_job_uses_calendar_windows_strict_manifests_and_exact_contracts(
     assert captured["stock"][1]["trade_date"].nunique() == 250
     assert captured["price"][0]["trade_date"].nunique() == 251
     assert captured["price"][1]["trade_date"].nunique() == 251
+    assert set(captured["price"][2]["industry_catalog"]["level"]) == {"L1"}
+    assert set(captured["price"][2]["industry_memberships"]["level"]) == {"L1"}
+    assert captured["price"][2]["sector_hotspot"].iloc[0]["group_code"] == (
+        "801010.SI"
+    )
     assert captured["sector"][1].columns.tolist() == [
         "group_type", "group_code", "group_name", "level", "official_index_code"
     ]
@@ -321,7 +332,7 @@ def test_job_persists_scenario_ready_price_context_from_251_sessions(
         and len(call[1].get(ResearchDatasetId.EQUITY_DAILY, ())) == 251
     )
     assert summary.price_rows == 1
-    assert price_commit["formula_version"] == "price-analysis-context-v1"
+    assert price_commit["formula_version"] == "price-analysis-context-v2"
     assert price_commit["entity_key"] == ("analysis_date", "ts_code")
     assert len(price_snapshot[ResearchDatasetId.EQUITY_DAILY]) == 251
     assert len(price_snapshot[ResearchDatasetId.ADJ_FACTOR]) == 251
@@ -329,10 +340,13 @@ def test_job_persists_scenario_ready_price_context_from_251_sessions(
     assert price_snapshot[ResearchDatasetId.STOCK_LIMIT] == tuple(
         value.isoformat() for value in dates[-251:]
     )
-    price_equity, price_benchmark = captured["price"]
+    assert price_snapshot[ResearchDatasetId.INDUSTRY_CATALOG] == ("SW2021",)
+    assert price_snapshot[ResearchDatasetId.INDUSTRY_MEMBER] == ("SW2021",)
+    price_equity, price_benchmark, price_context = captured["price"]
     assert price_equity["trade_date"].max() == ANALYSIS_DATE
     assert price_equity["up_limit"].notna().all()
     assert price_benchmark["trade_date"].nunique() == 251
+    assert not price_context["sector_hotspot"].empty
 
 
 def test_job_normalizes_equity_and_adjustment_trade_date_types(
@@ -632,7 +646,7 @@ def _capture_stock(captured):
 
 def _capture_price(captured):
     def compute(equity, benchmark, **kwargs):
-        captured["price"] = (equity, benchmark)
+        captured["price"] = (equity, benchmark, kwargs)
         return _simple_price(equity, benchmark, **kwargs)
     return compute
 

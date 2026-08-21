@@ -96,15 +96,14 @@ ST、退市和重大官方风险使用 `rules.seed.yaml` 中的正式边界。�
 
 只有三路第一轮都完成后，总控才按股票代码归并候选。方向和板块不能由总控直接猜成股票，必须由对应专业 Skill 补出具体成员。第一轮不得为了完整感逐只读取全市场公告正文。
 
-### 2A. 保留候选链审计账
+### 2A. 保留紧凑候选账
 
-在同一份研究回答中保留四个专业 Skill 实际输出的全部 `candidate_leads`；某个 Skill 没有线索时显式记录空输出。每条线索记录 `lead_id`、来源 Skill、类型、名称、股票代码和原始理由。
+只把板块、公司或价格 Skill 实际提交的股票按标准代码去重后写入 `candidate_ledger`；市场与非股票方向只保留会改变搜索的简短上下文，不复制全部中间输出。
 
-- `stock` 线索按标准股票代码去重；只有名称且形成日无法可靠映射时记为未解决，不用当前身份信息倒填。
-- `direction`、`group` 和 `question` 线索逐条记录为已转换到哪些股票、有理由未转换或未解决。方向本身不能被总控猜成股票。
-- 去重后的每只股票保留全部 `source_lead_ids`，并在共同验证后记录市场、板块、公司和价格四个视角的支持、反证与未知。
-- 每只去重候选必须有且只有一个最终去向 `selected | rejected | unresolved`、去向阶段和一条主要原因。未解决只用于关键事实确实无法判断，不用来回避取舍。
-- 输出前核对：去重候选数 = 入选数 + 淘汰数 + 未解决数；每条股票线索可追到候选；每条非股票线索有去向；去重不丢失来源。
+- 每只候选保留实际 `source_skills`，不用来源数量计分；
+- 每只候选必须有且只有一个 `selected | rejected | unresolved` 去向和一条主要原因；
+- 候选守恒是去重候选数 = 入选数 + 淘汰数 + 未解决数；
+- 只保留实际候选和最多 3 只 `nearest_nonselections`，不为完整感扩展账本。
 
 该账只保留已发生的研究链，不产生新候选，不计分、排名或改变选股判断。
 
@@ -146,9 +145,9 @@ ST、退市和重大官方风险使用 `rules.seed.yaml` 中的正式边界。�
 
 跨类型取舍时比较哪条因果链在形成日拥有更真实的增量、更清晰的市场识别和更大的剩余路径；公司材料更完整不自动优于板块扩散或独立价格异常。低位激活与高位突破是并列的剩余路径，不静态地把价格位置更低、前期涨幅更小或走势更平滑解释为剩余空间更大，也不因股票已处高位、此前上涨更多或存在一定上影和回落就默认透支。先判断形成日前的新增趋势是否仍在产生：多窗口相对市场、行业或同类的强势是否继续，是否形成真实突破，成交增加后是否仍能推动收盘，以及是否仍有新的公司或板块事实强化命题。若这些增量仍在，高位和此前已涨更多应理解为市场确认的一部分；真正需要降低的是强势已经衰减、成交推进变差、上涨主要依赖少数涨停且缺少新增事实继续强化的候选。上影、冲高回落、涨停贡献和透支仍是反证，但不能单独盖过真实突破、持续相对增量、有效成交推进与新增公司或板块强化；这也不降低公司催化对真实公司因果和材料性的要求。
 
-### 5. 共同验证
+### 5. 独立共同验证
 
-把同一批少量候选交回四个专业 Skill，只补充能够改变选择的问题：
+把同一批少量候选卡交给四个专业 Skill，只补充能够改变选择的问题。四个 Skill 分别依据自己负责的事实验证，提交前不读取或沿用其他专业 Skill 的结论：
 
 - 上涨命题在形成日前是否真实存在；
 - 候选的绝对上涨中，哪些更像市场普涨、板块共同变化或个股自身增量；可用基准不足时保留未知；
@@ -158,7 +157,7 @@ ST、退市和重大官方风险使用 `rules.seed.yaml` 中的正式边界。�
 - 行动日是否可能正常参与；
 - 最强反证和关键未知是什么。
 
-只允许一轮定向补证。补证不能借机重新扫描全市场。
+只允许一轮定向补证。补证不能借机重新扫描全市场。四个 Skill 不重复输出大段相同事实；每个 Skill 对每只深度候选最多保留 1—2 条真正改变取舍的证据。总控在四路提交后解决冲突，不按投票、证据数量、场景数量或固定分数排序。
 
 ### 6. 作出最终取舍
 
@@ -185,84 +184,52 @@ ST、退市和重大官方风险使用 `rules.seed.yaml` 中的正式边界。�
 
 ## 最终输出
 
+每日只输出一份完整 `DailyResearchTrace`，不再另写紧凑 pending ResearchResult：
+
 ```yaml
-research_objective: ""
+trace_version: daily-research-trace-v1
 formation_date: YYYY-MM-DD
 action_date: YYYY-MM-DD
-as_of: ""
-selection_universe: ""
+as_of: "带时区时间"
 market_search_context: ""
-candidate_chain:
-  skill_leads:
-    - lead_id: ""
-      source_skill: market | sector | company | price
-      lead_type: direction | group | stock | question
-      name: ""
-      ts_code: ""
-      rationale: ""
-  non_stock_lead_fates:
-    - lead_id: ""
-      fate: converted_to_stock | not_converted_with_reason | unresolved
-      mapped_ts_codes: []
-      reason: ""
-  candidate_ledger:
-    - ts_code: ""
-      name: ""
-      opportunity_type: company_catalyst | sector_diffusion | independent_price_anomaly
-      opportunity_type_reason: ""
-      type_evidence: []
-      type_confidence: high | medium | low
-      source_lead_ids: []
-      lens_reviews:
-        market: {support: "", counter: "", unknown: ""}
-        sector: {support: "", counter: "", unknown: ""}
-        company: {support: "", counter: "", unknown: ""}
-        price: {support: "", counter: "", unknown: ""}
-      final_fate: selected | rejected | unresolved
-      fate_stage: discovery | joint_validation | final_decision
-      primary_reason: ""
-  candidate_conservation:
-    deduped_candidates: 0
-    selected: 0
-    rejected: 0
-    unresolved: 0
-    stock_leads_traced: true | false
-    non_stock_leads_traced: true | false
-    sources_preserved: true | false
-data_quality_issues:
-  - fact_or_dataset: ""
-    status: missing | failed | unsupported | current_only | unavailable_at_cutoff | genuinely_absent
-    effect_on_decision: ""
-selected_stocks:
+candidate_ledger:
   - ts_code: ""
     name: ""
     opportunity_type: company_catalyst | sector_diffusion | independent_price_anomaly
-    opportunity_type_reason: ""
-    type_evidence: []
-    type_confidence: high | medium | low
-    new_change: ""
-    target_thesis: ""
-    causal_chain: ""
-    evidence_by_lens: {market: [], sector: [], company: [], price: []}
-    why_this_over_alternatives: ""
-    strongest_counter_evidence: ""
-    key_unknowns: []
-    secondary_unknowns: []
-    action_day_participation_conditions: []
-    abandonment_conditions: []
-representative_non_selections:
+    source_skills: [researching-sectors-industries]
+    final_fate: selected | rejected | unresolved
+    primary_reason: ""
+decision_trace:
   - ts_code: ""
-    name: ""
-    reason_not_selected: ""
-common_exposure_note: ""
-data_limitations: []
+    source_skill: interpreting-market-macro | researching-sectors-industries | researching-company-events | analyzing-price-trading
+    evidence_id: ""
+    evidence_version: ""
+    evidence_status_at_use: supported_with_boundary | provisional | observation_only
+    decision_role: discovery | support | counter | comparison | action_condition
+    decision_changed: created_lead | promoted | demoted | rejected | no_change
+    formation_values: {}
+research_result:
+  research_completed: true
+  point_in_time_evidence_verified: true
+  failure_reason: ""
+  skills_used:
+    - orchestrating-stock-research
+    - interpreting-market-macro
+    - researching-sectors-industries
+    - researching-company-events
+    - analyzing-price-trading
+  selected_stocks: []
+  nearest_nonselections: []
+  empty_reason: "空名单时填真实原因；有入选时留空"
 ```
 
-`representative_non_selections` 不能代替 `candidate_chain`：前者帮助用户快速理解最典型的取舍，后者负责让所有已提交线索和候选可追溯。
+`research_result` 继续严格符合现有 `ResearchResult`，其中 `skills_used` 为实际使用的五个 Skill。每条 `decision_trace` 必须引用候选账中的股票；`formation_values` 只放真正用于当时判断的少量标量，不保存整行派生事实。实际入选股和 `nearest_nonselections` 每只必须有 1—2 条价格证据，场景不合适时使用 `raw_price`。
 
-`target_thesis` 必须直接说明为什么形成日前的新变化可能在未来约 20 个交易日触发进一步重估。`why_this_over_alternatives` 必须体现实际比较，不能只重复支持证据。
+没有合适股票时，`selected_stocks` 返回空数组并填写真实 `empty_reason`，不得补位。研究或形成日事实验证失败时，按现有失败合同留空两组候选，不把执行失败伪装成空名单。
 
-没有合适股票时，`selected_stocks` 返回空数组，并说明主要原因。不得用低质量候选补位。
+程序只校验日期、合格股票、候选守恒、引用和 ResearchResult 结构，再从这一份 trace 抽取现有 Forward 记录；它不判断证据观点是否正确。
+
+正式每日运行只将该 JSON 写入 `local_archive/forward_selection/pending-trace-<formation_date>.json`，再使用 prepare 冻结的原日期和 `as_of` 调用 `record-trace`。不再另生成 pending ResearchResult JSON。
 
 ## 历史评价边界
 
