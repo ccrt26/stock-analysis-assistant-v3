@@ -18,6 +18,9 @@ from zoneinfo import ZoneInfo
 import duckdb
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from stock_analyzer.analysis.event_reaction_features import (
+    EVENT_REACTION_EVIDENCE_ID,
+)
 from stock_analyzer.analysis.price_scenario_validation import SCENARIO_SPECS
 
 
@@ -111,6 +114,20 @@ class ResearchResult(BaseModel):
     empty_reason: str
 
 
+class ResearchThesis(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    catalyst: str = Field(min_length=1)
+    short_term_engine: str = Field(min_length=1)
+    propagation: str = Field(min_length=1)
+    price_confirmation: str = Field(min_length=1)
+    remaining_path: str = Field(min_length=1)
+    fundamental_anchor: str = Field(min_length=1)
+    company_risk: str = Field(min_length=1)
+    critical_unknown: str = Field(min_length=1)
+    decision_ids: list[str] = Field(min_length=2)
+
+
 class TraceCandidate(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
@@ -120,11 +137,13 @@ class TraceCandidate(BaseModel):
     source_skills: list[DiscoverySkillName] = Field(min_length=1)
     final_fate: Literal["selected", "rejected", "unresolved"]
     primary_reason: str = Field(min_length=1)
+    research_thesis: ResearchThesis | None = None
 
 
 class TraceDecision(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
+    decision_id: str = Field(min_length=1)
     ts_code: str = Field(min_length=9)
     source_skill: ProfessionalSkillName
     evidence_id: str = Field(min_length=1)
@@ -154,7 +173,7 @@ class TraceDecision(BaseModel):
 class DailyResearchTrace(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
-    trace_version: Literal["daily-research-trace-v1"]
+    trace_version: Literal["daily-research-trace-v2"]
     formation_date: date
     action_date: date
     as_of: datetime
@@ -585,9 +604,16 @@ def _validate_trace(
         str(item["ts_code"])
         for item in validated_result["nearest_nonselections"]
     }
-    allowed_price_ids = set(SCENARIO_SPECS) | {"raw_price"}
+    allowed_price_ids = set(SCENARIO_SPECS) | {
+        "raw_price",
+        EVENT_REACTION_EVIDENCE_ID,
+    }
     price_counts: dict[str, int] = {}
+    decisions_by_id: dict[str, TraceDecision] = {}
     for decision in payload.decision_trace:
+        if decision.decision_id in decisions_by_id:
+            raise ValueError("duplicate_decision_ids")
+        decisions_by_id[decision.decision_id] = decision
         if decision.ts_code not in ledger:
             raise ValueError("decision_trace_candidate_missing")
         for value in decision.formation_values.values():
@@ -600,6 +626,40 @@ def _validate_trace(
     for code in selected_codes | nearest_codes:
         if price_counts.get(code, 0) not in {1, 2}:
             raise ValueError("price_evidence_count_invalid")
+    for code, candidate in ledger.items():
+        thesis = candidate.research_thesis
+        if candidate.final_fate == "selected" and thesis is None:
+            raise ValueError("selected_candidate_thesis_missing")
+        if thesis is None:
+            continue
+        if len(thesis.decision_ids) != len(set(thesis.decision_ids)):
+            raise ValueError("duplicate_thesis_decision_ids")
+        referenced: list[TraceDecision] = []
+        for decision_id in thesis.decision_ids:
+            decision = decisions_by_id.get(decision_id)
+            if decision is None:
+                raise ValueError("thesis_decision_missing")
+            if decision.ts_code != code:
+                raise ValueError("thesis_decision_candidate_mismatch")
+            referenced.append(decision)
+        if candidate.final_fate != "selected":
+            continue
+        if not any(
+            decision.source_skill == "researching-company-events"
+            for decision in referenced
+        ):
+            raise ValueError("selected_thesis_company_evidence_missing")
+        if not any(
+            decision.source_skill == "analyzing-price-trading"
+            and decision.decision_role == "support"
+            for decision in referenced
+        ):
+            raise ValueError("selected_thesis_price_confirmation_missing")
+        if candidate.opportunity_type == "sector_diffusion" and not any(
+            decision.source_skill == "researching-sectors-industries"
+            for decision in referenced
+        ):
+            raise ValueError("sector_diffusion_thesis_evidence_missing")
     return payload
 
 

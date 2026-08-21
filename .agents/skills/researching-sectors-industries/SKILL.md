@@ -11,6 +11,8 @@ description: Use when point-in-time A-share candidate selection or validation ne
 
 本 Skill 必须为最终选股提供增量辨别：判断一个方向是早期扩散、持续增强、少数龙头集中、内部退潮还是只有标签共振，并说明为什么继续研究某只股票而不是同类。
 
+板块共同动力只有在形成新增需求并传播到足够多有效成员时，才可能成为短期上涨发动机的一部分。行业名称、主题标签、单日普涨或少数龙头上涨都不是传播证据；板块 Skill 证明传播，价格 Skill 另行证明候选自身的相对价格成交确认。
+
 “20 日约 20%”是总控的使用目标和事后评价标签，不是板块涨幅、广度或成员表现的固定筛选阈值。
 
 ## 输入
@@ -95,6 +97,7 @@ description: Use when point-in-time A-share candidate selection or validation ne
 - 核对形成日有效的行业和主题归属；
 - 比较候选与最接近同类，而不是只与板块指数比较；
 - 判断板块共同动力是否仍能支持候选命题；
+- 明确传播证据如何形成候选需求，以及它是扩散、集中还是衰减；
 - 识别候选是否仅由标签、少数龙头或一次普涨带动；
 - 给出板块视角下为什么选择它、为什么可能不该选择它。
 
@@ -118,13 +121,15 @@ candidate_leads:
     rationale: ""
     target_relevance: ""
     comparative_reason: ""
+    propagation_evidence: ""
+    propagation_limit: ""
     strongest_counter_evidence: ""
     missing_evidence: []
 questions_for_other_lenses: []
 evidence_sufficiency: sufficient | partial | insufficient
 ```
 
-股票线索必须说明板块共同证据、候选的同类位置、对目标的相关性、为什么是它而不是同类，以及最强反证。它是总控需要比较的候选，不是最终买入结论。
+股票线索必须说明板块共同证据、传播到候选的路径、候选的同类位置、为什么是它而不是同类，以及最强反证。它是总控需要比较的候选，不是价格确认或最终买入结论。
 
 ## 边界
 

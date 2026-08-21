@@ -11,6 +11,8 @@ description: Use when personal A-share daily selection, historical formation-dat
 
 “20 日约 20%”是用户的实际目标和候选冻结后的评价标签，不是固定财务增速、价格形态、总分或筛选阈值。总控要比较哪些事实提高或降低目标实现的可能性，并对股票作出实际取舍。
 
+正式入选还必须能说明一个形成日已经存在的“短期上涨发动机”：新信息或新需求如何形成股票自身或板块层面的增量需求，并已得到相对市场、相对行业的价格成交确认。公司业绩、估值、现金流和低位可以是催化或基本面锚，不能单独充当发动机。
+
 最终允许空名单。不能承诺收益，也不能因为结论需要证据就把工作退化为只检查研究文本是否合规。
 
 ## 职责
@@ -51,8 +53,8 @@ exclusions: []
 
 - `interpreting-market-macro`：判断市场结构支持哪类机会；
 - `researching-sectors-industries`：发现共同增强的方向并比较具体成员；
-- `researching-company-events`：证明公司真实变化、业务联系和财务或预期传导；
-- `analyzing-price-trading`：判断市场识别、剩余路径和行动日可参与性。
+- `researching-company-events`：分开证明公司催化、基本面锚、业务联系和公司风险；
+- `analyzing-price-trading`：判断增量需求是否已有价格成交确认、剩余路径和行动日可参与性。
 
 四个视角不是四道 Gate，也不是四票表决。市场可以逆风、板块可以中性，只要独立公司变化和价格路径足够有说服力；反过来，市场和板块都强也不能替代公司联系与价格空间。
 
@@ -112,14 +114,14 @@ ST、退市和重大官方风险使用 `rules.seed.yaml` 中的正式边界。�
 对每条股票线索建立：
 
 ```text
-形成日前出现了什么新变化
-→ 为什么能影响公司业务、收入、利润、现金流或预期
-→ 市场或板块是否开始识别
-→ 当前价格是否仍有可参与的剩余路径
-→ 什么事实最可能使命题失败
+新信息或新需求
+→ 是否形成板块传播或股票需求
+→ 相对市场和行业的价格成交是否确认
+→ 上涨路径是否仍未耗尽
+→ 基本面锚和公司风险是否支持
 ```
 
-上涨原因可以来自政策产业变化、板块共同增强、公司事件、业绩重估、周期或困境改善、独立价格异常等，不设固定类型配额。
+“公司催化”“基本面锚”“板块传播”和“价格确认”是不同角色，不得互相代替。上涨发动机可以来自政策产业变化、板块共同增强、公司事件形成的新增需求或独立价格异常等，不设固定类型配额；业绩好、估值低、现金流好、位置低或材料完整本身都不是发动机。
 
 ### 4. 同一因果链内比较
 
@@ -139,7 +141,7 @@ ST、退市和重大官方风险使用 `rules.seed.yaml` 中的正式边界。�
 
 类型内按以下事实顺序比较，不计算总分或固定阈值：
 
-- **公司催化**：先核对首次披露、重复披露、事件阶段、材料性、主营或非经常性以及收入、利润、现金流一致性；再比较公告前市场是否已经抢跑、公告后价格与成交是否继续有效推进、所处价格位置和同行反应。公司故事完整但公告后没有进一步价格推进，或成交放大只换来停滞和回落，是比故事完整度更强的剩余路径反证；形成日刚披露、尚无公告后交易时，转为行动日条件，不把零日反应写成已经确认。
+- **公司催化**：先核对首次披露、重复披露、事件阶段、材料性、主营或非经常性以及收入、利润、现金流一致性，再明确催化将通过什么新增需求作用于股票；随后比较公告前抢跑、公告后 1/3/5 个完整交易日相对市场和申万二级行业的价格成交反应、所处价格位置和同行反应。公司故事完整但没有进一步价格推进，或成交放大只换来停滞和回落，是比材料完整度更强的反证；刚披露且尚无完整反应交易日时只能保留为未决或行动日观察条件，不能正式写成已确认。
 - **板块扩散**：先确认上涨面、成员中位数和成交份额是否多日共同增强，再检查龙头集中度与分化是否突然恶化；只有共同动力仍在时，才比较候选的流动性、板块内排名及其变化，并与成交和波动最接近的同类直接比较。优先共同动力没有快速坍缩、能够正常参与且确实超过最接近同类的成员，不因行业标签或单日普涨入选。
 - **独立价格异常**：先确认 1、3、5 日相对市场和相对板块的强势具有连续性，再区分两条可比较路径：一是相对强势持续并完成真实突破，且上涨不是主要由少数涨停日贡献；二是此前位置和累计涨幅仍低、相对强势连续、成交显著激活的早期路径。反复上影或冲高回落、成交增加但价格推进低效、短期上涨几乎全由涨停贡献，或相似股票拥有更完整的连续性与剩余路径，均为优先淘汰依据。独立价量路径成立时，没有可确认的公司事件不是关键未知。
 
@@ -163,9 +165,10 @@ ST、退市和重大官方风险使用 `rules.seed.yaml` 中的正式边界。�
 
 输出 0—5 只：
 
-- 关键因果链有形成日前证据；
+- 能清楚说明形成日的短期上涨发动机及其增量需求来源；
+- 关键因果链有形成日前证据，催化、基本面锚、传播和价格确认没有混写；
 - 与同类相比存在明确增量优势；
-- 市场或价格已经提供必要识别，或者有充分理由解释尚未识别；
+- 至少一条价格证据已经提供正向确认；低位、未透支、行动条件或场景名称不能替代该确认；
 - 价格路径尚未被明显透支且行动日可能参与；
 - 最强反证尚未足以推翻命题。
 
@@ -187,7 +190,7 @@ ST、退市和重大官方风险使用 `rules.seed.yaml` 中的正式边界。�
 每日只输出一份完整 `DailyResearchTrace`，不再另写紧凑 pending ResearchResult：
 
 ```yaml
-trace_version: daily-research-trace-v1
+trace_version: daily-research-trace-v2
 formation_date: YYYY-MM-DD
 action_date: YYYY-MM-DD
 as_of: "带时区时间"
@@ -199,8 +202,19 @@ candidate_ledger:
     source_skills: [researching-sectors-industries]
     final_fate: selected | rejected | unresolved
     primary_reason: ""
+    research_thesis:  # selected 必填，其他候选可省略
+      catalyst: ""
+      short_term_engine: ""
+      propagation: ""
+      price_confirmation: ""
+      remaining_path: ""
+      fundamental_anchor: ""
+      company_risk: ""
+      critical_unknown: ""
+      decision_ids: [company-anchor-risk, price-confirmation]
 decision_trace:
-  - ts_code: ""
+  - decision_id: company-anchor-risk
+    ts_code: ""
     source_skill: interpreting-market-macro | researching-sectors-industries | researching-company-events | analyzing-price-trading
     evidence_id: ""
     evidence_version: ""
@@ -223,11 +237,11 @@ research_result:
   empty_reason: "空名单时填真实原因；有入选时留空"
 ```
 
-`research_result` 继续严格符合现有 `ResearchResult`，其中 `skills_used` 为实际使用的五个 Skill。每条 `decision_trace` 必须引用候选账中的股票；`formation_values` 只放真正用于当时判断的少量标量，不保存整行派生事实。实际入选股和 `nearest_nonselections` 每只必须有 1—2 条价格证据，场景不合适时使用 `raw_price`。
+`research_result` 继续严格符合现有 `ResearchResult`，其中 `skills_used` 为实际使用的五个 Skill。每条 `decision_trace` 使用唯一 `decision_id` 并引用候选账中的股票；`formation_values` 只放真正用于当时判断的少量标量，不保存整行派生事实。每只入选股的 `research_thesis.decision_ids` 必须实际引用本股票的公司证据和至少一条 `decision_role: support` 的价格证据；`sector_diffusion` 还须引用板块证据。实际入选股和 `nearest_nonselections` 每只保留 1—2 条价格证据，场景不合适时可使用 `raw_price`，但 `raw_price` 只有在承担正向确认且记录形成日数值时才能支持入选。
 
 没有合适股票时，`selected_stocks` 返回空数组并填写真实 `empty_reason`，不得补位。研究或形成日事实验证失败时，按现有失败合同留空两组候选，不把执行失败伪装成空名单。
 
-程序只校验日期、合格股票、候选守恒、引用和 ResearchResult 结构，再从这一份 trace 抽取现有 Forward 记录；它不判断证据观点是否正确。
+程序只校验日期、合格股票、候选守恒、证据引用、角色一致性和 ResearchResult 结构，再从这一份 trace 抽取现有 Forward 记录；它不判断发动机、传播或价格解释是否正确，也不把这些字段变成评分、阈值或 Gate。
 
 正式每日运行只将该 JSON 写入 `local_archive/forward_selection/pending-trace-<formation_date>.json`，再使用 prepare 冻结的原日期和 `as_of` 调用 `record-trace`。不再另生成 pending ResearchResult JSON。
 

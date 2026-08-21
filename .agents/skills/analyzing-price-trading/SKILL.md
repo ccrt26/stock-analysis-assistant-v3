@@ -11,6 +11,8 @@ description: Use when point-in-time A-share candidate selection or validation ne
 
 本 Skill 必须帮助总控区分“正在被有效识别”与“已经透支、背离或无法参与”。它可以发现具体股票线索，也可以否定量价上缺乏现实路径的候选。
 
+正式入选需要本 Skill 给出至少一条 `decision_role: support` 的正向价格确认。低位、未透支、行动日可参与、场景名称或单纯缺少反证都不能替代确认；`action_condition` 只约束下一交易日，不是形成日已经发生的确认。
+
 “20 日约 20%”是总控的使用目标和事后评价标签。本 Skill 评估实现该目标的价格路径是否有依据。技术指标可以参加判断，但指标名称、单次交叉、固定阈值或历史涨幅本身都不是预测结论。
 
 ## 输入
@@ -83,6 +85,8 @@ BOLL 窄带后上轨突破的预设正面组合已失败，不得改名为“辅
 
 每条 trace 价格证据写明场景或 `raw_price`、证据版本和当时权限，并用 `decision_role` 与 `decision_changed` 说明它的作用。`formation_values` 只保存真正使用的少量 5/20 日收益、相对市场/申万二级行业、收盘、成交、涨停贡献、位置或 ATR 数值，不保存整行派生数据。价格未改变取舍时可写 `decision_changed=no_change`；不得事后补造当时轨迹。
 
+每条 trace 再使用唯一 `decision_id`，供总控的 `research_thesis.decision_ids` 引用。`raw_price` 可以承担支持、反证、比较或行动条件，但承担支持时必须写出实际使用的相对收益和成交推进等形成日数值；只写“低位”“未透支”或“明日观察”不得标为支持。
+
 D20 后按照 `docs/2026-08-19-price-skill-d20-audit-method.md` 复核。场景本身的历史关联与 AI 当时是否正确使用分开评价；盘中 20% 触达、收盘触达、MFE、MAE 和 D20 收盘分开看。效果大小、区间、跨日期稳定性和覆盖共同构成证据，不用单个 `3%` 或其他数字自动裁决去留。
 
 ## 判断方法
@@ -90,6 +94,8 @@ D20 后按照 `docs/2026-08-19-price-skill-d20-audit-method.md` 复核。场景�
 只使用 `available_at <= as_of` 的复权日线、估值、成交额、换手、涨跌停、停牌和交易状态。分钟数据不是默认必需输入。
 
 每日先在 DuckDB 中投影并过滤程序已生成的 `price_analysis_context`，优先读取 `scenario_case_ids`、`scenario_assignment_status`、相对市场、相对申万二级行业、量价推进、突破、涨停贡献、`target_atr_distance_20pct` 和流动性，用 SQL 缩小需要深度比较的范围。不把全部价格表送入模型，不重算 11 个场景公式，也不把 SQL 过滤结果当成候选排名。
+
+公司 Skill 已识别具体事件且该事件 `available_at <= as_of` 时，可按需调用 `compute_event_reaction_features`，用现有日线、宽基指数和形成日有效的申万二级成员，确定性计算事件前 5 日以及事件后 1/3/5 个完整交易日的绝对收益、相对市场、相对行业和成交额比。事件由 AI 选择并解释，程序不判断语义或方向；实际用于轨迹时写 `evidence_id: event_price_reaction`、`evidence_status_at_use: observation_only` 和函数返回的公式版本，只有结合实际相对收益与成交推进后才可把 `decision_role` 写成 `support`。`partial` 必须披露覆盖，`awaiting_first_session` 表示尚无可确认反应，不能用行动日条件补写成形成日支持。该计算不落新表、不另起定时任务。
 
 ### 1. 拆分价格来源
 
@@ -145,6 +151,7 @@ D20 后按照 `docs/2026-08-19-price-skill-d20-audit-method.md` 复核。场景�
 只围绕总控给出的少量候选：
 
 - 检查原始上涨命题是否得到相对价格和成交确认；
+- 若命题依赖公司事件，区分事件前抢跑、事件后已观察反应和尚待首个完整交易日，不能把自然上涨误归因于公告；
 - 先归因共同变化，再并列填写趋势、原始路径、相对强弱、收盘/量价、振荡、波动和长期位置；识别最相关的场景或原始价格判断及当前证据边界，不把它们做成顺序漏斗；
 - 比较候选与最接近替代股票的价格路径；
 - 说明为什么仍可能有空间，或为什么市场已经充分甚至过度反映；
@@ -171,6 +178,8 @@ candidate_leads:
     target_relevance: ""
     comparative_reason: ""
     remaining_path_reasoning: ""
+    price_confirmation: ""
+    reaction_window_status: complete | partial | awaiting_first_session | not_applicable
     strongest_counter_evidence: ""
     action_day_observations: []
     missing_evidence: []

@@ -9,6 +9,8 @@ description: Use when an A-share research task needs point-in-time company funda
 
 判断形成日前公司发生了什么真实变化，变化能否传导到业务、收入、利润、现金流或市场预期，以及什么公司事实最可能推翻这条命题。
 
+每次解释必须分开给出：`company_catalyst` 是形成日前的新变化及其可能引发的新增需求；`fundamental_anchor` 是业绩、估值、现金流、主营和资产负债对命题的支持边界；`company_risk` 是公司层反证。业绩增长、估值便宜、现金流良好或低位本身只能成为催化事实或基本面锚，不能单独证明“为什么是现在”，也不能替代短期上涨发动机和价格确认。
+
 自主发现时，从公司自身变化寻找线索；验证总控随板块或价格候选提交的待验外部变化命题时，把该命题作为输入，只核对公司真实业务联系、传导、材料性和公司反证。价格异动本身不是外部经营变化，板块动力和价格解释仍交回对应 Skill。
 
 只形成公司视角的候选线索和验证意见，不作买入结论。
@@ -55,9 +57,10 @@ description: Use when an A-share research task needs point-in-time company funda
 1. 形成日前出现了什么新变化？
 2. 哪个事实证明公司确实涉及相关业务？
 3. 变化如何可能传导到收入、利润、现金流或预期？
-4. 影响是否具有可辨认的规模、阶段和新鲜度？
-5. 哪个事实最可能推翻传导？
-6. 还需要市场、板块或价格视角回答什么？
+4. 它是新增催化，还是只提供基本面锚？若是催化，可能通过什么新增需求作用于股票？
+5. 影响是否具有可辨认的规模、阶段和新鲜度？
+6. 哪个事实最可能推翻传导？
+7. 还需要板块传播和价格确认回答什么？
 
 价格尚未启动不能删除公司线索。只有概念标签、关联词或公告标题时，不得声称直接受益。
 
@@ -95,7 +98,13 @@ unknowns: []
 candidate_leads:
   - lead_type: direction | group | stock | question
     name: ""
-    rationale: ""
+    ts_code: ""
+    company_catalyst: ""
+    fundamental_anchor: ""
+    company_risk: ""
+    possible_demand_transmission: ""
+    engine_question: ""
+    strongest_counter_evidence: ""
     missing_evidence: []
 questions_for_other_lenses: []
 evidence_sufficiency: sufficient | partial | insufficient
@@ -103,7 +112,7 @@ evidence_sufficiency: sufficient | partial | insufficient
 
 本 Skill 的线索通常使用 `stock` 或 `question`。不得用行业方向或概念标签代替具体公司的业务与事件证据。
 
-每个 `candidate_leads` 至少说明股票、公司变化、可能传导、现有支持、最强反证和待补证据。它不是推荐、排名或买入信号。
+每个 `candidate_leads` 至少分开说明股票、公司催化、基本面锚、公司风险、可能的需求传导、发动机待验问题和待补证据。它不是推荐、排名或买入信号，公司材料更完整也不提高其跨类型优先级。
 
 判定证据充分性：
 
@@ -116,6 +125,7 @@ evidence_sufficiency: sufficient | partial | insufficient
 - 不判断市场环境、板块领导和价格是否透支；
 - 不输出目标价、买入条件、总分、权重或固定阈值；
 - 不把回购计划当成已经完成，不把业绩预告当成正式报表；
+- 不把业绩、估值、现金流、低位或公司材料完整度写成短期上涨发动机或价格确认；
 - 不从新闻语气、标题或概念标签补写事实；
 - 除验证阶段上述官方原链接定向读取外，不通过一般网页搜索或替代来源补证，不创建采集、财务指标或公告分析系统。
 

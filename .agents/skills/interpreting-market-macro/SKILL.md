@@ -9,6 +9,8 @@ description: Use when point-in-time A-share candidate selection or validation ne
 
 用形成日可得事实回答两件事：当前机会分布是什么样，给定候选的上涨命题依赖哪些市场条件。市场视角不预测指数点位，不直接生成股票，不给候选投票，也不作为一票否决。
 
+市场视角还负责提供“共同变化基线”：区分候选的绝对上涨有多少只是全市场同步变化。市场普涨或成交放大本身不能充当单只股票的短期上涨发动机；它只说明传播环境和共同需求背景，股票或板块增量仍须由板块、公司和价格视角证明。
+
 正式结论必须属于以下三类：
 
 1. **一级事实**：官方制度、指数含义和可复算市场分布。它可以直接描述发生了什么，不能推出未来收益。
@@ -112,14 +114,15 @@ description: Use when point-in-time A-share candidate selection or validation ne
 1. `dependency_type`：上涨命题主要依赖 `broad_market`、`sector_diffusion`、`independent_company_change` 还是 `mixed`，并说明依据；
 2. `required_market_conditions`：命题成立真正需要哪些可观察条件，不写“市场配合”这种空话；
 3. `observed_conditions`：当前事实、基线、质量和成熟度；
-4. `market_effect_on_thesis`：只能是
+4. `common_movement_assessment`：候选的价格确认是否主要可由市场共同变化解释；市场视角只回答基线，不替价格 Skill 判定个股确认；
+5. `market_effect_on_thesis`：只能是
    - `raises_path_risk`：仅在可靠的高分化二级证据下使用；
    - `constraint_or_participation_issue`：由正式交易规则、停牌、涨跌停或行动日事实支持；
    - `question_only`：广度、成交、风格、市场状态等尚未通过方向验证的关系；
    - `no_material_market_effect`：候选主要由独立公司变化驱动，且当前没有可靠市场反证；
-5. `strongest_market_counterevidence`：最强的一条市场反证及其为什么相关；
-6. `invalidating_change`：哪个可观察变化会使当前判断失效；
-7. `unknowns`：缺失、不可回放或变量不等价之处。
+6. `strongest_market_counterevidence`：最强的一条市场反证及其为什么相关；
+7. `invalidating_change`：哪个可观察变化会使当前判断失效；
+8. `unknowns`：缺失、不可回放或变量不等价之处。
 
 市场逆风、窄行情、高成交或所谓强市本身都不能删除或升级候选。只有制度可参与性和已验证的分化—波动关系可以直接改变市场层结论，其余只形成跨视角核对问题。
 
@@ -165,6 +168,7 @@ candidate_reviews:
     dependency_reason: ""
     required_market_conditions: []
     observed_conditions: []
+    common_movement_assessment: ""
     market_effect_on_thesis: raises_path_risk | constraint_or_participation_issue | question_only | no_material_market_effect
     strongest_market_counterevidence: ""
     invalidating_change: ""

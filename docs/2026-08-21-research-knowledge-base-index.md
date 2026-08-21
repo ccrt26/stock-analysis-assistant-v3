@@ -4,10 +4,11 @@
 
 ## 建议先读
 
-1. [今日四只股票结果与详细复盘](2026-08-21-daily-selection-review.md)
-2. [方正科技五个 Skill 的完整逻辑](2026-08-21-founder-technology-five-skill-analysis.md)
-3. [A股短期定价与公司业绩讨论](2026-08-21-a-share-earnings-and-short-term-pricing.md)
-4. [当前 V3 架构](architecture/current-v3-architecture.md)
+1. [五 Skill 短期上涨发动机定向优化报告](2026-08-21-a-share-short-term-upside-engine-tuning-report.md)
+2. [今日四只股票结果与详细复盘](2026-08-21-daily-selection-review.md)
+3. [方正科技五个 Skill 的完整逻辑](2026-08-21-founder-technology-five-skill-analysis.md)
+4. [A股短期定价与公司业绩讨论](2026-08-21-a-share-earnings-and-short-term-pricing.md)
+5. [当前 V3 架构](architecture/current-v3-architecture.md)
 
 ## 五个研究 Skill
 

@@ -2,17 +2,20 @@
 
 这是人工发起的集中复盘，不是 Scheduled Task。只读取已经成熟 D20 的形成日，使用现有 Forward CSV、`local_archive/forward_selection/research-trace-*.json` 和当时可回放事实；未成熟日期不进入结论。
 
-使用现有确定性函数，对每个成熟形成日的完整合格股票范围重算 11 个场景 case/control，不重新拟合阈值。分开评价：
+使用现有确定性函数，对每个成熟形成日的完整合格股票范围重算 11 个场景 case/control，不重新拟合阈值；对当时 trace 已引用的具体公司事件，按原 `as_of` 重算事件价格反应，不把后来事件补进形成日理由。分开评价：
 
 1. 场景本身的历史关联；
-2. AI 在当日 trace 中如何使用该场景或 `raw_price`。
+2. 事件反应事实与当时所写发动机是否一致；
+3. AI 在当日 trace 中如何使用场景、`raw_price`、催化、传播和价格确认。
 
-两者均分开比较可执行的收盘 20% 触达、最大收盘路径、MFE、MAE 和 D20 收盘，并检查：
+三者均分开比较可执行的收盘 20% 触达、最大收盘路径、MFE、MAE 和 D20 收盘，并检查：
 
 - `provisional` 支持是否错误提升了候选；
 - `provisional` 反证是否错杀了实际最近替代股；
 - `supported_with_boundary` 和 `observation_only` 是否按权限使用；
 - 当时实际引用的 `formation_values`、最强反证和同类比较是否与最终去向一致。
+- `research_thesis` 是否把业绩、估值、现金流、低位或行动条件误当发动机；
+- `decision_ids` 是否能还原哪条公司与价格证据实际支持、反证、比较或改变了选择。
 
 对后来达标但未入选的股票，每只只归一个主要原因：`discovery_miss`、`decision_miss`、`data_capability_miss`、`future_catalyst`、`non_executable` 或 `no_point_in_time_case`。未来结果只用于确定倒查对象和评价取舍，不得制造形成日理由。
 

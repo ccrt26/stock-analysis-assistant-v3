@@ -1,5 +1,5 @@
 schema_version: v3-knowledge-governance-v1
-generated_on: 2026-08-19
+generated_on: 2026-08-21
 sources:
   - source_id: official-csrc-program-trading-2024
     grade: S
@@ -1928,3 +1928,41 @@ entries:
       status: validated
       reason: 当前仓库能逐项复算多表方向，历史上大量利润改善同时存在其他维度反证，说明该核对可直接使用但不能形成困境概率。
       validation_reference: targeted_gap_validation_results.yaml#src_cn_turnaround_financial_consistency
+
+  - knowledge_id: src_cn_short_term_engine_separation
+    title: 分开记录公司催化、基本面锚、传播与价格确认
+    primary_source_id: paper-brown-warner-1985
+    supporting_source_ids: [paper-mackinlay-event-study-1997, paper-sun-wen-earnings-car-2023]
+    source_grade: A
+    version_status: current
+    effect: method_only
+    modules: [events, sector_theme, fundamentals, price_trading]
+    opportunity_types: [general, industry_trend, earnings_rerating, company_event, turnaround]
+    topics: [event_price_reaction, business_transmission, short_term_engine]
+    claim_summary: 公司事件和基本面事实先说明催化或经营锚，只有新信息或新需求形成板块传播或股票需求，并得到相对市场和行业的价格成交确认时，才构成可讨论的短期上涨发动机；该链仍不保证未来收益。
+    allowed_uses:
+      - 将公司催化、基本面锚、板块传播、股票需求、价格确认、剩余路径和公司风险分开解释。
+      - 对形成日已可见的具体事件计算事件前5日及事件后1、3、5个完整交易日的绝对、相对市场、相对行业和成交额反应。
+      - 用最接近同类检查传播和价格确认是否为候选自身增量。
+    forbidden_uses:
+      - 因业绩增长、低估值、现金流良好、低位或材料完整就宣称短期上涨发动机成立。
+      - 把事件后绝对上涨、未透支、行动日条件或任一场景名称单独写成正向价格确认。
+      - 把观察链改成总分、权重、固定阈值、Gate或收益承诺。
+    prerequisites:
+      - 冻结formation_date、action_date和带时区as_of，只使用available_at不晚于as_of的事件与事实。
+      - 由AI先选定经济上相关的具体事件；程序只做交易日对齐和确定性计算。
+      - 使用形成日截断的复权行情、宽基指数和形成日有效的申万二级成员；窗口不足必须披露。
+    counter_evidence:
+      - 相对市场和行业没有可区分反应，成交增加但价格不推进，或反应主要发生在事件公开前。
+      - 板块只有标签或少数龙头，候选没有自身需求增量，或更接近同类拥有更强确认。
+      - 事件刚公开尚无首个完整反应交易日，存在事件重叠，或基本面和公司风险与催化冲突。
+    data_requirements:
+      - {kind: fact, name: announcement, required_fields: [announcement_id, announcement_time, ts_code, available_at]}
+      - {kind: fact, name: equity_daily, required_fields: [trade_date, ts_code, close, amount, available_at]}
+      - {kind: fact, name: adj_factor, required_fields: [trade_date, ts_code, adj_factor, available_at]}
+      - {kind: fact, name: index_daily, required_fields: [trade_date, index_code, close, available_at]}
+      - {kind: fact, name: industry_member, required_fields: [ts_code, industry_code, valid_from, valid_to, available_at]}
+      - {kind: derived, name: price_analysis_context, required_fields: [analysis_date, ts_code, relative_return_5d, relative_industry_return_5d, amount_ratio_last_20d]}
+    local_validation:
+      status: insufficient_for_direction
+      reason: 现有本地验证和A股文献支持事件时点、共同变化扣除及分离解释的方法，但不支持把该链或任何固定反应阈值当成未来20日收益方向规则。

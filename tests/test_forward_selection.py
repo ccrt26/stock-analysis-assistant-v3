@@ -194,11 +194,13 @@ def _one_stock_result() -> dict:
 
 def _one_stock_trace() -> dict:
     return {
-        "trace_version": "daily-research-trace-v1",
+        "trace_version": "daily-research-trace-v2",
         "formation_date": "2026-08-18",
         "action_date": "2026-08-19",
         "as_of": "2026-08-19T09:10:00+08:00",
-        "market_search_context": "普通股票参与宽度与指数同步，继续比较个股增量。",
+        "market_search_context": (
+            "普通股票参与宽度与指数同步，继续比较个股增量。"
+        ),
         "candidate_ledger": [
             {
                 "ts_code": "000001.SZ",
@@ -207,10 +209,39 @@ def _one_stock_trace() -> dict:
                 "source_skills": ["analyzing-price-trading"],
                 "final_fate": "selected",
                 "primary_reason": "相对市场和行业的连续增量仍在。",
+                "research_thesis": {
+                    "catalyst": (
+                        "没有独立公司公告催化，新增信息来自价格相对增量。"
+                    ),
+                    "short_term_engine": (
+                        "相对市场和行业的连续价量推进显示股票需求增加。"
+                    ),
+                    "propagation": (
+                        "个股需求独立增强，未把行业标签当作传播证据。"
+                    ),
+                    "price_confirmation": "多窗口相对收益和成交推进共同为正。",
+                    "remaining_path": "累计涨幅和波动尚未消耗全部可参与路径。",
+                    "fundamental_anchor": "主营和财务事实提供有限经营锚。",
+                    "company_risk": "缺少新公司事件，经营锚不能替代价格确认。",
+                    "critical_unknown": "相对增量能否在行动日继续仍未知。",
+                    "decision_ids": ["company-anchor-risk", "price-confirmation"],
+                },
             }
         ],
         "decision_trace": [
             {
+                "decision_id": "company-anchor-risk",
+                "ts_code": "000001.SZ",
+                "source_skill": "researching-company-events",
+                "evidence_id": "company_fundamentals",
+                "evidence_version": "research-registry-2026-08-21",
+                "evidence_status_at_use": "observation_only",
+                "decision_role": "support",
+                "decision_changed": "no_change",
+                "formation_values": {"business_link_verified": True},
+            },
+            {
+                "decision_id": "price-confirmation",
                 "ts_code": "000001.SZ",
                 "source_skill": "analyzing-price-trading",
                 "evidence_id": "raw_price",
@@ -242,6 +273,7 @@ def _trace_with_nearest_nonselection() -> dict:
     )
     trace["decision_trace"].append(
         {
+            "decision_id": "nearest-price",
             "ts_code": "600000.SH",
             "source_skill": "analyzing-price-trading",
             "evidence_id": "raw_price",
@@ -743,6 +775,113 @@ def test_trace_candidate_conservation_and_price_references_are_enforced(
     assert summary.error == expected_error
     assert _read_csv(csv_path) == []
     assert pending.exists()
+
+
+def test_selected_trace_requires_a_separate_short_term_engine_thesis(
+    tmp_path: Path,
+) -> None:
+    trace = _one_stock_trace()
+    trace["candidate_ledger"][0].pop("research_thesis")
+
+    summary, _, _, _ = _record_trace_for_test(trace, tmp_path)
+
+    assert summary.status == "invalid_result"
+    assert summary.error == "selected_candidate_thesis_missing"
+
+
+def test_selected_trace_rejects_price_action_condition_without_confirmation(
+    tmp_path: Path,
+) -> None:
+    trace = _one_stock_trace()
+    price = next(
+        item
+        for item in trace["decision_trace"]
+        if item["decision_id"] == "price-confirmation"
+    )
+    price["decision_role"] = "action_condition"
+
+    summary, _, _, _ = _record_trace_for_test(trace, tmp_path)
+
+    assert summary.status == "invalid_result"
+    assert summary.error == "selected_thesis_price_confirmation_missing"
+
+
+def test_selected_trace_accepts_event_price_reaction_evidence(tmp_path: Path) -> None:
+    trace = _one_stock_trace()
+    price = trace["decision_trace"][1]
+    price["evidence_id"] = "event_price_reaction"
+    price["evidence_version"] = "event-price-reaction-v1"
+    price["formation_values"] = {
+        "reaction_window_status": "complete",
+        "relative_market_return_5d": 0.04,
+        "relative_industry_return_5d": 0.03,
+        "amount_ratio_5d": 1.4,
+    }
+
+    summary, _, _, _ = _record_trace_for_test(trace, tmp_path)
+
+    assert summary.status == "selection_frozen"
+
+
+def test_trace_thesis_references_must_resolve_to_the_same_candidate(
+    tmp_path: Path,
+) -> None:
+    trace = _trace_with_nearest_nonselection()
+    trace["candidate_ledger"][0]["research_thesis"]["decision_ids"].append(
+        "nearest-price"
+    )
+
+    summary, _, _, _ = _record_trace_for_test(trace, tmp_path)
+
+    assert summary.status == "invalid_result"
+    assert summary.error == "thesis_decision_candidate_mismatch"
+
+
+def test_trace_thesis_rejects_unknown_decision_reference(tmp_path: Path) -> None:
+    trace = _one_stock_trace()
+    trace["candidate_ledger"][0]["research_thesis"]["decision_ids"].append(
+        "missing-decision"
+    )
+
+    summary, _, _, _ = _record_trace_for_test(trace, tmp_path)
+
+    assert summary.status == "invalid_result"
+    assert summary.error == "thesis_decision_missing"
+
+
+def test_selected_thesis_requires_referenced_company_evidence(tmp_path: Path) -> None:
+    trace = _one_stock_trace()
+    trace["decision_trace"][0]["source_skill"] = "interpreting-market-macro"
+
+    summary, _, _, _ = _record_trace_for_test(trace, tmp_path)
+
+    assert summary.status == "invalid_result"
+    assert summary.error == "selected_thesis_company_evidence_missing"
+
+
+def test_sector_diffusion_thesis_requires_referenced_sector_evidence(
+    tmp_path: Path,
+) -> None:
+    trace = _one_stock_trace()
+    trace["candidate_ledger"][0]["opportunity_type"] = "sector_diffusion"
+    trace["research_result"]["selected_stocks"][0][
+        "opportunity_type"
+    ] = "sector_diffusion"
+
+    summary, _, _, _ = _record_trace_for_test(trace, tmp_path)
+
+    assert summary.status == "invalid_result"
+    assert summary.error == "sector_diffusion_thesis_evidence_missing"
+
+
+def test_trace_rejects_duplicate_decision_ids(tmp_path: Path) -> None:
+    trace = _one_stock_trace()
+    trace["decision_trace"][1]["decision_id"] = "company-anchor-risk"
+
+    summary, _, _, _ = _record_trace_for_test(trace, tmp_path)
+
+    assert summary.status == "invalid_result"
+    assert summary.error == "duplicate_decision_ids"
 
 
 @pytest.mark.parametrize(
