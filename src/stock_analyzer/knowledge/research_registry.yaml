@@ -1939,26 +1939,31 @@ entries:
     modules: [events, sector_theme, fundamentals, price_trading]
     opportunity_types: [general, industry_trend, earnings_rerating, company_event, turnaround]
     topics: [event_price_reaction, business_transmission, short_term_engine]
-    claim_summary: 公司事件和基本面事实先说明催化或经营锚，只有新信息或新需求形成板块传播或股票需求，并得到相对市场和行业的价格成交确认时，才构成可讨论的短期上涨发动机；该链仍不保证未来收益。
+    claim_summary: 公司事件和基本面事实先说明催化或经营锚；候选应结构化区分发动机类型、状态和市场识别。通常只有新信息或新需求形成板块传播或股票需求，并得到可用市场或行业基准下的真实价格成交数值确认时，才是已确认短期发动机；形成日收盘后重大首次披露或实质增量事件可在尚无完整反应交易日时保留为条件性待确认发动机。该链仍不保证未来收益。
     allowed_uses:
       - 将公司催化、基本面锚、板块传播、股票需求、价格确认、剩余路径和公司风险分开解释。
-      - 对形成日已可见的具体事件计算事件前5日及事件后1、3、5个完整交易日的绝对、相对市场、相对行业和成交额反应。
+      - 结构化记录发动机类型、确认或待确认状态、市场识别、披露新颖性和适用的板块龙头簇，以便D20后分层复盘。
+      - 对形成日已可见的具体事件计算事件前5日及事件后1、3、5个完整交易日的绝对、相对市场、相对行业、成交额和收盘质量反应。
+      - 将形成日收盘后重大首次披露或实质增量事件记录为fresh_event_pending及行动条件，但明确尚未形成价格确认。
       - 用最接近同类检查传播和价格确认是否为候选自身增量。
     forbidden_uses:
       - 因业绩增长、低估值、现金流良好、低位或材料完整就宣称短期上涨发动机成立。
       - 把事件后绝对上涨、未透支、行动日条件或任一场景名称单独写成正向价格确认。
+      - 把重复披露、普通财报、有限增量、低估值、现金流、低位或无新增信息放入fresh_event_pending通道。
       - 把观察链改成总分、权重、固定阈值、Gate或收益承诺。
     prerequisites:
       - 冻结formation_date、action_date和带时区as_of，只使用available_at不晚于as_of的事件与事实。
       - 由AI先选定经济上相关的具体事件；程序只做交易日对齐和确定性计算。
-      - 使用形成日截断的复权行情、宽基指数和形成日有效的申万二级成员；窗口不足必须披露。
+      - 使用按as_of官方收盘边界截断的复权OHLC、成交额、宽基指数和形成日有效的申万二级成员；停牌、缺失和窗口不足必须披露。
+      - 用截至as_of的同类历史披露区分首次、增量、重复或历史不足；材料性和语义仍由AI判断。
     counter_evidence:
       - 相对市场和行业没有可区分反应，成交增加但价格不推进，或反应主要发生在事件公开前。
       - 板块只有标签或少数龙头，候选没有自身需求增量，或更接近同类拥有更强确认。
       - 事件刚公开尚无首个完整反应交易日，存在事件重叠，或基本面和公司风险与催化冲突。
+      - 所谓新事件其实重复了预告、快报或先前公告，或新增信息不足以形成新的股票需求。
     data_requirements:
       - {kind: fact, name: announcement, required_fields: [announcement_id, announcement_time, ts_code, available_at]}
-      - {kind: fact, name: equity_daily, required_fields: [trade_date, ts_code, close, amount, available_at]}
+      - {kind: fact, name: equity_daily, required_fields: [trade_date, ts_code, open, high, low, close, amount, available_at]}
       - {kind: fact, name: adj_factor, required_fields: [trade_date, ts_code, adj_factor, available_at]}
       - {kind: fact, name: index_daily, required_fields: [trade_date, index_code, close, available_at]}
       - {kind: fact, name: industry_member, required_fields: [ts_code, industry_code, valid_from, valid_to, available_at]}

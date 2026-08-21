@@ -55,14 +55,17 @@ description: Use when an A-share research task needs point-in-time company funda
 对每条线索依次回答：
 
 1. 形成日前出现了什么新变化？
-2. 哪个事实证明公司确实涉及相关业务？
-3. 变化如何可能传导到收入、利润、现金流或预期？
-4. 它是新增催化，还是只提供基本面锚？若是催化，可能通过什么新增需求作用于股票？
-5. 影响是否具有可辨认的规模、阶段和新鲜度？
-6. 哪个事实最可能推翻传导？
-7. 还需要板块传播和价格确认回答什么？
+2. 在 `available_at <= as_of` 的同类历史披露中，它是 `first_disclosure | incremental_update | repeat_disclosure | history_insufficient` 哪一种？新增信息等级是 `major_new_information | material_increment | limited_increment | no_new_information | unknown` 哪一种，依据是哪条此前披露和本次新增事实？
+3. 哪个事实证明公司确实涉及相关业务？
+4. 变化如何可能传导到收入、利润、现金流或预期？
+5. 它是新增催化，还是只提供基本面锚？若是催化，可能通过什么新增需求作用于股票？
+6. 影响是否具有可辨认的规模、阶段和新鲜度？
+7. 哪个事实最可能推翻传导？
+8. 还需要板块传播和价格确认回答什么？
 
 价格尚未启动不能删除公司线索。只有概念标签、关联词或公告标题时，不得声称直接受益。
+
+“首次”只表示在形成日截止的本地可见历史中第一次披露同一经济事项，不表示公司历史上绝对首次；历史覆盖不足时必须用 `history_insufficient`。正式报告重复预告或快报中已知内容时属于 `repeat_disclosure`；只有金额、范围、阶段、条件或风险出现可辨认新增时才是 `incremental_update`，并按实际材料性给出新增信息等级。该等级不是分数，也不预测收益。
 
 ## 验证阶段
 
@@ -100,6 +103,12 @@ candidate_leads:
     name: ""
     ts_code: ""
     company_catalyst: ""
+    company_information_novelty:
+      disclosure_novelty: first_disclosure | incremental_update | repeat_disclosure | history_insufficient | not_applicable
+      new_information_level: major_new_information | material_increment | limited_increment | no_new_information | unknown | not_applicable
+      basis: ""
+      event_id: null
+      event_available_at: null
     fundamental_anchor: ""
     company_risk: ""
     possible_demand_transmission: ""

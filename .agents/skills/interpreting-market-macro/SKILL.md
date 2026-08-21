@@ -126,6 +126,10 @@ description: Use when point-in-time A-share candidate selection or validation ne
 
 市场逆风、窄行情、高成交或所谓强市本身都不能删除或升级候选。只有制度可参与性和已验证的分化—波动关系可以直接改变市场层结论，其余只形成跨视角核对问题。
 
+发现阶段必须把当日共同传播条件压缩为一个结构化 `market_propagation_environment`。`propagation_state` 只允许 `supportive | neutral | adverse | unknown`，依据实际可得的广度、流动性、风险偏好、风格和集中度逐项说明；它是后续候选解释共同变化的引用环境，不是市场 Gate。缺少任何关键维度时保留 `unknown` 或在该维度明确未知，不用自由文本中的“强市/弱市”补齐。
+
+验证阶段再为每只候选给出 `market_recognition.status`：`confirmed | partial | absent | not_yet_observable | unknown`，并引用同一个 `market_environment_id`。这里只判断候选的需求是否已经超出市场共同变化或尚无完整时点可观察，不替价格 Skill制造确认数值。
+
 ## 输出合同
 
 ```yaml
@@ -154,6 +158,15 @@ market_structure:
   dispersion_volatility_concentration: {observations: [], conflicts: [], unknowns: []}
   size_style: {observations: [], conflicts: [], unknowns: []}
   policy_or_rule_context: {observations: [], transmission_limits: [], unknowns: []}
+market_propagation_environment:
+  environment_id: "market-<formation_date>"
+  propagation_state: supportive | neutral | adverse | unknown
+  breadth: ""
+  liquidity: ""
+  risk_appetite: ""
+  style: ""
+  concentration: ""
+  evidence_basis: []
 primary_interpretation: "只概括已展示事实和已验证关系"
 alternative_interpretations: []
 strongest_counter_evidence: ""
@@ -169,6 +182,10 @@ candidate_reviews:
     required_market_conditions: []
     observed_conditions: []
     common_movement_assessment: ""
+    market_recognition:
+      status: confirmed | partial | absent | not_yet_observable | unknown
+      market_environment_id: "market-<formation_date>"
+      basis: ""
     market_effect_on_thesis: raises_path_risk | constraint_or_participation_issue | question_only | no_material_market_effect
     strongest_market_counterevidence: ""
     invalidating_change: ""

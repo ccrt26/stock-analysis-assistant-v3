@@ -99,7 +99,10 @@ description: Use when point-in-time A-share candidate selection or validation ne
 - 判断板块共同动力是否仍能支持候选命题；
 - 明确传播证据如何形成候选需求，以及它是扩散、集中还是衰减；
 - 识别候选是否仅由标签、少数龙头或一次普涨带动；
+- 对每条 `sector_diffusion` 股票线索形成一个 `sector_leader_cluster`：使用形成日有效成员列出实际共同推进的至少两只成员，标明候选是 `leader | core | follower | outside | unknown`，并分别保留传播事实、最强反证和未知；
 - 给出板块视角下为什么选择它、为什么可能不该选择它。
+
+`sector_leader_cluster` 是对同一传播链中实际成员的紧凑归组，不是固定龙头榜、行业配额或排序器。不能按股票代码、单一涨幅阈值或当前成员快照指定龙头；成员不足、历史归属不足或共同推进不成立时，不得补造该簇，相关候选只能保持未确认。
 
 ## 输出合同
 
@@ -123,6 +126,15 @@ candidate_leads:
     comparative_reason: ""
     propagation_evidence: ""
     propagation_limit: ""
+    sector_leader_cluster:  # stock 且依赖 sector_diffusion 时必填
+      cluster_id: ""
+      group_code: ""
+      group_name: ""
+      members: []
+      candidate_role: leader | core | follower | outside | unknown
+      propagation_evidence: ""
+      strongest_counterevidence: ""
+      unknowns: []
     strongest_counter_evidence: ""
     missing_evidence: []
 questions_for_other_lenses: []

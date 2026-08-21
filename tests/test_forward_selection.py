@@ -194,13 +194,23 @@ def _one_stock_result() -> dict:
 
 def _one_stock_trace() -> dict:
     return {
-        "trace_version": "daily-research-trace-v2",
+        "trace_version": "daily-research-trace-v3",
         "formation_date": "2026-08-18",
         "action_date": "2026-08-19",
         "as_of": "2026-08-19T09:10:00+08:00",
         "market_search_context": (
             "普通股票参与宽度与指数同步，继续比较个股增量。"
         ),
+        "market_propagation_environment": {
+            "environment_id": "market-2026-08-18",
+            "propagation_state": "neutral",
+            "breadth": "上涨宽度尚可，但多日连续性一般。",
+            "liquidity": "成交额未显示全市场增量放大。",
+            "risk_appetite": "风险偏好中性。",
+            "style": "没有单一风格形成压倒性传播。",
+            "concentration": "正收益并非只集中于极少数股票。",
+            "evidence_basis": ["market-context-v3"],
+        },
         "candidate_ledger": [
             {
                 "ts_code": "000001.SZ",
@@ -210,6 +220,20 @@ def _one_stock_trace() -> dict:
                 "final_fate": "selected",
                 "primary_reason": "相对市场和行业的连续增量仍在。",
                 "research_thesis": {
+                    "engine_type": "stock_specific_demand",
+                    "engine_status": "confirmed",
+                    "market_recognition": {
+                        "status": "confirmed",
+                        "market_environment_id": "market-2026-08-18",
+                        "basis": "相对市场和行业的价格成交共同确认。",
+                    },
+                    "company_information_novelty": {
+                        "disclosure_novelty": "not_applicable",
+                        "new_information_level": "not_applicable",
+                        "basis": "独立价格需求命题不依赖公司新事件。",
+                    },
+                    "sector_leader_cluster": None,
+                    "action_condition_decision_id": None,
                     "catalyst": (
                         "没有独立公司公告催化，新增信息来自价格相对增量。"
                     ),
@@ -250,7 +274,10 @@ def _one_stock_trace() -> dict:
                 "decision_role": "support",
                 "decision_changed": "promoted",
                 "formation_values": {
+                    "observation_date": "2026-08-18",
                     "return_5d": 0.05,
+                    "amount_ratio_last_20d": 1.2,
+                    "relative_market_5d": 0.04,
                     "relative_industry_return_5d": 0.03,
                 },
             }
@@ -269,6 +296,44 @@ def _trace_with_nearest_nonselection() -> dict:
             "source_skills": ["researching-company-events"],
             "final_fate": "rejected",
             "primary_reason": "催化证据仍不足。",
+            "research_thesis": {
+                "engine_type": "company_event",
+                "engine_status": "unconfirmed",
+                "market_recognition": {
+                    "status": "absent",
+                    "market_environment_id": "market-2026-08-18",
+                    "basis": "价格比较未显示独立识别。",
+                },
+                "company_information_novelty": {
+                    "disclosure_novelty": "history_insufficient",
+                    "new_information_level": "unknown",
+                    "basis": "形成日历史披露不足以确认首次或增量。",
+                },
+                "sector_leader_cluster": None,
+                "action_condition_decision_id": None,
+                "catalyst": "存在公司线索，但材料性仍未确认。",
+                "short_term_engine": "尚未建立可验证的短期需求发动机。",
+                "propagation": "未观察到板块或股票自身需求传播。",
+                "price_confirmation": "价格只用于落选比较，不构成支持。",
+                "remaining_path": "因发动机未确认，剩余路径保持未知。",
+                "fundamental_anchor": "可见公司事实只构成有限经营锚。",
+                "company_risk": "披露历史与事件材料性不足。",
+                "critical_unknown": "是否存在首次且重大的新增信息。",
+                "decision_ids": ["nearest-price", "nearest-company"],
+            },
+        }
+    )
+    trace["decision_trace"].append(
+        {
+            "decision_id": "nearest-company",
+            "ts_code": "600000.SH",
+            "source_skill": "researching-company-events",
+            "evidence_id": "company_fundamentals",
+            "evidence_version": "research-registry-2026-08-21",
+            "evidence_status_at_use": "provisional",
+            "decision_role": "counter",
+            "decision_changed": "rejected",
+            "formation_values": {"novelty_status": "history_insufficient"},
         }
     )
     trace["decision_trace"].append(
@@ -786,7 +851,51 @@ def test_selected_trace_requires_a_separate_short_term_engine_thesis(
     summary, _, _, _ = _record_trace_for_test(trace, tmp_path)
 
     assert summary.status == "invalid_result"
-    assert summary.error == "selected_candidate_thesis_missing"
+    assert summary.error == "candidate_thesis_missing"
+
+
+def test_every_nearest_candidate_requires_a_structured_engine_thesis(
+    tmp_path: Path,
+) -> None:
+    trace = _trace_with_nearest_nonselection()
+    trace["candidate_ledger"][1].pop("research_thesis")
+
+    summary, _, _, _ = _record_trace_for_test(trace, tmp_path)
+
+    assert summary.status == "invalid_result"
+    assert summary.error == "candidate_thesis_missing"
+
+
+def test_candidate_market_recognition_must_reference_daily_environment(
+    tmp_path: Path,
+) -> None:
+    trace = _one_stock_trace()
+    trace["candidate_ledger"][0]["research_thesis"]["market_recognition"][
+        "market_environment_id"
+    ] = "another-market"
+
+    summary, _, _, _ = _record_trace_for_test(trace, tmp_path)
+
+    assert summary.status == "invalid_result"
+    assert summary.error == "market_recognition_environment_mismatch"
+
+
+def test_candidate_company_event_time_must_not_exceed_trace_as_of(
+    tmp_path: Path,
+) -> None:
+    trace = _trace_with_nearest_nonselection()
+    novelty = trace["candidate_ledger"][1]["research_thesis"][
+        "company_information_novelty"
+    ]
+    novelty.update(
+        event_id="FUTURE-EVENT",
+        event_available_at="2026-08-19T10:00:00+08:00",
+    )
+
+    summary, _, _, _ = _record_trace_for_test(trace, tmp_path)
+
+    assert summary.status == "invalid_result"
+    assert summary.error == "company_event_available_after_as_of"
 
 
 def test_selected_trace_rejects_price_action_condition_without_confirmation(
@@ -810,9 +919,11 @@ def test_selected_trace_accepts_event_price_reaction_evidence(tmp_path: Path) ->
     trace = _one_stock_trace()
     price = trace["decision_trace"][1]
     price["evidence_id"] = "event_price_reaction"
-    price["evidence_version"] = "event-price-reaction-v1"
+    price["evidence_version"] = "event-price-reaction-v2"
     price["formation_values"] = {
+        "observation_date": "2026-08-18",
         "reaction_window_status": "complete",
+        "event_return_5d": 0.05,
         "relative_market_return_5d": 0.04,
         "relative_industry_return_5d": 0.03,
         "amount_ratio_5d": 1.4,
@@ -821,6 +932,282 @@ def test_selected_trace_accepts_event_price_reaction_evidence(tmp_path: Path) ->
     summary, _, _, _ = _record_trace_for_test(trace, tmp_path)
 
     assert summary.status == "selection_frozen"
+
+
+@pytest.mark.parametrize(
+    ("missing_field", "expected_error"),
+    [
+        ("observation_date", "price_support_observation_date_missing"),
+        ("return_5d", "price_support_price_value_missing"),
+        ("amount_ratio_last_20d", "price_support_amount_value_missing"),
+        ("relative_market_5d", "price_support_relative_value_missing"),
+    ],
+)
+def test_confirmed_engine_price_support_requires_minimum_raw_values(
+    tmp_path: Path,
+    missing_field: str,
+    expected_error: str,
+) -> None:
+    trace = _one_stock_trace()
+    price = trace["decision_trace"][1]
+    values = price["formation_values"]
+    values.pop(missing_field)
+    if missing_field == "relative_market_5d":
+        values.pop("relative_industry_return_5d")
+
+    summary, _, _, _ = _record_trace_for_test(trace, tmp_path)
+
+    assert summary.status == "invalid_result"
+    assert summary.error == expected_error
+
+
+def test_confirmed_engine_rejects_nonpositive_amount_support(
+    tmp_path: Path,
+) -> None:
+    trace = _one_stock_trace()
+    trace["decision_trace"][1]["formation_values"][
+        "amount_ratio_last_20d"
+    ] = 0.0
+
+    summary, _, _, _ = _record_trace_for_test(trace, tmp_path)
+
+    assert summary.status == "invalid_result"
+    assert summary.error == "price_support_amount_value_invalid"
+
+
+def test_selected_fresh_event_pending_accepts_material_after_close_event(
+    tmp_path: Path,
+) -> None:
+    trace = _one_stock_trace()
+    trace["candidate_ledger"][0]["opportunity_type"] = "company_catalyst"
+    trace["research_result"]["selected_stocks"][0][
+        "opportunity_type"
+    ] = "company_catalyst"
+    thesis = trace["candidate_ledger"][0]["research_thesis"]
+    thesis.update(
+        engine_type="company_event",
+        engine_status="fresh_event_pending",
+        market_recognition={
+            "status": "not_yet_observable",
+            "market_environment_id": "market-2026-08-18",
+            "basis": "收盘后新事件尚无完整交易日可观察。",
+        },
+        company_information_novelty={
+            "disclosure_novelty": "first_disclosure",
+            "new_information_level": "major_new_information",
+            "basis": "首次披露的重大资产收购形成新信息。",
+            "event_id": "ANN-NEW",
+            "event_available_at": "2026-08-18T19:34:27+08:00",
+        },
+        action_condition_decision_id="price-confirmation",
+    )
+    price = trace["decision_trace"][1]
+    price.update(
+        evidence_id="event_price_reaction",
+        evidence_version="event-price-reaction-v2",
+        decision_role="action_condition",
+        evidence_status_at_use="provisional",
+        formation_values={
+            "event_id": "ANN-NEW",
+            "event_available_at": "2026-08-18T19:34:27+08:00",
+            "reaction_start_date": "2026-08-19",
+            "reaction_window_status": "awaiting_first_session",
+        },
+    )
+
+    summary, _, _, _ = _record_trace_for_test(trace, tmp_path)
+
+    assert summary.status == "selection_frozen"
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "expected_error"),
+    [
+        (
+            "disclosure_novelty",
+            "repeat_disclosure",
+            "fresh_event_novelty_invalid",
+        ),
+        (
+            "new_information_level",
+            "no_new_information",
+            "fresh_event_information_level_invalid",
+        ),
+    ],
+)
+def test_fresh_event_pending_rejects_repeat_or_nonincremental_disclosure(
+    tmp_path: Path,
+    field: str,
+    value: str,
+    expected_error: str,
+) -> None:
+    trace = _one_stock_trace()
+    trace["candidate_ledger"][0]["opportunity_type"] = "company_catalyst"
+    trace["research_result"]["selected_stocks"][0][
+        "opportunity_type"
+    ] = "company_catalyst"
+    thesis = trace["candidate_ledger"][0]["research_thesis"]
+    thesis.update(
+        engine_type="company_event",
+        engine_status="fresh_event_pending",
+        market_recognition={
+            "status": "not_yet_observable",
+            "market_environment_id": "market-2026-08-18",
+            "basis": "收盘后尚无完整反应交易日。",
+        },
+        company_information_novelty={
+            "disclosure_novelty": "first_disclosure",
+            "new_information_level": "major_new_information",
+            "basis": "形成日收盘后事件。",
+            "event_id": "ANN-NEW",
+            "event_available_at": "2026-08-18T19:34:27+08:00",
+        },
+        action_condition_decision_id="price-confirmation",
+    )
+    thesis["company_information_novelty"][field] = value
+    trace["decision_trace"][1].update(
+        evidence_id="event_price_reaction",
+        evidence_version="event-price-reaction-v2",
+        decision_role="action_condition",
+        evidence_status_at_use="provisional",
+        formation_values={
+            "event_id": "ANN-NEW",
+            "event_available_at": "2026-08-18T19:34:27+08:00",
+            "reaction_start_date": "2026-08-19",
+            "reaction_window_status": "awaiting_first_session",
+        },
+    )
+
+    summary, _, _, _ = _record_trace_for_test(trace, tmp_path)
+
+    assert summary.status == "invalid_result"
+    assert summary.error == expected_error
+
+
+def test_fresh_event_pending_rejects_event_before_formation_close(
+    tmp_path: Path,
+) -> None:
+    trace = _one_stock_trace()
+    trace["candidate_ledger"][0]["opportunity_type"] = "company_catalyst"
+    trace["research_result"]["selected_stocks"][0][
+        "opportunity_type"
+    ] = "company_catalyst"
+    thesis = trace["candidate_ledger"][0]["research_thesis"]
+    thesis.update(
+        engine_type="company_event",
+        engine_status="fresh_event_pending",
+        market_recognition={
+            "status": "not_yet_observable",
+            "market_environment_id": "market-2026-08-18",
+            "basis": "声称尚不可观察。",
+        },
+        company_information_novelty={
+            "disclosure_novelty": "first_disclosure",
+            "new_information_level": "major_new_information",
+            "basis": "盘中已经可见的重大事件。",
+            "event_id": "ANN-EARLY",
+            "event_available_at": "2026-08-18T14:30:00+08:00",
+        },
+        action_condition_decision_id="price-confirmation",
+    )
+    trace["decision_trace"][1].update(
+        evidence_id="event_price_reaction",
+        evidence_version="event-price-reaction-v2",
+        decision_role="action_condition",
+        formation_values={
+            "event_id": "ANN-EARLY",
+            "event_available_at": "2026-08-18T14:30:00+08:00",
+            "reaction_start_date": "2026-08-19",
+            "reaction_window_status": "awaiting_first_session",
+        },
+    )
+
+    summary, _, _, _ = _record_trace_for_test(trace, tmp_path)
+
+    assert summary.status == "invalid_result"
+    assert summary.error == "fresh_event_not_after_formation_close"
+
+
+def test_sector_diffusion_requires_candidate_in_structured_leader_cluster(
+    tmp_path: Path,
+) -> None:
+    trace = _one_stock_trace()
+    trace["candidate_ledger"][0]["opportunity_type"] = "sector_diffusion"
+    trace["research_result"]["selected_stocks"][0][
+        "opportunity_type"
+    ] = "sector_diffusion"
+    thesis = trace["candidate_ledger"][0]["research_thesis"]
+    thesis["engine_type"] = "sector_diffusion"
+    thesis["sector_leader_cluster"] = {
+        "cluster_id": "801780.SI-2026-08-18",
+        "group_code": "801780.SI",
+        "group_name": "银行",
+        "members": ["600000.SH", "601398.SH"],
+        "candidate_role": "core",
+        "propagation_evidence": "板块多日宽度和成交份额共同增强。",
+        "strongest_counterevidence": "龙头集中度有所上升。",
+        "unknowns": ["次日扩散能否延续"],
+    }
+    trace["decision_trace"].append(
+        {
+            "decision_id": "sector-cluster",
+            "ts_code": "000001.SZ",
+            "source_skill": "researching-sectors-industries",
+            "evidence_id": "sector_hotspot",
+            "evidence_version": "sector-hotspot-v3",
+            "evidence_status_at_use": "supported_with_boundary",
+            "decision_role": "support",
+            "decision_changed": "promoted",
+            "formation_values": {"breadth_5d": 0.7},
+        }
+    )
+    thesis["decision_ids"].append("sector-cluster")
+
+    summary, _, _, _ = _record_trace_for_test(trace, tmp_path)
+
+    assert summary.status == "invalid_result"
+    assert summary.error == "sector_cluster_candidate_missing"
+
+
+def test_confirmed_sector_candidate_cannot_be_outside_its_leader_cluster(
+    tmp_path: Path,
+) -> None:
+    trace = _one_stock_trace()
+    trace["candidate_ledger"][0]["opportunity_type"] = "sector_diffusion"
+    trace["research_result"]["selected_stocks"][0][
+        "opportunity_type"
+    ] = "sector_diffusion"
+    thesis = trace["candidate_ledger"][0]["research_thesis"]
+    thesis["engine_type"] = "sector_diffusion"
+    thesis["sector_leader_cluster"] = {
+        "cluster_id": "801780.SI-2026-08-18",
+        "group_code": "801780.SI",
+        "group_name": "银行",
+        "members": ["000001.SZ", "600000.SH"],
+        "candidate_role": "outside",
+        "propagation_evidence": "板块存在共同推进。",
+        "strongest_counterevidence": "候选不属于实际传播核心。",
+        "unknowns": [],
+    }
+    trace["decision_trace"].append(
+        {
+            "decision_id": "sector-cluster",
+            "ts_code": "000001.SZ",
+            "source_skill": "researching-sectors-industries",
+            "evidence_id": "sector_hotspot",
+            "evidence_version": "sector-hotspot-v3",
+            "evidence_status_at_use": "supported_with_boundary",
+            "decision_role": "support",
+            "decision_changed": "promoted",
+            "formation_values": {"breadth_5d": 0.7},
+        }
+    )
+    thesis["decision_ids"].append("sector-cluster")
+
+    summary, _, _, _ = _record_trace_for_test(trace, tmp_path)
+
+    assert summary.status == "invalid_result"
+    assert summary.error == "confirmed_sector_cluster_role_invalid"
 
 
 def test_trace_thesis_references_must_resolve_to_the_same_candidate(
@@ -867,6 +1254,18 @@ def test_sector_diffusion_thesis_requires_referenced_sector_evidence(
     trace["research_result"]["selected_stocks"][0][
         "opportunity_type"
     ] = "sector_diffusion"
+    thesis = trace["candidate_ledger"][0]["research_thesis"]
+    thesis["engine_type"] = "sector_diffusion"
+    thesis["sector_leader_cluster"] = {
+        "cluster_id": "801780.SI-2026-08-18",
+        "group_code": "801780.SI",
+        "group_name": "银行",
+        "members": ["000001.SZ", "600000.SH"],
+        "candidate_role": "leader",
+        "propagation_evidence": "板块多日宽度和成交份额共同增强。",
+        "strongest_counterevidence": "集中度偏高。",
+        "unknowns": ["扩散能否延续"],
+    }
 
     summary, _, _, _ = _record_trace_for_test(trace, tmp_path)
 

@@ -79,7 +79,7 @@ flowchart TD
     M -. "候选与理由冻结后" .-> N["独立未来路径评价"]
 ```
 
-这不是四个专业 Skill 投票或四道 Gate。正式入选必须说明形成日短期上涨发动机：新信息或新需求如何形成板块传播或股票需求，如何得到相对市场和行业的价格成交确认，以及路径为何仍未耗尽；公司催化、基本面锚、传播、价格确认和公司风险分别记录。市场或板块可以逆风，但公司业绩、估值、现金流、低位或材料完整度不能单独替代发动机。
+这不是四个专业 Skill 投票或四道 Gate。每只候选结构化记录发动机类型、状态和市场识别。`confirmed` 正式入选必须说明形成日短期上涨发动机：新信息或新需求如何形成板块传播或股票需求，如何得到相对市场或行业的价格成交数值确认，以及路径为何仍未耗尽；形成日收盘后重大首次披露或实质增量事件可以在尚无完整反应交易日时以 `fresh_event_pending` 条件性入选，但不等同已确认。公司催化、基本面锚、传播、价格确认和公司风险分别记录。市场或板块可以逆风，但公司业绩、估值、现金流、低位或材料完整度不能单独替代发动机。
 
 ## 5. 程序层：已经实现的确定性能力
 
@@ -146,7 +146,7 @@ data health
 
 `ops/launchd/` 保留收盘、晚间和次晨三个数据任务模板。它们只更新本地事实、派生观察和健康摘要，不运行最终选股、不发布报告、不交易。
 
-交易日上午约 09:05 的最终研究由 Codex 原生 Scheduled Task 在当前项目中直接调用 `$orchestrating-stock-research`，总控在同一个顶层会话内使用四个专业 Skill；仓库代码不通过 Python 启动第二个 Codex，也没有第四个 AI LaunchAgent。`prepare` 冻结上一交易日、行动日和带时区的 `as_of`，等待次晨数据并结算到期 D20；Codex 只生成 `pending-trace-<formation_date>.json` 一份 `daily-research-trace-v2` 完整轨迹；`record-trace` 只校验结构、日期、合格股票、候选守恒、唯一决定引用及入选命题的公司/价格角色一致性，从其中抽取现有 `ResearchResult` 调用 `record_daily_selection`，写入现有 Forward CSV 后将完整轨迹原子归档为 `research-trace-<formation_date>.json`。程序不判断发动机、传播或价格解释是否正确。现有 `record` 命令、`ResearchResult`、Forward CSV 字段和 D20 结算保持不变；完整 trace 不写入 DuckDB。
+交易日上午约 09:05 的最终研究由 Codex 原生 Scheduled Task 在当前项目中直接调用 `$orchestrating-stock-research`，总控在同一个顶层会话内使用四个专业 Skill；仓库代码不通过 Python 启动第二个 Codex，也没有第四个 AI LaunchAgent。`prepare` 冻结上一交易日、行动日和带时区的 `as_of`，等待次晨数据并结算到期 D20；Codex 只生成 `pending-trace-<formation_date>.json` 一份 `daily-research-trace-v3` 完整轨迹。v3 新增市场传播环境、候选发动机类型/状态、市场识别、公司信息新颖性、板块龙头簇和条件事件引用；`record-trace` 校验结构、日期、合格股票、候选守恒、唯一决定引用、已确认价格支持的最小形成日数值，以及 `fresh_event_pending` 的事件时点和等待窗口，从其中抽取现有 `ResearchResult` 调用 `record_daily_selection`，写入现有 Forward CSV 后将完整轨迹原子归档为 `research-trace-<formation_date>.json`。程序不判断事件语义、材料性、发动机、传播或价格解释是否正确。既有 v1/v2 归档不迁移、不倒填；现有 `record` 命令、`ResearchResult`、Forward CSV 字段和 D20 结算保持不变，完整 trace 不写入 DuckDB。
 
 研究超过 18 分钟或 09:30 后完成仍可保存，只要冻结的 `as_of` 早于行动日 09:30，且所有行情交易日期不晚于形成日、所有事实满足 `available_at <= as_of`。合规结果统一按 `selection` 语义写入被 Git 忽略的 `local_archive/forward_selection/forward-selection-log.csv`；历史 `validation_mode` 只为 CSV 兼容保留，不再形成 forward/reconstructed 两套推荐。历史记录首次由 `docs/forward-selection-log.csv` 初始化，之后只在 D1—D20 行情完整时一次性结算。
 
@@ -200,10 +200,10 @@ data health
 | DuckDB + Parquet 事实仓、修订、哈希和恢复 | 已实现 | `storage/research_warehouse.py` |
 | 带 `as_of` 的形成日查询和输入清单 | 已实现 | `storage/research_query.py` |
 | 市场、板块、个股交易、价格上下文四类确定性观察 | 已实现 | `analysis/`、`ops/research_features.py`；价格上下文按形成日截断，含冻结场景身份、相对申万二级行业和 ATR 目标距离，不产生候选排名 |
-| 选定公司事件的形成日安全价格反应计算 | 已实现为按需纯函数 | `analysis/event_reaction_features.py`；计算事件前 5 日和事件后 1/3/5 日相对市场、行业及成交额反应，不解释语义、不持久化 |
+| 选定公司事件的形成日安全价格反应计算 | 已实现为按需纯函数 v2 | `analysis/event_reaction_features.py`；按官方收盘时点截断日线，计算事件前 5 日和事件后 1/3/5 日相对市场、行业、成交额、收盘位置与上影，并显式区分停牌、收盘/成交/基准缺失和等待/部分窗口；不解释语义、不持久化 |
 | 本地研究知识与 Skill 定向调阅 | 已实现 | `knowledge/*.yaml`、五个 Skill |
 | 一个总控 + 四个专业研究 Skill | 已实现 | `.agents/skills/` |
-| 候选与决定轨迹追溯、历史形成日模拟和调优诊断方法 | 已实现为 `daily-research-trace-v2` 与 Skill 流程 | 入选命题分开记录催化、发动机、传播、价格确认、剩余路径、锚、风险和未知；程序只校验结构与引用角色，AI 仍负责解释与取舍；手动 D20 复盘只有 Prompt，不是常驻 Python 服务 |
+| 候选与决定轨迹追溯、历史形成日模拟和调优诊断方法 | 已实现为 `daily-research-trace-v3` 与 Skill 流程 | 每只候选结构化记录发动机类型/状态、市场识别、披露新颖性及适用的板块龙头簇，并分开记录催化、发动机、传播、价格确认、剩余路径、锚、风险和未知；程序校验结构、引用、最小价格数值与条件事件边界，AI 仍负责语义解释与取舍；手动 D20 复盘只有 Prompt，不是常驻 Python 服务 |
 | 每日自动端到端 AI 选股 | 仓库侧准备和归档已实现；触发由 Codex 原生 Scheduled Task 配置 | 约 09:05 顶层任务直接调用总控 Skill；`prepare`/`record-trace` 不启动模型，只冻结边界、检查数据、校验一份 trace、抽取现有 Forward 结果、归档和结算 D20 |
 | AI 调用前的研究结果缓存、候选 memo 缓存和断点恢复 | 未实现 | 目前只有事实/派生层哈希、清单与跳过重算 |
 | 自动报告渲染、云端发布、Supabase 和交易执行 | 有意不存在 | 旧 V3 路径已从 `main` 删除，不得当作备用能力 |

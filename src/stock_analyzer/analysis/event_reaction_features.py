@@ -9,7 +9,7 @@ selection decisions.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 import numpy as np
@@ -17,11 +17,12 @@ import pandas as pd
 
 
 EVENT_REACTION_EVIDENCE_ID = "event_price_reaction"
-EVENT_REACTION_FORMULA_VERSION = "event-price-reaction-v1"
+EVENT_REACTION_FORMULA_VERSION = "event-price-reaction-v2"
 EVENT_REACTION_HORIZONS = (1, 3, 5)
 MINIMUM_INDUSTRY_MEMBER_COVERAGE = 0.80
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 MARKET_OPEN = time(9, 30)
+MARKET_CLOSE = time(15, 0)
 
 
 def compute_event_reaction_features(
@@ -33,13 +34,15 @@ def compute_event_reaction_features(
     as_of: datetime,
     trading_sessions: Sequence[date],
     industry_memberships: pd.DataFrame | None = None,
+    suspensions: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     """Return one deterministic event-reaction row per caller-selected event.
 
     An event available before the market open is aligned to that session.  All
     other events are aligned to the next full session.  Price observations are
-    always truncated at ``analysis_date`` even when future rows are present in
-    an input frame.
+    truncated at ``analysis_date`` and, when ``as_of`` is before the official
+    close on that date, at the preceding calendar day.  Future input rows
+    therefore cannot become observable daily bars.
     """
 
     cutoff = _aware_timestamp(as_of, "as_of").tz_convert(SHANGHAI)
@@ -48,7 +51,16 @@ def compute_event_reaction_features(
     _require_fields(events, {"event_id", "ts_code", "available_at"}, "events")
     _require_fields(
         equity_daily,
-        {"trade_date", "ts_code", "close", "adj_factor", "amount"},
+        {
+            "trade_date",
+            "ts_code",
+            "open",
+            "high",
+            "low",
+            "close",
+            "adj_factor",
+            "amount",
+        },
         "equity_daily",
     )
     _require_fields(benchmark_daily, {"trade_date", "close"}, "benchmark_daily")
@@ -58,19 +70,27 @@ def compute_event_reaction_features(
     sessions = sorted({_as_date(value) for value in trading_sessions})
     if not sessions:
         raise ValueError("trading_sessions_empty")
-    equity = _prepare_equity(equity_daily, analysis_date)
-    benchmark = _prepare_benchmark(benchmark_daily, analysis_date)
+    effective_analysis_date = _effective_analysis_date(
+        analysis_date,
+        cutoff=cutoff,
+        sessions=sessions,
+    )
+    equity = _prepare_equity(equity_daily, effective_analysis_date)
+    benchmark = _prepare_benchmark(benchmark_daily, effective_analysis_date)
     memberships = _prepare_memberships(industry_memberships)
+    suspension_keys = _prepare_suspensions(suspensions)
 
     rows = [
         _event_row(
             event,
             cutoff=cutoff,
             analysis_date=analysis_date,
+            effective_analysis_date=effective_analysis_date,
             sessions=sessions,
             equity=equity,
             benchmark=benchmark,
             memberships=memberships,
+            suspensions=suspension_keys,
         )
         for _, event in events.iterrows()
     ]
@@ -88,10 +108,12 @@ def _event_row(
     *,
     cutoff: pd.Timestamp,
     analysis_date: date,
+    effective_analysis_date: date,
     sessions: list[date],
     equity: pd.DataFrame,
     benchmark: pd.Series,
     memberships: pd.DataFrame,
+    suspensions: set[tuple[str, date]],
 ) -> dict[str, object]:
     event_time = _aware_timestamp(event["available_at"], "event available_at")
     event_local = event_time.tz_convert(SHANGHAI)
@@ -109,7 +131,7 @@ def _event_row(
         else [
             session
             for session in sessions
-            if reaction_start <= session <= analysis_date
+            if reaction_start <= session <= effective_analysis_date
         ][: max(EVENT_REACTION_HORIZONS)]
     )
     window_status = (
@@ -121,6 +143,7 @@ def _event_row(
     )
     row: dict[str, object] = {
         "analysis_date": analysis_date,
+        "effective_analysis_date": effective_analysis_date,
         "event_id": event_id,
         "ts_code": ts_code,
         "evidence_id": EVENT_REACTION_EVIDENCE_ID,
@@ -129,6 +152,10 @@ def _event_row(
         "reaction_start_date": reaction_start,
         "observed_reaction_sessions": len(observed),
         "reaction_window_status": window_status,
+        "stock_observation_status": "not_yet_observable",
+        "amount_observation_status": "not_yet_observable",
+        "benchmark_observation_status": "not_yet_observable",
+        "close_quality_status": "not_yet_observable",
         "industry_code": None,
         "industry_comparison_status": "limited",
         "coverage_status": "limited",
@@ -181,6 +208,34 @@ def _event_row(
 
     prior_amount_dates = sessions[max(0, start_position - 20) : start_position]
     prior_amount = _mean_amount(stock, prior_amount_dates)
+    row["stock_observation_status"] = _stock_observation_status(
+        stock,
+        ts_code=ts_code,
+        prior_date=prior_date,
+        observed=observed,
+        suspensions=suspensions,
+    )
+    row["amount_observation_status"] = _amount_observation_status(
+        stock,
+        required_dates=[*prior_amount_dates, *observed],
+        observed=observed,
+    )
+    row["benchmark_observation_status"] = _benchmark_observation_status(
+        benchmark,
+        prior_date=prior_date,
+        observed=observed,
+    )
+    row["close_quality_status"] = _close_quality_status(stock, observed)
+    if row["stock_observation_status"] == "suspended":
+        notes.append("stock reaction session is suspended")
+    elif row["stock_observation_status"] != "complete" and observed:
+        notes.append("stock close observation is missing or invalid")
+    if row["amount_observation_status"] == "missing":
+        notes.append("stock amount observation is missing or invalid")
+    if row["benchmark_observation_status"] == "missing":
+        notes.append("benchmark close observation is missing or invalid")
+    if row["close_quality_status"] in {"unavailable", "invalid"}:
+        notes.append("OHLC close-quality observation is unavailable or invalid")
     industry_complete: list[bool] = [industry_pre_complete]
     for horizon in EVENT_REACTION_HORIZONS:
         if len(observed) < horizon:
@@ -207,6 +262,12 @@ def _event_row(
         reaction_amount = _mean_amount(stock, reaction_dates)
         if _finite(prior_amount) and prior_amount > 0.0 and _finite(reaction_amount):
             row[f"amount_ratio_{horizon}d"] = reaction_amount / prior_amount
+        close_location, upper_shadow = _close_quality_means(
+            stock,
+            reaction_dates,
+        )
+        row[f"mean_close_location_{horizon}d"] = close_location
+        row[f"mean_upper_shadow_ratio_{horizon}d"] = upper_shadow
 
     if members and all(industry_complete):
         row["industry_comparison_status"] = "complete"
@@ -218,7 +279,20 @@ def _event_row(
         "relative_industry_return_5d",
         "amount_ratio_5d",
     ]
-    if window_status == "complete" and all(_finite(row[field]) for field in core_fields):
+    observations_complete = all(
+        row[field] == "complete"
+        for field in (
+            "stock_observation_status",
+            "amount_observation_status",
+            "benchmark_observation_status",
+            "close_quality_status",
+        )
+    )
+    if (
+        window_status == "complete"
+        and observations_complete
+        and all(_finite(row[field]) for field in core_fields)
+    ):
         row["coverage_status"] = "complete"
     elif window_status == "partial":
         notes.append("fewer than five post-event sessions are observable")
@@ -233,10 +307,10 @@ def _prepare_equity(frame: pd.DataFrame, analysis_date: date) -> pd.DataFrame:
     output["trade_date"] = pd.to_datetime(output["trade_date"], errors="raise").dt.date
     output = output[output["trade_date"] <= analysis_date].copy()
     output["ts_code"] = output["ts_code"].astype(str)
-    output["adjusted_close"] = (
-        pd.to_numeric(output["close"], errors="coerce")
-        * pd.to_numeric(output["adj_factor"], errors="coerce")
-    )
+    adjustment = pd.to_numeric(output["adj_factor"], errors="coerce")
+    for field in ("open", "high", "low", "close"):
+        output[field] = pd.to_numeric(output[field], errors="coerce")
+        output[f"adjusted_{field}"] = output[field] * adjustment
     output["amount"] = pd.to_numeric(output["amount"], errors="coerce")
     if output.duplicated(["trade_date", "ts_code"]).any():
         raise ValueError("duplicate_equity_rows")
@@ -268,6 +342,18 @@ def _prepare_memberships(frame: pd.DataFrame | None) -> pd.DataFrame:
     output["valid_from"] = pd.to_datetime(output["valid_from"], errors="raise").dt.normalize()
     output["valid_to"] = pd.to_datetime(output["valid_to"], errors="coerce").dt.normalize()
     return output
+
+
+def _prepare_suspensions(
+    frame: pd.DataFrame | None,
+) -> set[tuple[str, date]]:
+    if frame is None or frame.empty:
+        return set()
+    _require_fields(frame, {"trade_date", "ts_code"}, "suspensions")
+    return {
+        (str(row.ts_code), _as_date(row.trade_date))
+        for row in frame[["trade_date", "ts_code"]].itertuples(index=False)
+    }
 
 
 def _industry_members(
@@ -336,6 +422,111 @@ def _reaction_start(event_time: pd.Timestamp, sessions: list[date]) -> date | No
     return next((session for session in sessions if session > event_date), None)
 
 
+def _effective_analysis_date(
+    analysis_date: date,
+    *,
+    cutoff: pd.Timestamp,
+    sessions: list[date],
+) -> date:
+    candidates = [session for session in sessions if session <= analysis_date]
+    if analysis_date == cutoff.date() and cutoff.time() < MARKET_CLOSE:
+        candidates = [session for session in candidates if session < analysis_date]
+    return max(candidates) if candidates else analysis_date - timedelta(days=1)
+
+
+def _stock_observation_status(
+    stock: pd.DataFrame,
+    *,
+    ts_code: str,
+    prior_date: date,
+    observed: list[date],
+    suspensions: set[tuple[str, date]],
+) -> str:
+    if not observed:
+        return "not_yet_observable"
+    if any((ts_code, session) in suspensions for session in observed):
+        return "suspended"
+    required = [prior_date, *observed]
+    if any(session not in stock.index for session in required):
+        return "missing"
+    closes = pd.to_numeric(stock.loc[required, "adjusted_close"], errors="coerce")
+    if not bool(np.isfinite(closes).all()) or bool((closes <= 0.0).any()):
+        return "invalid_close"
+    return "complete"
+
+
+def _amount_observation_status(
+    stock: pd.DataFrame,
+    *,
+    required_dates: list[date],
+    observed: list[date],
+) -> str:
+    if not observed:
+        return "not_yet_observable"
+    if any(session not in stock.index for session in required_dates):
+        return "missing"
+    values = pd.to_numeric(stock.loc[required_dates, "amount"], errors="coerce")
+    if not bool(np.isfinite(values).all()) or bool((values <= 0.0).any()):
+        return "missing"
+    return "complete"
+
+
+def _benchmark_observation_status(
+    benchmark: pd.Series,
+    *,
+    prior_date: date,
+    observed: list[date],
+) -> str:
+    if not observed:
+        return "not_yet_observable"
+    required = [prior_date, *observed]
+    if any(session not in benchmark.index for session in required):
+        return "missing"
+    values = pd.to_numeric(benchmark.loc[required], errors="coerce")
+    if not bool(np.isfinite(values).all()) or bool((values <= 0.0).any()):
+        return "missing"
+    return "complete"
+
+
+def _close_quality_status(stock: pd.DataFrame, observed: list[date]) -> str:
+    if not observed:
+        return "not_yet_observable"
+    if any(session not in stock.index for session in observed):
+        return "unavailable"
+    selected = stock.loc[observed, ["open", "high", "low", "close"]]
+    if not bool(np.isfinite(selected.to_numpy(dtype=float)).all()):
+        return "unavailable"
+    valid = (
+        (selected["high"] > selected["low"])
+        & (selected["high"] >= selected[["open", "close"]].max(axis=1))
+        & (selected["low"] <= selected[["open", "close"]].min(axis=1))
+    )
+    return "complete" if bool(valid.all()) else "invalid"
+
+
+def _close_quality_means(
+    stock: pd.DataFrame,
+    sessions: Sequence[date],
+) -> tuple[float, float]:
+    if not sessions or any(session not in stock.index for session in sessions):
+        return np.nan, np.nan
+    selected = stock.loc[list(sessions), ["open", "high", "low", "close"]]
+    ranges = selected["high"] - selected["low"]
+    valid = (
+        np.isfinite(selected.to_numpy(dtype=float)).all(axis=1)
+        & (ranges > 0.0)
+        & (selected["high"] >= selected[["open", "close"]].max(axis=1))
+        & (selected["low"] <= selected[["open", "close"]].min(axis=1))
+    )
+    if not bool(valid.all()):
+        return np.nan, np.nan
+    close_location = (selected["close"] - selected["low"]) / ranges
+    upper_shadow = (
+        selected["high"] - selected[["open", "close"]].max(axis=1)
+    ) / ranges
+    return float(close_location.mean()), float(upper_shadow.mean())
+
+
 def _return(values: pd.Series, start: date, end: date) -> float:
     if start not in values.index or end not in values.index:
         return np.nan
@@ -396,12 +587,18 @@ def _metric_columns() -> tuple[str, ...]:
         *(f"relative_market_return_{horizon}d" for horizon in EVENT_REACTION_HORIZONS),
         *(f"relative_industry_return_{horizon}d" for horizon in EVENT_REACTION_HORIZONS),
         *(f"amount_ratio_{horizon}d" for horizon in EVENT_REACTION_HORIZONS),
+        *(f"mean_close_location_{horizon}d" for horizon in EVENT_REACTION_HORIZONS),
+        *(
+            f"mean_upper_shadow_ratio_{horizon}d"
+            for horizon in EVENT_REACTION_HORIZONS
+        ),
     )
 
 
 def _output_columns() -> tuple[str, ...]:
     return (
         "analysis_date",
+        "effective_analysis_date",
         "event_id",
         "ts_code",
         "evidence_id",
@@ -410,6 +607,10 @@ def _output_columns() -> tuple[str, ...]:
         "reaction_start_date",
         "observed_reaction_sessions",
         "reaction_window_status",
+        "stock_observation_status",
+        "amount_observation_status",
+        "benchmark_observation_status",
+        "close_quality_status",
         "industry_code",
         "industry_comparison_status",
         *_metric_columns(),
