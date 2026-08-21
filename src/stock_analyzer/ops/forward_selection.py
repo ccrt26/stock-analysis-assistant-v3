@@ -77,6 +77,11 @@ ProfessionalSkillName = Literal[
     "researching-company-events",
     "analyzing-price-trading",
 ]
+DiscoverySkillName = Literal[
+    "researching-sectors-industries",
+    "researching-company-events",
+    "analyzing-price-trading",
+]
 
 
 class CandidateResult(BaseModel):
@@ -112,7 +117,7 @@ class TraceCandidate(BaseModel):
     ts_code: str = Field(min_length=9)
     name: str = Field(min_length=1)
     opportunity_type: OpportunityType
-    source_skills: list[SkillName] = Field(min_length=1)
+    source_skills: list[DiscoverySkillName] = Field(min_length=1)
     final_fate: Literal["selected", "rejected", "unresolved"]
     primary_reason: str = Field(min_length=1)
 
@@ -488,8 +493,25 @@ def record_daily_trace(
     archive_dir = Path(archive_dir)
     archive_dir.mkdir(parents=True, exist_ok=True)
     archive_path = archive_dir / f"research-trace-{formation_date.isoformat()}.json"
-    os.replace(Path(pending_path), archive_path)
-    return summary
+    pending_path = Path(pending_path)
+    if not archive_path.exists():
+        os.replace(pending_path, archive_path)
+        return summary
+    try:
+        pending_payload = json.loads(pending_path.read_text(encoding="utf-8"))
+        archived_payload = json.loads(archive_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        pending_payload = archived_payload = None
+    if pending_payload is not None and pending_payload == archived_payload:
+        pending_path.unlink()
+        return summary
+    return RunSummary(
+        **{
+            **asdict(summary),
+            "status": "invalid_result",
+            "error": "trace_conflict",
+        }
+    )
 
 
 def _validate_trace(
@@ -531,6 +553,25 @@ def _validate_trace(
     )
     if failed and (result.selected_stocks or result.nearest_nonselections):
         raise ValueError("failed_research_candidates_present")
+    for item in result.selected_stocks:
+        ledger_item = ledger.get(item.ts_code)
+        if ledger_item is not None and (
+            item.name != ledger_item.name
+            or item.opportunity_type != ledger_item.opportunity_type
+        ):
+            raise ValueError("selected_candidate_identity_mismatch")
+    for item in result.nearest_nonselections:
+        ledger_item = ledger.get(item.ts_code)
+        if ledger_item is None or ledger_item.final_fate not in {
+            "rejected",
+            "unresolved",
+        }:
+            raise ValueError("nearest_candidate_fate_mismatch")
+        if (
+            item.name != ledger_item.name
+            or item.opportunity_type != ledger_item.opportunity_type
+        ):
+            raise ValueError("nearest_candidate_identity_mismatch")
     validated_result = _validate_result(result.model_dump(), eligible)
     selected_codes = {
         str(item["ts_code"]) for item in validated_result["selected_stocks"]
@@ -544,9 +585,6 @@ def _validate_trace(
         str(item["ts_code"])
         for item in validated_result["nearest_nonselections"]
     }
-    if any(code not in ledger or ledger[code].final_fate == "selected" for code in nearest_codes):
-        raise ValueError("nearest_candidate_fate_mismatch")
-
     allowed_price_ids = set(SCENARIO_SPECS) | {"raw_price"}
     price_counts: dict[str, int] = {}
     for decision in payload.decision_trace:

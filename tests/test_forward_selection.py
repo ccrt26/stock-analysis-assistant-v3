@@ -228,6 +228,80 @@ def _one_stock_trace() -> dict:
     }
 
 
+def _trace_with_nearest_nonselection() -> dict:
+    trace = _one_stock_trace()
+    trace["candidate_ledger"].append(
+        {
+            "ts_code": "600000.SH",
+            "name": "浦发银行",
+            "opportunity_type": "company_catalyst",
+            "source_skills": ["researching-company-events"],
+            "final_fate": "rejected",
+            "primary_reason": "催化证据仍不足。",
+        }
+    )
+    trace["decision_trace"].append(
+        {
+            "ts_code": "600000.SH",
+            "source_skill": "analyzing-price-trading",
+            "evidence_id": "raw_price",
+            "evidence_version": "price-analysis-context-v2",
+            "evidence_status_at_use": "observation_only",
+            "decision_role": "comparison",
+            "decision_changed": "rejected",
+            "formation_values": {"return_5d": 0.01},
+        }
+    )
+    trace["research_result"]["nearest_nonselections"].append(
+        {
+            "ts_code": "600000.SH",
+            "name": "浦发银行",
+            "opportunity_type": "company_catalyst",
+            "selection_reason": "公司催化存在。",
+            "strongest_counterevidence": "证据强度仍不足。",
+            "nearest_comparison": "与入选股相比剩余路径较弱。",
+        }
+    )
+    return trace
+
+
+def _record_trace_for_test(
+    trace: dict,
+    tmp_path: Path,
+    *,
+    csv_path: Path | None = None,
+    archive_dir: Path | None = None,
+    data: FakeData | None = None,
+    pending_text: str | None = None,
+) -> tuple[RunSummary, Path, Path, Path]:
+    pending = tmp_path / "pending.json"
+    pending.write_text(
+        pending_text or json.dumps(trace, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    if csv_path is None:
+        csv_path = tmp_path / "forward.csv"
+        _write_csv(csv_path, [])
+    archive_dir = archive_dir or tmp_path / "archive"
+    data = data or FakeData(
+        open_dates=[date(2026, 8, 18), date(2026, 8, 19)]
+    )
+    moment = datetime(2026, 8, 19, 9, 10, tzinfo=SHANGHAI)
+    summary = record_daily_trace(
+        trace,
+        pending_path=pending,
+        archive_dir=archive_dir,
+        csv_path=csv_path,
+        data=data,
+        clock=_clock(moment),
+        formation_date=date(2026, 8, 18),
+        action_date=date(2026, 8, 19),
+        selection_as_of=moment,
+    )
+    archive = archive_dir / "research-trace-2026-08-18.json"
+    return summary, pending, archive, csv_path
+
+
 def _run(
     tmp_path: Path,
     *,
@@ -490,6 +564,100 @@ def test_complete_trace_records_the_same_forward_rows_and_is_archived(
     assert json.loads(archive.read_text(encoding="utf-8")) == trace
 
 
+def test_already_selected_recovers_when_trace_archive_is_missing(
+    tmp_path: Path,
+) -> None:
+    trace = _one_stock_trace()
+    csv_path = tmp_path / "forward.csv"
+    _write_csv(csv_path, [])
+    archive_dir = tmp_path / "archive"
+    moment = datetime(2026, 8, 19, 9, 10, tzinfo=SHANGHAI)
+    data = FakeData(open_dates=[date(2026, 8, 18), date(2026, 8, 19)])
+
+    first = record_daily_selection(
+        trace["research_result"],
+        csv_path=csv_path,
+        data=data,
+        clock=_clock(moment),
+        formation_date=date(2026, 8, 18),
+        action_date=date(2026, 8, 19),
+        selection_as_of=moment,
+    )
+    recovered, pending, archive, _ = _record_trace_for_test(
+        trace,
+        tmp_path,
+        csv_path=csv_path,
+        archive_dir=archive_dir,
+        data=data,
+    )
+
+    assert first.status == "selection_frozen"
+    assert recovered.status == "already_selected"
+    assert not pending.exists()
+    assert json.loads(archive.read_text(encoding="utf-8")) == trace
+
+
+def test_already_selected_with_same_trace_is_idempotent_without_overwrite(
+    tmp_path: Path,
+) -> None:
+    trace = _one_stock_trace()
+    archive_dir = tmp_path / "archive"
+    data = FakeData(open_dates=[date(2026, 8, 18), date(2026, 8, 19)])
+
+    first, pending, archive, csv_path = _record_trace_for_test(
+        trace,
+        tmp_path,
+        archive_dir=archive_dir,
+        data=data,
+    )
+    archived_bytes = archive.read_bytes()
+    reordered = dict(reversed(list(trace.items())))
+    pending_text = json.dumps(reordered, ensure_ascii=False, indent=2)
+    repeated, _, _, _ = _record_trace_for_test(
+        reordered,
+        tmp_path,
+        csv_path=csv_path,
+        archive_dir=archive_dir,
+        data=data,
+        pending_text=pending_text,
+    )
+
+    assert first.status == "selection_frozen"
+    assert repeated.status == "already_selected"
+    assert archive.read_bytes() == archived_bytes
+
+
+def test_trace_conflict_preserves_archive_and_pending(tmp_path: Path) -> None:
+    trace = _one_stock_trace()
+    archive_dir = tmp_path / "archive"
+    data = FakeData(open_dates=[date(2026, 8, 18), date(2026, 8, 19)])
+
+    first, _, archive, csv_path = _record_trace_for_test(
+        trace,
+        tmp_path,
+        archive_dir=archive_dir,
+        data=data,
+    )
+    archived_bytes = archive.read_bytes()
+    conflicting = json.loads(json.dumps(trace, ensure_ascii=False))
+    conflicting["market_search_context"] = "冲突的市场搜索上下文。"
+    pending_text = json.dumps(conflicting, ensure_ascii=False)
+    repeated, pending, _, _ = _record_trace_for_test(
+        conflicting,
+        tmp_path,
+        csv_path=csv_path,
+        archive_dir=archive_dir,
+        data=data,
+        pending_text=pending_text,
+    )
+
+    assert first.status == "selection_frozen"
+    assert repeated.status == "invalid_result"
+    assert repeated.error == "trace_conflict"
+    assert archive.read_bytes() == archived_bytes
+    assert pending.read_text(encoding="utf-8") == pending_text
+
+
 def test_trace_date_mismatch_is_rejected_without_writing_or_moving(
     tmp_path: Path,
 ) -> None:
@@ -575,6 +743,74 @@ def test_trace_candidate_conservation_and_price_references_are_enforced(
     assert summary.error == expected_error
     assert _read_csv(csv_path) == []
     assert pending.exists()
+
+
+@pytest.mark.parametrize(
+    "source_skill",
+    ["interpreting-market-macro", "orchestrating-stock-research"],
+)
+def test_trace_rejects_non_discovery_candidate_source_skills(
+    tmp_path: Path,
+    source_skill: str,
+) -> None:
+    trace = _one_stock_trace()
+    trace["candidate_ledger"][0]["source_skills"] = [source_skill]
+    summary, _, _, _ = _record_trace_for_test(trace, tmp_path)
+
+    assert summary.status == "invalid_result"
+    assert summary.error == "invalid_trace_structure"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("name", "浦发银行"), ("opportunity_type", "company_catalyst")],
+)
+def test_trace_rejects_selected_candidate_identity_mismatch(
+    tmp_path: Path,
+    field: str,
+    value: str,
+) -> None:
+    trace = _one_stock_trace()
+    trace["research_result"]["selected_stocks"][0][field] = value
+    summary, _, _, _ = _record_trace_for_test(trace, tmp_path)
+
+    assert summary.status == "invalid_result"
+    assert summary.error == "selected_candidate_identity_mismatch"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("name", "上海银行"), ("opportunity_type", "sector_diffusion")],
+)
+def test_trace_rejects_nearest_candidate_identity_mismatch(
+    tmp_path: Path,
+    field: str,
+    value: str,
+) -> None:
+    trace = _trace_with_nearest_nonselection()
+    trace["research_result"]["nearest_nonselections"][0][field] = value
+    summary, _, _, _ = _record_trace_for_test(trace, tmp_path)
+
+    assert summary.status == "invalid_result"
+    assert summary.error == "nearest_candidate_identity_mismatch"
+
+
+def test_trace_rejects_selected_fate_for_nearest_nonselection(
+    tmp_path: Path,
+) -> None:
+    trace = _trace_with_nearest_nonselection()
+    trace["candidate_ledger"][1]["final_fate"] = "selected"
+    summary, _, _, _ = _record_trace_for_test(trace, tmp_path)
+
+    assert summary.status == "invalid_result"
+    assert summary.error == "nearest_candidate_fate_mismatch"
+
+
+def test_trace_with_consistent_nearest_nonselection_continues(tmp_path: Path) -> None:
+    trace = _trace_with_nearest_nonselection()
+    summary, _, _, _ = _record_trace_for_test(trace, tmp_path)
+
+    assert summary.status == "selection_frozen"
 
 
 @pytest.mark.parametrize("result", [{"research_complete": True}])
