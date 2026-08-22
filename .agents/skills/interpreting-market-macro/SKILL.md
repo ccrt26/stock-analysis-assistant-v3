@@ -5,6 +5,11 @@ description: Use when point-in-time A-share candidate selection or validation ne
 
 # 市场与宏观解释
 
+## A股短周期发动机 V4 最终合同（优先级最高）
+
+必须输出V4六种之一的 `market_propagation_mode`，高分化单独进入 `market_risk_overlays`。`one_day_repair`、`sector_rotation`、`concentrated_speculation` 不得合并成“neutral”。市场不输出股票。
+
+
 ## 目标与证据等级
 
 用形成日可得事实回答两件事：当前机会分布是什么样，给定候选的上涨命题依赖哪些市场条件。市场视角不预测指数点位，不直接生成股票，不给候选投票，也不作为一票否决。

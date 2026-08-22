@@ -1,5 +1,18 @@
 # 手动 D20 研究复盘提示
 
+## A股短周期发动机 V4 复盘合同（优先级最高）
+
+这是个人助手的手动集中复盘，不新增定时任务、数据库、模型或平台。只读取成熟D20记录和原 `as_of` 可回放事实。
+
+v1/v2/v3轨迹保持 legacy，不倒填V4类型。V4按七种发动机分组：`fresh_event_pending | event_repricing_confirmed | sector_broad_diffusion | sector_leader_cluster | independent_demand_acceleration | anchor_only | unresolved`。
+
+每组至少报告：形成日数、股票数、行动日可执行率、D1/D3/D5/D10/D20收益、相对市场、相对行业、20日收盘20%触达、最大收盘路径、MFE、MAE、D20收盘，以及 selected 与 nearest_nonselection 成对结果。
+
+分开评价发动机本身和AI是否正确使用；检查披露链、条件性事件首次定价、广泛扩散/领导集群区分、价格支持原值和场景使用。错失只归入一个主要原因：`discovery_miss | decision_miss | data_capability_miss | future_catalyst | non_executable | no_point_in_time_case`。
+
+只输出证据和最小修改建议，不自动改 Skill。样本不足时只描述，不宣告有效或无效。
+
+
 这是人工发起的集中复盘，不是 Scheduled Task。只读取已经成熟 D20 的形成日，使用现有 Forward CSV、`local_archive/forward_selection/research-trace-*.json` 和当时可回放事实；未成熟日期不进入结论。
 
 使用现有确定性函数，对每个成熟形成日的完整合格股票范围重算 11 个场景 case/control，不重新拟合阈值；对当时 trace 已引用的具体公司事件，按原 `as_of` 重算事件价格反应，不把后来事件补进形成日理由。分开评价：

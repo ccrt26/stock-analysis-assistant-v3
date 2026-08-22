@@ -1,0 +1,60 @@
+# A股短周期上涨发动机 V4 最终合同
+
+本合同是个人股票助手的短周期研究唯一定义。它不建立评分器、模型、平台或自动交易，只固定五个 Skill 的分工和每日留痕，避免把“公司材料完整”再次误写成“未来约20日上涨路径最强”。
+
+## 1. 固定研究链
+
+```text
+新信息或新需求
+→ 市场传播、板块传播或股票自身需求
+→ 相对市场和行业的价格成交确认
+→ 剩余路径是否仍未耗尽
+→ 基本面锚和公司风险是否支持
+```
+
+## 2. 七种发动机和四种状态
+
+从 `formation_date >= 2026-08-21` 起，新提交的正式轨迹必须是 `daily-research-trace-v4`；旧v1/v2/v3只作为历史记录读取，不得用于新的正式提交。
+
+`engine_type`：`fresh_event_pending | event_repricing_confirmed | sector_broad_diffusion | sector_leader_cluster | independent_demand_acceleration | anchor_only | unresolved`。
+
+`engine_status`：`active | conditional | inactive | unresolved`。
+
+四种已确认发动机使用 `active`；`fresh_event_pending` 只能是 `conditional`；`anchor_only` 只能是 `inactive`；`unresolved` 只能是 `unresolved`。
+
+## 3. 两条入选通道
+
+已确认通道适用于四种 `active` 发动机。价格支持必须有观察日期、绝对价格或收益、成交、相对市场或行业收益，以及至少一个独立路径质量字段。
+
+条件性通道只适用于 `fresh_event_pending`：形成日15:00后公开、早于 `as_of`、首次、`substantive_new`、主营直接相关、材料性可解释、尚无首个完整交易日，并保存同一事件的公司支持、行动条件、公告前相对表现和抢跑/透支事实。它不是已确认。
+
+## 4. 市场传播
+
+`market_propagation_mode`：`broad_sustained_participation | one_day_repair | sector_rotation | concentrated_speculation | weak_or_fragmented | unclear`。
+
+V1透明解释条件：
+
+- `broad_sustained_participation`：3日和5日等权收益、中位数均为正，上涨面均高于50%，成交没有明显低于20日基线，新高没有与价格推进明显背离；
+- `one_day_repair`：1日等权收益、中位数为正且上涨面不低于65%，但3日或5日收益/上涨面未同步，成交未高于20日基线；
+- `sector_rotation`：市场不属于持续广泛参与，同时至少两个板块被板块Skill确认存在广泛扩散或领导集群，且5日成交份额增加；
+- `concentrated_speculation`：正收益贡献集中度高于自身20日80%分位，且市场中位数不为正或上涨面低于50%；
+- `weak_or_fragmented`：3日和5日分布均弱，且没有可确认的广泛参与或板块传播；
+- `unclear`：数据不足或模式冲突。
+
+高分化风险只写入 `market_risk_overlays: [high_dispersion_risk]`。传播模式改变搜索重点，不直接选股、决定仓位或否决。
+
+## 5. 板块发动机
+
+`sector_broad_diffusion` 要求3/5日板块相对收益和成员中位数为正、上涨面均高于50%、5日成交份额增加、前三强正收益贡献低于80%，候选只能是 `leader_confirmed` 或 `core_diffusion_member`。
+
+`sector_leader_cluster` 至少要求 `max(3, ceil(有效成员数×5%))` 只真实相关成员同步增强。每个记录成员都必须同时具有正的3日/5日相对市场收益和不低于75%的板块内5日百分位；5日成交份额增加，单一股票正收益贡献不高于60%，候选自身板块内百分位不低于75%。只有 `leader_confirmed` 和 `core_diffusion_member` 可以正式入选；不能用“补涨”升级落后成员。
+
+## 6. 披露链
+
+同一事项按 `预告 → 预告修正 → 快报 → 正式报告 → 更正` 核对。`new_information_level`：`substantive_new | incremental_detail | confirmation_only | repeat_or_no_new_information | not_applicable | unknown`。正式报告更完整不等于新增催化；没有分析师一致预期历史时不写“超市场预期”。
+
+## 7. 事件反应和复盘
+
+新合同使用 `compute_event_reaction_features_v3`，记录 `preopen | after_close | intraday_unresolved | nontrading_day`，拒绝盘前尚未完成的同日日线，使用形成日有效申万二级成员，并计算事件后1/3/5日相对表现、成交、收盘质量和窗口最高点到末日收盘回撤。
+
+V4按七种发动机分别复盘行动日可执行率、D1/D3/D5/D10/D20、相对市场、相对行业、20日收盘20%触达、最大上涨、MFE、MAE、D20收盘和 selected/nearest 成对结果。旧轨迹保持 legacy，不倒填新类型。

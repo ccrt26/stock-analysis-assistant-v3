@@ -5,6 +5,11 @@ description: Use when point-in-time A-share candidate selection or validation ne
 
 # 板块与行业研究
 
+## A股短周期发动机 V4 最终合同（优先级最高）
+
+必须把 `sector_broad_diffusion` 与 `sector_leader_cluster` 分开，按成员数、成交份额、单股贡献和板块内百分位留痕。只有 `leader_confirmed` 和 `core_diffusion_member` 可正式入选，不能用“补涨”升级。
+
+
 ## 目标
 
 发现正在形成共同上涨动力的行业或主题，并从有效成员中找出比同类更值得继续研究的具体股票。

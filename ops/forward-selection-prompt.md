@@ -1,5 +1,51 @@
 # Codex 原生 09:05 Scheduled Task 提示
 
+## A股短周期发动机 V4 最终执行合同（优先级最高）
+
+这是个人 A 股助手的正式每日研究。只执行研究，不开发程序、不修改 Skill、不启动其他模型、不读取未来行情。
+
+先运行：
+
+```bash
+./.venv/bin/python -m stock_analyzer.ops.forward_selection prepare
+```
+
+只有 `status=ready_for_research` 才继续。把返回的 `formation_date`、`action_date`、`selection_as_of` 作为唯一冻结边界。
+
+开始前完整读取：
+
+```text
+docs/architecture/a-share-short-horizon-engine-contract-v4.md
+```
+
+按以下顺序执行：
+
+1. 市场 Skill 输出六类之一的 `market_propagation_mode` 和可并存的 `market_risk_overlays`，不输出股票；
+2. 板块、公司、价格三个 Skill 独立发现，提交前不看彼此候选；
+3. 公司候选核对完整披露链和 `new_information_level`；
+4. 板块候选严格区分 `sector_broad_diffusion` 与 `sector_leader_cluster`；
+5. 总控归并后先确定七种之一的 `engine_type` 和四种之一的 `engine_status`，再共同验证；
+6. 对具体事件按需调用 `compute_event_reaction_features_v3`，不保存新表；
+7. 四个专业 Skill 独立验证同一批少量候选；
+8. 总控最终选择0—5只或空名单，不投票、不打分、不凑数。
+
+正式入选只有两条通道：
+
+- `active`：`event_repricing_confirmed | sector_broad_diffusion | sector_leader_cluster | independent_demand_acceleration`，必须有合格价格 `support`；
+- `conditional`：仅 `fresh_event_pending`，必须是形成日收盘后首次且 `substantive_new` 的重大事件，引用同一事件公司支持和 `event_price_reaction` 行动条件，并记录公告前抢跑/透支事实。
+
+`anchor_only` 和 `unresolved` 不得入选。业绩、估值、现金流、低位、未透支、场景名称和行动条件都不能单独替代发动机。
+
+只生成一份：
+
+```text
+trace_version=daily-research-trace-v4
+local_archive/forward_selection/pending-trace-<formation_date>.json
+```
+
+然后使用 prepare 原值运行 `record-trace`。只有 `selection_frozen` 或 `already_selected` 才算完成。最终向用户给出名单、排序、发动机、价格确认、最强反证和最近替代股比较。
+
+
 这是当前个人 A 股助手的正式每日推荐研究。直接使用 `$orchestrating-stock-research`；不要开发或修改程序，不要改写 Skill，不要启动新的 Codex/模型进程，也不要调用未来行情评价。
 
 先在当前项目根目录运行：

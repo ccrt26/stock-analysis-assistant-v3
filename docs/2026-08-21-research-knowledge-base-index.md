@@ -36,3 +36,8 @@
 ## 没有上传的内容
 
 本地行情事实仓、正式运行归档、缓存、日志和凭据不属于可公开知识文档，因此没有上传。论文只登记来源、方法和本地验证摘要，不上传论文全文。
+
+## 短周期发动机 V4
+
+- [最终合同](architecture/a-share-short-horizon-engine-contract-v4.md)
+- [最终修复审计](2026-08-21-a-share-engine-final-fix-audit.md)

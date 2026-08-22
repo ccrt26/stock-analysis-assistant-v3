@@ -5,6 +5,11 @@ description: Use when personal A-share daily selection, historical formation-dat
 
 # 股票研究总控
 
+## A股短周期发动机 V4 最终合同（优先级最高）
+
+每日选股前必须读取 `docs/architecture/a-share-short-horizon-engine-contract-v4.md`。如本文件其他段落与V4冲突，以V4为准。总控必须先写结构化发动机和市场传播，再取舍；不得用自由文本、业绩完整、低位或没有反证替代。
+
+
 ## 最终目标
 
 只使用形成日当时可见的信息，从可研究股票池中选出 0—5 只未来约 20 个交易日更可能形成可操作显著上涨路径、重点观察能否达到约 20% 涨幅的股票。

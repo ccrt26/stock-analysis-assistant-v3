@@ -5,6 +5,11 @@ description: Use when an A-share research task needs point-in-time company funda
 
 # 公司与事件研究
 
+## A股短周期发动机 V4 最终合同（优先级最高）
+
+每个主要事件保存预告、修正、快报、正式报告和更正披露链，并使用V4六类 `new_information_level`。正式报告数字大不等于新催化；`fresh_event_pending` 只允许收盘后首次且 `substantive_new` 的重大直接信息。
+
+
 ## 核心问题
 
 判断形成日前公司发生了什么真实变化，变化能否传导到业务、收入、利润、现金流或市场预期，以及什么公司事实最可能推翻这条命题。

@@ -619,9 +619,180 @@ def _output_columns() -> tuple[str, ...]:
     )
 
 
+# Strict event-reaction wrapper used by daily-research-trace-v4. The existing
+# v2 function remains available for earlier local diagnostics.
+EVENT_REACTION_FORMULA_VERSION_V3 = "event-price-reaction-v3"
+
+
+def compute_event_reaction_features_v3(
+    events: pd.DataFrame,
+    equity_daily: pd.DataFrame,
+    benchmark_daily: pd.DataFrame,
+    *,
+    formation_date: date,
+    analysis_date: date,
+    as_of: datetime,
+    trading_sessions: Sequence[date],
+    industry_memberships: pd.DataFrame | None = None,
+    suspensions: pd.DataFrame | None = None,
+) -> pd.DataFrame:
+    """Return formation-date-safe event observations for the v4 contract."""
+
+    cutoff = _aware_timestamp(as_of, "as_of").tz_convert(SHANGHAI)
+    if analysis_date == cutoff.date() and cutoff.time() < MARKET_CLOSE:
+        raise ValueError("analysis_date_not_closed_at_as_of")
+    sessions = sorted({_as_date(value) for value in trading_sessions})
+    if formation_date not in sessions:
+        raise ValueError("formation_date_not_in_trading_sessions")
+    frozen_memberships = _freeze_memberships_at_v3(
+        industry_memberships,
+        formation_date,
+    )
+    result = compute_event_reaction_features(
+        events,
+        equity_daily,
+        benchmark_daily,
+        analysis_date=analysis_date,
+        as_of=as_of,
+        trading_sessions=sessions,
+        industry_memberships=frozen_memberships,
+        suspensions=suspensions,
+    ).copy()
+    extra_fields = (
+        "event_timing_status",
+        "industry_membership_date",
+        "pre_event_return_20d",
+        "high_to_close_pullback_1d",
+        "high_to_close_pullback_3d",
+        "high_to_close_pullback_5d",
+    )
+    if result.empty:
+        for field in extra_fields:
+            result[field] = pd.Series(dtype="object")
+        return result
+    timing_by_event = {
+        str(row.event_id): _event_timing_status_v3(
+            _aware_timestamp(row.available_at, "event available_at").tz_convert(SHANGHAI),
+            sessions,
+        )
+        for row in events[["event_id", "available_at"]].itertuples(index=False)
+    }
+    result["formula_version"] = EVENT_REACTION_FORMULA_VERSION_V3
+    result["event_timing_status"] = result["event_id"].astype(str).map(timing_by_event)
+    result["industry_membership_date"] = formation_date
+    prepared = _prepare_equity(equity_daily, analysis_date)
+    result["pre_event_return_20d"] = result.apply(
+        lambda row: _pre_event_return_v3(
+            prepared,
+            str(row["ts_code"]),
+            row["reaction_start_date"],
+            sessions,
+            20,
+        ),
+        axis=1,
+    )
+    for horizon in EVENT_REACTION_HORIZONS:
+        result[f"high_to_close_pullback_{horizon}d"] = result.apply(
+            lambda row: _window_pullback_v3(
+                prepared,
+                str(row["ts_code"]),
+                row["reaction_start_date"],
+                sessions,
+                horizon,
+                int(row["observed_reaction_sessions"]),
+            ),
+            axis=1,
+        )
+    intraday = result["event_timing_status"].eq("intraday_unresolved")
+    result.loc[intraday, "reaction_window_status"] = "intraday_unresolved"
+    result.loc[intraday, "coverage_status"] = "limited"
+    return result
+
+
+def _freeze_memberships_at_v3(
+    frame: pd.DataFrame | None,
+    formation_date: date,
+) -> pd.DataFrame | None:
+    if frame is None or frame.empty:
+        return frame
+    output = frame.copy()
+    valid_from = pd.to_datetime(output["valid_from"], errors="raise").dt.date
+    valid_to = pd.to_datetime(output["valid_to"], errors="coerce").dt.date
+    active = (valid_from <= formation_date) & (
+        valid_to.isna() | (valid_to >= formation_date)
+    )
+    output = output.loc[active].copy()
+    output["valid_from"] = date(1900, 1, 1)
+    output["valid_to"] = None
+    return output
+
+
+def _event_timing_status_v3(
+    event_time: pd.Timestamp,
+    sessions: list[date],
+) -> str:
+    if event_time.date() not in sessions:
+        return "nontrading_day"
+    if event_time.time() < MARKET_OPEN:
+        return "preopen"
+    if event_time.time() < MARKET_CLOSE:
+        return "intraday_unresolved"
+    return "after_close"
+
+
+def _pre_event_return_v3(
+    equity: pd.DataFrame,
+    ts_code: str,
+    reaction_start: object,
+    sessions: list[date],
+    horizon: int,
+) -> float:
+    if reaction_start is None or pd.isna(reaction_start):
+        return np.nan
+    start = _as_date(reaction_start)
+    try:
+        position = sessions.index(start)
+    except ValueError:
+        return np.nan
+    if position < horizon + 1:
+        return np.nan
+    first = sessions[position - horizon - 1]
+    last = sessions[position - 1]
+    stock = equity[equity["ts_code"].eq(ts_code)].set_index("trade_date")
+    return _return(stock["adjusted_close"], first, last)
+
+
+def _window_pullback_v3(
+    equity: pd.DataFrame,
+    ts_code: str,
+    reaction_start: object,
+    sessions: list[date],
+    horizon: int,
+    observed_sessions: int,
+) -> float:
+    if reaction_start is None or pd.isna(reaction_start) or observed_sessions < horizon:
+        return np.nan
+    start = _as_date(reaction_start)
+    window = [session for session in sessions if session >= start][:horizon]
+    if len(window) < horizon:
+        return np.nan
+    stock = equity[
+        equity["ts_code"].eq(ts_code) & equity["trade_date"].isin(window)
+    ].set_index("trade_date")
+    if any(session not in stock.index for session in window):
+        return np.nan
+    highs = pd.to_numeric(stock.loc[window, "adjusted_high"], errors="coerce")
+    final_close = float(stock.loc[window[-1], "adjusted_close"])
+    if not bool(np.isfinite(highs).all()) or not np.isfinite(final_close) or final_close <= 0.0:
+        return np.nan
+    return float(highs.max() / final_close - 1.0)
+
+
 __all__ = [
     "EVENT_REACTION_EVIDENCE_ID",
     "EVENT_REACTION_FORMULA_VERSION",
+    "EVENT_REACTION_FORMULA_VERSION_V3",
     "EVENT_REACTION_HORIZONS",
     "compute_event_reaction_features",
+    "compute_event_reaction_features_v3",
 ]

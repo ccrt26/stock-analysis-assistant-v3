@@ -5,6 +5,11 @@ description: Use when point-in-time A-share candidate selection or validation ne
 
 # 价格与交易研究
 
+## A股短周期发动机 V4 最终合同（优先级最高）
+
+已确认价格 `support` 必须有观察日期、绝对变化、成交、相对变化和路径质量。事件使用 `compute_event_reaction_features_v3`；`awaiting_first_session` 只能作为条件性行动条件，不能伪装成支持。11个既有场景保持不变。
+
+
 ## 目标
 
 判断价格和成交是否正在确认候选的上涨命题、市场已经反映多少、是否仍有合理上涨路径，以及行动日能否正常参与。

@@ -851,6 +851,62 @@ sources:
       - 当前系统只使用详细财务项目需要多维核对的方法，不复制机器学习模型、变量权重、AUC或ST概率。
       - 财务困境证据不能直接转换成股票未来收益预测。
 
+  - source_id: paper-barber-odean-attention-2008
+    grade: A
+    kind: peer_reviewed_paper
+    research_design: empirical
+    title: "All That Glitters: The Effect of Attention and News on the Buying Behavior of Individual and Institutional Investors"
+    publisher: Oxford University Press
+    authors: [Brad M. Barber, Terrance Odean]
+    journal_or_series: Review of Financial Studies 21(2), 785-818
+    url: https://academic.oup.com/rfs/article/21/2/785/1568042
+    doi: 10.1093/rfs/hhm079
+    publication_date: 2008-04-01
+    last_verified_on: 2026-08-21
+    jurisdiction: 美国
+    market_scope: [美国股票]
+    method_summary: 研究新闻、异常成交和极端收益如何进入投资者注意集合。
+    limitations:
+      - 只支持注意力测量边界，不能把美国账户行为或阈值移植到A股。
+      - 本地没有媒体点击和账户身份数据，不能声称测量真实注意力。
+
+  - source_id: paper-fang-peress-media-2009
+    grade: A
+    kind: peer_reviewed_paper
+    research_design: empirical
+    title: "Media Coverage and the Cross-section of Stock Returns"
+    publisher: Wiley
+    authors: [Lily Fang, Joel Peress]
+    journal_or_series: Journal of Finance 64(5), 2023-2052
+    url: https://onlinelibrary.wiley.com/doi/10.1111/j.1540-6261.2009.01493.x
+    doi: 10.1111/j.1540-6261.2009.01493.x
+    publication_date: 2009-10-01
+    last_verified_on: 2026-08-21
+    jurisdiction: 美国
+    market_scope: [美国股票]
+    method_summary: 研究媒体覆盖与投资者认知范围和横截面收益。
+    limitations:
+      - 媒体覆盖不等于未来上涨；本地没有历史媒体覆盖，不能创建媒体分数。
+
+  - source_id: paper-jones-shi-zhang-retail-china-2025
+    grade: A
+    kind: peer_reviewed_paper
+    research_design: empirical
+    title: "Retail Trading and Return Predictability in China"
+    publisher: Cambridge University Press
+    authors: [Charles M. Jones, Donghui Shi, Xiaoyan Zhang, Xinran Zhang]
+    journal_or_series: Journal of Financial and Quantitative Analysis
+    url: https://www.cambridge.org/core/product/identifier/S0022109024000085/type/journal_article
+    doi: 10.1017/S0022109024000085
+    publication_date: 2024-02-12
+    journal_issue: Journal of Financial and Quantitative Analysis 60(1), February 2025, 68-104
+    last_verified_on: 2026-08-21
+    jurisdiction: 中国大陆
+    market_scope: [A股]
+    method_summary: 使用账户级数据研究中国个人投资者的异质性和信息处理。
+    limitations:
+      - 公开日线、成交和融资数据不能识别账户规模、机构、游资或主力身份。
+
 entries:
   - knowledge_id: src_cn_program_trading_rules_2025
     title: 价量结果不得推断交易主体身份
@@ -1971,3 +2027,113 @@ entries:
     local_validation:
       status: insufficient_for_direction
       reason: 现有本地验证和A股文献支持事件时点、共同变化扣除及分离解释的方法，但不支持把该链或任何固定反应阈值当成未来20日收益方向规则。
+
+  - knowledge_id: src_cn_disclosure_novelty_chain
+    title: 按披露链判断公司信息是否真正新增
+    primary_source_id: official-csrc-disclosure-2025
+    supporting_source_ids: [official-sse-listing-2026, official-szse-listing-2026, paper-sun-wen-earnings-car-2023]
+    source_grade: S
+    version_status: current
+    effect: method_only
+    modules: [events, fundamentals]
+    opportunity_types: [earnings_rerating, company_event]
+    topics: [disclosure_chain, information_novelty]
+    claim_summary: 同一事项必须沿预告、修正、快报、正式报告和更正比较；正式性不等于新增信息。
+    allowed_uses:
+      - 判断substantive_new、incremental_detail、confirmation_only或repeat_or_no_new_information。
+      - 比较正式结果是否超出此前官方区间，或新增主营、现金流、分部和风险。
+    forbidden_uses:
+      - 没有分析师一致预期历史时声称超市场预期。
+      - 因正式报告数字大或文件更完整就建立短期发动机。
+    prerequisites:
+      - 只使用available_at不晚于as_of的同公司、同报告期和同经济事项披露。
+    counter_evidence:
+      - 核心信息已由预告或快报披露；历史覆盖不足无法判断首次。
+    data_requirements:
+      - {kind: fact, name: earnings_forecast, required_fields: [ts_code, report_period, ann_date, available_at]}
+      - {kind: fact, name: earnings_express, required_fields: [ts_code, report_period, ann_date, available_at]}
+      - {kind: fact, name: announcement, required_fields: [announcement_id, ts_code, announcement_time, available_at]}
+    local_validation:
+      status: insufficient_for_direction
+      reason: 本地字段足以执行披露链语义核对，但不能把信息等级直接转成未来20日方向。
+
+  - knowledge_id: src_cn_market_propagation_modes
+    title: 区分持续参与、单日修复、轮动和集中投机
+    primary_source_id: paper-ma-liao-jiang-factor-momentum-2024
+    supporting_source_ids: [paper-zhang-zhu-t1-2024, paper-zhang-zhang-turnover-2022]
+    source_grade: A
+    version_status: current
+    effect: method_only
+    modules: [market, sector_theme, price_trading]
+    opportunity_types: [general, industry_trend]
+    topics: [market_propagation, breadth, concentration]
+    claim_summary: 等权、中位数、上涨面、成交、新高和集中度共同区分六种传播模式；市场共同变化不能替代个股确认。
+    allowed_uses:
+      - 输出V4六种传播模式并改变搜索重点和假阳性核对。
+    forbidden_uses:
+      - 把传播模式变成市场Gate、仓位、分数或指数方向预测。
+      - 从成交和集中度推断机构、主力、散户或游资身份。
+    prerequisites:
+      - 同时展示多窗口分布、成交基线、新高和正收益集中度。
+    counter_evidence:
+      - 单日普涨但多日宽度和成交未确认；上涨由少数股票贡献。
+    data_requirements:
+      - {kind: derived, name: market_context, required_fields: [analysis_date, equal_weight_return_1d, equal_weight_return_5d, breadth_1d, breadth_5d]}
+    local_validation:
+      status: insufficient_for_direction
+      reason: 模式可以复算并约束解释，但除高分化风险外尚无稳定未来方向关系。
+
+  - knowledge_id: src_cn_sector_leader_cluster
+    title: 分开广泛扩散与多股票领导集群
+    primary_source_id: paper-moskowitz-grinblatt-1999
+    supporting_source_ids: [paper-ma-liao-jiang-factor-momentum-2024]
+    source_grade: A
+    version_status: current
+    effect: method_only
+    modules: [sector_theme, price_trading]
+    opportunity_types: [industry_trend]
+    topics: [broad_diffusion, leader_cluster]
+    claim_summary: 广泛扩散、多股票领导集群和单一龙头是不同传播结构；只有真实多成员共同推进才能成为板块发动机。
+    allowed_uses:
+      - 使用形成日有效成员、领导数量、成交份额、单股贡献和板块内百分位核对领导集群。
+    forbidden_uses:
+      - 用单只涨停扩写板块，或把落后成员自动称为补涨。
+      - 移植海外收益和阈值。
+    prerequisites:
+      - 使用形成日有效申万成员和同窗口复权行情。
+    counter_evidence:
+      - 领导成员不足、单股贡献过高、候选不是领导或核心、成交份额未增加。
+    data_requirements:
+      - {kind: fact, name: industry_member, required_fields: [ts_code, industry_code, valid_from, valid_to, available_at]}
+      - {kind: derived, name: sector_hotspot, required_fields: [analysis_date, group_code, relative_return_5d, breadth_5d, turnover_share_change_5d]}
+    local_validation:
+      status: insufficient_for_direction
+      reason: 本地字段可前向观察两种传播形态，但不足以声明固定收益方向。
+
+  - knowledge_id: src_cn_attention_proxy_boundary
+    title: 公告、板块和价量只是传播代理，不能冒充真实注意力或账户身份
+    primary_source_id: paper-barber-odean-attention-2008
+    supporting_source_ids: [paper-fang-peress-media-2009, paper-jones-shi-zhang-retail-china-2025, official-csrc-program-trading-2024]
+    source_grade: A
+    version_status: current
+    effect: method_only
+    modules: [market, sector_theme, events, price_trading]
+    opportunity_types: [general, industry_trend, company_event]
+    topics: [attention_proxy, investor_identity_boundary]
+    claim_summary: 当前本地没有媒体、社交或账户级数据；只能观察正式公告、成员传播和价量反应。
+    allowed_uses:
+      - 把公告新颖性、板块传播和相对价量称为可观察代理。
+      - 明确无法测量真实情绪、散户、机构、游资或主力身份。
+    forbidden_uses:
+      - 由成交量、融资、涨停或概念热度推断交易主体。
+      - 创建没有数据来源的注意力、媒体或情绪分数。
+    prerequisites:
+      - 只使用本地已取得的公告、行业成员、市场和日线价量。
+    counter_evidence:
+      - 高关注可能伴随过度定价；投资者行为存在异质性。
+    data_requirements:
+      - {kind: fact, name: announcement, required_fields: [announcement_id, ts_code, announcement_time, available_at]}
+      - {kind: fact, name: equity_daily, required_fields: [trade_date, ts_code, close, amount, available_at]}
+    local_validation:
+      status: insufficient_for_direction
+      reason: 本地没有媒体和账户数据；该知识只限定用词和代理边界。

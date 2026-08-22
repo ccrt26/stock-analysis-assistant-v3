@@ -270,3 +270,7 @@ data health
 - 历史诊断可以改变 Skill，但不能把单次未来结果直接写成固定规则；
 - README 只保留入口和运行说明，本文负责完整架构；
 - 避免在文档中写入会迅速过期的固定数据日期、测试数量、本地绝对路径或账户信息。
+
+## A股短周期发动机 V4
+
+唯一合同：`docs/architecture/a-share-short-horizon-engine-contract-v4.md`。V4只收紧研究合同，不改变事实仓、Forward CSV、D20、数据源、定时任务或11个价格场景。

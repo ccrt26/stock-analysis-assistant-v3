@@ -263,6 +263,189 @@ class DailyResearchTrace(BaseModel):
     research_result: ResearchResult
 
 
+# ---------------------------------------------------------------------------
+# A-share short-horizon engine contract v4.
+#
+# Existing v3 traces remain readable. New daily research uses v4 so the exact
+# engine taxonomy can be reviewed by D20 without changing Forward CSV or the
+# data warehouse.
+# ---------------------------------------------------------------------------
+
+V4_EFFECTIVE_FORMATION_DATE = date(2026, 8, 21)
+
+EngineTypeV4 = Literal[
+    "fresh_event_pending",
+    "event_repricing_confirmed",
+    "sector_broad_diffusion",
+    "sector_leader_cluster",
+    "independent_demand_acceleration",
+    "anchor_only",
+    "unresolved",
+]
+EngineStatusV4 = Literal["active", "conditional", "inactive", "unresolved"]
+MarketRecognitionStatusV4 = Literal[
+    "pending",
+    "confirmed",
+    "mixed",
+    "rejected",
+    "not_applicable",
+]
+MarketPropagationModeV4 = Literal[
+    "broad_sustained_participation",
+    "one_day_repair",
+    "sector_rotation",
+    "concentrated_speculation",
+    "weak_or_fragmented",
+    "unclear",
+]
+MarketRiskOverlayV4 = Literal["high_dispersion_risk"]
+NewInformationLevelV4 = Literal[
+    "substantive_new",
+    "incremental_detail",
+    "confirmation_only",
+    "repeat_or_no_new_information",
+    "not_applicable",
+    "unknown",
+]
+
+
+class MarketRecognitionV4(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    status: MarketRecognitionStatusV4
+    basis: str = Field(min_length=1)
+
+
+class DisclosureChainV4(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    prior_forecast: str | None = Field(default=None, min_length=1)
+    forecast_revision: str | None = Field(default=None, min_length=1)
+    earnings_express: str | None = Field(default=None, min_length=1)
+    formal_report: str | None = Field(default=None, min_length=1)
+    correction: str | None = Field(default=None, min_length=1)
+    comparison_basis: str = Field(min_length=1)
+
+
+class CompanyInformationV4(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    first_or_repeat: Literal["first", "repeat", "unknown", "not_applicable"]
+    disclosure_chain: DisclosureChainV4
+    new_information_level: NewInformationLevelV4
+    event_id: str | None = Field(default=None, min_length=1)
+    event_available_at: datetime | None = None
+    event_stage: str = Field(min_length=1)
+    business_link: Literal["direct", "indirect", "unknown", "not_applicable"]
+    materiality: str = Field(min_length=1)
+    tradable_sessions_since_event: int | None = Field(default=None, ge=0)
+    basis: str = Field(min_length=1)
+
+
+class SectorBroadDiffusionEvidenceV4(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    group_code: str = Field(min_length=1)
+    group_name: str = Field(min_length=1)
+    relative_return_3d: float
+    relative_return_5d: float
+    median_return_3d: float
+    median_return_5d: float
+    breadth_3d: float = Field(ge=0.0, le=1.0)
+    breadth_5d: float = Field(ge=0.0, le=1.0)
+    turnover_share_change_5d: float
+    top3_positive_contribution: float = Field(ge=0.0, le=1.0)
+    candidate_role: Literal[
+        "leader_confirmed",
+        "core_diffusion_member",
+        "lagging_unverified",
+        "label_only",
+    ]
+    strongest_counterevidence: str = Field(min_length=1)
+
+
+class SectorLeaderMemberEvidenceV4(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    ts_code: str = Field(min_length=9)
+    relative_market_3d: float
+    relative_market_5d: float
+    industry_percentile_5d: float = Field(ge=0.0, le=1.0)
+
+
+class SectorLeaderClusterEvidenceV4(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    cluster_id: str = Field(min_length=1)
+    group_code: str = Field(min_length=1)
+    group_name: str = Field(min_length=1)
+    members: list[SectorLeaderMemberEvidenceV4] = Field(min_length=3)
+    effective_member_count: int = Field(ge=1)
+    qualifying_leader_count: int = Field(ge=1)
+    required_leader_count: int = Field(ge=3)
+    relative_return_3d: float
+    relative_return_5d: float
+    turnover_share_change_5d: float
+    top1_positive_contribution: float = Field(ge=0.0, le=1.0)
+    candidate_industry_percentile_5d: float = Field(ge=0.0, le=1.0)
+    candidate_role: Literal[
+        "leader_confirmed",
+        "core_diffusion_member",
+        "lagging_unverified",
+        "label_only",
+    ]
+    strongest_counterevidence: str = Field(min_length=1)
+    unknowns: list[str] = Field(default_factory=list)
+
+
+class ResearchThesisV4(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    engine_type: EngineTypeV4
+    engine_status: EngineStatusV4
+    market_recognition: MarketRecognitionV4
+    company_information: CompanyInformationV4
+    sector_broad_diffusion: SectorBroadDiffusionEvidenceV4 | None = None
+    sector_leader_cluster: SectorLeaderClusterEvidenceV4 | None = None
+    action_condition_decision_id: str | None = Field(default=None, min_length=1)
+    catalyst: str = Field(min_length=1)
+    short_term_engine: str = Field(min_length=1)
+    propagation: str = Field(min_length=1)
+    price_confirmation: str = Field(min_length=1)
+    remaining_path: str = Field(min_length=1)
+    fundamental_anchor: str = Field(min_length=1)
+    company_risk: str = Field(min_length=1)
+    critical_unknown: str = Field(min_length=1)
+    decision_ids: list[str] = Field(min_length=2)
+
+
+class TraceCandidateV4(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    ts_code: str = Field(min_length=9)
+    name: str = Field(min_length=1)
+    opportunity_type: OpportunityType
+    source_skills: list[DiscoverySkillName] = Field(min_length=1)
+    final_fate: Literal["selected", "rejected", "unresolved"]
+    primary_reason: str = Field(min_length=1)
+    research_thesis: ResearchThesisV4
+
+
+class DailyResearchTraceV4(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    trace_version: Literal["daily-research-trace-v4"]
+    formation_date: date
+    action_date: date
+    as_of: datetime
+    market_search_context: str = Field(min_length=1)
+    market_propagation_mode: MarketPropagationModeV4
+    market_risk_overlays: list[MarketRiskOverlayV4]
+    candidate_ledger: list[TraceCandidateV4]
+    decision_trace: list[TraceDecision]
+    research_result: ResearchResult
+
+
 @dataclass(frozen=True)
 class PricePoint:
     trade_date: date
@@ -613,7 +796,7 @@ def record_daily_trace(
     )
 
 
-def _validate_trace(
+def _validate_trace_v3(
     trace: dict[str, Any],
     *,
     formation_date: date,
@@ -925,6 +1108,491 @@ def _validate_fresh_event_pending(
         or _shanghai(decision_event_time) != local_event_time
     ):
         raise ValueError("fresh_event_reaction_boundary_invalid")
+
+
+_V4_PRICE_VALUE_KEYS = {
+    "close", "adjusted_close",
+    "return_1d", "return_3d", "return_5d", "return_20d",
+    "event_return_1d", "event_return_3d", "event_return_5d",
+}
+_V4_AMOUNT_VALUE_KEYS = {
+    "amount", "liquidity_log10_amount", "amount_ratio_last_20d",
+    "amount_ratio_1d", "amount_ratio_3d", "amount_ratio_5d",
+}
+_V4_RELATIVE_VALUE_KEYS = {
+    "relative_market_1d", "relative_market_3d", "relative_market_5d",
+    "relative_market_20d", "relative_market_return_1d",
+    "relative_market_return_3d", "relative_market_return_5d",
+    "relative_industry_return_1d", "relative_industry_return_3d",
+    "relative_industry_return_5d", "relative_industry_return_20d",
+    "relative_return_1d", "relative_return_3d", "relative_return_5d",
+    "relative_return_20d",
+}
+_V4_PATH_QUALITY_KEYS = {
+    "volume_price_efficiency_5d", "price_amount_efficiency_20d",
+    "mean_close_position_5d", "mean_close_location_1d",
+    "mean_close_location_3d", "mean_close_location_5d",
+    "mean_upper_shadow_ratio_1d", "mean_upper_shadow_ratio_3d",
+    "mean_upper_shadow_ratio_5d", "high_to_close_pullback_1d",
+    "high_to_close_pullback_3d", "high_to_close_pullback_5d",
+    "breakout_vs_prior60", "breakout_prior_250d_high",
+    "volume_amplification_days_5d", "upper_shadow_frequency_5d",
+    "fade_frequency_5d", "limit_up_return_contribution_5d",
+    "efficiency_ratio_20d", "adx_14d", "dmi_directional_spread_14d",
+    "target_atr_distance_20pct", "relative_strength_consistency_5d",
+}
+_V4_PRE_EVENT_RELATIVE_KEYS = {
+    "pre_event_relative_market_5d", "pre_event_relative_industry_5d",
+}
+_V4_PRE_EVENT_RISK_KEYS = {
+    "pre_event_return_5d", "pre_event_return_20d",
+    "target_atr_distance_20pct", "distance_to_prior_high_atr",
+    "max_single_day_return_20d", "limit_up_return_contribution_5d",
+}
+
+
+def _validate_trace(
+    trace: dict[str, Any],
+    *,
+    formation_date: date,
+    action_date: date,
+    selection_as_of: datetime,
+    eligible: dict[str, str],
+) -> DailyResearchTrace | DailyResearchTraceV4:
+    version = str(trace.get("trace_version", ""))
+    if formation_date >= V4_EFFECTIVE_FORMATION_DATE and version != "daily-research-trace-v4":
+        raise ValueError("v4_trace_required_for_new_formation_date")
+    if version == "daily-research-trace-v4":
+        return _validate_trace_v4(
+            trace,
+            formation_date=formation_date,
+            action_date=action_date,
+            selection_as_of=selection_as_of,
+            eligible=eligible,
+        )
+    if version == "daily-research-trace-v3":
+        return _validate_trace_v3(
+            trace,
+            formation_date=formation_date,
+            action_date=action_date,
+            selection_as_of=selection_as_of,
+            eligible=eligible,
+        )
+    raise ValueError("unsupported_trace_version")
+
+
+def _validate_trace_v4(
+    trace: dict[str, Any],
+    *,
+    formation_date: date,
+    action_date: date,
+    selection_as_of: datetime,
+    eligible: dict[str, str],
+) -> DailyResearchTraceV4:
+    try:
+        payload = DailyResearchTraceV4.model_validate(trace)
+    except ValidationError as error:
+        raise ValueError("invalid_trace_v4_structure") from error
+    if payload.formation_date != formation_date:
+        raise ValueError("trace_formation_date_mismatch")
+    if payload.action_date != action_date:
+        raise ValueError("trace_action_date_mismatch")
+    if payload.as_of.tzinfo is None or payload.as_of.utcoffset() is None:
+        raise ValueError("trace_as_of_timezone_missing")
+    if _shanghai(payload.as_of) != _shanghai(selection_as_of):
+        raise ValueError("trace_as_of_mismatch")
+    if len(payload.market_risk_overlays) != len(set(payload.market_risk_overlays)):
+        raise ValueError("duplicate_market_risk_overlays")
+
+    ledger_codes = [item.ts_code for item in payload.candidate_ledger]
+    if len(ledger_codes) != len(set(ledger_codes)):
+        raise ValueError("duplicate_candidate_codes")
+    ledger = {item.ts_code: item for item in payload.candidate_ledger}
+    for item in payload.candidate_ledger:
+        if eligible.get(item.ts_code) != item.name:
+            raise ValueError("ineligible_trace_candidate")
+        if len(item.source_skills) != len(set(item.source_skills)):
+            raise ValueError("duplicate_candidate_source_skills")
+
+    result = payload.research_result
+    failed = (
+        not result.research_completed
+        or not result.point_in_time_evidence_verified
+        or bool(result.failure_reason)
+    )
+    if failed and (result.selected_stocks or result.nearest_nonselections):
+        raise ValueError("failed_research_candidates_present")
+    for item in result.selected_stocks:
+        ledger_item = ledger.get(item.ts_code)
+        if ledger_item is None or (
+            item.name != ledger_item.name
+            or item.opportunity_type != ledger_item.opportunity_type
+        ):
+            raise ValueError("selected_candidate_identity_mismatch")
+    for item in result.nearest_nonselections:
+        ledger_item = ledger.get(item.ts_code)
+        if ledger_item is None or ledger_item.final_fate not in {"rejected", "unresolved"}:
+            raise ValueError("nearest_candidate_fate_mismatch")
+        if (
+            item.name != ledger_item.name
+            or item.opportunity_type != ledger_item.opportunity_type
+        ):
+            raise ValueError("nearest_candidate_identity_mismatch")
+    validated_result = _validate_result(result.model_dump(), eligible)
+    selected_codes = {
+        str(item["ts_code"]) for item in validated_result["selected_stocks"]
+    }
+    ledger_selected = {
+        code for code, item in ledger.items() if item.final_fate == "selected"
+    }
+    if selected_codes != ledger_selected:
+        raise ValueError("selected_candidate_fate_mismatch")
+    nearest_codes = {
+        str(item["ts_code"]) for item in validated_result["nearest_nonselections"]
+    }
+
+    allowed_price_ids = set(SCENARIO_SPECS) | {
+        "raw_price", EVENT_REACTION_EVIDENCE_ID,
+    }
+    decisions_by_id: dict[str, TraceDecision] = {}
+    price_counts: dict[str, int] = {}
+    for decision in payload.decision_trace:
+        if decision.decision_id in decisions_by_id:
+            raise ValueError("duplicate_decision_ids")
+        decisions_by_id[decision.decision_id] = decision
+        if decision.ts_code not in ledger:
+            raise ValueError("decision_trace_candidate_missing")
+        for value in decision.formation_values.values():
+            if isinstance(value, float) and not math.isfinite(value):
+                raise ValueError("formation_value_non_finite")
+        if decision.source_skill == "analyzing-price-trading":
+            if decision.evidence_id not in allowed_price_ids:
+                raise ValueError("invalid_price_evidence_id")
+            price_counts[decision.ts_code] = price_counts.get(decision.ts_code, 0) + 1
+    for code in selected_codes | nearest_codes:
+        if price_counts.get(code, 0) not in {1, 2}:
+            raise ValueError("price_evidence_count_invalid")
+
+    for code, candidate in ledger.items():
+        thesis = candidate.research_thesis
+        _validate_v4_engine_shape(candidate)
+        _validate_v4_company_information(thesis.company_information, as_of=payload.as_of)
+        _validate_v4_sector_evidence(code, thesis)
+        referenced = _resolve_v4_decisions(
+            code=code,
+            decision_ids=thesis.decision_ids,
+            decisions_by_id=decisions_by_id,
+        )
+        if candidate.final_fate != "selected":
+            continue
+        _validate_v4_selected_candidate(
+            candidate,
+            referenced=referenced,
+            formation_date=payload.formation_date,
+            action_date=payload.action_date,
+            as_of=payload.as_of,
+        )
+    return payload
+
+
+def _validate_v4_engine_shape(candidate: TraceCandidateV4) -> None:
+    thesis = candidate.research_thesis
+    expected_opportunity = {
+        "fresh_event_pending": "company_catalyst",
+        "event_repricing_confirmed": "company_catalyst",
+        "sector_broad_diffusion": "sector_diffusion",
+        "sector_leader_cluster": "sector_diffusion",
+        "independent_demand_acceleration": "independent_price_anomaly",
+    }.get(thesis.engine_type)
+    if expected_opportunity and candidate.opportunity_type != expected_opportunity:
+        raise ValueError("engine_type_opportunity_mismatch")
+    expected_status = {
+        "fresh_event_pending": "conditional",
+        "event_repricing_confirmed": "active",
+        "sector_broad_diffusion": "active",
+        "sector_leader_cluster": "active",
+        "independent_demand_acceleration": "active",
+        "anchor_only": "inactive",
+        "unresolved": "unresolved",
+    }[thesis.engine_type]
+    if thesis.engine_status != expected_status:
+        raise ValueError("engine_type_status_mismatch")
+    expected_recognition = {
+        "fresh_event_pending": "pending",
+        "event_repricing_confirmed": "confirmed",
+        "sector_broad_diffusion": "confirmed",
+        "sector_leader_cluster": "confirmed",
+        "independent_demand_acceleration": "confirmed",
+    }.get(thesis.engine_type)
+    if expected_recognition and thesis.market_recognition.status != expected_recognition:
+        raise ValueError("engine_market_recognition_mismatch")
+    if candidate.final_fate == "selected" and thesis.engine_type in {"anchor_only", "unresolved"}:
+        raise ValueError("selected_engine_type_invalid")
+
+
+def _validate_v4_company_information(
+    info: CompanyInformationV4,
+    *,
+    as_of: datetime,
+) -> None:
+    if (info.event_id is None) != (info.event_available_at is None):
+        raise ValueError("company_event_identity_incomplete")
+    if info.event_available_at is not None:
+        if info.event_available_at.tzinfo is None or info.event_available_at.utcoffset() is None:
+            raise ValueError("company_event_available_at_timezone_missing")
+        if _shanghai(info.event_available_at) > _shanghai(as_of):
+            raise ValueError("company_event_available_after_as_of")
+    if info.first_or_repeat == "not_applicable" and info.new_information_level not in {"not_applicable", "unknown"}:
+        raise ValueError("company_information_not_applicable_mismatch")
+
+
+def _validate_v4_sector_evidence(code: str, thesis: ResearchThesisV4) -> None:
+    broad = thesis.sector_broad_diffusion
+    cluster = thesis.sector_leader_cluster
+    if thesis.engine_type == "sector_broad_diffusion":
+        if broad is None or cluster is not None:
+            raise ValueError("sector_broad_diffusion_evidence_invalid")
+        if not (
+            broad.relative_return_3d > 0.0
+            and broad.relative_return_5d > 0.0
+            and broad.median_return_3d > 0.0
+            and broad.median_return_5d > 0.0
+            and broad.breadth_3d > 0.5
+            and broad.breadth_5d > 0.5
+            and broad.turnover_share_change_5d > 0.0
+            and broad.top3_positive_contribution < 0.80
+            and broad.candidate_role in {"leader_confirmed", "core_diffusion_member"}
+        ):
+            raise ValueError("sector_broad_diffusion_conditions_invalid")
+    elif thesis.engine_type == "sector_leader_cluster":
+        if cluster is None or broad is not None:
+            raise ValueError("sector_leader_cluster_evidence_invalid")
+        required = max(3, math.ceil(cluster.effective_member_count * 0.05))
+        member_codes = [member.ts_code for member in cluster.members]
+        if len(member_codes) != len(set(member_codes)):
+            raise ValueError("sector_cluster_duplicate_members")
+        if code not in member_codes:
+            raise ValueError("sector_cluster_candidate_missing")
+        member_conditions_hold = all(
+            member.relative_market_3d > 0.0
+            and member.relative_market_5d > 0.0
+            and member.industry_percentile_5d >= 0.75
+            for member in cluster.members
+        )
+        if not (
+            cluster.required_leader_count == required
+            and cluster.qualifying_leader_count >= required
+            and len(cluster.members) == cluster.qualifying_leader_count
+            and member_conditions_hold
+            and cluster.relative_return_3d > 0.0
+            and cluster.relative_return_5d > 0.0
+            and cluster.turnover_share_change_5d > 0.0
+            and cluster.top1_positive_contribution <= 0.60
+            and cluster.candidate_industry_percentile_5d >= 0.75
+            and cluster.candidate_role in {"leader_confirmed", "core_diffusion_member"}
+        ):
+            raise ValueError("sector_leader_cluster_conditions_invalid")
+    elif broad is not None or cluster is not None:
+        raise ValueError("sector_evidence_not_applicable")
+
+
+def _resolve_v4_decisions(
+    *,
+    code: str,
+    decision_ids: list[str],
+    decisions_by_id: dict[str, TraceDecision],
+) -> list[TraceDecision]:
+    if len(decision_ids) != len(set(decision_ids)):
+        raise ValueError("duplicate_thesis_decision_ids")
+    referenced: list[TraceDecision] = []
+    for decision_id in decision_ids:
+        decision = decisions_by_id.get(decision_id)
+        if decision is None:
+            raise ValueError("thesis_decision_missing")
+        if decision.ts_code != code:
+            raise ValueError("thesis_decision_candidate_mismatch")
+        referenced.append(decision)
+    return referenced
+
+
+def _validate_v4_selected_candidate(
+    candidate: TraceCandidateV4,
+    *,
+    referenced: list[TraceDecision],
+    formation_date: date,
+    action_date: date,
+    as_of: datetime,
+) -> None:
+    thesis = candidate.research_thesis
+    if thesis.engine_status == "conditional":
+        _validate_v4_fresh_event_pending(
+            thesis,
+            referenced=referenced,
+            formation_date=formation_date,
+            action_date=action_date,
+            as_of=as_of,
+        )
+        return
+    if thesis.engine_status != "active":
+        raise ValueError("selected_engine_status_invalid")
+    company_decisions = [
+        item for item in referenced if item.source_skill == "researching-company-events"
+    ]
+    if not company_decisions:
+        raise ValueError("selected_thesis_company_evidence_missing")
+    price_support = [
+        item for item in referenced
+        if item.source_skill == "analyzing-price-trading" and item.decision_role == "support"
+    ]
+    if not price_support:
+        raise ValueError("selected_thesis_price_confirmation_missing")
+    for decision in price_support:
+        _validate_v4_price_support_values(decision, formation_date=formation_date)
+    if thesis.engine_type == "event_repricing_confirmed":
+        info = thesis.company_information
+        if info.new_information_level not in {"substantive_new", "incremental_detail"}:
+            raise ValueError("confirmed_event_information_level_invalid")
+        if not info.event_id or info.event_available_at is None:
+            raise ValueError("confirmed_event_identity_missing")
+        if info.tradable_sessions_since_event is None or info.tradable_sessions_since_event < 1:
+            raise ValueError("confirmed_event_sessions_invalid")
+        if not any(
+            item.decision_role == "support"
+            and str(item.formation_values.get("event_id", "")) == info.event_id
+            for item in company_decisions
+        ):
+            raise ValueError("confirmed_event_company_support_missing")
+        if not any(
+            item.evidence_id == EVENT_REACTION_EVIDENCE_ID
+            and str(item.formation_values.get("event_id", "")) == info.event_id
+            for item in price_support
+        ):
+            raise ValueError("confirmed_event_price_reaction_missing")
+    if thesis.engine_type in {"sector_broad_diffusion", "sector_leader_cluster"}:
+        if not any(
+            item.source_skill == "researching-sectors-industries"
+            and item.decision_role == "support"
+            and item.evidence_id == thesis.engine_type
+            for item in referenced
+        ):
+            raise ValueError("sector_engine_support_missing")
+
+
+def _finite_v4_values(values: dict[str, Any]) -> dict[str, float]:
+    return {
+        key: float(value)
+        for key, value in values.items()
+        if not isinstance(value, bool)
+        and isinstance(value, (int, float))
+        and math.isfinite(float(value))
+    }
+
+
+def _validate_v4_price_support_values(
+    decision: TraceDecision,
+    *,
+    formation_date: date,
+) -> None:
+    values = decision.formation_values
+    try:
+        observed_date = date.fromisoformat(str(values.get("observation_date", "")))
+    except ValueError:
+        raise ValueError("price_support_observation_date_missing") from None
+    if observed_date > formation_date:
+        raise ValueError("price_support_observation_date_after_formation")
+    numeric = _finite_v4_values(values)
+    if not (_V4_PRICE_VALUE_KEYS & numeric.keys()):
+        raise ValueError("price_support_price_value_missing")
+    amount_keys = _V4_AMOUNT_VALUE_KEYS & numeric.keys()
+    if not amount_keys:
+        raise ValueError("price_support_amount_value_missing")
+    if not any(numeric[key] > 0.0 for key in amount_keys):
+        raise ValueError("price_support_amount_value_invalid")
+    if not (_V4_RELATIVE_VALUE_KEYS & numeric.keys()):
+        raise ValueError("price_support_relative_value_missing")
+    if not (_V4_PATH_QUALITY_KEYS & numeric.keys()):
+        raise ValueError("price_support_path_quality_missing")
+    if decision.evidence_id == EVENT_REACTION_EVIDENCE_ID:
+        if decision.evidence_version != "event-price-reaction-v3":
+            raise ValueError("event_price_support_version_invalid")
+        if str(values.get("reaction_window_status", "")) not in {"partial", "complete"}:
+            raise ValueError("event_price_support_window_invalid")
+        try:
+            sessions = int(values.get("observed_reaction_sessions", 0))
+        except (TypeError, ValueError):
+            sessions = 0
+        if sessions < 1:
+            raise ValueError("event_price_support_sessions_invalid")
+        if str(values.get("event_timing_status", "")) == "intraday_unresolved":
+            raise ValueError("event_price_support_timing_invalid")
+
+
+def _validate_v4_fresh_event_pending(
+    thesis: ResearchThesisV4,
+    *,
+    referenced: list[TraceDecision],
+    formation_date: date,
+    action_date: date,
+    as_of: datetime,
+) -> None:
+    if thesis.engine_type != "fresh_event_pending":
+        raise ValueError("conditional_engine_type_invalid")
+    info = thesis.company_information
+    if info.first_or_repeat != "first":
+        raise ValueError("fresh_event_first_disclosure_required")
+    if info.new_information_level != "substantive_new":
+        raise ValueError("fresh_event_information_level_invalid")
+    if info.business_link != "direct":
+        raise ValueError("fresh_event_business_link_invalid")
+    if info.tradable_sessions_since_event != 0:
+        raise ValueError("fresh_event_sessions_invalid")
+    if not info.event_id or info.event_available_at is None:
+        raise ValueError("fresh_event_identity_missing")
+    event_time = _shanghai(info.event_available_at)
+    if event_time > _shanghai(as_of):
+        raise ValueError("fresh_event_available_after_as_of")
+    if event_time.date() != formation_date or event_time.time() < time(15):
+        raise ValueError("fresh_event_not_after_formation_close")
+    company_support = [
+        item for item in referenced
+        if item.source_skill == "researching-company-events"
+        and item.decision_role == "support"
+        and str(item.formation_values.get("event_id", "")) == info.event_id
+    ]
+    if not company_support:
+        raise ValueError("fresh_event_company_support_missing")
+    action_id = thesis.action_condition_decision_id
+    if not action_id or action_id not in thesis.decision_ids:
+        raise ValueError("fresh_event_action_condition_missing")
+    action = next((item for item in referenced if item.decision_id == action_id), None)
+    if (
+        action is None
+        or action.source_skill != "analyzing-price-trading"
+        or action.evidence_id != EVENT_REACTION_EVIDENCE_ID
+        or action.evidence_version != "event-price-reaction-v3"
+        or action.decision_role != "action_condition"
+    ):
+        raise ValueError("fresh_event_action_condition_invalid")
+    values = action.formation_values
+    if (
+        str(values.get("event_id", "")) != info.event_id
+        or str(values.get("reaction_window_status", "")) != "awaiting_first_session"
+        or int(values.get("observed_reaction_sessions", -1)) != 0
+        or str(values.get("reaction_start_date", "")) != action_date.isoformat()
+        or str(values.get("event_timing_status", "")) != "after_close"
+    ):
+        raise ValueError("fresh_event_reaction_boundary_invalid")
+    try:
+        decision_event_time = datetime.fromisoformat(str(values.get("event_available_at", "")))
+    except ValueError:
+        raise ValueError("fresh_event_reaction_boundary_invalid") from None
+    if decision_event_time.tzinfo is None or _shanghai(decision_event_time) != event_time:
+        raise ValueError("fresh_event_reaction_boundary_invalid")
+    numeric = _finite_v4_values(values)
+    if not (_V4_PRE_EVENT_RELATIVE_KEYS & numeric.keys()):
+        raise ValueError("fresh_event_pre_event_relative_missing")
+    if not (_V4_PRE_EVENT_RISK_KEYS & numeric.keys()):
+        raise ValueError("fresh_event_pre_event_risk_missing")
 
 
 def _prepare_selection_context(
