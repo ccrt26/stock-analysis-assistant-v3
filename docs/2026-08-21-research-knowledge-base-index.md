@@ -10,6 +10,7 @@
 4. [方正科技五个 Skill 的完整逻辑](2026-08-21-founder-technology-five-skill-analysis.md)
 5. [A股短期定价与公司业绩讨论](2026-08-21-a-share-earnings-and-short-term-pricing.md)
 6. [当前 V3 架构](architecture/current-v3-architecture.md)
+7. [选出股票后的轻量跟踪 V1](architecture/forward-monitoring-v1.md)
 
 ## 五个研究 Skill
 
@@ -41,3 +42,9 @@
 
 - [最终合同](architecture/a-share-short-horizon-engine-contract-v4.md)
 - [最终修复审计](2026-08-21-a-share-engine-final-fix-audit.md)
+
+## 选出后的跟踪
+
+- 方法边界：`research_registry.yaml` 中的 `src_forward_monitoring_prequential_horizon`
+- D1—D20 是预先固定的主要评价期；D21—D30 是本地轻量观察设计，不是论文给出的统一最优窗口。
+- 用户只看到通俗的状态变化和少量重点提醒；内部字段名与技术分类不直接展示。

@@ -1,5 +1,5 @@
 schema_version: v3-knowledge-governance-v1
-generated_on: 2026-08-21
+generated_on: 2026-08-23
 sources:
   - source_id: official-csrc-program-trading-2024
     grade: S
@@ -906,6 +906,42 @@ sources:
     method_summary: 使用账户级数据研究中国个人投资者的异质性和信息处理。
     limitations:
       - 公开日线、成交和融资数据不能识别账户规模、机构、游资或主力身份。
+
+  - source_id: paper-dawid-prequential-1984
+    grade: A
+    kind: peer_reviewed_paper
+    research_design: methodological
+    title: "Present Position and Potential Developments: Some Personal Views—Statistical Theory: The Prequential Approach"
+    publisher: Wiley
+    authors: [A. P. Dawid]
+    journal_or_series: Journal of the Royal Statistical Society Series A 147(2), 278-290
+    url: https://rss.onlinelibrary.wiley.com/doi/10.2307/2981683
+    doi: 10.2307/2981683
+    publication_date: 1984-03-01
+    last_verified_on: 2026-08-23
+    jurisdiction: 方法研究
+    market_scope: [通用预测评价]
+    method_summary: 以预测当时可得信息为边界，按实际发生顺序记录预测和结果并持续评价。
+    limitations:
+      - 逐日顺序评价不提供A股持有天数、提醒阈值或未来收益方向。
+
+  - source_id: paper-white-reality-check-2000
+    grade: A
+    kind: peer_reviewed_paper
+    research_design: methodological
+    title: A Reality Check for Data Snooping
+    publisher: Wiley
+    authors: [Halbert White]
+    journal_or_series: Econometrica 68(5), 1097-1126
+    url: https://onlinelibrary.wiley.com/doi/10.1111/1468-0262.00152
+    doi: 10.1111/1468-0262.00152
+    publication_date: 2000-09-01
+    last_verified_on: 2026-08-23
+    jurisdiction: 方法研究
+    market_scope: [通用模型评价]
+    method_summary: 说明反复尝试和事后挑选会夸大历史表现，需要预先固定评价方式并控制数据窥探。
+    limitations:
+      - 论文不提供A股20、25或30个交易日的统一最优窗口，也不验证本地提醒条件。
 
 entries:
   - knowledge_id: src_cn_program_trading_rules_2025
@@ -2137,3 +2173,45 @@ entries:
     local_validation:
       status: insufficient_for_direction
       reason: 本地没有媒体和账户数据；该知识只限定用词和代理边界。
+
+  - knowledge_id: src_forward_monitoring_prequential_horizon
+    title: 预先固定主评价期并按交易日顺序跟踪变化
+    primary_source_id: paper-mackinlay-event-study-1997
+    supporting_source_ids: [paper-dawid-prequential-1984, paper-white-reality-check-2000, paper-zhang-zhu-t1-2024, paper-zhang-zhang-price-limit-2025, paper-ma-liao-jiang-factor-momentum-2024, paper-sun-wen-earnings-car-2023, paper-barber-odean-attention-2008]
+    source_grade: A
+    version_status: current
+    effect: method_only
+    modules: [market, sector_theme, events, price_trading, orchestration]
+    opportunity_types: [general, industry_trend, earnings_rerating, company_event, turnaround]
+    topics: [prequential_evaluation, fixed_horizon, event_driven_reporting]
+    claim_summary: 选择理由冻结后，应预先固定主要评价期，按当时可得事实逐日记录结果，把市场、板块、公司和价格变化分开，并只把真实变化送入用户重点提醒；这套记录方法不提供未来收益保证。
+    allowed_uses:
+      - 主评价窗口预先固定。
+      - 逐日顺序记录预测和结果。
+      - 把市场、板块、公司、价格变化分开。
+      - A股短期强势需要检查反转、涨停延迟发现和过热。
+      - 用户报告采用事件驱动重点集合。
+    forbidden_uses:
+      - 文献没有证明20、25或30天是统一最优窗口。
+      - D21—D30尾部期是本地V1设计，不是论文阈值。
+      - 不能因为迟到上涨修改D20结果。
+      - 不能用单批三个案例调整Skill。
+      - 不能把关注度或成交量称为散户、机构、游资或主力。
+      - 不能从报告提醒推出收益保证。
+    prerequisites:
+      - 每条记录冻结原选择日期、次日可参与日期和带时区截止时间，只使用当时已经可得的事实。
+      - 主评价期结束后才评价原结果，后10个交易日只记录迟到变化，不回写原结论。
+    counter_evidence:
+      - 样本过少、数据覆盖不足、后见选择或反复修改窗口都会削弱复盘结论。
+      - 短期强势可能来自反转、涨跌停延迟发现或少数交易日贡献，提醒本身不是持续性证据。
+    data_requirements:
+      - {kind: fact, name: trade_calendar, required_fields: [cal_date, is_open, available_at]}
+      - {kind: fact, name: equity_daily, required_fields: [trade_date, ts_code, open, high, low, close, amount, available_at]}
+      - {kind: fact, name: adj_factor, required_fields: [trade_date, ts_code, adj_factor, available_at]}
+      - {kind: fact, name: announcement, required_fields: [announcement_id, announcement_time, ts_code, title, available_at]}
+      - {kind: derived, name: market_context, required_fields: [analysis_date]}
+      - {kind: derived, name: sector_hotspot, required_fields: [analysis_date, group_code]}
+      - {kind: derived, name: price_analysis_context, required_fields: [analysis_date, ts_code]}
+    local_validation:
+      status: insufficient_for_direction
+      reason: 当前本地记录能力足以固定窗口并按日保存变化，但没有足够前向样本证明任何提醒条件能预测未来方向。

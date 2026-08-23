@@ -2,7 +2,7 @@
 
 这是当前个人 A 股助手的正式每日推荐研究。只执行研究，不开发或修改程序，不改写 Skill，不启动新的 Codex/模型进程，不读取未来行情。
 
-## 1. 确定性准备
+## 1. 每日准备与共同市场判断
 
 在项目根目录运行：
 
@@ -10,7 +10,17 @@
 ./.venv/bin/python -m stock_analyzer.ops.forward_selection prepare
 ```
 
-只有返回 `status=ready_for_research` 才继续。若返回 `already_selected`、`non_trading_day`、数据缺口或错误，说明具体状态后停止，不补猜。
+若为交易日且返回可靠的 `formation_date`，先用该已收盘日期和带时区截止时间运行：
+
+```bash
+./.venv/bin/python -m stock_analyzer.ops.forward_monitor prepare \
+  --analysis-date <formation_date> \
+  --as-of <selection_as_of>
+```
+
+然后读取 `ops/forward-monitor-prompt.md`。市场 Skill 每天只分析一次，同一份市场结果同时用于已有股票跟踪和当天新选股。先根据 monitor snapshot 生成并 `record` 跟踪报告；只有 selection 返回 `ready_for_research` 时才继续当天 V4 新选股。
+
+若 selection 返回 `already_selected`，仍可生成跟踪报告，但不得重复执行新选股。若当天没有仍在跟踪的记录，跳过跟踪明细，正常执行新选股。若返回 `non_trading_day`、数据缺口或错误，说明真实状态，不补猜。
 
 把返回的以下三个字段作为唯一时间边界：
 
@@ -38,7 +48,7 @@ stock_analyzer.ops.forward_selection.DailyResearchTraceV4
 
 ## 3. 五个 Skill 的执行顺序
 
-1. 市场 Skill 读取形成日 `market_context`，输出六种之一的 `market_propagation_mode`，并按事实填写可并存的 `market_risk_overlays`；市场不输出股票。
+1. 市场 Skill 读取当日 `market_context`，输出六种之一的 `market_propagation_mode`，并按事实填写可并存的 `market_risk_overlays`；市场不输出股票。这一步只运行一次，并把结果同时交给跟踪和新选股。
 2. 板块、公司和价格三个 Skill 在相同冻结边界和完整合格股票范围内独立发现，提交前不读取彼此候选。
 3. 公司 Skill 对主要事件核对完整披露链：预告、预告修正、快报、正式报告和更正，并确定 `new_information_level`。
 4. 板块 Skill 严格区分 `sector_broad_diffusion` 与 `sector_leader_cluster`，保存 V4 要求的成员和传播原值。
@@ -140,7 +150,14 @@ local_archive/forward_selection/pending-trace-<formation_date>.json
 
 只有返回 `selection_frozen` 或 `already_selected` 才算完成。若返回结构或证据校验错误，不得退回旧版轨迹，不得删减 V4 字段，应按错误定位当前 V4 JSON。
 
-最终向用户给出：
+最终向用户只给出一份合并报告，使用通俗说法，不向用户展示 `formation_date`、`engine_type` 等内部字段名：
+
+- 今日市场
+- 已有股票重点提醒
+- 跟踪数量概览
+- 今日新选股
+
+“今日新选股”部分给出：
 
 - 正式推荐股票或空名单
 - 排序
