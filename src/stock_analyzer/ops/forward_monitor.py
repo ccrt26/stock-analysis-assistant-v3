@@ -75,7 +75,10 @@ class ForwardMonitorAlertV1(BaseModel):
     ts_code: str = Field(min_length=9)
     name: str = Field(min_length=1)
     episode_ids: list[str] = Field(min_length=1)
-    role: Literal["selected", "comparator"]
+    roles: list[Literal["selected", "comparator"]] = Field(
+        min_length=1,
+        max_length=2,
+    )
     day_numbers: list[int] = Field(min_length=1)
     original_engine_types: list[str]
     alert_type: Literal[
@@ -98,6 +101,17 @@ class ForwardMonitorAlertV1(BaseModel):
     confirmation_condition: str = Field(min_length=1)
     invalidation_condition: str = Field(min_length=1)
     why_reported: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_roles(self) -> "ForwardMonitorAlertV1":
+        fixed_order = [
+            role
+            for role in ("selected", "comparator")
+            if role in self.roles
+        ]
+        if self.roles != fixed_order:
+            raise ValueError("roles must be unique and ordered selected, comparator")
+        return self
 
 
 class DailyForwardMonitorReportV1(BaseModel):
@@ -430,8 +444,10 @@ def record_forward_monitor(
             str(value)
             for value in attention_item.get("episode_ids", [])
         }
-        if not set(alert.episode_ids).issubset(attention_episode_ids):
-            raise ValueError(f"alert episode is not in stock attention set: {alert.ts_code}")
+        if set(alert.episode_ids) != attention_episode_ids:
+            raise ValueError(
+                f"alert must include all stock attention episodes: {alert.ts_code}"
+            )
         referenced: list[dict[str, Any]] = []
         for episode_id in alert.episode_ids:
             episode = episodes.get(episode_id)
@@ -440,9 +456,14 @@ def record_forward_monitor(
             if str(episode.get("ts_code")) != alert.ts_code:
                 raise ValueError(f"alert episode stock mismatch: {episode_id}")
             referenced.append(episode)
-        valid_roles = {str(item.get("role")) for item in referenced}
-        if valid_roles != {alert.role}:
-            raise ValueError(f"alert role does not match referenced episodes: {alert.ts_code}")
+        referenced_roles = {str(item.get("role")) for item in referenced}
+        valid_roles = [
+            role
+            for role in ("selected", "comparator")
+            if role in referenced_roles
+        ]
+        if alert.roles != valid_roles:
+            raise ValueError(f"alert roles do not match referenced episodes: {alert.ts_code}")
         valid_days = sorted({int(item["day_number"]) for item in referenced})
         if alert.day_numbers != valid_days:
             raise ValueError(f"alert day numbers do not match referenced episodes: {alert.ts_code}")
@@ -591,7 +612,7 @@ def _render_markdown(
                 "",
                 "当前："
                 + " / ".join(f"D{day}" for day in alert.day_numbers),
-                f"原角色：{role_labels[alert.role]}",
+                "原角色：" + " / ".join(role_labels[role] for role in alert.roles),
                 f"最初入选依据：{basis or '未记录'}",
                 "原始主要理由："
                 + ("；".join(primary_reasons) if primary_reasons else "未记录"),
@@ -1113,7 +1134,11 @@ def _aggregate_attention(episodes: list[dict[str, Any]]) -> list[dict[str, Any]]
                 "ts_code": ts_code,
                 "name": next((str(item["name"]) for item in items if item.get("name")), ""),
                 "episode_ids": sorted(str(item["episode_id"]) for item in items),
-                "roles": sorted({str(item["role"]) for item in items}),
+                "roles": [
+                    role
+                    for role in ("selected", "comparator")
+                    if any(str(item["role"]) == role for item in items)
+                ],
                 "day_numbers": sorted({int(item["day_number"]) for item in items}),
                 "original_engine_types": sorted({str(item["original_engine_type"]) for item in items if item.get("original_engine_type")}),
                 "attention_reasons": [reason for reason in allowed if reason in reasons],

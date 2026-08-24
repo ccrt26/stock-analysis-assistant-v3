@@ -106,6 +106,65 @@ def test_event_backfill_stores_official_announcement_and_structured_actions(tmp_
     assert summary.failed == 0
 
 
+def test_next_morning_extension_changes_only_the_announcement_end_date(tmp_path):
+    class TrackingActionPro(ActionPro):
+        def __init__(self):
+            super().__init__()
+            self.holder_calls = []
+            self.float_calls = []
+            self.repurchase_calls = []
+            self.pledge_calls = []
+
+        def stk_holdertrade(self, **kwargs):
+            self.holder_calls.append(kwargs)
+            return super().stk_holdertrade(**kwargs)
+
+        def share_float(self, **kwargs):
+            self.float_calls.append(kwargs)
+            return super().share_float(**kwargs)
+
+        def repurchase(self, **kwargs):
+            self.repurchase_calls.append(kwargs)
+            return super().repurchase(**kwargs)
+
+        def pledge_stat(self, **kwargs):
+            self.pledge_calls.append(kwargs)
+            return super().pledge_stat(**kwargs)
+
+    class TrackingAnnouncementClient:
+        def __init__(self):
+            self.calls = []
+
+        def fetch_announcements(self, start, through):
+            self.calls.append((start, through))
+            return []
+
+    friday = date(2026, 8, 21)
+    monday = date(2026, 8, 24)
+    pro = TrackingActionPro()
+    announcements = TrackingAnnouncementClient()
+    service = EventBackfillService(
+        TushareResearchClient(pro, pacer=lambda method: None),
+        announcements,
+        ResearchWarehouse(tmp_path / "warehouse"),
+    )
+
+    service.backfill(
+        start=friday,
+        through=friday,
+        announcement_through=monday,
+        trading_dates=(friday,),
+        resume=False,
+    )
+
+    assert announcements.calls == [(friday, monday)]
+    assert pro.holder_calls[0]["end_date"] == "20260821"
+    assert pro.float_calls[0]["ann_date"] == "20260821"
+    assert pro.repurchase_calls[0]["end_date"] == "20260821"
+    assert pro.pledge_calls[0]["end_date"] == "20260821"
+    assert pro.suspension_calls == ["20260821"]
+
+
 def test_event_backfill_limits_daily_suspension_history_to_one_year(tmp_path):
     pro = ActionPro()
     warehouse = ResearchWarehouse(tmp_path / "warehouse")

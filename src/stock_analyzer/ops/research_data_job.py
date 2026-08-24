@@ -5,11 +5,12 @@ import json
 import re
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from functools import partial
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 import httpx
 import pandas as pd
@@ -38,6 +39,7 @@ BROAD_INDEX_CODES = (
     "000852.SH",
     "899050.BJ",
 )
+SHANGHAI = ZoneInfo("Asia/Shanghai")
 
 _FINANCIAL_REPORT_TITLE = re.compile(
     r"\d{4}年(?:年度|半年度|第一季度|第三季度)报告"
@@ -299,6 +301,7 @@ def _run_research_stage_impl(
         ).backfill(
             start=data_date,
             through=data_date,
+            announcement_through=_shanghai_today(),
             trading_dates=(),
             resume=False,
         )
@@ -320,6 +323,10 @@ def _run_research_stage_impl(
             data_date=data_date,
         )
     raise ValueError(f"unsupported research data stage: {stage}")
+
+
+def _shanghai_today() -> date:
+    return datetime.now(SHANGHAI).date()
 
 
 def select_fundamental_refresh_codes(

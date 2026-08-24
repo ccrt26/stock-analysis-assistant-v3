@@ -148,13 +148,19 @@ data health
 
 交易日上午约 09:05 的最终研究由 Codex 原生 Scheduled Task 在当前项目中直接调用 `$orchestrating-stock-research`，总控在同一个顶层会话内使用四个专业 Skill；仓库代码不通过 Python 启动第二个 Codex，也没有第四个 AI LaunchAgent。`prepare` 冻结上一交易日、行动日和带时区的 `as_of`，等待次晨数据并结算到期 D20；Codex 只生成 `pending-trace-<formation_date>.json` 一份 `daily-research-trace-v4` 完整轨迹。`record-trace` 校验结构、日期、合格股票、候选守恒、唯一决定引用、已确认价格支持的最小形成日数值，以及 `fresh_event_pending` 的事件时点和等待窗口，从其中抽取现有 `ResearchResult` 调用 `record_daily_selection`，写入现有 Forward CSV 后将完整轨迹原子归档为 `research-trace-<formation_date>.json`。程序不判断事件语义、材料性、内部分类、传播或价格解释是否正确。既有 v1/v2/v3 归档不迁移、不倒填；现有 `record` 命令、`ResearchResult`、Forward CSV 字段和 D20 结算保持不变，完整 trace 不写入 DuckDB。
 
+次晨任务的数据日期仍是上一交易日，只有公告补采延长到上海实际运行日，股东变动、回购、质押、解禁和停牌仍截止上一交易日。`prepare` 保持最初冻结的 `as_of`；次晨任务失败或等待上游时立即返回明确状态，其他未就绪情况每30秒检查一次，最晚到行动日09:30停止且不再休眠。`fresh_event_pending` 接受形成日15:00（含）到行动日09:30（不含）、且不晚于冻结 `as_of` 的首次重大公开信息。
+
 ### 5.7 选出后的轻量跟踪
 
 `src/stock_analyzer/ops/forward_monitor.py` 复用现有 09:05 任务，提供 `register`、`prepare`、`record` 三个命令。程序每天记录全部仍开放的选择记录，并根据固定变化原因临时生成当天重点集合；AI 和五个现有 Skill 只解释这个小集合，用户日报最多8只股票。它不建立第二套人工股票池，不打分，也不增加任务、数据库或服务。
 
+同一股票当天同时有入选和对照记录时只生成一条提醒，但必须引用全部重点记录并显示两个原角色。
+
 D1—D20 是固定主评价期，仍由现有 Forward 口径在 D20 结算；D21—D30 只做被动后续观察，迟到上涨不能回写 D20；D30 后旧记录关闭。完整说明见 `docs/architecture/forward-monitoring-v1.md`。
 
 研究超过 18 分钟或 09:30 后完成仍可保存，只要冻结的 `as_of` 早于行动日 09:30，且所有行情交易日期不晚于形成日、所有事实满足 `available_at <= as_of`。合规结果统一按 `selection` 语义写入被 Git 忽略的 `local_archive/forward_selection/forward-selection-log.csv`；历史 `validation_mode` 只为 CSV 兼容保留，不再形成 forward/reconstructed 两套推荐。历史记录首次由 `docs/forward-selection-log.csv` 初始化，之后只在 D1—D20 行情完整时一次性结算。
+
+如果本次确实完成了当天新选择且合并报告生成时已过09:30，只在“今日新选股”前提示结论基于开盘前冻结信息、原行动窗口已过，当前价格不能替代原行动条件；不改变原研究、不重读盘中价格、不重跑。
 
 `select_minute_candidate_scope` 中的确定性排序只用于限制可选分钟数据的采集范围，属于数据成本控制，不是投资评分或最终候选排名；分钟数据也不是目标架构的每日必需输入。
 

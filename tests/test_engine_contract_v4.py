@@ -34,6 +34,53 @@ def test_v4_fresh_event_requires_pre_event_risk():
  t=_fresh(); t["decision_trace"][1]["formation_values"].pop("pre_event_return_20d")
  with pytest.raises(ValueError,match="fresh_event_pre_event_risk_missing"): _v(t)
 
+def _weekend_fresh(event_available_at: str, timing_status: str):
+ t=_fresh(); formation=date(2026,8,21); action=date(2026,8,24); as_of=datetime(2026,8,24,9,5,tzinfo=SHANGHAI)
+ t.update(formation_date=str(formation),action_date=str(action),as_of=as_of.isoformat())
+ info=t["candidate_ledger"][0]["research_thesis"]["company_information"]
+ info["event_available_at"]=event_available_at
+ values=t["decision_trace"][1]["formation_values"]
+ values.update(event_available_at=event_available_at,reaction_start_date=str(action),event_timing_status=timing_status)
+ return t
+
+def _v_weekend(t, *, as_of=datetime(2026,8,24,9,5,tzinfo=SHANGHAI)):
+ return _validate_trace(t,formation_date=date(2026,8,21),action_date=date(2026,8,24),selection_as_of=as_of,eligible={"000001.SZ":"平安银行"})
+
+@pytest.mark.parametrize(
+ ("event_available_at","timing_status"),
+ [
+  ("2026-08-21T19:34:27+08:00","after_close"),
+  ("2026-08-22T10:00:00+08:00","nontrading_day"),
+  ("2026-08-23T22:00:00+08:00","nontrading_day"),
+  ("2026-08-24T08:30:00+08:00","preopen"),
+ ],
+)
+def test_v4_fresh_event_accepts_the_full_preopen_window(event_available_at, timing_status):
+ assert _v_weekend(_weekend_fresh(event_available_at,timing_status)).candidate_ledger[0].research_thesis.engine_status=="conditional"
+
+@pytest.mark.parametrize(
+ "event_available_at",
+ ["2026-08-20T20:00:00+08:00","2026-08-21T14:59:59+08:00"],
+)
+def test_v4_fresh_event_rejects_facts_before_formation_close(event_available_at):
+ with pytest.raises(ValueError,match="fresh_event_not_after_formation_close"):
+  _v_weekend(_weekend_fresh(event_available_at,"after_close"))
+
+def test_v4_fresh_event_rejects_facts_after_the_frozen_cutoff():
+ with pytest.raises(ValueError,match="company_event_available_after_as_of"):
+  _v_weekend(_weekend_fresh("2026-08-24T09:06:00+08:00","preopen"))
+
+def test_v4_fresh_event_rejects_action_open_even_with_a_later_as_of():
+ later_as_of=datetime(2026,8,24,9,31,tzinfo=SHANGHAI)
+ t=_weekend_fresh("2026-08-24T09:30:00+08:00","intraday_unresolved")
+ t["as_of"]=later_as_of.isoformat()
+ with pytest.raises(ValueError,match="fresh_event_not_before_action_open"):
+  _v_weekend(t,as_of=later_as_of)
+
+def test_v4_fresh_event_rejects_a_timing_label_that_disagrees_with_the_timestamp():
+ with pytest.raises(ValueError,match="fresh_event_reaction_boundary_invalid"):
+  _v_weekend(_weekend_fresh("2026-08-23T22:00:00+08:00","after_close"))
+
 def test_v4_is_required_for_new_formation_dates():
  t=_trace(); t["trace_version"]="daily-research-trace-v3"
  with pytest.raises(ValueError,match="v4_trace_required_for_new_formation_date"):

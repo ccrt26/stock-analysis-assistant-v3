@@ -46,17 +46,20 @@ class EventBackfillService:
         through: date,
         trading_dates: Iterable[date],
         resume: bool = True,
+        announcement_through: date | None = None,
     ) -> BackfillSummary:
         summary = BackfillSummary(scope="events", start=start, through=through)
-        announcement_start = max(start, through - timedelta(days=365))
+        announcement_end = announcement_through or through
+        announcement_start = max(start, announcement_end - timedelta(days=365))
+        announcement_current_month = announcement_end.strftime("%Y-%m")
         current_month = through.strftime("%Y-%m")
-        for month_start, month_end in _month_ranges(announcement_start, through):
+        for month_start, month_end in _month_ranges(announcement_start, announcement_end):
             partition = month_start.strftime("%Y-%m")
             if self._should_skip_historical(
                 ResearchDatasetId.ANNOUNCEMENT,
                 partition,
-                current_month=current_month,
-                through=through,
+                current_month=announcement_current_month,
+                through=announcement_end,
                 resume=resume,
             ):
                 summary.skipped += 1
@@ -67,7 +70,7 @@ class EventBackfillService:
                 partition,
                 "cninfo.new/hisAnnouncement/query",
                 announcements,
-                through,
+                announcement_end,
                 summary,
             )
             self._mark_partition_checked(

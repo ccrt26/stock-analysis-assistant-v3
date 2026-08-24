@@ -28,7 +28,7 @@
 - `action_date`
 - `selection_as_of`
 
-不得移动已经冻结的 `selection_as_of`；不得读取 `available_at > selection_as_of` 的事实，也不得读取交易日期晚于 `formation_date` 的行情、行动日开盘/分钟走势或未来 D20 结果。
+不得改变 `selection_as_of`；不得读取 `available_at > selection_as_of` 的事实，也不得读取交易日期晚于 `formation_date` 的行情、行动日开盘/分钟走势或未来 D20 结果。
 
 ## 2. 唯一研究合同
 
@@ -98,7 +98,8 @@ independent_demand_acceleration
 
 只适用于 `fresh_event_pending`。必须是：
 
-- 形成日 15:00 后首次公开；
+- 公开时间满足 `formation_date 15:00（含） <= event_available_at < action_date 09:30`，并且不晚于 `selection_as_of`；
+- 时间标签必须与实际公开时间一致：形成日收盘后为 `after_close`，中间非交易日为 `nontrading_day`，行动日开盘前为 `preopen`；不得使用 `intraday_unresolved`；
 - `new_information_level=substantive_new`；
 - 与主营直接相关；
 - 材料性可解释；
@@ -157,13 +158,15 @@ local_archive/forward_selection/pending-trace-<formation_date>.json
 - 跟踪数量概览
 - 今日新选股
 
+在输出这份合并报告前，只读取一次上海当前时间。只有本次 selection 返回 `ready_for_research`、实际生成了“今日新选股”，并且读取到的时间已经达到或晚于 `action_date 09:30` 时，才在“今日新选股”前提示：本次结论依据开盘前冻结信息完成，但已过原行动窗口；原研究结论不变，当前价格不能替代原来的行动条件。09:30 前不提示，`already_selected` 不提示。不得改变 `selection_as_of`，不得重读盘中价格，也不得重跑研究。
+
 “今日新选股”部分给出：
 
 - 正式推荐股票或空名单
 - 排序
-- 发动机类型和状态
+- 当前短期推动因素，以及是否已经得到价格确认
 - 为什么是现在
-- 价格确认或条件性首次定价要求
-- 剩余路径
+- 现在参与需要满足什么条件
+- 后续还有多少空间
 - 最强反证
 - 与最近替代股的比较

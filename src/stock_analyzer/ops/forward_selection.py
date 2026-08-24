@@ -1551,8 +1551,18 @@ def _validate_v4_fresh_event_pending(
     event_time = _shanghai(info.event_available_at)
     if event_time > _shanghai(as_of):
         raise ValueError("fresh_event_available_after_as_of")
-    if event_time.date() != formation_date or event_time.time() < time(15):
+    formation_close = datetime.combine(formation_date, time(15), SHANGHAI)
+    action_open = datetime.combine(action_date, MARKET_OPEN, SHANGHAI)
+    if event_time < formation_close:
         raise ValueError("fresh_event_not_after_formation_close")
+    if event_time >= action_open:
+        raise ValueError("fresh_event_not_before_action_open")
+    if event_time.date() == formation_date:
+        expected_timing_status = "after_close"
+    elif event_time.date() == action_date:
+        expected_timing_status = "preopen"
+    else:
+        expected_timing_status = "nontrading_day"
     company_support = [
         item for item in referenced
         if item.source_skill == "researching-company-events"
@@ -1579,7 +1589,7 @@ def _validate_v4_fresh_event_pending(
         or str(values.get("reaction_window_status", "")) != "awaiting_first_session"
         or int(values.get("observed_reaction_sessions", -1)) != 0
         or str(values.get("reaction_start_date", "")) != action_date.isoformat()
-        or str(values.get("event_timing_status", "")) != "after_close"
+        or str(values.get("event_timing_status", "")) != expected_timing_status
     ):
         raise ValueError("fresh_event_reaction_boundary_invalid")
     try:
@@ -1679,12 +1689,22 @@ def _prepare_selection_context(
             error="formation_date_is_not_prior_trading_date",
             **summary_base,
         )
-    _wait_until_data_ready(
+    readiness_error = _wait_until_data_ready(
         data=data,
         formation_date=formation_date,
+        action_date=action_date,
         clock=clock,
         sleep=sleep,
     )
+    if readiness_error:
+        return None, RunSummary(
+            status="data_not_ready",
+            formation_date=formation_date.isoformat(),
+            action_date=action_date.isoformat(),
+            selection_as_of=selection_as_of.isoformat(timespec="seconds"),
+            error=readiness_error,
+            **summary_base,
+        )
 
     updated_rows, settled = apply_mature_settlements(
         rows,
@@ -1773,15 +1793,38 @@ def _wait_until_data_ready(
     *,
     data: ForwardData,
     formation_date: date,
+    action_date: date,
     clock: Callable[[], datetime],
     sleep: Callable[[float], None],
-) -> None:
+) -> str:
+    market_open = datetime.combine(action_date, MARKET_OPEN, SHANGHAI)
     while True:
         checked_at = _shanghai(clock())
         report = data.health_report(formation_date)
         if _data_ready(report, formation_date, checked_at):
-            return
-        sleep(float(READINESS_POLL_SECONDS))
+            return ""
+        stage_status = _next_morning_stage_status(report, formation_date)
+        if stage_status in {"failed", "waiting_upstream"}:
+            return f"next_morning_stage_{stage_status}"
+        if checked_at >= market_open:
+            return "next_morning_data_not_ready_by_market_open"
+        remaining = (market_open - checked_at).total_seconds()
+        sleep(min(float(READINESS_POLL_SECONDS), remaining))
+
+
+def _next_morning_stage_status(
+    report: dict[str, Any],
+    formation_date: date,
+) -> str:
+    rows = [
+        row
+        for row in report.get("latest_stage_runs", [])
+        if row.get("stage") == "next-morning"
+        and row.get("data_date") == formation_date.isoformat()
+    ]
+    if len(rows) != 1:
+        return ""
+    return str(rows[0].get("status", ""))
 
 
 def _data_ready(

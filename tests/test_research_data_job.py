@@ -289,6 +289,7 @@ def test_next_morning_only_checks_current_date_facts_and_then_derives(
     import stock_analyzer.ops.research_data_job as job
 
     order = []
+    event_options = []
     late = BackfillSummary(
         scope="events", start=date(2026, 7, 13), through=date(2026, 7, 13)
     )
@@ -304,6 +305,7 @@ def test_next_morning_only_checks_current_date_facts_and_then_derives(
 
         def backfill(self, **kwargs):
             assert kwargs["resume"] is False
+            event_options.append(kwargs)
             order.append("late-events")
             return late
 
@@ -322,6 +324,7 @@ def test_next_morning_only_checks_current_date_facts_and_then_derives(
         lambda *args: (date(2026, 7, 13),),
     )
     monkeypatch.setattr(job, "EventBackfillService", EventService)
+    monkeypatch.setattr(job, "_shanghai_today", lambda: date(2026, 7, 16))
     monkeypatch.setattr(job, "TradingStructureBackfillService", TradingService)
     monkeypatch.setattr(
         job,
@@ -354,6 +357,15 @@ def test_next_morning_only_checks_current_date_facts_and_then_derives(
         "trading-structure",
         "reconcile",
         "derive",
+    ]
+    assert event_options == [
+        {
+            "start": date(2026, 7, 13),
+            "through": date(2026, 7, 13),
+            "announcement_through": date(2026, 7, 16),
+            "trading_dates": (),
+            "resume": False,
+        }
     ]
     assert summaries[-1].scope == "derived-research-features"
 

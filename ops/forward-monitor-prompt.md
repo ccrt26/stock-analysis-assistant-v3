@@ -50,7 +50,8 @@ local_archive/forward_monitor/pending-report-<analysis_date>.json
 
 - `market_propagation_mode` 只能是 `broad_sustained_participation`、`one_day_repair`、`sector_rotation`、`concentrated_speculation`、`weak_or_fragmented`、`unclear` 之一；
 - `pool_summary` 和 `unreported_attention_count` 必须与 snapshot 完全一致；
-- 每只提醒的股票名称、所引用记录、原角色、当前 D 数和最初入选依据必须与实际引用的跟踪记录完全一致，不得漏写或编造。
+- 每只提醒的 `episode_ids` 必须包含该股票全部 attention episode，不得只取子集；`roles`、当前 D 数和最初入选依据必须从这些记录完整得出。
+- `roles` 必须非空、去重且只允许 `selected`、`comparator`，固定按 `selected` 后 `comparator` 排列。同一股票同时有两种角色时仍只写一条提醒，向用户显示“原角色：入选 / 对照”。
 
 用户看到的每只提醒必须包含“当前：D…、原角色、最初入选依据、原始主要理由、当前状态、大盘、板块、个股、公司、未来1—3个交易日基础情形、确认条件、失效条件、提醒原因”，内部英文值一律换成通俗中文。
 

@@ -37,6 +37,13 @@ def test_existing_daily_prompt_stays_v4_and_adds_monitor_in_same_task() -> None:
     assert "已有股票重点提醒" in text
     assert "跟踪数量概览" in text
     assert "今日新选股" in text
+    assert "开盘前冻结信息" in text
+    assert "已过原行动窗口" in text
+    assert "当前价格" in text
+    assert "09:30" in text
+    assert "不得改变 `selection_as_of`" in text
+    assert "当前短期推动因素" in text
+    assert "- 发动机类型和状态" not in text
     assert text.count("09:05 Scheduled Task") == 1
 
 
@@ -60,6 +67,8 @@ def test_forward_monitor_prompt_uses_previous_state_and_strict_report_contract()
     assert "最初入选依据" in text
     assert "原始主要理由" in text
     assert "当前：D" in text
+    assert "roles" in text
+    assert "该股票全部 attention episode" in text
 
 
 def test_periodic_review_reads_monitor_history_and_checks_reminder_timing() -> None:

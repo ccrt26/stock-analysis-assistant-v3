@@ -60,12 +60,14 @@ class FakeData:
         action_date_status: bool | None = True,
         ready: bool = True,
         ready_states: list[bool] | None = None,
+        stage_status: str = "limited",
         prices: dict[str, list[PricePoint] | None] | None = None,
     ) -> None:
         self._open_dates = open_dates
         self.action_date_status = action_date_status
         self.ready = ready
         self.ready_states = iter(ready_states) if ready_states is not None else None
+        self.stage_status = stage_status
         self.health_calls = 0
         self.prices = prices or {}
 
@@ -95,7 +97,7 @@ class FakeData:
                 {
                     "stage": "next-morning",
                     "data_date": formation_date.isoformat(),
-                    "status": "limited",
+                    "status": self.stage_status,
                     "started_at": finished.replace(minute=0).isoformat(),
                     "finished_at": finished.isoformat(),
                 }
@@ -546,6 +548,63 @@ def test_unready_next_morning_data_keeps_waiting_past_0915(tmp_path: Path) -> No
     assert sleeps == [30] * 21
     assert research.calls == 1
     assert len(_read_csv(csv_path)) == 1
+    assert summary.selection_as_of == checks[0].isoformat(timespec="seconds")
+
+
+@pytest.mark.parametrize("stage_status", ["failed", "waiting_upstream"])
+def test_failed_next_morning_stage_returns_without_sleeping(
+    tmp_path: Path,
+    stage_status: str,
+) -> None:
+    start = datetime(2026, 8, 19, 9, 5, tzinfo=SHANGHAI)
+    research = FakeResearch(_empty_result())
+
+    summary, _ = _run(
+        tmp_path,
+        now=_clock(start, start),
+        data=FakeData(
+            open_dates=[date(2026, 8, 18), date(2026, 8, 19)],
+            ready=False,
+            stage_status=stage_status,
+        ),
+        research=research,
+        sleep=lambda _seconds: pytest.fail("终态失败后不应继续等待"),
+    )
+
+    assert summary.status == "data_not_ready"
+    assert summary.error == f"next_morning_stage_{stage_status}"
+    assert summary.selection_as_of == start.isoformat(timespec="seconds")
+    assert research.calls == 0
+
+
+def test_unready_next_morning_stage_stops_at_market_open(tmp_path: Path) -> None:
+    start = datetime(2026, 8, 19, 9, 5, tzinfo=SHANGHAI)
+    market_open = start.replace(hour=9, minute=30)
+    sleeps: list[float] = []
+
+    def finite_sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+        if len(sleeps) > 1:
+            raise AssertionError("开盘时不得再 sleep")
+
+    research = FakeResearch(_empty_result())
+    summary, _ = _run(
+        tmp_path,
+        now=_clock(start, start, market_open),
+        data=FakeData(
+            open_dates=[date(2026, 8, 18), date(2026, 8, 19)],
+            ready=False,
+            stage_status="running",
+        ),
+        research=research,
+        sleep=finite_sleep,
+    )
+
+    assert summary.status == "data_not_ready"
+    assert summary.error == "next_morning_data_not_ready_by_market_open"
+    assert summary.selection_as_of == start.isoformat(timespec="seconds")
+    assert sleeps == [30]
+    assert research.calls == 0
 
 
 def test_existing_forward_empty_decision_is_idempotent(tmp_path: Path) -> None:

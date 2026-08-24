@@ -1178,7 +1178,7 @@ def _alert(ts_code: str, episode_id: str) -> dict:
         "ts_code": ts_code,
         "name": "银龙股份",
         "episode_ids": [episode_id],
-        "role": "selected",
+        "roles": ["selected"],
         "day_numbers": [1],
         "original_engine_types": ["independent_demand_acceleration"],
         "alert_type": "checkpoint",
@@ -1192,6 +1192,113 @@ def _alert(ts_code: str, episode_id: str) -> dict:
         "invalidation_condition": "相对表现继续走弱",
         "why_reported": "固定检查日",
     }
+
+
+def _mixed_role_snapshot() -> dict:
+    selected_id = "daily:2026-07-31:603969.SH:selected"
+    comparator_id = "daily:2026-07-20:603969.SH:comparator"
+    episodes = [
+        {
+            "episode_id": selected_id,
+            "ts_code": "603969.SH",
+            "role": "selected",
+            "day_number": 1,
+            "original_engine_type": "independent_demand_acceleration",
+            "original_primary_reason": "入选时个股独立走强",
+        },
+        {
+            "episode_id": comparator_id,
+            "ts_code": "603969.SH",
+            "role": "comparator",
+            "day_number": 10,
+            "original_engine_type": "sector_leader_cluster",
+            "original_primary_reason": "对照时用于比较板块龙头",
+        },
+    ]
+    return {
+        "snapshot_version": "forward-monitor-snapshot-v1",
+        "analysis_date": "2026-08-03",
+        "as_of": "2026-08-03T18:00:00+08:00",
+        "summary": {
+            "open_episode_count": 2,
+            "distinct_stock_count": 1,
+            "selected_count": 1,
+            "comparator_count": 1,
+            "primary_count": 2,
+            "passive_tail_count": 0,
+            "attention_stock_count": 1,
+            "closed_count": 0,
+        },
+        "episodes": episodes,
+        "attention_stocks": [
+            {
+                "ts_code": "603969.SH",
+                "name": "银龙股份",
+                "episode_ids": [selected_id, comparator_id],
+                "roles": ["selected", "comparator"],
+                "day_numbers": [1, 10],
+                "original_engine_types": [
+                    "independent_demand_acceleration",
+                    "sector_leader_cluster",
+                ],
+                "attention_reasons": ["checkpoint"],
+            }
+        ],
+    }
+
+
+def test_report_accepts_one_alert_for_all_roles_of_the_same_stock(tmp_path: Path) -> None:
+    snapshot = _mixed_role_snapshot()
+    snapshot_path = tmp_path / "snapshot.json"
+    snapshot_path.write_text(json.dumps(snapshot), encoding="utf-8")
+    alert = _alert("603969.SH", snapshot["attention_stocks"][0]["episode_ids"][0])
+    alert.update(
+        episode_ids=snapshot["attention_stocks"][0]["episode_ids"],
+        roles=["selected", "comparator"],
+        day_numbers=[1, 10],
+        original_engine_types=[
+            "independent_demand_acceleration",
+            "sector_leader_cluster",
+        ],
+    )
+    pending = tmp_path / "pending.json"
+    pending.write_text(
+        json.dumps(_report_payload(snapshot, alerts=[alert]), ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    summary = record_forward_monitor(
+        snapshot_file=snapshot_path,
+        report_file=pending,
+        project_root=tmp_path,
+    )
+
+    saved = json.loads(Path(summary.json_file).read_text(encoding="utf-8"))
+    markdown = Path(summary.markdown_file).read_text(encoding="utf-8")
+    assert saved["alerts"][0]["roles"] == ["selected", "comparator"]
+    assert markdown.count("### 银龙股份（603969.SH）") == 1
+    assert "原角色：入选 / 对照" in markdown
+
+
+def test_record_rejects_omitting_one_attention_episode_for_the_same_stock(
+    tmp_path: Path,
+) -> None:
+    snapshot = _mixed_role_snapshot()
+    snapshot_path = tmp_path / "snapshot.json"
+    snapshot_path.write_text(json.dumps(snapshot), encoding="utf-8")
+    alert = _alert("603969.SH", snapshot["attention_stocks"][0]["episode_ids"][0])
+    pending = tmp_path / "pending.json"
+    pending.write_text(
+        json.dumps(_report_payload(snapshot, alerts=[alert]), ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="all stock attention episodes"):
+        record_forward_monitor(
+            snapshot_file=snapshot_path,
+            report_file=pending,
+            project_root=tmp_path,
+        )
 
 
 def test_report_model_rejects_more_than_eight_or_duplicate_stocks() -> None:
@@ -1221,7 +1328,7 @@ def test_report_accepts_eight_alerts_and_counts_the_rest() -> None:
     [
         "pool_summary",
         "name",
-        "role",
+        "roles",
         "original_engine_types",
         "day_numbers",
         "unreported_attention_count",
@@ -1248,8 +1355,8 @@ def test_record_rejects_each_snapshot_contract_mismatch(
         payload["pool_summary"]["selected_count"] += 1
     elif mismatch == "name":
         payload["alerts"][0]["name"] = "错误名称"
-    elif mismatch == "role":
-        payload["alerts"][0]["role"] = "comparator"
+    elif mismatch == "roles":
+        payload["alerts"][0]["roles"] = ["comparator"]
     elif mismatch == "original_engine_types":
         payload["alerts"][0]["original_engine_types"] = ["anchor_only"]
     elif mismatch == "day_numbers":

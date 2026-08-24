@@ -26,7 +26,7 @@
 
 已确认通道适用于四种 `active` 发动机。价格支持必须有观察日期、绝对价格或收益、成交、相对市场或行业收益，以及至少一个独立路径质量字段。
 
-条件性通道只适用于 `fresh_event_pending`：形成日15:00后公开、早于 `as_of`、首次、`substantive_new`、主营直接相关、材料性可解释、尚无首个完整交易日，并保存同一事件的公司支持、行动条件、公告前相对表现和抢跑/透支事实。它不是已确认。
+条件性通道只适用于 `fresh_event_pending`：公开时间必须满足 `formation_date 15:00（含） <= event_available_at < action_date 09:30` 且不晚于 `as_of`。形成日收盘后、中间非交易日、行动日开盘前分别使用 `after_close`、`nontrading_day`、`preopen`，不接受 `intraday_unresolved`。事件还必须是首次、`substantive_new`、主营直接相关、材料性可解释、尚无首个完整交易日，并保存同一事件的公司支持、行动条件、公告前相对表现和抢跑/透支事实。它不是已确认。
 
 ## 4. 市场传播
 
