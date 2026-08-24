@@ -12,7 +12,7 @@
   --as-of <带时区截止时间>
 ```
 
-程序处理全部 episode，并生成 `local_archive/forward_monitor/snapshot-<analysis_date>.json`。不得把全部股票交给 AI，不得建立人工维护的第二套股票池，不得打分。
+程序处理全部跟踪记录，并生成 `local_archive/forward_monitor/snapshot-<analysis_date>.json`。不得把全部股票交给 AI，不得建立人工维护的第二套股票池，不得打分。
 
 同一份市场 Skill 结果同时供选后跟踪和当天新选股使用，市场 Skill 每天只分析一次。
 
@@ -35,6 +35,9 @@
 
 公告正文继续按 V4 规则按需读取，不批量下载。总控 Skill 不重新判断这些股票当初是否应该入选，只判断今天有没有变化、是否需要提醒、未来1—3个交易日的基础情形、确认条件和失效条件。不得改写最初的入选依据、当时理由或原 D20 结果。
 
+每条跟踪记录都要查看 snapshot 中的 `previous_monitor_state`。判断今天的状态时，明确区分状态延续、正在转强后失效、正在转强后过热、等待确认后转强和其他真实变化；`previous_monitor_state` 只用于比较，不得机械维持上次状态。
+
+
 ## 3. 生成简短日报
 
 生成严格符合 `DailyForwardMonitorReportV1` 的：
@@ -42,6 +45,14 @@
 ```text
 local_archive/forward_monitor/pending-report-<analysis_date>.json
 ```
+
+报告必须严格对应当天 snapshot：
+
+- `market_propagation_mode` 只能是 `broad_sustained_participation`、`one_day_repair`、`sector_rotation`、`concentrated_speculation`、`weak_or_fragmented`、`unclear` 之一；
+- `pool_summary` 和 `unreported_attention_count` 必须与 snapshot 完全一致；
+- 每只提醒的股票名称、所引用记录、原角色、当前 D 数和最初入选依据必须与实际引用的跟踪记录完全一致，不得漏写或编造。
+
+用户看到的每只提醒必须包含“当前：D…、原角色、最初入选依据、原始主要理由、当前状态、大盘、板块、个股、公司、未来1—3个交易日基础情形、确认条件、失效条件、提醒原因”，内部英文值一律换成通俗中文。
 
 详细提醒最多8只不同股票。超过8只时，消息优先级固定为：
 
