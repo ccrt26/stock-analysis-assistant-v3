@@ -555,6 +555,175 @@ def test_prepare_calculates_adjusted_path_and_excludes_future_prices(tmp_path: P
     assert episode["current_hit_20pct_close"] is True
 
 
+def test_d20_close_hit_uses_forward_tolerance_at_twenty_percent(
+    tmp_path: Path,
+) -> None:
+    trace = _single_selected_trace(
+        formation_date="2026-07-31",
+        action_date="2026-08-03",
+    )
+    archive = tmp_path / "local_archive/forward_selection"
+    archive.mkdir(parents=True)
+    _write_trace(archive / "research-trace-2026-07-31.json", trace)
+    sessions = _seed_monitor_project(
+        tmp_path,
+        trace=trace,
+        session_count=1,
+        price_overrides={
+            1: {"open": 10.0, "close": 12.0, "high": 11.0, "low": 9.5},
+        },
+    )
+
+    episode = _prepare(tmp_path, sessions[0])["episodes"][0]
+
+    assert episode["d20_first_close_hit_20pct_date"] == sessions[0].isoformat()
+    assert episode["d20_hit_20pct_close_within_20d"] is True
+    assert episode["current_first_close_hit_20pct_date"] is None
+    assert episode["current_hit_20pct_close"] is False
+
+
+def test_mature_d20_metrics_require_complete_exact_twenty_day_path(
+    tmp_path: Path,
+) -> None:
+    incomplete_root = tmp_path / "incomplete"
+    trace = _single_selected_trace(
+        formation_date="2026-07-01",
+        action_date="2026-07-02",
+    )
+    archive = incomplete_root / "local_archive/forward_selection"
+    archive.mkdir(parents=True)
+    _write_trace(archive / "research-trace-2026-07-01.json", trace)
+    sessions = _seed_monitor_project(
+        incomplete_root,
+        trace=trace,
+        session_count=20,
+    )
+    for dataset in ("equity_daily", "adj_factor"):
+        (
+            incomplete_root
+            / f"local_warehouse/facts/{dataset}/trade_date={sessions[6]}/data.parquet"
+        ).unlink()
+
+    incomplete = _prepare(incomplete_root, sessions[-1])["episodes"][0]
+
+    assert "incomplete_price_path" in incomplete["data_limitations"]
+    for field in (
+        "d20_close_return_since_entry",
+        "d20_max_close_return_since_entry",
+        "d20_max_high_return_since_entry",
+        "d20_mae_since_entry",
+        "d20_first_close_hit_20pct_date",
+        "d20_first_high_hit_20pct_date",
+        "d20_hit_20pct_close_within_20d",
+    ):
+        assert incomplete[field] is None
+
+    complete_root = tmp_path / "complete"
+    archive = complete_root / "local_archive/forward_selection"
+    archive.mkdir(parents=True)
+    _write_trace(archive / "research-trace-2026-07-01.json", trace)
+    complete_sessions = _seed_monitor_project(
+        complete_root,
+        trace=trace,
+        session_count=20,
+    )
+
+    complete = _prepare(complete_root, complete_sessions[-1])["episodes"][0]
+
+    assert complete["d20_close_return_since_entry"] == pytest.approx(0.20)
+    assert complete["d20_hit_20pct_close_within_20d"] is True
+
+
+def test_legacy_target_hit_is_not_repeated_but_a_real_first_hit_is_alerted(
+    tmp_path: Path,
+) -> None:
+    trace = _single_selected_trace(
+        formation_date="2026-07-31",
+        action_date="2026-08-03",
+    )
+
+    legacy_root = tmp_path / "legacy"
+    archive = legacy_root / "local_archive/forward_selection"
+    archive.mkdir(parents=True)
+    _write_trace(archive / "research-trace-2026-07-31.json", trace)
+    legacy_sessions = _seed_monitor_project(
+        legacy_root,
+        trace=trace,
+        session_count=2,
+        price_overrides={
+            1: {"open": 10.0, "close": 12.1, "high": 12.2, "low": 9.5},
+            2: {"open": 12.0, "close": 12.2, "high": 12.3, "low": 11.8},
+        },
+    )
+    monitor_dir = legacy_root / "local_archive/forward_monitor"
+    monitor_dir.mkdir(parents=True)
+    (monitor_dir / f"snapshot-{legacy_sessions[0]}.json").write_text(
+        json.dumps(
+            {
+                "snapshot_version": "forward-monitor-snapshot-v1",
+                "analysis_date": legacy_sessions[0].isoformat(),
+                "as_of": datetime.combine(
+                    legacy_sessions[0],
+                    datetime.min.time(),
+                    SHANGHAI,
+                ).replace(hour=18).isoformat(),
+                "episodes": [
+                    {
+                        "episode_id": "formal:2026-07-31:603969.SH:selected",
+                        "first_close_hit_20pct_date": legacy_sessions[0].isoformat(),
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    repeated = _prepare(legacy_root, legacy_sessions[1])["episodes"][0]
+
+    assert "target_hit_first_time" not in repeated["attention_reasons"]
+
+    first_hit_root = tmp_path / "first-hit"
+    archive = first_hit_root / "local_archive/forward_selection"
+    archive.mkdir(parents=True)
+    _write_trace(archive / "research-trace-2026-07-31.json", trace)
+    first_hit_sessions = _seed_monitor_project(
+        first_hit_root,
+        trace=trace,
+        session_count=2,
+        price_overrides={
+            1: {"open": 10.0, "close": 11.0, "high": 11.5, "low": 9.5},
+            2: {"open": 11.0, "close": 12.1, "high": 12.2, "low": 10.8},
+        },
+    )
+    monitor_dir = first_hit_root / "local_archive/forward_monitor"
+    monitor_dir.mkdir(parents=True)
+    (monitor_dir / f"snapshot-{first_hit_sessions[0]}.json").write_text(
+        json.dumps(
+            {
+                "snapshot_version": "forward-monitor-snapshot-v1",
+                "analysis_date": first_hit_sessions[0].isoformat(),
+                "as_of": datetime.combine(
+                    first_hit_sessions[0],
+                    datetime.min.time(),
+                    SHANGHAI,
+                ).replace(hour=18).isoformat(),
+                "episodes": [
+                    {
+                        "episode_id": "formal:2026-07-31:603969.SH:selected",
+                        "d20_first_close_hit_20pct_date": None,
+                        "first_close_hit_20pct_date": None,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    first_hit = _prepare(first_hit_root, first_hit_sessions[1])["episodes"][0]
+
+    assert "target_hit_first_time" in first_hit["attention_reasons"]
+
+
 def test_breakout_uses_positive_numeric_state_for_changes_tail_and_overheat(tmp_path: Path) -> None:
     trace = _single_selected_trace(formation_date="2026-07-01", action_date="2026-07-02")
     archive = tmp_path / "local_archive/forward_selection"
@@ -1190,6 +1359,85 @@ def test_record_is_idempotent_and_preserves_conflicting_pending_report(tmp_path:
     assert conflict_pending.exists()
     assert final_json.read_bytes() == original_json
     assert final_markdown.read_bytes() == original_markdown
+
+
+def test_record_recovers_missing_markdown_without_rewriting_json(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    trace = _single_selected_trace(
+        formation_date="2026-07-31",
+        action_date="2026-08-03",
+    )
+    archive = tmp_path / "local_archive/forward_selection"
+    archive.mkdir(parents=True)
+    _write_trace(archive / "research-trace-2026-07-31.json", trace)
+    sessions = _seed_monitor_project(tmp_path, trace=trace, session_count=1)
+    snapshot = _prepare(tmp_path, sessions[0])
+    snapshot_path = (
+        tmp_path / f"local_archive/forward_monitor/snapshot-{sessions[0]}.json"
+    )
+    payload = _report_payload(
+        snapshot,
+        alerts=[_alert("603969.SH", snapshot["episodes"][0]["episode_id"])],
+    )
+    first_pending = tmp_path / "first-pending.json"
+    first_pending.write_text(
+        json.dumps(payload, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    first = record_forward_monitor(
+        snapshot_file=snapshot_path,
+        report_file=first_pending,
+        project_root=tmp_path,
+    )
+    final_json = Path(first.json_file)
+    final_markdown = Path(first.markdown_file)
+    original_json = final_json.read_bytes()
+    original_markdown = final_markdown.read_bytes()
+    final_markdown.unlink()
+
+    recovery_pending = tmp_path / "recovery-pending.json"
+    recovery_pending.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=4),
+        encoding="utf-8",
+    )
+    recovered = record_forward_monitor(
+        snapshot_file=snapshot_path,
+        report_file=recovery_pending,
+        project_root=tmp_path,
+    )
+
+    assert recovered.status == "already_recorded"
+    assert not recovery_pending.exists()
+    assert final_json.read_bytes() == original_json
+    assert final_markdown.read_bytes() == original_markdown
+
+    final_markdown.unlink()
+    failed_pending = tmp_path / "failed-pending.json"
+    failed_pending.write_text(
+        json.dumps(payload, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    def fail_markdown_write(path: Path, content: str) -> None:
+        raise OSError("markdown recovery failed")
+
+    monkeypatch.setattr(
+        "stock_analyzer.ops.forward_monitor._atomic_write_text",
+        fail_markdown_write,
+    )
+
+    with pytest.raises(OSError, match="markdown recovery failed"):
+        record_forward_monitor(
+            snapshot_file=snapshot_path,
+            report_file=failed_pending,
+            project_root=tmp_path,
+        )
+
+    assert final_json.read_bytes() == original_json
+    assert not final_markdown.exists()
+    assert failed_pending.exists()
 
 
 def test_markdown_uses_plain_chinese_and_includes_all_alert_context(tmp_path: Path) -> None:

@@ -478,6 +478,11 @@ def record_forward_monitor(
         except (OSError, json.JSONDecodeError, ValueError):
             existing = None
         if existing == output:
+            if not markdown_path.is_file():
+                _atomic_write_text(
+                    markdown_path,
+                    _render_markdown(report, snapshot),
+                )
             pending_path.unlink()
             return RecordSummary(
                 status="already_recorded",
@@ -659,6 +664,14 @@ def _episode_observation(
     )
     d20_dates = set(path_days[:20])
     d20_path = [item for item in path if item["date"] in d20_dates]
+    d20_metrics_path = d20_path
+    if day_number >= 20 and not (
+        len(d20_path) == 20
+        and [item["date"] for item in d20_path] == path_days[:20]
+    ):
+        d20_metrics_path = []
+        if "incomplete_price_path" not in limitations:
+            limitations.append("incomplete_price_path")
     current_fields = _price_fields(price_row)
     if phase != "closed" and price_row is None:
         limitations.append("missing_current_price_context")
@@ -692,7 +705,7 @@ def _episode_observation(
         "first_observable_date": (
             path[0]["date"].isoformat() if path else None
         ),
-        **_path_metrics(d20_path, entry, prefix="d20"),
+        **_path_metrics(d20_metrics_path, entry, prefix="d20"),
         **_path_metrics(path, entry, prefix="current"),
         **current_fields,
         "original_group_code": group_code,
@@ -726,8 +739,16 @@ def _attention_reasons(
     ):
         reasons.append("first_event_reaction")
     first_hit = current["d20_first_close_hit_20pct_date"]
+    previous_first_hit = None
+    if previous is not None:
+        if "d20_first_close_hit_20pct_date" in previous:
+            previous_first_hit = previous.get(
+                "d20_first_close_hit_20pct_date"
+            )
+        else:
+            previous_first_hit = previous.get("first_close_hit_20pct_date")
     if first_hit and (
-        (previous is not None and not previous.get("d20_first_close_hit_20pct_date"))
+        (previous is not None and not previous_first_hit)
         or (previous is None and first_hit == current["analysis_date"])
     ):
         reasons.append("target_hit_first_time")
@@ -945,11 +966,12 @@ def _path_metrics(
     close_returns = [(item["close"] / entry) - 1.0 for item in path]
     high_returns = [(item["high"] / entry) - 1.0 for item in path]
     low_returns = [(item["low"] / entry) - 1.0 for item in path]
+    close_hit_threshold = 0.20 - 1e-12 if prefix == "d20" else 0.20
     first_close_hit = next(
         (
             item["date"].isoformat()
             for item, value in zip(path, close_returns, strict=True)
-            if value >= 0.2
+            if value >= close_hit_threshold
         ),
         None,
     )
