@@ -1,6 +1,6 @@
 ---
 name: researching-company-events
-description: Use when an A-share research task needs point-in-time company fundamentals, business transmission, corporate events, announcements, company-specific counterevidence, or candidate discovery and validation before an action date.
+description: Use when A-share candidate discovery, validation, or post-selection review needs point-in-time company fundamentals, business transmission, corporate events, announcements, or company-specific counterevidence.
 ---
 
 # 公司与事件研究

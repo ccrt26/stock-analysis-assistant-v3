@@ -20,3 +20,13 @@ def test_forward_review_methods_are_registered_without_duplicate_existing_source
  for entry in (x for x in payload["entries"] if x["knowledge_id"] in review_ids):
   assert entry["primary_source_id"] in source_ids
   assert set(entry["supporting_source_ids"]) <= source_ids
+
+
+def test_forward_review_paper_dates_follow_official_pages_without_guessing_a_day():
+ sources={x["source_id"]: x for x in _payload()["sources"]}
+ pan=sources["paper-pan-tang-xu-speculative-trading-2016"]
+ assert str(pan["publication_date"]) == "2015-12-14"
+ assert pan["issue_date"] == "2016-08"
+ chen=sources["paper-chen-gao-he-jiang-xiong-price-limits-2019"]
+ assert "publication_date" not in chen
+ assert "2019年1月卷期" in chen["publication_date_status"]

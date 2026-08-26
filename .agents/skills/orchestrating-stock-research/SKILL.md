@@ -1,6 +1,6 @@
 ---
 name: orchestrating-stock-research
-description: Use when personal A-share daily selection, historical formation-date simulation, or multi-perspective stock research must turn point-in-time market, sector, company, and price evidence into a conditional zero-to-five-stock decision.
+description: Use when personal A-share daily selection, historical formation-date simulation, or post-selection review must turn point-in-time market, sector, company, and price evidence into a conditional zero-to-five-stock decision or a plain-language review of an existing decision.
 ---
 
 # 股票研究总控
@@ -275,9 +275,9 @@ research_result:
 
 ## Review 阶段
 
-`phase: review` 只复盘已经冻结的原判断，不重新推荐股票。总控把完整原判断、市场/行业/公司/价格的后续事实，以及当时最接近但未推荐股票的表现放在一起，形成 `ForwardReviewAssessmentV1`。不另建评分、概率或第二套备选股票库。
+`phase: review` 只复盘已经冻结的原判断，不重新推荐股票。总控把完整原判断、市场/行业/公司/价格的后续事实，以及当时最接近但未推荐股票的表现放在一起，为每条推荐或比较记录形成 `ForwardEpisodeReviewV1`。同一股票可以合并显示，但不能用一条记录的成熟状态代替另一条，也不另建评分、概率或第二套备选股票库。
 
-第20个交易日以前必须使用 `decision_review=not_final_yet`，只说明原判断是尚未验证、部分得到支持、得到支持、正在减弱、受到明显反驳还是数据不足。从第20个交易日起不得再使用 `not_final_yet`，必须评价原判断和具体股票是否都合理、是否方向正确但选错股票、是否时间不合适、当时是否无法正常参与、短期原因是否判断错误，或当时证据是否不足。
+同一只股票可以合并显示，但每次推荐或比较记录必须有自己的 `ForwardEpisodeReviewV1`。第1至第19个交易日只说明原判断尚未验证、部分得到支持、得到支持、正在减弱、受到明显反驳还是数据不足，`final_twenty_day_review` 保持为空。第20个交易日为该条记录首次形成前20天最终结论；之后可以更新当前走势评价，但必须原样保留这个最终结论。最终评价要区分原判断和具体股票是否都合理、是否方向正确但选错股票、是否时间不合适、当时是否无法正常参与、短期原因是否判断错误，或当时证据是否不足。
 
 每日给用户的合并报告必须使用通俗中文。新推荐股票只回答：为什么现在值得看、目前有什么实际推动、股价和成交有没有认可、推荐后的第一个交易日要看什么、已经涨了多少以及后面是否还有空间、最不利的事实、为什么选它而不是最接近的备选。内部分类、日期字段和英文枚举不向用户展示。
 

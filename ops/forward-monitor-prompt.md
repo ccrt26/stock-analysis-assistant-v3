@@ -40,7 +40,7 @@
 
 ## 3. 生成走势复盘日报
 
-生成严格符合 `DailyForwardMonitorReportV2` 的新日报，其中每只重点股票都必须有一个 `ForwardReviewAssessmentV1`：
+生成严格符合 `DailyForwardMonitorReportV2` 的新日报。一只股票仍只有一条提醒，但其 `episode_reviews` 必须为每条记录分别复盘，且每条使用一个 `ForwardEpisodeReviewV1`；前20个交易日的最终结论使用 `FrozenTwentyDayReviewV1`：
 
 ```text
 local_archive/forward_monitor/pending-report-<analysis_date>.json
@@ -52,10 +52,13 @@ local_archive/forward_monitor/pending-report-<analysis_date>.json
 - `pool_summary` 和 `unreported_attention_count` 必须与 snapshot 完全一致；
 - 每只提醒的 `episode_ids` 必须包含该股票全部 attention episode，不得只取子集；`roles`、交易日序号和原始完整判断必须从这些记录完整得出。
 - `roles` 必须非空、去重且只允许 `selected`、`comparator`，固定按 `selected` 后 `comparator` 排列。同一股票同时有两种记录时仍只写一条提醒，向用户分别说明当时是推荐股还是比较对象。
-- `review_assessment` 只填写：当前判断、现有证据最支持的解释、最弱或失败的环节、是否已经能作最终评价、与可靠备选的比较和整体复盘，不增加分数、概率或更多分类。
-- 第20个交易日以前，`decision_review` 必须是 `not_final_yet`；第20个交易日及以后不得再使用 `not_final_yet`，必须给出最终选择评价。
+- `episode_reviews` 中的 `episode_id` 必须与该股票全部 attention episode 完全一致，不得缺少、重复或多出；不得用该股票最大交易日序号替其他记录结案。
+- 每条记录的 `ForwardEpisodeReviewV1` 只填写通俗原因与风险、当前判断、现有证据最支持的解释、当前最弱环节、当前复盘、成对比较解释和 `final_twenty_day_review`，不增加分数、概率或更多分类。
+- 第1至第19个交易日，`final_twenty_day_review` 必须为空；第20个交易日必须首次形成。第21至第30个交易日不得改写这个结论，只能更新当前走势评价。snapshot 已有 `frozen_twenty_day_review` 时必须原样使用；第20天漏跑后首次建立，也只能依据 `d20_*` 和前20个交易日以内的事实。
+- `original_reason_plain_language` 和 `original_key_risk_plain_language` 只通俗改写当时已经冻结的意思，不加入后来事实。Markdown 只展示这两个字段，不直接展示原始理由和原始风险。
 - 原始完整判断缺失时，内部保留 `missing_original_research_thesis`，面向用户明确说明只能复盘价格表现，不能补写当时理由。
-- 只在代码或名称能严格匹配时逐只比较当时最接近但未推荐的股票；不能可靠匹配时明确说不知道，不从模糊文字猜代码。
+- 只在代码或完整名称能唯一严格匹配时逐只比较当时最接近但未推荐的股票。必须使用 snapshot 中的真实成对价格路径，先展示两边的涨跌、期间最深跌幅和期间最大收盘回撤，再解释。路径不完整、窗口不一致或无法匹配时用固定说明，不展示 AI 自由比较文字。
+- 价格段落按当前所处交易日显示最近1、3、5或20个交易日的相对市场和相对行业数字；字段缺失时明确未知，不把这个窗口写成“从推荐以来”。
 
 用户看到的每只股票使用自然短段落，最多显示“当时为什么看它、实际怎么走、为什么会这样、原判断现在怎么看、和当时最接近的备选相比、接下来观察什么”六个小标题。第20个交易日结束后再增加“这次选择最后怎么看”。不得显示交易日缩写、内部角色、记录 ID、内部分类或英文字段。
 
@@ -84,4 +87,4 @@ D21—D30 的 `late_activation` 面向用户必须写成“这只股票在前20�
   --report-file local_archive/forward_monitor/pending-report-<analysis_date>.json
 ```
 
-成功后只向用户展示：今天的市场情况、之前推荐股票的走势复盘、目前还在跟踪多少只，以及没有详细展开的重点股票数量。不要展示全部跟踪股票。
+成功后只向用户展示：今天的市场情况、之前研究过的股票走势复盘、目前还在跟踪多少只，以及没有详细展开的重点股票数量。不要展示全部跟踪股票。

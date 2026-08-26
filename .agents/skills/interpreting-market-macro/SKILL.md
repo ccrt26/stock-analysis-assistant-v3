@@ -1,6 +1,6 @@
 ---
 name: interpreting-market-macro
-description: Use when point-in-time A-share candidate selection or validation needs market breadth, liquidity, risk appetite, style, volatility, concentration, macro or policy context, or market-level counterevidence.
+description: Use when point-in-time A-share candidate selection, validation, or post-selection review needs market breadth, liquidity, risk appetite, style, volatility, concentration, macro or policy context, or market-level counterevidence.
 ---
 
 # 市场与宏观解释

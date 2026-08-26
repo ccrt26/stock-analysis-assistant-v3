@@ -26,7 +26,8 @@ def test_forward_monitor_prompt_limits_ai_work_and_report_size() -> None:
         in text
     )
     assert "DailyForwardMonitorReportV2" in text
-    assert "ForwardReviewAssessmentV1" in text
+    assert "ForwardEpisodeReviewV1" in text
+    assert "FrozenTwentyDayReviewV1" in text
     priorities = [
         "data_problem", "invalidated", "new_event", "first_reaction",
         "actionable_watch", "strengthening", "overheated", "target_hit",
@@ -47,7 +48,7 @@ def test_existing_daily_prompt_stays_v4_and_adds_monitor_in_same_task() -> None:
     assert "already_selected" in text
     assert "不得重复执行新选股" in text
     assert "今天的市场情况" in text
-    assert "之前推荐股票的走势复盘" in text
+    assert "之前研究过的股票走势复盘" in text
     assert "目前还在跟踪多少只" in text
     assert "今天新推荐的股票" in text
     assert "已过原行动窗口" not in text
@@ -90,10 +91,16 @@ def test_forward_monitor_prompt_uses_previous_state_and_strict_report_contract()
     assert "原判断现在怎么看" in text
     assert "和当时最接近的备选相比" in text
     assert "接下来观察什么" in text
-    assert "第20个交易日及以后不得再使用 `not_final_yet`" in text
+    assert "第20个交易日必须首次形成" in text
     assert "当前：D" not in text
     assert "roles" in text
     assert "该股票全部 attention episode" in text
+    assert "每条记录分别复盘" in text
+    assert "final_twenty_day_review" in text
+    assert "第21至第30个交易日不得改写" in text
+    assert "original_reason_plain_language" in text
+    assert "original_key_risk_plain_language" in text
+    assert "真实成对价格路径" in text
 
 
 def test_periodic_review_reads_monitor_history_and_checks_reminder_timing() -> None:
@@ -142,5 +149,7 @@ def test_all_five_stock_research_skills_define_a_review_phase() -> None:
     assert "从期间最高点又跌回来多少" in price
 
     orchestrator = Path(SKILL_PATHS["总控"]).read_text(encoding="utf-8")
-    assert "decision_review=not_final_yet" in orchestrator
+    assert "第1至第19个交易日" in orchestrator
+    assert "第20个交易日为该条记录首次形成前20天最终结论" in orchestrator
+    assert "之后可以更新当前走势评价" in orchestrator
     assert "为什么现在值得看" in orchestrator

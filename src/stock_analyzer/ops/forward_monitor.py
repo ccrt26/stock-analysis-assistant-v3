@@ -138,9 +138,40 @@ class DailyForwardMonitorReportV1(BaseModel):
         return self
 
 
-class ForwardReviewAssessmentV1(BaseModel):
+class FrozenTwentyDayReviewV1(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
+    weak_or_failed_link: Literal[
+        "none",
+        "market_conditions",
+        "new_information",
+        "industry_follow_through",
+        "price_and_volume_confirmation",
+        "remaining_room",
+        "company_risk",
+        "timing",
+        "execution",
+        "stock_selection",
+        "unknown",
+    ]
+    decision_review: Literal[
+        "logic_and_stock_both_reasonable",
+        "direction_right_stock_wrong",
+        "logic_right_timing_wrong",
+        "not_executable",
+        "short_term_reason_wrong",
+        "selection_evidence_insufficient",
+        "unknown",
+    ]
+    overall_review: str = Field(min_length=1)
+
+
+class ForwardEpisodeReviewV1(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    episode_id: str = Field(min_length=1)
+    original_reason_plain_language: str = Field(min_length=1)
+    original_key_risk_plain_language: str = Field(min_length=1)
     current_assessment: Literal[
         "not_yet_tested",
         "partly_supported",
@@ -157,7 +188,7 @@ class ForwardReviewAssessmentV1(BaseModel):
         "mixed",
         "unknown",
     ]
-    weak_or_failed_link: Literal[
+    current_weak_or_failed_link: Literal[
         "none",
         "market_conditions",
         "new_information",
@@ -170,35 +201,22 @@ class ForwardReviewAssessmentV1(BaseModel):
         "stock_selection",
         "unknown",
     ]
-    decision_review: Literal[
-        "not_final_yet",
-        "logic_and_stock_both_reasonable",
-        "direction_right_stock_wrong",
-        "logic_right_timing_wrong",
-        "not_executable",
-        "short_term_reason_wrong",
-        "selection_evidence_insufficient",
-        "unknown",
-    ]
-    comparison_with_alternative: str = Field(min_length=1)
-    overall_review: str = Field(min_length=1)
+    current_review: str = Field(min_length=1)
+    comparison_interpretation: str = Field(min_length=1)
+    final_twenty_day_review: FrozenTwentyDayReviewV1 | None = None
 
 
 class ForwardMonitorAlertV2(ForwardMonitorAlertV1):
-    review_assessment: ForwardReviewAssessmentV1
+    episode_reviews: list[ForwardEpisodeReviewV1] = Field(min_length=1)
 
     @model_validator(mode="after")
-    def validate_review_timing(self) -> "ForwardMonitorAlertV2":
-        latest_day = max(self.day_numbers)
-        decision_review = self.review_assessment.decision_review
-        if latest_day < 20 and decision_review != "not_final_yet":
-            raise ValueError(
-                "a final decision review is not allowed before the twentieth trading day"
-            )
-        if latest_day >= 20 and decision_review == "not_final_yet":
-            raise ValueError(
-                "a final decision review is required at or after the twentieth trading day"
-            )
+    def validate_episode_reviews(self) -> "ForwardMonitorAlertV2":
+        review_ids = [review.episode_id for review in self.episode_reviews]
+        if (
+            len(review_ids) != len(set(review_ids))
+            or set(review_ids) != set(self.episode_ids)
+        ):
+            raise ValueError("each alert episode must be reviewed exactly once")
         return self
 
 
@@ -298,6 +316,9 @@ def _fill_missing_original_fields(
     for field in (
         "original_research_thesis",
         "original_selection_reason",
+        "original_referenced_decisions",
+        "original_nearest_alternative_episode_id",
+        "data_limitations",
     ):
         if (field not in existing or existing[field] is None) and source.get(
             field
@@ -353,6 +374,10 @@ def prepare_forward_monitor(
         monitor_dir,
         analysis_date,
         previous,
+    )
+    frozen_reviews = _earliest_frozen_reviews(
+        monitor_dir,
+        analysis_date,
     )
     price_by_code = {
         str(row.get("ts_code")): row
@@ -450,9 +475,11 @@ def prepare_forward_monitor(
             previous_as_of=(previous or {}).get("as_of"),
             previous_monitor_state=previous_monitor_states.get(episode_id),
             market_context_available=bool(market_rows),
+            frozen_twenty_day_review=frozen_reviews.get(episode_id),
         )
         observations.append(observation)
 
+    _attach_pair_contexts(observations)
     attention_stocks = _aggregate_attention(observations)
     open_episodes = [item for item in observations if item["monitor_phase"] != "closed"]
     summary_payload = {
@@ -552,6 +579,10 @@ def record_forward_monitor(
                 f"alert must include all stock attention episodes: {alert.ts_code}"
             )
         referenced: list[dict[str, Any]] = []
+        reviews_by_id = {
+            review.episode_id: review
+            for review in alert.episode_reviews
+        }
         for episode_id in alert.episode_ids:
             episode = episodes.get(episode_id)
             if episode is None:
@@ -559,6 +590,31 @@ def record_forward_monitor(
             if str(episode.get("ts_code")) != alert.ts_code:
                 raise ValueError(f"alert episode stock mismatch: {episode_id}")
             referenced.append(episode)
+            review = reviews_by_id[episode_id]
+            final_review = (
+                review.final_twenty_day_review.model_dump(mode="json")
+                if review.final_twenty_day_review is not None
+                else None
+            )
+            day_number = int(episode["day_number"])
+            if day_number < 20 and final_review is not None:
+                raise ValueError(
+                    "a final decision review is not allowed before the twentieth trading day"
+                )
+            if day_number >= 20 and final_review is None:
+                raise ValueError(
+                    "a final decision review is required at or after the twentieth trading day"
+                )
+            frozen_raw = episode.get("frozen_twenty_day_review")
+            if frozen_raw is not None:
+                frozen = FrozenTwentyDayReviewV1.model_validate(
+                    frozen_raw
+                ).model_dump(mode="json")
+                if final_review != frozen:
+                    raise ValueError(
+                        f"final twenty day review is frozen: {episode_id}"
+                    )
+            _validate_pair_context(episode, episodes)
         referenced_roles = {str(item.get("role")) for item in referenced}
         valid_roles = [
             role
@@ -649,6 +705,32 @@ def record_forward_monitor(
     )
 
 
+def _validate_pair_context(
+    episode: dict[str, Any],
+    episodes: dict[str, dict[str, Any]],
+) -> None:
+    context = episode.get("pair_context")
+    if not isinstance(context, dict) or context.get("pair_status") != "complete":
+        return
+    paired_id = str(context.get("paired_episode_id", ""))
+    paired = episodes.get(paired_id)
+    if paired is None:
+        raise ValueError(f"paired episode does not exist: {paired_id}")
+    if (
+        str(context.get("paired_name", "")) != str(paired.get("name", ""))
+        or int(context.get("paired_day_number", -1))
+        != int(paired.get("day_number", -2))
+        or episode.get("formation_date") != paired.get("formation_date")
+        or episode.get("action_date") != paired.get("action_date")
+        or episode.get("analysis_date") != paired.get("analysis_date")
+        or episode.get("day_number") != paired.get("day_number")
+        or episode.get("ts_code") == paired.get("ts_code")
+    ):
+        raise ValueError(
+            f"paired episode identity or window mismatch: {paired_id}"
+        )
+
+
 def _render_markdown(
     report: DailyForwardMonitorReportV2,
     snapshot: dict[str, Any],
@@ -659,10 +741,6 @@ def _render_markdown(
         str(item.get("episode_id")): item
         for item in snapshot.get("episodes", [])
         if isinstance(item, dict)
-    }
-    role_labels = {
-        "selected": "当时推荐的股票",
-        "comparator": "当时作为比较对象的股票",
     }
     assessment_labels = {
         "not_yet_tested": "还没有经过足够交易日验证",
@@ -680,7 +758,7 @@ def _render_markdown(
         "mixed": "目前看，市场、行业、公司和股票自身变化共同影响了走势",
         "unknown": "现有事实还不足以说明哪一种解释最可靠",
     }
-    weak_link_labels = {
+    weak_labels = {
         "none": "暂时没有哪一部分已经明确失败",
         "market_conditions": "原判断依赖的市场条件正在减弱",
         "new_information": "原先依赖的新信息没有继续增强",
@@ -689,12 +767,11 @@ def _render_markdown(
         "remaining_room": "此前上涨已经消耗了较多后续空间",
         "company_risk": "公司层面的不利事实正在变得更重要",
         "timing": "原来观察的时间可能偏早或偏晚",
-        "execution": "推荐后的第一个交易日未必能按原条件正常参与",
+        "execution": "原计划观察的第一个交易日未必能按原条件正常参与",
         "stock_selection": "同一方向里可能选错了具体股票",
         "unknown": "目前还不能可靠判断哪一部分最弱",
     }
     final_labels = {
-        "not_final_yet": "前20个交易日尚未结束，现在不作最终评价",
         "logic_and_stock_both_reasonable": "原判断和具体股票都基本合理",
         "direction_right_stock_wrong": "方向大体正确，但具体股票选错",
         "logic_right_timing_wrong": "原判断大体正确，但时间选早或选晚",
@@ -704,163 +781,127 @@ def _render_markdown(
         "unknown": "仍然无法可靠判断",
     }
     lines = [
-        f"# {report.analysis_date.isoformat()} 之前推荐股票的走势复盘",
+        f"# {report.analysis_date.isoformat()} 之前研究过的股票走势复盘",
         "",
         "## 今天的市场情况",
         "",
-        (
-            f"{overview.what_changed.rstrip('。！？!?；; ')}。"
-            f"{overview.implication_for_monitored_stocks}"
-        ),
+        f"{overview.what_changed.rstrip('。！？!? ；; ')}。{overview.implication_for_monitored_stocks}",
         "",
-        "## 之前推荐股票的走势复盘",
+        "## 之前研究过的股票走势复盘",
         "",
     ]
     if not report.alerts:
         lines.append("今天没有需要详细提醒的股票。")
     for alert in report.alerts:
-        referenced = [
-            episodes[episode_id]
-            for episode_id in alert.episode_ids
-        ]
-        primary_reasons = list(
-            dict.fromkeys(
-                str(item["original_primary_reason"])
-                for item in referenced
-                if item.get("original_primary_reason")
+        lines.extend([f"### {alert.name}（{alert.ts_code}）", ""])
+        reviews = {item.episode_id: item for item in alert.episode_reviews}
+        for episode_id in alert.episode_ids:
+            episode = episodes[episode_id]
+            review = reviews[episode_id]
+            day_number = int(episode["day_number"])
+            formation = date.fromisoformat(str(episode["formation_date"]))
+            formation_text = f"{formation.year}年{formation.month}月{formation.day}日"
+            if episode.get("role") == "comparator":
+                day_text = _human_trading_day(day_number).removeprefix("推荐后的")
+                subtitle = (
+                    f"#### {formation_text}那次研究中，它是用于比较的股票，"
+                    f"目前跟踪到该次研究后的{day_text}"
+                )
+            else:
+                subtitle = f"#### {formation_text}那次推荐，目前跟踪到{_human_trading_day(day_number)}"
+            limitations = set(episode.get("data_limitations") or [])
+            original = (
+                f"{review.original_reason_plain_language.rstrip('。！？!? ；; ')}。"
+                f"{review.original_key_risk_plain_language.rstrip('。！？!? ；; ')}。"
             )
-        )
-        selection_reasons = list(
-            dict.fromkeys(
-                str(item["original_selection_reason"])
-                for item in referenced
-                if item.get("original_selection_reason")
-                and item.get("original_selection_reason")
-                != item.get("original_primary_reason")
+            if "missing_original_research_thesis" in limitations:
+                original += " 当时留下的原始判断不完整，因此这次只能复盘价格表现，不能逐项审查当时的理由。"
+            if "missing_original_referenced_decisions" in limitations:
+                original += " 当时留下的部分价格依据或首个交易日观察条件不完整，因此这部分不能事后补写。"
+            actual = f"{_render_price_summary([episode])} {_render_relative_performance(episode)}"
+            if alert.stock_change:
+                actual += f" {alert.stock_change.rstrip('。！？!? ；; ')}。"
+            if alert.alert_type == "late_activation" and day_number > 20:
+                actual += " 这只股票在前20个交易日结束后才开始明显走强，因此不会改变前20天的原评价结果。"
+            why = (
+                f"市场方面，{alert.market_change.rstrip('。！？!? ；; ')}。"
+                f"行业方面，{alert.sector_change.rstrip('。！？!? ；; ')}。"
+                f"公司事实方面，{alert.company_change.rstrip('。！？!? ；; ')}。"
+                f"{explanation_labels[review.best_supported_explanation]}。"
+                "这只是现有证据最支持的解释，不是精确的因果分解。"
             )
-        )
-        counterevidence = list(
-            dict.fromkeys(
-                str(item["original_strongest_counterevidence"])
-                for item in referenced
-                if item.get("original_strongest_counterevidence")
+            current = (
+                f"{assessment_labels[review.current_assessment]}。"
+                f"{weak_labels[review.current_weak_or_failed_link]}。"
+                f"{review.current_review}"
             )
-        )
-        roles = "、".join(role_labels[role] for role in alert.roles)
-        days = "、".join(_human_trading_day(day) for day in alert.day_numbers)
-        missing_thesis = any(
-            "missing_original_research_thesis"
-            in (item.get("data_limitations") or [])
-            for item in referenced
-        )
-        original_text = "；".join([*primary_reasons, *selection_reasons])
-        why_text = f"这次涉及的是{roles}。"
-        if original_text:
-            why_text += f" 当时看它，主要因为{original_text}。"
-        if counterevidence:
-            why_text += f" 当时最担心的是{'；'.join(counterevidence)}。"
-        if missing_thesis:
-            why_text += (
-                " 当时留下的原始判断不完整，因此这次只能复盘价格表现，"
-                "不能逐项审查当时的理由。"
-            )
-
-        actual_text = _render_price_summary(referenced)
-        if alert.stock_change:
-            actual_text += f" {alert.stock_change.rstrip('。！？!?；; ')}。"
-        if alert.alert_type == "late_activation":
-            actual_text += (
-                " 这只股票在前20个交易日结束后才开始明显走强，"
-                "因此不会改变前20天的原评价结果。"
-            )
-
-        review = alert.review_assessment
-        reliable_alternative = any(
-            item.get("original_nearest_alternative") for item in referenced
-        )
-        comparison = (
-            review.comparison_with_alternative
-            if reliable_alternative
-            else (
-                "当时没有留下可以严格匹配的备选股票代码，因此这次不能做可靠的逐只比较。"
-            )
-        )
-        final_review = max(alert.day_numbers) >= 20
-        current_review = (
-            f"{assessment_labels[review.current_assessment]}。"
-            f"{weak_link_labels[review.weak_or_failed_link]}。"
-        )
-        if not final_review:
-            current_review += review.overall_review
-        lines.extend(
-            [
-                f"### {alert.name}（{alert.ts_code}，跟踪到{days}）",
-                "",
-                "**当时为什么看它**",
-                "",
-                why_text,
-                "",
-                "**实际怎么走**",
-                "",
-                actual_text,
-                "",
-                "**为什么会这样**",
-                "",
-                (
-                    f"市场方面，{alert.market_change.rstrip('。！？!?；; ')}。"
-                    f"行业方面，{alert.sector_change.rstrip('。！？!?；; ')}。"
-                    f"公司事实方面，{alert.company_change.rstrip('。！？!?；; ')}。"
-                    f"{explanation_labels[review.best_supported_explanation]}。"
-                    "这只是现有证据最支持的解释，不是精确的因果分解。"
-                ),
-                "",
-                "**原判断现在怎么看**",
-                "",
-                current_review,
-                "",
-                "**和当时最接近的备选相比**",
-                "",
-                comparison,
-                "",
-                "**接下来观察什么**",
-                "",
-                (
-                    f"接下来重点看：{alert.confirmation_condition}。"
-                    f"如果{alert.invalidation_condition}，说明原来的短期判断不再成立。"
-                ),
-            ]
-        )
-        if final_review:
-            lines.extend(
-                [
-                    "",
-                    "**这次选择最后怎么看**",
-                    "",
-                    (
-                        f"{final_labels[review.decision_review]}。"
-                        f"{review.overall_review}"
-                    ),
-                ]
-            )
-        lines.append("")
-    lines.extend(
-        [
-            "## 目前还在跟踪多少只",
-            "",
-            (
-                f"仍在跟踪 {pool.open_episode_count} 条记录，涉及 "
-                f"{pool.distinct_stock_count} 只股票；推荐后的前20个交易日有 "
-                f"{pool.primary_count} 条，之后继续低成本观察的有 "
-                f"{pool.passive_tail_count} 条。"
-            ),
-            "",
-            "## 今天没有详细展开的股票",
-            "",
-            f"还有 {report.unreported_attention_count} 只触发变化但未在上面详细显示。{report.routine_summary}",
-            "",
-        ]
-    )
+            lines.extend([
+                subtitle, "", "**当时为什么看它**", "", original,
+                "", "**实际怎么走**", "", actual,
+                "", "**为什么会这样**", "", why,
+                "", "**原判断现在怎么看**", "", current,
+                "", "**和当时最接近的备选相比**", "",
+                _render_pair_comparison(episode, review, list(episodes.values())),
+                "", "**接下来观察什么**", "",
+                f"接下来重点看：{alert.confirmation_condition}。如果{alert.invalidation_condition}，说明原来的短期判断不再成立。",
+            ])
+            final = review.final_twenty_day_review
+            if final is not None:
+                lines.extend(["", "**这次选择最后怎么看**", "", f"{final_labels[final.decision_review]}。{final.overall_review}"])
+            lines.append("")
+    lines.extend([
+        "## 目前还在跟踪多少只", "",
+        f"仍在跟踪 {pool.open_episode_count} 条记录，涉及 {pool.distinct_stock_count} 只股票；推荐后的前20个交易日有 {pool.primary_count} 条，之后继续低成本观察的有 {pool.passive_tail_count} 条。",
+        "", "## 今天没有详细展开的股票", "",
+        f"还有 {report.unreported_attention_count} 只触发变化但未在上面详细显示。{report.routine_summary}", "",
+    ])
     return "\n".join(lines)
+
+
+def _render_relative_performance(episode: dict[str, Any]) -> str:
+    day_number = int(episode["day_number"])
+    window = 20 if day_number >= 20 else 5 if day_number >= 5 else 3 if day_number >= 3 else 1
+    market = _number(episode.get(f"relative_market_{window}d"))
+    industry = _number(episode.get(f"relative_industry_{window}d"))
+    market_text = "全市场的对照数据不足" if market is None else f"这只股票比全市场{_relative_words(market)}"
+    industry_text = "同一行业的对照数据不足" if industry is None else f"比同一行业{_relative_words(industry)}"
+    return f"最近{window}个交易日，{market_text}，{industry_text}。"
+
+
+def _relative_words(value: float) -> str:
+    return f"{'强' if value >= 0 else '弱'}{abs(value) * 100:.2f}个百分点"
+
+
+def _render_pair_comparison(
+    episode: dict[str, Any],
+    review: ForwardEpisodeReviewV1,
+    all_episodes: list[dict[str, Any]],
+) -> str:
+    context = episode.get("pair_context") or {}
+    if context.get("pair_status") == "incomplete":
+        return "这次研究中两只股票的价格路径或观察窗口不完整，因此不能做可靠比较。"
+    if context.get("pair_status") != "complete":
+        return "当时没有留下能够严格匹配的备选股票，因此这次不能做可靠的逐只比较。"
+    paired_name = str(context["paired_name"])
+    paired_label = f"这次研究中的推荐股{paired_name}" if episode.get("role") == "comparator" else f"当时备选股{paired_name}"
+    text = (
+        f"这条记录目前涨跌为{_format_return(float(context['selected_or_subject_return_since_entry']))}，"
+        f"{paired_label}为{_format_return(float(context['alternative_return_since_entry']))}，"
+        f"两者相差{_format_return(float(context['return_difference']))}。"
+        f"这条记录期间最深跌幅为{_format_return(float(context['subject_mae_since_entry']))}，"
+        f"期间最大收盘回撤为{abs(float(context['subject_max_close_drawdown'])):.2%}；"
+        f"{paired_name}期间最深跌幅为{_format_return(float(context['alternative_mae_since_entry']))}，"
+        f"期间最大收盘回撤为{abs(float(context['alternative_max_close_drawdown'])):.2%}。"
+    )
+    allowed_names = {str(episode.get("name", "")), paired_name}
+    other_names = {str(item.get("name", "")) for item in all_episodes if str(item.get("name", "")) and str(item.get("name", "")) not in allowed_names}
+    interpretation = review.comparison_interpretation
+    if (
+        paired_name not in interpretation
+        or any(name in interpretation for name in other_names)
+    ):
+        interpretation = ""
+    return text + (f" {interpretation}" if interpretation else "")
 
 
 def _human_trading_day(day_number: int) -> str:
@@ -896,6 +937,8 @@ def _render_price_summary(episodes: list[dict[str, Any]]) -> str:
     summaries: list[str] = []
     for episode in episodes:
         day = _human_trading_day(int(episode["day_number"]))
+        if episode.get("role") == "comparator":
+            day = f"该次研究后的{day.removeprefix('推荐后的')}"
         current = _number(episode.get("current_close_return_since_entry"))
         if current is None:
             summaries.append(f"{day}这条记录的价格路径不完整，暂时无法可靠计算涨跌。")
@@ -903,6 +946,7 @@ def _render_price_summary(episodes: list[dict[str, Any]]) -> str:
         max_close = _number(episode.get("current_max_close_return_since_entry"))
         max_high = _number(episode.get("current_max_high_return_since_entry"))
         lowest = _number(episode.get("current_mae_since_entry"))
+        max_drawdown = _number(episode.get("current_max_close_drawdown"))
         drawdown = _number(episode.get("current_close_drawdown_from_peak"))
         details = [f"目前涨跌为{_format_return(current)}"]
         if max_close is not None:
@@ -911,8 +955,10 @@ def _render_price_summary(episodes: list[dict[str, Any]]) -> str:
             details.append(f"盘中最高涨幅为{_format_return(max_high)}")
         if lowest is not None:
             details.append(f"期间最深跌幅为{_format_return(lowest)}")
+        if max_drawdown is not None:
+            details.append(f"期间最大收盘回撤为{abs(max_drawdown):.2%}")
         if drawdown is not None:
-            details.append(f"从期间最高收盘价回落{abs(drawdown):.2%}")
+            details.append(f"当前收盘价较期间最高收盘价回落{abs(drawdown):.2%}")
         summaries.append(f"{day}这条记录，" + "；".join(details) + "。")
     return " ".join(summaries)
 
@@ -941,9 +987,14 @@ def _episode_observation(
     previous_as_of: str | None,
     previous_monitor_state: str | None,
     market_context_available: bool,
+    frozen_twenty_day_review: dict[str, Any] | None,
 ) -> dict[str, Any]:
     ts_code = str(base["ts_code"])
-    limitations: list[str] = []
+    limitations = [
+        str(value)
+        for value in base.get("data_limitations", [])
+        if str(value)
+    ]
     original_thesis = base.get("original_research_thesis")
     if not isinstance(original_thesis, dict) or not original_thesis:
         original_thesis = None
@@ -1014,6 +1065,7 @@ def _episode_observation(
         "new_announcements": new_announcements,
         "checkpoint": checkpoint,
         "previous_monitor_state": previous_monitor_state,
+        "frozen_twenty_day_review": frozen_twenty_day_review,
         "attention_reasons": [],
         "data_limitations": limitations,
     }
@@ -1257,6 +1309,7 @@ def _path_metrics(
         f"{prefix}_close_return_since_entry": None,
         f"{prefix}_max_close_return_since_entry": None,
         f"{prefix}_close_drawdown_from_peak": None,
+        f"{prefix}_max_close_drawdown": None,
         f"{prefix}_max_high_return_since_entry": None,
         f"{prefix}_mae_since_entry": None,
         f"{prefix}_first_close_hit_20pct_date": None,
@@ -1278,12 +1331,21 @@ def _path_metrics(
         None,
     )
     peak_close = max(item["close"] for item in path)
+    running_peak = path[0]["close"]
+    max_close_drawdown = 0.0
+    for item in path:
+        running_peak = max(running_peak, item["close"])
+        max_close_drawdown = min(
+            max_close_drawdown,
+            item["close"] / running_peak - 1.0,
+        )
     return {
         f"{prefix}_close_return_since_entry": close_returns[-1],
         f"{prefix}_max_close_return_since_entry": max(close_returns),
         f"{prefix}_close_drawdown_from_peak": (
             path[-1]["close"] / peak_close - 1.0
         ),
+        f"{prefix}_max_close_drawdown": max_close_drawdown,
         f"{prefix}_max_high_return_since_entry": max(high_returns),
         f"{prefix}_mae_since_entry": min(low_returns),
         f"{prefix}_first_close_hit_20pct_date": first_close_hit,
@@ -1305,9 +1367,11 @@ def _price_fields(row: dict[str, Any] | None) -> dict[str, Any]:
         "relative_market_1d": "relative_market_1d",
         "relative_market_3d": "relative_market_3d",
         "relative_market_5d": "relative_market_5d",
+        "relative_market_20d": "relative_market_20d",
         "relative_industry_1d": "relative_industry_return_1d",
         "relative_industry_3d": "relative_industry_return_3d",
         "relative_industry_5d": "relative_industry_return_5d",
+        "relative_industry_20d": "relative_industry_return_20d",
         "amount_ratio_last_20d": "amount_ratio_last_20d",
         "volume_price_efficiency_5d": "volume_price_efficiency_5d",
         "mean_close_position_5d": "mean_close_position_5d",
@@ -1487,6 +1551,123 @@ def _previous_monitor_states(
     return {**carried, **found}
 
 
+def _earliest_frozen_reviews(
+    monitor_dir: Path,
+    analysis_date: date,
+) -> dict[str, dict[str, Any]]:
+    reports: list[tuple[date, Path]] = []
+    for path in monitor_dir.glob("monitor-report-*.json"):
+        try:
+            report_date = date.fromisoformat(
+                path.stem.removeprefix("monitor-report-")
+            )
+        except ValueError:
+            continue
+        if report_date <= analysis_date:
+            reports.append((report_date, path))
+    frozen: dict[str, dict[str, Any]] = {}
+    for _, path in sorted(reports):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if (
+            not isinstance(payload, dict)
+            or payload.get("report_version")
+            != "daily-forward-monitor-report-v2"
+        ):
+            continue
+        for alert in payload.get("alerts", []):
+            if not isinstance(alert, dict):
+                continue
+            for review in alert.get("episode_reviews", []):
+                if not isinstance(review, dict):
+                    continue
+                episode_id = str(review.get("episode_id", ""))
+                final_review = review.get("final_twenty_day_review")
+                if episode_id and isinstance(final_review, dict):
+                    frozen.setdefault(episode_id, _json_value(final_review))
+    return frozen
+
+
+def _attach_pair_contexts(observations: list[dict[str, Any]]) -> None:
+    by_id = {
+        str(item.get("episode_id")): item
+        for item in observations
+        if item.get("episode_id")
+    }
+    reverse: dict[str, list[str]] = {}
+    for item in observations:
+        paired_id = item.get("original_nearest_alternative_episode_id")
+        if paired_id:
+            reverse.setdefault(str(paired_id), []).append(
+                str(item["episode_id"])
+            )
+    for item in observations:
+        paired_id = item.get("original_nearest_alternative_episode_id")
+        if not paired_id:
+            reverse_ids = reverse.get(str(item["episode_id"]), [])
+            paired_id = reverse_ids[0] if len(reverse_ids) == 1 else None
+        paired = by_id.get(str(paired_id)) if paired_id else None
+        if paired is None:
+            item["pair_context"] = {"pair_status": "unavailable"}
+            continue
+        context: dict[str, Any] = {
+            "pair_status": "incomplete",
+            "paired_episode_id": str(paired["episode_id"]),
+            "paired_name": str(paired.get("name", "")),
+            "paired_day_number": int(paired["day_number"]),
+        }
+        same_window = (
+            item.get("formation_date") == paired.get("formation_date")
+            and item.get("action_date") == paired.get("action_date")
+            and item.get("analysis_date") == paired.get("analysis_date")
+            and item.get("day_number") == paired.get("day_number")
+        )
+        incomplete_flags = {
+            "missing_price_path",
+            "incomplete_price_path",
+        }
+        paths_complete = not (
+            incomplete_flags & set(item.get("data_limitations") or [])
+            or incomplete_flags & set(paired.get("data_limitations") or [])
+        )
+        metric_fields = (
+            "current_close_return_since_entry",
+            "current_mae_since_entry",
+            "current_max_close_drawdown",
+        )
+        metrics_complete = all(
+            _number(value.get(field)) is not None
+            for value in (item, paired)
+            for field in metric_fields
+        )
+        if same_window and paths_complete and metrics_complete:
+            subject_return = float(item["current_close_return_since_entry"])
+            alternative_return = float(
+                paired["current_close_return_since_entry"]
+            )
+            context.update(
+                pair_status="complete",
+                selected_or_subject_return_since_entry=subject_return,
+                alternative_return_since_entry=alternative_return,
+                return_difference=subject_return - alternative_return,
+                subject_mae_since_entry=float(
+                    item["current_mae_since_entry"]
+                ),
+                alternative_mae_since_entry=float(
+                    paired["current_mae_since_entry"]
+                ),
+                subject_max_close_drawdown=float(
+                    item["current_max_close_drawdown"]
+                ),
+                alternative_max_close_drawdown=float(
+                    paired["current_max_close_drawdown"]
+                ),
+            )
+        item["pair_context"] = _json_value(context)
+
+
 def _sector_holds(item: dict[str, Any]) -> bool:
     engine = item.get("original_engine_type")
     common = (
@@ -1624,6 +1805,11 @@ def _trace_episodes(
         for item in trace.get("candidate_ledger", [])
         if isinstance(item, dict)
     }
+    decisions_by_id = {
+        str(item.get("decision_id", "")): item
+        for item in trace.get("decision_trace", [])
+        if isinstance(item, dict) and item.get("decision_id")
+    }
     result = trace.get("research_result", {})
     nearest_items = [
         item
@@ -1647,6 +1833,31 @@ def _trace_episodes(
                 _reliable_nearest_alternative(item, nearest_items)
                 if role == "selected"
                 else None
+            )
+            decision_ids = [
+                str(value)
+                for value in thesis.get("decision_ids", [])
+                if str(value)
+            ]
+            action_decision_id = str(
+                thesis.get("action_condition_decision_id") or ""
+            )
+            if action_decision_id and action_decision_id not in decision_ids:
+                decision_ids.append(action_decision_id)
+            referenced_decisions = [
+                _json_value(decisions_by_id[decision_id])
+                for decision_id in decision_ids
+                if decision_id in decisions_by_id
+            ]
+            missing_decisions = [
+                decision_id
+                for decision_id in decision_ids
+                if decision_id not in decisions_by_id
+            ]
+            data_limitations = (
+                ["missing_original_referenced_decisions"]
+                if missing_decisions
+                else []
             )
             episodes.append(
                 {
@@ -1673,6 +1884,14 @@ def _trace_episodes(
                     ),
                     "original_nearest_comparison": item.get("nearest_comparison"),
                     "original_nearest_alternative": nearest_alternative,
+                    "original_nearest_alternative_episode_id": (
+                        f"{label}:{formation_date}:"
+                        f"{nearest_alternative['ts_code']}:comparator"
+                        if nearest_alternative is not None
+                        else None
+                    ),
+                    "original_referenced_decisions": referenced_decisions,
+                    "data_limitations": data_limitations,
                     "original_group_code": broad.get("group_code")
                     or cluster.get("group_code"),
                 }
@@ -1687,15 +1906,18 @@ def _reliable_nearest_alternative(
     comparison = str(selected.get("nearest_comparison", ""))
     if not comparison:
         return None
-    matches = [
-        item
+    matches_by_code = {
+        str(item.get("ts_code", "")).strip(): item
         for item in nearest_items
-        if str(item.get("ts_code", "")) in comparison
-        or (
-            bool(str(item.get("name", "")).strip())
-            and str(item.get("name", "")).strip() in comparison
+        if (
+            str(item.get("ts_code", "")).strip() in comparison
+            or (
+                bool(str(item.get("name", "")).strip())
+                and str(item.get("name", "")).strip() in comparison
+            )
         )
-    ]
+    }
+    matches = list(matches_by_code.values())
     if len(matches) != 1:
         return None
     match = matches[0]
@@ -1821,7 +2043,8 @@ def main(argv: list[str] | None = None) -> int:
 __all__ = [
     "DailyForwardMonitorReportV1",
     "DailyForwardMonitorReportV2",
-    "ForwardReviewAssessmentV1",
+    "ForwardEpisodeReviewV1",
+    "FrozenTwentyDayReviewV1",
     "PrepareSummary",
     "RecordSummary",
     "RegisterSummary",

@@ -1,6 +1,6 @@
 ---
 name: researching-sectors-industries
-description: Use when point-in-time A-share candidate selection or validation needs sector or industry breadth, leadership, concentration, dispersion, rotation, historical membership, peer comparison, or group-to-stock discovery.
+description: Use when point-in-time A-share candidate selection, validation, or post-selection review needs sector or industry breadth, leadership, concentration, dispersion, rotation, historical membership, peer comparison, or group-to-stock discovery.
 ---
 
 # 板块与行业研究

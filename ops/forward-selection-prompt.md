@@ -154,7 +154,7 @@ local_archive/forward_selection/pending-trace-<formation_date>.json
 最终向用户只给出一份合并报告，使用通俗说法，不向用户展示 `formation_date`、`engine_type` 等内部字段名：
 
 - 今天的市场情况
-- 之前推荐股票的走势复盘
+- 之前研究过的股票走势复盘
 - 目前还在跟踪多少只
 - 今天新推荐的股票
 

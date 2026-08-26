@@ -991,7 +991,7 @@ sources:
     journal_or_series: Journal of Econometrics 208(1), 249-264
     url: https://doi.org/10.1016/j.jeconom.2018.09.014
     doi: 10.1016/j.jeconom.2018.09.014
-    publication_date: 2019-01-01
+    publication_date_status: 官方期刊页面仅显示2019年1月卷期，未显示可核验的具体日期
     last_verified_on: 2026-08-26
     jurisdiction: 中国大陆
     market_scope: [深圳证券交易所, A股]
@@ -1011,7 +1011,8 @@ sources:
     journal_or_series: Review of Finance 20(5), 1835-1865
     url: https://doi.org/10.1093/rof/rfv059
     doi: 10.1093/rof/rfv059
-    publication_date: 2016-09-01
+    publication_date: 2015-12-14
+    issue_date: 2016-08
     last_verified_on: 2026-08-26
     jurisdiction: 中国大陆
     market_scope: [A股]

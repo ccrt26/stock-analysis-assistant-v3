@@ -1,6 +1,6 @@
 ---
 name: analyzing-price-trading
-description: Use when point-in-time A-share candidate selection or validation needs price and volume confirmation, relative performance, remaining price path, overextension, liquidity, tradability, or conditional action-date participation checks.
+description: Use when point-in-time A-share candidate selection, validation, or post-selection review needs price and volume confirmation, relative performance, remaining price path, overextension, drawdown, liquidity, tradability, or conditional action-date participation checks.
 ---
 
 # 价格与交易研究
