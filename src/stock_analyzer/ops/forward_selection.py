@@ -28,6 +28,11 @@ SHANGHAI = ZoneInfo("Asia/Shanghai")
 SELECTION_START = time(9, 5)
 READINESS_POLL_SECONDS = 30
 MARKET_OPEN = time(9, 30)
+SECTOR_RESEARCH_LIMITATION = "行业研究数据不可用，本次无行业候选"
+STOCK_CONTEXT_LIMITATION = "个股交易背景不可用，不使用其独有字段"
+PREOPEN_REFRESH_LIMITATION = (
+    "行动日前公告补采未完成，不形成 fresh_event_pending"
+)
 REQUIRED_SKILLS = {
     "orchestrating-stock-research",
     "interpreting-market-macro",
@@ -457,6 +462,12 @@ class PricePoint:
 class RunSummary:
     status: str
     started_at: str
+    run_mode: Literal["normal", "rerun"] = "normal"
+    research_mode: Literal["full", "limited", ""] = ""
+    sector_research_available: bool = False
+    stock_context_available: bool = False
+    preopen_event_refresh_complete: bool = False
+    limitations: tuple[str, ...] = ()
     formation_date: str = ""
     action_date: str = ""
     selection_as_of: str = ""
@@ -486,6 +497,12 @@ class ForwardData(Protocol):
 @dataclass(frozen=True)
 class _SelectionContext:
     started_at: str
+    run_mode: Literal["normal", "rerun"]
+    research_mode: Literal["full", "limited"]
+    sector_research_available: bool
+    stock_context_available: bool
+    preopen_event_refresh_complete: bool
+    limitations: tuple[str, ...]
     formation_date: date
     action_date: date
     selection_as_of: datetime
@@ -635,6 +652,7 @@ def prepare_daily_selection(
     formation_date: date | None = None,
     action_date: date | None = None,
     selection_as_of: datetime | None = None,
+    rerun_date: date | None = None,
 ) -> RunSummary:
     """Freeze and validate a point-in-time selection context without starting AI."""
 
@@ -646,6 +664,7 @@ def prepare_daily_selection(
         formation_date=formation_date,
         action_date=action_date,
         selection_as_of=selection_as_of,
+        rerun_date=rerun_date,
     )
     if failure is not None:
         return failure
@@ -653,7 +672,12 @@ def prepare_daily_selection(
     formation_text = context.formation_date.isoformat()
     if _has_selection_decision(context.rows, formation_text):
         return _context_summary(context, status="already_selected")
-    return _context_summary(context, status="ready_for_research")
+    status = (
+        "ready_for_research"
+        if context.research_mode == "full"
+        else "ready_for_research_limited"
+    )
+    return _context_summary(context, status=status)
 
 
 def record_daily_selection(
@@ -677,10 +701,26 @@ def record_daily_selection(
         formation_date=formation_date,
         action_date=action_date,
         selection_as_of=selection_as_of,
+        rerun_date=None,
     )
     if failure is not None:
         return failure
     assert context is not None
+    return _record_daily_selection_with_context(
+        result,
+        context=context,
+        csv_path=csv_path,
+        data=data,
+    )
+
+
+def _record_daily_selection_with_context(
+    result: dict[str, Any],
+    *,
+    context: _SelectionContext,
+    csv_path: Path,
+    data: ForwardData,
+) -> RunSummary:
     formation_text = context.formation_date.isoformat()
     if _has_selection_decision(context.rows, formation_text):
         return _context_summary(context, status="already_selected")
@@ -739,6 +779,19 @@ def record_daily_trace(
 ) -> RunSummary:
     """Validate one complete trace, record its ResearchResult, and archive it."""
 
+    context, failure = _prepare_selection_context(
+        csv_path=csv_path,
+        data=data,
+        clock=clock,
+        sleep=sleep,
+        formation_date=formation_date,
+        action_date=action_date,
+        selection_as_of=selection_as_of,
+        rerun_date=None,
+    )
+    if failure is not None:
+        return failure
+    assert context is not None
     try:
         validated = _validate_trace(
             trace,
@@ -747,28 +800,25 @@ def record_daily_trace(
             selection_as_of=selection_as_of,
             eligible=data.eligible_securities(formation_date),
         )
-    except Exception as error:
-        started = _shanghai(clock())
-        return RunSummary(
-            status="invalid_result",
-            started_at=started.isoformat(timespec="seconds"),
-            formation_date=formation_date.isoformat(),
-            action_date=action_date.isoformat(),
-            selection_as_of=_shanghai(selection_as_of).isoformat(
-                timespec="seconds"
+        _validate_trace_research_availability(
+            validated,
+            sector_research_available=context.sector_research_available,
+            preopen_event_refresh_complete=(
+                context.preopen_event_refresh_complete
             ),
+        )
+    except Exception as error:
+        return _context_summary(
+            context,
+            status="invalid_result",
             error=_safe_error(error),
         )
 
-    summary = record_daily_selection(
+    summary = _record_daily_selection_with_context(
         validated.research_result.model_dump(),
+        context=context,
         csv_path=csv_path,
         data=data,
-        clock=clock,
-        formation_date=formation_date,
-        action_date=action_date,
-        selection_as_of=selection_as_of,
-        sleep=sleep,
     )
     if summary.status not in {"selection_frozen", "already_selected"}:
         return summary
@@ -794,6 +844,34 @@ def record_daily_trace(
             "error": "trace_conflict",
         }
     )
+
+
+def _validate_trace_research_availability(
+    trace: DailyResearchTrace | DailyResearchTraceV4,
+    *,
+    sector_research_available: bool,
+    preopen_event_refresh_complete: bool,
+) -> None:
+    if not isinstance(trace, DailyResearchTraceV4):
+        return
+    if not sector_research_available:
+        uses_sector_basis = any(
+            candidate.opportunity_type == "sector_diffusion"
+            or candidate.research_thesis.engine_type
+            in {"sector_broad_diffusion", "sector_leader_cluster"}
+            or "researching-sectors-industries" in candidate.source_skills
+            for candidate in trace.candidate_ledger
+        ) or any(
+            decision.source_skill == "researching-sectors-industries"
+            for decision in trace.decision_trace
+        )
+        if uses_sector_basis:
+            raise ValueError("sector_research_unavailable")
+    if not preopen_event_refresh_complete and any(
+        candidate.research_thesis.engine_type == "fresh_event_pending"
+        for candidate in trace.candidate_ledger
+    ):
+        raise ValueError("preopen_event_refresh_incomplete")
 
 
 def _validate_trace_v3(
@@ -1614,13 +1692,26 @@ def _prepare_selection_context(
     formation_date: date | None,
     action_date: date | None,
     selection_as_of: datetime | None,
+    rerun_date: date | None,
 ) -> tuple[_SelectionContext | None, RunSummary | None]:
     started = _shanghai(clock())
-    summary_base = {"started_at": started.isoformat(timespec="seconds")}
+    run_mode: Literal["normal", "rerun"] = (
+        "rerun" if rerun_date is not None else "normal"
+    )
+    summary_base = {
+        "started_at": started.isoformat(timespec="seconds"),
+        "run_mode": run_mode,
+    }
     explicit_context = any(
         value is not None
         for value in (formation_date, action_date, selection_as_of)
     )
+    if rerun_date is not None and explicit_context:
+        return None, RunSummary(
+            status="invalid_selection_context",
+            error="rerun_date_cannot_mix_with_explicit_context",
+            **summary_base,
+        )
     if explicit_context and not all(
         value is not None
         for value in (formation_date, action_date, selection_as_of)
@@ -1630,7 +1721,22 @@ def _prepare_selection_context(
             error="formation_date_action_date_and_as_of_are_required_together",
             **summary_base,
         )
-    if not explicit_context and (
+    if rerun_date is not None:
+        action_date = rerun_date
+        selection_as_of = datetime.combine(
+            rerun_date,
+            SELECTION_START,
+            SHANGHAI,
+        )
+        if rerun_date > started.date():
+            return None, RunSummary(
+                status="invalid_selection_context",
+                action_date=rerun_date.isoformat(),
+                selection_as_of=selection_as_of.isoformat(timespec="seconds"),
+                error="rerun_date_must_not_be_future",
+                **summary_base,
+            )
+    elif not explicit_context and (
         started.time() < SELECTION_START or started.time() >= MARKET_OPEN
     ):
         return None, RunSummary(status="outside_selection_window", **summary_base)
@@ -1689,12 +1795,21 @@ def _prepare_selection_context(
             error="formation_date_is_not_prior_trading_date",
             **summary_base,
         )
-    readiness_error = _wait_until_data_ready(
+    (
+        research_mode,
+        sector_research_available,
+        stock_context_available,
+        preopen_event_refresh_complete,
+        limitations,
+        readiness_error,
+    ) = _wait_until_data_ready(
         data=data,
         formation_date=formation_date,
         action_date=action_date,
         clock=clock,
         sleep=sleep,
+        run_mode=run_mode,
+        explicit_context=explicit_context,
     )
     if readiness_error:
         return None, RunSummary(
@@ -1702,6 +1817,12 @@ def _prepare_selection_context(
             formation_date=formation_date.isoformat(),
             action_date=action_date.isoformat(),
             selection_as_of=selection_as_of.isoformat(timespec="seconds"),
+            sector_research_available=sector_research_available,
+            stock_context_available=stock_context_available,
+            preopen_event_refresh_complete=(
+                preopen_event_refresh_complete
+            ),
+            limitations=limitations,
             error=readiness_error,
             **summary_base,
         )
@@ -1717,6 +1838,12 @@ def _prepare_selection_context(
 
     return _SelectionContext(
         started_at=summary_base["started_at"],
+        run_mode=run_mode,
+        research_mode=research_mode,
+        sector_research_available=sector_research_available,
+        stock_context_available=stock_context_available,
+        preopen_event_refresh_complete=preopen_event_refresh_complete,
+        limitations=limitations,
         formation_date=formation_date,
         action_date=action_date,
         selection_as_of=selection_as_of,
@@ -1738,6 +1865,12 @@ def _context_summary(
     return RunSummary(
         status=status,
         started_at=context.started_at,
+        run_mode=context.run_mode,
+        research_mode=context.research_mode,
+        sector_research_available=context.sector_research_available,
+        stock_context_available=context.stock_context_available,
+        preopen_event_refresh_complete=context.preopen_event_refresh_complete,
+        limitations=context.limitations,
         formation_date=context.formation_date.isoformat(),
         action_date=context.action_date.isoformat(),
         selection_as_of=context.selection_as_of.isoformat(timespec="seconds"),
@@ -1796,18 +1929,92 @@ def _wait_until_data_ready(
     action_date: date,
     clock: Callable[[], datetime],
     sleep: Callable[[float], None],
-) -> str:
+    run_mode: Literal["normal", "rerun"],
+    explicit_context: bool,
+) -> tuple[
+    Literal["full", "limited", ""],
+    bool,
+    bool,
+    bool,
+    tuple[str, ...],
+    str,
+]:
     market_open = datetime.combine(action_date, MARKET_OPEN, SHANGHAI)
     while True:
         checked_at = _shanghai(clock())
         report = data.health_report(formation_date)
-        if _data_ready(report, formation_date, checked_at):
-            return ""
+        feature_ready = {
+            str(item.get("feature_set", "")): bool(item.get("ready"))
+            for item in report.get("derived_features", [])
+            if isinstance(item, dict)
+        }
+        report_date_matches = (
+            report.get("data_date") == formation_date.isoformat()
+        )
+        market_ready = feature_ready.get("market_context", False)
+        price_ready = feature_ready.get("price_analysis_context", False)
+        core_ready = bool(
+            report_date_matches
+            and report.get("complete_core_date")
+            and market_ready
+            and price_ready
+        )
+        sector_ready = feature_ready.get("sector_hotspot", False)
+        stock_ready = feature_ready.get("stock_trading_context", False)
         stage_status = _next_morning_stage_status(report, formation_date)
-        if stage_status in {"failed", "waiting_upstream"}:
-            return f"next_morning_stage_{stage_status}"
-        if checked_at >= market_open:
-            return "next_morning_data_not_ready_by_market_open"
+        preopen_ready = stage_status in {"succeeded", "limited"}
+        limitations = tuple(
+            text
+            for available, text in (
+                (sector_ready, SECTOR_RESEARCH_LIMITATION),
+                (stock_ready, STOCK_CONTEXT_LIMITATION),
+                (preopen_ready, PREOPEN_REFRESH_LIMITATION),
+            )
+            if not available
+        )
+
+        if core_ready and not limitations:
+            return "full", True, True, True, (), ""
+        if stage_status == "failed":
+            if core_ready:
+                return (
+                    "limited",
+                    sector_ready,
+                    stock_ready,
+                    False,
+                    limitations,
+                    "",
+                )
+            return "", sector_ready, stock_ready, False, limitations, (
+                "next_morning_stage_failed"
+            )
+
+        can_wait = run_mode == "normal" and checked_at < market_open
+        if explicit_context and checked_at >= market_open:
+            can_wait = False
+        optional_stage_may_finish = stage_status in {
+            "",
+            "running",
+            "waiting_upstream",
+        }
+        if core_ready and (not can_wait or not optional_stage_may_finish):
+            return (
+                "limited",
+                sector_ready,
+                stock_ready,
+                preopen_ready,
+                limitations,
+                "",
+            )
+        if not can_wait:
+            return (
+                "",
+                sector_ready,
+                stock_ready,
+                preopen_ready,
+                limitations,
+                "next_morning_data_not_ready_by_market_open",
+            )
         remaining = (market_open - checked_at).total_seconds()
         sleep(min(float(READINESS_POLL_SECONDS), remaining))
 
@@ -1822,41 +2029,13 @@ def _next_morning_stage_status(
         if row.get("stage") == "next-morning"
         and row.get("data_date") == formation_date.isoformat()
     ]
-    if len(rows) != 1:
+    if not rows:
         return ""
-    return str(rows[0].get("status", ""))
-
-
-def _data_ready(
-    report: dict[str, Any],
-    formation_date: date,
-    cutoff: datetime,
-) -> bool:
-    if not report.get("complete_core_date"):
-        return False
-    if not report.get("derived_ready_for_research"):
-        return False
-    next_morning = [
-        row
-        for row in report.get("latest_stage_runs", [])
-        if row.get("stage") == "next-morning"
-        and row.get("data_date") == formation_date.isoformat()
-    ]
-    if len(next_morning) != 1:
-        return False
-    row = next_morning[0]
-    if row.get("status") not in {"succeeded", "limited"}:
-        return False
-    try:
-        started_at = _shanghai(datetime.fromisoformat(row["started_at"]))
-        finished_at = _shanghai(datetime.fromisoformat(row["finished_at"]))
-    except (KeyError, TypeError, ValueError):
-        return False
-    return (
-        started_at.date() == cutoff.date()
-        and started_at.time() >= time(9, 0)
-        and finished_at <= cutoff
+    latest = max(
+        rows,
+        key=lambda row: str(row.get("started_at", "")),
     )
+    return str(latest.get("status", ""))
 
 
 def _validate_result(
@@ -2075,6 +2254,7 @@ def _parse_main_args(argv: list[str] | None) -> argparse.Namespace:
     prepare.add_argument("--formation-date")
     prepare.add_argument("--action-date")
     prepare.add_argument("--as-of")
+    prepare.add_argument("--rerun-date")
     record = commands.add_parser("record")
     record.add_argument("--result-file", required=True)
     record.add_argument("--formation-date", required=True)
@@ -2094,6 +2274,15 @@ def _parse_main_args(argv: list[str] | None) -> argparse.Namespace:
     if args.command == "prepare" and any(supplied) and not all(supplied):
         parser.error(
             "--formation-date, --action-date, and --as-of must be provided together"
+        )
+    if (
+        args.command == "prepare"
+        and getattr(args, "rerun_date", None)
+        and any(supplied)
+    ):
+        parser.error(
+            "--rerun-date cannot be combined with --formation-date, "
+            "--action-date, or --as-of"
         )
     return args
 
@@ -2118,6 +2307,11 @@ def main(argv: list[str] | None = None) -> int:
         selection_as_of = (
             datetime.fromisoformat(args.as_of) if args.as_of else None
         )
+        rerun_date = (
+            date.fromisoformat(args.rerun_date)
+            if getattr(args, "rerun_date", None)
+            else None
+        )
         common = {
             "csv_path": csv_path,
             "data": data,
@@ -2129,6 +2323,7 @@ def main(argv: list[str] | None = None) -> int:
                 formation_date=formation_date,
                 action_date=action_date,
                 selection_as_of=selection_as_of,
+                rerun_date=rerun_date,
             )
         elif args.command == "record":
             if formation_date is None or action_date is None or selection_as_of is None:
@@ -2175,6 +2370,8 @@ def main(argv: list[str] | None = None) -> int:
         "invalid_result",
         "invalid_selection_context",
         "invalid_selection_cutoff",
+        "outside_selection_window",
+        "data_not_ready",
     } else 0
 
 

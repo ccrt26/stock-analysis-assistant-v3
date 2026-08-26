@@ -236,12 +236,13 @@ def build_research_health_report(
             or bool(item.limitations)
             for item in derived
         ),
-        latest_stage_runs=_latest_stage_runs(warehouse),
+        latest_stage_runs=_latest_stage_runs(warehouse, data_date),
     )
 
 
 def _latest_stage_runs(
     warehouse: ResearchWarehouse,
+    data_date: date,
 ) -> tuple[StageRunHealth, ...]:
     with connect_research_warehouse(
         warehouse.duckdb_path, read_only=True
@@ -252,11 +253,13 @@ def _latest_stage_runs(
                    cast(started_at as varchar), cast(finished_at as varchar),
                    cast(summary_json as varchar)
             from research_ingestion_runs
+            where data_date = ?
             qualify row_number() over (
                 partition by stage order by started_at desc, run_id desc
             ) = 1
             order by stage
-            """
+            """,
+            [data_date],
         ).fetchall()
     result: list[StageRunHealth] = []
     for row in rows:

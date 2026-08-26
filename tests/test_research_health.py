@@ -116,6 +116,33 @@ def test_health_reports_each_stage_latest_real_run_status(tmp_path):
     assert report.latest_stage_runs[0].issues == ("行情接口失败",)
 
 
+def test_health_stage_runs_are_scoped_to_the_requested_data_date(tmp_path):
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    with connect_research_warehouse(warehouse.duckdb_path) as connection:
+        connection.execute(
+            """
+            insert into research_ingestion_runs values
+            ('target-next', 'target-next', 'next-morning', '2026-08-04',
+             'limited', now() - interval '1 day', now() - interval '1 day',
+             '{}')
+            """
+        )
+        connection.execute(
+            """
+            insert into research_ingestion_runs values
+            ('later-next', 'later-next', 'next-morning', '2026-08-05',
+             'succeeded', now(), now(), '{}')
+            """
+        )
+
+    report = build_research_health_report(warehouse, date(2026, 8, 4))
+
+    assert len(report.latest_stage_runs) == 1
+    assert report.latest_stage_runs[0].run_id == "target-next"
+    assert report.latest_stage_runs[0].data_date == date(2026, 8, 4)
+    assert report.latest_stage_runs[0].status == "limited"
+
+
 def test_health_rejects_nonpositive_and_overlapping_revision_intervals(tmp_path):
     warehouse = ResearchWarehouse(tmp_path / "warehouse")
     first = datetime(2026, 8, 4, 7, 1, tzinfo=timezone.utc)

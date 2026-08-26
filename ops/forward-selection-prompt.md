@@ -18,7 +18,7 @@
   --as-of <selection_as_of>
 ```
 
-然后读取 `ops/forward-monitor-prompt.md`。市场 Skill 每天只分析一次，同一份市场结果同时用于已有股票跟踪和当天新选股。先根据 monitor snapshot 生成并 `record` 跟踪报告；只有 selection 返回 `ready_for_research` 时才继续当天 V4 新选股。
+然后读取 `ops/forward-monitor-prompt.md`。市场 Skill 每天只分析一次，同一份市场结果同时用于已有股票跟踪和当天新选股。先根据 monitor snapshot 生成并 `record` 跟踪报告；只有 selection 返回 `ready_for_research` 或 `ready_for_research_limited` 时才继续当天 V4 新选股。
 
 若 selection 返回 `already_selected`，仍可生成跟踪报告，但不得重复执行新选股。若当天没有仍在跟踪的记录，跳过跟踪明细，正常执行新选股。若返回 `non_trading_day`、数据缺口或错误，说明真实状态，不补猜。
 
@@ -29,6 +29,40 @@
 - `selection_as_of`
 
 不得改变 `selection_as_of`；不得读取 `available_at > selection_as_of` 的事实，也不得读取交易日期晚于 `formation_date` 的行情、行动日开盘/分钟走势或未来 D20 结果。
+
+### 用户要求补跑早晨失败任务时
+
+先运行：
+
+```bash
+./.venv/bin/python -m stock_analyzer.ops.forward_selection prepare \
+  --rerun-date <原计划推荐日期>
+```
+
+这个命令会把截止时间固定为原计划推荐日期上海时间 09:05，并由交易日历确定前一个交易日，不使用当前时间或当前价格。如果返回 `data_not_ready`，使用返回的原始 `formation_date` 运行：
+
+```bash
+./.venv/bin/python -m stock_analyzer data run-stage \
+  --stage next-morning \
+  --data-date <formation_date>
+```
+
+然后再次运行：
+
+```bash
+./.venv/bin/python -m stock_analyzer.ops.forward_selection prepare \
+  --rerun-date <原计划推荐日期>
+```
+
+返回 `ready_for_research` 或 `ready_for_research_limited` 后，继续原有 forward monitor、五个 Skill、V4 研究和 `record-trace`。`record-trace` 必须逐字使用 prepare 返回的 `formation_date`、`action_date` 和 `selection_as_of`。受限模式必须把不可用通道交给总控，不得补猜：
+
+- `sector_research_available=false`：板块 Skill 仍运行，但只说明行业数据不可用、本次没有行业候选；不得形成板块类依据，也不得用公司名称或概念标签代替。
+- `stock_context_available=false`：不得引用个股交易背景独有字段；市场、公司和价格仍可研究。
+- `preopen_event_refresh_complete=false`：公司 Skill 可以使用形成日及更早的正式事实，但不得形成刚在行动日前公开、尚无完整交易日的候选，也不得声称完整检查了行动日开盘前新公告。
+
+若已经存在同一 `formation_date` 的正式选择，prepare 返回 `already_selected`，不得重复选股，但仍可继续已有股票走势复盘。
+
+补跑报告开头必须原样说明：“这是对<日期>早晨任务的补跑。研究只使用当日09:05前能够看到的信息；原开盘观察时点已经过去，当前价格不能替代当时的参与条件。”不得把补跑结果称为当前价格下的新推荐，也不得用盘中走势改写原判断。
 
 ## 2. 唯一研究合同
 
@@ -158,7 +192,7 @@ local_archive/forward_selection/pending-trace-<formation_date>.json
 - 目前还在跟踪多少只
 - 今天新推荐的股票
 
-在输出这份合并报告前，只读取一次上海当前时间。只有本次 selection 返回 `ready_for_research`、实际生成了“今天新推荐的股票”，并且读取到的时间已经达到或晚于 `action_date 09:30` 时，才在该部分前提示一次：“本次研究只使用了今天开盘前能够看到的信息，但现在已经超过原本计划观察的开盘时点。不要把当前价格当成当时可以参与的价格，也不要用盘中走势重新改写开盘前的研究结论。”09:30 前不提示，`already_selected` 不提示。不得改变 `selection_as_of`，不得重读盘中价格，也不得重跑研究。
+在输出这份合并报告前，只读取一次上海当前时间。只有本次 selection 返回 `ready_for_research` 或 `ready_for_research_limited`、实际生成了“今天新推荐的股票”，并且读取到的时间已经达到或晚于 `action_date 09:30` 时，才在该部分前提示一次：“本次研究只使用了今天开盘前能够看到的信息，但现在已经超过原本计划观察的开盘时点。不要把当前价格当成当时可以参与的价格，也不要用盘中走势重新改写开盘前的研究结论。”09:30 前不提示，`already_selected` 不提示。不得改变 `selection_as_of`，不得重读盘中价格，也不得重跑研究。
 
 “今天新推荐的股票”部分对每只股票只回答：
 

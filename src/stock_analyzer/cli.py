@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta
-from typing import Optional
+from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
 import typer
@@ -12,6 +12,45 @@ from stock_analyzer.config import AppConfig
 app = typer.Typer(no_args_is_help=True)
 data_app = typer.Typer(no_args_is_help=True)
 app.add_typer(data_app, name="data")
+
+
+def _health_research_state(report: Any) -> tuple[bool, tuple[str, ...]]:
+    features = {
+        str(getattr(item, "feature_set", "")): bool(
+            getattr(item, "ready", False)
+        )
+        for item in getattr(report, "derived_features", ())
+    }
+    core_ready = bool(
+        getattr(report, "complete_core_date", False)
+        and features.get("market_context", False)
+        and features.get("price_analysis_context", False)
+    )
+    limitations: list[str] = []
+    if not features.get("sector_hotspot", False):
+        limitations.append("行业研究数据不可用")
+    if not features.get("stock_trading_context", False):
+        limitations.append("个股交易背景不可用")
+    next_morning = next(
+        (
+            item
+            for item in getattr(report, "latest_stage_runs", ())
+            if getattr(item, "stage", "") == "next-morning"
+        ),
+        None,
+    )
+    if next_morning is None or getattr(next_morning, "status", "") not in {
+        "succeeded",
+        "limited",
+    }:
+        limitations.append("行动日前公告补采未完成")
+    return core_ready, tuple(limitations)
+
+
+def _print_limited_research(limitations: tuple[str, ...]) -> None:
+    typer.echo("核心研究可用，部分研究通道受限")
+    for limitation in limitations:
+        typer.echo(f"- {limitation}")
 
 
 @data_app.command("backfill")
@@ -97,11 +136,21 @@ def data_run_stage(
         f"stage health: core_complete={str(health.complete_core_date).lower()} "
         f"output={health_path}"
     )
-    if (
-        any(item.failed or item.waiting_upstream for item in summaries)
-        or not health.complete_core_date
-    ):
+    core_ready, limitations = _health_research_state(health)
+    if not core_ready:
         raise typer.Exit(code=2)
+    stage_limitations = tuple(
+        (
+            f"{item.scope}: {item.issues[0]}"
+            if item.issues
+            else f"{item.scope} 未完整完成"
+        )
+        for item in summaries
+        if item.failed or item.waiting_upstream
+    )
+    combined = tuple(dict.fromkeys((*limitations, *stage_limitations)))
+    if combined:
+        _print_limited_research(combined)
 
 
 @data_app.command("derive")
@@ -119,8 +168,11 @@ def data_derive(
         date.fromisoformat(data_date),
     )
     typer.echo(summary.plain_language_summary)
-    if summary.failed_feature_sets:
+    failed = set(summary.failed_feature_sets)
+    if failed & {"market_context", "price_analysis_context"}:
         raise typer.Exit(code=2)
+    if failed:
+        _print_limited_research(tuple(sorted(failed)))
 
 
 @data_app.command("health")

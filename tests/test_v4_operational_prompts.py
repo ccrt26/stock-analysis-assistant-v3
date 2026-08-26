@@ -10,7 +10,16 @@ def test_daily_prompt_is_v4_only() -> None:
     assert "market_propagation_environment" not in text
     assert "engine_type: company_event" not in text
     assert "engine_status=fresh_event_pending" not in text
-    assert text.count("stock_analyzer.ops.forward_selection prepare") == 1
+    assert text.count("stock_analyzer.ops.forward_selection prepare") == 3
+    assert "用户要求补跑早晨失败任务时" in text
+    assert text.count("--rerun-date <原计划推荐日期>") == 2
+    assert "ready_for_research_limited" in text
+    assert "受限模式必须把不可用通道交给总控，不得补猜" in text
+    assert (
+        "这是对<日期>早晨任务的补跑。研究只使用当日09:05前能够看到的信息；"
+        "原开盘观察时点已经过去，当前价格不能替代当时的参与条件。"
+        in text
+    )
     for question in (
         "为什么现在值得看",
         "目前有什么实际推动",

@@ -3,7 +3,7 @@ from __future__ import annotations
 import csv
 import json
 from collections.abc import Callable
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -12,7 +12,9 @@ import pytest
 from stock_analyzer.ops.forward_selection import (
     PricePoint,
     RunSummary,
+    _parse_main_args,
     apply_mature_settlements,
+    main,
     prepare_daily_selection,
     prepare_runtime_log,
     record_daily_trace,
@@ -60,7 +62,10 @@ class FakeData:
         action_date_status: bool | None = True,
         ready: bool = True,
         ready_states: list[bool] | None = None,
-        stage_status: str = "limited",
+        stage_status: str | None = "limited",
+        feature_ready: dict[str, bool] | None = None,
+        stage_started_at: datetime | None = None,
+        stage_finished_at: datetime | None = None,
         prices: dict[str, list[PricePoint] | None] | None = None,
     ) -> None:
         self._open_dates = open_dates
@@ -68,6 +73,9 @@ class FakeData:
         self.ready = ready
         self.ready_states = iter(ready_states) if ready_states is not None else None
         self.stage_status = stage_status
+        self.feature_ready = feature_ready or {}
+        self.stage_started_at = stage_started_at
+        self.stage_finished_at = stage_finished_at
         self.health_calls = 0
         self.prices = prices or {}
 
@@ -85,20 +93,40 @@ class FakeData:
                 ready = next(self.ready_states)
             except StopIteration:
                 pass
-        finished = datetime.combine(
-            formation_date.replace(day=formation_date.day + 1),
+        finished = self.stage_finished_at or datetime.combine(
+            formation_date + timedelta(days=1),
             datetime.min.time(),
             SHANGHAI,
         ).replace(hour=9, minute=2)
+        started = self.stage_started_at or finished.replace(minute=0)
+        feature_names = (
+            "market_context",
+            "sector_hotspot",
+            "stock_trading_context",
+            "price_analysis_context",
+        )
+        feature_states = {
+            name: ready and self.feature_ready.get(name, True)
+            for name in feature_names
+        }
         return {
+            "data_date": formation_date.isoformat(),
             "complete_core_date": ready,
-            "derived_ready_for_research": ready,
-            "latest_stage_runs": [
+            "derived_ready_for_research": all(feature_states.values()),
+            "derived_features": [
+                {
+                    "feature_set": name,
+                    "ready": available,
+                    "limitations": [],
+                }
+                for name, available in feature_states.items()
+            ],
+            "latest_stage_runs": [] if self.stage_status is None else [
                 {
                     "stage": "next-morning",
                     "data_date": formation_date.isoformat(),
                     "status": self.stage_status,
-                    "started_at": finished.replace(minute=0).isoformat(),
+                    "started_at": started.isoformat(),
                     "finished_at": finished.isoformat(),
                 }
             ],
@@ -288,6 +316,215 @@ def _one_stock_trace() -> dict:
     }
 
 
+def _v4_trace() -> dict:
+    formation = date(2026, 8, 25)
+    action = date(2026, 8, 26)
+    as_of = datetime(2026, 8, 26, 9, 5, tzinfo=SHANGHAI)
+    return {
+        "trace_version": "daily-research-trace-v4",
+        "formation_date": formation.isoformat(),
+        "action_date": action.isoformat(),
+        "as_of": as_of.isoformat(),
+        "market_search_context": "核对形成日的相对增量。",
+        "market_propagation_mode": "one_day_repair",
+        "market_risk_overlays": [],
+        "candidate_ledger": [
+            {
+                "ts_code": "000001.SZ",
+                "name": "平安银行",
+                "opportunity_type": "independent_price_anomaly",
+                "source_skills": ["analyzing-price-trading"],
+                "final_fate": "selected",
+                "primary_reason": "独立需求增强。",
+                "research_thesis": {
+                    "engine_type": "independent_demand_acceleration",
+                    "engine_status": "active",
+                    "market_recognition": {
+                        "status": "confirmed",
+                        "basis": "相对市场和路径已经确认。",
+                    },
+                    "company_information": {
+                        "first_or_repeat": "not_applicable",
+                        "disclosure_chain": {
+                            "prior_forecast": None,
+                            "forecast_revision": None,
+                            "earnings_express": None,
+                            "formal_report": None,
+                            "correction": None,
+                            "comparison_basis": "不适用",
+                        },
+                        "new_information_level": "not_applicable",
+                        "event_id": None,
+                        "event_available_at": None,
+                        "event_stage": "not_applicable",
+                        "business_link": "not_applicable",
+                        "materiality": "not_applicable",
+                        "tradable_sessions_since_event": None,
+                        "basis": "不依赖公司新事件。",
+                    },
+                    "sector_broad_diffusion": None,
+                    "sector_leader_cluster": None,
+                    "action_condition_decision_id": None,
+                    "catalyst": "没有公司新事件。",
+                    "short_term_engine": "独立需求加速。",
+                    "propagation": "个股自身推进。",
+                    "price_confirmation": "价量已经确认。",
+                    "remaining_path": "仍有剩余路径。",
+                    "fundamental_anchor": "公司事实提供有限锚。",
+                    "company_risk": "没有新催化。",
+                    "critical_unknown": "需求能否延续。",
+                    "decision_ids": ["company", "price"],
+                },
+            }
+        ],
+        "decision_trace": [
+            {
+                "decision_id": "company",
+                "ts_code": "000001.SZ",
+                "source_skill": "researching-company-events",
+                "evidence_id": "company_fundamentals",
+                "evidence_version": "v4",
+                "evidence_status_at_use": "observation_only",
+                "decision_role": "counter",
+                "decision_changed": "no_change",
+                "formation_values": {"business_link_verified": True},
+            },
+            {
+                "decision_id": "price",
+                "ts_code": "000001.SZ",
+                "source_skill": "analyzing-price-trading",
+                "evidence_id": "raw_price",
+                "evidence_version": "price-analysis-context-v2",
+                "evidence_status_at_use": "provisional",
+                "decision_role": "support",
+                "decision_changed": "promoted",
+                "formation_values": {
+                    "observation_date": formation.isoformat(),
+                    "return_5d": 0.05,
+                    "amount_ratio_last_20d": 1.2,
+                    "relative_market_5d": 0.04,
+                    "volume_price_efficiency_5d": 0.4,
+                },
+            },
+        ],
+        "research_result": _one_stock_result(),
+    }
+
+
+def _v4_sector_trace() -> dict:
+    trace = _v4_trace()
+    candidate = trace["candidate_ledger"][0]
+    candidate["opportunity_type"] = "sector_diffusion"
+    candidate["source_skills"] = ["researching-sectors-industries"]
+    trace["research_result"]["selected_stocks"][0][
+        "opportunity_type"
+    ] = "sector_diffusion"
+    thesis = candidate["research_thesis"]
+    thesis["engine_type"] = "sector_leader_cluster"
+    thesis["sector_leader_cluster"] = {
+        "cluster_id": "bank-cluster",
+        "group_code": "801780.SI",
+        "group_name": "银行",
+        "members": [
+            {
+                "ts_code": code,
+                "relative_market_3d": value,
+                "relative_market_5d": value + 0.02,
+                "industry_percentile_5d": percentile,
+            }
+            for code, value, percentile in (
+                ("000001.SZ", 0.03, 0.90),
+                ("600000.SH", 0.02, 0.85),
+                ("601398.SH", 0.01, 0.80),
+            )
+        ],
+        "effective_member_count": 50,
+        "qualifying_leader_count": 3,
+        "required_leader_count": 3,
+        "relative_return_3d": 0.02,
+        "relative_return_5d": 0.04,
+        "turnover_share_change_5d": 0.01,
+        "top1_positive_contribution": 0.50,
+        "candidate_industry_percentile_5d": 0.90,
+        "candidate_role": "leader_confirmed",
+        "strongest_counterevidence": "仍有集中风险。",
+        "unknowns": [],
+    }
+    trace["decision_trace"].append(
+        {
+            "decision_id": "sector",
+            "ts_code": "000001.SZ",
+            "source_skill": "researching-sectors-industries",
+            "evidence_id": "sector_leader_cluster",
+            "evidence_version": "v4",
+            "evidence_status_at_use": "provisional",
+            "decision_role": "support",
+            "decision_changed": "promoted",
+            "formation_values": {"qualifying_leader_count": 3},
+        }
+    )
+    thesis["decision_ids"].append("sector")
+    return trace
+
+
+def _v4_fresh_event_trace() -> dict:
+    trace = _v4_trace()
+    candidate = trace["candidate_ledger"][0]
+    candidate["opportunity_type"] = "company_catalyst"
+    candidate["source_skills"] = ["researching-company-events"]
+    trace["research_result"]["selected_stocks"][0][
+        "opportunity_type"
+    ] = "company_catalyst"
+    event_time = "2026-08-25T19:34:27+08:00"
+    thesis = candidate["research_thesis"]
+    thesis.update(
+        engine_type="fresh_event_pending",
+        engine_status="conditional",
+        market_recognition={"status": "pending", "basis": "尚无首日。"},
+        company_information={
+            "first_or_repeat": "first",
+            "disclosure_chain": {
+                "prior_forecast": None,
+                "forecast_revision": None,
+                "earnings_express": None,
+                "formal_report": "ANN",
+                "correction": None,
+                "comparison_basis": "首次披露",
+            },
+            "new_information_level": "substantive_new",
+            "event_id": "ANN",
+            "event_available_at": event_time,
+            "event_stage": "signed",
+            "business_link": "direct",
+            "materiality": "重大",
+            "tradable_sessions_since_event": 0,
+            "basis": "形成日收盘后首次披露。",
+        },
+        action_condition_decision_id="price",
+    )
+    trace["decision_trace"][0].update(
+        evidence_id="company_event",
+        decision_role="support",
+        formation_values={"event_id": "ANN", "materiality_verified": True},
+    )
+    trace["decision_trace"][1].update(
+        evidence_id="event_price_reaction",
+        evidence_version="event-price-reaction-v3",
+        decision_role="action_condition",
+        formation_values={
+            "event_id": "ANN",
+            "event_available_at": event_time,
+            "reaction_start_date": "2026-08-26",
+            "reaction_window_status": "awaiting_first_session",
+            "observed_reaction_sessions": 0,
+            "event_timing_status": "after_close",
+            "pre_event_relative_market_5d": -0.02,
+            "pre_event_return_20d": 0.08,
+        },
+    )
+    return trace
+
+
 def _trace_with_nearest_nonselection() -> dict:
     trace = _one_stock_trace()
     trace["candidate_ledger"].append(
@@ -429,7 +666,10 @@ def _run(
         sleep=sleep,
         **request,
     )
-    if prepared.status != "ready_for_research":
+    if prepared.status not in {
+        "ready_for_research",
+        "ready_for_research_limited",
+    }:
         return prepared, csv_path
     try:
         result = research.execute(prompt="top-level Codex result")
@@ -454,6 +694,142 @@ def _run(
         selection_as_of=datetime.fromisoformat(prepared.selection_as_of),
     )
     return summary, csv_path
+
+
+def test_afternoon_rerun_freezes_the_original_preopen_context(
+    tmp_path: Path,
+) -> None:
+    current = datetime(2026, 8, 26, 16, 24, tzinfo=SHANGHAI)
+    csv_path = tmp_path / "forward.csv"
+    _write_csv(csv_path, [])
+
+    summary = prepare_daily_selection(
+        csv_path=csv_path,
+        data=FakeData(
+            open_dates=[date(2026, 8, 25), date(2026, 8, 26)]
+        ),
+        clock=_clock(current, current),
+        rerun_date=date(2026, 8, 26),
+        sleep=lambda _seconds: pytest.fail("下午补跑不得等待"),
+    )
+
+    assert summary.status == "ready_for_research"
+    assert summary.run_mode == "rerun"
+    assert summary.research_mode == "full"
+    assert summary.action_date == "2026-08-26"
+    assert summary.formation_date == "2026-08-25"
+    assert summary.selection_as_of == "2026-08-26T09:05:00+08:00"
+    assert summary.selection_as_of != current.isoformat(timespec="seconds")
+
+
+def test_afternoon_prepare_without_rerun_stays_outside_window(
+    tmp_path: Path,
+) -> None:
+    current = datetime(2026, 8, 26, 16, 24, tzinfo=SHANGHAI)
+    csv_path = tmp_path / "forward.csv"
+    _write_csv(csv_path, [])
+
+    summary = prepare_daily_selection(
+        csv_path=csv_path,
+        data=FakeData(
+            open_dates=[date(2026, 8, 25), date(2026, 8, 26)]
+        ),
+        clock=_clock(current),
+    )
+
+    assert summary.status == "outside_selection_window"
+    assert summary.research_mode == ""
+
+
+@pytest.mark.parametrize(
+    ("status", "expected_exit"),
+    [
+        ("ready_for_research", 0),
+        ("ready_for_research_limited", 0),
+        ("non_trading_day", 0),
+        ("outside_selection_window", 2),
+        ("data_not_ready", 2),
+    ],
+)
+def test_forward_selection_main_exit_codes(
+    tmp_path: Path,
+    monkeypatch,
+    status: str,
+    expected_exit: int,
+) -> None:
+    import stock_analyzer.ops.forward_selection as module
+
+    csv_path = tmp_path / "forward.csv"
+    _write_csv(csv_path, [])
+    monkeypatch.setattr(module, "prepare_runtime_log", lambda root: csv_path)
+    monkeypatch.setattr(module, "LocalForwardData", lambda *args: object())
+    monkeypatch.setattr(
+        module,
+        "prepare_daily_selection",
+        lambda **kwargs: RunSummary(
+            status=status,
+            started_at="2026-08-26T16:24:00+08:00",
+        ),
+    )
+
+    assert main(["prepare"]) == expected_exit
+
+
+def test_rerun_date_cannot_mix_with_explicit_context() -> None:
+    with pytest.raises(SystemExit) as error:
+        _parse_main_args(
+            [
+                "prepare",
+                "--rerun-date",
+                "2026-08-26",
+                "--formation-date",
+                "2026-08-25",
+                "--action-date",
+                "2026-08-26",
+                "--as-of",
+                "2026-08-26T09:05:00+08:00",
+            ]
+        )
+
+    assert error.value.code == 2
+
+
+def test_future_rerun_date_is_rejected(tmp_path: Path) -> None:
+    current = datetime(2026, 8, 26, 16, 24, tzinfo=SHANGHAI)
+    csv_path = tmp_path / "forward.csv"
+    _write_csv(csv_path, [])
+
+    summary = prepare_daily_selection(
+        csv_path=csv_path,
+        data=FakeData(open_dates=[date(2026, 8, 26), date(2026, 8, 27)]),
+        clock=_clock(current),
+        rerun_date=date(2026, 8, 27),
+    )
+
+    assert summary.status == "invalid_selection_context"
+    assert summary.error == "rerun_date_must_not_be_future"
+
+
+def test_non_trading_rerun_date_returns_non_trading_day(
+    tmp_path: Path,
+) -> None:
+    current = datetime(2026, 8, 26, 16, 24, tzinfo=SHANGHAI)
+    csv_path = tmp_path / "forward.csv"
+    _write_csv(csv_path, [])
+
+    summary = prepare_daily_selection(
+        csv_path=csv_path,
+        data=FakeData(
+            open_dates=[date(2026, 8, 25)],
+            action_date_status=False,
+        ),
+        clock=_clock(current),
+        rerun_date=date(2026, 8, 26),
+    )
+
+    assert summary.status == "non_trading_day"
+    assert summary.run_mode == "rerun"
+    assert summary.action_date == "2026-08-26"
 
 
 def test_non_trading_day_does_not_call_codex_or_write(tmp_path: Path) -> None:
@@ -551,10 +927,8 @@ def test_unready_next_morning_data_keeps_waiting_past_0915(tmp_path: Path) -> No
     assert summary.selection_as_of == checks[0].isoformat(timespec="seconds")
 
 
-@pytest.mark.parametrize("stage_status", ["failed", "waiting_upstream"])
-def test_failed_next_morning_stage_returns_without_sleeping(
+def test_failed_next_morning_stage_with_missing_core_returns_without_sleeping(
     tmp_path: Path,
-    stage_status: str,
 ) -> None:
     start = datetime(2026, 8, 19, 9, 5, tzinfo=SHANGHAI)
     research = FakeResearch(_empty_result())
@@ -565,16 +939,191 @@ def test_failed_next_morning_stage_returns_without_sleeping(
         data=FakeData(
             open_dates=[date(2026, 8, 18), date(2026, 8, 19)],
             ready=False,
-            stage_status=stage_status,
+            stage_status="failed",
         ),
         research=research,
         sleep=lambda _seconds: pytest.fail("终态失败后不应继续等待"),
     )
 
     assert summary.status == "data_not_ready"
-    assert summary.error == f"next_morning_stage_{stage_status}"
+    assert summary.error == "next_morning_stage_failed"
     assert summary.selection_as_of == start.isoformat(timespec="seconds")
     assert research.calls == 0
+
+
+def test_waiting_upstream_keeps_checking_until_0930_then_runs_limited(
+    tmp_path: Path,
+) -> None:
+    start = datetime(2026, 8, 19, 9, 29, 30, tzinfo=SHANGHAI)
+    market_open = start.replace(minute=30, second=0)
+    csv_path = tmp_path / "forward.csv"
+    _write_csv(csv_path, [])
+    sleeps: list[float] = []
+
+    summary = prepare_daily_selection(
+        csv_path=csv_path,
+        data=FakeData(
+            open_dates=[date(2026, 8, 18), date(2026, 8, 19)],
+            stage_status="waiting_upstream",
+        ),
+        clock=_clock(start, start, market_open),
+        sleep=sleeps.append,
+    )
+
+    assert sleeps == [30]
+    assert summary.status == "ready_for_research_limited"
+    assert summary.research_mode == "limited"
+    assert summary.preopen_event_refresh_complete is False
+    assert "行动日前公告补采未完成" in "；".join(summary.limitations)
+
+
+def test_failed_next_morning_with_core_ready_runs_limited_immediately(
+    tmp_path: Path,
+) -> None:
+    start = datetime(2026, 8, 19, 9, 5, tzinfo=SHANGHAI)
+    csv_path = tmp_path / "forward.csv"
+    _write_csv(csv_path, [])
+
+    summary = prepare_daily_selection(
+        csv_path=csv_path,
+        data=FakeData(
+            open_dates=[date(2026, 8, 18), date(2026, 8, 19)],
+            stage_status="failed",
+        ),
+        clock=_clock(start, start),
+        sleep=lambda _seconds: pytest.fail("次晨任务失败后不得继续等待"),
+    )
+
+    assert summary.status == "ready_for_research_limited"
+    assert summary.preopen_event_refresh_complete is False
+
+
+@pytest.mark.parametrize(
+    ("missing_feature", "available_field", "limitation_text"),
+    [
+        (
+            "sector_hotspot",
+            "sector_research_available",
+            "行业研究数据不可用",
+        ),
+        (
+            "stock_trading_context",
+            "stock_context_available",
+            "个股交易背景不可用",
+        ),
+    ],
+)
+def test_optional_derived_feature_missing_allows_limited_rerun(
+    tmp_path: Path,
+    missing_feature: str,
+    available_field: str,
+    limitation_text: str,
+) -> None:
+    current = datetime(2026, 8, 26, 16, 24, tzinfo=SHANGHAI)
+    csv_path = tmp_path / "forward.csv"
+    _write_csv(csv_path, [])
+
+    summary = prepare_daily_selection(
+        csv_path=csv_path,
+        data=FakeData(
+            open_dates=[date(2026, 8, 25), date(2026, 8, 26)],
+            feature_ready={missing_feature: False},
+        ),
+        clock=_clock(current, current),
+        rerun_date=date(2026, 8, 26),
+        sleep=lambda _seconds: pytest.fail("下午补跑不得等待"),
+    )
+
+    assert summary.status == "ready_for_research_limited"
+    assert summary.research_mode == "limited"
+    assert getattr(summary, available_field) is False
+    assert limitation_text in "；".join(summary.limitations)
+
+
+@pytest.mark.parametrize(
+    "missing_feature",
+    ["market_context", "price_analysis_context"],
+)
+def test_missing_core_feature_blocks_rerun_without_waiting(
+    tmp_path: Path,
+    missing_feature: str,
+) -> None:
+    current = datetime(2026, 8, 26, 16, 24, tzinfo=SHANGHAI)
+    csv_path = tmp_path / "forward.csv"
+    _write_csv(csv_path, [])
+
+    summary = prepare_daily_selection(
+        csv_path=csv_path,
+        data=FakeData(
+            open_dates=[date(2026, 8, 25), date(2026, 8, 26)],
+            feature_ready={missing_feature: False},
+        ),
+        clock=_clock(current, current),
+        rerun_date=date(2026, 8, 26),
+        sleep=lambda _seconds: pytest.fail("下午补跑不得等待"),
+    )
+
+    assert summary.status == "data_not_ready"
+    assert summary.research_mode == ""
+    assert summary.formation_date == "2026-08-25"
+    assert summary.action_date == "2026-08-26"
+    assert summary.selection_as_of == "2026-08-26T09:05:00+08:00"
+
+
+def test_health_summary_for_another_date_cannot_enable_rerun(
+    tmp_path: Path,
+) -> None:
+    current = datetime(2026, 8, 26, 16, 24, tzinfo=SHANGHAI)
+    csv_path = tmp_path / "forward.csv"
+    _write_csv(csv_path, [])
+    data = FakeData(
+        open_dates=[date(2026, 8, 25), date(2026, 8, 26)]
+    )
+    original_health_report = data.health_report
+
+    def wrong_date_health(formation_date: date) -> dict:
+        report = original_health_report(formation_date)
+        report["data_date"] = "2026-08-24"
+        return report
+
+    data.health_report = wrong_date_health  # type: ignore[method-assign]
+    summary = prepare_daily_selection(
+        csv_path=csv_path,
+        data=data,
+        clock=_clock(current, current),
+        rerun_date=date(2026, 8, 26),
+        sleep=lambda _seconds: pytest.fail("下午补跑不得等待"),
+    )
+
+    assert summary.status == "data_not_ready"
+
+
+def test_historical_rerun_accepts_afternoon_stage_completion_without_sleep(
+    tmp_path: Path,
+) -> None:
+    current = datetime(2026, 8, 27, 16, 24, tzinfo=SHANGHAI)
+    csv_path = tmp_path / "forward.csv"
+    _write_csv(csv_path, [])
+
+    summary = prepare_daily_selection(
+        csv_path=csv_path,
+        data=FakeData(
+            open_dates=[date(2026, 8, 25), date(2026, 8, 26)],
+            stage_started_at=datetime(
+                2026, 8, 26, 16, 0, tzinfo=SHANGHAI
+            ),
+            stage_finished_at=datetime(
+                2026, 8, 26, 16, 20, tzinfo=SHANGHAI
+            ),
+        ),
+        clock=_clock(current, current),
+        rerun_date=date(2026, 8, 26),
+        sleep=lambda _seconds: pytest.fail("历史补跑不得等待"),
+    )
+
+    assert summary.status == "ready_for_research"
+    assert summary.preopen_event_refresh_complete is True
+    assert summary.selection_as_of == "2026-08-26T09:05:00+08:00"
 
 
 def test_unready_next_morning_stage_stops_at_market_open(tmp_path: Path) -> None:
@@ -839,6 +1388,70 @@ def test_trace_date_mismatch_is_rejected_without_writing_or_moving(
 
     assert summary.status == "invalid_result"
     assert summary.error == "trace_formation_date_mismatch"
+    assert _read_csv(csv_path) == []
+    assert pending.exists()
+
+
+def test_limited_record_trace_rejects_sector_basis_when_sector_is_unavailable(
+    tmp_path: Path,
+) -> None:
+    trace = _v4_sector_trace()
+    pending = tmp_path / "pending-sector.json"
+    pending.write_text(json.dumps(trace, ensure_ascii=False), encoding="utf-8")
+    csv_path = tmp_path / "forward.csv"
+    _write_csv(csv_path, [])
+    current = datetime(2026, 8, 26, 16, 24, tzinfo=SHANGHAI)
+
+    summary = record_daily_trace(
+        trace,
+        pending_path=pending,
+        archive_dir=tmp_path / "archive",
+        csv_path=csv_path,
+        data=FakeData(
+            open_dates=[date(2026, 8, 25), date(2026, 8, 26)],
+            feature_ready={"sector_hotspot": False},
+        ),
+        clock=_clock(current, current),
+        formation_date=date(2026, 8, 25),
+        action_date=date(2026, 8, 26),
+        selection_as_of=datetime(2026, 8, 26, 9, 5, tzinfo=SHANGHAI),
+        sleep=lambda _seconds: pytest.fail("下午归档不得等待"),
+    )
+
+    assert summary.status == "invalid_result"
+    assert summary.error == "sector_research_unavailable"
+    assert _read_csv(csv_path) == []
+    assert pending.exists()
+
+
+def test_limited_record_trace_rejects_fresh_event_when_preopen_is_incomplete(
+    tmp_path: Path,
+) -> None:
+    trace = _v4_fresh_event_trace()
+    pending = tmp_path / "pending-event.json"
+    pending.write_text(json.dumps(trace, ensure_ascii=False), encoding="utf-8")
+    csv_path = tmp_path / "forward.csv"
+    _write_csv(csv_path, [])
+    current = datetime(2026, 8, 26, 16, 24, tzinfo=SHANGHAI)
+
+    summary = record_daily_trace(
+        trace,
+        pending_path=pending,
+        archive_dir=tmp_path / "archive",
+        csv_path=csv_path,
+        data=FakeData(
+            open_dates=[date(2026, 8, 25), date(2026, 8, 26)],
+            stage_status="failed",
+        ),
+        clock=_clock(current, current),
+        formation_date=date(2026, 8, 25),
+        action_date=date(2026, 8, 26),
+        selection_as_of=datetime(2026, 8, 26, 9, 5, tzinfo=SHANGHAI),
+        sleep=lambda _seconds: pytest.fail("下午归档不得等待"),
+    )
+
+    assert summary.status == "invalid_result"
+    assert summary.error == "preopen_event_refresh_incomplete"
     assert _read_csv(csv_path) == []
     assert pending.exists()
 
