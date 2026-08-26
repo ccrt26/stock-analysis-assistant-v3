@@ -12,6 +12,8 @@ from pydantic import ValidationError
 
 from stock_analyzer.ops.forward_monitor import (
     DailyForwardMonitorReportV1,
+    DailyForwardMonitorReportV2,
+    _human_trading_day,
     prepare_forward_monitor,
     record_forward_monitor,
     register_episodes,
@@ -64,6 +66,7 @@ def _trace(
                     "name": "银龙股份",
                     "priority": 1,
                     "opportunity_type": "independent_price_anomaly",
+                    "selection_reason": "推荐时保留的独立选择理由",
                     "strongest_counterevidence": "持续性仍待观察",
                     "nearest_comparison": "比对照股票启动更早",
                 }
@@ -73,6 +76,7 @@ def _trace(
                     "ts_code": comparator_code,
                     "name": "尚太科技",
                     "opportunity_type": "independent_price_anomaly",
+                    "selection_reason": "对照股票当时接近入选",
                     "strongest_counterevidence": "短期涨幅偏大",
                     "nearest_comparison": "剩余空间弱于入选股票",
                 }
@@ -335,6 +339,18 @@ def test_register_imports_selected_and_comparator_with_stable_ids(
     )
     assert episodes["selected"]["original_priority"] == 1
     assert episodes["comparator"]["original_priority"] is None
+    assert episodes["selected"]["original_research_thesis"] == (
+        _trace()["candidate_ledger"][0]["research_thesis"]
+    )
+    assert episodes["comparator"]["original_research_thesis"] == (
+        _trace()["candidate_ledger"][1]["research_thesis"]
+    )
+    assert episodes["selected"]["original_selection_reason"] == (
+        "推荐时保留的独立选择理由"
+    )
+    assert episodes["comparator"]["original_selection_reason"] == (
+        "对照股票当时接近入选"
+    )
     assert trace_file.read_bytes() == original
 
 
@@ -364,6 +380,47 @@ def test_register_is_idempotent(tmp_path: Path) -> None:
     assert registry_path.read_bytes() == first_bytes
 
 
+def test_register_only_fills_missing_original_fields(tmp_path: Path) -> None:
+    trace_file = tmp_path / "trace.json"
+    trace = _trace()
+    _write_trace(trace_file, trace)
+    register_episodes(
+        trace_file=trace_file,
+        label="replay",
+        project_root=tmp_path,
+    )
+    registry_path = (
+        tmp_path / "local_archive/forward_monitor/registered-episodes.json"
+    )
+    registry = json.loads(registry_path.read_text(encoding="utf-8"))
+    selected = next(
+        item for item in registry["episodes"] if item["role"] == "selected"
+    )
+    selected.pop("original_research_thesis")
+    selected["original_primary_reason"] = "已经保存的原始理由"
+    registry_path.write_text(
+        json.dumps(registry, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    repeated = register_episodes(
+        trace_file=trace_file,
+        label="replay",
+        project_root=tmp_path,
+    )
+
+    refreshed = json.loads(registry_path.read_text(encoding="utf-8"))
+    selected = next(
+        item for item in refreshed["episodes"] if item["role"] == "selected"
+    )
+    assert repeated.selected_registered == 0
+    assert repeated.comparators_registered == 0
+    assert selected["original_research_thesis"] == (
+        trace["candidate_ledger"][0]["research_thesis"]
+    )
+    assert selected["original_primary_reason"] == "已经保存的原始理由"
+
+
 def test_prepare_auto_discovers_formal_v4_trace(tmp_path: Path) -> None:
     trace = _single_selected_trace(
         formation_date="2026-07-31",
@@ -384,6 +441,42 @@ def test_prepare_auto_discovers_formal_v4_trace(tmp_path: Path) -> None:
         "formal:2026-07-31:603969.SH:selected"
     )
     assert snapshot["episodes"][0]["source_type"] == "formal"
+    assert snapshot["episodes"][0]["original_research_thesis"] == (
+        trace["candidate_ledger"][0]["research_thesis"]
+    )
+    assert trace["candidate_ledger"][0]["research_thesis"] == (
+        json.loads(trace_path.read_text(encoding="utf-8"))["candidate_ledger"][0][
+            "research_thesis"
+        ]
+    )
+
+
+def test_prepare_marks_old_episode_with_missing_original_thesis(
+    tmp_path: Path,
+) -> None:
+    trace = _single_selected_trace(
+        formation_date="2026-07-31",
+        action_date="2026-08-03",
+    )
+    trace_file = tmp_path / "trace.json"
+    _write_trace(trace_file, trace)
+    register_episodes(
+        trace_file=trace_file,
+        label="legacy",
+        project_root=tmp_path,
+    )
+    registry_path = (
+        tmp_path / "local_archive/forward_monitor/registered-episodes.json"
+    )
+    registry = json.loads(registry_path.read_text(encoding="utf-8"))
+    registry["episodes"][0].pop("original_research_thesis")
+    registry_path.write_text(json.dumps(registry), encoding="utf-8")
+    sessions = _seed_monitor_project(tmp_path, trace=trace, session_count=1)
+
+    episode = _prepare(tmp_path, sessions[0])["episodes"][0]
+
+    assert episode["original_research_thesis"] is None
+    assert "missing_original_research_thesis" in episode["data_limitations"]
 
 
 def test_prepare_keeps_multiple_episodes_for_the_same_stock(tmp_path: Path) -> None:
@@ -549,10 +642,39 @@ def test_prepare_calculates_adjusted_path_and_excludes_future_prices(tmp_path: P
         assert episode[f"{prefix}_max_close_return_since_entry"] == pytest.approx(0.22)
         assert episode[f"{prefix}_max_high_return_since_entry"] == pytest.approx(0.30)
         assert episode[f"{prefix}_mae_since_entry"] == pytest.approx(-0.20)
+        assert episode[f"{prefix}_close_drawdown_from_peak"] == pytest.approx(0.0)
         assert episode[f"{prefix}_first_close_hit_20pct_date"] == sessions[1].isoformat()
         assert episode[f"{prefix}_first_high_hit_20pct_date"] == sessions[0].isoformat()
     assert episode["d20_hit_20pct_close_within_20d"] is True
     assert episode["current_hit_20pct_close"] is True
+
+
+def test_path_reports_close_drawdown_from_the_period_peak(tmp_path: Path) -> None:
+    trace = _single_selected_trace(
+        formation_date="2026-07-31",
+        action_date="2026-08-03",
+    )
+    archive = tmp_path / "local_archive/forward_selection"
+    archive.mkdir(parents=True)
+    _write_trace(archive / "research-trace-2026-07-31.json", trace)
+    sessions = _seed_monitor_project(
+        tmp_path,
+        trace=trace,
+        session_count=2,
+        price_overrides={
+            1: {"open": 10.0, "close": 12.0, "high": 12.2, "low": 9.5},
+            2: {"open": 11.5, "close": 11.0, "high": 11.8, "low": 10.8},
+        },
+    )
+
+    episode = _prepare(tmp_path, sessions[-1])["episodes"][0]
+
+    assert episode["current_close_drawdown_from_peak"] == pytest.approx(
+        11.0 / 12.0 - 1.0
+    )
+    assert episode["d20_close_drawdown_from_peak"] == pytest.approx(
+        11.0 / 12.0 - 1.0
+    )
 
 
 def test_d20_close_hit_uses_forward_tolerance_at_twenty_percent(
@@ -1145,9 +1267,15 @@ def test_prepare_is_idempotent_and_never_changes_forward_csv(tmp_path: Path) -> 
     assert forward_csv.read_bytes() == b"existing,d20,result\n"
 
 
-def _report_payload(snapshot: dict, *, alerts: list[dict] | None = None, unreported: int = 0) -> dict:
+def _report_payload(
+    snapshot: dict,
+    *,
+    alerts: list[dict] | None = None,
+    unreported: int = 0,
+    report_version: str = "daily-forward-monitor-report-v2",
+) -> dict:
     return {
-        "report_version": "daily-forward-monitor-report-v1",
+        "report_version": report_version,
         "analysis_date": snapshot["analysis_date"],
         "as_of": snapshot["as_of"],
         "market_overview": {
@@ -1191,6 +1319,16 @@ def _alert(ts_code: str, episode_id: str) -> dict:
         "confirmation_condition": "相对表现转强",
         "invalidation_condition": "相对表现继续走弱",
         "why_reported": "固定检查日",
+        "review_assessment": {
+            "current_assessment": "partly_supported",
+            "best_supported_explanation": "stock_specific_move",
+            "weak_or_failed_link": "none",
+            "decision_review": "not_final_yet",
+            "comparison_with_alternative": (
+                "当时没有留下可以严格匹配的备选股票代码，因此这次不能做可靠的逐只比较。"
+            ),
+            "overall_review": "原判断有一部分得到走势支持，但仍需继续观察。",
+        },
     }
 
 
@@ -1276,8 +1414,8 @@ def test_report_accepts_one_alert_for_all_roles_of_the_same_stock(tmp_path: Path
     saved = json.loads(Path(summary.json_file).read_text(encoding="utf-8"))
     markdown = Path(summary.markdown_file).read_text(encoding="utf-8")
     assert saved["alerts"][0]["roles"] == ["selected", "comparator"]
-    assert markdown.count("### 银龙股份（603969.SH）") == 1
-    assert "原角色：入选 / 对照" in markdown
+    assert markdown.count("### 银龙股份（603969.SH，") == 1
+    assert "当时推荐的股票、当时作为比较对象的股票" in markdown
 
 
 def test_record_rejects_omitting_one_attention_episode_for_the_same_stock(
@@ -1305,22 +1443,113 @@ def test_report_model_rejects_more_than_eight_or_duplicate_stocks() -> None:
     snapshot = {"analysis_date": "2026-08-03", "as_of": "2026-08-03T18:00:00+08:00", "summary": {"open_episode_count": 9, "distinct_stock_count": 9, "attention_stock_count": 9, "selected_count": 9, "comparator_count": 0, "primary_count": 9, "passive_tail_count": 0, "closed_count": 0}}
     nine = [_alert(f"00000{i}.SZ", f"e{i}") for i in range(9)]
     with pytest.raises(ValidationError):
-        DailyForwardMonitorReportV1.model_validate(_report_payload(snapshot, alerts=nine))
+        DailyForwardMonitorReportV2.model_validate(_report_payload(snapshot, alerts=nine))
     duplicate = [_alert("000001.SZ", "e1"), _alert("000001.SZ", "e2")]
     with pytest.raises(ValidationError):
-        DailyForwardMonitorReportV1.model_validate(_report_payload(snapshot, alerts=duplicate))
+        DailyForwardMonitorReportV2.model_validate(_report_payload(snapshot, alerts=duplicate))
 
 
 def test_report_accepts_eight_alerts_and_counts_the_rest() -> None:
     snapshot = {"analysis_date": "2026-08-03", "as_of": "2026-08-03T18:00:00+08:00", "summary": {"open_episode_count": 9, "distinct_stock_count": 9, "attention_stock_count": 9, "selected_count": 9, "comparator_count": 0, "primary_count": 9, "passive_tail_count": 0, "closed_count": 0}}
     alerts = [_alert(f"00000{i}.SZ", f"e{i}") for i in range(8)]
 
-    report = DailyForwardMonitorReportV1.model_validate(
+    report = DailyForwardMonitorReportV2.model_validate(
         _report_payload(snapshot, alerts=alerts, unreported=1)
     )
 
     assert len(report.alerts) == 8
     assert report.unreported_attention_count == 1
+
+
+def test_v1_report_model_remains_readable() -> None:
+    snapshot = {
+        "analysis_date": "2026-08-03",
+        "as_of": "2026-08-03T18:00:00+08:00",
+        "summary": {
+            "open_episode_count": 0,
+            "distinct_stock_count": 0,
+            "attention_stock_count": 0,
+            "selected_count": 0,
+            "comparator_count": 0,
+            "primary_count": 0,
+            "passive_tail_count": 0,
+        },
+    }
+    payload = _report_payload(
+        snapshot,
+        report_version="daily-forward-monitor-report-v1",
+    )
+
+    report = DailyForwardMonitorReportV1.model_validate(payload)
+
+    assert report.report_version == "daily-forward-monitor-report-v1"
+
+
+def test_v2_report_requires_review_and_keeps_final_decision_for_day_twenty() -> None:
+    snapshot = {
+        "analysis_date": "2026-08-03",
+        "as_of": "2026-08-03T18:00:00+08:00",
+        "summary": {
+            "open_episode_count": 1,
+            "distinct_stock_count": 1,
+            "attention_stock_count": 1,
+            "selected_count": 1,
+            "comparator_count": 0,
+            "primary_count": 1,
+            "passive_tail_count": 0,
+        },
+    }
+    alert = _alert("603969.SH", "e1")
+    without_review = json.loads(json.dumps(alert))
+    without_review.pop("review_assessment")
+    with pytest.raises(ValidationError):
+        DailyForwardMonitorReportV2.model_validate(
+            _report_payload(snapshot, alerts=[without_review])
+        )
+
+    early_final = json.loads(json.dumps(alert))
+    early_final["review_assessment"]["decision_review"] = (
+        "logic_and_stock_both_reasonable"
+    )
+    with pytest.raises(ValidationError, match="before the twentieth"):
+        DailyForwardMonitorReportV2.model_validate(
+            _report_payload(snapshot, alerts=[early_final])
+        )
+
+    mature_nonfinal = json.loads(json.dumps(alert))
+    mature_nonfinal["day_numbers"] = [20]
+    with pytest.raises(ValidationError, match="at or after the twentieth"):
+        DailyForwardMonitorReportV2.model_validate(
+            _report_payload(snapshot, alerts=[mature_nonfinal])
+        )
+
+    mature = json.loads(json.dumps(alert))
+    mature["day_numbers"] = [20]
+    mature["review_assessment"]["decision_review"] = (
+        "logic_and_stock_both_reasonable"
+    )
+    report = DailyForwardMonitorReportV2.model_validate(
+        _report_payload(snapshot, alerts=[mature])
+    )
+    assert report.alerts[0].review_assessment.current_assessment == (
+        "partly_supported"
+    )
+
+
+@pytest.mark.parametrize(
+    ("day_number", "expected"),
+    [
+        (1, "推荐后的第一个交易日"),
+        (2, "推荐后的第二个交易日"),
+        (10, "推荐后的第十个交易日"),
+        (11, "推荐后的第十一个交易日"),
+        (20, "推荐后的第二十个交易日"),
+        (21, "推荐后的第二十一个交易日"),
+        (30, "推荐后的第三十个交易日"),
+    ],
+)
+def test_human_trading_day(day_number: int, expected: str) -> None:
+    assert _human_trading_day(day_number) == expected
 
 
 @pytest.mark.parametrize(
@@ -1404,7 +1633,7 @@ def test_report_accepts_each_v4_market_propagation_mode(mode: str) -> None:
     payload = _report_payload(snapshot)
     payload["market_overview"]["market_propagation_mode"] = mode
 
-    DailyForwardMonitorReportV1.model_validate(payload)
+    DailyForwardMonitorReportV2.model_validate(payload)
 
 
 def test_record_is_idempotent_and_preserves_conflicting_pending_report(tmp_path: Path) -> None:
@@ -1547,7 +1776,9 @@ def test_record_recovers_missing_markdown_without_rewriting_json(
     assert failed_pending.exists()
 
 
-def test_markdown_uses_plain_chinese_and_includes_all_alert_context(tmp_path: Path) -> None:
+def test_markdown_uses_plain_chinese_and_natural_review_sections(
+    tmp_path: Path,
+) -> None:
     trace = _single_selected_trace(formation_date="2026-07-31", action_date="2026-08-03")
     archive = tmp_path / "local_archive/forward_selection"
     archive.mkdir(parents=True)
@@ -1559,15 +1790,15 @@ def test_markdown_uses_plain_chinese_and_includes_all_alert_context(tmp_path: Pa
     alert = _alert("603969.SH", episode_id)
     alert.update(
         {
-            "alert_type": "late_activation",
+            "alert_type": "checkpoint",
             "monitor_state": "strengthening",
             "market_change": "测试中的大盘变化",
             "sector_change": "测试中的板块变化",
             "stock_change": "测试中的个股变化",
             "company_change": "测试中的公司变化",
             "outlook_1_3d": "continuation_possible",
-            "confirmation_condition": "测试确认条件",
-            "invalidation_condition": "测试失效条件",
+            "confirmation_condition": "测试中需要看到的继续走强事实",
+            "invalidation_condition": "测试中说明原判断不再成立的事实",
             "why_reported": "测试提醒原因",
         }
     )
@@ -1587,23 +1818,227 @@ def test_markdown_uses_plain_chinese_and_includes_all_alert_context(tmp_path: Pa
     )
     markdown = Path(summary.markdown_file).read_text(encoding="utf-8")
 
-    assert "当前：D1" in markdown
-    assert "原角色：入选" in markdown
-    assert "最初入选依据：个股独立需求加速" in markdown
-    assert "原始主要理由：银龙股份的原始判断依据" in markdown
-    assert "当前状态：正在转强" in markdown
-    assert "大盘：测试中的大盘变化" in markdown
-    assert "板块：测试中的板块变化" in markdown
-    assert "个股：测试中的个股变化" in markdown
-    assert "公司：测试中的公司变化" in markdown
-    assert "未来1—3个交易日基础情形：仍有延续可能" in markdown
-    assert "确认条件：测试确认条件" in markdown
-    assert "失效条件：测试失效条件" in markdown
-    assert "提醒原因：测试提醒原因" in markdown
-    assert "迟到启动，不改变原20个交易日结果" in markdown
-    assert "independent_demand_acceleration" not in markdown
-    assert "continuation_possible" not in markdown
-    assert "strengthening" not in markdown
+    assert "今天的市场情况" in markdown
+    assert "之前推荐股票的走势复盘" in markdown
+    assert "推荐后的第一个交易日" in markdown
+    for heading in (
+        "当时为什么看它",
+        "实际怎么走",
+        "为什么会这样",
+        "原判断现在怎么看",
+        "和当时最接近的备选相比",
+        "接下来观察什么",
+    ):
+        assert heading in markdown
+    assert "银龙股份的原始判断依据" in markdown
+    assert "测试中的大盘变化" in markdown
+    assert "测试中的板块变化" in markdown
+    assert "测试中的个股变化" in markdown
+    assert "测试中的公司变化" in markdown
+    assert "市场方面，测试中的大盘变化。行业方面，测试中的板块变化。" in markdown
+    assert "从期间最高收盘价回落0.00%" in markdown
+    assert "从期间最高收盘价回落+0.00%" not in markdown
+    assert "测试中需要看到的继续走强事实" in markdown
+    assert "测试中说明原判断不再成立的事实" in markdown
+    for forbidden in (
+        "D1", "D2", "D10", "D20", "发动机", "行动日", "行动窗口",
+        "原角色", "MFE", "MAE", "selected", "comparator",
+        "nearest_nonselection", "episode", "episode_ids", "engine_type",
+        "engine_status", "确认条件", "失效条件", "基础情形",
+    ):
+        assert forbidden not in markdown
+
+
+def test_markdown_names_the_second_trading_day_without_d_label(
+    tmp_path: Path,
+) -> None:
+    trace = _single_selected_trace(
+        formation_date="2026-07-31",
+        action_date="2026-08-03",
+    )
+    archive = tmp_path / "local_archive/forward_selection"
+    archive.mkdir(parents=True)
+    _write_trace(archive / "research-trace-2026-07-31.json", trace)
+    sessions = _seed_monitor_project(
+        tmp_path,
+        trace=trace,
+        session_count=2,
+        announcements=[
+            {
+                "announcement_id": "A2",
+                "ts_code": "603969.SH",
+                "title": "测试公告",
+                "announcement_time": datetime(2026, 8, 4, 17, tzinfo=SHANGHAI),
+                "available_at": datetime(2026, 8, 4, 17, tzinfo=SHANGHAI),
+            }
+        ],
+    )
+    snapshot = _prepare(tmp_path, sessions[-1])
+    snapshot_path = (
+        tmp_path / f"local_archive/forward_monitor/snapshot-{sessions[-1]}.json"
+    )
+    alert = _alert("603969.SH", snapshot["episodes"][0]["episode_id"])
+    alert["day_numbers"] = [2]
+    alert["alert_type"] = "new_event"
+    pending = tmp_path / "pending-d2.json"
+    pending.write_text(
+        json.dumps(_report_payload(snapshot, alerts=[alert]), ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    summary = record_forward_monitor(
+        snapshot_file=snapshot_path,
+        report_file=pending,
+        project_root=tmp_path,
+    )
+    markdown = Path(summary.markdown_file).read_text(encoding="utf-8")
+
+    assert "推荐后的第二个交易日" in markdown
+    assert "D2" not in markdown
+
+
+def test_late_activation_markdown_uses_plain_tail_explanation(tmp_path: Path) -> None:
+    trace = _single_selected_trace(
+        formation_date="2026-07-01",
+        action_date="2026-07-02",
+    )
+    archive = tmp_path / "local_archive/forward_selection"
+    archive.mkdir(parents=True)
+    _write_trace(archive / "research-trace-2026-07-01.json", trace)
+    sessions = _seed_monitor_project(tmp_path, trace=trace, session_count=21)
+    snapshot = _prepare(tmp_path, sessions[-1])
+    snapshot_path = (
+        tmp_path / f"local_archive/forward_monitor/snapshot-{sessions[-1]}.json"
+    )
+    episode = snapshot["episodes"][0]
+    episode["attention_reasons"] = ["late_activation_candidate"]
+    snapshot["attention_stocks"] = [
+        {
+            "ts_code": episode["ts_code"],
+            "name": episode["name"],
+            "episode_ids": [episode["episode_id"]],
+            "roles": [episode["role"]],
+            "day_numbers": [episode["day_number"]],
+            "original_engine_types": [episode["original_engine_type"]],
+            "attention_reasons": ["late_activation_candidate"],
+        }
+    ]
+    snapshot["summary"]["attention_stock_count"] = 1
+    snapshot_path.write_text(
+        json.dumps(snapshot, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    alert = _alert("603969.SH", snapshot["episodes"][0]["episode_id"])
+    alert["day_numbers"] = [21]
+    alert["alert_type"] = "late_activation"
+    alert["review_assessment"]["decision_review"] = "unknown"
+    alert["review_assessment"]["overall_review"] = (
+        "前20个交易日的原评价已经固定，较晚走强不会改写它。"
+    )
+    pending = tmp_path / "pending-late-activation.json"
+    pending.write_text(
+        json.dumps(_report_payload(snapshot, alerts=[alert]), ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    summary = record_forward_monitor(
+        snapshot_file=snapshot_path,
+        report_file=pending,
+        project_root=tmp_path,
+    )
+    markdown = Path(summary.markdown_file).read_text(encoding="utf-8")
+
+    assert "推荐后的第二十一个交易日" in markdown
+    assert (
+        "这只股票在前20个交易日结束后才开始明显走强，因此不会改变前20天的原评价结果。"
+        in markdown
+    )
+    assert "迟到启动" not in markdown
+    assert "D21" not in markdown
+
+
+def test_day_twenty_markdown_adds_final_review_section(tmp_path: Path) -> None:
+    trace = _single_selected_trace(
+        formation_date="2026-07-01",
+        action_date="2026-07-02",
+    )
+    archive = tmp_path / "local_archive/forward_selection"
+    archive.mkdir(parents=True)
+    _write_trace(archive / "research-trace-2026-07-01.json", trace)
+    sessions = _seed_monitor_project(tmp_path, trace=trace, session_count=20)
+    snapshot = _prepare(tmp_path, sessions[-1])
+    snapshot_path = (
+        tmp_path / f"local_archive/forward_monitor/snapshot-{sessions[-1]}.json"
+    )
+    alert = _alert("603969.SH", snapshot["episodes"][0]["episode_id"])
+    alert["day_numbers"] = [20]
+    alert["review_assessment"].update(
+        current_assessment="supported",
+        decision_review="logic_and_stock_both_reasonable",
+        overall_review="前20个交易日结束后，原判断和具体股票都基本合理。",
+    )
+    pending = tmp_path / "pending-day-twenty.json"
+    pending.write_text(
+        json.dumps(_report_payload(snapshot, alerts=[alert]), ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    summary = record_forward_monitor(
+        snapshot_file=snapshot_path,
+        report_file=pending,
+        project_root=tmp_path,
+    )
+    markdown = Path(summary.markdown_file).read_text(encoding="utf-8")
+
+    assert "推荐后的第二十个交易日" in markdown
+    assert "这次选择最后怎么看" in markdown
+    assert markdown.count("前20个交易日结束后，原判断和具体股票都基本合理。") == 1
+    assert "D20" not in markdown
+
+
+def test_markdown_explains_missing_original_thesis_and_unmatched_alternative(
+    tmp_path: Path,
+) -> None:
+    snapshot = _mixed_role_snapshot()
+    for episode in snapshot["episodes"]:
+        episode["original_research_thesis"] = None
+        episode["data_limitations"] = ["missing_original_research_thesis"]
+    snapshot_path = tmp_path / "snapshot.json"
+    snapshot_path.write_text(json.dumps(snapshot), encoding="utf-8")
+    alert = _alert(
+        "603969.SH",
+        snapshot["attention_stocks"][0]["episode_ids"][0],
+    )
+    alert.update(
+        episode_ids=snapshot["attention_stocks"][0]["episode_ids"],
+        roles=["selected", "comparator"],
+        day_numbers=[1, 10],
+        original_engine_types=[
+            "independent_demand_acceleration",
+            "sector_leader_cluster",
+        ],
+    )
+    pending = tmp_path / "pending-missing-thesis.json"
+    pending.write_text(
+        json.dumps(_report_payload(snapshot, alerts=[alert]), ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    summary = record_forward_monitor(
+        snapshot_file=snapshot_path,
+        report_file=pending,
+        project_root=tmp_path,
+    )
+    markdown = Path(summary.markdown_file).read_text(encoding="utf-8")
+
+    assert (
+        "当时留下的原始判断不完整，因此这次只能复盘价格表现，不能逐项审查当时的理由。"
+        in markdown
+    )
+    assert (
+        "当时没有留下可以严格匹配的备选股票代码，因此这次不能做可靠的逐只比较。"
+        in markdown
+    )
 
 
 def test_record_requires_attention_stock_and_writes_short_json_and_markdown(tmp_path: Path) -> None:
@@ -1629,8 +2064,8 @@ def test_record_requires_attention_stock_and_writes_short_json_and_markdown(tmp_
     saved = json.loads(Path(summary.json_file).read_text(encoding="utf-8"))
     markdown = Path(summary.markdown_file).read_text(encoding="utf-8")
     assert saved["alerts"][0]["ts_code"] == "603969.SH"
-    assert "今日市场" in markdown
-    assert "重点提醒" in markdown
+    assert saved["report_version"] == "daily-forward-monitor-report-v2"
+    assert "今天的市场情况" in markdown
+    assert "之前推荐股票的走势复盘" in markdown
     assert "全部跟踪记录" not in markdown
-    assert "震荡或继续等待" in markdown
     assert "range_or_wait" not in markdown

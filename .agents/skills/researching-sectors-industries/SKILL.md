@@ -24,7 +24,7 @@ description: Use when point-in-time A-share candidate selection or validation ne
 
 取得总控提供的：
 
-- `phase`：`discovery` 或 `validation`；
+- `phase`：`discovery`、`validation` 或 `review`；
 - `formation_date`、`action_date`、带时区的 `as_of`；
 - 股票范围或待验证候选；
 - 本轮目标、板块问题和所需同类比较对象。
@@ -109,12 +109,18 @@ description: Use when point-in-time A-share candidate selection or validation ne
 
 `sector_leader_cluster` 是对同一传播链中实际成员的紧凑归组，不是固定龙头榜、行业配额或排序器。不能按股票代码、单一涨幅阈值或当前成员快照指定龙头；成员不足、历史归属不足或共同推进不成立时，不得补造该簇，相关候选只能保持未确认。
 
+## Review 阶段
+
+`phase: review` 只复盘已有记录，不重新推荐股票。核对当时同一行业多只股票共同走强的情况是否持续，上涨股票比例、成员中位数、相对市场表现和成交份额是否减弱，是否从多数股票共同走强变成少数股票上涨，以及被复盘股票仍处在行业前列还是已经落后。
+
+若同一次研究中存在代码或名称能够严格匹配的备选股票，同时比较推荐股和备选股；不能可靠匹配时明确不知道，不根据模糊文字猜代码。不得用行业名称、“补涨”“卡位”或“龙头”替代实际成员表现，也不得因为一只股票上涨就宣布整个行业仍强。
+
 ## 输出合同
 
 每条关键事实同时保留统一的数据质量信息。`fact_as_of` 表示事实对应的日期或期间，`available_at` 表示系统何时能够取得；两者不得互换。顶层 `as_of` 仍是本轮形成日决策截止时点。`quality` 使用 `complete | partial | unreliable`，`capability_status` 使用 `supported | partial | unsupported`。历史成员缺失、数据源不支持历史查询、查询失败、当前成员快照不可回放和真实无成员记录必须分开写入 `missing_fields` 或 `unknowns`。这些字段只解释证据边界，不计分或投票。
 
 ```yaml
-phase: discovery | validation
+phase: discovery | validation | review
 objective: ""
 facts: [{claim, value, provider, dataset, fact_as_of, available_at, quality, missing_fields, capability_status}]
 primary_interpretation: ""

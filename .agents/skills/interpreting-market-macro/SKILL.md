@@ -28,7 +28,7 @@ description: Use when point-in-time A-share candidate selection or validation ne
 
 取得总控提供的：
 
-- `phase`：`discovery` 或 `validation`；
+- `phase`：`discovery`、`validation` 或 `review`；
 - `formation_date`、下一交易日 `action_date`、带时区的 `as_of`；
 - 默认股票范围或待验证候选；
 - 本轮目标、比较窗口、候选命题和机会类型。
@@ -131,6 +131,12 @@ description: Use when point-in-time A-share candidate selection or validation ne
 
 市场逆风、窄行情、高成交或所谓强市本身都不能删除或升级候选。只有制度可参与性和已验证的分化—波动关系可以直接改变市场层结论，其余只形成跨视角核对问题。
 
+## Review 阶段
+
+`phase: review` 只复盘已经冻结的原判断，不重新推荐股票。读取原研究时点的市场事实、当前 snapshot 和同一份当日市场判断，回答：当时依赖的市场条件是否还在；个股绝对涨跌是否主要跟随全市场；市场事实只是增加波动风险，还是已经明显不利；哪些变化不能由市场共同涨跌解释，需要交给行业、公司或价格视角。
+
+必须展示实际上涨面、等权收益、成交和分化事实，不用“市场情绪”或“风险偏好”代替数据，不输出精确的大盘贡献比例。市场判断每天仍只做一次，同一份结果同时供已有股票复盘和当天新研究使用。
+
 发现阶段必须把当日共同传播条件压缩为一个结构化 `market_propagation_environment`。`propagation_state` 只允许 `supportive | neutral | adverse | unknown`，依据实际可得的广度、流动性、风险偏好、风格和集中度逐项说明；它是后续候选解释共同变化的引用环境，不是市场 Gate。缺少任何关键维度时保留 `unknown` 或在该维度明确未知，不用自由文本中的“强市/弱市”补齐。
 
 验证阶段再为每只候选给出 `market_recognition.status`：`confirmed | partial | absent | not_yet_observable | unknown`，并引用同一个 `market_environment_id`。这里只判断候选的需求是否已经超出市场共同变化或尚无完整时点可观察，不替价格 Skill制造确认数值。
@@ -138,7 +144,7 @@ description: Use when point-in-time A-share candidate selection or validation ne
 ## 输出合同
 
 ```yaml
-phase: discovery | validation
+phase: discovery | validation | review
 objective: ""
 formation_date: YYYY-MM-DD
 action_date: YYYY-MM-DD

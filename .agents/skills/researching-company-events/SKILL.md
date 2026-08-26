@@ -26,7 +26,7 @@ description: Use when an A-share research task needs point-in-time company funda
 
 必须取得总控提供的：
 
-- `phase`：`discovery` 或 `validation`；
+- `phase`：`discovery`、`validation` 或 `review`；
 - `formation_date`、`action_date`、`as_of`；
 - 股票范围或待验证候选；
 - 本轮公司问题和未知条件。
@@ -89,6 +89,12 @@ description: Use when an A-share research task needs point-in-time company funda
 
 需要原文时，先确认元数据 `available_at <= as_of`，使用其 `pdf_path`；`www` 地址不可用时只切换到巨潮官方静态域名。下载到临时文件并校验 PDF，优先用 `pypdf`、必要时用 `pdfplumber` 提取本轮所需内容，然后删除临时文件。不缓存、不 OCR、不建全文库，不新增 Python helper 或依赖；失败时保持正文未知，不用新闻网站补写。
 
+## Review 阶段
+
+`phase: review` 只复盘已有记录，不重新推荐股票。必须分别写清“公司事实现在怎么看”和“股价对这件事有没有实际反应”：核对当时事件或经营变化是否仍是真实事实，后续公告属于新增、重复确认、修正还是相反变化，原先的业务传导后来是否得到正式事实支持，以及哪个公司事实最可能推翻原判断。
+
+股价下跌不能否定公告事实本身，公告真实也不能证明短期上涨判断仍然成立。只有公告标题时只确认标题存在，不补写收入、利润、订单或业务影响。
+
 ## 输出合同
 
 每条关键事实同时保留统一的数据质量信息。`fact_as_of` 表示事件发生日、报告期或事实对应期间，`available_at` 表示系统何时能够取得；两者不得互换。顶层 `as_of` 仍是本轮形成日决策截止时点。`quality` 使用 `complete | partial | unreliable`，`capability_status` 使用 `supported | partial | unsupported`。正文缺失、历史覆盖不足、查询失败、只有当前快照和真实无记录必须分开写入 `missing_fields` 或 `unknowns`。这些字段只解释证据边界，不计分或投票；无法确认形成日前可得的事实不能支持候选命题。
@@ -96,7 +102,7 @@ description: Use when an A-share research task needs point-in-time company funda
 严格返回：
 
 ```yaml
-phase: discovery | validation
+phase: discovery | validation | review
 facts: [{claim, value, provider, dataset, fact_as_of, available_at, quality, missing_fields, capability_status}]
 primary_interpretation: ""
 alternative_interpretations: []

@@ -1,6 +1,15 @@
 from pathlib import Path
 
 
+SKILL_PATHS = {
+    "总控": ".agents/skills/orchestrating-stock-research/SKILL.md",
+    "市场": ".agents/skills/interpreting-market-macro/SKILL.md",
+    "行业": ".agents/skills/researching-sectors-industries/SKILL.md",
+    "公司": ".agents/skills/researching-company-events/SKILL.md",
+    "价格": ".agents/skills/analyzing-price-trading/SKILL.md",
+}
+
+
 def test_forward_monitor_prompt_limits_ai_work_and_report_size() -> None:
     text = Path("ops/forward-monitor-prompt.md").read_text(encoding="utf-8")
 
@@ -12,8 +21,12 @@ def test_forward_monitor_prompt_limits_ai_work_and_report_size() -> None:
     assert "不创建新的 Scheduled Task" in text
     assert "不得把全部股票交给 AI" in text
     assert "不得打分" in text
-    assert "迟到启动，不改变原20个交易日结果" in text
-    assert "DailyForwardMonitorReportV1" in text
+    assert (
+        "这只股票在前20个交易日结束后才开始明显走强，因此不会改变前20天的原评价结果"
+        in text
+    )
+    assert "DailyForwardMonitorReportV2" in text
+    assert "ForwardReviewAssessmentV1" in text
     priorities = [
         "data_problem", "invalidated", "new_event", "first_reaction",
         "actionable_watch", "strengthening", "overheated", "target_hit",
@@ -33,16 +46,22 @@ def test_existing_daily_prompt_stays_v4_and_adds_monitor_in_same_task() -> None:
     assert "市场 Skill 每天只分析一次" in text
     assert "already_selected" in text
     assert "不得重复执行新选股" in text
-    assert "今日市场" in text
-    assert "已有股票重点提醒" in text
-    assert "跟踪数量概览" in text
-    assert "今日新选股" in text
-    assert "开盘前冻结信息" in text
-    assert "已过原行动窗口" in text
+    assert "今天的市场情况" in text
+    assert "之前推荐股票的走势复盘" in text
+    assert "目前还在跟踪多少只" in text
+    assert "今天新推荐的股票" in text
+    assert "已过原行动窗口" not in text
+    assert "今天开盘前能够看到的信息" in text
     assert "当前价格" in text
     assert "09:30" in text
     assert "不得改变 `selection_as_of`" in text
-    assert "当前短期推动因素" in text
+    for question in (
+        "为什么现在值得看",
+        "股价和成交有没有认可",
+        "推荐后的第一个交易日要看什么",
+        "为什么选它而不是最接近的备选",
+    ):
+        assert question in text
     assert "- 发动机类型和状态" not in text
     assert text.count("09:05 Scheduled Task") == 1
 
@@ -64,9 +83,15 @@ def test_forward_monitor_prompt_uses_previous_state_and_strict_report_contract()
         assert mode in text
     assert "pool_summary" in text
     assert "必须与 snapshot 完全一致" in text
-    assert "最初入选依据" in text
-    assert "原始主要理由" in text
-    assert "当前：D" in text
+    assert "原始完整判断" in text
+    assert "当时为什么看它" in text
+    assert "实际怎么走" in text
+    assert "为什么会这样" in text
+    assert "原判断现在怎么看" in text
+    assert "和当时最接近的备选相比" in text
+    assert "接下来观察什么" in text
+    assert "第20个交易日及以后不得再使用 `not_final_yet`" in text
+    assert "当前：D" not in text
     assert "roles" in text
     assert "该股票全部 attention episode" in text
 
@@ -82,10 +107,10 @@ def test_periodic_review_reads_monitor_history_and_checks_reminder_timing() -> N
     assert "后续1—3个交易日" in text
     assert "失效" in text
     assert "过热" in text
-    assert "D1—D20" in text
-    assert "D21—D30" in text
-    assert "迟到启动" in text
-    assert "不得改变原20个交易日结果" in text
+    assert "推荐后的前20个交易日内" in text
+    assert "第21至第30个交易日" in text
+    assert "前20个交易日结束后才开始明显走强" in text
+    assert "不得改变前20个交易日的原评价结果" in text
     assert "data_problem" in text
     assert "previous_monitor_state" in text
     assert "snapshot 中已出现但日报漏报" in text
@@ -94,3 +119,28 @@ def test_periodic_review_reads_monitor_history_and_checks_reminder_timing() -> N
     assert "禁止用未来结果倒填当天提醒理由" in text
     assert "不新增定时任务" in text
     assert "不增加自动评分" in text
+    assert "前20个交易日结束后的集中研究复盘" in text
+    assert "手动 D20 研究复盘提示" not in text
+    assert "期间最高涨幅" in text
+    assert "期间最深跌幅" in text
+    assert "推荐股与当时最接近但未推荐股票的比较" in text
+    assert "不自动修改 Skill" in text
+    assert "成熟样本" in text
+
+
+def test_all_five_stock_research_skills_define_a_review_phase() -> None:
+    for label, path in SKILL_PATHS.items():
+        text = Path(path).read_text(encoding="utf-8")
+        assert "phase: review" in text, label
+        assert "不重新推荐股票" in text, label
+
+    company = Path(SKILL_PATHS["公司"]).read_text(encoding="utf-8")
+    assert "公司事实现在怎么看" in company
+    assert "股价对这件事有没有实际反应" in company
+
+    price = Path(SKILL_PATHS["价格"]).read_text(encoding="utf-8")
+    assert "从期间最高点又跌回来多少" in price
+
+    orchestrator = Path(SKILL_PATHS["总控"]).read_text(encoding="utf-8")
+    assert "decision_review=not_final_yet" in orchestrator
+    assert "为什么现在值得看" in orchestrator

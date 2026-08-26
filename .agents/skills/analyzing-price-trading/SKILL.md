@@ -24,7 +24,7 @@ description: Use when point-in-time A-share candidate selection or validation ne
 
 取得总控提供的：
 
-- `phase`：`discovery` 或 `validation`；
+- `phase`：`discovery`、`validation` 或 `review`；
 - `formation_date`、`action_date`、带时区的 `as_of`；
 - 股票范围或待验证候选；
 - 比较基准、候选原始命题和需要回答的交易问题。
@@ -164,12 +164,18 @@ D20 后按照 `docs/2026-08-19-price-skill-d20-audit-method.md` 复核。场景�
 - 说明为什么仍可能有空间，或为什么市场已经充分甚至过度反映；
 - 给出最强价格反证和行动日参与、放弃条件。
 
+## Review 阶段
+
+`phase: review` 只复盘已有记录，不重新推荐股票。使用 snapshot 的确定性字段说明：从当时计划观察的开盘价算起实际涨跌多少，比全市场和同一行业强弱多少，期间最高涨幅、期间最深跌幅、从期间最高点又跌回来多少，成交放大时股价是否真正向上推进，是否反复冲高回落，以及推荐后的第一个交易日能否按原条件正常参与。
+
+结论只说明原来的股价和成交支持是在增强、减弱还是已经失败。不得用单个指标下结论，不用“量价共振”“承接良好”或“筹码健康”代替事实，也不从成交推断任何交易主体。
+
 ## 输出合同
 
 每条关键事实同时保留统一的数据质量信息。`fact_as_of` 表示行情或交易状态对应的交易日，`available_at` 表示系统何时能够取得；两者不得互换。顶层 `as_of` 仍是本轮形成日决策截止时点。`quality` 使用 `complete | partial | unreliable`，`capability_status` 使用 `supported | partial | unsupported`。复权、基准、行业归属、成交状态或历史窗口缺失，以及查询失败、当前快照不可回放和真实无记录，必须分别写入 `missing_fields` 或 `unknowns`。这些字段只解释证据边界，不计分或投票。
 
 ```yaml
-phase: discovery | validation
+phase: discovery | validation | review
 objective: ""
 facts: [{claim, value, provider, dataset, fact_as_of, available_at, quality, missing_fields, capability_status}]
 primary_interpretation: ""

@@ -1,5 +1,5 @@
 schema_version: v3-knowledge-governance-v1
-generated_on: 2026-08-23
+generated_on: 2026-08-26
 sources:
   - source_id: official-csrc-program-trading-2024
     grade: S
@@ -942,6 +942,84 @@ sources:
     method_summary: 说明反复尝试和事后挑选会夸大历史表现，需要预先固定评价方式并控制数据窥探。
     limitations:
       - 论文不提供A股20、25或30个交易日的统一最优窗口，也不验证本地提醒条件。
+
+  - source_id: cfa-performance-attribution-2019
+    grade: A
+    kind: research_foundation_review
+    research_design: methodological_review
+    title: "Performance Attribution: History and Progress"
+    publisher: CFA Institute Research Foundation
+    authors: [Carl R. Bacon]
+    url: https://rpc.cfainstitute.org/research/foundation/2019/performance-attribution
+    publication_date: 2019-12-23
+    last_verified_on: 2026-08-26
+    jurisdiction: 方法研究
+    market_scope: [全球投资组合]
+    method_summary: 说明绩效评价应先确定合适基准，再把相对基准表现与真实投资决策联系起来，并区分不同归因方法的适用条件。
+    proof_boundary: 支持选择基准和把结果联系到原决策的方法；不支持对单只股票编造市场、行业和公司贡献百分比。
+    limitations:
+      - 研究对象主要是投资组合归因，不能把组合归因公式机械套到单只股票。
+      - 本助手没有持仓和交易数据，只保留相对基准比较与原决策复盘方法。
+
+  - source_id: paper-perold-implementation-shortfall-1988
+    grade: A
+    kind: peer_reviewed_paper
+    research_design: methodological
+    title: "The Implementation Shortfall: Paper Versus Reality"
+    publisher: The Journal of Portfolio Management
+    authors: [André F. Perold]
+    journal_or_series: The Journal of Portfolio Management 14(3), 4-9
+    url: https://doi.org/10.3905/jpm.1988.409150
+    doi: 10.3905/jpm.1988.409150
+    publication_date: 1988-04-30
+    last_verified_on: 2026-08-26
+    jurisdiction: 方法研究
+    market_scope: [全球证券]
+    method_summary: 区分研究或纸面组合的决定与真实执行之间的差异，包括延迟、未成交和实际参与条件。
+    proof_boundary: 支持把研究判断和能否按原条件参与分开评价；没有真实成交记录时不能虚构交易成本。
+    limitations:
+      - 本助手不记录实际委托或成交，不能计算真实实施差额或交易成本。
+      - 该方法不要求建立持仓、订单或成交系统。
+
+  - source_id: paper-chen-gao-he-jiang-xiong-price-limits-2019
+    grade: A
+    kind: peer_reviewed_paper
+    research_design: empirical
+    title: Daily Price Limits and Destructive Market Behavior
+    publisher: Elsevier
+    authors: [Ting Chen, Zhenyu Gao, Jibao He, Wenxi Jiang, Wei Xiong]
+    journal_or_series: Journal of Econometrics 208(1), 249-264
+    url: https://doi.org/10.1016/j.jeconom.2018.09.014
+    doi: 10.1016/j.jeconom.2018.09.014
+    publication_date: 2019-01-01
+    last_verified_on: 2026-08-26
+    jurisdiction: 中国大陆
+    market_scope: [深圳证券交易所, A股]
+    method_summary: 使用深交所账户级数据研究涨跌幅限制附近的交易行为和后续价格反转，为涨停后的继续观察与可参与性核对提供A股边界。
+    proof_boundary: 支持把触及涨停、第二天表现和后续反转分开观察；不证明任一股票涨停后必然反转。
+    limitations:
+      - 论文使用账户级数据，公开日线不能复制其投资者身份结论。
+      - 不得由该研究新增固定涨停淘汰规则或未来收益保证。
+
+  - source_id: paper-pan-tang-xu-speculative-trading-2016
+    grade: A
+    kind: peer_reviewed_paper
+    research_design: empirical
+    title: Speculative Trading and Stock Returns
+    publisher: Oxford University Press
+    authors: [Li Pan, Ya Tang, Jianguo Xu]
+    journal_or_series: Review of Finance 20(5), 1835-1865
+    url: https://doi.org/10.1093/rof/rfv059
+    doi: 10.1093/rof/rfv059
+    publication_date: 2016-09-01
+    last_verified_on: 2026-08-26
+    jurisdiction: 中国大陆
+    market_scope: [A股]
+    method_summary: 在中国股票样本中构造异常换手指标并研究其后续收益关系，提示成交异常必须与价格推进和后续表现共同解释。
+    proof_boundary: 支持把异常成交作为需要继续核对的问题；不支持从普通日线识别具体投机者或直接复制论文指标阈值。
+    limitations:
+      - 本助手不复制论文异常换手模型、分组、效应大小或持有期。
+      - 高换手不能自动判为利空，也不能用于推断账户身份。
 
 entries:
   - knowledge_id: src_cn_program_trading_rules_2025
@@ -2215,3 +2293,77 @@ entries:
     local_validation:
       status: insufficient_for_direction
       reason: 当前本地记录能力足以固定窗口并按日保存变化，但没有足够前向样本证明任何提醒条件能预测未来方向。
+
+  - knowledge_id: src_forward_review_benchmark_execution
+    title: 用原推荐逻辑和合适参照复盘，区分判断与实际参与条件
+    primary_source_id: cfa-performance-attribution-2019
+    supporting_source_ids: [paper-perold-implementation-shortfall-1988, paper-mackinlay-event-study-1997]
+    source_grade: A
+    version_status: current
+    effect: method_only
+    modules: [orchestration, price_trading]
+    opportunity_types: [general, industry_trend, earnings_rerating, company_event, turnaround]
+    topics: [forward_review, benchmark_comparison, execution_boundary]
+    claim_summary: 复盘应回到推荐当时的理由，并结合市场、行业和最近替代股的相对表现判断原逻辑是否得到支持；研究判断是否合理和行动日能否按原条件参与必须分开说明。
+    allowed_uses:
+      - 以冻结的原推荐理由和完整研究结论为起点，逐项核对后来发生了什么。
+      - 用市场、行业和可靠匹配的最近替代股作参照，描述共同变化与个股自身变化。
+      - 把原判断是否合理、股票选择是否合适、时机是否合适和原条件是否可参与分开复盘。
+    forbidden_uses:
+      - 没有投资组合和持仓数据时编造市场、行业或公司贡献百分比。
+      - 没有真实委托成交时虚构交易成本、成交价格或实施差额。
+      - 因后来上涨或下跌改写原推荐理由、原行动条件或原评价期限。
+      - 由复盘结果建立持仓、订单、自动交易或固定打分系统。
+    prerequisites:
+      - 原推荐理由、完整研究结论、原行动条件和研究截止时间已经冻结。
+      - 使用的后续事实按当日截止时间可得，价格路径按实际交易日顺序计算。
+      - 市场、行业和替代股比较有明确来源；无法可靠匹配时直接说明没有可靠对照。
+    counter_evidence:
+      - 绝对上涨主要来自市场或行业共同上涨，个股没有额外表现。
+      - 原理由看对但股票选择、时机或实际参与条件不合适。
+      - 原研究结论缺失，无法完整回到当时逻辑。
+    data_requirements:
+      - {kind: derived, name: forward_episode, required_fields: [formation_date, action_date, selection_as_of, original_selection_reason, original_research_thesis]}
+      - {kind: fact, name: equity_daily, required_fields: [trade_date, ts_code, open, high, low, close, amount, available_at]}
+      - {kind: derived, name: market_context, required_fields: [analysis_date]}
+      - {kind: derived, name: sector_hotspot, required_fields: [analysis_date, group_code]}
+    local_validation:
+      status: insufficient_for_direction
+      reason: 这些来源支持选择参照、联系原决策和区分执行条件的方法，但不证明任何复盘标签能够预测下一阶段收益。
+
+  - knowledge_id: src_cn_forward_review_trading_boundaries
+    title: A股复盘要把涨跌停、成交异常和可参与条件分开看
+    primary_source_id: paper-chen-gao-he-jiang-xiong-price-limits-2019
+    supporting_source_ids: [paper-pan-tang-xu-speculative-trading-2016, paper-liu-stambaugh-yuan-2019, official-sse-trading-rules-2026, official-szse-trading-rules-2026]
+    source_grade: A
+    version_status: current
+    effect: method_only
+    modules: [price_trading, orchestration]
+    opportunity_types: [general, industry_trend, earnings_rerating, company_event, turnaround]
+    topics: [forward_review, price_limits, turnover, participation]
+    claim_summary: A股短期走势复盘要继续观察涨跌停后的价格路径，并把成交变化、价格推进、收盘位置、相对表现和原行动条件放在一起看；单一价量现象不能代替结论。
+    allowed_uses:
+      - 分开记录触及涨跌停、次日表现、后续回撤和最终表现。
+      - 把成交变化与价格是否继续推进、收盘是否稳固、相对市场和行业表现共同解释。
+      - 单独说明行动日是否能够按原条件正常参与，不把当前价格改写成原推荐价格。
+    forbidden_uses:
+      - 宣称涨停后必然继续上涨、必然反转或固定天数内完成定价。
+      - 从成交量、换手或涨跌停推断机构、主力、游资或账户身份。
+      - 直接复制论文阈值，新增固定换手率、ATR、涨停次数或淘汰规则。
+      - 把当日盘中或研究截止时间之后的信息补进原推荐结论。
+    prerequisites:
+      - 使用正式交易日历、复权日线、成交额和当时有效的市场及行业参照。
+      - 价格与事实的可得时间不晚于当次复盘截止时间。
+      - 数据不足、停牌、无法成交和没有可靠行业参照时分别说明。
+    counter_evidence:
+      - 成交放大但价格没有继续推进，或收盘明显回落。
+      - 绝对上涨明显弱于市场或行业，或主要由少数交易日贡献。
+      - 原行动条件无法满足，即使后来价格方向与判断一致也不能当作可执行成功。
+    data_requirements:
+      - {kind: fact, name: trade_calendar, required_fields: [cal_date, is_open, available_at]}
+      - {kind: fact, name: equity_daily, required_fields: [trade_date, ts_code, open, high, low, close, amount, available_at]}
+      - {kind: fact, name: adj_factor, required_fields: [trade_date, ts_code, adj_factor, available_at]}
+      - {kind: derived, name: forward_observation, required_fields: [trading_day_count, return_since_entry, close_drawdown_from_peak, max_drawdown]}
+    local_validation:
+      status: insufficient_for_direction
+      reason: A股研究支持这些交易边界和继续观察方法，但不支持把单一成交或价格现象直接变成未来方向判断。
