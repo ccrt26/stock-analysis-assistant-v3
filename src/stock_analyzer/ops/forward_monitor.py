@@ -375,6 +375,10 @@ def prepare_forward_monitor(
         analysis_date,
         previous,
     )
+    previous_episode_reviews = _previous_episode_reviews(
+        monitor_dir,
+        analysis_date,
+    )
     frozen_reviews = _earliest_frozen_reviews(
         monitor_dir,
         analysis_date,
@@ -474,6 +478,7 @@ def prepare_forward_monitor(
             previous_episode=previous_by_id.get(episode_id),
             previous_as_of=(previous or {}).get("as_of"),
             previous_monitor_state=previous_monitor_states.get(episode_id),
+            previous_episode_review=previous_episode_reviews.get(episode_id),
             market_context_available=bool(market_rows),
             frozen_twenty_day_review=frozen_reviews.get(episode_id),
         )
@@ -481,6 +486,14 @@ def prepare_forward_monitor(
 
     _attach_pair_contexts(observations)
     attention_stocks = _aggregate_attention(observations)
+    required_final_review_episode_ids = sorted(
+        str(item["episode_id"])
+        for item in observations
+        if item["monitor_phase"] != "closed"
+        and item.get("role") == "selected"
+        and int(item["day_number"]) >= 20
+        and item.get("frozen_twenty_day_review") is None
+    )
     open_episodes = [item for item in observations if item["monitor_phase"] != "closed"]
     summary_payload = {
         "open_episode_count": len(open_episodes),
@@ -503,6 +516,9 @@ def prepare_forward_monitor(
             "summary": summary_payload,
             "episodes": observations,
             "attention_stocks": attention_stocks,
+            "required_final_review_episode_ids": (
+                required_final_review_episode_ids
+            ),
         },
     )
     return PrepareSummary(
@@ -562,6 +578,7 @@ def record_forward_monitor(
         for item in snapshot.get("episodes", [])
         if isinstance(item, dict)
     }
+    reported_episode_ids: set[str] = set()
     for alert in report.alerts:
         attention_item = attention.get(alert.ts_code)
         if attention_item is None:
@@ -583,6 +600,7 @@ def record_forward_monitor(
             review.episode_id: review
             for review in alert.episode_reviews
         }
+        reported_episode_ids.update(reviews_by_id)
         for episode_id in alert.episode_ids:
             episode = episodes.get(episode_id)
             if episode is None:
@@ -597,11 +615,16 @@ def record_forward_monitor(
                 else None
             )
             day_number = int(episode["day_number"])
-            if day_number < 20 and final_review is not None:
+            role = str(episode.get("role"))
+            if role == "comparator" and final_review is not None:
+                raise ValueError(
+                    "a comparator must not have a final recommendation review"
+                )
+            if role == "selected" and day_number < 20 and final_review is not None:
                 raise ValueError(
                     "a final decision review is not allowed before the twentieth trading day"
                 )
-            if day_number >= 20 and final_review is None:
+            if role == "selected" and day_number >= 20 and final_review is None:
                 raise ValueError(
                     "a final decision review is required at or after the twentieth trading day"
                 )
@@ -615,6 +638,17 @@ def record_forward_monitor(
                         f"final twenty day review is frozen: {episode_id}"
                     )
             _validate_pair_context(episode, episodes)
+            if (
+                role == "selected"
+                and final_review is not None
+                and final_review["decision_review"]
+                == "direction_right_stock_wrong"
+                and (episode.get("pair_context") or {}).get("pair_status")
+                != "complete"
+            ):
+                raise ValueError(
+                    "direction_right_stock_wrong requires a complete pair"
+                )
         referenced_roles = {str(item.get("role")) for item in referenced}
         valid_roles = [
             role
@@ -635,6 +669,17 @@ def record_forward_monitor(
         )
         if alert.original_engine_types != valid_engines:
             raise ValueError(f"alert original engines do not match referenced episodes: {alert.ts_code}")
+
+    required_final_review_episode_ids = {
+        str(value)
+        for value in snapshot.get("required_final_review_episode_ids", [])
+    }
+    missing_required = required_final_review_episode_ids - reported_episode_ids
+    if missing_required:
+        raise ValueError(
+            "report is missing required final review episodes: "
+            + ",".join(sorted(missing_required))
+        )
 
     expected_unreported = (
         int(snapshot_summary.get("attention_stock_count", 0))
@@ -793,22 +838,36 @@ def _render_markdown(
     if not report.alerts:
         lines.append("今天没有需要详细提醒的股票。")
     for alert in report.alerts:
-        lines.extend([f"### {alert.name}（{alert.ts_code}）", ""])
+        lines.extend(
+            [
+                f"### {alert.name}（{alert.ts_code}）",
+                "",
+                "**今天这只股票发生了什么**",
+                "",
+                (
+                    f"市场方面，{alert.market_change.rstrip('。！？!? ；; ')}。"
+                    f"行业方面，{alert.sector_change.rstrip('。！？!? ；; ')}。"
+                    f"公司方面，{alert.company_change.rstrip('。！？!? ；; ')}。"
+                    f"个股方面，{alert.stock_change.rstrip('。！？!? ；; ')}。"
+                ),
+                "",
+            ]
+        )
         reviews = {item.episode_id: item for item in alert.episode_reviews}
         for episode_id in alert.episode_ids:
             episode = episodes[episode_id]
             review = reviews[episode_id]
             day_number = int(episode["day_number"])
-            formation = date.fromisoformat(str(episode["formation_date"]))
-            formation_text = f"{formation.year}年{formation.month}月{formation.day}日"
+            action = date.fromisoformat(str(episode["action_date"]))
+            action_text = f"{action.year}年{action.month}月{action.day}日"
             if episode.get("role") == "comparator":
                 day_text = _human_trading_day(day_number).removeprefix("推荐后的")
                 subtitle = (
-                    f"#### {formation_text}那次研究中，它是用于比较的股票，"
+                    f"#### {action_text}那次研究中，它是用于比较的股票，"
                     f"目前跟踪到该次研究后的{day_text}"
                 )
             else:
-                subtitle = f"#### {formation_text}那次推荐，目前跟踪到{_human_trading_day(day_number)}"
+                subtitle = f"#### {action_text}那次推荐，目前跟踪到{_human_trading_day(day_number)}"
             limitations = set(episode.get("data_limitations") or [])
             original = (
                 f"{review.original_reason_plain_language.rstrip('。！？!? ；; ')}。"
@@ -819,36 +878,48 @@ def _render_markdown(
             if "missing_original_referenced_decisions" in limitations:
                 original += " 当时留下的部分价格依据或首个交易日观察条件不完整，因此这部分不能事后补写。"
             actual = f"{_render_price_summary([episode])} {_render_relative_performance(episode)}"
-            if alert.stock_change:
-                actual += f" {alert.stock_change.rstrip('。！？!? ；; ')}。"
             if alert.alert_type == "late_activation" and day_number > 20:
                 actual += " 这只股票在前20个交易日结束后才开始明显走强，因此不会改变前20天的原评价结果。"
-            why = (
-                f"市场方面，{alert.market_change.rstrip('。！？!? ；; ')}。"
-                f"行业方面，{alert.sector_change.rstrip('。！？!? ；; ')}。"
-                f"公司事实方面，{alert.company_change.rstrip('。！？!? ；; ')}。"
-                f"{explanation_labels[review.best_supported_explanation]}。"
-                "这只是现有证据最支持的解释，不是精确的因果分解。"
-            )
             current = (
                 f"{assessment_labels[review.current_assessment]}。"
                 f"{weak_labels[review.current_weak_or_failed_link]}。"
+                f"{explanation_labels[review.best_supported_explanation]}。"
                 f"{review.current_review}"
             )
             lines.extend([
                 subtitle, "", "**当时为什么看它**", "", original,
                 "", "**实际怎么走**", "", actual,
-                "", "**为什么会这样**", "", why,
                 "", "**原判断现在怎么看**", "", current,
                 "", "**和当时最接近的备选相比**", "",
                 _render_pair_comparison(episode, review, list(episodes.values())),
-                "", "**接下来观察什么**", "",
-                f"接下来重点看：{alert.confirmation_condition}。如果{alert.invalidation_condition}，说明原来的短期判断不再成立。",
             ])
             final = review.final_twenty_day_review
-            if final is not None:
-                lines.extend(["", "**这次选择最后怎么看**", "", f"{final_labels[final.decision_review]}。{final.overall_review}"])
+            if final is not None and episode.get("role") == "selected":
+                lines.extend(
+                    [
+                        "",
+                        "**这次推荐最后怎么看**",
+                        "",
+                        _render_final_twenty_day_review(
+                            episode,
+                            final,
+                            weak_labels,
+                            final_labels,
+                        ),
+                    ]
+                )
             lines.append("")
+        lines.extend(
+            [
+                "**接下来观察什么**",
+                "",
+                (
+                    f"接下来重点看：{alert.confirmation_condition}。"
+                    f"如果{alert.invalidation_condition}，说明原来的短期判断不再成立。"
+                ),
+                "",
+            ]
+        )
     lines.extend([
         "## 目前还在跟踪多少只", "",
         f"仍在跟踪 {pool.open_episode_count} 条记录，涉及 {pool.distinct_stock_count} 只股票；推荐后的前20个交易日有 {pool.primary_count} 条，之后继续低成本观察的有 {pool.passive_tail_count} 条。",
@@ -856,6 +927,73 @@ def _render_markdown(
         f"还有 {report.unreported_attention_count} 只触发变化但未在上面详细显示。{report.routine_summary}", "",
     ])
     return "\n".join(lines)
+
+
+def _render_final_twenty_day_review(
+    episode: dict[str, Any],
+    final: FrozenTwentyDayReviewV1,
+    weak_labels: dict[str, str],
+    final_labels: dict[str, str],
+) -> str:
+    close_return = _number(episode.get("d20_close_return_since_entry"))
+    max_close = _number(episode.get("d20_max_close_return_since_entry"))
+    max_high = _number(episode.get("d20_max_high_return_since_entry"))
+    mae = _number(episode.get("d20_mae_since_entry"))
+    max_drawdown = _number(episode.get("d20_max_close_drawdown"))
+    close_drawdown = _number(episode.get("d20_close_drawdown_from_peak"))
+    facts = [
+        (
+            "前20个交易日收盘数据不足"
+            if close_return is None
+            else f"前20个交易日收盘{_plain_movement(close_return)}"
+        ),
+        (
+            "期间最高收盘数据不足"
+            if max_close is None
+            else f"期间最高收盘{_plain_movement(max_close)}"
+        ),
+        (
+            "盘中最高价格数据不足"
+            if max_high is None
+            else f"盘中最高{_plain_movement(max_high)}"
+        ),
+        (
+            "期间最低价格数据不足"
+            if mae is None
+            else _plain_low_point(mae)
+        ),
+        (
+            "最大收盘回撤数据不足"
+            if max_drawdown is None
+            else f"最大收盘回撤{abs(max_drawdown):.2%}"
+        ),
+        (
+            "前20天最高收盘后的回落数据不足"
+            if close_drawdown is None
+            else f"收盘较前20天最高收盘回落{abs(close_drawdown):.2%}"
+        ),
+    ]
+    return (
+        f"{'，'.join(facts)}。"
+        f"前20天最终判断中，最薄弱的是“{weak_labels[final.weak_or_failed_link]}”。"
+        f"{final_labels[final.decision_review]}。{final.overall_review}"
+    )
+
+
+def _plain_movement(value: float) -> str:
+    if value > 0:
+        return f"上涨{value:.2%}"
+    if value < 0:
+        return f"下跌{abs(value):.2%}"
+    return "持平0.00%"
+
+
+def _plain_low_point(value: float) -> str:
+    if value < 0:
+        return f"期间最深下跌{abs(value):.2%}"
+    if value > 0:
+        return f"期间最低仍上涨{value:.2%}"
+    return "期间最低持平0.00%"
 
 
 def _render_relative_performance(episode: dict[str, Any]) -> str:
@@ -884,10 +1022,21 @@ def _render_pair_comparison(
         return "当时没有留下能够严格匹配的备选股票，因此这次不能做可靠的逐只比较。"
     paired_name = str(context["paired_name"])
     paired_label = f"这次研究中的推荐股{paired_name}" if episode.get("role") == "comparator" else f"当时备选股{paired_name}"
+    difference = float(context["return_difference"])
+    if round(difference * 100.0, 2) == 0.0:
+        difference_text = "两只股票表现接近，相差0.00个百分点。"
+    elif difference > 0:
+        difference_text = (
+            f"这条记录比{paired_name}强{abs(difference) * 100:.2f}个百分点。"
+        )
+    else:
+        difference_text = (
+            f"这条记录比{paired_name}弱{abs(difference) * 100:.2f}个百分点。"
+        )
     text = (
         f"这条记录目前涨跌为{_format_return(float(context['selected_or_subject_return_since_entry']))}，"
         f"{paired_label}为{_format_return(float(context['alternative_return_since_entry']))}，"
-        f"两者相差{_format_return(float(context['return_difference']))}。"
+        f"{difference_text}"
         f"这条记录期间最深跌幅为{_format_return(float(context['subject_mae_since_entry']))}，"
         f"期间最大收盘回撤为{abs(float(context['subject_max_close_drawdown'])):.2%}；"
         f"{paired_name}期间最深跌幅为{_format_return(float(context['alternative_mae_since_entry']))}，"
@@ -986,6 +1135,7 @@ def _episode_observation(
     previous_episode: dict[str, Any] | None,
     previous_as_of: str | None,
     previous_monitor_state: str | None,
+    previous_episode_review: dict[str, Any] | None,
     market_context_available: bool,
     frozen_twenty_day_review: dict[str, Any] | None,
 ) -> dict[str, Any]:
@@ -1065,6 +1215,7 @@ def _episode_observation(
         "new_announcements": new_announcements,
         "checkpoint": checkpoint,
         "previous_monitor_state": previous_monitor_state,
+        "previous_episode_review": previous_episode_review,
         "frozen_twenty_day_review": frozen_twenty_day_review,
         "attention_reasons": [],
         "data_limitations": limitations,
@@ -1082,6 +1233,12 @@ def _attention_reasons(
     previous: dict[str, Any] | None,
 ) -> list[str]:
     reasons: list[str] = []
+    if (
+        current.get("role") == "selected"
+        and int(current["day_number"]) >= 20
+        and current.get("frozen_twenty_day_review") is None
+    ):
+        reasons.append("pending_final_review")
     if current["checkpoint"]:
         reasons.append("checkpoint")
     if current["new_announcements"]:
@@ -1130,7 +1287,7 @@ def _attention_reasons(
     ):
         reasons.append("data_problem")
     allowed_order = [
-        "checkpoint", "new_official_event", "first_event_reaction",
+        "pending_final_review", "checkpoint", "new_official_event", "first_event_reaction",
         "target_hit_first_time", "relative_state_changed", "scenario_changed",
         "breakout_changed", "sector_state_changed", "late_activation_candidate",
         "overheat_candidate", "data_problem",
@@ -1470,7 +1627,7 @@ def _aggregate_attention(episodes: list[dict[str, Any]]) -> list[dict[str, Any]]
         grouped.setdefault(str(episode["ts_code"]), []).append(episode)
     result: list[dict[str, Any]] = []
     allowed = [
-        "checkpoint", "new_official_event", "first_event_reaction",
+        "pending_final_review", "checkpoint", "new_official_event", "first_event_reaction",
         "target_hit_first_time", "relative_state_changed", "scenario_changed",
         "breakout_changed", "sector_state_changed", "late_activation_candidate",
         "overheat_candidate", "data_problem",
@@ -1549,6 +1706,54 @@ def _previous_monitor_states(
             for episode_id in alert.get("episode_ids", []):
                 found[str(episode_id)] = str(alert["monitor_state"])
     return {**carried, **found}
+
+
+def _previous_episode_reviews(
+    monitor_dir: Path,
+    analysis_date: date,
+) -> dict[str, dict[str, Any]]:
+    reports: list[tuple[date, Path]] = []
+    for path in monitor_dir.glob("monitor-report-*.json"):
+        try:
+            report_date = date.fromisoformat(
+                path.stem.removeprefix("monitor-report-")
+            )
+        except ValueError:
+            continue
+        if report_date < analysis_date:
+            reports.append((report_date, path))
+    for _, path in sorted(reports, reverse=True):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(payload, dict) or payload.get("report_version") not in {
+            "daily-forward-monitor-report-v2",
+            "daily-forward-monitor-report-v3",
+        }:
+            continue
+        found: dict[str, dict[str, Any]] = {}
+        for alert in payload.get("alerts", []):
+            if not isinstance(alert, dict):
+                continue
+            for review in alert.get("episode_reviews", []):
+                if not isinstance(review, dict):
+                    continue
+                episode_id = str(review.get("episode_id", ""))
+                compact = {
+                    key: review[key]
+                    for key in (
+                        "current_assessment",
+                        "best_supported_explanation",
+                        "current_weak_or_failed_link",
+                        "current_review",
+                    )
+                    if key in review
+                }
+                if episode_id and len(compact) == 4:
+                    found[episode_id] = _json_value(compact)
+        return found
+    return {}
 
 
 def _earliest_frozen_reviews(

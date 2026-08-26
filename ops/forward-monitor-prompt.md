@@ -35,7 +35,7 @@
 
 公告正文继续按 V4 规则按需读取，不批量下载。五个 Skill 使用各自的 `phase: review` 职责复盘冻结的原始完整判断，不重新推荐股票。公司事实是否仍成立，和股价成交是否实际支持该事实，必须分开写。不得改写原始完整判断、当时理由或前20个交易日的原评价结果。
 
-每条跟踪记录都要查看 snapshot 中的 `previous_monitor_state`。判断今天的状态时，明确区分状态延续、正在转强后失效、正在转强后过热、等待确认后转强和其他真实变化；`previous_monitor_state` 只用于比较，不得机械维持上次状态。
+V2/V3 的每条跟踪记录优先查看 snapshot 中按本记录编号保存的 `previous_episode_review`，分别延续 `current_assessment`、`best_supported_explanation`、`current_weak_or_failed_link` 和 `current_review`，不得借用同一股票另一条记录的上次复盘。`previous_monitor_state` 只用于历史 V1 报告兼容。判断今天的状态时，明确区分状态延续、正在转强后失效、正在转强后过热、等待确认后转强和其他真实变化；上次状态只用于比较，不得机械维持。
 
 
 ## 3. 生成走势复盘日报
@@ -53,27 +53,29 @@ local_archive/forward_monitor/pending-report-<analysis_date>.json
 - 每只提醒的 `episode_ids` 必须包含该股票全部 attention episode，不得只取子集；`roles`、交易日序号和原始完整判断必须从这些记录完整得出。
 - `roles` 必须非空、去重且只允许 `selected`、`comparator`，固定按 `selected` 后 `comparator` 排列。同一股票同时有两种记录时仍只写一条提醒，向用户分别说明当时是推荐股还是比较对象。
 - `episode_reviews` 中的 `episode_id` 必须与该股票全部 attention episode 完全一致，不得缺少、重复或多出；不得用该股票最大交易日序号替其他记录结案。
+- snapshot 的 `required_final_review_episode_ids` 必须全部出现在日报的 `episode_reviews` 中；这些记录优先进入最多8只的详细提醒，不能留到未详细展示数量中。
 - 每条记录的 `ForwardEpisodeReviewV1` 只填写通俗原因与风险、当前判断、现有证据最支持的解释、当前最弱环节、当前复盘、成对比较解释和 `final_twenty_day_review`，不增加分数、概率或更多分类。
-- 第1至第19个交易日，`final_twenty_day_review` 必须为空；第20个交易日必须首次形成。第21至第30个交易日不得改写这个结论，只能更新当前走势评价。snapshot 已有 `frozen_twenty_day_review` 时必须原样使用；第20天漏跑后首次建立，也只能依据 `d20_*` 和前20个交易日以内的事实。
+- 正式推荐记录在第1至第19个交易日，`final_twenty_day_review` 必须为空；第20个交易日必须首次形成。第20天漏跑时，`pending_final_review` 必须持续排在提醒原因第一位，直到结论成功保存并在下一次 prepare 恢复。第21至第30个交易日不得改写这个结论，只能更新当前走势评价。snapshot 已有 `frozen_twenty_day_review` 时必须原样使用；漏跑后首次建立也只能依据 `d20_*`、前20个交易日以内的事实和已冻结原判断。比较记录的 `final_twenty_day_review` 始终为空，不能写成正式推荐的最终结论。
 - `original_reason_plain_language` 和 `original_key_risk_plain_language` 只通俗改写当时已经冻结的意思，不加入后来事实。Markdown 只展示这两个字段，不直接展示原始理由和原始风险。
 - 原始完整判断缺失时，内部保留 `missing_original_research_thesis`，面向用户明确说明只能复盘价格表现，不能补写当时理由。
 - 只在代码或完整名称能唯一严格匹配时逐只比较当时最接近但未推荐的股票。必须使用 snapshot 中的真实成对价格路径，先展示两边的涨跌、期间最深跌幅和期间最大收盘回撤，再解释。路径不完整、窗口不一致或无法匹配时用固定说明，不展示 AI 自由比较文字。
 - 价格段落按当前所处交易日显示最近1、3、5或20个交易日的相对市场和相对行业数字；字段缺失时明确未知，不把这个窗口写成“从推荐以来”。
 
-用户看到的每只股票使用自然短段落，最多显示“当时为什么看它、实际怎么走、为什么会这样、原判断现在怎么看、和当时最接近的备选相比、接下来观察什么”六个小标题。第20个交易日结束后再增加“这次选择最后怎么看”。不得显示交易日缩写、内部角色、记录 ID、内部分类或英文字段。
+用户看到的推荐日期使用该条记录的 `action_date`，不使用 `formation_date`。同一只股票当天共同的市场、行业、公司和个股变化放在“今天这只股票发生了什么”中，只显示一次；每条记录分别显示“当时为什么看它、实际怎么走、原判断现在怎么看、和当时最接近的备选相比”；全部记录结束后只显示一次“接下来观察什么”。正式推荐完成前20天复盘后增加“这次推荐最后怎么看”，确定性展示现有六个 `d20_*` 价格结果，以及冻结的最薄弱环节、选择复盘和整体结论。比较记录不显示这一段。不得显示交易日缩写、内部角色、记录 ID、内部分类或英文字段。
 
 详细提醒最多8只不同股票。超过8只时，消息优先级固定为：
 
-1. `data_problem`
-2. `invalidated`
-3. `new_event`
-4. `first_reaction`
-5. `actionable_watch`
-6. `strengthening`
-7. `overheated`
-8. `target_hit`
-9. `late_activation`
-10. `checkpoint`
+1. `pending_final_review`
+2. `data_problem`
+3. `invalidated`
+4. `new_event`
+5. `first_reaction`
+6. `actionable_watch`
+7. `strengthening`
+8. `overheated`
+9. `target_hit`
+10. `late_activation`
+11. `checkpoint`
 
 这只是消息显示顺序，不是投资排名。其余重点股票只计入 `unreported_attention_count` 和 `routine_summary`。不得输出收益概率、目标价、“必涨”、自动交易、仓位、止盈或止损建议。
 

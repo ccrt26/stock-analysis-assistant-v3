@@ -29,7 +29,7 @@ def test_forward_monitor_prompt_limits_ai_work_and_report_size() -> None:
     assert "ForwardEpisodeReviewV1" in text
     assert "FrozenTwentyDayReviewV1" in text
     priorities = [
-        "data_problem", "invalidated", "new_event", "first_reaction",
+        "pending_final_review", "data_problem", "invalidated", "new_event", "first_reaction",
         "actionable_watch", "strengthening", "overheated", "target_hit",
         "late_activation", "checkpoint",
     ]
@@ -71,6 +71,8 @@ def test_forward_monitor_prompt_uses_previous_state_and_strict_report_contract()
     text = Path("ops/forward-monitor-prompt.md").read_text(encoding="utf-8")
 
     assert "previous_monitor_state" in text
+    assert "previous_episode_review" in text
+    assert "required_final_review_episode_ids" in text
     assert "状态延续" in text
     assert "不得机械维持" in text
     for mode in (
@@ -87,7 +89,6 @@ def test_forward_monitor_prompt_uses_previous_state_and_strict_report_contract()
     assert "原始完整判断" in text
     assert "当时为什么看它" in text
     assert "实际怎么走" in text
-    assert "为什么会这样" in text
     assert "原判断现在怎么看" in text
     assert "和当时最接近的备选相比" in text
     assert "接下来观察什么" in text
@@ -101,6 +102,9 @@ def test_forward_monitor_prompt_uses_previous_state_and_strict_report_contract()
     assert "original_reason_plain_language" in text
     assert "original_key_risk_plain_language" in text
     assert "真实成对价格路径" in text
+    assert "action_date" in text
+    assert "这次推荐最后怎么看" in text
+    assert "比较记录的 `final_twenty_day_review` 始终为空" in text
 
 
 def test_periodic_review_reads_monitor_history_and_checks_reminder_timing() -> None:
@@ -150,6 +154,8 @@ def test_all_five_stock_research_skills_define_a_review_phase() -> None:
 
     orchestrator = Path(SKILL_PATHS["总控"]).read_text(encoding="utf-8")
     assert "第1至第19个交易日" in orchestrator
-    assert "第20个交易日为该条记录首次形成前20天最终结论" in orchestrator
+    assert "第20个交易日首次形成前20天最终结论" in orchestrator
     assert "之后可以更新当前走势评价" in orchestrator
+    assert "比较记录的 `final_twenty_day_review` 始终为空" in orchestrator
+    assert "用户标题使用 `action_date`" in orchestrator
     assert "为什么现在值得看" in orchestrator

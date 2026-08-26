@@ -586,6 +586,40 @@ def test_prepare_keeps_multiple_episodes_for_the_same_stock(tmp_path: Path) -> N
             }
         ],
     )
+    old_id = "formal:2026-07-30:603969.SH:selected"
+    new_id = "formal:2026-07-31:603969.SH:selected"
+    monitor_dir = tmp_path / "local_archive/forward_monitor"
+    monitor_dir.mkdir(parents=True)
+    (monitor_dir / "monitor-report-2026-08-02.json").write_text(
+        json.dumps(
+            {
+                "report_version": "daily-forward-monitor-report-v2",
+                "analysis_date": "2026-08-02",
+                "alerts": [
+                    {
+                        "episode_reviews": [
+                            {
+                                "episode_id": old_id,
+                                "current_assessment": "contradicted",
+                                "best_supported_explanation": "market_common_move",
+                                "current_weak_or_failed_link": "stock_selection",
+                                "current_review": "旧记录已经受到反驳。",
+                            },
+                            {
+                                "episode_id": new_id,
+                                "current_assessment": "partly_supported",
+                                "best_supported_explanation": "stock_specific_move",
+                                "current_weak_or_failed_link": "none",
+                                "current_review": "新记录只得到部分支持。",
+                            },
+                        ]
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
 
     snapshot = _prepare(tmp_path, sessions[0])
 
@@ -600,6 +634,13 @@ def test_prepare_keeps_multiple_episodes_for_the_same_stock(tmp_path: Path) -> N
         "2026-07-31",
     }
     assert snapshot["summary"]["distinct_stock_count"] == 1
+    by_id = {item["episode_id"]: item for item in stock_episodes}
+    assert by_id[old_id]["previous_episode_review"]["current_assessment"] == (
+        "contradicted"
+    )
+    assert by_id[new_id]["previous_episode_review"]["current_assessment"] == (
+        "partly_supported"
+    )
 
 
 @pytest.mark.parametrize(
@@ -1520,8 +1561,10 @@ def test_report_accepts_one_alert_for_all_roles_of_the_same_stock(tmp_path: Path
     markdown = Path(summary.markdown_file).read_text(encoding="utf-8")
     assert saved["alerts"][0]["roles"] == ["selected", "comparator"]
     assert markdown.count("### 银龙股份（603969.SH）") == 1
-    assert "2026年7月31日那次推荐" in markdown
-    assert "2026年7月20日那次研究中，它是用于比较的股票" in markdown
+    assert "2026年8月3日那次推荐" in markdown
+    assert "2026年7月21日那次研究中，它是用于比较的股票" in markdown
+    assert "2026年7月31日那次推荐" not in markdown
+    assert "2026年7月20日那次研究中" not in markdown
     assert "该次研究后的第十个交易日这条记录" in markdown
     assert "推荐后的第十个交易日这条记录" not in markdown
 
@@ -1923,9 +1966,9 @@ def test_markdown_uses_plain_chinese_and_natural_review_sections(
     assert "之前研究过的股票走势复盘" in markdown
     assert "推荐后的第一个交易日" in markdown
     for heading in (
+        "今天这只股票发生了什么",
         "当时为什么看它",
         "实际怎么走",
-        "为什么会这样",
         "原判断现在怎么看",
         "和当时最接近的备选相比",
         "接下来观察什么",
@@ -2090,7 +2133,13 @@ def test_day_twenty_markdown_adds_final_review_section(tmp_path: Path) -> None:
     markdown = Path(summary.markdown_file).read_text(encoding="utf-8")
 
     assert "推荐后的第二十个交易日" in markdown
-    assert "这次选择最后怎么看" in markdown
+    assert "这次推荐最后怎么看" in markdown
+    assert "前20个交易日收盘上涨20.00%" in markdown
+    assert "期间最高收盘上涨20.00%" in markdown
+    assert "盘中最高上涨25.00%" in markdown
+    assert "期间最深下跌5.00%" in markdown
+    assert "最大收盘回撤" in markdown
+    assert "收盘较前20天最高收盘回落" in markdown
     assert markdown.count("前20个交易日结束后，原判断和具体股票都基本合理。") == 1
     assert "D20" not in markdown
 
@@ -2333,9 +2382,13 @@ def test_each_episode_has_its_own_maturity_and_final_review(
     assert reviews[old_episode["episode_id"]]["final_twenty_day_review"] == _final_review()
     assert reviews[new_episode["episode_id"]]["final_twenty_day_review"] is None
     assert markdown.count("### 银龙股份（603969.SH）") == 1
-    assert "2026年7月31日那次推荐" in markdown
-    assert "2026年8月27日那次推荐" in markdown
-    assert markdown.count("这次选择最后怎么看") == 1
+    assert markdown.count("2026年8月3日那次推荐") == 2
+    assert markdown.count("这次推荐最后怎么看") == 1
+    assert markdown.count("今天这只股票发生了什么") == 1
+    assert markdown.count("市场方面，无明显变化") == 1
+    assert markdown.count("当时为什么看它") == 2
+    assert markdown.count("实际怎么走") == 2
+    assert markdown.count("接下来观察什么") == 1
 
 
 def test_final_review_is_rejected_before_twentieth_day(tmp_path: Path) -> None:
@@ -2372,6 +2425,70 @@ def test_final_review_is_required_on_twentieth_day(tmp_path: Path) -> None:
         )
 
 
+def test_comparator_never_has_a_final_recommendation_review(
+    tmp_path: Path,
+) -> None:
+    snapshot = _snapshot_with_complete_pair()
+    selected, comparator = snapshot["episodes"]
+    selected["day_number"] = 20
+    selected["pair_context"]["paired_day_number"] = 20
+    comparator["day_number"] = 20
+    comparator["pair_context"] = {
+        "pair_status": "complete",
+        "paired_episode_id": selected["episode_id"],
+        "paired_name": selected["name"],
+        "paired_day_number": 20,
+        "selected_or_subject_return_since_entry": 0.03,
+        "alternative_return_since_entry": 0.08,
+        "return_difference": -0.05,
+        "subject_mae_since_entry": -0.07,
+        "alternative_mae_since_entry": -0.04,
+        "subject_max_close_drawdown": -0.09,
+        "alternative_max_close_drawdown": -0.06,
+    }
+    snapshot["attention_stocks"] = [
+        {
+            "ts_code": comparator["ts_code"],
+            "name": comparator["name"],
+            "episode_ids": [comparator["episode_id"]],
+            "roles": ["comparator"],
+            "day_numbers": [20],
+            "original_engine_types": ["independent_demand_acceleration"],
+            "attention_reasons": ["checkpoint"],
+        }
+    ]
+    alert = _alert(comparator["ts_code"], comparator["episode_id"])
+    alert.update(
+        name=comparator["name"],
+        roles=["comparator"],
+        day_numbers=[20],
+        episode_reviews=[_episode_review(comparator["episode_id"])],
+    )
+    snapshot_path = tmp_path / "snapshot.json"
+    pending_path = tmp_path / "pending.json"
+    snapshot_path.write_text(json.dumps(snapshot), encoding="utf-8")
+    pending_path.write_text(
+        json.dumps(_report_payload(snapshot, alerts=[alert]), ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    summary = record_forward_monitor(
+        snapshot_file=snapshot_path,
+        report_file=pending_path,
+        project_root=tmp_path,
+    )
+
+    saved = json.loads(Path(summary.json_file).read_text(encoding="utf-8"))
+    markdown = Path(summary.markdown_file).read_text(encoding="utf-8")
+    assert saved["alerts"][0]["episode_reviews"][0][
+        "final_twenty_day_review"
+    ] is None
+    assert "这次推荐最后怎么看" not in markdown
+    assert "当时证据不足，不应该形成正式推荐" not in markdown
+    assert "该次研究后的第二十个交易日" in markdown
+    assert "这条记录比银龙股份弱5.00个百分点" in markdown
+
+
 @pytest.mark.parametrize("day_number", [21, 25, 30])
 def test_frozen_twenty_day_review_cannot_be_changed_later(
     tmp_path: Path,
@@ -2402,7 +2519,8 @@ def test_later_current_review_may_change_while_final_review_stays_frozen(
     tmp_path: Path,
 ) -> None:
     frozen = _final_review()
-    snapshot = _review_snapshot(day_number=21, frozen_review=frozen)
+    snapshot = _review_snapshot(day_number=25, frozen_review=frozen)
+    snapshot["episodes"][0]["current_close_return_since_entry"] = 0.50
     episode_id = snapshot["episodes"][0]["episode_id"]
     review = _episode_review(episode_id, final=frozen)
     review.update(
@@ -2423,9 +2541,16 @@ def test_later_current_review_may_change_while_final_review_stays_frozen(
     )
 
     saved = json.loads(Path(summary.json_file).read_text(encoding="utf-8"))
+    markdown = Path(summary.markdown_file).read_text(encoding="utf-8")
     saved_review = saved["alerts"][0]["episode_reviews"][0]
     assert saved_review["current_assessment"] == "weakening"
     assert saved_review["final_twenty_day_review"] == frozen
+    assert "目前涨跌为+50.00%" in markdown
+    assert "前20个交易日收盘上涨8.00%" in markdown
+    assert (
+        "前20天最终判断中，最薄弱的是“暂时没有哪一部分已经明确失败”"
+        in markdown
+    )
 
 
 def test_register_keeps_only_referenced_decisions_and_pair_episode_id(
@@ -2866,3 +2991,196 @@ def test_markdown_explicitly_says_industry_comparison_is_unknown(
 
     assert "最近5个交易日" in markdown
     assert "同一行业的对照数据不足" in markdown
+
+
+def test_pending_final_review_persists_until_a_selected_episode_is_saved(
+    tmp_path: Path,
+) -> None:
+    trace = _single_selected_trace(
+        formation_date="2026-07-01",
+        action_date="2026-07-02",
+    )
+    archive = tmp_path / "local_archive/forward_selection"
+    archive.mkdir(parents=True)
+    _write_trace(archive / "research-trace-2026-07-01.json", trace)
+    sessions = _seed_monitor_project(tmp_path, trace=trace, session_count=22)
+
+    d20 = _prepare(tmp_path, sessions[19])
+    episode_id = d20["episodes"][0]["episode_id"]
+    assert d20["episodes"][0]["attention_reasons"][0] == "pending_final_review"
+    assert d20["required_final_review_episode_ids"] == [episode_id]
+
+    d21 = _prepare(tmp_path, sessions[20])
+    assert d21["episodes"][0]["attention_reasons"][0] == "pending_final_review"
+    assert d21["required_final_review_episode_ids"] == [episode_id]
+
+    snapshot_path, pending_path = _record_review_payload(
+        tmp_path,
+        d21,
+        _episode_review(episode_id, final=_final_review()),
+    )
+    record_forward_monitor(
+        snapshot_file=snapshot_path,
+        report_file=pending_path,
+        project_root=tmp_path,
+    )
+
+    d22 = _prepare(tmp_path, sessions[21])
+    assert d22["episodes"][0]["frozen_twenty_day_review"] == _final_review()
+    assert "pending_final_review" not in d22["episodes"][0]["attention_reasons"]
+    assert d22["required_final_review_episode_ids"] == []
+
+
+def test_record_requires_every_pending_final_review_episode_within_eight_stocks(
+    tmp_path: Path,
+) -> None:
+    base = _review_snapshot(day_number=20)
+    episodes: list[dict] = []
+    attention: list[dict] = []
+    required: list[str] = []
+    for index in range(9):
+        code = f"00000{index}.SZ"
+        role = "selected" if index < 5 else "comparator"
+        episode = {
+            **base["episodes"][0],
+            "episode_id": f"episode-{index}",
+            "ts_code": code,
+            "name": f"股票{index}",
+            "role": role,
+            "day_number": 20 if role == "selected" else 3,
+            "frozen_twenty_day_review": None,
+        }
+        episodes.append(episode)
+        attention.append(
+            {
+                "ts_code": code,
+                "name": episode["name"],
+                "episode_ids": [episode["episode_id"]],
+                "roles": [role],
+                "day_numbers": [episode["day_number"]],
+                "original_engine_types": ["independent_demand_acceleration"],
+                "attention_reasons": [
+                    "pending_final_review" if role == "selected" else "checkpoint"
+                ],
+            }
+        )
+        if role == "selected":
+            required.append(episode["episode_id"])
+    snapshot = {
+        **base,
+        "episodes": episodes,
+        "attention_stocks": attention,
+        "required_final_review_episode_ids": required,
+        "summary": {
+            **base["summary"],
+            "open_episode_count": 9,
+            "distinct_stock_count": 9,
+            "selected_count": 5,
+            "comparator_count": 4,
+            "primary_count": 9,
+            "attention_stock_count": 9,
+        },
+    }
+    alerts = []
+    for episode in episodes[:8]:
+        alert = _alert(episode["ts_code"], episode["episode_id"])
+        alert.update(
+            name=episode["name"],
+            roles=[episode["role"]],
+            day_numbers=[episode["day_number"]],
+            episode_reviews=[
+                _episode_review(
+                    episode["episode_id"],
+                    final=_final_review() if episode["role"] == "selected" else None,
+                )
+            ],
+        )
+        alerts.append(alert)
+    snapshot_path = tmp_path / "snapshot.json"
+    pending_path = tmp_path / "pending.json"
+    snapshot_path.write_text(json.dumps(snapshot), encoding="utf-8")
+    pending_path.write_text(
+        json.dumps(_report_payload(snapshot, alerts=alerts, unreported=1)),
+        encoding="utf-8",
+    )
+
+    summary = record_forward_monitor(
+        snapshot_file=snapshot_path,
+        report_file=pending_path,
+        project_root=tmp_path,
+    )
+    assert summary.alert_count == 8
+    assert summary.unreported_attention_count == 1
+
+    omitted = alerts[1:]
+    omitted_alert = _alert(episodes[8]["ts_code"], episodes[8]["episode_id"])
+    omitted_alert.update(
+        name=episodes[8]["name"],
+        roles=["comparator"],
+        day_numbers=[3],
+    )
+    omitted.append(omitted_alert)
+    second_pending = tmp_path / "pending-omitted.json"
+    second_pending.write_text(
+        json.dumps(_report_payload(snapshot, alerts=omitted, unreported=1)),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="required final review"):
+        record_forward_monitor(
+            snapshot_file=snapshot_path,
+            report_file=second_pending,
+            project_root=tmp_path,
+        )
+
+
+@pytest.mark.parametrize(
+    ("difference", "expected"),
+    [
+        (0.032, "这条记录比尚太科技强3.20个百分点。"),
+        (-0.032, "这条记录比尚太科技弱3.20个百分点。"),
+        (0.0, "两只股票表现接近，相差0.00个百分点。"),
+    ],
+)
+def test_pair_difference_uses_plain_chinese(
+    tmp_path: Path,
+    difference: float,
+    expected: str,
+) -> None:
+    snapshot = _snapshot_with_complete_pair()
+    snapshot["episodes"][0]["pair_context"]["return_difference"] = difference
+    episode_id = snapshot["episodes"][0]["episode_id"]
+    snapshot_path, pending_path = _record_review_payload(
+        tmp_path,
+        snapshot,
+        _episode_review(episode_id),
+    )
+
+    summary = record_forward_monitor(
+        snapshot_file=snapshot_path,
+        report_file=pending_path,
+        project_root=tmp_path,
+    )
+    markdown = Path(summary.markdown_file).read_text(encoding="utf-8")
+    assert expected in markdown
+
+
+def test_direction_right_stock_wrong_requires_a_complete_pair(
+    tmp_path: Path,
+) -> None:
+    snapshot = _review_snapshot(day_number=20)
+    episode_id = snapshot["episodes"][0]["episode_id"]
+    snapshot_path, pending_path = _record_review_payload(
+        tmp_path,
+        snapshot,
+        _episode_review(
+            episode_id,
+            final=_final_review("direction_right_stock_wrong"),
+        ),
+    )
+
+    with pytest.raises(ValueError, match="complete pair"):
+        record_forward_monitor(
+            snapshot_file=snapshot_path,
+            report_file=pending_path,
+            project_root=tmp_path,
+        )
