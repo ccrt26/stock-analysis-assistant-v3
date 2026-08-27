@@ -1,0 +1,24 @@
+research_id: <topic>-<period>-001
+version: 1
+task_type: first_full_research
+theme: <研究主题>
+as_of: <ISO-8601 with timezone>
+expected_horizon: <季度或半年>
+scope:
+  global_technology_and_supply: true
+  china_commercialization: true
+  a_share_mapping: true
+system_start: <最终使用者与付款人>
+system_end: <上游追溯终点与停止理由>
+lifecycle:
+- 研发
+- 制造
+- 认证
+- 部署
+- 运行
+- 维护
+decomposition_depth: <拆到可采购、可认证、可映射供应商的节点>
+importance_rule: <遗漏后会改变需求、瓶颈、利润或竞争结论>
+exclusions: []
+user_questions: []
+user_approval: pending

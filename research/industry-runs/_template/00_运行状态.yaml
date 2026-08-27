@@ -1,0 +1,13 @@
+research_id: <topic>-<period>-001
+version: 1
+branch: research/<topic-slug>-<period>
+base_commit: <sha>
+latest_commit: <sha>
+current_step: 1
+current_stage: setup
+next_actor: codex
+status: waiting_execution
+required_inputs: []
+expected_outputs: []
+user_decision_required: false
+last_updated: <ISO-8601 with timezone>
