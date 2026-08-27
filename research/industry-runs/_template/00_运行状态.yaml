@@ -1,13 +1,17 @@
-research_id: <topic>-<period>-001
+research_id: <由ChatGPT创建，Codex保存>
 version: 1
-branch: research/<topic-slug>-<period>
-base_commit: <sha>
-latest_commit: <sha>
+branch: null
+base_commit: null
+latest_commit: null
 current_step: 1
-current_stage: setup
-next_actor: codex
-status: waiting_execution
-required_inputs: []
-expected_outputs: []
-user_decision_required: false
+current_stage: A_setup
+next_actor: chatgpt
+status: waiting_scope_draft
+required_inputs:
+- repository_main
+expected_outputs:
+- 00_研究启动说明.docx
+- 00_研究范围.yaml
+- 00_下一步操作.md
+user_decision_required: true
 last_updated: <ISO-8601 with timezone>

@@ -1,24 +1,24 @@
-research_id: <topic>-<period>-001
+research_id: <由ChatGPT创建>
 version: 1
+created_by: chatgpt
+approved_by_user: pending
+as_of: <由ChatGPT设置为执行时上海时间>
 task_type: first_full_research
-theme: <研究主题>
-as_of: <ISO-8601 with timezone>
-expected_horizon: <季度或半年>
+theme: <由ChatGPT填写；第一次默认AI数据中心液冷端到端可行性试点>
+precise_thesis: <由ChatGPT填写>
+expected_horizon: half_year
 scope:
   global_technology_and_supply: true
   china_commercialization: true
   a_share_mapping: true
-system_start: <最终使用者与付款人>
-system_end: <上游追溯终点与停止理由>
-lifecycle:
-- 研发
-- 制造
-- 认证
-- 部署
-- 运行
-- 维护
-decomposition_depth: <拆到可采购、可认证、可映射供应商的节点>
-importance_rule: <遗漏后会改变需求、瓶颈、利润或竞争结论>
-exclusions: []
-user_questions: []
+final_payer: <由ChatGPT填写>
+system_start: <由ChatGPT填写>
+system_end: <由ChatGPT填写并说明停止理由>
+lifecycle: <由ChatGPT填写>
+decomposition_depth: <由ChatGPT填写>
+importance_rule: <由ChatGPT填写>
+exclusions: <由ChatGPT填写>
+unknowns: <由ChatGPT填写>
+user_questions: <由ChatGPT填写>
 user_approval: pending
+# 用户不编辑本文件，只审批人话版研究启动说明。

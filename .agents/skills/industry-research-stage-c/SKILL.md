@@ -1,47 +1,43 @@
 ---
 name: industry-research-stage-c
-description: Use when approved industry evidence and local facts must be combined through business realization, earnings/cash scenarios, sustainability and expectation-gap analysis into one of four research states and an executable monitoring contract.
+description: Use when ChatGPT must build evidence-bound business and scenario assumptions, Codex must calculate them reproducibly, and ChatGPT must form one of four research states plus a monitoring contract.
 ---
 
-# C阶段：综合研究结论
+# C阶段：综合研究结论 V3.0
 
-## 必须先读
+## 角色顺序
 
-根 `AGENTS.md`、逐步执行手册、全局规范、当前运行控制文件、A最终包、B事实/验收包和全部未解决冲突。
+ChatGPT C1 → Codex C2 → ChatGPT C3。
 
-## 第8步：ChatGPT综合草案与计算请求
+## C1：ChatGPT综合草案与计算请求
 
-按业务模式建立订单—交付/续费—收入—毛利—净利润—现金链；建立保守/基准/乐观情景；每个假设绑定证据与时间；列出扩产、二供、客户自制、技术替代、利润池迁移和价格隐含问题。
-
-输出：
-
-- `07_C_综合草案.md`
-- `07_C_计算请求.yaml`
-
-不得先得出高利润结论再倒推数字。下一步指向第9步/Codex。
-
-## 第9步：Codex可复算计算
-
-严格按已批准变量计算三情景、主题收入/毛利/新增净利润/现金弹性、估值历史位置和反向经营假设；无法计算写未知；不得添加总分或推荐阈值。
+建立订单/认证/交付或续费到收入、毛利、净利润和现金的链；建立证据绑定的保守/基准/乐观情景；列出扩产、二供、自制、替代、利润池迁移和市场隐含要求。
 
 输出：
+- `07_C1_综合研究草案.docx`
+- `07_C1_计算请求.yaml`
+- 更新 `00_下一步操作.md`
 
-- `08_C_计算结果.json`
-- `08_C_计算摘要.md`
-- `08_C_数据缺口.json`
+## C2：Codex确定性计算
 
-下一步指向第10步/ChatGPT。
+先原样保存C1文件；严格按批准变量、公式、数据集和as_of计算三情景、主题收入/毛利/新增净利润/现金弹性、估值位置和反向经营假设。
 
-## 第10步：ChatGPT最终综合结论
+输出：
+- `08_C2_计算结果.json`
+- `08_C2_计算摘要.md`
+- `08_C2_数据缺口.json`
+- 更新 `00_下一步操作.md`
 
-依次检查产品匹配、关系证据、生意成立、业绩重要、质量、持续性和预期差七道硬门；写最强证据、最强反证和关键未知。
+必须commit+push。不得增加总分、推荐阈值或修改产业假设。
 
-需要补算时最多输出一次 `09_C_定向补算请求.yaml`。
+## C3：ChatGPT最终结论
 
-通过时输出：
+依次检查产品匹配、关系证据、生意成立、业绩重要、质量、持续性和预期差；硬门失败不得由其他高分补救。
 
+输出：
 - `09_C_综合研究结论.docx`
 - `09_C_监控合同.yaml`
 - `09_C_研究状态.csv`
+- 更新 `00_下一步操作.md`
 
-研究状态只为 research_candidate、continue_observing、insufficient_evidence、thesis_invalidated。不得自动交易。用户同意监控后下一步指向第11步/Codex。
+状态只为 research_candidate、continue_observing、insufficient_evidence、thesis_invalidated。不得自动交易。
