@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime, time, timedelta, timezone
 import hashlib
 import json
+import re
 from typing import Any, Iterable
 from zoneinfo import ZoneInfo
 
@@ -34,10 +35,13 @@ class EventBackfillService:
         tushare: TushareResearchClient,
         cninfo: Any,
         warehouse: ResearchWarehouse,
+        *,
+        exchange_announcements: Any | None = None,
     ) -> None:
         self.tushare = tushare
         self.cninfo = cninfo
         self.warehouse = warehouse
+        self.exchange_announcements = exchange_announcements
 
     def backfill(
         self,
@@ -47,37 +51,19 @@ class EventBackfillService:
         trading_dates: Iterable[date],
         resume: bool = True,
         announcement_through: date | None = None,
+        fallback_to_exchanges: bool = False,
     ) -> BackfillSummary:
         summary = BackfillSummary(scope="events", start=start, through=through)
         announcement_end = announcement_through or through
         announcement_start = max(start, announcement_end - timedelta(days=365))
-        announcement_current_month = announcement_end.strftime("%Y-%m")
+        announcement_summary = self.backfill_announcements(
+            start=announcement_start,
+            through=announcement_end,
+            resume=resume,
+            fallback_to_exchanges=fallback_to_exchanges,
+        )
+        _merge_summary(summary, announcement_summary)
         current_month = through.strftime("%Y-%m")
-        for month_start, month_end in _month_ranges(announcement_start, announcement_end):
-            partition = month_start.strftime("%Y-%m")
-            if self._should_skip_historical(
-                ResearchDatasetId.ANNOUNCEMENT,
-                partition,
-                current_month=announcement_current_month,
-                through=announcement_end,
-                resume=resume,
-            ):
-                summary.skipped += 1
-                continue
-            announcements = self.cninfo.fetch_announcements(month_start, month_end)
-            self._commit(
-                ResearchDatasetId.ANNOUNCEMENT,
-                partition,
-                "cninfo.new/hisAnnouncement/query",
-                announcements,
-                announcement_end,
-                summary,
-            )
-            self._mark_partition_checked(
-                ResearchDatasetId.ANNOUNCEMENT,
-                partition,
-                f"rows:{len(announcements)}",
-            )
 
         for month_start, month_end in _month_ranges(start, through):
             partition = month_start.strftime("%Y-%m")
@@ -254,6 +240,160 @@ class EventBackfillService:
             self._mark_suspension_checked(partition, f"rows:{len(rows)}")
         return summary
 
+    def backfill_announcements(
+        self,
+        *,
+        start: date,
+        through: date,
+        resume: bool = True,
+        fallback_to_exchanges: bool = False,
+    ) -> BackfillSummary:
+        summary = BackfillSummary(
+            scope="announcements",
+            start=start,
+            through=through,
+            capabilities={
+                "announcement_query_start": start.isoformat(),
+                "announcement_query_through": through.isoformat(),
+                "cninfo_status": "not_run",
+                "sse_status": "not_run",
+                "szse_status": "not_run",
+                "announcement_status": "announcement_unavailable",
+                "announcement_exchanges": [],
+                "announcement_failures": {},
+            },
+        )
+        current_month = through.strftime("%Y-%m")
+        pending: list[tuple[str, list[dict[str, Any]]]] = []
+        try:
+            for month_start, month_end in _month_ranges(start, through):
+                partition = month_start.strftime("%Y-%m")
+                if self._should_skip_historical(
+                    ResearchDatasetId.ANNOUNCEMENT,
+                    partition,
+                    current_month=current_month,
+                    through=through,
+                    resume=resume,
+                ):
+                    summary.skipped += 1
+                    continue
+                pending.append(
+                    (
+                        partition,
+                        self.cninfo.fetch_announcements(month_start, month_end),
+                    )
+                )
+        except ResearchSourceError as exc:
+            summary.capabilities["cninfo_status"] = "failed"
+            failures = summary.capabilities["announcement_failures"]
+            assert isinstance(failures, dict)
+            failures["cninfo"] = exc.category
+            summary.issues.append(f"cninfo:{exc.category}:{exc.endpoint}")
+            if not fallback_to_exchanges:
+                raise
+        else:
+            for partition, rows in pending:
+                self._commit(
+                    ResearchDatasetId.ANNOUNCEMENT,
+                    partition,
+                    "new/hisAnnouncement/query",
+                    rows,
+                    through,
+                    summary,
+                    source_name="cninfo",
+                )
+                self._mark_partition_checked(
+                    ResearchDatasetId.ANNOUNCEMENT,
+                    partition,
+                    f"cninfo:rows:{len(rows)}",
+                )
+            summary.capabilities.update(
+                {
+                    "cninfo_status": "complete",
+                    "announcement_status": "cninfo_complete",
+                    "announcement_exchanges": ["SSE", "SZSE"],
+                }
+            )
+            return summary
+
+        completed: list[str] = []
+        exchange_rows: dict[str, list[dict[str, Any]]] = {}
+        if self.exchange_announcements is not None:
+            for source, fetch in (
+                ("sse", self.exchange_announcements.fetch_sse_announcements),
+                ("szse", self.exchange_announcements.fetch_szse_announcements),
+            ):
+                try:
+                    rows = fetch(start, through)
+                except ResearchSourceError as exc:
+                    summary.capabilities[f"{source}_status"] = "failed"
+                    failures = summary.capabilities["announcement_failures"]
+                    assert isinstance(failures, dict)
+                    failures[source] = exc.category
+                    summary.issues.append(f"{source}:{exc.category}:{exc.endpoint}")
+                    continue
+                summary.capabilities[f"{source}_status"] = "complete"
+                completed.append(source.upper())
+                exchange_rows[source] = rows
+        else:
+            summary.capabilities["sse_status"] = "unavailable"
+            summary.capabilities["szse_status"] = "unavailable"
+
+        known_announcements = _existing_announcement_sources(self.warehouse)
+        for source, rows in exchange_rows.items():
+            filtered: list[dict[str, Any]] = []
+            for row in rows:
+                identity = _obvious_announcement_identity(row)
+                prior_sources = known_announcements.get(identity, set())
+                if prior_sources - {source}:
+                    continue
+                filtered.append(row)
+                known_announcements.setdefault(identity, set()).add(source)
+            exchange_rows[source] = filtered
+
+        for source, rows in exchange_rows.items():
+            grouped: dict[str, list[dict[str, Any]]] = {}
+            for row in rows:
+                partition = row["announcement_time"].strftime("%Y-%m")
+                grouped.setdefault(partition, []).append(row)
+            for partition, partition_rows in sorted(grouped.items()):
+                endpoint = str(partition_rows[0]["source_endpoint"])
+                self._commit(
+                    ResearchDatasetId.ANNOUNCEMENT,
+                    partition,
+                    endpoint,
+                    partition_rows,
+                    through,
+                    summary,
+                    source_name=source,
+                )
+
+        summary.capabilities["announcement_exchanges"] = completed
+        if len(completed) == 2:
+            summary.capabilities["announcement_status"] = "exchange_complete"
+            for month_start, _ in _month_ranges(start, through):
+                partition = month_start.strftime("%Y-%m")
+                count = sum(
+                    1
+                    for rows in exchange_rows.values()
+                    for row in rows
+                    if (
+                        row["announcement_time"].strftime("%Y-%m") == partition
+                    )
+                )
+                self._mark_partition_checked(
+                    ResearchDatasetId.ANNOUNCEMENT,
+                    partition,
+                    f"exchanges:rows:{count}",
+                )
+        elif completed:
+            summary.capabilities["announcement_status"] = "exchange_partial"
+            summary.limited += 1
+        else:
+            summary.capabilities["announcement_status"] = "announcement_unavailable"
+            summary.limited += 1
+        return summary
+
     def _fetch_share_float_range(self, start: date, through: date) -> pd.DataFrame:
         try:
             frame = self.tushare.call_paged(
@@ -422,6 +562,8 @@ class EventBackfillService:
         rows: list[dict[str, Any]],
         through: date,
         summary: BackfillSummary,
+        *,
+        source_name: str | None = None,
     ) -> None:
         if not rows:
             return
@@ -429,9 +571,18 @@ class EventBackfillService:
             FactBatch(
                 dataset_id=dataset,
                 partition_value=partition,
-                source_name="cninfo" if dataset is ResearchDatasetId.ANNOUNCEMENT else "tushare",
+                source_name=source_name
+                or (
+                    "cninfo"
+                    if dataset is ResearchDatasetId.ANNOUNCEMENT
+                    else "tushare"
+                ),
                 source_endpoint=endpoint,
-                ingestion_run_id=f"events:{dataset.value}:{partition}",
+                ingestion_run_id=(
+                    f"events:{dataset.value}:{source_name}:{partition}"
+                    if source_name
+                    else f"events:{dataset.value}:{partition}"
+                ),
                 ingested_at=datetime.now(timezone.utc),
                 default_available_at=_post_close(through),
                 records=rows,
@@ -568,6 +719,51 @@ class EventBackfillService:
                 """,
                 [partition, value, f"events:suspension-check:{partition}"],
             )
+
+
+def _merge_summary(target: BackfillSummary, source: BackfillSummary) -> None:
+    for field in (
+        "committed",
+        "skipped",
+        "waiting_upstream",
+        "limited",
+        "failed",
+    ):
+        setattr(target, field, getattr(target, field) + getattr(source, field))
+    target.limitations_checked = (
+        target.limitations_checked or source.limitations_checked
+    )
+    target.issues.extend(source.issues)
+    target.retry_codes.extend(source.retry_codes)
+    target.capabilities.update(source.capabilities)
+
+
+def _existing_announcement_sources(
+    warehouse: ResearchWarehouse,
+) -> dict[tuple[str, str, str], set[str]]:
+    frame = warehouse.read_current(ResearchDatasetId.ANNOUNCEMENT)
+    if frame.empty:
+        return {}
+    required = {"ts_code", "title", "available_at", "source_name"}
+    if not required <= set(frame.columns):
+        raise ValueError("existing announcement facts lack deduplication fields")
+    result: dict[tuple[str, str, str], set[str]] = {}
+    for row in frame.to_dict(orient="records"):
+        result.setdefault(_obvious_announcement_identity(row), set()).add(
+            str(row["source_name"])
+        )
+    return result
+
+
+def _obvious_announcement_identity(
+    row: dict[str, Any],
+) -> tuple[str, str, str]:
+    code = str(row.get("ts_code", "")).strip()
+    title = re.sub(r"\s+", "", str(row.get("title", ""))).strip()
+    timestamp = pd.Timestamp(row.get("available_at"))
+    if not code or not title or pd.isna(timestamp) or timestamp.tzinfo is None:
+        raise ValueError("announcement lacks exact cross-source identity fields")
+    return code, title, timestamp.tz_convert("UTC").isoformat()
 
 
 def _holder_row(raw: dict[str, Any]) -> dict[str, Any]:

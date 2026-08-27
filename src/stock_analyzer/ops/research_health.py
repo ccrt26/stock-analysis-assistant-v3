@@ -8,7 +8,7 @@ from typing import Any
 
 import duckdb
 import pyarrow.parquet as pq
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from stock_analyzer.analysis.hotspot_features import HOTSPOT_FORMULA_VERSION
 from stock_analyzer.analysis.market_context_features import MARKET_CONTEXT_FORMULA_VERSION
@@ -42,6 +42,7 @@ class DatasetHealth(BaseModel):
     rows: int
     first_partition: str | None
     last_partition: str | None
+    data_date_partition_ready: bool
     checked_partitions: int
     checked_rows: int
     duplicate_business_keys: int
@@ -89,6 +90,7 @@ class StageRunHealth(BaseModel):
     started_at: datetime
     finished_at: datetime | None
     issues: tuple[str, ...]
+    capabilities: dict[str, Any] = Field(default_factory=dict)
 
 
 class ResearchHealthReport(BaseModel):
@@ -162,6 +164,11 @@ def build_research_health_report(
                 rows=rows,
                 first_partition=values[0] if values else None,
                 last_partition=values[-1] if values else None,
+                data_date_partition_ready=bool(
+                    data_date.isoformat() in set(values)
+                    and file_audit["contract_valid"]
+                    and file_audit["physical_valid"]
+                ),
                 checked_partitions=len(selected),
                 checked_rows=file_audit["rows"],
                 duplicate_business_keys=duplicates,
@@ -265,10 +272,14 @@ def _latest_stage_runs(
     for row in rows:
         payload = json.loads(row[6]) if row[6] else {}
         issues: list[str] = []
+        capabilities: dict[str, Any] = {}
         if payload.get("message"):
             issues.append(str(payload["message"]))
         for summary in payload.get("summaries", []):
             issues.extend(str(item) for item in summary.get("issues", []))
+            raw_capabilities = summary.get("capabilities", {})
+            if isinstance(raw_capabilities, dict):
+                capabilities.update(raw_capabilities)
         result.append(
             StageRunHealth(
                 stage=str(row[0]),
@@ -280,6 +291,7 @@ def _latest_stage_runs(
                     datetime.fromisoformat(row[5]) if row[5] else None
                 ),
                 issues=tuple(dict.fromkeys(issues)),
+                capabilities=capabilities,
             )
         )
     return tuple(result)

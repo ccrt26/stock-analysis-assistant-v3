@@ -10,6 +10,7 @@ from stock_analyzer.data.research_contracts import (
     research_contract,
 )
 from stock_analyzer.data.tushare_research_client import TushareResearchClient
+from stock_analyzer.data.tushare_research_client import ResearchSourceError
 from stock_analyzer.storage.research_warehouse import ResearchWarehouse
 
 
@@ -77,6 +78,271 @@ class AnnouncementClient:
             "classification_version": "cninfo-title-v1", "classification_is_fact": False,
             "hard_risk_candidate": False,
         }]
+
+
+def _official_announcement(source: str, announcement_id: str) -> dict:
+    suffix = "SH" if source == "sse" else "SZ"
+    return {
+        "announcement_id": announcement_id,
+        "ts_code": f"600000.{suffix}" if source == "sse" else "000001.SZ",
+        "title": "年度报告",
+        "announcement_time": datetime(2026, 8, 26, 8, tzinfo=timezone.utc),
+        "available_at": datetime(2026, 8, 26, 8, tzinfo=timezone.utc),
+        "url": f"https://official.example/{announcement_id}.pdf",
+        "pdf_path": f"/{announcement_id}.pdf",
+        "source_name": source,
+        "source_endpoint": f"{source}/announcements",
+        "source_record_id": announcement_id,
+        "candidate_event_types": [],
+        "classification_version": "official-title-v1",
+        "classification_is_fact": False,
+        "hard_risk_candidate": False,
+    }
+
+
+def test_announcement_backfill_uses_cninfo_without_calling_exchange_fallback(tmp_path):
+    class Cninfo:
+        def fetch_announcements(self, start, through):
+            return AnnouncementClient().fetch_announcements(start, through)
+
+    class Exchanges:
+        def __init__(self):
+            self.calls = []
+
+        def fetch_sse_announcements(self, start, through):
+            self.calls.append("sse")
+            return []
+
+        def fetch_szse_announcements(self, start, through):
+            self.calls.append("szse")
+            return []
+
+    exchanges = Exchanges()
+    service = EventBackfillService(
+        TushareResearchClient(ActionPro(), pacer=lambda method: None),
+        Cninfo(),
+        ResearchWarehouse(tmp_path / "warehouse"),
+        exchange_announcements=exchanges,
+    )
+
+    summary = service.backfill_announcements(
+        start=date(2026, 8, 26),
+        through=date(2026, 8, 26),
+        resume=False,
+        fallback_to_exchanges=True,
+    )
+
+    assert exchanges.calls == []
+    assert summary.capabilities["announcement_status"] == "cninfo_complete"
+    assert summary.capabilities["announcement_exchanges"] == ["SSE", "SZSE"]
+
+
+def test_announcement_backfill_uses_both_official_exchanges_after_cninfo_source_failure(tmp_path):
+    class Cninfo:
+        def fetch_announcements(self, start, through):
+            raise ResearchSourceError(
+                "CNINFO timeout", category="network", endpoint="cninfo"
+            )
+
+    class Exchanges:
+        def fetch_sse_announcements(self, start, through):
+            return [_official_announcement("sse", "sse:one")]
+
+        def fetch_szse_announcements(self, start, through):
+            return [_official_announcement("szse", "szse:one")]
+
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    service = EventBackfillService(
+        TushareResearchClient(ActionPro(), pacer=lambda method: None),
+        Cninfo(),
+        warehouse,
+        exchange_announcements=Exchanges(),
+    )
+
+    summary = service.backfill_announcements(
+        start=date(2026, 8, 26),
+        through=date(2026, 8, 26),
+        resume=False,
+        fallback_to_exchanges=True,
+    )
+
+    rows = warehouse.read_current(ResearchDatasetId.ANNOUNCEMENT)
+    assert set(rows["source_name"]) == {"sse", "szse"}
+    assert summary.capabilities["announcement_status"] == "exchange_complete"
+    assert summary.capabilities["announcement_exchanges"] == ["SSE", "SZSE"]
+    assert summary.capabilities["announcement_failures"]["cninfo"] == "network"
+    assert summary.limited == 0
+
+
+def test_announcement_backfill_keeps_one_complete_exchange_as_partial(tmp_path):
+    class Cninfo:
+        def fetch_announcements(self, start, through):
+            raise ResearchSourceError(
+                "CNINFO timeout", category="network", endpoint="cninfo"
+            )
+
+    class Exchanges:
+        def fetch_sse_announcements(self, start, through):
+            return [_official_announcement("sse", "sse:one")]
+
+        def fetch_szse_announcements(self, start, through):
+            raise ResearchSourceError(
+                "SZSE changed total", category="incomplete", endpoint="szse"
+            )
+
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    service = EventBackfillService(
+        TushareResearchClient(ActionPro(), pacer=lambda method: None),
+        Cninfo(),
+        warehouse,
+        exchange_announcements=Exchanges(),
+    )
+
+    summary = service.backfill_announcements(
+        start=date(2026, 8, 26),
+        through=date(2026, 8, 26),
+        resume=False,
+        fallback_to_exchanges=True,
+    )
+
+    rows = warehouse.read_current(ResearchDatasetId.ANNOUNCEMENT)
+    assert set(rows["source_name"]) == {"sse"}
+    assert summary.capabilities["announcement_status"] == "exchange_partial"
+    assert summary.capabilities["announcement_exchanges"] == ["SSE"]
+    assert summary.capabilities["announcement_failures"]["szse"] == "incomplete"
+    assert summary.limited == 1
+
+
+def test_announcement_backfill_does_not_hide_local_cninfo_client_errors(tmp_path):
+    class BrokenCninfo:
+        def fetch_announcements(self, start, through):
+            raise RuntimeError("local normalization bug")
+
+    class Exchanges:
+        def __init__(self):
+            self.called = False
+
+        def fetch_sse_announcements(self, start, through):
+            self.called = True
+            return []
+
+        def fetch_szse_announcements(self, start, through):
+            self.called = True
+            return []
+
+    exchanges = Exchanges()
+    service = EventBackfillService(
+        TushareResearchClient(ActionPro(), pacer=lambda method: None),
+        BrokenCninfo(),
+        ResearchWarehouse(tmp_path / "warehouse"),
+        exchange_announcements=exchanges,
+    )
+
+    with __import__("pytest").raises(RuntimeError, match="local normalization bug"):
+        service.backfill_announcements(
+            start=date(2026, 8, 26),
+            through=date(2026, 8, 26),
+            resume=False,
+            fallback_to_exchanges=True,
+        )
+
+    assert exchanges.called is False
+
+
+def test_announcement_backfill_marks_all_sources_unavailable_without_blocking(tmp_path):
+    class Cninfo:
+        def fetch_announcements(self, start, through):
+            raise ResearchSourceError(
+                "CNINFO timeout", category="network", endpoint="cninfo"
+            )
+
+    class Exchanges:
+        def fetch_sse_announcements(self, start, through):
+            raise ResearchSourceError(
+                "SSE timeout", category="network", endpoint="sse"
+            )
+
+        def fetch_szse_announcements(self, start, through):
+            raise ResearchSourceError(
+                "SZSE timeout", category="network", endpoint="szse"
+            )
+
+    service = EventBackfillService(
+        TushareResearchClient(ActionPro(), pacer=lambda method: None),
+        Cninfo(),
+        ResearchWarehouse(tmp_path / "warehouse"),
+        exchange_announcements=Exchanges(),
+    )
+
+    summary = service.backfill_announcements(
+        start=date(2026, 8, 26),
+        through=date(2026, 8, 26),
+        resume=False,
+        fallback_to_exchanges=True,
+    )
+
+    assert summary.capabilities["announcement_status"] == "announcement_unavailable"
+    assert summary.capabilities["announcement_exchanges"] == []
+    assert summary.limited == 1
+    assert summary.failed == 0
+
+
+def test_exchange_fallback_drops_only_obvious_existing_cross_source_duplicate(
+    tmp_path,
+):
+    published = datetime(2026, 8, 26, 8, tzinfo=timezone.utc)
+    duplicate = _official_announcement("szse", "szse:duplicate")
+    duplicate["title"] = "年度 报告"
+    duplicate["available_at"] = published
+    duplicate["announcement_time"] = published
+
+    class FirstCninfo:
+        def fetch_announcements(self, start, through):
+            row = dict(duplicate)
+            row.update(
+                announcement_id="cninfo:duplicate",
+                title="年度报告",
+                source_name="cninfo",
+                source_endpoint="new/hisAnnouncement/query",
+                source_record_id="cninfo:duplicate",
+            )
+            return [row]
+
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    base = TushareResearchClient(ActionPro(), pacer=lambda method: None)
+    EventBackfillService(base, FirstCninfo(), warehouse).backfill_announcements(
+        start=date(2026, 8, 26), through=date(2026, 8, 26), resume=False
+    )
+
+    class FailedCninfo:
+        def fetch_announcements(self, start, through):
+            raise ResearchSourceError(
+                "CNINFO timeout", category="network", endpoint="cninfo"
+            )
+
+    class Exchanges:
+        def fetch_sse_announcements(self, start, through):
+            return []
+
+        def fetch_szse_announcements(self, start, through):
+            return [duplicate]
+
+    summary = EventBackfillService(
+        base,
+        FailedCninfo(),
+        warehouse,
+        exchange_announcements=Exchanges(),
+    ).backfill_announcements(
+        start=date(2026, 8, 26),
+        through=date(2026, 8, 26),
+        resume=False,
+        fallback_to_exchanges=True,
+    )
+
+    rows = warehouse.read_current(ResearchDatasetId.ANNOUNCEMENT)
+    assert len(rows) == 1
+    assert rows.iloc[0]["source_name"] == "cninfo"
+    assert summary.capabilities["announcement_status"] == "exchange_complete"
 
 
 def test_event_backfill_stores_official_announcement_and_structured_actions(tmp_path):

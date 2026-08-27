@@ -38,6 +38,7 @@ class BackfillSummary(BaseModel):
     failed: int = 0
     issues: list[str] = Field(default_factory=list)
     retry_codes: list[str] = Field(default_factory=list)
+    capabilities: dict[str, object] = Field(default_factory=dict)
 
 
 class ResearchBackfillService:

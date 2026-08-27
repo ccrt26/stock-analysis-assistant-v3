@@ -502,7 +502,7 @@ class CninfoResearchClient:
                 category="invalid_semantics",
                 endpoint="new/hisAnnouncement/query",
             )
-        candidate_types = _candidate_event_types(title)
+        candidate_types = candidate_event_types(title)
         return {
             "announcement_id": announcement_id,
             "ts_code": _ts_code(code),
@@ -522,7 +522,7 @@ class CninfoResearchClient:
         }
 
 
-def _candidate_event_types(title: str) -> list[str]:
+def candidate_event_types(title: str) -> list[str]:
     rules = (
         ("shareholder_reduction", ("减持",)),
         ("share_unlock", ("解除限售", "限售股上市流通", "解禁")),
@@ -574,4 +574,8 @@ def _plate_for_code(code: str) -> str:
     )
 
 
-__all__ = ["CninfoRequestPacer", "CninfoResearchClient"]
+__all__ = [
+    "CninfoRequestPacer",
+    "CninfoResearchClient",
+    "candidate_event_types",
+]

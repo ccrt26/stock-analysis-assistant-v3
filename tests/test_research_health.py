@@ -143,6 +143,42 @@ def test_health_stage_runs_are_scoped_to_the_requested_data_date(tmp_path):
     assert report.latest_stage_runs[0].status == "limited"
 
 
+def test_health_exposes_structured_announcement_capabilities_from_stage_summary(
+    tmp_path,
+):
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    summary = {
+        "summaries": [
+            {
+                "scope": "announcements",
+                "issues": ["cninfo:network:query"],
+                "capabilities": {
+                    "announcement_status": "exchange_partial",
+                    "announcement_exchanges": ["SSE"],
+                    "cninfo_status": "failed",
+                    "sse_status": "complete",
+                    "szse_status": "failed",
+                },
+            }
+        ]
+    }
+    with connect_research_warehouse(warehouse.duckdb_path) as connection:
+        connection.execute(
+            """
+            insert into research_ingestion_runs values
+            ('next', 'next', 'next-morning', '2026-08-26', 'limited',
+             now(), now(), ?)
+            """,
+            [__import__("json").dumps(summary)],
+        )
+
+    report = build_research_health_report(warehouse, date(2026, 8, 26))
+
+    stage = report.latest_stage_runs[0]
+    assert stage.capabilities["announcement_status"] == "exchange_partial"
+    assert stage.capabilities["announcement_exchanges"] == ["SSE"]
+
+
 def test_health_rejects_nonpositive_and_overlapping_revision_intervals(tmp_path):
     warehouse = ResearchWarehouse(tmp_path / "warehouse")
     first = datetime(2026, 8, 4, 7, 1, tzinfo=timezone.utc)

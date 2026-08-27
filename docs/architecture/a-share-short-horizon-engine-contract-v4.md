@@ -69,4 +69,12 @@ V4 结果冻结后，程序按每条选择记录继续保存路径，但不改�
 - 提前判断失效后仍由程序被动记录到 D20，但退出普通详细提醒。
 - 提前达到目标后仍记录到 D20，不自动产生新的买入建议。
 
+## 9. 每次运行的数据能力边界
+
+新生成的 V4 轨迹必须保存 `runtime_capabilities`，包括 `market_research_available`、`price_research_available`、`industry_research_available`、`theme_research_available`、`stock_context_available`、`announcement_status`、`announcement_exchanges` 和本次限制。历史 V4 轨迹继续可读，不倒填该字段；新的 `record-trace` 必须收到它，并拒绝比 `prepare` 更宽的能力声明。
+
+市场观察和价格分析是正式研究最低条件，任一不可用时停止。行业、主题、个股背景和公告是彼此独立的可选通道：一项缺失只禁用对应证据，不得阻断其他可用研究路径。`complete_core_date` 只作数据诊断，不是正式研究 Gate。
+
+公告状态只有 `cninfo_complete | exchange_complete | exchange_partial | announcement_unavailable`。`exchange_partial` 时，`fresh_event_pending` 只允许用于 `announcement_exchanges` 中完整覆盖的交易所；未覆盖交易所不得把查询失败解释为没有公告。`announcement_unavailable` 时不得形成行动日前新公告候选。所有公告仍必须满足 `available_at <= as_of`。
+
 跟踪程序不增加第六个 Skill，不计算总分，也不改变本合同七种 `engine_type`、四种 `engine_status`、两条入选通道和11个既有价格场景。

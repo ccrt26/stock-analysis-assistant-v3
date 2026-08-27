@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 from typer.testing import CliRunner
 
-from stock_analyzer.cli import app
+from stock_analyzer.cli import _health_research_state, app
 from stock_analyzer.data.research_backfill import BackfillSummary
 
 
@@ -18,6 +18,7 @@ def _health_report(
     stock_ready: bool = True,
     price_ready: bool = True,
     next_morning_status: str = "succeeded",
+    announcement_status: str | None = None,
 ):
     features = (
         SimpleNamespace(feature_set="market_context", ready=market_ready),
@@ -32,9 +33,27 @@ def _health_report(
             SimpleNamespace(
                 stage="next-morning",
                 status=next_morning_status,
+                capabilities={
+                    "announcement_status": announcement_status
+                    or (
+                        "cninfo_complete"
+                        if next_morning_status in {"succeeded", "limited"}
+                        else "announcement_unavailable"
+                    ),
+                    "announcement_exchanges": ["SSE", "SZSE"],
+                },
             ),
         ),
     )
+
+
+def test_health_research_state_treats_complete_core_date_as_diagnostic_only():
+    core_ready, limitations = _health_research_state(
+        _health_report(complete_core_date=False)
+    )
+
+    assert core_ready is True
+    assert limitations == ()
 
 
 def test_root_cli_exposes_only_the_data_group():

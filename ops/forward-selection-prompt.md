@@ -56,9 +56,14 @@
 
 返回 `ready_for_research` 或 `ready_for_research_limited` 后，继续原有 forward monitor、五个 Skill、V4 研究和 `record-trace`。`record-trace` 必须逐字使用 prepare 返回的 `formation_date`、`action_date` 和 `selection_as_of`。受限模式必须把不可用通道交给总控，不得补猜：
 
-- `sector_research_available=false`：板块 Skill 仍运行，但只说明行业数据不可用、本次没有行业候选；不得形成板块类依据，也不得用公司名称或概念标签代替。
+- `market_research_available=false` 或 `price_research_available=false`：最低研究条件缺失，停止正式选股，不补猜。
+- `industry_research_available=false`：不得使用行业日行情或行业传播证据；不得因为行业缺失而停止主题、公司或个股价格路径。
+- `theme_research_available=false`：不得使用主题日行情或主题传播证据；不得因为主题缺失而停止行业、公司或个股价格路径。
 - `stock_context_available=false`：不得引用个股交易背景独有字段；市场、公司和价格仍可研究。
-- `preopen_event_refresh_complete=false`：公司 Skill 可以使用形成日及更早的正式事实，但不得形成刚在行动日前公开、尚无完整交易日的候选，也不得声称完整检查了行动日开盘前新公告。
+- `announcement_status=exchange_partial`：只允许列在 `announcement_exchanges` 的交易所使用行动日前新公告形成 `fresh_event_pending`；未覆盖交易所不得把“没有取到”写成“没有公告”。
+- `announcement_status=announcement_unavailable`：公司 Skill 可以使用形成日及更早的正式事实，但不得形成刚在行动日前公开、尚无完整交易日的候选，也不得声称完整检查了行动日开盘前新公告。
+
+`complete_core_date` 只作诊断，不再决定能否研究。`prepare` 返回的市场、价格、行业、主题、个股背景、`announcement_status`、`announcement_exchanges` 和限制才是本次真实能力边界。
 
 若已经存在同一 `formation_date` 的正式选择，prepare 返回 `already_selected`，不得重复选股，但仍可继续已有股票走势复盘。
 
@@ -79,6 +84,8 @@ stock_analyzer.ops.forward_selection.DailyResearchTraceV4
 ```
 
 不得生成 V1、V2 或 V3 轨迹，不得使用旧字段或旧枚举。专业 Skill 正文中若仍有历史示例，只保留其研究方法和事实边界；最终市场模式、发动机、公司信息、板块证据和轨迹结构一律以 V4 合同及 `DailyResearchTraceV4` 为准。
+
+新生成的 V4 轨迹必须填写 `runtime_capabilities`，逐项复制本次 `prepare` 返回的市场、价格、行业、主题、个股背景、`announcement_status`、`announcement_exchanges` 和限制。可以写得更保守，不得把不可用或部分覆盖写成完整可用；`record-trace` 会拒绝扩大能力范围的声明。
 
 ## 3. 五个 Skill 的执行顺序
 

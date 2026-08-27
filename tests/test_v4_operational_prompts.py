@@ -37,6 +37,26 @@ def test_daily_prompt_is_v4_only() -> None:
     )
 
 
+def test_daily_prompt_and_v4_contract_define_runtime_data_capability_boundary() -> None:
+    prompt = Path("ops/forward-selection-prompt.md").read_text(encoding="utf-8")
+    contract = Path(
+        "docs/architecture/a-share-short-horizon-engine-contract-v4.md"
+    ).read_text(encoding="utf-8")
+    skill = Path(
+        ".agents/skills/orchestrating-stock-research/SKILL.md"
+    ).read_text(encoding="utf-8")
+
+    for text in (prompt, contract, skill):
+        assert "runtime_capabilities" in text
+        assert "industry_research_available" in text
+        assert "theme_research_available" in text
+        assert "announcement_status" in text
+        assert "exchange_partial" in text
+        assert "未覆盖交易所" in text
+    assert "complete_core_date` 只作诊断" in prompt
+    assert "不得因为行业或主题一项缺失而停止其他研究路径" in skill
+
+
 def test_periodic_review_prompt_is_v4_only() -> None:
     text = Path("ops/periodic-research-review-prompt.md").read_text(encoding="utf-8")
     for engine in (

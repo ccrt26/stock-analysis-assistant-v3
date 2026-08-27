@@ -22,8 +22,7 @@ def _health_research_state(report: Any) -> tuple[bool, tuple[str, ...]]:
         for item in getattr(report, "derived_features", ())
     }
     core_ready = bool(
-        getattr(report, "complete_core_date", False)
-        and features.get("market_context", False)
+        features.get("market_context", False)
         and features.get("price_analysis_context", False)
     )
     limitations: list[str] = []
@@ -39,10 +38,17 @@ def _health_research_state(report: Any) -> tuple[bool, tuple[str, ...]]:
         ),
         None,
     )
-    if next_morning is None or getattr(next_morning, "status", "") not in {
-        "succeeded",
-        "limited",
-    }:
+    capabilities = (
+        getattr(next_morning, "capabilities", {})
+        if next_morning is not None
+        else {}
+    )
+    announcement_status = (
+        str(capabilities.get("announcement_status", ""))
+        if isinstance(capabilities, dict)
+        else ""
+    )
+    if announcement_status not in {"cninfo_complete", "exchange_complete"}:
         limitations.append("行动日前公告补采未完成")
     return core_ready, tuple(limitations)
 

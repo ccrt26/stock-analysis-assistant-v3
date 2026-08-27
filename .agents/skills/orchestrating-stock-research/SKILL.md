@@ -52,6 +52,18 @@ exclusions: []
 
 `action_date` 是形成日之后第一个真实交易日，`as_of` 必须严格早于行动日开盘。核心行情、交易日、股票身份或时间边界不可靠时停止正式选股；次要证据不足时可以继续，但必须减少结论并保留未知。
 
+## 运行时数据能力
+
+每日以 `prepare` 返回的 `runtime_capabilities` 为本次事实边界，并原样写入新 V4 轨迹：
+
+- `market_research_available` 和 `price_research_available` 是最低条件，任一为假就停止正式选股；
+- `industry_research_available`、`theme_research_available` 和 `stock_context_available` 各自只约束对应证据；不得因为行业或主题一项缺失而停止其他研究路径；
+- `announcement_status=exchange_partial` 时，行动日前新公告和 `fresh_event_pending` 只用于 `announcement_exchanges` 内完整覆盖的交易所；未覆盖交易所保持未知；
+- `announcement_status=announcement_unavailable` 时，不形成行动日前新公告候选，但形成日及更早的公司事实和其他可用路径仍可研究；
+- 所有事实继续满足 `available_at <= as_of`，不得用行动日盘中信息补缺。
+
+`complete_core_date` 只作数据诊断，不是研究 Gate。能力声明可以比 `prepare` 更保守，不得扩大；限制会由 `record-trace` 再次核对。这里不增加评分、审批或第二套研究流程。
+
 ## 专业 Skill
 
 按以下名称使用：

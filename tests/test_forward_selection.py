@@ -67,6 +67,10 @@ class FakeData:
         stage_started_at: datetime | None = None,
         stage_finished_at: datetime | None = None,
         prices: dict[str, list[PricePoint] | None] | None = None,
+        complete_core_date: bool | None = None,
+        dataset_ready: dict[str, bool] | None = None,
+        announcement_status: str | None = None,
+        announcement_exchanges: list[str] | None = None,
     ) -> None:
         self._open_dates = open_dates
         self.action_date_status = action_date_status
@@ -78,6 +82,10 @@ class FakeData:
         self.stage_finished_at = stage_finished_at
         self.health_calls = 0
         self.prices = prices or {}
+        self.complete_core_date = complete_core_date
+        self.dataset_ready = dataset_ready or {}
+        self.announcement_status = announcement_status
+        self.announcement_exchanges = announcement_exchanges
 
     def trading_dates(self, start: date, end: date) -> list[date]:
         return [day for day in self._open_dates if start <= day <= end]
@@ -109,9 +117,42 @@ class FakeData:
             name: ready and self.feature_ready.get(name, True)
             for name in feature_names
         }
+        announcement_status = self.announcement_status
+        if announcement_status is None:
+            announcement_status = (
+                "cninfo_complete"
+                if self.stage_status in {"succeeded", "limited"}
+                else "announcement_unavailable"
+            )
+        exchanges = self.announcement_exchanges
+        if exchanges is None:
+            exchanges = (
+                ["SSE", "SZSE"]
+                if announcement_status in {"cninfo_complete", "exchange_complete"}
+                else []
+            )
+        dataset_rows = []
+        for dataset_id in ("industry_daily", "theme_daily"):
+            available = ready and self.dataset_ready.get(dataset_id, True)
+            dataset_rows.append(
+                {
+                    "dataset_id": dataset_id,
+                    "last_partition": (
+                        formation_date.isoformat()
+                        if available
+                        else (formation_date - timedelta(days=1)).isoformat()
+                    ),
+                    "contract_valid": available,
+                    "physical_valid": available,
+                    "data_date_partition_ready": available,
+                }
+            )
         return {
             "data_date": formation_date.isoformat(),
-            "complete_core_date": ready,
+            "complete_core_date": (
+                ready if self.complete_core_date is None else self.complete_core_date
+            ),
+            "datasets": dataset_rows,
             "derived_ready_for_research": all(feature_states.values()),
             "derived_features": [
                 {
@@ -128,6 +169,10 @@ class FakeData:
                     "status": self.stage_status,
                     "started_at": started.isoformat(),
                     "finished_at": finished.isoformat(),
+                    "capabilities": {
+                        "announcement_status": announcement_status,
+                        "announcement_exchanges": exchanges,
+                    },
                 }
             ],
         }
@@ -328,6 +373,16 @@ def _v4_trace() -> dict:
         "market_search_context": "核对形成日的相对增量。",
         "market_propagation_mode": "one_day_repair",
         "market_risk_overlays": [],
+        "runtime_capabilities": {
+            "market_research_available": True,
+            "price_research_available": True,
+            "industry_research_available": True,
+            "theme_research_available": True,
+            "stock_context_available": True,
+            "announcement_status": "cninfo_complete",
+            "announcement_exchanges": ["SSE", "SZSE"],
+            "limitations": [],
+        },
         "candidate_ledger": [
             {
                 "ts_code": "000001.SZ",
@@ -998,13 +1053,109 @@ def test_failed_next_morning_with_core_ready_runs_limited_immediately(
     assert summary.preopen_event_refresh_complete is False
 
 
+def test_legacy_complete_core_date_no_longer_blocks_market_and_price_ready_prepare(
+    tmp_path: Path,
+) -> None:
+    current = datetime(2026, 8, 26, 16, 24, tzinfo=SHANGHAI)
+    csv_path = tmp_path / "forward.csv"
+    _write_csv(csv_path, [])
+
+    summary = prepare_daily_selection(
+        csv_path=csv_path,
+        data=FakeData(
+            open_dates=[date(2026, 8, 25), date(2026, 8, 26)],
+            complete_core_date=False,
+        ),
+        clock=_clock(current, current),
+        rerun_date=date(2026, 8, 26),
+    )
+
+    assert summary.status == "ready_for_research"
+    assert summary.market_research_available is True
+    assert summary.price_research_available is True
+
+
+def test_missing_industry_daily_is_limited_without_disabling_theme_research(
+    tmp_path: Path,
+) -> None:
+    current = datetime(2026, 8, 26, 16, 24, tzinfo=SHANGHAI)
+    csv_path = tmp_path / "forward.csv"
+    _write_csv(csv_path, [])
+
+    summary = prepare_daily_selection(
+        csv_path=csv_path,
+        data=FakeData(
+            open_dates=[date(2026, 8, 25), date(2026, 8, 26)],
+            dataset_ready={"industry_daily": False},
+        ),
+        clock=_clock(current, current),
+        rerun_date=date(2026, 8, 26),
+    )
+
+    assert summary.status == "ready_for_research_limited"
+    assert summary.industry_research_available is False
+    assert summary.theme_research_available is True
+    assert summary.sector_research_available is True
+    assert summary.market_research_available is True
+    assert summary.price_research_available is True
+    assert "行业原始日数据不可用" in "；".join(summary.limitations)
+
+
+def test_exchange_partial_prepare_reports_exact_covered_exchange(tmp_path: Path) -> None:
+    current = datetime(2026, 8, 26, 16, 24, tzinfo=SHANGHAI)
+    csv_path = tmp_path / "forward.csv"
+    _write_csv(csv_path, [])
+
+    summary = prepare_daily_selection(
+        csv_path=csv_path,
+        data=FakeData(
+            open_dates=[date(2026, 8, 25), date(2026, 8, 26)],
+            announcement_status="exchange_partial",
+            announcement_exchanges=["SSE"],
+        ),
+        clock=_clock(current, current),
+        rerun_date=date(2026, 8, 26),
+    )
+
+    assert summary.status == "ready_for_research_limited"
+    assert summary.announcement_status == "exchange_partial"
+    assert summary.announcement_exchanges == ("SSE",)
+    assert summary.preopen_event_refresh_complete is False
+    assert "仅完整覆盖SSE" in "；".join(summary.limitations)
+
+
+def test_announcement_unavailable_still_allows_other_ready_paths_limited(
+    tmp_path: Path,
+) -> None:
+    current = datetime(2026, 8, 26, 16, 24, tzinfo=SHANGHAI)
+    csv_path = tmp_path / "forward.csv"
+    _write_csv(csv_path, [])
+
+    summary = prepare_daily_selection(
+        csv_path=csv_path,
+        data=FakeData(
+            open_dates=[date(2026, 8, 25), date(2026, 8, 26)],
+            announcement_status="announcement_unavailable",
+            announcement_exchanges=[],
+        ),
+        clock=_clock(current, current),
+        rerun_date=date(2026, 8, 26),
+    )
+
+    assert summary.status == "ready_for_research_limited"
+    assert summary.market_research_available is True
+    assert summary.price_research_available is True
+    assert summary.announcement_status == "announcement_unavailable"
+    assert "不形成 fresh_event_pending" in "；".join(summary.limitations)
+
+
 @pytest.mark.parametrize(
     ("missing_feature", "available_field", "limitation_text"),
     [
         (
             "sector_hotspot",
             "sector_research_available",
-            "行业研究数据不可用",
+            "行业原始日数据不可用",
         ),
         (
             "stock_trading_context",
@@ -1454,6 +1605,102 @@ def test_limited_record_trace_rejects_fresh_event_when_preopen_is_incomplete(
     assert summary.error == "preopen_event_refresh_incomplete"
     assert _read_csv(csv_path) == []
     assert pending.exists()
+
+
+def test_record_trace_requires_v4_runtime_capabilities(tmp_path: Path) -> None:
+    trace = _v4_trace()
+    trace.pop("runtime_capabilities")
+    pending = tmp_path / "pending-missing-capabilities.json"
+    pending.write_text(json.dumps(trace, ensure_ascii=False), encoding="utf-8")
+    csv_path = tmp_path / "forward.csv"
+    _write_csv(csv_path, [])
+    current = datetime(2026, 8, 26, 16, 24, tzinfo=SHANGHAI)
+
+    summary = record_daily_trace(
+        trace,
+        pending_path=pending,
+        archive_dir=tmp_path / "archive",
+        csv_path=csv_path,
+        data=FakeData(open_dates=[date(2026, 8, 25), date(2026, 8, 26)]),
+        clock=_clock(current, current),
+        formation_date=date(2026, 8, 25),
+        action_date=date(2026, 8, 26),
+        selection_as_of=datetime(2026, 8, 26, 9, 5, tzinfo=SHANGHAI),
+    )
+
+    assert summary.status == "invalid_result"
+    assert summary.error == "runtime_capabilities_missing"
+
+
+def test_exchange_partial_allows_fresh_event_only_for_covered_szse(tmp_path: Path) -> None:
+    trace = _v4_fresh_event_trace()
+    limitation = (
+        "行动日前公告仅完整覆盖SZSE，未覆盖交易所不得形成 fresh_event_pending"
+    )
+    trace["runtime_capabilities"].update(
+        announcement_status="exchange_partial",
+        announcement_exchanges=["SZSE"],
+        limitations=[limitation],
+    )
+    pending = tmp_path / "pending-covered-event.json"
+    pending.write_text(json.dumps(trace, ensure_ascii=False), encoding="utf-8")
+    csv_path = tmp_path / "forward.csv"
+    _write_csv(csv_path, [])
+    current = datetime(2026, 8, 26, 16, 24, tzinfo=SHANGHAI)
+
+    summary = record_daily_trace(
+        trace,
+        pending_path=pending,
+        archive_dir=tmp_path / "archive",
+        csv_path=csv_path,
+        data=FakeData(
+            open_dates=[date(2026, 8, 25), date(2026, 8, 26)],
+            announcement_status="exchange_partial",
+            announcement_exchanges=["SZSE"],
+        ),
+        clock=_clock(current, current),
+        formation_date=date(2026, 8, 25),
+        action_date=date(2026, 8, 26),
+        selection_as_of=datetime(2026, 8, 26, 9, 5, tzinfo=SHANGHAI),
+    )
+
+    assert summary.status == "selection_frozen"
+
+
+def test_exchange_partial_rejects_fresh_event_for_uncovered_szse(tmp_path: Path) -> None:
+    trace = _v4_fresh_event_trace()
+    limitation = (
+        "行动日前公告仅完整覆盖SSE，未覆盖交易所不得形成 fresh_event_pending"
+    )
+    trace["runtime_capabilities"].update(
+        announcement_status="exchange_partial",
+        announcement_exchanges=["SSE"],
+        limitations=[limitation],
+    )
+    pending = tmp_path / "pending-uncovered-event.json"
+    pending.write_text(json.dumps(trace, ensure_ascii=False), encoding="utf-8")
+    csv_path = tmp_path / "forward.csv"
+    _write_csv(csv_path, [])
+    current = datetime(2026, 8, 26, 16, 24, tzinfo=SHANGHAI)
+
+    summary = record_daily_trace(
+        trace,
+        pending_path=pending,
+        archive_dir=tmp_path / "archive",
+        csv_path=csv_path,
+        data=FakeData(
+            open_dates=[date(2026, 8, 25), date(2026, 8, 26)],
+            announcement_status="exchange_partial",
+            announcement_exchanges=["SSE"],
+        ),
+        clock=_clock(current, current),
+        formation_date=date(2026, 8, 25),
+        action_date=date(2026, 8, 26),
+        selection_as_of=datetime(2026, 8, 26, 9, 5, tzinfo=SHANGHAI),
+    )
+
+    assert summary.status == "invalid_result"
+    assert summary.error == "preopen_event_refresh_incomplete"
 
 
 @pytest.mark.parametrize(

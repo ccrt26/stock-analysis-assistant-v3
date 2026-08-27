@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import date, datetime, time, timedelta, timezone
-from typing import Any
+from typing import Any, Iterable
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -199,16 +199,54 @@ class ClassificationBackfillService:
             return tuple(open_dates)
         return tuple(open_dates[-sessions:])
 
-    def refresh_daily(self, data_date: date) -> BackfillSummary:
+    def refresh_daily(
+        self,
+        data_date: date,
+        *,
+        datasets: Iterable[ResearchDatasetId] | None = None,
+        refresh_memberships: bool = True,
+    ) -> BackfillSummary:
+        requested = (
+            {
+                ResearchDatasetId.INDUSTRY_DAILY,
+                ResearchDatasetId.THEME_DAILY,
+            }
+            if datasets is None
+            else {ResearchDatasetId(value) for value in datasets}
+        )
+        allowed = {
+            ResearchDatasetId.INDUSTRY_DAILY,
+            ResearchDatasetId.THEME_DAILY,
+        }
+        if not requested or not requested <= allowed:
+            raise ValueError("daily classification refresh only supports industry/theme")
         summary = BackfillSummary(
-            scope="classification-daily", start=data_date, through=data_date
+            scope=(
+                next(iter(requested)).value
+                if len(requested) == 1
+                else "classification-daily"
+            ),
+            start=data_date,
+            through=data_date,
         )
         industry_catalog = self.warehouse.read_current(
             ResearchDatasetId.INDUSTRY_CATALOG
         )
         theme_catalog = self.warehouse.read_current(ResearchDatasetId.THEME_CATALOG)
-        if industry_catalog.empty or theme_catalog.empty:
+        missing_requested_catalog = (
+            ResearchDatasetId.INDUSTRY_DAILY in requested
+            and industry_catalog.empty
+        ) or (
+            ResearchDatasetId.THEME_DAILY in requested and theme_catalog.empty
+        )
+        if missing_requested_catalog and datasets is None:
             return self.backfill(start=data_date, through=data_date, resume=True)
+        if missing_requested_catalog:
+            raise ResearchSourceError(
+                "targeted daily classification refresh lacks its catalog",
+                category="incomplete",
+                endpoint="index_daily",
+            )
         frame = self.client.call_paged(
             "index_daily", trade_date=_yyyymmdd(data_date)
         )
@@ -220,18 +258,29 @@ class ClassificationBackfillService:
             ),
             "index_daily",
         )
-        industry_codes = set(industry_catalog["industry_code"].astype(str))
-        theme_codes = set(theme_catalog["theme_code"].astype(str))
+        industry_codes = (
+            set(industry_catalog["industry_code"].astype(str))
+            if not industry_catalog.empty
+            else set()
+        )
+        theme_codes = (
+            set(theme_catalog["theme_code"].astype(str))
+            if not theme_catalog.empty
+            else set()
+        )
         industry_rows: list[dict[str, Any]] = []
         theme_rows: list[dict[str, Any]] = []
         for raw in frame.to_dict(orient="records"):
             code = str(raw["ts_code"])
             target: list[dict[str, Any]] | None = None
             code_field = ""
-            if code in industry_codes:
+            if (
+                ResearchDatasetId.INDUSTRY_DAILY in requested
+                and code in industry_codes
+            ):
                 target = industry_rows
                 code_field = "industry_code"
-            elif code in theme_codes:
+            elif ResearchDatasetId.THEME_DAILY in requested and code in theme_codes:
                 target = theme_rows
                 code_field = "theme_code"
             if target is None:
@@ -251,25 +300,28 @@ class ClassificationBackfillService:
                 }
             )
         partition = data_date.isoformat()
-        self._commit(
-            ResearchDatasetId.INDUSTRY_DAILY,
-            partition,
-            "index_daily",
-            industry_rows,
-            data_date,
-            False,
-            summary,
-        )
-        self._commit(
-            ResearchDatasetId.THEME_DAILY,
-            partition,
-            "index_daily",
-            theme_rows,
-            data_date,
-            False,
-            summary,
-        )
-        self._refresh_monthly_memberships(data_date, summary)
+        if ResearchDatasetId.INDUSTRY_DAILY in requested:
+            self._commit(
+                ResearchDatasetId.INDUSTRY_DAILY,
+                partition,
+                "index_daily",
+                industry_rows,
+                data_date,
+                False,
+                summary,
+            )
+        if ResearchDatasetId.THEME_DAILY in requested:
+            self._commit(
+                ResearchDatasetId.THEME_DAILY,
+                partition,
+                "index_daily",
+                theme_rows,
+                data_date,
+                False,
+                summary,
+            )
+        if refresh_memberships:
+            self._refresh_monthly_memberships(data_date, summary)
         return summary
 
     def _refresh_monthly_memberships(

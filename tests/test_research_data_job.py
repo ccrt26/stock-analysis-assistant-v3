@@ -197,7 +197,7 @@ def test_evening_derives_only_after_fact_commits_and_reconciliation(monkeypatch)
             raise AssertionError(dataset)
 
     class EventService:
-        def __init__(self, *args):
+        def __init__(self, *args, **kwargs):
             pass
 
         def backfill(self, **kwargs):
@@ -211,10 +211,11 @@ def test_evening_derives_only_after_fact_commits_and_reconciliation(monkeypatch)
         def __init__(self, *args):
             pass
 
-        def refresh_daily(self, data_date):
-            order.append("classifications")
+        def refresh_daily(self, data_date, *, datasets, refresh_memberships):
+            dataset = tuple(datasets)[0]
+            order.append(dataset.value)
             return BackfillSummary(
-                scope="classifications", start=data_date, through=data_date
+                scope=dataset.value, start=data_date, through=data_date
             )
 
     monkeypatch.setattr(job, "EventBackfillService", EventService)
@@ -229,7 +230,8 @@ def test_evening_derives_only_after_fact_commits_and_reconciliation(monkeypatch)
         raising=False,
     )
     runtime = SimpleNamespace(
-        tushare=object(), cninfo=object(), warehouse=Warehouse()
+        tushare=object(), cninfo=object(), warehouse=Warehouse(),
+        exchange_announcements=object(),
     )
 
     summaries = run_research_stage(
@@ -238,13 +240,128 @@ def test_evening_derives_only_after_fact_commits_and_reconciliation(monkeypatch)
 
     assert order == [
         "events",
-        "classifications",
+        "industry_daily",
+        "theme_daily",
         "reconcile",
         "derive",
     ]
     assert summaries[-1].scope == "derived-research-features"
     assert summaries[-1].committed == 3
     assert summaries[-1].issues == ["2026-07-13 已完成三类研究观察。"]
+
+
+def test_evening_continues_industry_and_theme_refresh_after_event_failure(monkeypatch):
+    import stock_analyzer.ops.research_data_job as job
+
+    order = []
+
+    class Warehouse:
+        def read_current(self, dataset, *, partition_value=None):
+            if ResearchDatasetId(dataset) is ResearchDatasetId.ANNOUNCEMENT:
+                return pd.DataFrame(columns=["announcement_time", "title", "ts_code"])
+            return pd.DataFrame()
+
+    class EventService:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def backfill(self, **kwargs):
+            order.append("events-failed")
+            raise RuntimeError("local event failure")
+
+    class ClassificationService:
+        def __init__(self, *args):
+            pass
+
+        def refresh_daily(self, data_date, *, datasets, refresh_memberships):
+            dataset = tuple(datasets)[0]
+            order.append(dataset.value)
+            return BackfillSummary(
+                scope=dataset.value, start=data_date, through=data_date
+            )
+
+    monkeypatch.setattr(job, "_trading_dates", lambda *args: (date(2026, 7, 13),))
+    monkeypatch.setattr(job, "EventBackfillService", EventService)
+    monkeypatch.setattr(job, "ClassificationBackfillService", ClassificationService)
+    monkeypatch.setattr(job, "reconcile_research_gaps", lambda *args: None)
+    monkeypatch.setattr(job, "run_research_features", lambda *args: _derived_summary())
+    runtime = SimpleNamespace(
+        tushare=object(),
+        cninfo=object(),
+        exchange_announcements=object(),
+        warehouse=Warehouse(),
+    )
+
+    summaries = run_research_stage(
+        runtime, stage="evening", data_date=date(2026, 7, 13)
+    )
+
+    assert order == ["events-failed", "industry_daily", "theme_daily"]
+    assert summaries[0].scope == "events"
+    assert summaries[0].failed == 1
+    assert "RuntimeError" in summaries[0].issues[0]
+    assert {summary.scope for summary in summaries} >= {
+        "industry_daily",
+        "theme_daily",
+        "derived-research-features",
+    }
+
+
+def test_evening_continues_theme_refresh_after_industry_failure(monkeypatch):
+    import stock_analyzer.ops.research_data_job as job
+
+    calls = []
+
+    class Warehouse:
+        def read_current(self, dataset, *, partition_value=None):
+            if ResearchDatasetId(dataset) is ResearchDatasetId.ANNOUNCEMENT:
+                return pd.DataFrame(columns=["announcement_time", "title", "ts_code"])
+            return pd.DataFrame()
+
+    monkeypatch.setattr(job, "_trading_dates", lambda *args: ())
+    monkeypatch.setattr(
+        job,
+        "EventBackfillService",
+        lambda *args, **kwargs: SimpleNamespace(
+            backfill=lambda **options: BackfillSummary(
+                scope="events",
+                start=date(2026, 7, 13),
+                through=date(2026, 7, 13),
+            )
+        ),
+    )
+
+    class ClassificationService:
+        def __init__(self, *args):
+            pass
+
+        def refresh_daily(self, data_date, *, datasets, refresh_memberships):
+            dataset = tuple(datasets)[0]
+            calls.append(dataset)
+            if dataset is ResearchDatasetId.INDUSTRY_DAILY:
+                raise RuntimeError("industry endpoint failed")
+            return BackfillSummary(
+                scope=dataset.value, start=data_date, through=data_date
+            )
+
+    monkeypatch.setattr(job, "ClassificationBackfillService", ClassificationService)
+    monkeypatch.setattr(job, "reconcile_research_gaps", lambda *args: None)
+    monkeypatch.setattr(job, "run_research_features", lambda *args: _derived_summary())
+    runtime = SimpleNamespace(
+        tushare=object(),
+        cninfo=object(),
+        exchange_announcements=object(),
+        warehouse=Warehouse(),
+    )
+
+    summaries = run_research_stage(
+        runtime, stage="evening", data_date=date(2026, 7, 13)
+    )
+
+    assert calls == [ResearchDatasetId.INDUSTRY_DAILY, ResearchDatasetId.THEME_DAILY]
+    industry = next(summary for summary in summaries if summary.scope == "industry_daily")
+    assert industry.failed == 1
+    assert any(summary.scope == "theme_daily" and summary.failed == 0 for summary in summaries)
 
 
 def test_fundamental_refresh_scope_uses_actual_financial_disclosures_only():
@@ -300,10 +417,10 @@ def test_next_morning_only_checks_current_date_facts_and_then_derives(
     )
 
     class EventService:
-        def __init__(self, *args):
+        def __init__(self, *args, **kwargs):
             pass
 
-        def backfill(self, **kwargs):
+        def backfill_announcements(self, **kwargs):
             assert kwargs["resume"] is False
             event_options.append(kwargs)
             order.append("late-events")
@@ -324,6 +441,7 @@ def test_next_morning_only_checks_current_date_facts_and_then_derives(
         lambda *args: (date(2026, 7, 13),),
     )
     monkeypatch.setattr(job, "EventBackfillService", EventService)
+    monkeypatch.setattr(job, "_daily_partition_passed", lambda *args: True)
     monkeypatch.setattr(job, "_shanghai_today", lambda: date(2026, 7, 16))
     monkeypatch.setattr(job, "TradingStructureBackfillService", TradingService)
     monkeypatch.setattr(
@@ -345,6 +463,7 @@ def test_next_morning_only_checks_current_date_facts_and_then_derives(
         cninfo=object(),
         warehouse=object(),
         minute_fetcher=lambda **kwargs: pd.DataFrame(),
+        exchange_announcements=object(),
     )
 
     summaries = run_research_stage(
@@ -361,13 +480,78 @@ def test_next_morning_only_checks_current_date_facts_and_then_derives(
     assert event_options == [
         {
             "start": date(2026, 7, 13),
-            "through": date(2026, 7, 13),
-            "announcement_through": date(2026, 7, 16),
-            "trading_dates": (),
+            "through": date(2026, 7, 16),
             "resume": False,
+            "fallback_to_exchanges": True,
         }
     ]
     assert summaries[-1].scope == "derived-research-features"
+
+
+def test_next_morning_repairs_only_missing_theme_daily_partition(monkeypatch):
+    import stock_analyzer.ops.research_data_job as job
+
+    order = []
+
+    monkeypatch.setattr(job, "_trading_dates", lambda *args: (date(2026, 7, 13),))
+    monkeypatch.setattr(job, "_shanghai_today", lambda: date(2026, 7, 14))
+    monkeypatch.setattr(
+        job,
+        "_daily_partition_passed",
+        lambda warehouse, dataset, data_date: dataset
+        is ResearchDatasetId.INDUSTRY_DAILY,
+    )
+    monkeypatch.setattr(
+        job,
+        "EventBackfillService",
+        lambda *args, **kwargs: SimpleNamespace(
+            backfill_announcements=lambda **options: order.append("announcements")
+            or BackfillSummary(
+                scope="announcements",
+                start=date(2026, 7, 13),
+                through=date(2026, 7, 14),
+            )
+        ),
+    )
+
+    class ClassificationService:
+        def __init__(self, *args):
+            pass
+
+        def refresh_daily(self, data_date, *, datasets, refresh_memberships):
+            order.append(tuple(datasets)[0].value)
+            assert refresh_memberships is False
+            return BackfillSummary(
+                scope="theme_daily", start=data_date, through=data_date
+            )
+
+    monkeypatch.setattr(job, "ClassificationBackfillService", ClassificationService)
+    monkeypatch.setattr(job, "select_minute_candidate_scope", lambda *args: ())
+    monkeypatch.setattr(
+        job,
+        "TradingStructureBackfillService",
+        lambda *args, **kwargs: SimpleNamespace(
+            backfill=lambda **options: order.append("trading")
+            or BackfillSummary(
+                scope="trading-structure",
+                start=date(2026, 7, 13),
+                through=date(2026, 7, 13),
+            )
+        ),
+    )
+    monkeypatch.setattr(job, "reconcile_research_gaps", lambda *args: None)
+    monkeypatch.setattr(job, "run_research_features", lambda *args: _derived_summary())
+    runtime = SimpleNamespace(
+        tushare=object(),
+        cninfo=object(),
+        exchange_announcements=object(),
+        warehouse=object(),
+        minute_fetcher=None,
+    )
+
+    run_research_stage(runtime, stage="next-morning", data_date=date(2026, 7, 13))
+
+    assert order == ["announcements", "theme_daily", "trading"]
 
 
 def test_feature_failure_is_returned_as_a_failed_data_stage(monkeypatch):
@@ -377,14 +561,15 @@ def test_feature_failure_is_returned_as_a_failed_data_stage(monkeypatch):
     monkeypatch.setattr(
         job,
         "EventBackfillService",
-        lambda *args: SimpleNamespace(
-            backfill=lambda **kwargs: BackfillSummary(
+        lambda *args, **kwargs: SimpleNamespace(
+            backfill_announcements=lambda **options: BackfillSummary(
                 scope="events",
                 start=date(2026, 7, 13),
                 through=date(2026, 7, 13),
             )
         ),
     )
+    monkeypatch.setattr(job, "_daily_partition_passed", lambda *args: True)
     monkeypatch.setattr(job, "select_minute_candidate_scope", lambda *args: ())
     monkeypatch.setattr(
         job,
@@ -405,7 +590,8 @@ def test_feature_failure_is_returned_as_a_failed_data_stage(monkeypatch):
         raising=False,
     )
     runtime = SimpleNamespace(
-        tushare=object(), cninfo=object(), warehouse=object(), minute_fetcher=None
+        tushare=object(), cninfo=object(), warehouse=object(), minute_fetcher=None,
+        exchange_announcements=object(),
     )
 
     summaries = run_research_stage(

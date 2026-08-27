@@ -28,7 +28,8 @@ SHANGHAI = ZoneInfo("Asia/Shanghai")
 SELECTION_START = time(9, 5)
 READINESS_POLL_SECONDS = 30
 MARKET_OPEN = time(9, 30)
-SECTOR_RESEARCH_LIMITATION = "行业研究数据不可用，本次无行业候选"
+INDUSTRY_RESEARCH_LIMITATION = "行业原始日数据不可用，本次不使用行业证据"
+THEME_RESEARCH_LIMITATION = "主题原始日数据不可用，本次不使用主题证据"
 STOCK_CONTEXT_LIMITATION = "个股交易背景不可用，不使用其独有字段"
 PREOPEN_REFRESH_LIMITATION = (
     "行动日前公告补采未完成，不形成 fresh_event_pending"
@@ -436,6 +437,24 @@ class TraceCandidateV4(BaseModel):
     research_thesis: ResearchThesisV4
 
 
+class RuntimeCapabilitiesV4(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    market_research_available: bool
+    price_research_available: bool
+    industry_research_available: bool
+    theme_research_available: bool
+    stock_context_available: bool
+    announcement_status: Literal[
+        "cninfo_complete",
+        "exchange_complete",
+        "exchange_partial",
+        "announcement_unavailable",
+    ]
+    announcement_exchanges: list[Literal["SSE", "SZSE"]]
+    limitations: list[str]
+
+
 class DailyResearchTraceV4(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
@@ -446,6 +465,7 @@ class DailyResearchTraceV4(BaseModel):
     market_search_context: str = Field(min_length=1)
     market_propagation_mode: MarketPropagationModeV4
     market_risk_overlays: list[MarketRiskOverlayV4]
+    runtime_capabilities: RuntimeCapabilitiesV4 | None = None
     candidate_ledger: list[TraceCandidateV4]
     decision_trace: list[TraceDecision]
     research_result: ResearchResult
@@ -464,9 +484,15 @@ class RunSummary:
     started_at: str
     run_mode: Literal["normal", "rerun"] = "normal"
     research_mode: Literal["full", "limited", ""] = ""
+    market_research_available: bool = False
+    price_research_available: bool = False
+    industry_research_available: bool = False
+    theme_research_available: bool = False
     sector_research_available: bool = False
     stock_context_available: bool = False
     preopen_event_refresh_complete: bool = False
+    announcement_status: str = ""
+    announcement_exchanges: tuple[str, ...] = ()
     limitations: tuple[str, ...] = ()
     formation_date: str = ""
     action_date: str = ""
@@ -499,9 +525,15 @@ class _SelectionContext:
     started_at: str
     run_mode: Literal["normal", "rerun"]
     research_mode: Literal["full", "limited"]
+    market_research_available: bool
+    price_research_available: bool
+    industry_research_available: bool
+    theme_research_available: bool
     sector_research_available: bool
     stock_context_available: bool
     preopen_event_refresh_complete: bool
+    announcement_status: str
+    announcement_exchanges: tuple[str, ...]
     limitations: tuple[str, ...]
     formation_date: date
     action_date: date
@@ -803,10 +835,10 @@ def record_daily_trace(
         _validate_trace_research_availability(
             validated,
             sector_research_available=context.sector_research_available,
-            preopen_event_refresh_complete=(
-                context.preopen_event_refresh_complete
-            ),
+            announcement_status=context.announcement_status,
+            announcement_exchanges=context.announcement_exchanges,
         )
+        _validate_trace_runtime_capabilities(validated, context)
     except Exception as error:
         return _context_summary(
             context,
@@ -850,7 +882,8 @@ def _validate_trace_research_availability(
     trace: DailyResearchTrace | DailyResearchTraceV4,
     *,
     sector_research_available: bool,
-    preopen_event_refresh_complete: bool,
+    announcement_status: str,
+    announcement_exchanges: tuple[str, ...],
 ) -> None:
     if not isinstance(trace, DailyResearchTraceV4):
         return
@@ -867,11 +900,68 @@ def _validate_trace_research_availability(
         )
         if uses_sector_basis:
             raise ValueError("sector_research_unavailable")
-    if not preopen_event_refresh_complete and any(
-        candidate.research_thesis.engine_type == "fresh_event_pending"
-        for candidate in trace.candidate_ledger
-    ):
+    full_announcement_coverage = bool(
+        announcement_status == "cninfo_complete"
+        or (
+            announcement_status == "exchange_complete"
+            and announcement_exchanges == ("SSE", "SZSE")
+        )
+    )
+    for candidate in trace.candidate_ledger:
+        if candidate.research_thesis.engine_type != "fresh_event_pending":
+            continue
+        exchange = "SZSE" if candidate.ts_code.endswith(".SZ") else "SSE"
+        if full_announcement_coverage:
+            continue
+        if (
+            announcement_status == "exchange_partial"
+            and exchange in announcement_exchanges
+        ):
+            continue
         raise ValueError("preopen_event_refresh_incomplete")
+
+
+def _validate_trace_runtime_capabilities(
+    trace: DailyResearchTrace | DailyResearchTraceV4,
+    context: _SelectionContext,
+) -> None:
+    if not isinstance(trace, DailyResearchTraceV4):
+        return
+    declared = trace.runtime_capabilities
+    if declared is None:
+        raise ValueError("runtime_capabilities_missing")
+    actual_flags = {
+        "market_research_available": context.market_research_available,
+        "price_research_available": context.price_research_available,
+        "industry_research_available": context.industry_research_available,
+        "theme_research_available": context.theme_research_available,
+        "stock_context_available": context.stock_context_available,
+    }
+    for field, actual in actual_flags.items():
+        if bool(getattr(declared, field)) and not actual:
+            raise ValueError("runtime_capabilities_overclaim")
+    declared_exchanges = set(declared.announcement_exchanges)
+    if len(declared_exchanges) != len(declared.announcement_exchanges):
+        raise ValueError("runtime_capabilities_invalid")
+    if not declared_exchanges <= set(context.announcement_exchanges):
+        raise ValueError("runtime_capabilities_overclaim")
+    if declared.announcement_status in {
+        "cninfo_complete",
+        "exchange_complete",
+    } and declared.announcement_status != context.announcement_status:
+        raise ValueError("runtime_capabilities_overclaim")
+    if (
+        declared.announcement_status == "exchange_partial"
+        and not declared_exchanges
+    ):
+        raise ValueError("runtime_capabilities_invalid")
+    if (
+        declared.announcement_status == "announcement_unavailable"
+        and declared_exchanges
+    ):
+        raise ValueError("runtime_capabilities_invalid")
+    if not set(context.limitations) <= set(declared.limitations):
+        raise ValueError("runtime_capabilities_overclaim")
 
 
 def _validate_trace_v3(
@@ -1797,9 +1887,15 @@ def _prepare_selection_context(
         )
     (
         research_mode,
+        market_research_available,
+        price_research_available,
+        industry_research_available,
+        theme_research_available,
         sector_research_available,
         stock_context_available,
         preopen_event_refresh_complete,
+        announcement_status,
+        announcement_exchanges,
         limitations,
         readiness_error,
     ) = _wait_until_data_ready(
@@ -1817,11 +1913,17 @@ def _prepare_selection_context(
             formation_date=formation_date.isoformat(),
             action_date=action_date.isoformat(),
             selection_as_of=selection_as_of.isoformat(timespec="seconds"),
+            market_research_available=market_research_available,
+            price_research_available=price_research_available,
+            industry_research_available=industry_research_available,
+            theme_research_available=theme_research_available,
             sector_research_available=sector_research_available,
             stock_context_available=stock_context_available,
             preopen_event_refresh_complete=(
                 preopen_event_refresh_complete
             ),
+            announcement_status=announcement_status,
+            announcement_exchanges=announcement_exchanges,
             limitations=limitations,
             error=readiness_error,
             **summary_base,
@@ -1840,9 +1942,15 @@ def _prepare_selection_context(
         started_at=summary_base["started_at"],
         run_mode=run_mode,
         research_mode=research_mode,
+        market_research_available=market_research_available,
+        price_research_available=price_research_available,
+        industry_research_available=industry_research_available,
+        theme_research_available=theme_research_available,
         sector_research_available=sector_research_available,
         stock_context_available=stock_context_available,
         preopen_event_refresh_complete=preopen_event_refresh_complete,
+        announcement_status=announcement_status,
+        announcement_exchanges=announcement_exchanges,
         limitations=limitations,
         formation_date=formation_date,
         action_date=action_date,
@@ -1867,9 +1975,15 @@ def _context_summary(
         started_at=context.started_at,
         run_mode=context.run_mode,
         research_mode=context.research_mode,
+        market_research_available=context.market_research_available,
+        price_research_available=context.price_research_available,
+        industry_research_available=context.industry_research_available,
+        theme_research_available=context.theme_research_available,
         sector_research_available=context.sector_research_available,
         stock_context_available=context.stock_context_available,
         preopen_event_refresh_complete=context.preopen_event_refresh_complete,
+        announcement_status=context.announcement_status,
+        announcement_exchanges=context.announcement_exchanges,
         limitations=context.limitations,
         formation_date=context.formation_date.isoformat(),
         action_date=context.action_date.isoformat(),
@@ -1936,6 +2050,12 @@ def _wait_until_data_ready(
     bool,
     bool,
     bool,
+    bool,
+    bool,
+    bool,
+    bool,
+    str,
+    tuple[str, ...],
     tuple[str, ...],
     str,
 ]:
@@ -1955,38 +2075,114 @@ def _wait_until_data_ready(
         price_ready = feature_ready.get("price_analysis_context", False)
         core_ready = bool(
             report_date_matches
-            and report.get("complete_core_date")
             and market_ready
             and price_ready
         )
-        sector_ready = feature_ready.get("sector_hotspot", False)
-        stock_ready = feature_ready.get("stock_trading_context", False)
-        stage_status = _next_morning_stage_status(report, formation_date)
-        preopen_ready = stage_status in {"succeeded", "limited"}
-        limitations = tuple(
-            text
-            for available, text in (
-                (sector_ready, SECTOR_RESEARCH_LIMITATION),
-                (stock_ready, STOCK_CONTEXT_LIMITATION),
-                (preopen_ready, PREOPEN_REFRESH_LIMITATION),
+        dataset_ready = {
+            str(item.get("dataset_id", "")): bool(
+                item.get(
+                    "data_date_partition_ready",
+                    item.get("last_partition") == formation_date.isoformat()
+                    and item.get("contract_valid")
+                    and item.get("physical_valid"),
+                )
             )
-            if not available
+            for item in report.get("datasets", [])
+            if isinstance(item, dict)
+        }
+        sector_feature_ready = feature_ready.get("sector_hotspot", False)
+        industry_ready = bool(
+            sector_feature_ready and dataset_ready.get("industry_daily", False)
         )
+        theme_ready = bool(
+            sector_feature_ready and dataset_ready.get("theme_daily", False)
+        )
+        sector_ready = industry_ready or theme_ready
+        stock_ready = feature_ready.get("stock_trading_context", False)
+        stage = _next_morning_stage(report, formation_date)
+        stage_status = str(stage.get("status", ""))
+        raw_capabilities = stage.get("capabilities", {})
+        capabilities = (
+            raw_capabilities if isinstance(raw_capabilities, dict) else {}
+        )
+        announcement_status = str(
+            capabilities.get("announcement_status", "announcement_unavailable")
+        )
+        raw_exchanges = capabilities.get("announcement_exchanges", [])
+        announcement_exchanges = tuple(
+            source
+            for source in ("SSE", "SZSE")
+            if source in {str(item).upper() for item in raw_exchanges}
+        ) if isinstance(raw_exchanges, list) else ()
+        preopen_ready = bool(
+            announcement_status == "cninfo_complete"
+            or (
+                announcement_status == "exchange_complete"
+                and announcement_exchanges == ("SSE", "SZSE")
+            )
+        )
+        limitation_items: list[str] = []
+        if not industry_ready:
+            limitation_items.append(INDUSTRY_RESEARCH_LIMITATION)
+        if not theme_ready:
+            limitation_items.append(THEME_RESEARCH_LIMITATION)
+        if not stock_ready:
+            limitation_items.append(STOCK_CONTEXT_LIMITATION)
+        if announcement_status == "exchange_partial":
+            covered = "、".join(announcement_exchanges) or "无交易所"
+            limitation_items.append(
+                f"行动日前公告仅完整覆盖{covered}，未覆盖交易所不得形成 fresh_event_pending"
+            )
+        elif not preopen_ready:
+            limitation_items.append(PREOPEN_REFRESH_LIMITATION)
+        if stage_status == "failed":
+            limitation_items.append("次晨任务存在失败步骤，按已确认可用通道受限研究")
+        limitations = tuple(dict.fromkeys(limitation_items))
 
         if core_ready and not limitations:
-            return "full", True, True, True, (), ""
+            return (
+                "full",
+                True,
+                True,
+                True,
+                True,
+                True,
+                True,
+                True,
+                announcement_status,
+                announcement_exchanges,
+                (),
+                "",
+            )
         if stage_status == "failed":
             if core_ready:
                 return (
                     "limited",
+                    market_ready,
+                    price_ready,
+                    industry_ready,
+                    theme_ready,
                     sector_ready,
                     stock_ready,
-                    False,
+                    preopen_ready,
+                    announcement_status,
+                    announcement_exchanges,
                     limitations,
                     "",
                 )
-            return "", sector_ready, stock_ready, False, limitations, (
-                "next_morning_stage_failed"
+            return (
+                "",
+                market_ready,
+                price_ready,
+                industry_ready,
+                theme_ready,
+                sector_ready,
+                stock_ready,
+                preopen_ready,
+                announcement_status,
+                announcement_exchanges,
+                limitations,
+                "next_morning_stage_failed",
             )
 
         can_wait = run_mode == "normal" and checked_at < market_open
@@ -2000,18 +2196,30 @@ def _wait_until_data_ready(
         if core_ready and (not can_wait or not optional_stage_may_finish):
             return (
                 "limited",
+                market_ready,
+                price_ready,
+                industry_ready,
+                theme_ready,
                 sector_ready,
                 stock_ready,
                 preopen_ready,
+                announcement_status,
+                announcement_exchanges,
                 limitations,
                 "",
             )
         if not can_wait:
             return (
                 "",
+                market_ready,
+                price_ready,
+                industry_ready,
+                theme_ready,
                 sector_ready,
                 stock_ready,
                 preopen_ready,
+                announcement_status,
+                announcement_exchanges,
                 limitations,
                 "next_morning_data_not_ready_by_market_open",
             )
@@ -2019,10 +2227,10 @@ def _wait_until_data_ready(
         sleep(min(float(READINESS_POLL_SECONDS), remaining))
 
 
-def _next_morning_stage_status(
+def _next_morning_stage(
     report: dict[str, Any],
     formation_date: date,
-) -> str:
+) -> dict[str, Any]:
     rows = [
         row
         for row in report.get("latest_stage_runs", [])
@@ -2030,12 +2238,11 @@ def _next_morning_stage_status(
         and row.get("data_date") == formation_date.isoformat()
     ]
     if not rows:
-        return ""
-    latest = max(
+        return {}
+    return max(
         rows,
         key=lambda row: str(row.get("started_at", "")),
     )
-    return str(latest.get("status", ""))
 
 
 def _validate_result(

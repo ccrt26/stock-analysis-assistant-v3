@@ -19,6 +19,9 @@ from stock_analyzer.config import AppConfig
 from stock_analyzer.data.classification_backfill import ClassificationBackfillService
 from stock_analyzer.data.cninfo_research_client import CninfoResearchClient
 from stock_analyzer.data.event_backfill import EventBackfillService
+from stock_analyzer.data.exchange_announcement_client import (
+    ExchangeAnnouncementClient,
+)
 from stock_analyzer.data.fundamental_backfill import FundamentalBackfillService
 from stock_analyzer.data.research_backfill import BackfillSummary, ResearchBackfillService
 from stock_analyzer.data.research_contracts import ResearchDatasetId
@@ -56,6 +59,7 @@ class ResearchDataRuntime:
     cninfo: CninfoResearchClient
     warehouse: ResearchWarehouse
     http_client: httpx.Client
+    exchange_announcements: ExchangeAnnouncementClient | None = None
 
     def minute_fetcher(self, **kwargs: Any) -> pd.DataFrame:
         frame = self.pro.stk_mins(
@@ -102,6 +106,7 @@ def build_research_data_runtime(config: AppConfig) -> ResearchDataRuntime:
         ),
         warehouse=ResearchWarehouse(config.local_warehouse_dir),
         http_client=http_client,
+        exchange_announcements=ExchangeAnnouncementClient(http_client),
     )
 
 
@@ -145,7 +150,10 @@ def run_research_backfill(
     if scope in {"all", "events"}:
         summaries.append(
             EventBackfillService(
-                runtime.tushare, runtime.cninfo, runtime.warehouse
+                runtime.tushare,
+                runtime.cninfo,
+                runtime.warehouse,
+                exchange_announcements=runtime.exchange_announcements,
             ).backfill(
                 start=start,
                 through=through,
@@ -222,7 +230,7 @@ def run_research_stage(
                 stage=stage,
                 data_date=data_date,
             )
-        except BaseException as exc:
+        except Exception as exc:
             _finish_failed_stage_run(warehouse, run_id, exc)
             raise
         _finish_stage_run(warehouse, run_id, summaries)
@@ -262,71 +270,180 @@ def _run_research_stage_impl(
         runtime.warehouse, data_date - timedelta(days=10), data_date
     )
     if stage == "evening":
-        event_summary = EventBackfillService(
-            runtime.tushare, runtime.cninfo, runtime.warehouse
-        ).backfill(
-            start=data_date,
-            through=data_date,
-            trading_dates=(data_date,) if data_date in trading_dates else (),
-            resume=False,
-        )
-        classification_summary = ClassificationBackfillService(
-            runtime.tushare, runtime.warehouse
-        ).refresh_daily(data_date)
-        announcements = runtime.warehouse.read_current(
-            ResearchDatasetId.ANNOUNCEMENT
-        )
-        affected_codes = select_fundamental_refresh_codes(
-            announcements,
-            data_date,
-        )
-        summaries: list[BackfillSummary] = [event_summary, classification_summary]
-        if affected_codes:
+        summaries: list[BackfillSummary] = []
+        try:
             summaries.append(
-                FundamentalBackfillService(
-                    runtime.tushare, runtime.warehouse
+                EventBackfillService(
+                    runtime.tushare,
+                    runtime.cninfo,
+                    runtime.warehouse,
+                    exchange_announcements=getattr(
+                        runtime, "exchange_announcements", None
+                    ),
                 ).backfill(
-                    start=data_date - timedelta(days=5 * 366),
+                    start=data_date,
                     through=data_date,
-                    codes=affected_codes,
+                    trading_dates=(
+                        (data_date,) if data_date in trading_dates else ()
+                    ),
                     resume=False,
+                    fallback_to_exchanges=True,
                 )
+            )
+        except Exception as exc:
+            summaries.append(_failed_step_summary("events", data_date, exc))
+
+        classifications = ClassificationBackfillService(
+            runtime.tushare, runtime.warehouse
+        )
+        for dataset, refresh_memberships in (
+            (ResearchDatasetId.INDUSTRY_DAILY, False),
+            (ResearchDatasetId.THEME_DAILY, True),
+        ):
+            try:
+                summaries.append(
+                    classifications.refresh_daily(
+                        data_date,
+                        datasets=(dataset,),
+                        refresh_memberships=refresh_memberships,
+                    )
+                )
+            except Exception as exc:
+                summaries.append(
+                    _failed_step_summary(dataset.value, data_date, exc)
+                )
+
+        try:
+            announcements = runtime.warehouse.read_current(
+                ResearchDatasetId.ANNOUNCEMENT
+            )
+            affected_codes = select_fundamental_refresh_codes(
+                announcements,
+                data_date,
+            )
+            if affected_codes:
+                summaries.append(
+                    FundamentalBackfillService(
+                        runtime.tushare, runtime.warehouse
+                    ).backfill(
+                        start=data_date - timedelta(days=5 * 366),
+                        through=data_date,
+                        codes=affected_codes,
+                        resume=False,
+                    )
+                )
+        except Exception as exc:
+            summaries.append(
+                _failed_step_summary("fundamental-refresh", data_date, exc)
             )
         return _finalize_stage_with_research_features(
             runtime, summaries, data_date=data_date
         )
     if stage == "next-morning":
-        late_event_summary = EventBackfillService(
-            runtime.tushare, runtime.cninfo, runtime.warehouse
-        ).backfill(
-            start=data_date,
-            through=data_date,
-            announcement_through=_shanghai_today(),
-            trading_dates=(),
-            resume=False,
+        summaries = []
+        try:
+            summaries.append(
+                EventBackfillService(
+                    runtime.tushare,
+                    runtime.cninfo,
+                    runtime.warehouse,
+                    exchange_announcements=getattr(
+                        runtime, "exchange_announcements", None
+                    ),
+                ).backfill_announcements(
+                    start=data_date,
+                    through=_shanghai_today(),
+                    resume=False,
+                    fallback_to_exchanges=True,
+                )
+            )
+        except Exception as exc:
+            summaries.append(
+                _failed_step_summary("announcements", data_date, exc)
+            )
+
+        classifications = ClassificationBackfillService(
+            runtime.tushare, runtime.warehouse
         )
-        candidates = select_minute_candidate_scope(runtime.warehouse, data_date)
-        summary = TradingStructureBackfillService(
-            runtime.tushare,
-            runtime.warehouse,
-            minute_fetcher=runtime.minute_fetcher,
-        ).backfill(
-            trading_dates=(data_date,),
-            through=data_date,
-            candidate_codes=candidates,
-            index_codes=BROAD_INDEX_CODES,
-            resume=False,
-        )
+        for dataset in (
+            ResearchDatasetId.INDUSTRY_DAILY,
+            ResearchDatasetId.THEME_DAILY,
+        ):
+            try:
+                if _daily_partition_passed(
+                    runtime.warehouse, dataset, data_date
+                ):
+                    continue
+                summaries.append(
+                    classifications.refresh_daily(
+                        data_date,
+                        datasets=(dataset,),
+                        refresh_memberships=False,
+                    )
+                )
+            except Exception as exc:
+                summaries.append(
+                    _failed_step_summary(dataset.value, data_date, exc)
+                )
+
+        try:
+            candidates = select_minute_candidate_scope(
+                runtime.warehouse, data_date
+            )
+            summaries.append(
+                TradingStructureBackfillService(
+                    runtime.tushare,
+                    runtime.warehouse,
+                    minute_fetcher=runtime.minute_fetcher,
+                ).backfill(
+                    trading_dates=(data_date,),
+                    through=data_date,
+                    candidate_codes=candidates,
+                    index_codes=BROAD_INDEX_CODES,
+                    resume=False,
+                )
+            )
+        except Exception as exc:
+            summaries.append(
+                _failed_step_summary("trading-structure", data_date, exc)
+            )
         return _finalize_stage_with_research_features(
-            runtime,
-            [late_event_summary, summary],
-            data_date=data_date,
+            runtime, summaries, data_date=data_date
         )
     raise ValueError(f"unsupported research data stage: {stage}")
 
 
 def _shanghai_today() -> date:
     return datetime.now(SHANGHAI).date()
+
+
+def _daily_partition_passed(
+    warehouse: ResearchWarehouse,
+    dataset: ResearchDatasetId,
+    data_date: date,
+) -> bool:
+    manifest = warehouse.partition_manifest(dataset)
+    if manifest.empty:
+        return False
+    return bool(
+        (
+            (manifest["partition_value"].astype(str) == data_date.isoformat())
+            & (manifest["quality_status"].astype(str) == "passed")
+        ).any()
+    )
+
+
+def _failed_step_summary(
+    scope: str, data_date: date, exc: Exception
+) -> BackfillSummary:
+    message = " ".join(str(exc).split())[:500]
+    return BackfillSummary(
+        scope=scope,
+        start=data_date,
+        through=data_date,
+        failed=1,
+        issues=[f"{type(exc).__name__}: {message}"],
+    )
 
 
 def select_fundamental_refresh_codes(
@@ -429,7 +546,7 @@ def _finish_stage_run(
 def _finish_failed_stage_run(
     warehouse: ResearchWarehouse,
     run_id: str,
-    exc: BaseException,
+    exc: Exception,
 ) -> None:
     payload = {
         "error_type": type(exc).__name__,
