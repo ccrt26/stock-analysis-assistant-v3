@@ -1,139 +1,273 @@
-contract_type: B3_acceptance_handoff
+contract_type: B3_to_C_final_handoff
 research_id: ai-liquid-cooling-2026h2-001
-version: 2
-stage: B3_reassessment
+version: 3
+stage: B3_final_semantic_acceptance
+acceptance_status: accepted_with_gaps
+ready_for_C: true
+scope_for_C: narrowed
 as_of: '2026-08-27T22:32:34+08:00'
-generated_at: '2026-08-28T14:15:33+08:00'
-created_by: chatgpt
 source_branch: research/ai-liquid-cooling-2026h2
-source_b2_commit: 2704a7f9a45a71aa8fb9f164775f60c6c7ec86b2
-supersedes_local_b3_version:
-  version: 1
-  acceptance_status: accepted_with_gaps
-  status: withdrawn_not_valid_for_C
-  reason: new_read_only_diagnosis_proved_required_official_bodies_recoverable_via_official_paths
-acceptance_status: return_to_B
-ready_for_C: false
-correction_request:
-  required: true
-  round: 1
-  maximum_rounds: 1
-  correction_type: document_source_mapping_error
-  why_allowed:
-  - B3_allows_one_directed_correction_for_explicit_mapping_time_or_calculation_error
-  - SSE_metadata_to_official_pdf_path_mapping_was_incomplete
-  - BSE_announcement_session_and_category_api_path_mapping_was_incomplete
-  - the_failed_bodies_are_required_by_B1_and_material_to_ownership_or_relationship_gates
-  not_a_reason:
-  - not_general_gap_chasing
-  - not_an_attempt_to_zero_all_21_gaps
-  - not_a_request_to_recalculate_existing_numeric_baselines
-next_actor: codex
-next_step: B2_R1_directed_official_document_backfill
-do_not_start_C: true
-target_documents:
-- record_id: ENT036B
-  entity: 中科曙光
-  exchange: SSE
-  title: 中科曙光2025年年度报告
-- record_id: ENT036B
-  entity: 中科曙光
-  exchange: SSE
-  title: 中科曙光2026年半年度报告
-- record_id: ENT038
-  entity: 佳力图
-  exchange: SSE
-  title: 佳力图2025年年度报告
-- record_id: ENT038
-  entity: 佳力图
-  exchange: SSE
-  title: 佳力图2025年年报监管问询回复
-- record_id: ENT038
-  entity: 佳力图
-  exchange: SSE
-  title: 佳力图2026年半年度报告
-- record_id: ENT036A
-  entity: 曙光数创
-  exchange: BSE
-  title: 曙光数创2025年年度报告
-- record_id: ENT036A
-  entity: 曙光数创
-  exchange: BSE
-  title: 曙光数创2026年半年度报告
-- record_id: A2L007
-  entity: 荣亿精密
-  exchange: BSE
-  title: 荣亿精密2025年年度报告
-- record_id: A2L007
-  entity: 荣亿精密
-  exchange: BSE
-  title: 荣亿精密2026年半年度报告
-- record_id: A2L007
-  entity: 荣亿精密
-  exchange: BSE
-  title: 荣亿精密服务器液冷快速接头精密零部件项目公告
-approved_acquisition_routes:
-  SSE:
-    scope: five_known_documents_only
-    route: existing_official_metadata_then_official_big5_mirror_or_equivalent_official_resolved_pdf
-    verification:
-    - same_announcement_identity
-    - published_at_not_after_as_of
-    - http_success
-    - pdf_magic
-    - byte_count
-    - sha256
-  BSE:
-    scope: five_known_documents_only
-    route: official_announcement_entry_preserve_normal_session_cookie_then_use_official_category_query_path_and_official_pdf
-    verification:
-    - same_announcement_identity
-    - published_at_not_after_as_of
-    - http_success
-    - pdf_magic
-    - byte_count
-    - sha256
-compliance_limits:
-- official_domains_and_normal_site_session_only
-- no_captcha_or_javascript_challenge_cracking
-- no_proxy_rotation_or_login_bypass
-- no_high_frequency_or_full_market_crawler
-- no_src_or_tests_changes_in_this_correction
-point_in_time_rules:
-- document_title_identity_and_published_at_must_match_pre_cutoff_official_metadata
-- published_at_must_be_on_or_before_as_of
-- record_retrieved_at_and_observed_at_separately
-- do_not_use_post_cutoff_new_operating_documents_or_amendments
-- retrieval_after_as_of_is_audit_recovery_of_the_same_historical_document_not_a_new_operating_fact
-numeric_freeze:
-  existing_company_baseline: unchanged
-  existing_valuation_and_price: unchanged
-  existing_returns_and_derived_metrics: unchanged
-  direct_document_facts: may_be_added_only_if_exact_same_scope_period_and_page_cited
-  conflict_rule: record_conflict_and_stop_related_field_instead_of_silent_numeric_overwrite
-b2_outputs_to_update:
-- 05_B2_本地核查.json
-- 05_B2_本地核查摘要.md
-- 05_B2_数据缺口.json
-- 00_运行状态.yaml
-- 00_下一步操作.md
-b3_files_to_save_before_backfill:
-- 06_B_验收报告.md
-- 06_B_交给C阶段.yaml
-gap_policy:
-  target_query_failed_gap_ids:
+source_commit: 1f49d7b11494666e686d9ebac307400b4cc969c9
+generated_by: chatgpt
+generated_on: '2026-08-28'
+supersedes:
+  previous_B3_status: return_to_B
+  reason: B2-R1已恢复十份正式公告正文并关闭四项query_failed缺口
+  previous_files_preserved_read_only: true
+correction:
+  correction_id: B2-R1
+  type: document_source_mapping_error
+  round: 1/1
+  status: accepted_complete
+  second_return_to_B_for_ordinary_gaps: false
+B2_R1_acceptance:
+  records_expected: 9
+  records_returned: 9
+  target_documents_expected: 10
+  target_documents_complete: 10
+  formal_document_bodies_complete: 17
+  formal_document_bodies_query_failed: 0
+  point_in_time_rule: available_at <= as_of
+  numeric_freeze: passed_company_baseline_valuation_price_returns_and_derived_metrics
+  ownership_guard: passed
+  pdf_identity_magic_sha256: passed_10_of_10
+  git_scope: run_directory_only
+gap_summary:
+  remaining_gap_count: 17
+  closed_gap_ids:
   - B2G006
   - B2G007
   - B2G011
   - B2G018
-  other_gap_ids_default: preserve
-  other_gap_may_change_only_if: one_of_the_ten_official_bodies_directly_resolves_exact_same_period_scope_and_field
-  no_inference: true
-after_correction:
-  actor: chatgpt
-  step: B3_final_semantic_acceptance
-  allowed_statuses:
-  - accepted
-  - accepted_with_gaps
-  - blocked
-  second_return_to_B_for_ordinary_gaps: false
+  remaining_categories:
+    working_capital_intensity_partial:
+      count: 8
+      gap_ids:
+      - B2G001
+      - B2G003
+      - B2G005
+      - B2G008
+      - B2G010
+      - B2G013
+      - B2G015
+      - B2G017
+      C_rule: 可使用已计算部分；缺失字段不得按0，完整营运资金强度保持partial
+    direct_theme_financial_split_unknown:
+      count: 7
+      gap_ids:
+      - B2G002
+      - B2G004
+      - B2G009
+      - B2G012
+      - B2G014
+      - B2G016
+      - B2G019
+      C_rule: 除曙光数创直接产品分类外，不得用公司总数或混合分项代替液冷主题值
+    industry_relative_return_unsupported:
+      count: 1
+      gap_ids:
+      - B2G020
+      C_rule: 只允许使用相对沪深300结果，不得声称行业相对收益
+    valuation_long_history_partial:
+      count: 1
+      gap_ids:
+      - B2G021
+      C_rule: 估值分位只称为实际260交易日窗口，不得声称5年或10年分位
+C_scope_counts:
+  direct_theme_quantitative: 1
+  core_commercial_company_context: 4
+  restricted_relation_observation: 2
+  ownership_context_only: 1
+  capability_competition_background_only: 1
+  total_records: 9
+entities:
+- record_id: ENT034
+  entity_name: 英维克
+  ts_code: 002837.SZ
+  relationship_status: passed_partial
+  C_route: core_commercial_company_context
+  allowed_in_C:
+  - 正式产品、平台验证和部分规模应用关系
+  - 公司级财务、营运资金、估值和价格背景
+  - 订单、复购和主题利润证据缺口分析
+  must_remain_unknown:
+  - 液冷专属客户与订单金额
+  - 复购次数
+  - 液冷主题收入、毛利、净利润和现金贡献
+  - 液冷业务良率、有效产能和回款
+  forbidden_inferences:
+  - 不得把公司总收入或综合毛利率当作液冷主题值
+  - 不得把公司级利润变化自动归因于液冷
+  strongest_counterevidence: 2026H1公司收入同比增长17.24%，归母净利润同比下降14.32%，综合毛利率同比下降1.21个百分点；均为公司级事实。
+- record_id: ENT035
+  entity_name: 申菱环境
+  ts_code: 301018.SZ
+  relationship_status: passed_partial
+  C_route: core_commercial_company_context
+  allowed_in_C:
+  - 液冷产品矩阵和数据服务业务订单增长关系
+  - 公司级财务、工程营运资金和市场背景
+  must_remain_unknown:
+  - 数据服务订单中的液冷专属金额
+  - 液冷项目验收与复购
+  - 液冷主题收入、项目毛利、净利润和现金
+  - 传统温控、设施冷源、工程服务与液冷的精确拆分
+  forbidden_inferences:
+  - 不得把数据服务板块订单全部写成液冷订单
+  - 不得用公司总收入替代液冷设施侧收入
+  strongest_counterevidence: 2026Q1公司收入同比下降1.80%、归母净利润同比下降47.71%、经营现金流-1.93亿元；应收和存货增速明显高于收入。
+- record_id: ENT036A
+  entity_name: 曙光数创
+  ts_code: 920808.BJ
+  relationship_status: passed_direct_product_revenue
+  C_route: direct_theme_quantitative
+  direct_theme_baseline:
+    period: 2026H1
+    product_scope:
+    - 冷板液冷
+    - 浸没液冷
+    revenue_cny_approx: 219000000
+    revenue_share_of_company: 0.891
+    combined_gross_margin: 0.0895
+    share_of_company_total_gross_profit: 0.6683
+    exclusions:
+    - 模块化数据中心
+    - 系统集成
+    - 未披露的项目分配
+  allowed_in_C:
+  - 直接披露的冷板/浸没产品收入、成本和毛利口径
+  - 公司级财务、存货、现金、估值和价格质量背景
+  must_remain_unknown:
+  - 客户、订单金额和复购客户链
+  - 逐项目交付与验收
+  - 冷板与浸没各自净利润和现金贡献
+  - 模块化数据中心及系统集成中的液冷准确份额
+  forbidden_inferences:
+  - 不得把模块化数据中心或系统集成自动分配为液冷
+  - 不得把公司全部现金流写成液冷现金
+  - 不得从收入占比推断订单重复性
+  strongest_counterevidence: 2026H1综合毛利率同比下降7.56个百分点，2025年度与2026H1连续出现存货增速明显高于收入增速，2026H1经营现金流-2.42亿元。
+- record_id: ENT036B
+  entity_name: 中科曙光
+  ts_code: 603019.SH
+  relationship_status: passed_ownership_context_only
+  C_route: ownership_context_only
+  allowed_in_C:
+  - 曙光数创的重要非全资子公司身份
+  - 控制、合并范围、少数股东权益和利润归属边界
+  - 年报少数股东持股37.9302%、半年报37.93%的正式披露
+  must_remain_unknown:
+  - 曙光数创液冷经营结果对中科曙光归母利润的精确增量影响，除非正式报表直接披露
+  forbidden_inferences:
+  - 不得继承曙光数创产品、客户、订单、收入、利润或价格
+  - 不得按持股比例简单乘收入或归母利润
+  - 不得建立中科曙光液冷经营情景或主题估值
+  strongest_counterevidence: 母子公司合并与少数股东权益使简单持股比例乘算失真。
+- record_id: ENT037
+  entity_name: 飞荣达
+  ts_code: 300602.SZ
+  relationship_status: passed_partial
+  C_route: core_commercial_company_context
+  allowed_in_C:
+  - 服务器/数据中心液冷产品、供应合作和部分产品批量交付
+  - 公司级财务、现金、应收、存货、估值和价格背景
+  must_remain_unknown:
+  - 液冷订单金额、客户名称和复购次数
+  - 液冷主题收入、产品线毛利、净利润和现金
+  - AI服务器液冷与储能、汽车、消费电子、通信的准确拆分
+  forbidden_inferences:
+  - 不得把公司整体增长写成AI数据中心液冷增长
+  - 不得把储能或汽车液冷并入目标主题
+  strongest_counterevidence: 2026Q1公司收入和归母利润增长，但经营现金流-0.24亿元；公司业务跨多个场景。
+- record_id: ENT038
+  entity_name: 佳力图
+  ts_code: 603912.SH
+  relationship_status: passed_partial_facility_liquid_cooling_relation
+  C_route: restricted_facility_relation_observation
+  allowed_in_C:
+  - 全栈液冷方案、CDU认证、2MW级CDU批量交付和项目案例
+  - 设施侧水环、最终排热、风液协同和数据中心改造关系
+  - 公司级工程垫资、验收、应收和现金风险背景
+  must_remain_unknown:
+  - 液冷专属客户和订单金额
+  - 液冷项目验收与复购
+  - 液冷设施侧收入、项目毛利、净利润和现金贡献
+  forbidden_inferences:
+  - 不得按服务器内冷板/快接部件模板分析
+  - 不得把传统风冷、风液协同、IDC运营或普通温控全部归为液冷
+  strongest_counterevidence: 2026Q1公司亏损扩大、综合毛利率同比下降7.91个百分点、经营现金流-0.40亿元；均为公司级事实。
+- record_id: ENT039
+  entity_name: 高澜股份
+  ts_code: 300499.SZ
+  relationship_status: passed_project_relation
+  C_route: core_commercial_company_context
+  allowed_in_C:
+  - 国内AIDC项目交付和海外数据中心EPC项目关系
+  - 公司级财务、应收、存货、现金、估值和价格背景
+  must_remain_unknown:
+  - 高功率密度分项中纯AI数据中心液冷收入和毛利
+  - 液冷专属订单金额、项目验收、净利润和现金贡献
+  forbidden_inferences:
+  - 不得将混有储能等场景的高功率密度分项全部归为AI数据中心液冷
+  strongest_counterevidence: 2026Q1经营现金流-1.12亿元，应收和存货增速明显高于收入；高功率密度分项混有其他场景。
+- record_id: A2L007
+  entity_name: 荣亿精密
+  ts_code: 920223.BJ
+  relationship_status: passed_direct_mass_production_relationship
+  C_route: restricted_new_entrant_observation
+  allowed_in_C:
+  - 服务器液冷快接相关零部件2025Q2批量生产
+  - 核心客户富世达、设备到位和产能爬坡
+  - 快速接头新增供给、二供和竞争加剧样本
+  - 公司级亏损、现金和扩产压力背景
+  must_remain_unknown:
+  - 液冷订单金额、复购次数和客户集中度
+  - 液冷收入、毛利、净利润和现金
+  - 良率、认证通过率、有效产能和利用率
+  forbidden_inferences:
+  - 3C混合收入不得作为液冷收入
+  - 1亿元项目投资不得直接等同于投产、有效产能、订单或利润
+  - 量产关系不等于高份额核心供应商
+  strongest_counterevidence: 2026H1公司仍亏损约0.11亿元、经营现金流-0.36亿元、综合毛利率同比下降3.68个百分点；液冷规模和利润重要性未拆。
+- record_id: ENT040
+  entity_name: 同飞股份
+  ts_code: 300990.SZ
+  relationship_status: not_passed_hard_relation_gate
+  C_route: capability_competition_background_only
+  allowed_in_C:
+  - CDU、Manifold、浸没箱体等产品能力
+  - 潜在供给、竞争者和未来关系升级背景
+  must_remain_unknown:
+  - 客户、订单、交付、重复采购
+  - 液冷主题收入、利润和现金
+  forbidden_inferences:
+  - 不得作为已确认供应商
+  - 不得建立主题收入、利润、现金或估值情景
+  - 不得用公司级财务和股价补救关系硬门失败
+  upgrade_conditions:
+  - 正式披露数据中心液冷客户
+  - 正式订单或交付
+  - 重复采购或独立业务分项
+  strongest_counterevidence: 正式年报只证明产品能力，未见客户、订单、交付或独立业务分项。
+global_C_rules:
+- 不得修改Codex原始数值
+- 缺失、unknown、partial、unsupported和无记录不得写成0
+- 公司总收入、综合毛利率和公司现金流不得替代液冷主题值
+- 混合业务分项不得强行拆成液冷
+- 每个保守/基准/乐观假设必须绑定来源、时间和适用范围
+- 没有直接主题数据时只能写条件和待验证变量，不得虚构销量、份额、毛利或现金
+- 估值分位只称为实际260交易日窗口
+- 相对收益只称为相对沪深300
+- 中科曙光只作所有权与归属背景
+- 同飞股份不进入液冷经营或估值情景
+- 不得输出买入、卖出、目标价、仓位或收益承诺
+user_approval:
+  required_before_C1: true
+  approval_text: 同意进入C阶段。
+  modification_option: 用户可以用一句话提出范围修改
+next_actor_after_approval: chatgpt
+next_step_after_approval: C1_integrated_research_draft_and_calculation_request
+expected_C1_outputs:
+- 07_C1_综合研究草案.docx
+- 07_C1_计算请求.yaml
+- 00_下一步操作.md

@@ -1,0 +1,3577 @@
+{
+  "contract_type": "C2_deterministic_calculation_result",
+  "research_id": "ai-liquid-cooling-2026h2-001",
+  "version": 1,
+  "stage": "C2_deterministic_calculation",
+  "status": "complete",
+  "as_of": "2026-08-27T22:32:34+08:00",
+  "generated_at": "2026-08-28T17:37:28+08:00",
+  "source_branch": "research/ai-liquid-cooling-2026h2",
+  "source_commit": "1f49d7b11494666e686d9ebac307400b4cc969c9",
+  "user_approval": "同意按本草案计算。",
+  "formula_version": "C1_contract_v1_C2_deterministic_v1",
+  "input_integrity": {
+    "05_B2_本地核查.json_sha256": "6f6989413883c95a8242d89308401e5562411029a27b1565e5202bca7702ecf3",
+    "07_C1_计算请求.yaml_sha256": "f4254fa418049145315b7362a9d3e9f25b0e13ccf72bd0e3af8de9784b5825c0",
+    "local_fact_manifest_hash": "2fcef04e5ff70c7096c626872c0b1bb8c3d76794495f470b2a0066d05baad306",
+    "daily_basic_partitions": 260,
+    "daily_basic_window": [
+      "2025-08-04",
+      "2026-08-27"
+    ],
+    "no_external_new_materials": true,
+    "b2_numeric_freeze": "passed_file_hash_and_current_snapshot_cross_checks"
+  },
+  "record_conservation": {
+    "expected": 9,
+    "returned": 9,
+    "record_ids": [
+      "ENT034",
+      "ENT035",
+      "ENT036A",
+      "ENT036B",
+      "ENT037",
+      "ENT038",
+      "ENT039",
+      "A2L007",
+      "ENT040"
+    ],
+    "passed": true
+  },
+  "scenario_calculability_counts": {
+    "calculable": 1,
+    "condition_only": 20,
+    "not_applicable": 6
+  },
+  "reverse_operating_requirement_counts": {
+    "eligible_records": 7,
+    "pe_calculable": 3,
+    "pe_calculable_partial_valid_samples": 2,
+    "pe_not_calculable": 2,
+    "ps_calculable": 7,
+    "ps_not_calculable": 0,
+    "not_applicable_records": 2
+  },
+  "point_in_time": {
+    "rule": "available_at <= as_of",
+    "status": "passed",
+    "daily_basic_rows_checked": 2340,
+    "financial_and_theme_refs_checked": 115
+  },
+  "entities": [
+    {
+      "record_id": "ENT034",
+      "entity_name": "英维克",
+      "ts_code": "002837.SZ",
+      "relationship_status": "passed_partial",
+      "C_route": "core_commercial_company_context",
+      "calculation_permissions": {
+        "company_quality_background": true,
+        "direct_theme_actual": false,
+        "theme_forward_numeric_scenarios": false,
+        "reverse_valuation_own_260d": true,
+        "ownership_only": false,
+        "competition_background_only": false
+      },
+      "company_quality": {
+        "scope": "company_level_not_theme",
+        "latest_comparable": {
+          "period": "2026-06-30",
+          "scope": "company_level_not_theme",
+          "values_cny": {
+            "revenue": 3016714649.18,
+            "prior_revenue": 2573139460.9,
+            "parent_net_profit": 184767516.83,
+            "prior_parent_net_profit": 215640426.56,
+            "deducted_parent_net_profit": 175488612.89,
+            "cfo": 61871999.03,
+            "cash_received_from_sales": 2977483077.38,
+            "capex_cash": 218409614.46,
+            "accounts_receivable": 3024421650.79,
+            "notes_receivable": 17489122.01,
+            "contract_assets": 226922237.78,
+            "inventory": 1552295823.53,
+            "contract_liabilities": 282007192.51,
+            "advance_receipts": null,
+            "construction_in_progress": 135112195.49,
+            "fixed_assets": 1053918559.45,
+            "cash": 1078144870.43,
+            "ttm_revenue": 6511334279.83
+          },
+          "derived": {
+            "revenue_yoy": 0.17238677,
+            "parent_net_profit_yoy": -0.14316847,
+            "parent_net_profit_absolute_change_cny": -30872909.72999999,
+            "statement_gross_margin": 0.2493394,
+            "prior_statement_gross_margin": 0.26145735,
+            "gross_margin_change_pp": -1.211795,
+            "indicator_grossprofit_margin_pct": 24.9339,
+            "deducted_profit_share": 0.94978065,
+            "cfo_to_parent_net_profit": 0.33486405,
+            "cash_collection_ratio": 0.98699527,
+            "accounts_receivable_growth_minus_revenue_growth_pp": -2.168331,
+            "inventory_growth_minus_revenue_growth_pp": 8.036906,
+            "working_capital_intensity": null,
+            "working_capital_calculable_part_cny": 4521632519.59,
+            "working_capital_missing_fields": [
+              "advance_receipts"
+            ],
+            "one_off_profit_share": 0.05021935
+          },
+          "source_refs": [
+            {
+              "dataset": "income_statement",
+              "report_period": "2026-06-30",
+              "source_record_id": "3786a4f9c1daf122649e801f77050125c51b9ee5c75fa4e239430ebe87acd4f6",
+              "available_at": "2026-08-26 00:00:00+08:00",
+              "payload_hash": "8c092fb80192ced7108f44e5cd62482d63384320ca561f8b6b1affcf189f9f36",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "income_statement_prior",
+              "report_period": "2025-06-30",
+              "source_record_id": "8440e1708ebf5a2f5d02f81a4371710c8c92525b700b76212e738ba9c15d609c",
+              "available_at": "2025-08-20 00:00:00+08:00",
+              "payload_hash": "04cdbb6361a513d3e1e56e1c752a349c3cd836230b8d2c6389ce6907ed69e1eb",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "balance_sheet",
+              "report_period": "2026-06-30",
+              "source_record_id": "3786a4f9c1daf122649e801f77050125c51b9ee5c75fa4e239430ebe87acd4f6",
+              "available_at": "2026-08-26 00:00:00+08:00",
+              "payload_hash": "f86b6005f26ae01fe4d364e0cdc3c89d80614f052339088e2a36bb05cd5dc2f7",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "balance_sheet_prior",
+              "report_period": "2025-06-30",
+              "source_record_id": "8440e1708ebf5a2f5d02f81a4371710c8c92525b700b76212e738ba9c15d609c",
+              "available_at": "2025-08-20 00:00:00+08:00",
+              "payload_hash": "52bc843a30d25441b1fe4f57a6f8d185643e1b18db0d75621e2ae3a291fe28c6",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "cash_flow",
+              "report_period": "2026-06-30",
+              "source_record_id": "3786a4f9c1daf122649e801f77050125c51b9ee5c75fa4e239430ebe87acd4f6",
+              "available_at": "2026-08-26 00:00:00+08:00",
+              "payload_hash": "6853dc5bebdc0a6ae87b0cbb07fda634bc5cf609935e003be16b37f44c7b9278",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "cash_flow_prior",
+              "report_period": "2025-06-30",
+              "source_record_id": "8440e1708ebf5a2f5d02f81a4371710c8c92525b700b76212e738ba9c15d609c",
+              "available_at": "2025-08-20 00:00:00+08:00",
+              "payload_hash": "e7c69ae6f3b8d91ca41de65d89e8c0240cd2b2c364ca14e6e4083bc7f492c116",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "financial_indicator",
+              "report_period": "2026-06-30",
+              "source_record_id": "3a8c405796e72ba9b9c90519b0652e9781cd39da4a2a67ca972aafd7f6026b19",
+              "available_at": "2026-08-26 00:00:00+08:00",
+              "payload_hash": "5bd5304e8a85d8010cd6afa176c49fb0455cabe51c4aff5d0ba29c71e5aac648",
+              "quality_status": "passed"
+            }
+          ]
+        },
+        "annual_2025": {
+          "period": "2025-12-31",
+          "scope": "company_level_not_theme",
+          "values_cny": {
+            "revenue": 6067759091.55,
+            "prior_revenue": 4588819487.27,
+            "parent_net_profit": 521914773.0,
+            "prior_parent_net_profit": 452664369.42,
+            "deducted_parent_net_profit": 503698695.52,
+            "cfo": 157273222.36,
+            "cash_received_from_sales": 5089358063.61,
+            "capex_cash": 303000207.71,
+            "accounts_receivable": 3053959547.65,
+            "notes_receivable": 70965217.32,
+            "contract_assets": 229096582.29,
+            "inventory": 983397026.13,
+            "contract_liabilities": 230686085.97,
+            "advance_receipts": null,
+            "construction_in_progress": 268132326.74,
+            "fixed_assets": 792168298.52,
+            "cash": 1236773517.3,
+            "ttm_revenue": 6067759091.549999
+          },
+          "derived": {
+            "revenue_yoy": 0.32229196,
+            "parent_net_profit_yoy": 0.15298399,
+            "parent_net_profit_absolute_change_cny": 69250403.57999998,
+            "statement_gross_margin": 0.27862565,
+            "prior_statement_gross_margin": 0.28747667,
+            "gross_margin_change_pp": -0.885102,
+            "indicator_grossprofit_margin_pct": 27.8626,
+            "deducted_profit_share": 0.9650976,
+            "cfo_to_parent_net_profit": 0.3013389,
+            "cash_collection_ratio": 0.83875414,
+            "accounts_receivable_growth_minus_revenue_growth_pp": -6.469352,
+            "inventory_growth_minus_revenue_growth_pp": -21.030126,
+            "working_capital_intensity": null,
+            "working_capital_calculable_part_cny": 4035767070.1000004,
+            "working_capital_missing_fields": [
+              "advance_receipts"
+            ],
+            "one_off_profit_share": 0.0349024
+          },
+          "source_refs": [
+            {
+              "dataset": "income_statement",
+              "report_period": "2025-12-31",
+              "source_record_id": "2923a9360e7dc09e9543aa1487ab1588ccd0bc865409aae34049e1b5054bbf04",
+              "available_at": "2026-04-22 00:00:00+08:00",
+              "payload_hash": "0919c0e3645fc1041312fdecd1939b107cf4b8a9f268c945f15f430d68bab995",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "income_statement_prior",
+              "report_period": "2024-12-31",
+              "source_record_id": "5bfb1cdb4eeadb5b57aeb611467566510eff62b9539eae9e1c192d93cc3d14bc",
+              "available_at": "2025-04-23 00:00:00+08:00",
+              "payload_hash": "bcf2613acece4970ecbaf7d34a9647d30dc9244321edb76b755e905e90426e76",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "balance_sheet",
+              "report_period": "2025-12-31",
+              "source_record_id": "2923a9360e7dc09e9543aa1487ab1588ccd0bc865409aae34049e1b5054bbf04",
+              "available_at": "2026-04-22 00:00:00+08:00",
+              "payload_hash": "7f141c925841218144f71fd985fcc5860233c7c819bad4b6f91801444358d2b7",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "balance_sheet_prior",
+              "report_period": "2024-12-31",
+              "source_record_id": "5bfb1cdb4eeadb5b57aeb611467566510eff62b9539eae9e1c192d93cc3d14bc",
+              "available_at": "2025-04-23 00:00:00+08:00",
+              "payload_hash": "7ffb208c78d163bda4210ae3feef313e589be9481faf1cd10589f3faa2c008b9",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "cash_flow",
+              "report_period": "2025-12-31",
+              "source_record_id": "2923a9360e7dc09e9543aa1487ab1588ccd0bc865409aae34049e1b5054bbf04",
+              "available_at": "2026-04-22 00:00:00+08:00",
+              "payload_hash": "7da2f3f9da18116f0cbaea28af397ee31bc988d12fe8ee382f693a7279cdefe3",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "cash_flow_prior",
+              "report_period": "2024-12-31",
+              "source_record_id": "5bfb1cdb4eeadb5b57aeb611467566510eff62b9539eae9e1c192d93cc3d14bc",
+              "available_at": "2026-08-26 16:43:48.291545+08:00",
+              "payload_hash": "74af19ba6c9a1bca9b68926483a50157d28b21e7413c3cc0fd36a01ca14b5f1d",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "financial_indicator",
+              "report_period": "2025-12-31",
+              "source_record_id": "0a7a96e872ab0d2d58ce675b5160ab1a97897f9da7b0ea80fa893514a1c06fb8",
+              "available_at": "2026-04-22 00:00:00+08:00",
+              "payload_hash": "d66a8566a1f7499ec4cf214c4ad78eb39ae2743e89f8fba23017fbccbf16f8f9",
+              "quality_status": "passed"
+            }
+          ]
+        },
+        "alerts": [
+          {
+            "alert": "利润—现金背离",
+            "status": "not_triggered_or_insufficient_two_period_pattern",
+            "evidence": "未出现连续两个可比报告期同时满足收入/利润增长且经营现金流恶化或为负的完整组合。"
+          },
+          {
+            "alert": "营运资金异常",
+            "status": "not_triggered",
+            "evidence": {
+              "latest_ar_minus_revenue_pp": -2.168331,
+              "latest_inventory_minus_revenue_pp": 8.036906,
+              "annual_ar_minus_revenue_pp": -6.469352,
+              "annual_inventory_minus_revenue_pp": -21.030126
+            }
+          },
+          {
+            "alert": "毛利反向",
+            "status": "not_triggered",
+            "evidence": {
+              "latest_company_gross_margin_change_pp": -1.211795
+            }
+          },
+          {
+            "alert": "扩产过快",
+            "status": "unknown_or_not_triggered",
+            "evidence": "合同所需订单覆盖、认证、良率和利用率缺少直接拆分；未把名义项目或单期资本开支自动判定为有效产能。"
+          },
+          {
+            "alert": "一次性利润",
+            "status": "not_triggered",
+            "evidence": {
+              "latest_nonrecurring_share_of_parent_profit": 0.05021935
+            }
+          },
+          {
+            "alert": "客户过度集中",
+            "status": "unknown",
+            "evidence": "未取得可归属于目标液冷业务的单一客户占比。"
+          }
+        ]
+      },
+      "direct_theme_actual": {
+        "calculability": "condition_only",
+        "period": null,
+        "annualized": false,
+        "theme_revenue_cny": null,
+        "theme_cost_cny": null,
+        "theme_gross_profit_cny": null,
+        "theme_gross_margin": null,
+        "theme_revenue_share_TRS": null,
+        "theme_gross_profit_share_TGPS": null,
+        "theme_net_profit_cny": null,
+        "theme_cash_contribution_cny": null,
+        "missing_reasons": {
+          "theme_revenue_cny": "机房温控与电子散热口径混合风冷、液冷及其他场景，未直接拆分AI数据中心液冷。",
+          "theme_gross_profit_cny": "机房温控与电子散热口径混合风冷、液冷及其他场景，未直接拆分AI数据中心液冷。",
+          "theme_net_profit_cny": "机房温控与电子散热口径混合风冷、液冷及其他场景，未直接拆分AI数据中心液冷。",
+          "theme_cash_contribution_cny": "机房温控与电子散热口径混合风冷、液冷及其他场景，未直接拆分AI数据中心液冷。"
+        },
+        "source_refs": [
+          "05_B2_本地核查.json ENT034.theme_metrics",
+          "07_C1_计算请求.yaml ENT034.must_remain_unknown"
+        ]
+      },
+      "scenarios": {
+        "conservative": {
+          "calculability": "condition_only",
+          "value": null,
+          "plain_condition": "保持当前证据等级：确认产品、验证与规模应用，但不假设液冷订单和主题收入。",
+          "source_refs": [
+            "07_C1_计算请求.yaml ENT034.scenarios.conservative",
+            "05_B2_本地核查.json ENT034"
+          ],
+          "missing_reasons": [
+            "液冷专属客户与订单金额",
+            "复购次数",
+            "液冷主题收入、毛利、净利润和现金贡献",
+            "液冷业务良率、有效产能和回款"
+          ]
+        },
+        "base": {
+          "calculability": "condition_only",
+          "value": null,
+          "plain_condition": "出现正式液冷客户/订单或同口径主题收入拆分，且至少一项重复交付证据成立。",
+          "source_refs": [
+            "07_C1_计算请求.yaml ENT034.scenarios.base",
+            "05_B2_本地核查.json ENT034"
+          ],
+          "missing_reasons": [
+            "正式液冷订单或客户证据",
+            "液冷主题收入/毛利直接拆分",
+            "同一客户追加或第二客户"
+          ]
+        },
+        "optimistic": {
+          "calculability": "condition_only",
+          "value": null,
+          "plain_condition": "在基准条件之上，主题毛利稳定、回款改善，且有效产能/良率有直接证据。",
+          "source_refs": [
+            "07_C1_计算请求.yaml ENT034.scenarios.optimistic",
+            "05_B2_本地核查.json ENT034"
+          ],
+          "missing_reasons": [
+            "重复订单/第二客户",
+            "主题毛利直接披露并稳定",
+            "主题现金或回款改善",
+            "良率/有效产能直接证据"
+          ]
+        }
+      },
+      "reverse_operating_requirements_own_260_sessions": {
+        "status": "calculable",
+        "window": {
+          "start": "2025-08-04",
+          "end": "2026-08-27",
+          "session_count": 260,
+          "quantile_method": "pandas_linear_interpolation",
+          "null_rule": "exclude null, non-finite and non-positive"
+        },
+        "current_market_cap_cny": 84252371652.0,
+        "current_ttm_parent_profit_cny": 491041851.63,
+        "current_ttm_revenue_cny": 6511334279.83,
+        "current_ps_implied_ttm_revenue_cny": 6511354683.17,
+        "ps_implied_vs_financial_ttm_gap": 3.13e-06,
+        "pe": {
+          "status": "calculable",
+          "valid_sample_count": 260,
+          "percentiles": {
+            "p25": 145.281325,
+            "p50": 175.097,
+            "p75": 199.865125
+          },
+          "requirements": {
+            "p25": {
+              "historical_multiple": 145.281325,
+              "implied_ttm_cny": 579925683.17,
+              "required_change_vs_current_ttm": 0.1810107
+            },
+            "p50": {
+              "historical_multiple": 175.097,
+              "implied_ttm_cny": 481175415.07,
+              "required_change_vs_current_ttm": -0.02009286
+            },
+            "p75": {
+              "historical_multiple": 199.865125,
+              "implied_ttm_cny": 421546138.44,
+              "required_change_vs_current_ttm": -0.14152707
+            }
+          },
+          "missing_reasons": []
+        },
+        "ps": {
+          "status": "calculable",
+          "valid_sample_count": 260,
+          "percentiles": {
+            "p25": 12.31545,
+            "p50": 14.2239,
+            "p75": 16.577625
+          },
+          "requirements": {
+            "p25": {
+              "historical_multiple": 12.31545,
+              "implied_ttm_cny": 6841193107.19,
+              "required_change_vs_current_ttm": 0.05065918
+            },
+            "p50": {
+              "historical_multiple": 14.2239,
+              "implied_ttm_cny": 5923296117.94,
+              "required_change_vs_current_ttm": -0.09030993
+            },
+            "p75": {
+              "historical_multiple": 16.577625,
+              "implied_ttm_cny": 5082294457.26,
+              "required_change_vs_current_ttm": -0.21946958
+            }
+          },
+          "missing_reasons": []
+        },
+        "source_refs": [
+          "05_B2_本地核查.json ENT034.valuation_and_price",
+          "local_fact_manifest_hash=2fcef04e5ff70c7096c626872c0b1bb8c3d76794495f470b2a0066d05baad306"
+        ],
+        "guard": "Own-history operating requirement at current market value only; not an action price or industry-relative return."
+      },
+      "sustainability_and_supply_risk": {
+        "strongest_counterevidence": "2026H1公司收入同比增长17.24%，归母净利润同比下降14.32%，综合毛利率同比下降1.21个百分点；均为公司级事实。",
+        "upgrade_condition": "正式客户或订单 + 重复交付/第二客户 + 主题收入/毛利拆分。",
+        "invalidation_condition": "规模应用长期不转成订单或复购；毛利继续下降；二供/自制压低价格；库存与应收显著恶化。",
+        "numeric_market_share_sum": null,
+        "missing_reason": "No same-scope additive market-share dataset in B2."
+      },
+      "source_refs": [
+        "05_B2_本地核查.json -> entity_results[record_id=ENT034]",
+        "06_B_交给C阶段.yaml -> entities[record_id=ENT034]"
+      ]
+    },
+    {
+      "record_id": "ENT035",
+      "entity_name": "申菱环境",
+      "ts_code": "301018.SZ",
+      "relationship_status": "passed_partial",
+      "C_route": "core_commercial_company_context",
+      "calculation_permissions": {
+        "company_quality_background": true,
+        "direct_theme_actual": false,
+        "theme_forward_numeric_scenarios": false,
+        "reverse_valuation_own_260d": true,
+        "ownership_only": false,
+        "competition_background_only": false
+      },
+      "company_quality": {
+        "scope": "company_level_not_theme",
+        "latest_comparable": {
+          "period": "2026-03-31",
+          "scope": "company_level_not_theme",
+          "values_cny": {
+            "revenue": 617158503.38,
+            "prior_revenue": 628483116.38,
+            "parent_net_profit": 28305819.43,
+            "prior_parent_net_profit": 54135208.79,
+            "deducted_parent_net_profit": 25641958.56,
+            "cfo": -193352472.74,
+            "cash_received_from_sales": 914197140.72,
+            "capex_cash": 101870941.67,
+            "accounts_receivable": 2174574889.03,
+            "notes_receivable": 37294642.13,
+            "contract_assets": 188354169.32,
+            "inventory": 1292142323.62,
+            "contract_liabilities": 431049154.98,
+            "advance_receipts": null,
+            "construction_in_progress": 37940662.76,
+            "fixed_assets": 1713676132.11,
+            "cash": 894190114.04,
+            "ttm_revenue": 4197874231.25
+          },
+          "derived": {
+            "revenue_yoy": -0.01801896,
+            "parent_net_profit_yoy": -0.47712736,
+            "parent_net_profit_absolute_change_cny": -25829389.36,
+            "statement_gross_margin": 0.20595539,
+            "prior_statement_gross_margin": 0.21993029,
+            "gross_margin_change_pp": -1.39749,
+            "indicator_grossprofit_margin_pct": 20.5955,
+            "deducted_profit_share": 0.90588999,
+            "cfo_to_parent_net_profit": -6.8308382,
+            "cash_collection_ratio": 1.4813004,
+            "accounts_receivable_growth_minus_revenue_growth_pp": 29.517576,
+            "inventory_growth_minus_revenue_growth_pp": 47.524365,
+            "working_capital_intensity": null,
+            "working_capital_calculable_part_cny": 3224022226.9900002,
+            "working_capital_missing_fields": [
+              "advance_receipts"
+            ],
+            "one_off_profit_share": 0.09411001
+          },
+          "source_refs": [
+            {
+              "dataset": "income_statement",
+              "report_period": "2026-03-31",
+              "source_record_id": "916addc6318bda690a5ebdfed79deaa338ed17343a6e2f2194e63db49c42476d",
+              "available_at": "2026-04-30 00:00:00+08:00",
+              "payload_hash": "00815306c53f342dc75eabedd7e3972d78fdf68a45d0493d423fcfa7c0a3ca49",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "income_statement_prior",
+              "report_period": "2025-03-31",
+              "source_record_id": "b8db0950c33d6429a5fcd4a5a0d6bc9929efa86138570c7a12e35c29bb7a53c3",
+              "available_at": "2025-04-30 00:00:00+08:00",
+              "payload_hash": "340279ba1b91cfc978dbda7ff4acbf1bb1a82fffe3d91bca9bf2051a17d43bee",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "balance_sheet",
+              "report_period": "2026-03-31",
+              "source_record_id": "916addc6318bda690a5ebdfed79deaa338ed17343a6e2f2194e63db49c42476d",
+              "available_at": "2026-04-30 00:00:00+08:00",
+              "payload_hash": "9d6f523649c60af8814507fe0d62e5ead38f8ba7d92d45b59f6d077bee4fcc4d",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "balance_sheet_prior",
+              "report_period": "2025-03-31",
+              "source_record_id": "b8db0950c33d6429a5fcd4a5a0d6bc9929efa86138570c7a12e35c29bb7a53c3",
+              "available_at": "2025-04-30 00:00:00+08:00",
+              "payload_hash": "1770ef78cddfbabe77297ed3d3efa5f1a3a509723b2110c2290063d9d5632cd3",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "cash_flow",
+              "report_period": "2026-03-31",
+              "source_record_id": "916addc6318bda690a5ebdfed79deaa338ed17343a6e2f2194e63db49c42476d",
+              "available_at": "2026-04-30 00:00:00+08:00",
+              "payload_hash": "50d6608855e9047c831d5a4c36b0403448f3b91195a543a1331e33c4db9344d2",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "cash_flow_prior",
+              "report_period": "2025-03-31",
+              "source_record_id": "b8db0950c33d6429a5fcd4a5a0d6bc9929efa86138570c7a12e35c29bb7a53c3",
+              "available_at": "2025-04-30 00:00:00+08:00",
+              "payload_hash": "f1b496e31a5d24ab8562f5415b98260401109c7b431300df0b151c837b40f980",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "financial_indicator",
+              "report_period": "2026-03-31",
+              "source_record_id": "2128af36a234f07096829fd629898d7f322313c9e23cc0090574b7b8d57c87ee",
+              "available_at": "2026-04-30 00:00:00+08:00",
+              "payload_hash": "42ac8542b7f60b2860873e1c2111f1631eca7ac75f8c10e7292bedc09ed0e30b",
+              "quality_status": "passed"
+            }
+          ]
+        },
+        "annual_2025": {
+          "period": "2025-12-31",
+          "scope": "company_level_not_theme",
+          "values_cny": {
+            "revenue": 4209198844.25,
+            "prior_revenue": 3016184306.91,
+            "parent_net_profit": 216777173.18,
+            "prior_parent_net_profit": 115561619.69,
+            "deducted_parent_net_profit": 207219611.8,
+            "cfo": 324937326.72,
+            "cash_received_from_sales": 3851487068.76,
+            "capex_cash": 375352957.67,
+            "accounts_receivable": 2229815221.42,
+            "notes_receivable": 21225520.63,
+            "contract_assets": 209926083.89,
+            "inventory": 869046583.42,
+            "contract_liabilities": 275402750.43,
+            "advance_receipts": null,
+            "construction_in_progress": 34196061.61,
+            "fixed_assets": 1729363854.42,
+            "cash": 592880773.18,
+            "ttm_revenue": 4209198844.25
+          },
+          "derived": {
+            "revenue_yoy": 0.39553768,
+            "parent_net_profit_yoy": 0.87585786,
+            "parent_net_profit_absolute_change_cny": 101215553.49000001,
+            "statement_gross_margin": 0.23988492,
+            "prior_statement_gross_margin": 0.23801512,
+            "gross_margin_change_pp": 0.18698,
+            "indicator_grossprofit_margin_pct": 23.9885,
+            "deducted_profit_share": 0.95591067,
+            "cfo_to_parent_net_profit": 1.49894623,
+            "cash_collection_ratio": 0.91501666,
+            "accounts_receivable_growth_minus_revenue_growth_pp": -9.014899,
+            "inventory_growth_minus_revenue_growth_pp": -38.901164,
+            "working_capital_intensity": null,
+            "working_capital_calculable_part_cny": 3033385138.3,
+            "working_capital_missing_fields": [
+              "advance_receipts"
+            ],
+            "one_off_profit_share": 0.04408933
+          },
+          "source_refs": [
+            {
+              "dataset": "income_statement",
+              "report_period": "2025-12-31",
+              "source_record_id": "1941d6154b772498465584911601a4bb8bae81c00e274bb84fea448451d2f9d5",
+              "available_at": "2026-04-28 00:00:00+08:00",
+              "payload_hash": "5b1dbe0f094b95e60ffdbf257ab6af7cbb41c735edc1ace7c13958703052ba09",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "income_statement_prior",
+              "report_period": "2024-12-31",
+              "source_record_id": "c7738fe340fbc6bcb248f48819cc8f74bb62130fb8d5f2de15fd348103a50a8c",
+              "available_at": "2025-04-29 00:00:00+08:00",
+              "payload_hash": "2eae91e63eaf74fb577bb352546a5f3fa7f2127df1c5c82457122da7c6f5c8d0",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "balance_sheet",
+              "report_period": "2025-12-31",
+              "source_record_id": "1941d6154b772498465584911601a4bb8bae81c00e274bb84fea448451d2f9d5",
+              "available_at": "2026-04-28 00:00:00+08:00",
+              "payload_hash": "0603962c5d922103e4711b75d98e7fcccc5695cf81cc3ed9c07f2281c9cbe87b",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "balance_sheet_prior",
+              "report_period": "2024-12-31",
+              "source_record_id": "c7738fe340fbc6bcb248f48819cc8f74bb62130fb8d5f2de15fd348103a50a8c",
+              "available_at": "2025-04-29 00:00:00+08:00",
+              "payload_hash": "c64be4c06d721d2592a230e4fd70c5c5460b4569ad22916cd62eb254990b8173",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "cash_flow",
+              "report_period": "2025-12-31",
+              "source_record_id": "1941d6154b772498465584911601a4bb8bae81c00e274bb84fea448451d2f9d5",
+              "available_at": "2026-04-28 00:00:00+08:00",
+              "payload_hash": "3f240c966fcec066dd0075dc9a568d1235a6c2e3a05ea2fe2810d281623ab125",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "cash_flow_prior",
+              "report_period": "2024-12-31",
+              "source_record_id": "c7738fe340fbc6bcb248f48819cc8f74bb62130fb8d5f2de15fd348103a50a8c",
+              "available_at": "2025-04-29 00:00:00+08:00",
+              "payload_hash": "acb2f800ba8c8ed213652831624313faf96565119cec73a02033db547c575a10",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "financial_indicator",
+              "report_period": "2025-12-31",
+              "source_record_id": "020fea72310cad886d63242014372125828219d04b454358197310a696a58bb7",
+              "available_at": "2026-04-28 00:00:00+08:00",
+              "payload_hash": "e5679828326e9d377c636e8e8b5beb87a2d340f4540541f51b6a27a541c50ab3",
+              "quality_status": "passed"
+            }
+          ]
+        },
+        "alerts": [
+          {
+            "alert": "利润—现金背离",
+            "status": "not_triggered_or_insufficient_two_period_pattern",
+            "evidence": "未出现连续两个可比报告期同时满足收入/利润增长且经营现金流恶化或为负的完整组合。"
+          },
+          {
+            "alert": "营运资金异常",
+            "status": "not_triggered",
+            "evidence": {
+              "latest_ar_minus_revenue_pp": 29.517576,
+              "latest_inventory_minus_revenue_pp": 47.524365,
+              "annual_ar_minus_revenue_pp": -9.014899,
+              "annual_inventory_minus_revenue_pp": -38.901164
+            }
+          },
+          {
+            "alert": "毛利反向",
+            "status": "not_triggered",
+            "evidence": {
+              "latest_company_gross_margin_change_pp": -1.39749
+            }
+          },
+          {
+            "alert": "扩产过快",
+            "status": "unknown_or_not_triggered",
+            "evidence": "合同所需订单覆盖、认证、良率和利用率缺少直接拆分；未把名义项目或单期资本开支自动判定为有效产能。"
+          },
+          {
+            "alert": "一次性利润",
+            "status": "not_triggered",
+            "evidence": {
+              "latest_nonrecurring_share_of_parent_profit": 0.09411001
+            }
+          },
+          {
+            "alert": "客户过度集中",
+            "status": "not_triggered",
+            "evidence": {
+              "largest_customer_share": 0.143,
+              "status": "not_triggered",
+              "source": "DOC301018A p17"
+            }
+          }
+        ]
+      },
+      "direct_theme_actual": {
+        "calculability": "condition_only",
+        "period": null,
+        "annualized": false,
+        "theme_revenue_cny": null,
+        "theme_cost_cny": null,
+        "theme_gross_profit_cny": null,
+        "theme_gross_margin": null,
+        "theme_revenue_share_TRS": null,
+        "theme_gross_profit_share_TGPS": null,
+        "theme_net_profit_cny": null,
+        "theme_cash_contribution_cny": null,
+        "missing_reasons": {
+          "theme_revenue_cny": "数据服务、新增订单和客户均为板块合计口径，液冷只披露进展。",
+          "theme_gross_profit_cny": "数据服务、新增订单和客户均为板块合计口径，液冷只披露进展。",
+          "theme_net_profit_cny": "数据服务、新增订单和客户均为板块合计口径，液冷只披露进展。",
+          "theme_cash_contribution_cny": "数据服务、新增订单和客户均为板块合计口径，液冷只披露进展。"
+        },
+        "source_refs": [
+          "05_B2_本地核查.json ENT035.theme_metrics",
+          "07_C1_计算请求.yaml ENT035.must_remain_unknown"
+        ]
+      },
+      "scenarios": {
+        "conservative": {
+          "calculability": "condition_only",
+          "value": null,
+          "plain_condition": "只承认液冷产品能力和数据服务板块订单背景，不把板块订单全部视为液冷。",
+          "source_refs": [
+            "07_C1_计算请求.yaml ENT035.scenarios.conservative",
+            "05_B2_本地核查.json ENT035"
+          ],
+          "missing_reasons": [
+            "数据服务订单中的液冷专属金额",
+            "液冷项目验收与复购",
+            "液冷主题收入、项目毛利、净利润和现金",
+            "传统温控、设施冷源、工程服务与液冷的精确拆分"
+          ]
+        },
+        "base": {
+          "calculability": "condition_only",
+          "value": null,
+          "plain_condition": "正式披露液冷项目合同/订单、可交付金额或验收收入，并与传统温控、设施冷源分开。",
+          "source_refs": [
+            "07_C1_计算请求.yaml ENT035.scenarios.base",
+            "05_B2_本地核查.json ENT035"
+          ],
+          "missing_reasons": [
+            "液冷专属合同/订单",
+            "项目验收或直接收入",
+            "传统温控与液冷拆分"
+          ]
+        },
+        "optimistic": {
+          "calculability": "condition_only",
+          "value": null,
+          "plain_condition": "在基准条件上出现跨客户复制、项目毛利稳定、合同资产/应收与现金改善。",
+          "source_refs": [
+            "07_C1_计算请求.yaml ENT035.scenarios.optimistic",
+            "05_B2_本地核查.json ENT035"
+          ],
+          "missing_reasons": [
+            "第二客户或重复项目",
+            "项目毛利直接披露",
+            "应收/合同资产受控",
+            "经营现金改善"
+          ]
+        }
+      },
+      "reverse_operating_requirements_own_260_sessions": {
+        "status": "calculable",
+        "window": {
+          "start": "2025-08-04",
+          "end": "2026-08-27",
+          "session_count": 260,
+          "quantile_method": "pandas_linear_interpolation",
+          "null_rule": "exclude null, non-finite and non-positive"
+        },
+        "current_market_cap_cny": 40377466644.0,
+        "current_ttm_parent_profit_cny": 190947745.91,
+        "current_ttm_revenue_cny": 4197874231.25,
+        "current_ps_implied_ttm_revenue_cny": 4197852769.01,
+        "ps_implied_vs_financial_ttm_gap": -5.11e-06,
+        "pe": {
+          "status": "calculable",
+          "valid_sample_count": 260,
+          "percentiles": {
+            "p25": 123.6997,
+            "p50": 155.49325,
+            "p75": 201.946525
+          },
+          "requirements": {
+            "p25": {
+              "historical_multiple": 123.6997,
+              "implied_ttm_cny": 326415234.99,
+              "required_change_vs_current_ttm": 0.70944796
+            },
+            "p50": {
+              "historical_multiple": 155.49325,
+              "implied_ttm_cny": 259673436.91,
+              "required_change_vs_current_ttm": 0.35991884
+            },
+            "p75": {
+              "historical_multiple": 201.946525,
+              "implied_ttm_cny": 199941378.76,
+              "required_change_vs_current_ttm": 0.04709997
+            }
+          },
+          "missing_reasons": []
+        },
+        "ps": {
+          "status": "calculable",
+          "valid_sample_count": 260,
+          "percentiles": {
+            "p25": 4.979675,
+            "p50": 6.25145,
+            "p75": 8.316
+          },
+          "requirements": {
+            "p25": {
+              "historical_multiple": 4.979675,
+              "implied_ttm_cny": 8108454195.1,
+              "required_change_vs_current_ttm": 0.93156196
+            },
+            "p50": {
+              "historical_multiple": 6.25145,
+              "implied_ttm_cny": 6458896199.12,
+              "required_change_vs_current_ttm": 0.53861117
+            },
+            "p75": {
+              "historical_multiple": 8.316,
+              "implied_ttm_cny": 4855395219.34,
+              "required_change_vs_current_ttm": 0.15663189
+            }
+          },
+          "missing_reasons": []
+        },
+        "source_refs": [
+          "05_B2_本地核查.json ENT035.valuation_and_price",
+          "local_fact_manifest_hash=2fcef04e5ff70c7096c626872c0b1bb8c3d76794495f470b2a0066d05baad306"
+        ],
+        "guard": "Own-history operating requirement at current market value only; not an action price or industry-relative return."
+      },
+      "sustainability_and_supply_risk": {
+        "strongest_counterevidence": "2026Q1公司收入同比下降1.80%、归母净利润同比下降47.71%、经营现金流-1.93亿元；应收和存货增速明显高于收入。",
+        "upgrade_condition": "液冷专属合同或验收收入 + 跨项目复制 + 项目毛利/回款证据。",
+        "invalidation_condition": "订单主要是传统温控；项目验收延期；应收/存货继续快于收入；现金持续恶化。",
+        "numeric_market_share_sum": null,
+        "missing_reason": "No same-scope additive market-share dataset in B2."
+      },
+      "source_refs": [
+        "05_B2_本地核查.json -> entity_results[record_id=ENT035]",
+        "06_B_交给C阶段.yaml -> entities[record_id=ENT035]"
+      ]
+    },
+    {
+      "record_id": "ENT036A",
+      "entity_name": "曙光数创",
+      "ts_code": "920808.BJ",
+      "relationship_status": "passed_direct_product_revenue",
+      "C_route": "direct_theme_quantitative",
+      "calculation_permissions": {
+        "company_quality_background": true,
+        "direct_theme_actual": true,
+        "theme_forward_numeric_scenarios": false,
+        "reverse_valuation_own_260d": true,
+        "ownership_only": false,
+        "competition_background_only": false
+      },
+      "company_quality": {
+        "scope": "company_level_not_theme",
+        "latest_comparable": {
+          "period": "2026-06-30",
+          "scope": "company_level_not_theme",
+          "values_cny": {
+            "revenue": 245937592.4,
+            "prior_revenue": 140090437.2,
+            "parent_net_profit": -73404074.73,
+            "prior_parent_net_profit": -40772293.01,
+            "deducted_parent_net_profit": -74673495.11,
+            "cfo": -242011677.48,
+            "cash_received_from_sales": 588603048.94,
+            "capex_cash": 64713064.8,
+            "accounts_receivable": 439815761.6,
+            "notes_receivable": null,
+            "contract_assets": null,
+            "inventory": 868882778.86,
+            "contract_liabilities": 83834502.65,
+            "advance_receipts": null,
+            "construction_in_progress": null,
+            "fixed_assets": 190449378.39,
+            "cash": 129260993.39,
+            "ttm_revenue": 988188419.4200001
+          },
+          "derived": {
+            "revenue_yoy": 0.75556303,
+            "parent_net_profit_yoy": 0.80034208,
+            "parent_net_profit_absolute_change_cny": -32631781.72000001,
+            "statement_gross_margin": 0.11931876,
+            "prior_statement_gross_margin": 0.19487947,
+            "gross_margin_change_pp": -7.556071,
+            "indicator_grossprofit_margin_pct": 11.9319,
+            "deducted_profit_share": null,
+            "cfo_to_parent_net_profit": null,
+            "cash_collection_ratio": 2.39330248,
+            "accounts_receivable_growth_minus_revenue_growth_pp": -65.907935,
+            "inventory_growth_minus_revenue_growth_pp": 37.503916,
+            "working_capital_intensity": null,
+            "working_capital_calculable_part_cny": 1224864037.81,
+            "working_capital_missing_fields": [
+              "contract_assets",
+              "advance_receipts"
+            ],
+            "one_off_profit_share": null
+          },
+          "source_refs": [
+            {
+              "dataset": "income_statement",
+              "report_period": "2026-06-30",
+              "source_record_id": "e74daef00a3adaefef79bfab9dd654bbe4ba4a446a0bec2d28aa905ab537d421",
+              "available_at": "2026-08-26 00:00:00+08:00",
+              "payload_hash": "aaef08f4eb3de946ea005f09a64b43e3b3c95384bed927aa33827d508c0edf1b",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "income_statement_prior",
+              "report_period": "2025-06-30",
+              "source_record_id": "ef39f73e90d9c888a3b71791dc13d989c4f02fd6a4b21617e23dbba5b2ae2753",
+              "available_at": "2025-08-30 00:00:00+08:00",
+              "payload_hash": "a16bdac9e78eb01da7c2774cda78bc32df199d84159e1cfbf595950ba0566c78",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "balance_sheet",
+              "report_period": "2026-06-30",
+              "source_record_id": "e74daef00a3adaefef79bfab9dd654bbe4ba4a446a0bec2d28aa905ab537d421",
+              "available_at": "2026-08-26 00:00:00+08:00",
+              "payload_hash": "c4e34c9f2560230e3ba4e9252f7bd357ea6a5a049765ce5ce390d5bd6336a392",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "balance_sheet_prior",
+              "report_period": "2025-06-30",
+              "source_record_id": "ef39f73e90d9c888a3b71791dc13d989c4f02fd6a4b21617e23dbba5b2ae2753",
+              "available_at": "2025-08-30 00:00:00+08:00",
+              "payload_hash": "34dc387308aa49b75cf512e564e88e12859169eee0c8e4d5b323c2dc2fa92cb7",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "cash_flow",
+              "report_period": "2026-06-30",
+              "source_record_id": "e74daef00a3adaefef79bfab9dd654bbe4ba4a446a0bec2d28aa905ab537d421",
+              "available_at": "2026-08-26 00:00:00+08:00",
+              "payload_hash": "d1aa7583d0a4442182dcf14340784517f01eb6f20c92f8ba3b2a3b9a93cfe47b",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "cash_flow_prior",
+              "report_period": "2025-06-30",
+              "source_record_id": "ef39f73e90d9c888a3b71791dc13d989c4f02fd6a4b21617e23dbba5b2ae2753",
+              "available_at": "2025-08-30 00:00:00+08:00",
+              "payload_hash": "62d9deb76ecf577e3a0361c2c21c5f5e5ad2d0f531c67817cb17d851fb305611",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "financial_indicator",
+              "report_period": "2026-06-30",
+              "source_record_id": "f5a03242079a557194d61764cd11a2bf8c326b9db9519eba91cf28f13a1a137e",
+              "available_at": "2026-08-26 00:00:00+08:00",
+              "payload_hash": "a5b1b075d9a158cf556120262a12f210bc119a092012793a9a20d46d17db04cf",
+              "quality_status": "passed"
+            }
+          ]
+        },
+        "annual_2025": {
+          "period": "2025-12-31",
+          "scope": "company_level_not_theme",
+          "values_cny": {
+            "revenue": 882341264.22,
+            "prior_revenue": 506251725.6,
+            "parent_net_profit": 36897665.35,
+            "prior_parent_net_profit": 61424446.37,
+            "deducted_parent_net_profit": 33086057.44,
+            "cfo": -437787362.99,
+            "cash_received_from_sales": 638677652.39,
+            "capex_cash": 69206925.99,
+            "accounts_receivable": 708719589.85,
+            "notes_receivable": 77252905.55,
+            "contract_assets": null,
+            "inventory": 370129743.61,
+            "contract_liabilities": 63906549.45,
+            "advance_receipts": null,
+            "construction_in_progress": null,
+            "fixed_assets": 188432912.39,
+            "cash": 117254706.06,
+            "ttm_revenue": 882341264.2200001
+          },
+          "derived": {
+            "revenue_yoy": 0.74289038,
+            "parent_net_profit_yoy": -0.39929999,
+            "parent_net_profit_absolute_change_cny": -24526781.02,
+            "statement_gross_margin": 0.25652961,
+            "prior_statement_gross_margin": 0.30100854,
+            "gross_margin_change_pp": -4.447893,
+            "indicator_grossprofit_margin_pct": 25.653,
+            "deducted_profit_share": 0.89669786,
+            "cfo_to_parent_net_profit": -11.86490687,
+            "cash_collection_ratio": 0.72384425,
+            "accounts_receivable_growth_minus_revenue_growth_pp": -2.92923,
+            "inventory_growth_minus_revenue_growth_pp": 132.81533,
+            "working_capital_intensity": null,
+            "working_capital_calculable_part_cny": 1014942784.01,
+            "working_capital_missing_fields": [
+              "contract_assets",
+              "advance_receipts"
+            ],
+            "one_off_profit_share": 0.10330214
+          },
+          "source_refs": [
+            {
+              "dataset": "income_statement",
+              "report_period": "2025-12-31",
+              "source_record_id": "0cfc57c98d7f2d9b1571e0d8cadca4336d7878b7b39918e7f7ce030e979e6c7e",
+              "available_at": "2026-08-26 16:42:47.872029+08:00",
+              "payload_hash": "8d3bf9120c73dbf992bdca3ef2d083c00c2a897fe3add413e231c6ae3f87ad96",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "income_statement_prior",
+              "report_period": "2024-12-31",
+              "source_record_id": "e59b56e03a8cdca4fa51a1213f3cc4b1e2181e5835aca9020e6febdab34e61e1",
+              "available_at": "2025-03-06 00:00:00+08:00",
+              "payload_hash": "850455a27da4d61b54617b6c3688db2b6a0dbd29b7a9c49e7b23926e9f777459",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "balance_sheet",
+              "report_period": "2025-12-31",
+              "source_record_id": "0cfc57c98d7f2d9b1571e0d8cadca4336d7878b7b39918e7f7ce030e979e6c7e",
+              "available_at": "2026-04-16 00:00:00+08:00",
+              "payload_hash": "de8b4a79bbb58bf2ade164120a359f75e0b8f9f898a5111a9a9bde4b0209ddd8",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "balance_sheet_prior",
+              "report_period": "2024-12-31",
+              "source_record_id": "e59b56e03a8cdca4fa51a1213f3cc4b1e2181e5835aca9020e6febdab34e61e1",
+              "available_at": "2025-03-06 00:00:00+08:00",
+              "payload_hash": "1511b40b25ce1a35e1e89e324d5dbb68cd196985ec581a8ad67bfef2c21a6139",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "cash_flow",
+              "report_period": "2025-12-31",
+              "source_record_id": "0cfc57c98d7f2d9b1571e0d8cadca4336d7878b7b39918e7f7ce030e979e6c7e",
+              "available_at": "2026-08-26 16:43:58.365478+08:00",
+              "payload_hash": "65b7288b5f29d54058ceff97e162d3b8fd761991cf2864c259674f5c548410dd",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "cash_flow_prior",
+              "report_period": "2024-12-31",
+              "source_record_id": "e59b56e03a8cdca4fa51a1213f3cc4b1e2181e5835aca9020e6febdab34e61e1",
+              "available_at": "2026-08-26 16:43:48.291545+08:00",
+              "payload_hash": "26dfe126a5499d5177cd70ce01cb2e41b4e9fc8128f21edfe87672f856ea7135",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "financial_indicator",
+              "report_period": "2025-12-31",
+              "source_record_id": "94434b6dab9fc0cd188457e7c38afc89e2c3a8659f98f2930a8498531e634eb6",
+              "available_at": "2026-08-26 16:44:25.158146+08:00",
+              "payload_hash": "30c964e9fd617d189d7c16aca8def57e05436cb31f68f5bc5f6de9b769ab9104",
+              "quality_status": "passed"
+            }
+          ]
+        },
+        "alerts": [
+          {
+            "alert": "利润—现金背离",
+            "status": "not_triggered_or_insufficient_two_period_pattern",
+            "evidence": "未出现连续两个可比报告期同时满足收入/利润增长且经营现金流恶化或为负的完整组合。"
+          },
+          {
+            "alert": "营运资金异常",
+            "status": "triggered",
+            "evidence": {
+              "latest_ar_minus_revenue_pp": -65.907935,
+              "latest_inventory_minus_revenue_pp": 37.503916,
+              "annual_ar_minus_revenue_pp": -2.92923,
+              "annual_inventory_minus_revenue_pp": 132.81533
+            }
+          },
+          {
+            "alert": "毛利反向",
+            "status": "triggered",
+            "evidence": {
+              "latest_company_gross_margin_change_pp": -7.556071
+            }
+          },
+          {
+            "alert": "扩产过快",
+            "status": "unknown_or_not_triggered",
+            "evidence": "合同所需订单覆盖、认证、良率和利用率缺少直接拆分；未把名义项目或单期资本开支自动判定为有效产能。"
+          },
+          {
+            "alert": "一次性利润",
+            "status": "not_applicable_loss_period",
+            "evidence": {
+              "latest_nonrecurring_share_of_parent_profit": null
+            }
+          },
+          {
+            "alert": "客户过度集中",
+            "status": "unknown",
+            "evidence": "未取得可归属于目标液冷业务的单一客户占比。"
+          }
+        ]
+      },
+      "direct_theme_actual": {
+        "calculability": "calculable",
+        "period": "2026H1",
+        "period_end": "2026-06-30",
+        "annualized": false,
+        "scope": [
+          "冷板液冷产品",
+          "浸没液冷产品"
+        ],
+        "excluded_scope": [
+          "模块化数据中心",
+          "系统集成",
+          "未披露项目分配"
+        ],
+        "components": [
+          {
+            "report_period": "2026-06-30",
+            "classification": "product",
+            "item_name": "冷板液冷产品",
+            "revenue_cny": 208500511.11,
+            "cost_cny": 190927738.5,
+            "gross_profit_cny": 17572772.61,
+            "gross_margin": 0.08428168,
+            "available_at": "2026-08-26 00:00:00+08:00",
+            "source_record_id": "315ef00c44b41fdb3325b14757978f25cc3975253b9f05ccd270cd12f17c3f49",
+            "payload_hash": "0311d811a6140dc4b18a2ebe579049491fe9446834f1e16b2488ff57f8b55ae6",
+            "quality_status": "passed"
+          },
+          {
+            "report_period": "2026-06-30",
+            "classification": "product",
+            "item_name": "浸没液冷产品",
+            "revenue_cny": 10625337.63,
+            "cost_cny": 8586386.13,
+            "gross_profit_cny": 2038951.5,
+            "gross_margin": 0.19189522,
+            "available_at": "2026-08-26 00:00:00+08:00",
+            "source_record_id": "22433895f23cc85e020ec30b7f50d1c6478df7ccd6353aed93676f61c3dd8067",
+            "payload_hash": "f948ff4b1dd31633f09ee96d057a91349c47b127ac017c93f993bcad1bc33b3f",
+            "quality_status": "passed"
+          }
+        ],
+        "theme_revenue_cny": 219125848.74,
+        "theme_cost_cny": 199514124.63,
+        "theme_gross_profit_cny": 19611724.11,
+        "theme_gross_margin": 0.08949982,
+        "theme_revenue_share_TRS": 0.89098152,
+        "theme_gross_profit_share_TGPS": 0.66831641,
+        "theme_net_profit_cny": null,
+        "theme_cash_contribution_cny": null,
+        "missing_reasons": {
+          "theme_net_profit_cny": "No direct theme net-profit split; company net profit cannot substitute.",
+          "theme_cash_contribution_cny": "No direct theme cash split; company CFO cannot substitute."
+        },
+        "source_refs": [
+          "05_B2_本地核查.json ENT036A.theme_metrics",
+          "05_B2_本地核查.json ENT036A.latest_comparable"
+        ]
+      },
+      "scenarios": {
+        "conservative": {
+          "calculability": "calculable",
+          "value": {
+            "period": "2026H1",
+            "annualized": false,
+            "theme_revenue_cny": 219125848.74,
+            "theme_gross_profit_cny": 19611724.11,
+            "theme_gross_margin": 0.08949982,
+            "theme_net_profit_cny": null,
+            "theme_cash_contribution_cny": null
+          },
+          "plain_condition": "只使用2026H1已披露的冷板与浸没产品收入和毛利；不年化、不假设增长。",
+          "source_refs": [
+            "07_C1_计算请求.yaml ENT036A.scenarios.conservative",
+            "05_B2_本地核查.json ENT036A"
+          ],
+          "missing_reasons": [
+            "No direct theme net-profit split; company net profit cannot substitute.",
+            "No direct theme cash split; company CFO cannot substitute."
+          ]
+        },
+        "base": {
+          "calculability": "condition_only",
+          "value": null,
+          "plain_condition": "直接产品收入继续兑现，并出现订单/验收或复购证据；毛利不再明显下滑。",
+          "source_refs": [
+            "07_C1_计算请求.yaml ENT036A.scenarios.base",
+            "05_B2_本地核查.json ENT036A"
+          ],
+          "missing_reasons": [
+            "正式订单或逐项目验收",
+            "同一客户追加或第二客户",
+            "直接产品毛利稳定"
+          ]
+        },
+        "optimistic": {
+          "calculability": "condition_only",
+          "value": null,
+          "plain_condition": "在基准条件上，客户扩展、产品毛利改善，库存和经营现金同步转好。",
+          "source_refs": [
+            "07_C1_计算请求.yaml ENT036A.scenarios.optimistic",
+            "05_B2_本地核查.json ENT036A"
+          ],
+          "missing_reasons": [
+            "第二客户/跨项目复制",
+            "直接产品毛利改善",
+            "库存增速回落",
+            "经营现金转正或显著改善"
+          ]
+        }
+      },
+      "reverse_operating_requirements_own_260_sessions": {
+        "status": "calculable",
+        "window": {
+          "start": "2025-08-04",
+          "end": "2026-08-27",
+          "session_count": 260,
+          "quantile_method": "pandas_linear_interpolation",
+          "null_rule": "exclude null, non-finite and non-positive"
+        },
+        "current_market_cap_cny": 11592000058.0,
+        "current_ttm_parent_profit_cny": 4265883.66,
+        "current_ttm_revenue_cny": 988188419.42,
+        "current_ps_implied_ttm_revenue_cny": 988184752.53,
+        "ps_implied_vs_financial_ttm_gap": -3.71e-06,
+        "pe": {
+          "status": "calculable_partial_valid_samples",
+          "valid_sample_count": 184,
+          "percentiles": {
+            "p25": 463.68095,
+            "p50": 646.85915,
+            "p75": 745.6933
+          },
+          "requirements": {
+            "p25": {
+              "historical_multiple": 463.68095,
+              "implied_ttm_cny": 24999948.9,
+              "required_change_vs_current_ttm": 4.86043852
+            },
+            "p50": {
+              "historical_multiple": 646.85915,
+              "implied_ttm_cny": 17920439.18,
+              "required_change_vs_current_ttm": 3.20087387
+            },
+            "p75": {
+              "historical_multiple": 745.6933,
+              "implied_ttm_cny": 15545265.14,
+              "required_change_vs_current_ttm": 2.64409027
+            }
+          },
+          "missing_reasons": [
+            "76 of 260 sessions excluded because pe_ttm was null, non-finite, or non-positive"
+          ]
+        },
+        "ps": {
+          "status": "calculable",
+          "valid_sample_count": 260,
+          "percentiles": {
+            "p25": 16.215225,
+            "p50": 23.18585,
+            "p75": 27.3045
+          },
+          "requirements": {
+            "p25": {
+              "historical_multiple": 16.215225,
+              "implied_ttm_cny": 714883700.84,
+              "required_change_vs_current_ttm": -0.27657146
+            },
+            "p50": {
+              "historical_multiple": 23.18585,
+              "implied_ttm_cny": 499960107.48,
+              "required_change_vs_current_ttm": -0.49406399
+            },
+            "p75": {
+              "historical_multiple": 27.3045,
+              "implied_ttm_cny": 424545406.73,
+              "required_change_vs_current_ttm": -0.5703801
+            }
+          },
+          "missing_reasons": []
+        },
+        "source_refs": [
+          "05_B2_本地核查.json ENT036A.valuation_and_price",
+          "local_fact_manifest_hash=2fcef04e5ff70c7096c626872c0b1bb8c3d76794495f470b2a0066d05baad306"
+        ],
+        "guard": "Own-history operating requirement at current market value only; not an action price or industry-relative return."
+      },
+      "sustainability_and_supply_risk": {
+        "strongest_counterevidence": "2026H1综合毛利率同比下降7.56个百分点，2025年度与2026H1连续出现存货增速明显高于收入增速，2026H1经营现金流-2.42亿元。",
+        "upgrade_condition": "订单/验收链 + 复购/第二客户 + 毛利与现金改善。",
+        "invalidation_condition": "收入增长继续伴随毛利下滑、库存异常和负现金；模块化/系统集成被错误分配；路线替代压缩直接产品价值。",
+        "numeric_market_share_sum": null,
+        "missing_reason": "No same-scope additive market-share dataset in B2."
+      },
+      "source_refs": [
+        "05_B2_本地核查.json -> entity_results[record_id=ENT036A]",
+        "06_B_交给C阶段.yaml -> entities[record_id=ENT036A]"
+      ]
+    },
+    {
+      "record_id": "ENT036B",
+      "entity_name": "中科曙光",
+      "ts_code": "603019.SH",
+      "relationship_status": "passed_ownership_context_only",
+      "C_route": "ownership_context_only",
+      "calculation_permissions": {
+        "company_quality_background": false,
+        "direct_theme_actual": false,
+        "theme_forward_numeric_scenarios": false,
+        "reverse_valuation_own_260d": false,
+        "ownership_only": true,
+        "competition_background_only": false
+      },
+      "company_quality": {
+        "scope": "ownership_context_only",
+        "ownership_fields_only": {
+          "scope": "ownership_fields_only",
+          "period": "2026-03-31",
+          "group_minority_interests_cny": 599956828.01,
+          "quality": "partial",
+          "source_ref": {
+            "dataset": "balance_sheet",
+            "report_period": "2026-03-31",
+            "source_name": "tushare",
+            "source_endpoint": "balancesheet",
+            "source_record_id": "6d17f877f0adad0f332fd12239fc2796de24e5e5330e06c3bb644dbee0cadf4b",
+            "available_at": "2026-04-26 00:00:00+08:00",
+            "payload_hash": "429596d78b708f1d3d3ccfa9476ce3cdc682a6e0bbba55a9a3689d4bad44f64e",
+            "business_key_hash": "6d17f877f0adad0f332fd12239fc2796de24e5e5330e06c3bb644dbee0cadf4b",
+            "quality_status": "passed",
+            "revision_no": 1,
+            "comparable_candidate_count": 1,
+            "comparable_selection_rule": "as_of_then_end_type_match_then_update_flag_then_consolidated_report_then_available_at_then_statement_type"
+          },
+          "warning": "集团少数股东权益不能直接归属于曙光数创；持股比例、合并范围和具体利润归属正文未取得。"
+        },
+        "ownership_facts": {
+          "2025-12-31": {
+            "minority_share_ratio": 0.379302,
+            "implied_parent_share_ratio": 0.620698,
+            "derivation": "1 - officially_disclosed_minority_share_ratio",
+            "source": "DOC603019A p.193"
+          },
+          "2026-06-30": {
+            "minority_share_ratio_rounded": 0.3793,
+            "subsidiary_revenue_cny": 245937592.4,
+            "subsidiary_net_profit_cny": -73404074.73,
+            "minority_shareholder_profit_or_loss_cny": -27842312.35,
+            "source": "DOC603019H1 pp.158-159"
+          },
+          "boundary": "曙光数创为重要非全资子公司并纳入合并披露；不得按持股比例简单乘收入，也不得把其产品或收入重复归给中科曙光主题口径。"
+        },
+        "alerts": [
+          {
+            "alert": "利润—现金背离",
+            "status": "not_applicable_ownership_context_only"
+          },
+          {
+            "alert": "营运资金异常",
+            "status": "not_applicable_ownership_context_only"
+          },
+          {
+            "alert": "毛利反向",
+            "status": "not_applicable_ownership_context_only"
+          },
+          {
+            "alert": "扩产过快",
+            "status": "not_applicable_ownership_context_only"
+          },
+          {
+            "alert": "一次性利润",
+            "status": "not_applicable_ownership_context_only"
+          },
+          {
+            "alert": "客户过度集中",
+            "status": "not_applicable_ownership_context_only"
+          }
+        ],
+        "guard": "No subsidiary financial or market fact is inherited or multiplied by a shareholding ratio."
+      },
+      "direct_theme_actual": {
+        "calculability": "not_applicable",
+        "period": null,
+        "annualized": false,
+        "theme_revenue_cny": null,
+        "theme_cost_cny": null,
+        "theme_gross_profit_cny": null,
+        "theme_gross_margin": null,
+        "theme_revenue_share_TRS": null,
+        "theme_gross_profit_share_TGPS": null,
+        "theme_net_profit_cny": null,
+        "theme_cash_contribution_cny": null,
+        "missing_reasons": {
+          "theme_revenue_cny": "Ownership/consolidation context only; subsidiary theme facts cannot be inherited.",
+          "theme_gross_profit_cny": "Ownership/consolidation context only; subsidiary theme facts cannot be inherited.",
+          "theme_net_profit_cny": "Ownership/consolidation context only; subsidiary theme facts cannot be inherited.",
+          "theme_cash_contribution_cny": "Ownership/consolidation context only; subsidiary theme facts cannot be inherited."
+        },
+        "source_refs": [
+          "05_B2_本地核查.json ENT036B.theme_metrics",
+          "07_C1_计算请求.yaml ENT036B.must_remain_unknown"
+        ]
+      },
+      "scenarios": {
+        "conservative": {
+          "calculability": "not_applicable",
+          "value": null,
+          "plain_condition": "不建立经营情景。",
+          "source_refs": [
+            "07_C1_计算请求.yaml ENT036B.scenarios.conservative",
+            "05_B2_本地核查.json ENT036B"
+          ],
+          "missing_reasons": [
+            "Outside approved C2 operating-scenario scope."
+          ]
+        },
+        "base": {
+          "calculability": "not_applicable",
+          "value": null,
+          "plain_condition": "不建立经营情景。",
+          "source_refs": [
+            "07_C1_计算请求.yaml ENT036B.scenarios.base",
+            "05_B2_本地核查.json ENT036B"
+          ],
+          "missing_reasons": [
+            "Outside approved C2 operating-scenario scope."
+          ]
+        },
+        "optimistic": {
+          "calculability": "not_applicable",
+          "value": null,
+          "plain_condition": "不建立经营情景。",
+          "source_refs": [
+            "07_C1_计算请求.yaml ENT036B.scenarios.optimistic",
+            "05_B2_本地核查.json ENT036B"
+          ],
+          "missing_reasons": [
+            "Outside approved C2 operating-scenario scope."
+          ]
+        }
+      },
+      "reverse_operating_requirements_own_260_sessions": {
+        "status": "not_applicable",
+        "reason": "ownership_context_only",
+        "pe": null,
+        "ps": null,
+        "guard": "No theme reverse valuation created."
+      },
+      "sustainability_and_supply_risk": {
+        "strongest_counterevidence": "母子公司合并与少数股东权益使简单持股比例乘算失真。",
+        "upgrade_condition": "只有正式报表直接披露并可按合并口径解释时，才补充母公司归母影响。",
+        "invalidation_condition": "任何把子公司收入或利润简单乘持股比例的做法均无效。",
+        "numeric_market_share_sum": null,
+        "missing_reason": "No same-scope additive market-share dataset in B2."
+      },
+      "source_refs": [
+        "05_B2_本地核查.json -> entity_results[record_id=ENT036B]",
+        "06_B_交给C阶段.yaml -> entities[record_id=ENT036B]"
+      ]
+    },
+    {
+      "record_id": "ENT037",
+      "entity_name": "飞荣达",
+      "ts_code": "300602.SZ",
+      "relationship_status": "passed_partial",
+      "C_route": "core_commercial_company_context",
+      "calculation_permissions": {
+        "company_quality_background": true,
+        "direct_theme_actual": false,
+        "theme_forward_numeric_scenarios": false,
+        "reverse_valuation_own_260d": true,
+        "ownership_only": false,
+        "competition_background_only": false
+      },
+      "company_quality": {
+        "scope": "company_level_not_theme",
+        "latest_comparable": {
+          "period": "2026-03-31",
+          "scope": "company_level_not_theme",
+          "values_cny": {
+            "revenue": 1643714119.75,
+            "prior_revenue": 1181287129.43,
+            "parent_net_profit": 77356955.36,
+            "prior_parent_net_profit": 57763731.39,
+            "deducted_parent_net_profit": 94326394.57,
+            "cfo": -23890682.83,
+            "cash_received_from_sales": 1664567948.94,
+            "capex_cash": 167426182.6,
+            "accounts_receivable": 2659671673.39,
+            "notes_receivable": 166411654.8,
+            "contract_assets": null,
+            "inventory": 1325648664.04,
+            "contract_liabilities": 11728890.13,
+            "advance_receipts": null,
+            "construction_in_progress": 539115893.33,
+            "fixed_assets": 2247776455.17,
+            "cash": 828626465.95,
+            "ttm_revenue": 6989112739.08
+          },
+          "derived": {
+            "revenue_yoy": 0.39146028,
+            "parent_net_profit_yoy": 0.33919595,
+            "parent_net_profit_absolute_change_cny": 19593223.97,
+            "statement_gross_margin": 0.20902141,
+            "prior_statement_gross_margin": 0.17522557,
+            "gross_margin_change_pp": 3.379584,
+            "indicator_grossprofit_margin_pct": 20.9021,
+            "deducted_profit_share": 1.2193654,
+            "cfo_to_parent_net_profit": -0.30883691,
+            "cash_collection_ratio": 1.01268702,
+            "accounts_receivable_growth_minus_revenue_growth_pp": 3.480793,
+            "inventory_growth_minus_revenue_growth_pp": -18.615264,
+            "working_capital_intensity": null,
+            "working_capital_calculable_part_cny": 3973591447.2999997,
+            "working_capital_missing_fields": [
+              "contract_assets",
+              "advance_receipts"
+            ],
+            "one_off_profit_share": -0.2193654
+          },
+          "source_refs": [
+            {
+              "dataset": "income_statement",
+              "report_period": "2026-03-31",
+              "source_record_id": "8cd9b756cd5831a2fdd4aec2821334839476fda1c1068d1aa0b72e36ef63d058",
+              "available_at": "2026-04-29 00:00:00+08:00",
+              "payload_hash": "53dfe082e7fe0f528bb9c39b3e2c8372f38cc1957f8d6b744fed079f7e30cbdf",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "income_statement_prior",
+              "report_period": "2025-03-31",
+              "source_record_id": "069c119c100b447bcaed143043a185fc7289161e1aa3ec6d0e50885617c8656d",
+              "available_at": "2025-04-17 00:00:00+08:00",
+              "payload_hash": "7d3e27cdb86e882069eda6fccc2f47c0be3ddaadadab5bf00883fe7d70fbbc72",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "balance_sheet",
+              "report_period": "2026-03-31",
+              "source_record_id": "8cd9b756cd5831a2fdd4aec2821334839476fda1c1068d1aa0b72e36ef63d058",
+              "available_at": "2026-04-29 00:00:00+08:00",
+              "payload_hash": "3325c89e4e2470f83459300ace0345cda069b44f194e94ec5f6ff90ac20308bc",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "balance_sheet_prior",
+              "report_period": "2025-03-31",
+              "source_record_id": "069c119c100b447bcaed143043a185fc7289161e1aa3ec6d0e50885617c8656d",
+              "available_at": "2025-04-17 00:00:00+08:00",
+              "payload_hash": "b4be552795b842fb6691e2acf4a01694f3577ea051819764676ee5c0b6b76249",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "cash_flow",
+              "report_period": "2026-03-31",
+              "source_record_id": "8cd9b756cd5831a2fdd4aec2821334839476fda1c1068d1aa0b72e36ef63d058",
+              "available_at": "2026-04-29 00:00:00+08:00",
+              "payload_hash": "e35fe8dd1ed461e281ac7f4e563d846bd55ac22bf30788ddba355388caf974fb",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "cash_flow_prior",
+              "report_period": "2025-03-31",
+              "source_record_id": "069c119c100b447bcaed143043a185fc7289161e1aa3ec6d0e50885617c8656d",
+              "available_at": "2025-04-17 00:00:00+08:00",
+              "payload_hash": "42b8b39efa146c2a09e788e34fab5b7015ac08bda0872387fe24e4c81585fcf7",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "financial_indicator",
+              "report_period": "2026-03-31",
+              "source_record_id": "2d5783215834d0f33b5cbfb8084acc339147ad4ab02f12c53f15d26922c9f9e2",
+              "available_at": "2026-04-29 00:00:00+08:00",
+              "payload_hash": "e137080f06d909e277d138e9d67a148c33306b73514b70d03b0e6c7a4e2cbbe3",
+              "quality_status": "passed"
+            }
+          ]
+        },
+        "annual_2025": {
+          "period": "2025-12-31",
+          "scope": "company_level_not_theme",
+          "values_cny": {
+            "revenue": 6526685748.76,
+            "prior_revenue": 5030786389.36,
+            "parent_net_profit": 364560225.57,
+            "prior_parent_net_profit": 188890277.36,
+            "deducted_parent_net_profit": 316432095.42,
+            "cfo": 437005614.59,
+            "cash_received_from_sales": 5644303281.68,
+            "capex_cash": 564818782.76,
+            "accounts_receivable": 2801037384.24,
+            "notes_receivable": 167500320.35,
+            "contract_assets": null,
+            "inventory": 1113689067.76,
+            "contract_liabilities": 6158196.87,
+            "advance_receipts": null,
+            "construction_in_progress": 574173367.26,
+            "fixed_assets": 2224824590.89,
+            "cash": 969249296.48,
+            "ttm_revenue": 6526685748.759999
+          },
+          "derived": {
+            "revenue_yoy": 0.29734901,
+            "parent_net_profit_yoy": 0.93001054,
+            "parent_net_profit_absolute_change_cny": 175669948.20999998,
+            "statement_gross_margin": 0.19472016,
+            "prior_statement_gross_margin": 0.19176434,
+            "gross_margin_change_pp": 0.295582,
+            "indicator_grossprofit_margin_pct": 19.472,
+            "deducted_profit_share": 0.86798305,
+            "cfo_to_parent_net_profit": 1.19871995,
+            "cash_collection_ratio": 0.8648039,
+            "accounts_receivable_growth_minus_revenue_growth_pp": 5.367028,
+            "inventory_growth_minus_revenue_growth_pp": -11.069242,
+            "working_capital_intensity": null,
+            "working_capital_calculable_part_cny": 3908568255.13,
+            "working_capital_missing_fields": [
+              "contract_assets",
+              "advance_receipts"
+            ],
+            "one_off_profit_share": 0.13201695
+          },
+          "source_refs": [
+            {
+              "dataset": "income_statement",
+              "report_period": "2025-12-31",
+              "source_record_id": "dabfeeab5e8c0a7dbe1408932b18f1c55886d24fa030fe86e44f3aefea1e8203",
+              "available_at": "2026-04-29 00:00:00+08:00",
+              "payload_hash": "928af0f54ef3a3a177940eed6e916e35e05c5ef1b41dfaad77a19934686808cf",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "income_statement_prior",
+              "report_period": "2024-12-31",
+              "source_record_id": "6a29ae0faf5b3f67b5635dc7e0ed52cfec8cbf40f72b04baf9b037e724f54fb4",
+              "available_at": "2025-04-17 00:00:00+08:00",
+              "payload_hash": "26c7c6aad475fddfc8cc9e3b0496f647b870b7b551844e56952d780655a0c79d",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "balance_sheet",
+              "report_period": "2025-12-31",
+              "source_record_id": "dabfeeab5e8c0a7dbe1408932b18f1c55886d24fa030fe86e44f3aefea1e8203",
+              "available_at": "2026-04-29 00:00:00+08:00",
+              "payload_hash": "b99f3c85ef18c59d34d23f2b6b98b15951686e62b01e976a6145b0e3a3b746c4",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "balance_sheet_prior",
+              "report_period": "2024-12-31",
+              "source_record_id": "6a29ae0faf5b3f67b5635dc7e0ed52cfec8cbf40f72b04baf9b037e724f54fb4",
+              "available_at": "2025-04-17 00:00:00+08:00",
+              "payload_hash": "40087fecc202c4fd250f82417574be7314b57f47fe9fd374707ad100c493b1b6",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "cash_flow",
+              "report_period": "2025-12-31",
+              "source_record_id": "dabfeeab5e8c0a7dbe1408932b18f1c55886d24fa030fe86e44f3aefea1e8203",
+              "available_at": "2026-04-29 00:00:00+08:00",
+              "payload_hash": "8c4b1507fb98fb12ba2f7502c0440462618117975fcffc1bd42dd90ce604f618",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "cash_flow_prior",
+              "report_period": "2024-12-31",
+              "source_record_id": "6a29ae0faf5b3f67b5635dc7e0ed52cfec8cbf40f72b04baf9b037e724f54fb4",
+              "available_at": "2025-04-17 00:00:00+08:00",
+              "payload_hash": "d3365385fb0b893ae71e2219c1127871c2d523bd256183aa910656596e75b58a",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "financial_indicator",
+              "report_period": "2025-12-31",
+              "source_record_id": "3fa0c653f3a0c705b8b1da48b552931ccf9e3eebc9a952fe17b973ff0bbd1591",
+              "available_at": "2026-04-29 00:00:00+08:00",
+              "payload_hash": "0c34ea9260f9636b1ce2b3657f3535cec48dca496528e266cd858754d919839d",
+              "quality_status": "passed"
+            }
+          ]
+        },
+        "alerts": [
+          {
+            "alert": "利润—现金背离",
+            "status": "not_triggered_or_insufficient_two_period_pattern",
+            "evidence": "未出现连续两个可比报告期同时满足收入/利润增长且经营现金流恶化或为负的完整组合。"
+          },
+          {
+            "alert": "营运资金异常",
+            "status": "not_triggered",
+            "evidence": {
+              "latest_ar_minus_revenue_pp": 3.480793,
+              "latest_inventory_minus_revenue_pp": -18.615264,
+              "annual_ar_minus_revenue_pp": 5.367028,
+              "annual_inventory_minus_revenue_pp": -11.069242
+            }
+          },
+          {
+            "alert": "毛利反向",
+            "status": "not_triggered",
+            "evidence": {
+              "latest_company_gross_margin_change_pp": 3.379584
+            }
+          },
+          {
+            "alert": "扩产过快",
+            "status": "unknown_or_not_triggered",
+            "evidence": "合同所需订单覆盖、认证、良率和利用率缺少直接拆分；未把名义项目或单期资本开支自动判定为有效产能。"
+          },
+          {
+            "alert": "一次性利润",
+            "status": "not_triggered",
+            "evidence": {
+              "latest_nonrecurring_share_of_parent_profit": -0.2193654
+            }
+          },
+          {
+            "alert": "客户过度集中",
+            "status": "unknown",
+            "evidence": "未取得可归属于目标液冷业务的单一客户占比。"
+          }
+        ]
+      },
+      "direct_theme_actual": {
+        "calculability": "condition_only",
+        "period": null,
+        "annualized": false,
+        "theme_revenue_cny": null,
+        "theme_cost_cny": null,
+        "theme_gross_profit_cny": null,
+        "theme_gross_margin": null,
+        "theme_revenue_share_TRS": null,
+        "theme_gross_profit_share_TGPS": null,
+        "theme_net_profit_cny": null,
+        "theme_cash_contribution_cny": null,
+        "missing_reasons": {
+          "theme_revenue_cny": "服务器与数据中心散热业务包含多类产品，批量交付未给液冷金额。",
+          "theme_gross_profit_cny": "服务器与数据中心散热业务包含多类产品，批量交付未给液冷金额。",
+          "theme_net_profit_cny": "服务器与数据中心散热业务包含多类产品，批量交付未给液冷金额。",
+          "theme_cash_contribution_cny": "服务器与数据中心散热业务包含多类产品，批量交付未给液冷金额。"
+        },
+        "source_refs": [
+          "05_B2_本地核查.json ENT037.theme_metrics",
+          "07_C1_计算请求.yaml ENT037.must_remain_unknown"
+        ]
+      },
+      "scenarios": {
+        "conservative": {
+          "calculability": "condition_only",
+          "value": null,
+          "plain_condition": "只承认供应合作和部分产品批量交付，不把公司整体增长归为AI液冷。",
+          "source_refs": [
+            "07_C1_计算请求.yaml ENT037.scenarios.conservative",
+            "05_B2_本地核查.json ENT037"
+          ],
+          "missing_reasons": [
+            "液冷订单金额、客户名称和复购次数",
+            "液冷主题收入、产品线毛利、净利润和现金",
+            "AI服务器液冷与储能、汽车、消费电子、通信的准确拆分"
+          ]
+        },
+        "base": {
+          "calculability": "condition_only",
+          "value": null,
+          "plain_condition": "出现液冷产品线收入/毛利拆分，以及同一客户追加或第二客户的正式证据。",
+          "source_refs": [
+            "07_C1_计算请求.yaml ENT037.scenarios.base",
+            "05_B2_本地核查.json ENT037"
+          ],
+          "missing_reasons": [
+            "液冷产品线收入/毛利",
+            "追加订单或第二客户",
+            "AI服务器与储能/汽车拆分"
+          ]
+        },
+        "optimistic": {
+          "calculability": "condition_only",
+          "value": null,
+          "plain_condition": "在基准条件上，良率/利用率与回款改善，液冷主题利润对公司形成实质影响。",
+          "source_refs": [
+            "07_C1_计算请求.yaml ENT037.scenarios.optimistic",
+            "05_B2_本地核查.json ENT037"
+          ],
+          "missing_reasons": [
+            "良率/利用率证据",
+            "主题净利润贡献",
+            "经营现金改善",
+            "客户结构分散"
+          ]
+        }
+      },
+      "reverse_operating_requirements_own_260_sessions": {
+        "status": "calculable",
+        "window": {
+          "start": "2025-08-04",
+          "end": "2026-08-27",
+          "session_count": 260,
+          "quantile_method": "pandas_linear_interpolation",
+          "null_rule": "exclude null, non-finite and non-positive"
+        },
+        "current_market_cap_cny": 26126062380.0,
+        "current_ttm_parent_profit_cny": 451074634.15,
+        "current_ttm_revenue_cny": 6989112739.08,
+        "current_ps_implied_ttm_revenue_cny": 7352412444.42,
+        "ps_implied_vs_financial_ttm_gap": 0.0519808,
+        "pe": {
+          "status": "calculable",
+          "valid_sample_count": 260,
+          "percentiles": {
+            "p25": 51.55885,
+            "p50": 56.0799,
+            "p75": 63.95515
+          },
+          "requirements": {
+            "p25": {
+              "historical_multiple": 51.55885,
+              "implied_ttm_cny": 506723140.26,
+              "required_change_vs_current_ttm": 0.12336873
+            },
+            "p50": {
+              "historical_multiple": 56.0799,
+              "implied_ttm_cny": 465872128.52,
+              "required_change_vs_current_ttm": 0.03280498
+            },
+            "p75": {
+              "historical_multiple": 63.95515,
+              "implied_ttm_cny": 408505998.03,
+              "required_change_vs_current_ttm": -0.0943716
+            }
+          },
+          "missing_reasons": []
+        },
+        "ps": {
+          "status": "calculable",
+          "valid_sample_count": 260,
+          "percentiles": {
+            "p25": 2.971025,
+            "p50": 3.17845,
+            "p75": 3.426475
+          },
+          "requirements": {
+            "p25": {
+              "historical_multiple": 2.971025,
+              "implied_ttm_cny": 8793619165.1,
+              "required_change_vs_current_ttm": 0.2581882
+            },
+            "p50": {
+              "historical_multiple": 3.17845,
+              "implied_ttm_cny": 8219749368.4,
+              "required_change_vs_current_ttm": 0.17607909
+            },
+            "p75": {
+              "historical_multiple": 3.426475,
+              "implied_ttm_cny": 7624763752.84,
+              "required_change_vs_current_ttm": 0.09094874
+            }
+          },
+          "missing_reasons": []
+        },
+        "source_refs": [
+          "05_B2_本地核查.json ENT037.valuation_and_price",
+          "local_fact_manifest_hash=2fcef04e5ff70c7096c626872c0b1bb8c3d76794495f470b2a0066d05baad306"
+        ],
+        "guard": "Own-history operating requirement at current market value only; not an action price or industry-relative return."
+      },
+      "sustainability_and_supply_risk": {
+        "strongest_counterevidence": "2026Q1公司收入和归母利润增长，但经营现金流-0.24亿元；公司业务跨多个场景。",
+        "upgrade_condition": "产品线财务拆分 + 重复订单/第二客户 + 良率与现金证据。",
+        "invalidation_condition": "批量交付没有复购；增长主要来自非目标场景；现金持续为负；标准化和二供导致降价。",
+        "numeric_market_share_sum": null,
+        "missing_reason": "No same-scope additive market-share dataset in B2."
+      },
+      "source_refs": [
+        "05_B2_本地核查.json -> entity_results[record_id=ENT037]",
+        "06_B_交给C阶段.yaml -> entities[record_id=ENT037]"
+      ]
+    },
+    {
+      "record_id": "ENT038",
+      "entity_name": "佳力图",
+      "ts_code": "603912.SH",
+      "relationship_status": "passed_partial_facility_liquid_cooling_relation",
+      "C_route": "restricted_facility_relation_observation",
+      "calculation_permissions": {
+        "company_quality_background": true,
+        "direct_theme_actual": false,
+        "theme_forward_numeric_scenarios": false,
+        "reverse_valuation_own_260d": true,
+        "ownership_only": false,
+        "competition_background_only": false
+      },
+      "company_quality": {
+        "scope": "company_level_not_theme",
+        "latest_comparable": {
+          "period": "2026-03-31",
+          "scope": "company_level_not_theme",
+          "values_cny": {
+            "revenue": 143075831.36,
+            "prior_revenue": 135814436.52,
+            "parent_net_profit": -20252831.42,
+            "prior_parent_net_profit": -12831702.5,
+            "deducted_parent_net_profit": null,
+            "cfo": -40052269.15,
+            "cash_received_from_sales": 162505321.14,
+            "capex_cash": 55683392.52,
+            "accounts_receivable": 355029621.12,
+            "notes_receivable": 7107271.69,
+            "contract_assets": 75792469.94,
+            "inventory": 434858648.97,
+            "contract_liabilities": 82794475.21,
+            "advance_receipts": null,
+            "construction_in_progress": 404910375.16,
+            "fixed_assets": 525493556.52,
+            "cash": 1263498873.87,
+            "ttm_revenue": 745831035.7900001
+          },
+          "derived": {
+            "revenue_yoy": 0.05346556,
+            "parent_net_profit_yoy": 0.57834328,
+            "parent_net_profit_absolute_change_cny": -7421128.92,
+            "statement_gross_margin": 0.09967801,
+            "prior_statement_gross_margin": 0.17875192,
+            "gross_margin_change_pp": -7.907391,
+            "indicator_grossprofit_margin_pct": 9.9678,
+            "deducted_profit_share": null,
+            "cfo_to_parent_net_profit": null,
+            "cash_collection_ratio": 1.13579855,
+            "accounts_receivable_growth_minus_revenue_growth_pp": -7.373711,
+            "inventory_growth_minus_revenue_growth_pp": -15.967074,
+            "working_capital_intensity": null,
+            "working_capital_calculable_part_cny": 782886264.8199999,
+            "working_capital_missing_fields": [
+              "advance_receipts"
+            ],
+            "one_off_profit_share": null
+          },
+          "source_refs": [
+            {
+              "dataset": "income_statement",
+              "report_period": "2026-03-31",
+              "source_record_id": "3e5fa833e1bf5f438aaba237d965c7b25d9b89788d6ea22bf285dfca6a95b277",
+              "available_at": "2026-05-01 00:00:00+08:00",
+              "payload_hash": "8217456a13036f32b82f68aa2905075afba207d702d13fd6e97fa68e03e9a258",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "income_statement_prior",
+              "report_period": "2025-03-31",
+              "source_record_id": "0a556b92416300238ececa7ff184d8219d95abe7380ce2bdfd7d5fa8abbbdefc",
+              "available_at": "2025-05-01 00:00:00+08:00",
+              "payload_hash": "e026a240a22921c3ddac92ccbcedb3643a35c1d61501d298b4c677cc1db9ad1d",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "balance_sheet",
+              "report_period": "2026-03-31",
+              "source_record_id": "3e5fa833e1bf5f438aaba237d965c7b25d9b89788d6ea22bf285dfca6a95b277",
+              "available_at": "2026-05-01 00:00:00+08:00",
+              "payload_hash": "01864f1a7ecd13362525a2c7b1ebfbbfd58caf2d2916d05933eb8a1c0b0e4927",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "balance_sheet_prior",
+              "report_period": "2025-03-31",
+              "source_record_id": "0a556b92416300238ececa7ff184d8219d95abe7380ce2bdfd7d5fa8abbbdefc",
+              "available_at": "2025-05-01 00:00:00+08:00",
+              "payload_hash": "8ed9b94c197870e27f39246d224049543af33424e22243ace7ec2dc9b9766cef",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "cash_flow",
+              "report_period": "2026-03-31",
+              "source_record_id": "3e5fa833e1bf5f438aaba237d965c7b25d9b89788d6ea22bf285dfca6a95b277",
+              "available_at": "2026-05-01 00:00:00+08:00",
+              "payload_hash": "14ac6f546c83e55818208b3f1255e8f0ca85d6d0732dbad600a6541afee7d458",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "cash_flow_prior",
+              "report_period": "2025-03-31",
+              "source_record_id": "0a556b92416300238ececa7ff184d8219d95abe7380ce2bdfd7d5fa8abbbdefc",
+              "available_at": "2025-05-01 00:00:00+08:00",
+              "payload_hash": "741008405aac9541d74b31f9409851df0acbca35ddc41791fbcec540326be472",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "financial_indicator",
+              "report_period": "2026-03-31",
+              "source_record_id": "71f52a61df9ba53e9cf53ffa193e21c1681f3f3217fe6d48c04fab08084c5299",
+              "available_at": "2026-05-01 00:00:00+08:00",
+              "payload_hash": "742816101218371eda2411001a8f7e6cb15cb508f3bc387f46541c26b578c896",
+              "quality_status": "passed"
+            }
+          ]
+        },
+        "annual_2025": {
+          "period": "2025-12-31",
+          "scope": "company_level_not_theme",
+          "values_cny": {
+            "revenue": 738569640.95,
+            "prior_revenue": 805732162.63,
+            "parent_net_profit": -54487971.76,
+            "prior_parent_net_profit": 35859241.8,
+            "deducted_parent_net_profit": -69231093.8,
+            "cfo": -92112985.75,
+            "cash_received_from_sales": 744343830.26,
+            "capex_cash": 220851087.13,
+            "accounts_receivable": 374446084.86,
+            "notes_receivable": 7107271.69,
+            "contract_assets": 69853505.45,
+            "inventory": 401101755.62,
+            "contract_liabilities": 84686419.04,
+            "advance_receipts": null,
+            "construction_in_progress": 441901910.76,
+            "fixed_assets": 442752865.28,
+            "cash": 762423681.93,
+            "ttm_revenue": 738569640.9499999
+          },
+          "derived": {
+            "revenue_yoy": -0.08335589,
+            "parent_net_profit_yoy": -2.51949592,
+            "parent_net_profit_absolute_change_cny": -90347213.56,
+            "statement_gross_margin": 0.14730475,
+            "prior_statement_gross_margin": 0.20900606,
+            "gross_margin_change_pp": -6.170131,
+            "indicator_grossprofit_margin_pct": 14.7305,
+            "deducted_profit_share": null,
+            "cfo_to_parent_net_profit": null,
+            "cash_collection_ratio": 1.00781807,
+            "accounts_receivable_growth_minus_revenue_growth_pp": 4.949845,
+            "inventory_growth_minus_revenue_growth_pp": 0.10181,
+            "working_capital_intensity": null,
+            "working_capital_calculable_part_cny": 760714926.8900001,
+            "working_capital_missing_fields": [
+              "advance_receipts"
+            ],
+            "one_off_profit_share": null
+          },
+          "source_refs": [
+            {
+              "dataset": "income_statement",
+              "report_period": "2025-12-31",
+              "source_record_id": "dea332b983b1fbd68b81d7c227239701d06f24ed91369333ac5181143bc5e78d",
+              "available_at": "2026-03-25 00:00:00+08:00",
+              "payload_hash": "f98cc037dbe2c8c2c2dd70f5a4fe8d9f4eaa271358d50aeb13a503f6c5b5a90f",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "income_statement_prior",
+              "report_period": "2024-12-31",
+              "source_record_id": "6cbd3620b80967987249268c3493d0348ede05f22d4c693401e81011e96b1acf",
+              "available_at": "2025-03-23 00:00:00+08:00",
+              "payload_hash": "182ef91bcdd31d893a3642ba257582da8b503bbc3a81748dedbffeb9e3584b94",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "balance_sheet",
+              "report_period": "2025-12-31",
+              "source_record_id": "dea332b983b1fbd68b81d7c227239701d06f24ed91369333ac5181143bc5e78d",
+              "available_at": "2026-03-25 00:00:00+08:00",
+              "payload_hash": "63a3076bcfab7132b6763ba299a31d9a95af0e34bfad874f53ef708c2c89fd7f",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "balance_sheet_prior",
+              "report_period": "2024-12-31",
+              "source_record_id": "6cbd3620b80967987249268c3493d0348ede05f22d4c693401e81011e96b1acf",
+              "available_at": "2025-03-23 00:00:00+08:00",
+              "payload_hash": "e7701f7f13adc90336ad0e3dc34ebe078474af9eed27ec8590d47319061512cd",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "cash_flow",
+              "report_period": "2025-12-31",
+              "source_record_id": "dea332b983b1fbd68b81d7c227239701d06f24ed91369333ac5181143bc5e78d",
+              "available_at": "2026-03-25 00:00:00+08:00",
+              "payload_hash": "16648a8720ef94dcd1a5d4a3f8d3df30f5864d06447c0a4870c1ffc5bf7e1183",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "cash_flow_prior",
+              "report_period": "2024-12-31",
+              "source_record_id": "6cbd3620b80967987249268c3493d0348ede05f22d4c693401e81011e96b1acf",
+              "available_at": "2025-03-23 00:00:00+08:00",
+              "payload_hash": "85326deb7de14a7618f6412ddd2dadab1c67351af6091254cdc6131e2d17e900",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "financial_indicator",
+              "report_period": "2025-12-31",
+              "source_record_id": "e33822feb3ed2e54b05dbf20363d46b8e1c0cbfe23cb9cb9437250e6bd772e05",
+              "available_at": "2026-03-25 00:00:00+08:00",
+              "payload_hash": "100db16c6921d3094c71ccfa1a7b63ed941136595bcf5972f7a68e4f0f9df86a",
+              "quality_status": "passed"
+            }
+          ]
+        },
+        "alerts": [
+          {
+            "alert": "利润—现金背离",
+            "status": "not_triggered_or_insufficient_two_period_pattern",
+            "evidence": "未出现连续两个可比报告期同时满足收入/利润增长且经营现金流恶化或为负的完整组合。"
+          },
+          {
+            "alert": "营运资金异常",
+            "status": "not_triggered",
+            "evidence": {
+              "latest_ar_minus_revenue_pp": -7.373711,
+              "latest_inventory_minus_revenue_pp": -15.967074,
+              "annual_ar_minus_revenue_pp": 4.949845,
+              "annual_inventory_minus_revenue_pp": 0.10181
+            }
+          },
+          {
+            "alert": "毛利反向",
+            "status": "not_triggered",
+            "evidence": {
+              "latest_company_gross_margin_change_pp": -7.907391
+            }
+          },
+          {
+            "alert": "扩产过快",
+            "status": "unknown_or_not_triggered",
+            "evidence": "合同所需订单覆盖、认证、良率和利用率缺少直接拆分；未把名义项目或单期资本开支自动判定为有效产能。"
+          },
+          {
+            "alert": "一次性利润",
+            "status": "not_applicable_loss_period",
+            "evidence": {
+              "latest_nonrecurring_share_of_parent_profit": null
+            }
+          },
+          {
+            "alert": "客户过度集中",
+            "status": "unknown",
+            "evidence": "未取得可归属于目标液冷业务的单一客户占比。"
+          }
+        ]
+      },
+      "direct_theme_actual": {
+        "calculability": "condition_only",
+        "period": null,
+        "annualized": false,
+        "theme_revenue_cny": null,
+        "theme_cost_cny": null,
+        "theme_gross_profit_cny": null,
+        "theme_gross_margin": null,
+        "theme_revenue_share_TRS": null,
+        "theme_gross_profit_share_TGPS": null,
+        "theme_net_profit_cny": null,
+        "theme_cash_contribution_cny": null,
+        "missing_reasons": {
+          "theme_revenue_cny": "Facility-side relation is accepted, but air cooling, hybrid cooling, IDC operations and ordinary temperature-control revenue are not separately disclosed.",
+          "theme_gross_profit_cny": "Facility-side relation is accepted, but air cooling, hybrid cooling, IDC operations and ordinary temperature-control revenue are not separately disclosed.",
+          "theme_net_profit_cny": "Facility-side relation is accepted, but air cooling, hybrid cooling, IDC operations and ordinary temperature-control revenue are not separately disclosed.",
+          "theme_cash_contribution_cny": "Facility-side relation is accepted, but air cooling, hybrid cooling, IDC operations and ordinary temperature-control revenue are not separately disclosed."
+        },
+        "source_refs": [
+          "05_B2_本地核查.json ENT038.theme_metrics",
+          "07_C1_计算请求.yaml ENT038.must_remain_unknown"
+        ]
+      },
+      "scenarios": {
+        "conservative": {
+          "calculability": "condition_only",
+          "value": null,
+          "plain_condition": "只承认设施侧液冷关系和批量交付，不计算液冷专属收入或利润。",
+          "source_refs": [
+            "07_C1_计算请求.yaml ENT038.scenarios.conservative",
+            "05_B2_本地核查.json ENT038"
+          ],
+          "missing_reasons": [
+            "液冷专属客户和订单金额",
+            "液冷项目验收与复购",
+            "液冷设施侧收入、项目毛利、净利润和现金贡献"
+          ]
+        },
+        "base": {
+          "calculability": "condition_only",
+          "value": null,
+          "plain_condition": "出现液冷设施侧合同/验收收入，且与传统风冷、IDC运营和普通温控分开。",
+          "source_refs": [
+            "07_C1_计算请求.yaml ENT038.scenarios.base",
+            "05_B2_本地核查.json ENT038"
+          ],
+          "missing_reasons": [
+            "液冷设施侧合同/验收",
+            "液冷与传统业务拆分",
+            "项目毛利或回款"
+          ]
+        },
+        "optimistic": {
+          "calculability": "condition_only",
+          "value": null,
+          "plain_condition": "在基准条件上出现重复项目/第二客户，工程毛利与现金质量改善。",
+          "source_refs": [
+            "07_C1_计算请求.yaml ENT038.scenarios.optimistic",
+            "05_B2_本地核查.json ENT038"
+          ],
+          "missing_reasons": [
+            "重复项目或第二客户",
+            "项目毛利稳定",
+            "应收/合同资产受控",
+            "现金改善"
+          ]
+        }
+      },
+      "reverse_operating_requirements_own_260_sessions": {
+        "status": "calculable",
+        "window": {
+          "start": "2025-08-04",
+          "end": "2026-08-27",
+          "session_count": 260,
+          "quantile_method": "pandas_linear_interpolation",
+          "null_rule": "exclude null, non-finite and non-positive"
+        },
+        "current_market_cap_cny": 4880936700.0,
+        "current_ttm_parent_profit_cny": null,
+        "current_ttm_revenue_cny": 745831035.79,
+        "current_ps_implied_ttm_revenue_cny": 719477697.52,
+        "ps_implied_vs_financial_ttm_gap": -0.03533419,
+        "pe": {
+          "status": "not_calculable",
+          "valid_sample_count": 57,
+          "percentiles": null,
+          "requirements": null,
+          "missing_reasons": [
+            "current_pe_ttm_is_null_or_non_positive; replacement is forbidden"
+          ]
+        },
+        "ps": {
+          "status": "calculable",
+          "valid_sample_count": 260,
+          "percentiles": {
+            "p25": 5.574475,
+            "p50": 5.91875,
+            "p75": 6.517575
+          },
+          "requirements": {
+            "p25": {
+              "historical_multiple": 5.574475,
+              "implied_ttm_cny": 875586795.17,
+              "required_change_vs_current_ttm": 0.17397474
+            },
+            "p50": {
+              "historical_multiple": 5.91875,
+              "implied_ttm_cny": 824656675.82,
+              "required_change_vs_current_ttm": 0.10568833
+            },
+            "p75": {
+              "historical_multiple": 6.517575,
+              "implied_ttm_cny": 748888459.28,
+              "required_change_vs_current_ttm": 0.00409935
+            }
+          },
+          "missing_reasons": []
+        },
+        "source_refs": [
+          "05_B2_本地核查.json ENT038.valuation_and_price",
+          "local_fact_manifest_hash=2fcef04e5ff70c7096c626872c0b1bb8c3d76794495f470b2a0066d05baad306"
+        ],
+        "guard": "Own-history operating requirement at current market value only; not an action price or industry-relative return."
+      },
+      "sustainability_and_supply_risk": {
+        "strongest_counterevidence": "2026Q1公司亏损扩大、综合毛利率同比下降7.91个百分点、经营现金流-0.40亿元；均为公司级事实。",
+        "upgrade_condition": "设施侧液冷合同/验收 + 业务拆分 + 重复项目与现金。",
+        "invalidation_condition": "收入主要来自传统温控或IDC运营；项目延期、垫资和应收吞噬利润；风液混合推迟直接液冷投资。",
+        "numeric_market_share_sum": null,
+        "missing_reason": "No same-scope additive market-share dataset in B2."
+      },
+      "source_refs": [
+        "05_B2_本地核查.json -> entity_results[record_id=ENT038]",
+        "06_B_交给C阶段.yaml -> entities[record_id=ENT038]"
+      ]
+    },
+    {
+      "record_id": "ENT039",
+      "entity_name": "高澜股份",
+      "ts_code": "300499.SZ",
+      "relationship_status": "passed_project_relation",
+      "C_route": "core_commercial_company_context",
+      "calculation_permissions": {
+        "company_quality_background": true,
+        "direct_theme_actual": false,
+        "theme_forward_numeric_scenarios": false,
+        "reverse_valuation_own_260d": true,
+        "ownership_only": false,
+        "competition_background_only": false
+      },
+      "company_quality": {
+        "scope": "company_level_not_theme",
+        "latest_comparable": {
+          "period": "2026-03-31",
+          "scope": "company_level_not_theme",
+          "values_cny": {
+            "revenue": 211951834.83,
+            "prior_revenue": 218000373.52,
+            "parent_net_profit": 15140762.55,
+            "prior_parent_net_profit": 12990872.11,
+            "deducted_parent_net_profit": 14243129.2,
+            "cfo": -112480645.3,
+            "cash_received_from_sales": 94182215.54,
+            "capex_cash": 6077149.77,
+            "accounts_receivable": 443570138.1,
+            "notes_receivable": 30183040.66,
+            "contract_assets": 13078535.23,
+            "inventory": 651241874.08,
+            "contract_liabilities": 313435885.81,
+            "advance_receipts": null,
+            "construction_in_progress": 909601.21,
+            "fixed_assets": 196039965.1,
+            "cash": 184636834.09,
+            "ttm_revenue": 983075292.6300001
+          },
+          "derived": {
+            "revenue_yoy": -0.02774554,
+            "parent_net_profit_yoy": 0.16549239,
+            "parent_net_profit_absolute_change_cny": 2149890.44,
+            "statement_gross_margin": 0.30682012,
+            "prior_statement_gross_margin": 0.2514349,
+            "gross_margin_change_pp": 5.538522,
+            "indicator_grossprofit_margin_pct": 30.682,
+            "deducted_profit_share": 0.94071413,
+            "cfo_to_parent_net_profit": -7.42899474,
+            "cash_collection_ratio": 0.44435669,
+            "accounts_receivable_growth_minus_revenue_growth_pp": 24.751458,
+            "inventory_growth_minus_revenue_growth_pp": 75.487725,
+            "working_capital_intensity": null,
+            "working_capital_calculable_part_cny": 794454661.6000001,
+            "working_capital_missing_fields": [
+              "advance_receipts"
+            ],
+            "one_off_profit_share": 0.05928587
+          },
+          "source_refs": [
+            {
+              "dataset": "income_statement",
+              "report_period": "2026-03-31",
+              "source_record_id": "e3cf3e91b25634d695a4cfe69392d6b7d82b6c91ca554d9db530021d78f07f54",
+              "available_at": "2026-04-25 00:00:00+08:00",
+              "payload_hash": "10095d997bcfc8b371fb32b02c8f6be3a8ed3dfbfa5eebf9c6cd75d208d2edee",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "income_statement_prior",
+              "report_period": "2025-03-31",
+              "source_record_id": "5d27d885428bba5f992f86a0f702b82e4b1ed85a178672530b8e272632a3e8f9",
+              "available_at": "2025-04-26 00:00:00+08:00",
+              "payload_hash": "46d5163f45056da3e8a52b6899e329e70c62b35a02e497cc5350d6b10a1cd015",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "balance_sheet",
+              "report_period": "2026-03-31",
+              "source_record_id": "e3cf3e91b25634d695a4cfe69392d6b7d82b6c91ca554d9db530021d78f07f54",
+              "available_at": "2026-04-25 00:00:00+08:00",
+              "payload_hash": "a4f41e884a80fc93008949724c6d5330c49ee7425b945c31418dba8abc06316c",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "balance_sheet_prior",
+              "report_period": "2025-03-31",
+              "source_record_id": "5d27d885428bba5f992f86a0f702b82e4b1ed85a178672530b8e272632a3e8f9",
+              "available_at": "2025-04-26 00:00:00+08:00",
+              "payload_hash": "955d3275df38a34933d6f72e9b87ecacfbf5717bd4b09bbdb357f651c356b14b",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "cash_flow",
+              "report_period": "2026-03-31",
+              "source_record_id": "e3cf3e91b25634d695a4cfe69392d6b7d82b6c91ca554d9db530021d78f07f54",
+              "available_at": "2026-04-25 00:00:00+08:00",
+              "payload_hash": "1386725895b1304f5a685376c4418dad7f678cf91cfe5ffd88d104aa8409a0d9",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "cash_flow_prior",
+              "report_period": "2025-03-31",
+              "source_record_id": "5d27d885428bba5f992f86a0f702b82e4b1ed85a178672530b8e272632a3e8f9",
+              "available_at": "2025-04-26 00:00:00+08:00",
+              "payload_hash": "f5283473783c509a36f774f0744e675e12d59bda3d11b1853b89c52ba68b235e",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "financial_indicator",
+              "report_period": "2026-03-31",
+              "source_record_id": "58d061b03a1bb6beb5865c142797e7455f5176726db16beb6a64cf4960a0bde5",
+              "available_at": "2026-04-25 00:00:00+08:00",
+              "payload_hash": "01d5b4f5cae061d4bbf0099e401000b93af9d7d7eeca3bb8b2180f5610c3c255",
+              "quality_status": "passed"
+            }
+          ]
+        },
+        "annual_2025": {
+          "period": "2025-12-31",
+          "scope": "company_level_not_theme",
+          "values_cny": {
+            "revenue": 989123831.32,
+            "prior_revenue": 691263985.19,
+            "parent_net_profit": 28383086.38,
+            "prior_parent_net_profit": -50322088.12,
+            "deducted_parent_net_profit": 55781819.77,
+            "cfo": 110855883.75,
+            "cash_received_from_sales": 810098354.41,
+            "capex_cash": 25803422.8,
+            "accounts_receivable": 404435977.73,
+            "notes_receivable": 39200339.1,
+            "contract_assets": 10245073.21,
+            "inventory": 546037779.22,
+            "contract_liabilities": 346963738.47,
+            "advance_receipts": null,
+            "construction_in_progress": 1287644.64,
+            "fixed_assets": 197327042.88,
+            "cash": 284089393.3,
+            "ttm_revenue": 989123831.3200002
+          },
+          "derived": {
+            "revenue_yoy": 0.4308916,
+            "parent_net_profit_yoy": -1.56402839,
+            "parent_net_profit_absolute_change_cny": 78705174.5,
+            "statement_gross_margin": 0.28939566,
+            "prior_statement_gross_margin": 0.24026524,
+            "gross_margin_change_pp": 4.913042,
+            "indicator_grossprofit_margin_pct": 28.9396,
+            "deducted_profit_share": 1.96531903,
+            "cfo_to_parent_net_profit": 3.90570223,
+            "cash_collection_ratio": 0.819006,
+            "accounts_receivable_growth_minus_revenue_growth_pp": -33.579537,
+            "inventory_growth_minus_revenue_growth_pp": 8.44919,
+            "working_capital_intensity": null,
+            "working_capital_calculable_part_cny": 613755091.69,
+            "working_capital_missing_fields": [
+              "advance_receipts"
+            ],
+            "one_off_profit_share": -0.96531903
+          },
+          "source_refs": [
+            {
+              "dataset": "income_statement",
+              "report_period": "2025-12-31",
+              "source_record_id": "ad6c71701171d173d35315a2c0b441169539b971047fda046fa618cd33fba500",
+              "available_at": "2026-04-25 00:00:00+08:00",
+              "payload_hash": "9c67200547bb22f463ba1aa04357808c8f8715699a9a405d96d30e06e112507d",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "income_statement_prior",
+              "report_period": "2024-12-31",
+              "source_record_id": "b9cf9277fee079c0a3a83bdabe910867b13245dbe863e639b541c5e171f6e29e",
+              "available_at": "2025-04-26 00:00:00+08:00",
+              "payload_hash": "2798249999f1cba8d13ff1fc0db860434cfa83d2d3638679606f3b32924adacd",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "balance_sheet",
+              "report_period": "2025-12-31",
+              "source_record_id": "ad6c71701171d173d35315a2c0b441169539b971047fda046fa618cd33fba500",
+              "available_at": "2026-04-25 00:00:00+08:00",
+              "payload_hash": "2d0ca552db06b22cab48165367026d566eaa3ab4a27d2e52a499aaa1c99781bb",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "balance_sheet_prior",
+              "report_period": "2024-12-31",
+              "source_record_id": "b9cf9277fee079c0a3a83bdabe910867b13245dbe863e639b541c5e171f6e29e",
+              "available_at": "2025-04-26 00:00:00+08:00",
+              "payload_hash": "44dcea27f2dcdd8521301ca13f39c4d300ea149e6f0f13666d506a0e62efe742",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "cash_flow",
+              "report_period": "2025-12-31",
+              "source_record_id": "ad6c71701171d173d35315a2c0b441169539b971047fda046fa618cd33fba500",
+              "available_at": "2026-04-25 00:00:00+08:00",
+              "payload_hash": "056dd058370b2d4dfff6eb724f3ab7806123c391284e1f06562288b47dd27cb6",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "cash_flow_prior",
+              "report_period": "2024-12-31",
+              "source_record_id": "b9cf9277fee079c0a3a83bdabe910867b13245dbe863e639b541c5e171f6e29e",
+              "available_at": "2025-04-26 00:00:00+08:00",
+              "payload_hash": "a445da8e8be36c346cc50fe8ebbf473ee5e6e5a4b1371e3562918cb053628a9f",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "financial_indicator",
+              "report_period": "2025-12-31",
+              "source_record_id": "66079fdc53865825c2032d2721227239e4d67cf06c50ecd5ff10b503d957d2b0",
+              "available_at": "2026-04-25 00:00:00+08:00",
+              "payload_hash": "436a46a04681d33b23dc1e98c2bc98c5103fc7e2db120be89b72cc92ae91193f",
+              "quality_status": "passed"
+            }
+          ]
+        },
+        "alerts": [
+          {
+            "alert": "利润—现金背离",
+            "status": "not_triggered_or_insufficient_two_period_pattern",
+            "evidence": "未出现连续两个可比报告期同时满足收入/利润增长且经营现金流恶化或为负的完整组合。"
+          },
+          {
+            "alert": "营运资金异常",
+            "status": "not_triggered",
+            "evidence": {
+              "latest_ar_minus_revenue_pp": 24.751458,
+              "latest_inventory_minus_revenue_pp": 75.487725,
+              "annual_ar_minus_revenue_pp": -33.579537,
+              "annual_inventory_minus_revenue_pp": 8.44919
+            }
+          },
+          {
+            "alert": "毛利反向",
+            "status": "not_triggered",
+            "evidence": {
+              "latest_company_gross_margin_change_pp": 5.538522
+            }
+          },
+          {
+            "alert": "扩产过快",
+            "status": "unknown_or_not_triggered",
+            "evidence": "合同所需订单覆盖、认证、良率和利用率缺少直接拆分；未把名义项目或单期资本开支自动判定为有效产能。"
+          },
+          {
+            "alert": "一次性利润",
+            "status": "not_triggered",
+            "evidence": {
+              "latest_nonrecurring_share_of_parent_profit": 0.05928587
+            }
+          },
+          {
+            "alert": "客户过度集中",
+            "status": "not_triggered",
+            "evidence": {
+              "largest_customer_share": 0.1971,
+              "status": "not_triggered",
+              "source": "DOC300499A p30"
+            }
+          }
+        ]
+      },
+      "direct_theme_actual": {
+        "calculability": "condition_only",
+        "period": null,
+        "annualized": false,
+        "theme_revenue_cny": null,
+        "theme_cost_cny": null,
+        "theme_gross_profit_cny": null,
+        "theme_gross_margin": null,
+        "theme_revenue_share_TRS": null,
+        "theme_gross_profit_share_TGPS": null,
+        "theme_net_profit_cny": null,
+        "theme_cash_contribution_cny": null,
+        "missing_reasons": {
+          "theme_revenue_cny": "高功率密度装置热管理同时含储能及其他场景。",
+          "theme_gross_profit_cny": "高功率密度装置热管理同时含储能及其他场景。",
+          "theme_net_profit_cny": "高功率密度装置热管理同时含储能及其他场景。",
+          "theme_cash_contribution_cny": "高功率密度装置热管理同时含储能及其他场景。"
+        },
+        "source_refs": [
+          "05_B2_本地核查.json ENT039.theme_metrics",
+          "07_C1_计算请求.yaml ENT039.must_remain_unknown"
+        ]
+      },
+      "scenarios": {
+        "conservative": {
+          "calculability": "condition_only",
+          "value": null,
+          "plain_condition": "只承认AIDC/海外数据中心项目关系，不把高功率密度分项全部归为液冷。",
+          "source_refs": [
+            "07_C1_计算请求.yaml ENT039.scenarios.conservative",
+            "05_B2_本地核查.json ENT039"
+          ],
+          "missing_reasons": [
+            "高功率密度分项中纯AI数据中心液冷收入和毛利",
+            "液冷专属订单金额、项目验收、净利润和现金贡献"
+          ]
+        },
+        "base": {
+          "calculability": "condition_only",
+          "value": null,
+          "plain_condition": "正式披露可交付订单、验收收入和纯数据中心液冷分项。",
+          "source_refs": [
+            "07_C1_计算请求.yaml ENT039.scenarios.base",
+            "05_B2_本地核查.json ENT039"
+          ],
+          "missing_reasons": [
+            "液冷专属订单/在手订单",
+            "验收收入",
+            "高功率密度分项场景拆分"
+          ]
+        },
+        "optimistic": {
+          "calculability": "condition_only",
+          "value": null,
+          "plain_condition": "在基准条件上出现重复项目/第二客户、项目毛利稳定、合同资产和现金改善。",
+          "source_refs": [
+            "07_C1_计算请求.yaml ENT039.scenarios.optimistic",
+            "05_B2_本地核查.json ENT039"
+          ],
+          "missing_reasons": [
+            "第二客户或重复项目",
+            "项目毛利",
+            "合同资产/应收受控",
+            "经营现金改善"
+          ]
+        }
+      },
+      "reverse_operating_requirements_own_260_sessions": {
+        "status": "calculable",
+        "window": {
+          "start": "2025-08-04",
+          "end": "2026-08-27",
+          "session_count": 260,
+          "quantile_method": "pandas_linear_interpolation",
+          "null_rule": "exclude null, non-finite and non-positive"
+        },
+        "current_market_cap_cny": 9615330900.0,
+        "current_ttm_parent_profit_cny": 31184243.4,
+        "current_ttm_revenue_cny": 983075292.63,
+        "current_ps_implied_ttm_revenue_cny": 1064985811.75,
+        "ps_implied_vs_financial_ttm_gap": 0.0833207,
+        "pe": {
+          "status": "calculable_partial_valid_samples",
+          "valid_sample_count": 206,
+          "percentiles": {
+            "p25": 384.4727,
+            "p50": 5215.8208,
+            "p75": 6152.3821
+          },
+          "requirements": {
+            "p25": {
+              "historical_multiple": 384.4727,
+              "implied_ttm_cny": 25009138.23,
+              "required_change_vs_current_ttm": -0.19802004
+            },
+            "p50": {
+              "historical_multiple": 5215.8208,
+              "implied_ttm_cny": 1843493.34,
+              "required_change_vs_current_ttm": -0.94088382
+            },
+            "p75": {
+              "historical_multiple": 6152.3821,
+              "implied_ttm_cny": 1562863.09,
+              "required_change_vs_current_ttm": -0.94988292
+            }
+          },
+          "missing_reasons": [
+            "54 of 260 sessions excluded because pe_ttm was null, non-finite, or non-positive"
+          ]
+        },
+        "ps": {
+          "status": "calculable",
+          "valid_sample_count": 260,
+          "percentiles": {
+            "p25": 9.20545,
+            "p50": 10.80395,
+            "p75": 12.1694
+          },
+          "requirements": {
+            "p25": {
+              "historical_multiple": 9.20545,
+              "implied_ttm_cny": 1044525894.99,
+              "required_change_vs_current_ttm": 0.06250854
+            },
+            "p50": {
+              "historical_multiple": 10.80395,
+              "implied_ttm_cny": 889982913.66,
+              "required_change_vs_current_ttm": -0.09469507
+            },
+            "p75": {
+              "historical_multiple": 12.1694,
+              "implied_ttm_cny": 790123662.63,
+              "required_change_vs_current_ttm": -0.1962735
+            }
+          },
+          "missing_reasons": []
+        },
+        "source_refs": [
+          "05_B2_本地核查.json ENT039.valuation_and_price",
+          "local_fact_manifest_hash=2fcef04e5ff70c7096c626872c0b1bb8c3d76794495f470b2a0066d05baad306"
+        ],
+        "guard": "Own-history operating requirement at current market value only; not an action price or industry-relative return."
+      },
+      "sustainability_and_supply_risk": {
+        "strongest_counterevidence": "2026Q1经营现金流-1.12亿元，应收和存货增速明显高于收入；高功率密度分项混有其他场景。",
+        "upgrade_condition": "液冷专属订单 + 验收收入 + 重复项目 + 现金。",
+        "invalidation_condition": "项目长期不验收；混合场景被误算；应收/库存继续异常；海外项目成本或变更吞噬毛利。",
+        "numeric_market_share_sum": null,
+        "missing_reason": "No same-scope additive market-share dataset in B2."
+      },
+      "source_refs": [
+        "05_B2_本地核查.json -> entity_results[record_id=ENT039]",
+        "06_B_交给C阶段.yaml -> entities[record_id=ENT039]"
+      ]
+    },
+    {
+      "record_id": "A2L007",
+      "entity_name": "荣亿精密",
+      "ts_code": "920223.BJ",
+      "relationship_status": "passed_direct_mass_production_relationship",
+      "C_route": "restricted_new_entrant_observation",
+      "calculation_permissions": {
+        "company_quality_background": true,
+        "direct_theme_actual": false,
+        "theme_forward_numeric_scenarios": false,
+        "reverse_valuation_own_260d": true,
+        "ownership_only": false,
+        "competition_background_only": false
+      },
+      "company_quality": {
+        "scope": "company_level_not_theme",
+        "latest_comparable": {
+          "period": "2026-06-30",
+          "scope": "company_level_not_theme",
+          "values_cny": {
+            "revenue": 251593472.13,
+            "prior_revenue": 192647742.19,
+            "parent_net_profit": -11227238.47,
+            "prior_parent_net_profit": -5223845.94,
+            "deducted_parent_net_profit": -13249679.1,
+            "cfo": -35689596.59,
+            "cash_received_from_sales": 202289328.6,
+            "capex_cash": 20110140.93,
+            "accounts_receivable": 230325051.11,
+            "notes_receivable": 21228551.06,
+            "contract_assets": null,
+            "inventory": 65772572.4,
+            "contract_liabilities": 361848.4,
+            "advance_receipts": null,
+            "construction_in_progress": 22985998.97,
+            "fixed_assets": 209750853.44,
+            "cash": 31831945.02,
+            "ttm_revenue": 493677805.81
+          },
+          "derived": {
+            "revenue_yoy": 0.30597675,
+            "parent_net_profit_yoy": 1.14922848,
+            "parent_net_profit_absolute_change_cny": -6003392.53,
+            "statement_gross_margin": 0.09956884,
+            "prior_statement_gross_margin": 0.13636588,
+            "gross_margin_change_pp": -3.679704,
+            "indicator_grossprofit_margin_pct": 9.9569,
+            "deducted_profit_share": null,
+            "cfo_to_parent_net_profit": null,
+            "cash_collection_ratio": 0.8040325,
+            "accounts_receivable_growth_minus_revenue_growth_pp": 7.142276,
+            "inventory_growth_minus_revenue_growth_pp": 4.285915,
+            "working_capital_intensity": null,
+            "working_capital_calculable_part_cny": 295735775.11,
+            "working_capital_missing_fields": [
+              "contract_assets",
+              "advance_receipts"
+            ],
+            "one_off_profit_share": null
+          },
+          "source_refs": [
+            {
+              "dataset": "income_statement",
+              "report_period": "2026-06-30",
+              "source_record_id": "a53d365b7c5732dc2c6f017d9299701c44e9ad696aaa4d62db4ec91506ef256a",
+              "available_at": "2026-08-26 00:00:00+08:00",
+              "payload_hash": "5a267680eb666d79d518982a64f1a23a4769cb4b9c1b8a9bae8e113c00dd1081",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "income_statement_prior",
+              "report_period": "2025-06-30",
+              "source_record_id": "e5a647474bc698a2d871b1558a8e36f9cea9eb395cef4371c6ee61b1f98c9940",
+              "available_at": "2025-08-24 00:00:00+08:00",
+              "payload_hash": "18b842d3f50cc6672e7bf41eccfbfbaf284f6526c923fd9de2f098fb88868620",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "balance_sheet",
+              "report_period": "2026-06-30",
+              "source_record_id": "a53d365b7c5732dc2c6f017d9299701c44e9ad696aaa4d62db4ec91506ef256a",
+              "available_at": "2026-08-26 00:00:00+08:00",
+              "payload_hash": "c54ab8a09e82b2fa0aa42a2bb71c43613f9513029bf7c985242cb6c2de915cdb",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "balance_sheet_prior",
+              "report_period": "2025-06-30",
+              "source_record_id": "e5a647474bc698a2d871b1558a8e36f9cea9eb395cef4371c6ee61b1f98c9940",
+              "available_at": "2026-08-26 16:43:17.833149+08:00",
+              "payload_hash": "ffea118195f4a4e88de45fca8a3ddea3a307d18fb0b01921ed3497c51d01e9f8",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "cash_flow",
+              "report_period": "2026-06-30",
+              "source_record_id": "a53d365b7c5732dc2c6f017d9299701c44e9ad696aaa4d62db4ec91506ef256a",
+              "available_at": "2026-08-26 00:00:00+08:00",
+              "payload_hash": "d1d36d3f264551a972e61f2837345a5b5c54c43ee77b206bb70f6e23e63f81c1",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "cash_flow_prior",
+              "report_period": "2025-06-30",
+              "source_record_id": "e5a647474bc698a2d871b1558a8e36f9cea9eb395cef4371c6ee61b1f98c9940",
+              "available_at": "2025-08-24 00:00:00+08:00",
+              "payload_hash": "af7ee5df78be326593d4a2d81c5d454de2d2e844dd300c84760548e9d8060cb5",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "financial_indicator",
+              "report_period": "2026-06-30",
+              "source_record_id": "8240ffe1bd69cd561af44c39c6198d1c1c59515d35c9d202f36ee1ec91ecc4f8",
+              "available_at": "2026-08-26 00:00:00+08:00",
+              "payload_hash": "f27ed98dfed5360d2ae914ae4263410a9562d8e472a0b3a271d11529e5c94715",
+              "quality_status": "passed"
+            }
+          ]
+        },
+        "annual_2025": {
+          "period": "2025-12-31",
+          "scope": "company_level_not_theme",
+          "values_cny": {
+            "revenue": 434732075.87,
+            "prior_revenue": 288206549.38,
+            "parent_net_profit": -19708965.55,
+            "prior_parent_net_profit": -30723539.81,
+            "deducted_parent_net_profit": -20935662.99,
+            "cfo": -59653584.44,
+            "cash_received_from_sales": 316048984.31,
+            "capex_cash": 9279267.25,
+            "accounts_receivable": 222015428.11,
+            "notes_receivable": 12129812.51,
+            "contract_assets": null,
+            "inventory": 69347945.04,
+            "contract_liabilities": 363876.09,
+            "advance_receipts": null,
+            "construction_in_progress": 6756830.96,
+            "fixed_assets": 196732277.83,
+            "cash": 40956152.64,
+            "ttm_revenue": 434732075.87
+          },
+          "derived": {
+            "revenue_yoy": 0.50840457,
+            "parent_net_profit_yoy": -0.35850603,
+            "parent_net_profit_absolute_change_cny": 11014574.26,
+            "statement_gross_margin": 0.13063698,
+            "prior_statement_gross_margin": 0.09380481,
+            "gross_margin_change_pp": 3.683217,
+            "indicator_grossprofit_margin_pct": 13.0637,
+            "deducted_profit_share": null,
+            "cfo_to_parent_net_profit": null,
+            "cash_collection_ratio": 0.72699716,
+            "accounts_receivable_growth_minus_revenue_growth_pp": 8.704778,
+            "inventory_growth_minus_revenue_growth_pp": 1.426286,
+            "working_capital_intensity": null,
+            "working_capital_calculable_part_cny": 290999497.06000006,
+            "working_capital_missing_fields": [
+              "contract_assets",
+              "advance_receipts"
+            ],
+            "one_off_profit_share": null
+          },
+          "source_refs": [
+            {
+              "dataset": "income_statement",
+              "report_period": "2025-12-31",
+              "source_record_id": "08a3755ff328d628d27cf3a8b64a4a793213ae88fd774415813de609448109db",
+              "available_at": "2026-04-17 00:00:00+08:00",
+              "payload_hash": "5b698a3f670aa15b99a2f6bfb3b5bc957df884fef22719ce087f4f6054da3ecd",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "income_statement_prior",
+              "report_period": "2024-12-31",
+              "source_record_id": "9e51f8b9af2ee4926ef60d38d9ed80b7fde5b25249776b768dce7566daadc496",
+              "available_at": "2025-04-27 00:00:00+08:00",
+              "payload_hash": "5e2f4ab159f41395a3bbba5e008351c02e0081865e0461e12da6b9955e356c0d",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "balance_sheet",
+              "report_period": "2025-12-31",
+              "source_record_id": "08a3755ff328d628d27cf3a8b64a4a793213ae88fd774415813de609448109db",
+              "available_at": "2026-04-17 00:00:00+08:00",
+              "payload_hash": "ab9f1804bf6b4c82e1c9051afbe1c400147aec1430fc38f81d771aba3f9745d2",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "balance_sheet_prior",
+              "report_period": "2024-12-31",
+              "source_record_id": "9e51f8b9af2ee4926ef60d38d9ed80b7fde5b25249776b768dce7566daadc496",
+              "available_at": "2025-04-27 00:00:00+08:00",
+              "payload_hash": "bbf9245ae69169458fe6febf5af1acacffa839d57a17de5262fdccbec00c3d6e",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "cash_flow",
+              "report_period": "2025-12-31",
+              "source_record_id": "08a3755ff328d628d27cf3a8b64a4a793213ae88fd774415813de609448109db",
+              "available_at": "2026-08-26 16:43:58.365478+08:00",
+              "payload_hash": "4cad82dcb89048a79ae04cf546228a1e9335cd5b6b47fcc206fbe13db7bc2f0a",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "cash_flow_prior",
+              "report_period": "2024-12-31",
+              "source_record_id": "9e51f8b9af2ee4926ef60d38d9ed80b7fde5b25249776b768dce7566daadc496",
+              "available_at": "2026-08-26 16:43:48.291545+08:00",
+              "payload_hash": "07e21f176404d1335905fb2f68bf2ab3e3e7a4d7c6dc20e5fc6f57b3a52e9c83",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "financial_indicator",
+              "report_period": "2025-12-31",
+              "source_record_id": "612c39320d16a120c60ecd36cbb2bcc20a879feb422f331e3232e0ca1b33f188",
+              "available_at": "2026-04-17 00:00:00+08:00",
+              "payload_hash": "eeebbb95006921552c9d1f27c94f0c6bc7d0f88d29ab6d0c85cedfb9da111221",
+              "quality_status": "passed"
+            }
+          ]
+        },
+        "alerts": [
+          {
+            "alert": "利润—现金背离",
+            "status": "not_triggered_or_insufficient_two_period_pattern",
+            "evidence": "未出现连续两个可比报告期同时满足收入/利润增长且经营现金流恶化或为负的完整组合。"
+          },
+          {
+            "alert": "营运资金异常",
+            "status": "not_triggered",
+            "evidence": {
+              "latest_ar_minus_revenue_pp": 7.142276,
+              "latest_inventory_minus_revenue_pp": 4.285915,
+              "annual_ar_minus_revenue_pp": 8.704778,
+              "annual_inventory_minus_revenue_pp": 1.426286
+            }
+          },
+          {
+            "alert": "毛利反向",
+            "status": "partial_theme_relation_unverified",
+            "evidence": {
+              "latest_company_gross_margin_change_pp": -3.679704
+            }
+          },
+          {
+            "alert": "扩产过快",
+            "status": "unknown_or_not_triggered",
+            "evidence": "合同所需订单覆盖、认证、良率和利用率缺少直接拆分；未把名义项目或单期资本开支自动判定为有效产能。"
+          },
+          {
+            "alert": "一次性利润",
+            "status": "not_applicable_loss_period",
+            "evidence": {
+              "latest_nonrecurring_share_of_parent_profit": null
+            }
+          },
+          {
+            "alert": "客户过度集中",
+            "status": "unknown",
+            "evidence": "未取得可归属于目标液冷业务的单一客户占比。"
+          }
+        ]
+      },
+      "direct_theme_actual": {
+        "calculability": "condition_only",
+        "period": null,
+        "annualized": false,
+        "theme_revenue_cny": null,
+        "theme_cost_cny": null,
+        "theme_gross_profit_cny": null,
+        "theme_gross_margin": null,
+        "theme_revenue_share_TRS": null,
+        "theme_gross_profit_share_TGPS": null,
+        "theme_net_profit_cny": null,
+        "theme_cash_contribution_cny": null,
+        "missing_reasons": {
+          "theme_revenue_cny": "Quick-connector mass-production relation is accepted, but mixed 3C revenue is not a liquid-cooling split.",
+          "theme_gross_profit_cny": "Quick-connector mass-production relation is accepted, but mixed 3C revenue is not a liquid-cooling split.",
+          "theme_net_profit_cny": "Quick-connector mass-production relation is accepted, but mixed 3C revenue is not a liquid-cooling split.",
+          "theme_cash_contribution_cny": "Quick-connector mass-production relation is accepted, but mixed 3C revenue is not a liquid-cooling split."
+        },
+        "source_refs": [
+          "05_B2_本地核查.json A2L007.theme_metrics",
+          "07_C1_计算请求.yaml A2L007.must_remain_unknown"
+        ]
+      },
+      "scenarios": {
+        "conservative": {
+          "calculability": "condition_only",
+          "value": null,
+          "plain_condition": "只承认量产和客户关系，不把3C混合收入或项目投资视为液冷收入/有效产能。",
+          "source_refs": [
+            "07_C1_计算请求.yaml A2L007.scenarios.conservative",
+            "05_B2_本地核查.json A2L007"
+          ],
+          "missing_reasons": [
+            "液冷订单金额、复购次数和客户集中度",
+            "液冷收入、毛利、净利润和现金",
+            "良率、认证通过率、有效产能和利用率"
+          ]
+        },
+        "base": {
+          "calculability": "condition_only",
+          "value": null,
+          "plain_condition": "出现液冷快接直接收入/交易金额，产能利用或良率证据，并确认重复交付。",
+          "source_refs": [
+            "07_C1_计算请求.yaml A2L007.scenarios.base",
+            "05_B2_本地核查.json A2L007"
+          ],
+          "missing_reasons": [
+            "液冷直接收入或客户交易金额",
+            "复购/重复交付",
+            "良率/有效产能"
+          ]
+        },
+        "optimistic": {
+          "calculability": "condition_only",
+          "value": null,
+          "plain_condition": "在基准条件上出现第二客户、毛利改善和现金爬坡完成。",
+          "source_refs": [
+            "07_C1_计算请求.yaml A2L007.scenarios.optimistic",
+            "05_B2_本地核查.json A2L007"
+          ],
+          "missing_reasons": [
+            "第二客户",
+            "主题毛利改善",
+            "有效产能利用率",
+            "经营现金改善"
+          ]
+        }
+      },
+      "reverse_operating_requirements_own_260_sessions": {
+        "status": "calculable",
+        "window": {
+          "start": "2025-08-04",
+          "end": "2026-08-27",
+          "session_count": 260,
+          "quantile_method": "pandas_linear_interpolation",
+          "null_rule": "exclude null, non-finite and non-positive"
+        },
+        "current_market_cap_cny": 1695532300.0,
+        "current_ttm_parent_profit_cny": null,
+        "current_ttm_revenue_cny": 493677805.81,
+        "current_ps_implied_ttm_revenue_cny": 493676605.04,
+        "ps_implied_vs_financial_ttm_gap": -2.43e-06,
+        "pe": {
+          "status": "not_calculable",
+          "valid_sample_count": 0,
+          "percentiles": null,
+          "requirements": null,
+          "missing_reasons": [
+            "current_pe_ttm_is_null_or_non_positive; replacement is forbidden"
+          ]
+        },
+        "ps": {
+          "status": "calculable",
+          "valid_sample_count": 260,
+          "percentiles": {
+            "p25": 5.320775,
+            "p50": 6.64975,
+            "p75": 8.637725
+          },
+          "requirements": {
+            "p25": {
+              "historical_multiple": 5.320775,
+              "implied_ttm_cny": 318662657.23,
+              "required_change_vs_current_ttm": -0.3545129
+            },
+            "p50": {
+              "historical_multiple": 6.64975,
+              "implied_ttm_cny": 254976848.75,
+              "required_change_vs_current_ttm": -0.48351567
+            },
+            "p75": {
+              "historical_multiple": 8.637725,
+              "implied_ttm_cny": 196293850.52,
+              "required_change_vs_current_ttm": -0.6023847
+            }
+          },
+          "missing_reasons": []
+        },
+        "source_refs": [
+          "05_B2_本地核查.json A2L007.valuation_and_price",
+          "local_fact_manifest_hash=2fcef04e5ff70c7096c626872c0b1bb8c3d76794495f470b2a0066d05baad306"
+        ],
+        "guard": "Own-history operating requirement at current market value only; not an action price or industry-relative return."
+      },
+      "sustainability_and_supply_risk": {
+        "strongest_counterevidence": "2026H1公司仍亏损约0.11亿元、经营现金流-0.36亿元、综合毛利率同比下降3.68个百分点；液冷规模和利润重要性未拆。",
+        "upgrade_condition": "直接主题收入 + 重复交付/第二客户 + 良率/有效产能 + 毛利与现金。",
+        "invalidation_condition": "扩产项目未按期形成有效产能；客户过度集中；低毛利/亏损延续；接口标准化降低稀缺性。",
+        "numeric_market_share_sum": null,
+        "missing_reason": "No same-scope additive market-share dataset in B2."
+      },
+      "source_refs": [
+        "05_B2_本地核查.json -> entity_results[record_id=A2L007]",
+        "06_B_交给C阶段.yaml -> entities[record_id=A2L007]"
+      ]
+    },
+    {
+      "record_id": "ENT040",
+      "entity_name": "同飞股份",
+      "ts_code": "300990.SZ",
+      "relationship_status": "not_passed_hard_relation_gate",
+      "C_route": "capability_competition_background_only",
+      "calculation_permissions": {
+        "company_quality_background": true,
+        "direct_theme_actual": false,
+        "theme_forward_numeric_scenarios": false,
+        "reverse_valuation_own_260d": false,
+        "ownership_only": false,
+        "competition_background_only": true
+      },
+      "company_quality": {
+        "scope": "competition_background_only_company_level_not_theme",
+        "latest_comparable": {
+          "period": "2026-03-31",
+          "scope": "company_level_not_theme",
+          "values_cny": {
+            "revenue": 698648608.86,
+            "prior_revenue": 573620262.98,
+            "parent_net_profit": 59774437.93,
+            "prior_parent_net_profit": 61906853.08,
+            "deducted_parent_net_profit": 59139496.96,
+            "cfo": 143393446.04,
+            "cash_received_from_sales": 387208721.14,
+            "capex_cash": 6798786.09,
+            "accounts_receivable": 867161404.94,
+            "notes_receivable": 1193790.19,
+            "contract_assets": 31298638.89,
+            "inventory": 318712139.96,
+            "contract_liabilities": 28663461.78,
+            "advance_receipts": null,
+            "construction_in_progress": 10525576.47,
+            "fixed_assets": 596781252.81,
+            "cash": 572916773.29,
+            "ttm_revenue": 2992511693.9
+          },
+          "derived": {
+            "revenue_yoy": 0.21796361,
+            "parent_net_profit_yoy": -0.03444554,
+            "parent_net_profit_absolute_change_cny": -2132415.15,
+            "statement_gross_margin": 0.22787328,
+            "prior_statement_gross_margin": 0.25448164,
+            "gross_margin_change_pp": -2.660836,
+            "indicator_grossprofit_margin_pct": 22.7873,
+            "deducted_profit_share": 0.98937772,
+            "cfo_to_parent_net_profit": 2.39890915,
+            "cash_collection_ratio": 0.55422528,
+            "accounts_receivable_growth_minus_revenue_growth_pp": -12.572612,
+            "inventory_growth_minus_revenue_growth_pp": -29.536413,
+            "working_capital_intensity": null,
+            "working_capital_calculable_part_cny": 1188508722.01,
+            "working_capital_missing_fields": [
+              "advance_receipts"
+            ],
+            "one_off_profit_share": 0.01062228
+          },
+          "source_refs": [
+            {
+              "dataset": "income_statement",
+              "report_period": "2026-03-31",
+              "source_record_id": "db1fbece2ebf44456118e7a8e00e647421b7d9b45c86e3a8bc7b56e8586fecf6",
+              "available_at": "2026-04-25 00:00:00+08:00",
+              "payload_hash": "d43d62e21aa288f13a820c72be72a3f7de3212c898746ffff5396f0511d13806",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "income_statement_prior",
+              "report_period": "2025-03-31",
+              "source_record_id": "bd2dbb2f18336f4de79a82e2cf1b70c34f53e7c5f5f08a72efe5075e0e0b1a07",
+              "available_at": "2025-04-19 00:00:00+08:00",
+              "payload_hash": "7ecfc127e44044f098297243b0267a9749d6fe76fab6e47a8037c6f902278701",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "balance_sheet",
+              "report_period": "2026-03-31",
+              "source_record_id": "db1fbece2ebf44456118e7a8e00e647421b7d9b45c86e3a8bc7b56e8586fecf6",
+              "available_at": "2026-04-25 00:00:00+08:00",
+              "payload_hash": "8deb9d4485b0db1c62ba49052bb7c9f3e99c759ef1a72679a2d002f7a97306f2",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "balance_sheet_prior",
+              "report_period": "2025-03-31",
+              "source_record_id": "bd2dbb2f18336f4de79a82e2cf1b70c34f53e7c5f5f08a72efe5075e0e0b1a07",
+              "available_at": "2025-04-19 00:00:00+08:00",
+              "payload_hash": "d42b3cc6e20c7f99e3bc6c9689ed7240603ea4497a0fb94530ec6b2df1254fa4",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "cash_flow",
+              "report_period": "2026-03-31",
+              "source_record_id": "db1fbece2ebf44456118e7a8e00e647421b7d9b45c86e3a8bc7b56e8586fecf6",
+              "available_at": "2026-04-25 00:00:00+08:00",
+              "payload_hash": "ecc5b415a2bf1d2734b0da3ef328fd31d68a922007d12954a3f25d916de0c855",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "cash_flow_prior",
+              "report_period": "2025-03-31",
+              "source_record_id": "bd2dbb2f18336f4de79a82e2cf1b70c34f53e7c5f5f08a72efe5075e0e0b1a07",
+              "available_at": "2025-04-19 00:00:00+08:00",
+              "payload_hash": "c7e4c1a7d470111ddb7e1c7d0026636308b0caeb291cf8eb000826799f041a5e",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "financial_indicator",
+              "report_period": "2026-03-31",
+              "source_record_id": "b82d97ff81d495e1ef6374537aa407fff8835b7e776c2bd1a5181dea41b421ce",
+              "available_at": "2026-04-25 00:00:00+08:00",
+              "payload_hash": "777e7d3b954c6e649ceee511c14665b4434d9b8caacd7ec715c5ed4e1f3f58ee",
+              "quality_status": "passed"
+            }
+          ]
+        },
+        "annual_2025": {
+          "period": "2025-12-31",
+          "scope": "company_level_not_theme",
+          "values_cny": {
+            "revenue": 2867483348.02,
+            "prior_revenue": 2160074424.38,
+            "parent_net_profit": 252903184.27,
+            "prior_parent_net_profit": 153427727.02,
+            "deducted_parent_net_profit": 247849301.26,
+            "cfo": 189432640.19,
+            "cash_received_from_sales": 1197574596.74,
+            "capex_cash": 26233119.94,
+            "accounts_receivable": 873163352.89,
+            "notes_receivable": 560938.26,
+            "contract_assets": 31441283.99,
+            "inventory": 279077131.14,
+            "contract_liabilities": 23825835.26,
+            "advance_receipts": null,
+            "construction_in_progress": 7118759.78,
+            "fixed_assets": 604688500.93,
+            "cash": 476038172.4,
+            "ttm_revenue": 2867483348.0199995
+          },
+          "derived": {
+            "revenue_yoy": 0.32749285,
+            "parent_net_profit_yoy": 0.64835385,
+            "parent_net_profit_absolute_change_cny": 99475457.25,
+            "statement_gross_margin": 0.22313693,
+            "prior_statement_gross_margin": 0.22059807,
+            "gross_margin_change_pp": 0.253886,
+            "indicator_grossprofit_margin_pct": 22.3137,
+            "deducted_profit_share": 0.98001653,
+            "cfo_to_parent_net_profit": 0.74903225,
+            "cash_collection_ratio": 0.4176396,
+            "accounts_receivable_growth_minus_revenue_growth_pp": -29.608595,
+            "inventory_growth_minus_revenue_growth_pp": -44.759298,
+            "working_capital_intensity": null,
+            "working_capital_calculable_part_cny": 1159855932.76,
+            "working_capital_missing_fields": [
+              "advance_receipts"
+            ],
+            "one_off_profit_share": 0.01998347
+          },
+          "source_refs": [
+            {
+              "dataset": "income_statement",
+              "report_period": "2025-12-31",
+              "source_record_id": "6e5070b9f011a9dfdf4404576a4fd4fb3fea6b76ddbd1f64f45000ec2952ff58",
+              "available_at": "2026-04-02 00:00:00+08:00",
+              "payload_hash": "1df5647ec8494d9809172b5229e2a14e4f6cdf2732df01ad02b6215da879257a",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "income_statement_prior",
+              "report_period": "2024-12-31",
+              "source_record_id": "c279bbce93c8ace18e3adf169c27a9ad37029ab86c6d63225a57868cd9ea0f69",
+              "available_at": "2025-04-19 00:00:00+08:00",
+              "payload_hash": "844afe4a37a3112b0828db161a4964078130655cdc38e63e956e7bbbed55b8a1",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "balance_sheet",
+              "report_period": "2025-12-31",
+              "source_record_id": "6e5070b9f011a9dfdf4404576a4fd4fb3fea6b76ddbd1f64f45000ec2952ff58",
+              "available_at": "2026-04-02 00:00:00+08:00",
+              "payload_hash": "89a92357946392ff77c05bfd1642fcaf351bad6c923aa0683a5399b781866cd6",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "balance_sheet_prior",
+              "report_period": "2024-12-31",
+              "source_record_id": "c279bbce93c8ace18e3adf169c27a9ad37029ab86c6d63225a57868cd9ea0f69",
+              "available_at": "2025-04-19 00:00:00+08:00",
+              "payload_hash": "b8523f320952b666e7d5fe0a7995844230a4e061ac082e7a0477f36bbda10c8d",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "cash_flow",
+              "report_period": "2025-12-31",
+              "source_record_id": "6e5070b9f011a9dfdf4404576a4fd4fb3fea6b76ddbd1f64f45000ec2952ff58",
+              "available_at": "2026-04-02 00:00:00+08:00",
+              "payload_hash": "035ca5b4cae6f5e674985c1f27e4c317904b54b5bd38bd5d273f16ef38da26b0",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "cash_flow_prior",
+              "report_period": "2024-12-31",
+              "source_record_id": "c279bbce93c8ace18e3adf169c27a9ad37029ab86c6d63225a57868cd9ea0f69",
+              "available_at": "2025-04-19 00:00:00+08:00",
+              "payload_hash": "14e3b2b143e5eb41d1af778d3f4b9e569f2956a416061f4946ea1f8eb8cb0d12",
+              "quality_status": "passed"
+            },
+            {
+              "dataset": "financial_indicator",
+              "report_period": "2025-12-31",
+              "source_record_id": "1fd7a78cecaf8b2e1df5acc5d73a45d8c33f6aaf6d77fd06e865e538babae527",
+              "available_at": "2026-04-02 00:00:00+08:00",
+              "payload_hash": "1bdb7780ac546d61b3a9f1f42ce9b08407cb7c98f47b83a2aca7bebf6ebb522f",
+              "quality_status": "passed"
+            }
+          ]
+        },
+        "alerts": [
+          {
+            "alert": "利润—现金背离",
+            "status": "not_triggered_or_insufficient_two_period_pattern",
+            "evidence": "未出现连续两个可比报告期同时满足收入/利润增长且经营现金流恶化或为负的完整组合。"
+          },
+          {
+            "alert": "营运资金异常",
+            "status": "not_triggered",
+            "evidence": {
+              "latest_ar_minus_revenue_pp": -12.572612,
+              "latest_inventory_minus_revenue_pp": -29.536413,
+              "annual_ar_minus_revenue_pp": -29.608595,
+              "annual_inventory_minus_revenue_pp": -44.759298
+            }
+          },
+          {
+            "alert": "毛利反向",
+            "status": "not_triggered",
+            "evidence": {
+              "latest_company_gross_margin_change_pp": -2.660836
+            }
+          },
+          {
+            "alert": "扩产过快",
+            "status": "unknown_or_not_triggered",
+            "evidence": "合同所需订单覆盖、认证、良率和利用率缺少直接拆分；未把名义项目或单期资本开支自动判定为有效产能。"
+          },
+          {
+            "alert": "一次性利润",
+            "status": "not_triggered",
+            "evidence": {
+              "latest_nonrecurring_share_of_parent_profit": 0.01062228
+            }
+          },
+          {
+            "alert": "客户过度集中",
+            "status": "unknown",
+            "evidence": "未取得可归属于目标液冷业务的单一客户占比。"
+          }
+        ]
+      },
+      "direct_theme_actual": {
+        "calculability": "not_applicable",
+        "period": null,
+        "annualized": false,
+        "theme_revenue_cny": null,
+        "theme_cost_cny": null,
+        "theme_gross_profit_cny": null,
+        "theme_gross_margin": null,
+        "theme_revenue_share_TRS": null,
+        "theme_gross_profit_share_TGPS": null,
+        "theme_net_profit_cny": null,
+        "theme_cash_contribution_cny": null,
+        "missing_reasons": {
+          "theme_revenue_cny": "Capability/competition background only; the hard commercial relationship gate did not pass.",
+          "theme_gross_profit_cny": "Capability/competition background only; the hard commercial relationship gate did not pass.",
+          "theme_net_profit_cny": "Capability/competition background only; the hard commercial relationship gate did not pass.",
+          "theme_cash_contribution_cny": "Capability/competition background only; the hard commercial relationship gate did not pass."
+        },
+        "source_refs": [
+          "05_B2_本地核查.json ENT040.theme_metrics",
+          "07_C1_计算请求.yaml ENT040.must_remain_unknown"
+        ]
+      },
+      "scenarios": {
+        "conservative": {
+          "calculability": "not_applicable",
+          "value": null,
+          "plain_condition": "仅作为能力与潜在供给背景。",
+          "source_refs": [
+            "07_C1_计算请求.yaml ENT040.scenarios.conservative",
+            "05_B2_本地核查.json ENT040"
+          ],
+          "missing_reasons": [
+            "Outside approved C2 operating-scenario scope."
+          ]
+        },
+        "base": {
+          "calculability": "not_applicable",
+          "value": null,
+          "plain_condition": "正式客户/订单/交付出现后才重新进入关系验收。",
+          "source_refs": [
+            "07_C1_计算请求.yaml ENT040.scenarios.base",
+            "05_B2_本地核查.json ENT040"
+          ],
+          "missing_reasons": [
+            "Outside approved C2 operating-scenario scope."
+          ]
+        },
+        "optimistic": {
+          "calculability": "not_applicable",
+          "value": null,
+          "plain_condition": "不在本轮建立。",
+          "source_refs": [
+            "07_C1_计算请求.yaml ENT040.scenarios.optimistic",
+            "05_B2_本地核查.json ENT040"
+          ],
+          "missing_reasons": [
+            "Outside approved C2 operating-scenario scope."
+          ]
+        }
+      },
+      "reverse_operating_requirements_own_260_sessions": {
+        "status": "not_applicable",
+        "reason": "competition_background_only",
+        "pe": null,
+        "ps": null,
+        "guard": "No theme reverse valuation created."
+      },
+      "sustainability_and_supply_risk": {
+        "strongest_counterevidence": "正式年报只证明产品能力，未见客户、订单、交付或独立业务分项。",
+        "upgrade_condition": "正式客户、订单、交付、重复采购或独立业务分项。",
+        "invalidation_condition": "继续只有产品展示或能力描述而没有商业关系。",
+        "numeric_market_share_sum": null,
+        "missing_reason": "No same-scope additive market-share dataset in B2."
+      },
+      "source_refs": [
+        "05_B2_本地核查.json -> entity_results[record_id=ENT040]",
+        "06_B_交给C阶段.yaml -> entities[record_id=ENT040]"
+      ]
+    }
+  ],
+  "supply_and_sustainability_context": {
+    "expansion_and_new_entry": {
+      "known": [
+        "荣亿精密快接零部件量产关系",
+        "同飞股份液冷设备能力"
+      ],
+      "unknown": [
+        "有效产能",
+        "认证通过率",
+        "良率",
+        "利用率",
+        "同规格价格"
+      ]
+    },
+    "second_source": {
+      "known": [],
+      "unknown": [
+        "第二供应商认证",
+        "份额变化",
+        "同规格价格"
+      ]
+    },
+    "customer_self_build": {
+      "known": [],
+      "unknown": [
+        "服务器/OEM自制比例",
+        "指定供应边界",
+        "控制软件内置比例"
+      ]
+    },
+    "standardization": {
+      "known": [
+        "接口标准化可能提高互换性"
+      ],
+      "unknown": [
+        "认证周期是否缩短",
+        "二供数量",
+        "价格变化"
+      ]
+    },
+    "substitution_routes": {
+      "known": [
+        "冷板DTC、浸没、RDHx、液到气和风液混合可能并存"
+      ],
+      "unknown": [
+        "场景路线份额",
+        "切换成本"
+      ]
+    },
+    "profit_pool_migration": {
+      "known": [
+        "系统/工程可能伴随垫资，部件可能受标准化影响"
+      ],
+      "unknown": [
+        "同口径利润池",
+        "客户掌控度"
+      ]
+    },
+    "market_share_sum": null,
+    "market_share_missing_reason": "No same-scope additive market-share values exist in B2."
+  },
+  "guards": {
+    "only_ENT036A_has_direct_theme_actual": true,
+    "ENT036A_2026H1_not_annualized": true,
+    "modular_data_center_and_system_integration_excluded": true,
+    "ENT036B_ownership_only_no_inheritance": true,
+    "ENT040_competition_background_no_theme_scenario_or_reverse_valuation": true,
+    "relative_return_label": "relative_to_CSI300_only",
+    "no_C3_or_D_started": true,
+    "no_funding_action_output": true
+  },
+  "next_actor": "chatgpt",
+  "next_step": "C3_final_synthesis"
+}

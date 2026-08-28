@@ -1,12 +1,12 @@
 research_id: ai-liquid-cooling-2026h2-001
-version: 3
+version: 4
 branch: research/ai-liquid-cooling-2026h2
 base_commit: 70b9f7838551a2e61a2c10cb7698e74c35303a7c
 latest_commit: HEAD
-current_step: B3
-current_stage: B_final_semantic_acceptance
+current_step: C2
+current_stage: C_deterministic_calculation_complete
 next_actor: chatgpt
-status: waiting_chatgpt_B3_final
+status: waiting_chatgpt_C3
 as_of: '2026-08-27T22:32:34+08:00'
 required_inputs:
 - 03_A_开放式产业研究最终报告.docx
@@ -17,12 +17,18 @@ required_inputs:
 - 05_B2_本地核查.json
 - 05_B2_本地核查摘要.md
 - 05_B2_数据缺口.json
-- industry-research-stage-b
 - 06_B_验收报告.md
 - 06_B_交给C阶段.yaml
+- 07_C1_综合研究草案.docx
+- 07_C1_计算请求.yaml
+- 08_C2_计算结果.json
+- 08_C2_计算摘要.md
+- 08_C2_数据缺口.json
+- industry-research-stage-c
 expected_outputs:
-- 06_B_验收报告.md
-- 06_B_交给C阶段.yaml
+- 09_C_综合研究结论.docx
+- 09_C_监控合同.yaml
+- 09_C_研究状态.csv
 - 00_下一步操作.md
 user_decision_required: false
 completed_outputs:
@@ -43,6 +49,11 @@ completed_outputs:
 - 05_B2_数据缺口.json
 - 06_B_验收报告.md
 - 06_B_交给C阶段.yaml
+- 07_C1_综合研究草案.docx
+- 07_C1_计算请求.yaml
+- 08_C2_计算结果.json
+- 08_C2_计算摘要.md
+- 08_C2_数据缺口.json
 a2_result:
   validation_status: complete
   conflict_file: not_created_no_conflict
@@ -57,7 +68,7 @@ a2_result:
     szse_metadata: complete
     szse_pdf_sample: complete
     sampled_publication_date: '2026-08-26'
-last_updated: '2026-08-28T15:14:52+08:00'
+last_updated: '2026-08-28T17:37:28+08:00'
 b2_result:
   validation_status: complete_B2_R1
   records_expected: 9
@@ -99,3 +110,36 @@ b2_result:
     target_documents_query_failed: 0
     next_step: B3_final_semantic_acceptance
     second_return_to_B_for_ordinary_gaps: false
+next_step: C3_final_synthesis
+c2_result:
+  validation_status: complete
+  records_expected: 9
+  records_returned: 9
+  scenario_calculability_counts:
+    calculable: 1
+    condition_only: 20
+    not_applicable: 6
+  direct_theme_actual_records:
+  - ENT036A
+  reverse_operating_requirement_counts:
+    eligible_records: 7
+    pe_calculable: 3
+    pe_calculable_partial_valid_samples: 2
+    pe_not_calculable: 2
+    ps_calculable: 7
+    ps_not_calculable: 0
+    not_applicable_records: 2
+  carried_B2_gap_count: 17
+  new_C2_calculation_gap_count: 11
+  point_in_time_filter: available_at <= 2026-08-27T22:32:34+08:00
+  b2_sha256: 6f6989413883c95a8242d89308401e5562411029a27b1565e5202bca7702ecf3
+  local_fact_manifest_hash: 2fcef04e5ff70c7096c626872c0b1bb8c3d76794495f470b2a0066d05baad306
+  verification:
+    json_yaml_parse: passed
+    record_conservation: passed_9_of_9
+    point_in_time_cutoff: passed
+    b2_numeric_freeze: passed
+    direct_theme_actual_guard: passed_only_ENT036A
+    ownership_guard: passed
+    competition_background_guard: passed_ENT040_no_theme_or_reverse_valuation
+    no_C3_or_D_started: true

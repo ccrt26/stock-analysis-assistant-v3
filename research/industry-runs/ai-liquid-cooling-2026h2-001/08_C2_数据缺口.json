@@ -1,0 +1,264 @@
+{
+  "contract_type": "C2_calculation_data_gaps",
+  "research_id": "ai-liquid-cooling-2026h2-001",
+  "version": 1,
+  "as_of": "2026-08-27T22:32:34+08:00",
+  "generated_at": "2026-08-28T17:37:28+08:00",
+  "carried_B2_gap_count": 17,
+  "carried_B2_gap_file": "05_B2_数据缺口.json",
+  "new_C2_calculation_gap_count": 11,
+  "new_C2_calculation_gaps": [
+    {
+      "gap_id": "C2G001",
+      "record_id": "ENT034",
+      "category": "theme_actual_missing",
+      "fields": [
+        "theme_revenue_cny",
+        "theme_gross_profit_cny",
+        "theme_net_profit_cny",
+        "theme_cash_contribution_cny"
+      ],
+      "status": "unknown",
+      "reasons": [
+        "机房温控与电子散热口径混合风冷、液冷及其他场景，未直接拆分AI数据中心液冷。",
+        "机房温控与电子散热口径混合风冷、液冷及其他场景，未直接拆分AI数据中心液冷。",
+        "机房温控与电子散热口径混合风冷、液冷及其他场景，未直接拆分AI数据中心液冷。",
+        "机房温控与电子散热口径混合风冷、液冷及其他场景，未直接拆分AI数据中心液冷。"
+      ],
+      "zero_imputation_forbidden": true
+    },
+    {
+      "gap_id": "C2G002",
+      "record_id": "ENT035",
+      "category": "theme_actual_missing",
+      "fields": [
+        "theme_revenue_cny",
+        "theme_gross_profit_cny",
+        "theme_net_profit_cny",
+        "theme_cash_contribution_cny"
+      ],
+      "status": "unknown",
+      "reasons": [
+        "数据服务、新增订单和客户均为板块合计口径，液冷只披露进展。",
+        "数据服务、新增订单和客户均为板块合计口径，液冷只披露进展。",
+        "数据服务、新增订单和客户均为板块合计口径，液冷只披露进展。",
+        "数据服务、新增订单和客户均为板块合计口径，液冷只披露进展。"
+      ],
+      "zero_imputation_forbidden": true
+    },
+    {
+      "gap_id": "C2G003",
+      "record_id": "ENT036A",
+      "category": "theme_actual_missing",
+      "fields": [
+        "theme_net_profit_cny",
+        "theme_cash_contribution_cny"
+      ],
+      "status": "unknown",
+      "reasons": [
+        "No direct theme net-profit split; company net profit cannot substitute.",
+        "No direct theme cash split; company CFO cannot substitute."
+      ],
+      "zero_imputation_forbidden": true
+    },
+    {
+      "gap_id": "C2G004",
+      "record_id": "ENT036A",
+      "category": "reverse_PE_partial_valid_samples",
+      "fields": [
+        "PE_260_session_positive_valid_sample_count"
+      ],
+      "status": "partial",
+      "reasons": [
+        "76 of 260 sessions excluded because pe_ttm was null, non-finite, or non-positive"
+      ],
+      "replacement_forbidden": true
+    },
+    {
+      "gap_id": "C2G005",
+      "record_id": "ENT037",
+      "category": "theme_actual_missing",
+      "fields": [
+        "theme_revenue_cny",
+        "theme_gross_profit_cny",
+        "theme_net_profit_cny",
+        "theme_cash_contribution_cny"
+      ],
+      "status": "unknown",
+      "reasons": [
+        "服务器与数据中心散热业务包含多类产品，批量交付未给液冷金额。",
+        "服务器与数据中心散热业务包含多类产品，批量交付未给液冷金额。",
+        "服务器与数据中心散热业务包含多类产品，批量交付未给液冷金额。",
+        "服务器与数据中心散热业务包含多类产品，批量交付未给液冷金额。"
+      ],
+      "zero_imputation_forbidden": true
+    },
+    {
+      "gap_id": "C2G006",
+      "record_id": "ENT038",
+      "category": "theme_actual_missing",
+      "fields": [
+        "theme_revenue_cny",
+        "theme_gross_profit_cny",
+        "theme_net_profit_cny",
+        "theme_cash_contribution_cny"
+      ],
+      "status": "unknown",
+      "reasons": [
+        "Facility-side relation is accepted, but air cooling, hybrid cooling, IDC operations and ordinary temperature-control revenue are not separately disclosed.",
+        "Facility-side relation is accepted, but air cooling, hybrid cooling, IDC operations and ordinary temperature-control revenue are not separately disclosed.",
+        "Facility-side relation is accepted, but air cooling, hybrid cooling, IDC operations and ordinary temperature-control revenue are not separately disclosed.",
+        "Facility-side relation is accepted, but air cooling, hybrid cooling, IDC operations and ordinary temperature-control revenue are not separately disclosed."
+      ],
+      "zero_imputation_forbidden": true
+    },
+    {
+      "gap_id": "C2G007",
+      "record_id": "ENT038",
+      "category": "reverse_PE_not_calculable",
+      "fields": [
+        "current_pe_ttm",
+        "PE_p25_p50_p75_requirements"
+      ],
+      "status": "unsupported_for_current_loss_or_invalid_PE",
+      "reasons": [
+        "current_pe_ttm_is_null_or_non_positive; replacement is forbidden"
+      ],
+      "replacement_forbidden": true
+    },
+    {
+      "gap_id": "C2G008",
+      "record_id": "ENT039",
+      "category": "theme_actual_missing",
+      "fields": [
+        "theme_revenue_cny",
+        "theme_gross_profit_cny",
+        "theme_net_profit_cny",
+        "theme_cash_contribution_cny"
+      ],
+      "status": "unknown",
+      "reasons": [
+        "高功率密度装置热管理同时含储能及其他场景。",
+        "高功率密度装置热管理同时含储能及其他场景。",
+        "高功率密度装置热管理同时含储能及其他场景。",
+        "高功率密度装置热管理同时含储能及其他场景。"
+      ],
+      "zero_imputation_forbidden": true
+    },
+    {
+      "gap_id": "C2G009",
+      "record_id": "ENT039",
+      "category": "reverse_PE_partial_valid_samples",
+      "fields": [
+        "PE_260_session_positive_valid_sample_count"
+      ],
+      "status": "partial",
+      "reasons": [
+        "54 of 260 sessions excluded because pe_ttm was null, non-finite, or non-positive"
+      ],
+      "replacement_forbidden": true
+    },
+    {
+      "gap_id": "C2G010",
+      "record_id": "A2L007",
+      "category": "theme_actual_missing",
+      "fields": [
+        "theme_revenue_cny",
+        "theme_gross_profit_cny",
+        "theme_net_profit_cny",
+        "theme_cash_contribution_cny"
+      ],
+      "status": "unknown",
+      "reasons": [
+        "Quick-connector mass-production relation is accepted, but mixed 3C revenue is not a liquid-cooling split.",
+        "Quick-connector mass-production relation is accepted, but mixed 3C revenue is not a liquid-cooling split.",
+        "Quick-connector mass-production relation is accepted, but mixed 3C revenue is not a liquid-cooling split.",
+        "Quick-connector mass-production relation is accepted, but mixed 3C revenue is not a liquid-cooling split."
+      ],
+      "zero_imputation_forbidden": true
+    },
+    {
+      "gap_id": "C2G011",
+      "record_id": "A2L007",
+      "category": "reverse_PE_not_calculable",
+      "fields": [
+        "current_pe_ttm",
+        "PE_p25_p50_p75_requirements"
+      ],
+      "status": "unsupported_for_current_loss_or_invalid_PE",
+      "reasons": [
+        "current_pe_ttm_is_null_or_non_positive; replacement is forbidden"
+      ],
+      "replacement_forbidden": true
+    }
+  ],
+  "not_applicable_boundaries": [
+    {
+      "record_id": "ENT036B",
+      "reason": "Ownership/consolidation/minority-interest background only.",
+      "theme_fields_all_null": true
+    },
+    {
+      "record_id": "ENT040",
+      "reason": "Capability/competition background only.",
+      "theme_fields_all_null": true
+    }
+  ],
+  "rules": {
+    "missing_is_not_zero": true,
+    "no_external_replacement_multiple": true,
+    "no_company_total_substitution_for_theme_values": true,
+    "no_mixed_segment_forced_allocation": true
+  },
+  "next_actor": "chatgpt",
+  "next_step": "C3_final_synthesis",
+  "cross_source_diagnostics": {
+    "count": 7,
+    "counted_as_calculation_gap": false,
+    "description": "PS历史倍数来自daily_basic；required_change_vs_current_ttm使用冻结的B2财报TTM收入。保留跨源当前收入分母差异，不强行消除。",
+    "records": [
+      {
+        "record_id": "ENT034",
+        "current_ttm_revenue_cny": 6511334279.83,
+        "current_ps_implied_ttm_revenue_cny": 6511354683.17,
+        "ps_implied_vs_financial_ttm_gap": 3.13e-06
+      },
+      {
+        "record_id": "ENT035",
+        "current_ttm_revenue_cny": 4197874231.25,
+        "current_ps_implied_ttm_revenue_cny": 4197852769.01,
+        "ps_implied_vs_financial_ttm_gap": -5.11e-06
+      },
+      {
+        "record_id": "ENT036A",
+        "current_ttm_revenue_cny": 988188419.42,
+        "current_ps_implied_ttm_revenue_cny": 988184752.53,
+        "ps_implied_vs_financial_ttm_gap": -3.71e-06
+      },
+      {
+        "record_id": "ENT037",
+        "current_ttm_revenue_cny": 6989112739.08,
+        "current_ps_implied_ttm_revenue_cny": 7352412444.42,
+        "ps_implied_vs_financial_ttm_gap": 0.0519808
+      },
+      {
+        "record_id": "ENT038",
+        "current_ttm_revenue_cny": 745831035.79,
+        "current_ps_implied_ttm_revenue_cny": 719477697.52,
+        "ps_implied_vs_financial_ttm_gap": -0.03533419
+      },
+      {
+        "record_id": "ENT039",
+        "current_ttm_revenue_cny": 983075292.63,
+        "current_ps_implied_ttm_revenue_cny": 1064985811.75,
+        "ps_implied_vs_financial_ttm_gap": 0.0833207
+      },
+      {
+        "record_id": "A2L007",
+        "current_ttm_revenue_cny": 493677805.81,
+        "current_ps_implied_ttm_revenue_cny": 493676605.04,
+        "ps_implied_vs_financial_ttm_gap": -2.43e-06
+      }
+    ]
+  }
+}

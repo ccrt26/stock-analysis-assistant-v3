@@ -1,0 +1,868 @@
+contract_type: C1_evidence_bound_calculation_request
+research_id: ai-liquid-cooling-2026h2-001
+version: 1
+stage: C1_integrated_research_draft
+status: approved_ready_for_C2
+as_of: '2026-08-27T22:32:34+08:00'
+source_branch: research/ai-liquid-cooling-2026h2
+source_commit: 1f49d7b11494666e686d9ebac307400b4cc969c9
+created_by: chatgpt
+created_at: '2026-08-28'
+user_approvals:
+  enter_C:
+    status: approved
+    approval_text: 同意进入C阶段。
+  execute_C2:
+    status: approved
+    approval_text: 同意按本草案计算。
+    approved_by: user
+    recorded_on: '2026-08-28'
+source_artifacts:
+- file: 06_B_验收报告.md
+  sha256: 754a25efd20a36a7037319b5fd434ffd13515074a4c42c9952de6280a12b2a7e
+  role: B3最终人读验收
+- file: 06_B_交给C阶段.yaml
+  sha256: 13385800c7b5fa5a4334b1218cdca0250222794d9aa5935e14a74c7cc0be0482
+  role: B3最终机读边界
+- file: 05_B2_本地核查.json
+  sha256: null
+  role: Codex原始本地事实；以仓库commit为准，不改写
+- file: 05_B2_本地核查摘要.md
+  sha256: null
+  role: B2-R1人读摘要
+- file: 05_B2_数据缺口.json
+  sha256: null
+  role: 17项正式缺口
+objective:
+  plain: 把已确认的产业关系和本地事实连接成商业兑现链、证据约束情景、持续性检查和反向经营要求；不为了形成结果而补数。
+  C1_may_decide:
+  - 每个主体当前商业链走到哪一步
+  - 哪些事实允许进入情景，哪些必须保持unknown
+  - 保守/基准/乐观情景的条件与触发证据
+  - C2允许计算的公式、字段和停止条件
+  C1_must_not_decide:
+  - 最终研究候选状态
+  - 买入、卖出、目标价、仓位、止盈止损或收益承诺
+  - 没有来源的销量、份额、毛利、净利润或现金
+scope:
+  record_count: 9
+  direct_theme_quantitative:
+  - ENT036A
+  core_commercial_company_context:
+  - ENT034
+  - ENT035
+  - ENT037
+  - ENT039
+  restricted_relation_observation:
+  - ENT038
+  - A2L007
+  ownership_context_only:
+  - ENT036B
+  capability_competition_background_only:
+  - ENT040
+  remaining_gap_count: 17
+  second_return_to_B_for_ordinary_gaps: false
+scenario_policy:
+  principle: 三情景首先是三组可证伪条件；只有直接披露且期间、合并范围和场景一致的变量才能填数。
+  conservative:
+    name_cn: 保守情景/事实下限
+    allowed:
+    - 已实现值、已验收收入、正式披露下限
+    - 当前已确认关系停在原证据层级
+    forbidden:
+    - 任意砍半制造安全边际
+    - 自动年化2026H1
+    - 把公司总数或混合分项当主题值
+  base:
+    name_cn: 基准情景/正常兑现条件
+    allowed:
+    - 当前订单、历史可复算转化、有效产能和正常交付能够支持的变量
+    - 必须明确列出尚需出现的证据触发
+    forbidden:
+    - 把市场目标、行业空间或公司规划直接当基准
+    - 缺失字段以0或经验值补齐
+  optimistic:
+    name_cn: 乐观情景/新增触发条件
+    allowed:
+    - 第二客户、重复订单、份额、价格、良率或现金改善的明确触发
+    - 只有触发证据和直接数值同时存在时才计算
+    forbidden:
+    - 先得到高利润结论再倒推销量和毛利
+    - 把名义产能或扩产投资直接变成有效供给
+  null_rule: 缺失、unknown、partial、unsupported、no_record均不得转成0；不可计算必须返回null和missing_reasons。
+global_formulas:
+  component_hardware_revenue:
+    formula: min(validated_demand, nominal_capacity * certification_rate * yield_rate * utilization) * average_selling_price
+    rule: 任一关键输入缺失则不计算；名义产能不等于有效产能。
+  project_revenue:
+    formula: min(firm_deliverable_order_amount, completed_and_accepted_amount)
+    rule: 框架协议、意向订单和未验收项目不得进入收入。
+  incremental_net_profit:
+    formula: incremental_gross_profit - incremental_R&D_sales_delivery_expense - incremental_depreciation - incremental_financing_cost
+      - bad_debt_and_inventory_impairment - tax
+    rule: 不得只用收入乘综合毛利率。
+  theme_revenue_share_TRS:
+    formula: direct_theme_revenue / company_revenue_same_period
+    rule: 同期间、同合并范围、同场景。
+  theme_gross_profit_share_TGPS:
+    formula: direct_theme_gross_profit / company_gross_profit_same_period
+    rule: 主题毛利优先用直接成本；不得用公司综合毛利率代替。
+  cash_quality:
+    formula: company_CFO / company_parent_net_profit; cash_received_from_sales / company_revenue
+    rule: 仅作为公司级质量背景；没有主题现金拆分时不得命名为液冷现金质量。
+  working_capital_alerts:
+    formula: AR_growth - revenue_growth; inventory_growth - revenue_growth
+    rule: 沿用B2原始计算；缺失字段不按0。
+  reverse_valuation_own_history:
+    positive_PE:
+    - PE_260d_p25, PE_260d_p50, PE_260d_p75
+    - implied_TTM_parent_profit_at_each_PE = total_market_value / PE_percentile
+    - required_profit_change_vs_current_TTM = implied_profit / current_TTM_parent_profit - 1
+    PS:
+    - PS_260d_p25, PS_260d_p50, PS_260d_p75
+    - implied_TTM_revenue_at_each_PS = total_market_value / PS_percentile
+    - required_revenue_change_vs_current_TTM = implied_revenue / current_TTM_revenue - 1
+    rule: 只是当前市值对应的经营要求，不是目标价；历史窗口仅为实际260个交易日，若数据不足则返回partial/unsupported。
+global_C2_tasks:
+- task_id: C2T01
+  name: 输入和冻结校验
+  instructions:
+  - 校验研究编号、as_of、9条记录和C1文件哈希。
+  - 确认B2公司级财务、估值、价格、收益与派生指标未被改写。
+  - 只使用05_B2_本地核查.json中available_at<=as_of的数据。
+- task_id: C2T02
+  name: 公司级质量快照
+  instructions:
+  - 对允许的经营主体输出最新可比期和2025年度公司级收入、利润、毛利、CFO、应收、存货、资本开支与预警。
+  - 明确标注company_level_not_theme。
+  - 中科曙光只输出所有权字段；同飞股份只输出竞争背景，不形成主题情景。
+- task_id: C2T03
+  name: 直接主题事实
+  instructions:
+  - 只对ENT036A计算直接披露的冷板液冷与浸没液冷实际收入、成本/毛利、TRS和TGPS。
+  - 不年化、不预测、不纳入模块化数据中心和系统集成。
+  - 主题净利润和主题现金仍返回null。
+- task_id: C2T04
+  name: 三情景可计算性
+  instructions:
+  - 逐实体、逐情景返回calculable / condition_only / not_applicable。
+  - 仅保守事实下限中存在锁定数字时计算；基准/乐观缺少直接变量时返回null和missing_reasons。
+  - 不得为了完整表格创建任何新假设。
+- task_id: C2T05
+  name: 260交易日反向经营要求
+  instructions:
+  - 对B3允许使用估值价格的经营主体，基于本地实际260交易日PE/PS分布计算p25/p50/p75对应的利润或收入要求。
+  - PE无效时跳过PE，只使用PS/PB可用事实；不得引入外部估值倍数。
+  - 不得对中科曙光建立液冷估值；不得对同飞股份建立主题估值。
+- task_id: C2T06
+  name: 大市场一致性和供应风险字段
+  instructions:
+  - 只整理已存在的扩产、新进入者、二供、自制、接口标准化、替代路线和利润池迁移事实/未知。
+  - 不估算市场份额总和，除非B2已有同口径可加数据。
+entities:
+- record_id: ENT034
+  entity_name: 英维克
+  ts_code: 002837.SZ
+  relationship_status: passed_partial
+  C_route: core_commercial_company_context
+  business_models:
+  - 核心部件/硬件
+  - 系统设备
+  commercial_chain_current:
+  - 准确产品已确认
+  - 平台验证已确认
+  - 部分规模应用已确认
+  - 订单金额未知
+  - 复购未知
+  - 主题财务未知
+  - 主题现金未知
+  current_evidence_stop: 已走到“验证/部分规模应用”，尚未走到可量化订单、复购和液冷主题利润。
+  allowed_facts:
+  - 正式产品、平台验证和部分规模应用关系
+  - 公司级财务、营运资金、估值和价格背景
+  - 订单、复购和主题利润证据缺口分析
+  must_remain_unknown:
+  - 液冷专属客户与订单金额
+  - 复购次数
+  - 液冷主题收入、毛利、净利润和现金贡献
+  - 液冷业务良率、有效产能和回款
+  forbidden_inferences:
+  - 不得把公司总收入或综合毛利率当作液冷主题值
+  - 不得把公司级利润变化自动归因于液冷
+  strongest_counterevidence: 2026H1公司收入同比增长17.24%，归母净利润同比下降14.32%，综合毛利率同比下降1.21个百分点；均为公司级事实。
+  scenarios:
+    conservative:
+      mode: condition_only
+      plain: 保持当前证据等级：确认产品、验证与规模应用，但不假设液冷订单和主题收入。
+      numeric: false
+      triggers: []
+    base:
+      mode: condition_only
+      plain: 出现正式液冷客户/订单或同口径主题收入拆分，且至少一项重复交付证据成立。
+      numeric: false
+      triggers:
+      - 正式液冷订单或客户证据
+      - 液冷主题收入/毛利直接拆分
+      - 同一客户追加或第二客户
+    optimistic:
+      mode: condition_only
+      plain: 在基准条件之上，主题毛利稳定、回款改善，且有效产能/良率有直接证据。
+      numeric: false
+      triggers:
+      - 重复订单/第二客户
+      - 主题毛利直接披露并稳定
+      - 主题现金或回款改善
+      - 良率/有效产能直接证据
+  upgrade_condition: 正式客户或订单 + 重复交付/第二客户 + 主题收入/毛利拆分。
+  invalidation_condition: 规模应用长期不转成订单或复购；毛利继续下降；二供/自制压低价格；库存与应收显著恶化。
+  company_snapshot_for_verification:
+    name: 英维克
+    code: 002837.SZ
+    period: 2026H1
+    revenue_yoy: 0.1724
+    profit_yoy: -0.1432
+    gross_margin_change_pp: -1.21
+    cfo_cny: 61871999
+    market_cap_cny: 84252371652
+    pe_ttm: 171.58
+    pb: 23.5
+    ret20: 0.3992
+    ret250: 0.3463
+  C2_calculation_permissions:
+    company_quality_background: true
+    direct_theme_actual: false
+    theme_forward_numeric_scenarios: false
+    reverse_valuation_own_260d: true
+    ownership_only: false
+    competition_background_only: false
+  source_path_hints:
+  - 05_B2_本地核查.json -> entity_results[record_id=ENT034]
+  - 06_B_交给C阶段.yaml -> entities[record_id=ENT034]
+- record_id: ENT035
+  entity_name: 申菱环境
+  ts_code: 301018.SZ
+  relationship_status: passed_partial
+  C_route: core_commercial_company_context
+  business_models:
+  - 系统设备/工程
+  - 设施侧工程
+  commercial_chain_current:
+  - 液冷产品矩阵已确认
+  - 数据服务订单增长已确认
+  - 液冷专属订单未知
+  - 验收/复购未知
+  - 主题财务未知
+  - 主题现金未知
+  current_evidence_stop: 已走到产品与数据服务板块订单背景，但液冷专属合同、验收和回款未拆。
+  allowed_facts:
+  - 液冷产品矩阵和数据服务业务订单增长关系
+  - 公司级财务、工程营运资金和市场背景
+  must_remain_unknown:
+  - 数据服务订单中的液冷专属金额
+  - 液冷项目验收与复购
+  - 液冷主题收入、项目毛利、净利润和现金
+  - 传统温控、设施冷源、工程服务与液冷的精确拆分
+  forbidden_inferences:
+  - 不得把数据服务板块订单全部写成液冷订单
+  - 不得用公司总收入替代液冷设施侧收入
+  strongest_counterevidence: 2026Q1公司收入同比下降1.80%、归母净利润同比下降47.71%、经营现金流-1.93亿元；应收和存货增速明显高于收入。
+  scenarios:
+    conservative:
+      mode: condition_only
+      plain: 只承认液冷产品能力和数据服务板块订单背景，不把板块订单全部视为液冷。
+      numeric: false
+      triggers: []
+    base:
+      mode: condition_only
+      plain: 正式披露液冷项目合同/订单、可交付金额或验收收入，并与传统温控、设施冷源分开。
+      numeric: false
+      triggers:
+      - 液冷专属合同/订单
+      - 项目验收或直接收入
+      - 传统温控与液冷拆分
+    optimistic:
+      mode: condition_only
+      plain: 在基准条件上出现跨客户复制、项目毛利稳定、合同资产/应收与现金改善。
+      numeric: false
+      triggers:
+      - 第二客户或重复项目
+      - 项目毛利直接披露
+      - 应收/合同资产受控
+      - 经营现金改善
+  upgrade_condition: 液冷专属合同或验收收入 + 跨项目复制 + 项目毛利/回款证据。
+  invalidation_condition: 订单主要是传统温控；项目验收延期；应收/存货继续快于收入；现金持续恶化。
+  company_snapshot_for_verification:
+    name: 申菱环境
+    code: 301018.SZ
+    period: 2026Q1
+    revenue_yoy: -0.018
+    profit_yoy: -0.4771
+    gross_margin_change_pp: -1.4
+    cfo_cny: -193352473
+    market_cap_cny: 40377000000
+    pe_ttm: 211.46
+    pb: 14.63
+    ret20: 0.5923
+    ret250: 1.3603
+  C2_calculation_permissions:
+    company_quality_background: true
+    direct_theme_actual: false
+    theme_forward_numeric_scenarios: false
+    reverse_valuation_own_260d: true
+    ownership_only: false
+    competition_background_only: false
+  source_path_hints:
+  - 05_B2_本地核查.json -> entity_results[record_id=ENT035]
+  - 06_B_交给C阶段.yaml -> entities[record_id=ENT035]
+- record_id: ENT036A
+  entity_name: 曙光数创
+  ts_code: 920808.BJ
+  relationship_status: passed_direct_product_revenue
+  C_route: direct_theme_quantitative
+  business_models:
+  - 系统设备/项目
+  - 直接液冷产品
+  commercial_chain_current:
+  - 冷板/浸没直接产品收入已确认
+  - 产品毛利已确认
+  - 客户/订单未知
+  - 逐项目验收未知
+  - 复购未知
+  - 主题净利润/现金未知
+  current_evidence_stop: 已走到直接产品收入和毛利，但重复生意、净利润与现金质量仍未通过。
+  allowed_facts:
+  - 直接披露的冷板/浸没产品收入、成本和毛利口径
+  - 公司级财务、存货、现金、估值和价格质量背景
+  must_remain_unknown:
+  - 客户、订单金额和复购客户链
+  - 逐项目交付与验收
+  - 冷板与浸没各自净利润和现金贡献
+  - 模块化数据中心及系统集成中的液冷准确份额
+  forbidden_inferences:
+  - 不得把模块化数据中心或系统集成自动分配为液冷
+  - 不得把公司全部现金流写成液冷现金
+  - 不得从收入占比推断订单重复性
+  strongest_counterevidence: 2026H1综合毛利率同比下降7.56个百分点，2025年度与2026H1连续出现存货增速明显高于收入增速，2026H1经营现金流-2.42亿元。
+  scenarios:
+    conservative:
+      mode: factual_floor
+      plain: 只使用2026H1已披露的冷板与浸没产品收入和毛利；不年化、不假设增长。
+      numeric: true
+      locked_inputs:
+        period: 2026H1
+        revenue_cny: 219000000
+        revenue_share: 0.891
+        gross_margin: 0.0895
+        gross_profit_share: 0.6683
+      triggers: []
+    base:
+      mode: condition_only
+      plain: 直接产品收入继续兑现，并出现订单/验收或复购证据；毛利不再明显下滑。
+      numeric: false
+      triggers:
+      - 正式订单或逐项目验收
+      - 同一客户追加或第二客户
+      - 直接产品毛利稳定
+    optimistic:
+      mode: condition_only
+      plain: 在基准条件上，客户扩展、产品毛利改善，库存和经营现金同步转好。
+      numeric: false
+      triggers:
+      - 第二客户/跨项目复制
+      - 直接产品毛利改善
+      - 库存增速回落
+      - 经营现金转正或显著改善
+  upgrade_condition: 订单/验收链 + 复购/第二客户 + 毛利与现金改善。
+  invalidation_condition: 收入增长继续伴随毛利下滑、库存异常和负现金；模块化/系统集成被错误分配；路线替代压缩直接产品价值。
+  company_snapshot_for_verification:
+    name: 曙光数创
+    code: 920808.BJ
+    period: 2026H1
+    revenue_yoy: 0.7556
+    profit_yoy: null
+    profit_note: 亏损扩大约3260万元
+    gross_margin_change_pp: -7.56
+    cfo_cny: -242000000
+    market_cap_cny: 11592000000
+    pe_ttm: 2717.37
+    pb: 17.07
+    ret20: 0.06
+    ret250: -0.2393
+    direct_theme_revenue_cny: 219000000
+    direct_theme_revenue_share: 0.891
+    direct_theme_gross_margin: 0.0895
+    direct_theme_gross_profit_share: 0.6683
+  C2_calculation_permissions:
+    company_quality_background: true
+    direct_theme_actual: true
+    theme_forward_numeric_scenarios: false
+    reverse_valuation_own_260d: true
+    ownership_only: false
+    competition_background_only: false
+  source_path_hints:
+  - 05_B2_本地核查.json -> entity_results[record_id=ENT036A]
+  - 06_B_交给C阶段.yaml -> entities[record_id=ENT036A]
+- record_id: ENT036B
+  entity_name: 中科曙光
+  ts_code: 603019.SH
+  relationship_status: passed_ownership_context_only
+  C_route: ownership_context_only
+  business_models:
+  - 所有权与合并背景
+  commercial_chain_current:
+  - 重要非全资子公司身份已确认
+  - 合并边界已确认
+  - 少数股东权益已确认
+  - 母公司液冷增量归母影响未知
+  current_evidence_stop: 只完成所有权与合并边界，不建立液冷经营情景。
+  allowed_facts:
+  - 曙光数创的重要非全资子公司身份
+  - 控制、合并范围、少数股东权益和利润归属边界
+  - 年报少数股东持股37.9302%、半年报37.93%的正式披露
+  must_remain_unknown:
+  - 曙光数创液冷经营结果对中科曙光归母利润的精确增量影响，除非正式报表直接披露
+  forbidden_inferences:
+  - 不得继承曙光数创产品、客户、订单、收入、利润或价格
+  - 不得按持股比例简单乘收入或归母利润
+  - 不得建立中科曙光液冷经营情景或主题估值
+  strongest_counterevidence: 母子公司合并与少数股东权益使简单持股比例乘算失真。
+  scenarios:
+    conservative:
+      mode: not_applicable
+      plain: 不建立经营情景。
+      numeric: false
+      triggers: []
+    base:
+      mode: not_applicable
+      plain: 不建立经营情景。
+      numeric: false
+      triggers: []
+    optimistic:
+      mode: not_applicable
+      plain: 不建立经营情景。
+      numeric: false
+      triggers: []
+  upgrade_condition: 只有正式报表直接披露并可按合并口径解释时，才补充母公司归母影响。
+  invalidation_condition: 任何把子公司收入或利润简单乘持股比例的做法均无效。
+  company_snapshot_for_verification:
+    name: 中科曙光
+    code: 603019.SH
+    period: ownership context
+    minority_share_annual: 0.379302
+    minority_share_h1: 0.3793
+  C2_calculation_permissions:
+    company_quality_background: false
+    direct_theme_actual: false
+    theme_forward_numeric_scenarios: false
+    reverse_valuation_own_260d: false
+    ownership_only: true
+    competition_background_only: false
+  source_path_hints:
+  - 05_B2_本地核查.json -> entity_results[record_id=ENT036B]
+  - 06_B_交给C阶段.yaml -> entities[record_id=ENT036B]
+- record_id: ENT037
+  entity_name: 飞荣达
+  ts_code: 300602.SZ
+  relationship_status: passed_partial
+  C_route: core_commercial_company_context
+  business_models:
+  - 核心部件/硬件
+  commercial_chain_current:
+  - 液冷产品已确认
+  - 服务器厂商供应合作已确认
+  - 部分产品批量交付已确认
+  - 复购/第二客户未知
+  - 主题财务未知
+  - 主题现金未知
+  current_evidence_stop: 已走到供应合作和部分批量交付，尚未证明重复订单、液冷主题利润和现金。
+  allowed_facts:
+  - 服务器/数据中心液冷产品、供应合作和部分产品批量交付
+  - 公司级财务、现金、应收、存货、估值和价格背景
+  must_remain_unknown:
+  - 液冷订单金额、客户名称和复购次数
+  - 液冷主题收入、产品线毛利、净利润和现金
+  - AI服务器液冷与储能、汽车、消费电子、通信的准确拆分
+  forbidden_inferences:
+  - 不得把公司整体增长写成AI数据中心液冷增长
+  - 不得把储能或汽车液冷并入目标主题
+  strongest_counterevidence: 2026Q1公司收入和归母利润增长，但经营现金流-0.24亿元；公司业务跨多个场景。
+  scenarios:
+    conservative:
+      mode: condition_only
+      plain: 只承认供应合作和部分产品批量交付，不把公司整体增长归为AI液冷。
+      numeric: false
+      triggers: []
+    base:
+      mode: condition_only
+      plain: 出现液冷产品线收入/毛利拆分，以及同一客户追加或第二客户的正式证据。
+      numeric: false
+      triggers:
+      - 液冷产品线收入/毛利
+      - 追加订单或第二客户
+      - AI服务器与储能/汽车拆分
+    optimistic:
+      mode: condition_only
+      plain: 在基准条件上，良率/利用率与回款改善，液冷主题利润对公司形成实质影响。
+      numeric: false
+      triggers:
+      - 良率/利用率证据
+      - 主题净利润贡献
+      - 经营现金改善
+      - 客户结构分散
+  upgrade_condition: 产品线财务拆分 + 重复订单/第二客户 + 良率与现金证据。
+  invalidation_condition: 批量交付没有复购；增长主要来自非目标场景；现金持续为负；标准化和二供导致降价。
+  company_snapshot_for_verification:
+    name: 飞荣达
+    code: 300602.SZ
+    period: 2026Q1
+    revenue_yoy: 0.3915
+    profit_yoy: 0.3392
+    gross_margin_change_pp: 3.38
+    cfo_cny: -24000000
+    market_cap_cny: 26126000000
+    pe_ttm: 57.92
+    pb: 6.03
+    ret20: 0.4436
+    ret250: 0.4839
+  C2_calculation_permissions:
+    company_quality_background: true
+    direct_theme_actual: false
+    theme_forward_numeric_scenarios: false
+    reverse_valuation_own_260d: true
+    ownership_only: false
+    competition_background_only: false
+  source_path_hints:
+  - 05_B2_本地核查.json -> entity_results[record_id=ENT037]
+  - 06_B_交给C阶段.yaml -> entities[record_id=ENT037]
+- record_id: ENT038
+  entity_name: 佳力图
+  ts_code: 603912.SH
+  relationship_status: passed_partial_facility_liquid_cooling_relation
+  C_route: restricted_facility_relation_observation
+  business_models:
+  - 设施侧液冷/工程
+  commercial_chain_current:
+  - 全栈方案已确认
+  - CDU认证已确认
+  - 2MW级CDU批量交付已确认
+  - 液冷专属订单/验收未知
+  - 设施侧主题财务未知
+  current_evidence_stop: 设施侧关系已通过，但传统风冷、风液协同、IDC运营与液冷财务未拆。
+  allowed_facts:
+  - 全栈液冷方案、CDU认证、2MW级CDU批量交付和项目案例
+  - 设施侧水环、最终排热、风液协同和数据中心改造关系
+  - 公司级工程垫资、验收、应收和现金风险背景
+  must_remain_unknown:
+  - 液冷专属客户和订单金额
+  - 液冷项目验收与复购
+  - 液冷设施侧收入、项目毛利、净利润和现金贡献
+  forbidden_inferences:
+  - 不得按服务器内冷板/快接部件模板分析
+  - 不得把传统风冷、风液协同、IDC运营或普通温控全部归为液冷
+  strongest_counterevidence: 2026Q1公司亏损扩大、综合毛利率同比下降7.91个百分点、经营现金流-0.40亿元；均为公司级事实。
+  scenarios:
+    conservative:
+      mode: condition_only
+      plain: 只承认设施侧液冷关系和批量交付，不计算液冷专属收入或利润。
+      numeric: false
+      triggers: []
+    base:
+      mode: condition_only
+      plain: 出现液冷设施侧合同/验收收入，且与传统风冷、IDC运营和普通温控分开。
+      numeric: false
+      triggers:
+      - 液冷设施侧合同/验收
+      - 液冷与传统业务拆分
+      - 项目毛利或回款
+    optimistic:
+      mode: condition_only
+      plain: 在基准条件上出现重复项目/第二客户，工程毛利与现金质量改善。
+      numeric: false
+      triggers:
+      - 重复项目或第二客户
+      - 项目毛利稳定
+      - 应收/合同资产受控
+      - 现金改善
+  upgrade_condition: 设施侧液冷合同/验收 + 业务拆分 + 重复项目与现金。
+  invalidation_condition: 收入主要来自传统温控或IDC运营；项目延期、垫资和应收吞噬利润；风液混合推迟直接液冷投资。
+  company_snapshot_for_verification:
+    name: 佳力图
+    code: 603912.SH
+    period: 2026Q1
+    revenue_yoy: 0.0535
+    profit_yoy: null
+    profit_note: 亏损扩大约740万元
+    gross_margin_change_pp: -7.91
+    cfo_cny: -40000000
+    market_cap_cny: 4881000000
+    pe_ttm: null
+    pb: 2.92
+    ret20: 0.3216
+    ret250: -0.1651
+  C2_calculation_permissions:
+    company_quality_background: true
+    direct_theme_actual: false
+    theme_forward_numeric_scenarios: false
+    reverse_valuation_own_260d: true
+    ownership_only: false
+    competition_background_only: false
+  source_path_hints:
+  - 05_B2_本地核查.json -> entity_results[record_id=ENT038]
+  - 06_B_交给C阶段.yaml -> entities[record_id=ENT038]
+- record_id: ENT039
+  entity_name: 高澜股份
+  ts_code: 300499.SZ
+  relationship_status: passed_project_relation
+  C_route: core_commercial_company_context
+  business_models:
+  - 系统设备/项目/EPC
+  commercial_chain_current:
+  - 国内AIDC交付已确认
+  - 海外数据中心EPC已确认
+  - 液冷专属订单金额未知
+  - 验收/复购未知
+  - 混合分项未拆
+  - 主题现金未知
+  current_evidence_stop: 项目关系成立，但高功率密度分项混有其他场景，订单、验收和现金未闭环。
+  allowed_facts:
+  - 国内AIDC项目交付和海外数据中心EPC项目关系
+  - 公司级财务、应收、存货、现金、估值和价格背景
+  must_remain_unknown:
+  - 高功率密度分项中纯AI数据中心液冷收入和毛利
+  - 液冷专属订单金额、项目验收、净利润和现金贡献
+  forbidden_inferences:
+  - 不得将混有储能等场景的高功率密度分项全部归为AI数据中心液冷
+  strongest_counterevidence: 2026Q1经营现金流-1.12亿元，应收和存货增速明显高于收入；高功率密度分项混有其他场景。
+  scenarios:
+    conservative:
+      mode: condition_only
+      plain: 只承认AIDC/海外数据中心项目关系，不把高功率密度分项全部归为液冷。
+      numeric: false
+      triggers: []
+    base:
+      mode: condition_only
+      plain: 正式披露可交付订单、验收收入和纯数据中心液冷分项。
+      numeric: false
+      triggers:
+      - 液冷专属订单/在手订单
+      - 验收收入
+      - 高功率密度分项场景拆分
+    optimistic:
+      mode: condition_only
+      plain: 在基准条件上出现重复项目/第二客户、项目毛利稳定、合同资产和现金改善。
+      numeric: false
+      triggers:
+      - 第二客户或重复项目
+      - 项目毛利
+      - 合同资产/应收受控
+      - 经营现金改善
+  upgrade_condition: 液冷专属订单 + 验收收入 + 重复项目 + 现金。
+  invalidation_condition: 项目长期不验收；混合场景被误算；应收/库存继续异常；海外项目成本或变更吞噬毛利。
+  company_snapshot_for_verification:
+    name: 高澜股份
+    code: 300499.SZ
+    period: 2026Q1
+    revenue_yoy: -0.0277
+    profit_yoy: 0.1655
+    gross_margin_change_pp: 5.54
+    cfo_cny: -112000000
+    market_cap_cny: 9615000000
+    pe_ttm: 308.34
+    pb: 6.95
+    ret20: 0.3235
+    ret250: 0.2242
+  C2_calculation_permissions:
+    company_quality_background: true
+    direct_theme_actual: false
+    theme_forward_numeric_scenarios: false
+    reverse_valuation_own_260d: true
+    ownership_only: false
+    competition_background_only: false
+  source_path_hints:
+  - 05_B2_本地核查.json -> entity_results[record_id=ENT039]
+  - 06_B_交给C阶段.yaml -> entities[record_id=ENT039]
+- record_id: A2L007
+  entity_name: 荣亿精密
+  ts_code: 920223.BJ
+  relationship_status: passed_direct_mass_production_relationship
+  C_route: restricted_new_entrant_observation
+  business_models:
+  - 快速接头精密零部件/新进入者
+  commercial_chain_current:
+  - 服务器液冷快接零部件已量产
+  - 核心客户富世达已确认
+  - 设备到位/产能爬坡已确认
+  - 液冷收入拆分未知
+  - 复购/良率/有效产能未知
+  - 主题利润/现金未知
+  current_evidence_stop: 量产关系已经成立，但规模、良率、有效产能和主题利润重要性未通过。
+  allowed_facts:
+  - 服务器液冷快接相关零部件2025Q2批量生产
+  - 核心客户富世达、设备到位和产能爬坡
+  - 快速接头新增供给、二供和竞争加剧样本
+  - 公司级亏损、现金和扩产压力背景
+  must_remain_unknown:
+  - 液冷订单金额、复购次数和客户集中度
+  - 液冷收入、毛利、净利润和现金
+  - 良率、认证通过率、有效产能和利用率
+  forbidden_inferences:
+  - 3C混合收入不得作为液冷收入
+  - 1亿元项目投资不得直接等同于投产、有效产能、订单或利润
+  - 量产关系不等于高份额核心供应商
+  strongest_counterevidence: 2026H1公司仍亏损约0.11亿元、经营现金流-0.36亿元、综合毛利率同比下降3.68个百分点；液冷规模和利润重要性未拆。
+  scenarios:
+    conservative:
+      mode: condition_only
+      plain: 只承认量产和客户关系，不把3C混合收入或项目投资视为液冷收入/有效产能。
+      numeric: false
+      triggers: []
+    base:
+      mode: condition_only
+      plain: 出现液冷快接直接收入/交易金额，产能利用或良率证据，并确认重复交付。
+      numeric: false
+      triggers:
+      - 液冷直接收入或客户交易金额
+      - 复购/重复交付
+      - 良率/有效产能
+    optimistic:
+      mode: condition_only
+      plain: 在基准条件上出现第二客户、毛利改善和现金爬坡完成。
+      numeric: false
+      triggers:
+      - 第二客户
+      - 主题毛利改善
+      - 有效产能利用率
+      - 经营现金改善
+  upgrade_condition: 直接主题收入 + 重复交付/第二客户 + 良率/有效产能 + 毛利与现金。
+  invalidation_condition: 扩产项目未按期形成有效产能；客户过度集中；低毛利/亏损延续；接口标准化降低稀缺性。
+  company_snapshot_for_verification:
+    name: 荣亿精密
+    code: 920223.BJ
+    period: 2026H1
+    revenue_yoy: 0.306
+    profit_yoy: null
+    profit_note: 亏损约1100万元
+    gross_margin_change_pp: -3.68
+    cfo_cny: -36000000
+    market_cap_cny: 1696000000
+    pe_ttm: null
+    pb: 7.33
+    ret20: -0.0092
+    ret250: -0.0888
+  C2_calculation_permissions:
+    company_quality_background: true
+    direct_theme_actual: false
+    theme_forward_numeric_scenarios: false
+    reverse_valuation_own_260d: true
+    ownership_only: false
+    competition_background_only: false
+  source_path_hints:
+  - 05_B2_本地核查.json -> entity_results[record_id=A2L007]
+  - 06_B_交给C阶段.yaml -> entities[record_id=A2L007]
+- record_id: ENT040
+  entity_name: 同飞股份
+  ts_code: 300990.SZ
+  relationship_status: not_passed_hard_relation_gate
+  C_route: capability_competition_background_only
+  business_models:
+  - 能力/竞争背景
+  commercial_chain_current:
+  - CDU/Manifold/浸没箱体能力已确认
+  - 客户未知
+  - 订单未知
+  - 交付未知
+  - 主题财务未知
+  current_evidence_stop: 只证明产品能力，关系硬门未通过。
+  allowed_facts:
+  - CDU、Manifold、浸没箱体等产品能力
+  - 潜在供给、竞争者和未来关系升级背景
+  must_remain_unknown:
+  - 客户、订单、交付、重复采购
+  - 液冷主题收入、利润和现金
+  forbidden_inferences:
+  - 不得作为已确认供应商
+  - 不得建立主题收入、利润、现金或估值情景
+  - 不得用公司级财务和股价补救关系硬门失败
+  strongest_counterevidence: 正式年报只证明产品能力，未见客户、订单、交付或独立业务分项。
+  scenarios:
+    conservative:
+      mode: background_only
+      plain: 仅作为能力与潜在供给背景。
+      numeric: false
+      triggers: []
+    base:
+      mode: background_only
+      plain: 正式客户/订单/交付出现后才重新进入关系验收。
+      numeric: false
+      triggers:
+      - 正式客户或订单
+      - 正式交付或独立业务分项
+    optimistic:
+      mode: background_only
+      plain: 不在本轮建立。
+      numeric: false
+      triggers: []
+  upgrade_condition: 正式客户、订单、交付、重复采购或独立业务分项。
+  invalidation_condition: 继续只有产品展示或能力描述而没有商业关系。
+  company_snapshot_for_verification:
+    name: 同飞股份
+    code: 300990.SZ
+    period: 2026Q1
+    revenue_yoy: 0.218
+    profit_yoy: -0.0344
+    gross_margin_change_pp: -2.66
+    cfo_cny: 143000000
+    market_cap_cny: 15603000000
+    pe_ttm: 62.22
+    pb: 7.28
+    ret20: 0.4195
+    ret250: 0.305
+  C2_calculation_permissions:
+    company_quality_background: true
+    direct_theme_actual: false
+    theme_forward_numeric_scenarios: false
+    reverse_valuation_own_260d: false
+    ownership_only: false
+    competition_background_only: true
+  source_path_hints:
+  - 05_B2_本地核查.json -> entity_results[record_id=ENT040]
+  - 06_B_交给C阶段.yaml -> entities[record_id=ENT040]
+output_contract:
+  files:
+  - file: 08_C2_计算结果.json
+    purpose: 逐实体事实、情景可计算性、确定性计算、反向经营要求和缺口
+  - file: 08_C2_计算摘要.md
+    purpose: 用户与C3阅读的人话结果，不形成候选或交易动作
+  - file: 08_C2_数据缺口.json
+    purpose: C1请求中仍无法计算的变量、原因与禁止推断
+  - file: 00_运行状态.yaml
+    purpose: 运行控制，下一执行者设为ChatGPT C3
+  - file: 00_下一步操作.md
+    purpose: 给ChatGPT C3的唯一完整提示词
+  commit_and_push_required: true
+  next_actor_after_completion: chatgpt
+  next_step_after_completion: C3_final_synthesis
+C2_stop_conditions:
+- 9条记录全部返回，记录数守恒。
+- 每个情景均有calculability、value/null、source_refs和missing_reasons。
+- unknown/partial/unsupported未转成0。
+- 只有ENT036A出现直接液冷数量计算。
+- 中科曙光没有继承曙光数创主题财务。
+- 同飞股份没有进入主题经营或估值情景。
+- 未使用外部新材料、未来数据或任意估值倍数。
+- 输出五个文件，commit+push后停止，不开始C3或D。
+forbidden_inferences:
+- 不得修改Codex原始数值
+- 缺失、unknown、partial、unsupported和无记录不得写成0
+- 公司总收入、综合毛利率和公司现金流不得替代液冷主题值
+- 混合业务分项不得强行拆成液冷
+- 每个保守/基准/乐观假设必须绑定来源、时间和适用范围
+- 没有直接主题数据时只能写条件和待验证变量，不得虚构销量、份额、毛利或现金
+- 估值分位只称为实际260交易日窗口
+- 相对收益只称为相对沪深300
+- 中科曙光只作所有权与归属背景
+- 同飞股份不进入液冷经营或估值情景
+- 不得输出买入、卖出、目标价、仓位或收益承诺
+next_actor: codex
+next_step: C2_deterministic_calculation
+handoff_note: Codex必须先用本执行包中的最终B3文件覆盖仓库内旧的return_to_B版本，再原样保存C1文件并执行C2。
