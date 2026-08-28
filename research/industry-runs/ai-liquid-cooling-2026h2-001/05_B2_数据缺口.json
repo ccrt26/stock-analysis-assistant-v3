@@ -1,10 +1,10 @@
 {
   "research_id": "ai-liquid-cooling-2026h2-001",
-  "version": 1,
-  "stage": "B2",
+  "version": 2,
+  "stage": "B2_R1",
   "as_of": "2026-08-27T22:32:34+08:00",
-  "generated_at": "2026-08-28T12:22:22+08:00",
-  "gap_count": 21,
+  "generated_at": "2026-08-28T15:14:52+08:00",
+  "gap_count": 17,
   "gaps": [
     {
       "gap_id": "B2G001",
@@ -57,32 +57,6 @@
       "must_not_infer": "缺失字段不得按0。"
     },
     {
-      "gap_id": "B2G006",
-      "entity_or_node": "曙光数创",
-      "field": "required_document_body",
-      "status": "query_failed",
-      "impact": "关系、所有权或直接主题字段无法完成正式原文复核",
-      "attempted_source": [
-        "曙光数创2025年年度报告",
-        "曙光数创2026年半年度报告"
-      ],
-      "next_action": "B3决定保留未知或发起一次限定向纠正",
-      "must_not_infer": "不得用A3摘要或媒体转述补合同金额、客户、比例或条件。"
-    },
-    {
-      "gap_id": "B2G007",
-      "entity_or_node": "中科曙光",
-      "field": "required_document_body",
-      "status": "query_failed",
-      "impact": "关系、所有权或直接主题字段无法完成正式原文复核",
-      "attempted_source": [
-        "中科曙光2025年年度报告",
-        "中科曙光2026年半年度报告"
-      ],
-      "next_action": "B3决定保留未知或发起一次限定向纠正",
-      "must_not_infer": "不得用A3摘要或媒体转述补合同金额、客户、比例或条件。"
-    },
-    {
       "gap_id": "B2G008",
       "entity_or_node": "飞荣达",
       "field": "working_capital_intensity",
@@ -111,20 +85,6 @@
       "attempted_source": "balance_sheet actual columns",
       "next_action": "B3判断可计算部分是否足够；下次财报补字段",
       "must_not_infer": "缺失字段不得按0。"
-    },
-    {
-      "gap_id": "B2G011",
-      "entity_or_node": "佳力图",
-      "field": "required_document_body",
-      "status": "query_failed",
-      "impact": "关系、所有权或直接主题字段无法完成正式原文复核",
-      "attempted_source": [
-        "佳力图2025年年度报告",
-        "佳力图2025年年报监管问询回复",
-        "佳力图2026年半年度报告"
-      ],
-      "next_action": "B3决定保留未知或发起一次限定向纠正",
-      "must_not_infer": "不得用A3摘要或媒体转述补合同金额、客户、比例或条件。"
     },
     {
       "gap_id": "B2G012",
@@ -185,20 +145,6 @@
       "attempted_source": "balance_sheet actual columns",
       "next_action": "B3判断可计算部分是否足够；下次财报补字段",
       "must_not_infer": "缺失字段不得按0。"
-    },
-    {
-      "gap_id": "B2G018",
-      "entity_or_node": "荣亿精密",
-      "field": "required_document_body",
-      "status": "query_failed",
-      "impact": "关系、所有权或直接主题字段无法完成正式原文复核",
-      "attempted_source": [
-        "荣亿精密2025年年度报告",
-        "荣亿精密2026年半年度报告",
-        "荣亿精密服务器液冷快速接头精密零部件项目公告"
-      ],
-      "next_action": "B3决定保留未知或发起一次限定向纠正",
-      "must_not_infer": "不得用A3摘要或媒体转述补合同金额、客户、比例或条件。"
     },
     {
       "gap_id": "B2G019",

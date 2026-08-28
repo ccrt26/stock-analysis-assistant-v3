@@ -1,12 +1,12 @@
 research_id: ai-liquid-cooling-2026h2-001
-version: 2
+version: 3
 branch: research/ai-liquid-cooling-2026h2
 base_commit: 70b9f7838551a2e61a2c10cb7698e74c35303a7c
 latest_commit: HEAD
 current_step: B3
-current_stage: B_semantic_acceptance
+current_stage: B_final_semantic_acceptance
 next_actor: chatgpt
-status: waiting_chatgpt_b3
+status: waiting_chatgpt_B3_final
 as_of: '2026-08-27T22:32:34+08:00'
 required_inputs:
 - 03_A_开放式产业研究最终报告.docx
@@ -18,6 +18,8 @@ required_inputs:
 - 05_B2_本地核查摘要.md
 - 05_B2_数据缺口.json
 - industry-research-stage-b
+- 06_B_验收报告.md
+- 06_B_交给C阶段.yaml
 expected_outputs:
 - 06_B_验收报告.md
 - 06_B_交给C阶段.yaml
@@ -39,6 +41,8 @@ completed_outputs:
 - 05_B2_本地核查.json
 - 05_B2_本地核查摘要.md
 - 05_B2_数据缺口.json
+- 06_B_验收报告.md
+- 06_B_交给C阶段.yaml
 a2_result:
   validation_status: complete
   conflict_file: not_created_no_conflict
@@ -53,9 +57,9 @@ a2_result:
     szse_metadata: complete
     szse_pdf_sample: complete
     sampled_publication_date: '2026-08-26'
-last_updated: '2026-08-28T12:29:02+08:00'
+last_updated: '2026-08-28T15:14:52+08:00'
 b2_result:
-  validation_status: complete
+  validation_status: complete_B2_R1
   records_expected: 9
   records_returned: 9
   local_fact_manifest_hash: 2fcef04e5ff70c7096c626872c0b1bb8c3d76794495f470b2a0066d05baad306
@@ -63,15 +67,15 @@ b2_result:
     ENT034: passed_partial
     ENT035: passed_partial
     ENT036A: passed_direct_product_revenue
-    ENT036B: not_completed_ownership_body_failed
+    ENT036B: passed_ownership_context_only
     ENT037: passed_partial
-    ENT038: not_passed_conditional_facility_relation
+    ENT038: passed_partial_facility_liquid_cooling_relation
     ENT039: passed_project_relation
     ENT040: not_passed_hard_relation_gate
-    A2L007: not_completed_original_body_failed
-  formal_document_bodies_complete: 7
-  formal_document_bodies_query_failed: 10
-  data_gap_count: 21
+    A2L007: passed_direct_mass_production_relationship
+  formal_document_bodies_complete: 17
+  formal_document_bodies_query_failed: 0
+  data_gap_count: 17
   point_in_time_filter: available_at <= 2026-08-27T22:32:34+08:00
   verification:
     json_yaml_parse: passed
@@ -81,4 +85,17 @@ b2_result:
     ownership_guard: passed
     input_hash_integrity: passed
     git_scope: run_directory_only
+    numeric_freeze: passed_company_baseline_valuation_price_returns_and_derived_metrics
+    target_document_conservation: passed_10_of_10
+    pdf_magic_and_sha256: passed_10_of_10
   b3_c_d_started: false
+  correction:
+    correction_id: B2-R1
+    correction_type: document_source_mapping_error
+    round: 1/1
+    status: complete
+    target_documents_expected: 10
+    target_documents_complete: 10
+    target_documents_query_failed: 0
+    next_step: B3_final_semantic_acceptance
+    second_return_to_B_for_ordinary_gaps: false

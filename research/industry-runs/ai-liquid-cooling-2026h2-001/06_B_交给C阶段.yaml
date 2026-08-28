@@ -1,0 +1,139 @@
+contract_type: B3_acceptance_handoff
+research_id: ai-liquid-cooling-2026h2-001
+version: 2
+stage: B3_reassessment
+as_of: '2026-08-27T22:32:34+08:00'
+generated_at: '2026-08-28T14:15:33+08:00'
+created_by: chatgpt
+source_branch: research/ai-liquid-cooling-2026h2
+source_b2_commit: 2704a7f9a45a71aa8fb9f164775f60c6c7ec86b2
+supersedes_local_b3_version:
+  version: 1
+  acceptance_status: accepted_with_gaps
+  status: withdrawn_not_valid_for_C
+  reason: new_read_only_diagnosis_proved_required_official_bodies_recoverable_via_official_paths
+acceptance_status: return_to_B
+ready_for_C: false
+correction_request:
+  required: true
+  round: 1
+  maximum_rounds: 1
+  correction_type: document_source_mapping_error
+  why_allowed:
+  - B3_allows_one_directed_correction_for_explicit_mapping_time_or_calculation_error
+  - SSE_metadata_to_official_pdf_path_mapping_was_incomplete
+  - BSE_announcement_session_and_category_api_path_mapping_was_incomplete
+  - the_failed_bodies_are_required_by_B1_and_material_to_ownership_or_relationship_gates
+  not_a_reason:
+  - not_general_gap_chasing
+  - not_an_attempt_to_zero_all_21_gaps
+  - not_a_request_to_recalculate_existing_numeric_baselines
+next_actor: codex
+next_step: B2_R1_directed_official_document_backfill
+do_not_start_C: true
+target_documents:
+- record_id: ENT036B
+  entity: 中科曙光
+  exchange: SSE
+  title: 中科曙光2025年年度报告
+- record_id: ENT036B
+  entity: 中科曙光
+  exchange: SSE
+  title: 中科曙光2026年半年度报告
+- record_id: ENT038
+  entity: 佳力图
+  exchange: SSE
+  title: 佳力图2025年年度报告
+- record_id: ENT038
+  entity: 佳力图
+  exchange: SSE
+  title: 佳力图2025年年报监管问询回复
+- record_id: ENT038
+  entity: 佳力图
+  exchange: SSE
+  title: 佳力图2026年半年度报告
+- record_id: ENT036A
+  entity: 曙光数创
+  exchange: BSE
+  title: 曙光数创2025年年度报告
+- record_id: ENT036A
+  entity: 曙光数创
+  exchange: BSE
+  title: 曙光数创2026年半年度报告
+- record_id: A2L007
+  entity: 荣亿精密
+  exchange: BSE
+  title: 荣亿精密2025年年度报告
+- record_id: A2L007
+  entity: 荣亿精密
+  exchange: BSE
+  title: 荣亿精密2026年半年度报告
+- record_id: A2L007
+  entity: 荣亿精密
+  exchange: BSE
+  title: 荣亿精密服务器液冷快速接头精密零部件项目公告
+approved_acquisition_routes:
+  SSE:
+    scope: five_known_documents_only
+    route: existing_official_metadata_then_official_big5_mirror_or_equivalent_official_resolved_pdf
+    verification:
+    - same_announcement_identity
+    - published_at_not_after_as_of
+    - http_success
+    - pdf_magic
+    - byte_count
+    - sha256
+  BSE:
+    scope: five_known_documents_only
+    route: official_announcement_entry_preserve_normal_session_cookie_then_use_official_category_query_path_and_official_pdf
+    verification:
+    - same_announcement_identity
+    - published_at_not_after_as_of
+    - http_success
+    - pdf_magic
+    - byte_count
+    - sha256
+compliance_limits:
+- official_domains_and_normal_site_session_only
+- no_captcha_or_javascript_challenge_cracking
+- no_proxy_rotation_or_login_bypass
+- no_high_frequency_or_full_market_crawler
+- no_src_or_tests_changes_in_this_correction
+point_in_time_rules:
+- document_title_identity_and_published_at_must_match_pre_cutoff_official_metadata
+- published_at_must_be_on_or_before_as_of
+- record_retrieved_at_and_observed_at_separately
+- do_not_use_post_cutoff_new_operating_documents_or_amendments
+- retrieval_after_as_of_is_audit_recovery_of_the_same_historical_document_not_a_new_operating_fact
+numeric_freeze:
+  existing_company_baseline: unchanged
+  existing_valuation_and_price: unchanged
+  existing_returns_and_derived_metrics: unchanged
+  direct_document_facts: may_be_added_only_if_exact_same_scope_period_and_page_cited
+  conflict_rule: record_conflict_and_stop_related_field_instead_of_silent_numeric_overwrite
+b2_outputs_to_update:
+- 05_B2_本地核查.json
+- 05_B2_本地核查摘要.md
+- 05_B2_数据缺口.json
+- 00_运行状态.yaml
+- 00_下一步操作.md
+b3_files_to_save_before_backfill:
+- 06_B_验收报告.md
+- 06_B_交给C阶段.yaml
+gap_policy:
+  target_query_failed_gap_ids:
+  - B2G006
+  - B2G007
+  - B2G011
+  - B2G018
+  other_gap_ids_default: preserve
+  other_gap_may_change_only_if: one_of_the_ten_official_bodies_directly_resolves_exact_same_period_scope_and_field
+  no_inference: true
+after_correction:
+  actor: chatgpt
+  step: B3_final_semantic_acceptance
+  allowed_statuses:
+  - accepted
+  - accepted_with_gaps
+  - blocked
+  second_return_to_B_for_ordinary_gaps: false

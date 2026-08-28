@@ -1,10 +1,10 @@
 {
   "research_id": "ai-liquid-cooling-2026h2-001",
-  "version": 1,
-  "stage": "B2_local_quantitative_verification",
-  "status": "complete_waiting_chatgpt_B3",
+  "version": 2,
+  "stage": "B2_R1_directed_official_document_backfill",
+  "status": "complete_waiting_chatgpt_B3_final",
   "as_of": "2026-08-27T22:32:34+08:00",
-  "generated_at": "2026-08-28T12:22:22+08:00",
+  "generated_at": "2026-08-28T15:14:52+08:00",
   "contract_compliance": {
     "sole_entry": "00_下一步操作.md",
     "sole_entry_sha256": "64b247fc8711bbc56842db41eab046124b51e35e5328f6ee983a4cd9b6b9c3a6",
@@ -26,7 +26,12 @@
       "目标价",
       "仓位",
       "收益承诺"
-    ]
+    ],
+    "b2_r1_correction_id": "B2-R1",
+    "b2_r1_correction_round": "1/1",
+    "b2_r1_sole_entry_sha256": "862e30aba0761b8d68dfe771befdc44e1b51799c5e7cbbb252dc2b29013b7fa6",
+    "b2_r1_scope": "ten_known_official_documents_only",
+    "b2_r1_official_routes_only": true
   },
   "input_manifest": {
     "local_fact_snapshot": {
@@ -12545,33 +12550,6 @@
         "sha256": "dcbd174eb1e62dd75cf8164dc52cecbb1ea22dd8463322f2d40c3a30859ba255"
       },
       {
-        "source": "sse",
-        "code": "603019",
-        "date": "2026-08-26",
-        "title": "中科曙光2026年半年度报告",
-        "file": "603019_2026H1.pdf",
-        "status": "query_failed",
-        "error": "ValueError: non_pdf=b\"<html><script>\\n        var arg1='7C76C1E\""
-      },
-      {
-        "source": "sse",
-        "code": "603912",
-        "date": "2026-08-26",
-        "title": "603912：佳力图2026年半年度报告",
-        "file": "603912_2026H1.pdf",
-        "status": "query_failed",
-        "error": "ValueError: non_pdf=b\"<html><script>\\n        var arg1='7C76C1E\""
-      },
-      {
-        "source": "sse",
-        "code": "603912",
-        "date": "2026-08-07",
-        "title": "603912：佳力图关于上海证券交易所对公司2025年年度报告的信息披露监管问询函的回复公告",
-        "file": "603912_2025A_inquiry_reply.pdf",
-        "status": "query_failed",
-        "error": "ValueError: non_pdf=b\"<html><script>\\n        var arg1='7C76C1E\""
-      },
-      {
         "source": "szse",
         "code": "002837",
         "date": "2026-04-21",
@@ -12585,24 +12563,6 @@
         "sha256": "2cbfc5dc8a60b01212b68d930fb06d0a25bd74563cd1942bd87161246c3a1472"
       },
       {
-        "source": "sse",
-        "code": "603019",
-        "date": "2026-04-15",
-        "title": "中科曙光2025年年度报告",
-        "file": "603019_2025A.pdf",
-        "status": "query_failed",
-        "error": "ReadTimeout: HTTPSConnectionPool(host='query.sse.com.cn', port=443): Read timed out. (read timeout=30)"
-      },
-      {
-        "source": "sse",
-        "code": "603912",
-        "date": "2026-03-24",
-        "title": "603912：佳力图2025年年度报告",
-        "file": "603912_2025A.pdf",
-        "status": "query_failed",
-        "error": "ValueError: non_pdf=b\"<html><script>\\n        var arg1='7A2072E\""
-      },
-      {
         "source": "szse",
         "code": "300602",
         "date": "2026-07-13",
@@ -12614,6 +12574,196 @@
         "document_id": "1225421851",
         "bytes": 120079,
         "sha256": "cb04fc52dd5bd2ad0a11fb7492406954ca3e2d0606044ef78e33322d2fa1fbc1"
+      },
+      {
+        "source": "sse",
+        "code": "603019",
+        "date": "2026-04-15",
+        "title": "中科曙光2025年年度报告",
+        "file": "603019_2025A.pdf",
+        "status": "complete",
+        "official_url": "https://www.sse.com.cn/disclosure/listedinfo/announcement/c/new/2026-04-15/603019_20260415_7K80.pdf",
+        "resolved_official_pdf_url": "https://big5.sse.com.cn/site/cht/www.sse.com.cn/disclosure/listedinfo/announcement/c/new/2026-04-15/603019_20260415_7K80.pdf",
+        "published_at": "2026-04-15T00:00:00+08:00",
+        "document_id": "DOC603019A",
+        "http_status": 200,
+        "bytes": 1897948,
+        "sha256": "96e0142fab587c141645fdb1ef411fc13ae3940bbb7c06eb3831f480d5af7241",
+        "pdf_magic_verified": true,
+        "retrieved_at": "2026-08-28T14:57:51+08:00",
+        "observed_at": "2026-08-28T15:01:08+08:00",
+        "route": "official_big5_mirror"
+      },
+      {
+        "source": "sse",
+        "code": "603019",
+        "date": "2026-08-26",
+        "title": "中科曙光2026年半年度报告",
+        "file": "603019_2026H1.pdf",
+        "status": "complete",
+        "official_url": "https://www.sse.com.cn/disclosure/listedinfo/announcement/c/new/2026-08-26/603019_20260826_UXZY.pdf",
+        "resolved_official_pdf_url": "https://big5.sse.com.cn/site/cht/www.sse.com.cn/disclosure/listedinfo/announcement/c/new/2026-08-26/603019_20260826_UXZY.pdf",
+        "published_at": "2026-08-26T00:00:00+08:00",
+        "document_id": "DOC603019H1",
+        "http_status": 200,
+        "bytes": 1426946,
+        "sha256": "4a019403c7a57174c6c3d8e886320d2f3ce446cb830fbf8f05f85e8bd6fbf54b",
+        "pdf_magic_verified": true,
+        "retrieved_at": "2026-08-28T14:57:51+08:00",
+        "observed_at": "2026-08-28T15:01:08+08:00",
+        "route": "official_big5_mirror"
+      },
+      {
+        "source": "sse",
+        "code": "603912",
+        "date": "2026-03-24",
+        "title": "603912：佳力图2025年年度报告",
+        "file": "603912_2025A.pdf",
+        "status": "complete",
+        "official_url": "https://www.sse.com.cn/disclosure/listedinfo/announcement/c/new/2026-03-24/603912_20260324_ZQ52.pdf",
+        "resolved_official_pdf_url": "https://big5.sse.com.cn/site/cht/www.sse.com.cn/disclosure/listedinfo/announcement/c/new/2026-03-24/603912_20260324_ZQ52.pdf",
+        "published_at": "2026-03-24T00:00:00+08:00",
+        "document_id": "DOC603912A",
+        "http_status": 200,
+        "bytes": 1921803,
+        "sha256": "fc02ef0370cb60e31a5beecba983325418806dab0600ec36e3d29410ab1d5985",
+        "pdf_magic_verified": true,
+        "retrieved_at": "2026-08-28T14:57:52+08:00",
+        "observed_at": "2026-08-28T15:01:08+08:00",
+        "route": "official_big5_mirror"
+      },
+      {
+        "source": "sse",
+        "code": "603912",
+        "date": "2026-08-07",
+        "title": "603912：佳力图关于上海证券交易所对公司2025年年度报告的信息披露监管问询函的回复公告",
+        "file": "603912_2025A_inquiry_reply.pdf",
+        "status": "complete",
+        "official_url": "https://www.sse.com.cn/disclosure/listedinfo/announcement/c/new/2026-08-07/603912_20260807_X898.pdf",
+        "resolved_official_pdf_url": "https://big5.sse.com.cn/site/cht/www.sse.com.cn/disclosure/listedinfo/announcement/c/new/2026-08-07/603912_20260807_X898.pdf",
+        "published_at": "2026-08-07T00:00:00+08:00",
+        "document_id": "DOC603912Q",
+        "http_status": 200,
+        "bytes": 337533,
+        "sha256": "a1403cca8347afed54738f256895b2c54651ae90ffdada1fc30f7cfedf164721",
+        "pdf_magic_verified": true,
+        "retrieved_at": "2026-08-28T14:57:52+08:00",
+        "observed_at": "2026-08-28T15:01:09+08:00",
+        "route": "official_big5_mirror"
+      },
+      {
+        "source": "sse",
+        "code": "603912",
+        "date": "2026-08-26",
+        "title": "603912：佳力图2026年半年度报告",
+        "file": "603912_2026H1.pdf",
+        "status": "complete",
+        "official_url": "https://www.sse.com.cn/disclosure/listedinfo/announcement/c/new/2026-08-26/603912_20260826_04J5.pdf",
+        "resolved_official_pdf_url": "https://big5.sse.com.cn/site/cht/www.sse.com.cn/disclosure/listedinfo/announcement/c/new/2026-08-26/603912_20260826_04J5.pdf",
+        "published_at": "2026-08-26T00:00:00+08:00",
+        "document_id": "DOC603912H1",
+        "http_status": 200,
+        "bytes": 1371049,
+        "sha256": "206ff88509e52db1beab0479b639dc0e12254180b0f1865bc5bcd8171d608891",
+        "pdf_magic_verified": true,
+        "retrieved_at": "2026-08-28T14:57:53+08:00",
+        "observed_at": "2026-08-28T15:01:09+08:00",
+        "route": "official_big5_mirror"
+      },
+      {
+        "source": "bse",
+        "code": "920808",
+        "date": "2026-04-14",
+        "title": "[定期报告]曙光数创:2025年年度报告",
+        "file": "920808_2025A.pdf",
+        "status": "complete",
+        "official_url": "https://www.bse.cn/disclosure/2026/2026-04-14/11583a35f4b3460eb04305f845d2e837.pdf",
+        "resolved_official_pdf_url": "https://www.bse.cn/disclosure/2026/2026-04-14/11583a35f4b3460eb04305f845d2e837.pdf",
+        "published_at": "2026-04-14T00:00:00+08:00",
+        "document_id": "DOC920808A",
+        "http_status": 200,
+        "bytes": 3641160,
+        "sha256": "fc41d51bd9059bf12f7de83acb91f96c0dd5ce1161a73b85b888d3f8b108381f",
+        "pdf_magic_verified": true,
+        "retrieved_at": "2026-08-28T14:59:38+08:00",
+        "observed_at": "2026-08-28T14:59:38+08:00",
+        "route": "official_category_api_normal_session"
+      },
+      {
+        "source": "bse",
+        "code": "920808",
+        "date": "2026-08-25",
+        "title": "[定期报告]曙光数创:2026年半年度报告",
+        "file": "920808_2026H1.pdf",
+        "status": "complete",
+        "official_url": "https://www.bse.cn/disclosure/2026/2026-08-25/bd21c1cedd484f8ebc77bcf91b8dc85f.pdf",
+        "resolved_official_pdf_url": "https://www.bse.cn/disclosure/2026/2026-08-25/bd21c1cedd484f8ebc77bcf91b8dc85f.pdf",
+        "published_at": "2026-08-25T00:00:00+08:00",
+        "document_id": "DOC920808H1",
+        "http_status": 200,
+        "bytes": 3188021,
+        "sha256": "9717c93d44a87cc678b98ccd88deb367785deb525fe23826eb0d92739a3f6c6a",
+        "pdf_magic_verified": true,
+        "retrieved_at": "2026-08-28T14:59:38+08:00",
+        "observed_at": "2026-08-28T14:59:38+08:00",
+        "route": "official_category_api_normal_session"
+      },
+      {
+        "source": "bse",
+        "code": "920223",
+        "date": "2026-04-15",
+        "title": "[定期报告]荣亿精密:2025年年度报告",
+        "file": "920223_2025A.pdf",
+        "status": "complete",
+        "official_url": "https://www.bse.cn/disclosure/2026/2026-04-15/1284952b21fa42d9a75f30c8d5c7ea2b.pdf",
+        "resolved_official_pdf_url": "https://www.bse.cn/disclosure/2026/2026-04-15/1284952b21fa42d9a75f30c8d5c7ea2b.pdf",
+        "published_at": "2026-04-15T00:00:00+08:00",
+        "document_id": "DOC920223A",
+        "http_status": 200,
+        "bytes": 2305458,
+        "sha256": "07cb5ce8d0e59072fb1faa86cda75dc80d1ceba692d732cb3c5c2d6c1dac917c",
+        "pdf_magic_verified": true,
+        "retrieved_at": "2026-08-28T14:59:39+08:00",
+        "observed_at": "2026-08-28T14:59:39+08:00",
+        "route": "official_category_api_normal_session"
+      },
+      {
+        "source": "bse",
+        "code": "920223",
+        "date": "2026-08-25",
+        "title": "[定期报告]荣亿精密:2026年半年度报告",
+        "file": "920223_2026H1.pdf",
+        "status": "complete",
+        "official_url": "https://www.bse.cn/disclosure/2026/2026-08-25/a8486b7e58ee4bf7997110ce99996fdc.pdf",
+        "resolved_official_pdf_url": "https://www.bse.cn/disclosure/2026/2026-08-25/a8486b7e58ee4bf7997110ce99996fdc.pdf",
+        "published_at": "2026-08-25T00:00:00+08:00",
+        "document_id": "DOC920223H1",
+        "http_status": 200,
+        "bytes": 1957109,
+        "sha256": "67a3bb1f68690172cfaddc868672ccf5441e95bdef07368767841061dd9efb5d",
+        "pdf_magic_verified": true,
+        "retrieved_at": "2026-08-28T14:59:40+08:00",
+        "observed_at": "2026-08-28T14:59:40+08:00",
+        "route": "official_category_api_normal_session"
+      },
+      {
+        "source": "bse",
+        "code": "920223",
+        "date": "2025-12-02",
+        "title": "[临时公告]荣亿精密:关于投资服务器液冷快速接头精密零部件项目的公告",
+        "file": "920223_liquid_quick_connector_project.pdf",
+        "status": "complete",
+        "official_url": "https://www.bse.cn/disclosure/2025/2025-12-02/70c03161075846718d4348ef9be3e131.pdf",
+        "resolved_official_pdf_url": "https://www.bse.cn/disclosure/2025/2025-12-02/70c03161075846718d4348ef9be3e131.pdf",
+        "published_at": "2025-12-02T00:00:00+08:00",
+        "document_id": "DOC920223P",
+        "http_status": 200,
+        "bytes": 103276,
+        "sha256": "0164434f35c7a1194a6c94c247a517f59840c550d1c53139d35342620e7eec9c",
+        "pdf_magic_verified": true,
+        "retrieved_at": "2026-08-28T14:59:40+08:00",
+        "observed_at": "2026-08-28T14:59:40+08:00",
+        "route": "official_category_api_normal_session"
       }
     ],
     "bse_identity_mapping": {
@@ -12784,81 +12934,284 @@
         "document_id": "DOC603019A",
         "record_id": "ENT036B",
         "title": "中科曙光2025年年度报告",
+        "official_metadata_title": "中科曙光2025年年度报告",
         "published_at": "2026-04-15T00:00:00+08:00",
-        "body_status": "query_failed",
-        "reason": "上交所元数据可得；官方附件返回JavaScript挑战页/一次元数据请求超时。"
+        "body_status": "complete",
+        "file": "603019_2025A.pdf",
+        "storage_policy": "temporary_verification_copy_not_committed",
+        "proof_scope": "正式年报确认曙光数创为重要非全资子公司并披露少数股东持股、子公司财务及少数股东损益；只用于所有权、合并和利润归属边界。",
+        "pages": [
+          13,
+          16,
+          193
+        ],
+        "official_url": "https://www.sse.com.cn/disclosure/listedinfo/announcement/c/new/2026-04-15/603019_20260415_7K80.pdf",
+        "resolved_official_pdf_url": "https://big5.sse.com.cn/site/cht/www.sse.com.cn/disclosure/listedinfo/announcement/c/new/2026-04-15/603019_20260415_7K80.pdf",
+        "metadata_endpoint": "https://query.sse.com.cn/security/stock/queryCompanyBulletin.do",
+        "http_status": 200,
+        "content_type": "application/pdf",
+        "bytes": 1897948,
+        "sha256": "96e0142fab587c141645fdb1ef411fc13ae3940bbb7c06eb3831f480d5af7241",
+        "pdf_magic_verified": true,
+        "retrieved_at": "2026-08-28T14:57:51+08:00",
+        "observed_at": "2026-08-28T15:01:08+08:00",
+        "retrieval_time_policy": "post_cutoff_recovery_of_same_pre_cutoff_official_document_not_operating_fact"
       },
       {
         "document_id": "DOC603019H1",
         "record_id": "ENT036B",
         "title": "中科曙光2026年半年度报告",
+        "official_metadata_title": "中科曙光2026年半年度报告",
         "published_at": "2026-08-26T00:00:00+08:00",
-        "body_status": "query_failed",
-        "reason": "上交所元数据可得；官方附件返回JavaScript挑战页。"
+        "body_status": "complete",
+        "file": "603019_2026H1.pdf",
+        "storage_policy": "temporary_verification_copy_not_committed",
+        "proof_scope": "正式半年报确认曙光数创液冷业务主体身份并披露少数股东持股、子公司财务及少数股东损益；禁止把子公司主题财务复制给母公司。",
+        "pages": [
+          8,
+          158,
+          159
+        ],
+        "official_url": "https://www.sse.com.cn/disclosure/listedinfo/announcement/c/new/2026-08-26/603019_20260826_UXZY.pdf",
+        "resolved_official_pdf_url": "https://big5.sse.com.cn/site/cht/www.sse.com.cn/disclosure/listedinfo/announcement/c/new/2026-08-26/603019_20260826_UXZY.pdf",
+        "metadata_endpoint": "https://query.sse.com.cn/security/stock/queryCompanyBulletin.do",
+        "http_status": 200,
+        "content_type": "application/pdf",
+        "bytes": 1426946,
+        "sha256": "4a019403c7a57174c6c3d8e886320d2f3ce446cb830fbf8f05f85e8bd6fbf54b",
+        "pdf_magic_verified": true,
+        "retrieved_at": "2026-08-28T14:57:51+08:00",
+        "observed_at": "2026-08-28T15:01:08+08:00",
+        "retrieval_time_policy": "post_cutoff_recovery_of_same_pre_cutoff_official_document_not_operating_fact"
       },
       {
         "document_id": "DOC603912A",
         "record_id": "ENT038",
         "title": "佳力图2025年年度报告",
+        "official_metadata_title": "603912：佳力图2025年年度报告",
         "published_at": "2026-03-24T00:00:00+08:00",
-        "body_status": "query_failed",
-        "reason": "上交所元数据可得；官方附件返回JavaScript挑战页。"
+        "body_status": "complete",
+        "file": "603912_2025A.pdf",
+        "storage_policy": "temporary_verification_copy_not_committed",
+        "proof_scope": "正式年报确认冷板、Manifold、CDU、环网等液冷能力及项目案例；未独立拆分液冷财务。",
+        "pages": [
+          15,
+          16,
+          33,
+          44,
+          45
+        ],
+        "official_url": "https://www.sse.com.cn/disclosure/listedinfo/announcement/c/new/2026-03-24/603912_20260324_ZQ52.pdf",
+        "resolved_official_pdf_url": "https://big5.sse.com.cn/site/cht/www.sse.com.cn/disclosure/listedinfo/announcement/c/new/2026-03-24/603912_20260324_ZQ52.pdf",
+        "metadata_endpoint": "https://query.sse.com.cn/security/stock/queryCompanyBulletin.do",
+        "http_status": 200,
+        "content_type": "application/pdf",
+        "bytes": 1921803,
+        "sha256": "fc02ef0370cb60e31a5beecba983325418806dab0600ec36e3d29410ab1d5985",
+        "pdf_magic_verified": true,
+        "retrieved_at": "2026-08-28T14:57:52+08:00",
+        "observed_at": "2026-08-28T15:01:08+08:00",
+        "retrieval_time_policy": "post_cutoff_recovery_of_same_pre_cutoff_official_document_not_operating_fact"
       },
       {
         "document_id": "DOC603912Q",
         "record_id": "ENT038",
         "title": "佳力图2025年年报监管问询回复",
+        "official_metadata_title": "603912：佳力图关于上海证券交易所对公司2025年年度报告的信息披露监管问询函的回复公告",
         "published_at": "2026-08-07T00:00:00+08:00",
-        "body_status": "query_failed",
-        "reason": "上交所元数据可得；官方附件返回JavaScript挑战页。"
+        "body_status": "complete",
+        "file": "603912_2025A_inquiry_reply.pdf",
+        "storage_policy": "temporary_verification_copy_not_committed",
+        "proof_scope": "正式问询回复确认收入仍按精密空调/一体化等混合口径披露，液冷等高毛利产品占比较低。",
+        "pages": [
+          1,
+          2,
+          8,
+          9,
+          10
+        ],
+        "official_url": "https://www.sse.com.cn/disclosure/listedinfo/announcement/c/new/2026-08-07/603912_20260807_X898.pdf",
+        "resolved_official_pdf_url": "https://big5.sse.com.cn/site/cht/www.sse.com.cn/disclosure/listedinfo/announcement/c/new/2026-08-07/603912_20260807_X898.pdf",
+        "metadata_endpoint": "https://query.sse.com.cn/security/stock/queryCompanyBulletin.do",
+        "http_status": 200,
+        "content_type": "application/pdf",
+        "bytes": 337533,
+        "sha256": "a1403cca8347afed54738f256895b2c54651ae90ffdada1fc30f7cfedf164721",
+        "pdf_magic_verified": true,
+        "retrieved_at": "2026-08-28T14:57:52+08:00",
+        "observed_at": "2026-08-28T15:01:09+08:00",
+        "retrieval_time_policy": "post_cutoff_recovery_of_same_pre_cutoff_official_document_not_operating_fact"
       },
       {
         "document_id": "DOC603912H1",
         "record_id": "ENT038",
         "title": "佳力图2026年半年度报告",
+        "official_metadata_title": "603912：佳力图2026年半年度报告",
         "published_at": "2026-08-26T00:00:00+08:00",
-        "body_status": "query_failed",
-        "reason": "上交所元数据可得；官方附件返回JavaScript挑战页。"
+        "body_status": "complete",
+        "file": "603912_2026H1.pdf",
+        "storage_policy": "temporary_verification_copy_not_committed",
+        "proof_scope": "正式半年报确认CDU认证、兆瓦级检测、2MW级CDU批量交付及液冷项目案例；未披露液冷订单金额或独立财务。",
+        "pages": [
+          10,
+          11,
+          18
+        ],
+        "official_url": "https://www.sse.com.cn/disclosure/listedinfo/announcement/c/new/2026-08-26/603912_20260826_04J5.pdf",
+        "resolved_official_pdf_url": "https://big5.sse.com.cn/site/cht/www.sse.com.cn/disclosure/listedinfo/announcement/c/new/2026-08-26/603912_20260826_04J5.pdf",
+        "metadata_endpoint": "https://query.sse.com.cn/security/stock/queryCompanyBulletin.do",
+        "http_status": 200,
+        "content_type": "application/pdf",
+        "bytes": 1371049,
+        "sha256": "206ff88509e52db1beab0479b639dc0e12254180b0f1865bc5bcd8171d608891",
+        "pdf_magic_verified": true,
+        "retrieved_at": "2026-08-28T14:57:53+08:00",
+        "observed_at": "2026-08-28T15:01:09+08:00",
+        "retrieval_time_policy": "post_cutoff_recovery_of_same_pre_cutoff_official_document_not_operating_fact"
       },
       {
         "document_id": "DOC920808A",
         "record_id": "ENT036A",
         "title": "曙光数创2025年年度报告",
+        "official_metadata_title": "[定期报告]曙光数创:2025年年度报告",
         "published_at": "2026-04-14T00:00:00+08:00",
-        "body_status": "query_failed",
-        "reason": "巨潮元数据可得但直链404；北交所页面请求403，未取得正文。"
+        "body_status": "complete",
+        "file": "920808_2025A.pdf",
+        "storage_policy": "temporary_verification_copy_not_committed",
+        "proof_scope": "正式年报直接披露冷板/浸没液冷产品收入、成本与项目进展；不分配模块化或系统集成收入。",
+        "pages": [
+          18,
+          24,
+          25,
+          26,
+          27
+        ],
+        "official_url": "https://www.bse.cn/disclosure/2026/2026-04-14/11583a35f4b3460eb04305f845d2e837.pdf",
+        "resolved_official_pdf_url": "https://www.bse.cn/disclosure/2026/2026-04-14/11583a35f4b3460eb04305f845d2e837.pdf",
+        "metadata_endpoint": "https://www.bse.cn/disclosureInfoController/companyAnnouncement.do",
+        "http_status": 200,
+        "content_type": "application/pdf",
+        "bytes": 3641160,
+        "sha256": "fc41d51bd9059bf12f7de83acb91f96c0dd5ce1161a73b85b888d3f8b108381f",
+        "pdf_magic_verified": true,
+        "retrieved_at": "2026-08-28T14:59:38+08:00",
+        "observed_at": "2026-08-28T14:59:38+08:00",
+        "retrieval_time_policy": "post_cutoff_recovery_of_same_pre_cutoff_official_document_not_operating_fact"
       },
       {
         "document_id": "DOC920808H1",
         "record_id": "ENT036A",
         "title": "曙光数创2026年半年度报告",
+        "official_metadata_title": "[定期报告]曙光数创:2026年半年度报告",
         "published_at": "2026-08-25T00:00:00+08:00",
-        "body_status": "query_failed",
-        "reason": "巨潮元数据可得但直链404；北交所页面请求403，未取得正文。"
+        "body_status": "complete",
+        "file": "920808_2026H1.pdf",
+        "storage_policy": "temporary_verification_copy_not_committed",
+        "proof_scope": "正式半年报直接披露冷板/浸没液冷产品收入与成本；没有披露液冷在手订单金额或验收节奏。",
+        "pages": [
+          24,
+          25,
+          27,
+          126,
+          142
+        ],
+        "official_url": "https://www.bse.cn/disclosure/2026/2026-08-25/bd21c1cedd484f8ebc77bcf91b8dc85f.pdf",
+        "resolved_official_pdf_url": "https://www.bse.cn/disclosure/2026/2026-08-25/bd21c1cedd484f8ebc77bcf91b8dc85f.pdf",
+        "metadata_endpoint": "https://www.bse.cn/disclosureInfoController/companyAnnouncement.do",
+        "http_status": 200,
+        "content_type": "application/pdf",
+        "bytes": 3188021,
+        "sha256": "9717c93d44a87cc678b98ccd88deb367785deb525fe23826eb0d92739a3f6c6a",
+        "pdf_magic_verified": true,
+        "retrieved_at": "2026-08-28T14:59:38+08:00",
+        "observed_at": "2026-08-28T14:59:38+08:00",
+        "retrieval_time_policy": "post_cutoff_recovery_of_same_pre_cutoff_official_document_not_operating_fact"
       },
       {
         "document_id": "DOC920223A",
         "record_id": "A2L007",
         "title": "荣亿精密2025年年度报告",
+        "official_metadata_title": "[定期报告]荣亿精密:2025年年度报告",
         "published_at": "2026-04-15T00:00:00+08:00",
-        "body_status": "query_failed",
-        "reason": "巨潮元数据可得但直链404；北交所页面请求403，未取得正文。"
+        "body_status": "complete",
+        "file": "920223_2025A.pdf",
+        "storage_policy": "temporary_verification_copy_not_committed",
+        "proof_scope": "正式年报确认服务器液冷快接精密零部件批量生产、客户富世达及量产成为收入增长点；未独立披露收入或毛利。",
+        "pages": [
+          11,
+          13,
+          15
+        ],
+        "official_url": "https://www.bse.cn/disclosure/2026/2026-04-15/1284952b21fa42d9a75f30c8d5c7ea2b.pdf",
+        "resolved_official_pdf_url": "https://www.bse.cn/disclosure/2026/2026-04-15/1284952b21fa42d9a75f30c8d5c7ea2b.pdf",
+        "metadata_endpoint": "https://www.bse.cn/disclosureInfoController/companyAnnouncement.do",
+        "http_status": 200,
+        "content_type": "application/pdf",
+        "bytes": 2305458,
+        "sha256": "07cb5ce8d0e59072fb1faa86cda75dc80d1ceba692d732cb3c5c2d6c1dac917c",
+        "pdf_magic_verified": true,
+        "retrieved_at": "2026-08-28T14:59:39+08:00",
+        "observed_at": "2026-08-28T14:59:39+08:00",
+        "retrieval_time_policy": "post_cutoff_recovery_of_same_pre_cutoff_official_document_not_operating_fact"
       },
       {
         "document_id": "DOC920223H1",
         "record_id": "A2L007",
         "title": "荣亿精密2026年半年度报告",
+        "official_metadata_title": "[定期报告]荣亿精密:2026年半年度报告",
         "published_at": "2026-08-25T00:00:00+08:00",
-        "body_status": "query_failed",
-        "reason": "巨潮元数据可得但直链404；北交所页面请求403，未取得正文。"
+        "body_status": "complete",
+        "file": "920223_2026H1.pdf",
+        "storage_policy": "temporary_verification_copy_not_committed",
+        "proof_scope": "正式半年报确认液冷快接业务扩产、核心客户富世达、设备到位及产能爬坡，3C类包含液冷快接但未单独拆分。",
+        "pages": [
+          10,
+          11,
+          13,
+          14,
+          18,
+          19,
+          24
+        ],
+        "official_url": "https://www.bse.cn/disclosure/2026/2026-08-25/a8486b7e58ee4bf7997110ce99996fdc.pdf",
+        "resolved_official_pdf_url": "https://www.bse.cn/disclosure/2026/2026-08-25/a8486b7e58ee4bf7997110ce99996fdc.pdf",
+        "metadata_endpoint": "https://www.bse.cn/disclosureInfoController/companyAnnouncement.do",
+        "http_status": 200,
+        "content_type": "application/pdf",
+        "bytes": 1957109,
+        "sha256": "67a3bb1f68690172cfaddc868672ccf5441e95bdef07368767841061dd9efb5d",
+        "pdf_magic_verified": true,
+        "retrieved_at": "2026-08-28T14:59:40+08:00",
+        "observed_at": "2026-08-28T14:59:40+08:00",
+        "retrieval_time_policy": "post_cutoff_recovery_of_same_pre_cutoff_official_document_not_operating_fact"
       },
       {
         "document_id": "DOC920223P",
         "record_id": "A2L007",
         "title": "荣亿精密服务器液冷快速接头精密零部件项目公告",
+        "official_metadata_title": "[临时公告]荣亿精密:关于投资服务器液冷快速接头精密零部件项目的公告",
         "published_at": "2025-12-02T00:00:00+08:00",
-        "body_status": "query_failed",
-        "reason": "巨潮元数据可得但直链404；未用A3摘要代替正式正文。"
+        "body_status": "complete",
+        "file": "920223_liquid_quick_connector_project.pdf",
+        "storage_policy": "temporary_verification_copy_not_committed",
+        "proof_scope": "正式项目公告确认1亿元液冷快接项目、实施主体与投资用途，并明确金额、周期和效益均不构成业绩承诺。",
+        "pages": [
+          1,
+          2,
+          3,
+          4
+        ],
+        "official_url": "https://www.bse.cn/disclosure/2025/2025-12-02/70c03161075846718d4348ef9be3e131.pdf",
+        "resolved_official_pdf_url": "https://www.bse.cn/disclosure/2025/2025-12-02/70c03161075846718d4348ef9be3e131.pdf",
+        "metadata_endpoint": "https://www.bse.cn/disclosureInfoController/companyAnnouncement.do",
+        "http_status": 200,
+        "content_type": "application/pdf",
+        "bytes": 103276,
+        "sha256": "0164434f35c7a1194a6c94c247a517f59840c550d1c53139d35342620e7eec9c",
+        "pdf_magic_verified": true,
+        "retrieved_at": "2026-08-28T14:59:40+08:00",
+        "observed_at": "2026-08-28T14:59:40+08:00",
+        "retrieval_time_policy": "post_cutoff_recovery_of_same_pre_cutoff_official_document_not_operating_fact"
       },
       {
         "document_id": "DOC300602F",
@@ -12880,9 +13233,12 @@
         "pdf_magic_verified": true
       }
     ],
-    "complete_body_count": 7,
-    "query_failed_body_count": 10,
-    "no_secondary_summary_substitution": true
+    "complete_body_count": 17,
+    "query_failed_body_count": 0,
+    "no_secondary_summary_substitution": true,
+    "correction_id": "B2-R1",
+    "correction_scope": "ten_known_official_documents_only",
+    "route_compliance": "official domains and normal sessions only; no challenge execution, login bypass, proxy rotation, broad crawl"
   },
   "entity_results": [
     {
@@ -14767,11 +15123,11 @@
       "relationship_gate_result": {
         "overall": "passed_direct_product_revenue",
         "identity": "complete_with_official_old_new_code_mapping",
-        "capability": "complete_structured_main_business",
-        "certification_or_pilot": "partial_carried_from_A3",
-        "supply": "complete_at_aggregate_product_revenue_level",
-        "order": "unknown",
-        "repeat_delivery": "unknown_customer_chain",
+        "capability": "complete_official_body_structured_liquid_products",
+        "certification_or_pilot": "complete_commercial_deployment_in_official_body",
+        "supply": "complete_direct_product_revenue_and_multiple_project_delivery",
+        "order": "partial_contract_timing_disclosed_no_theme_backlog_amount",
+        "repeat_delivery": "partial_multiple_projects_no_repeat_customer_chain",
         "revenue": "complete_direct_product_categories",
         "profit": "partial_direct_product_gross_profit_only",
         "cash": "unknown_theme_split",
@@ -14782,17 +15138,59 @@
           "document_id": "DOC920808A",
           "record_id": "ENT036A",
           "title": "曙光数创2025年年度报告",
+          "official_metadata_title": "[定期报告]曙光数创:2025年年度报告",
           "published_at": "2026-04-14T00:00:00+08:00",
-          "body_status": "query_failed",
-          "reason": "巨潮元数据可得但直链404；北交所页面请求403，未取得正文。"
+          "body_status": "complete",
+          "file": "920808_2025A.pdf",
+          "storage_policy": "temporary_verification_copy_not_committed",
+          "proof_scope": "正式年报直接披露冷板/浸没液冷产品收入、成本与项目进展；不分配模块化或系统集成收入。",
+          "pages": [
+            18,
+            24,
+            25,
+            26,
+            27
+          ],
+          "official_url": "https://www.bse.cn/disclosure/2026/2026-04-14/11583a35f4b3460eb04305f845d2e837.pdf",
+          "resolved_official_pdf_url": "https://www.bse.cn/disclosure/2026/2026-04-14/11583a35f4b3460eb04305f845d2e837.pdf",
+          "metadata_endpoint": "https://www.bse.cn/disclosureInfoController/companyAnnouncement.do",
+          "http_status": 200,
+          "content_type": "application/pdf",
+          "bytes": 3641160,
+          "sha256": "fc41d51bd9059bf12f7de83acb91f96c0dd5ce1161a73b85b888d3f8b108381f",
+          "pdf_magic_verified": true,
+          "retrieved_at": "2026-08-28T14:59:38+08:00",
+          "observed_at": "2026-08-28T14:59:38+08:00",
+          "retrieval_time_policy": "post_cutoff_recovery_of_same_pre_cutoff_official_document_not_operating_fact"
         },
         {
           "document_id": "DOC920808H1",
           "record_id": "ENT036A",
           "title": "曙光数创2026年半年度报告",
+          "official_metadata_title": "[定期报告]曙光数创:2026年半年度报告",
           "published_at": "2026-08-25T00:00:00+08:00",
-          "body_status": "query_failed",
-          "reason": "巨潮元数据可得但直链404；北交所页面请求403，未取得正文。"
+          "body_status": "complete",
+          "file": "920808_2026H1.pdf",
+          "storage_policy": "temporary_verification_copy_not_committed",
+          "proof_scope": "正式半年报直接披露冷板/浸没液冷产品收入与成本；没有披露液冷在手订单金额或验收节奏。",
+          "pages": [
+            24,
+            25,
+            27,
+            126,
+            142
+          ],
+          "official_url": "https://www.bse.cn/disclosure/2026/2026-08-25/bd21c1cedd484f8ebc77bcf91b8dc85f.pdf",
+          "resolved_official_pdf_url": "https://www.bse.cn/disclosure/2026/2026-08-25/bd21c1cedd484f8ebc77bcf91b8dc85f.pdf",
+          "metadata_endpoint": "https://www.bse.cn/disclosureInfoController/companyAnnouncement.do",
+          "http_status": 200,
+          "content_type": "application/pdf",
+          "bytes": 3188021,
+          "sha256": "9717c93d44a87cc678b98ccd88deb367785deb525fe23826eb0d92739a3f6c6a",
+          "pdf_magic_verified": true,
+          "retrieved_at": "2026-08-28T14:59:38+08:00",
+          "observed_at": "2026-08-28T14:59:38+08:00",
+          "retrieval_time_policy": "post_cutoff_recovery_of_same_pre_cutoff_official_document_not_operating_fact"
         }
       ],
       "company_baseline": {
@@ -15164,7 +15562,25 @@
             "quality_status": "passed"
           }
         ],
-        "scope": "仅冷板液冷产品与浸没液冷产品；不分配模块化或系统集成收入。"
+        "scope": "仅冷板液冷产品与浸没液冷产品；不分配模块化或系统集成收入。",
+        "official_body_corroboration": {
+          "documents": [
+            "DOC920808A",
+            "DOC920808H1"
+          ],
+          "pages": {
+            "DOC920808A": [
+              24,
+              25,
+              26
+            ],
+            "DOC920808H1": [
+              126,
+              142
+            ]
+          },
+          "boundary": "正文核对既有冷板/浸没直接产品分类；未新增模块化、系统集成、订单或验收分配。"
+        }
       },
       "scenario_inputs": [
         {
@@ -15205,11 +15621,11 @@
           "actual_or_directly_disclosed_value": 219125848.74,
           "unit": "CNY",
           "period": "2026-06-30",
-          "source_id_or_document": "main_business:冷板液冷产品+浸没液冷产品",
-          "published_at": null,
+          "source_id_or_document": "DOC920808H1 pp.126,142; 冷板液冷产品+浸没液冷产品",
+          "published_at": "2026-08-25T00:00:00+08:00",
           "available_at": "2026-08-26 00:00:00+08:00",
-          "quality": "partial_direct_product_category_revenue",
-          "missing_reason": "金额为直接产品分类收入；项目验收正文未取得，B3需决定能否接受为recognized_project_revenue。"
+          "quality": "partial_direct_product_category_revenue_not_project_acceptance",
+          "missing_reason": "正式正文直接确认产品分类收入与成本，但没有逐项目验收映射，不能改写为项目验收收入。"
         },
         {
           "field": "project_gross_margin",
@@ -15430,13 +15846,13 @@
       "unknowns": [
         {
           "field": "order",
-          "status": "unknown",
-          "reason": "unknown"
+          "status": "partial",
+          "reason": "contract_timing_known_theme_backlog_amount_unknown"
         },
         {
           "field": "repeat_delivery",
-          "status": "unknown",
-          "reason": "unknown_customer_chain"
+          "status": "partial",
+          "reason": "multiple_projects_known_repeat_customer_chain_unknown"
         },
         {
           "field": "cash",
@@ -15453,8 +15869,8 @@
         "status": "partial",
         "point_in_time": "all local facts available_at <= as_of",
         "latest_comparable_period": "2026-06-30",
-        "document_body_complete_count": 0,
-        "document_body_failed_count": 2,
+        "document_body_complete_count": 2,
+        "document_body_failed_count": 0,
         "calculation_alerts": [
           {
             "alert": "利润—现金背离",
@@ -15495,7 +15911,8 @@
             "status": "unknown",
             "evidence": "未取得可归属于目标液冷业务的单一客户占比。"
           }
-        ]
+        ],
+        "document_body_status": "complete_target_chain"
       },
       "input_refs": [
         {
@@ -15598,11 +16015,33 @@
         },
         {
           "document_id": "DOC920808A",
-          "body_status": "query_failed"
+          "body_status": "complete",
+          "published_at": "2026-04-14T00:00:00+08:00",
+          "official_url": "https://www.bse.cn/disclosure/2026/2026-04-14/11583a35f4b3460eb04305f845d2e837.pdf",
+          "pages": [
+            18,
+            24,
+            25,
+            26,
+            27
+          ],
+          "sha256": "fc41d51bd9059bf12f7de83acb91f96c0dd5ce1161a73b85b888d3f8b108381f",
+          "retrieved_at": "2026-08-28T14:59:38+08:00"
         },
         {
           "document_id": "DOC920808H1",
-          "body_status": "query_failed"
+          "body_status": "complete",
+          "published_at": "2026-08-25T00:00:00+08:00",
+          "official_url": "https://www.bse.cn/disclosure/2026/2026-08-25/bd21c1cedd484f8ebc77bcf91b8dc85f.pdf",
+          "pages": [
+            24,
+            25,
+            27,
+            126,
+            142
+          ],
+          "sha256": "9717c93d44a87cc678b98ccd88deb367785deb525fe23826eb0d92739a3f6c6a",
+          "retrieved_at": "2026-08-28T14:59:38+08:00"
         }
       ]
     },
@@ -15614,34 +16053,72 @@
         "ownership_context"
       ],
       "relationship_gate_result": {
-        "overall": "not_completed_ownership_body_failed",
+        "overall": "passed_ownership_context_only",
         "identity": "complete",
-        "capability": "not_applicable",
+        "capability": "not_assigned_from_subsidiary",
         "certification_or_pilot": "not_applicable",
-        "supply": "not_applicable",
-        "order": "not_applicable",
-        "repeat_delivery": "not_applicable",
-        "revenue": "forbidden",
-        "profit": "unknown_ownership_attribution",
+        "supply": "not_assigned_from_subsidiary",
+        "order": "not_assigned_from_subsidiary",
+        "repeat_delivery": "not_assigned_from_subsidiary",
+        "revenue": "forbidden_to_inherit_subsidiary_theme_revenue",
+        "profit": "partial_subsidiary_and_minority_profit_disclosed_parent_effect_not_isolated",
         "cash": "not_applicable",
-        "ownership_gate": "not_passed"
+        "ownership_gate": "passed_control_and_consolidation_boundary"
       },
       "document_body_results": [
         {
           "document_id": "DOC603019A",
           "record_id": "ENT036B",
           "title": "中科曙光2025年年度报告",
+          "official_metadata_title": "中科曙光2025年年度报告",
           "published_at": "2026-04-15T00:00:00+08:00",
-          "body_status": "query_failed",
-          "reason": "上交所元数据可得；官方附件返回JavaScript挑战页/一次元数据请求超时。"
+          "body_status": "complete",
+          "file": "603019_2025A.pdf",
+          "storage_policy": "temporary_verification_copy_not_committed",
+          "proof_scope": "正式年报确认曙光数创为重要非全资子公司并披露少数股东持股、子公司财务及少数股东损益；只用于所有权、合并和利润归属边界。",
+          "pages": [
+            13,
+            16,
+            193
+          ],
+          "official_url": "https://www.sse.com.cn/disclosure/listedinfo/announcement/c/new/2026-04-15/603019_20260415_7K80.pdf",
+          "resolved_official_pdf_url": "https://big5.sse.com.cn/site/cht/www.sse.com.cn/disclosure/listedinfo/announcement/c/new/2026-04-15/603019_20260415_7K80.pdf",
+          "metadata_endpoint": "https://query.sse.com.cn/security/stock/queryCompanyBulletin.do",
+          "http_status": 200,
+          "content_type": "application/pdf",
+          "bytes": 1897948,
+          "sha256": "96e0142fab587c141645fdb1ef411fc13ae3940bbb7c06eb3831f480d5af7241",
+          "pdf_magic_verified": true,
+          "retrieved_at": "2026-08-28T14:57:51+08:00",
+          "observed_at": "2026-08-28T15:01:08+08:00",
+          "retrieval_time_policy": "post_cutoff_recovery_of_same_pre_cutoff_official_document_not_operating_fact"
         },
         {
           "document_id": "DOC603019H1",
           "record_id": "ENT036B",
           "title": "中科曙光2026年半年度报告",
+          "official_metadata_title": "中科曙光2026年半年度报告",
           "published_at": "2026-08-26T00:00:00+08:00",
-          "body_status": "query_failed",
-          "reason": "上交所元数据可得；官方附件返回JavaScript挑战页。"
+          "body_status": "complete",
+          "file": "603019_2026H1.pdf",
+          "storage_policy": "temporary_verification_copy_not_committed",
+          "proof_scope": "正式半年报确认曙光数创液冷业务主体身份并披露少数股东持股、子公司财务及少数股东损益；禁止把子公司主题财务复制给母公司。",
+          "pages": [
+            8,
+            158,
+            159
+          ],
+          "official_url": "https://www.sse.com.cn/disclosure/listedinfo/announcement/c/new/2026-08-26/603019_20260826_UXZY.pdf",
+          "resolved_official_pdf_url": "https://big5.sse.com.cn/site/cht/www.sse.com.cn/disclosure/listedinfo/announcement/c/new/2026-08-26/603019_20260826_UXZY.pdf",
+          "metadata_endpoint": "https://query.sse.com.cn/security/stock/queryCompanyBulletin.do",
+          "http_status": 200,
+          "content_type": "application/pdf",
+          "bytes": 1426946,
+          "sha256": "4a019403c7a57174c6c3d8e886320d2f3ce446cb830fbf8f05f85e8bd6fbf54b",
+          "pdf_magic_verified": true,
+          "retrieved_at": "2026-08-28T14:57:51+08:00",
+          "observed_at": "2026-08-28T15:01:08+08:00",
+          "retrieval_time_policy": "post_cutoff_recovery_of_same_pre_cutoff_official_document_not_operating_fact"
         }
       ],
       "company_baseline": {
@@ -15667,96 +16144,125 @@
       },
       "theme_metrics": {
         "status": "not_applicable_forbidden",
-        "reason": "仅允许核对所有权、合并和利润归属，禁止继承子公司主题财务。"
+        "reason": "正式年报与半年报只用于所有权、合并和利润归属核查；禁止继承曙光数创主题财务。",
+        "ownership_facts": {
+          "2025-12-31": {
+            "minority_share_ratio": 0.379302,
+            "implied_parent_share_ratio": 0.620698,
+            "derivation": "1 - officially_disclosed_minority_share_ratio",
+            "source": "DOC603019A p.193"
+          },
+          "2026-06-30": {
+            "minority_share_ratio_rounded": 0.3793,
+            "subsidiary_revenue_cny": 245937592.4,
+            "subsidiary_net_profit_cny": -73404074.73,
+            "minority_shareholder_profit_or_loss_cny": -27842312.35,
+            "source": "DOC603019H1 pp.158-159"
+          },
+          "boundary": "曙光数创为重要非全资子公司并纳入合并披露；不得按持股比例简单乘收入，也不得把其产品或收入重复归给中科曙光主题口径。"
+        }
       },
       "scenario_inputs": [
         {
           "field": "ownership_ratio",
-          "actual_or_directly_disclosed_value": null,
-          "unit": null,
-          "period": null,
-          "source_id_or_document": null,
-          "published_at": null,
-          "available_at": null,
-          "quality": "unknown",
-          "missing_reason": "没有满足同期间、同合并范围且可排除非目标场景的直接披露。"
+          "actual_or_directly_disclosed_value": {
+            "minority_ratio": 0.379302,
+            "implied_parent_ratio": 0.620698
+          },
+          "unit": "ratio",
+          "period": "2025-12-31",
+          "source_id_or_document": "DOC603019A p.193",
+          "published_at": "2026-04-15T00:00:00+08:00",
+          "available_at": "2026-04-15T00:00:00+08:00",
+          "quality": "official_minority_ratio_and_deterministic_complement",
+          "missing_reason": "半年报仅披露四舍五入后的少数股东持股37.93%；未据此改写年报精确比例。"
         },
         {
           "field": "control_status",
-          "actual_or_directly_disclosed_value": null,
-          "unit": null,
-          "period": null,
-          "source_id_or_document": null,
-          "published_at": null,
-          "available_at": null,
-          "quality": "unknown",
-          "missing_reason": "没有满足同期间、同合并范围且可排除非目标场景的直接披露。"
+          "actual_or_directly_disclosed_value": "控股子公司/重要非全资子公司",
+          "unit": "status",
+          "period": "2025-12-31 and 2026-06-30",
+          "source_id_or_document": "DOC603019A p.193; DOC603019H1 p.158",
+          "published_at": "2026-08-26T00:00:00+08:00",
+          "available_at": "2026-08-26T00:00:00+08:00",
+          "quality": "complete_official_body",
+          "missing_reason": null
         },
         {
           "field": "effective_date",
           "actual_or_directly_disclosed_value": null,
           "unit": null,
           "period": null,
-          "source_id_or_document": null,
+          "source_id_or_document": "DOC603019A p.193; DOC603019H1 p.158",
           "published_at": null,
           "available_at": null,
-          "quality": "unknown",
-          "missing_reason": "没有满足同期间、同合并范围且可排除非目标场景的直接披露。"
+          "quality": "unknown_initial_effective_date",
+          "missing_reason": "两份报告确认各报告期末的控制状态，但没有披露最初取得控制的生效日期。"
         },
         {
           "field": "consolidation_status",
-          "actual_or_directly_disclosed_value": null,
-          "unit": null,
-          "period": null,
-          "source_id_or_document": null,
-          "published_at": null,
-          "available_at": null,
-          "quality": "unknown",
-          "missing_reason": "没有满足同期间、同合并范围且可排除非目标场景的直接披露。"
+          "actual_or_directly_disclosed_value": "纳入合并报表的重要非全资子公司",
+          "unit": "status",
+          "period": "2025-12-31 and 2026-06-30",
+          "source_id_or_document": "DOC603019A pp.193-194; DOC603019H1 pp.158-159",
+          "published_at": "2026-08-26T00:00:00+08:00",
+          "available_at": "2026-08-26T00:00:00+08:00",
+          "quality": "complete_official_body",
+          "missing_reason": null
         },
         {
           "field": "minority_interest",
-          "actual_or_directly_disclosed_value": null,
-          "unit": null,
-          "period": null,
-          "source_id_or_document": null,
-          "published_at": null,
-          "available_at": null,
-          "quality": "unknown",
-          "missing_reason": "没有满足同期间、同合并范围且可排除非目标场景的直接披露。"
+          "actual_or_directly_disclosed_value": {
+            "period": "2026-06-30",
+            "minority_share_ratio_rounded": 0.3793,
+            "minority_profit_or_loss_cny": -27842312.35,
+            "ending_minority_equity_cny": 256166999.78
+          },
+          "unit": "mixed_exact_disclosures",
+          "period": "2026-06-30",
+          "source_id_or_document": "DOC603019H1 p.158",
+          "published_at": "2026-08-26T00:00:00+08:00",
+          "available_at": "2026-08-26T00:00:00+08:00",
+          "quality": "complete_official_body",
+          "missing_reason": null
         },
         {
           "field": "subsidiary_revenue_and_profit_disclosure",
-          "actual_or_directly_disclosed_value": null,
-          "unit": null,
-          "period": null,
-          "source_id_or_document": null,
-          "published_at": null,
-          "available_at": null,
-          "quality": "unknown",
-          "missing_reason": "没有满足同期间、同合并范围且可排除非目标场景的直接披露。"
+          "actual_or_directly_disclosed_value": {
+            "period": "2026-06-30",
+            "revenue_cny": 245937592.4,
+            "net_profit_cny": -73404074.73,
+            "operating_cash_flow_cny": -242011677.48
+          },
+          "unit": "CNY",
+          "period": "2026-06-30",
+          "source_id_or_document": "DOC603019H1 p.159",
+          "published_at": "2026-08-26T00:00:00+08:00",
+          "available_at": "2026-08-26T00:00:00+08:00",
+          "quality": "complete_official_subsidiary_disclosure_not_parent_theme_attribution",
+          "missing_reason": null
         },
         {
           "field": "parent_attributable_profit_effect",
           "actual_or_directly_disclosed_value": null,
           "unit": null,
           "period": null,
-          "source_id_or_document": null,
+          "source_id_or_document": "DOC603019A p.193; DOC603019H1 pp.158-159",
           "published_at": null,
           "available_at": null,
-          "quality": "unknown",
-          "missing_reason": "没有满足同期间、同合并范围且可排除非目标场景的直接披露。"
+          "quality": "partial_minorities_disclosed_parent_effect_not_isolated",
+          "missing_reason": "正式报告披露子公司净利润及少数股东损益，但没有单列内部抵销后的母公司归母利润影响；不得简单按持股比例乘算。"
         },
         {
           "field": "related_party_transactions",
           "actual_or_directly_disclosed_value": null,
           "unit": null,
           "period": null,
-          "source_id_or_document": null,
+          "source_id_or_document": "DOC603019A; DOC603019H1",
           "published_at": null,
           "available_at": null,
-          "quality": "unknown",
-          "missing_reason": "没有满足同期间、同合并范围且可排除非目标场景的直接披露。"
+          "quality": "unknown_theme_specific_internal_elimination",
+          "missing_reason": "目标页未单列液冷相关内部交易与抵销金额。"
         }
       ],
       "valuation_and_price": {
@@ -15765,49 +16271,50 @@
       },
       "counterevidence": [
         {
-          "type": "contract_check",
-          "status": "not_resolved_or_requires_B3",
-          "description": "产品属于子公司但被重复归给母公司"
+          "type": "parent_subsidiary_double_count",
+          "status": "resolved_boundary_verified",
+          "description": "产品和直接主题财务属于曙光数创，禁止重复归给中科曙光。",
+          "source": "DOC603019A p.193; DOC603019H1 pp.158-159"
         },
         {
-          "type": "contract_check",
-          "status": "not_resolved_or_requires_B3",
-          "description": "持股比例/控制关系在期间内变化"
+          "type": "ownership_change_within_period",
+          "status": "not_observed_in_target_reports",
+          "description": "年报与半年报均列为重要非全资子公司；精确初始生效日仍未知。"
         },
         {
-          "type": "contract_check",
-          "status": "not_resolved_or_requires_B3",
-          "description": "少数股东权益或内部交易导致简单比例失真"
+          "type": "simple_ratio_distortion",
+          "status": "remains_material",
+          "description": "少数股东损益已披露，母公司归母影响仍不得用持股比例简单乘算。"
         },
         {
-          "type": "contract_check",
-          "status": "not_resolved_or_requires_B3",
-          "description": "子公司不在合并范围"
+          "type": "subsidiary_outside_consolidation",
+          "status": "resolved_false",
+          "description": "正式合并报表附注明确列示为重要非全资子公司。"
         }
       ],
       "unknowns": [
         {
-          "field": "overall",
+          "field": "effective_date",
           "status": "unknown",
-          "reason": "not_completed_ownership_body_failed"
+          "reason": "initial_control_effective_date_not_disclosed"
         },
         {
-          "field": "profit",
-          "status": "unknown",
-          "reason": "unknown_ownership_attribution"
+          "field": "parent_attributable_profit_effect",
+          "status": "partial",
+          "reason": "minority_profit_disclosed_internal_elimination_not_isolated"
         },
         {
-          "field": "ownership_gate",
+          "field": "related_party_transactions",
           "status": "unknown",
-          "reason": "not_passed"
+          "reason": "theme_specific_internal_elimination_not_disclosed"
         }
       ],
       "quality": {
-        "status": "partial",
+        "status": "partial_ownership_context_complete_parent_effect_unknown",
         "point_in_time": "all local facts available_at <= as_of",
-        "latest_comparable_period": "2026-03-31",
-        "document_body_complete_count": 0,
-        "document_body_failed_count": 2,
+        "latest_comparable_period": "2026-06-30",
+        "document_body_complete_count": 2,
+        "document_body_failed_count": 0,
         "calculation_alerts": [
           {
             "alert": "利润—现金背离",
@@ -15833,7 +16340,8 @@
             "alert": "客户过度集中",
             "status": "not_applicable_ownership_context_only"
           }
-        ]
+        ],
+        "document_body_status": "complete_target_chain"
       },
       "input_refs": [
         {
@@ -15852,11 +16360,29 @@
         },
         {
           "document_id": "DOC603019A",
-          "body_status": "query_failed"
+          "body_status": "complete",
+          "published_at": "2026-04-15T00:00:00+08:00",
+          "official_url": "https://www.sse.com.cn/disclosure/listedinfo/announcement/c/new/2026-04-15/603019_20260415_7K80.pdf",
+          "pages": [
+            13,
+            16,
+            193
+          ],
+          "sha256": "96e0142fab587c141645fdb1ef411fc13ae3940bbb7c06eb3831f480d5af7241",
+          "retrieved_at": "2026-08-28T14:57:51+08:00"
         },
         {
           "document_id": "DOC603019H1",
-          "body_status": "query_failed"
+          "body_status": "complete",
+          "published_at": "2026-08-26T00:00:00+08:00",
+          "official_url": "https://www.sse.com.cn/disclosure/listedinfo/announcement/c/new/2026-08-26/603019_20260826_UXZY.pdf",
+          "pages": [
+            8,
+            158,
+            159
+          ],
+          "sha256": "4a019403c7a57174c6c3d8e886320d2f3ce446cb830fbf8f05f85e8bd6fbf54b",
+          "retrieved_at": "2026-08-28T14:57:51+08:00"
         }
       ]
     },
@@ -16716,42 +17242,103 @@
         "facility_side_engineering"
       ],
       "relationship_gate_result": {
-        "overall": "not_passed_conditional_facility_relation",
+        "overall": "passed_partial_facility_liquid_cooling_relation",
         "identity": "complete",
-        "capability": "partial_facility_side_context",
-        "certification_or_pilot": "unknown",
-        "supply": "unknown_liquid_facility_project",
-        "order": "unknown",
-        "repeat_delivery": "unknown",
+        "capability": "complete_facility_side_liquid_cooling_solution",
+        "certification_or_pilot": "complete_CRAA_and_CAICT_testing",
+        "supply": "complete_2MW_CDU_batch_delivery_and_project_examples",
+        "order": "unknown_liquid_cooling_specific_amount",
+        "repeat_delivery": "partial_multiple_project_examples_no_repeat_customer_chain",
         "revenue": "unknown_liquid_facility_split",
-        "profit": "unknown",
-        "cash": "unknown",
-        "theme_financial_gate": "not_passed"
+        "profit": "unknown_theme_contribution",
+        "cash": "unknown_theme_contribution",
+        "theme_financial_gate": "not_passed_no_direct_financial_split"
       },
       "document_body_results": [
         {
           "document_id": "DOC603912A",
           "record_id": "ENT038",
           "title": "佳力图2025年年度报告",
+          "official_metadata_title": "603912：佳力图2025年年度报告",
           "published_at": "2026-03-24T00:00:00+08:00",
-          "body_status": "query_failed",
-          "reason": "上交所元数据可得；官方附件返回JavaScript挑战页。"
+          "body_status": "complete",
+          "file": "603912_2025A.pdf",
+          "storage_policy": "temporary_verification_copy_not_committed",
+          "proof_scope": "正式年报确认冷板、Manifold、CDU、环网等液冷能力及项目案例；未独立拆分液冷财务。",
+          "pages": [
+            15,
+            16,
+            33,
+            44,
+            45
+          ],
+          "official_url": "https://www.sse.com.cn/disclosure/listedinfo/announcement/c/new/2026-03-24/603912_20260324_ZQ52.pdf",
+          "resolved_official_pdf_url": "https://big5.sse.com.cn/site/cht/www.sse.com.cn/disclosure/listedinfo/announcement/c/new/2026-03-24/603912_20260324_ZQ52.pdf",
+          "metadata_endpoint": "https://query.sse.com.cn/security/stock/queryCompanyBulletin.do",
+          "http_status": 200,
+          "content_type": "application/pdf",
+          "bytes": 1921803,
+          "sha256": "fc02ef0370cb60e31a5beecba983325418806dab0600ec36e3d29410ab1d5985",
+          "pdf_magic_verified": true,
+          "retrieved_at": "2026-08-28T14:57:52+08:00",
+          "observed_at": "2026-08-28T15:01:08+08:00",
+          "retrieval_time_policy": "post_cutoff_recovery_of_same_pre_cutoff_official_document_not_operating_fact"
         },
         {
           "document_id": "DOC603912Q",
           "record_id": "ENT038",
           "title": "佳力图2025年年报监管问询回复",
+          "official_metadata_title": "603912：佳力图关于上海证券交易所对公司2025年年度报告的信息披露监管问询函的回复公告",
           "published_at": "2026-08-07T00:00:00+08:00",
-          "body_status": "query_failed",
-          "reason": "上交所元数据可得；官方附件返回JavaScript挑战页。"
+          "body_status": "complete",
+          "file": "603912_2025A_inquiry_reply.pdf",
+          "storage_policy": "temporary_verification_copy_not_committed",
+          "proof_scope": "正式问询回复确认收入仍按精密空调/一体化等混合口径披露，液冷等高毛利产品占比较低。",
+          "pages": [
+            1,
+            2,
+            8,
+            9,
+            10
+          ],
+          "official_url": "https://www.sse.com.cn/disclosure/listedinfo/announcement/c/new/2026-08-07/603912_20260807_X898.pdf",
+          "resolved_official_pdf_url": "https://big5.sse.com.cn/site/cht/www.sse.com.cn/disclosure/listedinfo/announcement/c/new/2026-08-07/603912_20260807_X898.pdf",
+          "metadata_endpoint": "https://query.sse.com.cn/security/stock/queryCompanyBulletin.do",
+          "http_status": 200,
+          "content_type": "application/pdf",
+          "bytes": 337533,
+          "sha256": "a1403cca8347afed54738f256895b2c54651ae90ffdada1fc30f7cfedf164721",
+          "pdf_magic_verified": true,
+          "retrieved_at": "2026-08-28T14:57:52+08:00",
+          "observed_at": "2026-08-28T15:01:09+08:00",
+          "retrieval_time_policy": "post_cutoff_recovery_of_same_pre_cutoff_official_document_not_operating_fact"
         },
         {
           "document_id": "DOC603912H1",
           "record_id": "ENT038",
           "title": "佳力图2026年半年度报告",
+          "official_metadata_title": "603912：佳力图2026年半年度报告",
           "published_at": "2026-08-26T00:00:00+08:00",
-          "body_status": "query_failed",
-          "reason": "上交所元数据可得；官方附件返回JavaScript挑战页。"
+          "body_status": "complete",
+          "file": "603912_2026H1.pdf",
+          "storage_policy": "temporary_verification_copy_not_committed",
+          "proof_scope": "正式半年报确认CDU认证、兆瓦级检测、2MW级CDU批量交付及液冷项目案例；未披露液冷订单金额或独立财务。",
+          "pages": [
+            10,
+            11,
+            18
+          ],
+          "official_url": "https://www.sse.com.cn/disclosure/listedinfo/announcement/c/new/2026-08-26/603912_20260826_04J5.pdf",
+          "resolved_official_pdf_url": "https://big5.sse.com.cn/site/cht/www.sse.com.cn/disclosure/listedinfo/announcement/c/new/2026-08-26/603912_20260826_04J5.pdf",
+          "metadata_endpoint": "https://query.sse.com.cn/security/stock/queryCompanyBulletin.do",
+          "http_status": 200,
+          "content_type": "application/pdf",
+          "bytes": 1371049,
+          "sha256": "206ff88509e52db1beab0479b639dc0e12254180b0f1865bc5bcd8171d608891",
+          "pdf_magic_verified": true,
+          "retrieved_at": "2026-08-28T14:57:53+08:00",
+          "observed_at": "2026-08-28T15:01:09+08:00",
+          "retrieval_time_policy": "post_cutoff_recovery_of_same_pre_cutoff_official_document_not_operating_fact"
         }
       ],
       "company_baseline": {
@@ -17099,12 +17686,26 @@
         ]
       },
       "theme_metrics": {
-        "status": "unknown",
+        "status": "unknown_direct_financial_split",
         "direct_theme_revenue_actual": null,
         "theme_gross_profit": null,
         "theme_profit": null,
         "theme_cash_contribution": null,
-        "reason": "设施侧液冷项目关系未通过，机房环境控制不能等同液冷。"
+        "relationship_facts": [
+          {
+            "fact": "全栈液冷方案覆盖冷板、Manifold、环网与CDU",
+            "source": "DOC603912A pp.15-16"
+          },
+          {
+            "fact": "2MW级CDU成熟定型并进入批量交付",
+            "source": "DOC603912H1 p.10"
+          },
+          {
+            "fact": "冷板液冷项目案例披露",
+            "source": "DOC603912A p.33; DOC603912H1 p.18"
+          }
+        ],
+        "reason": "正式正文通过设施侧关系门，但收入仍按精密空调、一体化等混合口径披露，液冷独立收入、毛利、利润与现金未知。"
       },
       "scenario_inputs": [
         {
@@ -17112,88 +17713,88 @@
           "actual_or_directly_disclosed_value": null,
           "unit": null,
           "period": null,
-          "source_id_or_document": null,
+          "source_id_or_document": "DOC603912A; DOC603912Q; DOC603912H1",
           "published_at": null,
           "available_at": null,
-          "quality": "unknown",
-          "missing_reason": "没有满足同期间、同合并范围且可排除非目标场景的直接披露。"
+          "quality": "unknown_exact_liquid_facility_split",
+          "missing_reason": "正式正文没有同时满足液冷设施侧、同期间和独立财务口径的精确披露；公司总在手订单和混合产品分项不得替代。"
         },
         {
           "field": "traditional_air_cooling_revenue",
           "actual_or_directly_disclosed_value": null,
           "unit": null,
           "period": null,
-          "source_id_or_document": null,
+          "source_id_or_document": "DOC603912A; DOC603912Q; DOC603912H1",
           "published_at": null,
           "available_at": null,
-          "quality": "unknown",
-          "missing_reason": "没有满足同期间、同合并范围且可排除非目标场景的直接披露。"
+          "quality": "unknown_exact_liquid_facility_split",
+          "missing_reason": "正式正文没有同时满足液冷设施侧、同期间和独立财务口径的精确披露；公司总在手订单和混合产品分项不得替代。"
         },
         {
           "field": "idc_operation_revenue",
           "actual_or_directly_disclosed_value": null,
           "unit": null,
           "period": null,
-          "source_id_or_document": null,
+          "source_id_or_document": "DOC603912A; DOC603912Q; DOC603912H1",
           "published_at": null,
           "available_at": null,
-          "quality": "unknown",
-          "missing_reason": "没有满足同期间、同合并范围且可排除非目标场景的直接披露。"
+          "quality": "unknown_exact_liquid_facility_split",
+          "missing_reason": "正式正文没有同时满足液冷设施侧、同期间和独立财务口径的精确披露；公司总在手订单和混合产品分项不得替代。"
         },
         {
           "field": "facility_project_backlog",
           "actual_or_directly_disclosed_value": null,
           "unit": null,
           "period": null,
-          "source_id_or_document": null,
+          "source_id_or_document": "DOC603912A; DOC603912Q; DOC603912H1",
           "published_at": null,
           "available_at": null,
-          "quality": "unknown",
-          "missing_reason": "没有满足同期间、同合并范围且可排除非目标场景的直接披露。"
+          "quality": "unknown_exact_liquid_facility_split",
+          "missing_reason": "正式正文没有同时满足液冷设施侧、同期间和独立财务口径的精确披露；公司总在手订单和混合产品分项不得替代。"
         },
         {
           "field": "acceptance_schedule",
           "actual_or_directly_disclosed_value": null,
           "unit": null,
           "period": null,
-          "source_id_or_document": null,
+          "source_id_or_document": "DOC603912A; DOC603912Q; DOC603912H1",
           "published_at": null,
           "available_at": null,
-          "quality": "unknown",
-          "missing_reason": "没有满足同期间、同合并范围且可排除非目标场景的直接披露。"
+          "quality": "unknown_exact_liquid_facility_split",
+          "missing_reason": "正式正文没有同时满足液冷设施侧、同期间和独立财务口径的精确披露；公司总在手订单和混合产品分项不得替代。"
         },
         {
           "field": "project_gross_margin",
           "actual_or_directly_disclosed_value": null,
           "unit": null,
           "period": null,
-          "source_id_or_document": null,
+          "source_id_or_document": "DOC603912A; DOC603912Q; DOC603912H1",
           "published_at": null,
           "available_at": null,
-          "quality": "unknown",
-          "missing_reason": "没有满足同期间、同合并范围且可排除非目标场景的直接披露。"
+          "quality": "unknown_exact_liquid_facility_split",
+          "missing_reason": "正式正文没有同时满足液冷设施侧、同期间和独立财务口径的精确披露；公司总在手订单和混合产品分项不得替代。"
         },
         {
           "field": "contract_assets",
           "actual_or_directly_disclosed_value": null,
           "unit": null,
           "period": null,
-          "source_id_or_document": null,
+          "source_id_or_document": "DOC603912A; DOC603912Q; DOC603912H1",
           "published_at": null,
           "available_at": null,
-          "quality": "unknown",
-          "missing_reason": "没有满足同期间、同合并范围且可排除非目标场景的直接披露。"
+          "quality": "unknown_exact_liquid_facility_split",
+          "missing_reason": "正式正文没有同时满足液冷设施侧、同期间和独立财务口径的精确披露；公司总在手订单和混合产品分项不得替代。"
         },
         {
           "field": "cash_collection",
           "actual_or_directly_disclosed_value": null,
           "unit": null,
           "period": null,
-          "source_id_or_document": null,
+          "source_id_or_document": "DOC603912A; DOC603912Q; DOC603912H1",
           "published_at": null,
           "available_at": null,
-          "quality": "unknown",
-          "missing_reason": "没有满足同期间、同合并范围且可排除非目标场景的直接披露。"
+          "quality": "unknown_exact_liquid_facility_split",
+          "missing_reason": "正式正文没有同时满足液冷设施侧、同期间和独立财务口径的精确披露；公司总在手订单和混合产品分项不得替代。"
         }
       ],
       "valuation_and_price": {
@@ -17295,51 +17896,37 @@
           "must_not_attribute": "不能自动归因于液冷产品价格、良率或结构。"
         },
         {
-          "type": "contract_check",
-          "status": "not_resolved_or_requires_B3",
-          "description": "收入主要来自传统精密空调或IDC运营"
+          "type": "official_body_scope_boundary",
+          "status": "confirmed",
+          "description": "2025年收入主要按精密空调/一体化混合口径披露，问询回复称液冷等高毛利产品占比较低。",
+          "source": "DOC603912Q pp.2,8-10"
         },
         {
-          "type": "contract_check",
-          "status": "not_resolved_or_requires_B3",
-          "description": "没有液冷改造/设施侧合同原文"
+          "type": "liquid_facility_contract_original",
+          "status": "partially_resolved_examples_only_no_contract_amount",
+          "description": "正式年报与半年报列示液冷项目和批量交付，但未给液冷专属合同金额、验收节奏或独立收入。"
         },
         {
-          "type": "contract_check",
+          "type": "engineering_working_capital",
           "status": "not_resolved_or_requires_B3",
           "description": "工程垫资和应收吞噬利润"
         },
         {
-          "type": "contract_check",
-          "status": "not_resolved_or_requires_B3",
-          "description": "风液混合或传统风冷路线延缓直接液冷投入"
+          "type": "air_liquid_route_mix",
+          "status": "confirmed_mixed_routes",
+          "description": "公司同时经营传统风冷、风液协同与液冷方案，必须保持分拆边界。"
         }
       ],
       "unknowns": [
         {
-          "field": "overall",
-          "status": "unknown",
-          "reason": "not_passed_conditional_facility_relation"
-        },
-        {
-          "field": "certification_or_pilot",
-          "status": "unknown",
-          "reason": "unknown"
-        },
-        {
-          "field": "supply",
-          "status": "unknown",
-          "reason": "unknown_liquid_facility_project"
-        },
-        {
           "field": "order",
           "status": "unknown",
-          "reason": "unknown"
+          "reason": "unknown_liquid_cooling_specific_amount"
         },
         {
           "field": "repeat_delivery",
-          "status": "unknown",
-          "reason": "unknown"
+          "status": "partial",
+          "reason": "multiple_examples_no_repeat_customer_chain"
         },
         {
           "field": "revenue",
@@ -17349,17 +17936,17 @@
         {
           "field": "profit",
           "status": "unknown",
-          "reason": "unknown"
+          "reason": "unknown_theme_contribution"
         },
         {
           "field": "cash",
           "status": "unknown",
-          "reason": "unknown"
+          "reason": "unknown_theme_contribution"
         },
         {
           "field": "theme_financial_gate",
           "status": "unknown",
-          "reason": "not_passed"
+          "reason": "not_passed_no_direct_financial_split"
         },
         {
           "field": "working_capital_intensity",
@@ -17368,11 +17955,11 @@
         }
       ],
       "quality": {
-        "status": "partial",
+        "status": "partial_relation_passed_financial_split_unknown",
         "point_in_time": "all local facts available_at <= as_of",
         "latest_comparable_period": "2026-03-31",
-        "document_body_complete_count": 0,
-        "document_body_failed_count": 3,
+        "document_body_complete_count": 3,
+        "document_body_failed_count": 0,
         "calculation_alerts": [
           {
             "alert": "利润—现金背离",
@@ -17413,7 +18000,8 @@
             "status": "unknown",
             "evidence": "未取得可归属于目标液冷业务的单一客户占比。"
           }
-        ]
+        ],
+        "document_body_status": "complete_target_chain"
       },
       "input_refs": [
         {
@@ -17516,15 +18104,46 @@
         },
         {
           "document_id": "DOC603912A",
-          "body_status": "query_failed"
+          "body_status": "complete",
+          "published_at": "2026-03-24T00:00:00+08:00",
+          "official_url": "https://www.sse.com.cn/disclosure/listedinfo/announcement/c/new/2026-03-24/603912_20260324_ZQ52.pdf",
+          "pages": [
+            15,
+            16,
+            33,
+            44,
+            45
+          ],
+          "sha256": "fc02ef0370cb60e31a5beecba983325418806dab0600ec36e3d29410ab1d5985",
+          "retrieved_at": "2026-08-28T14:57:52+08:00"
         },
         {
           "document_id": "DOC603912Q",
-          "body_status": "query_failed"
+          "body_status": "complete",
+          "published_at": "2026-08-07T00:00:00+08:00",
+          "official_url": "https://www.sse.com.cn/disclosure/listedinfo/announcement/c/new/2026-08-07/603912_20260807_X898.pdf",
+          "pages": [
+            1,
+            2,
+            8,
+            9,
+            10
+          ],
+          "sha256": "a1403cca8347afed54738f256895b2c54651ae90ffdada1fc30f7cfedf164721",
+          "retrieved_at": "2026-08-28T14:57:52+08:00"
         },
         {
           "document_id": "DOC603912H1",
-          "body_status": "query_failed"
+          "body_status": "complete",
+          "published_at": "2026-08-26T00:00:00+08:00",
+          "official_url": "https://www.sse.com.cn/disclosure/listedinfo/announcement/c/new/2026-08-26/603912_20260826_04J5.pdf",
+          "pages": [
+            10,
+            11,
+            18
+          ],
+          "sha256": "206ff88509e52db1beab0479b639dc0e12254180b0f1865bc5bcd8171d608891",
+          "retrieved_at": "2026-08-28T14:57:53+08:00"
         }
       ]
     },
@@ -19149,42 +19768,104 @@
         "component_hardware"
       ],
       "relationship_gate_result": {
-        "overall": "not_completed_original_body_failed",
+        "overall": "passed_direct_mass_production_relationship",
         "identity": "complete_with_official_old_new_code_mapping",
-        "capability": "partial_A3_lead_not_reverified_in_body",
-        "certification_or_pilot": "partial_A3_lead_not_reverified_in_body",
-        "supply": "partial_A3_lead_not_reverified_in_body",
-        "order": "unknown",
-        "repeat_delivery": "partial_A3_lead_not_reverified_in_body",
-        "revenue": "unknown_direct_split",
-        "profit": "unknown",
-        "cash": "unknown",
-        "theme_financial_gate": "not_passed"
+        "capability": "complete_server_liquid_quick_connector_precision_parts",
+        "certification_or_pilot": "complete_market_validation_via_mass_production",
+        "supply": "complete_named_core_customer_Fushida",
+        "order": "partial_orders_and_delivery_disclosed_no_amount",
+        "repeat_delivery": "partial_continuing_core_customer_no_repeat_count",
+        "revenue": "partial_included_in_3C_category_no_direct_split",
+        "profit": "unknown_theme_contribution",
+        "cash": "unknown_theme_contribution",
+        "theme_financial_gate": "not_passed_no_direct_financial_split"
       },
       "document_body_results": [
         {
           "document_id": "DOC920223A",
           "record_id": "A2L007",
           "title": "荣亿精密2025年年度报告",
+          "official_metadata_title": "[定期报告]荣亿精密:2025年年度报告",
           "published_at": "2026-04-15T00:00:00+08:00",
-          "body_status": "query_failed",
-          "reason": "巨潮元数据可得但直链404；北交所页面请求403，未取得正文。"
+          "body_status": "complete",
+          "file": "920223_2025A.pdf",
+          "storage_policy": "temporary_verification_copy_not_committed",
+          "proof_scope": "正式年报确认服务器液冷快接精密零部件批量生产、客户富世达及量产成为收入增长点；未独立披露收入或毛利。",
+          "pages": [
+            11,
+            13,
+            15
+          ],
+          "official_url": "https://www.bse.cn/disclosure/2026/2026-04-15/1284952b21fa42d9a75f30c8d5c7ea2b.pdf",
+          "resolved_official_pdf_url": "https://www.bse.cn/disclosure/2026/2026-04-15/1284952b21fa42d9a75f30c8d5c7ea2b.pdf",
+          "metadata_endpoint": "https://www.bse.cn/disclosureInfoController/companyAnnouncement.do",
+          "http_status": 200,
+          "content_type": "application/pdf",
+          "bytes": 2305458,
+          "sha256": "07cb5ce8d0e59072fb1faa86cda75dc80d1ceba692d732cb3c5c2d6c1dac917c",
+          "pdf_magic_verified": true,
+          "retrieved_at": "2026-08-28T14:59:39+08:00",
+          "observed_at": "2026-08-28T14:59:39+08:00",
+          "retrieval_time_policy": "post_cutoff_recovery_of_same_pre_cutoff_official_document_not_operating_fact"
         },
         {
           "document_id": "DOC920223H1",
           "record_id": "A2L007",
           "title": "荣亿精密2026年半年度报告",
+          "official_metadata_title": "[定期报告]荣亿精密:2026年半年度报告",
           "published_at": "2026-08-25T00:00:00+08:00",
-          "body_status": "query_failed",
-          "reason": "巨潮元数据可得但直链404；北交所页面请求403，未取得正文。"
+          "body_status": "complete",
+          "file": "920223_2026H1.pdf",
+          "storage_policy": "temporary_verification_copy_not_committed",
+          "proof_scope": "正式半年报确认液冷快接业务扩产、核心客户富世达、设备到位及产能爬坡，3C类包含液冷快接但未单独拆分。",
+          "pages": [
+            10,
+            11,
+            13,
+            14,
+            18,
+            19,
+            24
+          ],
+          "official_url": "https://www.bse.cn/disclosure/2026/2026-08-25/a8486b7e58ee4bf7997110ce99996fdc.pdf",
+          "resolved_official_pdf_url": "https://www.bse.cn/disclosure/2026/2026-08-25/a8486b7e58ee4bf7997110ce99996fdc.pdf",
+          "metadata_endpoint": "https://www.bse.cn/disclosureInfoController/companyAnnouncement.do",
+          "http_status": 200,
+          "content_type": "application/pdf",
+          "bytes": 1957109,
+          "sha256": "67a3bb1f68690172cfaddc868672ccf5441e95bdef07368767841061dd9efb5d",
+          "pdf_magic_verified": true,
+          "retrieved_at": "2026-08-28T14:59:40+08:00",
+          "observed_at": "2026-08-28T14:59:40+08:00",
+          "retrieval_time_policy": "post_cutoff_recovery_of_same_pre_cutoff_official_document_not_operating_fact"
         },
         {
           "document_id": "DOC920223P",
           "record_id": "A2L007",
           "title": "荣亿精密服务器液冷快速接头精密零部件项目公告",
+          "official_metadata_title": "[临时公告]荣亿精密:关于投资服务器液冷快速接头精密零部件项目的公告",
           "published_at": "2025-12-02T00:00:00+08:00",
-          "body_status": "query_failed",
-          "reason": "巨潮元数据可得但直链404；未用A3摘要代替正式正文。"
+          "body_status": "complete",
+          "file": "920223_liquid_quick_connector_project.pdf",
+          "storage_policy": "temporary_verification_copy_not_committed",
+          "proof_scope": "正式项目公告确认1亿元液冷快接项目、实施主体与投资用途，并明确金额、周期和效益均不构成业绩承诺。",
+          "pages": [
+            1,
+            2,
+            3,
+            4
+          ],
+          "official_url": "https://www.bse.cn/disclosure/2025/2025-12-02/70c03161075846718d4348ef9be3e131.pdf",
+          "resolved_official_pdf_url": "https://www.bse.cn/disclosure/2025/2025-12-02/70c03161075846718d4348ef9be3e131.pdf",
+          "metadata_endpoint": "https://www.bse.cn/disclosureInfoController/companyAnnouncement.do",
+          "http_status": 200,
+          "content_type": "application/pdf",
+          "bytes": 103276,
+          "sha256": "0164434f35c7a1194a6c94c247a517f59840c550d1c53139d35342620e7eec9c",
+          "pdf_magic_verified": true,
+          "retrieved_at": "2026-08-28T14:59:40+08:00",
+          "observed_at": "2026-08-28T14:59:40+08:00",
+          "retrieval_time_policy": "post_cutoff_recovery_of_same_pre_cutoff_official_document_not_operating_fact"
         }
       ],
       "company_baseline": {
@@ -19494,12 +20175,26 @@
         "main_business_theme_or_adjacent_rows": []
       },
       "theme_metrics": {
-        "status": "unknown",
+        "status": "unknown_direct_financial_split",
         "direct_theme_revenue_actual": null,
         "theme_gross_profit": null,
         "theme_profit": null,
         "theme_cash_contribution": null,
-        "reason": "年报和项目公告正文未取得，A3摘要不得替代直接金额和比例。"
+        "relationship_facts": [
+          {
+            "fact": "2025年第二季度服务器液冷快速接头精密零部件实现批量生产",
+            "source": "DOC920223A p.11"
+          },
+          {
+            "fact": "核心客户富世达合作持续且2026H1订单交付能力提升",
+            "source": "DOC920223H1 p.10"
+          },
+          {
+            "fact": "1亿元扩产项目全部新增设备已到位，仍处产能爬坡",
+            "source": "DOC920223P pp.1-3; DOC920223H1 p.11"
+          }
+        ],
+        "reason": "正式原文确认量产、客户和扩产进度，但液冷快接收入包含在3C类，未独立披露收入、毛利、利润或现金贡献。"
       },
       "scenario_inputs": [
         {
@@ -19507,55 +20202,55 @@
           "actual_or_directly_disclosed_value": null,
           "unit": null,
           "period": null,
-          "source_id_or_document": null,
+          "source_id_or_document": "DOC920223H1 pp.13-14,18-19",
           "published_at": null,
           "available_at": null,
-          "quality": "unknown",
-          "missing_reason": "没有满足同期间、同合并范围且可排除非目标场景的直接披露。"
+          "quality": "unknown_included_in_3C_category",
+          "missing_reason": "3C类包含服务器液冷快接零部件，未单独拆分金额；不得把3C类收入全部视为液冷。"
         },
         {
           "field": "firm_order_or_batch_delivery_amount",
           "actual_or_directly_disclosed_value": null,
           "unit": null,
           "period": null,
-          "source_id_or_document": null,
-          "published_at": null,
-          "available_at": null,
-          "quality": "unknown",
-          "missing_reason": "没有满足同期间、同合并范围且可排除非目标场景的直接披露。"
+          "source_id_or_document": "DOC920223A p.11; DOC920223H1 p.10",
+          "published_at": "2026-08-25T00:00:00+08:00",
+          "available_at": "2026-08-25T00:00:00+08:00",
+          "quality": "batch_production_and_delivery_confirmed_amount_unknown",
+          "missing_reason": "正式报告确认批量生产和订单交付能力提升，但未披露液冷订单或交付金额。"
         },
         {
           "field": "validated_customer_count",
           "actual_or_directly_disclosed_value": null,
           "unit": null,
           "period": null,
-          "source_id_or_document": null,
-          "published_at": null,
-          "available_at": null,
-          "quality": "unknown",
-          "missing_reason": "没有满足同期间、同合并范围且可排除非目标场景的直接披露。"
+          "source_id_or_document": "DOC920223A p.11; DOC920223H1 p.10",
+          "published_at": "2026-08-25T00:00:00+08:00",
+          "available_at": "2026-08-25T00:00:00+08:00",
+          "quality": "one_named_core_customer_confirmed_total_unknown",
+          "missing_reason": "正式报告明确富世达为核心客户，但未披露已验证客户总数。"
         },
         {
           "field": "repeat_customer_count",
           "actual_or_directly_disclosed_value": null,
           "unit": null,
           "period": null,
-          "source_id_or_document": null,
-          "published_at": null,
-          "available_at": null,
-          "quality": "unknown",
-          "missing_reason": "没有满足同期间、同合并范围且可排除非目标场景的直接披露。"
+          "source_id_or_document": "DOC920223A p.11; DOC920223H1 p.10",
+          "published_at": "2026-08-25T00:00:00+08:00",
+          "available_at": "2026-08-25T00:00:00+08:00",
+          "quality": "continued_named_customer_relationship_count_unknown",
+          "missing_reason": "跨年报告确认与同一核心客户合作持续，但未披露复购次数或复购客户总数。"
         },
         {
           "field": "nominal_capacity",
           "actual_or_directly_disclosed_value": null,
           "unit": null,
           "period": null,
-          "source_id_or_document": null,
+          "source_id_or_document": "DOC920223P pp.1-3; DOC920223H1 p.11",
           "published_at": null,
           "available_at": null,
-          "quality": "unknown",
-          "missing_reason": "没有满足同期间、同合并范围且可排除非目标场景的直接披露。"
+          "quality": "unknown_equipment_arrived_capacity_ramping",
+          "missing_reason": "项目投资1亿元且设备已到位，但未披露名义产能；投资额不得替代产能。"
         },
         {
           "field": "certification_pass_rate",
@@ -19767,61 +20462,68 @@
           "must_not_attribute": "不能自动归因于液冷产品价格、良率或结构。"
         },
         {
-          "type": "contract_check",
-          "status": "not_resolved_or_requires_B3",
-          "description": "产品同名但场景为汽车/储能/通用工业"
+          "type": "application_scene",
+          "status": "resolved_server_liquid_cooling",
+          "description": "正式报告明确为服务器液冷快速接头精密零部件，不与汽车、储能或通用工业混同。",
+          "source": "DOC920223A p.11"
         },
         {
-          "type": "contract_check",
-          "status": "not_resolved_or_requires_B3",
-          "description": "长期停留在送样/试产"
+          "type": "stuck_in_sampling_or_trial",
+          "status": "resolved_false_mass_production_confirmed",
+          "description": "2025年第二季度实现批量生产，2026H1继续扩产和交付。"
         },
         {
-          "type": "contract_check",
-          "status": "not_resolved_or_requires_B3",
-          "description": "批量交付无复购或第二客户"
+          "type": "batch_delivery_without_repeat_or_second_customer",
+          "status": "partially_resolved_one_continuing_core_customer_total_unknown",
+          "description": "富世达合作持续，但复购次数、第二客户和客户总数未披露。"
         },
         {
-          "type": "contract_check",
-          "status": "not_resolved_or_requires_B3",
-          "description": "收入增长伴随降价、低毛利、应收或库存恶化"
+          "type": "revenue_growth_with_margin_or_working_capital_pressure",
+          "status": "remains_material",
+          "description": "公司级收入增长同时综合毛利率下降、亏损和经营现金流为负；不得归因于液冷。"
         },
         {
-          "type": "contract_check",
+          "type": "customer_second_source_or_standardization",
           "status": "not_resolved_or_requires_B3",
           "description": "客户扶持二供、接口标准化或客户自制"
+        },
+        {
+          "type": "project_execution_risk",
+          "status": "confirmed_by_official_announcement",
+          "description": "1亿元项目可能延期、变更、中止或终止，投资额和效益不构成业绩承诺。",
+          "source": "DOC920223P p.3"
         }
       ],
       "unknowns": [
         {
-          "field": "overall",
-          "status": "unknown",
-          "reason": "not_completed_original_body_failed"
+          "field": "order",
+          "status": "partial",
+          "reason": "batch_delivery_confirmed_amount_unknown"
         },
         {
-          "field": "order",
-          "status": "unknown",
-          "reason": "unknown"
+          "field": "repeat_delivery",
+          "status": "partial",
+          "reason": "continuing_core_customer_repeat_count_unknown"
         },
         {
           "field": "revenue",
           "status": "unknown",
-          "reason": "unknown_direct_split"
+          "reason": "included_in_3C_no_direct_split"
         },
         {
           "field": "profit",
           "status": "unknown",
-          "reason": "unknown"
+          "reason": "unknown_theme_contribution"
         },
         {
           "field": "cash",
           "status": "unknown",
-          "reason": "unknown"
+          "reason": "unknown_theme_contribution"
         },
         {
           "field": "theme_financial_gate",
           "status": "unknown",
-          "reason": "not_passed"
+          "reason": "not_passed_no_direct_financial_split"
         },
         {
           "field": "working_capital_intensity",
@@ -19830,11 +20532,11 @@
         }
       ],
       "quality": {
-        "status": "partial",
+        "status": "partial_relation_passed_financial_split_unknown",
         "point_in_time": "all local facts available_at <= as_of",
         "latest_comparable_period": "2026-06-30",
-        "document_body_complete_count": 0,
-        "document_body_failed_count": 3,
+        "document_body_complete_count": 3,
+        "document_body_failed_count": 0,
         "calculation_alerts": [
           {
             "alert": "利润—现金背离",
@@ -19875,7 +20577,8 @@
             "status": "unknown",
             "evidence": "未取得可归属于目标液冷业务的单一客户占比。"
           }
-        ]
+        ],
+        "document_body_status": "complete_target_chain"
       },
       "input_refs": [
         {
@@ -19978,15 +20681,47 @@
         },
         {
           "document_id": "DOC920223A",
-          "body_status": "query_failed"
+          "body_status": "complete",
+          "published_at": "2026-04-15T00:00:00+08:00",
+          "official_url": "https://www.bse.cn/disclosure/2026/2026-04-15/1284952b21fa42d9a75f30c8d5c7ea2b.pdf",
+          "pages": [
+            11,
+            13,
+            15
+          ],
+          "sha256": "07cb5ce8d0e59072fb1faa86cda75dc80d1ceba692d732cb3c5c2d6c1dac917c",
+          "retrieved_at": "2026-08-28T14:59:39+08:00"
         },
         {
           "document_id": "DOC920223H1",
-          "body_status": "query_failed"
+          "body_status": "complete",
+          "published_at": "2026-08-25T00:00:00+08:00",
+          "official_url": "https://www.bse.cn/disclosure/2026/2026-08-25/a8486b7e58ee4bf7997110ce99996fdc.pdf",
+          "pages": [
+            10,
+            11,
+            13,
+            14,
+            18,
+            19,
+            24
+          ],
+          "sha256": "67a3bb1f68690172cfaddc868672ccf5441e95bdef07368767841061dd9efb5d",
+          "retrieved_at": "2026-08-28T14:59:40+08:00"
         },
         {
           "document_id": "DOC920223P",
-          "body_status": "query_failed"
+          "body_status": "complete",
+          "published_at": "2025-12-02T00:00:00+08:00",
+          "official_url": "https://www.bse.cn/disclosure/2025/2025-12-02/70c03161075846718d4348ef9be3e131.pdf",
+          "pages": [
+            1,
+            2,
+            3,
+            4
+          ],
+          "sha256": "0164434f35c7a1194a6c94c247a517f59840c550d1c53139d35342620e7eec9c",
+          "retrieved_at": "2026-08-28T14:59:40+08:00"
         }
       ]
     }
@@ -23318,11 +24053,11 @@
             "actual_or_directly_disclosed_value": 219125848.74,
             "unit": "CNY",
             "period": "2026-06-30",
-            "source_id_or_document": "main_business:冷板液冷产品+浸没液冷产品",
-            "published_at": null,
+            "source_id_or_document": "DOC920808H1 pp.126,142; 冷板液冷产品+浸没液冷产品",
+            "published_at": "2026-08-25T00:00:00+08:00",
             "available_at": "2026-08-26 00:00:00+08:00",
-            "quality": "partial_direct_product_category_revenue",
-            "missing_reason": "金额为直接产品分类收入；项目验收正文未取得，B3需决定能否接受为recognized_project_revenue。"
+            "quality": "partial_direct_product_category_revenue_not_project_acceptance",
+            "missing_reason": "正式正文直接确认产品分类收入与成本，但没有逐项目验收映射，不能改写为项目验收收入。"
           },
           {
             "field": "project_gross_margin",
@@ -23408,91 +24143,104 @@
         "variables": [
           {
             "field": "ownership_ratio",
-            "actual_or_directly_disclosed_value": null,
-            "unit": null,
-            "period": null,
-            "source_id_or_document": null,
-            "published_at": null,
-            "available_at": null,
-            "quality": "unknown",
-            "missing_reason": "没有满足同期间、同合并范围且可排除非目标场景的直接披露。"
+            "actual_or_directly_disclosed_value": {
+              "minority_ratio": 0.379302,
+              "implied_parent_ratio": 0.620698
+            },
+            "unit": "ratio",
+            "period": "2025-12-31",
+            "source_id_or_document": "DOC603019A p.193",
+            "published_at": "2026-04-15T00:00:00+08:00",
+            "available_at": "2026-04-15T00:00:00+08:00",
+            "quality": "official_minority_ratio_and_deterministic_complement",
+            "missing_reason": "半年报仅披露四舍五入后的少数股东持股37.93%；未据此改写年报精确比例。"
           },
           {
             "field": "control_status",
-            "actual_or_directly_disclosed_value": null,
-            "unit": null,
-            "period": null,
-            "source_id_or_document": null,
-            "published_at": null,
-            "available_at": null,
-            "quality": "unknown",
-            "missing_reason": "没有满足同期间、同合并范围且可排除非目标场景的直接披露。"
+            "actual_or_directly_disclosed_value": "控股子公司/重要非全资子公司",
+            "unit": "status",
+            "period": "2025-12-31 and 2026-06-30",
+            "source_id_or_document": "DOC603019A p.193; DOC603019H1 p.158",
+            "published_at": "2026-08-26T00:00:00+08:00",
+            "available_at": "2026-08-26T00:00:00+08:00",
+            "quality": "complete_official_body",
+            "missing_reason": null
           },
           {
             "field": "effective_date",
             "actual_or_directly_disclosed_value": null,
             "unit": null,
             "period": null,
-            "source_id_or_document": null,
+            "source_id_or_document": "DOC603019A p.193; DOC603019H1 p.158",
             "published_at": null,
             "available_at": null,
-            "quality": "unknown",
-            "missing_reason": "没有满足同期间、同合并范围且可排除非目标场景的直接披露。"
+            "quality": "unknown_initial_effective_date",
+            "missing_reason": "两份报告确认各报告期末的控制状态，但没有披露最初取得控制的生效日期。"
           },
           {
             "field": "consolidation_status",
-            "actual_or_directly_disclosed_value": null,
-            "unit": null,
-            "period": null,
-            "source_id_or_document": null,
-            "published_at": null,
-            "available_at": null,
-            "quality": "unknown",
-            "missing_reason": "没有满足同期间、同合并范围且可排除非目标场景的直接披露。"
+            "actual_or_directly_disclosed_value": "纳入合并报表的重要非全资子公司",
+            "unit": "status",
+            "period": "2025-12-31 and 2026-06-30",
+            "source_id_or_document": "DOC603019A pp.193-194; DOC603019H1 pp.158-159",
+            "published_at": "2026-08-26T00:00:00+08:00",
+            "available_at": "2026-08-26T00:00:00+08:00",
+            "quality": "complete_official_body",
+            "missing_reason": null
           },
           {
             "field": "minority_interest",
-            "actual_or_directly_disclosed_value": null,
-            "unit": null,
-            "period": null,
-            "source_id_or_document": null,
-            "published_at": null,
-            "available_at": null,
-            "quality": "unknown",
-            "missing_reason": "没有满足同期间、同合并范围且可排除非目标场景的直接披露。"
+            "actual_or_directly_disclosed_value": {
+              "period": "2026-06-30",
+              "minority_share_ratio_rounded": 0.3793,
+              "minority_profit_or_loss_cny": -27842312.35,
+              "ending_minority_equity_cny": 256166999.78
+            },
+            "unit": "mixed_exact_disclosures",
+            "period": "2026-06-30",
+            "source_id_or_document": "DOC603019H1 p.158",
+            "published_at": "2026-08-26T00:00:00+08:00",
+            "available_at": "2026-08-26T00:00:00+08:00",
+            "quality": "complete_official_body",
+            "missing_reason": null
           },
           {
             "field": "subsidiary_revenue_and_profit_disclosure",
-            "actual_or_directly_disclosed_value": null,
-            "unit": null,
-            "period": null,
-            "source_id_or_document": null,
-            "published_at": null,
-            "available_at": null,
-            "quality": "unknown",
-            "missing_reason": "没有满足同期间、同合并范围且可排除非目标场景的直接披露。"
+            "actual_or_directly_disclosed_value": {
+              "period": "2026-06-30",
+              "revenue_cny": 245937592.4,
+              "net_profit_cny": -73404074.73,
+              "operating_cash_flow_cny": -242011677.48
+            },
+            "unit": "CNY",
+            "period": "2026-06-30",
+            "source_id_or_document": "DOC603019H1 p.159",
+            "published_at": "2026-08-26T00:00:00+08:00",
+            "available_at": "2026-08-26T00:00:00+08:00",
+            "quality": "complete_official_subsidiary_disclosure_not_parent_theme_attribution",
+            "missing_reason": null
           },
           {
             "field": "parent_attributable_profit_effect",
             "actual_or_directly_disclosed_value": null,
             "unit": null,
             "period": null,
-            "source_id_or_document": null,
+            "source_id_or_document": "DOC603019A p.193; DOC603019H1 pp.158-159",
             "published_at": null,
             "available_at": null,
-            "quality": "unknown",
-            "missing_reason": "没有满足同期间、同合并范围且可排除非目标场景的直接披露。"
+            "quality": "partial_minorities_disclosed_parent_effect_not_isolated",
+            "missing_reason": "正式报告披露子公司净利润及少数股东损益，但没有单列内部抵销后的母公司归母利润影响；不得简单按持股比例乘算。"
           },
           {
             "field": "related_party_transactions",
             "actual_or_directly_disclosed_value": null,
             "unit": null,
             "period": null,
-            "source_id_or_document": null,
+            "source_id_or_document": "DOC603019A; DOC603019H1",
             "published_at": null,
             "available_at": null,
-            "quality": "unknown",
-            "missing_reason": "没有满足同期间、同合并范围且可排除非目标场景的直接披露。"
+            "quality": "unknown_theme_specific_internal_elimination",
+            "missing_reason": "目标页未单列液冷相关内部交易与抵销金额。"
           }
         ]
       },
@@ -23674,88 +24422,88 @@
             "actual_or_directly_disclosed_value": null,
             "unit": null,
             "period": null,
-            "source_id_or_document": null,
+            "source_id_or_document": "DOC603912A; DOC603912Q; DOC603912H1",
             "published_at": null,
             "available_at": null,
-            "quality": "unknown",
-            "missing_reason": "没有满足同期间、同合并范围且可排除非目标场景的直接披露。"
+            "quality": "unknown_exact_liquid_facility_split",
+            "missing_reason": "正式正文没有同时满足液冷设施侧、同期间和独立财务口径的精确披露；公司总在手订单和混合产品分项不得替代。"
           },
           {
             "field": "traditional_air_cooling_revenue",
             "actual_or_directly_disclosed_value": null,
             "unit": null,
             "period": null,
-            "source_id_or_document": null,
+            "source_id_or_document": "DOC603912A; DOC603912Q; DOC603912H1",
             "published_at": null,
             "available_at": null,
-            "quality": "unknown",
-            "missing_reason": "没有满足同期间、同合并范围且可排除非目标场景的直接披露。"
+            "quality": "unknown_exact_liquid_facility_split",
+            "missing_reason": "正式正文没有同时满足液冷设施侧、同期间和独立财务口径的精确披露；公司总在手订单和混合产品分项不得替代。"
           },
           {
             "field": "idc_operation_revenue",
             "actual_or_directly_disclosed_value": null,
             "unit": null,
             "period": null,
-            "source_id_or_document": null,
+            "source_id_or_document": "DOC603912A; DOC603912Q; DOC603912H1",
             "published_at": null,
             "available_at": null,
-            "quality": "unknown",
-            "missing_reason": "没有满足同期间、同合并范围且可排除非目标场景的直接披露。"
+            "quality": "unknown_exact_liquid_facility_split",
+            "missing_reason": "正式正文没有同时满足液冷设施侧、同期间和独立财务口径的精确披露；公司总在手订单和混合产品分项不得替代。"
           },
           {
             "field": "facility_project_backlog",
             "actual_or_directly_disclosed_value": null,
             "unit": null,
             "period": null,
-            "source_id_or_document": null,
+            "source_id_or_document": "DOC603912A; DOC603912Q; DOC603912H1",
             "published_at": null,
             "available_at": null,
-            "quality": "unknown",
-            "missing_reason": "没有满足同期间、同合并范围且可排除非目标场景的直接披露。"
+            "quality": "unknown_exact_liquid_facility_split",
+            "missing_reason": "正式正文没有同时满足液冷设施侧、同期间和独立财务口径的精确披露；公司总在手订单和混合产品分项不得替代。"
           },
           {
             "field": "acceptance_schedule",
             "actual_or_directly_disclosed_value": null,
             "unit": null,
             "period": null,
-            "source_id_or_document": null,
+            "source_id_or_document": "DOC603912A; DOC603912Q; DOC603912H1",
             "published_at": null,
             "available_at": null,
-            "quality": "unknown",
-            "missing_reason": "没有满足同期间、同合并范围且可排除非目标场景的直接披露。"
+            "quality": "unknown_exact_liquid_facility_split",
+            "missing_reason": "正式正文没有同时满足液冷设施侧、同期间和独立财务口径的精确披露；公司总在手订单和混合产品分项不得替代。"
           },
           {
             "field": "project_gross_margin",
             "actual_or_directly_disclosed_value": null,
             "unit": null,
             "period": null,
-            "source_id_or_document": null,
+            "source_id_or_document": "DOC603912A; DOC603912Q; DOC603912H1",
             "published_at": null,
             "available_at": null,
-            "quality": "unknown",
-            "missing_reason": "没有满足同期间、同合并范围且可排除非目标场景的直接披露。"
+            "quality": "unknown_exact_liquid_facility_split",
+            "missing_reason": "正式正文没有同时满足液冷设施侧、同期间和独立财务口径的精确披露；公司总在手订单和混合产品分项不得替代。"
           },
           {
             "field": "contract_assets",
             "actual_or_directly_disclosed_value": null,
             "unit": null,
             "period": null,
-            "source_id_or_document": null,
+            "source_id_or_document": "DOC603912A; DOC603912Q; DOC603912H1",
             "published_at": null,
             "available_at": null,
-            "quality": "unknown",
-            "missing_reason": "没有满足同期间、同合并范围且可排除非目标场景的直接披露。"
+            "quality": "unknown_exact_liquid_facility_split",
+            "missing_reason": "正式正文没有同时满足液冷设施侧、同期间和独立财务口径的精确披露；公司总在手订单和混合产品分项不得替代。"
           },
           {
             "field": "cash_collection",
             "actual_or_directly_disclosed_value": null,
             "unit": null,
             "period": null,
-            "source_id_or_document": null,
+            "source_id_or_document": "DOC603912A; DOC603912Q; DOC603912H1",
             "published_at": null,
             "available_at": null,
-            "quality": "unknown",
-            "missing_reason": "没有满足同期间、同合并范围且可排除非目标场景的直接披露。"
+            "quality": "unknown_exact_liquid_facility_split",
+            "missing_reason": "正式正文没有同时满足液冷设施侧、同期间和独立财务口径的精确披露；公司总在手订单和混合产品分项不得替代。"
           }
         ]
       },
@@ -24019,55 +24767,55 @@
             "actual_or_directly_disclosed_value": null,
             "unit": null,
             "period": null,
-            "source_id_or_document": null,
+            "source_id_or_document": "DOC920223H1 pp.13-14,18-19",
             "published_at": null,
             "available_at": null,
-            "quality": "unknown",
-            "missing_reason": "没有满足同期间、同合并范围且可排除非目标场景的直接披露。"
+            "quality": "unknown_included_in_3C_category",
+            "missing_reason": "3C类包含服务器液冷快接零部件，未单独拆分金额；不得把3C类收入全部视为液冷。"
           },
           {
             "field": "firm_order_or_batch_delivery_amount",
             "actual_or_directly_disclosed_value": null,
             "unit": null,
             "period": null,
-            "source_id_or_document": null,
-            "published_at": null,
-            "available_at": null,
-            "quality": "unknown",
-            "missing_reason": "没有满足同期间、同合并范围且可排除非目标场景的直接披露。"
+            "source_id_or_document": "DOC920223A p.11; DOC920223H1 p.10",
+            "published_at": "2026-08-25T00:00:00+08:00",
+            "available_at": "2026-08-25T00:00:00+08:00",
+            "quality": "batch_production_and_delivery_confirmed_amount_unknown",
+            "missing_reason": "正式报告确认批量生产和订单交付能力提升，但未披露液冷订单或交付金额。"
           },
           {
             "field": "validated_customer_count",
             "actual_or_directly_disclosed_value": null,
             "unit": null,
             "period": null,
-            "source_id_or_document": null,
-            "published_at": null,
-            "available_at": null,
-            "quality": "unknown",
-            "missing_reason": "没有满足同期间、同合并范围且可排除非目标场景的直接披露。"
+            "source_id_or_document": "DOC920223A p.11; DOC920223H1 p.10",
+            "published_at": "2026-08-25T00:00:00+08:00",
+            "available_at": "2026-08-25T00:00:00+08:00",
+            "quality": "one_named_core_customer_confirmed_total_unknown",
+            "missing_reason": "正式报告明确富世达为核心客户，但未披露已验证客户总数。"
           },
           {
             "field": "repeat_customer_count",
             "actual_or_directly_disclosed_value": null,
             "unit": null,
             "period": null,
-            "source_id_or_document": null,
-            "published_at": null,
-            "available_at": null,
-            "quality": "unknown",
-            "missing_reason": "没有满足同期间、同合并范围且可排除非目标场景的直接披露。"
+            "source_id_or_document": "DOC920223A p.11; DOC920223H1 p.10",
+            "published_at": "2026-08-25T00:00:00+08:00",
+            "available_at": "2026-08-25T00:00:00+08:00",
+            "quality": "continued_named_customer_relationship_count_unknown",
+            "missing_reason": "跨年报告确认与同一核心客户合作持续，但未披露复购次数或复购客户总数。"
           },
           {
             "field": "nominal_capacity",
             "actual_or_directly_disclosed_value": null,
             "unit": null,
             "period": null,
-            "source_id_or_document": null,
+            "source_id_or_document": "DOC920223P pp.1-3; DOC920223H1 p.11",
             "published_at": null,
             "available_at": null,
-            "quality": "unknown",
-            "missing_reason": "没有满足同期间、同合并范围且可排除非目标场景的直接披露。"
+            "quality": "unknown_equipment_arrived_capacity_ramping",
+            "missing_reason": "项目投资1亿元且设备已到位，但未披露名义产能；投资额不得替代产能。"
           },
           {
             "field": "certification_pass_rate",
@@ -24355,29 +25103,25 @@
         "record_id": "ENT036B",
         "observed": [
           {
-            "type": "negative_operating_cash_flow",
-            "period": "2026-03-31",
-            "value_cny": -1390698665.3
+            "type": "parent_subsidiary_double_count",
+            "status": "resolved_boundary_verified",
+            "description": "产品和直接主题财务属于曙光数创，禁止重复归给中科曙光。",
+            "source": "DOC603019A p.193; DOC603019H1 pp.158-159"
           },
           {
-            "type": "contract_check",
-            "status": "not_resolved_or_requires_B3",
-            "description": "产品属于子公司但被重复归给母公司"
+            "type": "ownership_change_within_period",
+            "status": "not_observed_in_target_reports",
+            "description": "年报与半年报均列为重要非全资子公司；精确初始生效日仍未知。"
           },
           {
-            "type": "contract_check",
-            "status": "not_resolved_or_requires_B3",
-            "description": "持股比例/控制关系在期间内变化"
+            "type": "simple_ratio_distortion",
+            "status": "remains_material",
+            "description": "少数股东损益已披露，母公司归母影响仍不得用持股比例简单乘算。"
           },
           {
-            "type": "contract_check",
-            "status": "not_resolved_or_requires_B3",
-            "description": "少数股东权益或内部交易导致简单比例失真"
-          },
-          {
-            "type": "contract_check",
-            "status": "not_resolved_or_requires_B3",
-            "description": "子公司不在合并范围"
+            "type": "subsidiary_outside_consolidation",
+            "status": "resolved_false",
+            "description": "正式合并报表附注明确列示为重要非全资子公司。"
           }
         ]
       },
@@ -24431,24 +25175,25 @@
             "must_not_attribute": "不能自动归因于液冷产品价格、良率或结构。"
           },
           {
-            "type": "contract_check",
-            "status": "not_resolved_or_requires_B3",
-            "description": "收入主要来自传统精密空调或IDC运营"
+            "type": "official_body_scope_boundary",
+            "status": "confirmed",
+            "description": "2025年收入主要按精密空调/一体化混合口径披露，问询回复称液冷等高毛利产品占比较低。",
+            "source": "DOC603912Q pp.2,8-10"
           },
           {
-            "type": "contract_check",
-            "status": "not_resolved_or_requires_B3",
-            "description": "没有液冷改造/设施侧合同原文"
+            "type": "liquid_facility_contract_original",
+            "status": "partially_resolved_examples_only_no_contract_amount",
+            "description": "正式年报与半年报列示液冷项目和批量交付，但未给液冷专属合同金额、验收节奏或独立收入。"
           },
           {
-            "type": "contract_check",
+            "type": "engineering_working_capital",
             "status": "not_resolved_or_requires_B3",
             "description": "工程垫资和应收吞噬利润"
           },
           {
-            "type": "contract_check",
-            "status": "not_resolved_or_requires_B3",
-            "description": "风液混合或传统风冷路线延缓直接液冷投入"
+            "type": "air_liquid_route_mix",
+            "status": "confirmed_mixed_routes",
+            "description": "公司同时经营传统风冷、风液协同与液冷方案，必须保持分拆边界。"
           }
         ]
       },
@@ -24542,29 +25287,36 @@
             "must_not_attribute": "不能自动归因于液冷产品价格、良率或结构。"
           },
           {
-            "type": "contract_check",
-            "status": "not_resolved_or_requires_B3",
-            "description": "产品同名但场景为汽车/储能/通用工业"
+            "type": "application_scene",
+            "status": "resolved_server_liquid_cooling",
+            "description": "正式报告明确为服务器液冷快速接头精密零部件，不与汽车、储能或通用工业混同。",
+            "source": "DOC920223A p.11"
           },
           {
-            "type": "contract_check",
-            "status": "not_resolved_or_requires_B3",
-            "description": "长期停留在送样/试产"
+            "type": "stuck_in_sampling_or_trial",
+            "status": "resolved_false_mass_production_confirmed",
+            "description": "2025年第二季度实现批量生产，2026H1继续扩产和交付。"
           },
           {
-            "type": "contract_check",
-            "status": "not_resolved_or_requires_B3",
-            "description": "批量交付无复购或第二客户"
+            "type": "batch_delivery_without_repeat_or_second_customer",
+            "status": "partially_resolved_one_continuing_core_customer_total_unknown",
+            "description": "富世达合作持续，但复购次数、第二客户和客户总数未披露。"
           },
           {
-            "type": "contract_check",
-            "status": "not_resolved_or_requires_B3",
-            "description": "收入增长伴随降价、低毛利、应收或库存恶化"
+            "type": "revenue_growth_with_margin_or_working_capital_pressure",
+            "status": "remains_material",
+            "description": "公司级收入增长同时综合毛利率下降、亏损和经营现金流为负；不得归因于液冷。"
           },
           {
-            "type": "contract_check",
+            "type": "customer_second_source_or_standardization",
             "status": "not_resolved_or_requires_B3",
             "description": "客户扶持二供、接口标准化或客户自制"
+          },
+          {
+            "type": "project_execution_risk",
+            "status": "confirmed_by_official_announcement",
+            "description": "1亿元项目可能延期、变更、中止或终止，投资额和效益不构成业绩承诺。",
+            "source": "DOC920223P p.3"
           }
         ]
       }
@@ -24572,13 +25324,14 @@
     "rules_are_transparent_alerts_not_scores_or_gates": true
   },
   "quality_and_unknowns": {
-    "overall_status": "partial",
-    "gap_count": 21,
+    "overall_status": "partial_relationship_gates_updated_remaining_unknowns_preserved",
+    "gap_count": 17,
     "gap_file": "05_B2_数据缺口.json",
     "local_fact_manifest_hash": "2fcef04e5ff70c7096c626872c0b1bb8c3d76794495f470b2a0066d05baad306",
     "all_local_facts_cutoff_checked": true,
-    "document_body_limitations": "SSE metadata complete but attachment challenge; BSE body access failed; SZSE selected bodies complete including Feirongda H1 forecast.",
+    "document_body_limitations": "Ten directed SSE/BSE bodies recovered and verified; all 17 selected formal bodies complete. Remaining gaps are disclosure/scope limits, unsupported industry-relative return, and partial valuation history.",
     "next_actor": "chatgpt",
-    "next_step": "B3_semantic_acceptance"
+    "next_step": "B3_final_semantic_acceptance",
+    "b2_r1_correction_status": "complete_1_of_1"
   }
 }
