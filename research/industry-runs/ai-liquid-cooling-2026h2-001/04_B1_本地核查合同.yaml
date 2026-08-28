@@ -1,0 +1,1579 @@
+contract_type: B1_local_verification_contract
+research_id: ai-liquid-cooling-2026h2-001
+version: 3
+source_a_handoff_version: 2
+as_of: '2026-08-27T22:32:34+08:00'
+created_at: '2026-08-28T11:05:11+08:00'
+created_by: chatgpt
+stage: B1_complete
+status: ready_for_codex_B2
+next_actor: codex
+next_step: B2_execute_local_verification
+user_approval:
+  status: approved
+  approval_text: 同意进入B阶段。
+  recorded_at: '2026-08-28T11:05:11+08:00'
+source_artifacts:
+- file: 03_A_开放式产业研究最终报告.docx
+  sha256: e2c7658f0d2b720af3f91985bea006023b3f628976add06880954eb8cffd72ba
+  preservation_for_codex: save_byte_identical_before_B2
+- file: 03_A_交给B阶段.yaml
+  sha256: a8a8726a295c077fb55c23246950704c106b9adc73772918316321b7df3b4c7d
+  preservation_for_codex: save_byte_identical_before_B2
+- file: 03_A_证据清单.csv
+  sha256: 305dbb993696dc7f997b28aab76f73636aee8e13d278b08cd8f89a26b615dd93
+  preservation_for_codex: save_byte_identical_before_B2
+objective:
+  primary: 把A阶段允许进入B的九条记录转换成可复算、点时安全、业务模式匹配的本地事实包。
+  what_B2_may_answer:
+  - 主体和证券身份是否唯一，股权/合并范围如何
+  - 截至as_of可见的正式公告、主营和财务事实是什么
+  - 公司级收入、利润、现金、应收、存货、资本开支和估值/价格事实是什么
+  - 主题收入/毛利能否直接拆分；不能拆时缺什么
+  - 哪些反证和数据缺口会限制后续商业判断
+  what_B2_must_not_answer:
+  - 产业命题是否最终成立
+  - 是否形成可重复生意
+  - 是否为研究候选
+  - 是否买入、目标价、仓位或收益承诺
+scope_summary:
+  operating_record_count: 9
+  selected_node_count: 20
+  a_route: mixed_proceed_to_b_narrowed
+  relationship_rule: 只有A3明确进入B的记录执行；条件记录先过关系硬门，持股背景记录只核对归属。
+selected_nodes:
+- node_id: N02
+  product: 导热界面材料与芯片—冷板接触界面
+  view: 物理/制造
+  a1_stage: 正在验证/随平台变化
+  a3_disposition: enter_b_supporting
+  system_role: 决定芯片到冷板的第一段热阻、装配压力与长期可靠性
+  alternatives_or_self_build: 封装厂/OEM内置、自制
+  evidence_ids:
+  - EV004
+  - EV045
+- node_id: N03
+  product: 冷板
+  view: 物理/制造
+  a1_stage: 已出现订单+持续验证
+  a3_disposition: enter_b_primary
+  system_role: 直接从芯片/关键器件吸热；高度依赖封装、流道、材料和装配
+  alternatives_or_self_build: OEM/平台自研，二供快速进入
+  evidence_ids:
+  - EV004
+  - EV005
+  - EV031
+  - EV032
+  - EV033
+  - EV043
+  - EV045
+  - EV060
+- node_id: N04
+  product: 服务器内管路与快速接头/盲插接头
+  view: 接口/物理
+  a1_stage: 订单/产品已出，标准与认证仍在演进
+  a3_disposition: enter_b_primary
+  system_role: 支持服务器维护、热插拔与无泄漏连接；接口失配会阻断解耦
+  alternatives_or_self_build: OCP标准化、多供应商、客户专用接口
+  evidence_ids:
+  - EV010
+  - EV011
+  - EV012
+  - EV013
+  - EV019
+  - EV020
+  - EV040
+  - EV050
+  - EV055
+  - EV056
+  - EV057
+- node_id: N05
+  product: 机架歧管/供回液分配
+  view: 物理/接口
+  a1_stage: 已商业化+客户定制
+  a3_disposition: enter_b_primary
+  system_role: 把流量均匀分配到各托盘/服务器并支持维护冗余
+  alternatives_or_self_build: OEM自制、标准歧管、二供
+  evidence_ids:
+  - EV005
+  - EV006
+  - EV014
+  - EV040
+  - EV048
+  - EV062
+- node_id: N07
+  product: 流量/压力/温度/水质/漏液传感
+  view: 控制/运维
+  a1_stage: 商业化，独立价值量待核
+  a3_disposition: enter_b_supporting
+  system_role: 为流量平衡、热保护、漏液和预测维护提供反馈
+  alternatives_or_self_build: CDU/OEM内置、通用传感器
+  evidence_ids:
+  - EV006
+  - EV023
+  - EV025
+  - EV039
+  - EV040
+- node_id: N08
+  product: 冷却液分配单元CDU
+  view: 物理/接口/控制
+  a1_stage: 已出现规模产品，供给快速扩张
+  a3_disposition: enter_b_primary
+  system_role: 隔离设施水与技术冷却回路，完成换热、泵送、过滤、补液、控制与保护
+  alternatives_or_self_build: 开放规格、多供应商、OEM自制、L2A替代
+  evidence_ids:
+  - EV005
+  - EV006
+  - EV009
+  - EV017
+  - EV018
+  - EV021
+  - EV023
+  - EV024
+  - EV025
+  - EV039
+  - EV041
+  - EV054
+  - EV058
+  - EV061
+- node_id: N14
+  product: 单相水/乙二醇/丙二醇冷却液
+  view: 材料/运维
+  a1_stage: 产品已商业化，长期标准化仍在演进
+  a3_disposition: enter_b_supporting
+  system_role: 作为DTC二次侧传热介质，影响腐蚀、微生物、冻结和寿命
+  alternatives_or_self_build: 多流体供应商、现场配制
+  evidence_ids:
+  - EV015
+  - EV016
+  - EV059
+- node_id: N17
+  product: 设施水环/一次侧管网
+  view: 交付/物理
+  a1_stage: 成熟工程，改造成为约束
+  a3_disposition: enter_b_primary
+  system_role: 把热量从CDU带到冷站/干冷器/冷却塔；新建与改造差异大
+  alternatives_or_self_build: 液到气CDU、局部改造、客户现有设施
+  evidence_ids:
+  - EV006
+  - EV009
+  - EV021
+  - EV022
+  - EV046
+  - EV054
+- node_id: N19
+  product: 最终排热：干冷器/冷机/冷却塔
+  view: 物理/设施
+  a1_stage: 成熟供给，项目条件决定组合
+  a3_disposition: enter_b_primary
+  system_role: 将热量排向环境，受气候、水资源和温度窗口影响
+  alternatives_or_self_build: 自由冷却、蒸发冷、液到气局部方案
+  evidence_ids:
+  - EV006
+  - EV022
+  - EV046
+  - EV048
+  - EV054
+- node_id: N20
+  product: 后门换热器RDHx
+  view: 替代/产品
+  a1_stage: 已有产品/部署，密度上限场景化
+  a3_disposition: enter_b_primary
+  system_role: 在机架后门捕捉热量，适合改造和中高密度混合场景
+  alternatives_or_self_build: 风冷、DTC、液到气CDU
+  evidence_ids:
+  - EV008
+  - EV022
+  - EV023
+  - EV038
+- node_id: N21
+  product: 单相浸没槽/系统
+  view: 替代/产品
+  a1_stage: 商业化但应用比例不明
+  a3_disposition: enter_b_primary
+  system_role: 将IT设备浸入介电液，减少风扇与传统风冷设施
+  alternatives_or_self_build: DTC、两相浸没、客户不接受运维变化
+  evidence_ids:
+  - EV008
+  - EV035
+  - EV036
+  - EV044
+- node_id: N23
+  product: BMS/DCIM/遥测与控制接口
+  view: 接口/软件
+  a1_stage: 商业化，独立收费能力待核
+  a3_disposition: enter_b_supporting
+  system_role: 把液冷状态纳入设施与IT运维，支持告警、容量和故障定位
+  alternatives_or_self_build: 系统商内置、独立平台
+  evidence_ids:
+  - EV006
+  - EV007
+  - EV023
+  - EV025
+  - EV039
+  - EV040
+- node_id: N24
+  product: 预制管路、skid与模块化交付
+  view: 交付/制造
+  a1_stage: 商业化，项目毛利/现金风险待核
+  a3_disposition: enter_b_primary
+  system_role: 减少现场焊接和调试，缩短高密项目部署
+  alternatives_or_self_build: 现场工程、系统商集成
+  evidence_ids:
+  - EV021
+  - EV025
+  - EV034
+  - EV040
+  - EV048
+- node_id: N25
+  product: 精密加工与微通道制造
+  view: 制造
+  a1_stage: 潜在隐藏瓶颈，公开产能不足
+  a3_disposition: enter_b_supporting
+  system_role: 决定冷板流道、平整度、压降和批量一致性
+  alternatives_or_self_build: 蚀刻/钎焊/增材等替代工艺
+  evidence_ids:
+  - EV045
+- node_id: N26
+  product: 钎焊/焊接/密封与表面处理
+  view: 制造
+  a1_stage: 潜在隐藏瓶颈，需实体/工艺核验
+  a3_disposition: enter_b_supporting
+  system_role: 决定密封、腐蚀与寿命，失效可能造成系统事故
+  alternatives_or_self_build: 一体加工、胶接、不同材料路线
+  evidence_ids:
+  - EV013
+  - EV018
+- node_id: N27
+  product: 泄漏/压力/流量/热性能/腐蚀/寿命测试
+  view: 制造/认证
+  a1_stage: 关键认证环节，公开通过率未知
+  a3_disposition: enter_b_supporting
+  system_role: 把产品能力变成可进入客户供应链的资格
+  alternatives_or_self_build: 客户自测、第三方实验室
+  evidence_ids:
+  - EV013
+  - EV019
+  - EV020
+- node_id: N28
+  product: 系统设计、集成、机房改造与调试
+  view: 交付
+  a1_stage: 已有项目能力，利润/现金风险较高
+  a3_disposition: enter_b_primary
+  system_role: 把设备拼成可运行系统并完成清洗、灌液、调试和验收
+  alternatives_or_self_build: OEM总包、专业温控商、工程商
+  evidence_ids:
+  - EV006
+  - EV009
+  - EV022
+  - EV026
+  - EV042
+  - EV050
+  - EV051
+- node_id: N31
+  product: 液到气局部闭环/风液混合
+  view: 替代/交付
+  a1_stage: 商业化，适合存量改造
+  a3_disposition: enter_b_supporting
+  system_role: 在无设施水或改造困难场景部署液冷设备
+  alternatives_or_self_build: 全设施水DTC、RDHx、纯风冷
+  evidence_ids:
+  - EV006
+  - EV023
+  - EV026
+  - EV038
+- node_id: N33
+  product: 单相浸没路线
+  view: 路线
+  a1_stage: 商业化/选择性部署
+  a3_disposition: enter_b_primary
+  system_role: 减少风扇和传统机柜气流，但改变IT维护与流体体系
+  alternatives_or_self_build: DTC、两相浸没
+  evidence_ids:
+  - EV008
+  - EV036
+  - EV044
+- node_id: N35
+  product: 传统风冷与高效风冷混合路线
+  view: 路线
+  a1_stage: 长期共存，非全量液冷
+  a3_disposition: enter_b_supporting
+  system_role: 中低密度、存量机房或非关键器件仍可能保留风冷
+  alternatives_or_self_build: DTC/RDHx/液到气
+  evidence_ids:
+  - EV006
+  - EV038
+  - EV046
+global_execution_rules:
+  point_in_time_and_period_alignment:
+  - 只使用 available_at <= as_of 的事实；等于截止时间可用，晚于截止时间排除。
+  - 公告/财报链按更正或修订 > 正式报告 > 快报 > 预告的顺序记录，但必须保留整条链和每个版本的可见时间。
+  - 利润表和现金流量表的累计期只与上年同累计期比较；资产负债表同时给出上年同日和上年末比较。
+  - TTM仅在四个可比季度/累计期能够无重复拼接时计算；否则写unknown，不用年度数外推。
+  - 公司简介当前快照只作截止时点可见语境，不反推历史名称、历史业务和历史集团关系。
+  - A3之后形成的审计记录可以证明取数过程，但不能把截止日后才出现的经营事实加入as_of。
+  missing_status_definitions:
+    complete: 合同要求的字段和时间边界均满足。
+    partial: 有数据，但历史、字段、正文、口径或可回放性不完整。
+    unsupported: 本地系统没有该能力或该字段。
+    query_failed: 能力或入口存在，但本次查询/下载/解析失败。
+    no_record: 查询范围和能力有效，但没有匹配记录；不等于事实不存在。
+    unknown: 主体、口径或事实无法唯一确认。
+    current_snapshot_not_replayable: 只有当前快照，不能重建更早状态。
+    not_applicable: 该字段对该业务模式不适用。
+  source_precedence:
+  - priority: 1
+    source: 交易所/巨潮正式公告、经审计年报/半年报、招股书及更正文件
+    use: 身份、财务、主营、股权、合同/项目和正式风险。
+  - priority: 2
+    source: 客户或公司正式产品/技术文件、标准与测试白皮书
+    use: 产品、规格、能力、认证/测试；不能越级证明订单和规模。
+  - priority: 3
+    source: 本地结构化财务、主营、公告元数据和点时清单
+    use: 可复算数字、版本与查询质量。
+  - priority: 4
+    source: A3中的摘要、二手转述或当前产品页
+    use: 仅定位正式原文或保留线索；不能替代正式原文。
+  targeted_document_reading:
+    mode: narrow_one_pass
+    rule: 先用本地公告元数据和A3 evidence_ids定位少量官方原文；不扫描全市场、不建立全文库。
+    body_access: 能直接取得PDF则校验PDF魔数/哈希并提取所需段落；上交所挑战页可用浏览器/官方替代入口定向读取，失败写query_failed。
+    fallback: 官方原文无法取得时只确认元数据、标题、来源和时间；不得用二手摘要补合同金额、客户、条件、风险和财务影响。
+    storage: 结果中保存官方URL、文档ID、时间、正文取得状态、哈希（如有）、关键摘录与证明边界；不新增长期PDF库。
+  schema_mapping: Codex必须读取实际本地schema，把合同语义字段映射到真实列名并在输出记录；不得因合同列名与代码不同而静默补值。
+  relationship_gate:
+  - 身份、能力、认证/试点、供货、订单、重复交付、收入、利润和现金九层逐层返回。
+  - 条件实体在正式关系证据前只允许查身份、产品、公告原文和公司级基线，不允许主题收入/利润估算。
+  - 没有主题拆分时公司总收入、总毛利、总利润只能作为公司基线，不能成为液冷主题指标。
+allowed_local_datasets:
+  audited_in_A2:
+  - dataset: security_master
+    purpose: 证券身份、交易所、上市状态、上市日期与代码边界。
+    required_semantics:
+    - ts_code
+    - current_name
+    - legal_name_if_available
+    - exchange
+    - market
+    - list_status
+    - list_date
+    - available_at
+    limits: 不提供完整曾用名、旧证券代码、品牌、集团与股权历史。
+  - dataset: company_profile
+    purpose: 当前公司简介、经营范围、官网与主体标识，只作身份和业务语境。
+    required_semantics:
+    - company_id
+    - current_legal_name
+    - website
+    - introduction
+    - main_business
+    - business_scope
+    - snapshot_date
+    - available_at
+    limits: 只有当前快照，不可用于重建更早名称、业务、子公司或品牌状态。
+  - dataset: main_business
+    purpose: 主营分项、产品/行业/地区收入、成本与毛利线索。
+    required_semantics:
+    - report_period
+    - item_type
+    - item_name
+    - revenue
+    - cost
+    - gross_profit_if_available
+    - currency
+    - available_at
+    - revision
+    limits: 主营名称不是客户、认证、订单或供货证明；液冷未单列时不得把大类全部视作液冷。
+  - dataset: announcement
+    purpose: 公告链、标题、正式URL/PDF入口、发布时间与可用时间。
+    required_semantics:
+    - announcement_id
+    - title
+    - document_type
+    - published_at
+    - available_at
+    - provider
+    - official_url_or_pdf_path
+    - revision_or_correction_link
+    limits: 标题和PDF入口不能代替正文；本地窗口约自2025年7月开始，不是完整历史。
+  - dataset: income_statement
+    purpose: 收入、成本、期间费用、营业利润、净利润、归母净利润与非经常性影响基础。
+    required_semantics:
+    - report_period
+    - report_type
+    - revenue
+    - operating_cost
+    - selling_expense
+    - admin_expense
+    - r_and_d_expense
+    - finance_expense
+    - operating_profit
+    - total_profit
+    - net_profit
+    - parent_net_profit
+    - available_at
+    - revision
+    limits: 必须按同口径报告期比较；预告、快报、正式报告和更正不得混用。
+  - dataset: balance_sheet
+    purpose: 应收、存货、合同资产/负债、现金、在建工程、固定资产、借款、少数股东权益等。
+    required_semantics:
+    - report_period
+    - cash
+    - accounts_receivable
+    - notes_receivable
+    - contract_assets
+    - inventory
+    - contract_liabilities
+    - advance_receipts
+    - construction_in_progress
+    - fixed_assets
+    - total_assets
+    - total_liabilities
+    - short_term_borrowings
+    - long_term_borrowings
+    - minority_interests
+    - available_at
+    - revision
+    limits: 字段不存在、口径不适用和真实为零必须分开。
+  - dataset: cash_flow
+    purpose: 经营现金、销售回款、资本开支现金、融资现金及现金兑现质量。
+    required_semantics:
+    - report_period
+    - cash_received_from_sales
+    - net_operating_cash_flow
+    - cash_paid_for_long_term_assets
+    - net_investing_cash_flow
+    - net_financing_cash_flow
+    - available_at
+    - revision
+    limits: 累计现金流只与同口径累计期比较；不得把单季和年累计混合。
+  - dataset: financial_indicator
+    purpose: 毛利率、净利率、ROE、负债率、周转率、扣非净利润等已存在指标的交叉核验。
+    required_semantics:
+    - report_period
+    - gross_margin
+    - net_margin
+    - roe
+    - debt_ratio
+    - accounts_receivable_turnover
+    - inventory_turnover
+    - deducted_parent_net_profit
+    - available_at
+    - revision
+    limits: 指标表与三表冲突时保留两者并记录口径，不静默选择。
+  - dataset: daily_basic
+    purpose: 市值、PE/PB/PS等估值入口与实际可用历史窗口。
+    required_semantics:
+    - trade_date
+    - close_if_available
+    - total_market_value
+    - circulating_market_value
+    - pe_ttm
+    - pb
+    - ps_ttm
+    - turnover_rate
+    - available_at
+    limits: 亏损公司PE为空或失真时不得以任意值替代；历史分位必须披露实际覆盖起止和样本数。
+  - dataset: equity_daily
+    purpose: 截止日行情、复权收益、波动、成交与流动性基础。
+    required_semantics:
+    - trade_date
+    - open
+    - high
+    - low
+    - close
+    - volume
+    - amount
+    - adjustment_method_or_factor
+    - available_at
+    limits: 只用截止日及以前数据；920808.BJ旧代码/场所未规范前禁止价格计算。
+  - dataset: industry_member
+    purpose: 形成日有效行业归属和同类参照。
+    required_semantics:
+    - industry_system
+    - industry_code
+    - industry_name
+    - valid_from
+    - valid_to
+    - available_at
+    limits: 行业分类不能证明液冷关系。
+  - dataset: theme_member
+    purpose: 主题成员仅用于检查市场标签与发现偏差。
+    required_semantics:
+    - theme_code
+    - theme_name
+    - snapshot_date
+    - membership_status
+    - available_at
+    limits: 不得用于确认产品、供货、订单或收入。
+  optional_existing_only:
+  - dataset_semantics: broad_market_and_industry_price_series
+    purpose: 计算相对宽基市场和形成日有效行业的20/60/120/250交易日收益。
+    rule: 仅在仓库已有、点时可靠且无需新增数据源时使用；否则标unsupported，不临时建设。
+  - dataset_semantics: adjustment_factor_or_adjusted_price_query
+    purpose: 保证跨期收益使用统一复权口径。
+    rule: 必须复用仓库既有复权实现并记录公式/版本；不得自行拼接不一致价格。
+common_derived_metrics:
+  growth_and_margin:
+  - metric: revenue_yoy
+    formula: 本期营业收入 / 上年同期营业收入 - 1
+    conditions: 同报告期、同币种、同合并范围；上年同期为0时返回unknown。
+  - metric: parent_net_profit_yoy
+    formula: 本期归母净利润 / 上年同期归母净利润 - 1
+    conditions: 任一期为负或接近0时同时返回绝对变动，不只给百分比。
+  - metric: gross_margin
+    formula: (营业收入 - 营业成本) / 营业收入
+    conditions: 与财务指标表交叉核对；冲突时保留两口径。
+  - metric: gross_margin_change_pp
+    formula: 本期毛利率 - 上年同期毛利率（百分点）
+    conditions: 同口径。
+  - metric: deducted_profit_share
+    formula: 扣非归母净利润 / 归母净利润
+    conditions: 归母净利润为0或负时只列绝对值与非经常损益，不计算误导比例。
+  cash_and_working_capital:
+  - metric: cfo_to_parent_net_profit
+    formula: 经营活动现金流净额 / 归母净利润
+    conditions: 归母净利润<=0时不作质量比率结论，列绝对值和方向。
+  - metric: cash_collection_ratio
+    formula: 销售商品、提供劳务收到的现金 / 营业收入
+    conditions: 仅同累计期比较。
+  - metric: accounts_receivable_growth_minus_revenue_growth
+    formula: 应收账款同比增速 - 营业收入同比增速
+    conditions: 应收按期末余额，收入按同累计期；同时列票据/合同资产。
+  - metric: inventory_growth_minus_revenue_growth
+    formula: 存货同比增速 - 营业收入同比增速
+    conditions: 同时列存货结构和跌价准备（若有）。
+  - metric: working_capital_intensity
+    formula: (应收账款 + 合同资产 + 存货 - 合同负债 - 预收款) / TTM营业收入
+    conditions: 字段缺失时不得把缺失当0；返回可计算部分和缺口。
+  - metric: capex_cash
+    formula: 购建固定资产、无形资产和其他长期资产支付的现金
+    conditions: 若用固定资产/在建工程增加额替代，必须标明替代口径且不与现金口径混用。
+  valuation_and_price:
+  - metric: valuation_snapshot
+    formula: 截止日总市值、流通市值、PE_TTM、PB、PS_TTM
+    conditions: PE仅在TTM归母净利润为正且字段有效时使用。
+  - metric: valuation_percentile
+    formula: 当前估值在实际可用历史窗口中的百分位
+    conditions: 必须输出窗口起止、有效样本数、空值规则；不声称固定5年/10年。
+  - metric: adjusted_return_20_60_120_250
+    formula: 复权收盘价在20/60/120/250个交易日的收益
+    conditions: 数据不足返回partial；920808.BJ在旧代码/场所规范化前全部禁止。
+  - metric: relative_return
+    formula: 个股复权收益 - 同期宽基/形成日有效行业收益
+    conditions: 比较序列必须点时可得；不存在则unsupported。
+  - metric: liquidity_snapshot
+    formula: 20日成交额中位数、换手率中位数、停牌/无报价记录
+    conditions: 只作事实，不形成买入条件。
+  theme_metrics_only_when_directly_disclosed:
+  - metric: theme_revenue_share
+    formula: 直接披露的AI数据中心液冷收入 / 公司营业收入
+    conditions: 分子必须同期间、同合并范围且能排除储能/汽车/传统风冷；否则unknown。
+  - metric: theme_gross_profit_share
+    formula: 直接披露的液冷毛利 / 公司总毛利
+    conditions: 只有收入而没有主题毛利率时不得用公司综合毛利率代替。
+  - metric: incremental_net_profit_elasticity
+    formula: C阶段批准的液冷新增净利润 / 基期归母净利润
+    conditions: B2只提供输入，不自行估算；最终计算留到C2。
+  - metric: theme_cash_contribution
+    formula: 可直接归因的液冷经营现金贡献 / 公司经营现金流
+    conditions: 无项目/产品现金拆分时unknown。
+alert_rules:
+  nature: transparent_starting_alerts_not_scores_or_gates
+  rules:
+  - alert: 利润—现金背离
+    starting_rule: 收入/利润增长但经营现金流连续两个可比报告期恶化或为负。
+    handling: 标alert，不自动否决；列应收、存货、合同资产/负债和回款解释。
+  - alert: 营运资金异常
+    starting_rule: 应收或存货增速连续两个可比报告期高于收入增速15个百分点以上。
+    handling: 核对备货、验收、账期、发出商品和减值。
+  - alert: 毛利反向
+    starting_rule: 公司披露高价值产品放量，但相关或综合毛利率同比下降3个百分点以上。
+    handling: 拆价格、产品结构、成本、良率和项目变更；不能直接归因。
+  - alert: 扩产过快
+    starting_rule: 资本开支/在建工程显著翻倍，但订单覆盖、认证、良率或利用率无同步证据。
+    handling: 标记供给和融资风险；拟建产能不等于有效产能。
+  - alert: 一次性利润
+    starting_rule: 非经常性损益或补贴占利润30%以上。
+    handling: 同时报告扣非口径，不用一次性项目支撑主题利润。
+  - alert: 客户过度集中
+    starting_rule: 单一客户贡献超过50%，且缺少第二客户或长期合同保障。
+    handling: 提高集中风险描述，不自动否决；无数据则unknown。
+business_model_templates:
+  component_hardware:
+    plain_name: 核心部件/硬件
+    commercial_chain: 产品与规格 → 客户验证/认证 → 小批量 → 重复订单/第二客户 → 批量交付 → 收入与毛利 → 回款与现金
+    required_inputs:
+    - 准确产品、规格、应用场景和客户类型
+    - 送样/验证/定点/认证阶段及版本
+    - 批量交付、订单、复购、第二客户和故障/退货
+    - 相关产品收入、ASP、成本、毛利、良率、产能和利用率
+    - 应收、存货、资本开支、折旧、减值和经营现金流
+    future_formula_template: 可兑现收入 = min(已验证需求, 名义产能 × 认证通过率 × 良率 × 产能利用率) × 平均售价
+    b2_rule: B2只提取直接披露的变量和公司基线；任何认证率、良率、利用率或ASP缺失时写unknown，不计算虚假收入。
+    counterevidence:
+    - 产品同名但场景为汽车/储能/通用工业
+    - 长期停留在送样/试产
+    - 批量交付无复购或第二客户
+    - 收入增长伴随降价、低毛利、应收或库存恶化
+    - 客户扶持二供、接口标准化或客户自制
+  system_equipment_project:
+    plain_name: 系统设备/项目交付
+    commercial_chain: 正式合同/订单 → 可交付范围 → 调试/验收 → 收入确认 → 项目毛利 → 应收/质保金 → 现金回收
+    required_inputs:
+    - 合同性质、金额、可取消条款、产品/项目范围和交付期限
+    - 关键部件供应、项目进度、验收条件和收入确认政策
+    - 在手订单、交付、验收收入、项目毛利与变更成本
+    - 合同资产、应收、质保金、合同负债/预付款和现金回收
+    - 项目客户集中、跨客户复制和售后责任
+    future_formula_template: 项目利润链 = 正式订单 → 可交付金额 → 验收收入 → 项目毛利 → 扣除垫资、质保与融资成本后的现金回报
+    b2_rule: 框架协议、意向、在手订单和收入必须分开；无法取得验收/回款条款时不把订单直接计入收入。
+    counterevidence:
+    - 订单长期不转收入
+    - 验收延期或项目变更吞噬毛利
+    - 合同资产/应收显著上升
+    - 经营现金持续为负
+    - 大量系统收入实为传统温控或非AI场景
+  facility_side_engineering:
+    plain_name: 设施侧冷源/工程改造
+    commercial_chain: 数据中心设施侧项目/改造 → 设备与工程交付 → 验收 → 项目毛利 → 回款；与直接芯片液路产品分开
+    required_inputs:
+    - 液冷设施侧、水环、最终排热、风液混合项目与传统风冷/普通机房业务拆分
+    - 项目合同、改造范围、交付验收和客户类型
+    - 工程/设备收入、毛利、合同资产、应收、资本开支和现金流
+    - IDC运营、传统温控和液冷工程是否混在同一分部
+    future_formula_template: 可确认项目贡献 = 已明确为液冷设施侧的验收收入 × 对应项目毛利率；无法拆分时不计算主题贡献
+    b2_rule: 设施侧受益不等于冷板/CDU/UQD直接供应；只按明确液冷设施水环或改造项目核查。
+    counterevidence:
+    - 收入主要来自传统精密空调或IDC运营
+    - 没有液冷改造/设施侧合同原文
+    - 工程垫资和应收吞噬利润
+    - 风液混合或传统风冷路线延缓直接液冷投入
+  ownership_context:
+    plain_name: 持股/合并范围与利润归属
+    commercial_chain: 法律主体与持股有效期 → 控制/合并方式 → 少数股东权益/权益法 → 子公司经营结果如何进入母公司报表
+    required_inputs:
+    - 截至as_of的持股比例、控制关系、变更日期与官方来源
+    - 是否纳入合并范围、少数股东权益、关联交易和内部抵销
+    - 子公司收入/净利润对母公司归母利润的实际归属方式
+    - 品牌授权与产品披露主体边界
+    future_formula_template: 不得使用“子公司收入/利润 × 持股比例”的简单公式替代合并会计；按正式合并口径和少数股东权益披露处理
+    b2_rule: 只核对归属，不计算母公司的液冷主题收入、估值或价格结论。
+    counterevidence:
+    - 产品属于子公司但被重复归给母公司
+    - 持股比例/控制关系在期间内变化
+    - 少数股东权益或内部交易导致简单比例失真
+    - 子公司不在合并范围
+scenario_variable_policy:
+  purpose: B2只准备C阶段所需变量，不在B阶段自行预测或给目标价。
+  per_variable_output:
+  - actual_or_directly_disclosed_value
+  - unit
+  - period
+  - source_id_or_document
+  - published_at
+  - available_at
+  - quality
+  - missing_reason
+  candidate_bounds:
+    conservative_input_candidate: 只允许使用已实现值、已验收收入、不可撤销订单下限或公司正式披露下限。
+    base_input_candidate: 只记录当前订单、历史可复算转化率、有效产能和正常交付所支持的候选值；是否采用由C1决定。
+    optimistic_trigger_candidate: 只记录需要新增客户、认证、份额、价格或良率改善的触发条件；没有触发证据时不填数。
+  forbidden:
+  - 用行业空间、公司规划或名义产能直接填销量
+  - 用公司综合毛利率替代液冷产品/项目毛利率
+  - 把摘要、展会稿或互动平台数字当作正式情景输入
+  - 为了制造安全边际随意砍半，或为了乐观结论倒推销量和毛利
+entity_contracts:
+- record_id: ENT034
+  entity_name: 英维克
+  legal_name: 深圳市英维克科技股份有限公司
+  ts_code: 002837.SZ
+  market: 深交所主板
+  a3_disposition: enter_b_core
+  entity_role: 液冷系统与部件供应商
+  business_models:
+  - component_hardware
+  - system_equipment_project
+  node_ids:
+  - N04
+  - N05
+  - N07
+  - N08
+  - N14
+  - N23
+  - N24
+  a3_relationship_ladder:
+    identity: confirmed
+    capability: confirmed_dated_official
+    certification_or_pilot: confirmed_platform_validation_limited
+    supply: unknown
+    order: unknown
+    repeat_delivery: unknown
+    revenue: unknown_liquid_cooling_split
+    profit: unknown
+    cash: unknown
+  evidence_ids:
+  - EV039
+  - EV040
+  - EV066
+  - EV069
+  - EV070
+  strongest_support: 公司正式资料显示具备面向数据中心的全链条液冷产品、工质检测与多平台冷板系统验证能力。
+  strongest_counter: 正式资料仍未把液冷客户、订单、重复交付、收入、利润和现金按数据中心场景拆分；储能液冷不能外推为AI数据中心液冷。
+  calculation_permissions:
+    company_baseline: allowed
+    relationship_body_review: required
+    theme_revenue_and_profit: blocked_until_direct_formal_split
+    valuation_and_price: allowed_company_level_only
+    reason: 能力和平台验证较强，但客户、订单、重复交付和液冷财务拆分未知。
+  target_document_terms:
+  - 液冷
+  - 冷板
+  - CDU
+  - 快速接头
+  - 歧管
+  - 工质
+  - 数据中心
+  - 服务器
+  - 储能
+  - Intel
+  - 宝德
+  required_document_chain:
+  - 截至as_of可见的2025年年度报告及其更正/问询回复（若有）
+  - 截至as_of可见的2026年半年度报告/业绩快报/预告及其更正（若有）
+  - A3 evidence_ids指向的正式原文或正式URL；摘要只能用于定位
+  - 本地公告元数据中与target_document_terms直接相关且available_at<=as_of的少量正式公告
+  required_fields_from_a3:
+  - 数据中心液冷与储能液冷收入分拆
+  - 冷板/CDU/快接/歧管/工质/机柜各节点收入与毛利
+  - 客户类型、认证版本、订单、交付与复购
+  - 应收、存货、合同负债、资本开支和经营现金流
+  - 公告原文中的客户/项目/验收与风险
+  required_fields_from_business_model:
+  - 准确产品、规格、应用场景和客户类型
+  - 送样/验证/定点/认证阶段及版本
+  - 批量交付、订单、复购、第二客户和故障/退货
+  - 相关产品收入、ASP、成本、毛利、良率、产能和利用率
+  - 应收、存货、资本开支、折旧、减值和经营现金流
+  - 合同性质、金额、可取消条款、产品/项目范围和交付期限
+  - 关键部件供应、项目进度、验收条件和收入确认政策
+  - 在手订单、交付、验收收入、项目毛利与变更成本
+  - 合同资产、应收、质保金、合同负债/预付款和现金回收
+  - 项目客户集中、跨客户复制和售后责任
+  scenario_input_fields:
+  - direct_theme_revenue_actual
+  - firm_order_or_batch_delivery_amount
+  - validated_customer_count
+  - repeat_customer_count
+  - nominal_capacity
+  - certification_pass_rate
+  - yield_rate
+  - capacity_utilization
+  - average_selling_price
+  - theme_gross_margin
+  - incremental_r_and_d_sales_delivery_expense
+  - incremental_depreciation
+  - receivable_days
+  - inventory_days
+  - cash_collection
+  - firm_order_backlog
+  - deliverable_amount_within_horizon
+  - acceptance_schedule
+  - recognized_project_revenue
+  - project_gross_margin
+  - contract_assets
+  - accounts_receivable
+  - contract_liabilities_or_advances
+  - warranty_or_retention
+  - repeat_project_or_second_customer_count
+  counterevidence_checks:
+  - 产品同名但场景为汽车/储能/通用工业
+  - 长期停留在送样/试产
+  - 批量交付无复购或第二客户
+  - 收入增长伴随降价、低毛利、应收或库存恶化
+  - 客户扶持二供、接口标准化或客户自制
+  - 订单长期不转收入
+  - 验收延期或项目变更吞噬毛利
+  - 合同资产/应收显著上升
+  - 经营现金持续为负
+  - 大量系统收入实为传统温控或非AI场景
+  special_rules:
+  - 任何储能液冷收入、储能温控产品或新能源客户不得并入AI数据中心液冷分子。
+  - 若只有全链条产品能力而无客户/订单原文，主题收入、毛利、利润和现金全部unknown。
+  review_due: '2026-11-30'
+- record_id: ENT035
+  entity_name: 申菱环境
+  legal_name: 广东申菱环境系统股份有限公司
+  ts_code: 301018.SZ
+  market: 深交所创业板
+  a3_disposition: enter_b_core
+  entity_role: CDU、一次/二次侧输配、系统集成与设施冷源
+  business_models:
+  - system_equipment_project
+  - facility_side_engineering
+  node_ids:
+  - N05
+  - N08
+  - N17
+  - N19
+  - N23
+  - N24
+  - N28
+  a3_relationship_ladder:
+    identity: confirmed
+    capability: confirmed_dated_official
+    certification_or_pilot: standard_and_test_participation_confirmed
+    supply: project_application_claim_company_official
+    order: unknown
+    repeat_delivery: unknown
+    revenue: unknown_liquid_cooling_split
+    profit: unknown
+    cash: unknown
+  evidence_ids:
+  - EV041
+  - EV042
+  - EV066
+  - EV071
+  - EV072
+  - EV073
+  strongest_support: 公司正式资料显示CDU覆盖AI/智算场景，并参与冷板式液冷测试验证白皮书和工程标准，披露过超算、海外数据中心及运营商项目应用。
+  strongest_counter: 产品页和项目案例不能替代可回放的客户合同、订单金额、重复交付、液冷收入和利润拆分。
+  calculation_permissions:
+    company_baseline: allowed
+    relationship_body_review: required
+    theme_revenue_and_profit: blocked_until_direct_formal_split
+    valuation_and_price: allowed_company_level_only
+    reason: 项目应用与标准参与成立，但订单、验收、液冷收入和项目毛利未拆。
+  target_document_terms:
+  - 液冷
+  - CDU
+  - 智算
+  - 冷板
+  - 浸没
+  - 一次侧
+  - 二次侧
+  - 水力模块
+  - 超算
+  - 项目验收
+  required_document_chain:
+  - 截至as_of可见的2025年年度报告及其更正/问询回复（若有）
+  - 截至as_of可见的2026年半年度报告/业绩快报/预告及其更正（若有）
+  - A3 evidence_ids指向的正式原文或正式URL；摘要只能用于定位
+  - 本地公告元数据中与target_document_terms直接相关且available_at<=as_of的少量正式公告
+  required_fields_from_a3:
+  - 液冷CDU/液冷大系统/水力模块对应主营分项
+  - 数据服务收入中液冷与传统设施冷却的拆分
+  - 项目客户、合同、验收、重复交付与回款
+  - 系统集成/工程毛利、应收、存货、合同资产和现金流
+  - 正式公告原文及点时时间
+  required_fields_from_business_model:
+  - 合同性质、金额、可取消条款、产品/项目范围和交付期限
+  - 关键部件供应、项目进度、验收条件和收入确认政策
+  - 在手订单、交付、验收收入、项目毛利与变更成本
+  - 合同资产、应收、质保金、合同负债/预付款和现金回收
+  - 项目客户集中、跨客户复制和售后责任
+  - 液冷设施侧、水环、最终排热、风液混合项目与传统风冷/普通机房业务拆分
+  - 项目合同、改造范围、交付验收和客户类型
+  - 工程/设备收入、毛利、合同资产、应收、资本开支和现金流
+  - IDC运营、传统温控和液冷工程是否混在同一分部
+  scenario_input_fields:
+  - firm_order_backlog
+  - deliverable_amount_within_horizon
+  - acceptance_schedule
+  - recognized_project_revenue
+  - project_gross_margin
+  - contract_assets
+  - accounts_receivable
+  - contract_liabilities_or_advances
+  - warranty_or_retention
+  - cash_collection
+  - repeat_project_or_second_customer_count
+  - direct_liquid_cooling_facility_project_revenue
+  - traditional_air_cooling_revenue
+  - idc_operation_revenue
+  - facility_project_backlog
+  counterevidence_checks:
+  - 订单长期不转收入
+  - 验收延期或项目变更吞噬毛利
+  - 合同资产/应收显著上升
+  - 经营现金持续为负
+  - 大量系统收入实为传统温控或非AI场景
+  - 收入主要来自传统精密空调或IDC运营
+  - 没有液冷改造/设施侧合同原文
+  - 工程垫资和应收吞噬利润
+  - 风液混合或传统风冷路线延缓直接液冷投入
+  special_rules:
+  - 必须分开CDU/液冷大系统、传统精密空调、设施冷源和工程服务。
+  - 项目应用案例若无合同/验收/收入原文，只能作为能力或项目线索。
+  review_due: '2026-11-30'
+- record_id: ENT036A
+  entity_name: 曙光数创
+  legal_name: 曙光数据基础设施创新技术（北京）股份有限公司
+  ts_code: 920808.BJ
+  market: 北交所
+  a3_disposition: enter_b_core
+  entity_role: 冷板/浸没液冷数据中心基础设施、系统集成与服务
+  business_models:
+  - system_equipment_project
+  node_ids:
+  - N02
+  - N03
+  - N04
+  - N05
+  - N08
+  - N21
+  - N28
+  - N31
+  - N33
+  a3_relationship_ladder:
+    identity: confirmed
+    capability: confirmed
+    certification_or_pilot: partial
+    supply: commercial_product_delivery_implied_by_report
+    order: customer_names_and_contracts_unknown
+    repeat_delivery: partial_revenue_growth_but_order_chain_unknown
+    revenue: confirmed_product_category_level
+    profit: company_level_known_theme_profit_not_isolated
+    cash: company_level_known_theme_cash_not_isolated
+  evidence_ids:
+  - EV043
+  - EV044
+  - EV066
+  - EV067
+  - EV068
+  - EV074
+  strongest_support: 本地主营分项和2025年报摘要均表明其直接经营冷板、浸没液冷及模块化数据中心产品，并以项目验收确认收入。
+  strongest_counter: 客户、供应商、订单与产品线毛利未公开；公司层经营现金流与存货压力需要B阶段按点时口径核对。
+  calculation_permissions:
+    company_baseline: allowed
+    relationship_body_review: required
+    theme_revenue_and_profit: allowed_only_at_direct_disclosed_product_category
+    valuation_and_price: blocked_until_historical_code_and_venue_normalized
+    reason: 直接经营液冷产品已成立，但客户、订单链、产品线毛利和旧代码价格身份仍有缺口。
+  target_document_terms:
+  - 冷板液冷
+  - 浸没液冷
+  - C7000
+  - 模块化数据中心
+  - 项目验收
+  - 订单
+  - 客户
+  - 存货
+  - 合同资产
+  required_document_chain:
+  - 截至as_of可见的2025年年度报告及其更正/问询回复（若有）
+  - 截至as_of可见的2026年半年度报告/业绩快报/预告及其更正（若有）
+  - A3 evidence_ids指向的正式原文或正式URL；摘要只能用于定位
+  - 本地公告元数据中与target_document_terms直接相关且available_at<=as_of的少量正式公告
+  required_fields_from_a3:
+  - 冷板/浸没/模块化产品收入、毛利与项目验收
+  - 客户集中、订单、存货、合同资产/负债、应收和现金流
+  - 项目周期与收入确认时点
+  - 2025年收入增长、存货和现金流的匹配
+  - 920808历史证券代码/交易场所规范化
+  required_fields_from_business_model:
+  - 合同性质、金额、可取消条款、产品/项目范围和交付期限
+  - 关键部件供应、项目进度、验收条件和收入确认政策
+  - 在手订单、交付、验收收入、项目毛利与变更成本
+  - 合同资产、应收、质保金、合同负债/预付款和现金回收
+  - 项目客户集中、跨客户复制和售后责任
+  scenario_input_fields:
+  - firm_order_backlog
+  - deliverable_amount_within_horizon
+  - acceptance_schedule
+  - recognized_project_revenue
+  - project_gross_margin
+  - contract_assets
+  - accounts_receivable
+  - contract_liabilities_or_advances
+  - warranty_or_retention
+  - cash_collection
+  - repeat_project_or_second_customer_count
+  counterevidence_checks:
+  - 订单长期不转收入
+  - 验收延期或项目变更吞噬毛利
+  - 合同资产/应收显著上升
+  - 经营现金持续为负
+  - 大量系统收入实为传统温控或非AI场景
+  special_rules:
+  - 先规范920808.BJ在2022-11-18前的旧代码/挂牌场所；未完成前不输出任何价格收益、估值分位或相对表现。
+  - 按冷板、浸没、模块化数据中心和系统集成分别读取产品收入/毛利；若年报只给大类，保留大类，不做再分配。
+  - 项目验收收入必须与合同资产、存货、应收和现金流共同解释。
+  review_due: '2026-11-30'
+- record_id: ENT036B
+  entity_name: 中科曙光
+  legal_name: 曙光信息产业股份有限公司
+  ts_code: 603019.SH
+  market: 上交所主板
+  a3_disposition: enter_b_ownership_context_only
+  entity_role: 曙光数创控股/集团关系与利润归属核查对象
+  business_models:
+  - ownership_context
+  node_ids: []
+  a3_relationship_ladder:
+    identity: confirmed
+    capability: not_assigned_from_subsidiary
+    certification_or_pilot: not_applicable
+    supply: not_assigned
+    order: not_assigned
+    repeat_delivery: not_assigned
+    revenue: ownership_exposure_unknown
+    profit: profit_attribution_unknown
+    cash: not_applicable
+  evidence_ids:
+  - EV066
+  - EV067
+  - EV068
+  - EV074
+  strongest_support: 2025年报摘要将曙光数创表述为中科曙光控股子公司。
+  strongest_counter: 不能把920808的产品、收入和订单直接归入603019；持股比例、控制有效期、合并口径和利润归属需要正式年报股权表核验。
+  calculation_permissions:
+    company_baseline: ownership_fields_only
+    relationship_body_review: required
+    theme_revenue_and_profit: forbidden
+    valuation_and_price: forbidden_for_liquid_cooling_thesis
+    reason: 只核对曙光数创的控制、合并范围和利润归属，不能继承子公司产品与订单。
+  target_document_terms:
+  - 曙光数创
+  - 持股比例
+  - 控股子公司
+  - 合并范围
+  - 少数股东权益
+  - 关联交易
+  - 内部抵销
+  required_document_chain:
+  - 截至as_of可见的2025年年度报告及其更正/问询回复（若有）
+  - 截至as_of可见的2026年半年度报告/业绩快报/预告及其更正（若有）
+  - A3 evidence_ids指向的正式原文或正式URL；摘要只能用于定位
+  - 本地公告元数据中与target_document_terms直接相关且available_at<=as_of的少量正式公告
+  required_fields_from_a3:
+  - 截至as_of的持股比例、控制关系和有效期
+  - 合并报表范围与少数股东权益
+  - 曙光数创收入/利润对603019的归属方式
+  - 相关交易与品牌授权边界
+  required_fields_from_business_model:
+  - 截至as_of的持股比例、控制关系、变更日期与官方来源
+  - 是否纳入合并范围、少数股东权益、关联交易和内部抵销
+  - 子公司收入/净利润对母公司归母利润的实际归属方式
+  - 品牌授权与产品披露主体边界
+  scenario_input_fields:
+  - ownership_ratio
+  - control_status
+  - effective_date
+  - consolidation_status
+  - minority_interest
+  - subsidiary_revenue_and_profit_disclosure
+  - parent_attributable_profit_effect
+  - related_party_transactions
+  counterevidence_checks:
+  - 产品属于子公司但被重复归给母公司
+  - 持股比例/控制关系在期间内变化
+  - 少数股东权益或内部交易导致简单比例失真
+  - 子公司不在合并范围
+  special_rules:
+  - 不得将920808的产品、订单、收入、利润或价格直接复制给603019。
+  - 若曙光数创为合并子公司，不再用持股比例简单乘收入；按合并范围、少数股东权益和归母口径说明。
+  review_due: '2026-09-30'
+- record_id: ENT037
+  entity_name: 飞荣达
+  legal_name: 深圳市飞荣达科技股份有限公司
+  ts_code: 300602.SZ
+  market: 深交所创业板
+  a3_disposition: enter_b_core
+  entity_role: TIM、冷板、流量控制、CDU、快接及液冷机箱/机柜
+  business_models:
+  - component_hardware
+  node_ids:
+  - N02
+  - N03
+  - N04
+  - N08
+  - N25
+  - N26
+  a3_relationship_ladder:
+    identity: confirmed
+    capability: confirmed_company_disclosure
+    certification_or_pilot: sampling_and_trial_production_disclosed
+    supply: multiple_products_batch_delivered_company_disclosure
+    order: aggregate_orders_rising_no_named_customer
+    repeat_delivery: partial
+    revenue: aggregate_segment_growth_no_liquid_cooling_split
+    profit: unknown_theme_contribution
+    cash: unknown_theme_contribution
+  evidence_ids:
+  - EV045
+  - EV066
+  - EV075
+  strongest_support: 公司披露服务器/数据中心液冷产品矩阵，多类产品已批量交付，订单量与相关营业收入增长。
+  strongest_counter: 披露为汇总口径，客户、产品线收入、毛利、订单金额和现金贡献没有分拆，且公司业务跨消费电子、通信、汽车和储能。
+  calculation_permissions:
+    company_baseline: allowed
+    relationship_body_review: required
+    theme_revenue_and_profit: allowed_only_if_formal_original_disclosure_separates_ai_server_liquid_cooling
+    valuation_and_price: allowed_company_level_only
+    reason: 批量交付与相关收入增长为汇总披露，需排除储能/汽车/其他业务。
+  target_document_terms:
+  - 液冷
+  - 服务器
+  - TIM
+  - 冷板
+  - CDU
+  - 快速接头
+  - 液冷机柜
+  - 储能
+  - 批量交付
+  - 试产
+  required_document_chain:
+  - 截至as_of可见的2025年年度报告及其更正/问询回复（若有）
+  - 截至as_of可见的2026年半年度报告/业绩快报/预告及其更正（若有）
+  - A3 evidence_ids指向的正式原文或正式URL；摘要只能用于定位
+  - 本地公告元数据中与target_document_terms直接相关且available_at<=as_of的少量正式公告
+  required_fields_from_a3:
+  - AI服务器与储能液冷业务拆分
+  - TIM/冷板/CDU/快接/机箱机柜各产品收入和毛利
+  - 批量交付的客户、订单与复购
+  - 样品/试产项目转量产进度
+  - 应收、存货、产能、资本开支、现金流和减值
+  required_fields_from_business_model:
+  - 准确产品、规格、应用场景和客户类型
+  - 送样/验证/定点/认证阶段及版本
+  - 批量交付、订单、复购、第二客户和故障/退货
+  - 相关产品收入、ASP、成本、毛利、良率、产能和利用率
+  - 应收、存货、资本开支、折旧、减值和经营现金流
+  scenario_input_fields:
+  - direct_theme_revenue_actual
+  - firm_order_or_batch_delivery_amount
+  - validated_customer_count
+  - repeat_customer_count
+  - nominal_capacity
+  - certification_pass_rate
+  - yield_rate
+  - capacity_utilization
+  - average_selling_price
+  - theme_gross_margin
+  - incremental_r_and_d_sales_delivery_expense
+  - incremental_depreciation
+  - receivable_days
+  - inventory_days
+  - cash_collection
+  counterevidence_checks:
+  - 产品同名但场景为汽车/储能/通用工业
+  - 长期停留在送样/试产
+  - 批量交付无复购或第二客户
+  - 收入增长伴随降价、低毛利、应收或库存恶化
+  - 客户扶持二供、接口标准化或客户自制
+  special_rules:
+  - 必须把AI服务器/数据中心液冷与储能、汽车、消费电子、通信等业务分开。
+  - “相关营业收入增长”若无正式金额和产品分项，只保留披露语句，不推导主题占比。
+  review_due: '2026-11-30'
+- record_id: ENT038
+  entity_name: 佳力图
+  legal_name: 南京佳力图机房环境技术股份有限公司
+  ts_code: 603912.SH
+  market: 上交所主板
+  a3_disposition: enter_b_conditional_facility_side
+  entity_role: 设施侧冷源、风液混合、数据中心温控与改造
+  business_models:
+  - facility_side_engineering
+  node_ids:
+  - N17
+  - N19
+  - N20
+  - N35
+  a3_relationship_ladder:
+    identity: confirmed
+    capability: facility_side_confirmed_direct_liquid_loop_partial
+    certification_or_pilot: unknown
+    supply: unknown_liquid_cooling_specific
+    order: unknown_liquid_cooling_specific
+    repeat_delivery: unknown
+    revenue: data_center_business_known_liquid_cooling_split_unknown
+    profit: unknown_theme_contribution
+    cash: unknown_theme_contribution
+  evidence_ids:
+  - EV046
+  - EV066
+  - EV068
+  strongest_support: 公司身份和数据中心设施侧温控业务明确，属于液冷系统外围设施水环、最终排热和存量改造的重要对照。
+  strongest_counter: A1/A2没有形成冷板、UQD或CDU等直接液路硬证据，不能与直接液冷部件商放在同一业务模板。
+  calculation_permissions:
+    company_baseline: allowed
+    relationship_body_review: required_first
+    theme_revenue_and_profit: blocked_until_direct_facility_side_liquid_cooling_project_or_segment
+    valuation_and_price: allowed_company_level_only_after_relation_result_labeled
+    reason: 仅为设施侧条件进入，不得按直接液冷部件模板估算。
+  target_document_terms:
+  - 液冷
+  - 设施侧
+  - 水环
+  - 冷冻水
+  - 后门换热
+  - 风液混合
+  - 数据中心
+  - 改造
+  - 项目验收
+  required_document_chain:
+  - 截至as_of可见的2025年年度报告及其更正/问询回复（若有）
+  - 截至as_of可见的2026年半年度报告/业绩快报/预告及其更正（若有）
+  - A3 evidence_ids指向的正式原文或正式URL；摘要只能用于定位
+  - 本地公告元数据中与target_document_terms直接相关且available_at<=as_of的少量正式公告
+  required_fields_from_a3:
+  - 数据中心温控中液冷设施侧、传统风冷和IDC运营收入拆分
+  - 液冷改造/设施水环/最终排热项目合同与验收
+  - 工程毛利、应收、合同资产、资本开支和现金流
+  - 仅按设施侧业务模板核查
+  required_fields_from_business_model:
+  - 液冷设施侧、水环、最终排热、风液混合项目与传统风冷/普通机房业务拆分
+  - 项目合同、改造范围、交付验收和客户类型
+  - 工程/设备收入、毛利、合同资产、应收、资本开支和现金流
+  - IDC运营、传统温控和液冷工程是否混在同一分部
+  scenario_input_fields:
+  - direct_liquid_cooling_facility_project_revenue
+  - traditional_air_cooling_revenue
+  - idc_operation_revenue
+  - facility_project_backlog
+  - acceptance_schedule
+  - project_gross_margin
+  - contract_assets
+  - cash_collection
+  counterevidence_checks:
+  - 收入主要来自传统精密空调或IDC运营
+  - 没有液冷改造/设施侧合同原文
+  - 工程垫资和应收吞噬利润
+  - 风液混合或传统风冷路线延缓直接液冷投入
+  special_rules:
+  - 不核查冷板、UQD、CDU直接部件价值；只核查设施侧水环、最终排热、后门换热/风液混合和改造项目。
+  - IDC运营收入、传统风冷温控收入与液冷设施侧项目必须分开。
+  review_due: '2026-11-30'
+- record_id: ENT039
+  entity_name: 高澜股份
+  legal_name: 广州高澜节能技术股份有限公司
+  ts_code: 300499.SZ
+  market: 深交所创业板
+  a3_disposition: enter_b_core
+  entity_role: 数据中心液冷系统与热管理项目
+  business_models:
+  - system_equipment_project
+  node_ids:
+  - N08
+  - N28
+  - N33
+  a3_relationship_ladder:
+    identity: confirmed
+    capability: confirmed_company_disclosure
+    certification_or_pilot: partial_product_certification_claims
+    supply: company_disclosed_customer_service
+    order: company_disclosed_aggregate_orders_growing
+    repeat_delivery: partial
+    revenue: aggregate_high_power_density_segment_not_exact_liquid_cooling_split
+    profit: unknown_theme_contribution
+    cash: unknown_theme_contribution
+  evidence_ids:
+  - EV047
+  - EV066
+  - EV076
+  - EV077
+  strongest_support: 2026年8月公司公告披露数据中心液冷客户结构、运营商/海外进展和在手订单增长，半年报摘要亦称算力中心液冷项目批量落地。
+  strongest_counter: 未披露客户名称、订单金额和节点级收入；高功率密度装置同时包含其他业务，且经营现金流需要单独审查。
+  calculation_permissions:
+    company_baseline: allowed
+    relationship_body_review: required
+    theme_revenue_and_profit: blocked_unless_exact_data_center_liquid_cooling_split_is_found
+    valuation_and_price: allowed_company_level_only
+    reason: 客户类别和订单趋势较强，但高功率密度分部并非精确液冷口径。
+  target_document_terms:
+  - 数据中心液冷
+  - 算力中心
+  - 高功率密度
+  - 在手订单
+  - 云服务商
+  - 运营商
+  - 海外
+  - 批量落地
+  required_document_chain:
+  - 截至as_of可见的2025年年度报告及其更正/问询回复（若有）
+  - 截至as_of可见的2026年半年度报告/业绩快报/预告及其更正（若有）
+  - A3 evidence_ids指向的正式原文或正式URL；摘要只能用于定位
+  - 本地公告元数据中与target_document_terms直接相关且available_at<=as_of的少量正式公告
+  required_fields_from_a3:
+  - 数据中心液冷与输电/储能液冷收入、毛利拆分
+  - 在手订单的产品、客户、交付、验收和复购
+  - 高功率密度装置热管理分部口径
+  - 经营现金流、应收、存货、合同负债和发出商品
+  - 产品认证与海外订单原文
+  required_fields_from_business_model:
+  - 合同性质、金额、可取消条款、产品/项目范围和交付期限
+  - 关键部件供应、项目进度、验收条件和收入确认政策
+  - 在手订单、交付、验收收入、项目毛利与变更成本
+  - 合同资产、应收、质保金、合同负债/预付款和现金回收
+  - 项目客户集中、跨客户复制和售后责任
+  scenario_input_fields:
+  - firm_order_backlog
+  - deliverable_amount_within_horizon
+  - acceptance_schedule
+  - recognized_project_revenue
+  - project_gross_margin
+  - contract_assets
+  - accounts_receivable
+  - contract_liabilities_or_advances
+  - warranty_or_retention
+  - cash_collection
+  - repeat_project_or_second_customer_count
+  counterevidence_checks:
+  - 订单长期不转收入
+  - 验收延期或项目变更吞噬毛利
+  - 合同资产/应收显著上升
+  - 经营现金持续为负
+  - 大量系统收入实为传统温控或非AI场景
+  special_rules:
+  - 高功率密度装置热管理分部不可全部归为数据中心液冷。
+  - 公司披露客户类别和在手订单趋势后，仍需正式原文核对产品、订单金额、验收和回款。
+  review_due: '2026-11-30'
+- record_id: ENT040
+  entity_name: 同飞股份
+  legal_name: 三河同飞制冷股份有限公司
+  ts_code: 300990.SZ
+  market: 深交所创业板
+  a3_disposition: enter_b_conditional_relation_only
+  entity_role: 数据中心液冷全链条产品与系统方案
+  business_models:
+  - system_equipment_project
+  node_ids:
+  - N05
+  - N08
+  - N17
+  - N19
+  - N21
+  - N24
+  - N33
+  a3_relationship_ladder:
+    identity: confirmed
+    capability: confirmed_company_press_release
+    certification_or_pilot: unknown
+    supply: unknown
+    order: unknown
+    repeat_delivery: unknown
+    revenue: unknown_liquid_cooling_split
+    profit: unknown
+    cash: unknown
+  evidence_ids:
+  - EV048
+  - EV066
+  - EV078
+  strongest_support: 公司来源材料列出液冷机柜、CDU、Manifold、浸没箱体、预制管路和室外冷源等完整产品矩阵。
+  strongest_counter: 展会/公司宣传只能证明能力与产品，不能证明客户、订单、重复交付、收入、利润和现金。
+  calculation_permissions:
+    company_baseline: allowed_for_context
+    relationship_body_review: hard_gate_required_first
+    theme_revenue_and_profit: forbidden_until_A_or_two_independent_B_relation_evidence
+    valuation_and_price: allowed_raw_company_baseline_no_theme_interpretation
+    reason: 当前主要是产品能力/公司稿，正式关系层尚未通过。
+  target_document_terms:
+  - 液冷
+  - CDU
+  - Manifold
+  - 歧管
+  - 浸没
+  - 数据中心
+  - 智算
+  - 服务器
+  - 预制管路
+  required_document_chain:
+  - 截至as_of可见的2025年年度报告及其更正/问询回复（若有）
+  - 截至as_of可见的2026年半年度报告/业绩快报/预告及其更正（若有）
+  - A3 evidence_ids指向的正式原文或正式URL；摘要只能用于定位
+  - 本地公告元数据中与target_document_terms直接相关且available_at<=as_of的少量正式公告
+  required_fields_from_a3:
+  - 正式年报/公告中数据中心液冷业务分项
+  - 产品客户、订单、交付、复购和认证
+  - 数据中心液冷与工业/储能温控拆分
+  - 收入、毛利、应收、存货、资本开支和现金流
+  - 若无硬关系证据则禁止主题财务估算
+  required_fields_from_business_model:
+  - 合同性质、金额、可取消条款、产品/项目范围和交付期限
+  - 关键部件供应、项目进度、验收条件和收入确认政策
+  - 在手订单、交付、验收收入、项目毛利与变更成本
+  - 合同资产、应收、质保金、合同负债/预付款和现金回收
+  - 项目客户集中、跨客户复制和售后责任
+  scenario_input_fields:
+  - firm_order_backlog
+  - deliverable_amount_within_horizon
+  - acceptance_schedule
+  - recognized_project_revenue
+  - project_gross_margin
+  - contract_assets
+  - accounts_receivable
+  - contract_liabilities_or_advances
+  - warranty_or_retention
+  - cash_collection
+  - repeat_project_or_second_customer_count
+  counterevidence_checks:
+  - 订单长期不转收入
+  - 验收延期或项目变更吞噬毛利
+  - 合同资产/应收显著上升
+  - 经营现金持续为负
+  - 大量系统收入实为传统温控或非AI场景
+  special_rules:
+  - 先执行关系硬门：正式年报/公告中没有数据中心液冷客户、订单、交付或明确业务分项时，B2停止主题财务估算。
+  - 公司展会稿/互动平台/产品矩阵不构成供货或订单证据。
+  review_due: '2026-09-30'
+- record_id: A2L007
+  entity_name: 荣亿精密
+  legal_name: 浙江荣亿精密机械股份有限公司
+  ts_code: 920223.BJ
+  market: 北交所
+  a3_disposition: enter_b_core_new_entrant
+  entity_role: 服务器液冷快速接头金属外壳及精密结构件
+  business_models:
+  - component_hardware
+  node_ids:
+  - N04
+  - N25
+  - N26
+  - N27
+  a3_relationship_ladder:
+    identity: confirmed
+    capability: confirmed_annual_report_summary
+    certification_or_pilot: market_validation_disclosed
+    supply: entered_supply_chain_disclosed
+    order: customer_and_amount_partially_disclosed_secondary
+    repeat_delivery: batch_delivery_disclosed
+    revenue: confirmed_but_low_share
+    profit: no_material_contribution_disclosed
+    cash: unknown_theme_contribution
+  evidence_ids:
+  - EV067
+  - EV068
+  - EV079
+  - EV080
+  - EV081
+  strongest_support: 2025年报公开摘要称服务器液冷快接零部件实现量产、进入供应链并完成批量交付；同时已公告1亿元扩产项目。
+  strongest_counter: 该业务仍处导入与爬坡阶段，收入和订单占比低、未形成重大业绩贡献；客户、单价、良率、现金回收和项目投产进度仍需核查。
+  calculation_permissions:
+    company_baseline: allowed
+    relationship_body_review: required
+    theme_revenue_and_profit: allowed_only_at_direct_disclosed_low_share_or_original_report_value
+    valuation_and_price: allowed_company_level_only
+    reason: 已披露量产进入供应链但收入占比低且公司整体经营压力需核对。
+  target_document_terms:
+  - 服务器液冷
+  - 快速接头
+  - 富世达
+  - 金属外壳
+  - 结构件
+  - 批量交付
+  - 项目投资
+  - 产能
+  required_document_chain:
+  - 截至as_of可见的2025年年度报告及其更正/问询回复（若有）
+  - 截至as_of可见的2026年半年度报告/业绩快报/预告及其更正（若有）
+  - A3 evidence_ids指向的正式原文或正式URL；摘要只能用于定位
+  - 本地公告元数据中与target_document_terms直接相关且available_at<=as_of的少量正式公告
+  required_fields_from_a3:
+  - 年报原文中的客户、批量交付、收入和订单占比
+  - 液冷快接项目投资、设备、投产、良率和产能利用率
+  - 与客户的交易金额、复购和集中度
+  - 液冷收入/毛利/净利润/现金贡献
+  - 公司整体亏损、经营现金流、应收、存货和融资压力
+  required_fields_from_business_model:
+  - 准确产品、规格、应用场景和客户类型
+  - 送样/验证/定点/认证阶段及版本
+  - 批量交付、订单、复购、第二客户和故障/退货
+  - 相关产品收入、ASP、成本、毛利、良率、产能和利用率
+  - 应收、存货、资本开支、折旧、减值和经营现金流
+  scenario_input_fields:
+  - direct_theme_revenue_actual
+  - firm_order_or_batch_delivery_amount
+  - validated_customer_count
+  - repeat_customer_count
+  - nominal_capacity
+  - certification_pass_rate
+  - yield_rate
+  - capacity_utilization
+  - average_selling_price
+  - theme_gross_margin
+  - incremental_r_and_d_sales_delivery_expense
+  - incremental_depreciation
+  - receivable_days
+  - inventory_days
+  - cash_collection
+  counterevidence_checks:
+  - 产品同名但场景为汽车/储能/通用工业
+  - 长期停留在送样/试产
+  - 批量交付无复购或第二客户
+  - 收入增长伴随降价、低毛利、应收或库存恶化
+  - 客户扶持二供、接口标准化或客户自制
+  special_rules:
+  - 先回到年报和项目公告原文核对客户、交易金额、批量交付和收入占比。
+  - 1亿元项目投资只证明扩产计划，不证明投产、认证、良率、有效产能或订单。
+  - 公司总收入、亏损、融资和现金压力必须与低占比液冷业务分开。
+  review_due: '2026-11-30'
+output_contract:
+  files:
+  - file: 05_B2_本地核查.json
+    purpose: 完整机器事实包
+    required_sections:
+    - contract_compliance
+    - input_manifest
+    - document_chain
+    - entity_results
+    - derived_metrics
+    - scenario_inputs
+    - counterevidence
+    - quality_and_unknowns
+  - file: 05_B2_本地核查摘要.md
+    purpose: 给用户和B3阅读的人话摘要
+    required_sections:
+    - 执行范围
+    - 每个实体的关系门是否通过
+    - 最重要的本地数字
+    - 财务/现金反证
+    - 估值和价格事实（允许时）
+    - 数据缺口与下一步
+  - file: 05_B2_数据缺口.json
+    purpose: 无法取得、失败、无记录和不可回放项
+    required_sections:
+    - gap_id
+    - entity_or_node
+    - field
+    - status
+    - impact
+    - attempted_source
+    - next_action
+    - must_not_infer
+  - file: 00_下一步操作.md
+    purpose: 将下一执行者设为ChatGPT B3并给出完整提示词
+  entity_result_required_fields:
+  - record_id
+  - entity_name
+  - ts_code
+  - business_models
+  - relationship_gate_result
+  - document_body_results
+  - company_baseline
+  - theme_metrics
+  - scenario_inputs
+  - valuation_and_price
+  - counterevidence
+  - unknowns
+  - quality
+  - input_refs
+  commit_and_push_required: true
+  next_actor_after_completion: chatgpt
+  next_step_after_completion: B3_semantic_acceptance
+forbidden_inferences:
+- 不从公司简介、行业/主题成员、公告标题、关键词、专利、认证或展会稿独立确认供货、订单或收入。
+- 不把储能、汽车或通用工业液冷能力外推为AI服务器/数据中心液冷。
+- 不把当前产品页或截止日后才知道的事实倒填到as_of。
+- 不把公司总收入、综合毛利率或公司现金流直接当作液冷主题收入、毛利或现金。
+- 不把名义产能、项目计划、框架协议、意向订单直接变成收入或利润。
+- 不使用固定公司数量、综合总分、推荐阈值或代码顺序。
+- 不修改A3的产业命题、节点、证据等级、关系层级、升级/失效条件；冲突另记。
+- 不输出买入、卖出、目标价、仓位、止盈止损或收益承诺。
+stop_conditions:
+- 九条记录均返回关系门、数据质量、公司基线、主题字段状态、反证和未知。
+- 所有计算可回到实际数据列、报告期、available_at、来源和输入清单。
+- 920808历史代码/交易场所未规范时确认价格与估值结果为空且有明确原因。
+- 条件实体未通过关系硬门时确认主题收入/利润未被计算。
+- 输出四个文件并commit+push后立即停止，下一执行者为ChatGPT B3。

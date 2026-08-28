@@ -1,0 +1,1638 @@
+contract_type: A3_to_B1_research_handoff
+research_id: ai-liquid-cooling-2026h2-001
+version: 2
+as_of: '2026-08-27T22:32:34+08:00'
+created_at: '2026-08-28T10:21:59+08:00'
+created_by: chatgpt
+stage: A_complete
+next_actor_after_user_approval: chatgpt
+next_step_after_user_approval: B1_define_local_verification_contract
+overall_route:
+  decision: mixed_proceed_to_b_narrowed
+  meaning: A阶段允许进入B1，但只对已明确分层的少量上市实体定义核查合同；未通过关系层的线索不得计算主题收入、利润或估值。
+  targeted_a2_recheck_required: false
+  reason_no_recheck: A2缺口不会改变35节点产业结构或A阶段总体路线；缺失可通过B1窄合同、外部原文阅读和显式未知处理，无需让Codex重复本地扫描。
+ground_gates:
+  industry_chain_completeness:
+    decision: mixed
+    passed_elements:
+    - 35个节点覆盖功能、产品、制造、接口、交付、运维、竞争/替代七视图
+    - 所有关键功能均有节点或未知占位，未发现未解释的关键孤儿功能
+    - 冷板、UQD、歧管、CDU、设施水、交付改造、运维和替代路线均已纳入
+    - 27个节点达到至少双源且含一级来源的试点起始规则
+    gaps:
+    - N06、N12、N15、N16、N22、N24、N25、N34等节点的一级/双源证据仍不足
+    - 未完成连续两轮独立来源的新增节点比例测量，不能宣称搜索饱和
+    - 私有B2B供应关系、区域小型供应商和非上市实体仍可能遗漏
+    handling: 保留完整结构，B阶段只核查高影响节点；部分节点继续作为未知和竞争背景，不因缺口补故事。
+  data_availability:
+    decision: mixed
+    passed_elements:
+    - 九个优先证券主体可唯一映射
+    - 本地三表、财务指标和点时输入清单可用
+    - 主营、公告元数据、估值、价格、行业与主题成员具有部分历史覆盖
+    - 上交所和深交所官方公告元数据API样本可用
+    gaps:
+    - 无本地公告全文库和完整历史公告
+    - 历史名称、旧代码、完整子公司、品牌、持股与控制有效期缺失
+    - 客户—供应商、招投标、认证、专利/项目、非上市实体主数据缺乏系统化覆盖
+    - 上交所PDF直取样本遇JavaScript Cookie挑战
+    - 920808.BJ上市日前价格身份语义未知
+    handling: 沿用现有金融仓库；B1只定义必要字段和少量原文；不建设大平台，不将unsupported当零。
+  evidence_reliability:
+    decision: mixed
+    passed_elements:
+    - 关键实体身份已与证券代码分开
+    - 正式产品、标准/测试参与和部分项目/业务进展有可追溯来源
+    - A3明确区分身份、能力、认证/试点、供货、订单、重复交付、收入、利润和现金
+    - 关键词扫描的7个新增实体均未自动升级
+    gaps:
+    - 多数中国实体仍缺少命名客户、合同金额、重复交付和液冷收入/毛利拆分
+    - 部分进展来源为公告/年报摘要，B阶段必须回到正式原文
+    - 非上市实体身份、品牌和商业规模覆盖不足
+    - 当前产品页缺少可回放发布日期，不能倒填as_of
+    handling: 只有明确进入B的实体可定义核查合同；条件实体先补关系原文，未通过G2不得估算主题利润。
+node_scope:
+  summary:
+    total_nodes: 35
+    enter_b_primary: 11
+    enter_b_supporting: 9
+    context_or_unknown_only: 15
+    double_source_satisfied: 27
+    double_source_partial: 8
+  nodes:
+  - node_id: N01
+    product: 高功率AI热源/加速器与封装
+    view: 功能/物理
+    a1_stage: 已出现规模部署
+    a3_disposition: context_or_unknown_only
+    double_source_status: satisfied
+    source_owner_count: 3
+    a_level_present: true
+    evidence_ids:
+    - EV004
+    - EV005
+    - EV064
+    - EV065
+    system_role: GPU/TPU/CPU及封装产生高热流密度，决定散热需求起点
+    alternatives_or_self_build: 平台厂自研、封装代际变化
+    a3_note: 节点结构证据达到A3起始双源规则；公司商业关系仍需单独验证。
+  - node_id: N02
+    product: 导热界面材料与芯片—冷板接触界面
+    view: 物理/制造
+    a1_stage: 正在验证/随平台变化
+    a3_disposition: enter_b_supporting
+    double_source_status: satisfied
+    source_owner_count: 2
+    a_level_present: true
+    evidence_ids:
+    - EV004
+    - EV045
+    system_role: 决定芯片到冷板的第一段热阻、装配压力与长期可靠性
+    alternatives_or_self_build: 封装厂/OEM内置、自制
+    a3_note: 节点结构证据达到A3起始双源规则；公司商业关系仍需单独验证。
+  - node_id: N03
+    product: 冷板
+    view: 物理/制造
+    a1_stage: 已出现订单+持续验证
+    a3_disposition: enter_b_primary
+    double_source_status: satisfied
+    source_owner_count: 8
+    a_level_present: true
+    evidence_ids:
+    - EV004
+    - EV005
+    - EV031
+    - EV032
+    - EV033
+    - EV043
+    - EV045
+    - EV060
+    system_role: 直接从芯片/关键器件吸热；高度依赖封装、流道、材料和装配
+    alternatives_or_self_build: OEM/平台自研，二供快速进入
+    a3_note: 节点结构证据达到A3起始双源规则；公司商业关系仍需单独验证。
+  - node_id: N04
+    product: 服务器内管路与快速接头/盲插接头
+    view: 接口/物理
+    a1_stage: 订单/产品已出，标准与认证仍在演进
+    a3_disposition: enter_b_primary
+    double_source_status: satisfied
+    source_owner_count: 11
+    a_level_present: true
+    evidence_ids:
+    - EV010
+    - EV011
+    - EV012
+    - EV013
+    - EV019
+    - EV020
+    - EV040
+    - EV050
+    - EV055
+    - EV056
+    - EV057
+    system_role: 支持服务器维护、热插拔与无泄漏连接；接口失配会阻断解耦
+    alternatives_or_self_build: OCP标准化、多供应商、客户专用接口
+    a3_note: 节点结构证据达到A3起始双源规则；公司商业关系仍需单独验证。
+  - node_id: N05
+    product: 机架歧管/供回液分配
+    view: 物理/接口
+    a1_stage: 已商业化+客户定制
+    a3_disposition: enter_b_primary
+    double_source_status: satisfied
+    source_owner_count: 5
+    a_level_present: true
+    evidence_ids:
+    - EV005
+    - EV006
+    - EV014
+    - EV040
+    - EV048
+    - EV062
+    system_role: 把流量均匀分配到各托盘/服务器并支持维护冗余
+    alternatives_or_self_build: OEM自制、标准歧管、二供
+    a3_note: 节点结构证据达到A3起始双源规则；公司商业关系仍需单独验证。
+  - node_id: N06
+    product: 阀门与执行器
+    view: 物理/控制
+    a1_stage: 成熟供给，AI专用性待核
+    a3_disposition: context_or_unknown_only
+    double_source_status: partial
+    source_owner_count: 1
+    a_level_present: false
+    evidence_ids:
+    - EV030
+    system_role: 调节、隔离、旁通和维护；影响水力平衡和故障隔离
+    alternatives_or_self_build: 通用工业阀替代、集成进CDU
+    a3_note: 关键来源未达到双源且含一级来源；保留待核/未知。
+  - node_id: N07
+    product: 流量/压力/温度/水质/漏液传感
+    view: 控制/运维
+    a1_stage: 商业化，独立价值量待核
+    a3_disposition: enter_b_supporting
+    double_source_status: satisfied
+    source_owner_count: 4
+    a_level_present: true
+    evidence_ids:
+    - EV006
+    - EV023
+    - EV025
+    - EV039
+    - EV040
+    system_role: 为流量平衡、热保护、漏液和预测维护提供反馈
+    alternatives_or_self_build: CDU/OEM内置、通用传感器
+    a3_note: 节点结构证据达到A3起始双源规则；公司商业关系仍需单独验证。
+  - node_id: N08
+    product: 冷却液分配单元CDU
+    view: 物理/接口/控制
+    a1_stage: 已出现规模产品，供给快速扩张
+    a3_disposition: enter_b_primary
+    double_source_status: satisfied
+    source_owner_count: 13
+    a_level_present: true
+    evidence_ids:
+    - EV005
+    - EV006
+    - EV009
+    - EV017
+    - EV018
+    - EV021
+    - EV023
+    - EV024
+    - EV025
+    - EV039
+    - EV041
+    - EV054
+    - EV058
+    - EV061
+    system_role: 隔离设施水与技术冷却回路，完成换热、泵送、过滤、补液、控制与保护
+    alternatives_or_self_build: 开放规格、多供应商、OEM自制、L2A替代
+    a3_note: 节点结构证据达到A3起始双源规则；公司商业关系仍需单独验证。
+  - node_id: N09
+    product: 循环泵/无密封泵
+    view: 制造/物理
+    a1_stage: 成熟部件，数据中心资格待核
+    a3_disposition: context_or_unknown_only
+    double_source_status: satisfied
+    source_owner_count: 7
+    a_level_present: true
+    evidence_ids:
+    - EV017
+    - EV018
+    - EV021
+    - EV023
+    - EV039
+    - EV041
+    - EV058
+    system_role: 提供二次侧流量与压头，可靠性决定停机风险
+    alternatives_or_self_build: 多家工业泵厂、CDU厂集成
+    a3_note: 节点结构证据达到A3起始双源规则；公司商业关系仍需单独验证。
+  - node_id: N10
+    product: 板式换热器
+    view: 制造/物理
+    a1_stage: 成熟供给，AI规格升级
+    a3_disposition: context_or_unknown_only
+    double_source_status: satisfied
+    source_owner_count: 8
+    a_level_present: true
+    evidence_ids:
+    - EV017
+    - EV018
+    - EV021
+    - EV023
+    - EV028
+    - EV029
+    - EV039
+    - EV041
+    system_role: 隔离一次/二次回路并控制接近温差和压降
+    alternatives_or_self_build: 多家成熟换热器厂、CDU自制/采购
+    a3_note: 节点结构证据达到A3起始双源规则；公司商业关系仍需单独验证。
+  - node_id: N11
+    product: 过滤/旁滤/颗粒控制
+    view: 制造/运维
+    a1_stage: 商业化，长期维护证据不足
+    a3_disposition: context_or_unknown_only
+    double_source_status: satisfied
+    source_owner_count: 7
+    a_level_present: true
+    evidence_ids:
+    - EV015
+    - EV016
+    - EV017
+    - EV018
+    - EV023
+    - EV039
+    - EV058
+    system_role: 控制颗粒、焊渣和污染，保护微通道冷板和阀件
+    alternatives_or_self_build: CDU集成、独立过滤供应
+    a3_note: 节点结构证据达到A3起始双源规则；公司商业关系仍需单独验证。
+  - node_id: N12
+    product: 膨胀、补液、脱气与排气
+    view: 物理/运维
+    a1_stage: 商业化，设计差异大
+    a3_disposition: context_or_unknown_only
+    double_source_status: partial
+    source_owner_count: 2
+    a_level_present: false
+    evidence_ids:
+    - EV023
+    - EV039
+    - EV040
+    system_role: 管理体积变化、气穴、气体夹带和补液
+    alternatives_or_self_build: CDU集成、现场服务
+    a3_note: 关键来源未达到双源且含一级来源；保留待核/未知。
+  - node_id: N13
+    product: 变频驱动、PLC与CDU控制
+    view: 控制/接口
+    a1_stage: 商业化，软件价值独立性待核
+    a3_disposition: context_or_unknown_only
+    double_source_status: satisfied
+    source_owner_count: 8
+    a_level_present: true
+    evidence_ids:
+    - EV017
+    - EV018
+    - EV021
+    - EV023
+    - EV025
+    - EV039
+    - EV041
+    - EV058
+    system_role: 按负载调节流量、保护设备并接入BMS/DCIM
+    alternatives_or_self_build: OEM自研、通用PLC/VFD
+    a3_note: 节点结构证据达到A3起始双源规则；公司商业关系仍需单独验证。
+  - node_id: N14
+    product: 单相水/乙二醇/丙二醇冷却液
+    view: 材料/运维
+    a1_stage: 产品已商业化，长期标准化仍在演进
+    a3_disposition: enter_b_supporting
+    double_source_status: satisfied
+    source_owner_count: 3
+    a_level_present: true
+    evidence_ids:
+    - EV015
+    - EV016
+    - EV059
+    system_role: 作为DTC二次侧传热介质，影响腐蚀、微生物、冻结和寿命
+    alternatives_or_self_build: 多流体供应商、现场配制
+    a3_note: 节点结构证据达到A3起始双源规则；公司商业关系仍需单独验证。
+  - node_id: N15
+    product: 介电两相DTC工质
+    view: 材料/替代
+    a1_stage: 正在验证/早期商业
+    a3_disposition: context_or_unknown_only
+    double_source_status: partial
+    source_owner_count: 2
+    a_level_present: false
+    evidence_ids:
+    - EV037
+    - EV062
+    system_role: 通过相变直接从芯片移热，减少水风险但改变系统与维护
+    alternatives_or_self_build: 专有工质、替代路线、供应集中
+    a3_note: 关键来源未达到双源且含一级来源；保留待核/未知。
+  - node_id: N16
+    product: 浸没式介电液
+    view: 材料/替代
+    a1_stage: 商业产品存在，规模与路线分化
+    a3_disposition: context_or_unknown_only
+    double_source_status: partial
+    source_owner_count: 2
+    a_level_present: false
+    evidence_ids:
+    - EV035
+    - EV036
+    system_role: 服务器整体浸没，改变服务器、运维和材料体系
+    alternatives_or_self_build: 单相/两相路线、流体法规
+    a3_note: 关键来源未达到双源且含一级来源；保留待核/未知。
+  - node_id: N17
+    product: 设施水环/一次侧管网
+    view: 交付/物理
+    a1_stage: 成熟工程，改造成为约束
+    a3_disposition: enter_b_primary
+    double_source_status: satisfied
+    source_owner_count: 5
+    a_level_present: true
+    evidence_ids:
+    - EV006
+    - EV009
+    - EV021
+    - EV022
+    - EV046
+    - EV054
+    system_role: 把热量从CDU带到冷站/干冷器/冷却塔；新建与改造差异大
+    alternatives_or_self_build: 液到气CDU、局部改造、客户现有设施
+    a3_note: 节点结构证据达到A3起始双源规则；公司商业关系仍需单独验证。
+  - node_id: N18
+    product: 水处理、清洗与材料兼容
+    view: 制造/运维
+    a1_stage: 隐藏关键点，公开数据不足
+    a3_disposition: context_or_unknown_only
+    double_source_status: satisfied
+    source_owner_count: 4
+    a_level_present: true
+    evidence_ids:
+    - EV015
+    - EV016
+    - EV020
+    - EV059
+    system_role: 控制腐蚀、结垢、生物污染和微通道堵塞
+    alternatives_or_self_build: 专用流体服务、运维外包
+    a3_note: 节点结构证据达到A3起始双源规则；公司商业关系仍需单独验证。
+  - node_id: N19
+    product: 最终排热：干冷器/冷机/冷却塔
+    view: 物理/设施
+    a1_stage: 成熟供给，项目条件决定组合
+    a3_disposition: enter_b_primary
+    double_source_status: satisfied
+    source_owner_count: 5
+    a_level_present: true
+    evidence_ids:
+    - EV006
+    - EV022
+    - EV046
+    - EV048
+    - EV054
+    system_role: 将热量排向环境，受气候、水资源和温度窗口影响
+    alternatives_or_self_build: 自由冷却、蒸发冷、液到气局部方案
+    a3_note: 节点结构证据达到A3起始双源规则；公司商业关系仍需单独验证。
+  - node_id: N20
+    product: 后门换热器RDHx
+    view: 替代/产品
+    a1_stage: 已有产品/部署，密度上限场景化
+    a3_disposition: enter_b_primary
+    double_source_status: satisfied
+    source_owner_count: 4
+    a_level_present: true
+    evidence_ids:
+    - EV008
+    - EV022
+    - EV023
+    - EV038
+    system_role: 在机架后门捕捉热量，适合改造和中高密度混合场景
+    alternatives_or_self_build: 风冷、DTC、液到气CDU
+    a3_note: 节点结构证据达到A3起始双源规则；公司商业关系仍需单独验证。
+  - node_id: N21
+    product: 单相浸没槽/系统
+    view: 替代/产品
+    a1_stage: 商业化但应用比例不明
+    a3_disposition: enter_b_primary
+    double_source_status: satisfied
+    source_owner_count: 4
+    a_level_present: true
+    evidence_ids:
+    - EV008
+    - EV035
+    - EV036
+    - EV044
+    system_role: 将IT设备浸入介电液，减少风扇与传统风冷设施
+    alternatives_or_self_build: DTC、两相浸没、客户不接受运维变化
+    a3_note: 节点结构证据达到A3起始双源规则；公司商业关系仍需单独验证。
+  - node_id: N22
+    product: 两相浸没/冷凝回路
+    view: 替代/产品
+    a1_stage: 早期商业/验证
+    a3_disposition: context_or_unknown_only
+    double_source_status: partial
+    source_owner_count: 1
+    a_level_present: false
+    evidence_ids:
+    - EV035
+    system_role: 通过沸腾与冷凝移热，可高密但工质与运维体系变化大
+    alternatives_or_self_build: 单相浸没、两相DTC
+    a3_note: 关键来源未达到双源且含一级来源；保留待核/未知。
+  - node_id: N23
+    product: BMS/DCIM/遥测与控制接口
+    view: 接口/软件
+    a1_stage: 商业化，独立收费能力待核
+    a3_disposition: enter_b_supporting
+    double_source_status: satisfied
+    source_owner_count: 5
+    a_level_present: true
+    evidence_ids:
+    - EV006
+    - EV007
+    - EV023
+    - EV025
+    - EV039
+    - EV040
+    system_role: 把液冷状态纳入设施与IT运维，支持告警、容量和故障定位
+    alternatives_or_self_build: 系统商内置、独立平台
+    a3_note: 节点结构证据达到A3起始双源规则；公司商业关系仍需单独验证。
+  - node_id: N24
+    product: 预制管路、skid与模块化交付
+    view: 交付/制造
+    a1_stage: 商业化，项目毛利/现金风险待核
+    a3_disposition: enter_b_primary
+    double_source_status: partial
+    source_owner_count: 5
+    a_level_present: false
+    evidence_ids:
+    - EV021
+    - EV025
+    - EV034
+    - EV040
+    - EV048
+    system_role: 减少现场焊接和调试，缩短高密项目部署
+    alternatives_or_self_build: 现场工程、系统商集成
+    a3_note: 关键来源未达到双源且含一级来源；保留待核/未知。
+  - node_id: N25
+    product: 精密加工与微通道制造
+    view: 制造
+    a1_stage: 潜在隐藏瓶颈，公开产能不足
+    a3_disposition: enter_b_supporting
+    double_source_status: partial
+    source_owner_count: 1
+    a_level_present: false
+    evidence_ids:
+    - EV045
+    system_role: 决定冷板流道、平整度、压降和批量一致性
+    alternatives_or_self_build: 蚀刻/钎焊/增材等替代工艺
+    a3_note: 关键来源未达到双源且含一级来源；保留待核/未知。
+  - node_id: N26
+    product: 钎焊/焊接/密封与表面处理
+    view: 制造
+    a1_stage: 潜在隐藏瓶颈，需实体/工艺核验
+    a3_disposition: enter_b_supporting
+    double_source_status: satisfied
+    source_owner_count: 2
+    a_level_present: true
+    evidence_ids:
+    - EV013
+    - EV018
+    system_role: 决定密封、腐蚀与寿命，失效可能造成系统事故
+    alternatives_or_self_build: 一体加工、胶接、不同材料路线
+    a3_note: 节点结构证据达到A3起始双源规则；公司商业关系仍需单独验证。
+  - node_id: N27
+    product: 泄漏/压力/流量/热性能/腐蚀/寿命测试
+    view: 制造/认证
+    a1_stage: 关键认证环节，公开通过率未知
+    a3_disposition: enter_b_supporting
+    double_source_status: satisfied
+    source_owner_count: 3
+    a_level_present: true
+    evidence_ids:
+    - EV013
+    - EV019
+    - EV020
+    system_role: 把产品能力变成可进入客户供应链的资格
+    alternatives_or_self_build: 客户自测、第三方实验室
+    a3_note: 节点结构证据达到A3起始双源规则；公司商业关系仍需单独验证。
+  - node_id: N28
+    product: 系统设计、集成、机房改造与调试
+    view: 交付
+    a1_stage: 已有项目能力，利润/现金风险较高
+    a3_disposition: enter_b_primary
+    double_source_status: satisfied
+    source_owner_count: 7
+    a_level_present: true
+    evidence_ids:
+    - EV006
+    - EV009
+    - EV022
+    - EV026
+    - EV042
+    - EV050
+    - EV051
+    system_role: 把设备拼成可运行系统并完成清洗、灌液、调试和验收
+    alternatives_or_self_build: OEM总包、专业温控商、工程商
+    a3_note: 节点结构证据达到A3起始双源规则；公司商业关系仍需单独验证。
+  - node_id: N29
+    product: 运维：液质检测、换液、过滤、备件、清洗
+    view: 运维
+    a1_stage: 需求存在，收入模式/频率未知
+    a3_disposition: context_or_unknown_only
+    double_source_status: satisfied
+    source_owner_count: 4
+    a_level_present: true
+    evidence_ids:
+    - EV015
+    - EV016
+    - EV023
+    - EV040
+    system_role: 决定长期可靠性和持续服务收入，也可能形成高售后成本
+    alternatives_or_self_build: 客户自运维、系统商打包
+    a3_note: 节点结构证据达到A3起始双源规则；公司商业关系仍需单独验证。
+  - node_id: N30
+    product: 余热回收与热复用
+    view: 运维/替代
+    a1_stage: 示范/早期商业，通用经济性未知
+    a3_disposition: context_or_unknown_only
+    double_source_status: satisfied
+    source_owner_count: 3
+    a_level_present: true
+    evidence_ids:
+    - EV008
+    - EV011
+    - EV062
+    system_role: 高温液冷回水可提高余热利用可行性，但受地点和热负荷约束
+    alternatives_or_self_build: 直接排热、低品位热无法利用
+    a3_note: 节点结构证据达到A3起始双源规则；公司商业关系仍需单独验证。
+  - node_id: N31
+    product: 液到气局部闭环/风液混合
+    view: 替代/交付
+    a1_stage: 商业化，适合存量改造
+    a3_disposition: enter_b_supporting
+    double_source_status: satisfied
+    source_owner_count: 4
+    a_level_present: true
+    evidence_ids:
+    - EV006
+    - EV023
+    - EV026
+    - EV038
+    system_role: 在无设施水或改造困难场景部署液冷设备
+    alternatives_or_self_build: 全设施水DTC、RDHx、纯风冷
+    a3_note: 节点结构证据达到A3起始双源规则；公司商业关系仍需单独验证。
+  - node_id: N32
+    product: 单相冷板DTC路线
+    view: 路线
+    a1_stage: 已规模部署+标准演进
+    a3_disposition: context_or_unknown_only
+    double_source_status: satisfied
+    source_owner_count: 8
+    a_level_present: true
+    evidence_ids:
+    - EV004
+    - EV005
+    - EV008
+    - EV010
+    - EV017
+    - EV031
+    - EV032
+    - EV033
+    system_role: 当前公开部署和标准生态最完整的路线之一
+    alternatives_or_self_build: 两相DTC、浸没、RDHx
+    a3_note: 节点结构证据达到A3起始双源规则；公司商业关系仍需单独验证。
+  - node_id: N33
+    product: 单相浸没路线
+    view: 路线
+    a1_stage: 商业化/选择性部署
+    a3_disposition: enter_b_primary
+    double_source_status: satisfied
+    source_owner_count: 3
+    a_level_present: true
+    evidence_ids:
+    - EV008
+    - EV036
+    - EV044
+    system_role: 减少风扇和传统机柜气流，但改变IT维护与流体体系
+    alternatives_or_self_build: DTC、两相浸没
+    a3_note: 节点结构证据达到A3起始双源规则；公司商业关系仍需单独验证。
+  - node_id: N34
+    product: 两相DTC路线
+    view: 路线
+    a1_stage: 验证/早期商业
+    a3_disposition: context_or_unknown_only
+    double_source_status: partial
+    source_owner_count: 2
+    a_level_present: false
+    evidence_ids:
+    - EV037
+    - EV062
+    system_role: 高热流密度、无水/低流量潜力，但工质与系统专有性更高
+    alternatives_or_self_build: 单相DTC、浸没
+    a3_note: 关键来源未达到双源且含一级来源；保留待核/未知。
+  - node_id: N35
+    product: 传统风冷与高效风冷混合路线
+    view: 路线
+    a1_stage: 长期共存，非全量液冷
+    a3_disposition: enter_b_supporting
+    double_source_status: satisfied
+    source_owner_count: 3
+    a_level_present: true
+    evidence_ids:
+    - EV006
+    - EV038
+    - EV046
+    system_role: 中低密度、存量机房或非关键器件仍可能保留风冷
+    alternatives_or_self_build: DTC/RDHx/液到气
+    a3_note: 节点结构证据达到A3起始双源规则；公司商业关系仍需单独验证。
+b_scope:
+  operating_entities:
+  - record_id: ENT034
+    entity_name: 英维克
+    legal_name: 深圳市英维克科技股份有限公司
+    ts_code: 002837.SZ
+    market: 深交所主板
+    entity_role: 液冷系统与部件供应商
+    node_ids:
+    - N04
+    - N05
+    - N07
+    - N08
+    - N14
+    - N23
+    - N24
+    disposition: enter_b_core
+    relationship_ladder:
+      identity: confirmed
+      capability: confirmed_dated_official
+      certification_or_pilot: confirmed_platform_validation_limited
+      supply: unknown
+      order: unknown
+      repeat_delivery: unknown
+      revenue: unknown_liquid_cooling_split
+      profit: unknown
+      cash: unknown
+    strongest_support: 公司正式资料显示具备面向数据中心的全链条液冷产品、工质检测与多平台冷板系统验证能力。
+    strongest_counter: 正式资料仍未把液冷客户、订单、重复交付、收入、利润和现金按数据中心场景拆分；储能液冷不能外推为AI数据中心液冷。
+    b_fields_required:
+    - 数据中心液冷与储能液冷收入分拆
+    - 冷板/CDU/快接/歧管/工质/机柜各节点收入与毛利
+    - 客户类型、认证版本、订单、交付与复购
+    - 应收、存货、合同负债、资本开支和经营现金流
+    - 公告原文中的客户/项目/验收与风险
+    evidence_ids:
+    - EV039
+    - EV040
+    - EV066
+    - EV069
+    - EV070
+    review_due: '2026-11-30'
+  - record_id: ENT035
+    entity_name: 申菱环境
+    legal_name: 广东申菱环境系统股份有限公司
+    ts_code: 301018.SZ
+    market: 深交所创业板
+    entity_role: CDU、一次/二次侧输配、系统集成与设施冷源
+    node_ids:
+    - N05
+    - N08
+    - N17
+    - N19
+    - N23
+    - N24
+    - N28
+    disposition: enter_b_core
+    relationship_ladder:
+      identity: confirmed
+      capability: confirmed_dated_official
+      certification_or_pilot: standard_and_test_participation_confirmed
+      supply: project_application_claim_company_official
+      order: unknown
+      repeat_delivery: unknown
+      revenue: unknown_liquid_cooling_split
+      profit: unknown
+      cash: unknown
+    strongest_support: 公司正式资料显示CDU覆盖AI/智算场景，并参与冷板式液冷测试验证白皮书和工程标准，披露过超算、海外数据中心及运营商项目应用。
+    strongest_counter: 产品页和项目案例不能替代可回放的客户合同、订单金额、重复交付、液冷收入和利润拆分。
+    b_fields_required:
+    - 液冷CDU/液冷大系统/水力模块对应主营分项
+    - 数据服务收入中液冷与传统设施冷却的拆分
+    - 项目客户、合同、验收、重复交付与回款
+    - 系统集成/工程毛利、应收、存货、合同资产和现金流
+    - 正式公告原文及点时时间
+    evidence_ids:
+    - EV041
+    - EV042
+    - EV066
+    - EV071
+    - EV072
+    - EV073
+    review_due: '2026-11-30'
+  - record_id: ENT036A
+    source_entity_id: ENT036
+    entity_name: 曙光数创
+    legal_name: 曙光数据基础设施创新技术（北京）股份有限公司
+    ts_code: 920808.BJ
+    market: 北交所
+    entity_role: 冷板/浸没液冷数据中心基础设施、系统集成与服务
+    node_ids:
+    - N02
+    - N03
+    - N04
+    - N05
+    - N08
+    - N21
+    - N28
+    - N31
+    - N33
+    disposition: enter_b_core
+    relationship_ladder:
+      identity: confirmed
+      capability: confirmed
+      certification_or_pilot: partial
+      supply: commercial_product_delivery_implied_by_report
+      order: customer_names_and_contracts_unknown
+      repeat_delivery: partial_revenue_growth_but_order_chain_unknown
+      revenue: confirmed_product_category_level
+      profit: company_level_known_theme_profit_not_isolated
+      cash: company_level_known_theme_cash_not_isolated
+    strongest_support: 本地主营分项和2025年报摘要均表明其直接经营冷板、浸没液冷及模块化数据中心产品，并以项目验收确认收入。
+    strongest_counter: 客户、供应商、订单与产品线毛利未公开；公司层经营现金流与存货压力需要B阶段按点时口径核对。
+    b_fields_required:
+    - 冷板/浸没/模块化产品收入、毛利与项目验收
+    - 客户集中、订单、存货、合同资产/负债、应收和现金流
+    - 项目周期与收入确认时点
+    - 2025年收入增长、存货和现金流的匹配
+    - 920808历史证券代码/交易场所规范化
+    evidence_ids:
+    - EV043
+    - EV044
+    - EV066
+    - EV067
+    - EV068
+    - EV074
+    review_due: '2026-11-30'
+  - record_id: ENT036B
+    source_entity_id: ENT036
+    entity_name: 中科曙光
+    legal_name: 曙光信息产业股份有限公司
+    ts_code: 603019.SH
+    market: 上交所主板
+    entity_role: 曙光数创控股/集团关系与利润归属核查对象
+    node_ids: []
+    disposition: enter_b_ownership_context_only
+    relationship_ladder:
+      identity: confirmed
+      capability: not_assigned_from_subsidiary
+      certification_or_pilot: not_applicable
+      supply: not_assigned
+      order: not_assigned
+      repeat_delivery: not_assigned
+      revenue: ownership_exposure_unknown
+      profit: profit_attribution_unknown
+      cash: not_applicable
+    strongest_support: 2025年报摘要将曙光数创表述为中科曙光控股子公司。
+    strongest_counter: 不能把920808的产品、收入和订单直接归入603019；持股比例、控制有效期、合并口径和利润归属需要正式年报股权表核验。
+    b_fields_required:
+    - 截至as_of的持股比例、控制关系和有效期
+    - 合并报表范围与少数股东权益
+    - 曙光数创收入/利润对603019的归属方式
+    - 相关交易与品牌授权边界
+    evidence_ids:
+    - EV066
+    - EV067
+    - EV068
+    - EV074
+    review_due: '2026-09-30'
+  - record_id: ENT037
+    entity_name: 飞荣达
+    legal_name: 深圳市飞荣达科技股份有限公司
+    ts_code: 300602.SZ
+    market: 深交所创业板
+    entity_role: TIM、冷板、流量控制、CDU、快接及液冷机箱/机柜
+    node_ids:
+    - N02
+    - N03
+    - N04
+    - N08
+    - N25
+    - N26
+    disposition: enter_b_core
+    relationship_ladder:
+      identity: confirmed
+      capability: confirmed_company_disclosure
+      certification_or_pilot: sampling_and_trial_production_disclosed
+      supply: multiple_products_batch_delivered_company_disclosure
+      order: aggregate_orders_rising_no_named_customer
+      repeat_delivery: partial
+      revenue: aggregate_segment_growth_no_liquid_cooling_split
+      profit: unknown_theme_contribution
+      cash: unknown_theme_contribution
+    strongest_support: 公司披露服务器/数据中心液冷产品矩阵，多类产品已批量交付，订单量与相关营业收入增长。
+    strongest_counter: 披露为汇总口径，客户、产品线收入、毛利、订单金额和现金贡献没有分拆，且公司业务跨消费电子、通信、汽车和储能。
+    b_fields_required:
+    - AI服务器与储能液冷业务拆分
+    - TIM/冷板/CDU/快接/机箱机柜各产品收入和毛利
+    - 批量交付的客户、订单与复购
+    - 样品/试产项目转量产进度
+    - 应收、存货、产能、资本开支、现金流和减值
+    evidence_ids:
+    - EV045
+    - EV066
+    - EV075
+    review_due: '2026-11-30'
+  - record_id: ENT038
+    entity_name: 佳力图
+    legal_name: 南京佳力图机房环境技术股份有限公司
+    ts_code: 603912.SH
+    market: 上交所主板
+    entity_role: 设施侧冷源、风液混合、数据中心温控与改造
+    node_ids:
+    - N17
+    - N19
+    - N20
+    - N35
+    disposition: enter_b_conditional_facility_side
+    relationship_ladder:
+      identity: confirmed
+      capability: facility_side_confirmed_direct_liquid_loop_partial
+      certification_or_pilot: unknown
+      supply: unknown_liquid_cooling_specific
+      order: unknown_liquid_cooling_specific
+      repeat_delivery: unknown
+      revenue: data_center_business_known_liquid_cooling_split_unknown
+      profit: unknown_theme_contribution
+      cash: unknown_theme_contribution
+    strongest_support: 公司身份和数据中心设施侧温控业务明确，属于液冷系统外围设施水环、最终排热和存量改造的重要对照。
+    strongest_counter: A1/A2没有形成冷板、UQD或CDU等直接液路硬证据，不能与直接液冷部件商放在同一业务模板。
+    b_fields_required:
+    - 数据中心温控中液冷设施侧、传统风冷和IDC运营收入拆分
+    - 液冷改造/设施水环/最终排热项目合同与验收
+    - 工程毛利、应收、合同资产、资本开支和现金流
+    - 仅按设施侧业务模板核查
+    evidence_ids:
+    - EV046
+    - EV066
+    - EV068
+    review_due: '2026-11-30'
+  - record_id: ENT039
+    entity_name: 高澜股份
+    legal_name: 广州高澜节能技术股份有限公司
+    ts_code: 300499.SZ
+    market: 深交所创业板
+    entity_role: 数据中心液冷系统与热管理项目
+    node_ids:
+    - N08
+    - N28
+    - N33
+    disposition: enter_b_core
+    relationship_ladder:
+      identity: confirmed
+      capability: confirmed_company_disclosure
+      certification_or_pilot: partial_product_certification_claims
+      supply: company_disclosed_customer_service
+      order: company_disclosed_aggregate_orders_growing
+      repeat_delivery: partial
+      revenue: aggregate_high_power_density_segment_not_exact_liquid_cooling_split
+      profit: unknown_theme_contribution
+      cash: unknown_theme_contribution
+    strongest_support: 2026年8月公司公告披露数据中心液冷客户结构、运营商/海外进展和在手订单增长，半年报摘要亦称算力中心液冷项目批量落地。
+    strongest_counter: 未披露客户名称、订单金额和节点级收入；高功率密度装置同时包含其他业务，且经营现金流需要单独审查。
+    b_fields_required:
+    - 数据中心液冷与输电/储能液冷收入、毛利拆分
+    - 在手订单的产品、客户、交付、验收和复购
+    - 高功率密度装置热管理分部口径
+    - 经营现金流、应收、存货、合同负债和发出商品
+    - 产品认证与海外订单原文
+    evidence_ids:
+    - EV047
+    - EV066
+    - EV076
+    - EV077
+    review_due: '2026-11-30'
+  - record_id: ENT040
+    entity_name: 同飞股份
+    legal_name: 三河同飞制冷股份有限公司
+    ts_code: 300990.SZ
+    market: 深交所创业板
+    entity_role: 数据中心液冷全链条产品与系统方案
+    node_ids:
+    - N05
+    - N08
+    - N17
+    - N19
+    - N21
+    - N24
+    - N33
+    disposition: enter_b_conditional_relation_only
+    relationship_ladder:
+      identity: confirmed
+      capability: confirmed_company_press_release
+      certification_or_pilot: unknown
+      supply: unknown
+      order: unknown
+      repeat_delivery: unknown
+      revenue: unknown_liquid_cooling_split
+      profit: unknown
+      cash: unknown
+    strongest_support: 公司来源材料列出液冷机柜、CDU、Manifold、浸没箱体、预制管路和室外冷源等完整产品矩阵。
+    strongest_counter: 展会/公司宣传只能证明能力与产品，不能证明客户、订单、重复交付、收入、利润和现金。
+    b_fields_required:
+    - 正式年报/公告中数据中心液冷业务分项
+    - 产品客户、订单、交付、复购和认证
+    - 数据中心液冷与工业/储能温控拆分
+    - 收入、毛利、应收、存货、资本开支和现金流
+    - 若无硬关系证据则禁止主题财务估算
+    evidence_ids:
+    - EV048
+    - EV066
+    - EV078
+    review_due: '2026-09-30'
+  - record_id: A2L007
+    entity_name: 荣亿精密
+    legal_name: 浙江荣亿精密机械股份有限公司
+    ts_code: 920223.BJ
+    market: 北交所
+    entity_role: 服务器液冷快速接头金属外壳及精密结构件
+    node_ids:
+    - N04
+    - N25
+    - N26
+    - N27
+    disposition: enter_b_core_new_entrant
+    relationship_ladder:
+      identity: confirmed
+      capability: confirmed_annual_report_summary
+      certification_or_pilot: market_validation_disclosed
+      supply: entered_supply_chain_disclosed
+      order: customer_and_amount_partially_disclosed_secondary
+      repeat_delivery: batch_delivery_disclosed
+      revenue: confirmed_but_low_share
+      profit: no_material_contribution_disclosed
+      cash: unknown_theme_contribution
+    strongest_support: 2025年报公开摘要称服务器液冷快接零部件实现量产、进入供应链并完成批量交付；同时已公告1亿元扩产项目。
+    strongest_counter: 该业务仍处导入与爬坡阶段，收入和订单占比低、未形成重大业绩贡献；客户、单价、良率、现金回收和项目投产进度仍需核查。
+    b_fields_required:
+    - 年报原文中的客户、批量交付、收入和订单占比
+    - 液冷快接项目投资、设备、投产、良率和产能利用率
+    - 与客户的交易金额、复购和集中度
+    - 液冷收入/毛利/净利润/现金贡献
+    - 公司整体亏损、经营现金流、应收、存货和融资压力
+    evidence_ids:
+    - EV067
+    - EV068
+    - EV079
+    - EV080
+    - EV081
+    review_due: '2026-11-30'
+  excluded_or_hold_entities:
+  - record_id: A2L001
+    entity_name: 飞龙股份
+    ts_code: 002536.SZ
+    matched_node_ids:
+    - N05
+    decision: exclude_semantic_mismatch
+    reason: 命中的是汽车发动机进排气歧管，不是机架液冷供回液歧管。
+    allowed_future_upgrade: 只有出现数据中心液冷产品规格、客户/认证或正式项目证据时重启。
+  - record_id: A2L002
+    entity_name: 万得凯
+    ts_code: 301309.SZ
+    matched_node_ids:
+    - N04
+    decision: exclude_semantic_mismatch
+    reason: 命中通用水管快速接头，没有服务器液冷材料、压力、盲插、洁净度和客户认证语境。
+    allowed_future_upgrade: 需数据中心液冷规格与客户验证。
+  - record_id: A2L003
+    entity_name: 溯联股份
+    ts_code: 301397.SZ
+    matched_node_ids:
+    - N04
+    decision: exclude_semantic_mismatch
+    reason: 命中汽车流体管路和塑料快接，不能外推服务器液冷。
+    allowed_future_upgrade: 需数据中心液冷规格与正式客户证据。
+  - record_id: A2L004
+    entity_name: 纳百川
+    ts_code: 301667.SZ
+    matched_node_ids:
+    - N03
+    decision: exclude_semantic_mismatch
+    reason: 主营命中电池液冷板，属于汽车/储能场景，不等于AI服务器冷板。
+    allowed_future_upgrade: 需芯片/服务器冷板规格、认证和客户证据。
+  - record_id: A2L005
+    entity_name: 兰石重装
+    ts_code: 603169.SH
+    matched_node_ids:
+    - N10
+    decision: exclude_generic_component
+    reason: 板式换热器处于炼化和能源装备语境，未证明数据中心资格和主题重要性。
+    allowed_future_upgrade: 需数据中心专用换热器规格、客户和收入证据。
+  - record_id: A2L006
+    entity_name: 海希通讯
+    ts_code: 920405.BJ
+    matched_node_ids:
+    - N03
+    decision: hold_unknown_end_use
+    reason: “冷板式液冷PACK加工服务”的最终用途不清，不能确认是AI服务器还是电池PACK。
+    allowed_future_upgrade: 读取主营原文/客户材料，确认最终用途和产品规格。
+  - record_id: ENT041
+    entity_name: 中航光电
+    ts_code: 002179.SZ
+    matched_node_ids:
+    - N04
+    decision: hold_observe_standards_only
+    reason: 当前只能确认标准/生态参与，缺少液冷快接产品规格、客户资格和供货证据。
+    allowed_future_upgrade: 出现正式产品、认证或客户/项目证据后再进入B。
+  private_china_context:
+  - entity_id: ENT042
+    entity_name: 超聚变
+    legal_identity: unknown_local_security_master
+    node_ids:
+    - N01
+    - N02
+    - N03
+    - N04
+    - N05
+    - N08
+    - N23
+    - N24
+    status: private_context_capability_only
+    evidence_ids:
+    - EV050
+    reason: 用于OEM自研、整机柜、接口和采购边界；不进入A股财务核查。
+  - entity_id: ENT043
+    entity_name: 河南昆仑技术
+    legal_identity: unknown_local_security_master
+    node_ids:
+    - N01
+    - N02
+    - N03
+    - N04
+    - N05
+    - N08
+    - N23
+    - N24
+    status: private_context_capability_only
+    evidence_ids:
+    - EV051
+    reason: 用于国产服务器/OEM与整机柜能力背景；不猜测上市映射。
+  global_context_entities:
+  - entity_id: ENT001
+    entity_name: Microsoft
+    geography: 美国
+    listing_hint: 海外上市
+    role: final_payer_and_self_build_context
+    node_ids:
+    - N01
+    - N08
+    - N17
+    - N19
+    evidence_ids:
+    - EV001
+    b_handling: context_only_no_local_financial_request
+    evidence_scope: 付款与自研架构
+    commercial_relationship_limit: 不据此确认特定客户订单、重复交付、收入、利润或现金。
+  - entity_id: ENT002
+    entity_name: Alphabet / Google
+    geography: 美国
+    listing_hint: 海外上市
+    role: final_payer_and_self_build_context
+    node_ids:
+    - N01
+    - N03
+    - N05
+    - N08
+    - N23
+    - N31
+    evidence_ids:
+    - EV002
+    - EV005
+    - EV006
+    - EV064
+    b_handling: context_only_no_local_financial_request
+    evidence_scope: 付款与自研架构
+    commercial_relationship_limit: 不据此确认特定客户订单、重复交付、收入、利润或现金。
+  - entity_id: ENT003
+    entity_name: Amazon / AWS
+    geography: 美国
+    listing_hint: 海外上市
+    role: final_payer_and_self_build_context
+    node_ids:
+    - N01
+    - N08
+    - N17
+    - N19
+    evidence_ids:
+    - EV003
+    b_handling: context_only_no_local_financial_request
+    evidence_scope: 付款与自研架构
+    commercial_relationship_limit: 不据此确认特定客户订单、重复交付、收入、利润或现金。
+  - entity_id: ENT004
+    entity_name: Meta
+    geography: 美国
+    listing_hint: 海外上市
+    role: final_payer_and_self_build_context
+    node_ids:
+    - N01
+    - N03
+    - N05
+    - N08
+    - N23
+    - N31
+    evidence_ids:
+    - EV007
+    - EV038
+    b_handling: context_only_no_local_financial_request
+    evidence_scope: 付款与自研架构
+    commercial_relationship_limit: 不据此确认特定客户订单、重复交付、收入、利润或现金。
+  - entity_id: ENT005
+    entity_name: NVIDIA
+    geography: 美国
+    listing_hint: 海外上市
+    role: platform_oem_architecture_context
+    node_ids:
+    - N01
+    - N02
+    - N03
+    - N04
+    - N05
+    - N08
+    - N23
+    evidence_ids:
+    - EV004
+    - EV065
+    b_handling: context_only_no_local_financial_request
+    evidence_scope: 平台/OEM架构与客户自制
+    commercial_relationship_limit: 不据此确认特定客户订单、重复交付、收入、利润或现金。
+  - entity_id: ENT006
+    entity_name: Dell Technologies
+    geography: 美国
+    listing_hint: 海外上市
+    role: platform_oem_architecture_context
+    node_ids:
+    - N01
+    - N02
+    - N03
+    - N04
+    - N23
+    evidence_ids:
+    - EV031
+    b_handling: context_only_no_local_financial_request
+    evidence_scope: 平台/OEM架构与客户自制
+    commercial_relationship_limit: 不据此确认特定客户订单、重复交付、收入、利润或现金。
+  - entity_id: ENT007
+    entity_name: Hewlett Packard Enterprise
+    geography: 美国
+    listing_hint: 海外上市
+    role: platform_oem_architecture_context
+    node_ids:
+    - N01
+    - N02
+    - N03
+    - N04
+    - N05
+    - N08
+    - N23
+    evidence_ids:
+    - EV032
+    b_handling: context_only_no_local_financial_request
+    evidence_scope: 平台/OEM架构与客户自制
+    commercial_relationship_limit: 不据此确认特定客户订单、重复交付、收入、利润或现金。
+  - entity_id: ENT008
+    entity_name: Lenovo
+    geography: 中国/全球
+    listing_hint: 海外上市
+    role: platform_oem_architecture_context
+    node_ids:
+    - N01
+    - N02
+    - N03
+    - N04
+    - N05
+    - N08
+    - N23
+    evidence_ids:
+    - EV033
+    b_handling: context_only_no_local_financial_request
+    evidence_scope: 平台/OEM架构与客户自制
+    commercial_relationship_limit: 不据此确认特定客户订单、重复交付、收入、利润或现金。
+  - entity_id: ENT009
+    entity_name: Pegatron
+    geography: 中国台湾
+    listing_hint: 海外上市
+    role: platform_oem_architecture_context
+    node_ids:
+    - N01
+    - N02
+    - N03
+    - N04
+    - N05
+    - N23
+    evidence_ids:
+    - EV060
+    b_handling: context_only_no_local_financial_request
+    evidence_scope: 平台/OEM架构与客户自制
+    commercial_relationship_limit: 不据此确认特定客户订单、重复交付、收入、利润或现金。
+  - entity_id: ENT010
+    entity_name: Schneider Electric / Motivair
+    geography: 法国/美国
+    listing_hint: 海外上市+子公司
+    role: global_system_supply_context
+    node_ids:
+    - N02
+    - N08
+    - N17
+    - N19
+    - N20
+    - N23
+    - N28
+    evidence_ids:
+    - EV021
+    - EV022
+    b_handling: context_only_no_local_financial_request
+    evidence_scope: 系统设备与有效供给
+    commercial_relationship_limit: 不据此确认特定客户订单、重复交付、收入、利润或现金。
+  - entity_id: ENT011
+    entity_name: Vertiv
+    geography: 美国
+    listing_hint: 海外上市
+    role: global_system_supply_context
+    node_ids:
+    - N08
+    - N11
+    - N13
+    - N17
+    - N20
+    - N23
+    - N28
+    evidence_ids:
+    - EV023
+    b_handling: context_only_no_local_financial_request
+    evidence_scope: 系统设备与有效供给
+    commercial_relationship_limit: 不据此确认特定客户订单、重复交付、收入、利润或现金。
+  - entity_id: ENT012
+    entity_name: Eaton / Boyd Thermal
+    geography: 美国
+    listing_hint: 海外上市+收购标的
+    role: global_system_supply_context
+    node_ids:
+    - N02
+    - N08
+    - N10
+    - N24
+    - N28
+    evidence_ids:
+    - EV018
+    - EV027
+    b_handling: context_only_no_local_financial_request
+    evidence_scope: 系统设备与有效供给
+    commercial_relationship_limit: 不据此确认特定客户订单、重复交付、收入、利润或现金。
+  - entity_id: ENT013
+    entity_name: Modine / Airedale
+    geography: 美国/英国
+    listing_hint: 海外上市+子公司
+    role: global_system_supply_context
+    node_ids:
+    - N08
+    - N17
+    - N19
+    evidence_ids:
+    - EV024
+    b_handling: context_only_no_local_financial_request
+    evidence_scope: 系统设备与有效供给
+    commercial_relationship_limit: 不据此确认特定客户订单、重复交付、收入、利润或现金。
+  - entity_id: ENT014
+    entity_name: nVent
+    geography: 英国/美国
+    listing_hint: 海外上市
+    role: global_system_supply_context
+    node_ids:
+    - N05
+    - N07
+    - N08
+    - N23
+    - N24
+    evidence_ids:
+    - EV025
+    b_handling: context_only_no_local_financial_request
+    evidence_scope: 系统设备与有效供给
+    commercial_relationship_limit: 不据此确认特定客户订单、重复交付、收入、利润或现金。
+  - entity_id: ENT015
+    entity_name: Trane Technologies / LiquidStack
+    geography: 爱尔兰/美国
+    listing_hint: 海外上市+子公司
+    role: global_system_supply_context
+    node_ids:
+    - N08
+    - N17
+    - N19
+    - N21
+    - N24
+    - N28
+    - N33
+    evidence_ids:
+    - EV034
+    - EV035
+    - EV063
+    b_handling: context_only_no_local_financial_request
+    evidence_scope: 系统设备与有效供给
+    commercial_relationship_limit: 不据此确认特定客户订单、重复交付、收入、利润或现金。
+  - entity_id: ENT016
+    entity_name: CoolIT Systems
+    geography: 加拿大
+    listing_hint: 非上市
+    role: global_system_supply_context
+    node_ids:
+    - N02
+    - N05
+    - N08
+    - N20
+    - N24
+    - N28
+    evidence_ids:
+    - EV026
+    b_handling: context_only_no_local_financial_request
+    evidence_scope: 系统设备与有效供给
+    commercial_relationship_limit: 不据此确认特定客户订单、重复交付、收入、利润或现金。
+  - entity_id: ENT017
+    entity_name: STULZ
+    geography: 德国
+    listing_hint: 非上市
+    role: global_system_supply_context
+    node_ids:
+    - N08
+    - N09
+    - N10
+    - N11
+    - N12
+    - N13
+    - N19
+    evidence_ids:
+    - EV017
+    b_handling: context_only_no_local_financial_request
+    evidence_scope: 系统设备与有效供给
+    commercial_relationship_limit: 不据此确认特定客户订单、重复交付、收入、利润或现金。
+  - entity_id: ENT018
+    entity_name: Parker Hannifin
+    geography: 美国
+    listing_hint: 海外上市
+    role: global_component_supply_context
+    node_ids:
+    - N04
+    evidence_ids:
+    - EV012
+    b_handling: context_only_no_local_financial_request
+    evidence_scope: 部件、材料与二供
+    commercial_relationship_limit: 不据此确认特定客户订单、重复交付、收入、利润或现金。
+  - entity_id: ENT019
+    entity_name: Amphenol
+    geography: 美国
+    listing_hint: 海外上市
+    role: global_component_supply_context
+    node_ids:
+    - N04
+    evidence_ids:
+    - EV013
+    b_handling: context_only_no_local_financial_request
+    evidence_scope: 部件、材料与二供
+    commercial_relationship_limit: 不据此确认特定客户订单、重复交付、收入、利润或现金。
+  - entity_id: ENT020
+    entity_name: Stäubli
+    geography: 瑞士
+    listing_hint: 非上市
+    role: global_component_supply_context
+    node_ids:
+    - N04
+    evidence_ids:
+    - EV011
+    b_handling: context_only_no_local_financial_request
+    evidence_scope: 部件、材料与二供
+    commercial_relationship_limit: 不据此确认特定客户订单、重复交付、收入、利润或现金。
+  - entity_id: ENT021
+    entity_name: CEJN
+    geography: 瑞典
+    listing_hint: 非上市
+    role: global_component_supply_context
+    node_ids:
+    - N04
+    evidence_ids:
+    - EV010
+    b_handling: context_only_no_local_financial_request
+    evidence_scope: 部件、材料与二供
+    commercial_relationship_limit: 不据此确认特定客户订单、重复交付、收入、利润或现金。
+  - entity_id: ENT022
+    entity_name: LÜDECKE
+    geography: 德国
+    listing_hint: 非上市
+    role: global_component_supply_context
+    node_ids:
+    - N04
+    evidence_ids:
+    - EV055
+    b_handling: context_only_no_local_financial_request
+    evidence_scope: 部件、材料与二供
+    commercial_relationship_limit: 不据此确认特定客户订单、重复交付、收入、利润或现金。
+  - entity_id: ENT023
+    entity_name: KRES Technology
+    geography: 未知/待映射
+    listing_hint: 非上市/待核
+    role: global_component_supply_context
+    node_ids:
+    - N04
+    evidence_ids:
+    - EV056
+    b_handling: context_only_no_local_financial_request
+    evidence_scope: 部件、材料与二供
+    commercial_relationship_limit: 不据此确认特定客户订单、重复交付、收入、利润或现金。
+  - entity_id: ENT024
+    entity_name: BEEHE
+    geography: 中国/待映射
+    listing_hint: 非上市/待核
+    role: global_component_supply_context
+    node_ids:
+    - N04
+    - N08
+    - N09
+    - N10
+    - N11
+    - N12
+    - N13
+    evidence_ids:
+    - EV057
+    - EV058
+    b_handling: context_only_no_local_financial_request
+    evidence_scope: 部件、材料与二供
+    commercial_relationship_limit: 不据此确认特定客户订单、重复交付、收入、利润或现金。
+  - entity_id: ENT025
+    entity_name: Georg Fischer
+    geography: 瑞士
+    listing_hint: 海外上市
+    role: global_component_supply_context
+    node_ids:
+    - N05
+    evidence_ids:
+    - EV014
+    b_handling: context_only_no_local_financial_request
+    evidence_scope: 部件、材料与二供
+    commercial_relationship_limit: 不据此确认特定客户订单、重复交付、收入、利润或现金。
+  - entity_id: ENT026
+    entity_name: Danfoss
+    geography: 丹麦
+    listing_hint: 非上市基金会控股
+    role: global_component_supply_context
+    node_ids:
+    - N06
+    - N10
+    - N13
+    evidence_ids:
+    - EV028
+    b_handling: context_only_no_local_financial_request
+    evidence_scope: 部件、材料与二供
+    commercial_relationship_limit: 不据此确认特定客户订单、重复交付、收入、利润或现金。
+  - entity_id: ENT027
+    entity_name: Alfa Laval
+    geography: 瑞典
+    listing_hint: 海外上市
+    role: global_component_supply_context
+    node_ids:
+    - N10
+    - N19
+    evidence_ids:
+    - EV029
+    b_handling: context_only_no_local_financial_request
+    evidence_scope: 部件、材料与二供
+    commercial_relationship_limit: 不据此确认特定客户订单、重复交付、收入、利润或现金。
+  - entity_id: ENT028
+    entity_name: Belimo
+    geography: 瑞士
+    listing_hint: 海外上市
+    role: global_component_supply_context
+    node_ids:
+    - N06
+    - N07
+    - N13
+    - N17
+    evidence_ids:
+    - EV030
+    b_handling: context_only_no_local_financial_request
+    evidence_scope: 部件、材料与二供
+    commercial_relationship_limit: 不据此确认特定客户订单、重复交付、收入、利润或现金。
+  - entity_id: ENT029
+    entity_name: Dober
+    geography: 美国
+    listing_hint: 非上市
+    role: global_component_supply_context
+    node_ids:
+    - N14
+    - N18
+    - N29
+    evidence_ids:
+    - EV015
+    b_handling: context_only_no_local_financial_request
+    evidence_scope: 部件、材料与二供
+    commercial_relationship_limit: 不据此确认特定客户订单、重复交付、收入、利润或现金。
+  - entity_id: ENT030
+    entity_name: Dynalene
+    geography: 美国
+    listing_hint: 非上市
+    role: global_component_supply_context
+    node_ids:
+    - N14
+    - N18
+    evidence_ids:
+    - EV016
+    b_handling: context_only_no_local_financial_request
+    evidence_scope: 部件、材料与二供
+    commercial_relationship_limit: 不据此确认特定客户订单、重复交付、收入、利润或现金。
+  - entity_id: ENT031
+    entity_name: Castrol / BP
+    geography: 英国
+    listing_hint: 海外上市子品牌
+    role: global_component_supply_context
+    node_ids:
+    - N14
+    - N18
+    evidence_ids:
+    - EV059
+    b_handling: context_only_no_local_financial_request
+    evidence_scope: 部件、材料与二供
+    commercial_relationship_limit: 不据此确认特定客户订单、重复交付、收入、利润或现金。
+  - entity_id: ENT032
+    entity_name: GRC
+    geography: 美国
+    listing_hint: 非上市
+    role: alternative_route_context
+    node_ids:
+    - N21
+    - N33
+    evidence_ids:
+    - EV036
+    b_handling: context_only_no_local_financial_request
+    evidence_scope: 浸没/两相替代路线
+    commercial_relationship_limit: 不据此确认特定客户订单、重复交付、收入、利润或现金。
+  - entity_id: ENT033
+    entity_name: ZutaCore
+    geography: 美国/以色列
+    listing_hint: 非上市
+    role: alternative_route_context
+    node_ids:
+    - N08
+    - N15
+    - N22
+    - N34
+    evidence_ids:
+    - EV037
+    - EV062
+    b_handling: context_only_no_local_financial_request
+    evidence_scope: 浸没/两相替代路线
+    commercial_relationship_limit: 不据此确认特定客户订单、重复交付、收入、利润或现金。
+  b1_contract_rules:
+  - B1必须由ChatGPT按硬件部件、系统设备/工程和设施侧业务分别定义口径。
+  - enter_b_core可提取公司级财务并尝试主题拆分；无法拆分则写未知，不用公司总收入代替液冷收入。
+  - enter_b_conditional_*在取得正式关系/业务分项前，只允许核查身份、产品、公告原文和关系证据，不允许主题利润估算。
+  - enter_b_ownership_context_only只核对持股、合并范围和利润归属，不把子公司产品直接归给母公司。
+  - 所有公式、替代口径、反证和三情景变量由ChatGPT B1定义，Codex B2不得自行扩展。
+  - 920808.BJ的上市日前价格数据在代码/交易场所规范化前禁止用于价格或估值分析。
+  required_common_fields:
+  - entity_identity_and_effective_dates
+  - exact_product_node_and_specification
+  - official_source_body_and_available_at
+  - customer_type_or_named_customer_if_disclosed
+  - certification_or_validation_stage
+  - contract_order_delivery_repeat_delivery
+  - liquid_cooling_revenue_gross_profit_and_margin
+  - theme_net_profit_and_cash_contribution
+  - receivables_inventory_contract_liabilities_capex_r_and_d_cfo_impairment
+  - strongest_counterevidence_and_unknowns
+  hard_exclusions:
+  - 不从行业/主题成员、公司简介、公告标题或关键词确认供应关系
+  - 不把储能/汽车液冷能力外推到AI服务器液冷
+  - 不把当前产品页倒填为as_of历史事实
+  - 不使用固定公司数量、综合总分或买入阈值
+  - 不输出股票买入、目标价、仓位或收益承诺
+relationship_ladder_definition:
+  identity: 法定主体、证券代码、别名、股权和有效期
+  capability: 产品/工艺/测试/标准或产线能力
+  certification_or_pilot: 客户测试、标准验证、送样或试点
+  supply: 进入真实客户或供应链
+  order: 合同、定点、订单或中标
+  repeat_delivery: 同一客户追加或跨客户批量交付
+  revenue: 目标节点收入被确认并可与其他业务区分
+  profit: 目标节点毛利/净利润对公司重要
+  cash: 目标节点经营现金兑现且未被应收/存货吞噬
+unknowns_carried_forward:
+- 私有B2B客户与保密供应关系
+- 关键非上市实体的统一信用代码、别名、股权与规模
+- 部分产品页在as_of时点的历史可见性
+- 液冷产品在多数上市公司的收入、毛利、利润和现金贡献
+- 客户自制、专用接口和二供切换的实际比例
+- 两相DTC与浸没路线的中期应用比例和运维经济性
+- 完整搜索饱和度与个人维护成本
+evidence_file: 03_A_证据清单.csv
+report_file: 03_A_开放式产业研究最终报告.docx
+user_action_required:
+  decision: approve_B_or_request_one_change_or_stop
+  default_reply: 同意进入B阶段。
+  do_not_edit_machine_files: true
+review_due: '2026-11-30'
