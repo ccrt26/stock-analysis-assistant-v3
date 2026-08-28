@@ -1,0 +1,1801 @@
+contract_type: A1_to_A2_local_support_request
+research_id: ai-liquid-cooling-2026h2-001
+version: 1
+as_of: '2026-08-27T22:32:34+08:00'
+created_by: chatgpt
+current_stage: A1_complete_waiting_codex_A2
+next_actor: codex
+theme: AI数据中心液冷端到端可行性试点
+precise_thesis: 高功率AI训练与推理负载提高机柜热密度，会推动从芯片、服务器、机架到机房和运维的液冷支出；但价值归属取决于接口与认证、有效供给、客户自制、第二供应商、交付验收、运行维护和替代路线。
+a1_scope:
+  completed:
+  - 最终需求与付款人
+  - V1四张图
+  - 四种证据状态
+  - V3七视图
+  - 精确节点词典
+  - 替代/自制/二供挑战
+  - 第一轮上市与非上市实体线索
+  - A2本地支持任务
+  not_completed:
+  - 本地仓库读取
+  - 实体/证券代码最终映射
+  - 供应关系终审
+  - 订单/收入/利润/现金判断
+  - 财务/估值/价格计算
+  - 三道地基门最终验收
+  - 股票候选或交易结论
+hard_boundaries:
+- 只执行A2本地支持；不得进入A3、B、C或D。
+- 不得修改ChatGPT定义的theme、precise_thesis、node_id、证据等级、upgrade/invalidation语义。
+- 关键词、行业/主题成员、公告标题、专利、认证只能产生待核线索，不能确认供应关系。
+- 不得运行现有最终选股流程，不得输出股票推荐、目标价、仓位或交易指令。
+- 不得修改现有五个股票研究Skill、src、tests、数据schema、定时任务、Forward CSV、D20口径或价格场景。
+- 所有数据必须满足available_at <= as_of；当前快照不可回放时必须标注。
+a2_tasks:
+- task_id: A2-T01
+  name: 交接与版本校验
+  required: true
+  actions:
+  - 校验research_id/version/as_of/branch/run_directory
+  - 校验node_id/entity_id/evidence_id引用完整
+  - 发现缺失或冲突时停止相关项并记录
+  outputs:
+  - validation_status
+  - validation_errors
+- task_id: A2-T02
+  name: 实体与证券映射
+  required: true
+  actions:
+  - 为中国/A股优先实体补当前名称、曾用名、英文名、子公司、品牌、上市状态、证券代码和本地company_id
+  - 海外实体标记listed_overseas/private/unknown
+  - 无法唯一匹配写unknown，不按名称猜
+  outputs:
+  - entity_master_sample
+  - alias_map
+  - mapping_conflicts
+- task_id: A2-T03
+  name: 本地数据能力审计
+  required: true
+  datasets_to_check:
+  - company_profile
+  - main_business
+  - announcements_metadata
+  - announcement_full_text_or_pdf_path
+  - income_statement
+  - balance_sheet
+  - cashflow_statement
+  - financial_indicators
+  - valuation
+  - daily_price
+  - industry_membership
+  - theme_membership
+  - point_in_time_manifest
+  quality_states:
+  - complete
+  - partial
+  - unsupported
+  - query_failed
+  - no_record
+  - unknown
+  - current_snapshot_not_replayable
+  outputs:
+  - coverage_by_entity_and_dataset
+  - history_start_end
+  - available_at_semantics
+  - access_or_permission_limits
+- task_id: A2-T04
+  name: 节点词典本地扫描
+  required: true
+  actions:
+  - 在公司简介、主营分项、公告元数据中扫描node synonyms
+  - 保存命中字段、原文上下文、fact_as_of、available_at和provider
+  - 新增实体仅标lead_only
+  forbidden:
+  - 仅凭命中词确认产品规格、客户、供货、订单、收入或利润
+  outputs:
+  - new_a_share_leads
+  - match_contexts
+- task_id: A2-T05
+  name: 公告原文入口审计
+  required: true
+  actions:
+  - 确认公告元数据、官方URL/PDF路径与available_at
+  - 区分只有标题、已有正文、下载失败、正文不可解析和真实无公告
+  - 本轮不为全市场批量补全文库
+  outputs:
+  - document_access_status
+  - targeted_read_candidates
+- task_id: A2-T06
+  name: 点时与可复现性
+  required: true
+  actions:
+  - 只使用available_at <= as_of的数据
+  - 保存输入清单、来源、日期、质量状态
+  - 不把今天的公司关系或快照倒填过去
+  outputs:
+  - input_manifest
+  - point_in_time_limits
+priority_entities:
+- 英维克
+- 申菱环境
+- 曙光数创/中科曙光体系
+- 飞荣达
+- 佳力图
+- 高澜股份
+- 同飞股份
+- 中航光电
+nodes:
+- node_id: N01
+  product: 高功率AI热源/加速器与封装
+  english_name: AI heat source / accelerator package
+  view: 功能/物理
+  system_role: GPU/TPU/CPU及封装产生高热流密度，决定散热需求起点
+  synonyms:
+  - 高功率AI热源/加速器与封装
+  - AI heat source / accelerator package
+  specification_fields_to_map:
+  - TDP
+  - 热流密度
+  - 封装尺寸
+  - 可允许结温
+  alternatives_or_self_build: 平台厂自研、封装代际变化
+  a1_stage: 已出现规模部署
+  evidence_ids:
+  - EV004
+  - EV005
+  - EV064
+  - EV065
+- node_id: N02
+  product: 导热界面材料与芯片—冷板接触界面
+  english_name: TIM / package-to-cold-plate interface
+  view: 物理/制造
+  system_role: 决定芯片到冷板的第一段热阻、装配压力与长期可靠性
+  synonyms:
+  - 导热界面材料与芯片—冷板接触界面
+  - TIM / package-to-cold-plate interface
+  specification_fields_to_map:
+  - 导热系数
+  - 泵出
+  - 厚度
+  - 平整度
+  - 压紧力
+  - 材料兼容
+  alternatives_or_self_build: 封装厂/OEM内置、自制
+  a1_stage: 正在验证/随平台变化
+  evidence_ids:
+  - EV004
+  - EV045
+- node_id: N03
+  product: 冷板
+  english_name: Cold plate
+  view: 物理/制造
+  system_role: 直接从芯片/关键器件吸热；高度依赖封装、流道、材料和装配
+  synonyms:
+  - 冷板
+  - Cold plate
+  - 液冷板
+  - 水冷板
+  - cold plate
+  specification_fields_to_map:
+  - 热阻
+  - 压降
+  - 流量
+  - 均温
+  - 腐蚀
+  - 泄漏
+  - 良率
+  - 寿命
+  alternatives_or_self_build: OEM/平台自研，二供快速进入
+  a1_stage: 已出现订单+持续验证
+  evidence_ids:
+  - EV004
+  - EV005
+  - EV031
+  - EV032
+  - EV033
+  - EV043
+  - EV045
+  - EV060
+- node_id: N04
+  product: 服务器内管路与快速接头/盲插接头
+  english_name: Hose / UQD / blind-mate QD
+  view: 接口/物理
+  system_role: 支持服务器维护、热插拔与无泄漏连接；接口失配会阻断解耦
+  synonyms:
+  - 服务器内管路与快速接头/盲插接头
+  - Hose / UQD / blind-mate QD
+  - 快速接头
+  - 盲插快接
+  - UQD
+  - UQDB
+  - BMQC
+  - quick disconnect
+  specification_fields_to_map:
+  - Cv/压降
+  - 滴漏
+  - 气体夹带
+  - 插拔力
+  - 错位容差
+  - 循环寿命
+  - 密封材料
+  alternatives_or_self_build: OCP标准化、多供应商、客户专用接口
+  a1_stage: 订单/产品已出，标准与认证仍在演进
+  evidence_ids:
+  - EV010
+  - EV011
+  - EV012
+  - EV013
+  - EV019
+  - EV020
+  - EV040
+  - EV050
+  - EV055
+  - EV056
+  - EV057
+- node_id: N05
+  product: 机架歧管/供回液分配
+  english_name: Rack manifold
+  view: 物理/接口
+  system_role: 把流量均匀分配到各托盘/服务器并支持维护冗余
+  synonyms:
+  - 机架歧管/供回液分配
+  - Rack manifold
+  - manifold
+  - 歧管
+  - 分液器
+  - 集流管
+  specification_fields_to_map:
+  - 均流
+  - 压降
+  - 耐压
+  - 接口
+  - 维护空间
+  - 材料
+  - 颗粒洁净度
+  alternatives_or_self_build: OEM自制、标准歧管、二供
+  a1_stage: 已商业化+客户定制
+  evidence_ids:
+  - EV005
+  - EV006
+  - EV014
+  - EV040
+  - EV048
+  - EV062
+- node_id: N06
+  product: 阀门与执行器
+  english_name: Valves / actuators
+  view: 物理/控制
+  system_role: 调节、隔离、旁通和维护；影响水力平衡和故障隔离
+  synonyms:
+  - 阀门与执行器
+  - Valves / actuators
+  specification_fields_to_map:
+  - Cv
+  - 关断泄漏
+  - 响应
+  - 耐腐蚀
+  - 冗余
+  alternatives_or_self_build: 通用工业阀替代、集成进CDU
+  a1_stage: 成熟供给，AI专用性待核
+  evidence_ids:
+  - EV030
+- node_id: N07
+  product: 流量/压力/温度/水质/漏液传感
+  english_name: Sensors / leak detection
+  view: 控制/运维
+  system_role: 为流量平衡、热保护、漏液和预测维护提供反馈
+  synonyms:
+  - 流量/压力/温度/水质/漏液传感
+  - Sensors / leak detection
+  specification_fields_to_map:
+  - 精度
+  - 漂移
+  - 响应
+  - 通信
+  - 误报率
+  - 耐液体
+  alternatives_or_self_build: CDU/OEM内置、通用传感器
+  a1_stage: 商业化，独立价值量待核
+  evidence_ids:
+  - EV006
+  - EV023
+  - EV025
+  - EV039
+  - EV040
+- node_id: N08
+  product: 冷却液分配单元CDU
+  english_name: Coolant Distribution Unit
+  view: 物理/接口/控制
+  system_role: 隔离设施水与技术冷却回路，完成换热、泵送、过滤、补液、控制与保护
+  synonyms:
+  - 冷却液分配单元CDU
+  - Coolant Distribution Unit
+  - CDU
+  - 冷量分配单元
+  - 冷却液分配单元
+  - coolant distribution unit
+  specification_fields_to_map:
+  - 冷量
+  - ATD
+  - 流量
+  - 扬程
+  - 冗余
+  - 洁净度
+  - 温控
+  - 可维护性
+  - 协议
+  alternatives_or_self_build: 开放规格、多供应商、OEM自制、L2A替代
+  a1_stage: 已出现规模产品，供给快速扩张
+  evidence_ids:
+  - EV005
+  - EV006
+  - EV009
+  - EV017
+  - EV018
+  - EV021
+  - EV023
+  - EV024
+  - EV025
+  - EV039
+  - EV041
+  - EV054
+  - EV058
+  - EV061
+- node_id: N09
+  product: 循环泵/无密封泵
+  english_name: Pumps
+  view: 制造/物理
+  system_role: 提供二次侧流量与压头，可靠性决定停机风险
+  synonyms:
+  - 循环泵/无密封泵
+  - Pumps
+  specification_fields_to_map:
+  - 扬程
+  - 效率
+  - 冗余
+  - 寿命
+  - 振动
+  - 密封/无密封
+  alternatives_or_self_build: 多家工业泵厂、CDU厂集成
+  a1_stage: 成熟部件，数据中心资格待核
+  evidence_ids:
+  - EV017
+  - EV018
+  - EV021
+  - EV023
+  - EV039
+  - EV041
+  - EV058
+- node_id: N10
+  product: 板式换热器
+  english_name: Plate heat exchanger
+  view: 制造/物理
+  system_role: 隔离一次/二次回路并控制接近温差和压降
+  synonyms:
+  - 板式换热器
+  - Plate heat exchanger
+  specification_fields_to_map:
+  - 换热量
+  - ATD
+  - 压降
+  - 材料
+  - 钎焊质量
+  - 污染容忍
+  alternatives_or_self_build: 多家成熟换热器厂、CDU自制/采购
+  a1_stage: 成熟供给，AI规格升级
+  evidence_ids:
+  - EV017
+  - EV018
+  - EV021
+  - EV023
+  - EV028
+  - EV029
+  - EV039
+  - EV041
+- node_id: N11
+  product: 过滤/旁滤/颗粒控制
+  english_name: Filtration / side-stream filtration
+  view: 制造/运维
+  system_role: 控制颗粒、焊渣和污染，保护微通道冷板和阀件
+  synonyms:
+  - 过滤/旁滤/颗粒控制
+  - Filtration / side-stream filtration
+  specification_fields_to_map:
+  - 过滤精度
+  - 压损
+  - 旁滤比例
+  - 更换周期
+  - 清洁度
+  alternatives_or_self_build: CDU集成、独立过滤供应
+  a1_stage: 商业化，长期维护证据不足
+  evidence_ids:
+  - EV015
+  - EV016
+  - EV017
+  - EV018
+  - EV023
+  - EV039
+  - EV058
+- node_id: N12
+  product: 膨胀、补液、脱气与排气
+  english_name: Expansion / fill / degassing
+  view: 物理/运维
+  system_role: 管理体积变化、气穴、气体夹带和补液
+  synonyms:
+  - 膨胀、补液、脱气与排气
+  - Expansion / fill / degassing
+  specification_fields_to_map:
+  - 膨胀容积
+  - 脱气效率
+  - 补液策略
+  - 排气位置
+  alternatives_or_self_build: CDU集成、现场服务
+  a1_stage: 商业化，设计差异大
+  evidence_ids:
+  - EV023
+  - EV039
+  - EV040
+- node_id: N13
+  product: 变频驱动、PLC与CDU控制
+  english_name: VFD / PLC / controls
+  view: 控制/接口
+  system_role: 按负载调节流量、保护设备并接入BMS/DCIM
+  synonyms:
+  - 变频驱动、PLC与CDU控制
+  - VFD / PLC / controls
+  specification_fields_to_map:
+  - 控制精度
+  - 冗余
+  - 协议
+  - 告警
+  - 网络安全
+  alternatives_or_self_build: OEM自研、通用PLC/VFD
+  a1_stage: 商业化，软件价值独立性待核
+  evidence_ids:
+  - EV017
+  - EV018
+  - EV021
+  - EV023
+  - EV025
+  - EV039
+  - EV041
+  - EV058
+- node_id: N14
+  product: 单相水/乙二醇/丙二醇冷却液
+  english_name: Single-phase water/glycol coolant
+  view: 材料/运维
+  system_role: 作为DTC二次侧传热介质，影响腐蚀、微生物、冻结和寿命
+  synonyms:
+  - 单相水/乙二醇/丙二醇冷却液
+  - Single-phase water/glycol coolant
+  specification_fields_to_map:
+  - 浓度
+  - 水质
+  - 导电率
+  - pH
+  - 腐蚀
+  - 材料兼容
+  - 监测周期
+  alternatives_or_self_build: 多流体供应商、现场配制
+  a1_stage: 产品已商业化，长期标准化仍在演进
+  evidence_ids:
+  - EV015
+  - EV016
+  - EV059
+- node_id: N15
+  product: 介电两相DTC工质
+  english_name: Dielectric two-phase DTC fluid
+  view: 材料/替代
+  system_role: 通过相变直接从芯片移热，减少水风险但改变系统与维护
+  synonyms:
+  - 介电两相DTC工质
+  - Dielectric two-phase DTC fluid
+  specification_fields_to_map:
+  - 沸点
+  - 介电性
+  - 材料兼容
+  - 补充
+  - 法规
+  - 供应稳定
+  alternatives_or_self_build: 专有工质、替代路线、供应集中
+  a1_stage: 正在验证/早期商业
+  evidence_ids:
+  - EV037
+  - EV062
+- node_id: N16
+  product: 浸没式介电液
+  english_name: Immersion dielectric fluid
+  view: 材料/替代
+  system_role: 服务器整体浸没，改变服务器、运维和材料体系
+  synonyms:
+  - 浸没式介电液
+  - Immersion dielectric fluid
+  specification_fields_to_map:
+  - 介电性
+  - 黏度
+  - 闪点
+  - 材料兼容
+  - 挥发/损耗
+  - 可回收
+  alternatives_or_self_build: 单相/两相路线、流体法规
+  a1_stage: 商业产品存在，规模与路线分化
+  evidence_ids:
+  - EV035
+  - EV036
+- node_id: N17
+  product: 设施水环/一次侧管网
+  english_name: Facility Water System
+  view: 交付/物理
+  system_role: 把热量从CDU带到冷站/干冷器/冷却塔；新建与改造差异大
+  synonyms:
+  - 设施水环/一次侧管网
+  - Facility Water System
+  specification_fields_to_map:
+  - 供回水温
+  - 流量
+  - 压力
+  - 材质
+  - 冗余
+  - 水质
+  - 施工
+  alternatives_or_self_build: 液到气CDU、局部改造、客户现有设施
+  a1_stage: 成熟工程，改造成为约束
+  evidence_ids:
+  - EV006
+  - EV009
+  - EV021
+  - EV022
+  - EV046
+  - EV054
+- node_id: N18
+  product: 水处理、清洗与材料兼容
+  english_name: Water treatment / cleanliness
+  view: 制造/运维
+  system_role: 控制腐蚀、结垢、生物污染和微通道堵塞
+  synonyms:
+  - 水处理、清洗与材料兼容
+  - Water treatment / cleanliness
+  specification_fields_to_map:
+  - 水质
+  - 清洗残留
+  - 腐蚀速率
+  - 材料对
+  - 验收颗粒度
+  alternatives_or_self_build: 专用流体服务、运维外包
+  a1_stage: 隐藏关键点，公开数据不足
+  evidence_ids:
+  - EV015
+  - EV016
+  - EV020
+  - EV059
+- node_id: N19
+  product: 最终排热：干冷器/冷机/冷却塔
+  english_name: Heat rejection
+  view: 物理/设施
+  system_role: 将热量排向环境，受气候、水资源和温度窗口影响
+  synonyms:
+  - 最终排热：干冷器/冷机/冷却塔
+  - Heat rejection
+  specification_fields_to_map:
+  - 设计湿球/干球
+  - 供水温度
+  - 能效
+  - 水耗
+  - 冗余
+  alternatives_or_self_build: 自由冷却、蒸发冷、液到气局部方案
+  a1_stage: 成熟供给，项目条件决定组合
+  evidence_ids:
+  - EV006
+  - EV022
+  - EV046
+  - EV048
+  - EV054
+- node_id: N20
+  product: 后门换热器RDHx
+  english_name: Rear-door heat exchanger
+  view: 替代/产品
+  system_role: 在机架后门捕捉热量，适合改造和中高密度混合场景
+  synonyms:
+  - 后门换热器RDHx
+  - Rear-door heat exchanger
+  specification_fields_to_map:
+  - 冷量
+  - 风阻
+  - 漏液
+  - 门体承载
+  - 设施水条件
+  alternatives_or_self_build: 风冷、DTC、液到气CDU
+  a1_stage: 已有产品/部署，密度上限场景化
+  evidence_ids:
+  - EV008
+  - EV022
+  - EV023
+  - EV038
+- node_id: N21
+  product: 单相浸没槽/系统
+  english_name: Single-phase immersion
+  view: 替代/产品
+  system_role: 将IT设备浸入介电液，减少风扇与传统风冷设施
+  synonyms:
+  - 单相浸没槽/系统
+  - Single-phase immersion
+  - 浸没液冷
+  - immersion cooling
+  - TANK
+  specification_fields_to_map:
+  - 槽体容量
+  - 流体
+  - 维护
+  - 布线
+  - 消防
+  - 热排散
+  alternatives_or_self_build: DTC、两相浸没、客户不接受运维变化
+  a1_stage: 商业化但应用比例不明
+  evidence_ids:
+  - EV008
+  - EV035
+  - EV036
+  - EV044
+- node_id: N22
+  product: 两相浸没/冷凝回路
+  english_name: Two-phase immersion
+  view: 替代/产品
+  system_role: 通过沸腾与冷凝移热，可高密但工质与运维体系变化大
+  synonyms:
+  - 两相浸没/冷凝回路
+  - Two-phase immersion
+  specification_fields_to_map:
+  - 冷凝能力
+  - 工质损耗
+  - 密封
+  - 法规
+  - 维护
+  alternatives_or_self_build: 单相浸没、两相DTC
+  a1_stage: 早期商业/验证
+  evidence_ids:
+  - EV035
+- node_id: N23
+  product: BMS/DCIM/遥测与控制接口
+  english_name: BMS/DCIM integration
+  view: 接口/软件
+  system_role: 把液冷状态纳入设施与IT运维，支持告警、容量和故障定位
+  synonyms:
+  - BMS/DCIM/遥测与控制接口
+  - BMS/DCIM integration
+  specification_fields_to_map:
+  - Modbus/SNMP/API
+  - 数据粒度
+  - 网络安全
+  - 联动策略
+  alternatives_or_self_build: 系统商内置、独立平台
+  a1_stage: 商业化，独立收费能力待核
+  evidence_ids:
+  - EV006
+  - EV007
+  - EV023
+  - EV025
+  - EV039
+  - EV040
+- node_id: N24
+  product: 预制管路、skid与模块化交付
+  english_name: Prefabricated piping / skid
+  view: 交付/制造
+  system_role: 减少现场焊接和调试，缩短高密项目部署
+  synonyms:
+  - 预制管路、skid与模块化交付
+  - Prefabricated piping / skid
+  specification_fields_to_map:
+  - 工厂预制比例
+  - 洁净度
+  - 接口
+  - 运输
+  - 现场接驳
+  alternatives_or_self_build: 现场工程、系统商集成
+  a1_stage: 商业化，项目毛利/现金风险待核
+  evidence_ids:
+  - EV021
+  - EV025
+  - EV034
+  - EV040
+  - EV048
+- node_id: N25
+  product: 精密加工与微通道制造
+  english_name: Precision machining / microchannels
+  view: 制造
+  system_role: 决定冷板流道、平整度、压降和批量一致性
+  synonyms:
+  - 精密加工与微通道制造
+  - Precision machining / microchannels
+  specification_fields_to_map:
+  - 加工精度
+  - 毛刺
+  - 表面质量
+  - 良率
+  - 设备节拍
+  alternatives_or_self_build: 蚀刻/钎焊/增材等替代工艺
+  a1_stage: 潜在隐藏瓶颈，公开产能不足
+  evidence_ids:
+  - EV045
+- node_id: N26
+  product: 钎焊/焊接/密封与表面处理
+  english_name: Brazing / welding / sealing / surface treatment
+  view: 制造
+  system_role: 决定密封、腐蚀与寿命，失效可能造成系统事故
+  synonyms:
+  - 钎焊/焊接/密封与表面处理
+  - Brazing / welding / sealing / surface treatment
+  specification_fields_to_map:
+  - 焊缝
+  - 氦检
+  - 耐压
+  - 腐蚀
+  - 清洁
+  - 密封材料
+  alternatives_or_self_build: 一体加工、胶接、不同材料路线
+  a1_stage: 潜在隐藏瓶颈，需实体/工艺核验
+  evidence_ids:
+  - EV013
+  - EV018
+- node_id: N27
+  product: 泄漏/压力/流量/热性能/腐蚀/寿命测试
+  english_name: Qualification & test
+  view: 制造/认证
+  system_role: 把产品能力变成可进入客户供应链的资格
+  synonyms:
+  - 泄漏/压力/流量/热性能/腐蚀/寿命测试
+  - Qualification & test
+  specification_fields_to_map:
+  - 试验覆盖
+  - 周期
+  - 标准
+  - 抽检
+  - 失效率
+  - 可追溯性
+  alternatives_or_self_build: 客户自测、第三方实验室
+  a1_stage: 关键认证环节，公开通过率未知
+  evidence_ids:
+  - EV013
+  - EV019
+  - EV020
+- node_id: N28
+  product: 系统设计、集成、机房改造与调试
+  english_name: System integration / retrofit / commissioning
+  view: 交付
+  system_role: 把设备拼成可运行系统并完成清洗、灌液、调试和验收
+  synonyms:
+  - 系统设计、集成、机房改造与调试
+  - System integration / retrofit / commissioning
+  specification_fields_to_map:
+  - 工期
+  - 责任边界
+  - 验收
+  - 质保
+  - 垫资
+  - 回款
+  alternatives_or_self_build: OEM总包、专业温控商、工程商
+  a1_stage: 已有项目能力，利润/现金风险较高
+  evidence_ids:
+  - EV006
+  - EV009
+  - EV022
+  - EV026
+  - EV042
+  - EV050
+  - EV051
+- node_id: N29
+  product: 运维：液质检测、换液、过滤、备件、清洗
+  english_name: O&M services
+  view: 运维
+  system_role: 决定长期可靠性和持续服务收入，也可能形成高售后成本
+  synonyms:
+  - 运维：液质检测、换液、过滤、备件、清洗
+  - O&M services
+  specification_fields_to_map:
+  - 液质
+  - 过滤器寿命
+  - 故障率
+  - 备件
+  - 响应时间
+  - 年检
+  alternatives_or_self_build: 客户自运维、系统商打包
+  a1_stage: 需求存在，收入模式/频率未知
+  evidence_ids:
+  - EV015
+  - EV016
+  - EV023
+  - EV040
+- node_id: N30
+  product: 余热回收与热复用
+  english_name: Heat reuse
+  view: 运维/替代
+  system_role: 高温液冷回水可提高余热利用可行性，但受地点和热负荷约束
+  synonyms:
+  - 余热回收与热复用
+  - Heat reuse
+  specification_fields_to_map:
+  - 可用温度
+  - 利用小时
+  - 热网
+  - 合同
+  - 改造成本
+  alternatives_or_self_build: 直接排热、低品位热无法利用
+  a1_stage: 示范/早期商业，通用经济性未知
+  evidence_ids:
+  - EV008
+  - EV011
+  - EV062
+- node_id: N31
+  product: 液到气局部闭环/风液混合
+  english_name: Liquid-to-air / hybrid
+  view: 替代/交付
+  system_role: 在无设施水或改造困难场景部署液冷设备
+  synonyms:
+  - 液到气局部闭环/风液混合
+  - Liquid-to-air / hybrid
+  specification_fields_to_map:
+  - 机架冷量
+  - 房间排热
+  - 噪声
+  - 空间
+  - 效率
+  alternatives_or_self_build: 全设施水DTC、RDHx、纯风冷
+  a1_stage: 商业化，适合存量改造
+  evidence_ids:
+  - EV006
+  - EV023
+  - EV026
+  - EV038
+- node_id: N32
+  product: 单相冷板DTC路线
+  english_name: Single-phase DTC route
+  view: 路线
+  system_role: 当前公开部署和标准生态最完整的路线之一
+  synonyms:
+  - 单相冷板DTC路线
+  - Single-phase DTC route
+  specification_fields_to_map:
+  - 平台支持
+  - CDU
+  - UQD
+  - 流体
+  - 运维
+  - 设施水
+  alternatives_or_self_build: 两相DTC、浸没、RDHx
+  a1_stage: 已规模部署+标准演进
+  evidence_ids:
+  - EV004
+  - EV005
+  - EV008
+  - EV010
+  - EV017
+  - EV031
+  - EV032
+  - EV033
+- node_id: N33
+  product: 单相浸没路线
+  english_name: Single-phase immersion route
+  view: 路线
+  system_role: 减少风扇和传统机柜气流，但改变IT维护与流体体系
+  synonyms:
+  - 单相浸没路线
+  - Single-phase immersion route
+  specification_fields_to_map:
+  - 服务器兼容
+  - 流体
+  - 槽体
+  - 消防
+  - 维护
+  - 供应链
+  alternatives_or_self_build: DTC、两相浸没
+  a1_stage: 商业化/选择性部署
+  evidence_ids:
+  - EV008
+  - EV036
+  - EV044
+- node_id: N34
+  product: 两相DTC路线
+  english_name: Two-phase DTC route
+  view: 路线
+  system_role: 高热流密度、无水/低流量潜力，但工质与系统专有性更高
+  synonyms:
+  - 两相DTC路线
+  - Two-phase DTC route
+  specification_fields_to_map:
+  - 工质
+  - 冷凝
+  - 密封
+  - 法规
+  - OEM认证
+  - 维护
+  alternatives_or_self_build: 单相DTC、浸没
+  a1_stage: 验证/早期商业
+  evidence_ids:
+  - EV037
+  - EV062
+- node_id: N35
+  product: 传统风冷与高效风冷混合路线
+  english_name: Advanced air / hybrid air-liquid
+  view: 路线
+  system_role: 中低密度、存量机房或非关键器件仍可能保留风冷
+  synonyms:
+  - 传统风冷与高效风冷混合路线
+  - Advanced air / hybrid air-liquid
+  specification_fields_to_map:
+  - 风量
+  - 压损
+  - 风机功耗
+  - 房间冷量
+  - 机柜密度
+  alternatives_or_self_build: DTC/RDHx/液到气
+  a1_stage: 长期共存，非全量液冷
+  evidence_ids:
+  - EV006
+  - EV038
+  - EV046
+entities:
+- entity_id: ENT001
+  entity_name: Microsoft
+  geography: 美国
+  listing_hint: 海外上市
+  ts_code: null
+  a2_priority: context
+  candidate_roles:
+  - 最终付款人/自建AI基础设施
+  related_node_ids:
+  - N01
+  - N08
+  - N17
+  - N19
+  evidence_ids:
+  - EV001
+  current_relation_status: capability_or_context_lead
+  what_current_evidence_supports: A：资本开支与容量约束
+  what_it_does_not_support: 不代表其直接采购任何特定供应商
+  local_mapping_required: false
+- entity_id: ENT002
+  entity_name: Alphabet / Google
+  geography: 美国
+  listing_hint: 海外上市
+  ts_code: null
+  a2_priority: context
+  candidate_roles:
+  - 最终付款人/自研TPU与液冷架构
+  related_node_ids:
+  - N01
+  - N03
+  - N05
+  - N08
+  - N23
+  - N31
+  evidence_ids:
+  - EV002
+  - EV005
+  - EV006
+  - EV064
+  current_relation_status: capability_or_context_lead
+  what_current_evidence_supports: A：资本开支、规模部署与自研架构
+  what_it_does_not_support: 供应商和采购份额未知
+  local_mapping_required: false
+- entity_id: ENT003
+  entity_name: Amazon / AWS
+  geography: 美国
+  listing_hint: 海外上市
+  ts_code: null
+  a2_priority: context
+  candidate_roles:
+  - 最终付款人/自研加速器
+  related_node_ids:
+  - N01
+  - N08
+  - N17
+  - N19
+  evidence_ids:
+  - EV003
+  current_relation_status: capability_or_context_lead
+  what_current_evidence_supports: A：资本开支与AI芯片需求
+  what_it_does_not_support: 液冷路线和供应商未知
+  local_mapping_required: false
+- entity_id: ENT004
+  entity_name: Meta
+  geography: 美国
+  listing_hint: 海外上市
+  ts_code: null
+  a2_priority: context
+  candidate_roles:
+  - 最终付款人/开放机架与混合液冷设计
+  related_node_ids:
+  - N01
+  - N03
+  - N05
+  - N08
+  - N23
+  - N31
+  evidence_ids:
+  - EV007
+  - EV038
+  current_relation_status: capability_or_context_lead
+  what_current_evidence_supports: A：自研/开放架构
+  what_it_does_not_support: 供应商和外采比例未知
+  local_mapping_required: false
+- entity_id: ENT005
+  entity_name: NVIDIA
+  geography: 美国
+  listing_hint: 海外上市
+  ts_code: null
+  a2_priority: context
+  candidate_roles:
+  - 平台定义者/液冷机架架构
+  related_node_ids:
+  - N01
+  - N02
+  - N03
+  - N04
+  - N05
+  - N08
+  - N23
+  evidence_ids:
+  - EV004
+  - EV065
+  current_relation_status: capability_or_context_lead
+  what_current_evidence_supports: A：平台与规格贡献
+  what_it_does_not_support: 非冷却部件收入/供应关系证明
+  local_mapping_required: false
+- entity_id: ENT006
+  entity_name: Dell Technologies
+  geography: 美国
+  listing_hint: 海外上市
+  ts_code: null
+  a2_priority: context
+  candidate_roles:
+  - 服务器OEM/系统集成
+  related_node_ids:
+  - N01
+  - N02
+  - N03
+  - N04
+  - N23
+  evidence_ids:
+  - EV031
+  current_relation_status: capability_or_context_lead
+  what_current_evidence_supports: B：正式产品能力
+  what_it_does_not_support: 冷板/接头供应商、订单规模未知
+  local_mapping_required: false
+- entity_id: ENT007
+  entity_name: Hewlett Packard Enterprise
+  geography: 美国
+  listing_hint: 海外上市
+  ts_code: null
+  a2_priority: context
+  candidate_roles:
+  - 服务器OEM/整机柜液冷架构
+  related_node_ids:
+  - N01
+  - N02
+  - N03
+  - N04
+  - N05
+  - N08
+  - N23
+  evidence_ids:
+  - EV032
+  current_relation_status: capability_or_context_lead
+  what_current_evidence_supports: B：正式架构与产品
+  what_it_does_not_support: 供应商、收入和客户规模未知
+  local_mapping_required: false
+- entity_id: ENT008
+  entity_name: Lenovo
+  geography: 中国/全球
+  listing_hint: 海外上市
+  ts_code: null
+  a2_priority: context
+  candidate_roles:
+  - 服务器OEM/Neptune液冷
+  related_node_ids:
+  - N01
+  - N02
+  - N03
+  - N04
+  - N05
+  - N08
+  - N23
+  evidence_ids:
+  - EV033
+  current_relation_status: capability_or_context_lead
+  what_current_evidence_supports: B：正式产品能力
+  what_it_does_not_support: 具体供应商和业务占比未知
+  local_mapping_required: false
+- entity_id: ENT009
+  entity_name: Pegatron
+  geography: 中国台湾
+  listing_hint: 海外上市
+  ts_code: null
+  a2_priority: context
+  candidate_roles:
+  - ODM/ORv3冷板服务器
+  related_node_ids:
+  - N01
+  - N02
+  - N03
+  - N04
+  - N05
+  - N23
+  evidence_ids:
+  - EV060
+  current_relation_status: capability_or_context_lead
+  what_current_evidence_supports: A/B：OCP产品能力
+  what_it_does_not_support: 部署量与供应商未知
+  local_mapping_required: false
+- entity_id: ENT010
+  entity_name: Schneider Electric / Motivair
+  geography: 法国/美国
+  listing_hint: 海外上市+子公司
+  ts_code: null
+  a2_priority: context
+  candidate_roles:
+  - 端到端液冷系统/CDU/冷源
+  related_node_ids:
+  - N02
+  - N08
+  - N17
+  - N19
+  - N20
+  - N23
+  - N28
+  evidence_ids:
+  - EV021
+  - EV022
+  current_relation_status: capability_or_context_lead
+  what_current_evidence_supports: B：正式产品与路线
+  what_it_does_not_support: 订单、份额和利润未知
+  local_mapping_required: false
+- entity_id: ENT011
+  entity_name: Vertiv
+  geography: 美国
+  listing_hint: 海外上市
+  ts_code: null
+  a2_priority: context
+  candidate_roles:
+  - CDU/热管理/控制与服务
+  related_node_ids:
+  - N08
+  - N11
+  - N13
+  - N17
+  - N20
+  - N23
+  - N28
+  evidence_ids:
+  - EV023
+  current_relation_status: capability_or_context_lead
+  what_current_evidence_supports: B：正式产品能力
+  what_it_does_not_support: 页面时点、订单和盈利未知
+  local_mapping_required: false
+- entity_id: ENT012
+  entity_name: Eaton / Boyd Thermal
+  geography: 美国
+  listing_hint: 海外上市+收购标的
+  ts_code: null
+  a2_priority: context
+  candidate_roles:
+  - CDU/冷板/电力到芯片集成
+  related_node_ids:
+  - N02
+  - N08
+  - N10
+  - N24
+  - N28
+  evidence_ids:
+  - EV018
+  - EV027
+  current_relation_status: capability_or_context_lead
+  what_current_evidence_supports: A/B：OCP产品与战略整合
+  what_it_does_not_support: 收购后协同、订单和利润未知
+  local_mapping_required: false
+- entity_id: ENT013
+  entity_name: Modine / Airedale
+  geography: 美国/英国
+  listing_hint: 海外上市+子公司
+  ts_code: null
+  a2_priority: context
+  candidate_roles:
+  - CDU/冷源
+  related_node_ids:
+  - N08
+  - N17
+  - N19
+  evidence_ids:
+  - EV024
+  current_relation_status: capability_or_context_lead
+  what_current_evidence_supports: B：正式产品
+  what_it_does_not_support: 部署规模和差异化未知
+  local_mapping_required: false
+- entity_id: ENT014
+  entity_name: nVent
+  geography: 英国/美国
+  listing_hint: 海外上市
+  ts_code: null
+  a2_priority: context
+  candidate_roles:
+  - CDU/歧管/机柜/漏液与控制
+  related_node_ids:
+  - N05
+  - N07
+  - N08
+  - N23
+  - N24
+  evidence_ids:
+  - EV025
+  current_relation_status: capability_or_context_lead
+  what_current_evidence_supports: B：正式产品能力
+  what_it_does_not_support: 订单和收入占比未知
+  local_mapping_required: false
+- entity_id: ENT015
+  entity_name: Trane Technologies / LiquidStack
+  geography: 爱尔兰/美国
+  listing_hint: 海外上市+子公司
+  ts_code: null
+  a2_priority: context
+  candidate_roles:
+  - CDU/浸没/芯片到冷站
+  related_node_ids:
+  - N08
+  - N17
+  - N19
+  - N21
+  - N24
+  - N28
+  - N33
+  evidence_ids:
+  - EV034
+  - EV035
+  - EV063
+  current_relation_status: capability_or_context_lead
+  what_current_evidence_supports: B：产品与并购
+  what_it_does_not_support: 订单/路线占比/盈利未知
+  local_mapping_required: false
+- entity_id: ENT016
+  entity_name: CoolIT Systems
+  geography: 加拿大
+  listing_hint: 非上市
+  ts_code: null
+  a2_priority: context
+  candidate_roles:
+  - 冷板/CDU/歧管/液到气
+  related_node_ids:
+  - N02
+  - N05
+  - N08
+  - N20
+  - N24
+  - N28
+  evidence_ids:
+  - EV026
+  current_relation_status: capability_or_context_lead
+  what_current_evidence_supports: B：正式产品能力
+  what_it_does_not_support: 客户、订单和规模未知
+  local_mapping_required: false
+- entity_id: ENT017
+  entity_name: STULZ
+  geography: 德国
+  listing_hint: 非上市
+  ts_code: null
+  a2_priority: context
+  candidate_roles:
+  - Deschutes CDU/冷源
+  related_node_ids:
+  - N08
+  - N09
+  - N10
+  - N11
+  - N12
+  - N13
+  - N19
+  evidence_ids:
+  - EV017
+  current_relation_status: capability_or_context_lead
+  what_current_evidence_supports: A/B：OCP产品能力
+  what_it_does_not_support: 部署量和利润未知
+  local_mapping_required: false
+- entity_id: ENT018
+  entity_name: Parker Hannifin
+  geography: 美国
+  listing_hint: 海外上市
+  ts_code: null
+  a2_priority: context
+  candidate_roles:
+  - UQD/流体连接
+  related_node_ids:
+  - N04
+  evidence_ids:
+  - EV012
+  current_relation_status: capability_or_context_lead
+  what_current_evidence_supports: A：OCP产品能力
+  what_it_does_not_support: 客户认证、订单和份额未知
+  local_mapping_required: false
+- entity_id: ENT019
+  entity_name: Amphenol
+  geography: 美国
+  listing_hint: 海外上市
+  ts_code: null
+  a2_priority: context
+  candidate_roles:
+  - UQD/盲插流体连接
+  related_node_ids:
+  - N04
+  evidence_ids:
+  - EV013
+  current_relation_status: capability_or_context_lead
+  what_current_evidence_supports: A：OCP产品能力
+  what_it_does_not_support: 订单和份额未知
+  local_mapping_required: false
+- entity_id: ENT020
+  entity_name: Stäubli
+  geography: 瑞士
+  listing_hint: 非上市
+  ts_code: null
+  a2_priority: context
+  candidate_roles:
+  - UQD/流体连接
+  related_node_ids:
+  - N04
+  evidence_ids:
+  - EV011
+  current_relation_status: capability_or_context_lead
+  what_current_evidence_supports: A：OCP产品能力
+  what_it_does_not_support: 客户认证、订单和份额未知
+  local_mapping_required: false
+- entity_id: ENT021
+  entity_name: CEJN
+  geography: 瑞典
+  listing_hint: 非上市
+  ts_code: null
+  a2_priority: context
+  candidate_roles:
+  - UQD/流体连接
+  related_node_ids:
+  - N04
+  evidence_ids:
+  - EV010
+  current_relation_status: capability_or_context_lead
+  what_current_evidence_supports: A：OCP产品能力
+  what_it_does_not_support: 客户认证、订单和份额未知
+  local_mapping_required: false
+- entity_id: ENT022
+  entity_name: LÜDECKE
+  geography: 德国
+  listing_hint: 非上市
+  ts_code: null
+  a2_priority: context
+  candidate_roles:
+  - UQD/流体连接
+  related_node_ids:
+  - N04
+  evidence_ids:
+  - EV055
+  current_relation_status: capability_or_context_lead
+  what_current_evidence_supports: A：OCP产品能力
+  what_it_does_not_support: 订单和份额未知
+  local_mapping_required: false
+- entity_id: ENT023
+  entity_name: KRES Technology
+  geography: 未知/待映射
+  listing_hint: 非上市/待核
+  ts_code: null
+  a2_priority: context
+  candidate_roles:
+  - UQD/流体连接
+  related_node_ids:
+  - N04
+  evidence_ids:
+  - EV056
+  current_relation_status: capability_or_context_lead
+  what_current_evidence_supports: A：OCP产品能力
+  what_it_does_not_support: 法律主体、订单和份额未知
+  local_mapping_required: false
+- entity_id: ENT024
+  entity_name: BEEHE
+  geography: 中国/待映射
+  listing_hint: 非上市/待核
+  ts_code: null
+  a2_priority: context
+  candidate_roles:
+  - UQD与2MW CDU
+  related_node_ids:
+  - N04
+  - N08
+  - N09
+  - N10
+  - N11
+  - N12
+  - N13
+  evidence_ids:
+  - EV057
+  - EV058
+  current_relation_status: capability_or_context_lead
+  what_current_evidence_supports: A：OCP产品能力
+  what_it_does_not_support: 法律主体、客户与规模未知
+  local_mapping_required: false
+- entity_id: ENT025
+  entity_name: Georg Fischer
+  geography: 瑞士
+  listing_hint: 海外上市
+  ts_code: null
+  a2_priority: context
+  candidate_roles:
+  - 机架歧管/流体管路
+  related_node_ids:
+  - N05
+  evidence_ids:
+  - EV014
+  current_relation_status: capability_or_context_lead
+  what_current_evidence_supports: A：OCP产品能力
+  what_it_does_not_support: 订单和AI收入占比未知
+  local_mapping_required: false
+- entity_id: ENT026
+  entity_name: Danfoss
+  geography: 丹麦
+  listing_hint: 非上市基金会控股
+  ts_code: null
+  a2_priority: context
+  candidate_roles:
+  - 板式换热器/阀件/驱动
+  related_node_ids:
+  - N06
+  - N10
+  - N13
+  evidence_ids:
+  - EV028
+  current_relation_status: capability_or_context_lead
+  what_current_evidence_supports: B：正式数据中心产品
+  what_it_does_not_support: CDU认证、订单和收入未知
+  local_mapping_required: false
+- entity_id: ENT027
+  entity_name: Alfa Laval
+  geography: 瑞典
+  listing_hint: 海外上市
+  ts_code: null
+  a2_priority: context
+  candidate_roles:
+  - 板式换热器/设施侧换热
+  related_node_ids:
+  - N10
+  - N19
+  evidence_ids:
+  - EV029
+  current_relation_status: capability_or_context_lead
+  what_current_evidence_supports: B：正式产品能力
+  what_it_does_not_support: AI专用收入和订单未知
+  local_mapping_required: false
+- entity_id: ENT028
+  entity_name: Belimo
+  geography: 瑞士
+  listing_hint: 海外上市
+  ts_code: null
+  a2_priority: context
+  candidate_roles:
+  - 阀门/执行器/传感器
+  related_node_ids:
+  - N06
+  - N07
+  - N13
+  - N17
+  evidence_ids:
+  - EV030
+  current_relation_status: capability_or_context_lead
+  what_current_evidence_supports: B：正式产品能力
+  what_it_does_not_support: DTC资格和订单未知
+  local_mapping_required: false
+- entity_id: ENT029
+  entity_name: Dober
+  geography: 美国
+  listing_hint: 非上市
+  ts_code: null
+  a2_priority: context
+  candidate_roles:
+  - PG25冷却液与液质服务
+  related_node_ids:
+  - N14
+  - N18
+  - N29
+  evidence_ids:
+  - EV015
+  current_relation_status: capability_or_context_lead
+  what_current_evidence_supports: A：OCP产品能力
+  what_it_does_not_support: 订单、价格与现场寿命未知
+  local_mapping_required: false
+- entity_id: ENT030
+  entity_name: Dynalene
+  geography: 美国
+  listing_hint: 非上市
+  ts_code: null
+  a2_priority: context
+  candidate_roles:
+  - PG25冷却液
+  related_node_ids:
+  - N14
+  - N18
+  evidence_ids:
+  - EV016
+  current_relation_status: capability_or_context_lead
+  what_current_evidence_supports: A：OCP产品能力
+  what_it_does_not_support: 订单、价格与现场寿命未知
+  local_mapping_required: false
+- entity_id: ENT031
+  entity_name: Castrol / BP
+  geography: 英国
+  listing_hint: 海外上市子品牌
+  ts_code: null
+  a2_priority: context
+  candidate_roles:
+  - PG25冷却液
+  related_node_ids:
+  - N14
+  - N18
+  evidence_ids:
+  - EV059
+  current_relation_status: capability_or_context_lead
+  what_current_evidence_supports: A：OCP产品能力
+  what_it_does_not_support: 订单与液冷业务重要性未知
+  local_mapping_required: false
+- entity_id: ENT032
+  entity_name: GRC
+  geography: 美国
+  listing_hint: 非上市
+  ts_code: null
+  a2_priority: context
+  candidate_roles:
+  - 单相浸没系统
+  related_node_ids:
+  - N21
+  - N33
+  evidence_ids:
+  - EV036
+  current_relation_status: capability_or_context_lead
+  what_current_evidence_supports: B：正式产品能力
+  what_it_does_not_support: 应用占比、流体和运维经济性未知
+  local_mapping_required: false
+- entity_id: ENT033
+  entity_name: ZutaCore
+  geography: 美国/以色列
+  listing_hint: 非上市
+  ts_code: null
+  a2_priority: context
+  candidate_roles:
+  - 两相DTC
+  related_node_ids:
+  - N08
+  - N15
+  - N22
+  - N34
+  evidence_ids:
+  - EV037
+  - EV062
+  current_relation_status: capability_or_context_lead
+  what_current_evidence_supports: B：正式产品与商业生产伙伴
+  what_it_does_not_support: 广泛部署、工质供应与总成本未知
+  local_mapping_required: false
+- entity_id: ENT034
+  entity_name: 英维克
+  geography: 中国
+  listing_hint: A股待Codex映射
+  ts_code: null
+  a2_priority: high
+  candidate_roles:
+  - CDU/快接/歧管/工质/整机柜
+  related_node_ids:
+  - N04
+  - N05
+  - N07
+  - N08
+  - N14
+  - N23
+  - N24
+  evidence_ids:
+  - EV039
+  - EV040
+  current_relation_status: capability_or_context_lead
+  what_current_evidence_supports: B：正式产品能力
+  what_it_does_not_support: 客户、订单、收入、利润均未确认
+  local_mapping_required: true
+- entity_id: ENT035
+  entity_name: 申菱环境
+  geography: 中国
+  listing_hint: A股待Codex映射
+  ts_code: null
+  a2_priority: high
+  candidate_roles:
+  - CDU/冷源/系统集成
+  related_node_ids:
+  - N05
+  - N08
+  - N17
+  - N19
+  - N23
+  - N24
+  - N28
+  evidence_ids:
+  - EV041
+  - EV042
+  current_relation_status: capability_or_context_lead
+  what_current_evidence_supports: B：正式产品能力
+  what_it_does_not_support: 客户、订单、收入、利润均未确认
+  local_mapping_required: true
+- entity_id: ENT036
+  entity_name: 曙光数创/中科曙光体系
+  geography: 中国
+  listing_hint: 上市/挂牌关系待Codex映射
+  ts_code: null
+  a2_priority: high
+  candidate_roles:
+  - 冷板/浸没/系统设备
+  related_node_ids:
+  - N01
+  - N02
+  - N03
+  - N04
+  - N05
+  - N08
+  - N21
+  - N28
+  - N31
+  - N33
+  evidence_ids:
+  - EV043
+  - EV044
+  current_relation_status: capability_or_context_lead
+  what_current_evidence_supports: B：正式产品能力
+  what_it_does_not_support: 法律主体、利润归属、订单与规模未知
+  local_mapping_required: true
+- entity_id: ENT037
+  entity_name: 飞荣达
+  geography: 中国
+  listing_hint: A股待Codex映射
+  ts_code: null
+  a2_priority: high
+  candidate_roles:
+  - 冷板/TIM/热管理制造
+  related_node_ids:
+  - N02
+  - N03
+  - N25
+  - N26
+  evidence_ids:
+  - EV045
+  current_relation_status: capability_or_context_lead
+  what_current_evidence_supports: B：产品/能力线索
+  what_it_does_not_support: AI数据中心场景、认证、订单和规模未知
+  local_mapping_required: true
+- entity_id: ENT038
+  entity_name: 佳力图
+  geography: 中国
+  listing_hint: A股待Codex映射
+  ts_code: null
+  a2_priority: high
+  candidate_roles:
+  - 设施侧冷源/风液混合/数据中心温控
+  related_node_ids:
+  - N17
+  - N19
+  - N20
+  - N35
+  evidence_ids:
+  - EV046
+  current_relation_status: capability_or_context_lead
+  what_current_evidence_supports: B：设施温控能力
+  what_it_does_not_support: DTC液冷节点、订单和业务占比未知
+  local_mapping_required: true
+- entity_id: ENT039
+  entity_name: 高澜股份
+  geography: 中国
+  listing_hint: A股待Codex映射
+  ts_code: null
+  a2_priority: high
+  candidate_roles:
+  - 冷板/接头/CDU/浸没系统
+  related_node_ids:
+  - N02
+  - N04
+  - N08
+  - N21
+  - N33
+  evidence_ids:
+  - EV047
+  current_relation_status: lead_only
+  what_current_evidence_supports: D：二手转载的公司调研线索
+  what_it_does_not_support: 必须找到官方原文；订单与规模未知
+  local_mapping_required: true
+- entity_id: ENT040
+  entity_name: 同飞股份
+  geography: 中国
+  listing_hint: A股待Codex映射
+  ts_code: null
+  a2_priority: high
+  candidate_roles:
+  - CDU/歧管/预制管路/干冷器/浸没槽
+  related_node_ids:
+  - N05
+  - N08
+  - N17
+  - N19
+  - N21
+  - N24
+  - N33
+  evidence_ids:
+  - EV048
+  current_relation_status: lead_only
+  what_current_evidence_supports: D：互动平台二手转载线索
+  what_it_does_not_support: 不能证明客户、订单、收入和规模
+  local_mapping_required: true
+- entity_id: ENT041
+  entity_name: 中航光电
+  geography: 中国
+  listing_hint: A股待Codex映射
+  ts_code: null
+  a2_priority: high
+  candidate_roles:
+  - 液冷连接器/盲插快接潜在线索
+  related_node_ids:
+  - N04
+  evidence_ids:
+  - EV049
+  current_relation_status: lead_only
+  what_current_evidence_supports: C：标准报告参编/生态发现线索
+  what_it_does_not_support: 参编不等于产品资格、供货或订单
+  local_mapping_required: true
+- entity_id: ENT042
+  entity_name: 超聚变
+  geography: 中国
+  listing_hint: 非上市
+  ts_code: null
+  a2_priority: medium
+  candidate_roles:
+  - 液冷整机柜/服务器OEM
+  related_node_ids:
+  - N01
+  - N02
+  - N03
+  - N04
+  - N05
+  - N08
+  - N23
+  - N24
+  evidence_ids:
+  - EV050
+  current_relation_status: capability_or_context_lead
+  what_current_evidence_supports: B：正式产品能力
+  what_it_does_not_support: 组件供应商、客户和订单未知
+  local_mapping_required: true
+- entity_id: ENT043
+  entity_name: 河南昆仑技术
+  geography: 中国
+  listing_hint: 非上市
+  ts_code: null
+  a2_priority: medium
+  candidate_roles:
+  - 液冷整机柜/服务器OEM
+  related_node_ids:
+  - N01
+  - N02
+  - N03
+  - N04
+  - N05
+  - N08
+  - N23
+  - N24
+  evidence_ids:
+  - EV051
+  current_relation_status: capability_or_context_lead
+  what_current_evidence_supports: B：正式产品能力
+  what_it_does_not_support: 实体关系、组件供应商、客户和订单未知
+  local_mapping_required: true
+evidence_file: 01_A1_证据清单.csv
+expected_outputs:
+- 02_A2_本地支持摘要.md
+- 02_A2_本地支持.json
+- 02_A2_数据缺口.json
+- 02_A2_冲突记录.yaml（仅在存在冲突时）
+- 更新后的00_运行状态.yaml
+- 更新后的00_下一步操作.md
+completion_rule: 完成A2输出后commit+push并停止，next_actor必须设置为chatgpt，current_step=A3。
+review_due: '2026-11-30'

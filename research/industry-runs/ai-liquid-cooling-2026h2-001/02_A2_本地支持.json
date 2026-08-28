@@ -1,0 +1,512 @@
+{
+  "contract": {
+    "contract_type": "A2_local_support_result",
+    "research_id": "ai-liquid-cooling-2026h2-001",
+    "version": 1,
+    "stage": "A2",
+    "as_of": "2026-08-27T22:32:34+08:00",
+    "branch": "research/ai-liquid-cooling-2026h2",
+    "run_directory": "research/industry-runs/ai-liquid-cooling-2026h2-001",
+    "next_actor": "chatgpt",
+    "next_step": "A3"
+  },
+  "validation": {
+    "status": "complete",
+    "research_id_match": true,
+    "version_match": true,
+    "as_of_match": true,
+    "node_count": 35,
+    "node_id_range": ["N01", "N35"],
+    "entity_count": 43,
+    "entity_id_range": ["ENT001", "ENT043"],
+    "evidence_count": 65,
+    "evidence_id_range": ["EV001", "EV065"],
+    "duplicate_node_ids": [],
+    "duplicate_entity_ids": [],
+    "duplicate_evidence_ids": [],
+    "missing_node_evidence_refs": [],
+    "missing_entity_node_refs": [],
+    "missing_entity_evidence_refs": [],
+    "missing_evidence_node_refs": [],
+    "validation_errors": [],
+    "conflict_records": []
+  },
+  "input_manifest": {
+    "time_filter": "available_at <= 2026-08-27T22:32:34+08:00",
+    "utc_cutoff": "2026-08-27T14:32:34Z",
+    "resolution_method": {
+      "revision_aware_datasets": [
+        "main_business",
+        "announcement",
+        "income_statement",
+        "balance_sheet",
+        "cash_flow",
+        "financial_indicator"
+      ],
+      "revision_aware_query": "existing ResearchQuery.dataset_as_of; ResearchWarehouse constructor bypassed to preserve read-only operation",
+      "other_datasets": "current parquet rows filtered by available_at; priority rows had no current version after cutoff",
+      "scan_fields": [
+        "company_profile.introduction",
+        "company_profile.business_scope",
+        "company_profile.main_business",
+        "main_business.item_name",
+        "main_business.bz_item",
+        "announcement.title"
+      ]
+    },
+    "official_api_recheck": {
+      "observed_at": "2026-08-28T09:55:45+08:00",
+      "mode": "read_only_no_warehouse_write",
+      "requested_publication_date": "2026-08-26",
+      "cutoff_rule": "only inspect returned records with available_at <= 2026-08-27T22:32:34+08:00",
+      "endpoints": [
+        "https://query.sse.com.cn/security/stock/queryCompanyBulletin.do",
+        "https://www.szse.cn/api/disc/announcement/annList"
+      ],
+      "coverage_limit": "single-day capability sample; not a replacement for the local historical window"
+    },
+    "a1_files": [
+      {
+        "file": "01_A1_产业结构与初步线索报告.docx",
+        "bytes": 77030,
+        "sha256": "f2336a8872ac8aa4b2407e79a005b287cc6b393a584064632f4d0548e0fcd2b2",
+        "preservation": "byte_identical"
+      },
+      {
+        "file": "01_A1_本地支持请求.yaml",
+        "bytes": 45424,
+        "sha256": "9bc885b0d58b9af37663087bc306f73f2e0741f40a1ab291c2e80cb73d6bc404",
+        "preservation": "byte_identical"
+      },
+      {
+        "file": "01_A1_证据清单.csv",
+        "bytes": 40840,
+        "sha256": "b2dc5ef4aaa74c97535942e98f97054105cac81519e5d4ef394e5103c287e38d",
+        "preservation": "byte_identical"
+      },
+      {
+        "file": "00_下一步操作.md",
+        "input_bytes": 4188,
+        "input_sha256": "6fedf057e7ecb7032caa6154003675c0f61ea3117d38ebaf9c806f223308f639",
+        "preservation": "saved_then_transitioned_to_A3_control_file"
+      }
+    ],
+    "local_datasets": [
+      {
+        "dataset": "security_master",
+        "partition_count": 1,
+        "first_partition": "security-master",
+        "last_partition": "security-master",
+        "registered_row_count": 5889,
+        "partition_manifest_hash": "9b6da07d9fa002a9d9095fb323e8424510f7e26c9e3aef0e8ea2eb15fee70c33",
+        "revision_count": 78,
+        "source_names": ["tushare"],
+        "quality_statuses": ["passed"]
+      },
+      {
+        "dataset": "company_profile",
+        "partition_count": 1,
+        "first_partition": "company-profile",
+        "last_partition": "company-profile",
+        "registered_row_count": 15747,
+        "partition_manifest_hash": "54c024a858863f7d39a4691cf38067412dd06a471788a45774732a9dd942a626",
+        "revision_count": 9453,
+        "source_names": ["tushare"],
+        "quality_statuses": ["passed"]
+      },
+      {
+        "dataset": "main_business",
+        "partition_count": 14,
+        "first_partition": "2021-12-31",
+        "last_partition": "2026-06-30",
+        "registered_row_count": 667155,
+        "partition_manifest_hash": "b8b4d6c7a6d8fd2677e3972dd6c98e8211b7761367140d720d08a025809810fa",
+        "revision_count": 68842,
+        "source_names": ["tushare"],
+        "quality_statuses": ["passed"],
+        "contains_rows_after_cutoff": true
+      },
+      {
+        "dataset": "announcement",
+        "partition_count": 14,
+        "first_partition": "2025-07",
+        "last_partition": "2026-08",
+        "registered_row_count": 776220,
+        "partition_manifest_hash": "655b17e5a346ad3e42246c36133175ac5759901470bda4330d82e5bffb73ebec",
+        "revision_count": 0,
+        "source_names": ["cninfo", "sse", "szse"],
+        "quality_statuses": ["passed"],
+        "contains_rows_after_cutoff": true
+      },
+      {
+        "dataset": "income_statement",
+        "partition_count": 14,
+        "first_partition": "2021-12-31",
+        "last_partition": "2026-06-30",
+        "registered_row_count": 73567,
+        "partition_manifest_hash": "0db63c5fac5e44a4402f490470f8505971830469398f451fbf84f775545f3733",
+        "revision_count": 5171,
+        "source_names": ["tushare"],
+        "quality_statuses": ["passed"],
+        "contains_rows_after_cutoff": true
+      },
+      {
+        "dataset": "balance_sheet",
+        "partition_count": 14,
+        "first_partition": "2021-12-31",
+        "last_partition": "2026-06-30",
+        "registered_row_count": 73669,
+        "partition_manifest_hash": "11a2fb62278f4156a95e245740c56b40ccc2bdd53b65985a3fb0684aca8d7953",
+        "revision_count": 4385,
+        "source_names": ["tushare"],
+        "quality_statuses": ["passed"],
+        "contains_rows_after_cutoff": true
+      },
+      {
+        "dataset": "cash_flow",
+        "partition_count": 14,
+        "first_partition": "2021-12-31",
+        "last_partition": "2026-06-30",
+        "registered_row_count": 73352,
+        "partition_manifest_hash": "26bd710694ece8feb4a60cf73f49941431ffd9827e693055e300c389ac18251e",
+        "revision_count": 13134,
+        "source_names": ["tushare"],
+        "quality_statuses": ["passed"],
+        "contains_rows_after_cutoff": true
+      },
+      {
+        "dataset": "financial_indicator",
+        "partition_count": 14,
+        "first_partition": "2021-12-31",
+        "last_partition": "2026-06-30",
+        "registered_row_count": 73934,
+        "partition_manifest_hash": "0272b2240a03eaf30519360a924dd4dae21b928289d57e590c9dd976938a0b97",
+        "revision_count": 367,
+        "source_names": ["tushare"],
+        "quality_statuses": ["passed"],
+        "contains_rows_after_cutoff": true
+      },
+      {
+        "dataset": "daily_basic",
+        "partition_count": 1243,
+        "first_partition": "2021-07-14",
+        "last_partition": "2026-08-27",
+        "registered_row_count": 6431357,
+        "partition_manifest_hash": "c151165aeb6712e1146b9f03545ede1bd8f3b42097226f0aa14124ef3073add2",
+        "revision_count": 71,
+        "source_names": ["tushare"],
+        "quality_statuses": ["passed"]
+      },
+      {
+        "dataset": "equity_daily",
+        "partition_count": 1243,
+        "first_partition": "2021-07-14",
+        "last_partition": "2026-08-27",
+        "registered_row_count": 6449675,
+        "partition_manifest_hash": "246acb61abedc5af9ce8c14fd73794ba69674007d9858ad33e76752a89c79851",
+        "revision_count": 0,
+        "source_names": ["tushare"],
+        "quality_statuses": ["passed"]
+      },
+      {
+        "dataset": "industry_member",
+        "partition_count": 1,
+        "first_partition": "SW2021",
+        "last_partition": "SW2021",
+        "registered_row_count": 17850,
+        "partition_manifest_hash": "c3adbc167d743f42d75994434720e20bf5b4a4e69cb5d758350633d080535680",
+        "revision_count": 324,
+        "source_names": ["tushare"],
+        "quality_statuses": ["passed"]
+      },
+      {
+        "dataset": "theme_member",
+        "partition_count": 1,
+        "first_partition": "official-theme-v1",
+        "last_partition": "official-theme-v1",
+        "registered_row_count": 267102,
+        "partition_manifest_hash": "427e4a63429ed56fb20c745c110d10c0e494961e88b0094a67d125ebe32ade31",
+        "revision_count": 20672,
+        "source_names": ["tushare"],
+        "quality_statuses": ["passed"]
+      }
+    ]
+  },
+  "entity_master_sample": [
+    {
+      "a1_entity_id": "ENT034",
+      "a1_entity_name": "英维克",
+      "mapping_status": "complete",
+      "current_short_name": "英维克",
+      "current_legal_name": "深圳市英维克科技股份有限公司",
+      "ts_code": "002837.SZ",
+      "exchange": "SZSE",
+      "market": "主板",
+      "list_status": "L",
+      "local_company_id": "9144030077877383X6",
+      "website": "www.envicool.com",
+      "a1_aliases": ["Envicool"],
+      "former_names": {"status": "no_record", "values": []},
+      "subsidiaries": {"status": "unsupported", "values": []},
+      "brands": {"status": "partial", "values": ["Envicool"], "basis": "A1 alias plus matching local website domain; no local brand registry"}
+    },
+    {
+      "a1_entity_id": "ENT035",
+      "a1_entity_name": "申菱环境",
+      "mapping_status": "complete",
+      "current_short_name": "申菱环境",
+      "current_legal_name": "广东申菱环境系统股份有限公司",
+      "ts_code": "301018.SZ",
+      "exchange": "SZSE",
+      "market": "创业板",
+      "list_status": "L",
+      "local_company_id": "914406067243530987",
+      "website": "www.shenling.com",
+      "a1_aliases": ["Guangdong Shenling", "Shenling"],
+      "former_names": {"status": "no_record", "values": []},
+      "subsidiaries": {"status": "unsupported", "values": []},
+      "brands": {"status": "partial", "values": ["Shenling"], "basis": "A1 alias plus matching local website domain; no local brand registry"}
+    },
+    {
+      "a1_entity_id": "ENT036",
+      "a1_entity_name": "曙光数创/中科曙光体系",
+      "mapping_status": "split_required",
+      "current_short_name": "曙光数创",
+      "current_legal_name": "曙光数据基础设施创新技术(北京)股份有限公司",
+      "ts_code": "920808.BJ",
+      "exchange": "BSE",
+      "market": "北交所",
+      "list_status": "L",
+      "local_company_id": "911101087351280057",
+      "website": "DataEnergy.Sugon.com/",
+      "a1_aliases": ["Sugon Data Creation", "曙光数创"],
+      "former_names": {"status": "partial", "values": ["中科曙光集团数据中心产品事业部"], "basis": "current company-profile narrative; this is a predecessor business unit, not a confirmed former legal name"},
+      "subsidiaries": {"status": "unsupported", "values": []},
+      "brands": {"status": "partial", "values": ["曙光数创"], "basis": "short name and current website only"},
+      "relationship_limit": "current ownership, control, brand authorization and profit attribution to 603019.SH are unknown"
+    },
+    {
+      "a1_entity_id": "ENT036",
+      "a1_entity_name": "曙光数创/中科曙光体系",
+      "mapping_status": "split_required",
+      "current_short_name": "中科曙光",
+      "current_legal_name": "曙光信息产业股份有限公司",
+      "ts_code": "603019.SH",
+      "exchange": "SSE",
+      "market": "主板",
+      "list_status": "L",
+      "local_company_id": "91120000783342508F",
+      "website": "www.sugon.com",
+      "a1_aliases": ["中科曙光", "曙光公司"],
+      "former_names": {"status": "no_record", "values": []},
+      "subsidiaries": {"status": "unsupported", "values": []},
+      "brands": {"status": "partial", "values": ["中科曙光", "曙光"], "basis": "current company-profile narrative; no local brand registry"},
+      "relationship_limit": "current ownership, control and profit attribution relating to 920808.BJ are unknown"
+    },
+    {
+      "a1_entity_id": "ENT037",
+      "a1_entity_name": "飞荣达",
+      "mapping_status": "complete",
+      "current_short_name": "飞荣达",
+      "current_legal_name": "深圳市飞荣达科技股份有限公司",
+      "ts_code": "300602.SZ",
+      "exchange": "SZSE",
+      "market": "创业板",
+      "list_status": "L",
+      "local_company_id": "914403002794071819",
+      "website": "www.frd.cn",
+      "a1_aliases": ["FRD"],
+      "former_names": {"status": "no_record", "values": []},
+      "subsidiaries": {"status": "unsupported", "values": []},
+      "brands": {"status": "partial", "values": ["FRD"], "basis": "A1 alias plus matching local website domain; no local brand registry"}
+    },
+    {
+      "a1_entity_id": "ENT038",
+      "a1_entity_name": "佳力图",
+      "mapping_status": "complete",
+      "current_short_name": "佳力图",
+      "current_legal_name": "南京佳力图机房环境技术股份有限公司",
+      "ts_code": "603912.SH",
+      "exchange": "SSE",
+      "market": "主板",
+      "list_status": "L",
+      "local_company_id": "91320100751287129E",
+      "website": "www.canatal.com.cn",
+      "a1_aliases": ["Canatal"],
+      "former_names": {"status": "no_record", "values": []},
+      "subsidiaries": {"status": "unsupported", "values": []},
+      "brands": {"status": "partial", "values": ["Canatal"], "basis": "A1 alias plus matching local website domain; no local brand registry"}
+    },
+    {
+      "a1_entity_id": "ENT039",
+      "a1_entity_name": "高澜股份",
+      "mapping_status": "complete",
+      "current_short_name": "高澜股份",
+      "current_legal_name": "广州高澜节能技术股份有限公司",
+      "ts_code": "300499.SZ",
+      "exchange": "SZSE",
+      "market": "创业板",
+      "list_status": "L",
+      "local_company_id": "91440101729900257B",
+      "website": "www.goaland.com.cn",
+      "a1_aliases": ["Gaolan"],
+      "former_names": {"status": "no_record", "values": []},
+      "subsidiaries": {"status": "partial", "values": ["岳阳高澜节能装备制造有限公司", "高澜节能技术美国有限责任公司"], "basis": "current profile narrative only; not a complete ownership list"},
+      "brands": {"status": "partial", "values": ["高澜", "Gaolan"], "basis": "short name/A1 alias and website domain; no local brand registry"}
+    },
+    {
+      "a1_entity_id": "ENT040",
+      "a1_entity_name": "同飞股份",
+      "mapping_status": "complete",
+      "current_short_name": "同飞股份",
+      "current_legal_name": "三河同飞制冷股份有限公司",
+      "ts_code": "300990.SZ",
+      "exchange": "SZSE",
+      "market": "创业板",
+      "list_status": "L",
+      "local_company_id": "91131082601219411Y",
+      "website": "www.tfzl.com",
+      "a1_aliases": ["Tongfei"],
+      "former_names": {"status": "no_record", "values": []},
+      "subsidiaries": {"status": "unsupported", "values": []},
+      "brands": {"status": "partial", "values": ["Tongfei"], "basis": "A1 alias plus matching local website domain; no local brand registry"}
+    },
+    {
+      "a1_entity_id": "ENT041",
+      "a1_entity_name": "中航光电",
+      "mapping_status": "complete",
+      "current_short_name": "中航光电",
+      "current_legal_name": "中航光电科技股份有限公司",
+      "ts_code": "002179.SZ",
+      "exchange": "SZSE",
+      "market": "主板",
+      "list_status": "L",
+      "local_company_id": "914100007457748527",
+      "website": "www.jonhon.cn",
+      "a1_aliases": [],
+      "former_names": {"status": "no_record", "values": []},
+      "subsidiaries": {"status": "partial", "values": [], "basis": "current profile says branches and subsidiaries exist but does not name a complete legal-entity list"},
+      "brands": {"status": "unsupported", "values": []}
+    }
+  ],
+  "context_entity_local_mapping": [
+    {"entity_id": "ENT042", "entity_name": "超聚变", "status": "unknown", "reason": "private entity is not an A-share security-master identity"},
+    {"entity_id": "ENT043", "entity_name": "河南昆仑技术", "status": "unknown", "reason": "private entity is not an A-share security-master identity"},
+    {"entity_id": "ENT024", "entity_name": "BEEHE", "status": "unknown", "reason": "no unique A-share security-master identity"}
+  ],
+  "coverage_status_definitions": {
+    "complete": "the requested local capability is present for the current contract and cutoff",
+    "partial": "records exist but history, fields, scope or replayability is incomplete",
+    "unsupported": "the local warehouse has no such capability",
+    "query_failed": "the capability exists but the query failed",
+    "no_record": "the queried capability and scope were available but returned no matching record",
+    "unknown": "identity or fact cannot be uniquely resolved",
+    "current_snapshot_not_replayable": "only a current snapshot exists; earlier state cannot be reconstructed"
+  },
+  "coverage_by_entity_and_dataset": [
+    {"ts_code":"002837.SZ","name":"英维克","company_profile":{"status":"partial","pit_status":"current_snapshot_not_replayable","rows":1,"snapshot_date":"2026-07-13"},"main_business":{"status":"partial","rows":143,"periods":8,"first":"2021-12-31","last":"2026-06-30"},"announcement":{"status":"partial","rows":126,"first":"2025-07-17","last":"2026-08-24","remote_pdf_entries":126,"local_full_text":"unsupported"},"financials":{"status":"complete","income_periods":14,"balance_periods":14,"cashflow_periods":14,"indicator_periods":14,"first":"2021-12-31","last":"2026-06-30"},"valuation":{"status":"partial","rows":1243,"first":"2021-07-14","last":"2026-08-27"},"price":{"status":"partial","rows":1243,"first":"2021-07-14","last":"2026-08-27"},"industry_membership":{"status":"partial","rows":3},"theme_membership":{"status":"partial","rows":176,"snapshot_dates":13}},
+    {"ts_code":"301018.SZ","name":"申菱环境","company_profile":{"status":"partial","pit_status":"current_snapshot_not_replayable","rows":1,"snapshot_date":"2026-07-13"},"main_business":{"status":"partial","rows":63,"periods":7,"first":"2021-12-31","last":"2025-12-31"},"announcement":{"status":"partial","rows":176,"first":"2025-08-13","last":"2026-08-20","remote_pdf_entries":176,"local_full_text":"unsupported"},"financials":{"status":"complete","income_periods":13,"balance_periods":13,"cashflow_periods":13,"indicator_periods":13,"first":"2021-12-31","last":"2026-03-31"},"valuation":{"status":"partial","rows":1243,"first":"2021-07-14","last":"2026-08-27"},"price":{"status":"partial","rows":1243,"first":"2021-07-14","last":"2026-08-27"},"industry_membership":{"status":"partial","rows":3},"theme_membership":{"status":"partial","rows":28,"snapshot_dates":13}},
+    {"ts_code":"920808.BJ","name":"曙光数创","company_profile":{"status":"partial","pit_status":"current_snapshot_not_replayable","rows":1,"snapshot_date":"2026-07-13"},"main_business":{"status":"partial","rows":150,"periods":8,"first":"2021-12-31","last":"2026-06-30"},"announcement":{"status":"partial","rows":87,"first":"2025-10-28","last":"2026-08-26","remote_pdf_entries":87,"local_full_text":"unsupported"},"financials":{"status":"complete","income_periods":14,"balance_periods":14,"cashflow_periods":14,"indicator_periods":14,"first":"2021-12-31","last":"2026-06-30"},"valuation":{"status":"partial","rows":906,"first":"2022-11-18","last":"2026-08-27"},"price":{"status":"partial","rows":1125,"first":"2021-07-14","last":"2026-08-27","limitation":"history starts before security-master list_date; old-code/venue semantics unknown"},"industry_membership":{"status":"partial","rows":3},"theme_membership":{"status":"partial","rows":13,"snapshot_dates":13}},
+    {"ts_code":"603019.SH","name":"中科曙光","company_profile":{"status":"partial","pit_status":"current_snapshot_not_replayable","rows":1,"snapshot_date":"2026-07-13"},"main_business":{"status":"partial","rows":164,"periods":7,"first":"2021-12-31","last":"2025-12-31"},"announcement":{"status":"partial","rows":180,"first":"2025-07-21","last":"2026-08-25","remote_pdf_entries":180,"local_full_text":"unsupported"},"financials":{"status":"complete","income_periods":13,"balance_periods":13,"cashflow_periods":13,"indicator_periods":13,"first":"2021-12-31","last":"2026-03-31"},"valuation":{"status":"partial","rows":1233,"first":"2021-07-14","last":"2026-08-27"},"price":{"status":"partial","rows":1233,"first":"2021-07-14","last":"2026-08-27"},"industry_membership":{"status":"partial","rows":3},"theme_membership":{"status":"partial","rows":242,"snapshot_dates":13}},
+    {"ts_code":"300602.SZ","name":"飞荣达","company_profile":{"status":"partial","pit_status":"current_snapshot_not_replayable","rows":1,"snapshot_date":"2026-07-13"},"main_business":{"status":"partial","rows":152,"periods":7,"first":"2021-12-31","last":"2025-12-31"},"announcement":{"status":"partial","rows":122,"first":"2025-07-29","last":"2026-07-31","remote_pdf_entries":122,"local_full_text":"unsupported"},"financials":{"status":"complete","income_periods":13,"balance_periods":13,"cashflow_periods":13,"indicator_periods":13,"first":"2021-12-31","last":"2026-03-31"},"valuation":{"status":"partial","rows":1243,"first":"2021-07-14","last":"2026-08-27"},"price":{"status":"partial","rows":1243,"first":"2021-07-14","last":"2026-08-27"},"industry_membership":{"status":"partial","rows":3},"theme_membership":{"status":"partial","rows":86,"snapshot_dates":13}},
+    {"ts_code":"603912.SH","name":"佳力图","company_profile":{"status":"partial","pit_status":"current_snapshot_not_replayable","rows":1,"snapshot_date":"2026-07-13"},"main_business":{"status":"partial","rows":95,"periods":7,"first":"2021-12-31","last":"2025-12-31"},"announcement":{"status":"partial","rows":147,"first":"2025-07-14","last":"2026-08-26","remote_pdf_entries":147,"local_full_text":"unsupported"},"financials":{"status":"complete","income_periods":13,"balance_periods":13,"cashflow_periods":13,"indicator_periods":13,"first":"2021-12-31","last":"2026-03-31"},"valuation":{"status":"partial","rows":1243,"first":"2021-07-14","last":"2026-08-27"},"price":{"status":"partial","rows":1243,"first":"2021-07-14","last":"2026-08-27"},"industry_membership":{"status":"partial","rows":3},"theme_membership":{"status":"partial","rows":2,"snapshot_dates":2}},
+    {"ts_code":"300499.SZ","name":"高澜股份","company_profile":{"status":"partial","pit_status":"current_snapshot_not_replayable","rows":1,"snapshot_date":"2026-07-13"},"main_business":{"status":"partial","rows":74,"periods":7,"first":"2021-12-31","last":"2025-12-31"},"announcement":{"status":"partial","rows":85,"first":"2025-08-01","last":"2026-08-25","remote_pdf_entries":85,"local_full_text":"unsupported"},"financials":{"status":"complete","income_periods":13,"balance_periods":13,"cashflow_periods":13,"indicator_periods":13,"first":"2021-12-31","last":"2026-03-31"},"valuation":{"status":"partial","rows":1243,"first":"2021-07-14","last":"2026-08-27"},"price":{"status":"partial","rows":1243,"first":"2021-07-14","last":"2026-08-27"},"industry_membership":{"status":"partial","rows":3},"theme_membership":{"status":"partial","rows":28,"snapshot_dates":13}},
+    {"ts_code":"300990.SZ","name":"同飞股份","company_profile":{"status":"partial","pit_status":"current_snapshot_not_replayable","rows":1,"snapshot_date":"2026-07-13"},"main_business":{"status":"partial","rows":71,"periods":7,"first":"2021-12-31","last":"2025-12-31"},"announcement":{"status":"partial","rows":216,"first":"2025-07-28","last":"2026-08-10","remote_pdf_entries":216,"local_full_text":"unsupported"},"financials":{"status":"complete","income_periods":13,"balance_periods":13,"cashflow_periods":13,"indicator_periods":13,"first":"2021-12-31","last":"2026-03-31"},"valuation":{"status":"partial","rows":1243,"first":"2021-07-14","last":"2026-08-27"},"price":{"status":"partial","rows":1243,"first":"2021-07-14","last":"2026-08-27"},"industry_membership":{"status":"partial","rows":3},"theme_membership":{"status":"partial","rows":19,"snapshot_dates":13}},
+    {"ts_code":"002179.SZ","name":"中航光电","company_profile":{"status":"partial","pit_status":"current_snapshot_not_replayable","rows":1,"snapshot_date":"2026-07-13"},"main_business":{"status":"partial","rows":109,"periods":7,"first":"2021-12-31","last":"2025-12-31"},"announcement":{"status":"partial","rows":154,"first":"2025-08-01","last":"2026-08-26","remote_pdf_entries":154,"local_full_text":"unsupported"},"financials":{"status":"complete","income_periods":13,"balance_periods":13,"cashflow_periods":13,"indicator_periods":13,"first":"2021-12-31","last":"2026-03-31"},"valuation":{"status":"partial","rows":1243,"first":"2021-07-14","last":"2026-08-27"},"price":{"status":"partial","rows":1243,"first":"2021-07-14","last":"2026-08-27"},"industry_membership":{"status":"partial","rows":3},"theme_membership":{"status":"partial","rows":429,"snapshot_dates":13}}
+  ],
+  "announcement_access_audit": {
+    "metadata_status": "partial",
+    "available_sources": ["cninfo", "sse", "szse"],
+    "window": {"first_partition": "2025-07", "last_partition": "2026-08"},
+    "official_url_status": "complete_for_returned_priority_rows",
+    "pdf_path_semantics": "remote relative PDF path, not a local file",
+    "local_pdf_status": "unsupported",
+    "local_full_text_status": "unsupported",
+    "targeted_priority_title_terms": ["液冷", "冷板", "CDU", "快接", "冷却", "散热", "温控", "数据中心"],
+    "targeted_priority_title_hits": [],
+    "targeted_priority_title_hit_status": "no_record",
+    "interpretation_limit": "no title hit does not mean no relevant business or disclosure",
+    "live_official_api_recheck": {
+      "observed_at": "2026-08-28T09:55:45+08:00",
+      "requested_publication_date": "2026-08-26",
+      "time_safety": "all recorded priority matches have available_at <= research cutoff",
+      "sse": {
+        "metadata_status": "complete",
+        "endpoint": "security/stock/queryCompanyBulletin.do",
+        "returned_rows": 2436,
+        "priority_codes_matched": ["603019.SH", "603912.SH"],
+        "sampled_date_title_term_hits": [],
+        "pdf_sample": {
+          "ts_code": "603912.SH",
+          "title": "603912：佳力图2026年半年度报告",
+          "url": "https://www.sse.com.cn/disclosure/listedinfo/announcement/c/new/2026-08-26/603912_20260826_04J5.pdf",
+          "status": "query_failed",
+          "http_status": 200,
+          "returned_content_type": "text/html; charset=utf-8",
+          "returned_bytes": 7373,
+          "returned_sha256": "6bf5cd1f84068bb7a156e9c2e84c8f99b2be442273c5d463812d45bc16372eb5",
+          "reason": "official static host returned a JavaScript Cookie challenge page instead of PDF bytes"
+        }
+      },
+      "szse": {
+        "metadata_status": "complete",
+        "endpoint": "api/disc/announcement/annList",
+        "returned_rows": 3448,
+        "priority_codes_matched": ["300499.SZ"],
+        "sampled_date_title_term_hits": [],
+        "pdf_sample": {
+          "ts_code": "300499.SZ",
+          "title": "高澜股份：关于全资子公司变更法定代表人及经营范围并完成工商变更登记的公告",
+          "url": "https://disc.static.szse.cn/disc/disk03/finalpage/2026-08-26/9ab77bb8-00b8-4624-9ca1-638465fb8215.PDF",
+          "status": "complete",
+          "http_status": 200,
+          "returned_content_type": "application/pdf",
+          "returned_bytes": 128942,
+          "pdf_magic": "%PDF-",
+          "sha256": "48c239720da81987900be845d17d456d699507323c5da666327d21de86516131"
+        }
+      },
+      "bse_limit": "920808.BJ is not covered by these SSE/SZSE endpoints; its local announcement metadata source remains unchanged"
+    }
+  },
+  "node_dictionary_scan": {
+    "status": "complete",
+    "unique_synonym_count": 90,
+    "separately_scanned_ambiguous_english_terms": ["Pumps", "TANK", "manifold"],
+    "separate_scan_hits": 0,
+    "rule": "all matches are lead_only; keywords cannot establish capability, qualification, supply, order, revenue, profit or cash",
+    "existing_a1_entity_hits": [
+      {
+        "ts_code": "920808.BJ",
+        "name": "曙光数创",
+        "matched_nodes": ["N03", "N21"],
+        "contexts": ["C7000冷板式液冷系统", "冷板液冷产品", "浸没液冷产品"],
+        "status": "a1_existing_entity_match",
+        "relation_limit": "business classification only"
+      }
+    ],
+    "new_a_share_leads": [
+      {"ts_code":"002536.SZ","name":"飞龙股份","exchange":"SZSE","market":"主板","dataset":"company_profile","field":"introduction","matched_term":"歧管","node_ids":["N05"],"context":"主导产品为汽车水泵，发动机进、排气歧管，增压器涡壳，电子泵等","fact_as_of":"current_profile_snapshot","available_at":"2026-07-13T17:15:56.005Z","provider":"tushare","status":"lead_only","scope_note":"automotive intake/exhaust manifold; semantic mismatch with rack coolant manifold"},
+      {"ts_code":"301309.SZ","name":"万得凯","exchange":"SZSE","market":"创业板","dataset":"company_profile","field":"introduction","matched_term":"快速接头","node_ids":["N04"],"context":"所设计与开发的水管快速接头曾获省新产品认定","fact_as_of":"current_profile_snapshot","available_at":"2026-07-13T17:15:56.005Z","provider":"tushare","status":"lead_only","scope_note":"general water-pipe connector; no server-liquid-cooling context"},
+      {"ts_code":"301397.SZ","name":"溯联股份","exchange":"SZSE","market":"创业板","dataset":"company_profile","field":"introduction","matched_term":"快速接头","node_ids":["N04"],"context":"汽车燃油/真空系统管路总成、塑料快速接头及塑料紧固件","fact_as_of":"current_profile_snapshot","available_at":"2026-07-13T17:15:56.005Z","provider":"tushare","status":"lead_only","scope_note":"automotive fluid-line context"},
+      {"ts_code":"301667.SZ","name":"纳百川","exchange":"SZSE","market":"创业板","dataset":"main_business","field":"item_name","matched_term":"液冷板","node_ids":["N03"],"context":"电池液冷板","fact_as_of":"2025-12-31","available_at":"2026-04-24T00:00:00+08:00","provider":"tushare","status":"lead_only","scope_note":"new-energy/storage battery context; cannot be projected to AI cold plates"},
+      {"ts_code":"603169.SH","name":"兰石重装","exchange":"SSE","market":"主板","dataset":"company_profile","field":"introduction","matched_term":"板式换热器","node_ids":["N10"],"context":"炼油、煤化工高端压力容器装备、快速锻压机组装备、板式换热器、核电新能源等高端能源装备","fact_as_of":"current_profile_snapshot","available_at":"2026-07-13T17:15:56.005Z","provider":"tushare","status":"lead_only","scope_note":"general energy-equipment context; no data-center qualification"},
+      {"ts_code":"920405.BJ","name":"海希通讯","exchange":"BSE","market":"北交所","dataset":"main_business","field":"item_name","matched_term":"冷板","node_ids":["N03"],"context":"冷板式液冷PACK加工服务","fact_as_of":"2024-12-31","available_at":"2025-04-24T00:00:00+08:00","provider":"tushare","status":"lead_only","scope_note":"PACK end-use is not explained in the local business item"},
+      {"ts_code":"920223.BJ","name":"荣亿精密","exchange":"BSE","market":"北交所","dataset":"announcement","field":"title","matched_term":"快速接头","node_ids":["N04"],"context":"关于投资服务器液冷快速接头精密零部件项目的公告","fact_as_of":"2025-12-02T00:00:00+08:00","available_at":"2025-12-02T00:00:00+08:00","provider":"cninfo","official_url":"https://www.cninfo.com.cn/finalpage/2025-12-02/1224844134.PDF","status":"lead_only","scope_note":"title-only project lead; does not establish completion, qualification, supply, orders or revenue"}
+    ]
+  },
+  "point_in_time_limits": [
+    "company_profile has only a 2026-07-13 current snapshot and cannot replay earlier profile states",
+    "A1 undated live web pages observed after the cutoff remain current_snapshot_not_replayable",
+    "partitions containing post-cutoff rows were queried with available_at filtering; post-cutoff rows were excluded",
+    "announcement coverage is metadata plus remote PDF entry only and begins around 2025-07",
+    "920808.BJ equity_daily starts before security-master list_date; historical code/venue semantics are unknown"
+  ],
+  "forbidden_inferences_preserved": [
+    "keyword hit is not capability confirmation",
+    "theme or industry membership is not a supply relationship",
+    "announcement title is not announcement-body evidence",
+    "patent, certification or standards participation is not supply, order or revenue evidence",
+    "product or business classification is not customer, order, repeated delivery, profit or cash evidence"
+  ]
+}

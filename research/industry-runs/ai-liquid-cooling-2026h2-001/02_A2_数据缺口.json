@@ -1,0 +1,153 @@
+{
+  "contract": {
+    "contract_type": "A2_local_data_gap_register",
+    "research_id": "ai-liquid-cooling-2026h2-001",
+    "version": 1,
+    "as_of": "2026-08-27T22:32:34+08:00",
+    "next_actor": "chatgpt",
+    "next_step": "A3"
+  },
+  "status_summary": {
+    "complete": [
+      "priority security identity mapping",
+      "financial statement and indicator access relative to the current local contract and cutoff",
+      "selected-partition input manifest"
+    ],
+    "partial": [
+      "company profile",
+      "main business",
+      "announcement metadata, official API access and remote PDF entry",
+      "valuation history",
+      "price history",
+      "industry membership",
+      "theme membership",
+      "aliases, subsidiaries and brands"
+    ],
+    "unsupported": [
+      "local announcement PDF/full-text store",
+      "structured former-name and old-security-code history",
+      "structured subsidiary, brand, ownership and control history"
+    ],
+    "query_failed": [
+      "SSE official PDF direct retrieval sample returned a JavaScript Cookie challenge page; SSE metadata API itself succeeded"
+    ],
+    "no_record": [
+      "priority-entity announcement-title hits for liquid-cooling target terms within the local announcement window"
+    ],
+    "unknown": [
+      "current ownership/control/profit attribution between 920808.BJ and 603019.SH",
+      "unique local A-share identities for xFusion, Henan Kunlun Technology and BEEHE",
+      "historical code/venue meaning of 920808.BJ price rows before its security-master list date"
+    ],
+    "current_snapshot_not_replayable": [
+      "company profile before 2026-07-13",
+      "A1 undated live web pages observed after the research cutoff"
+    ]
+  },
+  "gaps": [
+    {
+      "gap_id": "A2-G01",
+      "topic": "company identity history",
+      "status": "unsupported",
+      "affected_entities": ["ENT034", "ENT035", "ENT036", "ENT037", "ENT038", "ENT039", "ENT040", "ENT041"],
+      "missing_fields": ["former_legal_names", "old_security_codes", "full_subsidiary_list", "brand_registry", "ownership_intervals", "control_intervals"],
+      "local_evidence": "security_master and company_profile provide current identities only; priority security/profile revision queries returned no historical name rows",
+      "impact": "entity families and historical facts cannot be safely merged by name alone",
+      "next_action": "ChatGPT A3 should use official corporate filings or registries and retain effective dates; unresolved items remain unknown",
+      "must_not_infer": "do not infer legal identity or ownership from shared website domains, similar names or A1 aliases"
+    },
+    {
+      "gap_id": "A2-G02",
+      "topic": "Sugon entity family relationship",
+      "status": "unknown",
+      "affected_entities": ["ENT036"],
+      "local_identities": ["920808.BJ", "603019.SH"],
+      "local_evidence": "both securities map uniquely; the current 920808.BJ profile says it originated from the Sugon data-center product business unit",
+      "missing_fields": ["current_equity_ownership", "control", "brand_authorization", "related_party_boundary", "profit_attribution"],
+      "impact": "A1 product evidence cannot be assigned to the wrong listed entity or double-counted",
+      "next_action": "A3 must verify the current legal relationship from official filings and keep the two securities separate until confirmed"
+    },
+    {
+      "gap_id": "A2-G03",
+      "topic": "company profile replayability",
+      "status": "current_snapshot_not_replayable",
+      "affected_entities": ["all priority A-share identities"],
+      "available_snapshot": "2026-07-13",
+      "impact": "profile text cannot establish what was known before that snapshot or reconstruct earlier names/business scopes",
+      "next_action": "use dated official filings for historical questions; keep the current profile only as a cutoff-available snapshot"
+    },
+    {
+      "gap_id": "A2-G04",
+      "topic": "announcement full text and historical window",
+      "status": "partial",
+      "affected_entities": ["all priority A-share identities"],
+      "available": "metadata, official URL and remote relative PDF path; partitions 2025-07 through 2026-08; 2026-08-26 SSE/SZSE official metadata API samples both succeeded; one SZSE PDF sample was retrieved and validated in memory",
+      "missing": "local PDF files, parsed body text and older complete history; the SSE PDF sample returned a JavaScript Cookie challenge page instead of PDF bytes",
+      "official_api_recheck": {
+        "observed_at": "2026-08-28T09:55:45+08:00",
+        "sse_metadata": "complete",
+        "sse_pdf_sample": "query_failed",
+        "szse_metadata": "complete",
+        "szse_pdf_sample": "complete",
+        "coverage_limit": "single publication date only"
+      },
+      "priority_title_scan_status": "no_record",
+      "impact": "titles cannot confirm products, customers, qualification, supply, orders, revenue or profit; older disclosures may be absent",
+      "next_action": "A3 may select a small number of official PDFs for external/manual reading, using the accessible exchange path or a browser for SSE challenge pages; do not treat no title hit as no business"
+    },
+    {
+      "gap_id": "A2-G05",
+      "topic": "business classification versus commercial relationship",
+      "status": "partial",
+      "affected_entities": ["all mapped and scan-hit entities"],
+      "available": "company description, business scope, main-business item, report period and available_at",
+      "missing_fields": ["customer", "qualification_version", "supply_relationship", "order", "repeated_delivery", "liquid_cooling_revenue", "liquid_cooling_profit", "cash_collection"],
+      "impact": "local product words and business items are insufficient for A3/B/C relationship or economics judgments",
+      "next_action": "A3 must preserve identity/capability/relation/scale separation and only upgrade with evidence that proves the requested layer"
+    },
+    {
+      "gap_id": "A2-G06",
+      "topic": "920808.BJ historical price identity",
+      "status": "unknown",
+      "affected_entities": ["ENT036"],
+      "observed": {
+        "security_master_list_date": "2022-11-18",
+        "daily_basic_first_date": "2022-11-18",
+        "equity_daily_first_date": "2021-07-14"
+      },
+      "impact": "pre-list-date price rows may reflect an old code or pre-BSE trading stage and must not be used without code/venue normalization",
+      "next_action": "before any later price analysis, verify historical security code and trading-venue semantics from an official or provider mapping"
+    },
+    {
+      "gap_id": "A2-G07",
+      "topic": "A1 undated live-page point-in-time proof",
+      "status": "current_snapshot_not_replayable",
+      "affected_evidence_status": "current_page_needs_archive_confirmation",
+      "observed_after_cutoff": "2026-08-28T00:30:00+08:00",
+      "research_cutoff": "2026-08-27T22:32:34+08:00",
+      "local_archive_status": "no_record",
+      "impact": "the current page cannot upgrade a historical fact at the cutoff",
+      "next_action": "A3 should locate a dated filing, archived page or earlier official publication; otherwise keep it as a current capability lead"
+    },
+    {
+      "gap_id": "A2-G08",
+      "topic": "private and non-A-share entity identities",
+      "status": "unknown",
+      "affected_entities": ["ENT024 BEEHE", "ENT042 超聚变", "ENT043 河南昆仑技术"],
+      "local_coverage": "not uniquely represented by the A-share security master",
+      "impact": "brand, legal entity and listed-company relationship cannot be assigned locally",
+      "next_action": "A3 must use official business-registry/company materials; no A-share code should be guessed"
+    },
+    {
+      "gap_id": "A2-G09",
+      "topic": "node-dictionary false positives",
+      "status": "partial",
+      "affected_leads": ["002536.SZ", "301309.SZ", "301397.SZ", "301667.SZ", "603169.SH", "920405.BJ", "920223.BJ"],
+      "observed": "six leads have automotive, battery, generic equipment or unclear PACK contexts; 920223.BJ is a server-liquid-cooling project title but remains title-only",
+      "impact": "automatic keyword discovery has low semantic precision for generic components",
+      "next_action": "A3 should review the saved context and may reject, retain or externally verify each lead; none enters a confirmed supplier pool from A2"
+    }
+  ],
+  "blocking_status": "not_blocked_for_A3",
+  "a2_completion_note": "A2 completed local capability and gap reporting only; it did not perform industrial relationship adjudication, financial analysis, valuation analysis, price analysis or stock selection."
+}
