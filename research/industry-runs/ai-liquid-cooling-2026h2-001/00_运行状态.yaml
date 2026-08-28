@@ -1,0 +1,25 @@
+research_id: ai-liquid-cooling-2026h2-001
+version: 1
+branch: research/ai-liquid-cooling-2026h2
+base_commit: 70b9f7838551a2e61a2c10cb7698e74c35303a7c
+latest_commit: HEAD
+current_step: A1
+current_stage: A_open_research
+next_actor: chatgpt
+status: waiting_chatgpt_a1
+as_of: '2026-08-27T22:32:34+08:00'
+required_inputs:
+- 00_研究范围.yaml
+- docs/industry-research/01_全局执行规范.md
+- docs/industry-research/methodology/V1_理论框架与AI产业链完整演练.md
+- docs/industry-research/methodology/V2_从AI产业地图到合适股票的完整方法论.md
+- docs/industry-research/methodology/V3_产业链完整性数据底座与非上市公司核验方法.md
+- docs/industry-research/methodology/V4_ChatGPT-Codex协同研究与执行分工规范.md
+- industry-research-stage-a
+expected_outputs:
+- 01_A1_产业结构与初步线索报告.docx
+- 01_A1_本地支持请求.yaml
+- 01_A1_证据清单.csv
+- 00_下一步操作.md
+user_decision_required: false
+last_updated: '2026-08-28T08:27:45+08:00'
