@@ -1,34 +1,25 @@
 research_id: ai-liquid-cooling-2026h2-001
-version: 4
+version: 5
 branch: research/ai-liquid-cooling-2026h2
 base_commit: 70b9f7838551a2e61a2c10cb7698e74c35303a7c
 latest_commit: HEAD
-current_step: C2
-current_stage: C_deterministic_calculation_complete
-next_actor: chatgpt
-status: waiting_chatgpt_C3
+current_step: D1
+current_stage: D_monitoring_baseline_installed
+next_actor: codex
+status: waiting_codex_D2
 as_of: '2026-08-27T22:32:34+08:00'
 required_inputs:
-- 03_A_开放式产业研究最终报告.docx
-- 03_A_交给B阶段.yaml
-- 03_A_证据清单.csv
-- 04_B1_本地核查合同.yaml
-- 04_B1_口径说明.md
-- 05_B2_本地核查.json
-- 05_B2_本地核查摘要.md
-- 05_B2_数据缺口.json
-- 06_B_验收报告.md
-- 06_B_交给C阶段.yaml
-- 07_C1_综合研究草案.docx
-- 07_C1_计算请求.yaml
-- 08_C2_计算结果.json
-- 08_C2_计算摘要.md
-- 08_C2_数据缺口.json
-- industry-research-stage-c
-expected_outputs:
 - 09_C_综合研究结论.docx
 - 09_C_监控合同.yaml
 - 09_C_研究状态.csv
+- 10_D_监控基线.json
+- 10_D_安装摘要.md
+- 11_D_状态账.csv
+- industry-research-stage-d
+expected_outputs:
+- 11_D_月度摘要.md
+- 12_D_重大触发包.yaml
+- 12_D_重大触发摘要.md
 - 00_下一步操作.md
 user_decision_required: false
 completed_outputs:
@@ -54,6 +45,12 @@ completed_outputs:
 - 08_C2_计算结果.json
 - 08_C2_计算摘要.md
 - 08_C2_数据缺口.json
+- 09_C_综合研究结论.docx
+- 09_C_监控合同.yaml
+- 09_C_研究状态.csv
+- 10_D_监控基线.json
+- 10_D_安装摘要.md
+- 11_D_状态账.csv
 a2_result:
   validation_status: complete
   conflict_file: not_created_no_conflict
@@ -68,7 +65,7 @@ a2_result:
     szse_metadata: complete
     szse_pdf_sample: complete
     sampled_publication_date: '2026-08-26'
-last_updated: '2026-08-28T17:37:28+08:00'
+last_updated: '2026-08-28T19:56:05+08:00'
 b2_result:
   validation_status: complete_B2_R1
   records_expected: 9
@@ -110,7 +107,7 @@ b2_result:
     target_documents_query_failed: 0
     next_step: B3_final_semantic_acceptance
     second_return_to_B_for_ordinary_gaps: false
-next_step: C3_final_synthesis
+next_step: D2_routine_monitoring
 c2_result:
   validation_status: complete
   records_expected: 9
@@ -143,3 +140,32 @@ c2_result:
     ownership_guard: passed
     competition_background_guard: passed_ENT040_no_theme_or_reverse_valuation
     no_C3_or_D_started: true
+d1_result:
+  validation_status: complete
+  user_approval: 同意安装D阶段监控合同
+  records_expected: 9
+  records_installed: 9
+  monitor_metric_count: 46
+  research_state_counts:
+    research_candidate: 0
+    continue_observing: 7
+    insufficient_evidence: 2
+    thesis_invalidated: 0
+  review_due_counts:
+    '2026-11-30': 6
+    '2026-09-30': 3
+  direct_theme_actual_records:
+  - ENT036A
+  baseline_sha256: 52a6af956e153df30cf5b2dc29ad37688fd866b480ae0be1553129084b04aa13
+  contract_sha256: 49173ba6680b7f7f9b3d61d31e2938adf1e9edfc89c48280469d8dc3db9470da
+  point_in_time_filter: available_at <= 2026-08-27T22:32:34+08:00
+  verification:
+    input_hash_integrity: passed
+    record_conservation: passed_9_of_9
+    state_distribution: passed_0_7_2_0
+    C2_frozen_baseline: passed
+    direct_theme_actual_guard: passed_only_ENT036A
+    ownership_guard: passed_ENT036B_ownership_only
+    competition_background_guard: passed_ENT040_background_only
+    automatic_trading_fields: not_installed
+    D2_D3_started: false

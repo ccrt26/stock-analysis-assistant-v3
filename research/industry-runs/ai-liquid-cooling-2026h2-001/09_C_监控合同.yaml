@@ -1,0 +1,655 @@
+contract_type: C3_monitoring_contract
+research_id: ai-liquid-cooling-2026h2-001
+version: 1
+stage: C3_complete
+status: awaiting_user_approval_for_D1
+as_of: '2026-08-27T22:32:34+08:00'
+source_branch: research/ai-liquid-cooling-2026h2
+source_commit: ba7a2cb493edf6caf3c589029c403ab73d9a4790
+created_by: chatgpt
+overall_conclusion:
+  industry_thesis: AI数据中心高密度液冷需求与商业化事实成立，但公司层面的可重复生意、主题利润、现金、持续性和预期差大多尚未闭环。
+  method_trial_result: partial_pass_mixed_mode
+  method_trial_result_cn: 部分通过：采用本地结构化数据 + 官方文档按需读取 + 少量ChatGPT人工语义复核的混合模式
+  research_state_counts:
+    research_candidate: 0
+    continue_observing: 7
+    insufficient_evidence: 2
+    thesis_invalidated: 0
+  candidate_count: 0
+  reason_no_candidate:
+  - 27个情景中只有1个可计算，20个仅能写条件，6个不适用。
+  - 七个经营关系主体均未完整通过可重复生意G3。
+  - 只有曙光数创能直接量化主题收入与毛利，但主题净利润/现金未知，且质量反证明显。
+  - 有效供给、二供、客户自制、标准化和路线替代缺少同口径量化。
+  - 当前只有公司自身260交易日反向经营要求，没有一致预期和完整行业相对收益，G7正预期差未被证明。
+  expansion_decision: 先安装D监控并经过至少一个季度更新与后续点时回放，再决定是否扩展到完整AI产业或接入现有五个股票研究Skill。
+source_policy:
+  allowed:
+  - 现有本地行情、估值、财务、主营和公告元数据
+  - 交易所/公司正式公告与定期报告的按需读取
+  - 已经批准的产业节点、证据和实体关系
+  forbidden:
+  - 用关键词或主题成员自动升级关系
+  - 绕过授权、验证码或反爬限制
+  - 把缺失、unknown、partial、unsupported写成0
+  - 把公司总收入、综合毛利率或公司现金流当成液冷主题数值
+  - 自动交易、决定仓位、给目标价或收益承诺
+  point_in_time_rule: available_at <= current_monitoring_as_of；旧版本只读保留。
+cadence:
+  trading_day:
+    silent_update:
+    - 价格、市值、PE/PB/PS
+    - 20日与250日复权收益
+    - 相对沪深300表现
+    - 停牌、流动性与公告元数据
+    trigger_rule: 估值跨越自身260交易日p25/p50/p75区间，或价格与基本面发生明显背离时，只生成提示，不自动改变研究状态。
+  weekly:
+    checks:
+    - 正式公告新增
+    - 接近升级/失效条件
+    - 数据源失败
+    - 需要ChatGPT阅读的正文
+    output: 无重大变化时并入周/月摘要，不频繁打扰用户。
+  monthly:
+    checks:
+    - 证据是否到期
+    - 关系是否需要降级复核
+    - 未知项是否有新正式来源
+    - 估值区间变化
+    output: 月度状态摘要。
+  quarterly:
+    checks:
+    - 财报和主营更新
+    - 液冷主题收入/毛利是否首次拆分
+    - 订单转收入、验收和复购
+    - 经营现金、应收、存货、合同资产/负债、资本开支
+    - 三情景与反向经营要求重算
+    output: 季度重算与状态复核触发包。
+  event:
+    checks:
+    - 首次正式客户/订单/批量交付
+    - 追加订单、第二客户或重复项目
+    - 客户否认或供应关系终止
+    - 主流接口、标准或技术路线变化
+    - 二供、新进入者、客户自制或有效产能变化
+    - 毛利、现金、应收、存货或项目验收异常
+    output: 12_D_重大触发包.yaml + 12_D_重大触发摘要.md，冻结自动状态改变并交ChatGPT。
+global_financial_alerts:
+  profit_cash_divergence: 收入和利润增长，但经营现金流连续两个可比报告期恶化或为负。
+  working_capital: 应收或存货增速连续两个可比报告期高于收入增速15个百分点以上。
+  gross_margin_reverse: 公司称高价值产品放量，但相关或综合毛利率同比下降3个百分点以上；主题口径缺失时只能标公司级提示。
+  capex_too_fast: 资本开支显著增加，但订单覆盖、认证、良率和利用率没有同步证据。
+  customer_concentration: 单一客户超过50%，且缺少第二客户或长期合同保障。
+  rule_note: 以上是研究起始预警，不是自动否决或金融定律；Codex只触发，ChatGPT解释。
+state_change_governance:
+  codex_may:
+  - 更新原始值
+  - 计算触发条件
+  - 生成触发包
+  - 维护状态账和版本
+  codex_must_not:
+  - 自行升级/降级研究状态
+  - 修改产业命题
+  - 把价格触发变成交易动作
+  chatgpt_may_after_trigger:
+  - no_change
+  - update_monitoring
+  - upgrade
+  - downgrade
+  - invalidate
+  - return_to_A
+  - return_to_B
+  - return_to_C
+  user_approval_required: true
+entities:
+- record_id: ENT036A
+  entity_name: 曙光数创
+  ts_code: 920808.BJ
+  role: 冷板/浸没液冷直接经营主体
+  relationship_status: passed_direct_product_revenue
+  research_state: continue_observing
+  monitoring_priority: P1
+  monitoring_priority_note: 重点观察；仅用于研究资源配置
+  gate_status:
+    G1_product_match: passed
+    G2_relation_evidence: passed_direct_product_revenue
+    G3_repeatable_business: partial_revenue_exists_repeat_customer_chain_unknown
+    G4_performance_importance: partial_high_TRS_TGPS_net_profit_unknown
+    G5_quality: failed_current_margin_inventory_cash
+    G6_sustainability: unknown
+    G7_expectation_gap: not_demonstrated_PE_profit_requirement_extreme
+    G8_action_condition: not_evaluated
+  baseline:
+    as_of: '2026-08-27T22:32:34+08:00'
+    company_snapshot:
+      name: 曙光数创
+      code: 920808.BJ
+      period: 2026H1
+      revenue_yoy: 0.7556
+      profit_yoy: null
+      profit_note: 亏损扩大约3260万元
+      gross_margin_change_pp: -7.56
+      cfo_cny: -242000000
+      market_cap_cny: 11592000000
+      pe_ttm: 2717.37
+      pb: 17.07
+      ret20: 0.06
+      ret250: -0.2393
+      direct_theme_revenue_cny: 219000000
+      direct_theme_revenue_share: 0.891
+      direct_theme_gross_margin: 0.0895
+      direct_theme_gross_profit_share: 0.6683
+    direct_theme_actual:
+      record_id: ENT036A
+      period: 2026H1
+      annualized: false
+      theme_revenue_cny: 219125848.74
+      theme_cost_cny: 199514124.63
+      theme_gross_profit_cny: 19611724.11
+      theme_gross_margin: 0.08949982
+      TRS: 0.89098152
+      TGPS: 0.66831641
+      theme_net_profit_cny: null
+      theme_cash_contribution_cny: null
+    reverse_operating_requirements:
+      pe_status: calculable_partial_valid_samples
+      pe_samples: 184
+      pe_req:
+        p25: 4.86043852
+        p50: 3.20087387
+        p75: 2.64409027
+      ps_status: calculable
+      ps_samples: 260
+      ps_req:
+        p25: -0.27657146
+        p50: -0.49406399
+        p75: -0.5703801
+  monitor_metrics:
+  - 冷板/浸没收入与毛利
+  - 正式订单与逐项目验收
+  - 同一客户追加/第二客户
+  - 库存相对收入
+  - 经营现金流
+  - 模块化/系统集成边界
+  upgrade_condition: 订单/验收链 + 复购/第二客户 + 毛利与现金改善。
+  downgrade_condition: 到review_due仍无新正式关系/商业证据，或现有证据过期、适用场景改变时，交ChatGPT复核是否降为insufficient_evidence。
+  invalidation_condition: 收入增长继续伴随毛利下滑、库存异常和负现金；模块化/系统集成被错误分配；路线替代压缩直接产品价值。
+  strongest_counterevidence: 2026H1综合毛利率同比下降7.56个百分点；2025年度与2026H1均出现存货增速明显快于收入；2026H1经营现金流为-2.42亿元。
+  must_remain_unknown:
+  - 客户、订单金额和复购客户链
+  - 逐项目交付与验收
+  - 冷板与浸没各自净利润和现金贡献
+  - 模块化数据中心及系统集成中的液冷准确份额
+  review_due: '2026-11-30'
+  route_on_trigger: generate_material_trigger_pack_and_return_to_chatgpt
+- record_id: ENT037
+  entity_name: 飞荣达
+  ts_code: 300602.SZ
+  role: TIM、冷板、CDU、快接等硬件
+  relationship_status: passed_partial
+  research_state: continue_observing
+  monitoring_priority: P1
+  monitoring_priority_note: 重点观察；仅用于研究资源配置
+  gate_status:
+    G1_product_match: passed
+    G2_relation_evidence: passed_partial_batch_delivery
+    G3_repeatable_business: not_passed_repeat_order_and_second_customer_unknown
+    G4_performance_importance: not_evaluable_theme_financials_unknown
+    G5_quality: company_level_improving_theme_cash_unknown
+    G6_sustainability: unknown_second_source_and_standardization
+    G7_expectation_gap: company_level_possible_but_theme_not_attributable
+    G8_action_condition: not_evaluated
+  baseline:
+    as_of: '2026-08-27T22:32:34+08:00'
+    company_snapshot:
+      name: 飞荣达
+      code: 300602.SZ
+      period: 2026Q1
+      revenue_yoy: 0.3915
+      profit_yoy: 0.3392
+      gross_margin_change_pp: 3.38
+      cfo_cny: -24000000
+      market_cap_cny: 26126000000
+      pe_ttm: 57.92
+      pb: 6.03
+      ret20: 0.4436
+      ret250: 0.4839
+    direct_theme_actual: null
+    reverse_operating_requirements:
+      pe_status: calculable
+      pe_samples: 260
+      pe_req:
+        p25: 0.12336873
+        p50: 0.03280498
+        p75: -0.0943716
+      ps_status: calculable
+      ps_samples: 260
+      ps_req:
+        p25: 0.2581882
+        p50: 0.17607909
+        p75: 0.09094874
+  monitor_metrics:
+  - 液冷产品线收入与毛利
+  - 追加订单/第二客户
+  - AI服务器与储能/汽车拆分
+  - 良率/利用率
+  - 经营现金与客户结构
+  upgrade_condition: 产品线财务拆分 + 重复订单/第二客户 + 良率与现金证据。
+  downgrade_condition: 到review_due仍无新正式关系/商业证据，或现有证据过期、适用场景改变时，交ChatGPT复核是否降为insufficient_evidence。
+  invalidation_condition: 批量交付没有复购；增长主要来自非目标场景；现金持续为负；标准化和二供导致降价。
+  strongest_counterevidence: 2026Q1公司收入与归母利润增长，但经营现金流为负；业务跨AI服务器、储能、汽车、消费电子和通信，公司整体增长不能自动归因于液冷。
+  must_remain_unknown:
+  - 液冷订单金额、客户名称和复购次数
+  - 液冷主题收入、产品线毛利、净利润和现金
+  - AI服务器液冷与储能、汽车、消费电子、通信的准确拆分
+  review_due: '2026-11-30'
+  route_on_trigger: generate_material_trigger_pack_and_return_to_chatgpt
+- record_id: ENT034
+  entity_name: 英维克
+  ts_code: 002837.SZ
+  role: 液冷系统与部件供应商
+  relationship_status: passed_partial
+  research_state: continue_observing
+  monitoring_priority: P2
+  monitoring_priority_note: 一般观察；仅用于研究资源配置
+  gate_status:
+    G1_product_match: passed
+    G2_relation_evidence: passed_partial
+    G3_repeatable_business: not_passed_repeat_order_unknown
+    G4_performance_importance: not_evaluable_theme_financials_unknown
+    G5_quality: not_evaluable_at_theme_level
+    G6_sustainability: unknown
+    G7_expectation_gap: not_demonstrated
+    G8_action_condition: not_evaluated
+  baseline:
+    as_of: '2026-08-27T22:32:34+08:00'
+    company_snapshot:
+      name: 英维克
+      code: 002837.SZ
+      period: 2026H1
+      revenue_yoy: 0.1724
+      profit_yoy: -0.1432
+      gross_margin_change_pp: -1.21
+      cfo_cny: 61871999
+      market_cap_cny: 84252371652
+      pe_ttm: 171.58
+      pb: 23.5
+      ret20: 0.3992
+      ret250: 0.3463
+    direct_theme_actual: null
+    reverse_operating_requirements:
+      pe_status: calculable
+      pe_samples: 260
+      pe_req:
+        p25: 0.1810107
+        p50: -0.02009286
+        p75: -0.14152707
+      ps_status: calculable
+      ps_samples: 260
+      ps_req:
+        p25: 0.05065918
+        p50: -0.09030993
+        p75: -0.21946958
+  monitor_metrics:
+  - 正式液冷客户/订单
+  - 同一客户追加或第二客户
+  - 液冷主题收入与毛利拆分
+  - 主题回款/现金
+  - 良率与有效产能
+  upgrade_condition: 正式客户或订单 + 重复交付/第二客户 + 主题收入/毛利拆分。
+  downgrade_condition: 到review_due仍无新正式关系/商业证据，或现有证据过期、适用场景改变时，交ChatGPT复核是否降为insufficient_evidence。
+  invalidation_condition: 规模应用长期不转成订单或复购；毛利继续下降；二供/自制压低价格；库存与应收显著恶化。
+  strongest_counterevidence: 2026H1公司收入同比增长17.24%，归母净利润同比下降14.32%，综合毛利率同比下降1.21个百分点；均为公司级事实。
+  must_remain_unknown:
+  - 液冷专属客户与订单金额
+  - 复购次数
+  - 液冷主题收入、毛利、净利润和现金贡献
+  - 液冷业务良率、有效产能和回款
+  review_due: '2026-11-30'
+  route_on_trigger: generate_material_trigger_pack_and_return_to_chatgpt
+- record_id: ENT035
+  entity_name: 申菱环境
+  ts_code: 301018.SZ
+  role: CDU、系统设备与设施侧工程
+  relationship_status: passed_partial
+  research_state: continue_observing
+  monitoring_priority: P2
+  monitoring_priority_note: 一般观察；仅用于研究资源配置
+  gate_status:
+    G1_product_match: passed
+    G2_relation_evidence: passed_partial
+    G3_repeatable_business: not_passed_liquid_cooling_contract_and_acceptance_unknown
+    G4_performance_importance: not_evaluable_theme_financials_unknown
+    G5_quality: company_level_pressure_theme_quality_unknown
+    G6_sustainability: unknown
+    G7_expectation_gap: not_demonstrated_price_requirements_high
+    G8_action_condition: not_evaluated
+  baseline:
+    as_of: '2026-08-27T22:32:34+08:00'
+    company_snapshot:
+      name: 申菱环境
+      code: 301018.SZ
+      period: 2026Q1
+      revenue_yoy: -0.018
+      profit_yoy: -0.4771
+      gross_margin_change_pp: -1.4
+      cfo_cny: -193352473
+      market_cap_cny: 40377000000
+      pe_ttm: 211.46
+      pb: 14.63
+      ret20: 0.5923
+      ret250: 1.3603
+    direct_theme_actual: null
+    reverse_operating_requirements:
+      pe_status: calculable
+      pe_samples: 260
+      pe_req:
+        p25: 0.70944796
+        p50: 0.35991884
+        p75: 0.04709997
+      ps_status: calculable
+      ps_samples: 260
+      ps_req:
+        p25: 0.93156196
+        p50: 0.53861117
+        p75: 0.15663189
+  monitor_metrics:
+  - 液冷专属合同/订单
+  - 项目验收收入
+  - 液冷与传统温控拆分
+  - 项目毛利
+  - 应收/存货/经营现金
+  upgrade_condition: 液冷专属合同或验收收入 + 跨项目复制 + 项目毛利/回款证据。
+  downgrade_condition: 到review_due仍无新正式关系/商业证据，或现有证据过期、适用场景改变时，交ChatGPT复核是否降为insufficient_evidence。
+  invalidation_condition: 订单主要是传统温控；项目验收延期；应收/存货继续快于收入；现金持续恶化。
+  strongest_counterevidence: 2026Q1公司收入同比下降1.80%、归母净利润同比下降47.71%、经营现金流-1.93亿元；应收和存货增速明显高于收入。
+  must_remain_unknown:
+  - 数据服务订单中的液冷专属金额
+  - 液冷项目验收与复购
+  - 液冷主题收入、项目毛利、净利润和现金
+  - 传统温控、设施冷源、工程服务与液冷的精确拆分
+  review_due: '2026-11-30'
+  route_on_trigger: generate_material_trigger_pack_and_return_to_chatgpt
+- record_id: ENT039
+  entity_name: 高澜股份
+  ts_code: 300499.SZ
+  role: 数据中心液冷系统与项目/EPC
+  relationship_status: passed_project_relation
+  research_state: continue_observing
+  monitoring_priority: P2
+  monitoring_priority_note: 一般观察；仅用于研究资源配置
+  gate_status:
+    G1_product_match: passed
+    G2_relation_evidence: passed_project_relation
+    G3_repeatable_business: not_passed_order_acceptance_repeat_unknown
+    G4_performance_importance: not_evaluable_mixed_segment
+    G5_quality: company_level_cash_working_capital_pressure
+    G6_sustainability: unknown_project_repeat_and_route_mix
+    G7_expectation_gap: not_demonstrated_PE_unstable
+    G8_action_condition: not_evaluated
+  baseline:
+    as_of: '2026-08-27T22:32:34+08:00'
+    company_snapshot:
+      name: 高澜股份
+      code: 300499.SZ
+      period: 2026Q1
+      revenue_yoy: -0.0277
+      profit_yoy: 0.1655
+      gross_margin_change_pp: 5.54
+      cfo_cny: -112000000
+      market_cap_cny: 9615000000
+      pe_ttm: 308.34
+      pb: 6.95
+      ret20: 0.3235
+      ret250: 0.2242
+    direct_theme_actual: null
+    reverse_operating_requirements:
+      pe_status: calculable_partial_valid_samples
+      pe_samples: 206
+      pe_req:
+        p25: -0.19802004
+        p50: -0.94088382
+        p75: -0.94988292
+      ps_status: calculable
+      ps_samples: 260
+      ps_req:
+        p25: 0.06250854
+        p50: -0.09469507
+        p75: -0.1962735
+  monitor_metrics:
+  - 液冷专属订单/在手订单
+  - 项目验收收入
+  - 高功率密度分项场景拆分
+  - 重复项目/第二客户
+  - 合同资产/应收/现金
+  upgrade_condition: 液冷专属订单 + 验收收入 + 重复项目 + 现金。
+  downgrade_condition: 到review_due仍无新正式关系/商业证据，或现有证据过期、适用场景改变时，交ChatGPT复核是否降为insufficient_evidence。
+  invalidation_condition: 项目长期不验收；混合场景被误算；应收/库存继续异常；海外项目成本或变更吞噬毛利。
+  strongest_counterevidence: 2026Q1经营现金流-1.12亿元，应收和存货增速明显高于收入；高功率密度分项混有其他场景。
+  must_remain_unknown:
+  - 高功率密度分项中纯AI数据中心液冷收入和毛利
+  - 液冷专属订单金额、项目验收、净利润和现金贡献
+  review_due: '2026-11-30'
+  route_on_trigger: generate_material_trigger_pack_and_return_to_chatgpt
+- record_id: ENT038
+  entity_name: 佳力图
+  ts_code: 603912.SH
+  role: 设施侧液冷、CDU、最终排热与改造
+  relationship_status: passed_partial_facility_liquid_cooling_relation
+  research_state: continue_observing
+  monitoring_priority: P2
+  monitoring_priority_note: 受限观察；仅用于研究资源配置
+  gate_status:
+    G1_product_match: passed_restricted_facility_side
+    G2_relation_evidence: passed_partial_facility_relation
+    G3_repeatable_business: not_passed_project_acceptance_and_repeat_unknown
+    G4_performance_importance: not_evaluable_theme_financials_unknown
+    G5_quality: company_loss_and_margin_pressure
+    G6_sustainability: unknown_route_mix_and_project_quality
+    G7_expectation_gap: not_demonstrated
+    G8_action_condition: not_evaluated
+  baseline:
+    as_of: '2026-08-27T22:32:34+08:00'
+    company_snapshot:
+      name: 佳力图
+      code: 603912.SH
+      period: 2026Q1
+      revenue_yoy: 0.0535
+      profit_yoy: null
+      profit_note: 亏损扩大约740万元
+      gross_margin_change_pp: -7.91
+      cfo_cny: -40000000
+      market_cap_cny: 4881000000
+      pe_ttm: null
+      pb: 2.92
+      ret20: 0.3216
+      ret250: -0.1651
+    direct_theme_actual: null
+    reverse_operating_requirements:
+      pe_status: not_calculable
+      pe_samples: 57
+      pe_req: null
+      ps_status: calculable
+      ps_samples: 260
+      ps_req:
+        p25: 0.17397474
+        p50: 0.10568833
+        p75: 0.00409935
+  monitor_metrics:
+  - 液冷设施侧合同/验收
+  - 液冷与传统业务拆分
+  - 重复项目/第二客户
+  - 项目毛利
+  - 应收/合同资产/现金
+  upgrade_condition: 设施侧液冷合同/验收 + 业务拆分 + 重复项目与现金。
+  downgrade_condition: 到review_due仍无新正式关系/商业证据，或现有证据过期、适用场景改变时，交ChatGPT复核是否降为insufficient_evidence。
+  invalidation_condition: 收入主要来自传统温控或IDC运营；项目延期、垫资和应收吞噬利润；风液混合推迟直接液冷投资。
+  strongest_counterevidence: 2026Q1公司亏损扩大、综合毛利率同比下降7.91个百分点、经营现金流-0.40亿元；均为公司级事实。
+  must_remain_unknown:
+  - 液冷专属客户和订单金额
+  - 液冷项目验收与复购
+  - 液冷设施侧收入、项目毛利、净利润和现金贡献
+  review_due: '2026-09-30'
+  route_on_trigger: generate_material_trigger_pack_and_return_to_chatgpt
+- record_id: A2L007
+  entity_name: 荣亿精密
+  ts_code: 920223.BJ
+  role: 服务器液冷快接精密零部件新进入者
+  relationship_status: passed_direct_mass_production_relationship
+  research_state: continue_observing
+  monitoring_priority: P2
+  monitoring_priority_note: 供给与竞争观察；仅用于研究资源配置
+  gate_status:
+    G1_product_match: passed
+    G2_relation_evidence: passed_direct_mass_production_relationship
+    G3_repeatable_business: not_passed_repeat_delivery_and_second_customer_unknown
+    G4_performance_importance: not_evaluable_mixed_3C_revenue
+    G5_quality: company_loss_margin_and_cash_pressure
+    G6_sustainability: unknown_effective_capacity_and_customer_concentration
+    G7_expectation_gap: not_demonstrated_loss_and_theme_split_missing
+    G8_action_condition: not_evaluated
+  baseline:
+    as_of: '2026-08-27T22:32:34+08:00'
+    company_snapshot:
+      name: 荣亿精密
+      code: 920223.BJ
+      period: 2026H1
+      revenue_yoy: 0.306
+      profit_yoy: null
+      profit_note: 亏损约1100万元
+      gross_margin_change_pp: -3.68
+      cfo_cny: -36000000
+      market_cap_cny: 1696000000
+      pe_ttm: null
+      pb: 7.33
+      ret20: -0.0092
+      ret250: -0.0888
+    direct_theme_actual: null
+    reverse_operating_requirements:
+      pe_status: not_calculable
+      pe_samples: 0
+      pe_req: null
+      ps_status: calculable
+      ps_samples: 260
+      ps_req:
+        p25: -0.3545129
+        p50: -0.48351567
+        p75: -0.6023847
+  monitor_metrics:
+  - 液冷直接收入/交易金额
+  - 重复交付/第二客户
+  - 良率/认证/有效产能
+  - 客户集中度
+  - 毛利与经营现金
+  - 接口标准化和二供
+  upgrade_condition: 直接主题收入 + 重复交付/第二客户 + 良率/有效产能 + 毛利与现金。
+  downgrade_condition: 到review_due仍无新正式关系/商业证据，或现有证据过期、适用场景改变时，交ChatGPT复核是否降为insufficient_evidence。
+  invalidation_condition: 扩产项目未按期形成有效产能；客户过度集中；低毛利/亏损延续；接口标准化降低稀缺性。
+  strongest_counterevidence: 2026H1公司仍亏损约0.11亿元、经营现金流-0.36亿元、综合毛利率同比下降3.68个百分点；液冷规模和利润重要性未拆。
+  must_remain_unknown:
+  - 液冷订单金额、复购次数和客户集中度
+  - 液冷收入、毛利、净利润和现金
+  - 良率、认证通过率、有效产能和利用率
+  review_due: '2026-11-30'
+  route_on_trigger: generate_material_trigger_pack_and_return_to_chatgpt
+- record_id: ENT036B
+  entity_name: 中科曙光
+  ts_code: 603019.SH
+  role: 所有权、合并与利润归属背景
+  relationship_status: passed_ownership_context_only
+  research_state: insufficient_evidence
+  monitoring_priority: P3
+  monitoring_priority_note: 背景观察；仅用于研究资源配置
+  gate_status:
+    G1_product_match: not_applicable_ownership_context
+    G2_relation_evidence: ownership_context_only
+    G3_repeatable_business: not_applicable
+    G4_performance_importance: not_applicable_no_direct_theme_attribution
+    G5_quality: not_applicable
+    G6_sustainability: not_applicable
+    G7_expectation_gap: not_applicable
+    G8_action_condition: not_evaluated
+  baseline:
+    as_of: '2026-08-27T22:32:34+08:00'
+    company_snapshot:
+      name: 中科曙光
+      code: 603019.SH
+      period: ownership context
+      minority_share_annual: 0.379302
+      minority_share_h1: 0.3793
+    direct_theme_actual: null
+    reverse_operating_requirements: null
+  monitor_metrics:
+  - 持股与控制变化
+  - 合并范围
+  - 少数股东权益
+  - 正式披露的母公司归母影响
+  upgrade_condition: 只有正式报表直接披露并可按合并口径解释时，才补充母公司归母影响。
+  downgrade_condition: 到review_due仍无新正式关系/商业证据，或现有证据过期、适用场景改变时，交ChatGPT复核是否降为insufficient_evidence。
+  invalidation_condition: 任何把子公司收入或利润简单乘持股比例的做法均无效。
+  strongest_counterevidence: 母子公司合并与少数股东权益使简单持股比例乘算失真。
+  must_remain_unknown:
+  - 曙光数创液冷经营结果对中科曙光归母利润的精确增量影响，除非正式报表直接披露
+  review_due: '2026-09-30'
+  route_on_trigger: generate_material_trigger_pack_and_return_to_chatgpt
+- record_id: ENT040
+  entity_name: 同飞股份
+  ts_code: 300990.SZ
+  role: 潜在液冷设备供应者
+  relationship_status: not_passed_hard_relation_gate
+  research_state: insufficient_evidence
+  monitoring_priority: P3
+  monitoring_priority_note: 能力与竞争背景；仅用于研究资源配置
+  gate_status:
+    G1_product_match: passed_capability
+    G2_relation_evidence: failed_no_customer_order_delivery
+    G3_repeatable_business: not_applicable_until_G2
+    G4_performance_importance: not_applicable_until_G2
+    G5_quality: not_applicable_for_theme
+    G6_sustainability: potential_supply_only
+    G7_expectation_gap: not_applicable
+    G8_action_condition: not_evaluated
+  baseline:
+    as_of: '2026-08-27T22:32:34+08:00'
+    company_snapshot:
+      name: 同飞股份
+      code: 300990.SZ
+      period: 2026Q1
+      revenue_yoy: 0.218
+      profit_yoy: -0.0344
+      gross_margin_change_pp: -2.66
+      cfo_cny: 143000000
+      market_cap_cny: 15603000000
+      pe_ttm: 62.22
+      pb: 7.28
+      ret20: 0.4195
+      ret250: 0.305
+    direct_theme_actual: null
+    reverse_operating_requirements: null
+  monitor_metrics:
+  - 正式液冷客户
+  - 订单/交付
+  - 重复采购
+  - 独立液冷业务分项
+  - 进入客户认证或供应链
+  upgrade_condition: 正式客户、订单、交付、重复采购或独立业务分项。
+  downgrade_condition: 到review_due仍无新正式关系/商业证据，或现有证据过期、适用场景改变时，交ChatGPT复核是否降为insufficient_evidence。
+  invalidation_condition: 继续只有产品展示或能力描述而没有商业关系。
+  strongest_counterevidence: 正式年报只证明产品能力，未见客户、订单、交付或独立业务分项。
+  must_remain_unknown:
+  - 客户、订单、交付、重复采购
+  - 液冷主题收入、利润和现金
+  review_due: '2026-09-30'
+  route_on_trigger: generate_material_trigger_pack_and_return_to_chatgpt
+D1_output_contract:
+  files:
+  - 10_D_监控基线.json
+  - 10_D_安装摘要.md
+  - 11_D_状态账.csv
+  - 00_运行状态.yaml
+  - 00_下一步操作.md
+  commit_and_push_required: true
+  next_actor_after_D1: codex
+  next_step_after_D1: D2_routine_monitoring
+  stop_after_installation: true
