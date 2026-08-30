@@ -1,0 +1,335 @@
+{
+  "contract_type": "liquid_cooling_targeted_regression_final_gap_list_v1_2",
+  "as_of": "2026-08-27T22:32:34+08:00",
+  "source_branch": "origin/research/ai-liquid-cooling-2026h2",
+  "source_commit": "388e93632a184190b989bc454af0402128955be4",
+  "record_conservation": {
+    "expected": 9,
+    "returned": 9,
+    "record_ids": [
+      "ENT034",
+      "ENT035",
+      "ENT036A",
+      "ENT036B",
+      "ENT037",
+      "ENT038",
+      "ENT039",
+      "A2L007",
+      "ENT040"
+    ],
+    "status": "passed"
+  },
+  "calculation_scope_counts": {
+    "total": 44,
+    "direct_calculable": 22,
+    "range_calculable": 0,
+    "condition_only": 14,
+    "not_applicable": 8
+  },
+  "working_capital_recovery": {
+    "company_count": 8,
+    "base_risk_layer_recovered": 8,
+    "composite_complete": 0,
+    "composite_partial": 8,
+    "true_zero_written_from_null_or_cross_period": 0,
+    "records": [
+      {
+        "record_id": "ENT034",
+        "entity_name": "英维克",
+        "period": "2026-06-30",
+        "accounts_receivable_cny": 3024421650.79,
+        "inventory_cny": 1552295823.53,
+        "contract_assets_cny": 226922237.78,
+        "contract_liabilities_cny": 282007192.51,
+        "cfo_cny": 61871999.03,
+        "cash_received_from_sales_cny": 2977483077.38,
+        "ttm_revenue_cny": 6511334279.83,
+        "revenue_yoy": 0.17238677,
+        "ar_growth_minus_revenue_growth_pp": -2.168331,
+        "inventory_growth_minus_revenue_growth_pp": 8.036906,
+        "working_capital_calculable_part_cny": 4521632519.59,
+        "composite_status": "partial",
+        "missing_fields": [
+          "advance_receipts"
+        ]
+      },
+      {
+        "record_id": "ENT035",
+        "entity_name": "申菱环境",
+        "period": "2026-03-31",
+        "accounts_receivable_cny": 2174574889.03,
+        "inventory_cny": 1292142323.62,
+        "contract_assets_cny": 188354169.32,
+        "contract_liabilities_cny": 431049154.98,
+        "cfo_cny": -193352472.74,
+        "cash_received_from_sales_cny": 914197140.72,
+        "ttm_revenue_cny": 4197874231.25,
+        "revenue_yoy": -0.01801896,
+        "ar_growth_minus_revenue_growth_pp": 29.517576,
+        "inventory_growth_minus_revenue_growth_pp": 47.524365,
+        "working_capital_calculable_part_cny": 3224022226.99,
+        "composite_status": "partial",
+        "missing_fields": [
+          "advance_receipts"
+        ]
+      },
+      {
+        "record_id": "ENT036A",
+        "entity_name": "曙光数创",
+        "period": "2026-06-30",
+        "accounts_receivable_cny": 439815761.6,
+        "inventory_cny": 868882778.86,
+        "contract_assets_cny": null,
+        "contract_liabilities_cny": 83834502.65,
+        "cfo_cny": -242011677.48,
+        "cash_received_from_sales_cny": 588603048.94,
+        "ttm_revenue_cny": 988188419.42,
+        "revenue_yoy": 0.75556303,
+        "ar_growth_minus_revenue_growth_pp": -65.907935,
+        "inventory_growth_minus_revenue_growth_pp": 37.503916,
+        "working_capital_calculable_part_cny": 1224864037.81,
+        "composite_status": "partial",
+        "missing_fields": [
+          "contract_assets",
+          "advance_receipts"
+        ]
+      },
+      {
+        "record_id": "ENT037",
+        "entity_name": "飞荣达",
+        "period": "2026-03-31",
+        "accounts_receivable_cny": 2659671673.39,
+        "inventory_cny": 1325648664.04,
+        "contract_assets_cny": null,
+        "contract_liabilities_cny": 11728890.13,
+        "cfo_cny": -23890682.83,
+        "cash_received_from_sales_cny": 1664567948.94,
+        "ttm_revenue_cny": 6989112739.08,
+        "revenue_yoy": 0.39146028,
+        "ar_growth_minus_revenue_growth_pp": 3.480793,
+        "inventory_growth_minus_revenue_growth_pp": -18.615264,
+        "working_capital_calculable_part_cny": 3973591447.3,
+        "composite_status": "partial",
+        "missing_fields": [
+          "contract_assets",
+          "advance_receipts"
+        ]
+      },
+      {
+        "record_id": "ENT038",
+        "entity_name": "佳力图",
+        "period": "2026-03-31",
+        "accounts_receivable_cny": 355029621.12,
+        "inventory_cny": 434858648.97,
+        "contract_assets_cny": 75792469.94,
+        "contract_liabilities_cny": 82794475.21,
+        "cfo_cny": -40052269.15,
+        "cash_received_from_sales_cny": 162505321.14,
+        "ttm_revenue_cny": 745831035.79,
+        "revenue_yoy": 0.05346556,
+        "ar_growth_minus_revenue_growth_pp": -7.373711,
+        "inventory_growth_minus_revenue_growth_pp": -15.967074,
+        "working_capital_calculable_part_cny": 782886264.82,
+        "composite_status": "partial",
+        "missing_fields": [
+          "advance_receipts"
+        ]
+      },
+      {
+        "record_id": "ENT039",
+        "entity_name": "高澜股份",
+        "period": "2026-03-31",
+        "accounts_receivable_cny": 443570138.1,
+        "inventory_cny": 651241874.08,
+        "contract_assets_cny": 13078535.23,
+        "contract_liabilities_cny": 313435885.81,
+        "cfo_cny": -112480645.3,
+        "cash_received_from_sales_cny": 94182215.54,
+        "ttm_revenue_cny": 983075292.63,
+        "revenue_yoy": -0.02774554,
+        "ar_growth_minus_revenue_growth_pp": 24.751458,
+        "inventory_growth_minus_revenue_growth_pp": 75.487725,
+        "working_capital_calculable_part_cny": 794454661.6,
+        "composite_status": "partial",
+        "missing_fields": [
+          "advance_receipts"
+        ]
+      },
+      {
+        "record_id": "A2L007",
+        "entity_name": "荣亿精密",
+        "period": "2026-06-30",
+        "accounts_receivable_cny": 230325051.11,
+        "inventory_cny": 65772572.4,
+        "contract_assets_cny": null,
+        "contract_liabilities_cny": 361848.4,
+        "cfo_cny": -35689596.59,
+        "cash_received_from_sales_cny": 202289328.6,
+        "ttm_revenue_cny": 493677805.81,
+        "revenue_yoy": 0.30597675,
+        "ar_growth_minus_revenue_growth_pp": 7.142276,
+        "inventory_growth_minus_revenue_growth_pp": 4.285915,
+        "working_capital_calculable_part_cny": 295735775.11,
+        "composite_status": "partial",
+        "missing_fields": [
+          "contract_assets",
+          "advance_receipts"
+        ]
+      },
+      {
+        "record_id": "ENT040",
+        "entity_name": "同飞股份",
+        "period": "2026-03-31",
+        "accounts_receivable_cny": 867161404.94,
+        "inventory_cny": 318712139.96,
+        "contract_assets_cny": 31298638.89,
+        "contract_liabilities_cny": 28663461.78,
+        "cfo_cny": 143393446.04,
+        "cash_received_from_sales_cny": 387208721.14,
+        "ttm_revenue_cny": 2992511693.9,
+        "revenue_yoy": 0.21796361,
+        "ar_growth_minus_revenue_growth_pp": -12.572612,
+        "inventory_growth_minus_revenue_growth_pp": -29.536413,
+        "working_capital_calculable_part_cny": 1188508722.01,
+        "composite_status": "partial",
+        "missing_fields": [
+          "advance_receipts"
+        ]
+      }
+    ]
+  },
+  "root_gaps": [
+    {
+      "gap_id": "RG01",
+      "category": "theme_actual_separation",
+      "affected_record_ids": [
+        "ENT034",
+        "ENT035",
+        "ENT037",
+        "ENT038",
+        "ENT039",
+        "A2L007"
+      ],
+      "current_treatment": "condition_only",
+      "reason": "缺少同期间、同口径且可归属于液冷主题的收入、成本、毛利、净利润或现金拆分。荣亿精密的快速接头量产与混合3C口径不等于液冷主题披露。",
+      "reopen_condition": "取得主体正式披露的液冷主题同期间拆分，并通过产品与关系边界核验。"
+    },
+    {
+      "gap_id": "RG02",
+      "category": "theme_net_profit_and_cash",
+      "affected_record_ids": [
+        "ENT036A"
+      ],
+      "current_treatment": "partial_direct_actual",
+      "reason": "曙光数创只直接披露冷板与浸没液冷收入、成本和毛利，未披露主题净利润与现金贡献。",
+      "reopen_condition": "取得同期间、同口径的液冷主题净利润或现金正式拆分。"
+    },
+    {
+      "gap_id": "RG03",
+      "category": "formal_forward_boundaries",
+      "affected_record_ids": [
+        "ENT034",
+        "ENT035",
+        "ENT036A",
+        "ENT037",
+        "ENT038",
+        "ENT039",
+        "A2L007"
+      ],
+      "current_treatment": "condition_only",
+      "reason": "没有正式合同、正式上下界或可核验限制，不能建立数值三情景。",
+      "reopen_condition": "取得正式且点时有效的业务边界后由ChatGPT重新批准C1计算请求。"
+    },
+    {
+      "gap_id": "RG04",
+      "category": "working_capital_composite_completeness",
+      "affected_record_ids": [
+        "ENT034",
+        "ENT035",
+        "ENT036A",
+        "ENT037",
+        "ENT038",
+        "ENT039",
+        "A2L007",
+        "ENT040"
+      ],
+      "current_treatment": "partial",
+      "reason": "综合项缺少预收款项，且曙光数创、飞荣达、荣亿精密同期间合同资产也未取得；基础风险项与可计算部分仍保留。",
+      "reopen_condition": "取得同一报告期、同一合并口径的全部适用字段，并确认预收款项与合同负债不重复。"
+    },
+    {
+      "gap_id": "RG05",
+      "category": "pe_economic_meaning",
+      "affected_record_ids": [
+        "ENT038",
+        "A2L007"
+      ],
+      "current_treatment": "not_applicable",
+      "reason": "TTM归母净利润非正，当前PE无经济含义。",
+      "reopen_condition": "TTM归母净利润转正且PE重新具有经济含义。"
+    },
+    {
+      "gap_id": "RG06",
+      "category": "optional_comparisons",
+      "affected_record_ids": [
+        "ENT034",
+        "ENT035",
+        "ENT036A",
+        "ENT037",
+        "ENT038",
+        "ENT039",
+        "A2L007"
+      ],
+      "current_treatment": "unsupported_or_partial_non_blocking",
+      "reason": "行业相对收益未获支持，部分主体固定长窗口估值样本不足。",
+      "reopen_condition": "存在点时安全、口径一致的比较集时再启用；不阻断主流程。"
+    },
+    {
+      "gap_id": "RG07",
+      "category": "ownership_attribution",
+      "affected_record_ids": [
+        "ENT036B"
+      ],
+      "current_treatment": "not_applicable_for_theme_numbers",
+      "reason": "中科曙光仅可使用所有权、合并与少数股东权益背景，不能继承曙光数创主题数字或按持股比例乘算。",
+      "reopen_condition": "中科曙光正式直接披露其自身液冷主题实际值、前瞻边界或可独立归属的主题估值。"
+    },
+    {
+      "gap_id": "RG08",
+      "category": "relationship_gate",
+      "affected_record_ids": [
+        "ENT040"
+      ],
+      "current_treatment": "not_applicable_for_theme_numbers",
+      "reason": "同飞股份只有能力与竞争背景，目标液冷客户、订单、交付或独立分部关系闸门未通过。",
+      "reopen_condition": "出现官方披露的目标液冷客户、订单、交付或独立主题分部并通过关系闸门。"
+    }
+  ],
+  "closed_or_non_fault_items": [
+    {
+      "item": "official_announcement_targeted_evidence",
+      "status": "closed_by_existing_evidence",
+      "note": "沿用第一阶段已恢复的官方正文证据；本轮未搜索、下载或升级事实。"
+    },
+    {
+      "item": "announcement_client",
+      "status": "no_common_program_fault_found",
+      "note": "未修改客户端，也未建设下载平台。"
+    },
+    {
+      "item": "empty_three_scenario_placeholders",
+      "status": "closed_by_scope_routing",
+      "note": "条件项改为单一condition_only作用域，不再生成三套全空数值表。"
+    }
+  ],
+  "guards": {
+    "new_search": false,
+    "new_download": false,
+    "future_fact_used": false,
+    "original_run_modified": false,
+    "state_upgraded": false,
+    "d2_started": false,
+    "ai12_started": false,
+    "recommendation_output": false
+  }
+}

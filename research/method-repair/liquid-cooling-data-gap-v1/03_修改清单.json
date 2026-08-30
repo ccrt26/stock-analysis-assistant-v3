@@ -1,25 +1,25 @@
 [
   {
     "file": ".agents/skills/industry-research-stage-b/SKILL.md",
-    "change_reason": "固定B1证据最低线、B2营运资金边界和B3计算准备状态",
+    "change_reason": "固定B1证据最低线、B2营运资金两层边界和B3 calculation_readiness",
     "changed_sections": ["B1", "B2", "B3"],
     "verification": "四状态、B1四字段、true_zero与作用域静态检查"
   },
   {
     "file": ".agents/skills/industry-research-stage-c/SKILL.md",
-    "change_reason": "限制C1/C2只对获准字段和可计算作用域发起数值计算",
+    "change_reason": "限制C1/C2按calculation_readiness分流且只计算获准字段",
     "changed_sections": ["C1", "C2"],
     "verification": "condition_only、不适用、PE单项与作用域静态检查"
   },
   {
     "file": "docs/industry-research/00_逐步执行操作手册.md",
-    "change_reason": "同步第7、9、10、11步可复制提示词",
-    "changed_sections": ["第7步", "第9步", "第10步", "第11步"],
+    "change_reason": "同步第7—11步可复制提示词并补齐第8步营运资金两层边界",
+    "changed_sections": ["第7步", "第8步", "第9步", "第10步", "第11步"],
     "verification": "与B/C Skill关键词和状态集合一致"
   },
   {
     "file": "docs/industry-research/01_全局执行规范.md",
-    "change_reason": "增加跨B/C阶段的计算准备与字段边界",
+    "change_reason": "统一事实状态枚举并分离calculation_readiness",
     "changed_sections": ["计算准备与字段边界"],
     "verification": "状态、true_zero、营运资金、PE与重开条件静态检查"
   },
@@ -43,19 +43,19 @@
   },
   {
     "file": "research/method-repair/liquid-cooling-data-gap-v1/02_ChatGPT审阅结论.md",
-    "change_reason": "保存通过且带三项边界修正的批准结论",
-    "changed_sections": ["结论", "批准范围", "排除项", "回归底线"],
+    "change_reason": "保存通过且带三项边界修正的批准结论与用户批准原文",
+    "changed_sections": ["结论", "用户批准原文", "批准范围", "排除项", "回归底线"],
     "verification": "人工审阅"
   },
   {
     "file": "research/method-repair/liquid-cooling-data-gap-v1/03_实施摘要.md",
-    "change_reason": "用人话汇总最小实施",
-    "changed_sections": ["七个必答问题"],
+    "change_reason": "用人话汇总最小实施与V1.2专项回归",
+    "changed_sections": ["七个必答问题", "V1.2定向修正与专项回归"],
     "verification": "人工审阅"
   },
   {
     "file": "research/method-repair/liquid-cooling-data-gap-v1/03_测试结果.md",
-    "change_reason": "保存轻量验证命令与真实结果",
+    "change_reason": "保存轻量验证、失败基线与专项回归真实结果",
     "changed_sections": ["验证结果"],
     "verification": "命令输出回填"
   },
@@ -67,14 +67,38 @@
   },
   {
     "file": "research/method-repair/liquid-cooling-data-gap-v1/00_运行状态.yaml",
-    "change_reason": "完成第三阶段最小实施并交回ChatGPT",
+    "change_reason": "完成第四阶段定向修正与专项回归并交回ChatGPT",
     "changed_sections": ["stage", "completed_outputs", "next_step"],
     "verification": "YAML解析与字段检查"
   },
   {
     "file": "research/method-repair/liquid-cooling-data-gap-v1/00_下一步操作.md",
-    "change_reason": "限制用户只读实施摘要和测试结果",
+    "change_reason": "限制用户只读回归摘要和能力基线",
     "changed_sections": ["已完成", "用户只需要看", "下一步"],
     "verification": "人工审阅"
+  },
+  {
+    "file": "research/method-repair/liquid-cooling-data-gap-v1/regression/04_回归摘要.md",
+    "change_reason": "汇总四项定向修正、作用域回归和边界结论",
+    "changed_sections": ["结论", "回归矩阵", "数值能力与空情景变化", "边界检查"],
+    "verification": "专项回归断言与人工审阅"
+  },
+  {
+    "file": "research/method-repair/liquid-cooling-data-gap-v1/regression/04_能力基线.md",
+    "change_reason": "区分稳定、部分、不支持和需ChatGPT处理的能力",
+    "changed_sections": ["稳定可用", "部分可用", "当前不支持或不适用", "仍需ChatGPT或定向人工取证"],
+    "verification": "与44条作用域矩阵交叉核对"
+  },
+  {
+    "file": "research/method-repair/liquid-cooling-data-gap-v1/regression/04_最终缺口清单.json",
+    "change_reason": "按根因去重保存冻结事实下的最终缺口",
+    "changed_sections": ["record_conservation", "calculation_scope_counts", "working_capital_recovery", "root_gaps", "guards"],
+    "verification": "JSON解析、8家公司基础项与9条记录守恒检查"
+  },
+  {
+    "file": "research/method-repair/liquid-cooling-data-gap-v1/regression/04_变更前后对照.csv",
+    "change_reason": "按计算作用域保存44条前后处理对照",
+    "changed_sections": ["12列矩阵", "9条记录", "四种calculation_readiness"],
+    "verification": "CSV列、状态集合、字段不重叠、不适用重开检查"
   }
 ]

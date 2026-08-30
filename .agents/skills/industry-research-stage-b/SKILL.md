@@ -22,7 +22,7 @@ ChatGPT B1 → Codex B2 → ChatGPT B3。Codex不得自行决定查什么业务�
 
 先原样保存A最终包和B1合同；唯一映射实体；只使用 `available_at <= as_of`；提取财务、主营、公告链、估值、价格和反证；保存输入清单和质量状态。
 
-营运资金必须分两层：先分别输出应收账款、存货、合同负债、经营活动现金流、销售回款等基础风险项；只有适用字段齐全、报告期相同且合并口径相同时，才计算含合同资产、预收款项等可选项的综合营运资金强度。字段不全时综合项写 `partial` 并列出 `missing_fields`，但不得丢弃已取得的基础项。预收款项只有正式报表另行列示且确认未与合同负债重复时才能纳入；不得因为存在合同负债就自动把预收款项写成不适用。
+营运资金必须分两层。基础风险项分别输出应收账款、存货、适用且非空的合同资产、合同负债、经营活动现金流、销售商品和提供劳务收到的现金、TTM营业收入，以及B1已批准的同比或相对指标。综合营运资金强度只纳入同一报告期、同一合并口径且适用字段完整的项目；字段不全时综合项写 `partial` 并列出 `missing_fields`，但不得丢弃已取得的基础项。预收款项只有正式报表另行列示且确认未与合同负债重复时才能纳入；不得因为存在合同负债就自动把预收款项写成不适用。
 
 `true_zero` 只允许由同一报告期、同一合并口径的正式证据确认。本地 `null`、未单列或跨期正式文件都不能证明本期为零；跨期文件只能支持字段含义、列报方式或会计语义。
 
@@ -38,7 +38,7 @@ ChatGPT B1 → Codex B2 → ChatGPT B3。Codex不得自行决定查什么业务�
 
 检查实体、时间、主营和指标是否对应精确产业节点；区分缺失、零、无记录和查询失败；决定哪些事实进入C。不得修改Codex原始值。
 
-每个计算作用域只能标为 `direct_calculable`、`range_calculable`、`condition_only`、`not_applicable` 之一，并同时给出 `calculation_scope`、`allowed_numeric_fields`、`must_remain_unknown`、`readiness_reason`，适用时再给出 `reopen_condition`。这些状态只约束所列计算作用域，不是公司级授权；未列入 `allowed_numeric_fields` 的字段不得计算，允许计算的字段与必须未知的字段可以并存。例如主题收入和毛利可算时，主题净利润与现金仍可保持未知；单项PE不适用不影响PS、PB或经营事实。
+每个计算作用域都必须给出 `calculation_scope`、`calculation_readiness`、`allowed_numeric_fields`、`must_remain_unknown`、`readiness_reason`、`reopen_condition`；其中 `calculation_readiness` 只能为 `direct_calculable`、`range_calculable`、`condition_only`、`not_applicable` 之一，`reopen_condition` 在不适用时必填，其余状态可留空。`review_due` 绑定到 `calculation_scope`。这些状态只约束所列计算作用域，不是公司级授权；实际值与前瞻情景准备度不同时必须拆分作用域，例如 `theme_actual` 与 `theme_forward_scenario`。未列入 `allowed_numeric_fields` 的字段不得计算，允许计算的字段与必须未知的字段可以并存。例如主题收入和毛利可算时，主题净利润与现金仍可保持未知；单项PE不适用不影响PS、PB或经营事实。
 
 `direct_calculable` 只接受同一报告期、同一合并口径、同一业务场景的直接正式披露；`range_calculable` 只接受正式合同、正式上下界或可核验限制，不能用规划、产能、行业数据、媒体报道或历史经验凑区间。`condition_only` 只进入商业链、证据最低线、升级/失效条件和反证，不向C2发出数值情景请求。`not_applicable` 必须写明当前原因和 `reopen_condition`，仍按 `review_due` 复核，不登记为当前待修数据缺口。
 

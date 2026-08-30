@@ -1,5 +1,5 @@
 task_id: liquid-cooling-data-gap-v1
-stage: phase_3_minimal_implementation
+stage: phase_4_targeted_correction_and_regression
 status: complete
 base_branch: origin/main
 base_commit: 70b9f7838551a2e61a2c10cb7698e74c35303a7c
@@ -19,5 +19,9 @@ completed_outputs:
   - 03_修改清单.json
   - 03_测试结果.md
   - 03_剩余未知.json
+  - regression/04_回归摘要.md
+  - regression/04_能力基线.md
+  - regression/04_最终缺口清单.json
+  - regression/04_变更前后对照.csv
 next_actor: chatgpt
-next_step: review_implementation
+next_step: final_acceptance
