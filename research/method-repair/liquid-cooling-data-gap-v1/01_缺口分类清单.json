@@ -1,0 +1,824 @@
+{
+  "task_id": "liquid-cooling-data-gap-v1",
+  "generated_at": "2026-08-30T08:52:28+08:00",
+  "base_commit": "70b9f7838551a2e61a2c10cb7698e74c35303a7c",
+  "evidence_commit": "388e93632a184190b989bc454af0402128955be4",
+  "word_source_status": "未直接读取Word原文",
+  "trace_summary": {
+    "original_B2_count": 21,
+    "B2_R1_remaining_count": 17,
+    "B2_R1_closed_gap_ids": [
+      "B2G006",
+      "B2G007",
+      "B2G011",
+      "B2G018"
+    ],
+    "C2_new_id_count": 11,
+    "C2_reexpressed_root_count": 6,
+    "total_preserved_original_ids": 32
+  },
+  "allowed_statuses": [
+    "complete",
+    "partial",
+    "unsupported",
+    "query_failed",
+    "no_record",
+    "unknown",
+    "current_snapshot_not_replayable",
+    "not_applicable",
+    "true_zero"
+  ],
+  "allowed_cause_classes": [
+    "technical_defect",
+    "source_access_issue",
+    "disclosure_absent",
+    "method_overrequirement",
+    "not_applicable",
+    "direction_specific"
+  ],
+  "allowed_actions": [
+    "fix_now",
+    "audit_then_decide",
+    "change_method",
+    "monitor_later",
+    "close_as_not_applicable",
+    "defer_to_direction"
+  ],
+  "cause_counts": {
+    "technical_defect": 0,
+    "source_access_issue": 4,
+    "disclosure_absent": 13,
+    "method_overrequirement": 12,
+    "not_applicable": 3,
+    "direction_specific": 0
+  },
+  "gaps": [
+    {
+      "gap_id": "B2G001",
+      "origin_stage": "B2",
+      "related_gap_ids": [],
+      "lifecycle": "continued_after_B2_R1",
+      "question": "英维克营运资金强度为何为partial？",
+      "entity_or_node": "英维克",
+      "field": "working_capital_intensity",
+      "status": "partial",
+      "cause_class": "method_overrequirement",
+      "impact": "综合强度为空，但应收、存货、合同负债、经营现金流、销售回款和TTM收入均可用。",
+      "blocks_gate": false,
+      "action": "change_method",
+      "must_not_infer": "不得把合并报表未单列的预收款项当0；不得因此丢弃已取得的基础风险项。",
+      "evidence_paths": [
+        "git:2704a7f9a45a71aa8fb9f164775f60c6c7ec86b2:research/industry-runs/ai-liquid-cooling-2026h2-001/05_B2_数据缺口.json",
+        "research/industry-runs/ai-liquid-cooling-2026h2-001/05_B2_数据缺口.json",
+        "research/industry-runs/ai-liquid-cooling-2026h2-001/05_B2_本地核查.json"
+      ],
+      "review_due": "2026-11-30",
+      "review_due_reason": "沿用 research/industry-runs/ai-liquid-cooling-2026h2-001/09_C_监控合同.yaml 的实体复核日。",
+      "cross_direction_count": 1
+    },
+    {
+      "gap_id": "B2G002",
+      "origin_stage": "B2",
+      "related_gap_ids": [
+        "C2G001"
+      ],
+      "lifecycle": "reexpressed_in_C2",
+      "question": "英维克是否披露液冷主题收入、毛利、净利润和现金？",
+      "entity_or_node": "英维克",
+      "field": "direct_theme_financial_split",
+      "status": "unknown",
+      "cause_class": "disclosure_absent",
+      "impact": "只能做公司级经营背景，不能形成液冷主题数值情景。",
+      "blocks_gate": false,
+      "action": "monitor_later",
+      "must_not_infer": "不得用机房温控、电子散热或公司总额替代液冷主题值。",
+      "evidence_paths": [
+        "git:2704a7f9a45a71aa8fb9f164775f60c6c7ec86b2:research/industry-runs/ai-liquid-cooling-2026h2-001/05_B2_数据缺口.json",
+        "research/industry-runs/ai-liquid-cooling-2026h2-001/05_B2_数据缺口.json",
+        "research/industry-runs/ai-liquid-cooling-2026h2-001/06_B_交给C阶段.yaml",
+        "research/industry-runs/ai-liquid-cooling-2026h2-001/08_C2_数据缺口.json"
+      ],
+      "review_due": "2026-11-30",
+      "review_due_reason": "沿用 research/industry-runs/ai-liquid-cooling-2026h2-001/09_C_监控合同.yaml 的实体复核日。",
+      "cross_direction_count": 1
+    },
+    {
+      "gap_id": "B2G003",
+      "origin_stage": "B2",
+      "related_gap_ids": [],
+      "lifecycle": "continued_after_B2_R1",
+      "question": "申菱环境营运资金强度为何为partial？",
+      "entity_or_node": "申菱环境",
+      "field": "working_capital_intensity",
+      "status": "partial",
+      "cause_class": "method_overrequirement",
+      "impact": "综合强度为空，但基础风险项均已取得。",
+      "blocks_gate": false,
+      "action": "change_method",
+      "must_not_infer": "不得把未单列预收款项当0。",
+      "evidence_paths": [
+        "git:2704a7f9a45a71aa8fb9f164775f60c6c7ec86b2:research/industry-runs/ai-liquid-cooling-2026h2-001/05_B2_数据缺口.json",
+        "research/industry-runs/ai-liquid-cooling-2026h2-001/05_B2_数据缺口.json",
+        "research/industry-runs/ai-liquid-cooling-2026h2-001/05_B2_本地核查.json"
+      ],
+      "review_due": "2026-11-30",
+      "review_due_reason": "沿用 research/industry-runs/ai-liquid-cooling-2026h2-001/09_C_监控合同.yaml 的实体复核日。",
+      "cross_direction_count": 1
+    },
+    {
+      "gap_id": "B2G004",
+      "origin_stage": "B2",
+      "related_gap_ids": [
+        "C2G002"
+      ],
+      "lifecycle": "reexpressed_in_C2",
+      "question": "申菱环境是否披露液冷主题收入、毛利、净利润和现金？",
+      "entity_or_node": "申菱环境",
+      "field": "direct_theme_financial_split",
+      "status": "unknown",
+      "cause_class": "disclosure_absent",
+      "impact": "数据服务板块合计不能成为液冷主题实际值。",
+      "blocks_gate": false,
+      "action": "monitor_later",
+      "must_not_infer": "不得把数据服务新增订单或公司总收入全部算作液冷。",
+      "evidence_paths": [
+        "git:2704a7f9a45a71aa8fb9f164775f60c6c7ec86b2:research/industry-runs/ai-liquid-cooling-2026h2-001/05_B2_数据缺口.json",
+        "research/industry-runs/ai-liquid-cooling-2026h2-001/05_B2_数据缺口.json",
+        "research/industry-runs/ai-liquid-cooling-2026h2-001/06_B_交给C阶段.yaml",
+        "research/industry-runs/ai-liquid-cooling-2026h2-001/08_C2_数据缺口.json"
+      ],
+      "review_due": "2026-11-30",
+      "review_due_reason": "沿用 research/industry-runs/ai-liquid-cooling-2026h2-001/09_C_监控合同.yaml 的实体复核日。",
+      "cross_direction_count": 1
+    },
+    {
+      "gap_id": "B2G005",
+      "origin_stage": "B2",
+      "related_gap_ids": [],
+      "lifecycle": "continued_after_B2_R1",
+      "question": "曙光数创营运资金强度为何为partial？",
+      "entity_or_node": "曙光数创",
+      "field": "working_capital_intensity",
+      "status": "partial",
+      "cause_class": "method_overrequirement",
+      "impact": "应收、存货、合同负债和现金流已取得；本地当前合同资产列为空，官方另披露一年以上合同资产。",
+      "blocks_gate": false,
+      "action": "change_method",
+      "must_not_infer": "不得把一年以上合同资产当0，也不得强塞入流动营运资金公式。",
+      "evidence_paths": [
+        "git:2704a7f9a45a71aa8fb9f164775f60c6c7ec86b2:research/industry-runs/ai-liquid-cooling-2026h2-001/05_B2_数据缺口.json",
+        "research/industry-runs/ai-liquid-cooling-2026h2-001/05_B2_数据缺口.json",
+        "research/industry-runs/ai-liquid-cooling-2026h2-001/05_B2_本地核查.json",
+        "https://www.bse.cn/disclosure/2026/2026-08-25/bd21c1cedd484f8ebc77bcf91b8dc85f.pdf"
+      ],
+      "review_due": "2026-11-30",
+      "review_due_reason": "沿用 research/industry-runs/ai-liquid-cooling-2026h2-001/09_C_监控合同.yaml 的实体复核日。",
+      "cross_direction_count": 1
+    },
+    {
+      "gap_id": "B2G006",
+      "origin_stage": "B2",
+      "related_gap_ids": [],
+      "lifecycle": "closed_in_B2_R1",
+      "question": "曙光数创两份必需正式报告正文是否可取得？",
+      "entity_or_node": "曙光数创",
+      "field": "required_document_body",
+      "status": "complete",
+      "cause_class": "source_access_issue",
+      "impact": "B2首版曾阻断正式原文核验；B2-R1已恢复2份并校验HTTP、PDF魔数与哈希。",
+      "blocks_gate": false,
+      "action": "monitor_later",
+      "must_not_infer": "不得把首次query_failed解释为公司没有披露。",
+      "evidence_paths": [
+        "git:2704a7f9a45a71aa8fb9f164775f60c6c7ec86b2:research/industry-runs/ai-liquid-cooling-2026h2-001/05_B2_数据缺口.json",
+        "research/industry-runs/ai-liquid-cooling-2026h2-001/05_B2_本地核查.json",
+        "https://www.bse.cn/disclosure/2026/2026-04-14/11583a35f4b3460eb04305f845d2e837.pdf",
+        "https://www.bse.cn/disclosure/2026/2026-08-25/bd21c1cedd484f8ebc77bcf91b8dc85f.pdf"
+      ],
+      "review_due": "2026-11-30",
+      "review_due_reason": "沿用 research/industry-runs/ai-liquid-cooling-2026h2-001/09_C_监控合同.yaml 的实体复核日。",
+      "cross_direction_count": 1
+    },
+    {
+      "gap_id": "B2G007",
+      "origin_stage": "B2",
+      "related_gap_ids": [],
+      "lifecycle": "closed_in_B2_R1",
+      "question": "中科曙光两份必需正式报告正文是否可取得？",
+      "entity_or_node": "中科曙光",
+      "field": "required_document_body",
+      "status": "complete",
+      "cause_class": "source_access_issue",
+      "impact": "B2-R1通过上交所元数据和上交所big5官方镜像恢复2份正文。",
+      "blocks_gate": false,
+      "action": "monitor_later",
+      "must_not_infer": "不得把首次query_failed解释为无公告或无所有权披露。",
+      "evidence_paths": [
+        "git:2704a7f9a45a71aa8fb9f164775f60c6c7ec86b2:research/industry-runs/ai-liquid-cooling-2026h2-001/05_B2_数据缺口.json",
+        "research/industry-runs/ai-liquid-cooling-2026h2-001/05_B2_本地核查.json",
+        "https://big5.sse.com.cn/site/cht/www.sse.com.cn/disclosure/listedinfo/announcement/c/new/2026-04-15/603019_20260415_7K80.pdf",
+        "https://big5.sse.com.cn/site/cht/www.sse.com.cn/disclosure/listedinfo/announcement/c/new/2026-08-26/603019_20260826_UXZY.pdf"
+      ],
+      "review_due": "2026-09-30",
+      "review_due_reason": "沿用 research/industry-runs/ai-liquid-cooling-2026h2-001/09_C_监控合同.yaml 的实体复核日。",
+      "cross_direction_count": 1
+    },
+    {
+      "gap_id": "B2G008",
+      "origin_stage": "B2",
+      "related_gap_ids": [],
+      "lifecycle": "continued_after_B2_R1",
+      "question": "飞荣达营运资金强度为何为partial？",
+      "entity_or_node": "飞荣达",
+      "field": "working_capital_intensity",
+      "status": "partial",
+      "cause_class": "method_overrequirement",
+      "impact": "本地contract_assets和adv_receipts为空；官方年报显示合同资产为真实零、预收款项未单列。基础项完整。",
+      "blocks_gate": false,
+      "action": "change_method",
+      "must_not_infer": "不得仅凭本地null写0；真实零必须绑定官方报告证据。",
+      "evidence_paths": [
+        "git:2704a7f9a45a71aa8fb9f164775f60c6c7ec86b2:research/industry-runs/ai-liquid-cooling-2026h2-001/05_B2_数据缺口.json",
+        "research/industry-runs/ai-liquid-cooling-2026h2-001/05_B2_数据缺口.json",
+        "research/industry-runs/ai-liquid-cooling-2026h2-001/05_B2_本地核查.json",
+        "https://disc.static.szse.cn/disc/disk03/finalpage/2026-04-28/cff7b1a4-5371-4d94-b1e6-06b1e0347649.PDF"
+      ],
+      "review_due": "2026-11-30",
+      "review_due_reason": "沿用 research/industry-runs/ai-liquid-cooling-2026h2-001/09_C_监控合同.yaml 的实体复核日。",
+      "cross_direction_count": 1
+    },
+    {
+      "gap_id": "B2G009",
+      "origin_stage": "B2",
+      "related_gap_ids": [
+        "C2G005"
+      ],
+      "lifecycle": "reexpressed_in_C2",
+      "question": "飞荣达是否披露液冷主题实际值？",
+      "entity_or_node": "飞荣达",
+      "field": "direct_theme_financial_split",
+      "status": "unknown",
+      "cause_class": "disclosure_absent",
+      "impact": "服务器与数据中心散热包含多产品，不能得到液冷主题财务。",
+      "blocks_gate": false,
+      "action": "monitor_later",
+      "must_not_infer": "不得把批量交付或公司整体增长等同于液冷收入。",
+      "evidence_paths": [
+        "git:2704a7f9a45a71aa8fb9f164775f60c6c7ec86b2:research/industry-runs/ai-liquid-cooling-2026h2-001/05_B2_数据缺口.json",
+        "research/industry-runs/ai-liquid-cooling-2026h2-001/05_B2_数据缺口.json",
+        "research/industry-runs/ai-liquid-cooling-2026h2-001/06_B_交给C阶段.yaml",
+        "research/industry-runs/ai-liquid-cooling-2026h2-001/08_C2_数据缺口.json"
+      ],
+      "review_due": "2026-11-30",
+      "review_due_reason": "沿用 research/industry-runs/ai-liquid-cooling-2026h2-001/09_C_监控合同.yaml 的实体复核日。",
+      "cross_direction_count": 1
+    },
+    {
+      "gap_id": "B2G010",
+      "origin_stage": "B2",
+      "related_gap_ids": [],
+      "lifecycle": "continued_after_B2_R1",
+      "question": "佳力图营运资金强度为何为partial？",
+      "entity_or_node": "佳力图",
+      "field": "working_capital_intensity",
+      "status": "partial",
+      "cause_class": "method_overrequirement",
+      "impact": "基础风险项完整；官方明确预收款项不适用，合同负债已列示。",
+      "blocks_gate": false,
+      "action": "change_method",
+      "must_not_infer": "不得把不适用字段记成待补技术缺口。",
+      "evidence_paths": [
+        "git:2704a7f9a45a71aa8fb9f164775f60c6c7ec86b2:research/industry-runs/ai-liquid-cooling-2026h2-001/05_B2_数据缺口.json",
+        "research/industry-runs/ai-liquid-cooling-2026h2-001/05_B2_数据缺口.json",
+        "research/industry-runs/ai-liquid-cooling-2026h2-001/05_B2_本地核查.json",
+        "https://big5.sse.com.cn/site/cht/www.sse.com.cn/disclosure/listedinfo/announcement/c/new/2026-08-26/603912_20260826_04J5.pdf"
+      ],
+      "review_due": "2026-09-30",
+      "review_due_reason": "沿用 research/industry-runs/ai-liquid-cooling-2026h2-001/09_C_监控合同.yaml 的实体复核日。",
+      "cross_direction_count": 1
+    },
+    {
+      "gap_id": "B2G011",
+      "origin_stage": "B2",
+      "related_gap_ids": [],
+      "lifecycle": "closed_in_B2_R1",
+      "question": "佳力图3份必需正式正文是否可取得？",
+      "entity_or_node": "佳力图",
+      "field": "required_document_body",
+      "status": "complete",
+      "cause_class": "source_access_issue",
+      "impact": "B2-R1通过上交所元数据和big5官方镜像恢复年报、问询回复和半年报。",
+      "blocks_gate": false,
+      "action": "monitor_later",
+      "must_not_infer": "不得把首次query_failed解释为公司没有披露。",
+      "evidence_paths": [
+        "git:2704a7f9a45a71aa8fb9f164775f60c6c7ec86b2:research/industry-runs/ai-liquid-cooling-2026h2-001/05_B2_数据缺口.json",
+        "research/industry-runs/ai-liquid-cooling-2026h2-001/05_B2_本地核查.json"
+      ],
+      "review_due": "2026-09-30",
+      "review_due_reason": "沿用 research/industry-runs/ai-liquid-cooling-2026h2-001/09_C_监控合同.yaml 的实体复核日。",
+      "cross_direction_count": 1
+    },
+    {
+      "gap_id": "B2G012",
+      "origin_stage": "B2",
+      "related_gap_ids": [
+        "C2G006"
+      ],
+      "lifecycle": "reexpressed_in_C2",
+      "question": "佳力图是否披露液冷主题实际值？",
+      "entity_or_node": "佳力图",
+      "field": "direct_theme_financial_split",
+      "status": "unknown",
+      "cause_class": "disclosure_absent",
+      "impact": "设施侧关系成立，但风冷、混合冷却、IDC和普通温控未拆。",
+      "blocks_gate": false,
+      "action": "monitor_later",
+      "must_not_infer": "不得把精密空调或IDC收入整体算作液冷。",
+      "evidence_paths": [
+        "git:2704a7f9a45a71aa8fb9f164775f60c6c7ec86b2:research/industry-runs/ai-liquid-cooling-2026h2-001/05_B2_数据缺口.json",
+        "research/industry-runs/ai-liquid-cooling-2026h2-001/05_B2_数据缺口.json",
+        "research/industry-runs/ai-liquid-cooling-2026h2-001/06_B_交给C阶段.yaml",
+        "research/industry-runs/ai-liquid-cooling-2026h2-001/08_C2_数据缺口.json"
+      ],
+      "review_due": "2026-09-30",
+      "review_due_reason": "沿用 research/industry-runs/ai-liquid-cooling-2026h2-001/09_C_监控合同.yaml 的实体复核日。",
+      "cross_direction_count": 1
+    },
+    {
+      "gap_id": "B2G013",
+      "origin_stage": "B2",
+      "related_gap_ids": [],
+      "lifecycle": "continued_after_B2_R1",
+      "question": "高澜股份营运资金强度为何为partial？",
+      "entity_or_node": "高澜股份",
+      "field": "working_capital_intensity",
+      "status": "partial",
+      "cause_class": "method_overrequirement",
+      "impact": "基础项完整，预收款项未单列；项目预收已通过合同负债表达。",
+      "blocks_gate": false,
+      "action": "change_method",
+      "must_not_infer": "不得重复扣减同一预收语义。",
+      "evidence_paths": [
+        "git:2704a7f9a45a71aa8fb9f164775f60c6c7ec86b2:research/industry-runs/ai-liquid-cooling-2026h2-001/05_B2_数据缺口.json",
+        "research/industry-runs/ai-liquid-cooling-2026h2-001/05_B2_数据缺口.json",
+        "research/industry-runs/ai-liquid-cooling-2026h2-001/05_B2_本地核查.json",
+        "https://disc.static.szse.cn/disc/disk03/finalpage/2026-04-24/705f7d73-d055-4316-bc17-3d035a582b4f.PDF"
+      ],
+      "review_due": "2026-11-30",
+      "review_due_reason": "沿用 research/industry-runs/ai-liquid-cooling-2026h2-001/09_C_监控合同.yaml 的实体复核日。",
+      "cross_direction_count": 1
+    },
+    {
+      "gap_id": "B2G014",
+      "origin_stage": "B2",
+      "related_gap_ids": [
+        "C2G008"
+      ],
+      "lifecycle": "reexpressed_in_C2",
+      "question": "高澜股份是否披露液冷主题实际值？",
+      "entity_or_node": "高澜股份",
+      "field": "direct_theme_financial_split",
+      "status": "unknown",
+      "cause_class": "disclosure_absent",
+      "impact": "高功率密度分项混有储能等场景。",
+      "blocks_gate": false,
+      "action": "monitor_later",
+      "must_not_infer": "不得把混合分项全部归入AI数据中心液冷。",
+      "evidence_paths": [
+        "git:2704a7f9a45a71aa8fb9f164775f60c6c7ec86b2:research/industry-runs/ai-liquid-cooling-2026h2-001/05_B2_数据缺口.json",
+        "research/industry-runs/ai-liquid-cooling-2026h2-001/05_B2_数据缺口.json",
+        "research/industry-runs/ai-liquid-cooling-2026h2-001/06_B_交给C阶段.yaml",
+        "research/industry-runs/ai-liquid-cooling-2026h2-001/08_C2_数据缺口.json"
+      ],
+      "review_due": "2026-11-30",
+      "review_due_reason": "沿用 research/industry-runs/ai-liquid-cooling-2026h2-001/09_C_监控合同.yaml 的实体复核日。",
+      "cross_direction_count": 1
+    },
+    {
+      "gap_id": "B2G015",
+      "origin_stage": "B2",
+      "related_gap_ids": [],
+      "lifecycle": "continued_after_B2_R1",
+      "question": "同飞股份营运资金强度为何为partial？",
+      "entity_or_node": "同飞股份",
+      "field": "working_capital_intensity",
+      "status": "partial",
+      "cause_class": "method_overrequirement",
+      "impact": "基础项完整，预收款项未单列；但该公司不应进入液冷经营计算。",
+      "blocks_gate": false,
+      "action": "change_method",
+      "must_not_infer": "不得用公司级财务补救液冷关系门未通过。",
+      "evidence_paths": [
+        "git:2704a7f9a45a71aa8fb9f164775f60c6c7ec86b2:research/industry-runs/ai-liquid-cooling-2026h2-001/05_B2_数据缺口.json",
+        "research/industry-runs/ai-liquid-cooling-2026h2-001/05_B2_数据缺口.json",
+        "research/industry-runs/ai-liquid-cooling-2026h2-001/05_B2_本地核查.json"
+      ],
+      "review_due": "2026-09-30",
+      "review_due_reason": "沿用 research/industry-runs/ai-liquid-cooling-2026h2-001/09_C_监控合同.yaml 的实体复核日。",
+      "cross_direction_count": 1
+    },
+    {
+      "gap_id": "B2G016",
+      "origin_stage": "B2",
+      "related_gap_ids": [],
+      "lifecycle": "closed_as_not_applicable_in_C",
+      "question": "同飞股份是否应补液冷主题财务拆分？",
+      "entity_or_node": "同飞股份",
+      "field": "direct_theme_financial_split",
+      "status": "not_applicable",
+      "cause_class": "not_applicable",
+      "impact": "B3已将其限定为能力与竞争背景，关系硬门未通过，不应创建主题财务待修缺口。",
+      "blocks_gate": false,
+      "action": "close_as_not_applicable",
+      "must_not_infer": "不得把产品能力推成客户、订单、交付或主题财务。",
+      "evidence_paths": [
+        "git:2704a7f9a45a71aa8fb9f164775f60c6c7ec86b2:research/industry-runs/ai-liquid-cooling-2026h2-001/05_B2_数据缺口.json",
+        "research/industry-runs/ai-liquid-cooling-2026h2-001/05_B2_数据缺口.json",
+        "research/industry-runs/ai-liquid-cooling-2026h2-001/06_B_交给C阶段.yaml",
+        "research/industry-runs/ai-liquid-cooling-2026h2-001/08_C2_数据缺口.json"
+      ],
+      "review_due": "2026-09-30",
+      "review_due_reason": "沿用 research/industry-runs/ai-liquid-cooling-2026h2-001/09_C_监控合同.yaml 的实体复核日。",
+      "cross_direction_count": 1
+    },
+    {
+      "gap_id": "B2G017",
+      "origin_stage": "B2",
+      "related_gap_ids": [],
+      "lifecycle": "continued_after_B2_R1",
+      "question": "荣亿精密营运资金强度为何为partial？",
+      "entity_or_node": "荣亿精密",
+      "field": "working_capital_intensity",
+      "status": "partial",
+      "cause_class": "method_overrequirement",
+      "impact": "本地合同资产和预收款项为空；官方合并报表未列数，其他基础项可用。",
+      "blocks_gate": false,
+      "action": "change_method",
+      "must_not_infer": "不得把未列示合同资产或预收款项直接当0。",
+      "evidence_paths": [
+        "git:2704a7f9a45a71aa8fb9f164775f60c6c7ec86b2:research/industry-runs/ai-liquid-cooling-2026h2-001/05_B2_数据缺口.json",
+        "research/industry-runs/ai-liquid-cooling-2026h2-001/05_B2_数据缺口.json",
+        "research/industry-runs/ai-liquid-cooling-2026h2-001/05_B2_本地核查.json",
+        "https://www.bse.cn/disclosure/2026/2026-08-25/a8486b7e58ee4bf7997110ce99996fdc.pdf"
+      ],
+      "review_due": "2026-11-30",
+      "review_due_reason": "沿用 research/industry-runs/ai-liquid-cooling-2026h2-001/09_C_监控合同.yaml 的实体复核日。",
+      "cross_direction_count": 1
+    },
+    {
+      "gap_id": "B2G018",
+      "origin_stage": "B2",
+      "related_gap_ids": [],
+      "lifecycle": "closed_in_B2_R1",
+      "question": "荣亿精密3份必需正式正文是否可取得？",
+      "entity_or_node": "荣亿精密",
+      "field": "required_document_body",
+      "status": "complete",
+      "cause_class": "source_access_issue",
+      "impact": "B2-R1通过北交所官方元数据与直接PDF恢复年报、半年报和项目公告。",
+      "blocks_gate": false,
+      "action": "monitor_later",
+      "must_not_infer": "不得把首次query_failed解释为无项目或无披露。",
+      "evidence_paths": [
+        "git:2704a7f9a45a71aa8fb9f164775f60c6c7ec86b2:research/industry-runs/ai-liquid-cooling-2026h2-001/05_B2_数据缺口.json",
+        "research/industry-runs/ai-liquid-cooling-2026h2-001/05_B2_本地核查.json"
+      ],
+      "review_due": "2026-11-30",
+      "review_due_reason": "沿用 research/industry-runs/ai-liquid-cooling-2026h2-001/09_C_监控合同.yaml 的实体复核日。",
+      "cross_direction_count": 1
+    },
+    {
+      "gap_id": "B2G019",
+      "origin_stage": "B2",
+      "related_gap_ids": [
+        "C2G010"
+      ],
+      "lifecycle": "reexpressed_in_C2",
+      "question": "荣亿精密是否披露液冷主题实际值？",
+      "entity_or_node": "荣亿精密",
+      "field": "direct_theme_financial_split",
+      "status": "unknown",
+      "cause_class": "disclosure_absent",
+      "impact": "快接量产关系成立，但3C混合收入未拆液冷。",
+      "blocks_gate": false,
+      "action": "monitor_later",
+      "must_not_infer": "不得把3C收入或1亿元项目投资当液冷收入、订单或利润。",
+      "evidence_paths": [
+        "git:2704a7f9a45a71aa8fb9f164775f60c6c7ec86b2:research/industry-runs/ai-liquid-cooling-2026h2-001/05_B2_数据缺口.json",
+        "research/industry-runs/ai-liquid-cooling-2026h2-001/05_B2_数据缺口.json",
+        "research/industry-runs/ai-liquid-cooling-2026h2-001/06_B_交给C阶段.yaml",
+        "research/industry-runs/ai-liquid-cooling-2026h2-001/08_C2_数据缺口.json"
+      ],
+      "review_due": "2026-11-30",
+      "review_due_reason": "沿用 research/industry-runs/ai-liquid-cooling-2026h2-001/09_C_监控合同.yaml 的实体复核日。",
+      "cross_direction_count": 1
+    },
+    {
+      "gap_id": "B2G020",
+      "origin_stage": "B2",
+      "related_gap_ids": [],
+      "lifecycle": "continued_as_optional",
+      "question": "是否必须为全部实体计算点时行业相对收益？",
+      "entity_or_node": "全部实体",
+      "field": "industry_relative_return",
+      "status": "unsupported",
+      "cause_class": "method_overrequirement",
+      "impact": "相对沪深300已可用；缺少点时可靠逐实体行业基准不阻断研究。",
+      "blocks_gate": false,
+      "action": "change_method",
+      "must_not_infer": "不得把宽基相对收益写成行业相对收益。",
+      "evidence_paths": [
+        "git:2704a7f9a45a71aa8fb9f164775f60c6c7ec86b2:research/industry-runs/ai-liquid-cooling-2026h2-001/05_B2_数据缺口.json",
+        "research/industry-runs/ai-liquid-cooling-2026h2-001/05_B2_数据缺口.json",
+        "research/industry-runs/ai-liquid-cooling-2026h2-001/06_B_交给C阶段.yaml"
+      ],
+      "review_due": null,
+      "review_due_reason": "D1只给实体设复核日，没有全局指标复核日。",
+      "cross_direction_count": 1
+    },
+    {
+      "gap_id": "B2G021",
+      "origin_stage": "B2",
+      "related_gap_ids": [],
+      "lifecycle": "continued_as_optional",
+      "question": "是否必须取得5年或10年估值分位？",
+      "entity_or_node": "全部实体",
+      "field": "valuation_long_history",
+      "status": "partial",
+      "cause_class": "method_overrequirement",
+      "impact": "实际260交易日窗口可用且已披露；不应为固定长窗口临时建数据。",
+      "blocks_gate": false,
+      "action": "change_method",
+      "must_not_infer": "不得把260交易日窗口声称为5年或10年。",
+      "evidence_paths": [
+        "git:2704a7f9a45a71aa8fb9f164775f60c6c7ec86b2:research/industry-runs/ai-liquid-cooling-2026h2-001/05_B2_数据缺口.json",
+        "research/industry-runs/ai-liquid-cooling-2026h2-001/05_B2_数据缺口.json",
+        "research/industry-runs/ai-liquid-cooling-2026h2-001/06_B_交给C阶段.yaml"
+      ],
+      "review_due": null,
+      "review_due_reason": "D1只给实体设复核日，没有全局指标复核日。",
+      "cross_direction_count": 1
+    },
+    {
+      "gap_id": "C2G001",
+      "origin_stage": "C2",
+      "related_gap_ids": [
+        "B2G002"
+      ],
+      "lifecycle": "reexpression_of_B2_root",
+      "question": "英维克四项液冷主题实际值能否用于C2？",
+      "entity_or_node": "英维克",
+      "field": "theme_revenue_cny|theme_gross_profit_cny|theme_net_profit_cny|theme_cash_contribution_cny",
+      "status": "unknown",
+      "cause_class": "disclosure_absent",
+      "impact": "不应创建数值情景，只能保留条件、反证和缺失原因。",
+      "blocks_gate": false,
+      "action": "monitor_later",
+      "must_not_infer": "不得用机房温控或电子散热合计替代。",
+      "evidence_paths": [
+        "research/industry-runs/ai-liquid-cooling-2026h2-001/08_C2_数据缺口.json",
+        "research/industry-runs/ai-liquid-cooling-2026h2-001/08_C2_计算结果.json",
+        "research/industry-runs/ai-liquid-cooling-2026h2-001/06_B_交给C阶段.yaml"
+      ],
+      "review_due": "2026-11-30",
+      "review_due_reason": "沿用 research/industry-runs/ai-liquid-cooling-2026h2-001/09_C_监控合同.yaml 的实体复核日。",
+      "cross_direction_count": 1
+    },
+    {
+      "gap_id": "C2G002",
+      "origin_stage": "C2",
+      "related_gap_ids": [
+        "B2G004"
+      ],
+      "lifecycle": "reexpression_of_B2_root",
+      "question": "申菱环境四项液冷主题实际值能否用于C2？",
+      "entity_or_node": "申菱环境",
+      "field": "theme_revenue_cny|theme_gross_profit_cny|theme_net_profit_cny|theme_cash_contribution_cny",
+      "status": "unknown",
+      "cause_class": "disclosure_absent",
+      "impact": "只适合condition_only。",
+      "blocks_gate": false,
+      "action": "monitor_later",
+      "must_not_infer": "不得把数据服务板块合计替代液冷。",
+      "evidence_paths": [
+        "research/industry-runs/ai-liquid-cooling-2026h2-001/08_C2_数据缺口.json",
+        "research/industry-runs/ai-liquid-cooling-2026h2-001/08_C2_计算结果.json",
+        "research/industry-runs/ai-liquid-cooling-2026h2-001/06_B_交给C阶段.yaml"
+      ],
+      "review_due": "2026-11-30",
+      "review_due_reason": "沿用 research/industry-runs/ai-liquid-cooling-2026h2-001/09_C_监控合同.yaml 的实体复核日。",
+      "cross_direction_count": 1
+    },
+    {
+      "gap_id": "C2G003",
+      "origin_stage": "C2",
+      "related_gap_ids": [],
+      "lifecycle": "new_in_C2",
+      "question": "曙光数创直接液冷收入和毛利已披露后，主题净利润与现金能否计算？",
+      "entity_or_node": "曙光数创",
+      "field": "theme_net_profit_cny|theme_cash_contribution_cny",
+      "status": "unknown",
+      "cause_class": "disclosure_absent",
+      "impact": "可算收入和毛利，不能算主题净利润与现金。",
+      "blocks_gate": false,
+      "action": "monitor_later",
+      "must_not_infer": "不得用公司净利润或经营现金流替代液冷主题值。",
+      "evidence_paths": [
+        "research/industry-runs/ai-liquid-cooling-2026h2-001/08_C2_数据缺口.json",
+        "research/industry-runs/ai-liquid-cooling-2026h2-001/08_C2_计算结果.json"
+      ],
+      "review_due": "2026-11-30",
+      "review_due_reason": "沿用 research/industry-runs/ai-liquid-cooling-2026h2-001/09_C_监控合同.yaml 的实体复核日。",
+      "cross_direction_count": 1
+    },
+    {
+      "gap_id": "C2G004",
+      "origin_stage": "C2",
+      "related_gap_ids": [],
+      "lifecycle": "new_in_C2_but_not_blocking",
+      "question": "曙光数创PE区间是否因76个无效样本而不可用？",
+      "entity_or_node": "曙光数创",
+      "field": "PE_260_session_positive_valid_sample_count",
+      "status": "partial",
+      "cause_class": "method_overrequirement",
+      "impact": "184个正值有效样本可披露实际区间；排除样本不应成为待修数据。",
+      "blocks_gate": false,
+      "action": "change_method",
+      "must_not_infer": "不得给空值、非有限值或非正PE补任意倍数。",
+      "evidence_paths": [
+        "research/industry-runs/ai-liquid-cooling-2026h2-001/08_C2_数据缺口.json",
+        "research/industry-runs/ai-liquid-cooling-2026h2-001/08_C2_计算结果.json"
+      ],
+      "review_due": "2026-11-30",
+      "review_due_reason": "沿用 research/industry-runs/ai-liquid-cooling-2026h2-001/09_C_监控合同.yaml 的实体复核日。",
+      "cross_direction_count": 1
+    },
+    {
+      "gap_id": "C2G005",
+      "origin_stage": "C2",
+      "related_gap_ids": [
+        "B2G009"
+      ],
+      "lifecycle": "reexpression_of_B2_root",
+      "question": "飞荣达四项液冷主题实际值能否用于C2？",
+      "entity_or_node": "飞荣达",
+      "field": "theme_revenue_cny|theme_gross_profit_cny|theme_net_profit_cny|theme_cash_contribution_cny",
+      "status": "unknown",
+      "cause_class": "disclosure_absent",
+      "impact": "只适合condition_only。",
+      "blocks_gate": false,
+      "action": "monitor_later",
+      "must_not_infer": "不得把服务器/数据中心散热合计或交付表述替代主题值。",
+      "evidence_paths": [
+        "research/industry-runs/ai-liquid-cooling-2026h2-001/08_C2_数据缺口.json",
+        "research/industry-runs/ai-liquid-cooling-2026h2-001/08_C2_计算结果.json",
+        "research/industry-runs/ai-liquid-cooling-2026h2-001/06_B_交给C阶段.yaml"
+      ],
+      "review_due": "2026-11-30",
+      "review_due_reason": "沿用 research/industry-runs/ai-liquid-cooling-2026h2-001/09_C_监控合同.yaml 的实体复核日。",
+      "cross_direction_count": 1
+    },
+    {
+      "gap_id": "C2G006",
+      "origin_stage": "C2",
+      "related_gap_ids": [
+        "B2G012"
+      ],
+      "lifecycle": "reexpression_of_B2_root",
+      "question": "佳力图四项液冷主题实际值能否用于C2？",
+      "entity_or_node": "佳力图",
+      "field": "theme_revenue_cny|theme_gross_profit_cny|theme_net_profit_cny|theme_cash_contribution_cny",
+      "status": "unknown",
+      "cause_class": "disclosure_absent",
+      "impact": "设施侧关系可接受，但主题值不可计算。",
+      "blocks_gate": false,
+      "action": "monitor_later",
+      "must_not_infer": "不得把风冷、混合冷却、IDC或普通温控归入液冷。",
+      "evidence_paths": [
+        "research/industry-runs/ai-liquid-cooling-2026h2-001/08_C2_数据缺口.json",
+        "research/industry-runs/ai-liquid-cooling-2026h2-001/08_C2_计算结果.json",
+        "research/industry-runs/ai-liquid-cooling-2026h2-001/06_B_交给C阶段.yaml"
+      ],
+      "review_due": "2026-09-30",
+      "review_due_reason": "沿用 research/industry-runs/ai-liquid-cooling-2026h2-001/09_C_监控合同.yaml 的实体复核日。",
+      "cross_direction_count": 1
+    },
+    {
+      "gap_id": "C2G007",
+      "origin_stage": "C2",
+      "related_gap_ids": [],
+      "lifecycle": "new_in_C2_closed_as_not_applicable",
+      "question": "佳力图当前亏损时是否要修复PE计算？",
+      "entity_or_node": "佳力图",
+      "field": "current_pe_ttm|PE_p25_p50_p75_requirements",
+      "status": "not_applicable",
+      "cause_class": "not_applicable",
+      "impact": "当前PE无经济含义，不是数据故障，也不应阻断PS或经营条件分析。",
+      "blocks_gate": false,
+      "action": "close_as_not_applicable",
+      "must_not_infer": "不得用任意PE、行业PE或外部倍数替代。",
+      "evidence_paths": [
+        "research/industry-runs/ai-liquid-cooling-2026h2-001/08_C2_数据缺口.json",
+        "research/industry-runs/ai-liquid-cooling-2026h2-001/08_C2_计算结果.json"
+      ],
+      "review_due": "2026-09-30",
+      "review_due_reason": "沿用 research/industry-runs/ai-liquid-cooling-2026h2-001/09_C_监控合同.yaml 的实体复核日。",
+      "cross_direction_count": 1
+    },
+    {
+      "gap_id": "C2G008",
+      "origin_stage": "C2",
+      "related_gap_ids": [
+        "B2G014"
+      ],
+      "lifecycle": "reexpression_of_B2_root",
+      "question": "高澜股份四项液冷主题实际值能否用于C2？",
+      "entity_or_node": "高澜股份",
+      "field": "theme_revenue_cny|theme_gross_profit_cny|theme_net_profit_cny|theme_cash_contribution_cny",
+      "status": "unknown",
+      "cause_class": "disclosure_absent",
+      "impact": "只适合condition_only。",
+      "blocks_gate": false,
+      "action": "monitor_later",
+      "must_not_infer": "不得把混合场景分项全部算作AI数据中心液冷。",
+      "evidence_paths": [
+        "research/industry-runs/ai-liquid-cooling-2026h2-001/08_C2_数据缺口.json",
+        "research/industry-runs/ai-liquid-cooling-2026h2-001/08_C2_计算结果.json",
+        "research/industry-runs/ai-liquid-cooling-2026h2-001/06_B_交给C阶段.yaml"
+      ],
+      "review_due": "2026-11-30",
+      "review_due_reason": "沿用 research/industry-runs/ai-liquid-cooling-2026h2-001/09_C_监控合同.yaml 的实体复核日。",
+      "cross_direction_count": 1
+    },
+    {
+      "gap_id": "C2G009",
+      "origin_stage": "C2",
+      "related_gap_ids": [],
+      "lifecycle": "new_in_C2_but_not_blocking",
+      "question": "高澜股份PE区间是否因54个无效样本而不可用？",
+      "entity_or_node": "高澜股份",
+      "field": "PE_260_session_positive_valid_sample_count",
+      "status": "partial",
+      "cause_class": "method_overrequirement",
+      "impact": "206个正值有效样本可披露实际区间；无效样本只需说明。",
+      "blocks_gate": false,
+      "action": "change_method",
+      "must_not_infer": "不得替换空值、非有限值或非正PE。",
+      "evidence_paths": [
+        "research/industry-runs/ai-liquid-cooling-2026h2-001/08_C2_数据缺口.json",
+        "research/industry-runs/ai-liquid-cooling-2026h2-001/08_C2_计算结果.json"
+      ],
+      "review_due": "2026-11-30",
+      "review_due_reason": "沿用 research/industry-runs/ai-liquid-cooling-2026h2-001/09_C_监控合同.yaml 的实体复核日。",
+      "cross_direction_count": 1
+    },
+    {
+      "gap_id": "C2G010",
+      "origin_stage": "C2",
+      "related_gap_ids": [
+        "B2G019"
+      ],
+      "lifecycle": "reexpression_of_B2_root",
+      "question": "荣亿精密四项液冷主题实际值能否用于C2？",
+      "entity_or_node": "荣亿精密",
+      "field": "theme_revenue_cny|theme_gross_profit_cny|theme_net_profit_cny|theme_cash_contribution_cny",
+      "status": "unknown",
+      "cause_class": "disclosure_absent",
+      "impact": "只适合condition_only。",
+      "blocks_gate": false,
+      "action": "monitor_later",
+      "must_not_infer": "不得把3C混合收入替代液冷主题值。",
+      "evidence_paths": [
+        "research/industry-runs/ai-liquid-cooling-2026h2-001/08_C2_数据缺口.json",
+        "research/industry-runs/ai-liquid-cooling-2026h2-001/08_C2_计算结果.json",
+        "research/industry-runs/ai-liquid-cooling-2026h2-001/06_B_交给C阶段.yaml"
+      ],
+      "review_due": "2026-11-30",
+      "review_due_reason": "沿用 research/industry-runs/ai-liquid-cooling-2026h2-001/09_C_监控合同.yaml 的实体复核日。",
+      "cross_direction_count": 1
+    },
+    {
+      "gap_id": "C2G011",
+      "origin_stage": "C2",
+      "related_gap_ids": [],
+      "lifecycle": "new_in_C2_closed_as_not_applicable",
+      "question": "荣亿精密当前亏损时是否要修复PE计算？",
+      "entity_or_node": "荣亿精密",
+      "field": "current_pe_ttm|PE_p25_p50_p75_requirements",
+      "status": "not_applicable",
+      "cause_class": "not_applicable",
+      "impact": "亏损PE不适用，不是数据故障。",
+      "blocks_gate": false,
+      "action": "close_as_not_applicable",
+      "must_not_infer": "不得用任意PE或外部倍数替代。",
+      "evidence_paths": [
+        "research/industry-runs/ai-liquid-cooling-2026h2-001/08_C2_数据缺口.json",
+        "research/industry-runs/ai-liquid-cooling-2026h2-001/08_C2_计算结果.json"
+      ],
+      "review_due": "2026-11-30",
+      "review_due_reason": "沿用 research/industry-runs/ai-liquid-cooling-2026h2-001/09_C_监控合同.yaml 的实体复核日。",
+      "cross_direction_count": 1
+    }
+  ]
+}

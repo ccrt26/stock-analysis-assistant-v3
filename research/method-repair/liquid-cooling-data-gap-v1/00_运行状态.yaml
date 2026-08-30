@@ -1,0 +1,18 @@
+task_id: liquid-cooling-data-gap-v1
+stage: phase_1_read_only_audit
+status: complete
+base_branch: origin/main
+base_commit: 70b9f7838551a2e61a2c10cb7698e74c35303a7c
+evidence_branch: origin/research/ai-liquid-cooling-2026h2
+evidence_commit: 388e93632a184190b989bc454af0402128955be4
+repair_branch: fix/liquid-cooling-data-gap-v1
+completed_outputs:
+  - 00_运行状态.yaml
+  - 00_下一步操作.md
+  - 01_缺口复盘摘要.md
+  - 01_缺口分类清单.json
+  - 01_字段与来源对照.csv
+  - 01_拟修改文件清单.md
+  - 01_不修项目清单.md
+next_actor: chatgpt
+next_step: review_repair_scope
