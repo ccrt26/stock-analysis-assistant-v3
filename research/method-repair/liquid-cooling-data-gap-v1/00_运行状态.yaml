@@ -1,5 +1,5 @@
 task_id: liquid-cooling-data-gap-v1
-stage: phase_1_read_only_audit
+stage: phase_3_minimal_implementation
 status: complete
 base_branch: origin/main
 base_commit: 70b9f7838551a2e61a2c10cb7698e74c35303a7c
@@ -14,5 +14,10 @@ completed_outputs:
   - 01_字段与来源对照.csv
   - 01_拟修改文件清单.md
   - 01_不修项目清单.md
+  - 02_ChatGPT审阅结论.md
+  - 03_实施摘要.md
+  - 03_修改清单.json
+  - 03_测试结果.md
+  - 03_剩余未知.json
 next_actor: chatgpt
-next_step: review_repair_scope
+next_step: review_implementation

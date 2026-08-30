@@ -231,12 +231,14 @@
       "question": "飞荣达营运资金强度为何为partial？",
       "entity_or_node": "飞荣达",
       "field": "working_capital_intensity",
+      "report_period": "2026-03-31",
+      "zero_evidence_period": "2025-12-31",
       "status": "partial",
       "cause_class": "method_overrequirement",
-      "impact": "本地contract_assets和adv_receipts为空；官方年报显示合同资产为真实零、预收款项未单列。基础项完整。",
+      "impact": "2026Q1本地contract_assets和adv_receipts为空；2025年报合同资产为零只证明上一报告期正式值及字段语义，不能证明2026Q1为true_zero。基础项完整。",
       "blocks_gate": false,
       "action": "change_method",
-      "must_not_infer": "不得仅凭本地null写0；真实零必须绑定官方报告证据。",
+      "must_not_infer": "不得仅凭本地null或跨期正式文件写本期为0；true_zero必须绑定同一报告期、同一合并口径的正式证据。",
       "evidence_paths": [
         "git:2704a7f9a45a71aa8fb9f164775f60c6c7ec86b2:research/industry-runs/ai-liquid-cooling-2026h2-001/05_B2_数据缺口.json",
         "research/industry-runs/ai-liquid-cooling-2026h2-001/05_B2_数据缺口.json",
@@ -422,7 +424,7 @@
       "gap_id": "B2G016",
       "origin_stage": "B2",
       "related_gap_ids": [],
-      "lifecycle": "closed_as_not_applicable_in_C",
+      "lifecycle": "current_not_applicable_reviewable",
       "question": "同飞股份是否应补液冷主题财务拆分？",
       "entity_or_node": "同飞股份",
       "field": "direct_theme_financial_split",
@@ -432,6 +434,7 @@
       "blocks_gate": false,
       "action": "close_as_not_applicable",
       "must_not_infer": "不得把产品能力推成客户、订单、交付或主题财务。",
+      "reopen_condition": "出现可核验的官方客户、订单、交付或独立分部证据，使液冷关系硬门通过。",
       "evidence_paths": [
         "git:2704a7f9a45a71aa8fb9f164775f60c6c7ec86b2:research/industry-runs/ai-liquid-cooling-2026h2-001/05_B2_数据缺口.json",
         "research/industry-runs/ai-liquid-cooling-2026h2-001/05_B2_数据缺口.json",
@@ -708,7 +711,7 @@
       "gap_id": "C2G007",
       "origin_stage": "C2",
       "related_gap_ids": [],
-      "lifecycle": "new_in_C2_closed_as_not_applicable",
+      "lifecycle": "current_not_applicable_reviewable",
       "question": "佳力图当前亏损时是否要修复PE计算？",
       "entity_or_node": "佳力图",
       "field": "current_pe_ttm|PE_p25_p50_p75_requirements",
@@ -718,6 +721,7 @@
       "blocks_gate": false,
       "action": "close_as_not_applicable",
       "must_not_infer": "不得用任意PE、行业PE或外部倍数替代。",
+      "reopen_condition": "TTM归母净利润转正且PE重新具有经济含义。",
       "evidence_paths": [
         "research/industry-runs/ai-liquid-cooling-2026h2-001/08_C2_数据缺口.json",
         "research/industry-runs/ai-liquid-cooling-2026h2-001/08_C2_计算结果.json"
@@ -802,7 +806,7 @@
       "gap_id": "C2G011",
       "origin_stage": "C2",
       "related_gap_ids": [],
-      "lifecycle": "new_in_C2_closed_as_not_applicable",
+      "lifecycle": "current_not_applicable_reviewable",
       "question": "荣亿精密当前亏损时是否要修复PE计算？",
       "entity_or_node": "荣亿精密",
       "field": "current_pe_ttm|PE_p25_p50_p75_requirements",
@@ -812,6 +816,7 @@
       "blocks_gate": false,
       "action": "close_as_not_applicable",
       "must_not_infer": "不得用任意PE或外部倍数替代。",
+      "reopen_condition": "TTM归母净利润转正且PE重新具有经济含义。",
       "evidence_paths": [
         "research/industry-runs/ai-liquid-cooling-2026h2-001/08_C2_数据缺口.json",
         "research/industry-runs/ai-liquid-cooling-2026h2-001/08_C2_计算结果.json"

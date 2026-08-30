@@ -1,0 +1,80 @@
+[
+  {
+    "file": ".agents/skills/industry-research-stage-b/SKILL.md",
+    "change_reason": "固定B1证据最低线、B2营运资金边界和B3计算准备状态",
+    "changed_sections": ["B1", "B2", "B3"],
+    "verification": "四状态、B1四字段、true_zero与作用域静态检查"
+  },
+  {
+    "file": ".agents/skills/industry-research-stage-c/SKILL.md",
+    "change_reason": "限制C1/C2只对获准字段和可计算作用域发起数值计算",
+    "changed_sections": ["C1", "C2"],
+    "verification": "condition_only、不适用、PE单项与作用域静态检查"
+  },
+  {
+    "file": "docs/industry-research/00_逐步执行操作手册.md",
+    "change_reason": "同步第7、9、10、11步可复制提示词",
+    "changed_sections": ["第7步", "第9步", "第10步", "第11步"],
+    "verification": "与B/C Skill关键词和状态集合一致"
+  },
+  {
+    "file": "docs/industry-research/01_全局执行规范.md",
+    "change_reason": "增加跨B/C阶段的计算准备与字段边界",
+    "changed_sections": ["计算准备与字段边界"],
+    "verification": "状态、true_zero、营运资金、PE与重开条件静态检查"
+  },
+  {
+    "file": "research/method-repair/liquid-cooling-data-gap-v1/01_缺口复盘摘要.md",
+    "change_reason": "落实三项ChatGPT审阅边界",
+    "changed_sections": ["五个问题", "原因统计", "营运资金审计", "三项边界修正"],
+    "verification": "人工审阅与关键词检查"
+  },
+  {
+    "file": "research/method-repair/liquid-cooling-data-gap-v1/01_缺口分类清单.json",
+    "change_reason": "修正飞荣达跨期零值并增加不适用重开条件",
+    "changed_sections": ["B2G008", "B2G016", "C2G007", "C2G011"],
+    "verification": "JSON解析和字段检查"
+  },
+  {
+    "file": "research/method-repair/liquid-cooling-data-gap-v1/01_字段与来源对照.csv",
+    "change_reason": "把跨期正式文件限定为语义证据",
+    "changed_sections": ["跨期预收款记录", "飞荣达B2G008合同资产"],
+    "verification": "13列、64条数据、8家公司各8条"
+  },
+  {
+    "file": "research/method-repair/liquid-cooling-data-gap-v1/02_ChatGPT审阅结论.md",
+    "change_reason": "保存通过且带三项边界修正的批准结论",
+    "changed_sections": ["结论", "批准范围", "排除项", "回归底线"],
+    "verification": "人工审阅"
+  },
+  {
+    "file": "research/method-repair/liquid-cooling-data-gap-v1/03_实施摘要.md",
+    "change_reason": "用人话汇总最小实施",
+    "changed_sections": ["七个必答问题"],
+    "verification": "人工审阅"
+  },
+  {
+    "file": "research/method-repair/liquid-cooling-data-gap-v1/03_测试结果.md",
+    "change_reason": "保存轻量验证命令与真实结果",
+    "changed_sections": ["验证结果"],
+    "verification": "命令输出回填"
+  },
+  {
+    "file": "research/method-repair/liquid-cooling-data-gap-v1/03_剩余未知.json",
+    "change_reason": "保留真实未知且不误记为程序故障",
+    "changed_sections": ["items", "treatment"],
+    "verification": "JSON解析"
+  },
+  {
+    "file": "research/method-repair/liquid-cooling-data-gap-v1/00_运行状态.yaml",
+    "change_reason": "完成第三阶段最小实施并交回ChatGPT",
+    "changed_sections": ["stage", "completed_outputs", "next_step"],
+    "verification": "YAML解析与字段检查"
+  },
+  {
+    "file": "research/method-repair/liquid-cooling-data-gap-v1/00_下一步操作.md",
+    "change_reason": "限制用户只读实施摘要和测试结果",
+    "changed_sections": ["已完成", "用户只需要看", "下一步"],
+    "verification": "人工审阅"
+  }
+]
