@@ -303,6 +303,14 @@
       "current_treatment": "not_applicable_for_theme_numbers",
       "reason": "同飞股份只有能力与竞争背景，目标液冷客户、订单、交付或独立分部关系闸门未通过。",
       "reopen_condition": "出现官方披露的目标液冷客户、订单、交付或独立主题分部并通过关系闸门。"
+    },
+    {
+      "gap_id": "RG09",
+      "category": "direction_specific_future_data",
+      "affected_record_ids": [],
+      "current_treatment": "defer_to_each_direction",
+      "reason": "HBM良率、AIDC上架率、软件续费等数据属于后续产业方向的业务模板字段，不能在液冷阶段提前建设或统一补齐。",
+      "reopen_condition": "进入新的产业方向时，由ChatGPT在B1按该方向的业务模式定义最好证据、最低可用证据、替代边界和缺失后果。"
     }
   ],
   "closed_or_non_fault_items": [
