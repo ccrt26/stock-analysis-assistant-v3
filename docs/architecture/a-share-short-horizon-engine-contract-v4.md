@@ -22,11 +22,24 @@
 
 四种已确认发动机使用 `active`；`fresh_event_pending` 只能是 `conditional`；`anchor_only` 只能是 `inactive`；`unresolved` 只能是 `unresolved`。
 
-## 3. 两条入选通道
+## 3. 一条正式推荐通道和一条事件线索通道
 
-已确认通道适用于四种 `active` 发动机。价格支持必须有观察日期、绝对价格或收益、成交、相对市场或行业收益，以及至少一个独立路径质量字段。
+正式推荐通道只适用于四种 `active` 发动机。价格支持必须有观察日期、绝对价格或收益、成交、相对市场或行业收益，以及至少一个独立路径质量字段。
 
-条件性通道只适用于 `fresh_event_pending`：公开时间必须满足 `formation_date 15:00（含） <= event_available_at < action_date 09:30` 且不晚于 `as_of`。形成日收盘后、中间非交易日、行动日开盘前分别使用 `after_close`、`nontrading_day`、`preopen`，不接受 `intraday_unresolved`。事件还必须是首次、`substantive_new`、主营直接相关、材料性可解释、尚无首个完整交易日，并保存同一事件的公司支持、行动条件、公告前相对表现和抢跑/透支事实。它不是已确认。
+事件线索通道只适用于 `fresh_event_pending`：公开时间必须满足 `formation_date 15:00（含） <= event_available_at < action_date 09:30` 且不晚于 `as_of`。形成日收盘后、中间非交易日、行动日开盘前分别使用 `after_close`、`nontrading_day`、`preopen`，不接受 `intraday_unresolved`。事件还必须是首次、`substantive_new`、主营直接相关、材料性可解释、尚无首个完整交易日，并保存同一事件的公司支持、行动条件、公告前相对表现和抢跑/透支事实。它不是已确认正式推荐。
+
+### 消费端派生分类
+
+冻结 trace 不增加字段、不迁移也不回写。程序和研究导出只在消费端派生 `selection_output_class`：
+
+- `confirmed_active`：V4 `final_fate=selected`，四种已确认发动机之一，`engine_status=active` 且 `market_recognition.status=confirmed`；
+- `conditional_event`：V4 `final_fate=selected`，`engine_type=fresh_event_pending`、`engine_status=conditional` 且 `market_recognition.status=pending`；
+- `legacy_v1_not_rewritten`：缺少 V4 thesis 的旧正式记录，只读保留，不事后确认；
+- `not_formal_candidate`：rejected、unresolved、nearest 或 comparator。
+
+`selection_output_class` 只允许出现在 monitor snapshot、研究 CSV 或渲染时的派生对象，不写回 trace、Forward CSV 或数据库。`final_fate=selected` 不再直接等同正式推荐。
+
+原 conditional trace 永不原地晋升。首个完整交易日只把原行动条件记为 `met | not_met | unknown`；无论条件是否满足，原记录都不进入正式推荐数量、正式 D1—D20、正式 D20 结论或正式收益汇总，也不得用行动日开盘、当日最低价、后续最高价或盘中价格倒推可靠入口。若之后某个正常形成日已经具备价格确认，总控可独立形成新的 `event_repricing_confirmed + active` trace；新记录拥有自己的入口和评价，旧记录身份不变。
 
 ## 4. 市场传播
 
@@ -57,13 +70,14 @@ V1透明解释条件：
 
 新合同使用 `compute_event_reaction_features_v3`，记录 `preopen | after_close | intraday_unresolved | nontrading_day`，拒绝盘前尚未完成的同日日线，使用形成日有效申万二级成员，并计算事件后1/3/5日相对表现、成交、收盘质量和窗口最高点到末日收盘回撤。
 
-V4按七种发动机分别复盘行动日可执行率、D1/D3/D5/D10/D20、相对市场、相对行业、20日收盘20%触达、最大上涨、MFE、MAE、D20收盘和 selected/nearest 成对结果。旧轨迹保持 legacy，不倒填新类型。
+四种 `confirmed_active` 发动机分别复盘行动日可执行率、D1/D3/D5/D10/D20、相对市场、相对行业、20日收盘20%触达、最大上涨、MFE、MAE、D20收盘和 selected/nearest 成对结果。`conditional_event` 只保留不依赖参与假设的首日绝对、相对、成交和收盘事实，入口依赖字段保持为空。旧轨迹保持 legacy，不倒填新类型。
 
 ## 8. 选出后的固定时间边界
 
-V4 结果冻结后，程序按每条选择记录继续保存路径，但不改写当时的内部分类、理由和比较：
+V4 结果冻结后，程序按每条研究记录继续保存必要事实，但不改写当时的内部分类、理由和比较：
 
-- D1—D20 是固定主评价期；D20 仍按现有 Forward 定义结算。
+- `confirmed_active` 的 D1—D20 是固定主评价期；D20 仍按现有 Forward 定义结算。
+- `conditional_event` 的 `formal_return_started=false`，正式收益字段和正式 D20 结论保持为空；其首日事实只评价原条件，不创造参与收益。
 - D21—D30 只是被动后续观察。迟到启动可以提醒，但必须写明“不改变原20个交易日结果”，也不修改 D20 命中结果。
 - D30 后旧记录关闭。此后的新事件或新变化必须由新的每日 V4 结果形成新记录。
 - 提前判断失效后仍由程序被动记录到 D20，但退出普通详细提醒。
@@ -77,4 +91,4 @@ V4 结果冻结后，程序按每条选择记录继续保存路径，但不改�
 
 公告状态只有 `cninfo_complete | exchange_complete | exchange_partial | announcement_unavailable`。`exchange_partial` 时，`fresh_event_pending` 只允许用于 `announcement_exchanges` 中完整覆盖的交易所；未覆盖交易所不得把查询失败解释为没有公告。`announcement_unavailable` 时不得形成行动日前新公告候选。所有公告仍必须满足 `available_at <= as_of`。
 
-跟踪程序不增加第六个 Skill，不计算总分，也不改变本合同七种 `engine_type`、四种 `engine_status`、两条入选通道和11个既有价格场景。
+跟踪程序不增加第六个 Skill，不计算总分，也不改变本合同七种 `engine_type`、四种 `engine_status`、一条正式推荐通道、一条事件线索通道和11个既有价格场景。

@@ -9,6 +9,16 @@ description: Use when point-in-time A-share candidate selection, validation, or 
 
 必须把 `sector_broad_diffusion` 与 `sector_leader_cluster` 分开，按成员数、成交份额、单股贡献和板块内百分位留痕。只有 `leader_confirmed` 和 `core_diffusion_member` 可正式入选，不能用“补涨”升级。
 
+## 唯一职责和固定比较顺序
+
+板块 Skill 独占板块共同动力、历史有效成员、扩散或领导集群，以及成员在同一传播链中的角色。固定顺序是：共同动力 → leader/core 角色 → 同板块近邻。
+
+1. 先用板块相对收益、成员中位数、上涨面、成交份额、集中和分化证明共同动力；共同动力不成立时，不从板块标签生成股票线索。
+2. 再只在形成日有效成员中判断 `leader_confirmed | core_diffusion_member | follower | outside | unknown`；小样本、高贡献集中或扩散收缩必须降低角色确信度并形成明确反证。
+3. 最后与共享同一板块动力、流动性和波动最接近的成员直接比较，说明为什么提交这一成员而不是近邻。
+
+候选自身价量只用于描述板块内角色和相对位置；本 Skill 不判断候选完整的个股连续性、剩余路径或最终淘汰，这些交给价格 Skill 和总控。板块成立只生成研究线索，不能等同具体股票成立。
+
 
 ## 目标
 
@@ -87,7 +97,7 @@ description: Use when point-in-time A-share candidate selection, validation, or 
 - 是已经透支的领涨者、得到确认的核心成员，还是尚待公司事实解释的跟随者；
 - 哪个成员最能代表当前因果链，哪个只是概念标签。
 
-板块证据可以产生具体股票线索，但真实业务联系必须交给公司与事件 Skill，剩余价格空间和行动日可参与性必须交给价格与交易 Skill。
+板块证据可以产生具体股票线索，但真实业务联系必须交给公司与事件 Skill；候选完整的 1/3/5 日连续性、单日脉冲、成交推进、剩余价格空间和行动日可参与性必须交给价格与交易 Skill。板块内相对表现只用于确认成员角色，不能替代这一独立价格验证。
 
 ## 发现阶段
 
@@ -104,7 +114,7 @@ description: Use when point-in-time A-share candidate selection, validation, or 
 - 判断板块共同动力是否仍能支持候选命题；
 - 明确传播证据如何形成候选需求，以及它是扩散、集中还是衰减；
 - 识别候选是否仅由标签、少数龙头或一次普涨带动；
-- 对每条 `sector_diffusion` 股票线索形成一个 `sector_leader_cluster`：使用形成日有效成员列出实际共同推进的至少两只成员，标明候选是 `leader | core | follower | outside | unknown`，并分别保留传播事实、最强反证和未知；
+- 对每条板块股票线索形成 V4 `sector_broad_diffusion` 或 `sector_leader_cluster`：使用形成日有效成员列出实际共同推进成员，标明候选是 `leader_confirmed | core_diffusion_member | lagging_unverified | label_only`，并分别保留传播事实、最强反证和未知；
 - 给出板块视角下为什么选择它、为什么可能不该选择它。
 
 `sector_leader_cluster` 是对同一传播链中实际成员的紧凑归组，不是固定龙头榜、行业配额或排序器。不能按股票代码、单一涨幅阈值或当前成员快照指定龙头；成员不足、历史归属不足或共同推进不成立时，不得补造该簇，相关候选只能保持未确认。
@@ -142,7 +152,7 @@ candidate_leads:
       group_code: ""
       group_name: ""
       members: []
-      candidate_role: leader | core | follower | outside | unknown
+      candidate_role: leader_confirmed | core_diffusion_member | lagging_unverified | label_only
       propagation_evidence: ""
       strongest_counterevidence: ""
       unknowns: []

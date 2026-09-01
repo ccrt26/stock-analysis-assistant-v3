@@ -9,6 +9,19 @@ description: Use when point-in-time A-share candidate selection, validation, or 
 
 已确认价格 `support` 必须有观察日期、绝对变化、成交、相对变化和路径质量。事件使用 `compute_event_reaction_features_v3`；`awaiting_first_session` 只能作为条件性行动条件，不能伪装成支持。11个既有场景保持不变。
 
+## 唯一职责和固定比较顺序
+
+价格 Skill 独占个股的多窗口连续性、单日脉冲、成交推进、有效收盘、事件反应、回落、组合余量、流动性和可参与性。固定顺序是：1/3/5 日连续性 → 单日贡献 → 有效收盘 → 成交推进 → 回落 → 组合余量。
+
+使用现有字段组合判断，不增加指标或拟合阈值：
+
+- 连续性同时比较绝对收益、相对市场、相对申万二级行业和同发动机近邻；不能把 5 日累计上涨直接写成多日推进。
+- 单日贡献同时查看最近单日对 3 日和 5 日路径的占比、最大单日贡献和涨停贡献；高度集中只能形成强反证，不能机械设线。
+- 有效收盘与成交推进必须一起看：放量后多个收盘继续抬升才是推进，放量停滞、上影或回落会降级价格支持。
+- 回落与组合余量同时使用形成日前累计路径、价格位置、真实突破、目标 ATR 距离、波动和催化是否继续强化；任何单项都不能证明“还有空间”。
+
+最强价格反证必须在提交给总控的 `decision_role`、`decision_changed`、行动条件或停止增加名单建议中产生可见后果，不能只写进风险段后维持原优先级。conditional 只允许服务于符合 V4 的 `fresh_event_pending` 首日行动条件；普通价格反证不能把其他发动机改成 conditional。价格 Skill 不证明公司业务或板块传播，也不作最终选择。
+
 
 ## 目标
 
@@ -16,7 +29,7 @@ description: Use when point-in-time A-share candidate selection, validation, or 
 
 本 Skill 必须帮助总控区分“正在被有效识别”与“已经透支、背离或无法参与”。它可以发现具体股票线索，也可以否定量价上缺乏现实路径的候选。
 
-`engine_status: confirmed` 的正式入选需要本 Skill 给出至少一条 `decision_role: support` 的正向价格确认。低位、未透支、行动日可参与、场景名称或单纯缺少反证都不能替代确认。唯一例外是符合公司 Skill 新颖性与材料性判断的形成日收盘后重大新事件：它可以使用 `engine_status: fresh_event_pending` 和一条 `event_price_reaction` 的 `action_condition` 条件性入选；这不是已确认，普通业绩重复披露、低估值、现金流、低位或无新增信息不得进入该通道。
+`engine_status: active` 的正式入选需要本 Skill 给出至少一条 `decision_role: support` 的正向价格确认。低位、未透支、行动日可参与、场景名称或单纯缺少反证都不能替代确认。唯一例外是符合公司 Skill 新颖性与材料性判断的形成日收盘后重大新事件：它可以使用 `engine_type: fresh_event_pending`、`engine_status: conditional` 和一条 `event_price_reaction` 的 `action_condition` 作为待确认事件线索；这不是正式推荐，普通业绩重复披露、低估值、现金流、低位或无新增信息不得进入该通道。
 
 “20 日约 20%”是总控的使用目标和事后评价标签。本 Skill 评估实现该目标的价格路径是否有依据。技术指标可以参加判断，但指标名称、单次交叉、固定阈值或历史涨幅本身都不是预测结论。
 
@@ -100,9 +113,9 @@ D20 后按照 `docs/2026-08-19-price-skill-d20-audit-method.md` 复核。场景�
 
 每日先在 DuckDB 中投影并过滤程序已生成的 `price_analysis_context`，优先读取 `scenario_case_ids`、`scenario_assignment_status`、相对市场、相对申万二级行业、量价推进、突破、涨停贡献、`target_atr_distance_20pct` 和流动性，用 SQL 缩小需要深度比较的范围。不把全部价格表送入模型，不重算 11 个场景公式，也不把 SQL 过滤结果当成候选排名。
 
-公司 Skill 已识别具体事件且该事件 `available_at <= as_of` 时，可按需调用 `compute_event_reaction_features`，用现有日线 OHLC、成交额、宽基指数和形成日有效的申万二级成员，确定性计算事件前 5 日以及事件后 1/3/5 个完整交易日的绝对收益、相对市场、相对行业、成交额比、收盘位置和上影比例。事件由 AI 选择并解释，程序不判断语义或方向；实际用于轨迹时写 `evidence_id: event_price_reaction`、`evidence_status_at_use: observation_only` 和函数返回的公式版本。只有结合实际收益、相对收益与成交推进数值后才可把 `decision_role` 写成 `support`。停牌、缺少收盘/成交、基准或行业、盘中尚未正式收盘及部分窗口必须按返回状态披露。
+公司 Skill 已识别具体事件且该事件 `available_at <= as_of` 时，可按需调用 `compute_event_reaction_features_v3`，用现有日线 OHLC、成交额、宽基指数和形成日有效的申万二级成员，确定性计算事件前 5 日以及事件后 1/3/5 个完整交易日的绝对收益、相对市场、相对行业、成交额比、收盘位置和上影比例。事件由 AI 选择并解释，程序不判断语义或方向；实际用于轨迹时写 `evidence_id: event_price_reaction`、`evidence_status_at_use: observation_only` 和函数返回的公式版本。只有结合实际收益、相对收益与成交推进数值后才可把 `decision_role` 写成 `support`。停牌、缺少收盘/成交、基准或行业、盘中尚未正式收盘及部分窗口必须按返回状态披露。
 
-`awaiting_first_session` 表示事件已知但没有首个完整反应交易日。一般事件只能未决；若公司 Skill 同时给出 `first_disclosure | incremental_update` 和 `major_new_information | material_increment`，且事件在形成日收盘后、`available_at <= as_of`，才可记录 `decision_role: action_condition`，并在 `formation_values` 保存同一 `event_id`、`event_available_at`、`reaction_start_date=action_date` 与 `reaction_window_status=awaiting_first_session`，供总控标为 `fresh_event_pending`。不得把行动条件补写成形成日支持。该计算不落新表、不另起定时任务。
+`awaiting_first_session` 表示事件已知但没有首个完整反应交易日。一般事件只能未决；若公司 Skill 同时给出 `first_or_repeat=first`、`new_information_level=substantive_new`、主营直接且材料性可解释，事件又在形成日收盘后且 `available_at <= as_of`，才可记录 `decision_role: action_condition`，并在 `formation_values` 保存同一 `event_id`、`event_available_at`、`reaction_start_date=action_date` 与 `reaction_window_status=awaiting_first_session`，供总控标为 `fresh_event_pending + conditional` 待确认线索。不得把行动条件补写成形成日支持或正式收益入口。该计算不落新表、不另起定时任务。
 
 ### 1. 拆分价格来源
 

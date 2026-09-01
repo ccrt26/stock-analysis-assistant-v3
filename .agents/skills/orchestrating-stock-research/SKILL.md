@@ -16,7 +16,7 @@ description: Use when personal A-share daily selection, historical formation-dat
 
 “20 日约 20%”是用户的实际目标和候选冻结后的评价标签，不是固定财务增速、价格形态、总分或筛选阈值。总控要比较哪些事实提高或降低目标实现的可能性，并对股票作出实际取舍。
 
-正式入选还必须能说明一个形成日已经存在的“短期上涨发动机”。每只候选都结构化记录 `engine_type`、`engine_status` 和 `market_recognition`：已确认发动机说明新信息或新需求如何形成股票自身或板块层面的增量需求，并已得到相对市场或行业的真实价格成交数值确认；形成日收盘后首次披露或实质增量的重大新事件，在尚无完整反应交易日时可以是 `fresh_event_pending` 条件性发动机。公司业绩、估值、现金流和低位可以是催化或基本面锚，不能单独充当发动机。
+正式入选还必须能说明一个形成日已经存在的“短期上涨发动机”。每只候选都结构化记录 `engine_type`、`engine_status` 和 `market_recognition`：已确认发动机说明新信息或新需求如何形成股票自身或板块层面的增量需求，并已得到相对市场或行业的真实价格成交数值确认；形成日收盘后首次披露或实质增量的重大新事件，在尚无完整反应交易日时只能形成 `fresh_event_pending` 待确认事件线索。公司业绩、估值、现金流和低位可以是催化或基本面锚，不能单独充当发动机。
 
 最终允许空名单。不能承诺收益，也不能因为结论需要证据就把工作退化为只检查研究文本是否合规。
 
@@ -33,6 +33,8 @@ description: Use when personal A-share daily selection, historical formation-dat
 - 在历史模拟中先冻结候选和理由，再把未来行情交给评价步骤。
 
 专业 Skill 负责各自判断方法，总控不在内部复制四套研究规则。程序只返回事实和确定性计算，不拥有最终选股权。
+
+总控独占发动机分组、同发动机比较、跨发动机比较、最终 `final_fate`、派生输出类别、绝对质量判断和停止增加名单。固定合并顺序是：同发动机组内比较 → 跨发动机比较 → 逐只绝对质量判断。总控只消费四个专业 Skill 的结论和关键原值，不复制它们的计算方法。
 
 ## 开始条件
 
@@ -108,7 +110,7 @@ ST、退市和重大官方风险使用 `rules.seed.yaml` 中的正式边界。�
 
 第一轮发现分为有先后关系的两步，不能在完成前归并股票：
 
-1. 先让市场 Skill 根据整体分布输出搜索含义和唯一的结构化 `market_propagation_environment`：后续更应寻找板块扩散、独立公司变化还是个股独立增量，以及哪些绝对上涨更可能只是市场普涨。这一步不提供股票名单，环境状态不是 Gate。
+1. 先让市场 Skill 根据整体分布输出搜索含义、唯一的 V4 `market_propagation_mode` 和可并存的 `market_risk_overlays`：后续更应寻找板块扩散、独立公司变化还是个股独立增量，以及哪些绝对上涨更可能只是市场普涨。这一步不提供股票名单，市场模式不是 Gate。
 2. 再向板块、公司和价格三个 Skill 提供相同的时间边界、完整合格股票范围、目标和已冻结的市场搜索含义。三者分别只依据自己负责的事实做横截面轻量发现，独立返回 `stock` 线索或明确的空线索。它们在提交前不接收、查看或沿用其他专业 Skill 的股票线索；不得先用价格排序缩成主要候选池，再让板块或公司视角补说明。
 
 每个形成日都以当时完整的合格股票范围为三路发现边界；新公告、旧名单或已有叙事都不得代替这个边界。这不要求逐股深度研究。没有当日新公司事件不阻止板块或价格线索提交，但它们仍须经公司传导、反证和可交易性验证才能最终入选。
@@ -142,7 +144,7 @@ ST、退市和重大官方风险使用 `rules.seed.yaml` 中的正式边界。�
 
 ### 4. 同一因果链内比较
 
-先比较共享同一上涨原因的候选，再比较不同原因的最终机会。每只深度候选必须回答：
+先按 V4 `engine_type` 把共享同一上涨原因的候选放进同一比较组，再比较不同发动机的最终机会。不同发动机不能互相充当“近邻”，也不能用跨组强项掩盖组内更好的替代股。每只深度候选必须回答：
 
 - 为什么是它，而不是最接近的同类；
 - 它拥有的增量事实是什么；
@@ -158,7 +160,7 @@ ST、退市和重大官方风险使用 `rules.seed.yaml` 中的正式边界。�
 
 类型内按以下事实顺序比较，不计算总分或固定阈值：
 
-- **公司催化**：先结构化核对 `first_disclosure | incremental_update | repeat_disclosure | history_insufficient`、新增信息等级、事件阶段、材料性、主营或非经常性以及收入、利润、现金流一致性，再明确催化将通过什么新增需求作用于股票；随后比较公告前抢跑、公告后 1/3/5 个完整交易日相对市场和申万二级行业的价格成交反应、所处价格位置和同行反应。公司故事完整但没有进一步价格推进，或成交放大只换来停滞和回落，是比材料完整度更强的反证。事件在形成日收盘后、`available_at <= as_of`，且属于首次披露或实质增量的重大新信息时，可在首个完整交易日尚不可见时用 `fresh_event_pending` 条件性入选；它必须引用同一事件的等待窗口和行动条件，不得写成已确认。重复披露、一般财报、有限增量、低估值、现金流、低位或无新增信息不适用。
+- **公司催化**：先结构化核对 `first_disclosure | incremental_update | repeat_disclosure | history_insufficient`、新增信息等级、事件阶段、材料性、主营或非经常性以及收入、利润、现金流一致性，再明确催化将通过什么新增需求作用于股票；随后比较公告前抢跑、公告后 1/3/5 个完整交易日相对市场和申万二级行业的价格成交反应、所处价格位置和同行反应。公司故事完整但没有进一步价格推进，或成交放大只换来停滞和回落，是比材料完整度更强的反证。事件在形成日收盘后、`available_at <= as_of`，且属于首次披露或实质增量的重大新信息时，可在首个完整交易日尚不可见时用 `fresh_event_pending` 形成待确认事件线索；它必须引用同一事件的等待窗口和行动条件，不得写成已确认或算作正式推荐。重复披露、一般财报、有限增量、低估值、现金流、低位或无新增信息不适用。
 - **板块扩散**：先确认上涨面、成员中位数和成交份额是否多日共同增强，再检查龙头集中度与分化是否突然恶化，并为具体候选形成使用历史有效成员的 `sector_leader_cluster`；只有共同动力仍在时，才比较候选在簇中的 `leader | core | follower | outside | unknown` 角色、流动性、板块内位置及其变化，并与成交和波动最接近的同类直接比较。优先共同动力没有快速坍缩、能够正常参与且确实超过最接近同类的成员，不因行业标签或单日普涨入选。
 - **独立价格异常**：先确认 1、3、5 日相对市场和相对板块的强势具有连续性，再区分两条可比较路径：一是相对强势持续并完成真实突破，且上涨不是主要由少数涨停日贡献；二是此前位置和累计涨幅仍低、相对强势连续、成交显著激活的早期路径。反复上影或冲高回落、成交增加但价格推进低效、短期上涨几乎全由涨停贡献，或相似股票拥有更完整的连续性与剩余路径，均为优先淘汰依据。独立价量路径成立时，没有可确认的公司事件不是关键未知。
 
@@ -185,11 +187,13 @@ ST、退市和重大官方风险使用 `rules.seed.yaml` 中的正式边界。�
 - 能清楚说明形成日的短期上涨发动机及其增量需求来源；
 - 关键因果链有形成日前证据，催化、基本面锚、传播和价格确认没有混写；
 - 与同类相比存在明确增量优势；
-- `engine_status: confirmed` 至少引用一条价格 `support`，并保存形成日观察日期、绝对价格或收益、成交额或成交额比以及相对市场或行业收益的真实数值；低位、未透支、行动条件或场景名称不能替代该确认；`fresh_event_pending` 则必须引用形成日收盘后重大新事件和同一事件的 `awaiting_first_session` 行动条件，明确它尚未确认；
+- `engine_status: active` 至少引用一条价格 `support`，并保存形成日观察日期、绝对价格或收益、成交额或成交额比以及相对市场或行业收益的真实数值；低位、未透支、行动条件或场景名称不能替代该确认；`fresh_event_pending + conditional` 只进入待确认事件线索，必须引用形成日收盘后重大新事件和同一事件的 `awaiting_first_session` 行动条件；
 - 价格路径尚未被明显透支且行动日可能参与；
 - 最强反证尚未足以推翻命题。
 
-最终名单不是候选排序的前 N 名。每增加一只股票，都要重新判断它是否仍达到与当前已入选股票相近的绝对机会质量，不能因为它是剩余候选中最好的一只就继续补位。若新增候选虽然自身逻辑成立，但在核心增量、市场识别或未来剩余路径上已经明显弱于当前最弱的入选股，则停止增加名单并将其保留为近邻落选。只有它拥有独立成立的上涨命题，并且整体机会质量与已有入选股处于同一层级，才继续加入。不得预设只能选 1 只或 2 只，也不得因为属于 P3 以后自动淘汰。
+最终名单不是候选排序的前 N 名。每增加一只股票，都要重新判断它是否仍达到与当前已入选股票相近的绝对机会质量。不能因为它是剩余候选中最好的一只而补位。若新增候选虽然自身逻辑成立，但在核心增量、市场识别或未来剩余路径上已经明显弱于当前最弱的入选股，则停止增加名单并将其保留为近邻落选。只有它拥有独立成立的上涨命题，并且整体机会质量与已有入选股处于同一层级，才继续加入。不得预设只能选 1 只或 2 只，也不得因为属于 P3 以后自动淘汰。
+
+conditional 只允许用于 `fresh_event_pending`。普通价格反证、板块衰减、公司传导未知或市场逆风不能把其他发动机改成 conditional；它们必须通过 `decision_changed`、`final_fate=rejected | unresolved`、行动条件或停止增加名单产生可见后果。
 
 这些是需要综合判断的问题，不是五项固定 Gate。某个视角中性或次要信息未知不等于自动淘汰。
 
@@ -204,23 +208,25 @@ ST、退市和重大官方风险使用 `rules.seed.yaml` 中的正式边界。�
 
 ## 最终输出
 
-每日只输出一份完整 `DailyResearchTrace`，不再另写紧凑 pending ResearchResult：
+每日只输出一份完整 `DailyResearchTraceV4`，不再另写紧凑 pending ResearchResult。旧 v1/v2/v3 只用于读取历史记录，不参与新选股：
 
 ```yaml
-trace_version: daily-research-trace-v3
+trace_version: daily-research-trace-v4
 formation_date: YYYY-MM-DD
 action_date: YYYY-MM-DD
 as_of: "带时区时间"
 market_search_context: ""
-market_propagation_environment:
-  environment_id: "market-<formation_date>"
-  propagation_state: supportive | neutral | adverse | unknown
-  breadth: ""
-  liquidity: ""
-  risk_appetite: ""
-  style: ""
-  concentration: ""
-  evidence_basis: []
+market_propagation_mode: broad_sustained_participation | one_day_repair | sector_rotation | concentrated_speculation | weak_or_fragmented | unclear
+market_risk_overlays: []
+runtime_capabilities:
+  market_research_available: true
+  price_research_available: true
+  industry_research_available: true
+  theme_research_available: true
+  stock_context_available: true
+  announcement_status: cninfo_complete | exchange_complete | exchange_partial | announcement_unavailable
+  announcement_exchanges: [SSE, SZSE]
+  limitations: []
 candidate_ledger:
   - ts_code: ""
     name: ""
@@ -229,18 +235,29 @@ candidate_ledger:
     final_fate: selected | rejected | unresolved
     primary_reason: ""
     research_thesis:  # 每只候选必填
-      engine_type: company_event | sector_diffusion | stock_specific_demand | no_valid_engine
-      engine_status: confirmed | fresh_event_pending | unconfirmed | invalidated
+      engine_type: fresh_event_pending | event_repricing_confirmed | sector_broad_diffusion | sector_leader_cluster | independent_demand_acceleration | anchor_only | unresolved
+      engine_status: active | conditional | inactive | unresolved
       market_recognition:
-        status: confirmed | partial | absent | not_yet_observable | unknown
-        market_environment_id: "market-<formation_date>"
+        status: pending | confirmed | mixed | rejected | not_applicable
         basis: ""
-      company_information_novelty:
-        disclosure_novelty: first_disclosure | incremental_update | repeat_disclosure | history_insufficient | not_applicable
-        new_information_level: major_new_information | material_increment | limited_increment | no_new_information | unknown | not_applicable
-        basis: ""
+      company_information:
+        first_or_repeat: first | repeat | unknown | not_applicable
+        disclosure_chain:
+          prior_forecast: null
+          forecast_revision: null
+          earnings_express: null
+          formal_report: null
+          correction: null
+          comparison_basis: ""
+        new_information_level: substantive_new | incremental_detail | confirmation_only | repeat_or_no_new_information | not_applicable | unknown
         event_id: null
         event_available_at: null
+        event_stage: ""
+        business_link: direct | indirect | unknown | not_applicable
+        materiality: ""
+        tradable_sessions_since_event: null
+        basis: ""
+      sector_broad_diffusion: null
       sector_leader_cluster: null
       action_condition_decision_id: null
       catalyst: ""
@@ -277,11 +294,13 @@ research_result:
   empty_reason: "空名单时填真实原因；有入选时留空"
 ```
 
-`research_result` 继续严格符合现有 `ResearchResult`，其中 `skills_used` 为实际使用的五个 Skill。每条 `decision_trace` 使用唯一 `decision_id` 并引用候选账中的股票；`formation_values` 只放真正用于当时判断的少量标量，不保存整行派生事实。每只候选都必须有结构化 `research_thesis` 并引用同一 `market_propagation_environment`。`confirmed` 入选必须引用本股票的公司证据和至少一条满足最小原始数值合同的价格 `support`；`fresh_event_pending` 必须引用公司重大新事件和同一事件的价格 `action_condition`，不得伪装成支持；`sector_diffusion` 还须有包含候选自身的 `sector_leader_cluster` 并引用板块证据。实际入选股和 `nearest_nonselections` 每只保留 1—2 条价格证据，场景不合适时可使用 `raw_price`。
+`research_result` 继续严格符合现有 `ResearchResult`，其中 `skills_used` 为实际使用的五个 Skill。每条 `decision_trace` 使用唯一 `decision_id` 并引用候选账中的股票；`formation_values` 只放真正用于当时判断的少量标量，不保存整行派生事实。每只候选都必须有结构化 V4 `research_thesis`。`active` 入选必须引用本股票的公司证据和至少一条满足最小原始数值合同的价格 `support`；`fresh_event_pending + conditional` 必须引用公司重大新事件和同一事件的价格 `action_condition`，不得伪装成支持；板块发动机还须保存对应扩散或领导集群证据。实际入选股和 `nearest_nonselections` 每只保留 1—2 条真正改变取舍的价格证据，场景不合适时可使用 `raw_price`。
+
+`research_result.selected_stocks` 和 `candidate_ledger.final_fate` 是冻结 trace 身份，不在本轮回写。消费端只派生 `selection_output_class`：四种已确认发动机的 `active + confirmed` 是 `confirmed_active`；`fresh_event_pending + conditional + pending` 是 `conditional_event`。后者不进入正式推荐数量、Forward 正式选择行或正式收益评价。
 
 没有合适股票时，`selected_stocks` 返回空数组并填写真实 `empty_reason`，不得补位。研究或形成日事实验证失败时，按现有失败合同留空两组候选，不把执行失败伪装成空名单。
 
-程序只校验日期、合格股票、候选守恒、结构化枚举、证据引用、角色一致性、确认价格的最小数值、`fresh_event_pending` 的时点/新颖性/等待窗口和 ResearchResult 结构，再从这一份 trace 抽取现有 Forward 记录；它不判断事件语义、材料性、发动机、传播或价格解释是否正确，也不把这些字段变成评分、阈值或 Gate。
+程序只校验日期、合格股票、候选守恒、结构化枚举、证据引用、角色一致性、确认价格的最小数值、`fresh_event_pending` 的时点/新颖性/等待窗口和 ResearchResult 结构，再从这一份 trace 派生正式 Forward 记录；它不判断事件语义、材料性、发动机、传播或价格解释是否正确，也不把这些字段变成评分、阈值或 Gate。
 
 正式每日运行只将该 JSON 写入 `local_archive/forward_selection/pending-trace-<formation_date>.json`，再使用 prepare 冻结的原日期和 `as_of` 调用 `record-trace`。不再另生成 pending ResearchResult JSON。
 

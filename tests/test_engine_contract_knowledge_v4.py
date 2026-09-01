@@ -1,3 +1,4 @@
+import csv
 from pathlib import Path
 import yaml
 def _payload(): return yaml.safe_load(Path("src/stock_analyzer/knowledge/research_registry.yaml").read_text(encoding="utf-8"))
@@ -8,6 +9,114 @@ def test_v4_sources_have_no_duplicate_id_or_doi():
 def test_v4_daily_prompt_and_contract_use_exact_taxonomy():
  prompt=Path("ops/forward-selection-prompt.md").read_text(encoding="utf-8"); contract=Path("docs/architecture/a-share-short-horizon-engine-contract-v4.md").read_text(encoding="utf-8")
  for term in ("daily-research-trace-v4","fresh_event_pending","event_repricing_confirmed","sector_broad_diffusion","sector_leader_cluster","independent_demand_acceleration","one_day_repair","sector_rotation","concentrated_speculation"): assert term in prompt+contract
+
+
+def test_five_skills_have_unique_selection_responsibilities_and_v4_output() -> None:
+    paths = {
+        "orchestrator": ".agents/skills/orchestrating-stock-research/SKILL.md",
+        "market": ".agents/skills/interpreting-market-macro/SKILL.md",
+        "sector": ".agents/skills/researching-sectors-industries/SKILL.md",
+        "company": ".agents/skills/researching-company-events/SKILL.md",
+        "price": ".agents/skills/analyzing-price-trading/SKILL.md",
+        "contract": "docs/architecture/a-share-short-horizon-engine-contract-v4.md",
+    }
+    text = {
+        name: Path(path).read_text(encoding="utf-8")
+        for name, path in paths.items()
+    }
+
+    assert "trace_version: daily-research-trace-v4" in text["orchestrator"]
+    assert "trace_version: daily-research-trace-v3" not in text["orchestrator"]
+    assert "engine_status: confirmed" not in text["orchestrator"]
+    assert "engine_status: fresh_event_pending" not in text["orchestrator"]
+    assert "同发动机组内比较 → 跨发动机比较 → 逐只绝对质量判断" in text["orchestrator"]
+    assert "不能因为它是剩余候选中最好的一只而补位" in text["orchestrator"]
+    assert "conditional 只允许用于 `fresh_event_pending`" in text["orchestrator"]
+
+    assert "市场模式只改变下一步搜索重点和市场反证强度" in text["market"]
+    assert "普涨仍须证明候选的相对增量" in text["market"]
+    assert "未知不自动选择，也不自动淘汰" in text["market"]
+
+    assert "共同动力 → leader/core 角色 → 同板块近邻" in text["sector"]
+    assert "不判断候选完整的个股连续性、剩余路径或最终淘汰" in text["sector"]
+
+    assert "新增性 → 阶段 → 主营联系 → 材料性 → 财务传导 → 兑现时间 → 失败条款" in text["company"]
+    assert "不宣布价格接受、可靠入口或最终推荐" in text["company"]
+
+    assert "1/3/5 日连续性 → 单日贡献 → 有效收盘 → 成交推进 → 回落 → 组合余量" in text["price"]
+    assert "不证明公司业务或板块传播，也不作最终选择" in text["price"]
+
+    assert "selection_output_class" in text["contract"]
+    assert "conditional_event" in text["contract"]
+    assert "原 conditional trace 永不原地晋升" in text["contract"]
+
+
+def test_selection_impact_matrix_is_complete_and_keeps_future_outcomes_separate() -> None:
+    path = Path(
+        "research/skill-optimization/"
+        "five-skill-selection-logic-optimization-20260901/"
+        "selection-impact-matrix.csv"
+    )
+    with path.open(encoding="utf-8-sig", newline="") as handle:
+        rows = list(csv.DictReader(handle))
+
+    expected_columns = [
+        "event_key",
+        "formation_date",
+        "action_date",
+        "ts_code",
+        "name",
+        "trace_version",
+        "original_engine_type",
+        "original_engine_status",
+        "original_output_class",
+        "revised_output_class",
+        "primary_selection_logic_issue",
+        "revised_formation_day_decision",
+        "same_engine_comparator",
+        "decisive_support",
+        "decisive_counterevidence",
+        "action_condition_effect",
+        "early_outcome_used_only_for_evaluation",
+        "notes",
+    ]
+    assert list(rows[0]) == expected_columns
+    assert len(rows) == 29
+    assert len({row["event_key"] for row in rows}) == 29
+
+    allowed_revised_classes = {
+        "confirmed_active",
+        "conditional_event",
+        "rejected_by_revised_logic",
+        "unresolved_by_revised_logic",
+        "legacy_v1_not_rewritten",
+    }
+    assert {row["revised_output_class"] for row in rows} <= allowed_revised_classes
+    legacy_rows = [row for row in rows if row["trace_version"] != "daily-research-trace-v4"]
+    assert len(legacy_rows) == 8
+    assert {row["revised_output_class"] for row in legacy_rows} == {
+        "legacy_v1_not_rewritten"
+    }
+
+    conditional_rows = [
+        row for row in rows if row["revised_output_class"] == "conditional_event"
+    ]
+    assert len(conditional_rows) == 4
+    assert {row["original_engine_type"] for row in conditional_rows} == {
+        "fresh_event_pending"
+    }
+    assert {row["action_condition_effect"] for row in conditional_rows} <= {
+        "met",
+        "not_met",
+        "unknown",
+    }
+    assert all(row["action_condition_effect"] for row in conditional_rows)
+    assert all(row["early_outcome_used_only_for_evaluation"] for row in rows)
+    assert all(
+        not row["action_condition_effect"]
+        for row in rows
+        if row["revised_output_class"] != "conditional_event"
+    )
 
 
 def test_forward_review_methods_are_registered_without_duplicate_existing_sources():

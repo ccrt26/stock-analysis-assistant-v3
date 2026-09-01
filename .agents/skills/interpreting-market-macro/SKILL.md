@@ -9,6 +9,19 @@ description: Use when point-in-time A-share candidate selection, validation, or 
 
 必须输出V4六种之一的 `market_propagation_mode`，高分化单独进入 `market_risk_overlays`。`one_day_repair`、`sector_rotation`、`concentrated_speculation` 不得合并成“neutral”。市场不输出股票。
 
+## 唯一职责和对选股的实际影响
+
+市场 Skill 独占六种市场传播模式、共同变化基线、下一步搜索重点和市场层最强反证。它不产生股票，不判断个股价格是否确认，不决定候选最终去留。市场模式只改变下一步搜索重点和市场反证强度，不能变成加分、配额或 Gate：
+
+- `broad_sustained_participation`：优先查哪些板块真正扩散，同时降低普通绝对上涨的信息量；普涨仍须证明候选的相对增量。
+- `one_day_repair`：优先排除只跟随当日反弹、3 日或 5 日没有同步的“假独立强势”，再把剩余线索交给板块、公司和价格验证。
+- `sector_rotation`：优先检查真正存在共同动力的板块及其领导集群；市场本身不指定板块成员。
+- `concentrated_speculation`：把少数股票贡献、追涨透支和流动性作为更强反证，优先查独立事件或真实领导集群，不把集中上涨写成普遍机会。
+- `weak_or_fragmented`：优先查独立公司变化或明确的个股相对增量；弱市不自动淘汰相对强候选。
+- `unclear`：逐项交付冲突和缺失，未知不自动选择，也不自动淘汰。
+
+市场反证必须具体说明共同变化怎样削弱候选的“独立增量”解释；不能用“市场不好”替代。最终候选是否被降级、淘汰或保留，由总控结合其他三个专业 Skill 决定。
+
 
 ## 目标与证据等级
 
@@ -137,9 +150,9 @@ description: Use when point-in-time A-share candidate selection, validation, or 
 
 必须展示实际上涨面、等权收益、成交和分化事实，不用“市场情绪”或“风险偏好”代替数据，不输出精确的大盘贡献比例。市场判断每天仍只做一次，同一份结果同时供已有股票复盘和当天新研究使用。
 
-发现阶段必须把当日共同传播条件压缩为一个结构化 `market_propagation_environment`。`propagation_state` 只允许 `supportive | neutral | adverse | unknown`，依据实际可得的广度、流动性、风险偏好、风格和集中度逐项说明；它是后续候选解释共同变化的引用环境，不是市场 Gate。缺少任何关键维度时保留 `unknown` 或在该维度明确未知，不用自由文本中的“强市/弱市”补齐。
+发现阶段必须把当日共同传播条件压缩为唯一的 V4 `market_propagation_mode`，只允许 `broad_sustained_participation | one_day_repair | sector_rotation | concentrated_speculation | weak_or_fragmented | unclear`；高分化风险只放入 `market_risk_overlays`。依据实际可得的广度、流动性、风格、集中和板块传播事实说明选择；模式冲突或关键事实不足时使用 `unclear`，不用自由文本中的“强市/弱市”补齐。
 
-验证阶段再为每只候选给出 `market_recognition.status`：`confirmed | partial | absent | not_yet_observable | unknown`，并引用同一个 `market_environment_id`。这里只判断候选的需求是否已经超出市场共同变化或尚无完整时点可观察，不替价格 Skill制造确认数值。
+验证阶段再为每只候选给出 V4 `market_recognition.status`：`pending | confirmed | mixed | rejected | not_applicable`。这里只判断候选的需求是否已经超出市场共同变化、混有共同变化、被市场事实反驳或尚待首日观察，不替价格 Skill 制造确认数值。
 
 ## 输出合同
 
@@ -169,15 +182,9 @@ market_structure:
   dispersion_volatility_concentration: {observations: [], conflicts: [], unknowns: []}
   size_style: {observations: [], conflicts: [], unknowns: []}
   policy_or_rule_context: {observations: [], transmission_limits: [], unknowns: []}
-market_propagation_environment:
-  environment_id: "market-<formation_date>"
-  propagation_state: supportive | neutral | adverse | unknown
-  breadth: ""
-  liquidity: ""
-  risk_appetite: ""
-  style: ""
-  concentration: ""
-  evidence_basis: []
+market_propagation_mode: broad_sustained_participation | one_day_repair | sector_rotation | concentrated_speculation | weak_or_fragmented | unclear
+market_risk_overlays: []
+mode_basis: []
 primary_interpretation: "只概括已展示事实和已验证关系"
 alternative_interpretations: []
 strongest_counter_evidence: ""
@@ -194,8 +201,7 @@ candidate_reviews:
     observed_conditions: []
     common_movement_assessment: ""
     market_recognition:
-      status: confirmed | partial | absent | not_yet_observable | unknown
-      market_environment_id: "market-<formation_date>"
+      status: pending | confirmed | mixed | rejected | not_applicable
       basis: ""
     market_effect_on_thesis: raises_path_risk | constraint_or_participation_issue | question_only | no_material_market_effect
     strongest_market_counterevidence: ""

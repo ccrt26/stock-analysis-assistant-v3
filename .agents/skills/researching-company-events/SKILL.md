@@ -9,6 +9,17 @@ description: Use when A-share candidate discovery, validation, or post-selection
 
 每个主要事件保存预告、修正、快报、正式报告和更正披露链，并使用V4六类 `new_information_level`。正式报告数字大不等于新催化；`fresh_event_pending` 只允许收盘后首次且 `substantive_new` 的重大直接信息。
 
+## 唯一职责和固定传导顺序
+
+公司 Skill 独占披露链、法律或业务阶段、主营联系、材料性、收入/利润/现金流传导、兑现时间和失败条款。固定顺序是：新增性 → 阶段 → 主营联系 → 材料性 → 财务传导 → 兑现时间 → 失败条款。
+
+- 新增性先区分首次、实质增量、重复确认和历史不足，不能因文件更完整就写成新催化。
+- 阶段必须区分意向、公告、获批、中标、签约、生效、履约和确认收入等实际状态；不得把中标通知、框架协议或远期交付直接等同当期利润。
+- 主营联系和材料性必须分别证明；概念相关、客户匿名、规模口径不明或非经常性只能保留对应未知。
+- 财务传导必须写清收入、利润与现金流中哪些会受影响，兑现时间落在哪个期间，以及哪些终止、审批、交付、回款或客户条件会使传导失败。
+
+本 Skill 不宣布价格接受、可靠入口或最终推荐。真实且重大的公司事件可以提交线索；是否已有市场识别、是否仍有路径以及能否正式选择，必须交给价格 Skill 和总控。
+
 
 ## 核心问题
 
@@ -57,16 +68,17 @@ description: Use when A-share candidate discovery, validation, or post-selection
 
 使用紧凑的公司、财务、业绩和事件事实寻找 0 个或多个线索。第一轮不得扫描全市场公告正文。
 
-对每条线索依次回答：
+对每条线索严格按固定传导顺序依次回答：
 
 1. 形成日前出现了什么新变化？
-2. 在 `available_at <= as_of` 的同类历史披露中，它是 `first_disclosure | incremental_update | repeat_disclosure | history_insufficient` 哪一种？新增信息等级是 `major_new_information | material_increment | limited_increment | no_new_information | unknown` 哪一种，依据是哪条此前披露和本次新增事实？
+2. 在 `available_at <= as_of` 的披露链中，它是 `first | repeat | unknown | not_applicable` 哪一种？V4 新增信息等级是 `substantive_new | incremental_detail | confirmation_only | repeat_or_no_new_information | not_applicable | unknown` 哪一种，依据是哪条此前披露和本次新增事实？
 3. 哪个事实证明公司确实涉及相关业务？
-4. 变化如何可能传导到收入、利润、现金流或预期？
-5. 它是新增催化，还是只提供基本面锚？若是催化，可能通过什么新增需求作用于股票？
-6. 影响是否具有可辨认的规模、阶段和新鲜度？
-7. 哪个事实最可能推翻传导？
-8. 还需要板块传播和价格确认回答什么？
+4. 当前法律或业务阶段是什么，离签约、生效、交付、回款或收入确认还有哪些条件？
+5. 材料性是否有可解释的金额、产能、客户、订单或经营口径，而不是只有形容词？
+6. 变化如何可能传导到收入、利润和经营现金流；三者不一致时哪个反证最重要？
+7. 兑现可能落在哪个期间，是否远于本轮约 20 个交易日目标？
+8. 哪项终止、审批、履约、回款、客户或会计确认条款最可能使传导失败？
+9. 它是新增催化，还是只提供基本面锚；还需要板块传播和价格确认回答什么？
 
 价格尚未启动不能删除公司线索。只有概念标签、关联词或公告标题时，不得声称直接受益。
 
@@ -114,12 +126,23 @@ candidate_leads:
     name: ""
     ts_code: ""
     company_catalyst: ""
-    company_information_novelty:
-      disclosure_novelty: first_disclosure | incremental_update | repeat_disclosure | history_insufficient | not_applicable
-      new_information_level: major_new_information | material_increment | limited_increment | no_new_information | unknown | not_applicable
-      basis: ""
+    company_information:
+      first_or_repeat: first | repeat | unknown | not_applicable
+      disclosure_chain:
+        prior_forecast: null
+        forecast_revision: null
+        earnings_express: null
+        formal_report: null
+        correction: null
+        comparison_basis: ""
+      new_information_level: substantive_new | incremental_detail | confirmation_only | repeat_or_no_new_information | not_applicable | unknown
       event_id: null
       event_available_at: null
+      event_stage: ""
+      business_link: direct | indirect | unknown | not_applicable
+      materiality: ""
+      tradable_sessions_since_event: null
+      basis: ""
     fundamental_anchor: ""
     company_risk: ""
     possible_demand_transmission: ""

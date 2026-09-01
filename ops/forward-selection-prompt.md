@@ -91,13 +91,13 @@ stock_analyzer.ops.forward_selection.DailyResearchTraceV4
 
 1. 市场 Skill 读取当日 `market_context`，输出六种之一的 `market_propagation_mode`，并按事实填写可并存的 `market_risk_overlays`；市场不输出股票。这一步只运行一次，并把结果同时交给跟踪和新选股。
 2. 板块、公司和价格三个 Skill 在相同冻结边界和完整合格股票范围内独立发现，提交前不读取彼此候选。
-3. 公司 Skill 对主要事件核对完整披露链：预告、预告修正、快报、正式报告和更正，并确定 `new_information_level`。
-4. 板块 Skill 严格区分 `sector_broad_diffusion` 与 `sector_leader_cluster`，保存 V4 要求的成员和传播原值。
+3. 公司 Skill 按“新增性 → 阶段 → 主营联系 → 材料性 → 财务传导 → 兑现时间 → 失败条款”核对主要事件，不判断价格接受。
+4. 板块 Skill 按“共同动力 → leader/core 角色 → 同板块近邻”严格区分 `sector_broad_diffusion` 与 `sector_leader_cluster`，不替价格 Skill 判断个股完整连续性和余量。
 5. 总控按股票代码归并候选，先确定结构化 `engine_type`、`engine_status` 和 `market_recognition`，再把同一批少量候选交给四个专业 Skill 独立验证。
-6. 对具体公司事件，价格 Skill 按需调用 `compute_event_reaction_features_v3`；不保存新表，不用旧版函数结果填充 V4 事件证据。
-7. 总控解决冲突，最终选择 0—5 只或空名单。不投票、不打分、不凑数。
+6. 价格 Skill 按“1/3/5 日连续性 → 单日贡献 → 有效收盘 → 成交推进 → 回落 → 组合余量”验证具体股票；对公司事件按需调用 `compute_event_reaction_features_v3`，不保存新表，不用旧版函数结果填充 V4 事件证据。
+7. 总控按“同发动机组内比较 → 跨发动机比较 → 逐只绝对质量判断”解决冲突，最终选择 0—5 只或空名单。每增加一只都重新判断绝对质量；不能因为它是剩余候选中最好的一只而补位。不投票、不打分、不凑数。
 
-## 4. 七种发动机与两条入选通道
+## 4. 七种发动机、一条正式推荐通道和一条事件线索通道
 
 `engine_type` 只能是：
 
@@ -120,7 +120,7 @@ inactive
 unresolved
 ```
 
-正式入选只有两条通道：
+输出分成一条正式推荐通道和一条事件线索通道：
 
 ### 已确认通道
 
@@ -135,7 +135,7 @@ independent_demand_acceleration
 
 必须是 `engine_status=active`、`market_recognition.status=confirmed`，并引用满足 V4 最小原值和路径质量要求的价格 `support`。
 
-### 条件性新事件通道
+### 待确认新事件线索通道
 
 只适用于 `fresh_event_pending`。必须是：
 
@@ -149,7 +149,7 @@ independent_demand_acceleration
 - 引用 `event-price-reaction-v3` 的 `action_condition`；
 - 保存公告前相对表现及抢跑/透支事实。
 
-它只能是 `engine_status=conditional`、`market_recognition.status=pending`，不能写成已确认。
+它只能是 `engine_status=conditional`、`market_recognition.status=pending`，不能写成已确认，也不进入正式推荐数量、Forward 正式选择行或正式收益评价。conditional 只允许用于 `fresh_event_pending`；普通价格反证、板块衰减、公司未知或市场逆风不得把其他发动机改成 conditional。
 
 `anchor_only` 和 `unresolved` 不得入选。业绩、估值、现金流、低位、未透支、场景名称、行动条件或没有反证都不能单独替代发动机。
 
