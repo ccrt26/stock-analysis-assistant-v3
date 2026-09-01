@@ -1,0 +1,137 @@
+{
+  "action_date_end": "2026-08-31",
+  "action_date_start": "2026-08-20",
+  "files": [
+    {
+      "bytes": 124545,
+      "path": "A股Skill优化样本_2026-08-20至2026-08-31.xlsx",
+      "sha256": "e564a94da499472eb29055a19c92760f02b42454dd7c4ffd1e147f52e48d38cb"
+    },
+    {
+      "bytes": 3288,
+      "path": "README.md",
+      "sha256": "65e0cb27a72a98938877346b1a98c739dee38b2470a2b1900a0b720c4bb83232"
+    },
+    {
+      "bytes": 143340,
+      "path": "data/candidate_ledger.jsonl",
+      "sha256": "16431766f901780a8836b26945d58037d6267e334e31e15a2b88e515c31edd46"
+    },
+    {
+      "bytes": 60356,
+      "path": "data/daily_price_volume.csv",
+      "sha256": "6fae2929a2633a0931e8c70b055287bfb73968a6c2250725fb896f7585459bfd"
+    },
+    {
+      "bytes": 88539,
+      "path": "data/decision_trace.jsonl",
+      "sha256": "5d05f4ae24246cefd20ec36563fb3888f5677c45e8f5132d8408bea9333f6309"
+    },
+    {
+      "bytes": 43475,
+      "path": "data/formal_selections.csv",
+      "sha256": "71890933c7db42945a3f53b230b920eb0c963a693c2b7becc6fd5a9293ad1dd7"
+    },
+    {
+      "bytes": 34932,
+      "path": "data/market_context.jsonl",
+      "sha256": "e7981a2ccfe10360bb82c9c954e9745b825e9ca9304461ec82e98e0a6b728201"
+    },
+    {
+      "bytes": 78801,
+      "path": "data/monitor_alerts.jsonl",
+      "sha256": "9b1b9b05cc99a3471c3c367ddde511538b3bf01b57add44b2e1de3afdad88893"
+    },
+    {
+      "bytes": 302814,
+      "path": "data/monitor_episodes.jsonl",
+      "sha256": "61da6dae77ab4e2b0a869c474329762a1d6f688e8d2ab35cb41de54be2824692"
+    },
+    {
+      "bytes": 41919,
+      "path": "data/monitor_reviews.jsonl",
+      "sha256": "ace2218f648a681e0d8bee74fa58d208ec9c82677357d0920a1c9b956b2b9110"
+    },
+    {
+      "bytes": 266881,
+      "path": "data/price_context.jsonl",
+      "sha256": "68b8e5e4983da45def6d95f913ad9ff23826ab9869664a87769c64469336dda2"
+    },
+    {
+      "bytes": 236070,
+      "path": "data/research_runs.jsonl",
+      "sha256": "1b9339da3bc0a00b7061f1f6a5459536cc0ae683551ca4823c0348a49ac1fdf0"
+    },
+    {
+      "bytes": 193255,
+      "path": "data/review_contracts.jsonl",
+      "sha256": "6836abc75f87652a919eb867e06c1aa17ab926555f64ca7f8e737e9fbe380b69"
+    },
+    {
+      "bytes": 176408,
+      "path": "data/sector_context.jsonl",
+      "sha256": "f0fb05c16ad3871eed4b8ddac11a3c77e51efd5d01a0bfacb13a0287610c9ef5"
+    }
+  ],
+  "formation_evidence_policy": "preserve each frozen selection_as_of",
+  "known_limitations": [
+    "The 2026-08-20 action-date trace predates V4 and has no recorded research_thesis or decision_trace.",
+    "Sector and price derived contexts are referenced audit slices, not full-universe exports.",
+    "The 2026-08-31 close monitor was produced on 2026-09-01 pre-open; report_as_of remains explicit."
+  ],
+  "outcome_policy": "post-selection data are separate and do not rewrite formation evidence",
+  "outcome_through_date": "2026-08-31",
+  "package_version": "a-share-skill-optimization-sample-v1",
+  "privacy": {
+    "contains_credentials": false,
+    "contains_personal_absolute_paths": false,
+    "contains_raw_local_archive": false,
+    "contains_raw_local_warehouse": false
+  },
+  "record_counts": {
+    "action_dates": 8,
+    "candidate_ledger": 78,
+    "daily_price_volume": 124,
+    "decision_trace": 126,
+    "formal_selections": 29,
+    "market_context": 8,
+    "monitor_alerts": 31,
+    "monitor_episodes": 39,
+    "monitor_reviews": 26,
+    "price_context": 78,
+    "research_runs": 8,
+    "review_contracts": 78,
+    "sector_context": 54,
+    "unique_selected_stocks": 28
+  },
+  "selected_stock_codes": [
+    "000513.SZ",
+    "000655.SZ",
+    "000690.SZ",
+    "000703.SZ",
+    "000801.SZ",
+    "000928.SZ",
+    "002274.SZ",
+    "002366.SZ",
+    "002430.SZ",
+    "002508.SZ",
+    "003816.SZ",
+    "300082.SZ",
+    "300107.SZ",
+    "300473.SZ",
+    "300910.SZ",
+    "301085.SZ",
+    "301289.SZ",
+    "600150.SH",
+    "600408.SH",
+    "600583.SH",
+    "600601.SH",
+    "600737.SH",
+    "600980.SH",
+    "601609.SH",
+    "601998.SH",
+    "603408.SH",
+    "603969.SH",
+    "603993.SH"
+  ]
+}
