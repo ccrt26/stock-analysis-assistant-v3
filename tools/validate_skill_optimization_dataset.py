@@ -14,8 +14,8 @@ from typing import Any, Iterable
 
 
 EXPECTED = {
-    "formal_selections": 29,
-    "unique_selected_stocks": 28,
+    "formal_selections": 25,
+    "unique_selected_stocks": 24,
     "action_dates": 8,
     "research_runs": 8,
     "candidate_ledger": 78,
@@ -24,7 +24,9 @@ EXPECTED = {
     "monitor_episodes": 39,
     "monitor_alerts": 31,
     "monitor_reviews": 26,
-    "daily_price_volume": 124,
+    "candidate_outcomes": 78,
+    "conditional_event_outcomes": 4,
+    "daily_price_volume": 115,
     "market_context": 8,
     "sector_context": 54,
     "price_context": 78,
@@ -138,6 +140,8 @@ def validate_package(package_dir: Path) -> dict[str, Any]:
     market = read_jsonl(data_dir / "market_context.jsonl")
     sector = read_jsonl(data_dir / "sector_context.jsonl")
     price = read_jsonl(data_dir / "price_context.jsonl")
+    candidate_outcomes = read_csv(data_dir / "candidate_outcomes.csv")
+    conditional_outcomes = read_csv(data_dir / "conditional_event_outcomes.csv")
     actual_counts = {
         "formal_selections": len(selections),
         "unique_selected_stocks": len({row["ts_code"] for row in selections}),
@@ -149,6 +153,8 @@ def validate_package(package_dir: Path) -> dict[str, Any]:
         "monitor_episodes": len(monitor_episodes),
         "monitor_alerts": len(monitor_alerts),
         "monitor_reviews": len(monitor_reviews),
+        "candidate_outcomes": len(candidate_outcomes),
+        "conditional_event_outcomes": len(conditional_outcomes),
         "daily_price_volume": len(daily),
         "market_context": len(market),
         "sector_context": len(sector),
@@ -172,9 +178,42 @@ def validate_package(package_dir: Path) -> dict[str, Any]:
     selection_keys = {row["event_key"] for row in selections}
     if {row["event_key"] for row in daily} != selection_keys:
         raise ValueError("daily paths do not cover every formal selection")
+    if {row["selection_output_class"] for row in selections} != {
+        "confirmed_active",
+        "legacy_v1_not_rewritten",
+    }:
+        raise ValueError("formal selections contain an invalid output class")
+    if {row["final_fate"] for row in candidate_outcomes} != {
+        "selected",
+        "rejected",
+        "unresolved",
+    }:
+        raise ValueError("candidate outcomes do not cover every final fate")
+    candidate_outcome_keys = {
+        (row["run_id"], row["ts_code"]) for row in candidate_outcomes
+    }
+    if candidate_outcome_keys != {
+        (row["run_id"], row["ts_code"]) for row in candidates
+    }:
+        raise ValueError("candidate outcomes do not cover the candidate ledger")
+    if any(
+        row["condition_result"] not in {"met", "not_met", "unknown"}
+        for row in conditional_outcomes
+    ):
+        raise ValueError("conditional outcome has an invalid condition result")
+    if any(
+        row["formal_return_started"].lower() != "false"
+        or row["reliable_entry_available"].lower() != "false"
+        or row["reliable_entry_price"]
+        or row["outcome_close_return"]
+        or row["outcome_max_close_return"]
+        or row["outcome_mae"]
+        for row in conditional_outcomes
+    ):
+        raise ValueError("conditional outcome incorrectly starts a formal return")
     selected_contracts = [row for row in contracts if row["final_fate"] == "selected"]
-    if len(selected_contracts) != len(selections):
-        raise ValueError("selected review-contract count differs from selections")
+    if len(selected_contracts) != len(selections) + len(conditional_outcomes):
+        raise ValueError("selected contracts do not split into formal and conditional")
     candidate_keys = {(row["run_id"], row["ts_code"]) for row in candidates}
     if any((row["run_id"], row["ts_code"]) not in candidate_keys for row in price):
         raise ValueError("price context has a row outside the candidate ledger")

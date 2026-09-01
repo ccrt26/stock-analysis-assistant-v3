@@ -465,9 +465,9 @@ overview.getRange("A3:H3").format = {
 };
 
 const metrics = [
-  ["正式入选事件", "=COUNTA('正式入选'!F2:F30)"],
-  ["不同股票", "=ROWS(UNIQUE('正式入选'!E2:E30))"],
-  ["行动日", "=ROWS(UNIQUE('正式入选'!A2:A30))"],
+  ["正式入选事件", `=COUNTA('正式入选'!F2:F${formalSelections.length + 1})`],
+  ["不同股票", `=ROWS(UNIQUE('正式入选'!E2:E${formalSelections.length + 1}))`],
+  ["行动日", `=ROWS(UNIQUE('正式入选'!A2:A${formalSelections.length + 1}))`],
   ["候选账", `=COUNTA('候选账'!C2:C${candidates.length + 1})`],
   ["决策证据", `=COUNTA('决策证据'!A2:A${decisions.length + 1})`],
   ["逐 episode 复盘", `=COUNTA('跟踪复盘'!C2:C${monitorReviews.length + 1})`],
@@ -531,7 +531,9 @@ overview.getRange(`A22:A${21 + actionDates.length}`).setNumberFormat("yyyy-mm-dd
 overview.getRange("A22:B22").format.font = { name: "Aptos", size: 10, color: palette.ink };
 actionDates.forEach((_, index) => {
   const row = 22 + index;
-  overview.getRange(`B${row}`).formulas = [[`=COUNTIF('正式入选'!$A$2:$A$30,A${row})`]];
+  overview.getRange(`B${row}`).formulas = [[
+    `=COUNTIF('正式入选'!$A$2:$A$${formalSelections.length + 1},A${row})`,
+  ]];
 });
 overview.getRange(`A22:B${21 + actionDates.length}`).format = {
   fill: palette.white,

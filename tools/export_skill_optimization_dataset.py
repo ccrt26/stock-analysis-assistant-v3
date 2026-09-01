@@ -24,9 +24,18 @@ import pandas as pd
 DEFAULT_START_ACTION_DATE = "2026-08-20"
 DEFAULT_END_ACTION_DATE = "2026-08-31"
 DEFAULT_OUTCOME_THROUGH_DATE = "2026-08-31"
-PACKAGE_VERSION = "a-share-skill-optimization-sample-v1"
+PACKAGE_VERSION = "a-share-skill-optimization-sample-v2"
 LEGACY_TRACE_NAME = "regenerated-selection-2026-08-19-asof-2026-08-20T090500+0800.json"
 TRACE_GLOB = "research-trace-*.json"
+CONFIRMED_ACTIVE_ENGINES = frozenset(
+    {
+        "event_repricing_confirmed",
+        "sector_broad_diffusion",
+        "sector_leader_cluster",
+        "independent_demand_acceleration",
+    }
+)
+CONDITION_RESULTS = frozenset({"met", "not_met", "unknown"})
 
 _ABSOLUTE_PATH_PATTERNS = (
     re.compile(r"^/Users/"),
@@ -45,6 +54,33 @@ def build_event_key(formation_date: str, ts_code: str, role: str) -> str:
 
 def build_run_id(formation_date: str, action_date: str) -> str:
     return f"formal:{formation_date}:{action_date}"
+
+
+def selection_output_class(
+    trace_version: str, candidate: Mapping[str, Any] | None
+) -> str:
+    if trace_version != "daily-research-trace-v4":
+        return "legacy_v1_not_rewritten"
+    thesis = candidate.get("research_thesis") if candidate else None
+    thesis_map = thesis if isinstance(thesis, Mapping) else {}
+    recognition = thesis_map.get("market_recognition")
+    recognition_map = recognition if isinstance(recognition, Mapping) else {}
+    engine_type = thesis_map.get("engine_type")
+    engine_status = thesis_map.get("engine_status")
+    recognition_status = recognition_map.get("status")
+    if (
+        engine_type in CONFIRMED_ACTIVE_ENGINES
+        and engine_status == "active"
+        and recognition_status == "confirmed"
+    ):
+        return "confirmed_active"
+    if (
+        engine_type == "fresh_event_pending"
+        and engine_status == "conditional"
+        and recognition_status == "pending"
+    ):
+        return "conditional_event"
+    return "not_formal_candidate"
 
 
 def ensure_public_safe(value: Any, *, path: str = "$", key: str | None = None) -> None:
@@ -244,19 +280,42 @@ def _read_selection_log(
     ]
 
 
+def load_selection_impact_rows(output_dir: Path) -> list[dict[str, str]]:
+    path = output_dir / "selection-impact-matrix.csv"
+    if not path.is_file():
+        path = (
+            Path(__file__).resolve().parents[1]
+            / "research"
+            / "skill-optimization"
+            / "five-skill-selection-logic-optimization-20260901"
+            / "selection-impact-matrix.csv"
+        )
+    if not path.is_file():
+        raise ValueError("selection impact matrix is required for conditional outcomes")
+    with path.open(encoding="utf-8-sig", newline="") as handle:
+        return [dict(row) for row in csv.DictReader(handle)]
+
+
 def build_formal_selections(
     traces: Sequence[tuple[str, Mapping[str, Any]]], log_rows: Sequence[Mapping[str, str]]
 ) -> list[dict[str, Any]]:
     log_by_key = {(row["action_date"], row["ts_code"]): row for row in log_rows}
+    traced_log_keys: set[tuple[str, str]] = set()
     records: list[dict[str, Any]] = []
     for source_name, trace in traces:
         formation_date = str(trace["formation_date"])
         action_date = str(trace["action_date"])
         version = _trace_version(source_name, trace)
+        candidate_by_code = {
+            str(row.get("ts_code")): row
+            for row in trace.get("candidate_ledger") or []
+            if isinstance(row, Mapping)
+        }
         for selected in _selected_trace_rows(trace):
             key = (action_date, str(selected["ts_code"]))
             if key not in log_by_key:
                 raise ValueError(f"selection missing from formal log: {key}")
+            traced_log_keys.add(key)
             logged = log_by_key[key]
             comparisons = {
                 "name": selected.get("name"),
@@ -273,6 +332,14 @@ def build_formal_selections(
                 raise ValueError(
                     f"trace/log mismatch for {key}: {', '.join(mismatched_fields)}"
                 )
+            output_class = selection_output_class(
+                version, candidate_by_code.get(str(selected["ts_code"]))
+            )
+            if output_class not in {
+                "confirmed_active",
+                "legacy_v1_not_rewritten",
+            }:
+                continue
             records.append(
                 {
                     "event_key": build_event_key(
@@ -283,6 +350,7 @@ def build_formal_selections(
                     "action_date": action_date,
                     "selection_as_of": trace.get("as_of"),
                     "trace_version": version,
+                    "selection_output_class": output_class,
                     "priority": selected.get("priority"),
                     "ts_code": selected.get("ts_code"),
                     "name": selected.get("name"),
@@ -317,8 +385,8 @@ def build_formal_selections(
                     "validation_mode": logged.get("validation_mode") or None,
                 }
             )
-    if len(log_by_key) != len(records):
-        missing = sorted(set(log_by_key) - {(r["action_date"], r["ts_code"]) for r in records})
+    if set(log_by_key) != traced_log_keys:
+        missing = sorted(set(log_by_key) - traced_log_keys)
         raise ValueError(f"formal log selections missing from traces: {missing}")
     return sorted(
         records,
@@ -809,6 +877,147 @@ def enrich_selections_with_outcomes(
         )
 
 
+def build_candidate_outcome_subjects(
+    candidates: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "event_key": build_event_key(
+                str(candidate["formation_date"]),
+                str(candidate["ts_code"]),
+                f"candidate-{candidate.get('final_fate') or 'unknown'}",
+            ),
+            "formation_date": candidate.get("formation_date"),
+            "action_date": candidate.get("action_date"),
+            "selection_as_of": candidate.get("selection_as_of"),
+            "ts_code": candidate.get("ts_code"),
+            "name": candidate.get("name"),
+        }
+        for candidate in candidates
+    ]
+
+
+def build_candidate_outcome_records(
+    candidates: Sequence[Mapping[str, Any]],
+    daily_records: Sequence[Mapping[str, Any]],
+    outcome_through_date: str,
+) -> list[dict[str, Any]]:
+    subjects = build_candidate_outcome_subjects(candidates)
+    enrich_selections_with_outcomes(subjects, daily_records, outcome_through_date)
+    records: list[dict[str, Any]] = []
+    for candidate, outcome in zip(candidates, subjects, strict=True):
+        thesis = candidate.get("research_thesis")
+        thesis_map = thesis if isinstance(thesis, Mapping) else {}
+        records.append(
+            {
+                "run_id": candidate.get("run_id"),
+                "formation_date": candidate.get("formation_date"),
+                "action_date": candidate.get("action_date"),
+                "ts_code": candidate.get("ts_code"),
+                "name": candidate.get("name"),
+                "final_fate": candidate.get("final_fate"),
+                "opportunity_type": candidate.get("opportunity_type"),
+                "engine_type": thesis_map.get("engine_type"),
+                "engine_status": thesis_map.get("engine_status"),
+                "selection_as_of": candidate.get("selection_as_of"),
+                "outcome_through_date": outcome.get("outcome_through_date"),
+                "outcome_trading_day_count": outcome.get(
+                    "outcome_trading_day_count"
+                ),
+                "outcome_data_status": outcome.get("outcome_data_status"),
+                "outcome_close_return": outcome.get("outcome_close_return"),
+                "outcome_max_close_return": outcome.get(
+                    "outcome_max_close_return"
+                ),
+                "outcome_max_high_return": outcome.get("outcome_max_high_return"),
+                "outcome_mae": outcome.get("outcome_mae"),
+                "outcome_close_drawdown_from_peak": outcome.get(
+                    "outcome_close_drawdown_from_peak"
+                ),
+                "relative_market_return_if_available": None,
+                "relative_sector_return_if_available": None,
+            }
+        )
+    return records
+
+
+def build_conditional_event_outcomes(
+    candidates: Sequence[Mapping[str, Any]],
+    decisions: Sequence[Mapping[str, Any]],
+    impact_rows: Sequence[Mapping[str, str]],
+) -> list[dict[str, Any]]:
+    decisions_by_id = {
+        str(row.get("decision_id")): row
+        for row in decisions
+        if row.get("decision_id")
+    }
+    impact_by_event = {
+        str(row.get("event_key")): row for row in impact_rows if row.get("event_key")
+    }
+    records: list[dict[str, Any]] = []
+    for candidate in candidates:
+        thesis = candidate.get("research_thesis")
+        thesis_map = thesis if isinstance(thesis, Mapping) else {}
+        if not (
+            candidate.get("final_fate") == "selected"
+            and thesis_map.get("engine_type") == "fresh_event_pending"
+            and thesis_map.get("engine_status") == "conditional"
+        ):
+            continue
+        event_key = build_event_key(
+            str(candidate["formation_date"]), str(candidate["ts_code"]), "selected"
+        )
+        impact = impact_by_event.get(event_key)
+        if impact is None:
+            raise ValueError(f"conditional event missing from impact matrix: {event_key}")
+        condition_result = str(impact.get("action_condition_effect") or "")
+        if condition_result not in CONDITION_RESULTS:
+            raise ValueError(
+                f"invalid conditional result for {event_key}: {condition_result}"
+            )
+        company = thesis_map.get("company_information")
+        company_map = company if isinstance(company, Mapping) else {}
+        decision_id = thesis_map.get("action_condition_decision_id")
+        decision = decisions_by_id.get(str(decision_id)) if decision_id else None
+        decision_map = decision if isinstance(decision, Mapping) else {}
+        formation_values = decision_map.get("formation_values")
+        formation_map = (
+            formation_values if isinstance(formation_values, Mapping) else {}
+        )
+        records.append(
+            {
+                "event_key": event_key,
+                "formation_date": candidate.get("formation_date"),
+                "action_date": candidate.get("action_date"),
+                "ts_code": candidate.get("ts_code"),
+                "name": candidate.get("name"),
+                "event_id": company_map.get("event_id"),
+                "event_available_at": company_map.get("event_available_at"),
+                "original_action_condition": thesis_map.get("critical_unknown"),
+                "first_observable_session": formation_map.get(
+                    "reaction_start_date"
+                ),
+                "condition_result": condition_result,
+                "reliable_entry_available": False,
+                "reliable_entry_date": None,
+                "reliable_entry_price": None,
+                "formal_return_started": False,
+                "outcome_data_status": (
+                    "condition_not_met"
+                    if condition_result == "not_met"
+                    else "condition_unknown"
+                    if condition_result == "unknown"
+                    else "no_reviewed_reliable_entry"
+                ),
+                "outcome_close_return": None,
+                "outcome_max_close_return": None,
+                "outcome_mae": None,
+                "notes": impact.get("early_outcome_used_only_for_evaluation"),
+            }
+        )
+    return sorted(records, key=lambda row: (row["action_date"], row["ts_code"]))
+
+
 def _adjusted_return(
     raw_price: float | None,
     factor: float | None,
@@ -859,7 +1068,9 @@ def write_readme(
 
 ## 文件说明
 
-- `data/formal_selections.csv`：所有正式入选事件及原始理由、最强反证、最近替代比较；
+- `data/formal_selections.csv`：confirmed active 与旧 V1 正式记录；不包含四条 conditional event lead；
+- `data/candidate_outcomes.csv`：全部候选账的同口径行动后价格摘要，覆盖 selected、rejected 与 unresolved；
+- `data/conditional_event_outcomes.csv`：四条 `fresh_event_pending + conditional` 的人工条件判定；无可靠入口时不启动正式收益；
 - `data/research_runs.jsonl`：8 次研究的完整冻结 trace 载荷，使用逻辑来源标识，不含本地路径；
 - `data/candidate_ledger.jsonl`：所有明确进入候选账的股票；
 - `data/decision_trace.jsonl`：研究 trace 中实际引用的结构化决策证据；
@@ -878,6 +1089,9 @@ def write_readme(
 - `event_key` 以形成日、股票代码和角色区分事件，因此洛阳钼业两次入选分别保留；
 - OHLC 为未复权原始价格，成交量单位为股，成交额单位为人民币元；
 - 从行动日开盘计算的跨日累计收益使用 `raw_price × adj_factor`；
+- 候选结果的行动日开盘基准只用于 selected/rejected/unresolved 同口径评价，不代表历史正式参与；
+- conditional 的 `condition_result` 只读取人工影响矩阵，不从名称、监控状态或后续最高价推断；无可靠入口时正式收益字段保持空值；
+- 当前派生切片不足以按每个形成日重建完整合格股票范围，因此不生成 `undiscovered_outcome_leads.csv`，也不补猜；
 - 缺少可靠行情的交易日保留一行并标记 `missing_equity_daily`，不补猜；
 - 8 月 31 日收盘跟踪报告在 9 月 1 日盘前形成，其 `report_as_of` 被完整保留，不能当作 8 月 31 日开盘前信息；
 - 旧格式的 8 月 20 日研究没有 V4 `research_thesis` 和 `decision_trace`，对应字段保持空值并明确标记，绝不事后重建。
@@ -904,6 +1118,7 @@ def finalize_manifest(
         for path in output_dir.rglob("*")
         if path.is_file()
         and path.name not in {"manifest.json", "checksums.sha256"}
+        and path.suffix.lower() != ".xlsx"
         and not path.name.endswith(".inspect.ndjson")
     )
     file_entries = [
@@ -933,6 +1148,8 @@ def finalize_manifest(
         "known_limitations": [
             "The 2026-08-20 action-date trace predates V4 and has no recorded research_thesis or decision_trace.",
             "Sector and price derived contexts are referenced audit slices, not full-universe exports.",
+            "Candidate-relative market and sector outcome returns remain null because no matching post-action benchmark series is exported.",
+            "The package cannot reconstruct each formation date's complete eligible universe, so no undiscovered outcome leads are generated.",
             "The 2026-08-31 close monitor was produced on 2026-09-01 pre-open; report_as_of remains explicit.",
         ],
     }
@@ -975,6 +1192,7 @@ def export_dataset(
         for record in extract_candidate_records(trace, _trace_version(source_name, trace))
     ]
     decisions = build_decision_records(traces)
+    impact_rows = load_selection_impact_rows(output_dir)
     research_runs = build_research_run_records(traces)
     review_contracts = build_review_contracts(candidates)
     monitor_episodes, monitor_alerts, monitor_reviews = build_monitor_records(
@@ -992,6 +1210,16 @@ def export_dataset(
     enrich_selections_with_outcomes(
         selections, daily_prices, outcome_through_date
     )
+    candidate_subjects = build_candidate_outcome_subjects(candidates)
+    candidate_daily_prices = build_daily_price_volume_records(
+        warehouse_root, candidate_subjects, outcome_through_date
+    )
+    candidate_outcomes = build_candidate_outcome_records(
+        candidates, candidate_daily_prices, outcome_through_date
+    )
+    conditional_event_outcomes = build_conditional_event_outcomes(
+        candidates, decisions, impact_rows
+    )
 
     output_dir.mkdir(parents=True, exist_ok=True)
     data_dir = output_dir / "data"
@@ -1004,6 +1232,7 @@ def export_dataset(
         "action_date",
         "selection_as_of",
         "trace_version",
+        "selection_output_class",
         "priority",
         "ts_code",
         "name",
@@ -1064,6 +1293,59 @@ def export_dataset(
     )
     counts["price_context"] = write_jsonl(
         data_dir / "price_context.jsonl", price_context
+    )
+    candidate_outcome_fields = [
+        "run_id",
+        "formation_date",
+        "action_date",
+        "ts_code",
+        "name",
+        "final_fate",
+        "opportunity_type",
+        "engine_type",
+        "engine_status",
+        "selection_as_of",
+        "outcome_through_date",
+        "outcome_trading_day_count",
+        "outcome_data_status",
+        "outcome_close_return",
+        "outcome_max_close_return",
+        "outcome_max_high_return",
+        "outcome_mae",
+        "outcome_close_drawdown_from_peak",
+        "relative_market_return_if_available",
+        "relative_sector_return_if_available",
+    ]
+    counts["candidate_outcomes"] = write_csv(
+        data_dir / "candidate_outcomes.csv",
+        candidate_outcomes,
+        candidate_outcome_fields,
+    )
+    conditional_outcome_fields = [
+        "event_key",
+        "formation_date",
+        "action_date",
+        "ts_code",
+        "name",
+        "event_id",
+        "event_available_at",
+        "original_action_condition",
+        "first_observable_session",
+        "condition_result",
+        "reliable_entry_available",
+        "reliable_entry_date",
+        "reliable_entry_price",
+        "formal_return_started",
+        "outcome_data_status",
+        "outcome_close_return",
+        "outcome_max_close_return",
+        "outcome_mae",
+        "notes",
+    ]
+    counts["conditional_event_outcomes"] = write_csv(
+        data_dir / "conditional_event_outcomes.csv",
+        conditional_event_outcomes,
+        conditional_outcome_fields,
     )
     daily_fields = [
         "event_key",

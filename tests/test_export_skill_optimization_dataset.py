@@ -6,7 +6,11 @@ from pathlib import Path
 import pytest
 
 from tools.export_skill_optimization_dataset import (
+    build_candidate_outcome_records,
+    build_candidate_outcome_subjects,
+    build_conditional_event_outcomes,
     build_event_key,
+    build_formal_selections,
     enrich_selections_with_outcomes,
     ensure_public_safe,
     extract_candidate_records,
@@ -108,3 +112,174 @@ def test_outcome_summary_uses_latest_available_event_path() -> None:
     assert selections[0]["outcome_trading_day_count"] == 1
     assert selections[0]["outcome_close_return"] == 0.02
     assert selections[0]["outcome_mae"] == -0.01
+
+
+def _selected_row(ts_code: str, name: str, priority: int) -> dict[str, object]:
+    return {
+        "ts_code": ts_code,
+        "name": name,
+        "priority": priority,
+        "opportunity_type": "company_catalyst",
+        "selection_reason": f"{name}理由",
+        "strongest_counterevidence": f"{name}反证",
+        "nearest_comparison": f"{name}近邻",
+    }
+
+
+def test_v4_formal_selections_exclude_conditional_event_leads() -> None:
+    active = _selected_row("000001.SZ", "正式股", 1)
+    conditional = _selected_row("000002.SZ", "条件股", 2)
+    trace = {
+        "trace_version": "daily-research-trace-v4",
+        "formation_date": "2026-08-28",
+        "action_date": "2026-08-31",
+        "as_of": "2026-08-28T17:00:00+08:00",
+        "candidate_ledger": [
+            {
+                **active,
+                "final_fate": "selected",
+                "research_thesis": {
+                    "engine_type": "independent_demand_acceleration",
+                    "engine_status": "active",
+                    "market_recognition": {"status": "confirmed"},
+                },
+            },
+            {
+                **conditional,
+                "final_fate": "selected",
+                "research_thesis": {
+                    "engine_type": "fresh_event_pending",
+                    "engine_status": "conditional",
+                    "market_recognition": {"status": "pending"},
+                },
+            },
+        ],
+        "research_result": {"selected_stocks": [active, conditional]},
+    }
+    log_rows = [
+        {
+            "action_date": "2026-08-31",
+            "ts_code": row["ts_code"],
+            "name": row["name"],
+            "selection_reason": row["selection_reason"],
+            "strongest_counterevidence": row["strongest_counterevidence"],
+            "nearest_comparison": row["nearest_comparison"],
+        }
+        for row in (active, conditional)
+    ]
+
+    rows = build_formal_selections([("trace.json", trace)], log_rows)
+
+    assert [row["name"] for row in rows] == ["正式股"]
+    assert rows[0]["selection_output_class"] == "confirmed_active"
+
+
+def test_candidate_outcomes_cover_selected_rejected_and_unresolved() -> None:
+    candidates = [
+        {
+            "run_id": "formal:2026-08-28:2026-08-31",
+            "formation_date": "2026-08-28",
+            "action_date": "2026-08-31",
+            "selection_as_of": "2026-08-28T17:00:00+08:00",
+            "ts_code": f"00000{index}.SZ",
+            "name": fate,
+            "final_fate": fate,
+            "opportunity_type": "independent_price_anomaly",
+            "research_thesis": {
+                "engine_type": "independent_demand_acceleration",
+                "engine_status": "active",
+            },
+        }
+        for index, fate in enumerate(("selected", "rejected", "unresolved"), start=1)
+    ]
+    subjects = build_candidate_outcome_subjects(candidates)
+    daily = [
+        {
+            "event_key": subject["event_key"],
+            "trade_date": "2026-08-31",
+            "trading_day_number": 1,
+            "data_status": "available",
+            "close_return_since_entry": 0.01,
+            "max_close_return_so_far": 0.01,
+            "max_high_return_so_far": 0.02,
+            "mae_since_entry": -0.01,
+            "close_drawdown_from_peak": 0.0,
+        }
+        for subject in subjects
+    ]
+
+    rows = build_candidate_outcome_records(candidates, daily, "2026-08-31")
+
+    assert {row["final_fate"] for row in rows} == {
+        "selected",
+        "rejected",
+        "unresolved",
+    }
+    assert {row["engine_type"] for row in rows} == {
+        "independent_demand_acceleration"
+    }
+    assert all(row["outcome_close_return"] == 0.01 for row in rows)
+    assert all(row["relative_market_return_if_available"] is None for row in rows)
+    assert all(row["relative_sector_return_if_available"] is None for row in rows)
+
+
+def test_conditional_event_without_reviewed_entry_has_no_formal_return() -> None:
+    candidate = {
+        "run_id": "formal:2026-08-28:2026-08-31",
+        "formation_date": "2026-08-28",
+        "action_date": "2026-08-31",
+        "selection_as_of": "2026-08-28T17:00:00+08:00",
+        "trace_version": "daily-research-trace-v4",
+        "ts_code": "600150.SH",
+        "name": "中国船舶",
+        "final_fate": "selected",
+        "research_thesis": {
+            "engine_type": "fresh_event_pending",
+            "engine_status": "conditional",
+            "action_condition_decision_id": "act-600150",
+            "critical_unknown": "首日是否形成相对强势和有效收盘",
+            "company_information": {
+                "event_id": "event-1",
+                "event_available_at": "2026-08-28T17:00:00+08:00",
+            },
+        },
+    }
+    decisions = [
+        {
+            "decision_id": "act-600150",
+            "formation_values": {"reaction_start_date": "2026-08-31"},
+        }
+    ]
+    matrix_rows = [
+        {
+            "event_key": "formal:2026-08-28:600150.SH:selected",
+            "action_condition_effect": "not_met",
+            "early_outcome_used_only_for_evaluation": "首日未确认",
+        }
+    ]
+
+    rows = build_conditional_event_outcomes([candidate], decisions, matrix_rows)
+
+    assert rows == [
+        {
+            "event_key": "formal:2026-08-28:600150.SH:selected",
+            "formation_date": "2026-08-28",
+            "action_date": "2026-08-31",
+            "ts_code": "600150.SH",
+            "name": "中国船舶",
+            "event_id": "event-1",
+            "event_available_at": "2026-08-28T17:00:00+08:00",
+            "original_action_condition": "首日是否形成相对强势和有效收盘",
+            "first_observable_session": "2026-08-31",
+            "condition_result": "not_met",
+            "reliable_entry_available": False,
+            "reliable_entry_date": None,
+            "reliable_entry_price": None,
+            "formal_return_started": False,
+            "outcome_data_status": "condition_not_met",
+            "outcome_close_return": None,
+            "outcome_max_close_return": None,
+            "outcome_mae": None,
+            "notes": "首日未确认",
+        }
+    ]
