@@ -66,6 +66,14 @@ REQUIRED_LOG_FIELDS = {
     "selection_as_of",
     "validation_mode",
 }
+CONFIRMED_ACTIVE_ENGINES = frozenset(
+    {
+        "event_repricing_confirmed",
+        "sector_broad_diffusion",
+        "sector_leader_cluster",
+        "independent_demand_acceleration",
+    }
+)
 
 
 OpportunityType = Literal[
@@ -91,6 +99,48 @@ DiscoverySkillName = Literal[
     "researching-company-events",
     "analyzing-price-trading",
 ]
+SelectionOutputClass = Literal[
+    "confirmed_active",
+    "conditional_event",
+    "legacy_v1_not_rewritten",
+    "not_formal_candidate",
+]
+
+
+def selection_output_class(
+    *,
+    trace_version: str,
+    candidate: dict[str, Any],
+    role: str = "selected",
+) -> SelectionOutputClass:
+    """Derive consumer semantics without rewriting the frozen trace."""
+
+    if role != "selected" or candidate.get("final_fate") != "selected":
+        return "not_formal_candidate"
+    if trace_version != "daily-research-trace-v4":
+        return "legacy_v1_not_rewritten"
+    thesis = candidate.get("research_thesis")
+    if not isinstance(thesis, dict):
+        return "not_formal_candidate"
+    recognition = thesis.get("market_recognition")
+    recognition_status = (
+        recognition.get("status") if isinstance(recognition, dict) else None
+    )
+    engine_type = thesis.get("engine_type")
+    engine_status = thesis.get("engine_status")
+    if (
+        engine_type in CONFIRMED_ACTIVE_ENGINES
+        and engine_status == "active"
+        and recognition_status == "confirmed"
+    ):
+        return "confirmed_active"
+    if (
+        engine_type == "fresh_event_pending"
+        and engine_status == "conditional"
+        and recognition_status == "pending"
+    ):
+        return "conditional_event"
+    return "not_formal_candidate"
 
 
 class CandidateResult(BaseModel):
@@ -846,8 +896,11 @@ def record_daily_trace(
             error=_safe_error(error),
         )
 
+    forward_result = validated.research_result.model_dump()
+    if isinstance(validated, DailyResearchTraceV4):
+        forward_result = _confirmed_active_research_result(validated)
     summary = _record_daily_selection_with_context(
-        validated.research_result.model_dump(),
+        forward_result,
         context=context,
         csv_path=csv_path,
         data=data,
@@ -876,6 +929,37 @@ def record_daily_trace(
             "error": "trace_conflict",
         }
     )
+
+
+def _confirmed_active_research_result(
+    trace: DailyResearchTraceV4,
+) -> dict[str, Any]:
+    """Build a Forward-only result while leaving the V4 trace untouched."""
+
+    result = trace.research_result.model_dump()
+    ledger = {
+        item.ts_code: item.model_dump(mode="json")
+        for item in trace.candidate_ledger
+    }
+    confirmed = [
+        item.model_dump()
+        for item in trace.research_result.selected_stocks
+        if selection_output_class(
+            trace_version=trace.trace_version,
+            candidate=ledger.get(item.ts_code, {}),
+        )
+        == "confirmed_active"
+    ]
+    for priority, item in enumerate(confirmed, start=1):
+        item["priority"] = priority
+    result["selected_stocks"] = confirmed
+    if confirmed:
+        result["empty_reason"] = ""
+    elif trace.research_result.selected_stocks:
+        result["empty_reason"] = (
+            "今天没有已确认正式推荐；等待首个交易日确认的事件线索不计入正式名单。"
+        )
+    return result
 
 
 def _validate_trace_research_availability(
@@ -1933,6 +2017,9 @@ def _prepare_selection_context(
         rows,
         open_dates=open_dates,
         price_loader=data.adjusted_prices,
+        conditional_selection_keys=_archived_conditional_selection_keys(
+            csv_path.parent
+        ),
     )
     if settled:
         _atomic_write_csv(csv_path, fieldnames, updated_rows)
@@ -2001,12 +2088,17 @@ def apply_mature_settlements(
     *,
     open_dates: list[date],
     price_loader: Callable[[str, list[date]], list[PricePoint] | None],
+    conditional_selection_keys: set[tuple[str, str]] | None = None,
 ) -> tuple[list[dict[str, str]], int]:
     updated = [dict(row) for row in rows]
     sessions = sorted(set(open_dates))
+    excluded = conditional_selection_keys or set()
     settled = 0
     for row in updated:
         if not row.get("ts_code") or row.get("final_fate") == "empty_selection":
+            continue
+        key = (str(row.get("formation_date", "")), str(row["ts_code"]))
+        if key in excluded:
             continue
         if _settlement_complete(row):
             continue
@@ -2034,6 +2126,47 @@ def apply_mature_settlements(
         row["terminal_return_20d"] = _format_percent(close_returns[-1] * 100.0)
         settled += 1
     return updated, settled
+
+
+def _archived_conditional_selection_keys(
+    archive_dir: Path,
+) -> set[tuple[str, str]]:
+    """Find frozen V4 conditional selections beside the Forward log."""
+
+    keys: set[tuple[str, str]] = set()
+    for path in sorted(Path(archive_dir).glob("research-trace-*.json")):
+        try:
+            trace = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if (
+            not isinstance(trace, dict)
+            or trace.get("trace_version") != "daily-research-trace-v4"
+        ):
+            continue
+        formation_date = str(trace.get("formation_date", ""))
+        result = trace.get("research_result")
+        selected_codes = {
+            str(item.get("ts_code", ""))
+            for item in (
+                result.get("selected_stocks", [])
+                if isinstance(result, dict)
+                else []
+            )
+            if isinstance(item, dict)
+        }
+        for candidate in trace.get("candidate_ledger", []):
+            if not isinstance(candidate, dict):
+                continue
+            code = str(candidate.get("ts_code", ""))
+            if code not in selected_codes:
+                continue
+            if selection_output_class(
+                trace_version="daily-research-trace-v4",
+                candidate=candidate,
+            ) == "conditional_event":
+                keys.add((formation_date, code))
+    return keys
 
 
 def _wait_until_data_ready(

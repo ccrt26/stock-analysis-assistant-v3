@@ -12,7 +12,10 @@ from typing import Any, Literal
 import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from stock_analyzer.ops.forward_selection import MarketPropagationModeV4
+from stock_analyzer.ops.forward_selection import (
+    MarketPropagationModeV4,
+    selection_output_class,
+)
 
 
 REGISTER_VERSION = "registered-forward-monitor-episodes-v1"
@@ -292,7 +295,7 @@ def register_episodes(
             _fill_missing_original_fields(existing[episode_id], episode)
             continue
         existing[episode_id] = episode
-        if episode["role"] == "selected":
+        if episode.get("selection_output_class") == "confirmed_active":
             selected_registered += 1
         else:
             comparators_registered += 1
@@ -490,7 +493,7 @@ def prepare_forward_monitor(
         str(item["episode_id"])
         for item in observations
         if item["monitor_phase"] != "closed"
-        and item.get("role") == "selected"
+        and item.get("selection_output_class") == "confirmed_active"
         and int(item["day_number"]) >= 20
         and item.get("frozen_twenty_day_review") is None
     )
@@ -499,7 +502,13 @@ def prepare_forward_monitor(
         "open_episode_count": len(open_episodes),
         "distinct_stock_count": len({item["ts_code"] for item in open_episodes}),
         "attention_stock_count": len(attention_stocks),
-        "selected_count": sum(item["role"] == "selected" for item in open_episodes),
+        "selected_count": len(
+            {
+                str(item["ts_code"])
+                for item in open_episodes
+                if item.get("selection_output_class") == "confirmed_active"
+            }
+        ),
         "comparator_count": sum(item["role"] == "comparator" for item in open_episodes),
         "primary_count": sum(item["monitor_phase"] == "primary" for item in observations),
         "passive_tail_count": sum(item["monitor_phase"] == "passive_tail" for item in observations),
@@ -616,15 +625,20 @@ def record_forward_monitor(
             )
             day_number = int(episode["day_number"])
             role = str(episode.get("role"))
-            if role == "comparator" and final_review is not None:
+            output_class = _episode_selection_output_class(episode)
+            is_formal_selection = output_class in {
+                "confirmed_active",
+                "legacy_v1_not_rewritten",
+            }
+            if not is_formal_selection and final_review is not None:
                 raise ValueError(
-                    "a comparator must not have a final recommendation review"
+                    "only a confirmed active selection may have a final recommendation review"
                 )
-            if role == "selected" and day_number < 20 and final_review is not None:
+            if is_formal_selection and day_number < 20 and final_review is not None:
                 raise ValueError(
                     "a final decision review is not allowed before the twentieth trading day"
                 )
-            if role == "selected" and day_number >= 20 and final_review is None:
+            if is_formal_selection and day_number >= 20 and final_review is None:
                 raise ValueError(
                     "a final decision review is required at or after the twentieth trading day"
                 )
@@ -639,7 +653,7 @@ def record_forward_monitor(
                     )
             _validate_pair_context(episode, episodes)
             if (
-                role == "selected"
+                is_formal_selection
                 and final_review is not None
                 and final_review["decision_review"]
                 == "direction_right_stock_wrong"
@@ -835,6 +849,40 @@ def _render_markdown(
         "## 之前研究过的股票走势复盘",
         "",
     ]
+    open_episodes = [
+        item
+        for item in episodes.values()
+        if item.get("monitor_phase") != "closed"
+    ]
+    conditional_count = len(
+        {
+            str(item["ts_code"])
+            for item in open_episodes
+            if _episode_selection_output_class(item) == "conditional_event"
+        }
+    )
+    formal_primary_count = sum(
+        _episode_selection_output_class(item)
+        in {"confirmed_active", "legacy_v1_not_rewritten"}
+        and item.get("monitor_phase") == "primary"
+        for item in episodes.values()
+    )
+    formal_tail_count = sum(
+        _episode_selection_output_class(item)
+        in {"confirmed_active", "legacy_v1_not_rewritten"}
+        and item.get("monitor_phase") == "passive_tail"
+        for item in episodes.values()
+    )
+    if pool.selected_count == 0:
+        lines.extend(["今天没有已确认正式推荐。", ""])
+    if conditional_count:
+        lines.extend(
+            [
+                f"等待首个交易日确认的事件线索有 {conditional_count} 条；"
+                "这些线索不计入正式推荐数量，也不形成正式收益。",
+                "",
+            ]
+        )
     if not report.alerts:
         lines.append("今天没有需要详细提醒的股票。")
     for alert in report.alerts:
@@ -860,7 +908,13 @@ def _render_markdown(
             day_number = int(episode["day_number"])
             action = date.fromisoformat(str(episode["action_date"]))
             action_text = f"{action.year}年{action.month}月{action.day}日"
-            if episode.get("role") == "comparator":
+            output_class = _episode_selection_output_class(episode)
+            if output_class == "conditional_event":
+                subtitle = (
+                    f"#### {action_text}等待首个交易日确认的事件线索，"
+                    f"目前观察到第{day_number}个交易日"
+                )
+            elif episode.get("role") == "comparator":
                 day_text = _human_trading_day(day_number).removeprefix("推荐后的")
                 subtitle = (
                     f"#### {action_text}那次研究中，它是用于比较的股票，"
@@ -877,7 +931,11 @@ def _render_markdown(
                 original += " 当时留下的原始判断不完整，因此这次只能复盘价格表现，不能逐项审查当时的理由。"
             if "missing_original_referenced_decisions" in limitations:
                 original += " 当时留下的部分价格依据或首个交易日观察条件不完整，因此这部分不能事后补写。"
-            actual = f"{_render_price_summary([episode])} {_render_relative_performance(episode)}"
+            actual = (
+                _render_conditional_event_reaction(episode)
+                if output_class == "conditional_event"
+                else f"{_render_price_summary([episode])} {_render_relative_performance(episode)}"
+            )
             if alert.alert_type == "late_activation" and day_number > 20:
                 actual += " 这只股票在前20个交易日结束后才开始明显走强，因此不会改变前20天的原评价结果。"
             current = (
@@ -894,7 +952,10 @@ def _render_markdown(
                 _render_pair_comparison(episode, review, list(episodes.values())),
             ])
             final = review.final_twenty_day_review
-            if final is not None and episode.get("role") == "selected":
+            if final is not None and output_class in {
+                "confirmed_active",
+                "legacy_v1_not_rewritten",
+            }:
                 lines.extend(
                     [
                         "",
@@ -922,7 +983,7 @@ def _render_markdown(
         )
     lines.extend([
         "## 目前还在跟踪多少只", "",
-        f"仍在跟踪 {pool.open_episode_count} 条记录，涉及 {pool.distinct_stock_count} 只股票；推荐后的前20个交易日有 {pool.primary_count} 条，之后继续低成本观察的有 {pool.passive_tail_count} 条。",
+        f"仍开放 {pool.selected_count} 只已确认正式推荐股票；推荐后的前20个交易日有 {formal_primary_count} 条正式记录，之后继续低成本观察的有 {formal_tail_count} 条正式记录。",
         "", "## 今天没有详细展开的股票", "",
         f"还有 {report.unreported_attention_count} 只触发变化但未在上面详细显示。{report.routine_summary}", "",
     ])
@@ -1112,6 +1173,29 @@ def _render_price_summary(episodes: list[dict[str, Any]]) -> str:
     return " ".join(summaries)
 
 
+def _render_conditional_event_reaction(episode: dict[str, Any]) -> str:
+    reaction = episode.get("first_event_reaction")
+    if not isinstance(reaction, dict):
+        return "首个完整交易日的价格事实不完整，不能判断原观察条件，也不得补写参与收益。"
+    movement = _number(reaction.get("open_to_close_return"))
+    amount = _number(reaction.get("amount"))
+    movement_text = (
+        "开盘到收盘变化无法可靠计算"
+        if movement is None
+        else f"开盘到收盘{_plain_movement(movement)}"
+    )
+    amount_text = (
+        "成交额数据不足"
+        if amount is None
+        else f"成交额为{amount:,.0f}"
+    )
+    return (
+        f"首个完整交易日为{reaction.get('trade_date')}，{movement_text}，"
+        f"{amount_text}。这是事件反应事实，不是正式推荐收益。 "
+        f"{_render_relative_performance(episode)}"
+    )
+
+
 def _format_return(value: float) -> str:
     return f"{value:+.2%}"
 
@@ -1159,9 +1243,18 @@ def _episode_observation(
     elif len(path) != len(path_days):
         limitations.append("incomplete_price_path")
     action_date = date.fromisoformat(str(base["action_date"]))
-    entry = next(
-        (item["open"] for item in path if item["date"] == action_date),
-        None,
+    output_class = str(base.get("selection_output_class", ""))
+    if not output_class:
+        output_class = _episode_selection_output_class(base)
+    if output_class == "conditional_event":
+        frozen_twenty_day_review = None
+    entry = (
+        None
+        if output_class == "conditional_event"
+        else next(
+            (item["open"] for item in path if item["date"] == action_date),
+            None,
+        )
     )
     d20_dates = set(path_days[:20])
     d20_path = [item for item in path if item["date"] in d20_dates]
@@ -1204,6 +1297,14 @@ def _episode_observation(
         "primary_days_remaining": max(20 - day_number, 0) if phase == "primary" else 0,
         "tail_days_remaining": 10 if phase == "primary" else max(30 - day_number, 0),
         "entry_open": entry,
+        "formal_return_started": bool(
+            output_class == "confirmed_active" and entry is not None
+        ),
+        "first_event_reaction": (
+            _first_event_reaction(path)
+            if output_class == "conditional_event"
+            else None
+        ),
         "first_observable_date": (
             path[0]["date"].isoformat() if path else None
         ),
@@ -1234,7 +1335,7 @@ def _attention_reasons(
 ) -> list[str]:
     reasons: list[str] = []
     if (
-        current.get("role") == "selected"
+        current.get("selection_output_class") == "confirmed_active"
         and int(current["day_number"]) >= 20
         and current.get("frozen_twenty_day_review") is None
     ):
@@ -1446,9 +1547,45 @@ def _adjusted_path(
             {
                 "date": day,
                 **{name: float(value) * factor for name, value in values.items()},
+                "amount": _number(row.get("amount")),
             }
         )
     return result
+
+
+def _first_event_reaction(path: list[dict[str, Any]]) -> dict[str, Any] | None:
+    if not path:
+        return None
+    first = path[0]
+    opening = _number(first.get("open"))
+    close = _number(first.get("close"))
+    return {
+        "trade_date": first["date"].isoformat(),
+        "open": opening,
+        "close": close,
+        "high": _number(first.get("high")),
+        "low": _number(first.get("low")),
+        "amount": _number(first.get("amount")),
+        "open_to_close_return": (
+            close / opening - 1.0
+            if opening is not None and opening > 0 and close is not None
+            else None
+        ),
+    }
+
+
+def _episode_selection_output_class(episode: dict[str, Any]) -> str:
+    value = str(episode.get("selection_output_class", ""))
+    if value:
+        return value
+    if episode.get("role") != "selected":
+        return "not_formal_candidate"
+    if (
+        episode.get("original_engine_type") == "fresh_event_pending"
+        and episode.get("original_engine_status") == "conditional"
+    ):
+        return "conditional_event"
+    return "legacy_v1_not_rewritten"
 
 
 def _path_metrics(
@@ -2031,6 +2168,11 @@ def _trace_episodes(
             ts_code = str(item.get("ts_code", "")).strip()
             candidate = ledger.get(ts_code, {})
             thesis = candidate.get("research_thesis", {})
+            output_class = selection_output_class(
+                trace_version=str(trace.get("trace_version", "")),
+                candidate=candidate,
+                role=role,
+            )
             recognition = thesis.get("market_recognition")
             broad = thesis.get("sector_broad_diffusion") or {}
             cluster = thesis.get("sector_leader_cluster") or {}
@@ -2070,6 +2212,7 @@ def _trace_episodes(
                     "source_type": source_type,
                     "source_as_of": source_as_of,
                     "role": role,
+                    "selection_output_class": output_class,
                     "formation_date": formation_date,
                     "action_date": action_date,
                     "ts_code": ts_code,

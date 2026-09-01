@@ -732,6 +732,99 @@ def test_prepare_calculates_adjusted_path_and_excludes_future_prices(tmp_path: P
     assert episode["current_hit_20pct_close"] is True
 
 
+def test_conditional_event_keeps_first_reaction_but_has_no_formal_entry(
+    tmp_path: Path,
+) -> None:
+    trace = _single_selected_trace(
+        formation_date="2026-07-31",
+        action_date="2026-08-03",
+    )
+    thesis = trace["candidate_ledger"][0]["research_thesis"]
+    thesis.update(
+        engine_type="fresh_event_pending",
+        engine_status="conditional",
+        market_recognition={"status": "pending", "basis": "等待首日确认"},
+    )
+    archive = tmp_path / "local_archive/forward_selection"
+    archive.mkdir(parents=True)
+    _write_trace(archive / "research-trace-2026-07-31.json", trace)
+    sessions = _seed_monitor_project(
+        tmp_path,
+        trace=trace,
+        session_count=1,
+        price_overrides={
+            1: {"open": 10.0, "close": 10.5, "high": 10.8, "low": 9.8},
+        },
+    )
+
+    snapshot = _prepare(tmp_path, sessions[0])
+    episode = snapshot["episodes"][0]
+
+    assert episode["role"] == "selected"
+    assert episode["selection_output_class"] == "conditional_event"
+    assert episode["formal_return_started"] is False
+    assert episode["entry_open"] is None
+    assert episode["current_close_return_since_entry"] is None
+    assert episode["d20_close_return_since_entry"] is None
+    assert episode["first_event_reaction"]["open_to_close_return"] == pytest.approx(0.05)
+    assert "first_event_reaction" in episode["attention_reasons"]
+    assert snapshot["summary"]["selected_count"] == 0
+    assert snapshot["required_final_review_episode_ids"] == []
+
+    snapshot_path = (
+        tmp_path
+        / f"local_archive/forward_monitor/snapshot-{sessions[0]}.json"
+    )
+    alert = _alert("603969.SH", episode["episode_id"])
+    alert["original_engine_types"] = ["fresh_event_pending"]
+    pending = tmp_path / "pending-conditional.json"
+    pending.write_text(
+        json.dumps(
+            _report_payload(snapshot, alerts=[alert]),
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    summary = record_forward_monitor(
+        snapshot_file=snapshot_path,
+        report_file=pending,
+        project_root=tmp_path,
+    )
+    markdown = Path(summary.markdown_file).read_text(encoding="utf-8")
+
+    assert "今天没有已确认正式推荐" in markdown
+    assert "等待首个交易日确认的事件线索" in markdown
+    assert "那次推荐" not in markdown
+
+
+def test_conditional_event_never_requires_or_accepts_a_d20_final_review(
+    tmp_path: Path,
+) -> None:
+    trace = _single_selected_trace(
+        formation_date="2026-07-01",
+        action_date="2026-07-02",
+    )
+    thesis = trace["candidate_ledger"][0]["research_thesis"]
+    thesis.update(
+        engine_type="fresh_event_pending",
+        engine_status="conditional",
+        market_recognition={"status": "pending", "basis": "等待首日确认"},
+    )
+    archive = tmp_path / "local_archive/forward_selection"
+    archive.mkdir(parents=True)
+    _write_trace(archive / "research-trace-2026-07-01.json", trace)
+    sessions = _seed_monitor_project(tmp_path, trace=trace, session_count=20)
+
+    snapshot = _prepare(tmp_path, sessions[-1])
+    episode = snapshot["episodes"][0]
+
+    assert episode["selection_output_class"] == "conditional_event"
+    assert episode["entry_open"] is None
+    assert episode["d20_close_return_since_entry"] is None
+    assert "pending_final_review" not in episode["attention_reasons"]
+    assert snapshot["required_final_review_episode_ids"] == []
+
+
 def test_path_reports_close_drawdown_from_the_period_peak(tmp_path: Path) -> None:
     trace = _single_selected_trace(
         formation_date="2026-07-31",

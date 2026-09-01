@@ -50,7 +50,9 @@ def test_existing_daily_prompt_stays_v4_and_adds_monitor_in_same_task() -> None:
     assert "今天的市场情况" in text
     assert "之前研究过的股票走势复盘" in text
     assert "目前还在跟踪多少只" in text
-    assert "今天新推荐的股票" in text
+    assert "今天已确认的正式推荐" in text
+    assert "等待首个交易日确认的事件线索" in text
+    assert "今天新推荐的股票" not in text
     assert "已过原行动窗口" not in text
     assert "今天开盘前能够看到的信息" in text
     assert "当前价格" in text
@@ -65,6 +67,23 @@ def test_existing_daily_prompt_stays_v4_and_adds_monitor_in_same_task() -> None:
         assert question in text
     assert "- 发动机类型和状态" not in text
     assert text.count("09:05 Scheduled Task") == 1
+
+
+def test_daily_prompts_separate_confirmed_recommendations_from_event_leads() -> None:
+    selection = Path("ops/forward-selection-prompt.md").read_text(
+        encoding="utf-8"
+    )
+    monitor = Path("ops/forward-monitor-prompt.md").read_text(
+        encoding="utf-8"
+    )
+
+    for text in (selection, monitor):
+        assert "今天已确认的正式推荐" in text
+        assert "等待首个交易日确认的事件线索" in text
+        assert "conditional 不进入正式推荐数量" in text
+        assert "不得虚构收益" in text
+    assert "仅有 conditional 时，明确“今天没有已确认正式推荐”" in selection
+    assert "fresh_event_pending 仍属于正式推荐" not in selection
 
 
 def test_forward_monitor_prompt_uses_previous_state_and_strict_report_contract() -> None:

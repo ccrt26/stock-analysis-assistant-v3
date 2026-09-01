@@ -12,6 +12,7 @@ import pytest
 from stock_analyzer.ops.forward_selection import (
     PricePoint,
     RunSummary,
+    _archived_conditional_selection_keys,
     _parse_main_args,
     apply_mature_settlements,
     main,
@@ -664,6 +665,9 @@ def _record_trace_for_test(
     archive_dir: Path | None = None,
     data: FakeData | None = None,
     pending_text: str | None = None,
+    formation_date: date = date(2026, 8, 18),
+    action_date: date = date(2026, 8, 19),
+    selection_as_of: datetime | None = None,
 ) -> tuple[RunSummary, Path, Path, Path]:
     pending = tmp_path / "pending.json"
     pending.write_text(
@@ -677,7 +681,9 @@ def _record_trace_for_test(
     data = data or FakeData(
         open_dates=[date(2026, 8, 18), date(2026, 8, 19)]
     )
-    moment = datetime(2026, 8, 19, 9, 10, tzinfo=SHANGHAI)
+    moment = selection_as_of or datetime(
+        2026, 8, 19, 9, 10, tzinfo=SHANGHAI
+    )
     summary = record_daily_trace(
         trace,
         pending_path=pending,
@@ -685,11 +691,11 @@ def _record_trace_for_test(
         csv_path=csv_path,
         data=data,
         clock=_clock(moment),
-        formation_date=date(2026, 8, 18),
-        action_date=date(2026, 8, 19),
+        formation_date=formation_date,
+        action_date=action_date,
         selection_as_of=moment,
     )
-    archive = archive_dir / "research-trace-2026-08-18.json"
+    archive = archive_dir / f"research-trace-{formation_date.isoformat()}.json"
     return summary, pending, archive, csv_path
 
 
@@ -1417,6 +1423,93 @@ def test_complete_trace_records_the_same_forward_rows_and_is_archived(
     assert direct.status == recorded.status == "selection_frozen"
     assert _read_csv(trace_csv) == _read_csv(direct_csv)
     assert not pending.exists()
+    assert json.loads(archive.read_text(encoding="utf-8")) == trace
+
+
+def test_v4_trace_archives_conditional_but_only_writes_confirmed_active(
+    tmp_path: Path,
+) -> None:
+    trace = _v4_trace()
+    conditional_trace = _v4_fresh_event_trace()
+    conditional = conditional_trace["candidate_ledger"][0]
+    conditional["ts_code"] = "600000.SH"
+    conditional["name"] = "浦发银行"
+    conditional["research_thesis"]["decision_ids"] = [
+        "event-company",
+        "event-price",
+    ]
+    conditional["research_thesis"][
+        "action_condition_decision_id"
+    ] = "event-price"
+    event_decisions = conditional_trace["decision_trace"]
+    for decision, decision_id in zip(
+        event_decisions,
+        ("event-company", "event-price"),
+        strict=True,
+    ):
+        decision["decision_id"] = decision_id
+        decision["ts_code"] = "600000.SH"
+    active = trace["research_result"]["selected_stocks"][0]
+    active["priority"] = 2
+    conditional_result = conditional_trace["research_result"][
+        "selected_stocks"
+    ][0]
+    conditional_result.update(
+        ts_code="600000.SH",
+        name="浦发银行",
+        priority=1,
+    )
+    trace["candidate_ledger"].append(conditional)
+    trace["decision_trace"].extend(event_decisions)
+    trace["research_result"]["selected_stocks"] = [
+        conditional_result,
+        active,
+    ]
+
+    summary, _, archive, csv_path = _record_trace_for_test(
+        trace,
+        tmp_path,
+        data=FakeData(
+            open_dates=[date(2026, 8, 25), date(2026, 8, 26)],
+        ),
+        formation_date=date(2026, 8, 25),
+        action_date=date(2026, 8, 26),
+        selection_as_of=datetime(2026, 8, 26, 9, 5, tzinfo=SHANGHAI),
+    )
+
+    rows = _read_csv(csv_path)
+    assert summary.status == "selection_frozen"
+    assert summary.selected_count == 1
+    assert [(row["ts_code"], row["priority"]) for row in rows] == [
+        ("000001.SZ", "1")
+    ]
+    assert json.loads(archive.read_text(encoding="utf-8")) == trace
+    assert trace["research_result"]["selected_stocks"][1]["priority"] == 2
+
+
+def test_v4_conditional_only_trace_archives_as_zero_formal_selection(
+    tmp_path: Path,
+) -> None:
+    trace = _v4_fresh_event_trace()
+
+    summary, _, archive, csv_path = _record_trace_for_test(
+        trace,
+        tmp_path,
+        data=FakeData(
+            open_dates=[date(2026, 8, 25), date(2026, 8, 26)],
+        ),
+        formation_date=date(2026, 8, 25),
+        action_date=date(2026, 8, 26),
+        selection_as_of=datetime(2026, 8, 26, 9, 5, tzinfo=SHANGHAI),
+    )
+
+    rows = _read_csv(csv_path)
+    assert summary.status == "selection_frozen"
+    assert summary.selected_count == 0
+    assert len(rows) == 1
+    assert rows[0]["final_fate"] == "empty_selection"
+    assert rows[0]["ts_code"] == ""
+    assert "没有已确认正式推荐" in rows[0]["selection_reason"]
     assert json.loads(archive.read_text(encoding="utf-8")) == trace
 
 
@@ -2438,6 +2531,39 @@ def test_d20_settles_once_from_adjusted_open_and_closes() -> None:
     assert updated[0]["terminal_return_20d"] == "5"
     assert repeated_count == 0
     assert repeated == updated
+
+
+def test_archived_v4_conditional_is_excluded_from_legacy_d20_settlement(
+    tmp_path: Path,
+) -> None:
+    trace = _v4_fresh_event_trace()
+    archive = tmp_path / "research-trace-2026-08-25.json"
+    archive.write_text(json.dumps(trace, ensure_ascii=False), encoding="utf-8")
+    row = _row(
+        formation_date="2026-08-25",
+        action_date="2026-08-26",
+        ts_code="000001.SZ",
+        final_fate="selected",
+    )
+    days = [
+        date(2026, 8, 26) + timedelta(days=offset)
+        for offset in range(40)
+        if (date(2026, 8, 26) + timedelta(days=offset)).weekday() < 5
+    ][:20]
+
+    conditional_keys = _archived_conditional_selection_keys(tmp_path)
+    updated, count = apply_mature_settlements(
+        [row],
+        open_dates=days,
+        price_loader=lambda _code, _days: pytest.fail(
+            "conditional must not request a formal settlement price path"
+        ),
+        conditional_selection_keys=conditional_keys,
+    )
+
+    assert conditional_keys == {("2026-08-25", "000001.SZ")}
+    assert count == 0
+    assert updated == [row]
 
 
 def test_runtime_log_is_initialized_once_from_docs_history(tmp_path: Path) -> None:
