@@ -76,3 +76,45 @@ def test_periodic_review_prompt_is_v4_only() -> None:
     assert "期间最深跌幅" in text
     assert "推荐股与当时最接近但未推荐股票的比较" in text
     assert "不自动修改 Skill" in text
+
+
+def test_detailed_recommendation_explanation_is_required_after_selection_freeze() -> None:
+    prompt = Path("ops/forward-selection-prompt.md").read_text(encoding="utf-8")
+    orchestrator = Path(
+        ".agents/skills/orchestrating-stock-research/SKILL.md"
+    ).read_text(encoding="utf-8")
+    company = Path(
+        ".agents/skills/researching-company-events/SKILL.md"
+    ).read_text(encoding="utf-8")
+
+    for phrase in (
+        "汇总表只能作为目录",
+        "公司是做什么的",
+        "为什么偏偏是现在",
+        "为什么不是普通跟涨",
+        "关键数字说明什么",
+        "为什么还可能有路径",
+        "已知的不利事实",
+        "资料限制",
+        "下一个交易日",
+        "每只股票建议300—500个中文字",
+    ):
+        assert phrase in prompt
+
+    for phrase in (
+        "名单冻结后的用户解释",
+        "不得新增、删除、替换、重新排序股票",
+        "company_profile",
+        "main_business",
+        "汇总表不能代替逐只说明",
+    ):
+        assert phrase in orchestrator
+
+    for phrase in (
+        "最终名单的公司介绍补充",
+        "只服务于用户理解",
+        "公司主要卖什么产品或提供什么服务",
+        "资料缺失和公司风险必须分开",
+        "不能被总控当成新的入选理由",
+    ):
+        assert phrase in company
