@@ -92,4 +92,3 @@
 ## 拟修改文件清单
 
 第一批和第二批仅在实际需要时触碰：docs/2026-09-01-five-skill-selection-logic-optimization-prompt.md、五个 .agents/skills/*/SKILL.md、docs/architecture/a-share-short-horizon-engine-contract-v4.md、ops/forward-selection-prompt.md、ops/forward-monitor-prompt.md、src/stock_analyzer/ops/forward_selection.py、src/stock_analyzer/ops/forward_monitor.py，以及附件允许的现有相关测试。第三批仅在需要时触碰 tools/export_skill_optimization_dataset.py、tools/build_skill_optimization_workbook.mjs、tools/validate_skill_optimization_dataset.py、tests/test_export_skill_optimization_dataset.py。所有研究交付只写入 research/skill-optimization/five-skill-selection-logic-optimization-20260901/。不修改清单外文件。
-
