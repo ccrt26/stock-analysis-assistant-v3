@@ -206,6 +206,27 @@ def test_review_prompt_explains_why_actual_results_support_or_refute_original_re
         assert phrase in text
 
 
+def test_review_prompt_requests_an_analyst_style_view_update() -> None:
+    text = Path("ops/forward-monitor-prompt.md").read_text(encoding="utf-8")
+
+    for phrase in (
+        "观点更新稿",
+        "一个中心问题",
+        "一句话观点更新",
+        "2—4个决定性事实",
+        "与上一次复盘比较",
+        "后续基准判断",
+        "不平均复述市场、行业、公司和价格四路内容",
+        "首次复盘",
+    ):
+        assert phrase in text
+    assert (
+        "不以“最有证据的解释是、当前阶段是、核心预期目前得到支持”"
+        "作为固定句式"
+        in text
+    )
+
+
 def test_review_prompt_uses_dated_review_skill_and_one_retry_for_missing_data() -> None:
     text = Path("ops/forward-monitor-prompt.md").read_text(encoding="utf-8")
 

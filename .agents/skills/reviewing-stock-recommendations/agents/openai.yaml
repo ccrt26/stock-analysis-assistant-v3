@@ -1,4 +1,4 @@
 interface:
   display_name: "正式推荐复盘"
-  short_description: "把推荐日判断与后续走势、公司和行业变化进行对照，说明20日目标进展"
-  default_prompt: "使用 $reviewing-stock-recommendations 复盘一只明确正式推荐过的股票，不重新选股。"
+  short_description: "围绕一个中心问题形成正式推荐的观点更新短评"
+  default_prompt: "使用 $reviewing-stock-recommendations 复盘一只明确正式推荐过的股票，形成一篇以观点更新为中心的复盘短评，不逐项复述数据，也不重新选股。"

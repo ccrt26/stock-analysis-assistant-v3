@@ -120,6 +120,38 @@ def test_review_skill_requires_causal_comparison_expectation_phase_and_outlook()
     )
 
 
+def test_review_skill_requires_an_analyst_style_view_update() -> None:
+    review = Path(
+        ".agents/skills/reviewing-stock-recommendations/SKILL.md"
+    ).read_text(encoding="utf-8")
+    interface = yaml.safe_load(
+        Path(
+            ".agents/skills/reviewing-stock-recommendations/agents/openai.yaml"
+        ).read_text(encoding="utf-8")
+    )["interface"]
+
+    for phrase in (
+        "一个中心问题",
+        "一句话观点更新",
+        "2—4个决定性事实",
+        "与上一次复盘比较",
+        "后续基准判断",
+        "观点更新稿",
+        "事实与观点分开",
+        "不平均复述市场、行业、公司和价格四路内容",
+        "首次复盘",
+    ):
+        assert phrase in review
+    assert (
+        "不得把“最有证据的解释是”“当前阶段是”“核心预期目前得到支持”"
+        "当作固定开头"
+        in review
+    )
+    assert "形成一篇以观点更新为中心的复盘短评，不逐项复述数据" in (
+        interface["default_prompt"]
+    )
+
+
 def test_selection_impact_matrix_is_complete_and_keeps_future_outcomes_separate() -> None:
     path = Path(
         "research/skill-optimization/"
