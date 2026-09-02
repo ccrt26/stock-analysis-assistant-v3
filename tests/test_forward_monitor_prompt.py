@@ -100,10 +100,11 @@ def test_forward_monitor_prompt_uses_previous_state_and_strict_report_contract()
     assert "pool_summary" in text
     assert "必须与 snapshot 完全一致" in text
     assert "原始完整判断" in text
-    assert "当初为什么推荐" in text
-    assert "推荐后实际发生了什么" in text
-    assert "这些变化说明什么" in text
-    assert "现在结论" in text
+    assert "推荐日期和当时判断" in text
+    assert "到今天走到哪里" in text
+    assert "后来发生了什么" in text
+    assert "这些变化为什么支持或反对当时判断" in text
+    assert "现在怎么看" in text
     assert "接下来关注什么" in text
     assert "推荐后实际怎么走" not in text
     assert "为什么今天要说它" not in text
@@ -133,7 +134,7 @@ def test_public_review_only_lists_explicit_formal_recommendations() -> None:
     assert "legacy_v1_not_rewritten" in text
     assert "conditional_event" in text
     assert "不得出现在“正式推荐股票的走势复盘”中" in text
-    assert "这些变化说明什么" in text
+    assert "这些变化为什么支持或反对当时判断" in text
     assert "不得单列给用户凑内容" in text
 
 
@@ -188,9 +189,9 @@ def test_all_five_stock_research_skills_define_a_review_phase() -> None:
     assert "之后可以更新当前走势评价" in orchestrator
     assert "比较记录的 `final_twenty_day_review` 始终为空" in orchestrator
     assert "用户标题使用 `action_date`" in orchestrator
-    assert "我为什么会选它" in orchestrator
-    assert "这些情况为什么支持这个判断" in orchestrator
-    assert "什么情况会证明判断变差" in orchestrator
+    assert "为什么在这个时间选择它" in orchestrator
+    assert "支持选择的独立原因" in orchestrator
+    assert "什么情况会让我改变看法" in orchestrator
     assert "这次为什么会选它" not in orchestrator
 
 def test_review_prompt_explains_why_actual_results_support_or_refute_original_reason() -> None:
@@ -205,3 +206,49 @@ def test_review_prompt_explains_why_actual_results_support_or_refute_original_re
         "所以现在怎样评价这次推荐",
     ):
         assert phrase in text
+
+
+def test_review_prompt_uses_dated_review_skill_and_one_retry_for_missing_data() -> None:
+    text = Path("ops/forward-monitor-prompt.md").read_text(encoding="utf-8")
+
+    for phrase in (
+        "reviewing-stock-recommendations",
+        "具体推荐日期",
+        "距离20%观察目标",
+        "missing_price_path",
+        "missing_current_price_context",
+        "missing_market_context",
+        "missing_sector_context",
+        "重新运行一次 monitor prepare",
+        "不得循环重试",
+        "不新增定时任务",
+    ):
+        assert phrase in text
+    for heading in (
+        "推荐日期和当时判断",
+        "到今天走到哪里",
+        "后来发生了什么",
+        "这些变化为什么支持或反对当时判断",
+        "现在怎么看",
+        "接下来关注什么",
+    ):
+        assert heading in text
+
+
+def test_review_sample_uses_real_dates_target_progress_and_reasoning() -> None:
+    sample = Path(
+        "research/skill-optimization/entry-timing-review-skill-20260902/"
+        "review-sample.md"
+    ).read_text(encoding="utf-8")
+
+    for phrase in (
+        "2026年8月25日开盘前",
+        "离20%的观察目标还差17.32个百分点",
+        "跌回此前60日高点下方",
+        "停牌前",
+        "复牌后",
+        "为什么支持或反对",
+    ):
+        assert phrase in sample
+    for forbidden in ("冻结时点", "冻结结论", "正常双向成交", "农业样本"):
+        assert forbidden not in sample

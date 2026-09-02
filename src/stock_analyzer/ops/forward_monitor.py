@@ -9,6 +9,7 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Literal
 
+import numpy as np
 import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -887,7 +888,8 @@ def _render_markdown(
     for alert, episode_ids in public_alerts:
         reviews = {item.episode_id: item for item in alert.episode_reviews}
         original_paragraphs: list[str] = []
-        actual_paragraphs: list[str] = []
+        progress_paragraphs: list[str] = []
+        later_paragraphs: list[str] = []
         meaning_paragraphs: list[str] = []
         assessment_paragraphs: list[str] = []
         final_paragraphs: list[str] = []
@@ -900,7 +902,9 @@ def _render_markdown(
             action_text = f"{action.year}年{action.month}月{action.day}日"
             prefix = f"{action_text}那次推荐：" if multiple else ""
             limitations = set(episode.get("data_limitations") or [])
+            recommendation_date = _recommendation_date_sentence(episode)
             original = (
+                f"{recommendation_date} "
                 f"{review.original_reason_plain_language.rstrip('。！？!? ；; ')}。"
                 f"{review.original_key_risk_plain_language.rstrip('。！？!? ；; ')}。"
             )
@@ -910,10 +914,15 @@ def _render_markdown(
                 original += " 当时留下的部分价格依据或首个交易日观察条件不完整，因此这部分不能事后补写。"
             original_paragraphs.append(f"{prefix}{original}")
 
-            actual = f"{_render_price_summary([episode])} {_render_relative_performance(episode)}"
+            progress = _render_target_progress(episode).removeprefix(
+                f"{recommendation_date} "
+            )
+            progress_paragraphs.append(f"{prefix}{progress}")
+
+            later = _render_relative_performance(episode)
             if alert.alert_type == "late_activation" and day_number > 20:
-                actual += " 这只股票在前20个交易日结束后才开始明显走强，因此不会改变前20天的原评价结果。"
-            actual_paragraphs.append(f"{prefix}{actual}")
+                later += " 这只股票在前20个交易日结束后才开始明显走强，因此不会改变前20天的原评价结果。"
+            later_paragraphs.append(f"{prefix}{later}")
 
             meaning_paragraphs.append(f"{prefix}{review.current_review}")
             assessment_paragraphs.append(
@@ -949,39 +958,35 @@ def _render_markdown(
             [
                 f"### {alert.name}（{alert.ts_code}）",
                 "",
-                "**当初为什么推荐**",
+                "**推荐日期和当时判断**",
                 "",
                 *original_paragraphs,
                 "",
-                "**推荐后实际发生了什么**",
+                "**到今天走到哪里**",
                 "",
-                *actual_paragraphs,
+                *progress_paragraphs,
+                "",
+                "**后来发生了什么**",
+                "",
+                *later_paragraphs,
                 "",
                 recent,
                 "",
-                "**这些变化说明什么**",
+                "**这些变化为什么支持或反对当时判断**",
                 "",
                 *meaning_paragraphs,
                 "",
-                "**现在结论**",
+                "**现在怎么看**",
                 "",
                 *assessment_paragraphs,
                 "",
-                *(
-                    [
-                        "**前20个交易日最后结果**",
-                        "",
-                        *final_paragraphs,
-                        "",
-                    ]
-                    if final_paragraphs
-                    else []
-                ),
+                *final_paragraphs,
+                *([""] if final_paragraphs else []),
                 "**接下来关注什么**",
                 "",
                 (
                     f"接下来重点看：{alert.confirmation_condition}。"
-                    f"如果{alert.invalidation_condition}，说明当初看中的原因已经明显减弱。"
+                    f"如果{alert.invalidation_condition}，说明推荐时的核心判断已经明显减弱。"
                 ),
                 "",
             ]
@@ -1136,6 +1141,89 @@ def _human_trading_day(day_number: int) -> str:
     else:
         number = "三十"
     return f"推荐后的第{number}个交易日"
+
+
+def _recommendation_date_sentence(episode: dict[str, Any]) -> str:
+    action = date.fromisoformat(str(episode["action_date"]))
+    return (
+        f"这只股票在{action.year}年{action.month}月{action.day}日"
+        "开盘前被正式推荐。"
+    )
+
+
+def _render_target_progress(episode: dict[str, Any]) -> str:
+    """Render deterministic progress toward the 20% observation target."""
+
+    recommendation_date = _recommendation_date_sentence(episode)
+    current = _number(episode.get("current_close_return_since_entry"))
+    if current is None or (
+        "entry_open" in episode and _number(episode.get("entry_open")) is None
+    ):
+        return (
+            f"{recommendation_date} "
+            "没有可靠的推荐参考价，因此不能计算距离20%目标的进展。"
+        )
+
+    day_number = int(episode["day_number"])
+    movement = (
+        f"上涨{current:.2%}"
+        if current > 0.0
+        else f"下跌{abs(current):.2%}"
+        if current < 0.0
+        else "持平0.00%"
+    )
+    parts = [
+        f"{recommendation_date} 到今天是推荐后的第{day_number}个交易日，"
+        f"收盘较参考价{movement}"
+    ]
+    current_reached_target = current >= 0.20 - 1e-12
+    if not current_reached_target:
+        parts[-1] += f"，离20%的观察目标还差{(0.20 - current) * 100:.2f}个百分点。"
+    else:
+        parts[-1] += "。"
+
+    max_close = _number(episode.get("current_max_close_return_since_entry"))
+    max_high = _number(episode.get("current_max_high_return_since_entry"))
+    lowest = _number(episode.get("current_mae_since_entry"))
+    drawdown = _number(episode.get("current_close_drawdown_from_peak"))
+    path_facts: list[str] = []
+    if max_close is not None:
+        path_facts.append(f"期间最高上涨{max_close:.2%}")
+    if max_high is not None and (
+        max_close is None or not np.isclose(max_high, max_close)
+    ):
+        path_facts.append(f"盘中最高上涨{max_high:.2%}")
+    if lowest is not None:
+        path_facts.append(
+            f"最深下跌{abs(lowest):.2%}"
+            if lowest < 0.0
+            else f"期间最低仍上涨{lowest:.2%}"
+        )
+    if drawdown is not None and drawdown < 0.0:
+        path_facts.append(f"当前收盘较期间最高收盘回落{abs(drawdown):.2%}")
+    if path_facts:
+        parts.append(f"{'，'.join(path_facts)}。")
+
+    close_hit = (
+        bool(episode.get("current_first_close_hit_20pct_date"))
+        or current_reached_target
+        or (max_close is not None and max_close >= 0.20 - 1e-12)
+    )
+    high_hit = (
+        bool(episode.get("current_first_high_hit_20pct_date"))
+        or (max_high is not None and max_high >= 0.20)
+    )
+    if close_hit:
+        parts.append(
+            "收盘已经达到20%的观察目标，继续记录到第20个交易日，"
+            "判断达到后是否明显回吐。"
+        )
+    elif high_hit:
+        parts.append(
+            "盘中曾达到20%，但收盘没有保持在该位置，"
+            "说明目标曾被触及但没有站稳。"
+        )
+    return " ".join(parts)
 
 
 def _render_price_summary(episodes: list[dict[str, Any]]) -> str:

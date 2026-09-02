@@ -1,6 +1,6 @@
 # 现有 09:05 每日任务中的股票跟踪步骤
 
-这一步每天只运行一次，属于现有 09:05 任务，不创建新的 Scheduled Task。程序先记录全部股票，AI 只研究今天确实发生变化的股票。面向用户时自然说明“当初为什么推荐、推荐后实际发生了什么、这些变化说明什么、现在结论、接下来关注什么”，不展示内部字段名、英文值或交易日缩写。
+这一步每天只运行一次，属于现有 09:05 任务，不创建新的 Scheduled Task，也不新增定时任务。程序先记录全部股票，AI 只研究今天确实发生变化的股票。面向用户时按“推荐日期和当时判断、到今天走到哪里、后来发生了什么、这些变化为什么支持或反对当时判断、现在怎么看、接下来关注什么”说明，不展示内部字段名、英文值或交易日缩写。
 
 ## 1. 程序准备全部跟踪记录
 
@@ -33,9 +33,27 @@
 - 到达 D1、D3、D5、D10、D20 固定检查日；
 - 公司事实可能推翻最初判断。
 
-公告正文继续按 V4 规则按需读取，不批量下载。五个 Skill 使用各自的 `phase: review` 职责复盘冻结的原始完整判断，不重新推荐股票。公司事实是否仍成立，和股价成交是否实际支持该事实，必须分开写。不得改写原始完整判断、当时理由或前20个交易日的原评价结果。
+公告正文继续按 V4 规则按需读取，不批量下载。原五个 Skill 继续负责选股；复盘时，市场、板块、公司和价格四个专业 Skill 的 `phase: review` 只提供各自事实与解释，不重新推荐股票。`reviewing-stock-recommendations` 接收具体推荐日期、当时完整理由、四路 review 结果和已有 `ForwardEpisodeReviewV1`，负责跨时间综合和最终用户文字；总控只检查记录一致性，不重复形成第二套复盘方法。公司事实是否仍成立，和股价成交是否实际支持该事实，必须分开写。不得改写原始完整判断、当时理由或前20个交易日的原评价结果。
 
 V2/V3 的每条跟踪记录优先查看 snapshot 中按本记录编号保存的 `previous_episode_review`，分别延续 `current_assessment`、`best_supported_explanation`、`current_weak_or_failed_link` 和 `current_review`，不得借用同一股票另一条记录的上次复盘。`previous_monitor_state` 只用于历史 V1 报告兼容。判断今天的状态时，明确区分状态延续、正在转强后失效、正在转强后过热、等待确认后转强和其他真实变化；上次状态只用于比较，不得机械维持。
+
+### 数据缺口只补一次
+
+如果 snapshot 出现 `missing_price_path`、`missing_current_price_context`、`missing_market_context` 或 `missing_sector_context`，且对应交易日已经收盘，先按缺失类型使用现有流程定向补一次：
+
+```bash
+./.venv/bin/python -m stock_analyzer data run-stage \
+  --stage close \
+  --data-date <analysis_date>
+
+./.venv/bin/python -m stock_analyzer data run-stage \
+  --stage next-morning \
+  --data-date <analysis_date>
+```
+
+只有价格或市场缺失时运行 `close`；只有行业、主题或公告缺失时运行 `next-morning`。补数后重新运行一次 monitor prepare，仍缺失就明确具体限制，不得循环重试。不得为一只股票执行全市场财务回填、增加数据源或增加任务。
+
+若缺少的公司财务或公告正文会直接改变原推荐判断，公司 Skill 沿现有官方链接定向读取一次；无关月报、例行公告、单个公告标题或非核心细节不得主导整只股票的复盘。仍无法取得时只说明哪一项无法核对，继续分析其他已有事实。只有推荐参考价或整段行情确实不存在，才能说不能评价距离20%观察目标的进展。
 
 
 ## 3. 生成走势复盘日报
@@ -55,6 +73,7 @@ local_archive/forward_monitor/pending-report-<analysis_date>.json
 - `episode_reviews` 中的 `episode_id` 必须与该股票全部 attention episode 完全一致，不得缺少、重复或多出；不得用该股票最大交易日序号替其他记录结案。
 - snapshot 的 `required_final_review_episode_ids` 必须全部出现在日报的 `episode_reviews` 中；这些记录优先进入最多8只的详细提醒，不能留到未详细展示数量中。
 - 每条记录的 `ForwardEpisodeReviewV1` 只填写通俗原因与风险、当前判断、现有证据最支持的解释、当前最弱环节、当前复盘、成对比较解释和 `final_twenty_day_review`，不增加分数、概率或更多分类。
+- 具体推荐日期必须取该次正式推荐记录的 `action_date`，写成“这只股票在YYYY年M月D日开盘前被正式推荐”，不能用复盘日期或当前日期代替。
 - `confirmed_active` 和 `legacy_v1_not_rewritten` 两类正式推荐记录在第1至第19个交易日，`final_twenty_day_review` 必须为空；第20个交易日必须首次形成。第20天漏跑时，`pending_final_review` 必须持续排在提醒原因第一位，直到结论成功保存并在下一次 prepare 恢复。第21至第30个交易日不得改写这个结论，只能更新当前走势评价。snapshot 已有 `frozen_twenty_day_review` 时必须原样使用；漏跑后首次建立也只能依据 `d20_*`、前20个交易日以内的事实和已冻结原判断。
 - 比较记录的 `final_twenty_day_review` 始终为空；`conditional_event` 也始终为空，二者都不能写成正式推荐的最终结论。
 - `original_reason_plain_language` 和 `original_key_risk_plain_language` 只通俗改写当时已经冻结的意思，不加入后来事实。Markdown 只展示这两个字段，不直接展示原始理由和原始风险。
@@ -122,17 +141,21 @@ local_archive/forward_monitor/pending-report-<analysis_date>.json
 
 最终 Markdown 每只正式推荐股票使用以下自然顺序：
 
-**当初为什么推荐**
+**推荐日期和当时判断**
 
-**推荐后实际发生了什么**
+**到今天走到哪里**
 
-**这些变化说明什么**
+必须按实际收益说明当前收盘、期间最高、期间最深下跌和距离20%观察目标还差多少；不按每天1%的线性速度评价。
 
-**现在结论**
+**后来发生了什么**
+
+**这些变化为什么支持或反对当时判断**
+
+**现在怎么看**
 
 **接下来关注什么**
 
-“推荐后实际发生了什么”只负责事实；“这些变化说明什么”必须使用 `review.current_review`，解释事实与原推荐理由的关系。不得把事实和结论混成一句，不打印内部 `current_assessment`、`best_supported_explanation`、`current_weak_or_failed_link` 标签。
+“到今天走到哪里”和“后来发生了什么”只负责确定性数字与事实；“这些变化为什么支持或反对当时判断”必须使用 `review.current_review`，解释事实与原推荐理由的关系。不得把事实和结论混成一句，不打印内部 `current_assessment`、`best_supported_explanation`、`current_weak_or_failed_link` 标签。
 
 用户不是来读取行情表。每只股票先恢复当初期待，再用最少的关键事实说明它被验证还是被削弱。不要机械分成“市场方面、行业方面、公司方面、个股方面”，也不要依次朗读内部判断、薄弱项和解释分类。无法可靠区分原因时直接说不知道，不能编故事。
 

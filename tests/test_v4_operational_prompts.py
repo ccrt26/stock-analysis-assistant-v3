@@ -80,10 +80,10 @@ def test_detailed_recommendation_explanation_is_required_after_selection_freeze(
     for phrase in (
         "汇总表只能作为目录",
         "公司主要做什么",
-        "我为什么会选它",
-        "这些情况为什么支持这个判断",
-        "最需要担心什么",
-        "什么情况会证明判断变差",
+        "为什么在这个时间选择它",
+        "支持选择的独立原因",
+        "最需要担心什么，以及为什么仍然选择",
+        "什么情况会让我改变看法",
         "每只约300—500字",
     ):
         assert phrase in prompt
@@ -117,10 +117,10 @@ def test_recommendation_prompt_uses_fact_first_plain_language() -> None:
 
     for phrase in (
         "公司主要做什么",
-        "我为什么会选它",
-        "这些情况为什么支持这个判断",
-        "最需要担心什么",
-        "什么情况会证明判断变差",
+        "为什么在这个时间选择它",
+        "支持选择的独立原因",
+        "最需要担心什么，以及为什么仍然选择",
+        "什么情况会让我改变看法",
         "32只农业相关股票中",
         "事实本身不是推荐理由",
     ):
@@ -146,9 +146,30 @@ def test_selection_prompt_requires_reasoning_not_a_fact_list() -> None:
         "哪些事实支持，哪些事实反对",
         "为什么最不利的事实暂时没有推翻推荐",
         "为什么是这只股票，而不是同行里另一只",
-        "67.37%的涨幅来自一个涨停日不是支持证据",
+        "五日多数涨幅来自一个涨停日时",
     ):
         assert phrase in prompt
 
     assert "推荐理由必须是一个完整论证" in prompt
     assert "不得把涨幅、成交额和涨停贡献并排后直接得出推荐" in prompt
+
+
+def test_selection_prompt_separates_confirmation_from_price_already_paid() -> None:
+    prompt = Path("ops/forward-selection-prompt.md").read_text(encoding="utf-8")
+
+    for phrase in (
+        "获得的确认",
+        "已经付出的涨幅",
+        "去掉最大上涨日",
+        "最大上涨日之后",
+        "不能一边说核心持续性没有验证一边正式推荐",
+        "为什么在这个时间选择它",
+        "支持选择的独立原因",
+        "为什么不是追在短期高点之后",
+    ):
+        assert phrase in prompt
+
+    assert "我们在<action_date>开盘前选择这只股票" in prompt
+    user_output = prompt.split("### 唯一用户输出格式", maxsplit=1)[1]
+    for forbidden in ("冻结时点", "冻结结论", "正常双向成交", "农业样本"):
+        assert forbidden not in user_output

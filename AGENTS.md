@@ -4,6 +4,7 @@
 
 - 当前架构总览是 `docs/architecture/current-v3-architecture.md`。开始理解项目、设计新能力或解释当前状态前先阅读它。
 - 股票研究由 `.agents/skills/orchestrating-stock-research/` 总控，并按需调用市场、板块、公司和价格四个专业 Skill。研究方法以这些当前 `SKILL.md` 为准。
+- 现有五个 Skill 继续构成且仅它们构成选股体系。正式推荐形成后，市场、板块、公司和价格 Skill 的 `phase: review` 提供各自事实，`.agents/skills/reviewing-stock-recommendations/` 只负责跨时间综合和用户文字，不参与候选发现或选择；总控检查记录一致性。该接入继续使用现有报告模型和任务，不新增定时任务。
 - 程序负责事实获取、时点安全、存储、查询、确定性计算、哈希和质量检查；AI/Skill 负责问题选择、语义解释、因果、比较、反证、未知和最终取舍。
 - `docs/` 中的历史诊断和旧设计用于解释演进，不自动拥有当前架构解释权。不得从 Git 历史恢复已删除的旧 V3 评分、Gate、关注池、报告发布、Supabase、Cloudflare 或自动交易路径，除非用户另行明确批准一项新设计。
 - GitHub 不包含被忽略的本地事实仓、归档、日志或凭据。不要把仓库中没有的数据描述为已取得，也不要提交 `.env*`、Token、本地绝对路径或个人运行产物。

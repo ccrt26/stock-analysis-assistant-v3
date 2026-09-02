@@ -14,6 +14,7 @@ from stock_analyzer.ops.forward_monitor import (
     DailyForwardMonitorReportV1,
     DailyForwardMonitorReportV2,
     _human_trading_day,
+    _render_target_progress,
     prepare_forward_monitor,
     record_forward_monitor,
     register_episodes,
@@ -21,6 +22,71 @@ from stock_analyzer.ops.forward_monitor import (
 
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
+
+
+def _target_progress_episode(**overrides: object) -> dict:
+    episode = {
+        "action_date": "2026-08-25",
+        "day_number": 6,
+        "current_close_return_since_entry": 0.0268,
+        "current_max_close_return_since_entry": 0.0466,
+        "current_max_high_return_since_entry": 0.05,
+        "current_mae_since_entry": -0.0163,
+        "current_close_drawdown_from_peak": -0.019,
+        "current_first_close_hit_20pct_date": None,
+        "current_first_high_hit_20pct_date": None,
+    }
+    episode.update(overrides)
+    return episode
+
+
+def test_target_progress_uses_real_return_not_linear_daily_progress() -> None:
+    text = _render_target_progress(_target_progress_episode())
+
+    assert "2026年8月25日开盘前被正式推荐" in text
+    assert "推荐后的第6个交易日" in text
+    assert "离20%的观察目标还差17.32个百分点" in text
+    assert "期间最高上涨4.66%" in text
+    assert "最深下跌1.63%" in text
+
+
+def test_target_progress_distinguishes_intraday_touch_from_close_hit() -> None:
+    intraday = _render_target_progress(
+        _target_progress_episode(
+            current_close_return_since_entry=0.15,
+            current_max_close_return_since_entry=0.18,
+            current_max_high_return_since_entry=0.22,
+            current_first_high_hit_20pct_date="2026-08-28",
+        )
+    )
+    close = _render_target_progress(
+        _target_progress_episode(
+            current_close_return_since_entry=0.21,
+            current_max_close_return_since_entry=0.23,
+            current_max_high_return_since_entry=0.25,
+            current_first_close_hit_20pct_date="2026-08-29",
+            current_first_high_hit_20pct_date="2026-08-28",
+        )
+    )
+
+    assert "盘中曾达到20%" in intraday
+    assert "收盘没有保持" in intraday
+    assert "收盘已经达到20%的观察目标" in close
+    assert "继续记录到第20个交易日" in close
+
+
+def test_target_progress_says_when_entry_reference_is_unavailable() -> None:
+    text = _render_target_progress(
+        _target_progress_episode(
+            current_close_return_since_entry=None,
+            current_max_close_return_since_entry=None,
+            current_max_high_return_since_entry=None,
+            current_mae_since_entry=None,
+        )
+    )
+
+    assert "没有可靠的推荐参考价" in text
+    assert "不能计算距离20%目标的进展" in text
 
 
 def _trace(
@@ -2057,12 +2123,13 @@ def test_markdown_uses_plain_chinese_and_natural_review_sections(
 
     assert "今天的市场情况" in markdown
     assert "正式推荐股票的走势复盘" in markdown
-    assert "推荐后的第一个交易日" in markdown
+    assert "推荐后的第1个交易日" in markdown
     headings = (
-        "当初为什么推荐",
-        "推荐后实际发生了什么",
-        "这些变化说明什么",
-        "现在结论",
+        "推荐日期和当时判断",
+        "到今天走到哪里",
+        "后来发生了什么",
+        "这些变化为什么支持或反对当时判断",
+        "现在怎么看",
         "接下来关注什么",
     )
     positions = [markdown.index(heading) for heading in headings]
@@ -2071,7 +2138,6 @@ def test_markdown_uses_plain_chinese_and_natural_review_sections(
     assert "原判断有一部分得到走势支持，但仍需继续观察。" in markdown
     assert "部分预期已经发生，但仍有关键部分需要验证。" in markdown
     assert "推荐后怎么走" not in markdown
-    assert "现在怎么看" not in markdown
     assert "测试提醒原因" in markdown
     assert "测试中的大盘变化" in markdown
     assert "测试中的板块变化" in markdown
@@ -2081,10 +2147,12 @@ def test_markdown_uses_plain_chinese_and_natural_review_sections(
     assert "行业方面" not in markdown
     assert "公司方面" not in markdown
     assert "个股方面" not in markdown
-    assert "当前收盘价较期间最高收盘价回落0.00%" in markdown
-    assert "当前收盘价较期间最高收盘价回落+0.00%" not in markdown
+    assert "当前收盘较期间最高收盘回落+0.00%" not in markdown
     assert "测试中需要看到的继续走强事实" in markdown
     assert "测试中说明原判断不再成立的事实" in markdown
+    assert "2026年8月3日开盘前被正式推荐" in markdown
+    assert "当初看中它" not in markdown
+    assert "冻结结论" not in markdown
     for forbidden in (
         "D1", "D2", "D10", "D20", "发动机", "行动日", "行动窗口",
         "原角色", "MFE", "MAE", "selected", "comparator",
@@ -2140,7 +2208,7 @@ def test_markdown_names_the_second_trading_day_without_d_label(
     )
     markdown = Path(summary.markdown_file).read_text(encoding="utf-8")
 
-    assert "推荐后的第二个交易日" in markdown
+    assert "推荐后的第2个交易日" in markdown
     assert "D2" not in markdown
 
 
@@ -2194,9 +2262,8 @@ def test_late_activation_markdown_uses_plain_tail_explanation(tmp_path: Path) ->
     )
     markdown = Path(summary.markdown_file).read_text(encoding="utf-8")
 
-    assert "推荐后的第二十一个交易日" in markdown
-    assert "目前涨跌为+21.00%" in markdown
-    assert "前20个交易日最后结果" in markdown
+    assert "推荐后的第21个交易日" in markdown
+    assert "收盘较参考价上涨21.00%" in markdown
     assert "前20个交易日收盘上涨20.00%" in markdown
     assert markdown.count("前20个交易日结束后，原判断和具体股票都基本合理。") == 1
     assert (
@@ -2239,14 +2306,12 @@ def test_day_twenty_markdown_adds_final_review_section(tmp_path: Path) -> None:
     )
     markdown = Path(summary.markdown_file).read_text(encoding="utf-8")
 
-    assert "推荐后的第二十个交易日" in markdown
-    assert "前20个交易日最后结果" in markdown
-    assert "目前涨跌为+20.00%" in markdown
-    assert "期间最高收盘涨幅为+20.00%" in markdown
-    assert "盘中最高涨幅为+25.00%" in markdown
-    assert "期间最深跌幅为-5.00%" in markdown
-    assert "期间最大收盘回撤为" in markdown
-    assert "当前收盘价较期间最高收盘价回落" in markdown
+    assert "推荐后的第20个交易日" in markdown
+    assert "收盘较参考价上涨20.00%" in markdown
+    assert "期间最高上涨20.00%" in markdown
+    assert "盘中最高上涨25.00%" in markdown
+    assert "最深下跌5.00%" in markdown
+    assert "收盘已经达到20%的观察目标" in markdown
     assert "前20个交易日收盘上涨20.00%" in markdown
     assert "期间最高收盘上涨20.00%" in markdown
     assert "期间最深下跌5.00%" in markdown
@@ -2494,10 +2559,11 @@ def test_each_episode_has_its_own_maturity_and_final_review(
     assert "2026年8月3日那次推荐" in markdown
     assert markdown.count("前20个交易日结束后，原判断和具体股票都基本合理。") == 1
     for heading in (
-        "当初为什么推荐",
-        "推荐后实际发生了什么",
-        "这些变化说明什么",
-        "现在结论",
+        "推荐日期和当时判断",
+        "到今天走到哪里",
+        "后来发生了什么",
+        "这些变化为什么支持或反对当时判断",
+        "现在怎么看",
         "接下来关注什么",
     ):
         assert markdown.count(heading) == 1
@@ -2660,7 +2726,7 @@ def test_later_current_review_may_change_while_final_review_stays_frozen(
     saved_review = saved["alerts"][0]["episode_reviews"][0]
     assert saved_review["current_assessment"] == "weakening"
     assert saved_review["final_twenty_day_review"] == frozen
-    assert "目前涨跌为+50.00%" in markdown
+    assert "收盘较参考价上涨50.00%" in markdown
     assert "第21个交易日后的走势已经转弱" in markdown
     assert "前20个交易日结束后，原判断和具体股票都基本合理" in markdown
     assert "前20天最终判断中，最薄弱的是" not in markdown

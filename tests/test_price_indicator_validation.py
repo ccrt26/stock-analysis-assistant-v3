@@ -105,6 +105,121 @@ def test_baseline_contains_existing_price_information_before_new_indicators() ->
     assert row["price_location_82d"] == pytest.approx(1.0)
 
 
+def _baseline_window(
+    stock_returns: list[float],
+    *,
+    market_returns: list[float] | None = None,
+) -> tuple[pd.DataFrame, pd.DataFrame, date]:
+    dates = pd.bdate_range("2026-07-01", periods=6)
+    stock_closes = [100.0]
+    for daily_return in stock_returns:
+        stock_closes.append(stock_closes[-1] * (1.0 + daily_return))
+    market_closes = [100.0]
+    for daily_return in market_returns or [0.0] * 5:
+        market_closes.append(market_closes[-1] * (1.0 + daily_return))
+    equity = pd.DataFrame(
+        {
+            "trade_date": dates.date,
+            "ts_code": "A.SZ",
+            "open": stock_closes,
+            "high": np.asarray(stock_closes) + 0.1,
+            "low": np.asarray(stock_closes) - 0.1,
+            "close": stock_closes,
+            "adj_factor": 1.0,
+            "amount": 100.0,
+            "up_limit": np.asarray(stock_closes) + 100.0,
+        }
+    )
+    benchmark = pd.DataFrame(
+        {"trade_date": dates.date, "close": market_closes}
+    )
+    return equity, benchmark, dates[-1].date()
+
+
+def test_baseline_late_single_day_gain_has_no_follow_through_window() -> None:
+    equity, benchmark, formation_date = _baseline_window(
+        [0.0, 0.0, 0.0, 0.0, 0.10]
+    )
+
+    row = build_baseline_panel(
+        equity,
+        benchmark,
+        formation_dates=[formation_date],
+    ).iloc[0]
+
+    assert row["largest_positive_day_contribution_5d"] == pytest.approx(1.0)
+    assert row["sessions_since_largest_positive_day_5d"] == pytest.approx(0.0)
+    assert row["return_ex_largest_positive_day_5d"] == pytest.approx(0.0)
+    assert np.isnan(row["return_after_largest_positive_day_5d"])
+    assert np.isnan(row["relative_market_after_largest_positive_day_5d"])
+
+
+def test_baseline_early_largest_gain_preserves_multi_day_confirmation() -> None:
+    equity, benchmark, formation_date = _baseline_window(
+        [0.06, 0.02, 0.01, 0.01, 0.01]
+    )
+
+    row = build_baseline_panel(
+        equity,
+        benchmark,
+        formation_dates=[formation_date],
+    ).iloc[0]
+
+    expected_after = 1.02 * 1.01**3 - 1.0
+    assert row["largest_positive_day_contribution_5d"] == pytest.approx(0.06 / 0.11)
+    assert row["sessions_since_largest_positive_day_5d"] == pytest.approx(4.0)
+    assert row["return_ex_largest_positive_day_5d"] == pytest.approx(expected_after)
+    assert row["return_after_largest_positive_day_5d"] == pytest.approx(expected_after)
+    assert row["relative_market_after_largest_positive_day_5d"] == pytest.approx(
+        expected_after
+    )
+
+
+@pytest.mark.parametrize("missing_market_session", [False, True])
+def test_baseline_new_window_fields_are_missing_without_complete_positive_path(
+    missing_market_session: bool,
+) -> None:
+    equity, benchmark, formation_date = _baseline_window(
+        [0.0, -0.01, 0.0, -0.01, 0.0]
+        if not missing_market_session
+        else [0.01, 0.01, 0.01, 0.01, 0.01]
+    )
+    if missing_market_session:
+        benchmark = benchmark.drop(index=3)
+
+    row = build_baseline_panel(
+        equity,
+        benchmark,
+        formation_dates=[formation_date],
+    ).iloc[0]
+
+    for field in (
+        "largest_positive_day_contribution_5d",
+        "sessions_since_largest_positive_day_5d",
+        "return_ex_largest_positive_day_5d",
+        "return_after_largest_positive_day_5d",
+        "relative_market_after_largest_positive_day_5d",
+    ):
+        assert np.isnan(row[field])
+
+
+def test_baseline_largest_positive_day_tie_uses_the_later_session() -> None:
+    equity, benchmark, formation_date = _baseline_window(
+        [0.04, 0.01, 0.04, 0.01, 0.01]
+    )
+
+    row = build_baseline_panel(
+        equity,
+        benchmark,
+        formation_dates=[formation_date],
+    ).iloc[0]
+
+    assert row["sessions_since_largest_positive_day_5d"] == pytest.approx(2.0)
+    assert row["return_after_largest_positive_day_5d"] == pytest.approx(
+        1.01**2 - 1.0
+    )
+
+
 def test_baseline_snapshot_ignores_appended_future_rows() -> None:
     frame, formation_dates = _outcome_prices()
     frame["up_limit"] = 100.0

@@ -90,6 +90,10 @@ def build_baseline_panel(
             [np.inf, -np.inf], np.nan
         )
         relative_daily = daily_return - broad_return
+        largest_day_observations = _largest_positive_day_observations(
+            daily_return,
+            broad_return,
+        )
         relative_valid = relative_daily.notna().rolling(5, min_periods=5).sum() == 5
         relative_continuity = (relative_daily > 0.0).rolling(5, min_periods=5).mean()
         relative_continuity = relative_continuity.where(relative_valid)
@@ -172,6 +176,23 @@ def build_baseline_panel(
                 "volume_amplification_days_5d": amplified.rolling(5, min_periods=5).sum(),
                 "volume_price_efficiency_5d": volume_price_efficiency,
                 "limit_up_return_contribution_5d": limit_contribution,
+                "largest_positive_day_contribution_5d": largest_day_observations[
+                    "largest_positive_day_contribution_5d"
+                ],
+                "sessions_since_largest_positive_day_5d": largest_day_observations[
+                    "sessions_since_largest_positive_day_5d"
+                ],
+                "return_ex_largest_positive_day_5d": largest_day_observations[
+                    "return_ex_largest_positive_day_5d"
+                ],
+                "return_after_largest_positive_day_5d": largest_day_observations[
+                    "return_after_largest_positive_day_5d"
+                ],
+                "relative_market_after_largest_positive_day_5d": (
+                    largest_day_observations[
+                        "relative_market_after_largest_positive_day_5d"
+                    ]
+                ),
                 "breakout_vs_prior60": close / prior_60_high - 1.0,
                 "price_location_60d": _rolling_location(close, 60),
                 "price_location_82d": _rolling_location(close, 82),
@@ -202,6 +223,75 @@ def build_baseline_panel(
         .sort_values(["analysis_date", "ts_code"])
         .reset_index(drop=True)
     )
+
+
+def _largest_positive_day_observations(
+    daily_return: pd.Series,
+    broad_return: pd.Series,
+) -> pd.DataFrame:
+    """Describe how much of a complete five-session path came from one day."""
+
+    stock_windows = pd.concat(
+        [daily_return.shift(offset) for offset in range(4, -1, -1)],
+        axis=1,
+    ).to_numpy(dtype=float)
+    market_windows = pd.concat(
+        [broad_return.shift(offset) for offset in range(4, -1, -1)],
+        axis=1,
+    ).to_numpy(dtype=float)
+    complete = np.isfinite(stock_windows).all(axis=1) & np.isfinite(
+        market_windows
+    ).all(axis=1)
+    finite_stock = np.where(np.isfinite(stock_windows), stock_windows, -np.inf)
+    largest_positions = 4 - np.argmax(finite_stock[:, ::-1], axis=1)
+    row_positions = np.arange(len(daily_return))
+    largest_returns = finite_stock[row_positions, largest_positions]
+    positive_sums = np.where(stock_windows > 0.0, stock_windows, 0.0).sum(axis=1)
+    valid = complete & (largest_returns > 0.0) & (positive_sums > 0.0)
+
+    columns = (
+        "largest_positive_day_contribution_5d",
+        "sessions_since_largest_positive_day_5d",
+        "return_ex_largest_positive_day_5d",
+        "return_after_largest_positive_day_5d",
+        "relative_market_after_largest_positive_day_5d",
+    )
+    result = pd.DataFrame(np.nan, index=daily_return.index, columns=columns)
+    if not valid.any():
+        return result
+
+    result.loc[valid, "largest_positive_day_contribution_5d"] = (
+        largest_returns[valid] / positive_sums[valid]
+    )
+    sessions_after = 4 - largest_positions
+    result.loc[valid, "sessions_since_largest_positive_day_5d"] = sessions_after[
+        valid
+    ].astype(float)
+
+    window_positions = np.arange(5)[None, :]
+    largest_masks = window_positions == largest_positions[:, None]
+    ex_largest_returns = (
+        np.prod(np.where(largest_masks, 1.0, 1.0 + stock_windows), axis=1) - 1.0
+    )
+    result.loc[valid, "return_ex_largest_positive_day_5d"] = ex_largest_returns[
+        valid
+    ]
+
+    has_after = valid & (sessions_after > 0)
+    after_masks = window_positions > largest_positions[:, None]
+    stock_after = (
+        np.prod(np.where(after_masks, 1.0 + stock_windows, 1.0), axis=1) - 1.0
+    )
+    market_after = (
+        np.prod(np.where(after_masks, 1.0 + market_windows, 1.0), axis=1) - 1.0
+    )
+    result.loc[has_after, "return_after_largest_positive_day_5d"] = stock_after[
+        has_after
+    ]
+    result.loc[has_after, "relative_market_after_largest_positive_day_5d"] = (
+        stock_after[has_after] - market_after[has_after]
+    )
+    return result
 
 
 def build_outcome_panel(
