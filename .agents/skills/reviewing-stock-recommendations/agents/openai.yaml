@@ -1,4 +1,4 @@
 interface:
   display_name: "正式推荐复盘"
-  short_description: "围绕一个中心问题形成正式推荐的观点更新短评"
-  default_prompt: "使用 $reviewing-stock-recommendations 复盘一只明确正式推荐过的股票，形成一篇以观点更新为中心的复盘短评，不逐项复述数据，也不重新选股。"
+  short_description: "用最少可追溯事实更新正式推荐观点"
+  default_prompt: "使用 $reviewing-stock-recommendations 围绕当天唯一主要问题更新正式推荐观点，只用最少且可追溯的决定性事实，不重复程序已展示的目标进度和展望条件；观点未变时简短更新，D20才串起完整过程，不重新选股。"

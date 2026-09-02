@@ -213,11 +213,9 @@ def test_review_prompt_requests_an_analyst_style_view_update() -> None:
         "观点更新稿",
         "一个中心问题",
         "一句话观点更新",
-        "2—4个决定性事实",
         "与上一次复盘比较",
         "后续基准判断",
         "不平均复述市场、行业、公司和价格四路内容",
-        "首次复盘",
     ):
         assert phrase in text
     assert (
@@ -225,6 +223,24 @@ def test_review_prompt_requests_an_analyst_style_view_update() -> None:
         "作为固定句式"
         in text
     )
+
+
+def test_review_prompt_aligns_current_review_with_existing_renderer() -> None:
+    prompt = Path(
+        "ops/forward-monitor-prompt.md"
+    ).read_text(encoding="utf-8")
+
+    for phrase in (
+        "current_review 只负责",
+        "不再重复完整推荐日期",
+        "不再重复距离20%目标的固定进度句",
+        "不再重复未来1—3个交易日的完整展望",
+        "日常复盘只写增量",
+        "事件复盘",
+        "D20 最终复盘",
+        "字段和值",
+    ):
+        assert phrase in prompt
 
 
 def test_review_prompt_uses_dated_review_skill_and_one_retry_for_missing_data() -> None:

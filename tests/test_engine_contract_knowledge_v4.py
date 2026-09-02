@@ -133,13 +133,11 @@ def test_review_skill_requires_an_analyst_style_view_update() -> None:
     for phrase in (
         "一个中心问题",
         "一句话观点更新",
-        "2—4个决定性事实",
         "与上一次复盘比较",
         "后续基准判断",
         "观点更新稿",
         "事实与观点分开",
         "不平均复述市场、行业、公司和价格四路内容",
-        "首次复盘",
     ):
         assert phrase in review
     assert (
@@ -147,9 +145,36 @@ def test_review_skill_requires_an_analyst_style_view_update() -> None:
         "当作固定开头"
         in review
     )
-    assert "形成一篇以观点更新为中心的复盘短评，不逐项复述数据" in (
-        interface["default_prompt"]
-    )
+    assert "只用最少且可追溯的决定性事实" in interface["default_prompt"]
+    assert "D20才串起完整过程" in interface["default_prompt"]
+
+
+def test_review_skill_avoids_new_template_and_uses_traceable_minimum_facts() -> None:
+    review = Path(
+        ".agents/skills/reviewing-stock-recommendations/SKILL.md"
+    ).read_text(encoding="utf-8")
+
+    for phrase in (
+        "最多4个，不设最低数量",
+        "不得为了满足数量凑事实",
+        "可以是一段，也可以是两三段",
+        "通常不必写“这是首次复盘”",
+        "每一项具体",
+        "能够追溯到",
+        "previous_episode_review.current_assessment",
+        "previous_episode_review.best_supported_explanation",
+        "仅仅换了一种措辞，不叫观点改变",
+        "D20 是唯一允许串起完整过程的复盘",
+        "第21—30日",
+    ):
+        assert phrase in review
+
+    for old in (
+        "只使用2—4个决定性事实",
+        "D10：250—450个中文字",
+        "写成2—3个自然段",
+    ):
+        assert old not in review
 
 
 def test_selection_impact_matrix_is_complete_and_keeps_future_outcomes_separate() -> None:
