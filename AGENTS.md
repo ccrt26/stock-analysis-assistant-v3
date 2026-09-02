@@ -32,3 +32,11 @@
 ## 产业研究入口
 
 - 季度/半年产业研究先读 `docs/industry-research/00_逐步执行操作手册.md` 与 `docs/industry-research/01_全局执行规范.md`，并与现有短周期选股流程分离。
+
+## 哈希使用边界
+
+- Git提交SHA只用于固定一次开发任务的准确基线、代码对比和确认本地/远端版本一致；优先由命令读取，不在多个文档重复手抄。
+- 数据仓库中的 `content_hash`、`file_sha256`、`business_key_hash`、`payload_hash` 和 `input_manifest_hash` 用于去重、修订识别、输入对应和中断恢复，属于数据层核心能力，不因普通流程简化而删除。
+- `manifest.json` 和 `checksums.sha256` 只用于需要冻结并交付的一组多文件研究或数据样本。
+- 普通 Prompt、Skill、每日荐股、日常复盘、说明文档和分支合并，不新增校验和文件或输入哈希。
+- 不为“看起来更严谨”重复计算 Git 已经提供的文件完整性能力。

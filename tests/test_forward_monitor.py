@@ -2060,14 +2060,18 @@ def test_markdown_uses_plain_chinese_and_natural_review_sections(
     assert "推荐后的第一个交易日" in markdown
     headings = (
         "当初为什么推荐",
-        "推荐后怎么走",
-        "最近发生了什么，为什么今天提到它",
-        "现在怎么看",
+        "推荐后实际发生了什么",
+        "这些变化说明什么",
+        "现在结论",
         "接下来关注什么",
     )
     positions = [markdown.index(heading) for heading in headings]
     assert positions == sorted(positions)
     assert "当时看好它自身的价格表现连续强于市场和同类" in markdown
+    assert "原判断有一部分得到走势支持，但仍需继续观察。" in markdown
+    assert "部分预期已经发生，但仍有关键部分需要验证。" in markdown
+    assert "推荐后怎么走" not in markdown
+    assert "现在怎么看" not in markdown
     assert "测试提醒原因" in markdown
     assert "测试中的大盘变化" in markdown
     assert "测试中的板块变化" in markdown
@@ -2191,6 +2195,10 @@ def test_late_activation_markdown_uses_plain_tail_explanation(tmp_path: Path) ->
     markdown = Path(summary.markdown_file).read_text(encoding="utf-8")
 
     assert "推荐后的第二十一个交易日" in markdown
+    assert "目前涨跌为+21.00%" in markdown
+    assert "前20个交易日最后结果" in markdown
+    assert "前20个交易日收盘上涨20.00%" in markdown
+    assert markdown.count("前20个交易日结束后，原判断和具体股票都基本合理。") == 1
     assert (
         "这只股票在前20个交易日结束后才开始明显走强，因此不会改变前20天的原评价结果。"
         in markdown
@@ -2232,13 +2240,16 @@ def test_day_twenty_markdown_adds_final_review_section(tmp_path: Path) -> None:
     markdown = Path(summary.markdown_file).read_text(encoding="utf-8")
 
     assert "推荐后的第二十个交易日" in markdown
-    assert "现在怎么看" in markdown
+    assert "前20个交易日最后结果" in markdown
     assert "目前涨跌为+20.00%" in markdown
     assert "期间最高收盘涨幅为+20.00%" in markdown
     assert "盘中最高涨幅为+25.00%" in markdown
     assert "期间最深跌幅为-5.00%" in markdown
     assert "期间最大收盘回撤为" in markdown
     assert "当前收盘价较期间最高收盘价回落" in markdown
+    assert "前20个交易日收盘上涨20.00%" in markdown
+    assert "期间最高收盘上涨20.00%" in markdown
+    assert "期间最深下跌5.00%" in markdown
     assert markdown.count("前20个交易日结束后，原判断和具体股票都基本合理。") == 1
     assert "前20天最终判断中，最薄弱的是" not in markdown
     assert "D20" not in markdown
@@ -2484,9 +2495,9 @@ def test_each_episode_has_its_own_maturity_and_final_review(
     assert markdown.count("前20个交易日结束后，原判断和具体股票都基本合理。") == 1
     for heading in (
         "当初为什么推荐",
-        "推荐后怎么走",
-        "最近发生了什么，为什么今天提到它",
-        "现在怎么看",
+        "推荐后实际发生了什么",
+        "这些变化说明什么",
+        "现在结论",
         "接下来关注什么",
     ):
         assert markdown.count(heading) == 1
@@ -3298,3 +3309,218 @@ def test_direction_right_stock_wrong_requires_a_complete_pair(
             report_file=pending_path,
             project_root=tmp_path,
         )
+
+def test_register_counts_inferred_legacy_formal_selection(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    trace_file = tmp_path / "trace.json"
+    _write_trace(
+        trace_file,
+        _single_selected_trace(
+            formation_date="2026-07-31",
+            action_date="2026-08-03",
+        ),
+    )
+    monkeypatch.setattr(
+        "stock_analyzer.ops.forward_monitor.selection_output_class",
+        lambda **_kwargs: "legacy_v1_not_rewritten",
+    )
+
+    summary = register_episodes(
+        trace_file=trace_file,
+        label="legacy",
+        project_root=tmp_path,
+    )
+
+    assert summary.selected_registered == 1
+    assert summary.comparators_registered == 0
+
+
+def _registered_legacy_project(
+    tmp_path: Path,
+    *,
+    session_count: int,
+) -> tuple[list[date], str]:
+    trace = _single_selected_trace(
+        formation_date="2026-07-01",
+        action_date="2026-07-02",
+    )
+    trace_file = tmp_path / "trace.json"
+    _write_trace(trace_file, trace)
+    register_episodes(
+        trace_file=trace_file,
+        label="legacy",
+        project_root=tmp_path,
+    )
+    registry_path = (
+        tmp_path / "local_archive/forward_monitor/registered-episodes.json"
+    )
+    registry = json.loads(registry_path.read_text(encoding="utf-8"))
+    selected = next(
+        item for item in registry["episodes"] if item["role"] == "selected"
+    )
+    selected.pop("selection_output_class")
+    registry_path.write_text(
+        json.dumps(registry, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    sessions = _seed_monitor_project(
+        tmp_path,
+        trace=trace,
+        session_count=session_count,
+    )
+    return sessions, str(selected["episode_id"])
+
+
+def test_legacy_formal_selection_counts_and_starts_formal_return(
+    tmp_path: Path,
+) -> None:
+    sessions, episode_id = _registered_legacy_project(
+        tmp_path,
+        session_count=1,
+    )
+
+    snapshot = _prepare(tmp_path, sessions[0])
+    episode = snapshot["episodes"][0]
+
+    assert episode["episode_id"] == episode_id
+    assert "selection_output_class" not in episode
+    assert episode["formal_return_started"] is True
+    assert snapshot["summary"]["selected_count"] == 1
+
+
+def test_legacy_formal_selection_requires_and_persists_day_twenty_review(
+    tmp_path: Path,
+) -> None:
+    sessions, episode_id = _registered_legacy_project(
+        tmp_path,
+        session_count=21,
+    )
+
+    d20 = _prepare(tmp_path, sessions[19])
+    assert d20["required_final_review_episode_ids"] == [episode_id]
+    assert d20["episodes"][0]["attention_reasons"][0] == "pending_final_review"
+
+    d21 = _prepare(tmp_path, sessions[20])
+    assert d21["required_final_review_episode_ids"] == [episode_id]
+    assert d21["episodes"][0]["attention_reasons"][0] == "pending_final_review"
+
+
+def test_formal_attention_stock_cannot_be_displaced_by_eight_nonformal_stocks(
+    tmp_path: Path,
+) -> None:
+    base = _review_snapshot(day_number=3)
+    episodes: list[dict] = []
+    attention: list[dict] = []
+    for index in range(9):
+        formal = index == 8
+        comparator = 4 <= index < 8
+        code = f"00000{index}.SZ"
+        role = "comparator" if comparator else "selected"
+        output_class = (
+            "confirmed_active"
+            if formal
+            else "not_formal_candidate"
+            if comparator
+            else "conditional_event"
+        )
+        episode = {
+            **base["episodes"][0],
+            "episode_id": f"priority-{index}",
+            "ts_code": code,
+            "name": f"股票{index}",
+            "role": role,
+            "selection_output_class": output_class,
+            "day_number": 3,
+        }
+        episodes.append(episode)
+        attention.append(
+            {
+                "ts_code": code,
+                "name": episode["name"],
+                "episode_ids": [episode["episode_id"]],
+                "roles": [role],
+                "day_numbers": [3],
+                "original_engine_types": [
+                    "independent_demand_acceleration"
+                ],
+                "attention_reasons": ["checkpoint"],
+            }
+        )
+    snapshot = {
+        **base,
+        "episodes": episodes,
+        "attention_stocks": attention,
+        "required_final_review_episode_ids": [],
+        "summary": {
+            **base["summary"],
+            "open_episode_count": 9,
+            "distinct_stock_count": 9,
+            "selected_count": 1,
+            "comparator_count": 4,
+            "primary_count": 9,
+            "attention_stock_count": 9,
+        },
+    }
+
+    def make_alert(episode: dict) -> dict:
+        alert = _alert(episode["ts_code"], episode["episode_id"])
+        alert.update(
+            name=episode["name"],
+            roles=[episode["role"]],
+            day_numbers=[3],
+        )
+        return alert
+
+    snapshot_path = tmp_path / "snapshot.json"
+    snapshot_path.write_text(json.dumps(snapshot), encoding="utf-8")
+    displaced_path = tmp_path / "displaced.json"
+    displaced_path.write_text(
+        json.dumps(
+            _report_payload(
+                snapshot,
+                alerts=[make_alert(item) for item in episodes[:8]],
+                unreported=1,
+            ),
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="formal attention stocks"):
+        record_forward_monitor(
+            snapshot_file=snapshot_path,
+            report_file=displaced_path,
+            project_root=tmp_path,
+        )
+
+    included_path = tmp_path / "included.json"
+    included_alerts = [
+        make_alert(episodes[8]),
+        *[make_alert(item) for item in episodes[:7]],
+    ]
+    included_path.write_text(
+        json.dumps(
+            _report_payload(
+                snapshot,
+                alerts=included_alerts,
+                unreported=1,
+            ),
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    summary = record_forward_monitor(
+        snapshot_file=snapshot_path,
+        report_file=included_path,
+        project_root=tmp_path,
+    )
+    saved = json.loads(Path(summary.json_file).read_text(encoding="utf-8"))
+    markdown = Path(summary.markdown_file).read_text(encoding="utf-8")
+
+    assert len(saved["alerts"]) == 8
+    assert episodes[8]["name"] in markdown
+    for episode in episodes[:8]:
+        assert episode["name"] not in markdown

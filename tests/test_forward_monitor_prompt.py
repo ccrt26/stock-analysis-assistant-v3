@@ -58,13 +58,6 @@ def test_existing_daily_prompt_stays_v4_and_adds_monitor_in_same_task() -> None:
     assert "当前价格" in text
     assert "09:30" in text
     assert "不得改变 `selection_as_of`" in text
-    for question in (
-        "为什么现在值得看",
-        "股价和成交有没有认可",
-        "推荐后的第一个交易日要看什么",
-        "为什么选它而不是最接近的备选",
-    ):
-        assert question in text
     assert "- 发动机类型和状态" not in text
     assert text.count("09:05 Scheduled Task") == 1
 
@@ -108,11 +101,12 @@ def test_forward_monitor_prompt_uses_previous_state_and_strict_report_contract()
     assert "必须与 snapshot 完全一致" in text
     assert "原始完整判断" in text
     assert "当初为什么推荐" in text
-    assert "推荐后实际怎么走" in text
-    assert "最近发生了什么" in text
-    assert "为什么今天要说它" in text
-    assert "当初看中的原因现在还在不在" in text
-    assert "接下来几天看什么" in text
+    assert "推荐后实际发生了什么" in text
+    assert "这些变化说明什么" in text
+    assert "现在结论" in text
+    assert "接下来关注什么" in text
+    assert "推荐后实际怎么走" not in text
+    assert "为什么今天要说它" not in text
     assert "内部成对比较继续用于判断" in text
     assert "第20个交易日必须首次形成" in text
     assert "当前：D" not in text
@@ -125,6 +119,9 @@ def test_forward_monitor_prompt_uses_previous_state_and_strict_report_contract()
     assert "original_key_risk_plain_language" in text
     assert "真实成对价格路径" in text
     assert "正式推荐股票的走势复盘" in text
+    assert "`confirmed_active` 和 `legacy_v1_not_rewritten` 两类正式推荐记录" in text
+    assert "正式推荐重点股票不超过8只时必须全部进入详细提醒" in text
+    assert "不得由待确认事件或比较记录挤占" in text
     assert "比较记录的 `final_twenty_day_review` 始终为空" in text
 
 
@@ -136,7 +133,7 @@ def test_public_review_only_lists_explicit_formal_recommendations() -> None:
     assert "legacy_v1_not_rewritten" in text
     assert "conditional_event" in text
     assert "不得出现在“正式推荐股票的走势复盘”中" in text
-    assert "为什么今天要说它" in text
+    assert "这些变化说明什么" in text
     assert "不得单列给用户凑内容" in text
 
 
@@ -191,4 +188,20 @@ def test_all_five_stock_research_skills_define_a_review_phase() -> None:
     assert "之后可以更新当前走势评价" in orchestrator
     assert "比较记录的 `final_twenty_day_review` 始终为空" in orchestrator
     assert "用户标题使用 `action_date`" in orchestrator
-    assert "这次为什么会选它" in orchestrator
+    assert "我为什么会选它" in orchestrator
+    assert "这些情况为什么支持这个判断" in orchestrator
+    assert "什么情况会证明判断变差" in orchestrator
+    assert "这次为什么会选它" not in orchestrator
+
+def test_review_prompt_explains_why_actual_results_support_or_refute_original_reason() -> None:
+    text = Path("ops/forward-monitor-prompt.md").read_text(encoding="utf-8")
+
+    for phrase in (
+        "当初期待看到什么",
+        "实际发生的变化为什么支持或反对当初判断",
+        "不能只写“部分支持”",
+        "哪一项核心预期得到验证",
+        "哪一项核心预期没有发生",
+        "所以现在怎样评价这次推荐",
+    ):
+        assert phrase in text

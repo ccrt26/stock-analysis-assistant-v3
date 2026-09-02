@@ -20,16 +20,6 @@ def test_daily_prompt_is_v4_only() -> None:
         "原开盘观察时点已经过去，当前价格不能替代当时的参与条件。"
         in text
     )
-    for question in (
-        "为什么现在值得看",
-        "目前有什么实际推动",
-        "股价和成交有没有认可",
-        "推荐后的第一个交易日要看什么",
-        "已经涨了多少，后面是否还有空间",
-        "最不利的事实",
-        "为什么选它而不是最接近的备选",
-    ):
-        assert question in text
     assert "已过原行动窗口" not in text
     assert (
         "不要把当前价格当成当时可以参与的价格，也不要用盘中走势重新改写开盘前的研究结论"
@@ -90,12 +80,11 @@ def test_detailed_recommendation_explanation_is_required_after_selection_freeze(
     for phrase in (
         "汇总表只能作为目录",
         "公司主要做什么",
-        "这次为什么会选它",
-        "股价已经怎么走",
+        "我为什么会选它",
+        "这些情况为什么支持这个判断",
         "最需要担心什么",
-        "资料不足",
-        "接下来几天",
-        "每只股票建议250—450个中文字",
+        "什么情况会证明判断变差",
+        "每只约300—500字",
     ):
         assert phrase in prompt
 
@@ -103,6 +92,10 @@ def test_detailed_recommendation_explanation_is_required_after_selection_freeze(
         "名单冻结后的用户说明",
         "不得重新选择股票",
         "公司简介只帮助用户理解公司",
+        "内部选择理由和对外推荐说明都不能只是事实清单",
+        "股票未来继续走强主要依靠什么",
+        "最不利事实怎样削弱判断",
+        "为什么仍然入选",
     ):
         assert phrase in orchestrator
 
@@ -112,6 +105,9 @@ def test_detailed_recommendation_explanation_is_required_after_selection_freeze(
         "公司主要卖什么产品或提供什么服务",
         "资料不全时只说哪份资料暂时没有取得",
         "不能被总控当成新的入选理由",
+        "公司事实在推荐理由中的作用必须说清",
+        "不能自动证明短期股价会涨",
+        "减少了纯题材炒作的可能性",
     ):
         assert phrase in company
 
@@ -121,11 +117,12 @@ def test_recommendation_prompt_uses_fact_first_plain_language() -> None:
 
     for phrase in (
         "公司主要做什么",
-        "这次为什么会选它",
-        "股价已经怎么走",
+        "我为什么会选它",
+        "这些情况为什么支持这个判断",
         "最需要担心什么",
+        "什么情况会证明判断变差",
         "32只农业相关股票中",
-        "先说事实",
+        "事实本身不是推荐理由",
     ):
         assert phrase in prompt
 
@@ -134,5 +131,24 @@ def test_recommendation_prompt_uses_fact_first_plain_language() -> None:
         "为什么不是普通跟涨",
         "关键数字说明什么",
         "为什么还可能有路径",
+        "这次为什么会选它",
+        "股价已经怎么走",
     ):
         assert old_heading not in prompt
+
+
+def test_selection_prompt_requires_reasoning_not_a_fact_list() -> None:
+    prompt = Path("ops/forward-selection-prompt.md").read_text(encoding="utf-8")
+
+    for phrase in (
+        "事实本身不是推荐理由",
+        "为什么这些事实让继续上涨更有可能",
+        "哪些事实支持，哪些事实反对",
+        "为什么最不利的事实暂时没有推翻推荐",
+        "为什么是这只股票，而不是同行里另一只",
+        "67.37%的涨幅来自一个涨停日不是支持证据",
+    ):
+        assert phrase in prompt
+
+    assert "推荐理由必须是一个完整论证" in prompt
+    assert "不得把涨幅、成交额和涨停贡献并排后直接得出推荐" in prompt

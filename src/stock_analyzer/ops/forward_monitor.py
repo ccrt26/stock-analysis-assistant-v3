@@ -298,7 +298,10 @@ def register_episodes(
             _fill_missing_original_fields(existing[episode_id], episode)
             continue
         existing[episode_id] = episode
-        if episode.get("selection_output_class") == "confirmed_active":
+        if (
+            _episode_selection_output_class(episode)
+            in PUBLIC_FORMAL_OUTPUT_CLASSES
+        ):
             selected_registered += 1
         else:
             comparators_registered += 1
@@ -496,7 +499,8 @@ def prepare_forward_monitor(
         str(item["episode_id"])
         for item in observations
         if item["monitor_phase"] != "closed"
-        and item.get("selection_output_class") == "confirmed_active"
+        and _episode_selection_output_class(item)
+        in PUBLIC_FORMAL_OUTPUT_CLASSES
         and int(item["day_number"]) >= 20
         and item.get("frozen_twenty_day_review") is None
     )
@@ -509,7 +513,8 @@ def prepare_forward_monitor(
             {
                 str(item["ts_code"])
                 for item in open_episodes
-                if item.get("selection_output_class") == "confirmed_active"
+                if _episode_selection_output_class(item)
+                in PUBLIC_FORMAL_OUTPUT_CLASSES
             }
         ),
         "comparator_count": sum(item["role"] == "comparator" for item in open_episodes),
@@ -629,10 +634,9 @@ def record_forward_monitor(
             day_number = int(episode["day_number"])
             role = str(episode.get("role"))
             output_class = _episode_selection_output_class(episode)
-            is_formal_selection = output_class in {
-                "confirmed_active",
-                "legacy_v1_not_rewritten",
-            }
+            is_formal_selection = (
+                output_class in PUBLIC_FORMAL_OUTPUT_CLASSES
+            )
             if not is_formal_selection and final_review is not None:
                 raise ValueError(
                     "only a confirmed active selection may have a final recommendation review"
@@ -697,6 +701,32 @@ def record_forward_monitor(
             "report is missing required final review episodes: "
             + ",".join(sorted(missing_required))
         )
+    formal_attention_codes = {
+        ts_code
+        for ts_code, item in attention.items()
+        if any(
+            episode_id in episodes
+            and _episode_selection_output_class(episodes[episode_id])
+            in PUBLIC_FORMAL_OUTPUT_CLASSES
+            for episode_id in (
+                str(value) for value in item.get("episode_ids", [])
+            )
+        )
+    }
+    reported_codes = {alert.ts_code for alert in report.alerts}
+    if len(formal_attention_codes) <= 8:
+        missing_formal = formal_attention_codes - reported_codes
+        if missing_formal:
+            raise ValueError(
+                "report is missing formal attention stocks: "
+                + ",".join(sorted(missing_formal))
+            )
+    elif reported_codes - formal_attention_codes:
+        raise ValueError(
+            "report contains nonformal alerts while more than eight "
+            "formal attention stocks require priority"
+        )
+
 
     expected_unreported = (
         int(snapshot_summary.get("attention_stock_count", 0))
@@ -714,6 +744,7 @@ def record_forward_monitor(
     if json_path.is_file():
         try:
             existing_raw = json.loads(json_path.read_text(encoding="utf-8"))
+
             if existing_raw.get("report_version") == (
                 "daily-forward-monitor-report-v2"
             ):
@@ -857,7 +888,9 @@ def _render_markdown(
         reviews = {item.episode_id: item for item in alert.episode_reviews}
         original_paragraphs: list[str] = []
         actual_paragraphs: list[str] = []
-        current_paragraphs: list[str] = []
+        meaning_paragraphs: list[str] = []
+        assessment_paragraphs: list[str] = []
+        final_paragraphs: list[str] = []
         multiple = len(episode_ids) > 1
         for episode_id in episode_ids:
             episode = episodes[episode_id]
@@ -882,14 +915,15 @@ def _render_markdown(
                 actual += " 这只股票在前20个交易日结束后才开始明显走强，因此不会改变前20天的原评价结果。"
             actual_paragraphs.append(f"{prefix}{actual}")
 
-            current = review.current_review
+            meaning_paragraphs.append(f"{prefix}{review.current_review}")
+            assessment_paragraphs.append(
+                f"{prefix}{_render_current_assessment(review.current_assessment)}"
+            )
             final = review.final_twenty_day_review
             if final is not None:
-                current = (
-                    f"{current.rstrip('。！？!? ；; ')}。"
-                    f"前20个交易日结束时，{final.overall_review}"
+                final_paragraphs.append(
+                    f"{prefix}{_render_final_twenty_day_review(episode, final)}"
                 )
-            current_paragraphs.append(f"{prefix}{current}")
 
         why = alert.why_reported.rstrip("。！？!? ；; ")
         changes: list[str] = []
@@ -919,18 +953,30 @@ def _render_markdown(
                 "",
                 *original_paragraphs,
                 "",
-                "**推荐后怎么走**",
+                "**推荐后实际发生了什么**",
                 "",
                 *actual_paragraphs,
                 "",
-                "**最近发生了什么，为什么今天提到它**",
-                "",
                 recent,
                 "",
-                "**现在怎么看**",
+                "**这些变化说明什么**",
                 "",
-                *current_paragraphs,
+                *meaning_paragraphs,
                 "",
+                "**现在结论**",
+                "",
+                *assessment_paragraphs,
+                "",
+                *(
+                    [
+                        "**前20个交易日最后结果**",
+                        "",
+                        *final_paragraphs,
+                        "",
+                    ]
+                    if final_paragraphs
+                    else []
+                ),
                 "**接下来关注什么**",
                 "",
                 (
@@ -951,18 +997,25 @@ def _render_markdown(
     return "\n".join(lines)
 
 
+def _render_current_assessment(value: str) -> str:
+    labels = {
+        "not_yet_tested": "推荐后的事实还不足以检验当初判断。",
+        "partly_supported": "部分预期已经发生，但仍有关键部分需要验证。",
+        "supported": "当初的核心预期目前得到支持。",
+        "weakening": "当初的核心判断已经明显减弱。",
+        "contradicted": "推荐后的事实与当初核心预期相反，原判断已经不成立。",
+        "insufficient_evidence": "现有资料不足，暂时无法可靠评价当初判断。",
+    }
+    return labels[value]
+
+
 def _render_final_twenty_day_review(
     episode: dict[str, Any],
     final: FrozenTwentyDayReviewV1,
-    weak_labels: dict[str, str],
-    final_labels: dict[str, str],
 ) -> str:
     close_return = _number(episode.get("d20_close_return_since_entry"))
     max_close = _number(episode.get("d20_max_close_return_since_entry"))
-    max_high = _number(episode.get("d20_max_high_return_since_entry"))
     mae = _number(episode.get("d20_mae_since_entry"))
-    max_drawdown = _number(episode.get("d20_max_close_drawdown"))
-    close_drawdown = _number(episode.get("d20_close_drawdown_from_peak"))
     facts = [
         (
             "前20个交易日收盘数据不足"
@@ -975,31 +1028,12 @@ def _render_final_twenty_day_review(
             else f"期间最高收盘{_plain_movement(max_close)}"
         ),
         (
-            "盘中最高价格数据不足"
-            if max_high is None
-            else f"盘中最高{_plain_movement(max_high)}"
-        ),
-        (
             "期间最低价格数据不足"
             if mae is None
             else _plain_low_point(mae)
         ),
-        (
-            "最大收盘回撤数据不足"
-            if max_drawdown is None
-            else f"最大收盘回撤{abs(max_drawdown):.2%}"
-        ),
-        (
-            "前20天最高收盘后的回落数据不足"
-            if close_drawdown is None
-            else f"收盘较前20天最高收盘回落{abs(close_drawdown):.2%}"
-        ),
     ]
-    return (
-        f"{'，'.join(facts)}。"
-        f"前20天最终判断中，最薄弱的是“{weak_labels[final.weak_or_failed_link]}”。"
-        f"{final_labels[final.decision_review]}。{final.overall_review}"
-    )
+    return f"{'，'.join(facts)}。{final.overall_review}"
 
 
 def _plain_movement(value: float) -> str:
@@ -1259,7 +1293,8 @@ def _episode_observation(
         "tail_days_remaining": 10 if phase == "primary" else max(30 - day_number, 0),
         "entry_open": entry,
         "formal_return_started": bool(
-            output_class == "confirmed_active" and entry is not None
+            output_class in PUBLIC_FORMAL_OUTPUT_CLASSES
+            and entry is not None
         ),
         "first_event_reaction": (
             _first_event_reaction(path)
@@ -1296,7 +1331,8 @@ def _attention_reasons(
 ) -> list[str]:
     reasons: list[str] = []
     if (
-        current.get("selection_output_class") == "confirmed_active"
+        _episode_selection_output_class(current)
+        in PUBLIC_FORMAL_OUTPUT_CLASSES
         and int(current["day_number"]) >= 20
         and current.get("frozen_twenty_day_review") is None
     ):
