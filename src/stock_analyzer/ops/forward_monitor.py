@@ -25,6 +25,9 @@ CHECKPOINTS = {1: "D1", 3: "D3", 5: "D5", 10: "D10", 20: "D20", 25: "D25", 30: "
 POSITIVE_SCENARIOS = {"initial_activation", "confirmed_breakout", "trend_continuation", "reversal_attempt"}
 NEGATIVE_SCENARIOS = {"failed_breakout", "single_day_impulse", "range_cross_noise"}
 OVERHEAT_SCENARIOS = {"single_day_impulse", "trend_exhaustion", "failed_breakout"}
+PUBLIC_FORMAL_OUTPUT_CLASSES = frozenset(
+    {"confirmed_active", "legacy_v1_not_rewritten"}
+)
 
 
 @dataclass(frozen=True)
@@ -790,6 +793,19 @@ def _validate_pair_context(
         )
 
 
+def _public_formal_episode_ids(
+    alert: ForwardMonitorAlertV2,
+    episodes: dict[str, dict[str, Any]],
+) -> list[str]:
+    return [
+        episode_id
+        for episode_id in alert.episode_ids
+        if episode_id in episodes
+        and _episode_selection_output_class(episodes[episode_id])
+        in PUBLIC_FORMAL_OUTPUT_CLASSES
+    ]
+
+
 def _render_markdown(
     report: DailyForwardMonitorReportV2,
     snapshot: dict[str, Any],
@@ -801,127 +817,55 @@ def _render_markdown(
         for item in snapshot.get("episodes", [])
         if isinstance(item, dict)
     }
-    assessment_labels = {
-        "not_yet_tested": "还没有经过足够交易日验证",
-        "partly_supported": "有一部分事实符合原判断，但证据还不完整",
-        "supported": "原来最重要的判断目前得到实际走势支持",
-        "weakening": "原判断仍有部分依据，但走势正在减弱",
-        "contradicted": "关键事实或实际走势已经明显反对原判断",
-        "insufficient_evidence": "现有数据不足，不能可靠判断",
-    }
-    explanation_labels = {
-        "market_common_move": "目前看，走势主要跟随全市场共同变化",
-        "industry_common_move": "目前看，走势主要跟随同一行业共同变化",
-        "company_change": "目前看，公司后续出现的新变化最能解释这段走势",
-        "stock_specific_move": "目前看，这只股票自身的股价和成交变化最明显",
-        "mixed": "目前看，市场、行业、公司和股票自身变化共同影响了走势",
-        "unknown": "现有事实还不足以说明哪一种解释最可靠",
-    }
-    weak_labels = {
-        "none": "暂时没有哪一部分已经明确失败",
-        "market_conditions": "原判断依赖的市场条件正在减弱",
-        "new_information": "原先依赖的新信息没有继续增强",
-        "industry_follow_through": "同一行业多只股票共同走强的情况没有延续",
-        "price_and_volume_confirmation": "股价和成交没有继续支持原判断",
-        "remaining_room": "此前上涨已经消耗了较多后续空间",
-        "company_risk": "公司层面的不利事实正在变得更重要",
-        "timing": "原来观察的时间可能偏早或偏晚",
-        "execution": "原计划观察的第一个交易日未必能按原条件正常参与",
-        "stock_selection": "同一方向里可能选错了具体股票",
-        "unknown": "目前还不能可靠判断哪一部分最弱",
-    }
-    final_labels = {
-        "logic_and_stock_both_reasonable": "原判断和具体股票都基本合理",
-        "direction_right_stock_wrong": "方向大体正确，但具体股票选错",
-        "logic_right_timing_wrong": "原判断大体正确，但时间选早或选晚",
-        "not_executable": "当时无法按原条件正常参与",
-        "short_term_reason_wrong": "短期上涨原因判断错误",
-        "selection_evidence_insufficient": "当时证据不足，不应该形成正式推荐",
-        "unknown": "仍然无法可靠判断",
-    }
+    public_alerts = [
+        (alert, _public_formal_episode_ids(alert, episodes))
+        for alert in report.alerts
+    ]
+    public_alerts = [
+        (alert, episode_ids)
+        for alert, episode_ids in public_alerts
+        if episode_ids
+    ]
     lines = [
-        f"# {report.analysis_date.isoformat()} 之前研究过的股票走势复盘",
+        f"# {report.analysis_date.isoformat()} 正式推荐股票的走势复盘",
         "",
         "## 今天的市场情况",
         "",
         f"{overview.what_changed.rstrip('。！？!? ；; ')}。{overview.implication_for_monitored_stocks}",
         "",
-        "## 之前研究过的股票走势复盘",
+        "## 正式推荐股票的走势复盘",
         "",
     ]
-    open_episodes = [
-        item
-        for item in episodes.values()
-        if item.get("monitor_phase") != "closed"
-    ]
-    conditional_count = len(
-        {
-            str(item["ts_code"])
-            for item in open_episodes
-            if _episode_selection_output_class(item) == "conditional_event"
-        }
-    )
     formal_primary_count = sum(
-        _episode_selection_output_class(item)
-        in {"confirmed_active", "legacy_v1_not_rewritten"}
+        _episode_selection_output_class(item) in PUBLIC_FORMAL_OUTPUT_CLASSES
         and item.get("monitor_phase") == "primary"
         for item in episodes.values()
     )
     formal_tail_count = sum(
-        _episode_selection_output_class(item)
-        in {"confirmed_active", "legacy_v1_not_rewritten"}
+        _episode_selection_output_class(item) in PUBLIC_FORMAL_OUTPUT_CLASSES
         and item.get("monitor_phase") == "passive_tail"
         for item in episodes.values()
     )
-    if pool.selected_count == 0:
-        lines.extend(["今天没有已确认正式推荐。", ""])
-    if conditional_count:
+    if not public_alerts:
         lines.extend(
             [
-                f"等待首个交易日确认的事件线索有 {conditional_count} 条；"
-                "这些线索不计入正式推荐数量，也不形成正式收益。",
+                "今天没有被明确推荐过、同时又出现需要说明变化的股票。",
                 "",
             ]
         )
-    if not report.alerts:
-        lines.append("今天没有需要详细提醒的股票。")
-    for alert in report.alerts:
-        lines.extend(
-            [
-                f"### {alert.name}（{alert.ts_code}）",
-                "",
-                "**今天这只股票发生了什么**",
-                "",
-                (
-                    f"市场方面，{alert.market_change.rstrip('。！？!? ；; ')}。"
-                    f"行业方面，{alert.sector_change.rstrip('。！？!? ；; ')}。"
-                    f"公司方面，{alert.company_change.rstrip('。！？!? ；; ')}。"
-                    f"个股方面，{alert.stock_change.rstrip('。！？!? ；; ')}。"
-                ),
-                "",
-            ]
-        )
+    for alert, episode_ids in public_alerts:
         reviews = {item.episode_id: item for item in alert.episode_reviews}
-        for episode_id in alert.episode_ids:
+        original_paragraphs: list[str] = []
+        actual_paragraphs: list[str] = []
+        current_paragraphs: list[str] = []
+        multiple = len(episode_ids) > 1
+        for episode_id in episode_ids:
             episode = episodes[episode_id]
             review = reviews[episode_id]
             day_number = int(episode["day_number"])
             action = date.fromisoformat(str(episode["action_date"]))
             action_text = f"{action.year}年{action.month}月{action.day}日"
-            output_class = _episode_selection_output_class(episode)
-            if output_class == "conditional_event":
-                subtitle = (
-                    f"#### {action_text}等待首个交易日确认的事件线索，"
-                    f"目前观察到第{day_number}个交易日"
-                )
-            elif episode.get("role") == "comparator":
-                day_text = _human_trading_day(day_number).removeprefix("推荐后的")
-                subtitle = (
-                    f"#### {action_text}那次研究中，它是用于比较的股票，"
-                    f"目前跟踪到该次研究后的{day_text}"
-                )
-            else:
-                subtitle = f"#### {action_text}那次推荐，目前跟踪到{_human_trading_day(day_number)}"
+            prefix = f"{action_text}那次推荐：" if multiple else ""
             limitations = set(episode.get("data_limitations") or [])
             original = (
                 f"{review.original_reason_plain_language.rstrip('。！？!? ；; ')}。"
@@ -931,62 +875,79 @@ def _render_markdown(
                 original += " 当时留下的原始判断不完整，因此这次只能复盘价格表现，不能逐项审查当时的理由。"
             if "missing_original_referenced_decisions" in limitations:
                 original += " 当时留下的部分价格依据或首个交易日观察条件不完整，因此这部分不能事后补写。"
-            actual = (
-                _render_conditional_event_reaction(episode)
-                if output_class == "conditional_event"
-                else f"{_render_price_summary([episode])} {_render_relative_performance(episode)}"
-            )
+            original_paragraphs.append(f"{prefix}{original}")
+
+            actual = f"{_render_price_summary([episode])} {_render_relative_performance(episode)}"
             if alert.alert_type == "late_activation" and day_number > 20:
                 actual += " 这只股票在前20个交易日结束后才开始明显走强，因此不会改变前20天的原评价结果。"
-            current = (
-                f"{assessment_labels[review.current_assessment]}。"
-                f"{weak_labels[review.current_weak_or_failed_link]}。"
-                f"{explanation_labels[review.best_supported_explanation]}。"
-                f"{review.current_review}"
-            )
-            lines.extend([
-                subtitle, "", "**当时为什么看它**", "", original,
-                "", "**实际怎么走**", "", actual,
-                "", "**原判断现在怎么看**", "", current,
-                "", "**和当时最接近的备选相比**", "",
-                _render_pair_comparison(episode, review, list(episodes.values())),
-            ])
+            actual_paragraphs.append(f"{prefix}{actual}")
+
+            current = review.current_review
             final = review.final_twenty_day_review
-            if final is not None and output_class in {
-                "confirmed_active",
-                "legacy_v1_not_rewritten",
-            }:
-                lines.extend(
-                    [
-                        "",
-                        "**这次推荐最后怎么看**",
-                        "",
-                        _render_final_twenty_day_review(
-                            episode,
-                            final,
-                            weak_labels,
-                            final_labels,
-                        ),
-                    ]
+            if final is not None:
+                current = (
+                    f"{current.rstrip('。！？!? ；; ')}。"
+                    f"前20个交易日结束时，{final.overall_review}"
                 )
-            lines.append("")
+            current_paragraphs.append(f"{prefix}{current}")
+
+        why = alert.why_reported.rstrip("。！？!? ；; ")
+        changes: list[str] = []
+        for value in (
+            alert.company_change,
+            alert.sector_change,
+            alert.stock_change,
+            alert.market_change,
+        ):
+            cleaned = value.rstrip("。！？!? ；; ")
+            if (
+                cleaned
+                and cleaned not in {"无明显变化", "无新公告"}
+                and cleaned != why
+                and cleaned not in changes
+            ):
+                changes.append(cleaned)
+        recent = f"今天提到它，是因为{why}。"
+        if changes:
+            recent += f" 最近还看到：{'；'.join(changes)}。"
+
         lines.extend(
             [
-                "**接下来观察什么**",
+                f"### {alert.name}（{alert.ts_code}）",
+                "",
+                "**当初为什么推荐**",
+                "",
+                *original_paragraphs,
+                "",
+                "**推荐后怎么走**",
+                "",
+                *actual_paragraphs,
+                "",
+                "**最近发生了什么，为什么今天提到它**",
+                "",
+                recent,
+                "",
+                "**现在怎么看**",
+                "",
+                *current_paragraphs,
+                "",
+                "**接下来关注什么**",
                 "",
                 (
                     f"接下来重点看：{alert.confirmation_condition}。"
-                    f"如果{alert.invalidation_condition}，说明原来的短期判断不再成立。"
+                    f"如果{alert.invalidation_condition}，说明当初看中的原因已经明显减弱。"
                 ),
                 "",
             ]
         )
-    lines.extend([
-        "## 目前还在跟踪多少只", "",
-        f"仍开放 {pool.selected_count} 只已确认正式推荐股票；推荐后的前20个交易日有 {formal_primary_count} 条正式记录，之后继续低成本观察的有 {formal_tail_count} 条正式记录。",
-        "", "## 今天没有详细展开的股票", "",
-        f"还有 {report.unreported_attention_count} 只触发变化但未在上面详细显示。{report.routine_summary}", "",
-    ])
+    lines.extend(
+        [
+            "## 目前还在跟踪多少只",
+            "",
+            f"仍开放 {pool.selected_count} 只已确认正式推荐股票；推荐后的前20个交易日有 {formal_primary_count} 条正式记录，之后继续低成本观察的有 {formal_tail_count} 条正式记录。",
+            "",
+        ]
+    )
     return "\n".join(lines)
 
 

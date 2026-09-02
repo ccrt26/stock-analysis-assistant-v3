@@ -732,7 +732,7 @@ def test_prepare_calculates_adjusted_path_and_excludes_future_prices(tmp_path: P
     assert episode["current_hit_20pct_close"] is True
 
 
-def test_conditional_event_keeps_first_reaction_but_has_no_formal_entry(
+def test_public_markdown_hides_conditional_event_but_keeps_internal_json(
     tmp_path: Path,
 ) -> None:
     trace = _single_selected_trace(
@@ -791,10 +791,12 @@ def test_conditional_event_keeps_first_reaction_but_has_no_formal_entry(
         project_root=tmp_path,
     )
     markdown = Path(summary.markdown_file).read_text(encoding="utf-8")
+    saved = json.loads(Path(summary.json_file).read_text(encoding="utf-8"))
 
-    assert "今天没有已确认正式推荐" in markdown
-    assert "等待首个交易日确认的事件线索" in markdown
-    assert "那次推荐" not in markdown
+    assert saved["alerts"]
+    assert "银龙股份" not in markdown
+    assert "等待首个交易日确认" not in markdown
+    assert "今天没有被明确推荐过" in markdown
 
 
 def test_conditional_event_never_requires_or_accepts_a_d20_final_review(
@@ -1620,7 +1622,7 @@ def _mixed_role_snapshot() -> dict:
     }
 
 
-def test_report_accepts_one_alert_for_all_roles_of_the_same_stock(tmp_path: Path) -> None:
+def test_public_markdown_hides_comparator_episode(tmp_path: Path) -> None:
     snapshot = _mixed_role_snapshot()
     snapshot_path = tmp_path / "snapshot.json"
     snapshot_path.write_text(json.dumps(snapshot), encoding="utf-8")
@@ -1654,12 +1656,10 @@ def test_report_accepts_one_alert_for_all_roles_of_the_same_stock(tmp_path: Path
     markdown = Path(summary.markdown_file).read_text(encoding="utf-8")
     assert saved["alerts"][0]["roles"] == ["selected", "comparator"]
     assert markdown.count("### 银龙股份（603969.SH）") == 1
-    assert "2026年8月3日那次推荐" in markdown
-    assert "2026年7月21日那次研究中，它是用于比较的股票" in markdown
-    assert "2026年7月31日那次推荐" not in markdown
-    assert "2026年7月20日那次研究中" not in markdown
-    assert "该次研究后的第十个交易日这条记录" in markdown
-    assert "推荐后的第十个交易日这条记录" not in markdown
+    assert "用于比较的股票" not in markdown
+    assert "和当时最接近的备选相比" not in markdown
+    assert "当时备选股" not in markdown
+    assert "该次研究后的第十个交易日" not in markdown
 
 
 def test_record_rejects_omitting_one_attention_episode_for_the_same_stock(
@@ -2056,23 +2056,27 @@ def test_markdown_uses_plain_chinese_and_natural_review_sections(
     markdown = Path(summary.markdown_file).read_text(encoding="utf-8")
 
     assert "今天的市场情况" in markdown
-    assert "之前研究过的股票走势复盘" in markdown
+    assert "正式推荐股票的走势复盘" in markdown
     assert "推荐后的第一个交易日" in markdown
-    for heading in (
-        "今天这只股票发生了什么",
-        "当时为什么看它",
-        "实际怎么走",
-        "原判断现在怎么看",
-        "和当时最接近的备选相比",
-        "接下来观察什么",
-    ):
-        assert heading in markdown
+    headings = (
+        "当初为什么推荐",
+        "推荐后怎么走",
+        "最近发生了什么，为什么今天提到它",
+        "现在怎么看",
+        "接下来关注什么",
+    )
+    positions = [markdown.index(heading) for heading in headings]
+    assert positions == sorted(positions)
     assert "当时看好它自身的价格表现连续强于市场和同类" in markdown
+    assert "测试提醒原因" in markdown
     assert "测试中的大盘变化" in markdown
     assert "测试中的板块变化" in markdown
     assert "测试中的个股变化" in markdown
     assert "测试中的公司变化" in markdown
-    assert "市场方面，测试中的大盘变化。行业方面，测试中的板块变化。" in markdown
+    assert "市场方面" not in markdown
+    assert "行业方面" not in markdown
+    assert "公司方面" not in markdown
+    assert "个股方面" not in markdown
     assert "当前收盘价较期间最高收盘价回落0.00%" in markdown
     assert "当前收盘价较期间最高收盘价回落+0.00%" not in markdown
     assert "测试中需要看到的继续走强事实" in markdown
@@ -2082,6 +2086,8 @@ def test_markdown_uses_plain_chinese_and_natural_review_sections(
         "原角色", "MFE", "MAE", "selected", "comparator",
         "nearest_nonselection", "episode", "episode_ids", "engine_type",
         "engine_status", "确认条件", "失效条件", "基础情形",
+        "原逻辑", "传播链", "价格确认", "弱环节", "状态",
+        "和当时最接近的备选相比",
     ):
         assert forbidden not in markdown
 
@@ -2226,14 +2232,15 @@ def test_day_twenty_markdown_adds_final_review_section(tmp_path: Path) -> None:
     markdown = Path(summary.markdown_file).read_text(encoding="utf-8")
 
     assert "推荐后的第二十个交易日" in markdown
-    assert "这次推荐最后怎么看" in markdown
-    assert "前20个交易日收盘上涨20.00%" in markdown
-    assert "期间最高收盘上涨20.00%" in markdown
-    assert "盘中最高上涨25.00%" in markdown
-    assert "期间最深下跌5.00%" in markdown
-    assert "最大收盘回撤" in markdown
-    assert "收盘较前20天最高收盘回落" in markdown
+    assert "现在怎么看" in markdown
+    assert "目前涨跌为+20.00%" in markdown
+    assert "期间最高收盘涨幅为+20.00%" in markdown
+    assert "盘中最高涨幅为+25.00%" in markdown
+    assert "期间最深跌幅为-5.00%" in markdown
+    assert "期间最大收盘回撤为" in markdown
+    assert "当前收盘价较期间最高收盘价回落" in markdown
     assert markdown.count("前20个交易日结束后，原判断和具体股票都基本合理。") == 1
+    assert "前20天最终判断中，最薄弱的是" not in markdown
     assert "D20" not in markdown
 
 
@@ -2280,10 +2287,8 @@ def test_markdown_explains_missing_original_thesis_and_unmatched_alternative(
         "当时留下的原始判断不完整，因此这次只能复盘价格表现，不能逐项审查当时的理由。"
         in markdown
     )
-    assert (
-        "当时没有留下能够严格匹配的备选股票，因此这次不能做可靠的逐只比较。"
-        in markdown
-    )
+    assert "当时没有留下能够严格匹配的备选股票" not in markdown
+    assert "和当时最接近的备选相比" not in markdown
 
 
 def test_record_requires_attention_stock_and_writes_short_json_and_markdown(tmp_path: Path) -> None:
@@ -2311,7 +2316,7 @@ def test_record_requires_attention_stock_and_writes_short_json_and_markdown(tmp_
     assert saved["alerts"][0]["ts_code"] == "603969.SH"
     assert saved["report_version"] == "daily-forward-monitor-report-v2"
     assert "今天的市场情况" in markdown
-    assert "之前研究过的股票走势复盘" in markdown
+    assert "正式推荐股票的走势复盘" in markdown
     assert "全部跟踪记录" not in markdown
     assert "range_or_wait" not in markdown
 
@@ -2475,13 +2480,18 @@ def test_each_episode_has_its_own_maturity_and_final_review(
     assert reviews[old_episode["episode_id"]]["final_twenty_day_review"] == _final_review()
     assert reviews[new_episode["episode_id"]]["final_twenty_day_review"] is None
     assert markdown.count("### 银龙股份（603969.SH）") == 1
-    assert markdown.count("2026年8月3日那次推荐") == 2
-    assert markdown.count("这次推荐最后怎么看") == 1
-    assert markdown.count("今天这只股票发生了什么") == 1
-    assert markdown.count("市场方面，无明显变化") == 1
-    assert markdown.count("当时为什么看它") == 2
-    assert markdown.count("实际怎么走") == 2
-    assert markdown.count("接下来观察什么") == 1
+    assert "2026年8月3日那次推荐" in markdown
+    assert markdown.count("前20个交易日结束后，原判断和具体股票都基本合理。") == 1
+    for heading in (
+        "当初为什么推荐",
+        "推荐后怎么走",
+        "最近发生了什么，为什么今天提到它",
+        "现在怎么看",
+        "接下来关注什么",
+    ):
+        assert markdown.count(heading) == 1
+    assert "今天这只股票发生了什么" not in markdown
+    assert "市场方面" not in markdown
 
 
 def test_final_review_is_rejected_before_twentieth_day(tmp_path: Path) -> None:
@@ -2518,7 +2528,7 @@ def test_final_review_is_required_on_twentieth_day(tmp_path: Path) -> None:
         )
 
 
-def test_comparator_never_has_a_final_recommendation_review(
+def test_public_markdown_does_not_use_internal_attention_to_fill_content(
     tmp_path: Path,
 ) -> None:
     snapshot = _snapshot_with_complete_pair()
@@ -2573,13 +2583,14 @@ def test_comparator_never_has_a_final_recommendation_review(
 
     saved = json.loads(Path(summary.json_file).read_text(encoding="utf-8"))
     markdown = Path(summary.markdown_file).read_text(encoding="utf-8")
+    assert saved["alerts"][0]["roles"] == ["comparator"]
     assert saved["alerts"][0]["episode_reviews"][0][
         "final_twenty_day_review"
     ] is None
-    assert "这次推荐最后怎么看" not in markdown
-    assert "当时证据不足，不应该形成正式推荐" not in markdown
-    assert "该次研究后的第二十个交易日" in markdown
-    assert "这条记录比银龙股份弱5.00个百分点" in markdown
+    assert "尚太科技" not in markdown
+    assert "用于比较的股票" not in markdown
+    assert "和当时最接近的备选相比" not in markdown
+    assert "今天没有被明确推荐过" in markdown
 
 
 @pytest.mark.parametrize("day_number", [21, 25, 30])
@@ -2639,11 +2650,10 @@ def test_later_current_review_may_change_while_final_review_stays_frozen(
     assert saved_review["current_assessment"] == "weakening"
     assert saved_review["final_twenty_day_review"] == frozen
     assert "目前涨跌为+50.00%" in markdown
-    assert "前20个交易日收盘上涨8.00%" in markdown
-    assert (
-        "前20天最终判断中，最薄弱的是“暂时没有哪一部分已经明确失败”"
-        in markdown
-    )
+    assert "第21个交易日后的走势已经转弱" in markdown
+    assert "前20个交易日结束后，原判断和具体股票都基本合理" in markdown
+    assert "前20天最终判断中，最薄弱的是" not in markdown
+    assert "股价和成交没有继续支持原判断" not in markdown
 
 
 def test_register_keeps_only_referenced_decisions_and_pair_episode_id(
@@ -2822,8 +2832,11 @@ def test_markdown_hides_comparison_text_about_a_different_stock(
     )
     markdown = Path(summary.markdown_file).read_text(encoding="utf-8")
 
-    assert "当时备选股尚太科技" in markdown
+    assert "银龙股份" in markdown
+    assert "尚太科技" not in markdown
     assert "道道全" not in markdown
+    assert "和当时最接近的备选相比" not in markdown
+    assert "当时备选股" not in markdown
 
 
 @pytest.mark.parametrize(
@@ -3234,7 +3247,7 @@ def test_record_requires_every_pending_final_review_episode_within_eight_stocks(
         (0.0, "两只股票表现接近，相差0.00个百分点。"),
     ],
 )
-def test_pair_difference_uses_plain_chinese(
+def test_pair_difference_stays_internal_and_is_hidden_from_public_markdown(
     tmp_path: Path,
     difference: float,
     expected: str,
@@ -3242,10 +3255,12 @@ def test_pair_difference_uses_plain_chinese(
     snapshot = _snapshot_with_complete_pair()
     snapshot["episodes"][0]["pair_context"]["return_difference"] = difference
     episode_id = snapshot["episodes"][0]["episode_id"]
+    review = _episode_review(episode_id)
+    review["comparison_interpretation"] = expected
     snapshot_path, pending_path = _record_review_payload(
         tmp_path,
         snapshot,
-        _episode_review(episode_id),
+        review,
     )
 
     summary = record_forward_monitor(
@@ -3253,8 +3268,14 @@ def test_pair_difference_uses_plain_chinese(
         report_file=pending_path,
         project_root=tmp_path,
     )
+    saved = json.loads(Path(summary.json_file).read_text(encoding="utf-8"))
     markdown = Path(summary.markdown_file).read_text(encoding="utf-8")
-    assert expected in markdown
+
+    assert saved["alerts"][0]["episode_reviews"][0][
+        "comparison_interpretation"
+    ] == expected
+    assert expected not in markdown
+    assert "尚太科技" not in markdown
 
 
 def test_direction_right_stock_wrong_requires_a_complete_pair(

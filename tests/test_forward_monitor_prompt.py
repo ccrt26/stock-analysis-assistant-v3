@@ -77,12 +77,13 @@ def test_daily_prompts_separate_confirmed_recommendations_from_event_leads() -> 
         encoding="utf-8"
     )
 
-    for text in (selection, monitor):
-        assert "今天已确认的正式推荐" in text
-        assert "等待首个交易日确认的事件线索" in text
-        assert "conditional 不进入正式推荐数量" in text
-        assert "不得虚构收益" in text
-    assert "仅有 conditional 时，明确“今天没有已确认正式推荐”" in selection
+    assert "今天已确认的正式推荐" in selection
+    assert "等待首个交易日确认的事件线索" in selection
+    assert "conditional 不进入正式推荐数量" in selection
+    assert "不得虚构收益" in selection
+    assert "conditional_event" in monitor
+    assert "不得出现在“正式推荐股票的走势复盘”中" in monitor
+    assert "不得单列给用户凑内容" in monitor
     assert "fresh_event_pending 仍属于正式推荐" not in selection
 
 
@@ -106,11 +107,13 @@ def test_forward_monitor_prompt_uses_previous_state_and_strict_report_contract()
     assert "pool_summary" in text
     assert "必须与 snapshot 完全一致" in text
     assert "原始完整判断" in text
-    assert "当时为什么看它" in text
-    assert "实际怎么走" in text
-    assert "原判断现在怎么看" in text
-    assert "和当时最接近的备选相比" in text
-    assert "接下来观察什么" in text
+    assert "当初为什么推荐" in text
+    assert "推荐后实际怎么走" in text
+    assert "最近发生了什么" in text
+    assert "为什么今天要说它" in text
+    assert "当初看中的原因现在还在不在" in text
+    assert "接下来几天看什么" in text
+    assert "内部成对比较继续用于判断" in text
     assert "第20个交易日必须首次形成" in text
     assert "当前：D" not in text
     assert "roles" in text
@@ -121,9 +124,20 @@ def test_forward_monitor_prompt_uses_previous_state_and_strict_report_contract()
     assert "original_reason_plain_language" in text
     assert "original_key_risk_plain_language" in text
     assert "真实成对价格路径" in text
-    assert "action_date" in text
-    assert "这次推荐最后怎么看" in text
+    assert "正式推荐股票的走势复盘" in text
     assert "比较记录的 `final_twenty_day_review` 始终为空" in text
+
+
+def test_public_review_only_lists_explicit_formal_recommendations() -> None:
+    text = Path("ops/forward-monitor-prompt.md").read_text(encoding="utf-8")
+
+    assert "正式推荐股票的走势复盘" in text
+    assert "confirmed_active" in text
+    assert "legacy_v1_not_rewritten" in text
+    assert "conditional_event" in text
+    assert "不得出现在“正式推荐股票的走势复盘”中" in text
+    assert "为什么今天要说它" in text
+    assert "不得单列给用户凑内容" in text
 
 
 def test_periodic_review_reads_monitor_history_and_checks_reminder_timing() -> None:
@@ -177,4 +191,4 @@ def test_all_five_stock_research_skills_define_a_review_phase() -> None:
     assert "之后可以更新当前走势评价" in orchestrator
     assert "比较记录的 `final_twenty_day_review` 始终为空" in orchestrator
     assert "用户标题使用 `action_date`" in orchestrator
-    assert "为什么现在值得看" in orchestrator
+    assert "这次为什么会选它" in orchestrator
