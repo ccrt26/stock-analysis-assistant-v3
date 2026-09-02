@@ -17,4 +17,11 @@
 
 ## 部署后事实
 
-待功能分支完成、测试通过并按附件要求部署后补充。
+- 功能提交：`f33fc128a2b470fe7608807cd80ed4e4e831b763`（`fix: make recommendation and review output user-readable`）。
+- 实际部署根目录：`/Users/ccrt/股票分析助手`。
+- 运行分支：`main`。
+- 部署前 HEAD：`52bb9c5dda22bab979fdf3936de813e1c704cb36`。
+- 首轮部署后 HEAD：`f33fc128a2b470fe7608807cd80ed4e4e831b763`。
+- 部署方式：在工作区干净、旧 HEAD 可快进到功能提交的前提下执行 `git merge --ff-only`，随后推送 `origin/main`；没有 reset、强推或覆盖本地修改。
+- 部署核验：`main` 与 `origin/main` 均指向功能提交；运行目录中能检出新荐股示例句、正式复盘对待确认事件的隐藏规则，以及 `PUBLIC_FORMAL_OUTPUT_CLASSES` 过滤实现。
+- Saved Project 的符号链接仍解析到同一实际运行根目录，Automation 提示也直接进入该目录，因此无需修改 Automation。正式任务下次运行会读取已部署的新提示、Skill 和 Markdown 渲染实现。
