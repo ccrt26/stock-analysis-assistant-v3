@@ -85,6 +85,41 @@ def test_entry_timing_and_review_skills_keep_selection_and_review_separate() -> 
     assert interface["interface"]["display_name"] == "正式推荐复盘"
 
 
+def test_review_skill_requires_causal_comparison_expectation_phase_and_outlook() -> None:
+    review = Path(
+        ".agents/skills/reviewing-stock-recommendations/SKILL.md"
+    ).read_text(encoding="utf-8")
+    price = Path(
+        ".agents/skills/analyzing-price-trading/SKILL.md"
+    ).read_text(encoding="utf-8")
+    orchestrator = Path(
+        ".agents/skills/orchestrating-stock-research/SKILL.md"
+    ).read_text(encoding="utf-8")
+
+    for phrase in (
+        "最有证据的主要解释",
+        "为什么这一解释比其他解释更有证据",
+        "推荐日最重要的预期",
+        "上涨后整理",
+        "无法执行",
+        "未来1—3个交易日",
+        "相对行业表现",
+        "行业上涨面",
+    ):
+        assert phrase in review
+    for phrase in (
+        "推荐后实际路径",
+        "最大上涨日贡献",
+        "突破位置",
+        "最接近的价格阶段",
+    ):
+        assert phrase in price
+    assert (
+        "推荐日期和当时判断、到今天走到哪里、我的分析、接下来更可能怎样"
+        in orchestrator
+    )
+
+
 def test_selection_impact_matrix_is_complete_and_keeps_future_outcomes_separate() -> None:
     path = Path(
         "research/skill-optimization/"

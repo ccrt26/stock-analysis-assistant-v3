@@ -102,10 +102,8 @@ def test_forward_monitor_prompt_uses_previous_state_and_strict_report_contract()
     assert "原始完整判断" in text
     assert "推荐日期和当时判断" in text
     assert "到今天走到哪里" in text
-    assert "后来发生了什么" in text
-    assert "这些变化为什么支持或反对当时判断" in text
-    assert "现在怎么看" in text
-    assert "接下来关注什么" in text
+    assert "我的分析" in text
+    assert "接下来更可能怎样" in text
     assert "推荐后实际怎么走" not in text
     assert "为什么今天要说它" not in text
     assert "内部成对比较继续用于判断" in text
@@ -134,7 +132,7 @@ def test_public_review_only_lists_explicit_formal_recommendations() -> None:
     assert "legacy_v1_not_rewritten" in text
     assert "conditional_event" in text
     assert "不得出现在“正式推荐股票的走势复盘”中" in text
-    assert "这些变化为什么支持或反对当时判断" in text
+    assert "我的分析" in text
     assert "不得单列给用户凑内容" in text
 
 
@@ -199,11 +197,11 @@ def test_review_prompt_explains_why_actual_results_support_or_refute_original_re
 
     for phrase in (
         "当初期待看到什么",
-        "实际发生的变化为什么支持或反对当初判断",
-        "不能只写“部分支持”",
-        "哪一项核心预期得到验证",
-        "哪一项核心预期没有发生",
-        "所以现在怎样评价这次推荐",
+        "最有证据的主要解释",
+        "为什么这一解释比其他解释更有证据",
+        "哪一项核心预期真正实现",
+        "当前阶段",
+        "未来1—3个交易日",
     ):
         assert phrase in text
 
@@ -227,12 +225,27 @@ def test_review_prompt_uses_dated_review_skill_and_one_retry_for_missing_data() 
     for heading in (
         "推荐日期和当时判断",
         "到今天走到哪里",
-        "后来发生了什么",
-        "这些变化为什么支持或反对当时判断",
-        "现在怎么看",
-        "接下来关注什么",
+        "我的分析",
+        "接下来更可能怎样",
     ):
         assert heading in text
+
+
+def test_review_prompt_separates_internal_facts_from_public_causal_analysis() -> None:
+    text = Path("ops/forward-monitor-prompt.md").read_text(encoding="utf-8")
+
+    for phrase in (
+        "best_supported_explanation",
+        "current_review 才是公开分析核心",
+        "why_reported 只说明今天为什么复盘",
+        "相对行业表现",
+        "行业上涨面",
+        "不得说行业数据全部不可用",
+        "无法按计划执行",
+        "未来1—3个交易日方向暂时无法判断",
+        "D1—D4",
+    ):
+        assert phrase in text
 
 
 def test_review_sample_uses_real_dates_target_progress_and_reasoning() -> None:

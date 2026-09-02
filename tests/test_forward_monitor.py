@@ -13,6 +13,8 @@ from pydantic import ValidationError
 from stock_analyzer.ops.forward_monitor import (
     DailyForwardMonitorReportV1,
     DailyForwardMonitorReportV2,
+    ForwardEpisodeReviewV1,
+    ForwardMonitorAlertV2,
     _human_trading_day,
     _render_target_progress,
     prepare_forward_monitor,
@@ -22,6 +24,49 @@ from stock_analyzer.ops.forward_monitor import (
 
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
+
+
+def test_causal_review_keeps_existing_report_model_fields() -> None:
+    assert set(ForwardEpisodeReviewV1.model_fields) == {
+        "episode_id",
+        "original_reason_plain_language",
+        "original_key_risk_plain_language",
+        "current_assessment",
+        "best_supported_explanation",
+        "current_weak_or_failed_link",
+        "current_review",
+        "comparison_interpretation",
+        "final_twenty_day_review",
+    }
+    assert set(ForwardMonitorAlertV2.model_fields) == {
+        "ts_code",
+        "name",
+        "episode_ids",
+        "roles",
+        "day_numbers",
+        "original_engine_types",
+        "alert_type",
+        "monitor_state",
+        "market_change",
+        "sector_change",
+        "stock_change",
+        "company_change",
+        "outlook_1_3d",
+        "confirmation_condition",
+        "invalidation_condition",
+        "why_reported",
+        "episode_reviews",
+    }
+    assert set(DailyForwardMonitorReportV2.model_fields) == {
+        "report_version",
+        "analysis_date",
+        "as_of",
+        "market_overview",
+        "pool_summary",
+        "alerts",
+        "unreported_attention_count",
+        "routine_summary",
+    }
 
 
 def _target_progress_episode(**overrides: object) -> dict:
@@ -320,6 +365,16 @@ def _seed_monitor_project(
         "breakout_vs_prior60": 0.0,
         "limit_up_return_contribution_5d": 0.0,
         "target_atr_distance_20pct": 4.0,
+        "return_1d": 0.011,
+        "return_3d": 0.022,
+        "return_5d": 0.033,
+        "up_days_5d": 4.0,
+        "relative_continuity_5d": 0.8,
+        "largest_positive_day_contribution_5d": 0.4,
+        "sessions_since_largest_positive_day_5d": 2.0,
+        "return_ex_largest_positive_day_5d": 0.012,
+        "return_after_largest_positive_day_5d": 0.008,
+        "relative_market_after_largest_positive_day_5d": 0.006,
         "scenario_case_ids": "",
         "scenario_control_ids": "",
         "price_location_60d": 0.5,
@@ -856,8 +911,8 @@ def test_public_markdown_hides_conditional_event_but_keeps_internal_json(
         report_file=pending,
         project_root=tmp_path,
     )
-    markdown = Path(summary.markdown_file).read_text(encoding="utf-8")
     saved = json.loads(Path(summary.json_file).read_text(encoding="utf-8"))
+    markdown = Path(summary.markdown_file).read_text(encoding="utf-8")
 
     assert saved["alerts"]
     assert "银龙股份" not in markdown
@@ -1341,8 +1396,54 @@ def test_prepare_copies_relative_fields_and_filters_announcements_by_available_a
 
     assert episode["relative_market_5d"] == pytest.approx(0.03)
     assert episode["relative_industry_5d"] == pytest.approx(0.025)
+    assert episode["return_1d"] == pytest.approx(0.011)
+    assert episode["return_3d"] == pytest.approx(0.022)
+    assert episode["return_5d"] == pytest.approx(0.033)
+    assert episode["up_days_5d"] == pytest.approx(4.0)
+    assert episode["relative_continuity_5d"] == pytest.approx(0.8)
+    assert episode["largest_positive_day_contribution_5d"] == pytest.approx(0.4)
+    assert episode["sessions_since_largest_positive_day_5d"] == pytest.approx(2.0)
+    assert episode["return_ex_largest_positive_day_5d"] == pytest.approx(0.012)
+    assert episode["return_after_largest_positive_day_5d"] == pytest.approx(0.008)
+    assert episode["relative_market_after_largest_positive_day_5d"] == pytest.approx(0.006)
+    assert episode["price_location_60d"] == pytest.approx(0.5)
     assert [item["announcement_id"] for item in episode["new_announcements"]] == ["A1"]
     assert "new_official_event" in episode["attention_reasons"]
+
+
+def test_prepare_keeps_missing_causal_price_fields_as_none(tmp_path: Path) -> None:
+    trace = _single_selected_trace(
+        formation_date="2026-07-31",
+        action_date="2026-08-03",
+    )
+    archive = tmp_path / "local_archive/forward_selection"
+    archive.mkdir(parents=True)
+    _write_trace(archive / "research-trace-2026-07-31.json", trace)
+    fields = (
+        "return_1d",
+        "return_3d",
+        "return_5d",
+        "up_days_5d",
+        "relative_continuity_5d",
+        "largest_positive_day_contribution_5d",
+        "sessions_since_largest_positive_day_5d",
+        "return_ex_largest_positive_day_5d",
+        "return_after_largest_positive_day_5d",
+        "relative_market_after_largest_positive_day_5d",
+        "price_location_60d",
+    )
+    sessions = _seed_monitor_project(
+        tmp_path,
+        trace=trace,
+        session_count=1,
+        price_context_overrides={field: None for field in fields},
+    )
+
+    episode = _prepare(tmp_path, sessions[0])["episodes"][0]
+
+    assert {field: episode[field] for field in fields} == {
+        field: None for field in fields
+    }
 
 
 def test_prepare_detects_snapshot_changes_and_tail_candidates(tmp_path: Path) -> None:
@@ -2105,6 +2206,11 @@ def test_markdown_uses_plain_chinese_and_natural_review_sections(
             "why_reported": "测试提醒原因",
         }
     )
+    alert["episode_reviews"][0]["current_review"] = (
+        "这段上涨最有证据的解释是股票自身持续强于市场和行业，因为多个收盘推进，"
+        "而不是只随大盘或行业同步上涨，也没有新的公司事项足以解释。推荐时期待的"
+        "持续强势已经实现，目前更接近上涨后整理；未来一至三个交易日更可能震荡偏强。"
+    )
     pending = tmp_path / "markdown-pending.json"
     pending.write_text(
         json.dumps(
@@ -2119,6 +2225,7 @@ def test_markdown_uses_plain_chinese_and_natural_review_sections(
         report_file=pending,
         project_root=tmp_path,
     )
+    saved = json.loads(Path(summary.json_file).read_text(encoding="utf-8"))
     markdown = Path(summary.markdown_file).read_text(encoding="utf-8")
 
     assert "今天的市场情况" in markdown
@@ -2127,22 +2234,26 @@ def test_markdown_uses_plain_chinese_and_natural_review_sections(
     headings = (
         "推荐日期和当时判断",
         "到今天走到哪里",
-        "后来发生了什么",
-        "这些变化为什么支持或反对当时判断",
-        "现在怎么看",
-        "接下来关注什么",
+        "我的分析",
+        "接下来更可能怎样",
     )
     positions = [markdown.index(heading) for heading in headings]
     assert positions == sorted(positions)
     assert "当时看好它自身的价格表现连续强于市场和同类" in markdown
-    assert "原判断有一部分得到走势支持，但仍需继续观察。" in markdown
-    assert "部分预期已经发生，但仍有关键部分需要验证。" in markdown
+    assert "这段上涨最有证据的解释是股票自身持续强于市场和行业" in markdown
+    assert "部分预期已经发生，但仍有关键部分需要验证。" not in markdown
     assert "推荐后怎么走" not in markdown
-    assert "测试提醒原因" in markdown
-    assert "测试中的大盘变化" in markdown
-    assert "测试中的板块变化" in markdown
-    assert "测试中的个股变化" in markdown
-    assert "测试中的公司变化" in markdown
+    assert "测试提醒原因" not in markdown
+    assert "测试中的大盘变化" not in markdown
+    assert "测试中的板块变化" not in markdown
+    assert "测试中的个股变化" not in markdown
+    assert "测试中的公司变化" not in markdown
+    saved_alert = saved["alerts"][0]
+    assert saved_alert["market_change"] == "测试中的大盘变化"
+    assert saved_alert["sector_change"] == "测试中的板块变化"
+    assert saved_alert["stock_change"] == "测试中的个股变化"
+    assert saved_alert["company_change"] == "测试中的公司变化"
+    assert saved_alert["why_reported"] == "测试提醒原因"
     assert "市场方面" not in markdown
     assert "行业方面" not in markdown
     assert "公司方面" not in markdown
@@ -2150,6 +2261,11 @@ def test_markdown_uses_plain_chinese_and_natural_review_sections(
     assert "当前收盘较期间最高收盘回落+0.00%" not in markdown
     assert "测试中需要看到的继续走强事实" in markdown
     assert "测试中说明原判断不再成立的事实" in markdown
+    assert "未来1—3个交易日更可能震荡偏强" in markdown
+    assert "判断增强条件：" in markdown
+    assert "判断改变条件：" in markdown
+    assert "。。" not in markdown
+    assert "如果若" not in markdown
     assert "2026年8月3日开盘前被正式推荐" in markdown
     assert "当初看中它" not in markdown
     assert "冻结结论" not in markdown
@@ -2160,8 +2276,63 @@ def test_markdown_uses_plain_chinese_and_natural_review_sections(
         "engine_status", "确认条件", "失效条件", "基础情形",
         "原逻辑", "传播链", "价格确认", "弱环节", "状态",
         "和当时最接近的备选相比",
+        "后来发生了什么",
+        "这些变化为什么支持或反对当时判断",
+        "现在怎么看",
+        "接下来关注什么",
     ):
         assert forbidden not in markdown
+
+
+@pytest.mark.parametrize(
+    ("outlook", "expected"),
+    [
+        ("event_pending", "先等待事件或复牌后的实际交易反应"),
+        ("strengthening", "更可能继续走强"),
+        ("continuation_possible", "更可能震荡偏强"),
+        ("range_or_wait", "更可能横盘整理或等待新变化"),
+        ("weakening", "更可能继续回落或弱势震荡"),
+        ("overheated", "更可能高位剧烈波动并出现回吐"),
+        ("invalidated", "原判断已不成立，短期不再以继续走强为基准"),
+    ],
+)
+def test_markdown_renders_each_existing_outlook_without_punctuation_artifacts(
+    tmp_path: Path,
+    outlook: str,
+    expected: str,
+) -> None:
+    snapshot = _review_snapshot(day_number=3)
+    episode_id = snapshot["episodes"][0]["episode_id"]
+    review = _episode_review(episode_id)
+    review["current_review"] = "已比较主要解释与替代解释，并检验了推荐日的核心预期。"
+    snapshot_path, pending_path = _record_review_payload(
+        tmp_path,
+        snapshot,
+        review,
+    )
+    payload = json.loads(pending_path.read_text(encoding="utf-8"))
+    payload["alerts"][0].update(
+        outlook_1_3d=outlook,
+        confirmation_condition="收盘继续提高。",
+        invalidation_condition="若收盘持续走弱。",
+    )
+    pending_path.write_text(
+        json.dumps(payload, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    summary = record_forward_monitor(
+        snapshot_file=snapshot_path,
+        report_file=pending_path,
+        project_root=tmp_path,
+    )
+    markdown = Path(summary.markdown_file).read_text(encoding="utf-8")
+
+    assert expected in markdown
+    assert "判断增强条件：收盘继续提高。" in markdown
+    assert "判断改变条件：若收盘持续走弱。" in markdown
+    assert "。。" not in markdown
+    assert "如果若" not in markdown
 
 
 def test_markdown_names_the_second_trading_day_without_d_label(
@@ -2316,6 +2487,14 @@ def test_day_twenty_markdown_adds_final_review_section(tmp_path: Path) -> None:
     assert "期间最高收盘上涨20.00%" in markdown
     assert "期间最深下跌5.00%" in markdown
     assert markdown.count("前20个交易日结束后，原判断和具体股票都基本合理。") == 1
+    assert "前20个交易日最后结果：" in markdown
+    for heading in (
+        "推荐日期和当时判断",
+        "到今天走到哪里",
+        "我的分析",
+        "接下来更可能怎样",
+    ):
+        assert markdown.count(heading) == 1
     assert "前20天最终判断中，最薄弱的是" not in markdown
     assert "D20" not in markdown
 
@@ -2561,10 +2740,8 @@ def test_each_episode_has_its_own_maturity_and_final_review(
     for heading in (
         "推荐日期和当时判断",
         "到今天走到哪里",
-        "后来发生了什么",
-        "这些变化为什么支持或反对当时判断",
-        "现在怎么看",
-        "接下来关注什么",
+        "我的分析",
+        "接下来更可能怎样",
     ):
         assert markdown.count(heading) == 1
     assert "今天这只股票发生了什么" not in markdown
@@ -2916,14 +3093,10 @@ def test_markdown_hides_comparison_text_about_a_different_stock(
     assert "当时备选股" not in markdown
 
 
-@pytest.mark.parametrize(
-    ("day_number", "window"),
-    [(1, 1), (3, 3), (5, 5), (10, 5), (20, 20), (21, 20)],
-)
-def test_markdown_uses_deterministic_relative_window(
+@pytest.mark.parametrize("day_number", [1, 3, 5, 10, 20, 21])
+def test_markdown_does_not_repeat_internal_relative_fact_block(
     tmp_path: Path,
     day_number: int,
-    window: int,
 ) -> None:
     frozen = _final_review() if day_number > 20 else None
     snapshot = _review_snapshot(
@@ -2945,9 +3118,9 @@ def test_markdown_uses_deterministic_relative_window(
     )
     markdown = Path(summary.markdown_file).read_text(encoding="utf-8")
 
-    assert f"最近{window}个交易日" in markdown
-    if day_number == 10:
-        assert "从推荐以来" not in markdown
+    assert "这只股票比全市场" not in markdown
+    assert "比同一行业" not in markdown
+    assert "从推荐以来" not in markdown
 
 
 def test_markdown_keeps_raw_jargon_only_in_snapshot_json(tmp_path: Path) -> None:
@@ -3159,10 +3332,15 @@ def test_markdown_explicitly_says_industry_comparison_is_unknown(
     snapshot = _review_snapshot(day_number=10)
     snapshot["episodes"][0]["relative_industry_5d"] = None
     episode_id = snapshot["episodes"][0]["episode_id"]
+    review = _episode_review(episode_id)
+    review["current_review"] = (
+        "这段变化更可能来自股票自身，但相对行业数据缺失，无法比较这一解释与行业共同上涨；"
+        "推荐时最重要的预期只得到部分验证，目前方向暂时无法判断。"
+    )
     snapshot_path, pending_path = _record_review_payload(
         tmp_path,
         snapshot,
-        _episode_review(episode_id),
+        review,
     )
 
     summary = record_forward_monitor(
@@ -3172,8 +3350,8 @@ def test_markdown_explicitly_says_industry_comparison_is_unknown(
     )
     markdown = Path(summary.markdown_file).read_text(encoding="utf-8")
 
-    assert "最近5个交易日" in markdown
-    assert "同一行业的对照数据不足" in markdown
+    assert "相对行业数据缺失" in markdown
+    assert "同一行业的对照数据不足" not in markdown
 
 
 def test_pending_final_review_persists_until_a_selected_episode_is_saved(

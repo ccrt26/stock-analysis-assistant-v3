@@ -889,10 +889,7 @@ def _render_markdown(
         reviews = {item.episode_id: item for item in alert.episode_reviews}
         original_paragraphs: list[str] = []
         progress_paragraphs: list[str] = []
-        later_paragraphs: list[str] = []
-        meaning_paragraphs: list[str] = []
-        assessment_paragraphs: list[str] = []
-        final_paragraphs: list[str] = []
+        analysis_paragraphs: list[str] = []
         multiple = len(episode_ids) > 1
         for episode_id in episode_ids:
             episode = episodes[episode_id]
@@ -919,40 +916,21 @@ def _render_markdown(
             )
             progress_paragraphs.append(f"{prefix}{progress}")
 
-            later = _render_relative_performance(episode)
+            analysis = review.current_review
             if alert.alert_type == "late_activation" and day_number > 20:
-                later += " 这只股票在前20个交易日结束后才开始明显走强，因此不会改变前20天的原评价结果。"
-            later_paragraphs.append(f"{prefix}{later}")
-
-            meaning_paragraphs.append(f"{prefix}{review.current_review}")
-            assessment_paragraphs.append(
-                f"{prefix}{_render_current_assessment(review.current_assessment)}"
-            )
+                analysis = (
+                    f"{analysis.rstrip('。！？!? ；; ')}。"
+                    "这只股票在前20个交易日结束后才开始明显走强，"
+                    "因此不会改变前20天的原评价结果。"
+                )
             final = review.final_twenty_day_review
             if final is not None:
-                final_paragraphs.append(
-                    f"{prefix}{_render_final_twenty_day_review(episode, final)}"
+                analysis = (
+                    f"{analysis.rstrip('。！？!? ；; ')}。"
+                    "前20个交易日最后结果："
+                    f"{_render_final_twenty_day_review(episode, final)}"
                 )
-
-        why = alert.why_reported.rstrip("。！？!? ；; ")
-        changes: list[str] = []
-        for value in (
-            alert.company_change,
-            alert.sector_change,
-            alert.stock_change,
-            alert.market_change,
-        ):
-            cleaned = value.rstrip("。！？!? ；; ")
-            if (
-                cleaned
-                and cleaned not in {"无明显变化", "无新公告"}
-                and cleaned != why
-                and cleaned not in changes
-            ):
-                changes.append(cleaned)
-        recent = f"今天提到它，是因为{why}。"
-        if changes:
-            recent += f" 最近还看到：{'；'.join(changes)}。"
+            analysis_paragraphs.append(f"{prefix}{analysis}")
 
         lines.extend(
             [
@@ -966,28 +944,13 @@ def _render_markdown(
                 "",
                 *progress_paragraphs,
                 "",
-                "**后来发生了什么**",
+                "**我的分析**",
                 "",
-                *later_paragraphs,
+                *analysis_paragraphs,
                 "",
-                recent,
+                "**接下来更可能怎样**",
                 "",
-                "**这些变化为什么支持或反对当时判断**",
-                "",
-                *meaning_paragraphs,
-                "",
-                "**现在怎么看**",
-                "",
-                *assessment_paragraphs,
-                "",
-                *final_paragraphs,
-                *([""] if final_paragraphs else []),
-                "**接下来关注什么**",
-                "",
-                (
-                    f"接下来重点看：{alert.confirmation_condition}。"
-                    f"如果{alert.invalidation_condition}，说明推荐时的核心判断已经明显减弱。"
-                ),
+                _render_public_outlook(alert),
                 "",
             ]
         )
@@ -1012,6 +975,28 @@ def _render_current_assessment(value: str) -> str:
         "insufficient_evidence": "现有资料不足，暂时无法可靠评价当初判断。",
     }
     return labels[value]
+
+
+def _render_public_outlook(alert: ForwardMonitorAlertV2) -> str:
+    baselines = {
+        "event_pending": (
+            "未来1—3个交易日先等待事件或复牌后的实际交易反应，"
+            "当前方向暂时无法判断"
+        ),
+        "strengthening": "未来1—3个交易日更可能继续走强",
+        "continuation_possible": "未来1—3个交易日更可能震荡偏强",
+        "range_or_wait": "未来1—3个交易日更可能横盘整理或等待新变化",
+        "weakening": "未来1—3个交易日更可能继续回落或弱势震荡",
+        "overheated": "未来1—3个交易日更可能高位剧烈波动并出现回吐",
+        "invalidated": "原判断已不成立，短期不再以继续走强为基准",
+    }
+    confirmation = alert.confirmation_condition.rstrip("。！？!? ；; ")
+    invalidation = alert.invalidation_condition.rstrip("。！？!? ；; ")
+    return (
+        f"{baselines[alert.outlook_1_3d]}。"
+        f"判断增强条件：{confirmation}。"
+        f"判断改变条件：{invalidation}。"
+    )
 
 
 def _render_final_twenty_day_review(
@@ -1759,6 +1744,27 @@ def _price_fields(row: dict[str, Any] | None) -> dict[str, Any]:
         "breakout_vs_prior60": "breakout_vs_prior60",
         "limit_up_return_contribution_5d": "limit_up_return_contribution_5d",
         "target_atr_distance_20pct": "target_atr_distance_20pct",
+        "return_1d": "return_1d",
+        "return_3d": "return_3d",
+        "return_5d": "return_5d",
+        "up_days_5d": "up_days_5d",
+        "relative_continuity_5d": "relative_continuity_5d",
+        "largest_positive_day_contribution_5d": (
+            "largest_positive_day_contribution_5d"
+        ),
+        "sessions_since_largest_positive_day_5d": (
+            "sessions_since_largest_positive_day_5d"
+        ),
+        "return_ex_largest_positive_day_5d": (
+            "return_ex_largest_positive_day_5d"
+        ),
+        "return_after_largest_positive_day_5d": (
+            "return_after_largest_positive_day_5d"
+        ),
+        "relative_market_after_largest_positive_day_5d": (
+            "relative_market_after_largest_positive_day_5d"
+        ),
+        "price_location_60d": "price_location_60d",
     }
     fields = {target: _number(row.get(source)) for target, source in mapping.items()}
     fields["scenario_case_ids"] = _ids(row.get("scenario_case_ids"))
