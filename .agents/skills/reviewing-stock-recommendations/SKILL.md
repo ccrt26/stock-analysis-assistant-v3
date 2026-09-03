@@ -15,7 +15,7 @@ description: Use only after a stock was explicitly recommended, to compare the d
 - 推荐日期和当时完整理由；
 - 推荐后的价格与成交事实；
 - 市场、行业、公司和价格四个 Skill 的 review 结果；
-- 已有 `ForwardEpisodeReviewV1` 字段。
+- `previous_daily_formal_review` 和已有 `ForwardEpisodeReviewV1` 字段。
 
 它负责把这些事实合成一篇以观点更新为中心的复盘短评，而不是展示固定推理步骤。内部仍按以下顺序完成判断：
 
@@ -24,6 +24,26 @@ description: Use only after a stock was explicitly recommended, to compare the d
 ```
 
 这里判断的是当前最有证据的解释，不声称证明唯一真实原因。
+
+## 每日简评与主动跟踪
+
+每个仍为 `active` 的正式推荐 episode，在每个已收盘交易日都生成一条简短 AI 复盘，写入 `DailyFormalReviewV1`。日评必须明确：`current_path` 是向上、横盘、向下还是无法评价；当前是否仍在原推荐预期内；相对上一交易日的观点是否实质变化；未来1—3个交易日更可能怎样及原因；是否继续主动跟踪。
+
+普通无变化日也必须有日评，但只写增量，一两句说清方向和理由即可。D1、D3、D5、D10、D20不决定是否有日评，只决定当天加深什么：
+
+- D1 评价第一天实际反应和原推荐能否执行；
+- D3 评价早期持续性；
+- D5 形成第一周小结；
+- D10 形成中期小结；
+- D20 形成最终复盘，保存并冻结 `FrozenTwentyDayReviewV1`。
+
+D25、D30只适用于已经明确延长的记录；只写D20以后的新增表现，不改写D20，D30正式完成。
+
+只有原推荐最重要的判断被事实否定，或原推荐无法执行，才能停止主动跟踪。前者必须使用 `current_assessment=contradicted`，后者必须使用 `current_weak_or_failed_link=execution` 且没有可靠入口价格。weakening 不能单独停止；单日下跌、横盘、数据暂缺、未达到20%、普通市场回落或短期判断偏下，也不能单独停止。达到20%仍继续记录到D20。
+
+停止主动跟踪后，次日起不再生成普通每日 AI 复盘，也不占8只详细复盘名额；历史不删除，程序继续记录确定性价格到D20，并在D20重新生成日评和最终结论。同一股票以后再次推荐时使用新的 episode，不恢复旧记录。
+
+当天全部日评完成后，再选择8只详细复盘；若当天需复盘的不同正式推荐股票少于8只，则全部详细复盘。8只依次优先：今日停止、D20、观点明显变化、达到目标或显著回撤、重要公司事项、D10、D5、D3、D1；剩余名额按最长时间未详细复盘轮换补足。详细复盘可以更长，但与每日简评的当前判断、主要解释、薄弱或失败环节、未来方向、方向理由及D20结论必须一致。
 
 ## 观点更新稿
 
@@ -62,7 +82,7 @@ description: Use only after a stock was explicitly recommended, to compare the d
 
 ## 上一轮观点的真实锚点
 
-优先读取本记录自己的：
+优先读取本记录自己的 `previous_daily_formal_review`；历史尚无每日简评时，才兼容读取 `previous_episode_review`。两者都只取本 episode 的：
 
 - `previous_episode_review.current_assessment`；
 - `previous_episode_review.best_supported_explanation`；
@@ -71,7 +91,7 @@ description: Use only after a stock was explicitly recommended, to compare the d
 
 先比较前三个结构化字段，再读取上一轮 `current_review` 的第一句并识别它的中心问题。只有结构化判断、主要解释、原推荐的关键一环，或同一粗枚举下的具体观点发生实质变化时，才公开写观点改变。仅仅换了一种措辞，不叫观点改变。
 
-没有 `previous_episode_review` 时，内部只与原推荐判断比较，通常不必写“这是首次复盘”；只有没有上一轮观点本身会影响理解时才说明。不得借用同一股票的其他记录、旧日报自由文本或 `previous_monitor_state` 伪造上轮观点。
+没有 `previous_daily_formal_review` 或兼容的 `previous_episode_review` 时，内部只与原推荐判断比较，通常不必写“这是首次复盘”；只有没有上一轮观点本身会影响理解时才说明。不得借用同一股票的其他记录、旧日报自由文本或 `previous_monitor_state` 伪造上轮观点。
 
 ## 事实追溯与推断边界
 
@@ -126,7 +146,7 @@ description: Use only after a stock was explicitly recommended, to compare the d
 - 最近1、3、5日字段只有在观察天数覆盖相应窗口时，才能称为完整的推荐后表现；D1—D4 的五日字段只能作为近期背景。
 - 不使用“冻结时点、冻结结论、原逻辑、传播链、正常双向成交”等用户难以理解的词。
 - 必须使用具体推荐日期，并以正式推荐记录的 `action_date` 为准。
-- 不新增定时任务，不新增报告模型或 schema。
+- 不新增定时任务；除既定 `daily-formal-reviews-v1` 日评账本外，不增加其他报告模型或 schema。
 
 ## 按观点变化和复盘类型控制深度
 
@@ -145,7 +165,7 @@ D20 是唯一允许串起完整过程的复盘。`current_review` 当天仍只�
 
 ## 输出
 
-继续填写现有 `ForwardEpisodeReviewV1`；同时在 `ForwardMonitorAlertV2` 填写新增的可选文字字段，不增加报告版本，也不增加复盘枚举、评分或概率。
+先为 snapshot 的每个 `daily_review_episode_ids` 填写一条 `DailyFormalReviewV1`，统一保存为 `DailyFormalReviewLedgerV1`；再为当天选中的重点股票填写现有 `ForwardEpisodeReviewV1`，并在 `ForwardMonitorAlertV2` 保存完整展望。`monitor-report`只保存重点详评，不保存其余每日简评；不增加报告版本、评分或概率。
 
 `original_reason_plain_language`：
 只通俗改写当时原因，不加入后来事实，也不重复程序已生成的完整推荐日期句。

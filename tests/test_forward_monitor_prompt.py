@@ -22,10 +22,12 @@ def test_forward_monitor_prompt_limits_ai_work_and_report_size() -> None:
     assert "每天只运行一次" in text
     assert "市场 Skill 每天只分析一次" in text
     assert "程序处理全部跟踪记录" in text
-    assert "价格 Skill 只解释" in text
-    assert "详细提醒最多8只不同股票" in text
+    assert "每个 active 正式推荐 episode" in text
+    assert "详细复盘恰好8只不同股票" in text
+    assert "不足8只时全部详细复盘" in text
     assert "不创建新的 Scheduled Task" in text
-    assert "不得把全部股票交给 AI" in text
+    assert "不得把全部股票交给 AI" not in text
+    assert "AI 只研究今天确实发生变化的股票" not in text
     assert "不得打分" in text
     assert (
         "这只股票在前20个交易日结束后才开始明显走强，因此不会改变前20天的原评价结果"
@@ -35,15 +37,14 @@ def test_forward_monitor_prompt_limits_ai_work_and_report_size() -> None:
     assert "ForwardEpisodeReviewV1" in text
     assert "FrozenTwentyDayReviewV1" in text
     priorities = [
-        "pending_final_review", "data_problem", "invalidated", "new_event", "first_reaction",
-        "actionable_watch", "strengthening", "overheated", "target_hit",
-        "late_activation", "checkpoint",
+        "1. 今日停止", "2. D20", "3. 观点明显变化", "4. 达到20%",
+        "5. 重要公司事项", "6. D10", "7. D5", "8. D3", "9. D1",
     ]
     priority_block = text.split(
-        "超过8只候选时，内部消息排序仍为：",
+        "8只详细复盘按以下顺序选择：",
         maxsplit=1,
     )[1]
-    positions = [priority_block.index(f"`{value}`") for value in priorities]
+    positions = [priority_block.index(value) for value in priorities]
     assert positions == sorted(positions)
 
 
@@ -100,9 +101,12 @@ def test_forward_monitor_prompt_uses_previous_state_and_strict_report_contract()
 
     assert "previous_monitor_state" in text
     assert "previous_episode_review" in text
-    assert "required_final_review_episode_ids" in text
-    assert "状态延续" in text
-    assert "不得机械维持" in text
+    assert "previous_daily_formal_review" in text
+    assert "daily_review_episode_ids" in text
+    assert "daily-formal-reviews-v1" in text
+    assert "record-daily-formal-reviews" in text
+    assert "routine_detail" in text
+    assert "不得借用同一股票另一 episode 的观点" in text
     for mode in (
         "broad_sustained_participation",
         "one_day_repair",
@@ -125,7 +129,7 @@ def test_forward_monitor_prompt_uses_previous_state_and_strict_report_contract()
     assert "第20个交易日必须首次形成" in text
     assert "当前：D" not in text
     assert "roles" in text
-    assert "该股票全部 attention episode" in text
+    assert "该股票当天全部正式简评 episode" in text
     assert "每条记录分别复盘" in text
     assert "final_twenty_day_review" in text
     assert "第21至第30个交易日不得改写" in text
@@ -134,11 +138,52 @@ def test_forward_monitor_prompt_uses_previous_state_and_strict_report_contract()
     assert "真实成对价格路径" in text
     assert "正式推荐股票的走势复盘" in text
     assert "`confirmed_active` 和 `legacy_v1_not_rewritten` 两类正式推荐记录" in text
-    assert "MANDATORY_FORMAL_REVIEW_REASONS" in text
-    assert "仅由 `new_official_event` 触发" in text
-    assert "不要求凑满8只" in text
-    assert "不得由可选公告候选或比较记录挤占" in text
+    assert "detailed_review_stock_count" in text
+    assert "最长时间未详细复盘" in text
     assert "比较记录的 `final_twenty_day_review` 始终为空" in text
+
+
+def test_daily_review_prompt_defines_tracking_and_checkpoint_outputs() -> None:
+    text = Path("ops/forward-monitor-prompt.md").read_text(encoding="utf-8")
+
+    for phrase in (
+        "keep_active_tracking",
+        "stop_active_tracking",
+        "complete_observation",
+        "historical_not_applied",
+        "weakening 不能单独",
+        "单日下跌",
+        "横盘",
+        "数据暂缺",
+        "未达到20%",
+        "D1 评价第一天实际反应",
+        "D3 评价早期持续性",
+        "D5 形成第一周小结",
+        "D10 形成中期小结",
+        "D20 形成最终复盘",
+        "D1、D3、D5、D10、D20 不决定是否生成每日简评",
+    ):
+        assert phrase in text
+
+
+def test_review_skill_requires_daily_briefs_and_cautious_tracking_exit() -> None:
+    text = Path(
+        ".agents/skills/reviewing-stock-recommendations/SKILL.md"
+    ).read_text(encoding="utf-8")
+
+    for phrase in (
+        "每个已收盘交易日",
+        "current_path",
+        "是否仍在原推荐预期内",
+        "未来1—3个交易日",
+        "weakening 不能单独",
+        "原推荐最重要的判断被事实否定",
+        "无法执行",
+        "停止主动跟踪后",
+        "D20",
+        "8只详细复盘",
+    ):
+        assert phrase in text
 
 
 def test_public_review_only_lists_explicit_formal_recommendations() -> None:

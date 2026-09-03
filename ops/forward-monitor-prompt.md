@@ -1,6 +1,6 @@
 # 现有 09:05 每日任务中的股票跟踪步骤
 
-这一步每天只运行一次，属于现有 09:05 任务，不创建新的 Scheduled Task，也不新增定时任务。程序先记录全部股票，AI 只研究今天确实发生变化的股票。面向用户时按“推荐日期和当时判断、到今天走到哪里、我的分析、接下来更可能怎样”说明，不展示内部字段名、英文值或交易日缩写。
+这一步每天只运行一次，属于现有 09:05 任务，不创建新的 Scheduled Task，也不新增定时任务。程序处理全部跟踪记录；每个 active 正式推荐 episode 在每个已收盘交易日都必须生成一条简短 AI 复盘，再从当日需复盘的正式推荐中选最多8只做详细复盘。面向用户时先展示全部主动推荐的今日结论，再按“推荐日期和当时判断、到今天走到哪里、我的分析、接下来更可能怎样”展开重点股票，不展示内部字段名、英文值或交易日缩写。
 
 ## 1. 程序准备全部跟踪记录
 
@@ -12,32 +12,40 @@
   --as-of <带时区截止时间>
 ```
 
-程序处理全部跟踪记录，并生成 `local_archive/forward_monitor/snapshot-<analysis_date>.json`。不得把全部股票交给 AI，不得建立人工维护的第二套股票池，不得打分。
+程序处理全部跟踪记录，并生成 `local_archive/forward_monitor/snapshot-<analysis_date>.json`。snapshot 的 `daily_review_episode_ids` 是当天必须逐条简评的正式推荐记录，`evaluation_only_episode_ids` 是已停止普通日评但仍保留D20评价的记录，`detailed_review_candidate_codes` 是当天可进入详细复盘的股票。不得建立人工维护的第二套股票池，不得打分。
 
 同一份市场 Skill 结果同时供选后跟踪和当天新选股使用，市场 Skill 每天只分析一次。
 
-## 2. 只研究当天重点股票
+## 2. 先生成全部正式推荐的每日简评
 
-价格 Skill 只解释 snapshot 中 `attention_reasons` 非空的不同股票，程序已经完成全部股票的价格计算。
+只处理 snapshot 的 `daily_review_episode_ids`。每个 ID 恰好一条 `DailyFormalReviewV1`，总体写入 `DailyFormalReviewLedgerV1`，版本固定为 `daily-formal-reviews-v1`。conditional、比较股、落选股、未决股、evaluation_only 普通日期和 completed 记录不得进入。
 
-板块 Skill 只在以下情况使用，并且只看重点股票真实涉及的板块：
+每条简评先读取本 episode 的 `previous_daily_formal_review`；历史兼容时可读取 `previous_episode_review`，`previous_monitor_state` 只用于旧 V1 记录，不得借用同一股票另一 episode 的观点。普通无变化日仍要写短评，通常只用一两句说明当前向上、横盘、向下或无法评价，是否仍在原推荐预期内、与上一日相比有无实质变化、未来1—3个交易日更可能怎样及原因。只有节点、重大变化或重要事项才加深。
 
-- 原入选依据是 `sector_broad_diffusion` 或 `sector_leader_cluster`；
-- 出现 `sector_state_changed`；
-- 股票进入当天重点提醒。
+先生成：
 
-公司 Skill 只在以下情况使用：
+```text
+local_archive/forward_monitor/pending-daily-formal-reviews-<analysis_date>.json
+```
 
-- 出现 `new_official_event`；
-- 原入选依据是 `fresh_event_pending` 或 `event_repricing_confirmed`；
-- 到达 D1、D3、D5、D10、D20 固定检查日；
-- 公司事实可能推翻最初判断。
+然后记录：
 
-公告正文继续按 V4 规则按需读取，不批量下载。原五个 Skill 继续负责选股；复盘时，市场、板块、公司和价格四个专业 Skill 的 `phase: review` 只提供各自事实与解释，不重新推荐股票。`reviewing-stock-recommendations` 接收具体推荐日期、当时完整理由、四路 review 结果和已有 `ForwardEpisodeReviewV1`，负责跨时间综合和最终用户文字；总控只检查记录一致性，不重复形成第二套复盘方法。公司事实是否仍成立，和股价成交是否实际支持该事实，必须分开写。不得改写原始完整判断、当时理由或前20个交易日的原评价结果。
+```bash
+./.venv/bin/python -m stock_analyzer.ops.forward_monitor \
+  record-daily-formal-reviews \
+  --snapshot-file local_archive/forward_monitor/snapshot-<analysis_date>.json \
+  --review-file local_archive/forward_monitor/pending-daily-formal-reviews-<analysis_date>.json
+```
 
-V2/V3 的每条跟踪记录优先查看 snapshot 中按本记录编号保存的 `previous_episode_review`。判断观点是否改变时，先比较 `previous_episode_review.current_assessment`、`previous_episode_review.best_supported_explanation` 和 `previous_episode_review.current_weak_or_failed_link`，再读取上一轮 `current_review` 的第一句并识别它的中心问题。仅仅换了一种措辞，不叫观点改变。不得借用同一股票另一条记录的上次复盘；`previous_monitor_state` 只用于历史 V1 报告兼容。判断今天的状态时，明确区分状态延续、正在转强后失效、正在转强后过热、等待确认后转强和其他真实变化；上次状态只用于比较，不得机械维持。
+成功后正式文件是 `local_archive/forward_monitor/daily-formal-reviews-<analysis_date>.json`。`live` 记录必须作出 `keep_active_tracking`、`stop_active_tracking` 或 `complete_observation`；`copied_live_archive` 和 `backfill` 只能使用 `historical_not_applied`。
 
-`reviewing-stock-recommendations` 生成的是观点更新稿，不是推理步骤展示。有 `previous_episode_review` 时必须说明与上一次复盘比较后观点维持还是改变及原因。没有上一轮记录时只与原推荐判断对照，通常不必写“这是首次复盘”；只有没有上一轮观点本身会影响理解时才说明，不得借用 `previous_monitor_state` 或其他记录伪造上次观点。
+只有两种情况允许 `stop_active_tracking`：原推荐最重要的判断被后续事实否定，且 `current_assessment=contradicted`；或者原推荐无法执行，`current_weak_or_failed_link=execution` 且 `entry_open` 为空。weakening 不能单独停止；单日下跌、横盘、数据暂缺、未达到20%、普通市场回落或短期展望偏下也不能单独停止。达到20%不提前结束，继续记录到D20。
+
+停止主动跟踪后，次日起不再生成普通每日 AI 简评，也不占详细复盘名额；历史不删除，程序仍保存确定性价格到D20，D20重新进入日评并形成最终结论。新推荐必须建立新 episode，不能恢复或覆盖旧 episode。
+
+D1、D3、D5、D10、D20 不决定是否生成每日简评，只决定当天加深什么：D1 评价第一天实际反应与可执行性；D3 评价早期持续性；D5 形成第一周小结；D10 形成中期小结；D20 形成最终复盘并默认 `complete_observation`。D25/D30只用于已经明确延长的记录，且不得改写D20；D30必须完成。
+
+公告正文继续按 V4 规则按需读取，不批量下载。原五个 Skill 继续负责选股；复盘时，市场、板块、公司和价格四个专业 Skill 的 `phase: review` 只提供各自事实与解释，不重新推荐股票。`reviewing-stock-recommendations` 负责跨时间综合；总控只检查记录一致性。公司事实是否仍成立，和股价成交是否实际支持该事实，必须分开写。不得改写原始完整判断、当时理由或前20个交易日的冻结结论。
 
 ### 数据缺口只补一次
 
@@ -62,7 +70,7 @@ V2/V3 的每条跟踪记录优先查看 snapshot 中按本记录编号保存的 
 
 ## 3. 生成走势复盘日报
 
-生成严格符合 `DailyForwardMonitorReportV2` 的新日报。一只股票仍只有一条提醒，但其 `episode_reviews` 必须为每条记录分别复盘，且每条使用一个 `ForwardEpisodeReviewV1`；前20个交易日的最终结论使用 `FrozenTwentyDayReviewV1`：
+完成全部每日简评并正式记录后，生成严格符合 `DailyForwardMonitorReportV2` 的重点详评日报。`detailed_review_stock_count` 等于当天需简评的不同正式推荐股票数与8之间的较小值；新日报必须恰好包含这个数量。不足8只时全部详细复盘，达到或超过8只时详细复盘恰好8只不同股票。一只股票在详细区只出现一次，同股多个正式 episode 的每条记录分别复盘；每条使用一个 `ForwardEpisodeReviewV1`，前20个交易日的最终结论使用 `FrozenTwentyDayReviewV1`：
 
 ```text
 local_archive/forward_monitor/pending-report-<analysis_date>.json
@@ -72,10 +80,9 @@ local_archive/forward_monitor/pending-report-<analysis_date>.json
 
 - `market_propagation_mode` 只能是 `broad_sustained_participation`、`one_day_repair`、`sector_rotation`、`concentrated_speculation`、`weak_or_fragmented`、`unclear` 之一；
 - `pool_summary` 和 `unreported_attention_count` 必须与 snapshot 完全一致；
-- 每只提醒的 `episode_ids` 必须包含该股票全部 attention episode，不得只取子集；`roles`、交易日序号和原始完整判断必须从这些记录完整得出。
-- `roles` 必须非空、去重且只允许 `selected`、`comparator`，固定按 `selected` 后 `comparator` 排列。同一股票同时有两种记录时仍只写一条提醒，向用户分别说明当时是推荐股还是比较对象。
-- `episode_reviews` 中的 `episode_id` 必须与该股票全部 attention episode 完全一致，不得缺少、重复或多出；不得用该股票最大交易日序号替其他记录结案。
-- snapshot 的 `required_final_review_episode_ids` 必须全部出现在日报的 `episode_reviews` 中；这些记录优先进入最多8只的详细提醒，不能留到未详细展示数量中。
+- 每只详评的 `episode_ids` 必须包含该股票当天全部正式简评 episode，不得混入 conditional、比较或落选记录；`roles`、交易日序号和原始完整判断必须从这些记录完整得出。
+- `episode_reviews` 中的 `episode_id` 必须与该股票当天全部正式简评 episode 完全一致，不得缺少、重复或多出；不得用该股票最大交易日序号替其他记录结案。
+- `alert_type=routine_detail` 表示当天没有重大异常，但按轮换进入详细复盘；它不是第二套关注池。
 - 每条记录的 `ForwardEpisodeReviewV1` 只填写通俗原因与风险、当前判断、现有证据最支持的解释、当前最弱环节、当前复盘、成对比较解释和 `final_twenty_day_review`，不增加分数、概率或更多分类。
 - 每只新提醒必须填写 `outlook_reason_plain_language`，用当前最重要的1—3项事实说明未来1—3个交易日为什么更可能向上、横盘、向下或暂时无法判断。先作出方向判断，不写“如果……就……”，不重复两个验证条件，也不照抄整段 `current_review`；它必须与 `outlook_1_3d`、`current_assessment` 和 `current_review` 一致。没有可交易价格或证据冲突时可以说明目前无法判断方向，并明确缺少什么。
 - best_supported_explanation 等枚举继续在内部填写；current_review 才是公开分析核心，要写成连贯的观点更新短评，不向用户解释内部字段。why_reported 只说明今天为什么复盘，不参与涨跌归因，不直接展示。
@@ -84,13 +91,13 @@ local_archive/forward_monitor/pending-report-<analysis_date>.json
 - 比较记录的 `final_twenty_day_review` 始终为空；`conditional_event` 也始终为空，二者都不能写成正式推荐的最终结论。
 - `original_reason_plain_language` 和 `original_key_risk_plain_language` 只通俗改写当时已经冻结的意思，不加入后来事实。Markdown 只展示这两个字段，不直接展示原始理由和原始风险。
 - 原始完整判断缺失时，内部保留 `missing_original_research_thesis`，面向用户明确说明只能复盘价格表现，不能补写当时理由。
-- 只在代码或完整名称能唯一严格匹配时逐只比较当时最接近但未推荐的股票。必须使用 snapshot 中的真实成对价格路径，先展示两边的涨跌、期间最深跌幅和期间最大收盘回撤，再解释。路径不完整、窗口不一致或无法匹配时用固定说明，不展示 AI 自由比较文字。
+- 内部仍可使用真实成对价格路径帮助判断最初是否选对股票，但比较记录不进入本轮重点详评，不在用户报告展示替代股名称或表现。
 - 价格段落按当前所处交易日显示最近1、3、5或20个交易日的相对市场和相对行业数字；字段缺失时明确未知，不把这个窗口写成“从推荐以来”。
 - D1—D4 的五日收益、连续性和最大上涨日字段可能跨越形成日前后，只能作为近期背景，不得冒充为完整的推荐后五日路径。
 
 ### 内部日报和用户复盘分开处理
 
-snapshot、原始事实与 trace 是内部完整记录，继续保存全部推荐、比较、待确认事件、公告候选、成对价格和 attention 原因。`DailyForwardMonitorReportV2` 只保存 AI 实际选入的最多8只提醒以及 `unreported_attention_count`；仅由公告触发的候选没有进入日报，不等于从 snapshot、原始事实或 trace 删除。不得为了让最终文字更短而删掉内部事实或改变记录合同。
+snapshot、原始事实与 trace 是内部完整记录，继续保存全部推荐、比较、待确认事件、公告候选、成对价格和 attention 原因。`daily-formal-reviews-<analysis_date>.json` 保存当天全部正式简评；`DailyForwardMonitorReportV2` 只保存当天选出的重点详评，最多8只，不保存未进入正式推荐的事件线索或比较记录。它们仍留在 snapshot、原始事实与 trace 中，不等于删除。不得为了让最终文字更短而删掉内部事实或改变记录合同。
 
 ### 正式推荐股票的走势复盘
 
@@ -111,7 +118,7 @@ snapshot、原始事实与 trace 是内部完整记录，继续保存全部推�
 - 普通观察股
 - 内部关注股
 
-待确认事件可以保留在内部日报，但不得出现在“正式推荐股票的走势复盘”中，也不得单列给用户凑内容。面向用户不展示比较股名称，也不显示“还有多少内部股票未展开”。同一股票同时有正式推荐和比较记录时，对外只讲正式推荐记录；内部日报仍完整保存全部记录。
+待确认事件保留在 snapshot、原始事实与 trace，但不得写入 `daily-formal-reviews` 或 `monitor-report`，也不得出现在“正式推荐股票的走势复盘”中，并且不得单列给用户凑内容。面向用户不展示比较股名称，也不显示“还有多少内部股票未展开”。同一股票同时有正式推荐和比较记录时，对外只讲正式推荐 episode。
 
 ### 复盘不是行情播报
 
@@ -194,28 +201,20 @@ outlook_1_3d 保留现有七类，公开方向固定为：strengthening“未来
 - 不从量价猜测机构、主力、游资或账户身份；没有证据的原因就说未知。
 - 只保留必要的一次时间边界说明；不提供收益承诺、仓位、自动交易、止盈或止损建议。
 
-详细提醒最多8只不同股票。`MANDATORY_FORMAL_REVIEW_REASONS` 包含 `pending_final_review`、`checkpoint`、`target_hit_first_time`、`relative_state_changed`、`scenario_changed`、`breakout_changed`、`sector_state_changed`、`late_activation_candidate`、`overheat_candidate` 和 `data_problem`，故意不包含 `new_official_event`。每条记录按自己的 attention 原因判断，不得借用同一股票另一条比较记录或正式记录的原因。
+8只详细复盘按以下顺序选择：
 
-mandatory 正式重点不超过8只时必须全部进入详细提醒；超过8只时，8个位置只能先由 mandatory 正式重点使用，不得由可选公告候选或比较记录挤占。仅由 `new_official_event` 触发的正式股票是可选公告候选：公司 Skill 与复盘 Skill 确认公告实质改变原推荐、执行状态、控制权核心安排、收入、利润或现金流判断时可以进入；例行披露、重复进展和没有新条款的配套文件不进入。不使用公告标题关键词替代语义判断，也不要求凑满8只。
+1. 今日停止主动跟踪；
+2. D20最终复盘；
+3. 观点明显变化；
+4. 达到20%或出现显著回撤；
+5. 重要公司事项；
+6. D10；
+7. D5；
+8. D3；
+9. D1；
+10. 剩余名额按最长时间未详细复盘轮换补足。
 
-没有可靠入口价格的正式记录，首次确认无法执行或数据限制变化时仍以 `data_problem` 提醒；D20 仍由 `pending_final_review` 强制结案。若限制完全未变，D3、D5、D10、D25、D30 普通检查点不再单独占用详细提醒名额；后来出现可观察交易或限制发生真实变化时重新进入候选。
-
-超过8只候选时，内部消息排序仍为：
-
-
-1. `pending_final_review`
-2. `data_problem`
-3. `invalidated`
-4. `new_event`
-5. `first_reaction`
-6. `actionable_watch`
-7. `strengthening`
-8. `overheated`
-9. `target_hit`
-10. `late_activation`
-11. `checkpoint`
-
-这只是内部提醒顺序，不是投资排名。其余重点股票只留在 `unreported_attention_count` 和 `routine_summary`，不得展示给用户。
+这只是复盘资源顺序，不是投资排名。不得按股票代码、涨幅、推荐顺序、行业或发动机机械挑选，不建立分数或权重。同级高优先事项超过8只时，AI只选择对原推荐判断影响最大的8只，其他仍保留当天简评；任何股票都不能因为未进详细区而缺少每日简评。
 
 D21—D30 的 `late_activation` 面向用户必须写成“这只股票在前20个交易日结束后才开始明显走强，因此不会改变前20天的原评价结果”。达到原目标只说明已达到，仍记录到 D20，不自动生成新的买入建议。提前判断失效后不再放入普通详细提醒，但程序仍记录到 D20。
 
@@ -227,4 +226,4 @@ D21—D30 的 `late_activation` 面向用户必须写成“这只股票在前20�
   --report-file local_archive/forward_monitor/pending-report-<analysis_date>.json
 ```
 
-成功后只向用户展示：今天的市场情况、正式推荐股票的走势复盘和仍开放的正式推荐股票数量。不要展示待确认事件、比较股、普通观察股、最近替代股、内部关注股票及其数量；没有正式推荐需要复盘时，直接说明“今天没有被明确推荐过、同时又出现需要说明变化的股票”，不得用其他股票补位。
+成功后向用户展示：今天的市场情况；“所有主动推荐的今日结论”简表；“今天重点复盘的8只股票”（不足8只按实际数量改标题）；主动跟踪、仅保留评价和已完成三类数量；以及当天明确推荐的股票。不要展示待确认事件、比较股、普通观察股、最近替代股、内部关注股票及其数量。没有主动推荐时明确说明空表，不得用其他股票补位。

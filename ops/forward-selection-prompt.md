@@ -32,7 +32,7 @@
   --as-of <selection_as_of>
 ```
 
-然后读取 `ops/forward-monitor-prompt.md`。市场 Skill 每天只分析一次，同一份市场结果同时用于已有股票跟踪和当天新选股。先根据 monitor snapshot 生成并 `record` 跟踪报告；只有 selection 返回 `ready_for_research` 或 `ready_for_research_limited` 时才继续当天 V4 新选股。
+然后读取 `ops/forward-monitor-prompt.md`。市场 Skill 每天只分析一次，同一份市场结果同时用于已有股票跟踪和当天新选股。先根据 monitor snapshot 为 `daily_review_episode_ids` 生成全部每日简评，调用 `record-daily-formal-reviews` 保存 `daily-formal-reviews-<analysis_date>.json`；再按 `detailed_review_stock_count` 生成并 `record` 当天重点详评 `monitor-report`。只有 selection 返回 `ready_for_research` 或 `ready_for_research_limited` 时才继续当天 V4 新选股。
 
 若 selection 返回 `already_selected`，仍可生成跟踪报告，但不得重复执行新选股。若当天没有仍在跟踪的记录，跳过跟踪明细，正常执行新选股。若返回 `non_trading_day`、数据缺口或错误，说明真实状态，不补猜。
 
@@ -225,7 +225,7 @@ local_archive/forward_selection/pending-trace-<formation_date>.json
 
 内部归档和最终给用户的回复必须分开：
 
-- snapshot、V4 trace、比较记录、最近替代和程序要求的本地 JSON/Markdown 继续完整生成，供内部研究、校验和以后评价使用，不得删减或改写合同。`DailyForwardMonitorReportV2` 保存 AI 实际选入的提醒和未展开数量；没有公开的事件候选仍完整保留在 snapshot、事实仓和 trace。
+- snapshot、V4 trace、比较记录、最近替代和程序要求的本地 JSON/Markdown 继续完整生成，供内部研究、校验和以后评价使用，不得删减或改写合同。`daily-formal-reviews-<analysis_date>.json` 保存全部每日简评，`DailyForwardMonitorReportV2` 只保存当天最多8只重点详评；没有公开的事件候选仍完整保留在 snapshot、事实仓和 trace。
 - 最终回复的正式复盘只展示派生为 `confirmed_active` 的股票。比较股、最近替代股、未入选候选、未决股票和只在内部关注的股票都不展示、不点名，也不披露它们的表现或数量。
 - `fresh_event_pending + conditional + pending` 继续作为 `conditional_event` 保留在内部 V4 trace；原有的 `selected` 身份、优先级、事件公司证据和首个交易日观察条件保持不变。conditional 不进入正式推荐数量，不写入“今天明确推荐的股票”，也不得虚构收益或在用户报告中单列。
 - 同一股票同时有正式推荐和比较记录时，对外只讲正式推荐记录；内部仍保留完整比较。
@@ -328,11 +328,31 @@ local_archive/forward_selection/pending-trace-<formation_date>.json
 
 ## 正式推荐股票的走势复盘
 
-直接采用本次已记录的正式复盘 Markdown，只展示明确正式推荐过的股票。
+直接采用本次已记录的正式复盘 Markdown，只展示明确正式推荐过的股票，并依次包含：
+
+### 所有主动推荐的今日结论
+
+使用表格：
+
+```markdown
+| 股票 | 推荐后第几日 | 当前涨跌 | 当前走势 | 是否仍在预期内 | 未来1—3日 | 主动跟踪 |
+```
+
+每个 active 正式推荐一行；当前走势只写向上、横盘、向下或无法评价，主动跟踪只写继续或今日停止。
+
+### 今天重点复盘的8只股票
+
+active 正式推荐不足8只时按实际数量改标题并全部详细复盘；达到或超过8只时恰好详评8只。每只继续按“推荐日期和当时判断、到今天走到哪里、我的分析、接下来更可能怎样”展开。
 
 ## 目前仍开放的正式推荐股票数量
 
-只按仍开放的正式推荐股票代码去重统计，不显示事件线索、比较记录或其他内部关注数量。
+只使用正式推荐生命周期统计，不显示事件线索、比较记录或其他内部关注数量：
+
+```text
+主动跟踪：X只
+仅保留评价：Y条
+已完成：Z条
+```
 
 ## 今天明确推荐的股票
 

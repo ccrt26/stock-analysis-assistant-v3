@@ -218,6 +218,17 @@ def test_unique_user_output_hides_event_leads_and_uses_four_sections() -> None:
     assert user_output.index(headings[1]) < user_output.index(headings[2])
     assert user_output.index(headings[2]) < user_output.index(headings[3])
 
+    for phrase in (
+        "所有主动推荐的今日结论",
+        "今天重点复盘的8只股票",
+        "主动跟踪：X只",
+        "仅保留评价：Y条",
+        "已完成：Z条",
+        "record-daily-formal-reviews",
+        "daily-formal-reviews-<analysis_date>.json",
+    ):
+        assert phrase in prompt
+
 
 def test_internal_event_contract_remains_after_public_event_section_is_removed() -> None:
     prompt = Path("ops/forward-selection-prompt.md").read_text(encoding="utf-8")

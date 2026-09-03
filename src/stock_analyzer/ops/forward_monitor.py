@@ -22,6 +22,7 @@ from stock_analyzer.ops.forward_selection import (
 REGISTER_VERSION = "registered-forward-monitor-episodes-v1"
 TRACE_VERSION = "daily-research-trace-v4"
 SNAPSHOT_VERSION = "forward-monitor-snapshot-v1"
+DAILY_FORMAL_REVIEWS_VERSION = "daily-formal-reviews-v1"
 CHECKPOINTS = {1: "D1", 3: "D3", 5: "D5", 10: "D10", 20: "D20", 25: "D25", 30: "D30"}
 POSITIVE_SCENARIOS = {"initial_activation", "confirmed_breakout", "trend_continuation", "reversal_attempt"}
 NEGATIVE_SCENARIOS = {"failed_breakout", "single_day_impulse", "range_cross_noise"}
@@ -66,6 +67,11 @@ class PrepareSummary:
     primary_count: int
     passive_tail_count: int
     closed_count: int
+    active_tracking_count: int
+    evaluation_only_count: int
+    completed_formal_count: int
+    daily_review_episode_count: int
+    detailed_review_stock_count: int
 
 
 class MarketOverviewV1(BaseModel):
@@ -105,7 +111,7 @@ class ForwardMonitorAlertV1(BaseModel):
     alert_type: Literal[
         "new_event", "first_reaction", "strengthening", "actionable_watch",
         "overheated", "invalidated", "target_hit", "late_activation",
-        "checkpoint", "data_problem",
+        "checkpoint", "data_problem", "routine_detail",
     ]
     monitor_state: Literal[
         "pending_confirmation", "routine", "strengthening", "actionable_watch",
@@ -185,6 +191,69 @@ class FrozenTwentyDayReviewV1(BaseModel):
         "unknown",
     ]
     overall_review: str = Field(min_length=1)
+
+
+class DailyFormalReviewV1(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    episode_id: str = Field(min_length=1)
+    day_number: int = Field(ge=1, le=30)
+    checkpoint: Literal[
+        "D1", "D3", "D5", "D10", "D20", "D25", "D30",
+    ] | None = None
+    current_assessment: Literal[
+        "not_yet_tested", "partly_supported", "supported", "weakening",
+        "contradicted", "insufficient_evidence",
+    ]
+    current_path: Literal["up", "sideways", "down", "not_evaluable"]
+    best_supported_explanation: Literal[
+        "market_common_move", "industry_common_move", "company_change",
+        "stock_specific_move", "mixed", "unknown",
+    ]
+    current_weak_or_failed_link: Literal[
+        "none", "market_conditions", "new_information",
+        "industry_follow_through", "price_and_volume_confirmation",
+        "remaining_room", "company_risk", "timing", "execution",
+        "stock_selection", "unknown",
+    ]
+    current_review: str = Field(min_length=1, max_length=600)
+    view_change: Literal[
+        "first_review", "unchanged", "strengthened", "weakened",
+        "invalidated",
+    ]
+    view_change_reason: str = Field(min_length=1, max_length=300)
+    outlook_1_3d: Literal[
+        "event_pending", "strengthening", "continuation_possible",
+        "range_or_wait", "weakening", "overheated", "invalidated",
+    ]
+    outlook_reason_plain_language: str = Field(min_length=1, max_length=300)
+    tracking_decision: Literal[
+        "keep_active_tracking", "stop_active_tracking",
+        "complete_observation", "historical_not_applied",
+    ]
+    tracking_decision_reason: str = Field(min_length=1, max_length=300)
+    review_origin: Literal["live", "copied_live_archive", "backfill"]
+    final_twenty_day_review: FrozenTwentyDayReviewV1 | None = None
+
+
+class DailyFormalReviewLedgerV1(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    ledger_version: Literal["daily-formal-reviews-v1"]
+    analysis_date: date
+    as_of: datetime
+    reviews: list[DailyFormalReviewV1]
+
+    @model_validator(mode="after")
+    def validate_ledger(self) -> "DailyFormalReviewLedgerV1":
+        if self.as_of.tzinfo is None or self.as_of.utcoffset() is None:
+            raise ValueError("as_of must include a timezone")
+        if self.analysis_date > self.as_of.date():
+            raise ValueError("ledger contains a future analysis date")
+        review_ids = [review.episode_id for review in self.reviews]
+        if len(review_ids) != len(set(review_ids)):
+            raise ValueError("each episode may be reviewed only once")
+        return self
 
 
 class ForwardEpisodeReviewV1(BaseModel):
@@ -278,6 +347,14 @@ class RecordSummary:
     markdown_file: str
     alert_count: int
     unreported_attention_count: int
+
+
+@dataclass(frozen=True)
+class DailyFormalReviewRecordSummary:
+    status: str
+    analysis_date: str
+    json_file: str
+    review_count: int
 
 
 def register_episodes(
@@ -408,10 +485,18 @@ def prepare_forward_monitor(
         monitor_dir,
         analysis_date,
     )
+    previous_daily_reviews, previous_live_reviews, daily_frozen_reviews = (
+        _daily_review_history(monitor_dir, analysis_date)
+    )
+    last_detailed_reviews = _last_detailed_review_dates(
+        monitor_dir,
+        analysis_date,
+    )
     frozen_reviews = _earliest_frozen_reviews(
         monitor_dir,
         analysis_date,
     )
+    frozen_reviews = {**frozen_reviews, **daily_frozen_reviews}
     price_by_code = {
         str(row.get("ts_code")): row
         for row in _derived_rows(
@@ -511,6 +596,44 @@ def prepare_forward_monitor(
             market_context_available=bool(market_rows),
             frozen_twenty_day_review=frozen_reviews.get(episode_id),
         )
+        if (
+            _episode_selection_output_class(observation)
+            in PUBLIC_FORMAL_OUTPUT_CLASSES
+            and str(observation.get("role")) == "selected"
+        ):
+            latest_live = previous_live_reviews.get(episode_id)
+            tracking_status = _tracking_status(
+                observation,
+                latest_live,
+            )
+            last_detailed = last_detailed_reviews.get(episode_id)
+            observation.update(
+                tracking_status=tracking_status,
+                tracking_exit_date=(
+                    latest_live.get("_tracking_exit_date")
+                    if latest_live is not None
+                    else None
+                ),
+                tracking_exit_reason=(
+                    latest_live.get("_tracking_exit_reason")
+                    if latest_live is not None
+                    else None
+                ),
+                previous_daily_formal_review=(
+                    previous_daily_reviews.get(episode_id)
+                ),
+                last_detailed_review_date=(
+                    last_detailed.isoformat() if last_detailed else None
+                ),
+                days_since_last_detailed_review=(
+                    sum(
+                        last_detailed < session <= analysis_date
+                        for session in sessions
+                    )
+                    if last_detailed is not None
+                    else None
+                ),
+            )
         observations.append(observation)
 
     _attach_pair_contexts(observations)
@@ -525,6 +648,31 @@ def prepare_forward_monitor(
         and item.get("frozen_twenty_day_review") is None
     )
     open_episodes = [item for item in observations if item["monitor_phase"] != "closed"]
+    formal_episodes = [
+        item
+        for item in observations
+        if _episode_selection_output_class(item)
+        in PUBLIC_FORMAL_OUTPUT_CLASSES
+        and str(item.get("role")) == "selected"
+    ]
+    daily_review_episode_ids = sorted(
+        str(item["episode_id"])
+        for item in formal_episodes
+        if _needs_daily_formal_review(item, previous_live_reviews.get(str(item["episode_id"])))
+    )
+    daily_review_id_set = set(daily_review_episode_ids)
+    evaluation_only_episode_ids = sorted(
+        str(item["episode_id"])
+        for item in formal_episodes
+        if item.get("tracking_status") == "evaluation_only"
+    )
+    detailed_review_candidate_codes = sorted(
+        {
+            str(item["ts_code"])
+            for item in formal_episodes
+            if str(item["episode_id"]) in daily_review_id_set
+        }
+    )
     summary_payload = {
         "open_episode_count": len(open_episodes),
         "distinct_stock_count": len({item["ts_code"] for item in open_episodes}),
@@ -541,6 +689,23 @@ def prepare_forward_monitor(
         "primary_count": sum(item["monitor_phase"] == "primary" for item in observations),
         "passive_tail_count": sum(item["monitor_phase"] == "passive_tail" for item in observations),
         "closed_count": sum(item["monitor_phase"] == "closed" for item in observations),
+        "active_tracking_count": sum(
+            item.get("tracking_status") == "active"
+            for item in formal_episodes
+        ),
+        "evaluation_only_count": sum(
+            item.get("tracking_status") == "evaluation_only"
+            for item in formal_episodes
+        ),
+        "completed_formal_count": sum(
+            item.get("tracking_status") == "completed"
+            for item in formal_episodes
+        ),
+        "daily_review_episode_count": len(daily_review_episode_ids),
+        "detailed_review_stock_count": min(
+            8,
+            len(detailed_review_candidate_codes),
+        ),
     }
     snapshot_path = monitor_dir / f"snapshot-{analysis_date.isoformat()}.json"
     _atomic_write_json(
@@ -556,6 +721,11 @@ def prepare_forward_monitor(
             "required_final_review_episode_ids": (
                 required_final_review_episode_ids
             ),
+            "daily_review_episode_ids": daily_review_episode_ids,
+            "evaluation_only_episode_ids": evaluation_only_episode_ids,
+            "detailed_review_candidate_codes": (
+                detailed_review_candidate_codes
+            ),
         },
     )
     return PrepareSummary(
@@ -563,6 +733,147 @@ def prepare_forward_monitor(
         analysis_date=analysis_date.isoformat(),
         snapshot_file=str(snapshot_path),
         **summary_payload,
+    )
+
+
+def record_daily_formal_reviews(
+    *,
+    snapshot_file: Path,
+    review_file: Path,
+    project_root: Path,
+) -> DailyFormalReviewRecordSummary:
+    snapshot_path = Path(snapshot_file)
+    pending_path = Path(review_file)
+    snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
+    if (
+        not isinstance(snapshot, dict)
+        or snapshot.get("snapshot_version") != SNAPSHOT_VERSION
+    ):
+        raise ValueError("snapshot must be forward-monitor-snapshot-v1")
+
+    ledger = DailyFormalReviewLedgerV1.model_validate_json(
+        pending_path.read_text(encoding="utf-8")
+    )
+    if ledger.analysis_date.isoformat() != str(snapshot.get("analysis_date")):
+        raise ValueError("daily reviews analysis_date does not match snapshot")
+    snapshot_as_of = _as_datetime(snapshot.get("as_of"))
+    if snapshot_as_of is None or ledger.as_of != snapshot_as_of:
+        raise ValueError("daily reviews as_of does not match snapshot")
+
+    expected_ids = [
+        str(value) for value in snapshot.get("daily_review_episode_ids", [])
+    ]
+    review_ids = [review.episode_id for review in ledger.reviews]
+    if set(review_ids) != set(expected_ids) or len(review_ids) != len(expected_ids):
+        raise ValueError(
+            "daily review episode ids must exactly match snapshot"
+        )
+    episodes = {
+        str(item.get("episode_id")): item
+        for item in snapshot.get("episodes", [])
+        if isinstance(item, dict) and item.get("episode_id")
+    }
+    for review in ledger.reviews:
+        episode = episodes.get(review.episode_id)
+        if episode is None:
+            raise ValueError(f"daily review episode does not exist: {review.episode_id}")
+        if (
+            _episode_selection_output_class(episode)
+            not in PUBLIC_FORMAL_OUTPUT_CLASSES
+            or str(episode.get("role")) != "selected"
+        ):
+            raise ValueError("daily reviews only accept formal selections")
+        day_number = int(episode.get("day_number", 0))
+        if review.day_number != day_number:
+            raise ValueError("daily review day_number does not match snapshot")
+        if review.checkpoint != episode.get("checkpoint"):
+            raise ValueError("daily review checkpoint does not match snapshot")
+
+        historical = review.review_origin in {
+            "copied_live_archive", "backfill",
+        }
+        if historical and review.tracking_decision != "historical_not_applied":
+            raise ValueError(
+                "copied and backfill reviews must use historical_not_applied"
+            )
+        if not historical and review.tracking_decision == "historical_not_applied":
+            raise ValueError("live reviews cannot use historical_not_applied")
+        if review.tracking_decision == "stop_active_tracking" and not (
+            review.current_assessment == "contradicted"
+            or (
+                review.current_weak_or_failed_link == "execution"
+                and _number(episode.get("entry_open")) is None
+            )
+        ):
+            raise ValueError(
+                "stop_active_tracking requires contradiction or non-execution"
+            )
+        if (
+            review.tracking_decision == "complete_observation"
+            and day_number not in {20, 25, 30}
+        ):
+            raise ValueError(
+                "complete_observation is allowed only at an observation endpoint"
+            )
+        if day_number == 30 and review.tracking_decision not in {
+            "complete_observation", "historical_not_applied",
+        }:
+            raise ValueError("D30 must complete an extended observation")
+
+        final_review = (
+            review.final_twenty_day_review.model_dump(mode="json")
+            if review.final_twenty_day_review is not None
+            else None
+        )
+        frozen_raw = episode.get("frozen_twenty_day_review")
+        if day_number < 20 and final_review is not None:
+            raise ValueError("a final review is not allowed before D20")
+        if day_number >= 20 and final_review is None:
+            raise ValueError("a final review is required at and after D20")
+        if frozen_raw is not None:
+            frozen = FrozenTwentyDayReviewV1.model_validate(
+                frozen_raw
+            ).model_dump(mode="json")
+            if final_review != frozen:
+                raise ValueError(
+                    f"final twenty day review is frozen: {review.episode_id}"
+                )
+
+    output = ledger.model_dump(mode="json")
+    monitor_dir = Path(project_root) / "local_archive" / "forward_monitor"
+    final_path = (
+        monitor_dir
+        / f"daily-formal-reviews-{ledger.analysis_date.isoformat()}.json"
+    )
+    if final_path.is_file():
+        try:
+            existing = DailyFormalReviewLedgerV1.model_validate_json(
+                final_path.read_text(encoding="utf-8")
+            ).model_dump(mode="json")
+        except (OSError, ValueError):
+            existing = None
+        if existing == output:
+            pending_path.unlink()
+            return DailyFormalReviewRecordSummary(
+                status="already_recorded",
+                analysis_date=ledger.analysis_date.isoformat(),
+                json_file=str(final_path),
+                review_count=len(ledger.reviews),
+            )
+        return DailyFormalReviewRecordSummary(
+            status="review_conflict",
+            analysis_date=ledger.analysis_date.isoformat(),
+            json_file=str(final_path),
+            review_count=len(ledger.reviews),
+        )
+
+    _atomic_write_json(final_path, output)
+    pending_path.unlink()
+    return DailyFormalReviewRecordSummary(
+        status="recorded",
+        analysis_date=ledger.analysis_date.isoformat(),
+        json_file=str(final_path),
+        review_count=len(ledger.reviews),
     )
 
 
@@ -620,23 +931,86 @@ def record_forward_monitor(
         for item in snapshot.get("episodes", [])
         if isinstance(item, dict)
     }
+    daily_ledger_path = (
+        Path(project_root)
+        / "local_archive"
+        / "forward_monitor"
+        / f"daily-formal-reviews-{report.analysis_date.isoformat()}.json"
+    )
+    new_daily_workflow = (
+        "daily_review_episode_ids" in snapshot
+        and daily_ledger_path.is_file()
+    )
+    daily_reviews: dict[str, DailyFormalReviewV1] = {}
+    daily_ledger: DailyFormalReviewLedgerV1 | None = None
+    if new_daily_workflow:
+        daily_ledger = DailyFormalReviewLedgerV1.model_validate_json(
+            daily_ledger_path.read_text(encoding="utf-8")
+        )
+        if (
+            daily_ledger.analysis_date != report.analysis_date
+            or daily_ledger.as_of != report.as_of
+        ):
+            raise ValueError("daily formal review ledger does not match report")
+        daily_reviews = {
+            review.episode_id: review for review in daily_ledger.reviews
+        }
+        expected_daily_ids = {
+            str(value)
+            for value in snapshot.get("daily_review_episode_ids", [])
+        }
+        if set(daily_reviews) != expected_daily_ids:
+            raise ValueError("daily formal review ledger does not match snapshot")
+        expected_detail_count = int(
+            snapshot_summary.get("detailed_review_stock_count", 0)
+        )
+        if len(report.alerts) != expected_detail_count:
+            raise ValueError(
+                "detailed review stock count does not match snapshot"
+            )
     reported_episode_ids: set[str] = set()
     for alert in report.alerts:
         attention_item = attention.get(alert.ts_code)
-        if attention_item is None:
-            raise ValueError(f"alert stock is not in snapshot attention set: {alert.ts_code}")
-        if alert.name != str(attention_item.get("name", "")):
-            raise ValueError(f"alert stock name does not match snapshot: {alert.ts_code}")
+        if new_daily_workflow:
+            expected_code_ids = {
+                episode_id
+                for episode_id in daily_reviews
+                if str(episodes.get(episode_id, {}).get("ts_code"))
+                == alert.ts_code
+            }
+            if not expected_code_ids:
+                raise ValueError(
+                    f"detail stock is not a daily formal review: {alert.ts_code}"
+                )
+            expected_name = next(
+                str(episodes[episode_id].get("name", ""))
+                for episode_id in expected_code_ids
+            )
+            if alert.name != expected_name:
+                raise ValueError(
+                    f"alert stock name does not match snapshot: {alert.ts_code}"
+                )
+        else:
+            if attention_item is None:
+                raise ValueError(f"alert stock is not in snapshot attention set: {alert.ts_code}")
+            if alert.name != str(attention_item.get("name", "")):
+                raise ValueError(f"alert stock name does not match snapshot: {alert.ts_code}")
         if len(alert.episode_ids) != len(set(alert.episode_ids)):
             raise ValueError(f"alert contains duplicate episode ids: {alert.ts_code}")
-        attention_episode_ids = {
-            str(value)
-            for value in attention_item.get("episode_ids", [])
-        }
-        if set(alert.episode_ids) != attention_episode_ids:
-            raise ValueError(
-                f"alert must include all stock attention episodes: {alert.ts_code}"
-            )
+        if new_daily_workflow:
+            if set(alert.episode_ids) != expected_code_ids:
+                raise ValueError(
+                    f"alert must include all stock daily review episodes: {alert.ts_code}"
+                )
+        else:
+            attention_episode_ids = {
+                str(value)
+                for value in attention_item.get("episode_ids", [])
+            }
+            if set(alert.episode_ids) != attention_episode_ids:
+                raise ValueError(
+                    f"alert must include all stock attention episodes: {alert.ts_code}"
+                )
         referenced: list[dict[str, Any]] = []
         reviews_by_id = {
             review.episode_id: review
@@ -695,6 +1069,40 @@ def record_forward_monitor(
                 raise ValueError(
                     "direction_right_stock_wrong requires a complete pair"
                 )
+            if new_daily_workflow:
+                daily = daily_reviews[episode_id]
+                detailed_values = {
+                    "current_assessment": review.current_assessment,
+                    "best_supported_explanation": (
+                        review.best_supported_explanation
+                    ),
+                    "current_weak_or_failed_link": (
+                        review.current_weak_or_failed_link
+                    ),
+                    "final_twenty_day_review": final_review,
+                }
+                daily_values = {
+                    "current_assessment": daily.current_assessment,
+                    "best_supported_explanation": (
+                        daily.best_supported_explanation
+                    ),
+                    "current_weak_or_failed_link": (
+                        daily.current_weak_or_failed_link
+                    ),
+                    "final_twenty_day_review": (
+                        daily.final_twenty_day_review.model_dump(mode="json")
+                        if daily.final_twenty_day_review is not None
+                        else None
+                    ),
+                }
+                if detailed_values != daily_values or (
+                    alert.outlook_1_3d != daily.outlook_1_3d
+                    or alert.outlook_reason_plain_language
+                    != daily.outlook_reason_plain_language
+                ):
+                    raise ValueError(
+                        f"detail contradicts daily formal review: {episode_id}"
+                    )
         referenced_roles = {str(item.get("role")) for item in referenced}
         valid_roles = [
             role
@@ -721,7 +1129,7 @@ def record_forward_monitor(
         for value in snapshot.get("required_final_review_episode_ids", [])
     }
     missing_required = required_final_review_episode_ids - reported_episode_ids
-    if missing_required:
+    if missing_required and not new_daily_workflow:
         raise ValueError(
             "report is missing required final review episodes: "
             + ",".join(sorted(missing_required))
@@ -737,7 +1145,13 @@ def record_forward_monitor(
         )
     }
     reported_codes = {alert.ts_code for alert in report.alerts}
-    if len(mandatory_formal_codes) <= 8:
+    if new_daily_workflow:
+        _validate_detailed_review_priority(
+            snapshot=snapshot,
+            daily_reviews=daily_reviews,
+            reported_codes=reported_codes,
+        )
+    elif len(mandatory_formal_codes) <= 8:
         missing_formal = mandatory_formal_codes - reported_codes
         if missing_formal:
             raise ValueError(
@@ -751,10 +1165,7 @@ def record_forward_monitor(
         )
 
 
-    expected_unreported = (
-        int(snapshot_summary.get("attention_stock_count", 0))
-        - len(report.alerts)
-    )
+    expected_unreported = len(set(attention) - reported_codes)
     if report.unreported_attention_count != expected_unreported:
         raise ValueError(
             "report unreported_attention_count does not match snapshot"
@@ -788,7 +1199,7 @@ def record_forward_monitor(
             if not markdown_path.is_file():
                 _atomic_write_text(
                     markdown_path,
-                    _render_markdown(report, snapshot),
+                    _render_markdown(report, snapshot, daily_ledger),
                 )
             pending_path.unlink()
             return RecordSummary(
@@ -809,7 +1220,10 @@ def record_forward_monitor(
         )
 
     _atomic_write_json(json_path, output)
-    _atomic_write_text(markdown_path, _render_markdown(report, snapshot))
+    _atomic_write_text(
+        markdown_path,
+        _render_markdown(report, snapshot, daily_ledger),
+    )
     pending_path.unlink()
     return RecordSummary(
         status="recorded",
@@ -847,6 +1261,50 @@ def _validate_pair_context(
         )
 
 
+def _validate_detailed_review_priority(
+    *,
+    snapshot: dict[str, Any],
+    daily_reviews: dict[str, DailyFormalReviewV1],
+    reported_codes: set[str],
+) -> None:
+    episodes = {
+        str(item.get("episode_id")): item
+        for item in snapshot.get("episodes", [])
+        if isinstance(item, dict) and item.get("episode_id")
+    }
+    candidates: dict[str, list[tuple[dict[str, Any], DailyFormalReviewV1]]] = {}
+    for episode_id, review in daily_reviews.items():
+        episode = episodes.get(episode_id)
+        if episode is None:
+            continue
+        candidates.setdefault(str(episode.get("ts_code")), []).append(
+            (episode, review)
+        )
+    if reported_codes - set(candidates):
+        raise ValueError("detail report contains a non-candidate stock")
+    omitted_codes = set(candidates) - reported_codes
+    if not omitted_codes:
+        return
+
+    mandatory_codes = {
+        code
+        for code, items in candidates.items()
+        if any(
+            review.tracking_decision == "stop_active_tracking"
+            or review.day_number == 20
+            or review.view_change
+            in {"strengthened", "weakened", "invalidated"}
+            for _, review in items
+        )
+    }
+    if len(mandatory_codes) <= len(reported_codes) and not (
+        mandatory_codes <= reported_codes
+    ):
+        raise ValueError(
+            "detail report omits a stop, D20, or key view change"
+        )
+
+
 def _public_formal_episode_ids(
     alert: ForwardMonitorAlertV2,
     episodes: dict[str, dict[str, Any]],
@@ -863,6 +1321,7 @@ def _public_formal_episode_ids(
 def _render_markdown(
     report: DailyForwardMonitorReportV2,
     snapshot: dict[str, Any],
+    daily_ledger: DailyFormalReviewLedgerV1 | None = None,
 ) -> str:
     overview = report.market_overview
     pool = report.pool_summary
@@ -887,9 +1346,66 @@ def _render_markdown(
         "",
         f"{overview.what_changed.rstrip('。！？!? ；; ')}。{overview.implication_for_monitored_stocks}",
         "",
-        "## 正式推荐股票的走势复盘",
-        "",
     ]
+    if daily_ledger is None:
+        lines.extend(["## 正式推荐股票的走势复盘", ""])
+    if daily_ledger is not None:
+        daily_by_id = {
+            review.episode_id: review for review in daily_ledger.reviews
+        }
+        active_items = [
+            (episode, daily_by_id[str(episode["episode_id"])])
+            for episode in episodes.values()
+            if episode.get("tracking_status") == "active"
+            and str(episode.get("episode_id")) in daily_by_id
+        ]
+        active_items.sort(
+            key=lambda item: (
+                str(item[0].get("action_date", "")),
+                str(item[0].get("ts_code", "")),
+                str(item[0].get("episode_id", "")),
+            )
+        )
+        lines.extend(
+            [
+                "## 所有主动推荐的今日结论",
+                "",
+                "| 股票 | 推荐后第几日 | 当前涨跌 | 当前走势 | 是否仍在预期内 | 未来1—3日 | 主动跟踪 |",
+                "|---|---:|---:|---|---|---|---|",
+            ]
+        )
+        for episode, review in active_items:
+            current = _number(
+                episode.get("current_close_return_since_entry")
+            )
+            current_text = (
+                _format_return(current)
+                if current is not None
+                else "无法计算"
+            )
+            tracking_text = (
+                "继续"
+                if review.tracking_decision == "keep_active_tracking"
+                else "今日停止"
+            )
+            lines.append(
+                "| "
+                f"{episode.get('name')}（{episode.get('ts_code')}） | "
+                f"{review.day_number} | {current_text} | "
+                f"{_daily_path_label(review.current_path)} | "
+                f"{_daily_assessment_label(review.current_assessment)} | "
+                f"{_daily_outlook_label(review.outlook_1_3d)} | "
+                f"{tracking_text} |"
+            )
+        if not active_items:
+            lines.append("| 今日没有仍在主动跟踪的正式推荐 | — | — | — | — | — | — |")
+        lines.extend(
+            [
+                "",
+                f"## 今天重点复盘的{len(public_alerts)}只股票",
+                "",
+            ]
+        )
     formal_primary_count = sum(
         _episode_selection_output_class(item) in PUBLIC_FORMAL_OUTPUT_CLASSES
         and item.get("monitor_phase") == "primary"
@@ -980,11 +1496,76 @@ def _render_markdown(
         [
             "## 目前还在跟踪多少只",
             "",
-            f"仍开放 {pool.selected_count} 只已确认正式推荐股票；推荐后的前20个交易日有 {formal_primary_count} 条正式记录，之后继续低成本观察的有 {formal_tail_count} 条正式记录。",
+            (
+                _render_tracking_counts(snapshot, episodes, daily_ledger)
+                if daily_ledger is not None
+                else f"仍开放 {pool.selected_count} 只已确认正式推荐股票；推荐后的前20个交易日有 {formal_primary_count} 条正式记录，之后继续低成本观察的有 {formal_tail_count} 条正式记录。"
+            ),
             "",
         ]
     )
     return "\n".join(lines)
+
+
+def _render_tracking_counts(
+    snapshot: dict[str, Any],
+    episodes: dict[str, dict[str, Any]],
+    daily_ledger: DailyFormalReviewLedgerV1,
+) -> str:
+    summary = snapshot.get("summary", {})
+    active = int(summary.get("active_tracking_count", 0))
+    evaluation = int(summary.get("evaluation_only_count", 0))
+    completed = int(summary.get("completed_formal_count", 0))
+    for review in daily_ledger.reviews:
+        if review.tracking_decision == "historical_not_applied":
+            continue
+        status = str(episodes.get(review.episode_id, {}).get("tracking_status"))
+        if review.tracking_decision == "stop_active_tracking" and status == "active":
+            active -= 1
+            evaluation += 1
+        elif review.tracking_decision == "complete_observation":
+            if status == "active":
+                active -= 1
+            elif status == "evaluation_only":
+                evaluation -= 1
+            completed += 1
+    return (
+        f"主动跟踪：{active}只  "
+        f"\n仅保留评价：{evaluation}条  "
+        f"\n已完成：{completed}条"
+    )
+
+
+def _daily_path_label(value: str) -> str:
+    return {
+        "up": "向上",
+        "sideways": "横盘",
+        "down": "向下",
+        "not_evaluable": "无法评价",
+    }[value]
+
+
+def _daily_assessment_label(value: str) -> str:
+    return {
+        "not_yet_tested": "尚未充分检验",
+        "partly_supported": "仍在原推荐预期内",
+        "supported": "仍在原推荐预期内",
+        "weakening": "预期正在减弱但尚未被否定",
+        "contradicted": "已超出原推荐预期",
+        "insufficient_evidence": "现有事实不足以判断",
+    }[value]
+
+
+def _daily_outlook_label(value: str) -> str:
+    return {
+        "event_pending": "暂时无法判断",
+        "strengthening": "向上",
+        "continuation_possible": "震荡偏上",
+        "range_or_wait": "横盘",
+        "weakening": "震荡偏下",
+        "overheated": "高位震荡偏下",
+        "invalidated": "向下",
+    }[value]
 
 
 def _render_current_assessment(value: str) -> str:
@@ -1200,7 +1781,11 @@ def _render_target_progress(episode: dict[str, Any]) -> str:
     drawdown = _number(episode.get("current_close_drawdown_from_peak"))
     path_facts: list[str] = []
     if max_close is not None:
-        path_facts.append(f"期间最高上涨{max_close:.2%}")
+        path_facts.append(
+            f"期间最高上涨{max_close:.2%}"
+            if max_close >= 0.0
+            else f"期间最高收盘仍下跌{abs(max_close):.2%}"
+        )
     if max_high is not None and (
         max_close is None or not np.isclose(max_high, max_close)
     ):
@@ -1932,6 +2517,131 @@ def _previous_snapshot(monitor_dir: Path, analysis_date: date) -> dict[str, Any]
     return payload if isinstance(payload, dict) and payload.get("snapshot_version") == SNAPSHOT_VERSION else None
 
 
+def _daily_review_history(
+    monitor_dir: Path,
+    analysis_date: date,
+) -> tuple[
+    dict[str, dict[str, Any]],
+    dict[str, dict[str, Any]],
+    dict[str, dict[str, Any]],
+]:
+    ledgers: list[tuple[date, Path]] = []
+    for path in monitor_dir.glob("daily-formal-reviews-*.json"):
+        try:
+            ledger_date = date.fromisoformat(
+                path.stem.removeprefix("daily-formal-reviews-")
+            )
+        except ValueError:
+            continue
+        if ledger_date < analysis_date:
+            ledgers.append((ledger_date, path))
+
+    latest: dict[str, dict[str, Any]] = {}
+    latest_live: dict[str, dict[str, Any]] = {}
+    frozen: dict[str, dict[str, Any]] = {}
+    for ledger_date, path in sorted(ledgers):
+        try:
+            ledger = DailyFormalReviewLedgerV1.model_validate_json(
+                path.read_text(encoding="utf-8")
+            )
+        except (OSError, ValueError):
+            continue
+        for review in ledger.reviews:
+            payload = review.model_dump(mode="json")
+            latest[review.episode_id] = payload
+            if review.review_origin == "live":
+                previous_live = latest_live.get(review.episode_id, {})
+                exit_date = previous_live.get("_tracking_exit_date")
+                exit_reason = previous_live.get("_tracking_exit_reason")
+                if review.tracking_decision == "stop_active_tracking":
+                    exit_date = ledger_date.isoformat()
+                    exit_reason = review.tracking_decision_reason
+                latest_live[review.episode_id] = {
+                    **payload,
+                    "_analysis_date": ledger_date.isoformat(),
+                    "_tracking_exit_date": exit_date,
+                    "_tracking_exit_reason": exit_reason,
+                }
+            if review.final_twenty_day_review is not None:
+                frozen.setdefault(
+                    review.episode_id,
+                    review.final_twenty_day_review.model_dump(mode="json"),
+                )
+    return latest, latest_live, frozen
+
+
+def _last_detailed_review_dates(
+    monitor_dir: Path,
+    analysis_date: date,
+) -> dict[str, date]:
+    latest: dict[str, date] = {}
+    for path in monitor_dir.glob("monitor-report-*.json"):
+        try:
+            report_date = date.fromisoformat(
+                path.stem.removeprefix("monitor-report-")
+            )
+        except ValueError:
+            continue
+        if report_date >= analysis_date:
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        for alert in payload.get("alerts", []):
+            if not isinstance(alert, dict):
+                continue
+            for episode_id in alert.get("episode_ids", []):
+                latest[str(episode_id)] = report_date
+    return latest
+
+
+def _tracking_status(
+    episode: dict[str, Any],
+    latest_live_review: dict[str, Any] | None,
+) -> Literal["active", "evaluation_only", "completed"]:
+    if episode.get("monitor_phase") == "closed":
+        return "completed"
+    decision = (
+        str(latest_live_review.get("tracking_decision"))
+        if latest_live_review is not None
+        else ""
+    )
+    if decision == "stop_active_tracking":
+        if episode.get("frozen_twenty_day_review") is not None:
+            return "completed"
+        return "evaluation_only"
+    if decision == "complete_observation":
+        return "completed"
+    if decision == "keep_active_tracking":
+        return "active"
+    if episode.get("frozen_twenty_day_review") is not None:
+        return "completed"
+    return "active"
+
+
+def _needs_daily_formal_review(
+    episode: dict[str, Any],
+    latest_live_review: dict[str, Any] | None,
+) -> bool:
+    status = episode.get("tracking_status")
+    day_number = int(episode.get("day_number", 0))
+    if status == "evaluation_only":
+        return day_number >= 20 and episode.get("frozen_twenty_day_review") is None
+    if status != "active" or not 1 <= day_number <= 30:
+        return False
+    if day_number <= 20 or episode.get("frozen_twenty_day_review") is None:
+        return True
+    return bool(
+        latest_live_review is not None
+        and latest_live_review.get("tracking_decision")
+        == "keep_active_tracking"
+        and int(latest_live_review.get("day_number", 0)) >= 20
+    )
+
+
 def _previous_monitor_states(
     monitor_dir: Path,
     analysis_date: date,
@@ -2477,6 +3187,9 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     record = commands.add_parser("record")
     record.add_argument("--snapshot-file", required=True)
     record.add_argument("--report-file", required=True)
+    daily = commands.add_parser("record-daily-formal-reviews")
+    daily.add_argument("--snapshot-file", required=True)
+    daily.add_argument("--review-file", required=True)
     return parser.parse_args(argv)
 
 
@@ -2496,6 +3209,12 @@ def main(argv: list[str] | None = None) -> int:
                 as_of=datetime.fromisoformat(args.as_of),
                 project_root=project_root,
             )
+        elif args.command == "record-daily-formal-reviews":
+            summary = record_daily_formal_reviews(
+                snapshot_file=Path(args.snapshot_file).expanduser().resolve(),
+                review_file=Path(args.review_file).expanduser().resolve(),
+                project_root=project_root,
+            )
         else:
             summary = record_forward_monitor(
                 snapshot_file=Path(args.snapshot_file).expanduser().resolve(),
@@ -2512,6 +3231,10 @@ def main(argv: list[str] | None = None) -> int:
 
 
 __all__ = [
+    "DAILY_FORMAL_REVIEWS_VERSION",
+    "DailyFormalReviewLedgerV1",
+    "DailyFormalReviewRecordSummary",
+    "DailyFormalReviewV1",
     "DailyForwardMonitorReportV1",
     "DailyForwardMonitorReportV2",
     "ForwardEpisodeReviewV1",
@@ -2520,6 +3243,7 @@ __all__ = [
     "RecordSummary",
     "RegisterSummary",
     "prepare_forward_monitor",
+    "record_daily_formal_reviews",
     "record_forward_monitor",
     "register_episodes",
 ]

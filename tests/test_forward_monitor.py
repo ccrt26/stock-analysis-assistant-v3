@@ -11,15 +11,20 @@ import pytest
 from pydantic import ValidationError
 
 from stock_analyzer.ops.forward_monitor import (
+    DAILY_FORMAL_REVIEWS_VERSION,
+    DailyFormalReviewLedgerV1,
+    DailyFormalReviewV1,
     DailyForwardMonitorReportV1,
     DailyForwardMonitorReportV2,
     ForwardEpisodeReviewV1,
     ForwardMonitorAlertV2,
     _attention_reasons,
     _human_trading_day,
+    _parse_args,
     _render_public_outlook,
     _render_target_progress,
     prepare_forward_monitor,
+    record_daily_formal_reviews,
     record_forward_monitor,
     register_episodes,
 )
@@ -4200,3 +4205,742 @@ def test_eight_optional_formal_events_cannot_displace_one_mandatory_formal_revie
         episodes[8]["ts_code"],
         *(item["ts_code"] for item in episodes[:7]),
     }
+
+
+def _daily_formal_review(
+    episode_id: str,
+    *,
+    day_number: int = 3,
+    checkpoint: str | None = "D3",
+    current_assessment: str = "partly_supported",
+    current_path: str = "sideways",
+    current_weak_or_failed_link: str = "none",
+    view_change: str = "unchanged",
+    tracking_decision: str = "keep_active_tracking",
+    review_origin: str = "live",
+    final: dict | None = None,
+) -> dict:
+    return {
+        "episode_id": episode_id,
+        "day_number": day_number,
+        "checkpoint": checkpoint,
+        "current_assessment": current_assessment,
+        "current_path": current_path,
+        "best_supported_explanation": "stock_specific_move",
+        "current_weak_or_failed_link": current_weak_or_failed_link,
+        "current_review": "当前走势横盘，原判断没有出现实质变化。",
+        "view_change": view_change,
+        "view_change_reason": "与上一交易日相比，决定判断的事实没有变化。",
+        "outlook_1_3d": "range_or_wait",
+        "outlook_reason_plain_language": "最近收盘没有形成新的方向。",
+        "tracking_decision": tracking_decision,
+        "tracking_decision_reason": "原推荐最重要的判断仍未被事实否定。",
+        "review_origin": review_origin,
+        "final_twenty_day_review": final,
+    }
+
+
+def _daily_formal_snapshot(*, day_number: int = 3) -> dict:
+    snapshot = _review_snapshot(day_number=day_number)
+    episode = snapshot["episodes"][0]
+    episode.update(
+        selection_output_class="confirmed_active",
+        checkpoint=CHECKPOINTS_FOR_TESTS.get(day_number),
+        entry_open=10.0,
+        tracking_status="active",
+        frozen_twenty_day_review=(
+            _final_review() if day_number > 20 else None
+        ),
+    )
+    snapshot["daily_review_episode_ids"] = [episode["episode_id"]]
+    snapshot["evaluation_only_episode_ids"] = []
+    snapshot["detailed_review_candidate_codes"] = [episode["ts_code"]]
+    return snapshot
+
+
+CHECKPOINTS_FOR_TESTS = {
+    1: "D1",
+    3: "D3",
+    5: "D5",
+    10: "D10",
+    20: "D20",
+    25: "D25",
+    30: "D30",
+}
+
+
+def test_daily_formal_review_models_define_the_v1_contract() -> None:
+    episode_id = "formal:2026-08-20:603969.SH:selected"
+    payload = {
+        "ledger_version": DAILY_FORMAL_REVIEWS_VERSION,
+        "analysis_date": "2026-08-25",
+        "as_of": "2026-08-25T18:00:00+08:00",
+        "reviews": [_daily_formal_review(episode_id)],
+    }
+
+    ledger = DailyFormalReviewLedgerV1.model_validate(payload)
+
+    assert ledger.reviews[0].current_path == "sideways"
+    assert set(DailyFormalReviewV1.model_fields) == {
+        "episode_id", "day_number", "checkpoint", "current_assessment",
+        "current_path", "best_supported_explanation",
+        "current_weak_or_failed_link", "current_review", "view_change",
+        "view_change_reason", "outlook_1_3d",
+        "outlook_reason_plain_language", "tracking_decision",
+        "tracking_decision_reason", "review_origin",
+        "final_twenty_day_review",
+    }
+    invalid = json.loads(json.dumps(payload))
+    invalid["reviews"][0]["current_path"] = "震荡偏上"
+    with pytest.raises(ValidationError):
+        DailyFormalReviewLedgerV1.model_validate(invalid)
+
+
+def test_record_daily_formal_reviews_is_idempotent_and_preserves_conflicts(
+    tmp_path: Path,
+) -> None:
+    snapshot = _daily_formal_snapshot()
+    episode_id = snapshot["daily_review_episode_ids"][0]
+    payload = {
+        "ledger_version": DAILY_FORMAL_REVIEWS_VERSION,
+        "analysis_date": snapshot["analysis_date"],
+        "as_of": snapshot["as_of"],
+        "reviews": [_daily_formal_review(episode_id)],
+    }
+    snapshot_path = tmp_path / "snapshot.json"
+    snapshot_path.write_text(json.dumps(snapshot), encoding="utf-8")
+    pending = tmp_path / "pending-daily-formal-reviews.json"
+    pending.write_text(json.dumps(payload), encoding="utf-8")
+
+    first = record_daily_formal_reviews(
+        snapshot_file=snapshot_path,
+        review_file=pending,
+        project_root=tmp_path,
+    )
+
+    assert first.status == "recorded"
+    assert first.review_count == 1
+    assert not pending.exists()
+    saved_path = Path(first.json_file)
+    original = saved_path.read_bytes()
+
+    same = tmp_path / "same.json"
+    same.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    repeated = record_daily_formal_reviews(
+        snapshot_file=snapshot_path,
+        review_file=same,
+        project_root=tmp_path,
+    )
+    assert repeated.status == "already_recorded"
+    assert not same.exists()
+    assert saved_path.read_bytes() == original
+
+    conflict_payload = json.loads(json.dumps(payload))
+    conflict_payload["reviews"][0]["current_review"] = "另一份不同的复盘。"
+    conflict = tmp_path / "conflict.json"
+    conflict.write_text(json.dumps(conflict_payload), encoding="utf-8")
+    rejected = record_daily_formal_reviews(
+        snapshot_file=snapshot_path,
+        review_file=conflict,
+        project_root=tmp_path,
+    )
+    assert rejected.status == "review_conflict"
+    assert conflict.exists()
+    assert saved_path.read_bytes() == original
+
+
+@pytest.mark.parametrize(
+    ("change", "message"),
+    [
+        (
+            {"tracking_decision": "stop_active_tracking"},
+            "stop_active_tracking",
+        ),
+        (
+            {
+                "review_origin": "backfill",
+                "tracking_decision": "keep_active_tracking",
+            },
+            "historical_not_applied",
+        ),
+    ],
+)
+def test_record_daily_formal_reviews_rejects_invalid_tracking_decisions(
+    tmp_path: Path,
+    change: dict,
+    message: str,
+) -> None:
+    snapshot = _daily_formal_snapshot()
+    review = _daily_formal_review(snapshot["daily_review_episode_ids"][0])
+    review.update(change)
+    snapshot_path = tmp_path / "snapshot.json"
+    pending = tmp_path / "pending.json"
+    snapshot_path.write_text(json.dumps(snapshot), encoding="utf-8")
+    pending.write_text(
+        json.dumps(
+            {
+                "ledger_version": DAILY_FORMAL_REVIEWS_VERSION,
+                "analysis_date": snapshot["analysis_date"],
+                "as_of": snapshot["as_of"],
+                "reviews": [review],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match=message):
+        record_daily_formal_reviews(
+            snapshot_file=snapshot_path,
+            review_file=pending,
+            project_root=tmp_path,
+        )
+
+
+def test_daily_formal_review_requires_and_freezes_the_d20_conclusion(
+    tmp_path: Path,
+) -> None:
+    snapshot = _daily_formal_snapshot(day_number=20)
+    episode_id = snapshot["daily_review_episode_ids"][0]
+    review = _daily_formal_review(
+        episode_id,
+        day_number=20,
+        checkpoint="D20",
+        tracking_decision="complete_observation",
+        final=_final_review(),
+    )
+    snapshot_path = tmp_path / "snapshot.json"
+    pending = tmp_path / "pending.json"
+    snapshot_path.write_text(json.dumps(snapshot), encoding="utf-8")
+    pending.write_text(
+        json.dumps(
+            {
+                "ledger_version": DAILY_FORMAL_REVIEWS_VERSION,
+                "analysis_date": snapshot["analysis_date"],
+                "as_of": snapshot["as_of"],
+                "reviews": [review],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    recorded = record_daily_formal_reviews(
+        snapshot_file=snapshot_path,
+        review_file=pending,
+        project_root=tmp_path,
+    )
+    assert recorded.status == "recorded"
+
+    d21 = _daily_formal_snapshot(day_number=21)
+    d21["episodes"][0]["frozen_twenty_day_review"] = _final_review()
+    later = _daily_formal_review(
+        episode_id,
+        day_number=21,
+        checkpoint=None,
+        final=_final_review("logic_right_timing_wrong"),
+    )
+    d21_path = tmp_path / "d21.json"
+    d21_pending = tmp_path / "d21-pending.json"
+    d21_path.write_text(json.dumps(d21), encoding="utf-8")
+    d21_pending.write_text(
+        json.dumps(
+            {
+                "ledger_version": DAILY_FORMAL_REVIEWS_VERSION,
+                "analysis_date": d21["analysis_date"],
+                "as_of": d21["as_of"],
+                "reviews": [later],
+            }
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="frozen"):
+        record_daily_formal_reviews(
+            snapshot_file=d21_path,
+            review_file=d21_pending,
+            project_root=tmp_path,
+        )
+
+
+def _record_daily_review_for_snapshot(
+    root: Path,
+    snapshot: dict,
+    review: dict,
+) -> None:
+    monitor_dir = root / "local_archive/forward_monitor"
+    monitor_dir.mkdir(parents=True, exist_ok=True)
+    snapshot_path = monitor_dir / f"snapshot-{snapshot['analysis_date']}.json"
+    pending_path = root / f"pending-daily-{snapshot['analysis_date']}.json"
+    snapshot_path.write_text(json.dumps(snapshot), encoding="utf-8")
+    pending_path.write_text(
+        json.dumps(
+            {
+                "ledger_version": DAILY_FORMAL_REVIEWS_VERSION,
+                "analysis_date": snapshot["analysis_date"],
+                "as_of": snapshot["as_of"],
+                "reviews": [review],
+            }
+        ),
+        encoding="utf-8",
+    )
+    record_daily_formal_reviews(
+        snapshot_file=snapshot_path,
+        review_file=pending_path,
+        project_root=root,
+    )
+
+
+def test_prepare_includes_every_active_formal_episode_in_daily_reviews(
+    tmp_path: Path,
+) -> None:
+    trace = _single_selected_trace(
+        formation_date="2026-07-31",
+        action_date="2026-08-03",
+    )
+    archive = tmp_path / "local_archive/forward_selection"
+    archive.mkdir(parents=True)
+    _write_trace(archive / "research-trace-2026-07-31.json", trace)
+    sessions = _seed_monitor_project(tmp_path, trace=trace, session_count=2)
+
+    d1 = _prepare(tmp_path, sessions[0])
+    d2 = _prepare(tmp_path, sessions[1])
+    episode_id = d1["episodes"][0]["episode_id"]
+
+    assert d1["daily_review_episode_ids"] == [episode_id]
+    assert d2["daily_review_episode_ids"] == [episode_id]
+    assert d2["episodes"][0]["tracking_status"] == "active"
+    assert d2["summary"]["active_tracking_count"] == 1
+    assert d2["summary"]["daily_review_episode_count"] == 1
+    assert d2["summary"]["detailed_review_stock_count"] == 1
+    assert d2["detailed_review_candidate_codes"] == ["603969.SH"]
+
+
+def test_stop_tracking_skips_ordinary_days_but_returns_for_d20(
+    tmp_path: Path,
+) -> None:
+    trace = _single_selected_trace(
+        formation_date="2026-07-31",
+        action_date="2026-08-03",
+    )
+    archive = tmp_path / "local_archive/forward_selection"
+    archive.mkdir(parents=True)
+    _write_trace(archive / "research-trace-2026-07-31.json", trace)
+    sessions = _seed_monitor_project(tmp_path, trace=trace, session_count=21)
+    d1 = _prepare(tmp_path, sessions[0])
+    episode_id = d1["daily_review_episode_ids"][0]
+    _record_daily_review_for_snapshot(
+        tmp_path,
+        d1,
+        _daily_formal_review(
+            episode_id,
+            day_number=1,
+            checkpoint="D1",
+            current_assessment="contradicted",
+            current_path="down",
+            view_change="invalidated",
+            tracking_decision="stop_active_tracking",
+        ),
+    )
+
+    d2 = _prepare(tmp_path, sessions[1])
+    d20 = _prepare(tmp_path, sessions[19])
+
+    assert d2["daily_review_episode_ids"] == []
+    assert d2["evaluation_only_episode_ids"] == [episode_id]
+    assert d2["episodes"][0]["tracking_status"] == "evaluation_only"
+    assert d2["episodes"][0]["tracking_exit_date"] == str(sessions[0])
+    assert d2["episodes"][0]["current_close_return_since_entry"] is not None
+    assert d20["daily_review_episode_ids"] == [episode_id]
+    assert d20["episodes"][0]["tracking_status"] == "evaluation_only"
+    assert d20["summary"]["evaluation_only_count"] == 1
+
+    _record_daily_review_for_snapshot(
+        tmp_path,
+        d20,
+        _daily_formal_review(
+            episode_id,
+            day_number=20,
+            checkpoint="D20",
+            tracking_decision="complete_observation",
+            final=_final_review(),
+        ),
+    )
+    d21 = _prepare(tmp_path, sessions[20])
+    assert d21["episodes"][0]["tracking_status"] == "completed"
+    assert d21["episodes"][0]["tracking_exit_date"] == str(sessions[0])
+    assert "原推荐" in d21["episodes"][0]["tracking_exit_reason"]
+
+
+def test_backfill_review_never_changes_current_tracking_status(
+    tmp_path: Path,
+) -> None:
+    trace = _single_selected_trace(
+        formation_date="2026-07-31",
+        action_date="2026-08-03",
+    )
+    archive = tmp_path / "local_archive/forward_selection"
+    archive.mkdir(parents=True)
+    _write_trace(archive / "research-trace-2026-07-31.json", trace)
+    sessions = _seed_monitor_project(tmp_path, trace=trace, session_count=2)
+    d1 = _prepare(tmp_path, sessions[0])
+    episode_id = d1["daily_review_episode_ids"][0]
+    _record_daily_review_for_snapshot(
+        tmp_path,
+        d1,
+        _daily_formal_review(
+            episode_id,
+            day_number=1,
+            checkpoint="D1",
+            review_origin="backfill",
+            tracking_decision="historical_not_applied",
+        ),
+    )
+
+    d2 = _prepare(tmp_path, sessions[1])
+
+    assert d2["episodes"][0]["tracking_status"] == "active"
+    assert d2["daily_review_episode_ids"] == [episode_id]
+    assert d2["episodes"][0]["previous_daily_formal_review"][
+        "review_origin"
+    ] == "backfill"
+
+
+def _multi_daily_formal_snapshot(count: int) -> tuple[dict, list[dict]]:
+    base = _daily_formal_snapshot(day_number=2)
+    episodes: list[dict] = []
+    reviews: list[dict] = []
+    for index in range(count):
+        code = f"{index + 1:06d}.SZ"
+        episode_id = f"formal:2026-08-20:{code}:selected"
+        episode = {
+            **base["episodes"][0],
+            "episode_id": episode_id,
+            "ts_code": code,
+            "name": f"股票{index + 1}",
+            "day_number": 2,
+            "checkpoint": None,
+            "attention_reasons": [],
+            "last_detailed_review_date": (
+                f"2026-08-{20 + index:02d}" if index < 8 else None
+            ),
+            "days_since_last_detailed_review": (
+                count - index if index < 8 else None
+            ),
+        }
+        episodes.append(episode)
+        reviews.append(
+            _daily_formal_review(
+                episode_id,
+                day_number=2,
+                checkpoint=None,
+            )
+        )
+    codes = [episode["ts_code"] for episode in episodes]
+    snapshot = {
+        **base,
+        "episodes": episodes,
+        "attention_stocks": [],
+        "required_final_review_episode_ids": [],
+        "daily_review_episode_ids": [
+            episode["episode_id"] for episode in episodes
+        ],
+        "evaluation_only_episode_ids": [],
+        "detailed_review_candidate_codes": codes,
+        "summary": {
+            **base["summary"],
+            "open_episode_count": count,
+            "distinct_stock_count": count,
+            "selected_count": count,
+            "comparator_count": 0,
+            "primary_count": count,
+            "attention_stock_count": 0,
+            "active_tracking_count": count,
+            "evaluation_only_count": 0,
+            "completed_formal_count": 0,
+            "daily_review_episode_count": count,
+            "detailed_review_stock_count": min(8, count),
+        },
+    }
+    return snapshot, reviews
+
+
+def _daily_detail_alert(episode: dict, daily_review: dict) -> dict:
+    alert = _alert(episode["ts_code"], episode["episode_id"])
+    alert.update(
+        name=episode["name"],
+        day_numbers=[episode["day_number"]],
+        alert_type="routine_detail",
+        outlook_1_3d=daily_review["outlook_1_3d"],
+        outlook_reason_plain_language=(
+            daily_review["outlook_reason_plain_language"]
+        ),
+        episode_reviews=[
+            {
+                **_episode_review(episode["episode_id"]),
+                "current_assessment": daily_review["current_assessment"],
+                "best_supported_explanation": (
+                    daily_review["best_supported_explanation"]
+                ),
+                "current_weak_or_failed_link": (
+                    daily_review["current_weak_or_failed_link"]
+                ),
+                "final_twenty_day_review": (
+                    daily_review["final_twenty_day_review"]
+                ),
+            }
+        ],
+    )
+    return alert
+
+
+def _write_daily_ledger(root: Path, snapshot: dict, reviews: list[dict]) -> None:
+    monitor_dir = root / "local_archive/forward_monitor"
+    monitor_dir.mkdir(parents=True, exist_ok=True)
+    (monitor_dir / f"daily-formal-reviews-{snapshot['analysis_date']}.json").write_text(
+        json.dumps(
+            {
+                "ledger_version": DAILY_FORMAL_REVIEWS_VERSION,
+                "analysis_date": snapshot["analysis_date"],
+                "as_of": snapshot["as_of"],
+                "reviews": reviews,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+@pytest.mark.parametrize("count", [5, 12])
+def test_new_monitor_report_details_all_or_exactly_eight_active_stocks(
+    tmp_path: Path,
+    count: int,
+) -> None:
+    snapshot, reviews = _multi_daily_formal_snapshot(count)
+    snapshot_path = tmp_path / "snapshot.json"
+    pending = tmp_path / "pending.json"
+    snapshot_path.write_text(json.dumps(snapshot), encoding="utf-8")
+    _write_daily_ledger(tmp_path, snapshot, reviews)
+    expected = min(8, count)
+    selected_indices = (
+        list(range(count))
+        if count <= 8
+        else [8, 9, 10, 11, 0, 1, 2, 3]
+    )
+    alerts = [
+        _daily_detail_alert(snapshot["episodes"][index], reviews[index])
+        for index in selected_indices
+    ]
+    pending.write_text(
+        json.dumps(_report_payload(snapshot, alerts=alerts, unreported=0)),
+        encoding="utf-8",
+    )
+
+    summary = record_forward_monitor(
+        snapshot_file=snapshot_path,
+        report_file=pending,
+        project_root=tmp_path,
+    )
+
+    assert summary.alert_count == expected
+
+
+def test_detail_report_rejects_inconsistent_daily_review(
+    tmp_path: Path,
+) -> None:
+    snapshot, reviews = _multi_daily_formal_snapshot(1)
+    snapshot_path = tmp_path / "snapshot.json"
+    pending = tmp_path / "pending.json"
+    snapshot_path.write_text(json.dumps(snapshot), encoding="utf-8")
+    _write_daily_ledger(tmp_path, snapshot, reviews)
+    alert = _daily_detail_alert(snapshot["episodes"][0], reviews[0])
+    alert["episode_reviews"][0]["current_assessment"] = "supported"
+    pending.write_text(
+        json.dumps(_report_payload(snapshot, alerts=[alert], unreported=0)),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="daily formal review"):
+        record_forward_monitor(
+            snapshot_file=snapshot_path,
+            report_file=pending,
+            project_root=tmp_path,
+        )
+
+
+def test_detail_report_requires_stop_d20_and_key_view_changes(
+    tmp_path: Path,
+) -> None:
+    snapshot, reviews = _multi_daily_formal_snapshot(10)
+    stop, d20, changed = 9, 8, 7
+    reviews[stop].update(
+        current_assessment="contradicted",
+        current_path="down",
+        view_change="invalidated",
+        tracking_decision="stop_active_tracking",
+    )
+    snapshot["episodes"][d20].update(
+        day_number=20,
+        checkpoint="D20",
+        frozen_twenty_day_review=None,
+    )
+    reviews[d20].update(
+        day_number=20,
+        checkpoint="D20",
+        tracking_decision="complete_observation",
+        final_twenty_day_review=_final_review(),
+    )
+    reviews[changed]["view_change"] = "strengthened"
+    _write_daily_ledger(tmp_path, snapshot, reviews)
+    snapshot_path = tmp_path / "snapshot.json"
+    snapshot_path.write_text(json.dumps(snapshot), encoding="utf-8")
+
+    selected = [stop, d20, changed, 0, 1, 2, 3, 4]
+    accepted = tmp_path / "accepted.json"
+    accepted.write_text(
+        json.dumps(
+            _report_payload(
+                snapshot,
+                alerts=[
+                    _daily_detail_alert(snapshot["episodes"][i], reviews[i])
+                    for i in selected
+                ],
+                unreported=0,
+            )
+        ),
+        encoding="utf-8",
+    )
+    recorded = record_forward_monitor(
+        snapshot_file=snapshot_path,
+        report_file=accepted,
+        project_root=tmp_path,
+    )
+    assert recorded.alert_count == 8
+
+    Path(recorded.json_file).unlink()
+    Path(recorded.markdown_file).unlink()
+    omitted_stop = tmp_path / "omitted-stop.json"
+    omitted_stop.write_text(
+        json.dumps(
+            _report_payload(
+                snapshot,
+                alerts=[
+                    _daily_detail_alert(snapshot["episodes"][i], reviews[i])
+                    for i in [d20, changed, 0, 1, 2, 3, 4, 5]
+                ],
+                unreported=0,
+            )
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(
+        ValueError,
+        match="omits a stop, D20, or key view change",
+    ):
+        record_forward_monitor(
+            snapshot_file=snapshot_path,
+            report_file=omitted_stop,
+            project_root=tmp_path,
+        )
+
+
+def test_new_markdown_lists_every_active_review_then_only_the_detailed_stocks(
+    tmp_path: Path,
+) -> None:
+    snapshot, reviews = _multi_daily_formal_snapshot(5)
+    reviews[1].update(
+        current_assessment="weakening",
+        current_path="down",
+        outlook_1_3d="weakening",
+        outlook_reason_plain_language="最近两个收盘逐步降低。",
+    )
+    reviews[2].update(
+        current_assessment="contradicted",
+        current_path="down",
+        view_change="invalidated",
+        tracking_decision="stop_active_tracking",
+    )
+    snapshot_path = tmp_path / "snapshot.json"
+    pending = tmp_path / "pending.json"
+    snapshot_path.write_text(json.dumps(snapshot), encoding="utf-8")
+    _write_daily_ledger(tmp_path, snapshot, reviews)
+    alerts = [
+        _daily_detail_alert(episode, review)
+        for episode, review in zip(
+            snapshot["episodes"], reviews, strict=True
+        )
+    ]
+    pending.write_text(
+        json.dumps(_report_payload(snapshot, alerts=alerts, unreported=0)),
+        encoding="utf-8",
+    )
+
+    result = record_forward_monitor(
+        snapshot_file=snapshot_path,
+        report_file=pending,
+        project_root=tmp_path,
+    )
+    markdown = Path(result.markdown_file).read_text(encoding="utf-8")
+
+    assert "## 所有主动推荐的今日结论" in markdown
+    assert (
+        "| 股票 | 推荐后第几日 | 当前涨跌 | 当前走势 | 是否仍在预期内 | "
+        "未来1—3日 | 主动跟踪 |"
+    ) in markdown
+    assert "股票2" in markdown
+    assert "预期正在减弱但尚未被否定" in markdown
+    assert "股票3" in markdown
+    assert "今日停止" in markdown
+    assert "## 今天重点复盘的5只股票" in markdown
+    assert markdown.count("## 正式推荐股票的走势复盘") == 0
+    assert "主动跟踪：4只" in markdown
+    assert "仅保留评价：1条" in markdown
+    assert "已完成：0条" in markdown
+
+
+def test_cli_parses_record_daily_formal_reviews_command() -> None:
+    parsed = _parse_args(
+        [
+            "record-daily-formal-reviews",
+            "--snapshot-file",
+            "snapshot.json",
+            "--review-file",
+            "pending-daily-formal-reviews.json",
+        ]
+    )
+
+    assert parsed.command == "record-daily-formal-reviews"
+    assert parsed.snapshot_file == "snapshot.json"
+    assert parsed.review_file == "pending-daily-formal-reviews.json"
+
+
+def test_d30_daily_review_must_complete_extended_observation(
+    tmp_path: Path,
+) -> None:
+    snapshot = _daily_formal_snapshot(day_number=30)
+    episode_id = snapshot["daily_review_episode_ids"][0]
+    pending = tmp_path / "pending.json"
+    snapshot_path = tmp_path / "snapshot.json"
+    snapshot_path.write_text(json.dumps(snapshot), encoding="utf-8")
+    pending.write_text(
+        json.dumps(
+            {
+                "ledger_version": DAILY_FORMAL_REVIEWS_VERSION,
+                "analysis_date": snapshot["analysis_date"],
+                "as_of": snapshot["as_of"],
+                "reviews": [
+                    _daily_formal_review(
+                        episode_id,
+                        day_number=30,
+                        checkpoint="D30",
+                        tracking_decision="keep_active_tracking",
+                        final=_final_review(),
+                    )
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="D30"):
+        record_daily_formal_reviews(
+            snapshot_file=snapshot_path,
+            review_file=pending,
+            project_root=tmp_path,
+        )
