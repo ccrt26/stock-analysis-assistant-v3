@@ -50,6 +50,16 @@ description: Use only after a stock was explicitly recommended, to compare the d
 
 现有程序外层已分别展示具体推荐日期、当前/最高/最低路径、距离20%观察目标的进度、未来1—3个交易日的完整展望、`confirmation_condition` 和 `invalidation_condition`。`current_review` 不重复这些清单或固定句；只有某个日期或数字直接决定中心判断时，才可再引用一次。`original_reason_plain_language` 只通俗改写当时理由，不再自行加上完整推荐日期；`original_key_risk_plain_language` 只改写当时风险，不加入后来事实。
 
+## 未来方向不是条件清单
+
+复盘必须先判断未来1—3个交易日更可能是向上、震荡偏上、横盘、震荡偏下、向下，还是暂时无法判断，再说明哪些当前事实使这个方向比另外两个方向更合理。这个判断是短期基准，不是20日收益承诺，也不声称确定预测。
+
+用 `outlook_reason_plain_language` 保存方向理由：只选当前最重要的1—3项事实，不写“如果……就……”，不重复 `confirmation_condition`、`invalidation_condition` 或整段 `current_review`。条件只负责以后验证，不能代替当前判断。没有可交易价格或证据彼此冲突时，可以写“目前没有足够的可交易事实判断方向”，并说明缺少什么。
+
+## 20日目标的可实现性
+
+`current_review` 可以用一句话说明“20%目标仍有现实可能”“需要重新加速才有可能”“目前已明显变得困难”“已经不再以完成目标为主要判断”或“无法计算”。不增加结构化字段，不按每天1%线性推算。
+
 ## 上一轮观点的真实锚点
 
 优先读取本记录自己的：
@@ -135,7 +145,7 @@ D20 是唯一允许串起完整过程的复盘。`current_review` 当天仍只�
 
 ## 输出
 
-继续填写现有 `ForwardEpisodeReviewV1`，不增加schema。
+继续填写现有 `ForwardEpisodeReviewV1`；同时在 `ForwardMonitorAlertV2` 填写新增的可选文字字段，不增加报告版本，也不增加复盘枚举、评分或概率。
 
 `original_reason_plain_language`：
 只通俗改写当时原因，不加入后来事实，也不重复程序已生成的完整推荐日期句。
@@ -144,9 +154,12 @@ D20 是唯一允许串起完整过程的复盘。`current_review` 当天仍只�
 按本 Skill 的自然观点更新合同写一段或两三段。第一句先给本次观点，随后只用回答主要问题所需的最少事实，说明推荐日最重要的预期怎样被验证或削弱，并交代与上次相比是否有实质改变。不重复外层已展示的目标进度、完整展望和两个条件。
 
 `outlook_1_3d`：
-使用现有七类表达未来1—3个交易日的基准判断；确实无法判断方向时，在 `current_review` 明确写“未来1—3个交易日方向暂时无法判断”，不要用横盘预测掩盖未知。
+继续使用现有七类表达未来1—3个交易日的基准判断，并分别落到向上、震荡偏上、横盘、震荡偏下、向下或暂时无法判断；确实无法判断时不要用横盘预测掩盖未知。
+
+`outlook_reason_plain_language`：
+先作出方向判断，再用当前最重要的1—3项事实说明为什么这个方向更合理。它与 `outlook_1_3d`、`current_assessment`、`current_review` 保持一致，不复述后面的正反条件。
 
 `confirmation_condition` 与 `invalidation_condition`：
-各写一个完整中文句子，分别说明什么事实增强判断、什么事实改变判断。
+各写一个完整中文句子，分别说明什么事实支持判断、什么事实要求改变判断。条件只负责以后验证，不能取代当前方向和理由。
 
 其他枚举只供内部记录，不直接显示给用户。

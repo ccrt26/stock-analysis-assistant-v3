@@ -77,6 +77,7 @@ local_archive/forward_monitor/pending-report-<analysis_date>.json
 - `episode_reviews` 中的 `episode_id` 必须与该股票全部 attention episode 完全一致，不得缺少、重复或多出；不得用该股票最大交易日序号替其他记录结案。
 - snapshot 的 `required_final_review_episode_ids` 必须全部出现在日报的 `episode_reviews` 中；这些记录优先进入最多8只的详细提醒，不能留到未详细展示数量中。
 - 每条记录的 `ForwardEpisodeReviewV1` 只填写通俗原因与风险、当前判断、现有证据最支持的解释、当前最弱环节、当前复盘、成对比较解释和 `final_twenty_day_review`，不增加分数、概率或更多分类。
+- 每只新提醒必须填写 `outlook_reason_plain_language`，用当前最重要的1—3项事实说明未来1—3个交易日为什么更可能向上、横盘、向下或暂时无法判断。先作出方向判断，不写“如果……就……”，不重复两个验证条件，也不照抄整段 `current_review`；它必须与 `outlook_1_3d`、`current_assessment` 和 `current_review` 一致。没有可交易价格或证据冲突时可以说明目前无法判断方向，并明确缺少什么。
 - best_supported_explanation 等枚举继续在内部填写；current_review 才是公开分析核心，要写成连贯的观点更新短评，不向用户解释内部字段。why_reported 只说明今天为什么复盘，不参与涨跌归因，不直接展示。
 - 具体推荐日期必须取该次正式推荐记录的 `action_date`，写成“这只股票在YYYY年M月D日开盘前被正式推荐”，不能用复盘日期或当前日期代替。
 - `confirmed_active` 和 `legacy_v1_not_rewritten` 两类正式推荐记录在第1至第19个交易日，`final_twenty_day_review` 必须为空；第20个交易日必须首次形成。第20天漏跑时，`pending_final_review` 必须持续排在提醒原因第一位，直到结论成功保存并在下一次 prepare 恢复。第21至第30个交易日不得改写这个结论，只能更新当前走势评价。snapshot 已有 `frozen_twenty_day_review` 时必须原样使用；漏跑后首次建立也只能依据 `d20_*`、前20个交易日以内的事实和已冻结原判断。
@@ -89,7 +90,7 @@ local_archive/forward_monitor/pending-report-<analysis_date>.json
 
 ### 内部日报和用户复盘分开处理
 
-`DailyForwardMonitorReportV2` 是内部完整归档，继续按上面的合同保存所有应当复盘的推荐、比较、待确认事件和内部提醒。不得为了让最终文字更短而删掉比较记录、成对价格、内部提醒或必需字段，也不得改变 `record` 的校验口径。
+snapshot、原始事实与 trace 是内部完整记录，继续保存全部推荐、比较、待确认事件、公告候选、成对价格和 attention 原因。`DailyForwardMonitorReportV2` 只保存 AI 实际选入的最多8只提醒以及 `unreported_attention_count`；仅由公告触发的候选没有进入日报，不等于从 snapshot、原始事实或 trace 删除。不得为了让最终文字更短而删掉内部事实或改变记录合同。
 
 ### 正式推荐股票的走势复盘
 
@@ -135,6 +136,8 @@ local_archive/forward_monitor/pending-report-<analysis_date>.json
 
 事实与观点分开。`current_review` 中每一项具体的日期、百分比、金额、股票数量、公告名称和财务变化，都必须能追溯到当前 snapshot 或 monitor report 的确定性字段、原推荐 trace，或当日按现有流程读取的正式公司材料中的明确字段和值。百分比和日期可以换算格式，但要保留来源字段和原始值。上一轮 `current_review`、旧日报中的 `company_change` 等 AI 自由文本只能作观点锚点，不能作新事实来源。相对表现、公司事件与价格反应、价格成交组合、原推荐检查点只支持目前更合理的解释，不证明唯一原因。现有证据不能区分原因时，直接说不知道并说明缺什么，不为完整感编故事。
 
+`current_review` 可以用一句话说明“20%目标仍有现实可能”“需要重新加速才有可能”“目前已明显变得困难”“已经不再以完成目标为主要判断”或“无法计算”。这只是结合实际路径更新可实现性，不新增结构化字段，也不按每天1%线性推算。
+
 ### `current_review` 与现有渲染器的分工
 
 current_review 只负责一句话观点更新、当天主要问题、必要的原因解释、原判断实现或减弱的部分、相较本记录上一轮的实质变化和当前综合判断。
@@ -170,7 +173,9 @@ current_review 只负责一句话观点更新、当天主要问题、必要的�
 
 “我的分析”只展示 `review.current_review`；前20个交易日的冻结结论以“前20个交易日最后结果：”并入这一段，不新增第五个标题。不打印内部 `current_assessment`、`best_supported_explanation`、`current_weak_or_failed_link` 标签。
 
-outlook_1_3d 使用现有七类：strengthening 对应更可能继续走强，continuation_possible 对应更可能震荡偏强，range_or_wait 对应更可能横盘整理或等待新变化，weakening 对应更可能继续回落或弱势震荡，overheated 对应更可能高位剧烈波动并出现回吐，invalidated 表示原判断已不成立，event_pending 表示等待事件或复牌后的实际交易反应。确实无法判断方向时，current_review 和公开展望必须写“未来1—3个交易日方向暂时无法判断”，不得把未知包装成横盘预测。
+outlook_1_3d 保留现有七类，公开方向固定为：strengthening“未来1—3个交易日更可能继续向上”，continuation_possible“未来1—3个交易日更可能震荡偏上”，range_or_wait“未来1—3个交易日更可能横盘整理”，weakening“未来1—3个交易日更可能震荡偏下”，overheated“未来1—3个交易日更可能高位震荡，短线偏下”，invalidated“未来1—3个交易日更可能继续偏弱”，event_pending“目前没有足够的可交易事实判断方向”。确实无法判断方向时不得用横盘预测掩盖未知。
+
+“接下来更可能怎样”严格按“方向判断 → `outlook_reason_plain_language` 的主要原因 → 支持这个判断的后续表现 → 需要改变判断的后续表现”输出。理由必须在 `confirmation_condition` 和 `invalidation_condition` 之前；条件只负责以后验证，不能代替当前判断，也不能反过来写成两边都可能的空话。
 
 四路 `market_change`、`sector_change`、`company_change`、`stock_change`、`why_reported`、成对比较和待确认记录继续保留在内部 JSON 和 snapshot，公开 Markdown 不直接拼接这些文字。不得为了缩短公开文字而删除内部事实或记录。
 
@@ -189,8 +194,13 @@ outlook_1_3d 使用现有七类：strengthening 对应更可能继续走强，co
 - 不从量价猜测机构、主力、游资或账户身份；没有证据的原因就说未知。
 - 只保留必要的一次时间边界说明；不提供收益承诺、仓位、自动交易、止盈或止损建议。
 
-详细提醒最多8只不同股票。超过8只时，消息优先级固定为：
-正式推荐重点股票不超过8只时必须全部进入详细提醒，不得由待确认事件或比较记录挤占。正式推荐重点股票超过8只时，8个位置也只能由正式推荐使用；待确认事件和比较记录只能使用正式推荐之后剩余的位置。
+详细提醒最多8只不同股票。`MANDATORY_FORMAL_REVIEW_REASONS` 包含 `pending_final_review`、`checkpoint`、`target_hit_first_time`、`relative_state_changed`、`scenario_changed`、`breakout_changed`、`sector_state_changed`、`late_activation_candidate`、`overheat_candidate` 和 `data_problem`，故意不包含 `new_official_event`。每条记录按自己的 attention 原因判断，不得借用同一股票另一条比较记录或正式记录的原因。
+
+mandatory 正式重点不超过8只时必须全部进入详细提醒；超过8只时，8个位置只能先由 mandatory 正式重点使用，不得由可选公告候选或比较记录挤占。仅由 `new_official_event` 触发的正式股票是可选公告候选：公司 Skill 与复盘 Skill 确认公告实质改变原推荐、执行状态、控制权核心安排、收入、利润或现金流判断时可以进入；例行披露、重复进展和没有新条款的配套文件不进入。不使用公告标题关键词替代语义判断，也不要求凑满8只。
+
+没有可靠入口价格的正式记录，首次确认无法执行或数据限制变化时仍以 `data_problem` 提醒；D20 仍由 `pending_final_review` 强制结案。若限制完全未变，D3、D5、D10、D25、D30 普通检查点不再单独占用详细提醒名额；后来出现可观察交易或限制发生真实变化时重新进入候选。
+
+超过8只候选时，内部消息排序仍为：
 
 
 1. `pending_final_review`

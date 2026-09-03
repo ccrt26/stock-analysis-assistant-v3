@@ -39,7 +39,11 @@ def test_forward_monitor_prompt_limits_ai_work_and_report_size() -> None:
         "actionable_watch", "strengthening", "overheated", "target_hit",
         "late_activation", "checkpoint",
     ]
-    positions = [text.index(f"`{value}`") for value in priorities]
+    priority_block = text.split(
+        "超过8只候选时，内部消息排序仍为：",
+        maxsplit=1,
+    )[1]
+    positions = [priority_block.index(f"`{value}`") for value in priorities]
     assert positions == sorted(positions)
 
 
@@ -54,10 +58,11 @@ def test_existing_daily_prompt_stays_v4_and_adds_monitor_in_same_task() -> None:
     assert "already_selected" in text
     assert "不得重复执行新选股" in text
     assert "今天的市场情况" in text
-    assert "之前研究过的股票走势复盘" in text
-    assert "目前还在跟踪多少只" in text
-    assert "今天已确认的正式推荐" in text
-    assert "等待首个交易日确认的事件线索" in text
+    user_output = text.split("### 唯一用户输出格式", maxsplit=1)[1]
+    assert "正式推荐股票的走势复盘" in user_output
+    assert "目前仍开放的正式推荐股票数量" in user_output
+    assert "今天明确推荐的股票" in user_output
+    assert "等待首个交易日确认的事件线索" not in user_output
     assert "今天新推荐的股票" not in text
     assert "已过原行动窗口" not in text
     assert "今天开盘前能够看到的信息" in text
@@ -76,8 +81,12 @@ def test_daily_prompts_separate_confirmed_recommendations_from_event_leads() -> 
         encoding="utf-8"
     )
 
-    assert "今天已确认的正式推荐" in selection
-    assert "等待首个交易日确认的事件线索" in selection
+    user_output = selection.split("### 唯一用户输出格式", maxsplit=1)[1]
+    assert "今天明确推荐的股票" in user_output
+    assert "等待首个交易日确认的事件线索" not in user_output
+    assert "fresh_event_pending" in selection
+    assert "conditional_event" in selection
+    assert "内部 V4 trace" in selection
     assert "conditional 不进入正式推荐数量" in selection
     assert "不得虚构收益" in selection
     assert "conditional_event" in monitor
@@ -125,8 +134,10 @@ def test_forward_monitor_prompt_uses_previous_state_and_strict_report_contract()
     assert "真实成对价格路径" in text
     assert "正式推荐股票的走势复盘" in text
     assert "`confirmed_active` 和 `legacy_v1_not_rewritten` 两类正式推荐记录" in text
-    assert "正式推荐重点股票不超过8只时必须全部进入详细提醒" in text
-    assert "不得由待确认事件或比较记录挤占" in text
+    assert "MANDATORY_FORMAL_REVIEW_REASONS" in text
+    assert "仅由 `new_official_event` 触发" in text
+    assert "不要求凑满8只" in text
+    assert "不得由可选公告候选或比较记录挤占" in text
     assert "比较记录的 `final_twenty_day_review` 始终为空" in text
 
 
@@ -245,6 +256,34 @@ def test_review_prompt_aligns_current_review_with_existing_renderer() -> None:
         "事件复盘",
         "D20 最终复盘",
         "字段和值",
+        "outlook_reason_plain_language",
+        "先作出方向判断",
+        "当前最重要的1—3项事实",
+        "条件只负责以后验证",
+    ):
+        assert phrase in prompt
+
+    for direction in (
+        "继续向上",
+        "震荡偏上",
+        "横盘整理",
+        "震荡偏下",
+        "继续偏弱",
+        "没有足够的可交易事实判断方向",
+    ):
+        assert direction in prompt
+
+
+def test_review_prompt_explains_twenty_day_target_feasibility_without_linear_projection() -> None:
+    prompt = Path("ops/forward-monitor-prompt.md").read_text(encoding="utf-8")
+
+    for phrase in (
+        "20%目标仍有现实可能",
+        "需要重新加速才有可能",
+        "目前已明显变得困难",
+        "已经不再以完成目标为主要判断",
+        "无法计算",
+        "不按每天1%线性推算",
     ):
         assert phrase in prompt
 
@@ -285,7 +324,7 @@ def test_review_prompt_separates_internal_facts_from_public_causal_analysis() ->
         "行业上涨面",
         "不得说行业数据全部不可用",
         "无法按计划执行",
-        "未来1—3个交易日方向暂时无法判断",
+        "目前没有足够的可交易事实判断方向",
         "D1—D4",
     ):
         assert phrase in text
@@ -308,3 +347,29 @@ def test_review_sample_uses_real_dates_target_progress_and_reasoning() -> None:
         assert phrase in sample
     for forbidden in ("冻结时点", "冻结结论", "正常双向成交", "农业样本"):
         assert forbidden not in sample
+
+
+def test_review_skill_makes_future_direction_a_reasoned_judgment() -> None:
+    skill = Path(
+        ".agents/skills/reviewing-stock-recommendations/SKILL.md"
+    ).read_text(encoding="utf-8")
+
+    for phrase in (
+        "未来方向不是条件清单",
+        "outlook_reason_plain_language",
+        "向上",
+        "震荡偏上",
+        "横盘",
+        "震荡偏下",
+        "向下",
+        "暂时无法判断",
+        "未来1—3个交易日",
+        "条件只负责以后验证",
+        "20%目标仍有现实可能",
+        "需要重新加速才有可能",
+        "目前已明显变得困难",
+        "已经不再以完成目标为主要判断",
+        "无法计算",
+        "不按每天1%线性推算",
+    ):
+        assert phrase in skill

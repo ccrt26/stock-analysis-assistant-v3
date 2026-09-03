@@ -15,7 +15,9 @@ from stock_analyzer.ops.forward_monitor import (
     DailyForwardMonitorReportV2,
     ForwardEpisodeReviewV1,
     ForwardMonitorAlertV2,
+    _attention_reasons,
     _human_trading_day,
+    _render_public_outlook,
     _render_target_progress,
     prepare_forward_monitor,
     record_forward_monitor,
@@ -55,6 +57,7 @@ def test_causal_review_keeps_existing_report_model_fields() -> None:
         "confirmation_condition",
         "invalidation_condition",
         "why_reported",
+        "outlook_reason_plain_language",
         "episode_reviews",
     }
     assert set(DailyForwardMonitorReportV2.model_fields) == {
@@ -1552,6 +1555,137 @@ def test_data_problem_only_repeats_for_change_or_checkpoint(tmp_path: Path) -> N
     assert "data_problem" in d3["attention_reasons"]
 
 
+def _non_executable_attention_episode(
+    *,
+    day_number: int,
+    checkpoint: str | None,
+    limitations: list[str] | None = None,
+    entry_open: float | None = None,
+    new_announcements: list[dict] | None = None,
+) -> dict:
+    return {
+        "selection_output_class": "confirmed_active",
+        "entry_open": entry_open,
+        "day_number": day_number,
+        "frozen_twenty_day_review": (
+            {"overall_review": "已冻结"} if day_number > 20 else None
+        ),
+        "checkpoint": checkpoint,
+        "new_announcements": new_announcements or [],
+        "original_engine_type": "independent_demand_acceleration",
+        "first_observable_date": None,
+        "analysis_date": "2026-09-03",
+        "d20_first_close_hit_20pct_date": None,
+        "monitor_phase": "primary" if day_number <= 20 else "passive_tail",
+        "relative_market_3d": None,
+        "relative_market_5d": None,
+        "relative_industry_3d": None,
+        "relative_industry_5d": None,
+        "amount_ratio_last_20d": None,
+        "scenario_case_ids": [],
+        "breakout_vs_prior60": None,
+        "limit_up_return_contribution_5d": None,
+        "data_limitations": limitations or [],
+    }
+
+
+def test_non_executable_formal_without_new_fact_has_no_attention_reason() -> None:
+    current = _non_executable_attention_episode(
+        day_number=2,
+        checkpoint=None,
+        limitations=["incomplete_price_path", "price_context_incomplete"],
+    )
+    previous = {
+        **current,
+        "analysis_date": "2026-09-02",
+    }
+
+    assert _attention_reasons(current, previous) == []
+
+
+@pytest.mark.parametrize(
+    ("day_number", "checkpoint"),
+    [(3, "D3"), (5, "D5"), (10, "D10"), (25, "D25"), (30, "D30")],
+)
+def test_non_executable_formal_does_not_repeat_ordinary_checkpoint_or_data_problem(
+    day_number: int,
+    checkpoint: str,
+) -> None:
+    current = _non_executable_attention_episode(
+        day_number=day_number,
+        checkpoint=checkpoint,
+        limitations=["incomplete_price_path", "price_context_incomplete"],
+    )
+    previous = {
+        **current,
+        "day_number": day_number - 1,
+        "checkpoint": None,
+        "analysis_date": "2026-09-02",
+    }
+
+    assert _attention_reasons(current, previous) == []
+
+
+def test_non_executable_formal_reports_data_problem_once() -> None:
+    current = _non_executable_attention_episode(
+        day_number=1,
+        checkpoint="D1",
+        limitations=["incomplete_price_path", "price_context_incomplete"],
+    )
+
+    assert _attention_reasons(current, None) == ["data_problem"]
+
+
+def test_non_executable_formal_still_requires_day_twenty_review() -> None:
+    current = _non_executable_attention_episode(
+        day_number=20,
+        checkpoint="D20",
+        limitations=["incomplete_price_path", "price_context_incomplete"],
+    )
+    previous = {
+        **current,
+        "day_number": 19,
+        "checkpoint": None,
+        "analysis_date": "2026-09-02",
+    }
+
+    assert _attention_reasons(current, previous) == ["pending_final_review"]
+
+
+def test_non_executable_formal_keeps_new_event_as_optional_attention() -> None:
+    current = _non_executable_attention_episode(
+        day_number=3,
+        checkpoint="D3",
+        limitations=["incomplete_price_path", "price_context_incomplete"],
+        new_announcements=[{"announcement_id": "A1"}],
+    )
+    previous = {
+        **current,
+        "day_number": 2,
+        "checkpoint": None,
+        "new_announcements": [],
+        "analysis_date": "2026-09-02",
+    }
+
+    assert _attention_reasons(current, previous) == ["new_official_event"]
+
+
+def test_first_observable_trading_change_returns_to_attention() -> None:
+    previous = _non_executable_attention_episode(
+        day_number=2,
+        checkpoint=None,
+        limitations=["incomplete_price_path", "price_context_incomplete"],
+    )
+    current = _non_executable_attention_episode(
+        day_number=3,
+        checkpoint="D3",
+        limitations=["price_context_incomplete"],
+        entry_open=10.0,
+    )
+
+    assert "data_problem" in _attention_reasons(current, previous)
+
+
 def test_previous_monitor_state_uses_final_report_ignores_pending_and_carries_forward(
     tmp_path: Path,
 ) -> None:
@@ -1726,8 +1860,73 @@ def _alert(ts_code: str, episode_id: str) -> dict:
         "confirmation_condition": "相对表现转强",
         "invalidation_condition": "相对表现继续走弱",
         "why_reported": "固定检查日",
+        "outlook_reason_plain_language": (
+            "相对表现没有继续扩大，最近收盘也没有形成新的方向。"
+        ),
         "episode_reviews": [_episode_review(episode_id)],
     }
+
+
+def test_public_outlook_states_direction_reason_then_validation_conditions() -> None:
+    payload = _alert("603969.SH", "episode-1")
+    payload.update(
+        outlook_1_3d="range_or_wait",
+        outlook_reason_plain_language=(
+            "当前仍保留大部分推荐后涨幅，但最近两日冲高回落增多。"
+        ),
+        confirmation_condition="回落时成交缩小，收盘仍守在近期高位。",
+        invalidation_condition="成交明显增加并连续收低，或跌破主要涨幅区间。",
+    )
+    rendered = _render_public_outlook(ForwardMonitorAlertV2.model_validate(payload))
+
+    direction = "未来1—3个交易日更可能横盘整理。"
+    reason = "主要原因是：当前仍保留大部分推荐后涨幅，但最近两日冲高回落增多。"
+    support = "支持这个判断的后续表现：回落时成交缩小，收盘仍守在近期高位。"
+    change = "需要改变判断的后续表现：成交明显增加并连续收低，或跌破主要涨幅区间。"
+    assert rendered.index(direction) < rendered.index(reason)
+    assert rendered.index(reason) < rendered.index(support)
+    assert rendered.index(support) < rendered.index(change)
+    assert "判断增强条件" not in rendered
+    assert "判断改变条件" not in rendered
+    assert "如果若" not in rendered
+    assert "。。" not in rendered
+
+
+@pytest.mark.parametrize(
+    ("outlook", "direction"),
+    [
+        ("strengthening", "未来1—3个交易日更可能继续向上"),
+        ("continuation_possible", "未来1—3个交易日更可能震荡偏上"),
+        ("range_or_wait", "未来1—3个交易日更可能横盘整理"),
+        ("weakening", "未来1—3个交易日更可能震荡偏下"),
+        ("overheated", "未来1—3个交易日更可能高位震荡，短线偏下"),
+        ("invalidated", "未来1—3个交易日更可能继续偏弱"),
+        ("event_pending", "目前没有足够的可交易事实判断方向"),
+    ],
+)
+def test_public_outlook_maps_each_internal_state_to_clear_direction(
+    outlook: str,
+    direction: str,
+) -> None:
+    payload = _alert("603969.SH", "episode-1")
+    payload["outlook_1_3d"] = outlook
+
+    assert _render_public_outlook(
+        ForwardMonitorAlertV2.model_validate(payload)
+    ).startswith(f"{direction}。")
+
+
+def test_historical_v2_alert_without_outlook_reason_still_renders() -> None:
+    payload = _alert("603969.SH", "episode-1")
+    payload.pop("outlook_reason_plain_language")
+    alert = ForwardMonitorAlertV2.model_validate(payload)
+
+    rendered = _render_public_outlook(alert)
+
+    assert rendered.startswith("未来1—3个交易日更可能横盘整理。")
+    assert "主要原因是" not in rendered
+    assert "支持这个判断的后续表现" in rendered
+    assert "需要改变判断的后续表现" in rendered
 
 
 def _mixed_role_snapshot() -> dict:
@@ -2261,9 +2460,12 @@ def test_markdown_uses_plain_chinese_and_natural_review_sections(
     assert "当前收盘较期间最高收盘回落+0.00%" not in markdown
     assert "测试中需要看到的继续走强事实" in markdown
     assert "测试中说明原判断不再成立的事实" in markdown
-    assert "未来1—3个交易日更可能震荡偏强" in markdown
-    assert "判断增强条件：" in markdown
-    assert "判断改变条件：" in markdown
+    assert "未来1—3个交易日更可能震荡偏上" in markdown
+    assert "主要原因是：" in markdown
+    assert "支持这个判断的后续表现：" in markdown
+    assert "需要改变判断的后续表现：" in markdown
+    assert "判断增强条件：" not in markdown
+    assert "判断改变条件：" not in markdown
     assert "。。" not in markdown
     assert "如果若" not in markdown
     assert "2026年8月3日开盘前被正式推荐" in markdown
@@ -2287,13 +2489,13 @@ def test_markdown_uses_plain_chinese_and_natural_review_sections(
 @pytest.mark.parametrize(
     ("outlook", "expected"),
     [
-        ("event_pending", "先等待事件或复牌后的实际交易反应"),
-        ("strengthening", "更可能继续走强"),
-        ("continuation_possible", "更可能震荡偏强"),
-        ("range_or_wait", "更可能横盘整理或等待新变化"),
-        ("weakening", "更可能继续回落或弱势震荡"),
-        ("overheated", "更可能高位剧烈波动并出现回吐"),
-        ("invalidated", "原判断已不成立，短期不再以继续走强为基准"),
+        ("event_pending", "目前没有足够的可交易事实判断方向"),
+        ("strengthening", "更可能继续向上"),
+        ("continuation_possible", "更可能震荡偏上"),
+        ("range_or_wait", "更可能横盘整理"),
+        ("weakening", "更可能震荡偏下"),
+        ("overheated", "更可能高位震荡，短线偏下"),
+        ("invalidated", "更可能继续偏弱"),
     ],
 )
 def test_markdown_renders_each_existing_outlook_without_punctuation_artifacts(
@@ -2329,8 +2531,10 @@ def test_markdown_renders_each_existing_outlook_without_punctuation_artifacts(
     markdown = Path(summary.markdown_file).read_text(encoding="utf-8")
 
     assert expected in markdown
-    assert "判断增强条件：收盘继续提高。" in markdown
-    assert "判断改变条件：若收盘持续走弱。" in markdown
+    assert "支持这个判断的后续表现：收盘继续提高。" in markdown
+    assert "需要改变判断的后续表现：若收盘持续走弱。" in markdown
+    assert "判断增强条件" not in markdown
+    assert "判断改变条件" not in markdown
     assert "。。" not in markdown
     assert "如果若" not in markdown
 
@@ -2618,6 +2822,7 @@ def _review_snapshot(
         "relative_industry_20d": 0.035,
         "frozen_twenty_day_review": frozen_review,
         "pair_context": {"pair_status": "unavailable"},
+        "attention_reasons": ["checkpoint"],
         "data_limitations": [],
     }
     return {
@@ -2675,6 +2880,28 @@ def _record_review_payload(
         encoding="utf-8",
     )
     return snapshot_path, pending_path
+
+
+def test_record_requires_outlook_reason_for_each_new_alert(tmp_path: Path) -> None:
+    snapshot = _review_snapshot(day_number=3)
+    episode_id = snapshot["episodes"][0]["episode_id"]
+    alert = _alert("603969.SH", episode_id)
+    alert["day_numbers"] = [3]
+    alert.pop("outlook_reason_plain_language")
+    snapshot_path = tmp_path / "snapshot.json"
+    pending_path = tmp_path / "pending.json"
+    snapshot_path.write_text(json.dumps(snapshot), encoding="utf-8")
+    pending_path.write_text(
+        json.dumps(_report_payload(snapshot, alerts=[alert]), ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="outlook reason"):
+        record_forward_monitor(
+            snapshot_file=snapshot_path,
+            report_file=pending_path,
+            project_root=tmp_path,
+        )
 
 
 def test_each_episode_has_its_own_maturity_and_final_review(
@@ -2787,9 +3014,11 @@ def test_public_markdown_does_not_use_internal_attention_to_fill_content(
 ) -> None:
     snapshot = _snapshot_with_complete_pair()
     selected, comparator = snapshot["episodes"]
+    selected["attention_reasons"] = []
     selected["day_number"] = 20
     selected["pair_context"]["paired_day_number"] = 20
     comparator["day_number"] = 20
+    comparator["attention_reasons"] = ["checkpoint"]
     comparator["pair_context"] = {
         "pair_status": "complete",
         "paired_episode_id": selected["episode_id"],
@@ -3768,3 +3997,206 @@ def test_formal_attention_stock_cannot_be_displaced_by_eight_nonformal_stocks(
     assert episodes[8]["name"] in markdown
     for episode in episodes[:8]:
         assert episode["name"] not in markdown
+
+
+@pytest.mark.parametrize("include_alert", [False, True])
+def test_formal_stock_triggered_only_by_new_event_is_optional_for_public_report(
+    tmp_path: Path,
+    include_alert: bool,
+) -> None:
+    snapshot = _review_snapshot(day_number=3)
+    episode = snapshot["episodes"][0]
+    episode.update(
+        selection_output_class="confirmed_active",
+        attention_reasons=["new_official_event"],
+        new_announcements=[{"announcement_id": "A1", "title": "配套文件"}],
+    )
+    snapshot["attention_stocks"][0]["attention_reasons"] = [
+        "new_official_event"
+    ]
+    snapshot["required_final_review_episode_ids"] = []
+    alerts = [_alert(episode["ts_code"], episode["episode_id"])] if include_alert else []
+    if alerts:
+        alerts[0]["day_numbers"] = [3]
+    snapshot_path = tmp_path / "snapshot.json"
+    pending_path = tmp_path / "pending.json"
+    snapshot_path.write_text(json.dumps(snapshot), encoding="utf-8")
+    pending_path.write_text(
+        json.dumps(
+            _report_payload(
+                snapshot,
+                alerts=alerts,
+                unreported=0 if include_alert else 1,
+            ),
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    summary = record_forward_monitor(
+        snapshot_file=snapshot_path,
+        report_file=pending_path,
+        project_root=tmp_path,
+    )
+
+    saved = json.loads(Path(summary.json_file).read_text(encoding="utf-8"))
+    unchanged_snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
+    assert len(saved["alerts"]) == int(include_alert)
+    assert saved["unreported_attention_count"] == (0 if include_alert else 1)
+    assert unchanged_snapshot["episodes"][0]["new_announcements"][0][
+        "announcement_id"
+    ] == "A1"
+    assert unchanged_snapshot["attention_stocks"][0]["attention_reasons"] == [
+        "new_official_event"
+    ]
+
+
+def test_same_stock_comparator_checkpoint_does_not_make_optional_formal_event_mandatory(
+    tmp_path: Path,
+) -> None:
+    snapshot = _review_snapshot(day_number=3)
+    formal = snapshot["episodes"][0]
+    formal.update(
+        selection_output_class="confirmed_active",
+        attention_reasons=["new_official_event"],
+    )
+    comparator = {
+        **formal,
+        "episode_id": "comparator-episode",
+        "role": "comparator",
+        "selection_output_class": "not_formal_candidate",
+        "attention_reasons": ["checkpoint"],
+    }
+    snapshot["episodes"] = [formal, comparator]
+    snapshot["attention_stocks"][0].update(
+        episode_ids=[formal["episode_id"], comparator["episode_id"]],
+        roles=["selected", "comparator"],
+        attention_reasons=["new_official_event", "checkpoint"],
+    )
+    snapshot["summary"].update(
+        open_episode_count=2,
+        selected_count=1,
+        comparator_count=1,
+        primary_count=2,
+    )
+    snapshot["required_final_review_episode_ids"] = []
+    snapshot_path = tmp_path / "snapshot.json"
+    pending_path = tmp_path / "pending.json"
+    snapshot_path.write_text(json.dumps(snapshot), encoding="utf-8")
+    pending_path.write_text(
+        json.dumps(_report_payload(snapshot, unreported=1)),
+        encoding="utf-8",
+    )
+
+    summary = record_forward_monitor(
+        snapshot_file=snapshot_path,
+        report_file=pending_path,
+        project_root=tmp_path,
+    )
+
+    assert summary.alert_count == 0
+    assert summary.unreported_attention_count == 1
+
+
+def test_eight_optional_formal_events_cannot_displace_one_mandatory_formal_review(
+    tmp_path: Path,
+) -> None:
+    base = _review_snapshot(day_number=3)
+    episodes: list[dict] = []
+    attention: list[dict] = []
+    for index in range(9):
+        code = f"00000{index}.SZ"
+        reasons = ["checkpoint"] if index == 8 else ["new_official_event"]
+        episode = {
+            **base["episodes"][0],
+            "episode_id": f"formal-event-{index}",
+            "ts_code": code,
+            "name": f"股票{index}",
+            "selection_output_class": "confirmed_active",
+            "attention_reasons": reasons,
+        }
+        episodes.append(episode)
+        attention.append(
+            {
+                "ts_code": code,
+                "name": episode["name"],
+                "episode_ids": [episode["episode_id"]],
+                "roles": ["selected"],
+                "day_numbers": [3],
+                "original_engine_types": [
+                    "independent_demand_acceleration"
+                ],
+                "attention_reasons": reasons,
+            }
+        )
+    snapshot = {
+        **base,
+        "episodes": episodes,
+        "attention_stocks": attention,
+        "required_final_review_episode_ids": [],
+        "summary": {
+            **base["summary"],
+            "open_episode_count": 9,
+            "distinct_stock_count": 9,
+            "selected_count": 9,
+            "comparator_count": 0,
+            "primary_count": 9,
+            "attention_stock_count": 9,
+        },
+    }
+
+    def make_alert(episode: dict) -> dict:
+        alert = _alert(episode["ts_code"], episode["episode_id"])
+        alert.update(name=episode["name"], day_numbers=[3])
+        return alert
+
+    snapshot_path = tmp_path / "snapshot.json"
+    snapshot_path.write_text(json.dumps(snapshot), encoding="utf-8")
+    displaced_path = tmp_path / "displaced.json"
+    displaced_path.write_text(
+        json.dumps(
+            _report_payload(
+                snapshot,
+                alerts=[make_alert(item) for item in episodes[:8]],
+                unreported=1,
+            ),
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="mandatory formal attention stocks"):
+        record_forward_monitor(
+            snapshot_file=snapshot_path,
+            report_file=displaced_path,
+            project_root=tmp_path,
+        )
+
+    included_path = tmp_path / "included.json"
+    included_path.write_text(
+        json.dumps(
+            _report_payload(
+                snapshot,
+                alerts=[
+                    make_alert(episodes[8]),
+                    *[make_alert(item) for item in episodes[:7]],
+                ],
+                unreported=1,
+            ),
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    summary = record_forward_monitor(
+        snapshot_file=snapshot_path,
+        report_file=included_path,
+        project_root=tmp_path,
+    )
+    saved = json.loads(Path(summary.json_file).read_text(encoding="utf-8"))
+
+    assert len(saved["alerts"]) == 8
+    assert {item["ts_code"] for item in saved["alerts"]} == {
+        episodes[8]["ts_code"],
+        *(item["ts_code"] for item in episodes[:7]),
+    }

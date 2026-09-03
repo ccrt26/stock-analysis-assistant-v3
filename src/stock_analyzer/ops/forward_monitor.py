@@ -29,6 +29,20 @@ OVERHEAT_SCENARIOS = {"single_day_impulse", "trend_exhaustion", "failed_breakout
 PUBLIC_FORMAL_OUTPUT_CLASSES = frozenset(
     {"confirmed_active", "legacy_v1_not_rewritten"}
 )
+MANDATORY_FORMAL_REVIEW_REASONS = frozenset(
+    {
+        "pending_final_review",
+        "checkpoint",
+        "target_hit_first_time",
+        "relative_state_changed",
+        "scenario_changed",
+        "breakout_changed",
+        "sector_state_changed",
+        "late_activation_candidate",
+        "overheat_candidate",
+        "data_problem",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -214,6 +228,11 @@ class ForwardEpisodeReviewV1(BaseModel):
 
 
 class ForwardMonitorAlertV2(ForwardMonitorAlertV1):
+    outlook_reason_plain_language: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=300,
+    )
     episode_reviews: list[ForwardEpisodeReviewV1] = Field(min_length=1)
 
     @model_validator(mode="after")
@@ -560,6 +579,11 @@ def record_forward_monitor(
         raise ValueError("snapshot must be forward-monitor-snapshot-v1")
     raw_report = json.loads(pending_path.read_text(encoding="utf-8"))
     report = DailyForwardMonitorReportV2.model_validate(raw_report)
+    if any(
+        alert.outlook_reason_plain_language is None
+        for alert in report.alerts
+    ):
+        raise ValueError("each new alert must include an outlook reason")
     if report.analysis_date.isoformat() != str(snapshot.get("analysis_date")):
         raise ValueError("report analysis_date does not match snapshot")
     snapshot_as_of = _as_datetime(snapshot.get("as_of"))
@@ -702,30 +726,28 @@ def record_forward_monitor(
             "report is missing required final review episodes: "
             + ",".join(sorted(missing_required))
         )
-    formal_attention_codes = {
-        ts_code
-        for ts_code, item in attention.items()
-        if any(
-            episode_id in episodes
-            and _episode_selection_output_class(episodes[episode_id])
+    mandatory_formal_codes = {
+        str(episode.get("ts_code"))
+        for episode in episodes.values()
+        if (
+            _episode_selection_output_class(episode)
             in PUBLIC_FORMAL_OUTPUT_CLASSES
-            for episode_id in (
-                str(value) for value in item.get("episode_ids", [])
-            )
+            and set(episode.get("attention_reasons") or [])
+            & MANDATORY_FORMAL_REVIEW_REASONS
         )
     }
     reported_codes = {alert.ts_code for alert in report.alerts}
-    if len(formal_attention_codes) <= 8:
-        missing_formal = formal_attention_codes - reported_codes
+    if len(mandatory_formal_codes) <= 8:
+        missing_formal = mandatory_formal_codes - reported_codes
         if missing_formal:
             raise ValueError(
-                "report is missing formal attention stocks: "
+                "report is missing mandatory formal attention stocks: "
                 + ",".join(sorted(missing_formal))
             )
-    elif reported_codes - formal_attention_codes:
+    elif reported_codes - mandatory_formal_codes:
         raise ValueError(
-            "report contains nonformal alerts while more than eight "
-            "formal attention stocks require priority"
+            "report contains optional alerts while more than eight "
+            "mandatory formal attention stocks require priority"
         )
 
 
@@ -979,24 +1001,29 @@ def _render_current_assessment(value: str) -> str:
 
 def _render_public_outlook(alert: ForwardMonitorAlertV2) -> str:
     baselines = {
-        "event_pending": (
-            "未来1—3个交易日先等待事件或复牌后的实际交易反应，"
-            "当前方向暂时无法判断"
-        ),
-        "strengthening": "未来1—3个交易日更可能继续走强",
-        "continuation_possible": "未来1—3个交易日更可能震荡偏强",
-        "range_or_wait": "未来1—3个交易日更可能横盘整理或等待新变化",
-        "weakening": "未来1—3个交易日更可能继续回落或弱势震荡",
-        "overheated": "未来1—3个交易日更可能高位剧烈波动并出现回吐",
-        "invalidated": "原判断已不成立，短期不再以继续走强为基准",
+        "event_pending": "目前没有足够的可交易事实判断方向",
+        "strengthening": "未来1—3个交易日更可能继续向上",
+        "continuation_possible": "未来1—3个交易日更可能震荡偏上",
+        "range_or_wait": "未来1—3个交易日更可能横盘整理",
+        "weakening": "未来1—3个交易日更可能震荡偏下",
+        "overheated": "未来1—3个交易日更可能高位震荡，短线偏下",
+        "invalidated": "未来1—3个交易日更可能继续偏弱",
     }
     confirmation = alert.confirmation_condition.rstrip("。！？!? ；; ")
     invalidation = alert.invalidation_condition.rstrip("。！？!? ；; ")
-    return (
-        f"{baselines[alert.outlook_1_3d]}。"
-        f"判断增强条件：{confirmation}。"
-        f"判断改变条件：{invalidation}。"
+    paragraphs = [f"{baselines[alert.outlook_1_3d]}。"]
+    if alert.outlook_reason_plain_language is not None:
+        reason = alert.outlook_reason_plain_language.rstrip(
+            "。！？!? ；; "
+        )
+        paragraphs.append(f"主要原因是：{reason}。")
+    paragraphs.extend(
+        [
+            f"支持这个判断的后续表现：{confirmation}。",
+            f"需要改变判断的后续表现：{invalidation}。",
+        ]
     )
+    return "\n\n".join(paragraphs)
 
 
 def _render_final_twenty_day_review(
@@ -1403,6 +1430,11 @@ def _attention_reasons(
     previous: dict[str, Any] | None,
 ) -> list[str]:
     reasons: list[str] = []
+    is_non_executable_formal = (
+        _episode_selection_output_class(current)
+        in PUBLIC_FORMAL_OUTPUT_CLASSES
+        and current.get("entry_open") is None
+    )
     if (
         _episode_selection_output_class(current)
         in PUBLIC_FORMAL_OUTPUT_CLASSES
@@ -1410,7 +1442,7 @@ def _attention_reasons(
         and current.get("frozen_twenty_day_review") is None
     ):
         reasons.append("pending_final_review")
-    if current["checkpoint"]:
+    if current["checkpoint"] and not is_non_executable_formal:
         reasons.append("checkpoint")
     if current["new_announcements"]:
         reasons.append("new_official_event")
@@ -1454,7 +1486,7 @@ def _attention_reasons(
     if current_limitations and (
         previous is None
         or current_limitations != previous_limitations
-        or current["checkpoint"]
+        or (current["checkpoint"] and not is_non_executable_formal)
     ):
         reasons.append("data_problem")
     allowed_order = [

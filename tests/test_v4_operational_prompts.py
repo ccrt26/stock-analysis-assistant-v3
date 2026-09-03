@@ -92,11 +92,16 @@ def test_detailed_recommendation_explanation_is_required_after_selection_freeze(
     for phrase in (
         "汇总表只能作为目录",
         "公司主要做什么",
-        "为什么在这个时间选择它",
-        "支持选择的独立原因",
-        "最需要担心什么，以及为什么仍然选择",
+        "为什么会选它",
+        "行业或外部变化",
+        "股票自身表现",
+        "公司经营",
+        "主要不利因素",
+        "综合判断",
         "什么情况会让我改变看法",
-        "每只约300—500字",
+        "每只约350—650字",
+        "没有某个维度的可靠支持，就不写该小标题",
+        "每段最多2—4句话",
     ):
         assert phrase in prompt
 
@@ -129,9 +134,11 @@ def test_recommendation_prompt_uses_fact_first_plain_language() -> None:
 
     for phrase in (
         "公司主要做什么",
-        "为什么在这个时间选择它",
-        "支持选择的独立原因",
-        "最需要担心什么，以及为什么仍然选择",
+        "为什么会选它",
+        "行业或外部变化",
+        "股票自身表现",
+        "主要不利因素",
+        "综合判断",
         "什么情况会让我改变看法",
         "32只农业相关股票中",
         "事实本身不是推荐理由",
@@ -175,9 +182,9 @@ def test_selection_prompt_separates_confirmation_from_price_already_paid() -> No
         "去掉最大上涨日",
         "最大上涨日之后",
         "不能一边说核心持续性没有验证一边正式推荐",
-        "为什么在这个时间选择它",
-        "支持选择的独立原因",
-        "为什么不是追在短期高点之后",
+        "为什么会选它",
+        "股票自身表现",
+        "较早确认、正常启动还是已经偏晚",
     ):
         assert phrase in prompt
 
@@ -185,3 +192,123 @@ def test_selection_prompt_separates_confirmation_from_price_already_paid() -> No
     user_output = prompt.split("### 唯一用户输出格式", maxsplit=1)[1]
     for forbidden in ("冻结时点", "冻结结论", "正常双向成交", "农业样本"):
         assert forbidden not in user_output
+
+
+def test_unique_user_output_hides_event_leads_and_uses_four_sections() -> None:
+    prompt = Path("ops/forward-selection-prompt.md").read_text(encoding="utf-8")
+    user_output = prompt.split("### 唯一用户输出格式", maxsplit=1)[1]
+
+    headings = (
+        "今天的市场情况",
+        "正式推荐股票的走势复盘",
+        "目前仍开放的正式推荐股票数量",
+        "今天明确推荐的股票",
+    )
+    for heading in headings:
+        assert heading in user_output
+    for forbidden in (
+        "等待首个交易日确认的事件线索",
+        "conditional名单",
+        "conditional数量",
+        "最近未选",
+        "比较股",
+    ):
+        assert forbidden not in user_output
+    assert user_output.index(headings[0]) < user_output.index(headings[1])
+    assert user_output.index(headings[1]) < user_output.index(headings[2])
+    assert user_output.index(headings[2]) < user_output.index(headings[3])
+
+
+def test_internal_event_contract_remains_after_public_event_section_is_removed() -> None:
+    prompt = Path("ops/forward-selection-prompt.md").read_text(encoding="utf-8")
+
+    for phrase in (
+        "fresh_event_pending",
+        "conditional_event",
+        "首个完整交易日",
+        "内部 V4 trace",
+        "事件公司证据",
+    ):
+        assert phrase in prompt
+
+
+def test_review_priority_delivery_documents_match_the_new_public_contract() -> None:
+    root = Path(
+        "research/skill-optimization/review-priority-outlook-format-20260903"
+    )
+    diagnosis = (root / "current-production-diagnosis.md").read_text(
+        encoding="utf-8"
+    )
+    implementation = (root / "implementation-diagnosis.md").read_text(
+        encoding="utf-8"
+    )
+    sample = (root / "expected-user-report-v5.md").read_text(
+        encoding="utf-8"
+    )
+
+    for phrase in (
+        "formal:2026-08-25:002274.SZ:selected",
+        "new_official_event",
+        "data_problem",
+        "entry_open",
+        "formal_return_started",
+        "previous_episode_review",
+        "没有改变控制权安排的核心条款",
+    ):
+        assert phrase in diagnosis
+
+    for phrase in (
+        "outlook_reason_plain_language",
+        "不用公告标题关键词过滤",
+        "内部记录仍完整",
+        "没有重做选股或复盘系统",
+        "目前没有足够的可交易事实判断方向",
+    ):
+        assert phrase in implementation
+
+    for heading in (
+        "今天的市场情况",
+        "正式推荐股票的走势复盘",
+        "目前仍开放的正式推荐股票数量",
+        "今天明确推荐的股票",
+    ):
+        assert heading in sample
+    for phrase in (
+        "未来1—3个交易日更可能继续向上",
+        "未来1—3个交易日更可能横盘整理",
+        "未来1—3个交易日更可能震荡偏下",
+        "主要原因是：",
+        "支持这个判断的后续表现：",
+        "需要改变判断的后续表现：",
+        "中航西飞",
+        "万兴科技",
+        "行业或外部变化",
+        "股票自身表现",
+        "公司经营",
+        "主要不利因素",
+        "综合判断",
+    ):
+        assert phrase in sample
+    for forbidden in (
+        "华昌化工",
+        "等待首个交易日确认的事件线索",
+        "中国船舶",
+        "北京科锐",
+        "最近未选",
+        "比较股",
+        "Git状态",
+        "工作区状态",
+    ):
+        assert forbidden not in sample
+
+
+def test_archived_execution_instruction_is_a_verbatim_copy() -> None:
+    source = Path(
+        "/Users/ccrt/Downloads/"
+        "Codex执行指令_重点复盘未来判断与荐股展示优化_V1.0.md"
+    )
+    archived = Path(
+        "docs/2026-09-03-review-priority-outlook-format-prompt.md"
+    )
+
+    assert archived.read_bytes() == source.read_bytes()
