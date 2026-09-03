@@ -27,6 +27,18 @@ def test_daily_prompt_is_v4_only() -> None:
     )
 
 
+def test_daily_prompt_declares_the_only_final_response_source() -> None:
+    text = Path("ops/forward-selection-prompt.md").read_text(encoding="utf-8")
+
+    for phrase in (
+        "最终回复唯一来源",
+        "不得在生成归档后另写执行摘要",
+        "复盘部分直接采用本次已记录的正式复盘Markdown",
+        "不得追加Git、工作区、测试和文件清理汇报",
+    ):
+        assert phrase in text
+
+
 def test_daily_prompt_and_v4_contract_define_runtime_data_capability_boundary() -> None:
     prompt = Path("ops/forward-selection-prompt.md").read_text(encoding="utf-8")
     contract = Path(

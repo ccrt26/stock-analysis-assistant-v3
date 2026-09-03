@@ -10,6 +10,12 @@ SKILL_PATHS = {
 }
 
 
+def test_repository_rules_preserve_the_full_daily_user_report() -> None:
+    text = Path("AGENTS.md").read_text(encoding="utf-8")
+
+    assert "正式每日选股与复盘自动任务属于用户报告生产" in text
+
+
 def test_forward_monitor_prompt_limits_ai_work_and_report_size() -> None:
     text = Path("ops/forward-monitor-prompt.md").read_text(encoding="utf-8")
 
