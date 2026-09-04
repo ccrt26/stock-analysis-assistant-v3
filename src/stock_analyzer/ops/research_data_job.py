@@ -29,6 +29,7 @@ from stock_analyzer.data.trading_structure_backfill import TradingStructureBackf
 from stock_analyzer.data.tushare_research_client import TushareResearchClient
 from stock_analyzer.ops.research_features import run_research_features
 from stock_analyzer.storage.research_schema import connect_research_warehouse
+from stock_analyzer.storage.research_gap_registry import ResearchGapRegistry
 from stock_analyzer.storage.research_warehouse import ResearchWarehouse
 
 
@@ -181,35 +182,54 @@ def run_research_backfill(
 
 
 def reconcile_research_gaps(warehouse: ResearchWarehouse) -> int:
-    with connect_research_warehouse(warehouse.duckdb_path) as connection:
+    with connect_research_warehouse(
+        warehouse.duckdb_path, read_only=True
+    ) as connection:
         rows = connection.execute(
             """
-            select gap_id, dataset_id, partition_value
+            select dataset_id, partition_value, scope_key,
+                   source_name, source_endpoint
             from research_data_gaps
-            where status in ('waiting_upstream', 'failed', 'validation_failed')
+            where status in (
+                'legitimate_empty', 'waiting_upstream', 'permission_denied',
+                'failed', 'unclassified_missing'
+            )
             """
         ).fetchall()
-        resolved = 0
-        for gap_id, dataset_id, partition_value in rows:
-            complete = connection.execute(
-                """
-                select 1 from research_fact_partitions
-                where dataset_id = ? and partition_value = ?
-                  and quality_status = 'passed'
-                """,
-                [dataset_id, partition_value],
-            ).fetchone()
-            if complete is None:
-                continue
-            connection.execute(
-                """
-                update research_data_gaps
-                set status = 'resolved', last_checked_at = now(), next_retry_at = null
-                where gap_id = ?
-                """,
-                [gap_id],
+    registry = ResearchGapRegistry(warehouse.duckdb_path)
+    resolved = 0
+    for dataset_id, partition_value, scope_key, source_name, source_endpoint in rows:
+        if not source_name or not source_endpoint:
+            continue
+        frame = warehouse.read_current(
+            ResearchDatasetId(dataset_id), partition_value=str(partition_value)
+        )
+        if frame.empty or not {"source_name", "source_endpoint"} <= set(frame):
+            continue
+        matched = frame[
+            (frame["source_name"].astype(str) == str(source_name))
+            & (frame["source_endpoint"].astype(str) == str(source_endpoint))
+        ]
+        if str(scope_key or ""):
+            scope_column = (
+                "instrument_code"
+                if dataset_id == ResearchDatasetId.MINUTE_BAR.value
+                else "ts_code"
             )
-            resolved += 1
+            if scope_column not in matched:
+                continue
+            matched = matched[
+                matched[scope_column].astype(str) == str(scope_key)
+            ]
+        if matched.empty:
+            continue
+        resolved += registry.resolve_from_success(
+            ResearchDatasetId(dataset_id),
+            str(partition_value),
+            scope_key=str(scope_key or ""),
+            source_name=str(source_name),
+            source_endpoint=str(source_endpoint),
+        )
     return resolved
 
 
@@ -218,23 +238,39 @@ def run_research_stage(
     *,
     stage: str,
     data_date: date,
+    already_locked: bool = False,
 ) -> tuple[BackfillSummary, ...]:
     warehouse = getattr(runtime, "warehouse", None)
     if warehouse is None or not hasattr(warehouse, "duckdb_path"):
         return _run_research_stage_impl(runtime, stage=stage, data_date=data_date)
-    with _research_stage_lock(warehouse):
-        run_id = _begin_stage_run(warehouse, stage, data_date)
-        try:
-            summaries = _run_research_stage_impl(
-                runtime,
-                stage=stage,
-                data_date=data_date,
-            )
-        except Exception as exc:
-            _finish_failed_stage_run(warehouse, run_id, exc)
-            raise
-        _finish_stage_run(warehouse, run_id, summaries)
-        return summaries
+    if already_locked:
+        return _run_research_stage_locked(
+            runtime, stage=stage, data_date=data_date
+        )
+    with research_job_lock(warehouse.root):
+        return _run_research_stage_locked(
+            runtime, stage=stage, data_date=data_date
+        )
+
+
+def _run_research_stage_locked(
+    runtime: ResearchDataRuntime,
+    *,
+    stage: str,
+    data_date: date,
+) -> tuple[BackfillSummary, ...]:
+    warehouse = runtime.warehouse
+    interrupt_orphan_runs(warehouse)
+    run_id = _begin_stage_run(warehouse, stage, data_date)
+    try:
+        summaries = _run_research_stage_impl(
+            runtime, stage=stage, data_date=data_date
+        )
+    except Exception as exc:
+        _finish_failed_stage_run(warehouse, run_id, exc)
+        raise
+    _finish_stage_run(warehouse, run_id, summaries)
+    return summaries
 
 
 def _run_research_stage_impl(
@@ -297,7 +333,7 @@ def _run_research_stage_impl(
             runtime.tushare, runtime.warehouse
         )
         for dataset, refresh_memberships in (
-            (ResearchDatasetId.INDUSTRY_DAILY, False),
+            (ResearchDatasetId.INDUSTRY_DAILY_PROXY, False),
             (ResearchDatasetId.THEME_DAILY, True),
         ):
             try:
@@ -366,7 +402,7 @@ def _run_research_stage_impl(
             runtime.tushare, runtime.warehouse
         )
         for dataset in (
-            ResearchDatasetId.INDUSTRY_DAILY,
+            ResearchDatasetId.INDUSTRY_DAILY_PROXY,
             ResearchDatasetId.THEME_DAILY,
         ):
             try:
@@ -425,12 +461,19 @@ def _daily_partition_passed(
     manifest = warehouse.partition_manifest(dataset)
     if manifest.empty:
         return False
-    return bool(
+    passed = bool(
         (
             (manifest["partition_value"].astype(str) == data_date.isoformat())
             & (manifest["quality_status"].astype(str) == "passed")
         ).any()
     )
+    if not passed:
+        return False
+    if dataset is ResearchDatasetId.INDUSTRY_DAILY_PROXY:
+        return not ResearchGapRegistry(
+            warehouse.duckdb_path
+        ).has_active_gap(dataset, data_date)
+    return True
 
 
 def _failed_step_summary(
@@ -475,8 +518,10 @@ def select_fundamental_refresh_codes(
 
 
 @contextmanager
-def _research_stage_lock(warehouse: ResearchWarehouse):
-    lock_path = warehouse.root / ".research-jobs.lock"
+def research_job_lock(warehouse_root: Path):
+    root = Path(warehouse_root)
+    root.mkdir(parents=True, exist_ok=True)
+    lock_path = root / ".research-jobs.lock"
     with lock_path.open("a+b") as handle:
         fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
         try:
@@ -503,6 +548,31 @@ def _begin_stage_run(
             [run_id, idempotency_key, stage, data_date],
         )
     return run_id
+
+
+def interrupt_orphan_runs(warehouse: ResearchWarehouse) -> int:
+    payload = json.dumps(
+        {"message": "superseded by a later locked run"},
+        ensure_ascii=False,
+    )
+    with connect_research_warehouse(warehouse.duckdb_path) as connection:
+        count = connection.execute(
+            """
+            select count(*) from research_ingestion_runs
+            where status = 'running'
+            """
+        ).fetchone()[0]
+        if count:
+            connection.execute(
+                """
+                update research_ingestion_runs
+                set status = 'interrupted', finished_at = now(),
+                    summary_json = ?
+                where status = 'running'
+                """,
+                [payload],
+            )
+    return int(count)
 
 
 def _summary_status(summary: BackfillSummary) -> str:
@@ -680,6 +750,8 @@ __all__ = [
     "build_research_data_runtime",
     "run_research_backfill",
     "run_research_stage",
+    "interrupt_orphan_runs",
+    "research_job_lock",
     "reconcile_research_gaps",
     "select_minute_candidate_scope",
 ]

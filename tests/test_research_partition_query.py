@@ -191,6 +191,73 @@ def test_historical_relationship_hides_future_end_boundary(tmp_path):
     assert pd.Timestamp(after_end.iloc[0]["valid_to"]).date() == date(2025, 8, 28)
 
 
+def test_visible_successor_snapshot_closes_prior_theme_membership_as_of(tmp_path):
+    warehouse = ResearchWarehouse(tmp_path)
+    first_available = datetime(2026, 7, 31, 7, 1, tzinfo=timezone.utc)
+    successor_available = datetime(2026, 8, 31, 7, 1, tzinfo=timezone.utc)
+    closure_observed = datetime(2026, 9, 1, 13, 31, tzinfo=timezone.utc)
+    old = {
+        "theme_code": "000019.SH",
+        "ts_code": "600004.SH",
+        "valid_from": date(2026, 7, 31),
+        "valid_to": None,
+        "available_at": first_available,
+    }
+    warehouse.commit_batch(
+        FactBatch(
+            dataset_id=ResearchDatasetId.THEME_MEMBER,
+            partition_value="official-theme-v1",
+            source_name="tushare",
+            source_endpoint="index_weight",
+            ingestion_run_id="july-snapshot",
+            ingested_at=datetime(2026, 8, 3, tzinfo=timezone.utc),
+            records=[old],
+        )
+    )
+    warehouse.commit_batch(
+        FactBatch(
+            dataset_id=ResearchDatasetId.THEME_MEMBER,
+            partition_value="official-theme-v1",
+            source_name="tushare",
+            source_endpoint="index_weight",
+            ingestion_run_id="august-snapshot-and-late-closure",
+            ingested_at=closure_observed,
+            records=[
+                {**old, "valid_to": date(2026, 8, 30),
+                 "available_at": closure_observed},
+                {
+                    "theme_code": "000019.SH",
+                    "ts_code": "600004.SH",
+                    "valid_from": date(2026, 8, 31),
+                    "valid_to": None,
+                    "available_at": successor_available,
+                },
+            ],
+        )
+    )
+    query = ResearchQuery(warehouse)
+
+    before_successor = query.dataset_as_of(
+        ResearchDatasetId.THEME_MEMBER,
+        datetime(2026, 8, 30, 15, 59, tzinfo=timezone.utc),
+    )
+    at_successor = query.dataset_as_of(
+        ResearchDatasetId.THEME_MEMBER,
+        datetime(2026, 8, 31, 15, 59, tzinfo=timezone.utc),
+    )
+    at_successor = at_successor.assign(
+        __sort_valid_from=pd.to_datetime(at_successor["valid_from"])
+    ).sort_values("__sort_valid_from")
+
+    assert len(before_successor) == 1
+    assert pd.isna(before_successor.iloc[0]["valid_to"])
+    assert len(at_successor) == 2
+    assert pd.Timestamp(at_successor.iloc[0]["valid_to"]).date() == date(
+        2026, 8, 30
+    )
+    assert pd.isna(at_successor.iloc[1]["valid_to"])
+
+
 def test_partition_query_never_admits_a_future_partition_at_historical_cutoff(
     tmp_path,
 ):

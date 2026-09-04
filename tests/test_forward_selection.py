@@ -133,7 +133,7 @@ class FakeData:
                 else []
             )
         dataset_rows = []
-        for dataset_id in ("industry_daily", "theme_daily"):
+        for dataset_id in ("industry_daily_proxy", "theme_daily"):
             available = ready and self.dataset_ready.get(dataset_id, True)
             dataset_rows.append(
                 {
@@ -1081,7 +1081,7 @@ def test_legacy_complete_core_date_no_longer_blocks_market_and_price_ready_prepa
     assert summary.price_research_available is True
 
 
-def test_missing_industry_daily_is_limited_without_disabling_theme_research(
+def test_missing_industry_proxy_is_limited_without_disabling_theme_research(
     tmp_path: Path,
 ) -> None:
     current = datetime(2026, 8, 26, 16, 24, tzinfo=SHANGHAI)
@@ -1092,7 +1092,7 @@ def test_missing_industry_daily_is_limited_without_disabling_theme_research(
         csv_path=csv_path,
         data=FakeData(
             open_dates=[date(2026, 8, 25), date(2026, 8, 26)],
-            dataset_ready={"industry_daily": False},
+            dataset_ready={"industry_daily_proxy": False},
         ),
         clock=_clock(current, current),
         rerun_date=date(2026, 8, 26),
@@ -1104,7 +1104,7 @@ def test_missing_industry_daily_is_limited_without_disabling_theme_research(
     assert summary.sector_research_available is True
     assert summary.market_research_available is True
     assert summary.price_research_available is True
-    assert "行业原始日数据不可用" in "；".join(summary.limitations)
+    assert "申万一级行业代理不可用" in "；".join(summary.limitations)
 
 
 def test_exchange_partial_prepare_reports_exact_covered_exchange(tmp_path: Path) -> None:
@@ -1161,7 +1161,7 @@ def test_announcement_unavailable_still_allows_other_ready_paths_limited(
         (
             "sector_hotspot",
             "sector_research_available",
-            "行业原始日数据不可用",
+            "申万一级行业代理不可用",
         ),
         (
             "stock_trading_context",

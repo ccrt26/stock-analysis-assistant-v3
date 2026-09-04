@@ -37,7 +37,7 @@ class FakeWarehouse:
             ResearchDatasetId.DAILY_BASIC,
             ResearchDatasetId.STOCK_LIMIT,
             ResearchDatasetId.INDEX_DAILY,
-            ResearchDatasetId.INDUSTRY_DAILY,
+            ResearchDatasetId.INDUSTRY_DAILY_PROXY,
             ResearchDatasetId.THEME_DAILY,
         ):
             self.partitions[dataset] = [value.isoformat() for value in dates]
@@ -255,7 +255,7 @@ def test_job_uses_calendar_windows_strict_manifests_and_exact_contracts(
     )
     assert [call["formula_version"] for call in warehouse.commits] == [
         "market-context-v3",
-        "sector-hotspot-v3",
+        "sector-hotspot-v4",
         "stock-trading-context-v2",
         "price-analysis-context-v2",
     ]
@@ -278,6 +278,17 @@ def test_job_uses_calendar_windows_strict_manifests_and_exact_contracts(
         "group_type", "group_code", "group_name", "level", "official_index_code"
     ]
     assert "instrument_code" not in captured["sector"][6].columns
+    assert set(captured["sector_kwargs"]["industry_proxy_daily"].columns) >= {
+        "trade_date", "industry_code", "proxy_return", "proxy_method"
+    }
+    assert any(
+        ResearchDatasetId.INDUSTRY_DAILY_PROXY in mapping
+        for mapping in snapshots
+    )
+    assert all(
+        ResearchDatasetId.INDUSTRY_DAILY not in mapping
+        for mapping in snapshots
+    )
     assert all(
         call["input_manifest"]["fact_snapshot"]["as_of"]
         == "2026-07-13T15:59:59+00:00"
@@ -424,7 +435,7 @@ def test_later_feature_failure_preserves_prior_commits_and_continues(
     monkeypatch.setattr(job, "compute_stock_context_features", _simple_stock)
     job.run_research_features(warehouse, ANALYSIS_DATE)
     previous_sector = warehouse.current[
-        ("sector_hotspot", ANALYSIS_DATE, "sector-hotspot-v3")
+        ("sector_hotspot", ANALYSIS_DATE, "sector-hotspot-v4")
     ]["frame"].copy()
     warehouse.revisions[ResearchDatasetId.EQUITY_DAILY.value] = "new-equity"
 
@@ -437,7 +448,7 @@ def test_later_feature_failure_preserves_prior_commits_and_continues(
     assert summary.failed_feature_sets == ("sector_hotspot",)
     assert "sector formula failed" in summary.plain_language_summary
     pd.testing.assert_frame_equal(
-        warehouse.current[("sector_hotspot", ANALYSIS_DATE, "sector-hotspot-v3")]["frame"],
+        warehouse.current[("sector_hotspot", ANALYSIS_DATE, "sector-hotspot-v4")]["frame"],
         previous_sector,
     )
     assert summary.committed_feature_sets == (
@@ -579,9 +590,17 @@ def _fact_frames(dates: list[date]) -> dict[ResearchDatasetId, pd.DataFrame]:
              "000300.SH", "000905.SH", "000852.SH", "899050.BJ",
          )]
     )
-    industry_daily = pd.DataFrame(
-        [{"trade_date": day, "industry_code": "801010.SI", "close": 100.0}
-         for day in dates]
+    industry_proxy = pd.DataFrame(
+        [
+            {
+                "trade_date": day,
+                "industry_code": "801010.SI",
+                "proxy_return": 0.0,
+                "proxy_method": "sw_l1_free_float_proxy_v1",
+                "coverage_status": "complete",
+            }
+            for day in dates
+        ]
     )
     theme_daily = pd.DataFrame(
         [{"trade_date": day, "theme_code": "000802.SH", "close": 100.0}
@@ -607,7 +626,7 @@ def _fact_frames(dates: list[date]) -> dict[ResearchDatasetId, pd.DataFrame]:
             {"industry_system": "SW2021", "level": "L1", "industry_code": "801010.SI",
              "ts_code": "000001.SZ", "valid_from": date(2020, 1, 1), "valid_to": None}
         ]),
-        ResearchDatasetId.INDUSTRY_DAILY: industry_daily,
+        ResearchDatasetId.INDUSTRY_DAILY_PROXY: industry_proxy,
         ResearchDatasetId.THEME_CATALOG: pd.DataFrame([
             {"publisher": "official", "theme_code": "000802.SH", "theme_name": "Theme",
              "valid_from": date(2020, 1, 1), "valid_to": None}
@@ -633,6 +652,7 @@ def _capture_market(captured):
 def _capture_sector(captured):
     def compute(*args, **kwargs):
         captured["sector"] = args
+        captured["sector_kwargs"] = kwargs
         return _simple_sector(*args, **kwargs)
     return compute
 

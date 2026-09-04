@@ -1412,7 +1412,7 @@ entries:
       - 仅凭板块名称、单只强势股或第三方热度标签认定持续热点。
       - 把多个因子观察机械相加成总分，或把板块热度证据写成最终热点排名。
     prerequisites:
-      - 只使用分析时点已经公开、按当日有效的行业成分、行业日线和sector-hotspot-v3观察。
+      - 只使用分析时点已经公开、按当日有效的行业成分、行业代理收益和sector-hotspot-v4观察。
       - 极端值采用排序、分位或缩尾等稳健处理，并检查行业、规模和微盘股污染。
       - 与可复算板块热度证据共同使用；这些证据不是最终热点排名。
     counter_evidence:
@@ -1421,8 +1421,8 @@ entries:
       - 交易可行性不足、极小市值污染或稳健处理后观察消失。
     data_requirements:
       - kind: fact
-        name: industry_daily
-        required_fields: [available_at, trade_date, industry_code, close]
+        name: industry_daily_proxy
+        required_fields: [available_at, trade_date, industry_code, proxy_return, proxy_method]
       - kind: fact
         name: industry_member
         required_fields: [available_at, industry_code, ts_code, valid_from, valid_to]
@@ -1436,6 +1436,14 @@ entries:
           - relative_return_1d
           - relative_return_5d
           - relative_return_20d
+          - proxy_index_return_1d
+          - proxy_index_return_5d
+          - proxy_index_return_20d
+          - proxy_relative_return_1d
+          - proxy_relative_return_5d
+          - proxy_relative_return_20d
+          - proxy_index_status
+          - proxy_method
           - breadth_1d
           - breadth_20d
           - median_return_20d
@@ -1573,21 +1581,21 @@ entries:
       - 在A股本地验证前继承海外行业分类、历史窗口、组合收益或固定阈值。
       - 用海外行业动量论文证明当前A股某行业必然继续上涨。
     prerequisites:
-      - 使用时点有效的A股行业成分、行业日线和可复算板块观察。
+      - 使用时点有效的A股行业成分、明确标识的行业代理收益和可复算板块观察。
       - 结合公司业务披露确认热点能否传导到具体候选。
     counter_evidence:
       - 行业相对收益转弱、上涨面收窄或强势集中于极少数股票。
       - 个股主营业务与行业上涨原因不一致。
     data_requirements:
       - kind: fact
-        name: industry_daily
-        required_fields: [available_at, trade_date, industry_code, close]
+        name: industry_daily_proxy
+        required_fields: [available_at, trade_date, industry_code, proxy_return, proxy_method]
       - kind: fact
         name: industry_member
         required_fields: [available_at, industry_code, ts_code, valid_from, valid_to]
       - kind: derived
         name: sector_hotspot
-        required_fields: [analysis_date, equity_return_price_basis, group_code, group_type, relative_return_20d]
+        required_fields: [analysis_date, equity_return_price_basis, group_code, group_type, relative_return_20d, proxy_relative_return_20d, proxy_index_status, proxy_method]
     local_validation:
       status: required_before_threshold
       reason: 海外方法只能提供拆分思路，必须在中国A股本地时点验证前保持方法用途。

@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime, timezone
 from types import SimpleNamespace
 
 import pandas as pd
@@ -12,7 +12,7 @@ from stock_analyzer.ops.research_data_job import (
     select_minute_candidate_scope,
 )
 from stock_analyzer.data.research_backfill import BackfillSummary
-from stock_analyzer.data.research_contracts import ResearchDatasetId
+from stock_analyzer.data.research_contracts import FactBatch, ResearchDatasetId
 from stock_analyzer.storage.research_schema import connect_research_warehouse
 from stock_analyzer.storage.research_warehouse import ResearchWarehouse
 
@@ -148,6 +148,51 @@ def test_stage_exception_is_recorded_as_failed_with_finished_time(
     assert "simulated stage failure" in row[2]
 
 
+def test_stage_interrupts_orphan_running_rows_before_starting_new_run(
+    tmp_path, monkeypatch
+):
+    import stock_analyzer.ops.research_data_job as job
+
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    with connect_research_warehouse(warehouse.duckdb_path) as connection:
+        connection.execute(
+            """
+            insert into research_ingestion_runs
+            values ('orphan', 'orphan', 'next-morning', '2026-09-01',
+                    'running', now() - interval '1 day', null, null)
+            """
+        )
+    monkeypatch.setattr(
+        job,
+        "_run_research_stage_impl",
+        lambda *args, **kwargs: (
+            BackfillSummary(
+                scope="market-core",
+                start=date(2026, 9, 2),
+                through=date(2026, 9, 2),
+            ),
+        ),
+    )
+
+    run_research_stage(
+        SimpleNamespace(warehouse=warehouse),
+        stage="close",
+        data_date=date(2026, 9, 2),
+    )
+
+    with connect_research_warehouse(
+        warehouse.duckdb_path, read_only=True
+    ) as connection:
+        old = connection.execute(
+            """
+            select status, finished_at is not null, cast(summary_json as varchar)
+            from research_ingestion_runs where run_id = 'orphan'
+            """
+        ).fetchone()
+    assert old[0:2] == ("interrupted", True)
+    assert "superseded by a later locked run" in old[2]
+
+
 def test_close_stage_never_derives_partial_research_features(monkeypatch):
     import stock_analyzer.ops.research_data_job as job
 
@@ -240,7 +285,7 @@ def test_evening_derives_only_after_fact_commits_and_reconciliation(monkeypatch)
 
     assert order == [
         "events",
-        "industry_daily",
+        "industry_daily_proxy",
         "theme_daily",
         "reconcile",
         "derive",
@@ -296,12 +341,12 @@ def test_evening_continues_industry_and_theme_refresh_after_event_failure(monkey
         runtime, stage="evening", data_date=date(2026, 7, 13)
     )
 
-    assert order == ["events-failed", "industry_daily", "theme_daily"]
+    assert order == ["events-failed", "industry_daily_proxy", "theme_daily"]
     assert summaries[0].scope == "events"
     assert summaries[0].failed == 1
     assert "RuntimeError" in summaries[0].issues[0]
     assert {summary.scope for summary in summaries} >= {
-        "industry_daily",
+        "industry_daily_proxy",
         "theme_daily",
         "derived-research-features",
     }
@@ -338,7 +383,7 @@ def test_evening_continues_theme_refresh_after_industry_failure(monkeypatch):
         def refresh_daily(self, data_date, *, datasets, refresh_memberships):
             dataset = tuple(datasets)[0]
             calls.append(dataset)
-            if dataset is ResearchDatasetId.INDUSTRY_DAILY:
+            if dataset is ResearchDatasetId.INDUSTRY_DAILY_PROXY:
                 raise RuntimeError("industry endpoint failed")
             return BackfillSummary(
                 scope=dataset.value, start=data_date, through=data_date
@@ -358,8 +403,8 @@ def test_evening_continues_theme_refresh_after_industry_failure(monkeypatch):
         runtime, stage="evening", data_date=date(2026, 7, 13)
     )
 
-    assert calls == [ResearchDatasetId.INDUSTRY_DAILY, ResearchDatasetId.THEME_DAILY]
-    industry = next(summary for summary in summaries if summary.scope == "industry_daily")
+    assert calls == [ResearchDatasetId.INDUSTRY_DAILY_PROXY, ResearchDatasetId.THEME_DAILY]
+    industry = next(summary for summary in summaries if summary.scope == "industry_daily_proxy")
     assert industry.failed == 1
     assert any(summary.scope == "theme_daily" and summary.failed == 0 for summary in summaries)
 
@@ -499,7 +544,7 @@ def test_next_morning_repairs_only_missing_theme_daily_partition(monkeypatch):
         job,
         "_daily_partition_passed",
         lambda warehouse, dataset, data_date: dataset
-        is ResearchDatasetId.INDUSTRY_DAILY,
+        is ResearchDatasetId.INDUSTRY_DAILY_PROXY,
     )
     monkeypatch.setattr(
         job,
@@ -700,3 +745,61 @@ def test_minute_candidate_scope_reads_only_latest_21_daily_partitions():
     assert warehouse.daily_partition_calls == [
         value.isoformat() for value in dates[-21:]
     ]
+
+
+
+def test_proxy_partition_with_active_gap_is_not_treated_as_passed(tmp_path):
+    import stock_analyzer.ops.research_data_job as job
+    from stock_analyzer.storage.research_gap_registry import ResearchGapRegistry
+
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    observed = datetime(2026, 9, 2, 7, 1, tzinfo=timezone.utc)
+    warehouse.commit_batch(
+        FactBatch(
+            dataset_id=ResearchDatasetId.INDUSTRY_DAILY_PROXY,
+            partition_value="2026-09-02",
+            source_name="local_derived",
+            source_endpoint="sw_l1_free_float_proxy_v1",
+            ingestion_run_id="proxy",
+            ingested_at=observed,
+            default_available_at=observed,
+            records=[{
+                "trade_date": date(2026, 9, 2),
+                "industry_system": "SW2021",
+                "level": "L1",
+                "industry_code": "801010.SI",
+                "industry_name": "农林牧渔",
+                "proxy_return": 0.01,
+                "effective_member_count": 10,
+                "observed_member_count": 10,
+                "member_coverage_ratio": 1.0,
+                "coverage_status": "complete",
+                "limitation_notes": "",
+                "weight_date": date(2026, 9, 1),
+                "proxy_method": "sw_l1_free_float_proxy_v1",
+                "formula_version": "sw-l1-free-float-proxy-v1",
+                "input_manifest_hash": "manifest",
+                "available_at": observed,
+            }],
+        )
+    )
+    assert job._daily_partition_passed(
+        warehouse,
+        ResearchDatasetId.INDUSTRY_DAILY_PROXY,
+        date(2026, 9, 2),
+    )
+
+    ResearchGapRegistry(warehouse.duckdb_path).record(
+        ResearchDatasetId.INDUSTRY_DAILY_PROXY,
+        "2026-09-02",
+        status="unclassified_missing",
+        reason_category="member_coverage_below_80_percent",
+        source_name="local_derived",
+        source_endpoint="sw_l1_free_float_proxy_v1",
+    )
+
+    assert not job._daily_partition_passed(
+        warehouse,
+        ResearchDatasetId.INDUSTRY_DAILY_PROXY,
+        date(2026, 9, 2),
+    )

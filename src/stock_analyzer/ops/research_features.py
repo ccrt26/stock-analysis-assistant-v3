@@ -278,9 +278,9 @@ def run_research_features(
         calculate=calculate_market,
     )
 
-    industry_daily_dates = _optional_date_partitions(
+    industry_proxy_dates = _optional_date_partitions(
         warehouse,
-        ResearchDatasetId.INDUSTRY_DAILY,
+        ResearchDatasetId.INDUSTRY_DAILY_PROXY,
         price_dates,
     )
     theme_daily_dates = _optional_date_partitions(
@@ -288,9 +288,9 @@ def run_research_features(
         ResearchDatasetId.THEME_DAILY,
         price_dates,
     )
-    if len(industry_daily_dates) < len(price_dates):
+    if len(industry_proxy_dates) < len(price_dates):
         limitations.append(
-            "行业指数日线历史短于价格窗口，仅使用截止时点已存在分区"
+            "申万一级行业代理历史短于价格窗口，仅使用截止时点已存在分区"
         )
     if len(theme_daily_dates) < len(price_dates):
         limitations.append(
@@ -310,7 +310,7 @@ def run_research_features(
             ResearchDatasetId.INDUSTRY_MEMBER: partitions(
                 ResearchDatasetId.INDUSTRY_MEMBER
             ),
-            ResearchDatasetId.INDUSTRY_DAILY: industry_daily_dates,
+            ResearchDatasetId.INDUSTRY_DAILY_PROXY: industry_proxy_dates,
             ResearchDatasetId.THEME_CATALOG: partitions(
                 ResearchDatasetId.THEME_CATALOG
             ),
@@ -333,7 +333,9 @@ def run_research_features(
         theme_catalog = snapshot.frame(ResearchDatasetId.THEME_CATALOG)
         industry_members = snapshot.frame(ResearchDatasetId.INDUSTRY_MEMBER)
         theme_members = snapshot.frame(ResearchDatasetId.THEME_MEMBER)
-        industry_daily = snapshot.frame(ResearchDatasetId.INDUSTRY_DAILY)
+        industry_proxy = snapshot.frame(
+            ResearchDatasetId.INDUSTRY_DAILY_PROXY
+        )
         theme_daily = snapshot.frame(ResearchDatasetId.THEME_DAILY)
         minutes = (
             snapshot.frame(ResearchDatasetId.MINUTE_BAR)
@@ -346,9 +348,10 @@ def run_research_features(
             _sector_memberships(industry_members, theme_members, analysis_day),
             benchmark,
             limits,
-            _official_sector_daily(industry_daily, theme_daily),
+            _official_sector_daily(theme_daily),
             _minute_bars(minutes),
             analysis_date=analysis_day,
+            industry_proxy_daily=industry_proxy,
         )
 
     sector_context = execute(
@@ -826,19 +829,11 @@ def _sector_memberships(
     return pd.concat((industry_rows, theme_rows), ignore_index=True)
 
 
-def _official_sector_daily(
-    industries: pd.DataFrame,
-    themes: pd.DataFrame,
-) -> pd.DataFrame:
-    _require_columns(industries, {"trade_date", "industry_code", "close"}, "industry daily")
+def _official_sector_daily(themes: pd.DataFrame) -> pd.DataFrame:
     _require_columns(themes, {"trade_date", "theme_code", "close"}, "theme daily")
-    industry = industries.rename(columns={"industry_code": "index_code"})[
+    result = themes.rename(columns={"theme_code": "index_code"})[
         ["trade_date", "index_code", "close"]
-    ]
-    theme = themes.rename(columns={"theme_code": "index_code"})[
-        ["trade_date", "index_code", "close"]
-    ]
-    result = pd.concat((industry, theme), ignore_index=True)
+    ].copy()
     if result.duplicated(["trade_date", "index_code"]).any():
         raise ValueError("duplicate official sector daily entity")
     return result

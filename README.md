@@ -110,6 +110,38 @@ python -m stock_analyzer data run-stage --help
 
 `run-stage`会访问外部数据源并写入事实仓。仅检查命令能否加载时应使用 `--help`，不要启动真实任务。
 
+### 数据缺口与人工复核
+
+完整复核应使用交易日历推导应有日期，而不是只看最后一个文件：
+
+```bash
+python -m stock_analyzer data health --data-date YYYY-MM-DD --full-history
+```
+
+健康报告中的状态含义：
+
+- `complete`：事实存在且来源合同、文件哈希、行数和字段检查通过。
+- `legitimate_empty`：官方接口成功返回空，且该数据集允许当天无记录。
+- `waiting_upstream`：官方数据尚处于正常等待窗口。
+- `permission_denied`：正确官方接口明确拒绝当前 Token。
+- `provider_conflict`：同一业务键和公开时点有多个载荷，不能猜选版本；查询会在解决前屏蔽该键。
+- `unsupported_optional`：分钟等可选能力受权限或频率限制，不冒充核心日线完整。
+- `failed`：来源、解析、校验或写入失败，可重试。
+- `unclassified_missing`：应该有但没有且原因未查明，必须继续调查。
+
+申万官方行业日线仍只认 `sw_daily`，通用 `index_daily` 不作为申万行情来源。当前 Token 未购买 `sw_daily` 所需积分，因此活跃研究链路使用独立的 `industry_daily_proxy`：按交易日有效的申万 2021 一级行业成分，用前一交易日 `free_share × close` 加权当日个股收益。代理只提供收益和覆盖率，不生成或冒充官方点位、开高低收与成交量额；主题指数仍使用官方 `index_daily`。健康检查要求最近 250 个交易日的代理分区完整且成分覆盖率不低于 80%。
+
+财务指标业务键保持 `(ts_code, report_period, report_type)`。只有同一 `ts_code + end_date + ann_date` 返回多个不同载荷时，程序才用相同条件追加一次 `fina_indicator` 查询并显式请求官方 `update_flag`；恰好一个版本为 `1` 时采用该版本，但只从本次查询的实际观测时点起可用。这里不是按数值大小排序；没有唯一 `1` 时继续保留 `provider_conflict`。`update_flag` 不进入业务哈希和最终事实。
+
+一次性 2026-09-02 缺口修复工具必须显式选择模式；`--execute` 会先在 `local_archive/data_repairs/` 备份数据库和目标 Parquet，再生成 250 日行业代理、精确重试冲突财务键并重算受影响派生日期：
+
+```bash
+python tools/repair_research_data_gaps.py --dry-run
+python tools/repair_research_data_gaps.py --execute
+```
+
+三个写任务在初始化 DuckDB 前共用同一全局锁。`close` 只按收盘阶段的失败或等待决定非零退出；`evening` 与 `next-morning` 还检查各自应产出的研究观察。可选分钟受限会进入健康报告，但不会单独令核心日线任务失败。
+
 ## 人工补跑早晨研究
 
 当天早晨的研究没有启动或失败时，可以在稍后安全补跑：

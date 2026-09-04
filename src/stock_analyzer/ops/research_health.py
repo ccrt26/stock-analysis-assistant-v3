@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-import json
 import hashlib
-from datetime import date, datetime, timezone
+import json
+from collections import Counter
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -59,6 +60,12 @@ class DatasetHealth(BaseModel):
     required_field_min_coverage: dict[str, float]
     contract_valid: bool
     physical_valid: bool
+    expected_units: int = 0
+    complete_units: int = 0
+    status_counts: dict[str, int] = Field(default_factory=dict)
+    unclassified_missing_samples: tuple[str, ...] = ()
+    source_contract_failure_partitions: int = 0
+    source_contract_issues: tuple[str, ...] = ()
 
 
 class DerivedFeatureHealth(BaseModel):
@@ -114,6 +121,10 @@ def build_research_health_report(
     datasets: list[DatasetHealth] = []
     core_complete = True
     revision_audit = _revision_interval_audit(warehouse)
+    open_dates = _open_trading_dates(warehouse, data_date)
+    gap_statuses = _current_gap_statuses(warehouse)
+    suspension_empty = _legitimate_empty_suspension_dates(warehouse)
+    inferred_gap_counts: Counter[str] = Counter()
     for dataset_id, contract in research_contract_registry().items():
         manifest = warehouse.partition_manifest(dataset_id)
         partitions = len(manifest)
@@ -138,6 +149,64 @@ def build_research_health_report(
             ]
             selected = same_day if not same_day.empty else manifest.tail(1)
         file_audit = _audit_partition_files(warehouse, selected, contract)
+        source_failures, source_issues = _source_contract_failures(
+            warehouse, dataset_id, selected
+        )
+        expected_units = _expected_date_units(
+            dataset_id, open_dates, data_date, full_history
+        )
+        manifest_values = set(values)
+        complete_values = manifest_values - source_failures
+        status_counts: Counter[str] = Counter()
+        unclassified: list[str] = []
+        expected_count = len(expected_units)
+        if dataset_id is ResearchDatasetId.MINUTE_BAR:
+            scoped_units = _minute_scope_units(
+                warehouse, expected_units
+            )
+            completed_pairs = _complete_minute_units(
+                warehouse, tuple(sorted({value for value, _ in scoped_units}))
+            )
+            expected_count = len(scoped_units)
+            for expected, code in scoped_units:
+                partition = expected.isoformat()
+                if (code, expected) in completed_pairs:
+                    status_counts["complete"] += 1
+                    continue
+                status = gap_statuses.get(
+                    (dataset_id.value, partition, code)
+                )
+                if status is None:
+                    status = "unclassified_missing"
+                    unclassified.append(f"{partition}/{code}")
+                    inferred_gap_counts[status] += 1
+                status_counts[status] += 1
+        else:
+            for expected in expected_units:
+                partition = expected.isoformat()
+                status = gap_statuses.get((dataset_id.value, partition, ""))
+                if (
+                    dataset_id is ResearchDatasetId.INDUSTRY_DAILY_PROXY
+                    and status is not None
+                ):
+                    status_counts[status] += 1
+                    continue
+                if partition in complete_values:
+                    status_counts["complete"] += 1
+                    continue
+                if status is None and partition in source_failures:
+                    status = "failed"
+                if (
+                    status is None
+                    and dataset_id is ResearchDatasetId.SUSPENSION
+                    and partition in suspension_empty
+                ):
+                    status = "legitimate_empty"
+                if status is None:
+                    status = "unclassified_missing"
+                    unclassified.append(partition)
+                    inferred_gap_counts[status] += 1
+                status_counts[status] += 1
         interval_audit = _effective_interval_audit(
             dataset_id,
             file_audit["paths"],
@@ -165,7 +234,7 @@ def build_research_health_report(
                 first_partition=values[0] if values else None,
                 last_partition=values[-1] if values else None,
                 data_date_partition_ready=bool(
-                    data_date.isoformat() in set(values)
+                    data_date.isoformat() in complete_values
                     and file_audit["contract_valid"]
                     and file_audit["physical_valid"]
                 ),
@@ -193,11 +262,18 @@ def build_research_health_report(
                 ],
                 contract_valid=(
                     file_audit["contract_valid"]
+                    and not source_failures
                     and interval_audit["overlaps"] == 0
                     and revision_issues["invalid"] == 0
                     and revision_issues["overlaps"] == 0
                 ),
                 physical_valid=file_audit["physical_valid"],
+                expected_units=expected_count,
+                complete_units=status_counts["complete"],
+                status_counts=dict(sorted(status_counts.items())),
+                unclassified_missing_samples=tuple(unclassified[:20]),
+                source_contract_failure_partitions=len(source_failures),
+                source_contract_issues=tuple(source_issues[:20]),
             )
         )
         if contract.required_for_close_screen:
@@ -227,14 +303,20 @@ def build_research_health_report(
         warehouse.duckdb_path, read_only=True
     ) as connection:
         gap_rows = connection.execute(
-            "select status, count(*) from research_data_gaps group by status"
+            """
+            select status, count(*) from research_data_gaps
+            where status <> 'resolved'
+            group by status
+            """
         ).fetchall()
+    gap_counts = Counter({str(status): int(count) for status, count in gap_rows})
+    gap_counts.update(inferred_gap_counts)
     derived = _build_derived_health(warehouse, data_date)
     return ResearchHealthReport(
         data_date=data_date,
         generated_at=datetime.now(timezone.utc),
         datasets=tuple(datasets),
-        gap_counts={str(status): int(count) for status, count in gap_rows},
+        gap_counts=dict(sorted(gap_counts.items())),
         complete_core_date=bool(core_complete),
         derived_features=derived,
         derived_ready_for_research=all(item.ready for item in derived),
@@ -245,6 +327,202 @@ def build_research_health_report(
         ),
         latest_stage_runs=_latest_stage_runs(warehouse, data_date),
     )
+
+
+_CORE_DAILY = {
+    ResearchDatasetId.EQUITY_DAILY,
+    ResearchDatasetId.ADJ_FACTOR,
+    ResearchDatasetId.DAILY_BASIC,
+    ResearchDatasetId.STOCK_LIMIT,
+    ResearchDatasetId.INDEX_DAILY,
+}
+_SESSION_250_DAILY = {
+    ResearchDatasetId.INDUSTRY_DAILY_PROXY,
+    ResearchDatasetId.THEME_DAILY,
+    ResearchDatasetId.MARGIN_DETAIL,
+}
+
+
+def _open_trading_dates(
+    warehouse: ResearchWarehouse, through: date
+) -> tuple[date, ...]:
+    manifest = warehouse.partition_manifest(ResearchDatasetId.TRADE_CALENDAR)
+    if manifest.empty:
+        return ()
+    paths = [str(warehouse.root / value) for value in manifest["relative_path"]]
+    with duckdb.connect() as connection:
+        rows = connection.execute(
+            """
+            select distinct cast(cal_date as date)
+            from read_parquet(?, union_by_name=true, hive_partitioning=false)
+            where cast(is_open as boolean) and cast(cal_date as date) <= ?
+            order by 1
+            """,
+            [paths, through],
+        ).fetchall()
+    return tuple(row[0] for row in rows)
+
+
+def _expected_date_units(
+    dataset: ResearchDatasetId,
+    open_dates: tuple[date, ...],
+    through: date,
+    full_history: bool,
+) -> tuple[date, ...]:
+    if dataset not in (
+        _CORE_DAILY
+        | _SESSION_250_DAILY
+        | {ResearchDatasetId.SUSPENSION, ResearchDatasetId.MINUTE_BAR}
+    ):
+        return ()
+    if not full_history:
+        return (through,) if through in set(open_dates) else ()
+    if dataset in _CORE_DAILY:
+        try:
+            boundary = through.replace(year=through.year - 5)
+        except ValueError:
+            boundary = through.replace(year=through.year - 5, day=28)
+        return tuple(value for value in open_dates if value >= boundary)
+    if dataset in _SESSION_250_DAILY:
+        return open_dates[-250:]
+    if dataset is ResearchDatasetId.SUSPENSION:
+        return tuple(
+            value for value in open_dates if value >= through - timedelta(days=365)
+        )
+    return open_dates[-20:]
+
+
+def _current_gap_statuses(
+    warehouse: ResearchWarehouse,
+) -> dict[tuple[str, str, str], str]:
+    with connect_research_warehouse(
+        warehouse.duckdb_path, read_only=True
+    ) as connection:
+        rows = connection.execute(
+            """
+            select dataset_id, partition_value, scope_key, status
+            from research_data_gaps where status <> 'resolved'
+            """
+        ).fetchall()
+    return {
+        (str(dataset), str(partition), str(scope or "")): str(status)
+        for dataset, partition, scope, status in rows
+    }
+
+
+def _legitimate_empty_suspension_dates(
+    warehouse: ResearchWarehouse,
+) -> set[str]:
+    with connect_research_warehouse(
+        warehouse.duckdb_path, read_only=True
+    ) as connection:
+        rows = connection.execute(
+            """
+            select scope_key from research_watermarks
+            where dataset_id = 'suspension_check'
+              and watermark_value = 'empty'
+            """
+        ).fetchall()
+    return {str(row[0]) for row in rows}
+
+
+def _minute_scope_units(
+    warehouse: ResearchWarehouse,
+    trading_dates: tuple[date, ...],
+) -> tuple[tuple[date, str], ...]:
+    if not trading_dates:
+        return ()
+    allowed = {value.isoformat(): value for value in trading_dates}
+    with connect_research_warehouse(
+        warehouse.duckdb_path, read_only=True
+    ) as connection:
+        rows = connection.execute(
+            """
+            select scope_key, watermark_value from research_watermarks
+            where dataset_id = 'minute_scope'
+            """
+        ).fetchall()
+    units: list[tuple[date, str]] = []
+    for scope_key, payload in rows:
+        trading_date = allowed.get(str(scope_key))
+        if trading_date is None:
+            continue
+        try:
+            codes = json.loads(str(payload))
+        except (TypeError, ValueError):
+            continue
+        units.extend(
+            (trading_date, str(code)) for code in sorted(set(codes))
+        )
+    return tuple(sorted(units))
+
+
+def _complete_minute_units(
+    warehouse: ResearchWarehouse,
+    trading_dates: tuple[date, ...],
+) -> set[tuple[str, date]]:
+    if not trading_dates:
+        return set()
+    from stock_analyzer.data.trading_structure_backfill import (
+        _complete_minute_pairs,
+    )
+
+    frame = warehouse.read_current_partitions(
+        ResearchDatasetId.MINUTE_BAR,
+        [value.isoformat() for value in trading_dates],
+    )
+    return _complete_minute_pairs(frame)
+
+
+def _source_contract_failures(
+    warehouse: ResearchWarehouse,
+    dataset: ResearchDatasetId,
+    manifest,
+) -> tuple[set[str], list[str]]:
+    if dataset is not ResearchDatasetId.INDUSTRY_DAILY_PROXY or manifest.empty:
+        return set(), []
+    failures: set[str] = set()
+    issues: list[str] = []
+    expected = {
+        "source_name": {"local_derived"},
+        "source_endpoint": {"sw_l1_free_float_proxy_v1"},
+        "proxy_method": {"sw_l1_free_float_proxy_v1"},
+        "formula_version": {"sw-l1-free-float-proxy-v1"},
+        "coverage_status": {"complete"},
+    }
+    for row in manifest.to_dict(orient="records"):
+        partition = str(row["partition_value"])
+        path = warehouse.root / str(row["relative_path"])
+        if not path.is_file():
+            continue
+        parquet = pq.ParquetFile(path)
+        required = set(expected) | {"proxy_return"}
+        missing = sorted(required - set(parquet.schema_arrow.names))
+        if missing:
+            failures.add(partition)
+            issues.append(
+                f"{partition}: proxy contract columns missing {missing}"
+            )
+            continue
+        table = parquet.read(columns=sorted(required))
+        invalid: list[str] = []
+        for column, accepted in expected.items():
+            values = {
+                str(value)
+                for value in table.column(column).to_pylist()
+                if value is not None
+            }
+            if values != accepted:
+                invalid.append(
+                    f"{column} expected {sorted(accepted)}, got {sorted(values)}"
+                )
+        proxy_values = table.column("proxy_return")
+        if proxy_values.null_count:
+            invalid.append("proxy_return contains unavailable rows")
+        if invalid:
+            failures.add(partition)
+            issues.append(f"{partition}: " + "; ".join(invalid))
+    return failures, issues
 
 
 def _latest_stage_runs(
@@ -584,10 +862,13 @@ def _effective_interval_audit(
     if not paths or dataset_id not in {
         ResearchDatasetId.INDUSTRY_CATALOG,
         ResearchDatasetId.INDUSTRY_MEMBER,
+        ResearchDatasetId.THEME_MEMBER,
     }:
         return {"overlaps": 0, "issues": []}
     if dataset_id is ResearchDatasetId.INDUSTRY_MEMBER:
         return _industry_member_interval_audit(paths)
+    if dataset_id is ResearchDatasetId.THEME_MEMBER:
+        return _theme_member_interval_audit(paths)
     with duckdb.connect() as connection:
         rows = connection.execute(
             """
@@ -665,6 +946,41 @@ def _industry_member_interval_audit(paths: list[str]) -> dict[str, Any]:
     return {"overlaps": len(issues), "issues": issues}
 
 
+def _theme_member_interval_audit(paths: list[str]) -> dict[str, Any]:
+    with duckdb.connect() as connection:
+        rows = connection.execute(
+            """
+            select theme_code, ts_code, valid_from, valid_to
+            from read_parquet(?, union_by_name=true, hive_partitioning=false)
+            order by theme_code, ts_code, valid_from
+            """,
+            [paths],
+        ).fetchall()
+    issues: list[str] = []
+    active: dict[tuple[str, str], list[tuple[Any, Any]]] = {}
+    for theme_code, ts_code, valid_from, valid_to in rows:
+        slot = (str(theme_code), str(ts_code))
+        if valid_to is not None and valid_to < valid_from:
+            issues.append(
+                f"theme_member {slot[0]}/{slot[1]}: "
+                f"{_interval_text(valid_from, valid_to)} inverted"
+            )
+        still_active = [
+            interval
+            for interval in active.get(slot, [])
+            if interval[1] is None or valid_from <= interval[1]
+        ]
+        for prior_from, prior_to in still_active:
+            issues.append(
+                f"theme_member {slot[0]}/{slot[1]}: "
+                f"{_interval_text(prior_from, prior_to)} overlaps "
+                f"{_interval_text(valid_from, valid_to)}"
+            )
+        still_active.append((valid_from, valid_to))
+        active[slot] = still_active
+    return {"overlaps": len(issues), "issues": issues}
+
+
 def _interval_text(valid_from: Any, valid_to: Any) -> str:
     end = "open" if valid_to is None else str(valid_to)
     return f"{valid_from}..{end}"
@@ -707,18 +1023,28 @@ def write_health_report(
     lines.extend(
         [
         "",
-        "| 数据 | 分区 | 记录 | 本次核对分区 | 重复业务事实 | 缺文件 | 校验不符 | 契约异常 |",
-        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        "| 数据 | 分区 | 记录 | 核对分区 | 预期单元 | 完整单元 | 当前状态 | 缺文件 | 校验不符 | 契约异常 |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: |",
         ]
     )
     for item in report.datasets:
         lines.append(
             f"| {item.dataset_id} | {item.partitions} | {item.rows} | "
-            f"{item.checked_partitions} | {item.duplicate_business_keys} | "
+            f"{item.checked_partitions} | {item.expected_units} | "
+            f"{item.complete_units} | "
+            f"{json.dumps(item.status_counts, ensure_ascii=False, sort_keys=True)} | "
             f"{item.missing_files} | "
             f"{item.hash_mismatches + item.row_count_mismatches} | "
-            f"{item.schema_mismatch_partitions + item.coverage_failure_partitions + item.effective_interval_overlaps + item.invalid_revision_intervals + item.overlapping_revision_intervals} |"
+            f"{item.schema_mismatch_partitions + item.coverage_failure_partitions + item.effective_interval_overlaps + item.invalid_revision_intervals + item.overlapping_revision_intervals + item.source_contract_failure_partitions} |"
         )
+        if item.unclassified_missing_samples:
+            lines.append(
+                f"- {item.dataset_id} 未分类缺口样例："
+                + "、".join(item.unclassified_missing_samples)
+                + "。"
+            )
+        for issue in item.source_contract_issues:
+            lines.append(f"- {item.dataset_id} 来源合同不符：{issue}。")
         for issue in item.effective_interval_issues:
             lines.append(f"- {item.dataset_id} 有效区间重叠：{issue}。")
         if item.invalid_revision_intervals or item.overlapping_revision_intervals:

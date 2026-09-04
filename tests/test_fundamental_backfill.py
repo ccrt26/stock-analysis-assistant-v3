@@ -1,11 +1,13 @@
 from datetime import date, datetime, timezone
 
 import pandas as pd
+import pytest
 
 from stock_analyzer.data.fundamental_backfill import FundamentalBackfillService
 from stock_analyzer.data.research_contracts import FactBatch, ResearchDatasetId
 from stock_analyzer.data.tushare_research_client import TushareResearchClient
 from stock_analyzer.storage.research_query import ResearchQuery
+from stock_analyzer.storage.research_schema import connect_research_warehouse
 from stock_analyzer.storage.research_warehouse import ResearchWarehouse
 
 
@@ -142,7 +144,7 @@ def test_initial_backfill_reconstructs_dated_provider_revision_timeline(tmp_path
     assert after_second_publication.iloc[0]["total_revenue"] == 101.0
 
 
-def test_same_time_provider_variants_converge_across_forced_refreshes(tmp_path):
+def test_same_time_provider_variants_are_not_ranked_by_numeric_update_flag(tmp_path):
     class SameTimeVariantPro(FundamentalPro):
         def income(self, **kwargs):
             self.calls.append(("income", kwargs))
@@ -181,16 +183,13 @@ def test_same_time_provider_variants_converge_across_forced_refreshes(tmp_path):
         warehouse,
     )
 
-    service.backfill(
+    first = service.backfill(
         start=date(2021, 7, 14),
         through=date(2026, 7, 13),
         codes=("000001.SZ",),
         resume=False,
     )
-    first_revision_count = warehouse.revision_count(
-        ResearchDatasetId.INCOME_STATEMENT
-    )
-    service.backfill(
+    second = service.backfill(
         start=date(2021, 7, 14),
         through=date(2026, 7, 13),
         codes=("000001.SZ",),
@@ -198,10 +197,24 @@ def test_same_time_provider_variants_converge_across_forced_refreshes(tmp_path):
     )
 
     income = warehouse.read_current(ResearchDatasetId.INCOME_STATEMENT)
-    assert income.iloc[0]["total_revenue"] == 101.0
-    assert income.iloc[0]["update_flag"] == "1"
-    assert first_revision_count == 0
+    assert income.empty
+    assert first.limited == 1
+    assert second.limited == 1
     assert warehouse.revision_count(ResearchDatasetId.INCOME_STATEMENT) == 0
+    with connect_research_warehouse(
+        warehouse.duckdb_path, read_only=True
+    ) as connection:
+        conflicts = connection.execute(
+            """
+            select count(*) from research_fact_conflicts
+            where dataset_id = 'income_statement'
+            """
+        ).fetchone()[0]
+        watermarks = connection.execute(
+            "select count(*) from research_watermarks where dataset_id = 'fundamentals_scope'"
+        ).fetchone()[0]
+    assert conflicts == 2
+    assert watermarks == 0
 
 
 def test_same_time_indicator_variants_keep_the_already_known_payload(tmp_path):
@@ -294,6 +307,117 @@ def test_new_ambiguous_indicator_key_is_declared_unknown_without_losing_clear_ke
     assert pd.Timestamp(indicator.iloc[0]["report_period"]).date() == date(
         2025, 12, 31
     )
+
+
+def test_indicator_duplicate_refetches_update_flag_and_uses_unique_revision(
+    tmp_path,
+):
+    class RevisionIndicatorPro(FundamentalPro):
+        def fina_indicator(self, **kwargs):
+            self.calls.append(("fina_indicator", kwargs))
+            base = {
+                "ts_code": "000001.SZ",
+                "ann_date": "20260425",
+                "end_date": "20260331",
+                "roe": 3.0,
+            }
+            rows = [
+                base | {"fcff": 1.0},
+                base | {"fcff": 42.0},
+            ]
+            if "fields" in kwargs:
+                rows = [
+                    rows[0] | {"update_flag": "0"},
+                    rows[1] | {"update_flag": "1"},
+                ]
+            return pd.DataFrame(rows)
+
+    pro = RevisionIndicatorPro()
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    service = FundamentalBackfillService(
+        TushareResearchClient(pro, pacer=lambda method: None), warehouse
+    )
+
+    observed_after = datetime.now(timezone.utc)
+    summary = service.backfill_financial_indicators(
+        start=date(2021, 7, 14),
+        through=date(2026, 7, 13),
+        codes=("000001.SZ",),
+        resume=False,
+    )
+
+    facts = warehouse.read_current(ResearchDatasetId.FINANCIAL_INDICATOR)
+    assert len(pro.calls) == 2
+    assert pro.calls[1][1]["ts_code"] == pro.calls[0][1]["ts_code"]
+    assert pro.calls[1][1]["start_date"] == pro.calls[0][1]["start_date"]
+    assert pro.calls[1][1]["end_date"] == pro.calls[0][1]["end_date"]
+    assert "update_flag" in pro.calls[1][1]["fields"].split(",")
+    assert summary.failed == 0
+    assert summary.limited == 0
+    assert facts.iloc[0]["fcff"] == 42.0
+    assert pd.Timestamp(facts.iloc[0]["available_at"]) >= pd.Timestamp(observed_after)
+    assert facts.iloc[0]["availability_precision"] == "ingestion_cutoff"
+    assert "update_flag" not in facts.columns
+    assert not any(column.startswith("_provider_") for column in facts.columns)
+
+
+def test_indicator_refetch_keeps_clear_group_and_nonunique_flags_conflicted(
+    tmp_path,
+):
+    class NonuniqueRevisionIndicatorPro(FundamentalPro):
+        def fina_indicator(self, **kwargs):
+            self.calls.append(("fina_indicator", kwargs))
+            ambiguous = {
+                "ts_code": "000001.SZ",
+                "ann_date": "20260801",
+                "end_date": "20260630",
+                "roe": 8.0,
+            }
+            clear = {
+                "ts_code": "000001.SZ",
+                "ann_date": "20260420",
+                "end_date": "20260331",
+                "roe": 7.0,
+                "fcff": 7.0,
+            }
+            rows = [
+                ambiguous | {"fcff": 1.0},
+                ambiguous | {"fcff": 42.0},
+                clear,
+            ]
+            if "fields" in kwargs:
+                rows = [
+                    rows[0] | {"update_flag": "1"},
+                    rows[1] | {"update_flag": "1"},
+                    clear | {"update_flag": "0"},
+                ]
+            return pd.DataFrame(rows)
+
+    pro = NonuniqueRevisionIndicatorPro()
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    service = FundamentalBackfillService(
+        TushareResearchClient(pro, pacer=lambda method: None), warehouse
+    )
+
+    summary = service.backfill_financial_indicators(
+        start=date(2021, 7, 14),
+        through=date(2026, 9, 2),
+        codes=("000001.SZ",),
+        resume=False,
+    )
+
+    facts = warehouse.read_current(ResearchDatasetId.FINANCIAL_INDICATOR)
+    assert len(pro.calls) == 2
+    assert summary.limited == 1
+    assert set(facts["report_period"].astype(str)) == {"2026-03-31"}
+    with connect_research_warehouse(
+        warehouse.duckdb_path, read_only=True
+    ) as connection:
+        status = connection.execute(
+            "select distinct status from research_fact_conflicts "
+            "where dataset_id = 'financial_indicator'"
+        ).fetchone()[0]
+    assert status == "unresolved"
 
 
 def test_main_business_uses_provider_type_code_in_business_key(tmp_path):
@@ -593,6 +717,311 @@ def test_provider_error_keeps_the_exact_fundamental_code_for_retry(tmp_path):
 
     assert summary.failed == 1
     assert summary.retry_codes == ["000001.SZ"]
+
+
+def test_targeted_indicator_retry_calls_no_other_financial_endpoints(tmp_path):
+    pro = FundamentalPro()
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    service = FundamentalBackfillService(
+        TushareResearchClient(pro, pacer=lambda method: None), warehouse
+    )
+
+    service.backfill_financial_indicators(
+        start=date(2026, 6, 30),
+        through=date(2026, 9, 2),
+        codes=("000001.SZ",),
+        resume=False,
+    )
+
+    assert [method for method, _ in pro.calls] == ["fina_indicator"]
+
+
+def test_targeted_indicator_retry_commits_only_requested_business_keys(tmp_path):
+    class MultiPeriodIndicatorPro(FundamentalPro):
+        def fina_indicator(self, **kwargs):
+            self.calls.append(("fina_indicator", kwargs))
+            return pd.DataFrame([
+                {
+                    "ts_code": kwargs["ts_code"],
+                    "end_date": "20260630",
+                    "ann_date": "20260801",
+                    "f_ann_date": "20260801",
+                    "roe": 8.0,
+                },
+                {
+                    "ts_code": kwargs["ts_code"],
+                    "end_date": "20260331",
+                    "ann_date": "20260420",
+                    "f_ann_date": "20260420",
+                    "roe": 7.0,
+                },
+            ])
+
+    pro = MultiPeriodIndicatorPro()
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    service = FundamentalBackfillService(
+        TushareResearchClient(pro, pacer=lambda method: None), warehouse
+    )
+
+    service.backfill_financial_indicator_business_keys(
+        business_keys=(("000001.SZ", date(2026, 6, 30)),),
+        through=date(2026, 9, 2),
+    )
+
+    facts = warehouse.read_current(ResearchDatasetId.FINANCIAL_INDICATOR)
+    assert set(facts["report_period"].astype(str)) == {"2026-06-30"}
+    assert set(facts["availability_precision"].astype(str)) == {
+        "ingestion_cutoff"
+    }
+    assert [method for method, _ in pro.calls] == ["fina_indicator"]
+
+
+def test_targeted_indicator_retry_keeps_missing_key_retryable(tmp_path):
+    class MissingIndicatorPro(FundamentalPro):
+        def fina_indicator(self, **kwargs):
+            self.calls.append(("fina_indicator", kwargs))
+            return pd.DataFrame(columns=["ts_code", "end_date"])
+
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    service = FundamentalBackfillService(
+        TushareResearchClient(MissingIndicatorPro(), pacer=lambda method: None),
+        warehouse,
+    )
+
+    summary = service.backfill_financial_indicator_business_keys(
+        business_keys=(("000001.SZ", date(2026, 6, 30)),),
+        through=date(2026, 9, 2),
+    )
+
+    assert summary.waiting_upstream == 1
+    assert summary.retry_codes == ["000001.SZ"]
+    assert warehouse.read_current(
+        ResearchDatasetId.FINANCIAL_INDICATOR
+    ).empty
+
+
+def test_targeted_indicator_retry_resolves_recorded_conflict_only_from_retry_time(
+    tmp_path,
+):
+    from stock_analyzer.storage.research_conflicts import ResearchConflictRegistry
+
+    class ConvergedIndicatorPro(FundamentalPro):
+        def fina_indicator(self, **kwargs):
+            self.calls.append(("fina_indicator", kwargs))
+            return pd.DataFrame([{
+                "ts_code": "000001.SZ", "end_date": "20260630",
+                "ann_date": "20260801", "f_ann_date": "20260801",
+                "fcff": 42.0,
+            }])
+
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    published = datetime(2026, 8, 1, 16, tzinfo=timezone.utc)
+    ResearchConflictRegistry(warehouse.duckdb_path).record_variants(
+        ResearchDatasetId.FINANCIAL_INDICATOR,
+        "2026-06-30",
+        business_key=("000001.SZ", "2026-06-30", "indicator"),
+        rows=[
+            {"ts_code": "000001.SZ", "report_period": "2026-06-30",
+             "report_type": "indicator", "fcff": 1.0,
+             "available_at": published},
+            {"ts_code": "000001.SZ", "report_period": "2026-06-30",
+             "report_type": "indicator", "fcff": 42.0,
+             "available_at": published},
+        ],
+        source_name="tushare",
+        source_endpoint="fina_indicator",
+        observed_at=published,
+    )
+    service = FundamentalBackfillService(
+        TushareResearchClient(
+            ConvergedIndicatorPro(), pacer=lambda method: None
+        ),
+        warehouse,
+    )
+
+    retry_started = datetime.now(timezone.utc)
+    service.backfill_financial_indicator_business_keys(
+        business_keys=(("000001.SZ", date(2026, 6, 30)),),
+        through=date(2026, 9, 2),
+    )
+
+    facts = warehouse.read_current(ResearchDatasetId.FINANCIAL_INDICATOR)
+    with connect_research_warehouse(
+        warehouse.duckdb_path, read_only=True
+    ) as connection:
+        status, resolved_at_text = connection.execute(
+            "select status, cast(resolved_at as varchar) "
+            "from research_fact_conflicts limit 1"
+        ).fetchone()
+    assert facts.iloc[0]["fcff"] == 42.0
+    assert pd.Timestamp(facts.iloc[0]["available_at"]) >= pd.Timestamp(retry_started)
+    assert pd.Timestamp(resolved_at_text) >= pd.Timestamp(retry_started)
+    assert status == "resolved"
+
+
+def test_targeted_indicator_conflict_uses_unique_update_flag_resolution_basis(
+    tmp_path,
+):
+    import json
+
+    from stock_analyzer.storage.research_conflicts import ResearchConflictRegistry
+
+    class RevisionIndicatorPro(FundamentalPro):
+        def fina_indicator(self, **kwargs):
+            self.calls.append(("fina_indicator", kwargs))
+            base = {
+                "ts_code": "000001.SZ",
+                "end_date": "20260630",
+                "ann_date": "20260801",
+                "f_ann_date": "20260801",
+            }
+            rows = [
+                base | {"fcff": 1.0},
+                base | {"fcff": 42.0},
+            ]
+            if "fields" in kwargs:
+                rows = [
+                    rows[0] | {"update_flag": "0"},
+                    rows[1] | {"update_flag": "1"},
+                ]
+            return pd.DataFrame(rows)
+
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    published = datetime(2026, 8, 1, 16, tzinfo=timezone.utc)
+    ResearchConflictRegistry(warehouse.duckdb_path).record_variants(
+        ResearchDatasetId.FINANCIAL_INDICATOR,
+        "2026-06-30",
+        business_key=("000001.SZ", "2026-06-30", "indicator"),
+        rows=[
+            {
+                "ts_code": "000001.SZ",
+                "report_period": "2026-06-30",
+                "report_type": "indicator",
+                "fcff": 1.0,
+                "available_at": published,
+            },
+            {
+                "ts_code": "000001.SZ",
+                "report_period": "2026-06-30",
+                "report_type": "indicator",
+                "fcff": 42.0,
+                "available_at": published,
+            },
+        ],
+        source_name="tushare",
+        source_endpoint="fina_indicator",
+        observed_at=published,
+    )
+    pro = RevisionIndicatorPro()
+    service = FundamentalBackfillService(
+        TushareResearchClient(pro, pacer=lambda method: None), warehouse
+    )
+
+    retry_started = datetime.now(timezone.utc)
+    service.backfill_financial_indicator_business_keys(
+        business_keys=(("000001.SZ", date(2026, 6, 30)),),
+        through=date(2026, 9, 2),
+    )
+
+    facts = warehouse.read_current(ResearchDatasetId.FINANCIAL_INDICATOR)
+    with connect_research_warehouse(
+        warehouse.duckdb_path, read_only=True
+    ) as connection:
+        status, basis_text = connection.execute(
+            "select status, resolution_basis from research_fact_conflicts limit 1"
+        ).fetchone()
+    assert len(pro.calls) == 2
+    assert facts.iloc[0]["fcff"] == 42.0
+    assert pd.Timestamp(facts.iloc[0]["available_at"]) >= pd.Timestamp(retry_started)
+    assert status == "resolved"
+    assert json.loads(basis_text)["basis"] == (
+        "official_update_flag_unique_revision"
+    )
+
+
+def _historical_indicator_conflict(tmp_path):
+    from stock_analyzer.storage.research_conflicts import ResearchConflictRegistry
+
+    class RevertedIndicatorPro(FundamentalPro):
+        def fina_indicator(self, **kwargs):
+            self.calls.append(("fina_indicator", kwargs))
+            return pd.DataFrame([{
+                "ts_code": "000001.SZ", "end_date": "20260630",
+                "ann_date": "20260820", "roe": 3.0,
+            }])
+
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    dataset = ResearchDatasetId.FINANCIAL_INDICATOR
+    base = {
+        "ts_code": "000001.SZ", "report_period": date(2026, 6, 30),
+        "report_type": "indicator", "ann_date": "20260820",
+    }
+    for day, value in ((20, 3.0), (21, 4.0)):
+        observed = datetime(2026, 8, day, 16, tzinfo=timezone.utc)
+        warehouse.commit_batch(FactBatch(
+            dataset_id=dataset, partition_value="2026-06-30",
+            source_name="tushare", source_endpoint="fina_indicator",
+            ingestion_run_id=f"initial-{day}", ingested_at=observed,
+            default_available_at=observed,
+            records=[base | {"roe": value, "available_at": observed}],
+        ))
+    ResearchConflictRegistry(warehouse.duckdb_path).record_variants(
+        dataset, "2026-06-30",
+        business_key=("000001.SZ", "2026-06-30", "indicator"),
+        rows=[base | {"roe": value} for value in (3.0, 4.0)],
+        source_name="tushare", source_endpoint="fina_indicator",
+        observed_at=datetime(2026, 9, 1, tzinfo=timezone.utc),
+    )
+    service = FundamentalBackfillService(
+        TushareResearchClient(RevertedIndicatorPro(), pacer=lambda method: None),
+        warehouse,
+    )
+    return warehouse, service
+
+
+def test_targeted_retry_restores_historical_payload_as_new_current_version(tmp_path):
+    warehouse, service = _historical_indicator_conflict(tmp_path)
+    dataset = ResearchDatasetId.FINANCIAL_INDICATOR
+    query = ResearchQuery(warehouse)
+    before_retry = datetime.now(timezone.utc)
+    service.backfill_financial_indicator_business_keys(
+        business_keys=(("000001.SZ", date(2026, 6, 30)),),
+        through=date(2026, 9, 2),
+    )
+    assert query.dataset_as_of(dataset, datetime.now(timezone.utc))["roe"].tolist() == [3.0]
+    facts = warehouse.read_current(dataset)
+    assert pd.Timestamp(facts.iloc[0]["available_at"]) >= pd.Timestamp(before_retry)
+    assert query.dataset_as_of(dataset, datetime(2026, 8, 30, tzinfo=timezone.utc))["roe"].tolist() == [4.0]
+    assert query.dataset_as_of(dataset, before_retry).empty
+    revisions = warehouse.revision_rows(dataset)
+    assert len(revisions) == 2
+
+    service.backfill_financial_indicator_business_keys(
+        business_keys=(("000001.SZ", date(2026, 6, 30)),),
+        through=date(2026, 9, 2),
+    )
+    assert len(warehouse.revision_rows(dataset)) == 2
+    assert warehouse.read_current(dataset).iloc[0]["available_at"] == facts.iloc[0]["available_at"]
+
+
+def test_failed_reversion_commit_does_not_resolve_financial_conflict(tmp_path, monkeypatch):
+    warehouse, service = _historical_indicator_conflict(tmp_path)
+
+    def fail_commit(_batch):
+        raise OSError("injected fact write failure")
+
+    monkeypatch.setattr(warehouse, "commit_batch", fail_commit)
+    with pytest.raises(OSError, match="injected fact write failure"):
+        service.backfill_financial_indicator_business_keys(
+            business_keys=(("000001.SZ", date(2026, 6, 30)),),
+            through=date(2026, 9, 2),
+        )
+    with connect_research_warehouse(warehouse.duckdb_path, read_only=True) as conn:
+        assert conn.execute("select distinct status from research_fact_conflicts").fetchall() == [("unresolved",)]
+    assert warehouse.read_current(ResearchDatasetId.FINANCIAL_INDICATOR)["roe"].tolist() == [4.0]
+    assert ResearchQuery(warehouse).dataset_as_of(
+        ResearchDatasetId.FINANCIAL_INDICATOR, datetime.now(timezone.utc)
+    ).empty
 
 
 def test_recent_listing_without_due_periodic_report_can_complete_empty(tmp_path):

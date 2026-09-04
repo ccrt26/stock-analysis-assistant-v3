@@ -143,7 +143,8 @@ def test_history_windows_are_tiered_by_business_value():
     registry = research_contract_registry()
 
     assert registry[ResearchDatasetId.EQUITY_DAILY].history_window == "five_years"
-    assert registry[ResearchDatasetId.INDUSTRY_DAILY].history_window == "250_sessions"
+    assert registry[ResearchDatasetId.INDUSTRY_DAILY].history_window == "legacy_history"
+    assert registry[ResearchDatasetId.INDUSTRY_DAILY_PROXY].history_window == "250_sessions"
     assert registry[ResearchDatasetId.THEME_DAILY].history_window == "250_sessions"
     assert registry[ResearchDatasetId.SUSPENSION].history_window == "one_year"
     assert registry[ResearchDatasetId.MARGIN_DETAIL].history_window == "250_sessions"

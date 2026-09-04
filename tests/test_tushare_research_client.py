@@ -77,6 +77,20 @@ class FakePro:
             [{"ts_code": "000001.SZ", "trade_date": trade_date, "up_limit": 11.0, "down_limit": 9.0}]
         )
 
+    def sw_daily(self, **kwargs):
+        self.calls.append(("sw_daily", kwargs))
+        trade_date = kwargs.get("trade_date", "20260710")
+        return pd.DataFrame(
+            [{
+                "ts_code": "801010.SI", "trade_date": trade_date,
+                "name": "农林牧渔", "open": 1000.0, "low": 990.0,
+                "high": 1020.0, "close": 1010.0, "change": 10.0,
+                "pct_change": 1.0, "vol": 12.0, "amount": 34.0,
+                "pe": 20.0, "pb": 2.0, "float_mv": 3.0,
+                "total_mv": 4.0,
+            }]
+        )
+
 
 def test_market_batches_normalize_units_and_business_fields():
     client = TushareResearchClient(FakePro(), pacer=lambda method: None)
@@ -131,3 +145,16 @@ def test_market_endpoint_cannot_return_a_different_trade_date():
     with pytest.raises(ResearchSourceError, match="unexpected trade_date") as exc:
         client.fetch_market_date(date(2026, 7, 10), run_id="run-1")
     assert exc.value.category == "schema"
+
+
+def test_sw_daily_uses_dedicated_endpoint_and_normalizes_official_units():
+    pro = FakePro()
+    client = TushareResearchClient(pro, pacer=lambda method: None)
+
+    frame = client.fetch_sw_daily(date(2026, 7, 10))
+
+    assert pro.calls[-1] == ("sw_daily", {"trade_date": "20260710"})
+    assert frame.iloc[0]["industry_code"] == "801010.SI"
+    assert frame.iloc[0]["pct_chg"] == 1.0
+    assert frame.iloc[0]["volume"] == 120_000.0
+    assert frame.iloc[0]["amount"] == 340_000.0

@@ -12,6 +12,7 @@ import pandas as pd
 
 from stock_analyzer.data.research_contracts import ResearchDatasetId, research_contract
 from stock_analyzer.storage.research_warehouse import ResearchWarehouse
+from stock_analyzer.storage.research_conflicts import blocked_conflict_hashes
 
 
 _PARTITION_VALUE_COLUMN = "__research_partition_value"
@@ -44,12 +45,13 @@ class ResearchQuery:
         dataset = ResearchDatasetId(dataset_id)
         cutoff = _utc(as_of)
         current = self.warehouse.read_current(dataset)
-        return _resolve_as_of(
+        resolved = _resolve_as_of(
             dataset,
             current,
             self.warehouse.revision_rows(dataset),
             cutoff,
         )
+        return self._mask_provider_conflicts(dataset, resolved, cutoff)
 
     def dataset_partitions_as_of(
         self,
@@ -115,13 +117,6 @@ class ResearchQuery:
             "end_type", pd.Series(index=frame.index, dtype=object)
         ).astype("string")
         frame["__end_type_match"] = actual_end_type.eq(expected_end_type)
-        update_flag = frame.get(
-            "update_flag",
-            pd.Series(0, index=frame.index, dtype=int),
-        )
-        frame["__update_rank"] = pd.to_numeric(
-            update_flag, errors="coerce"
-        ).fillna(0)
         report_priority = {
             "1": 0,
             "4": 1,
@@ -144,12 +139,11 @@ class ResearchQuery:
                 group_key
                 + [
                     "__end_type_match",
-                    "__update_rank",
                     "__report_priority",
                     "__available_rank",
                     "__statement_rank",
                 ],
-                ascending=[True, True, False, False, True, False, True],
+                ascending=[True, True, False, True, False, True],
                 kind="mergesort",
             )
             .drop_duplicates(group_key, keep="first")
@@ -159,13 +153,12 @@ class ResearchQuery:
             "__candidate_count"
         ).astype(int)
         selected["comparable_selection_rule"] = (
-            "as_of_then_end_type_match_then_update_flag_then_"
-            "consolidated_report_then_available_at_then_statement_type"
+            "as_of_then_end_type_match_then_consolidated_report_then_"
+            "available_at_then_statement_type"
         )
         return selected.drop(
             columns=[
                 "__end_type_match",
-                "__update_rank",
                 "__report_priority",
                 "__available_rank",
                 "__statement_rank",
@@ -309,8 +302,29 @@ class ResearchQuery:
             revisions.append(prepared)
 
         resolved = _resolve_as_of(dataset, current, revisions, cutoff)
+        resolved = self._mask_provider_conflicts(dataset, resolved, cutoff)
         _assert_unique_business_keys(dataset, resolved)
         return resolved, metadata
+
+    def _mask_provider_conflicts(
+        self,
+        dataset: ResearchDatasetId,
+        frame: pd.DataFrame,
+        cutoff: datetime,
+    ) -> pd.DataFrame:
+        if frame.empty or "business_key_hash" not in frame:
+            return frame
+        duckdb_path = getattr(self.warehouse, "duckdb_path", None)
+        if duckdb_path is None:
+            return frame
+        blocked = blocked_conflict_hashes(
+            duckdb_path, dataset, cutoff
+        )
+        if not blocked:
+            return frame
+        return frame.loc[
+            ~frame["business_key_hash"].astype(str).isin(blocked)
+        ].reset_index(drop=True)
 
     def controlled_themes_as_of(self, as_of: datetime) -> pd.DataFrame:
         catalog = self.dataset_as_of(ResearchDatasetId.THEME_CATALOG, as_of)
@@ -444,7 +458,41 @@ def _mask_future_validity_edges(
         if "is_current" in result:
             result["is_current"] = valid_to.isna() | (valid_to >= cutoff_day)
         result.loc[valid_to >= cutoff_day, "valid_to"] = None
-    return result
+    return _infer_visible_membership_successors(dataset, result)
+
+
+def _infer_visible_membership_successors(
+    dataset: ResearchDatasetId,
+    frame: pd.DataFrame,
+) -> pd.DataFrame:
+    if dataset is ResearchDatasetId.INDUSTRY_MEMBER:
+        slot = ["ts_code", "industry_system", "level"]
+    elif dataset is ResearchDatasetId.THEME_MEMBER:
+        slot = ["theme_code", "ts_code"]
+    else:
+        return frame
+    required = {*slot, "valid_from", "valid_to"}
+    if frame.empty or not required <= set(frame):
+        return frame
+    result = frame.copy()
+    result["__valid_from"] = pd.to_datetime(
+        result["valid_from"], errors="raise"
+    ).dt.normalize()
+    ordered = result.sort_values([*slot, "__valid_from"], kind="mergesort")
+    next_start = ordered.groupby(slot, sort=False)["__valid_from"].shift(-1)
+    current_end = pd.to_datetime(ordered["valid_to"], errors="coerce").dt.normalize()
+    infer = next_start.notna() & (
+        current_end.isna() | (current_end >= next_start)
+    ) & (next_start > ordered["__valid_from"])
+    if not infer.any():
+        return ordered.drop(columns=["__valid_from"]).sort_index()
+    ordered["valid_to"] = current_end
+    ordered.loc[infer, "valid_to"] = (
+        next_start.loc[infer] - pd.Timedelta(days=1)
+    )
+    if "is_current" in ordered:
+        ordered.loc[infer, "is_current"] = False
+    return ordered.drop(columns=["__valid_from"]).sort_index()
 
 
 def _assert_unique_current_hashes(

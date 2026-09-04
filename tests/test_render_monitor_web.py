@@ -206,6 +206,10 @@ class TestStageAndTrigger:
 class TestBuildPayload:
     def test_v4_payload_shape(self, tmp_path: Path) -> None:
         formal = _episode("e-formal", "600000.SH", "示例股份")
+        formal["original_strongest_counterevidence"] = "涨幅集中在最近3日。"
+        formal["new_announcements"] = [
+            {"announcement_id": "ann-1", "available_at": "2026-09-02T08:00:00+08:00", "title": "临时公告"}
+        ]
         conditional = _episode(
             "e-cond", "600001.SH", "条件股",
             output_class="conditional_event", entry_open=None, priority=2,
@@ -220,6 +224,35 @@ class TestBuildPayload:
         )
         (tmp_path / "monitor-report-2026-09-02.json").write_text(
             json.dumps(report, ensure_ascii=False), encoding="utf-8"
+        )
+        # 每日复盘台账：与报告同日同条记录合并，结构化观点字段以台账为准
+        ledger = {
+            "ledger_version": "daily-formal-reviews-v1",
+            "analysis_date": "2026-09-02",
+            "as_of": "2026-09-03T09:00:00+08:00",
+            "reviews": [
+                {
+                    "episode_id": "e-formal",
+                    "day_number": 2,
+                    "checkpoint": None,
+                    "current_assessment": "weakening",
+                    "current_path": "down",
+                    "best_supported_explanation": "market_common_move",
+                    "current_weak_or_failed_link": "price_and_volume_confirmation",
+                    "current_review": "台账简评正文。",
+                    "view_change": "weakened",
+                    "view_change_reason": "收盘连续两日回落。",
+                    "outlook_1_3d": "weakening",
+                    "outlook_reason_plain_language": "路径向下且相对优势消失。",
+                    "tracking_decision": "keep_active_tracking",
+                    "tracking_decision_reason": "仍在观察窗口内。",
+                    "review_origin": "live",
+                    "final_twenty_day_review": None,
+                }
+            ],
+        }
+        (tmp_path / "daily-formal-reviews-2026-09-02.json").write_text(
+            json.dumps(ledger, ensure_ascii=False), encoding="utf-8"
         )
         payload = build_payload(
             tmp_path,
@@ -236,7 +269,7 @@ class TestBuildPayload:
         for key in (
             "code", "name", "recDate", "recIndex", "ref", "days", "stage", "stageType",
             "attention", "trigger", "suspended", "company", "industryName", "industry",
-            "candles", "thesisOriginal", "thesisState", "reviews", "events",
+            "candles", "reasonFull", "reasonRisk", "industrySource", "reviews", "events",
         ):
             assert key in formal_stock
         assert formal_stock["attention"] is True
@@ -244,12 +277,18 @@ class TestBuildPayload:
         # 正式记录的推荐参考价来自推荐日原始开盘价（无行情时为 None）
         assert formal_stock["ref"] is None or isinstance(formal_stock["ref"], float)
         assert conditional_stock["ref"] is None
-        # 复盘历史与事件时间线
+        assert formal_stock["reasonFull"] == "板块扩散且个股领先。"
+        assert formal_stock["reasonRisk"] == "涨幅集中在最近3日。"
+        # 复盘历史与事件时间线：报告正文 + 台账结构化字段合并
         review = formal_stock["reviews"][-1]
-        assert review["headline"] == "观点更新第一句。"
+        assert review["headline"] == "观点更新第一句。"  # 正文以报告为准
         assert review["viewChanged"] is True
+        assert review["viewLabel"] == "观点减弱"  # 观点字段以台账为准
+        assert review["viewReason"] == "收盘连续两日回落。"
         assert review["base"].startswith("未来1—3个交易日")
         assert any(event[2] == "正式推荐" for event in formal_stock["events"])
+        # 时间线不收录公司公告等客观事实
+        assert all(event[2] != "公司公告" for event in formal_stock["events"])
         # 交易日窗口与基准对齐
         assert len(payload["dates"]) == len(payload["market"])
         assert len(formal_stock["candles"]) == len(payload["dates"])
@@ -257,6 +296,48 @@ class TestBuildPayload:
         assert [f["file"] for f in payload["date_files"]] == [
             "monitor-report-2026-09-02.html"
         ]
+        # 重点观察的页内复盘日期列表（含报告日）
+        assert payload["review_dates"] == ["2026-09-02"]
+
+
+def test_conditional_event_uses_first_reaction_reference(tmp_path: Path) -> None:
+    """事件等待型：有事件首次定价且有当日行情时，参考价=事件日原始开盘价，观察起点对齐事件日。"""
+    import pandas as pd
+
+    from tools.render_monitor_web import build_payload
+
+    eq_dir = tmp_path / "local_warehouse" / "facts" / "equity_daily" / "trade_date=2026-09-02"
+    eq_dir.mkdir(parents=True)
+    pd.DataFrame(
+        [{"ts_code": "600001.SH", "open": 10.0, "high": 10.4, "low": 9.9, "close": 10.2,
+          "amount": 1.0e8, "available_at": pd.Timestamp("2026-09-02T08:00:00Z")}]
+    ).to_parquet(eq_dir / "data.parquet")
+    episode = _episode(
+        "e-cond", "600001.SH", "条件股",
+        output_class="conditional_event", entry_open=None,
+        action_date="2026-09-02",
+    )
+    episode["first_event_reaction"] = {"trade_date": "2026-09-02", "open": 10.0}
+    payload = build_payload(
+        tmp_path, tmp_path, date(2026, 9, 2), _report([]), _snapshot([episode])
+    )
+    stock = payload["stocks"][0]
+    assert stock["ref"] == 10.0
+    assert stock["refKind"] == "event"
+    assert stock["recIndex"] == stock["candles"].index(
+        next(bar for bar in stock["candles"] if bar[3] is not None)
+    )
+    # 无事件定价记录的事件型仍无参考价（如停牌股），不编造
+    suspended = _episode(
+        "e-cond2", "600002.SH", "停牌条件股",
+        output_class="conditional_event", entry_open=None,
+        action_date="2026-09-02",
+    )
+    payload2 = build_payload(
+        tmp_path, tmp_path, date(2026, 9, 2), _report([]), _snapshot([suspended])
+    )
+    assert payload2["stocks"][0]["ref"] is None
+    assert payload2["stocks"][0]["refKind"] is None
 
 
 class TestRender:
@@ -270,10 +351,14 @@ class TestRender:
         # V4 版式标志
         for marker in (
             "推荐观察台", "重点观察", "全部观察", "观察进度", "距 20%",
-            "下一检查日", "推荐理由对照", "公司与观察事件", "交易日尺" if False else "dayruler",
+            "下一检查日", "入选理由", "复盘内容", "公司与观察事件",
+            "交易日尺" if False else "dayruler",
             "K线", "相对表现", "缩起",
         ):
             assert marker in html
+        # 用户要求：推荐理由对照并入入选理由块与公司与观察事件时间线
+        assert "推荐理由对照" not in html
+        assert "决定性事实" not in html and "基准判断" not in html
         # 用户要求：删除今天先看什么；不出现自行改状态的按钮
         assert "今天先看什么" not in html
         assert "标记已买入" not in html

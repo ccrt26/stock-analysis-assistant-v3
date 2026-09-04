@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import time as system_time
 from collections import defaultdict
 from datetime import date, datetime, time, timedelta, timezone
@@ -19,6 +20,8 @@ from stock_analyzer.data.tushare_research_client import (
     TushareResearchClient,
 )
 from stock_analyzer.storage.research_warehouse import ResearchWarehouse
+from stock_analyzer.storage.research_gap_registry import ResearchGapRegistry
+from stock_analyzer.storage.research_schema import connect_research_warehouse
 
 
 class MinuteRequestPacer:
@@ -57,6 +60,7 @@ class TradingStructureBackfillService:
         self.warehouse = warehouse
         self.minute_fetcher = minute_fetcher
         self.minute_pacer = minute_pacer or MinuteRequestPacer()
+        self.gaps = ResearchGapRegistry(warehouse.duckdb_path)
 
     def backfill(
         self,
@@ -66,6 +70,7 @@ class TradingStructureBackfillService:
         candidate_codes: tuple[str, ...],
         index_codes: tuple[str, ...],
         resume: bool = True,
+        include_minutes: bool = True,
     ) -> BackfillSummary:
         dates = tuple(sorted(set(trading_dates)))
         if not dates:
@@ -86,6 +91,17 @@ class TradingStructureBackfillService:
                 summary.waiting_upstream += 1
                 summary.issues.append(
                     f"margin_detail:{partition}:waiting_upstream"
+                )
+                self.gaps.record(
+                    ResearchDatasetId.MARGIN_DETAIL,
+                    partition,
+                    status="waiting_upstream",
+                    reason_category="official_empty",
+                    source_name="tushare",
+                    source_endpoint="margin_detail",
+                    impact_text="该交易日融资融券明细尚未取得。",
+                    detail={"trade_date": partition},
+                    next_retry_at=_next_morning(trading_date) + timedelta(hours=1),
                 )
                 continue
             required = (
@@ -120,16 +136,25 @@ class TradingStructureBackfillService:
             )
             summary.committed += 1
 
-        codes = tuple(sorted(set(candidate_codes) | set(index_codes)))
-        summary.limitations_checked = bool(codes)
+        if not include_minutes:
+            summary.scope = "margin-detail"
+            return summary
+
+        requested_codes = tuple(sorted(set(candidate_codes) | set(index_codes)))
         minute_dates = margin_dates[-20:]
+        scopes = self._freeze_minute_scopes(minute_dates, requested_codes)
+        codes = tuple(sorted({code for values in scopes.values() for code in values}))
+        summary.limitations_checked = bool(codes)
         existing_minute = self.warehouse.read_current(ResearchDatasetId.MINUTE_BAR)
         covered_pairs = _complete_minute_pairs(existing_minute)
         start_at = f"{minute_dates[0].isoformat()} 09:00:00"
         end_at = f"{minute_dates[-1].isoformat()} 15:30:00"
         index_set = set(index_codes)
-        for code in codes:
-            if resume and all((code, value) in covered_pairs for value in minute_dates):
+        for code_index, code in enumerate(codes):
+            required_dates = tuple(
+                value for value in minute_dates if code in scopes[value]
+            )
+            if resume and all((code, value) in covered_pairs for value in required_dates):
                 summary.skipped += 1
                 continue
             self.minute_pacer()
@@ -146,10 +171,37 @@ class TradingStructureBackfillService:
                 if category == "access_or_rate_limit":
                     summary.limited += 1
                     summary.issues.append(f"minute_bar:{category}")
+                    for remaining_code in codes[code_index:]:
+                        for value in minute_dates:
+                            if remaining_code not in scopes[value]:
+                                continue
+                            self.gaps.record(
+                                ResearchDatasetId.MINUTE_BAR,
+                                value,
+                                scope_key=remaining_code,
+                                status="unsupported_optional",
+                                reason_category=category,
+                                source_name="tushare",
+                                source_endpoint="stk_mins",
+                                impact_text="分钟数据是可选能力，当前权限或频率不足。",
+                                detail={"message": str(exc)},
+                            )
                     break
                 else:
                     summary.failed += 1
                     summary.issues.append(f"minute_bar:{code}:{category}")
+                    for value in required_dates:
+                        self.gaps.record(
+                            ResearchDatasetId.MINUTE_BAR,
+                            value,
+                            scope_key=code,
+                            status="failed",
+                            reason_category=category,
+                            source_name="tushare",
+                            source_endpoint="stk_mins",
+                            impact_text="该代码分钟数据采集失败。",
+                            detail={"message": str(exc)},
+                        )
                     continue
             if not isinstance(frame, pd.DataFrame):
                 summary.failed += 1
@@ -169,10 +221,24 @@ class TradingStructureBackfillService:
             _require(frame, required, "pro_bar:1min")
             if frame.empty:
                 summary.waiting_upstream += 1
+                for value in required_dates:
+                    self.gaps.record(
+                        ResearchDatasetId.MINUTE_BAR,
+                        value,
+                        scope_key=code,
+                        status="unclassified_missing",
+                        reason_category="official_empty",
+                        source_name="tushare",
+                        source_endpoint="stk_mins",
+                        impact_text="官方分钟接口成功返回空结果。",
+                        detail={"instrument_code": code},
+                    )
                 continue
             grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
             for raw in frame.to_dict(orient="records"):
                 trading_date = _date(raw["trade_date"])
+                if trading_date not in scopes or code not in scopes[trading_date]:
+                    continue
                 minute = _minute_utc(raw["trade_time"])
                 grouped[trading_date.isoformat()].append(
                     {
@@ -197,12 +263,75 @@ class TradingStructureBackfillService:
                 self._commit(
                     ResearchDatasetId.MINUTE_BAR,
                     partition,
-                    "pro_bar:1min",
+                    "stk_mins",
                     rows,
                     through,
                 )
                 summary.committed += 1
+            complete_returned = _complete_minute_pairs(
+                self.warehouse.read_current(ResearchDatasetId.MINUTE_BAR)
+            )
+            for value in required_dates:
+                if (code, value) in complete_returned:
+                    self.gaps.resolve_from_success(
+                        ResearchDatasetId.MINUTE_BAR,
+                        value,
+                        scope_key=code,
+                        source_name="tushare",
+                        source_endpoint="stk_mins",
+                    )
         return summary
+
+    def backfill_margin_details(
+        self,
+        *,
+        trading_dates: Iterable[date],
+        through: date,
+        resume: bool = True,
+    ) -> BackfillSummary:
+        return self.backfill(
+            trading_dates=trading_dates,
+            through=through,
+            candidate_codes=(),
+            index_codes=(),
+            resume=resume,
+            include_minutes=False,
+        )
+
+    def _freeze_minute_scopes(
+        self,
+        trading_dates: Iterable[date],
+        requested_codes: tuple[str, ...],
+    ) -> dict[date, tuple[str, ...]]:
+        result: dict[date, tuple[str, ...]] = {}
+        with connect_research_warehouse(self.warehouse.duckdb_path) as connection:
+            for trading_date in trading_dates:
+                scope_key = trading_date.isoformat()
+                row = connection.execute(
+                    """
+                    select watermark_value from research_watermarks
+                    where dataset_id = 'minute_scope' and scope_key = ?
+                    """,
+                    [scope_key],
+                ).fetchone()
+                if row is None:
+                    values = requested_codes
+                    connection.execute(
+                        """
+                        insert into research_watermarks
+                        (dataset_id, scope_key, watermark_value, updated_at, run_id)
+                        values ('minute_scope', ?, ?, now(), ?)
+                        """,
+                        [
+                            scope_key,
+                            json.dumps(values, ensure_ascii=False),
+                            f"minute-scope:{scope_key}",
+                        ],
+                    )
+                else:
+                    values = tuple(sorted({str(value) for value in json.loads(row[0])}))
+                result[trading_date] = tuple(values)
+        return result
 
     def _commit(
         self,

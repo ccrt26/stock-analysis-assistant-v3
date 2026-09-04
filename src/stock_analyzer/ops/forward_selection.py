@@ -28,7 +28,7 @@ SHANGHAI = ZoneInfo("Asia/Shanghai")
 SELECTION_START = time(9, 5)
 READINESS_POLL_SECONDS = 30
 MARKET_OPEN = time(9, 30)
-INDUSTRY_RESEARCH_LIMITATION = "行业原始日数据不可用，本次不使用行业证据"
+INDUSTRY_RESEARCH_LIMITATION = "申万一级行业代理不可用，本次不使用行业证据"
 THEME_RESEARCH_LIMITATION = "主题原始日数据不可用，本次不使用主题证据"
 STOCK_CONTEXT_LIMITATION = "个股交易背景不可用，不使用其独有字段"
 PREOPEN_REFRESH_LIMITATION = (
@@ -2225,7 +2225,7 @@ def _wait_until_data_ready(
         }
         sector_feature_ready = feature_ready.get("sector_hotspot", False)
         industry_ready = bool(
-            sector_feature_ready and dataset_ready.get("industry_daily", False)
+            sector_feature_ready and dataset_ready.get("industry_daily_proxy", False)
         )
         theme_ready = bool(
             sector_feature_ready and dataset_ready.get("theme_daily", False)

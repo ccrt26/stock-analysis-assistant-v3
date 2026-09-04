@@ -1,4 +1,5 @@
 from datetime import date
+from contextlib import contextmanager
 from types import SimpleNamespace
 
 from typer.testing import CliRunner
@@ -164,6 +165,112 @@ def test_scheduled_stage_returns_nonzero_when_required_facts_are_incomplete(
 
     assert result.exit_code == 2, result.output
     assert "core_complete=false" in result.output
+
+
+def test_close_stage_does_not_require_evening_derived_features(
+    tmp_path, monkeypatch
+):
+    import stock_analyzer.ops.research_data_job as job
+    import stock_analyzer.ops.research_health as health
+
+    config = SimpleNamespace(local_archive_dir=tmp_path / "archive")
+    runtime = SimpleNamespace(config=config, warehouse=object())
+    monkeypatch.setattr(job, "build_research_data_runtime", lambda config: runtime)
+    monkeypatch.setattr(
+        job,
+        "run_research_stage",
+        lambda runtime, *, stage, data_date: (
+            BackfillSummary(
+                scope="market-core",
+                start=date(2026, 8, 4),
+                through=date(2026, 8, 4),
+                committed=4,
+            ),
+        ),
+    )
+    monkeypatch.setattr("stock_analyzer.config.AppConfig.load", lambda: config)
+    monkeypatch.setattr(
+        health,
+        "build_research_health_report",
+        lambda warehouse, data_date, full_history: _health_report(
+            market_ready=False, price_ready=False
+        ),
+    )
+    monkeypatch.setattr(
+        health,
+        "write_health_report",
+        lambda report, output_dir: (output_dir / "health.json", None),
+    )
+
+    result = runner.invoke(
+        app,
+        ["data", "run-stage", "--stage", "close", "--data-date", "2026-08-04"],
+    )
+
+    assert result.exit_code == 0, result.output
+
+
+def test_scheduled_stage_acquires_global_lock_before_runtime_initialization(
+    tmp_path, monkeypatch
+):
+    import stock_analyzer.ops.research_data_job as job
+    import stock_analyzer.ops.research_health as health
+
+    order = []
+    config = SimpleNamespace(
+        local_archive_dir=tmp_path / "archive",
+        local_warehouse_dir=tmp_path / "warehouse",
+    )
+    runtime = SimpleNamespace(config=config, warehouse=object())
+
+    @contextmanager
+    def lock(root):
+        order.append(("lock-enter", root))
+        try:
+            yield
+        finally:
+            order.append(("lock-exit", root))
+
+    def build(config):
+        assert order == [("lock-enter", config.local_warehouse_dir)]
+        order.append(("runtime", config.local_warehouse_dir))
+        return runtime
+
+    def run(runtime, *, stage, data_date, already_locked):
+        assert already_locked is True
+        order.append(("stage", data_date))
+        return (
+            BackfillSummary(
+                scope="market-core", start=data_date, through=data_date,
+                committed=4,
+            ),
+        )
+
+    monkeypatch.setattr(job, "research_job_lock", lock, raising=False)
+    monkeypatch.setattr(job, "build_research_data_runtime", build)
+    monkeypatch.setattr(job, "run_research_stage", run)
+    monkeypatch.setattr("stock_analyzer.config.AppConfig.load", lambda: config)
+    monkeypatch.setattr(
+        health, "build_research_health_report",
+        lambda *args, **kwargs: _health_report(),
+    )
+    monkeypatch.setattr(
+        health, "write_health_report",
+        lambda report, output_dir: (output_dir / "health.json", None),
+    )
+
+    result = runner.invoke(
+        app,
+        ["data", "run-stage", "--stage", "close", "--data-date", "2026-08-04"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert order[:3] == [
+        ("lock-enter", config.local_warehouse_dir),
+        ("runtime", config.local_warehouse_dir),
+        ("stage", date(2026, 8, 4)),
+    ]
+    assert order[-1] == ("lock-exit", config.local_warehouse_dir)
 
 
 def test_scheduled_stage_optional_waiting_returns_zero_when_core_is_ready(

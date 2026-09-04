@@ -1,3 +1,4 @@
+import json
 from datetime import date
 from zoneinfo import ZoneInfo
 
@@ -10,6 +11,7 @@ from stock_analyzer.data.trading_structure_backfill import (
 )
 from stock_analyzer.data.tushare_research_client import TushareResearchClient
 from stock_analyzer.storage.research_warehouse import ResearchWarehouse
+from stock_analyzer.storage.research_schema import connect_research_warehouse
 
 
 class Pro:
@@ -208,6 +210,29 @@ def test_margin_empty_dataframe_without_columns_is_waiting_not_schema_failure(
     assert summary.issues == ["margin_detail:2026-07-13:waiting_upstream"]
 
 
+def test_targeted_margin_backfill_does_not_touch_minute_endpoint(tmp_path):
+    pro = Pro()
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    service = TradingStructureBackfillService(
+        TushareResearchClient(pro, pacer=lambda method: None),
+        warehouse,
+        minute_fetcher=lambda **kwargs: (_ for _ in ()).throw(
+            AssertionError("minute endpoint must not be called")
+        ),
+        minute_pacer=lambda: None,
+    )
+
+    summary = service.backfill_margin_details(
+        trading_dates=(date(2026, 7, 10),),
+        through=date(2026, 7, 10),
+        resume=False,
+    )
+
+    assert pro.margin_calls == ["20260710"]
+    assert summary.scope == "margin-detail"
+    assert summary.committed == 1
+
+
 def test_minute_permission_error_stops_remaining_scope_after_first_failure(tmp_path):
     calls = []
 
@@ -236,6 +261,28 @@ def test_minute_permission_error_stops_remaining_scope_after_first_failure(tmp_p
     assert summary.limited == 1
     assert summary.limitations_checked
     assert summary.issues == ["minute_bar:access_or_rate_limit"]
+    with connect_research_warehouse(
+        warehouse.duckdb_path, read_only=True
+    ) as connection:
+        frozen = connection.execute(
+            """
+            select watermark_value from research_watermarks
+            where dataset_id = 'minute_scope' and scope_key = '2026-07-10'
+            """
+        ).fetchone()[0]
+        gaps = connection.execute(
+            """
+            select scope_key, status from research_data_gaps
+            where dataset_id = 'minute_bar' and partition_value = '2026-07-10'
+            order by scope_key
+            """
+        ).fetchall()
+    assert json.loads(frozen) == ["000001.SZ", "000002.SZ", "000003.SZ"]
+    assert gaps == [
+        ("000001.SZ", "unsupported_optional"),
+        ("000002.SZ", "unsupported_optional"),
+        ("000003.SZ", "unsupported_optional"),
+    ]
 
 
 def test_minute_error_for_one_code_does_not_drop_remaining_codes(tmp_path):

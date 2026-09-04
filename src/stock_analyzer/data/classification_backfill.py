@@ -7,6 +7,11 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
+from stock_analyzer.analysis.industry_proxy import (
+    PROXY_METHOD,
+    IndustryProxyInputError,
+    compute_industry_daily_proxy,
+)
 from stock_analyzer.data.research_backfill import BackfillSummary
 from stock_analyzer.data.research_contracts import (
     AvailabilityPrecision,
@@ -19,6 +24,8 @@ from stock_analyzer.data.tushare_research_client import (
 )
 from stock_analyzer.storage.research_warehouse import ResearchWarehouse
 from stock_analyzer.storage.research_schema import connect_research_warehouse
+from stock_analyzer.storage.research_gap_registry import ResearchGapRegistry
+from stock_analyzer.storage.research_query import ResearchQuery
 
 
 class ClassificationBackfillService:
@@ -29,6 +36,10 @@ class ClassificationBackfillService:
     ) -> None:
         self.client = client
         self.warehouse = warehouse
+        duckdb_path = getattr(warehouse, "duckdb_path", None)
+        self.gaps = (
+            ResearchGapRegistry(duckdb_path) if duckdb_path is not None else None
+        )
 
     def backfill(
         self,
@@ -75,35 +86,19 @@ class ClassificationBackfillService:
                 ingested_at=observed_at,
             )
 
-        industry_codes = sorted(
-            {
-                str(row["industry_code"])
-                for row in catalog
-                if str(row.get("is_published", "")) == "1"
-                and str(row.get("level", "")) == "L1"
-            }
-        )
         if resume and self._daily_history_complete(
-            ResearchDatasetId.INDUSTRY_DAILY, history_dates
+            ResearchDatasetId.INDUSTRY_DAILY_PROXY, history_dates
         ):
             summary.skipped += len(history_dates)
         else:
-            industry_bars = self._index_history(
-                industry_codes,
-                start=history_start,
-                through=through,
-                code_field="industry_code",
-                summary=summary,
-                allowed_dates=allowed_dates,
-            )
-            self._commit_daily_groups(
-                ResearchDatasetId.INDUSTRY_DAILY,
-                "index_daily",
-                industry_bars,
-                through,
-                resume,
-                summary,
-            )
+            for trading_date in history_dates or (through,):
+                if resume and self._complete(
+                    ResearchDatasetId.INDUSTRY_DAILY_PROXY,
+                    trading_date.isoformat(),
+                ):
+                    summary.skipped += 1
+                    continue
+                self._refresh_industry_proxy(trading_date, summary)
 
         if resume and self._complete(
             ResearchDatasetId.THEME_CATALOG, "official-theme-v1"
@@ -208,14 +203,14 @@ class ClassificationBackfillService:
     ) -> BackfillSummary:
         requested = (
             {
-                ResearchDatasetId.INDUSTRY_DAILY,
+                ResearchDatasetId.INDUSTRY_DAILY_PROXY,
                 ResearchDatasetId.THEME_DAILY,
             }
             if datasets is None
             else {ResearchDatasetId(value) for value in datasets}
         )
         allowed = {
-            ResearchDatasetId.INDUSTRY_DAILY,
+            ResearchDatasetId.INDUSTRY_DAILY_PROXY,
             ResearchDatasetId.THEME_DAILY,
         }
         if not requested or not requested <= allowed:
@@ -234,7 +229,7 @@ class ClassificationBackfillService:
         )
         theme_catalog = self.warehouse.read_current(ResearchDatasetId.THEME_CATALOG)
         missing_requested_catalog = (
-            ResearchDatasetId.INDUSTRY_DAILY in requested
+            ResearchDatasetId.INDUSTRY_DAILY_PROXY in requested
             and industry_catalog.empty
         ) or (
             ResearchDatasetId.THEME_DAILY in requested and theme_catalog.empty
@@ -247,70 +242,45 @@ class ClassificationBackfillService:
                 category="incomplete",
                 endpoint="index_daily",
             )
-        frame = self.client.call_paged(
-            "index_daily", trade_date=_yyyymmdd(data_date)
-        )
-        _require(
-            frame,
-            (
-                "ts_code", "trade_date", "open", "high", "low", "close",
-                "vol", "amount",
-            ),
-            "index_daily",
-        )
-        industry_codes = (
-            set(industry_catalog["industry_code"].astype(str))
-            if not industry_catalog.empty
-            else set()
-        )
         theme_codes = (
             set(theme_catalog["theme_code"].astype(str))
             if not theme_catalog.empty
             else set()
         )
-        industry_rows: list[dict[str, Any]] = []
         theme_rows: list[dict[str, Any]] = []
-        for raw in frame.to_dict(orient="records"):
-            code = str(raw["ts_code"])
-            target: list[dict[str, Any]] | None = None
-            code_field = ""
-            if (
-                ResearchDatasetId.INDUSTRY_DAILY in requested
-                and code in industry_codes
-            ):
-                target = industry_rows
-                code_field = "industry_code"
-            elif ResearchDatasetId.THEME_DAILY in requested and code in theme_codes:
-                target = theme_rows
-                code_field = "theme_code"
-            if target is None:
-                continue
-            target.append(
-                {
-                    "trade_date": data_date,
-                    code_field: code,
-                    "open": _number(raw["open"]),
-                    "high": _number(raw["high"]),
-                    "low": _number(raw["low"]),
-                    "close": _number(raw["close"]),
-                    "pre_close": _number(raw.get("pre_close")),
-                    "pct_chg": _number(raw.get("pct_chg")),
-                    "volume": _number(raw["vol"], multiplier=100.0),
-                    "amount": _number(raw["amount"], multiplier=1_000.0),
-                }
-            )
         partition = data_date.isoformat()
-        if ResearchDatasetId.INDUSTRY_DAILY in requested:
-            self._commit(
-                ResearchDatasetId.INDUSTRY_DAILY,
-                partition,
-                "index_daily",
-                industry_rows,
-                data_date,
-                False,
-                summary,
-            )
+        if ResearchDatasetId.INDUSTRY_DAILY_PROXY in requested:
+            self._refresh_industry_proxy(data_date, summary)
         if ResearchDatasetId.THEME_DAILY in requested:
+            frame = self.client.call_paged(
+                "index_daily", trade_date=_yyyymmdd(data_date)
+            )
+            _require(
+                frame,
+                (
+                    "ts_code", "trade_date", "open", "high", "low", "close",
+                    "vol", "amount",
+                ),
+                "index_daily",
+            )
+            for raw in frame.to_dict(orient="records"):
+                code = str(raw["ts_code"])
+                if code not in theme_codes:
+                    continue
+                theme_rows.append(
+                    {
+                        "trade_date": data_date,
+                        "theme_code": code,
+                        "open": _number(raw["open"]),
+                        "high": _number(raw["high"]),
+                        "low": _number(raw["low"]),
+                        "close": _number(raw["close"]),
+                        "pre_close": _number(raw.get("pre_close")),
+                        "pct_chg": _number(raw.get("pct_chg")),
+                        "volume": _number(raw["vol"], multiplier=100.0),
+                        "amount": _number(raw["amount"], multiplier=1_000.0),
+                    }
+                )
             self._commit(
                 ResearchDatasetId.THEME_DAILY,
                 partition,
@@ -323,6 +293,294 @@ class ClassificationBackfillService:
         if refresh_memberships:
             self._refresh_monthly_memberships(data_date, summary)
         return summary
+
+    def _refresh_industry_proxy(
+        self,
+        trading_date: date,
+        summary: BackfillSummary,
+    ) -> None:
+        weight_date = self._previous_session(trading_date)
+        if weight_date is None:
+            self._record_proxy_gap(
+                trading_date,
+                summary,
+                reason_category="missing_previous_trading_session",
+                message="交易日历没有给出代理权重所需的前一交易日。",
+            )
+            return
+        security_master = self.warehouse.read_current(
+            ResearchDatasetId.SECURITY_MASTER
+        )
+        if security_master.empty:
+            self._record_proxy_gap(
+                trading_date,
+                summary,
+                reason_category="missing_security_master",
+                message="证券主表为空，无法排除已退市的陈旧行业成分。",
+            )
+            return
+        security_availability = security_master["available_at"].tolist()
+        security_availability.extend(
+            revision["row_payload"]["available_at"]
+            for revision in self.warehouse.revision_rows(
+                ResearchDatasetId.SECURITY_MASTER
+            )
+        )
+        first_security_available_at = pd.to_datetime(
+            pd.Series(security_availability),
+            format="mixed",
+            utc=True,
+            errors="raise",
+        ).min().to_pydatetime()
+        # Use the trade-date version, not today's latest master. Before the
+        # warehouse existed, backfilled proxies inherit its first known time.
+        snapshot_cutoff = max(
+            _post_close_utc(trading_date),
+            first_security_available_at,
+        )
+        partitions = {
+            ResearchDatasetId.TRADE_CALENDAR: tuple(
+                sorted({str(weight_date.year), str(trading_date.year)})
+            ),
+            ResearchDatasetId.SECURITY_MASTER: ("security-master",),
+            ResearchDatasetId.INDUSTRY_CATALOG: ("SW2021",),
+            ResearchDatasetId.INDUSTRY_MEMBER: ("SW2021",),
+            ResearchDatasetId.EQUITY_DAILY: (
+                weight_date.isoformat(),
+                trading_date.isoformat(),
+            ),
+            ResearchDatasetId.DAILY_BASIC: (weight_date.isoformat(),),
+        }
+        try:
+            snapshot = ResearchQuery(self.warehouse).materialize_snapshot(
+                partitions,
+                as_of=snapshot_cutoff,
+            )
+            rows = compute_industry_daily_proxy(
+                trade_date=trading_date,
+                weight_date=weight_date,
+                industry_catalog=snapshot.frame(
+                    ResearchDatasetId.INDUSTRY_CATALOG
+                ),
+                industry_members=snapshot.frame(
+                    ResearchDatasetId.INDUSTRY_MEMBER
+                ),
+                security_master=snapshot.frame(
+                    ResearchDatasetId.SECURITY_MASTER
+                ),
+                equity_daily=snapshot.frame(ResearchDatasetId.EQUITY_DAILY),
+                daily_basic=snapshot.frame(ResearchDatasetId.DAILY_BASIC),
+                input_manifest_hash=snapshot.input_manifest[
+                    "input_manifest_hash"
+                ],
+            )
+        except (IndustryProxyInputError, ValueError) as exc:
+            self._record_proxy_gap(
+                trading_date,
+                summary,
+                reason_category="missing_or_invalid_proxy_input",
+                message=str(exc),
+            )
+            return
+        if rows.empty:
+            self._record_proxy_gap(
+                trading_date,
+                summary,
+                reason_category="no_effective_sw_l1_catalog",
+                message="形成日没有可用的 SW2021/L1 发布行业目录。",
+            )
+            return
+
+        self._commit(
+            ResearchDatasetId.INDUSTRY_DAILY_PROXY,
+            trading_date.isoformat(),
+            PROXY_METHOD,
+            rows.to_dict(orient="records"),
+            trading_date,
+            False,
+            summary,
+            source_name="local_derived",
+        )
+        limited = rows.loc[rows["coverage_status"] != "complete"]
+        if not limited.empty:
+            if self.gaps is None:
+                raise RuntimeError("gap registry requires a persistent warehouse")
+            self.gaps.record(
+                ResearchDatasetId.INDUSTRY_DAILY_PROXY,
+                trading_date,
+                status="unclassified_missing",
+                reason_category="member_coverage_below_80_percent",
+                source_name="local_derived",
+                source_endpoint=PROXY_METHOD,
+                impact_text="申万一级行业代理存在成分覆盖不足，行业通道受限。",
+                detail={
+                    "limited_industries": limited[
+                        [
+                            "industry_code",
+                            "effective_member_count",
+                            "observed_member_count",
+                            "member_coverage_ratio",
+                        ]
+                    ].to_dict(orient="records")
+                },
+            )
+            summary.limited += 1
+            summary.limitations_checked = True
+            summary.issues.append(
+                f"industry_daily_proxy:{trading_date}:member_coverage_below_80_percent"
+            )
+            return
+        if self.gaps is not None:
+            self.gaps.resolve_from_success(
+                ResearchDatasetId.INDUSTRY_DAILY_PROXY,
+                trading_date,
+                source_name="local_derived",
+                source_endpoint=PROXY_METHOD,
+            )
+            self.gaps.resolve_legacy_industry_gap_with_proxy(trading_date)
+
+    def _record_proxy_gap(
+        self,
+        trading_date: date,
+        summary: BackfillSummary,
+        *,
+        reason_category: str,
+        message: str,
+    ) -> None:
+        if self.gaps is None:
+            raise RuntimeError("gap registry requires a persistent warehouse")
+        self.gaps.record(
+            ResearchDatasetId.INDUSTRY_DAILY_PROXY,
+            trading_date,
+            status="unclassified_missing",
+            reason_category=reason_category,
+            source_name="local_derived",
+            source_endpoint=PROXY_METHOD,
+            impact_text="申万一级行业代理输入不完整，行业通道受限。",
+            detail={"message": message},
+        )
+        summary.waiting_upstream += 1
+        summary.issues.append(
+            f"industry_daily_proxy:{trading_date}:{reason_category}"
+        )
+
+    def _previous_session(self, trading_date: date) -> date | None:
+        calendar = self.warehouse.read_current(ResearchDatasetId.TRADE_CALENDAR)
+        if calendar.empty:
+            return None
+        open_dates = pd.to_datetime(
+            calendar.loc[calendar["is_open"].astype(bool), "cal_date"],
+            errors="coerce",
+        ).dropna().dt.date
+        previous = sorted({value for value in open_dates if value < trading_date})
+        return previous[-1] if previous else None
+
+    def _sw_history(
+        self,
+        codes: list[str],
+        trading_dates: Iterable[date],
+        *,
+        summary: BackfillSummary,
+    ) -> list[dict[str, Any]]:
+        allowed_codes = set(codes)
+        records: list[dict[str, Any]] = []
+        dates = tuple(trading_dates)
+        for index, trading_date in enumerate(dates):
+            try:
+                frame = self.client.fetch_sw_daily(trading_date)
+            except ResearchSourceError as exc:
+                self._record_daily_failure(
+                    ResearchDatasetId.INDUSTRY_DAILY,
+                    trading_date,
+                    exc,
+                    summary,
+                )
+                if exc.category == "permission_denied":
+                    if self.gaps is None:
+                        raise RuntimeError(
+                            "gap registry requires a persistent warehouse"
+                        )
+                    for remaining_date in dates[index + 1:]:
+                        self.gaps.record(
+                            ResearchDatasetId.INDUSTRY_DAILY,
+                            remaining_date,
+                            status="permission_denied",
+                            reason_category="permission_denied",
+                            source_name="tushare",
+                            source_endpoint="sw_daily",
+                            impact_text="行业研究缺少该交易日的官方分类行情。",
+                            detail={
+                                "message": str(exc),
+                                "inferred_from_same_locked_repair": True,
+                            },
+                        )
+                    break
+                continue
+            selected = [
+                row
+                for row in frame.to_dict(orient="records")
+                if str(row["industry_code"]) in allowed_codes
+            ]
+            if not selected:
+                self._record_empty_industry(trading_date, summary)
+                continue
+            records.extend(selected)
+        return records
+
+    def _record_daily_failure(
+        self,
+        dataset: ResearchDatasetId,
+        trading_date: date,
+        exc: ResearchSourceError,
+        summary: BackfillSummary,
+    ) -> None:
+        status = (
+            "permission_denied"
+            if exc.category == "permission_denied"
+            else "waiting_upstream"
+            if exc.category == "waiting_upstream"
+            else "failed"
+        )
+        if self.gaps is None:
+            raise RuntimeError("gap registry requires a persistent warehouse")
+        self.gaps.record(
+            dataset,
+            trading_date,
+            status=status,
+            reason_category=exc.category,
+            source_name="tushare",
+            source_endpoint=exc.endpoint,
+            impact_text="行业研究缺少该交易日的官方分类行情。",
+            detail={"message": str(exc)},
+        )
+        if status == "permission_denied":
+            summary.limited += 1
+            summary.limitations_checked = True
+        elif status == "waiting_upstream":
+            summary.waiting_upstream += 1
+        else:
+            summary.failed += 1
+        summary.issues.append(f"{dataset.value}:{trading_date}:{exc.category}")
+
+    def _record_empty_industry(
+        self, trading_date: date, summary: BackfillSummary
+    ) -> None:
+        if self.gaps is None:
+            raise RuntimeError("gap registry requires a persistent warehouse")
+        self.gaps.record(
+            ResearchDatasetId.INDUSTRY_DAILY,
+            trading_date,
+            status="unclassified_missing",
+            reason_category="official_empty_after_filter",
+            source_name="tushare",
+            source_endpoint="sw_daily",
+            impact_text="申万一级行业日线未返回可用记录。",
+            detail={"trade_date": trading_date.isoformat()},
+        )
+        summary.waiting_upstream += 1
+        summary.issues.append(
+            f"industry_daily:{trading_date}:official_empty_after_filter"
+        )
 
     def _refresh_monthly_memberships(
         self,
@@ -755,6 +1013,7 @@ class ClassificationBackfillService:
         summary: BackfillSummary,
         *,
         ingested_at: datetime | None = None,
+        source_name: str = "tushare",
     ) -> None:
         if resume and self._complete(dataset, partition):
             summary.skipped += 1
@@ -766,7 +1025,7 @@ class ClassificationBackfillService:
             FactBatch(
                 dataset_id=dataset,
                 partition_value=partition,
-                source_name="tushare",
+                source_name=source_name,
                 source_endpoint=endpoint,
                 ingestion_run_id=f"classification:{dataset.value}:{partition}",
                 ingested_at=ingested_at or datetime.now(timezone.utc),
@@ -778,9 +1037,32 @@ class ClassificationBackfillService:
 
     def _complete(self, dataset: ResearchDatasetId, partition: str) -> bool:
         frame = self.warehouse.partition_manifest(dataset)
-        return not frame.empty and bool(
+        complete = not frame.empty and bool(
             (frame["partition_value"].astype(str) == partition).any()
         )
+        if not complete:
+            return False
+        rows = self.warehouse.read_current(dataset, partition_value=partition)
+        if dataset is ResearchDatasetId.INDUSTRY_DAILY:
+            return not rows.empty and set(rows["source_endpoint"].astype(str)) == {
+                "sw_daily"
+            }
+        if dataset is ResearchDatasetId.INDUSTRY_DAILY_PROXY:
+            valid_source = (
+                not rows.empty
+                and set(rows["source_name"].astype(str)) == {"local_derived"}
+                and set(rows["source_endpoint"].astype(str)) == {PROXY_METHOD}
+                and set(rows["proxy_method"].astype(str)) == {PROXY_METHOD}
+                and rows["proxy_return"].notna().all()
+            )
+            return bool(
+                valid_source
+                and (
+                    self.gaps is None
+                    or not self.gaps.has_active_gap(dataset, partition)
+                )
+            )
+        return True
 
     def _daily_history_complete(
         self,
@@ -789,12 +1071,10 @@ class ClassificationBackfillService:
     ) -> bool:
         if not trading_dates:
             return False
-        manifest = self.warehouse.partition_manifest(dataset)
-        if manifest.empty:
-            return False
-        completed = set(manifest["partition_value"].astype(str))
-        expected = {value.isoformat() for value in trading_dates}
-        return expected <= completed
+        return all(
+            self._complete(dataset, value.isoformat())
+            for value in trading_dates
+        )
 
 
 def _matching_industry_valid_from(

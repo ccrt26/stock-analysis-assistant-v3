@@ -13,9 +13,14 @@ def test_gap_is_marked_resolved_only_after_partition_is_committed(tmp_path):
     with connect_research_warehouse(warehouse.duckdb_path) as connection:
         connection.execute(
             """
-            insert into research_data_gaps values
-            ('gap', 'equity_daily', '2026-07-10', 'waiting_upstream',
-             'waiting_upstream', 'tushare', now(), now(), null,
+            insert into research_data_gaps
+            (gap_id, dataset_id, partition_value, scope_key, status,
+             reason_category, source_name, source_endpoint, first_seen_at,
+             last_checked_at, next_retry_at, resolved_at, impact_text,
+             detail_json)
+            values
+            ('gap', 'equity_daily', '2026-07-10', '', 'waiting_upstream',
+             'waiting_upstream', 'test', 'daily', now(), now(), null, null,
              '当日行情未到，不能做全市场比较。', '{}')
             """
         )

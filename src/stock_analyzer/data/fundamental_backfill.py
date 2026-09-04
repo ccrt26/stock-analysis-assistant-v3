@@ -25,6 +25,7 @@ from stock_analyzer.data.tushare_research_client import (
     TushareResearchClient,
 )
 from stock_analyzer.storage.research_schema import connect_research_warehouse
+from stock_analyzer.storage.research_conflicts import ResearchConflictRegistry
 from stock_analyzer.storage.research_warehouse import ResearchWarehouse
 
 
@@ -57,6 +58,11 @@ _GOVERNANCE_FIELDS = {
     "quality_status",
     "revision_no",
 }
+_PROVIDER_PRIVATE_FIELDS = {
+    "_provider_observed_at",
+    "_provider_resolution_basis",
+    "_provider_update_flag",
+}
 
 
 class AmbiguousProviderVariantError(ValueError):
@@ -71,6 +77,7 @@ class FundamentalBackfillService:
     ) -> None:
         self.client = client
         self.warehouse = warehouse
+        self.conflicts = ResearchConflictRegistry(warehouse.duckdb_path)
 
     def backfill(
         self,
@@ -78,6 +85,8 @@ class FundamentalBackfillService:
         start: date,
         through: date,
         codes: tuple[str, ...] | None = None,
+        datasets: tuple[ResearchDatasetId, ...] | None = None,
+        exact_periods_by_code: dict[str, frozenset[date]] | None = None,
         resume: bool = True,
     ) -> BackfillSummary:
         summary = BackfillSummary(scope="fundamentals", start=start, through=through)
@@ -86,16 +95,41 @@ class FundamentalBackfillService:
             raise ValueError("fundamental backfill has no security universe")
         target_periods = _target_report_periods(start, through)
         expected_core_codes = self._expected_core_codes(effective_codes, through)
-        scope_hash = hashlib.sha256("|".join(effective_codes).encode("utf-8")).hexdigest()
+        selected_endpoints = {
+            dataset: endpoint
+            for dataset, endpoint in _ENDPOINTS.items()
+            if datasets is None or dataset in set(datasets)
+        }
+        if not selected_endpoints:
+            raise ValueError("fundamental backfill has no selected datasets")
+        if exact_periods_by_code is not None and set(selected_endpoints) != {
+            ResearchDatasetId.FINANCIAL_INDICATOR
+        }:
+            raise ValueError(
+                "exact report-period targeting is only supported for financial_indicator"
+            )
+        scope_identity = "|".join(
+            [
+                *effective_codes,
+                *(item.value for item in selected_endpoints),
+                *(
+                    f"{code}:{period.isoformat()}"
+                    for code, periods in sorted((exact_periods_by_code or {}).items())
+                    for period in sorted(periods)
+                ),
+            ]
+        )
+        scope_hash = hashlib.sha256(scope_identity.encode("utf-8")).hexdigest()
         scope_key = f"{start.isoformat()}:{through.isoformat()}:{scope_hash}"
         if resume and self._watermark_complete(scope_key):
             summary.skipped = 1
             return summary
 
-        try:
-            self._backfill_company_profiles(through, resume, summary)
-        except ResearchSourceError:
-            summary.failed += 1
+        if datasets is None:
+            try:
+                self._backfill_company_profiles(through, resume, summary)
+            except ResearchSourceError:
+                summary.failed += 1
 
         staging_scope = hashlib.sha256(scope_key.encode("utf-8")).hexdigest()[:24]
         staging = (
@@ -107,7 +141,7 @@ class FundamentalBackfillService:
         staging.mkdir(parents=True, exist_ok=True)
         for code in effective_codes:
             income_announcement_map: dict[str, str] = {}
-            for dataset, endpoint in _ENDPOINTS.items():
+            for dataset, endpoint in selected_endpoints.items():
                 path = staging / dataset.value / f"{code}.parquet"
                 if resume and path.is_file():
                     if (
@@ -121,13 +155,13 @@ class FundamentalBackfillService:
                             income_announcement_map = _announcement_map(pd.read_parquet(path))
                         summary.skipped += 1
                         continue
+                request_kwargs = {
+                    "ts_code": code,
+                    "start_date": _yyyymmdd(start),
+                    "end_date": _yyyymmdd(through),
+                }
                 try:
-                    frame = self.client.call(
-                        endpoint,
-                        ts_code=code,
-                        start_date=_yyyymmdd(start),
-                        end_date=_yyyymmdd(through),
-                    )
+                    frame = self.client.call(endpoint, **request_kwargs)
                 except ResearchSourceError:
                     summary.failed += 1
                     if code not in summary.retry_codes:
@@ -152,11 +186,46 @@ class FundamentalBackfillService:
                         summary.retry_codes.append(code)
                     continue
                 if not frame.empty:
+                    allowed_periods = (
+                        exact_periods_by_code.get(code, frozenset())
+                        if exact_periods_by_code is not None
+                        else target_periods
+                    )
                     frame = frame.loc[
                         frame["end_date"].map(
-                            lambda value: _date(value) in target_periods
+                            lambda value: _date(value) in allowed_periods
                         ).astype(bool)
                     ].copy()
+                if (
+                    dataset is ResearchDatasetId.FINANCIAL_INDICATOR
+                    and not frame.empty
+                ):
+                    try:
+                        frame = self._refetch_ambiguous_indicator_variants(
+                            frame,
+                            request_kwargs=request_kwargs,
+                        )
+                    except ResearchSourceError:
+                        summary.failed += 1
+                        if code not in summary.retry_codes:
+                            summary.retry_codes.append(code)
+                if exact_periods_by_code is not None:
+                    returned_periods = {
+                        _date(value) for value in frame["end_date"].tolist()
+                    }
+                    missing_periods = allowed_periods - returned_periods
+                    if missing_periods:
+                        summary.waiting_upstream += len(missing_periods)
+                        if code not in summary.retry_codes:
+                            summary.retry_codes.append(code)
+                        summary.issues.extend(
+                            f"financial_indicator:{code}/{period.isoformat()}/indicator:"
+                            "官方当前响应未返回该目标业务键"
+                            for period in sorted(missing_periods)
+                        )
+                    if frame.empty:
+                        path.unlink(missing_ok=True)
+                        continue
                 if dataset is ResearchDatasetId.INCOME_STATEMENT:
                     income_announcement_map = _announcement_map(frame)
                 if dataset is ResearchDatasetId.MAIN_BUSINESS:
@@ -167,7 +236,7 @@ class FundamentalBackfillService:
                 frame.to_parquet(path, index=False)
                 summary.committed += 1
 
-        for dataset, endpoint in _ENDPOINTS.items():
+        for dataset, endpoint in selected_endpoints.items():
             files = [
                 staging / dataset.value / f"{code}.parquet"
                 for code in effective_codes
@@ -181,12 +250,66 @@ class FundamentalBackfillService:
                 files,
                 through,
                 summary,
+                force_observed_keys=(
+                    frozenset(
+                        (code, period.isoformat(), "indicator")
+                        for code, periods in exact_periods_by_code.items()
+                        for period in periods
+                    )
+                    if exact_periods_by_code is not None
+                    else frozenset()
+                ),
             )
 
-        if summary.failed == 0 and summary.waiting_upstream == 0:
+        if (
+            summary.failed == 0
+            and summary.waiting_upstream == 0
+            and summary.limited == 0
+        ):
             self._save_watermark(scope_key, through)
             shutil.rmtree(staging, ignore_errors=True)
         return summary
+
+    def backfill_financial_indicators(
+        self,
+        *,
+        start: date,
+        through: date,
+        codes: tuple[str, ...],
+        resume: bool = False,
+    ) -> BackfillSummary:
+        return self.backfill(
+            start=start,
+            through=through,
+            codes=codes,
+            datasets=(ResearchDatasetId.FINANCIAL_INDICATOR,),
+            resume=resume,
+        )
+
+    def backfill_financial_indicator_business_keys(
+        self,
+        *,
+        business_keys: tuple[tuple[str, date], ...],
+        through: date,
+    ) -> BackfillSummary:
+        normalized = tuple(sorted(set(business_keys)))
+        if not normalized:
+            raise ValueError("financial indicator retry has no business keys")
+        periods_by_code: dict[str, set[date]] = defaultdict(set)
+        for code, report_period in normalized:
+            periods_by_code[str(code)].add(report_period)
+        earliest_period = min(period for _, period in normalized)
+        return self.backfill(
+            start=earliest_period,
+            through=through,
+            codes=tuple(sorted(periods_by_code)),
+            datasets=(ResearchDatasetId.FINANCIAL_INDICATOR,),
+            exact_periods_by_code={
+                code: frozenset(periods)
+                for code, periods in periods_by_code.items()
+            },
+            resume=False,
+        )
 
     def _backfill_company_profiles(
         self,
@@ -296,6 +419,48 @@ class FundamentalBackfillService:
         else:
             summary.skipped += 1
 
+    def _refetch_ambiguous_indicator_variants(
+        self,
+        frame: pd.DataFrame,
+        *,
+        request_kwargs: dict[str, str],
+    ) -> pd.DataFrame:
+        identities = _ambiguous_indicator_identities(frame)
+        if not identities:
+            return frame
+        fields = list(dict.fromkeys([*map(str, frame.columns), "update_flag"]))
+        refetched = self.client.call(
+            "fina_indicator",
+            **request_kwargs,
+            fields=",".join(fields),
+        )
+        required = {"ts_code", "end_date", "ann_date"}
+        if refetched.empty or not required.issubset(refetched.columns):
+            return frame
+
+        observed_at = datetime.now(timezone.utc)
+        initial_records = frame.to_dict(orient="records")
+        refetched_records = refetched.to_dict(orient="records")
+        merged = [
+            row for row in initial_records
+            if _indicator_identity(row) not in identities
+        ]
+        for identity in sorted(identities):
+            replacements = [
+                dict(row) for row in refetched_records
+                if _indicator_identity(row) == identity
+            ]
+            if not replacements:
+                replacements = [
+                    dict(row) for row in initial_records
+                    if _indicator_identity(row) == identity
+                ]
+            else:
+                for row in replacements:
+                    row["_provider_observed_at"] = observed_at
+            merged.extend(replacements)
+        return pd.DataFrame(merged)
+
     def _materialize_staged_dataset(
         self,
         dataset: ResearchDatasetId,
@@ -303,6 +468,7 @@ class FundamentalBackfillService:
         files: list[Path],
         through: date,
         summary: BackfillSummary,
+        force_observed_keys: frozenset[tuple[str, ...]] = frozenset(),
     ) -> None:
         paths = [str(path) for path in files]
         with duckdb.connect() as connection:
@@ -344,6 +510,7 @@ class FundamentalBackfillService:
                         records,
                         through,
                         summary,
+                        force_observed_keys=force_observed_keys,
                     )
                 return
             periods = [
@@ -378,6 +545,7 @@ class FundamentalBackfillService:
                     records,
                     through,
                     summary,
+                    force_observed_keys=force_observed_keys,
                 )
 
     def _normalize_financial_row(
@@ -387,6 +555,11 @@ class FundamentalBackfillService:
         through: date,
     ) -> dict[str, Any]:
         row = _clean_row(raw)
+        provider_update_flag = None
+        provider_observed_at = None
+        if dataset is ResearchDatasetId.FINANCIAL_INDICATOR:
+            provider_update_flag = row.pop("update_flag", None)
+            provider_observed_at = row.pop("_provider_observed_at", None)
         report_period = _date(row.pop("end_date"))
         row["report_period"] = report_period
         if dataset in _STATEMENTS:
@@ -397,6 +570,7 @@ class FundamentalBackfillService:
             )
         elif dataset is ResearchDatasetId.FINANCIAL_INDICATOR:
             row["report_type"] = "indicator"
+            row["_provider_update_flag"] = provider_update_flag
         elif dataset is ResearchDatasetId.MAIN_BUSINESS:
             item = str(row.get("bz_item") or "").strip()
             row["classification"] = _main_business_classification(
@@ -431,6 +605,21 @@ class FundamentalBackfillService:
             row["availability_precision"] = (
                 AvailabilityPrecision.DATE_CONSERVATIVE.value
             )
+        if (
+            dataset is ResearchDatasetId.FINANCIAL_INDICATOR
+            and provider_observed_at is not None
+        ):
+            observed_at = pd.Timestamp(provider_observed_at)
+            if observed_at.tzinfo is None:
+                observed_at = observed_at.tz_localize("UTC")
+            else:
+                observed_at = observed_at.tz_convert("UTC")
+            row["_provider_observed_at"] = observed_at.to_pydatetime()
+            row["available_at"] = row["_provider_observed_at"]
+            row["source_updated_at"] = row["_provider_observed_at"]
+            row["availability_precision"] = (
+                AvailabilityPrecision.INGESTION_CUTOFF.value
+            )
         row.pop("_report_ann_date", None)
         return row
 
@@ -442,6 +631,7 @@ class FundamentalBackfillService:
         records: list[dict[str, Any]],
         through: date,
         summary: BackfillSummary,
+        force_observed_keys: frozenset[tuple[str, ...]] = frozenset(),
     ) -> None:
         contract = research_contract(dataset)
         grouped: dict[tuple[str, ...], list[dict[str, Any]]] = defaultdict(list)
@@ -456,16 +646,12 @@ class FundamentalBackfillService:
             tuple(str(row.get(field)) for field in contract.business_key)
             for row in initial_current.to_dict(orient="records")
         }
-        current_hashes = {
-            tuple(str(row.get(field)) for field in contract.business_key): str(
-                row["payload_hash"]
-            )
-            for row in initial_current.to_dict(orient="records")
-        }
         known_hashes: dict[tuple[str, ...], set[str]] = defaultdict(set)
+        current_hashes: dict[tuple[str, ...], str] = {}
         for row in initial_current.to_dict(orient="records"):
             key = tuple(str(row.get(field)) for field in contract.business_key)
             known_hashes[key].add(str(row["payload_hash"]))
+            current_hashes[key] = str(row["payload_hash"])
         for revision in self.warehouse.revision_rows(
             dataset,
             partition_values=(partition,),
@@ -476,20 +662,44 @@ class FundamentalBackfillService:
 
         reconstruction_levels: dict[int, list[dict[str, Any]]] = defaultdict(list)
         observed_rows: list[dict[str, Any]] = []
+        converged_conflict_keys: list[tuple[tuple[str, ...], str, str]] = []
         for key, rows in grouped.items():
             try:
-                timeline = _canonical_provider_timeline(
-                    dataset,
-                    key,
-                    rows,
-                    preferred_payload_hash=current_hashes.get(key),
-                )
+                timeline = _canonical_provider_timeline(dataset, key, rows)
             except AmbiguousProviderVariantError:
+                self.conflicts.record_variants(
+                    dataset,
+                    partition,
+                    business_key=key,
+                    rows=rows,
+                    source_name="tushare",
+                    source_endpoint=endpoint,
+                )
                 summary.limited += 1
                 summary.limitations_checked = True
+                code = key[0]
+                if code not in summary.retry_codes:
+                    summary.retry_codes.append(code)
                 summary.issues.append(
                     f"{dataset.value}:{'/'.join(key)}:"
                     "同一公开时间存在多个无法排序的上游版本，未写入该业务键"
+                )
+                continue
+            if key in force_observed_keys:
+                observed = dict(timeline[-1])
+                if observed.get("_provider_observed_at") is None:
+                    observed["available_at"] = None
+                    observed["availability_precision"] = (
+                        AvailabilityPrecision.INGESTION_CUTOFF.value
+                    )
+                if current_hashes.get(key) != _business_hash(observed):
+                    observed_rows.append(observed)
+                basis = str(
+                    observed.get("_provider_resolution_basis")
+                    or "official_current_response_converged_to_one_payload"
+                )
+                converged_conflict_keys.append(
+                    (key, _business_hash(observed), basis)
                 )
                 continue
             if key in initial_keys:
@@ -529,6 +739,19 @@ class FundamentalBackfillService:
                 reconstruct_source_revisions=False,
                 summary=summary,
             )
+        resolved_at = datetime.now(timezone.utc)
+        for key, payload_hash, basis in converged_conflict_keys:
+            self.conflicts.resolve(
+                dataset,
+                business_key=key,
+                resolved_at=resolved_at,
+                resolution_basis={
+                    "basis": basis,
+                    "source_endpoint": endpoint,
+                    "payload_hash": payload_hash,
+                    "effective_policy": "resolution_time_forward_only",
+                },
+            )
 
     def _commit_financial_rows(
         self,
@@ -551,6 +774,8 @@ class FundamentalBackfillService:
                 prepared["availability_precision"] = (
                     AvailabilityPrecision.INGESTION_CUTOFF.value
                 )
+            for field in _PROVIDER_PRIVATE_FIELDS:
+                prepared.pop(field, None)
             prepared_rows.append(prepared)
         self.warehouse.commit_batch(
             FactBatch(
@@ -687,12 +912,55 @@ def _profile_record_from_fact(row: dict[str, Any]) -> dict[str, Any]:
     return record
 
 
+def _ambiguous_indicator_identities(
+    frame: pd.DataFrame,
+) -> set[tuple[str, str, str]]:
+    required = {"ts_code", "end_date", "ann_date"}
+    if frame.empty or not required.issubset(frame.columns):
+        return set()
+    grouped: dict[tuple[str, str, str], set[str]] = defaultdict(set)
+    for row in frame.to_dict(orient="records"):
+        grouped[_indicator_identity(row)].add(_raw_indicator_payload_hash(row))
+    return {
+        identity for identity, hashes in grouped.items()
+        if len(hashes) > 1
+    }
+
+
+def _indicator_identity(row: dict[str, Any]) -> tuple[str, str, str]:
+    return (
+        str(row.get("ts_code") or ""),
+        str(row.get("end_date") or ""),
+        str(row.get("ann_date") or ""),
+    )
+
+
+def _raw_indicator_payload_hash(row: dict[str, Any]) -> str:
+    payload = {
+        key: _json_safe(value)
+        for key, value in row.items()
+        if key != "update_flag" and key not in _PROVIDER_PRIVATE_FIELDS
+    }
+    return hashlib.sha256(
+        json.dumps(
+            payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+
+
+def _is_update_flag_one(value: Any) -> bool:
+    if value is None or pd.isna(value):
+        return False
+    return str(value).strip() in {"1", "1.0"}
+
+
 def _canonical_provider_timeline(
     dataset: ResearchDatasetId,
     key: tuple[str, ...],
     rows: list[dict[str, Any]],
-    *,
-    preferred_payload_hash: str | None = None,
 ) -> list[dict[str, Any]]:
     by_availability: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
@@ -709,45 +977,30 @@ def _canonical_provider_timeline(
         if len(candidates) == 1:
             result.append(candidates[0])
             continue
-        ranked = [(_update_flag_rank(row.get("update_flag")), row) for row in candidates]
-        if any(rank is None for rank, _ in ranked):
-            preferred = [
-                row
-                for row in candidates
-                if _business_hash(row) == preferred_payload_hash
+        if dataset is ResearchDatasetId.FINANCIAL_INDICATOR:
+            current = [
+                row for row in candidates
+                if _is_update_flag_one(row.get("_provider_update_flag"))
             ]
-            if len(preferred) == 1:
-                result.append(preferred[0])
+            if len(current) == 1:
+                selected = dict(current[0])
+                selected["_provider_resolution_basis"] = (
+                    "official_update_flag_unique_revision"
+                )
+                result.append(selected)
                 continue
-            raise AmbiguousProviderVariantError(
-                f"ambiguous same-time provider variants for {dataset.value} "
-                f"key={key} available_at={bucket}"
-            )
-        highest = max(rank for rank, _ in ranked if rank is not None)
-        winners = [row for rank, row in ranked if rank == highest]
-        if len(winners) != 1:
-            raise AmbiguousProviderVariantError(
-                f"ambiguous highest update_flag for {dataset.value} "
-                f"key={key} available_at={bucket}"
-            )
-        result.append(winners[0])
+        raise AmbiguousProviderVariantError(
+            f"ambiguous same-time provider variants for {dataset.value} "
+            f"key={key} available_at={bucket}"
+        )
     return result
-
-
-def _update_flag_rank(value: Any) -> float | None:
-    if value is None or pd.isna(value):
-        return None
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
 
 
 def _business_hash(row: dict[str, Any]) -> str:
     payload = {
         key: _json_safe(value)
         for key, value in row.items()
-        if key not in _GOVERNANCE_FIELDS
+        if key not in _GOVERNANCE_FIELDS | _PROVIDER_PRIVATE_FIELDS
     }
     return hashlib.sha256(
         json.dumps(

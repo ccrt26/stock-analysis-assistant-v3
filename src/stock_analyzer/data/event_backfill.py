@@ -21,6 +21,7 @@ from stock_analyzer.data.tushare_research_client import (
 )
 from stock_analyzer.storage.research_schema import connect_research_warehouse
 from stock_analyzer.storage.research_warehouse import ResearchWarehouse
+from stock_analyzer.storage.research_gap_registry import ResearchGapRegistry
 
 
 _SHARE_FLOAT_PAGE_SIZE = 5000
@@ -42,6 +43,7 @@ class EventBackfillService:
         self.cninfo = cninfo
         self.warehouse = warehouse
         self.exchange_announcements = exchange_announcements
+        self.gaps = ResearchGapRegistry(warehouse.duckdb_path)
 
     def backfill(
         self,
@@ -203,10 +205,34 @@ class EventBackfillService:
                 f"actual:{actual_snapshot.isoformat()}:rows:{len(pledge_rows)}",
             )
 
-        suspension_start = through - timedelta(days=365)
-        for trading_date in sorted(
-            value for value in set(trading_dates) if value >= suspension_start
-        ):
+        suspension_summary = self.backfill_suspensions(
+            trading_dates=trading_dates,
+            through=through,
+            resume=resume,
+        )
+        _merge_summary(summary, suspension_summary)
+        return summary
+
+    def backfill_suspensions(
+        self,
+        *,
+        trading_dates: Iterable[date],
+        through: date,
+        resume: bool = True,
+    ) -> BackfillSummary:
+        dates = tuple(
+            sorted(
+                value
+                for value in set(trading_dates)
+                if value >= through - timedelta(days=365)
+            )
+        )
+        summary = BackfillSummary(
+            scope="suspension",
+            start=dates[0] if dates else through,
+            through=through,
+        )
+        for trading_date in dates:
             partition = trading_date.isoformat()
             if resume and (
                 self._complete(ResearchDatasetId.SUSPENSION, partition)
@@ -219,6 +245,19 @@ class EventBackfillService:
             )
             if frame.empty:
                 self._mark_suspension_checked(partition, "empty")
+                self.gaps.record(
+                    ResearchDatasetId.SUSPENSION,
+                    partition,
+                    status="legitimate_empty",
+                    reason_category="official_success_empty",
+                    source_name="tushare",
+                    source_endpoint="suspend_d",
+                    impact_text="官方确认该交易日没有停牌记录。",
+                    detail={
+                        "trade_date": partition,
+                        "result": "empty",
+                    },
+                )
                 continue
             rows = []
             for raw in frame.to_dict(orient="records"):

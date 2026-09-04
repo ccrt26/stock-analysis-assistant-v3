@@ -323,6 +323,46 @@ class TushareResearchClient:
             )
         return tuple(batches)
 
+    def fetch_sw_daily(self, trade_date: date) -> pd.DataFrame:
+        """Fetch one published Shenwan industry trading day from its own endpoint."""
+        frame = self.call("sw_daily", trade_date=_yyyymmdd(trade_date))
+        columns = (
+            "ts_code", "trade_date", "name", "open", "low", "high", "close",
+            "change", "pct_change", "vol", "amount",
+        )
+        if frame.empty:
+            return pd.DataFrame(
+                columns=(
+                    "trade_date", "industry_code", "industry_name", "open",
+                    "low", "high", "close", "change", "pct_chg", "volume",
+                    "amount", "pe", "pb", "float_mv", "total_mv",
+                )
+            )
+        _require_columns(frame, columns, "sw_daily")
+        _require_exact_trade_date(frame, trade_date, "sw_daily")
+        records: list[dict[str, Any]] = []
+        for raw in frame.to_dict(orient="records"):
+            records.append(
+                {
+                    "trade_date": _parse_date(raw["trade_date"]),
+                    "industry_code": str(raw["ts_code"]),
+                    "industry_name": str(raw["name"]),
+                    "open": _number(raw["open"]),
+                    "low": _number(raw["low"]),
+                    "high": _number(raw["high"]),
+                    "close": _number(raw["close"]),
+                    "change": _number(raw["change"]),
+                    "pct_chg": _number(raw["pct_change"]),
+                    "volume": _number(raw["vol"], multiplier=10_000.0),
+                    "amount": _number(raw["amount"], multiplier=10_000.0),
+                    "pe": _number(raw.get("pe")),
+                    "pb": _number(raw.get("pb")),
+                    "float_mv": _number(raw.get("float_mv"), multiplier=10_000.0),
+                    "total_mv": _number(raw.get("total_mv"), multiplier=10_000.0),
+                }
+            )
+        return pd.DataFrame(records)
+
 
 def _batch(
     dataset: ResearchDatasetId,

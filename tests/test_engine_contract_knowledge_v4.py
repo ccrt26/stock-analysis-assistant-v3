@@ -324,3 +324,24 @@ def test_forward_review_paper_dates_follow_official_pages_without_guessing_a_day
  chen=sources["paper-chen-gao-he-jiang-xiong-price-limits-2019"]
  assert "publication_date" not in chen
  assert "2019年1月卷期" in chen["publication_date_status"]
+
+
+def test_sector_skill_and_current_knowledge_require_labeled_industry_proxy() -> None:
+    skill = Path(
+        ".agents/skills/researching-sectors-industries/SKILL.md"
+    ).read_text(encoding="utf-8")
+    assert "industry_daily_proxy" in skill
+    assert "本地可回放代理，不是官方申万指数" in skill
+    assert "旧 `industry_daily` 补位" in skill
+
+    entries = {
+        item["knowledge_id"]: item for item in _payload()["entries"]
+    }
+    for knowledge_id in (
+        "src_cn_factor_momentum_2023",
+        "src_moskowitz_grinblatt_1999",
+    ):
+        requirements = entries[knowledge_id]["data_requirements"]
+        names = {item["name"] for item in requirements}
+        assert "industry_daily_proxy" in names
+        assert "industry_daily" not in names

@@ -59,6 +59,7 @@ _EXACT_DATE_PARTITION_DATASETS = {
     ResearchDatasetId.STOCK_LIMIT,
     ResearchDatasetId.INDEX_DAILY,
     ResearchDatasetId.INDUSTRY_DAILY,
+    ResearchDatasetId.INDUSTRY_DAILY_PROXY,
     ResearchDatasetId.THEME_DAILY,
     ResearchDatasetId.SUSPENSION,
     ResearchDatasetId.MARGIN_DETAIL,

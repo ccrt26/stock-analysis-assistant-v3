@@ -56,6 +56,8 @@ description: Use when point-in-time A-share candidate selection, validation, or 
 
 只使用形成日有效且 `available_at <= as_of` 的行业、主题、成员和行情版本。
 
+申万一级行业的参考收益来自 `industry_daily_proxy`：它用前一交易日自由流通市值加权已有个股日收益，只读取 `proxy_index_return_*`、`proxy_relative_return_*`、`proxy_index_status` 和 `proxy_method`。这是本地可回放代理，不是官方申万指数；对应 `official_index_*` 应为空。主题仍读取真实官方指数行情，申万二级/三级仍以成员自下而上的共同表现观察。代理缺失、方法不符或窗口不连续时明确未知，不用旧 `industry_daily` 补位。
+
 ### 0. 先缩小确定性输入
 
 先用 DuckDB 对形成日 `sector_hotspot` 做字段投影和条件过滤，只取判断相对收益、成员中位数、上涨面、成交份额、集中和分化所需字段，返回可能值得解释的少量板块；再只查这些板块形成日有效的成员。不把全部板块行和全部字段送入模型，不重算 `sector_hotspot`，也不把盘中字段当作每日必需输入。
@@ -73,7 +75,7 @@ description: Use when point-in-time A-share candidate selection, validation, or 
 - 高成交低进展、量价背离、窄参与和冲高回落；
 - 收益分化及其变化。
 
-板块指数上涨但多数成员不支持时，解释为领导集中，不写成全面增强。没有权重或贡献数据时，不声称某只股票贡献了板块大部分涨幅。
+行业代理或主题指数上涨但多数成员不支持时，解释为领导集中，不写成全面增强。没有权重或贡献数据时，不声称某只股票贡献了板块大部分涨幅。
 
 ### 2. 判断所处阶段
 

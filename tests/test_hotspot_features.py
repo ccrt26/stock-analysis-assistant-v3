@@ -73,6 +73,22 @@ def _official(dates: pd.DatetimeIndex) -> pd.DataFrame:
     )
 
 
+def _proxy(
+    dates: pd.DatetimeIndex,
+    returns: list[float] | None = None,
+) -> pd.DataFrame:
+    values = [0.01] * len(dates) if returns is None else returns
+    return pd.DataFrame(
+        {
+            "trade_date": dates.date,
+            "industry_code": ["L1"] * len(dates),
+            "proxy_return": values,
+            "proxy_method": ["sw_l1_free_float_proxy_v1"] * len(dates),
+            "coverage_status": ["complete"] * len(dates),
+        }
+    )
+
+
 def _limits(equity: pd.DataFrame) -> pd.DataFrame:
     return equity[["trade_date", "ts_code", "close"]].assign(
         up_limit=lambda frame: frame["close"] + 10.0,
@@ -88,6 +104,7 @@ def _compute(
     members: pd.DataFrame | None = None,
     limits: pd.DataFrame | None = None,
     official: pd.DataFrame | None = None,
+    proxy: pd.DataFrame | None = None,
     minutes: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     return compute_hotspot_features(
@@ -101,6 +118,7 @@ def _compute(
         if minutes is None
         else minutes,
         analysis_date=ANALYSIS_DATE,
+        industry_proxy_daily=_proxy(dates) if proxy is None else proxy,
     )
 
 
@@ -254,10 +272,9 @@ def test_actual_limits_official_index_and_observable_crowding_flags() -> None:
 
     assert row["limit_up_count"] == 1
     assert row["limit_up_share"] == pytest.approx(0.5)
-    assert row["official_index_return_20d"] == pytest.approx(0.10)
-    assert row["official_bottom_up_discrepancy_20d"] == pytest.approx(
-        row["official_index_return_20d"] - row["equal_weight_return_20d"]
-    )
+    assert pd.isna(row["official_index_return_20d"])
+    assert pd.isna(row["official_bottom_up_discrepancy_20d"])
+    assert row["proxy_index_return_20d"] == pytest.approx(1.01 ** 20 - 1.0)
     assert bool(row["high_volume_low_progress_flag"])
     assert bool(row["upper_wick_reversal_flag"])
     assert isinstance(row["narrow_participation_flag"], (bool, np.bool_))
@@ -440,9 +457,10 @@ def test_missing_official_index_is_declared_and_overlapping_membership_fails() -
     equity = _daily(dates, {"A.SZ": (10.0, 0.1), "B.SZ": (20.0, 0.1)})
     empty_official = pd.DataFrame(columns=["trade_date", "index_code", "close"])
     row = _compute(equity, dates, official=empty_official).set_index("group_code").loc["L1"]
-    assert row["official_index_status"] == "limited"
-    assert row["coverage_status"] == "limited"
-    assert "official index" in row["limitation_notes"]
+    assert row["official_index_status"] == "unavailable_using_local_proxy"
+    assert row["proxy_index_status"] == "complete"
+    assert row["coverage_status"] == "complete_with_declared_gaps"
+    assert "本地自由流通市值加权代理" in row["limitation_notes"]
 
     members = _members(dates)
     overlap = members.iloc[[0]].copy()
@@ -499,3 +517,52 @@ def test_daily_turnover_uses_preindexed_sessions_without_rescanning_full_market(
 
     assert result["group_amount"].tolist() == [300.0, 300.0, 300.0]
     assert result["turnover_share"].tolist() == pytest.approx([0.3, 0.3, 0.3])
+
+
+
+def test_sw_l1_proxy_is_compounded_separately_and_never_fills_official_fields() -> None:
+    dates = pd.bdate_range(end=ANALYSIS_DATE, periods=21)
+    equity = _daily(dates, {"A.SZ": (10.0, 0.1), "B.SZ": (20.0, 0.1)})
+    official = pd.DataFrame(
+        {
+            "trade_date": dates.date,
+            "index_code": ["IDX1"] * len(dates),
+            "close": np.linspace(100.0, 120.0, len(dates)),
+        }
+    )
+
+    row = _compute(equity, dates, official=official).set_index("group_code").loc["L1"]
+
+    for horizon in (1, 3, 5, 20):
+        expected = 1.01 ** horizon - 1.0
+        assert row[f"proxy_index_return_{horizon}d"] == pytest.approx(expected)
+        assert row[f"proxy_relative_return_{horizon}d"] == pytest.approx(expected)
+        assert pd.isna(row[f"official_index_return_{horizon}d"])
+        assert pd.isna(row[f"official_bottom_up_discrepancy_{horizon}d"])
+    assert row["proxy_index_status"] == "complete"
+    assert row["proxy_method"] == "sw_l1_free_float_proxy_v1"
+    assert row["official_index_status"] == "unavailable_using_local_proxy"
+    assert "本地自由流通市值加权代理" in row["limitation_notes"]
+
+
+def test_proxy_window_is_unavailable_when_one_required_session_is_missing() -> None:
+    dates = pd.bdate_range(end=ANALYSIS_DATE, periods=21)
+    equity = _daily(dates, {"A.SZ": (10.0, 0.1), "B.SZ": (20.0, 0.1)})
+    returns = [0.01] * len(dates)
+    returns[-4] = np.nan
+
+    row = _compute(
+        equity,
+        dates,
+        proxy=_proxy(dates, returns),
+    ).set_index("group_code").loc["L1"]
+
+    assert row["proxy_index_return_1d"] == pytest.approx(0.01)
+    assert pd.isna(row["proxy_index_return_5d"])
+    assert pd.isna(row["proxy_index_return_20d"])
+    assert row["proxy_index_status"] == "limited"
+    assert pd.isna(
+        _compute(equity, dates).set_index("group_code").loc[
+            "L2", "proxy_index_return_1d"
+        ]
+    )

@@ -70,6 +70,17 @@ class ClassificationPro:
             "change": 15.0, "pct_chg": 1.5, "vol": 10.0, "amount": 20.0,
         }])
 
+    def sw_daily(self, **kwargs):
+        self.calls.append(("sw_daily", kwargs))
+        trade_date = kwargs.get("trade_date", "20260710")
+        return pd.DataFrame([{
+            "ts_code": "801010.SI", "trade_date": trade_date, "name": "L1",
+            "close": 1000.0, "open": 990.0, "high": 1010.0,
+            "low": 980.0, "change": 15.0, "pct_change": 1.5,
+            "vol": 10.0, "amount": 20.0, "pe": 20.0, "pb": 2.0,
+            "float_mv": 3.0, "total_mv": 4.0,
+        }])
+
 
 class MissingListDateClassificationPro(ClassificationPro):
     def __init__(self):
@@ -160,16 +171,20 @@ def test_classification_backfill_builds_all_sw_levels_and_traceable_themes(tmp_p
     assert summary.failed == 0
     assert all(method != "concept" for method, _ in pro.calls)
     industry_daily_calls = [
-        kwargs["ts_code"]
+        kwargs["trade_date"]
         for method, kwargs in pro.calls
-        if method == "index_daily" and kwargs["ts_code"].endswith(".SI")
+        if method == "sw_daily"
     ]
-    assert industry_daily_calls == ["801010.SI"]
-    industry_daily = warehouse.read_current(ResearchDatasetId.INDUSTRY_DAILY)
+    assert industry_daily_calls == []
+    assert all(
+        not (method == "index_daily" and kwargs.get("ts_code", "").endswith(".SI"))
+        for method, kwargs in pro.calls
+    )
+    industry_proxy = warehouse.read_current(
+        ResearchDatasetId.INDUSTRY_DAILY_PROXY
+    )
     theme_daily = warehouse.read_current(ResearchDatasetId.THEME_DAILY)
-    assert set(industry_daily["availability_precision"]) == {
-        "inferred_from_endpoint_policy"
-    }
+    assert industry_proxy.empty
     assert set(theme_daily["availability_precision"]) == {
         "inferred_from_endpoint_policy"
     }
@@ -261,35 +276,20 @@ def test_classification_backfill_records_empty_theme_members_as_source_limit(tmp
     )
     assert set(members["theme_code"]) == {"399013.SZ"}
     assert set(controlled["theme_code"]) == {"399013.SZ"}
-    assert summary.waiting_upstream == 0
+    assert summary.waiting_upstream == 1
     assert summary.limited == 1
     assert summary.limitations_checked
-    assert summary.issues == ["theme_member:000019.SH:source_unavailable"]
+    assert set(summary.issues) == {
+        "industry_daily_proxy:2026-07-10:missing_previous_trading_session",
+        "theme_member:000019.SH:source_unavailable",
+    }
 
 
 def test_classification_backfill_records_empty_index_history_as_waiting(tmp_path):
     class OneEmptyIndexPro(ClassificationPro):
-        def index_daily(self, **kwargs):
-            self.calls.append(("index_daily", kwargs))
-            if kwargs["ts_code"] == "801010.SI":
-                return pd.DataFrame()
-            return pd.DataFrame(
-                [
-                    {
-                        "ts_code": kwargs["ts_code"],
-                        "trade_date": "20260710",
-                        "close": 1000.0,
-                        "open": 990.0,
-                        "high": 1010.0,
-                        "low": 980.0,
-                        "pre_close": 985.0,
-                        "change": 15.0,
-                        "pct_chg": 1.5,
-                        "vol": 10.0,
-                        "amount": 20.0,
-                    }
-                ]
-            )
+        def sw_daily(self, **kwargs):
+            self.calls.append(("sw_daily", kwargs))
+            return pd.DataFrame()
 
     warehouse = ResearchWarehouse(tmp_path / "warehouse")
     service = ClassificationBackfillService(
@@ -304,6 +304,64 @@ def test_classification_backfill_records_empty_index_history_as_waiting(tmp_path
     industry = warehouse.read_current(ResearchDatasetId.INDUSTRY_DAILY)
     assert industry.empty
     assert summary.waiting_upstream == 1
+
+
+def test_legacy_industry_daily_is_not_an_active_refresh_dataset(tmp_path):
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    service = ClassificationBackfillService(
+        TushareResearchClient(ClassificationPro(), pacer=lambda method: None),
+        warehouse,
+    )
+
+    with pytest.raises(ValueError, match="only supports industry/theme"):
+        service.refresh_daily(
+            date(2026, 7, 13),
+            datasets=(ResearchDatasetId.INDUSTRY_DAILY,),
+            refresh_memberships=False,
+        )
+
+def test_industry_history_stops_after_permission_denial_and_classifies_remaining_dates(
+    tmp_path,
+):
+    class DeniedHistoryPro(ClassificationPro):
+        def sw_daily(self, **kwargs):
+            self.calls.append(("sw_daily", kwargs))
+            raise RuntimeError("抱歉，您没有接口访问权限")
+
+    pro = DeniedHistoryPro()
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    dates = (date(2026, 7, 8), date(2026, 7, 9), date(2026, 7, 10))
+    warehouse.commit_batch(
+        FactBatch(
+            dataset_id=ResearchDatasetId.TRADE_CALENDAR,
+            partition_value="2026", source_name="tushare",
+            source_endpoint="trade_cal", ingestion_run_id="calendar",
+            ingested_at=datetime.now(timezone.utc),
+            default_available_at=datetime.now(timezone.utc),
+            records=[{
+                "exchange": "SSE", "cal_date": value, "is_open": True,
+                "pretrade_date": None,
+            } for value in dates],
+        )
+    )
+    summary = ClassificationBackfillService(
+        TushareResearchClient(pro, pacer=lambda method: None), warehouse
+    ).backfill(start=dates[0], through=dates[-1], resume=False)
+
+    assert len([1 for method, _ in pro.calls if method == "sw_daily"]) == 0
+    assert summary.waiting_upstream == len(dates)
+    with connect_research_warehouse(
+        warehouse.duckdb_path, read_only=True
+    ) as connection:
+        rows = connection.execute(
+            """
+            select partition_value, status from research_data_gaps
+            where dataset_id = 'industry_daily_proxy' order by partition_value
+            """
+        ).fetchall()
+    assert rows == [
+        (value.isoformat(), "unclassified_missing") for value in dates
+    ]
 
 
 def test_classification_daily_history_keeps_only_a_share_open_dates(tmp_path):
@@ -364,11 +422,7 @@ def test_classification_daily_history_keeps_only_a_share_open_dates(tmp_path):
         start=date(2026, 7, 10), through=date(2026, 7, 11), resume=True
     )
 
-    industry = warehouse.read_current(ResearchDatasetId.INDUSTRY_DAILY)
     themes = warehouse.read_current(ResearchDatasetId.THEME_DAILY)
-    assert set(pd.to_datetime(industry["trade_date"]).dt.date) == {
-        date(2026, 7, 10)
-    }
     assert set(pd.to_datetime(themes["trade_date"]).dt.date) == {
         date(2026, 7, 10)
     }
@@ -857,3 +911,278 @@ def test_new_member_slot_with_two_source_versions_is_reconciled_in_one_batch(
     assert pd.Timestamp(target.iloc[1]["available_at"]).to_pydatetime() >= (
         receipt_lower_bound
     )
+
+
+class NoSwDailyClassificationPro(ClassificationPro):
+    def sw_daily(self, **kwargs):
+        raise AssertionError("active proxy path must not call sw_daily")
+
+
+def _commit_proxy_inputs(
+    warehouse: ResearchWarehouse,
+    *,
+    member_codes: tuple[str, ...] = ("000001.SZ", "000002.SZ"),
+) -> None:
+    observed = datetime(2026, 9, 2, 7, 1, tzinfo=timezone.utc)
+    warehouse.commit_batch(
+        FactBatch(
+            dataset_id=ResearchDatasetId.TRADE_CALENDAR,
+            partition_value="2026",
+            source_name="tushare",
+            source_endpoint="trade_cal",
+            ingestion_run_id="proxy-calendar",
+            ingested_at=observed,
+            default_available_at=observed,
+            records=[
+                {"exchange": "SSE", "cal_date": date(2026, 9, 1), "is_open": True, "pretrade_date": date(2026, 8, 31)},
+                {"exchange": "SSE", "cal_date": date(2026, 9, 2), "is_open": True, "pretrade_date": date(2026, 9, 1)},
+            ],
+        )
+    )
+    warehouse.commit_batch(
+        FactBatch(
+            dataset_id=ResearchDatasetId.INDUSTRY_CATALOG,
+            partition_value="SW2021",
+            source_name="tushare",
+            source_endpoint="index_classify+index_basic",
+            ingestion_run_id="proxy-catalog",
+            ingested_at=observed,
+            default_available_at=observed,
+            records=[{
+                "industry_system": "SW2021",
+                "level": "L1",
+                "industry_code": "801010.SI",
+                "classification_code": "110000",
+                "industry_name": "农林牧渔",
+                "parent_code": "0",
+                "is_published": "1",
+                "valid_from": date(2021, 12, 13),
+                "valid_to": None,
+            }],
+        )
+    )
+    warehouse.commit_batch(
+        FactBatch(
+            dataset_id=ResearchDatasetId.SECURITY_MASTER,
+            partition_value="security-master",
+            source_name="tushare",
+            source_endpoint="stock_basic",
+            ingestion_run_id="proxy-security-master",
+            ingested_at=observed,
+            default_available_at=observed,
+            records=[
+                {
+                    "ts_code": code,
+                    "valid_from": date(2020, 1, 1),
+                    "valid_to": None,
+                    "list_date": date(2020, 1, 1),
+                    "delist_date": None,
+                    "list_status": "L",
+                }
+                for code in member_codes
+            ],
+        )
+    )
+    warehouse.commit_batch(
+        FactBatch(
+            dataset_id=ResearchDatasetId.INDUSTRY_MEMBER,
+            partition_value="SW2021",
+            source_name="tushare",
+            source_endpoint="index_member_all",
+            ingestion_run_id="proxy-members",
+            ingested_at=observed,
+            default_available_at=observed,
+            records=[
+                {
+                    "ts_code": code,
+                    "security_name": code,
+                    "industry_system": "SW2021",
+                    "level": "L1",
+                    "industry_code": "801010.SI",
+                    "industry_name": "农林牧渔",
+                    "valid_from": date(2021, 12, 13),
+                    "valid_to": None,
+                    "is_current": True,
+                }
+                for code in member_codes
+            ],
+        )
+    )
+    for trading_day, prices, changes in (
+        (date(2026, 9, 1), (10.0, 20.0), (0.0, 0.0)),
+        (date(2026, 9, 2), (11.0, 19.0), (10.0, -5.0)),
+    ):
+        warehouse.commit_batch(
+            FactBatch(
+                dataset_id=ResearchDatasetId.EQUITY_DAILY,
+                partition_value=trading_day.isoformat(),
+                source_name="tushare",
+                source_endpoint="daily",
+                ingestion_run_id=f"proxy-equity-{trading_day}",
+                ingested_at=observed,
+                default_available_at=observed,
+                records=[
+                    {
+                        "trade_date": trading_day,
+                        "ts_code": code,
+                        "open": price,
+                        "high": price,
+                        "low": price,
+                        "close": price,
+                        "pre_close": price,
+                        "change": 0.0,
+                        "pct_chg": change,
+                        "volume": 100.0,
+                        "amount": 1000.0,
+                    }
+                    for code, price, change in zip(
+                        ("000001.SZ", "000002.SZ"), prices, changes
+                    )
+                ],
+            )
+        )
+    warehouse.commit_batch(
+        FactBatch(
+            dataset_id=ResearchDatasetId.DAILY_BASIC,
+            partition_value="2026-09-01",
+            source_name="tushare",
+            source_endpoint="daily_basic",
+            ingestion_run_id="proxy-basic",
+            ingested_at=observed,
+            default_available_at=observed,
+            records=[
+                {"trade_date": date(2026, 9, 1), "ts_code": "000001.SZ", "free_share": 100.0},
+                {"trade_date": date(2026, 9, 1), "ts_code": "000002.SZ", "free_share": 200.0},
+            ],
+        )
+    )
+
+
+def test_daily_proxy_refresh_uses_local_facts_is_idempotent_and_resolves_legacy_gap(tmp_path):
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    _commit_proxy_inputs(warehouse)
+    from stock_analyzer.storage.research_gap_registry import ResearchGapRegistry
+
+    gaps = ResearchGapRegistry(warehouse.duckdb_path)
+    gaps.record(
+        ResearchDatasetId.INDUSTRY_DAILY,
+        date(2026, 9, 2),
+        status="permission_denied",
+        reason_category="permission_denied",
+        source_name="tushare",
+        source_endpoint="sw_daily",
+    )
+    service = ClassificationBackfillService(
+        TushareResearchClient(NoSwDailyClassificationPro(), pacer=lambda method: None),
+        warehouse,
+    )
+
+    first = service.refresh_daily(
+        date(2026, 9, 2),
+        datasets=(ResearchDatasetId.INDUSTRY_DAILY_PROXY,),
+        refresh_memberships=False,
+    )
+    second = service.refresh_daily(
+        date(2026, 9, 2),
+        datasets=(ResearchDatasetId.INDUSTRY_DAILY_PROXY,),
+        refresh_memberships=False,
+    )
+
+    proxy = warehouse.read_current(
+        ResearchDatasetId.INDUSTRY_DAILY_PROXY,
+        partition_value="2026-09-02",
+    )
+    assert first.committed == 1
+    assert second.committed == 1
+    assert len(proxy) == 1
+    assert proxy.iloc[0]["proxy_return"] == pytest.approx(-0.02)
+    assert set(proxy["source_name"]) == {"local_derived"}
+    assert set(proxy["source_endpoint"]) == {"sw_l1_free_float_proxy_v1"}
+    assert warehouse.revision_rows(ResearchDatasetId.INDUSTRY_DAILY_PROXY) == []
+    with connect_research_warehouse(warehouse.duckdb_path, read_only=True) as connection:
+        status, detail = connection.execute(
+            """
+            select status, detail_json from research_data_gaps
+            where dataset_id = 'industry_daily' and partition_value = '2026-09-02'
+            """
+        ).fetchone()
+    assert status == "resolved"
+    assert "industry_daily_proxy" in detail
+    assert "sw_l1_free_float_proxy_v1" in detail
+
+
+def test_daily_proxy_refresh_records_low_member_coverage_as_active_gap(tmp_path):
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    _commit_proxy_inputs(
+        warehouse,
+        member_codes=(
+            "000001.SZ",
+            "000002.SZ",
+            "000003.SZ",
+            "000004.SZ",
+            "000005.SZ",
+        ),
+    )
+    service = ClassificationBackfillService(
+        TushareResearchClient(NoSwDailyClassificationPro(), pacer=lambda method: None),
+        warehouse,
+    )
+
+    summary = service.refresh_daily(
+        date(2026, 9, 2),
+        datasets=(ResearchDatasetId.INDUSTRY_DAILY_PROXY,),
+        refresh_memberships=False,
+    )
+
+    proxy = warehouse.read_current(
+        ResearchDatasetId.INDUSTRY_DAILY_PROXY,
+        partition_value="2026-09-02",
+    )
+    assert summary.limited == 1
+    assert pd.isna(proxy.iloc[0]["proxy_return"])
+    with connect_research_warehouse(warehouse.duckdb_path, read_only=True) as connection:
+        row = connection.execute(
+            """
+            select status, reason_category from research_data_gaps
+            where dataset_id = 'industry_daily_proxy'
+              and partition_value = '2026-09-02'
+            """
+        ).fetchone()
+    assert row == ("unclassified_missing", "member_coverage_below_80_percent")
+
+
+def test_proxy_uses_security_master_version_known_on_trade_date(tmp_path):
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    _commit_proxy_inputs(warehouse)
+    next_day = datetime(2026, 9, 3, 7, 1, tzinfo=timezone.utc)
+    warehouse.commit_batch(FactBatch(
+        dataset_id=ResearchDatasetId.SECURITY_MASTER,
+        partition_value="security-master",
+        source_name="tushare",
+        source_endpoint="stock_basic",
+        ingestion_run_id="next-day-security-revision",
+        ingested_at=next_day,
+        default_available_at=next_day,
+        records=[{
+            "ts_code": "000001.SZ", "valid_from": date(2020, 1, 1),
+            "valid_to": None, "list_date": date(2020, 1, 1),
+            "delist_date": None, "list_status": "L", "name": "revised name",
+        }],
+    ))
+    service = ClassificationBackfillService(
+        TushareResearchClient(NoSwDailyClassificationPro(), pacer=lambda method: None),
+        warehouse,
+    )
+
+    service.refresh_daily(
+        date(2026, 9, 2),
+        datasets=(ResearchDatasetId.INDUSTRY_DAILY_PROXY,),
+        refresh_memberships=False,
+    )
+
+    proxy = warehouse.read_current(
+        ResearchDatasetId.INDUSTRY_DAILY_PROXY,
+        partition_value="2026-09-02",
+    )
+    assert proxy.iloc[0]["proxy_return"] == pytest.approx(-0.02)
+    assert pd.Timestamp(proxy.iloc[0]["available_at"]) < pd.Timestamp(next_day)

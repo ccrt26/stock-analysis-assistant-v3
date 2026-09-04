@@ -15,7 +15,7 @@ import numpy as np
 import pandas as pd
 
 
-HOTSPOT_FORMULA_VERSION = "sector-hotspot-v3"
+HOTSPOT_FORMULA_VERSION = "sector-hotspot-v4"
 HORIZONS = (1, 3, 5, 20)
 NEW_HIGH_WINDOWS = (20, 60)
 MINIMUM_MEMBER_COVERAGE = 0.80
@@ -34,6 +34,7 @@ def compute_hotspot_features(
     minute_bars: pd.DataFrame,
     *,
     analysis_date: date,
+    industry_proxy_daily: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     """Return one observation row for every governed industry or theme.
 
@@ -82,6 +83,7 @@ def compute_hotspot_features(
         "official sector daily",
         analysis_date,
     )
+    proxy = _prepare_proxy(industry_proxy_daily, analysis_date)
     minutes = _prepare_minutes(minute_bars, analysis_date)
 
     session_dates = sorted(benchmark["trade_date"].unique())
@@ -126,6 +128,7 @@ def compute_hotspot_features(
                 benchmark_close,
                 limits,
                 official,
+                proxy,
                 minutes,
                 sessions,
                 analysis_date,
@@ -144,6 +147,7 @@ def _group_row(
     benchmark_close: pd.Series,
     limits: pd.DataFrame,
     official: pd.DataFrame,
+    proxy: pd.DataFrame,
     minutes: pd.DataFrame,
     sessions: pd.Index,
     analysis_date: date,
@@ -262,8 +266,50 @@ def _group_row(
         limitations.append("current stock-limit coverage is below required 80%")
 
     official_code = item.get("official_index_code")
+    is_sw_l1 = group_type == "industry" and str(item.get("level")) == "L1"
     official_status = "not_applicable"
-    if pd.notna(official_code) and str(official_code):
+    proxy_status = "not_applicable"
+    if is_sw_l1:
+        official_status = "unavailable_using_local_proxy"
+        proxy_rows = proxy[
+            proxy["industry_code"].astype(str) == group_code
+        ].copy()
+        methods = tuple(
+            sorted(proxy_rows["proxy_method"].dropna().astype(str).unique())
+        )
+        proxy_method = methods[0] if len(methods) == 1 else None
+        proxy_series = proxy_rows.set_index("trade_date")["proxy_return"].reindex(
+            sessions
+        )
+        for horizon in HORIZONS:
+            proxy_return = _compound_exact(
+                proxy_series, horizon, analysis_date
+            )
+            benchmark_return = _endpoint_return(
+                benchmark_close, horizon, analysis_date
+            )
+            base[f"proxy_index_return_{horizon}d"] = proxy_return
+            base[f"proxy_relative_return_{horizon}d"] = (
+                proxy_return - benchmark_return
+                if np.isfinite(proxy_return) and np.isfinite(benchmark_return)
+                else np.nan
+            )
+        proxy_status = (
+            "complete"
+            if proxy_method is not None
+            and all(
+                np.isfinite(base[f"proxy_index_return_{horizon}d"])
+                for horizon in HORIZONS
+            )
+            else "limited"
+        )
+        base["proxy_method"] = proxy_method
+        limitations.append(
+            "申万官方行业行情不可用；使用独立的本地自由流通市值加权代理"
+        )
+        if proxy_status == "limited":
+            limitations.append("local SW L1 proxy history is incomplete")
+    elif pd.notna(official_code) and str(official_code):
         official_series = (
             official[official["index_code"].astype(str) == str(official_code)]
             .set_index("trade_date")["close"]
@@ -289,6 +335,7 @@ def _group_row(
         if official_status == "limited":
             limitations.append("official index history is incomplete")
     base["official_index_status"] = official_status
+    base["proxy_index_status"] = proxy_status
 
     base.update(
         _crowding_observations(
@@ -319,13 +366,17 @@ def _group_row(
     )
     if not new_high_complete:
         limitations.append("20/60-session new-high member coverage is incomplete")
-    official_complete = official_status in ("complete", "not_applicable")
+    reference_complete = (
+        proxy_status == "complete"
+        if is_sw_l1
+        else official_status in ("complete", "not_applicable")
+    )
     core_complete = (
         member_complete
         and limit_complete
         and core_horizons
         and new_high_complete
-        and official_complete
+        and reference_complete
     )
     base["coverage_status"] = (
         "complete"
@@ -690,6 +741,8 @@ def _blank_observations() -> dict[str, object]:
         "top3_positive_contribution_1d": np.nan,
         "positive_contributor_count_1d": 0,
         "official_index_status": "not_applicable",
+        "proxy_index_status": "not_applicable",
+        "proxy_method": None,
         "limit_observed_member_count": 0,
         "limit_coverage_ratio": np.nan,
         "limit_up_count": np.nan,
@@ -712,6 +765,8 @@ def _blank_observations() -> dict[str, object]:
             "turnover_share_average",
             "official_index_return",
             "official_bottom_up_discrepancy",
+            "proxy_index_return",
+            "proxy_relative_return",
         ):
             row[f"{prefix}_{horizon}d"] = np.nan
         row[f"horizon_observed_member_count_{horizon}d"] = 0
@@ -724,6 +779,46 @@ def _blank_observations() -> dict[str, object]:
         row[f"new_high_member_coverage_ratio_{window}d"] = np.nan
     row.update(_minute_observations(pd.DataFrame(columns=["trade_date", "ts_code", "minute", "close", "amount"]), ["_"], date.min))
     return row
+
+
+def _prepare_proxy(
+    frame: pd.DataFrame | None,
+    analysis_date: date,
+) -> pd.DataFrame:
+    columns = [
+        "trade_date",
+        "industry_code",
+        "proxy_return",
+        "proxy_method",
+        "coverage_status",
+    ]
+    if frame is None or frame.empty:
+        return pd.DataFrame(columns=columns)
+    result = _prepare(
+        frame,
+        set(columns),
+        ("trade_date", "industry_code"),
+        ("proxy_return",),
+        "industry proxy daily",
+        analysis_date,
+    )
+    incomplete = result["coverage_status"].astype(str) != "complete"
+    result.loc[incomplete, "proxy_return"] = np.nan
+    return result
+
+
+def _compound_exact(
+    series: pd.Series,
+    horizon: int,
+    analysis_date: date,
+) -> float:
+    values = pd.to_numeric(series, errors="coerce")
+    if len(values) < horizon or series.index[-1] != analysis_date:
+        return np.nan
+    sample = values.iloc[-horizon:]
+    if len(sample) != horizon or not np.isfinite(sample).all() or (sample <= -1).any():
+        return np.nan
+    return float(np.prod(1.0 + sample) - 1.0)
 
 
 def _prepare(

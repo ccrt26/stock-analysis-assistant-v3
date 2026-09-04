@@ -102,19 +102,58 @@ def data_run_stage(
 ) -> None:
     from stock_analyzer.ops.research_data_job import (
         build_research_data_runtime,
+        research_job_lock,
         run_research_stage,
     )
 
-    runtime = build_research_data_runtime(AppConfig.load())
-    if data_date == "auto":
-        parsed = _resolve_research_stage_date(
+    config = AppConfig.load()
+    warehouse_root = getattr(config, "local_warehouse_dir", None)
+    if warehouse_root is None:
+        _execute_data_stage(
+            config,
+            stage=stage,
+            data_date=data_date,
+            already_locked=False,
+            build_runtime=build_research_data_runtime,
+            run_stage=run_research_stage,
+        )
+        return
+    with research_job_lock(warehouse_root):
+        _execute_data_stage(
+            config,
+            stage=stage,
+            data_date=data_date,
+            already_locked=True,
+            build_runtime=build_research_data_runtime,
+            run_stage=run_research_stage,
+        )
+
+
+def _execute_data_stage(
+    config,
+    *,
+    stage: str,
+    data_date: str,
+    already_locked: bool,
+    build_runtime,
+    run_stage,
+) -> None:
+    runtime = build_runtime(config)
+    parsed = (
+        _resolve_research_stage_date(
             runtime.tushare,
             stage,
             datetime.now(ZoneInfo("Asia/Shanghai")),
         )
+        if data_date == "auto"
+        else date.fromisoformat(data_date)
+    )
+    if already_locked:
+        summaries = run_stage(
+            runtime, stage=stage, data_date=parsed, already_locked=True
+        )
     else:
-        parsed = date.fromisoformat(data_date)
-    summaries = run_research_stage(runtime, stage=stage, data_date=parsed)
+        summaries = run_stage(runtime, stage=stage, data_date=parsed)
     for item in summaries:
         typer.echo(
             f"{stage}/{item.scope}: committed={item.committed} skipped={item.skipped} "
@@ -130,19 +169,27 @@ def data_run_stage(
     )
 
     health = build_research_health_report(
-        runtime.warehouse,
-        parsed,
-        full_history=False,
+        runtime.warehouse, parsed, full_history=False
     )
     health_path, _ = write_health_report(
-        health,
-        runtime.config.local_archive_dir / "data_health",
+        health, runtime.config.local_archive_dir / "data_health"
     )
     typer.echo(
         f"stage health: core_complete={str(health.complete_core_date).lower()} "
         f"output={health_path}"
     )
-    core_ready, limitations = _health_research_state(health)
+    if stage == "close":
+        core_ready = not any(
+            item.failed or item.waiting_upstream for item in summaries
+        )
+        limitations = tuple(
+            issue
+            for item in summaries
+            if item.limited
+            for issue in (item.issues or [f"{item.scope} 受限"])
+        )
+    else:
+        core_ready, limitations = _health_research_state(health)
     if not core_ready:
         raise typer.Exit(code=2)
     stage_limitations = tuple(

@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import hashlib
-import json
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -19,7 +17,7 @@ from stock_analyzer.data.tushare_research_client import (
     ResearchSourceError,
     TushareResearchClient,
 )
-from stock_analyzer.storage.research_schema import connect_research_warehouse
+from stock_analyzer.storage.research_gap_registry import ResearchGapRegistry
 from stock_analyzer.storage.research_warehouse import ResearchWarehouse
 from stock_analyzer.storage.research_contract_audit import (
     audit_fact_partition_contract,
@@ -39,6 +37,16 @@ class BackfillSummary(BaseModel):
     issues: list[str] = Field(default_factory=list)
     retry_codes: list[str] = Field(default_factory=list)
     capabilities: dict[str, object] = Field(default_factory=dict)
+
+
+_DATASET_ENDPOINTS = {
+    ResearchDatasetId.EQUITY_DAILY: "daily",
+    ResearchDatasetId.ADJ_FACTOR: "adj_factor",
+    ResearchDatasetId.DAILY_BASIC: "daily_basic",
+    ResearchDatasetId.STOCK_LIMIT: "stk_limit",
+    ResearchDatasetId.INDEX_DAILY: "index_daily",
+}
+_ENDPOINT_DATASETS = {value: key for key, value in _DATASET_ENDPOINTS.items()}
 
 
 class ResearchBackfillService:
@@ -61,6 +69,7 @@ class ResearchBackfillService:
         self.client = client
         self.warehouse = warehouse
         self.broad_index_codes = broad_index_codes
+        self.gaps = ResearchGapRegistry(warehouse.duckdb_path)
 
     def backfill_market_core(
         self,
@@ -160,8 +169,11 @@ class ResearchBackfillService:
                     if exc.category == "waiting_upstream"
                     else "failed"
                 )
+                failed_dataset = _ENDPOINT_DATASETS.get(
+                    exc.endpoint, ResearchDatasetId.EQUITY_DAILY
+                )
                 self._record_gap(
-                    dataset=ResearchDatasetId.EQUITY_DAILY,
+                    dataset=failed_dataset,
                     partition=partition,
                     status=status,
                     reason=exc.category,
@@ -273,37 +285,16 @@ class ResearchBackfillService:
         impact: str,
         detail: str,
     ) -> None:
-        now = datetime.now(timezone.utc)
-        gap_id = hashlib.sha256(
-            f"{dataset.value}|{partition}|{reason}".encode("utf-8")
-        ).hexdigest()
-        with connect_research_warehouse(self.warehouse.duckdb_path) as connection:
-            connection.execute(
-                """
-                insert into research_data_gaps
-                (gap_id, dataset_id, partition_value, status, reason_category,
-                 source_name, first_seen_at, last_checked_at, next_retry_at,
-                 impact_text, detail_json)
-                values (?, ?, ?, ?, ?, ?, ?, ?, null, ?, ?)
-                on conflict(dataset_id, partition_value, reason_category)
-                do update set status=excluded.status,
-                              last_checked_at=excluded.last_checked_at,
-                              impact_text=excluded.impact_text,
-                              detail_json=excluded.detail_json
-                """,
-                [
-                    gap_id,
-                    dataset.value,
-                    partition,
-                    status,
-                    reason,
-                    source,
-                    now,
-                    now,
-                    impact,
-                    json.dumps({"message": detail}, ensure_ascii=False),
-                ],
-            )
+        self.gaps.record(
+            dataset,
+            partition,
+            status=status,
+            reason_category=reason,
+            source_name=source,
+            source_endpoint=_DATASET_ENDPOINTS.get(dataset),
+            impact_text=impact,
+            detail={"message": detail},
+        )
 
 
 def _post_close_utc(value: date) -> datetime:

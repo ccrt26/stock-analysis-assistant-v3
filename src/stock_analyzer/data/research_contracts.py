@@ -19,6 +19,7 @@ class ResearchDatasetId(str, Enum):
     INDUSTRY_CATALOG = "industry_catalog"
     INDUSTRY_MEMBER = "industry_member"
     INDUSTRY_DAILY = "industry_daily"
+    INDUSTRY_DAILY_PROXY = "industry_daily_proxy"
     THEME_CATALOG = "theme_catalog"
     THEME_MEMBER = "theme_member"
     THEME_DAILY = "theme_daily"
@@ -133,6 +134,7 @@ class BatchQualityResult(BaseModel):
 
 
 _TUSHARE = ("tushare",)
+_LOCAL_DERIVED = ("local_derived",)
 _OFFICIAL_DISCLOSURE = ("cninfo", "sse", "szse", "bse", "csrc")
 
 
@@ -144,6 +146,7 @@ _BUSINESS_CLOSE_DATASETS = {
     ResearchDatasetId.STOCK_LIMIT: "trade_date",
     ResearchDatasetId.INDEX_DAILY: "trade_date",
     ResearchDatasetId.INDUSTRY_DAILY: "trade_date",
+    ResearchDatasetId.INDUSTRY_DAILY_PROXY: "trade_date",
     ResearchDatasetId.THEME_DAILY: "trade_date",
     ResearchDatasetId.SUSPENSION: "trade_date",
     ResearchDatasetId.MINUTE_BAR: "trade_date",
@@ -288,7 +291,25 @@ def research_contract_registry() -> dict[ResearchDatasetId, DatasetContract]:
         _contract(ResearchDatasetId.INDEX_DAILY, ("trade_date", "index_code"), "trade_date", required=True, window="five_years"),
         _contract(ResearchDatasetId.INDUSTRY_CATALOG, ("industry_system", "level", "industry_code", "valid_from"), "classification_version", required=True, window="sw2021_full_hierarchy"),
         _contract(ResearchDatasetId.INDUSTRY_MEMBER, ("ts_code", "industry_system", "level", "valid_from"), "classification_version", required=True, window="available_effective_history"),
-        _contract(ResearchDatasetId.INDUSTRY_DAILY, ("trade_date", "industry_code"), "trade_date", required=True, window="250_sessions"),
+        _contract(ResearchDatasetId.INDUSTRY_DAILY, ("trade_date", "industry_code"), "trade_date", window="legacy_history"),
+        _contract(
+            ResearchDatasetId.INDUSTRY_DAILY_PROXY,
+            ("trade_date", "industry_code"),
+            "trade_date",
+            sources=_LOCAL_DERIVED,
+            window="250_sessions",
+            availability="derived after close from point-in-time SW2021/L1 membership and prior-session free-float market cap",
+            required_columns=(
+                "trade_date", "industry_system", "level", "industry_code",
+                "industry_name", "proxy_return", "effective_member_count",
+                "observed_member_count", "member_coverage_ratio",
+                "coverage_status", "limitation_notes", "weight_date",
+                "proxy_method", "formula_version", "input_manifest_hash",
+                "available_at",
+            ),
+            coverage_columns=("proxy_return",),
+            minimum_coverage=1.0,
+        ),
         _contract(ResearchDatasetId.THEME_CATALOG, ("publisher", "theme_code", "valid_from"), "catalog_version", required=True, window="controlled_catalog"),
         _contract(ResearchDatasetId.THEME_MEMBER, ("theme_code", "ts_code", "valid_from"), "catalog_version", required=True, window="available_effective_history"),
         _contract(ResearchDatasetId.THEME_DAILY, ("trade_date", "theme_code"), "trade_date", required=True, window="250_sessions"),

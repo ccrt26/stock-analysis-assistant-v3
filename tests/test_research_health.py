@@ -47,6 +47,143 @@ def _daily_batch(partition: str, code: str) -> FactBatch:
     )
 
 
+def _calendar_batch(values: list[date]) -> FactBatch:
+    observed = datetime.now(timezone.utc)
+    return FactBatch(
+        dataset_id=ResearchDatasetId.TRADE_CALENDAR,
+        partition_value=str(values[-1].year),
+        source_name="tushare",
+        source_endpoint="trade_cal",
+        ingestion_run_id="calendar",
+        ingested_at=observed,
+        default_available_at=observed,
+        records=[
+            {
+                "exchange": "SSE", "cal_date": value, "is_open": True,
+                "pretrade_date": values[index - 1] if index else None,
+            }
+            for index, value in enumerate(values)
+        ],
+    )
+
+
+def test_full_history_health_enumerates_missing_middle_trading_day(tmp_path):
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    days = [date(2026, 7, 8), date(2026, 7, 9), date(2026, 7, 10)]
+    warehouse.commit_batch(_calendar_batch(days))
+    warehouse.commit_batch(_daily_batch("2026-07-08", "000001.SZ"))
+    warehouse.commit_batch(_daily_batch("2026-07-10", "000001.SZ"))
+
+    report = build_research_health_report(
+        warehouse, days[-1], full_history=True
+    )
+    daily = next(item for item in report.datasets if item.dataset_id == "equity_daily")
+
+    assert daily.expected_units == 3
+    assert daily.complete_units == 2
+    assert daily.status_counts["unclassified_missing"] == 1
+    assert daily.unclassified_missing_samples == ("2026-07-09",)
+
+
+def test_health_rejects_historical_industry_partition_from_wrong_endpoint(tmp_path):
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    day = date(2026, 7, 10)
+    warehouse.commit_batch(_calendar_batch([day]))
+    observed = datetime.now(timezone.utc)
+    warehouse.commit_batch(
+        FactBatch(
+            dataset_id=ResearchDatasetId.INDUSTRY_DAILY,
+            partition_value=day.isoformat(),
+            source_name="tushare",
+            source_endpoint="index_daily",
+            ingestion_run_id="old-contract",
+            ingested_at=observed,
+            default_available_at=observed,
+            records=[{
+                "trade_date": day, "industry_code": "801010.SI",
+                "open": 10.0, "high": 11.0, "low": 9.0, "close": 10.5,
+                "volume": 100.0, "amount": 1000.0,
+            }],
+        )
+    )
+
+    report = build_research_health_report(warehouse, day, full_history=True)
+    industry = next(
+        item for item in report.datasets if item.dataset_id == "industry_daily"
+    )
+
+    assert industry.expected_units == 0
+    assert industry.complete_units == 0
+    assert industry.source_contract_failure_partitions == 0
+    assert industry.status_counts == {}
+    assert industry.unclassified_missing_samples == ()
+
+
+def test_health_gap_counts_exclude_resolved_history(tmp_path):
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    with connect_research_warehouse(warehouse.duckdb_path) as connection:
+        connection.execute(
+            """
+            insert into research_data_gaps
+            (gap_id, dataset_id, partition_value, scope_key, status,
+             reason_category, source_name, source_endpoint, first_seen_at,
+             last_checked_at, next_retry_at, resolved_at, impact_text,
+             detail_json)
+            values ('resolved', 'industry_daily', '2026-07-10', '',
+                    'resolved', 'old', 'tushare', 'sw_daily', now(), now(),
+                    null, now(), '', '{}')
+            """
+        )
+
+    report = build_research_health_report(warehouse, date(2026, 7, 10))
+
+    assert "resolved" not in report.gap_counts
+
+
+def test_minute_health_checks_frozen_code_date_units_not_partition_presence(tmp_path):
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    day = date(2026, 7, 10)
+    warehouse.commit_batch(_calendar_batch([day]))
+    observed = datetime.now(timezone.utc)
+    rows = []
+    for minute in list(pd.date_range("2026-07-10 09:31", periods=120, freq="min")) + list(
+        pd.date_range("2026-07-10 13:01", periods=120, freq="min")
+    ):
+        rows.append({
+            "trade_date": day, "instrument_code": "000001.SZ",
+            "instrument_type": "equity", "minute": minute.tz_localize(
+                "Asia/Shanghai"
+            ).tz_convert("UTC").to_pydatetime(),
+            "frequency": "1min", "open": 10.0, "high": 10.2,
+            "low": 9.9, "close": 10.1, "volume": 1.0, "amount": 10.0,
+        })
+    warehouse.commit_batch(
+        FactBatch(
+            dataset_id=ResearchDatasetId.MINUTE_BAR,
+            partition_value=day.isoformat(),
+            source_name="tushare", source_endpoint="stk_mins",
+            ingestion_run_id="minutes", ingested_at=observed,
+            default_available_at=observed, records=rows,
+        )
+    )
+    with connect_research_warehouse(warehouse.duckdb_path) as connection:
+        connection.execute(
+            """
+            insert into research_watermarks
+            values ('minute_scope', '2026-07-10',
+                    '["000001.SZ", "000002.SZ"]', now(), 'scope')
+            """
+        )
+
+    report = build_research_health_report(warehouse, day, full_history=True)
+    minute = next(item for item in report.datasets if item.dataset_id == "minute_bar")
+
+    assert minute.expected_units == 2
+    assert minute.complete_units == 1
+    assert minute.status_counts["unclassified_missing"] == 1
+    assert minute.unclassified_missing_samples == ("2026-07-10/000002.SZ",)
+
+
 def test_full_history_health_audits_files_without_loading_all_facts_into_pandas(
     tmp_path, monkeypatch
 ):
@@ -452,6 +589,46 @@ def test_health_reports_overlapping_industry_member_slots_with_details(tmp_path)
     assert "000876.SZ" in text
 
 
+def test_health_reports_overlapping_theme_member_intervals(tmp_path):
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    observed_at = datetime(2026, 8, 31, 7, 1, tzinfo=timezone.utc)
+    warehouse.commit_batch(
+        FactBatch(
+            dataset_id=ResearchDatasetId.THEME_MEMBER,
+            partition_value="official-theme-v1",
+            source_name="tushare",
+            source_endpoint="index_weight",
+            ingestion_run_id="overlapping-theme-members",
+            ingested_at=observed_at,
+            default_available_at=observed_at,
+            records=[
+                {
+                    "theme_code": "000019.SH", "ts_code": "600004.SH",
+                    "valid_from": date(2026, 7, 31), "valid_to": None,
+                },
+                {
+                    "theme_code": "000019.SH", "ts_code": "600004.SH",
+                    "valid_from": date(2026, 8, 31), "valid_to": None,
+                },
+            ],
+        )
+    )
+
+    report = build_research_health_report(
+        warehouse, date(2026, 8, 31), full_history=False
+    )
+    members = next(
+        item for item in report.datasets
+        if item.dataset_id == ResearchDatasetId.THEME_MEMBER.value
+    )
+
+    assert members.effective_interval_overlaps == 1
+    assert any(
+        "theme_member" in issue and "600004.SH" in issue
+        for issue in members.effective_interval_issues
+    )
+
+
 def test_fast_health_audits_all_industry_member_partitions(tmp_path):
     warehouse = ResearchWarehouse(tmp_path / "warehouse")
     observed_at = datetime(2026, 8, 3, 13, 30, tzinfo=timezone.utc)
@@ -847,3 +1024,116 @@ def test_derived_health_detects_row_hash_and_input_manifest_changes(tmp_path):
     assert by_name["sector_hotspot"].hash_mismatches == 1
     assert by_name["stock_trading_context"].stale_input_manifest is True
     assert report.derived_ready_for_research is False
+
+
+
+def _industry_proxy_batch(
+    day: date,
+    *,
+    endpoint: str = "sw_l1_free_float_proxy_v1",
+    proxy_return: float | None = 0.01,
+    coverage_status: str = "complete",
+) -> FactBatch:
+    observed = datetime.combine(
+        day, datetime.min.time(), tzinfo=timezone.utc
+    ) + timedelta(hours=8)
+    return FactBatch(
+        dataset_id=ResearchDatasetId.INDUSTRY_DAILY_PROXY,
+        partition_value=day.isoformat(),
+        source_name="local_derived",
+        source_endpoint=endpoint,
+        ingestion_run_id=f"proxy-{day}",
+        ingested_at=observed,
+        default_available_at=observed,
+        records=[{
+            "trade_date": day,
+            "industry_system": "SW2021",
+            "level": "L1",
+            "industry_code": "801010.SI",
+            "industry_name": "农林牧渔",
+            "proxy_return": proxy_return,
+            "effective_member_count": 10,
+            "observed_member_count": 10 if proxy_return is not None else 5,
+            "member_coverage_ratio": 1.0 if proxy_return is not None else 0.5,
+            "coverage_status": coverage_status,
+            "limitation_notes": "" if proxy_return is not None else "below 80%",
+            "weight_date": day - timedelta(days=1),
+            "proxy_method": "sw_l1_free_float_proxy_v1",
+            "formula_version": "sw-l1-free-float-proxy-v1",
+            "input_manifest_hash": "manifest",
+            "available_at": observed,
+        }],
+    )
+
+
+def test_health_treats_valid_industry_proxy_as_current_250_session_fact(tmp_path):
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    day = date(2026, 9, 2)
+    warehouse.commit_batch(_calendar_batch([day]))
+    warehouse.commit_batch(_industry_proxy_batch(day))
+
+    report = build_research_health_report(warehouse, day, full_history=True)
+    proxy = next(
+        item for item in report.datasets
+        if item.dataset_id == "industry_daily_proxy"
+    )
+
+    assert proxy.expected_units == 1
+    assert proxy.complete_units == 1
+    assert proxy.status_counts == {"complete": 1}
+    assert proxy.source_contract_failure_partitions == 0
+    assert proxy.contract_valid
+    assert proxy.data_date_partition_ready
+
+
+def test_health_rejects_proxy_with_wrong_endpoint_or_incomplete_coverage(tmp_path):
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    days = [date(2026, 9, 1), date(2026, 9, 2)]
+    warehouse.commit_batch(_calendar_batch(days))
+    warehouse.commit_batch(
+        _industry_proxy_batch(days[0], endpoint="wrong_proxy_method")
+    )
+    warehouse.commit_batch(
+        _industry_proxy_batch(
+            days[1], proxy_return=None, coverage_status="limited"
+        )
+    )
+
+    report = build_research_health_report(warehouse, days[-1], full_history=True)
+    proxy = next(
+        item for item in report.datasets
+        if item.dataset_id == "industry_daily_proxy"
+    )
+
+    assert proxy.expected_units == 2
+    assert proxy.complete_units == 0
+    assert proxy.status_counts == {"failed": 2}
+    assert proxy.source_contract_failure_partitions == 2
+    assert proxy.coverage_failure_partitions == 1
+    assert not proxy.contract_valid
+
+
+def test_health_does_not_call_proxy_complete_while_an_active_gap_exists(tmp_path):
+    from stock_analyzer.storage.research_gap_registry import ResearchGapRegistry
+
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    day = date(2026, 9, 2)
+    warehouse.commit_batch(_calendar_batch([day]))
+    warehouse.commit_batch(_industry_proxy_batch(day))
+    ResearchGapRegistry(warehouse.duckdb_path).record(
+        ResearchDatasetId.INDUSTRY_DAILY_PROXY,
+        day,
+        status="unclassified_missing",
+        reason_category="missing_or_invalid_proxy_input",
+        source_name="local_derived",
+        source_endpoint="sw_l1_free_float_proxy_v1",
+    )
+
+    report = build_research_health_report(warehouse, day, full_history=True)
+    proxy = next(
+        item for item in report.datasets
+        if item.dataset_id == "industry_daily_proxy"
+    )
+
+    assert proxy.complete_units == 0
+    assert proxy.status_counts == {"unclassified_missing": 1}

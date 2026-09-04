@@ -478,6 +478,26 @@ def test_empty_suspension_day_is_checked_once_on_resume(tmp_path):
     assert pro.suspension_calls == ["20260710"]
 
 
+def test_targeted_suspension_backfill_calls_only_suspend_endpoint(tmp_path):
+    pro = ActionPro()
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    service = EventBackfillService(
+        TushareResearchClient(pro, pacer=lambda method: None),
+        object(),
+        warehouse,
+    )
+
+    summary = service.backfill_suspensions(
+        trading_dates=(date(2026, 8, 26),),
+        through=date(2026, 8, 26),
+        resume=False,
+    )
+
+    assert pro.suspension_calls == ["20260826"]
+    assert summary.failed == 0
+    assert summary.scope == "suspension"
+
+
 def test_holder_trade_deduplicates_exact_rows_but_preserves_provider_variants(tmp_path):
     class VariantHolderPro(ActionPro):
         def __init__(self):
