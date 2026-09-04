@@ -2274,6 +2274,15 @@ def _wait_until_data_ready(
             )
         elif not preopen_ready:
             limitation_items.append(PREOPEN_REFRESH_LIMITATION)
+        published_statuses = capabilities.get("published_event_statuses")
+        if cutoff_matches and isinstance(published_statuses, dict):
+            for channel, limitation in (
+                ("holder_trade", "股东增减持结构化补采未完成，不能把未取得写成没有发生"),
+                ("share_float", "解禁结构化补采未完成，不能把未取得写成没有安排"),
+                ("repurchase", "回购结构化补采未完成，不能把未取得写成没有发生"),
+            ):
+                if published_statuses.get(channel) in {"partial", "failed"}:
+                    limitation_items.append(limitation)
         if stage_status == "failed":
             limitation_items.append("晚间研究准备任务存在失败步骤，按已确认可用通道受限研究")
         limitations = tuple(dict.fromkeys(limitation_items))

@@ -91,6 +91,12 @@
 - `announcement_status=exchange_partial`：只允许列在 `announcement_exchanges` 的交易所使用行动日前新公告形成 `fresh_event_pending`；未覆盖交易所不得把“没有取到”写成“没有公告”。
 - `announcement_status=announcement_unavailable`：公司 Skill 可以使用形成日及更早的正式事实，但不得形成刚在行动日前公开、尚无完整交易日的候选，也不得声称完整检查了研究截止前新公告。
 
+- `limitations` 包含“股东增减持结构化补采未完成”：不能把未取得写成没有发生，不声称完整检查了该类事件。
+- `limitations` 包含“解禁结构化补采未完成”：不能把未取得写成没有安排，不声称完整检查了解禁安排。
+- `limitations` 包含“回购结构化补采未完成”：不能把未取得写成没有发生，不声称完整检查了回购事件。
+
+上述可选缺口不阻断已确认可用的市场、价格、行业或主题研究，公司 Skill 也可继续研究其他已取得事实；必须把 prepare 返回的全部 `limitations` 原样写入 V4 的 `runtime_capabilities.limitations`，不得删除其中一项或将未取得写成没有事件。
+
 `complete_core_date` 只作诊断，不再决定能否研究。`prepare` 返回的市场、价格、行业、主题、个股背景、`announcement_status`、`announcement_exchanges` 和限制才是本次真实能力边界。
 
 若已经存在同一 `formation_date` 的正式选择，prepare 返回 `already_selected`，不得重复选股，但仍可继续已有股票走势复盘。

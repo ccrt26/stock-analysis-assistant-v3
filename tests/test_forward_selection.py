@@ -72,6 +72,7 @@ class FakeData:
         dataset_ready: dict[str, bool] | None = None,
         announcement_status: str | None = None,
         announcement_exchanges: list[str] | None = None,
+        published_event_statuses: dict[str, str] | None = None,
     ) -> None:
         self._open_dates = open_dates
         self.action_date_status = action_date_status
@@ -87,6 +88,7 @@ class FakeData:
         self.dataset_ready = dataset_ready or {}
         self.announcement_status = announcement_status
         self.announcement_exchanges = announcement_exchanges
+        self.published_event_statuses = published_event_statuses
 
     def trading_dates(self, start: date, end: date) -> list[date]:
         return [day for day in self._open_dates if start <= day <= end]
@@ -171,6 +173,8 @@ class FakeData:
                     "started_at": started.isoformat(),
                     "finished_at": finished.isoformat(),
                     "capabilities": {
+                        **({"published_event_statuses": self.published_event_statuses}
+                           if self.published_event_statuses is not None else {}),
                         "announcement_status": announcement_status,
                         "announcement_exchanges": exchanges,
                         "research_as_of": datetime.combine(formation_date, datetime.min.time(), SHANGHAI).replace(hour=18, minute=30).isoformat(),
@@ -2666,7 +2670,8 @@ def test_normal_sunday_freezes_friday_prices_and_monday_action(tmp_path):
     assert result.selection_as_of == "2026-09-06T18:30:00+08:00"
 
 
-def test_late_record_trace_uses_health_frozen_before_evening_retry(tmp_path, monkeypatch):
+@pytest.mark.parametrize("snapshot_case", ["valid", "markdown_missing", "damaged_json"])
+def test_late_record_trace_uses_health_frozen_before_evening_retry(tmp_path, monkeypatch, snapshot_case):
     from types import SimpleNamespace
     from stock_analyzer.cli import _execute_data_stage
     from stock_analyzer.data.research_backfill import BackfillSummary
@@ -2677,27 +2682,33 @@ def test_late_record_trace_uses_health_frozen_before_evening_retry(tmp_path, mon
     formation, action = date(2026, 8, 25), date(2026, 8, 26)
     cutoff = datetime(2026, 8, 25, 18, 30, tzinfo=SHANGHAI)
     fake = FakeData(open_dates=[formation, action])
-    frozen = fake.health_report(formation)
+    from stock_analyzer.storage.research_warehouse import ResearchWarehouse
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    frozen = health.build_research_health_report(warehouse, formation)
+    frozen.latest_stage_runs = (health.StageRunHealth(
+        stage="pre-research", data_date=formation, run_id="formal", status="limited",
+        started_at=cutoff.replace(minute=32), finished_at=cutoff.replace(minute=40),
+        issues=(), capabilities={"research_as_of": cutoff.isoformat(),
+                                "announcement_status": "cninfo_complete",
+                                "announcement_exchanges": ["SSE", "SZSE"]},
+    ),)
+    for feature in frozen.derived_features:
+        feature.ready = True
+    for dataset in frozen.datasets:
+        if dataset.dataset_id in {"industry_daily_proxy", "theme_daily"}:
+            dataset.data_date_partition_ready = True
     archive = tmp_path / "archive"
     output = archive / "data_health"
-    output.mkdir(parents=True)
-    json_path, md_path = output / f"{formation}.json", output / f"{formation}.md"
-    json_path.write_text(json.dumps(frozen), encoding="utf-8")
-    md_path.write_text("18:30正式健康", encoding="utf-8")
+    json_path, md_path = health.write_health_report(frozen, output)
     before = (json_path.read_bytes(), md_path.read_bytes())
-    maintenance = json.loads(json.dumps(frozen))
-    maintenance["derived_features"][1]["ready"] = False
-    pre = frozen["latest_stage_runs"][0]
+    if snapshot_case == "markdown_missing":
+        md_path.unlink()
+    elif snapshot_case == "damaged_json":
+        json_path.write_text("{broken", encoding="utf-8")
+    maintenance = frozen.model_copy(deep=True)
+    maintenance.derived_features[1].ready = False
     config = SimpleNamespace(local_archive_dir=archive)
-    report = SimpleNamespace(complete_core_date=True, latest_stage_runs=(
-        SimpleNamespace(**{**pre, "data_date": formation}),
-    ))
-    monkeypatch.setattr(health, "build_research_health_report", lambda *a, **k: report)
-    def write_maintenance(report, root):
-        json_path.write_text(json.dumps(maintenance), encoding="utf-8")
-        md_path.write_text("21:30维护健康", encoding="utf-8")
-        return json_path, md_path
-    monkeypatch.setattr(health, "write_health_report", write_maintenance)
+    monkeypatch.setattr(health, "build_research_health_report", lambda *a, **k: maintenance)
     _execute_data_stage(config, stage="evening", data_date=formation.isoformat(),
         as_of=None, already_locked=False,
         build_runtime=lambda _: SimpleNamespace(config=config, warehouse=object()),
@@ -2715,8 +2726,111 @@ def test_late_record_trace_uses_health_frozen_before_evening_retry(tmp_path, mon
         formation_date=formation, action_date=action, selection_as_of=cutoff,
         sleep=lambda _: pytest.fail("late record must not wait"))
 
+    if snapshot_case == "damaged_json":
+        assert result.status == "invalid_result"
+        assert result.error == "runtime_capabilities_overclaim"
+        assert pending.exists() and _read_csv(csv_path) == []
+        assert health.ResearchHealthReport.model_validate_json(json_path.read_text()) == maintenance
+        return
     assert result.status == "selection_frozen", result.error
     assert result.industry_research_available and result.theme_research_available
     assert (json_path.read_bytes(), md_path.read_bytes()) == before
     assert json.loads((archive / f"research-trace-{formation}.json").read_text()) == trace
     assert _read_csv(csv_path)[0]["selection_as_of"] == "2026-08-25T18:30:00+08:00"
+
+
+PUBLISHED_LIMITATIONS = {
+    "holder_trade": "股东增减持结构化补采未完成，不能把未取得写成没有发生",
+    "share_float": "解禁结构化补采未完成，不能把未取得写成没有安排",
+    "repurchase": "回购结构化补采未完成，不能把未取得写成没有发生",
+}
+
+
+@pytest.mark.parametrize("failed_channel", [None, "complete", *PUBLISHED_LIMITATIONS, "all"])
+@pytest.mark.parametrize("status", ["failed", "partial"])
+def test_prepare_exposes_only_failed_published_event_channels(tmp_path, failed_channel, status):
+    statuses = None if failed_channel is None else dict.fromkeys(PUBLISHED_LIMITATIONS, "complete")
+    if failed_channel == "all":
+        statuses = dict.fromkeys(PUBLISHED_LIMITATIONS, status)
+    elif failed_channel in PUBLISHED_LIMITATIONS:
+        statuses[failed_channel] = status
+    data = FakeData(open_dates=[date(2026, 8, 25), date(2026, 8, 26)],
+                    published_event_statuses=statuses)
+    csv_path = tmp_path / "forward.csv"
+    _write_csv(csv_path, [])
+    result = prepare_daily_selection(csv_path=csv_path, data=data,
+        clock=lambda: datetime(2026, 8, 26, 16, 24, tzinfo=SHANGHAI),
+        rerun_date=date(2026, 8, 26), sleep=lambda _: pytest.fail("must not wait"))
+    expected = tuple(text for name, text in PUBLISHED_LIMITATIONS.items()
+                     if statuses and statuses[name] != "complete")
+    assert result.limitations == expected
+    assert result.status == ("ready_for_research_limited" if expected else "ready_for_research")
+    assert result.market_research_available and result.price_research_available
+    assert result.industry_research_available and result.theme_research_available
+    assert result.stock_context_available
+
+
+@pytest.mark.parametrize("omitted", [None, *PUBLISHED_LIMITATIONS])
+def test_record_trace_requires_each_published_event_limitation(tmp_path, omitted):
+    trace = _v4_trace()
+    trace["runtime_capabilities"]["limitations"] = [
+        text for channel, text in PUBLISHED_LIMITATIONS.items() if channel != omitted
+    ]
+    data = FakeData(open_dates=[date(2026, 8, 25), date(2026, 8, 26)],
+                    published_event_statuses=dict.fromkeys(PUBLISHED_LIMITATIONS, "failed"))
+    summary, pending, archive, csv_path = _record_trace_for_test(
+        trace, tmp_path, data=data, formation_date=date(2026, 8, 25),
+        action_date=date(2026, 8, 26),
+        selection_as_of=datetime(2026, 8, 25, 18, 30, tzinfo=SHANGHAI))
+    if omitted is not None:
+        assert summary.status == "invalid_result"
+        assert summary.error == "runtime_capabilities_overclaim"
+        assert pending.exists() and not archive.exists()
+        assert _read_csv(csv_path) == []
+    else:
+        assert summary.status == "selection_frozen"
+        assert archive.exists()
+
+
+@pytest.mark.parametrize("latest_status,cutoff_matches", [
+    ("complete", True), ("failed", True), ("failed", False),
+])
+def test_published_limitations_use_only_latest_same_formation_cutoff(
+    tmp_path, latest_status, cutoff_matches,
+):
+    class MultiRunData(FakeData):
+        def health_report(self, formation_date):
+            report = super().health_report(formation_date)
+            latest = report["latest_stage_runs"][0]
+            latest["started_at"] = "2026-08-25T18:32:00+08:00"
+            latest["capabilities"]["published_event_statuses"] = dict.fromkeys(
+                PUBLISHED_LIMITATIONS, latest_status)
+            older = {
+                **latest, "started_at": "2026-08-25T18:31:00+08:00",
+                "capabilities": {
+                    **latest["capabilities"], "published_event_statuses": dict.fromkeys(
+                        PUBLISHED_LIMITATIONS, "failed" if latest_status == "complete" else "complete"),
+                },
+            }
+            if not cutoff_matches:
+                latest["capabilities"]["research_as_of"] = "2026-08-24T18:30:00+08:00"
+            unrelated = {
+                **older, "data_date": "2026-08-24",
+                "started_at": "2026-08-25T21:30:00+08:00",
+            }
+            report["latest_stage_runs"] = [older, unrelated, latest]
+            return report
+
+    csv_path = tmp_path / "forward.csv"
+    _write_csv(csv_path, [])
+    result = prepare_daily_selection(csv_path=csv_path,
+        data=MultiRunData(open_dates=[date(2026, 8, 25), date(2026, 8, 26)]),
+        clock=lambda: datetime(2026, 8, 26, 16, 24, tzinfo=SHANGHAI),
+        rerun_date=date(2026, 8, 26), sleep=lambda _: pytest.fail("must not wait"))
+    if not cutoff_matches:
+        assert result.error == "pre_research_cutoff_missing_or_mismatch"
+        assert not result.limitations
+    else:
+        expected = () if latest_status == "complete" else tuple(PUBLISHED_LIMITATIONS.values())
+        assert result.limitations == expected
+        assert result.status == ("ready_for_research_limited" if expected else "ready_for_research")

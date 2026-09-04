@@ -13,6 +13,22 @@ from stock_analyzer.data.research_backfill import BackfillSummary
 runner = CliRunner()
 
 
+def _freeze_cli_clock(monkeypatch, value):
+    calls = []
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            calls.append(tz)
+            return value.astimezone(tz)
+    monkeypatch.setattr("stock_analyzer.cli.datetime", Clock)
+    return calls
+
+
+@pytest.fixture(autouse=True)
+def _fixed_cli_time(monkeypatch):
+    _freeze_cli_clock(monkeypatch, datetime.fromisoformat("2026-09-07T18:45:00+08:00"))
+
+
 def _health_report(
     *,
     complete_core_date: bool = True,
@@ -441,17 +457,15 @@ def test_stage_cutoff_option_and_validation_before_runtime():
 
 
 @pytest.mark.parametrize("stage", ["evening", "close"])
-@pytest.mark.parametrize("files,cutoff,same_date,preserve", [
-    (("json", "md"), "2026-09-06T18:30:00+08:00", True, True),
-    (("json", "md"), "", True, False),
-    (("json", "md"), "2026-09-06T18:30:00+08:00", False, False),
-    (("json",), "2026-09-06T18:30:00+08:00", True, False),
-    (("md",), "2026-09-06T18:30:00+08:00", True, False),
-    ((), "2026-09-06T18:30:00+08:00", True, False),
+@pytest.mark.parametrize("case", [
+    "valid", "same_instant", "json_missing", "json_broken", "json_string",
+    "wrong_date", "missing_pre", "old_run", "latest_snapshot_run", "latest_current_run",
+    "wrong_cutoff", "empty_cutoff", "naive_cutoff", "invalid_cutoff",
+    "current_empty_cutoff", "current_naive_cutoff", "current_missing_pre",
+    "market_not_ready", "price_not_ready",
+    "md_missing", "md_empty", "md_broken", "md_wrong_date",
 ])
-def test_maintenance_preserves_only_existing_formal_health(
-    tmp_path, monkeypatch, stage, files, cutoff, same_date, preserve,
-):
+def test_maintenance_preserves_only_validated_formal_health(tmp_path, monkeypatch, stage, case):
     import stock_analyzer.ops.research_data_job as job
     import stock_analyzer.ops.research_health as health
     from stock_analyzer.storage.research_warehouse import ResearchWarehouse
@@ -461,18 +475,65 @@ def test_maintenance_preserves_only_existing_formal_health(
     config = SimpleNamespace(local_archive_dir=tmp_path / "archive")
     warehouse = ResearchWarehouse(tmp_path / "warehouse")
     runtime = SimpleNamespace(config=config, warehouse=warehouse)
-    report = health.build_research_health_report(warehouse, formation)
-    report.latest_stage_runs = (health.StageRunHealth(
-        stage="pre-research", data_date=formation if same_date else date(2026, 9, 3),
-        run_id="formal", status="limited",
+    frozen = health.build_research_health_report(warehouse, formation)
+    frozen.latest_stage_runs = (health.StageRunHealth(
+        stage="pre-research", data_date=formation, run_id="formal", status="limited",
         started_at=datetime.fromisoformat("2026-09-06T18:32:00+08:00"),
         finished_at=datetime.fromisoformat("2026-09-06T18:40:00+08:00"),
-        issues=(), capabilities={"research_as_of": cutoff},
+        issues=(), capabilities={"research_as_of": "2026-09-06T18:30:00+08:00"},
     ),)
+    for feature in frozen.derived_features:
+        feature.ready = True
+    current = frozen.model_copy(deep=True)
+    current.derived_features[1].ready = False  # 维护状态不得混入有效正式快照。
+    pre = frozen.latest_stage_runs[0]
+    if case == "same_instant":
+        pre.capabilities["research_as_of"] = "2026-09-06T10:30:00Z"
+    elif case == "wrong_date":
+        frozen.data_date = date(2026, 9, 3)
+    elif case == "missing_pre":
+        pre.data_date = date(2026, 9, 3)
+    elif case == "old_run":
+        pre.run_id = "old"
+    elif case in {"latest_snapshot_run", "latest_current_run"}:
+        newer = pre.model_copy(deep=True)
+        newer.run_id = "newer"
+        newer.started_at = newer.started_at.replace(minute=33)
+        target = frozen if case == "latest_snapshot_run" else current
+        target.latest_stage_runs = (newer, *target.latest_stage_runs)
+    elif case in {"wrong_cutoff", "empty_cutoff", "naive_cutoff", "invalid_cutoff"}:
+        pre.capabilities["research_as_of"] = {
+            "wrong_cutoff": "2026-09-04T18:30:00+08:00",
+            "empty_cutoff": "", "naive_cutoff": "2026-09-06T18:30:00",
+            "invalid_cutoff": "not-a-time",
+        }[case]
+    elif case == "current_empty_cutoff":
+        current.latest_stage_runs[0].capabilities["research_as_of"] = ""
+    elif case == "current_naive_cutoff":
+        current.latest_stage_runs[0].capabilities["research_as_of"] = "2026-09-06T18:30:00"
+    elif case == "current_missing_pre":
+        current.latest_stage_runs = ()
+    elif case in {"market_not_ready", "price_not_ready"}:
+        feature_set = "market_context" if case == "market_not_ready" else "price_analysis_context"
+        next(f for f in frozen.derived_features if f.feature_set == feature_set).ready = False
     output = config.local_archive_dir / "data_health"
     output.mkdir(parents=True)
-    for suffix in files:
-        (output / f"{formation}.{suffix}").write_text("frozen", encoding="utf-8")
+    json_path, md_path = output / f"{formation}.json", output / f"{formation}.md"
+    json_path.write_text(frozen.model_dump_json(), encoding="utf-8")
+    md_path.write_text(f"# {formation} 数据健康摘要\n正式内容", encoding="utf-8")
+    if case == "json_missing":
+        json_path.unlink()
+    elif case == "json_broken":
+        json_path.write_text("{broken", encoding="utf-8")
+    elif case == "json_string":
+        json_path.write_text('"frozen"', encoding="utf-8")
+    elif case == "md_missing":
+        md_path.unlink()
+    elif case.startswith("md_"):
+        md_path.write_text({"md_empty": "", "md_broken": "broken",
+                           "md_wrong_date": "# 2026-09-03 数据健康摘要"}[case], encoding="utf-8")
+    before = (json_path.read_bytes() if json_path.exists() else None,
+              md_path.read_bytes() if md_path.exists() else None)
     fact_calls = []
     def collect(*args, **kwargs):
         fact_calls.append(kwargs["stage"])
@@ -480,7 +541,7 @@ def test_maintenance_preserves_only_existing_formal_health(
     monkeypatch.setattr(job, "_run_research_stage_impl", collect)
     monkeypatch.setattr(job, "build_research_data_runtime", lambda _: runtime)
     monkeypatch.setattr("stock_analyzer.config.AppConfig.load", lambda: config)
-    monkeypatch.setattr(health, "build_research_health_report", lambda *a, **k: report)
+    monkeypatch.setattr(health, "build_research_health_report", lambda *a, **k: current)
 
     result = runner.invoke(app, ["data", "run-stage", "--stage", stage,
                                  "--data-date", formation.isoformat()])
@@ -491,10 +552,14 @@ def test_maintenance_preserves_only_existing_formal_health(
         assert connection.execute(
             "select stage, status from research_ingestion_runs"
         ).fetchall() == [(stage, "succeeded")]
-    for suffix in ("json", "md"):
-        contents = (output / f"{formation}.{suffix}").read_text(encoding="utf-8")
-        assert (contents == "frozen") is preserve
-    assert ("保留18:30正式健康快照" in result.output) is preserve
+    valid = case in {"valid", "same_instant", "md_missing", "md_empty", "md_broken", "md_wrong_date"}
+    saved = health.ResearchHealthReport.model_validate_json(json_path.read_text())
+    assert saved == (frozen if valid else current)
+    assert f"# {formation} 数据健康摘要" in md_path.read_text()
+    if case in {"valid", "same_instant"}:
+        assert (json_path.read_bytes(), md_path.read_bytes()) == before
+    if not valid:
+        assert "保留18:30正式健康快照" not in result.output
 
 
 def test_pre_research_always_writes_both_formal_health_files(tmp_path, monkeypatch):
@@ -559,3 +624,94 @@ def test_evening_no_action_day_exits_zero_without_fact_collection(tmp_path, monk
     assert result.exit_code == 0, result.output
     assert "no_action_day" in result.output
     assert not config.local_archive_dir.exists()
+
+
+@pytest.mark.parametrize("moment", [
+    "2026-09-07T08:00:00+08:00", "2026-09-07T18:29:59+08:00",
+    "2026-09-06T08:00:00+08:00", "2026-10-08T08:00:00+08:00",
+])
+@pytest.mark.parametrize("data_date", ["auto", "2026-09-04"])
+@pytest.mark.parametrize("as_of_args", [[], ["--as-of", "auto"]])
+def test_auto_pre_research_before_cutoff_has_no_side_effects(
+    tmp_path, monkeypatch, moment, data_date, as_of_args,
+):
+    import stock_analyzer.ops.research_data_job as job
+    clock_calls = _freeze_cli_clock(monkeypatch, datetime.fromisoformat(moment))
+    monkeypatch.setattr("stock_analyzer.config.AppConfig.load", lambda: pytest.fail("must not load config"))
+    monkeypatch.setattr(job, "research_job_lock", lambda *a: pytest.fail("must not lock"))
+    monkeypatch.setattr(job, "build_research_data_runtime", lambda *a: pytest.fail("must not initialize data"))
+    monkeypatch.setattr(job, "run_research_stage", lambda *a, **k: pytest.fail("must not collect"))
+    result = runner.invoke(app, ["data", "run-stage", "--stage", "pre-research",
+                                "--data-date", data_date, *as_of_args])
+    assert result.exit_code == 0, result.output
+    assert "no_action_day" in result.output or "cutoff has not occurred" in result.output
+    assert len(clock_calls) == 1
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize("cutoff", [
+    "2026-09-07T18:30:00+08:00", "2026-09-07T10:30:00Z",
+    "2026-09-06T18:30:00+08:00", "2026-09-06T10:30:00+00:00",
+])
+def test_explicit_future_pre_research_cutoff_fails_before_any_data_access(monkeypatch, cutoff):
+    import stock_analyzer.ops.research_data_job as job
+    clock_calls = _freeze_cli_clock(monkeypatch, datetime.fromisoformat("2026-09-06T08:00:00+08:00"))
+    monkeypatch.setattr("stock_analyzer.config.AppConfig.load", lambda: pytest.fail("must not load config"))
+    monkeypatch.setattr(job, "research_job_lock", lambda *a: pytest.fail("must not lock"))
+    monkeypatch.setattr(job, "build_research_data_runtime", lambda *a: pytest.fail("must not initialize"))
+    result = runner.invoke(app, ["data", "run-stage", "--stage", "pre-research",
+                                "--data-date", "auto", "--as-of", cutoff])
+    assert result.exit_code == 2, result.output
+    assert "cutoff has not occurred" in result.output
+    assert len(clock_calls) == 1
+
+
+@pytest.mark.parametrize("moment,cutoff", [
+    ("2026-09-06T18:30:00+08:00", None),
+    ("2026-09-06T18:32:00+08:00", "auto"),
+    ("2026-09-06T10:32:00Z", "auto"),
+    ("2026-09-07T08:00:00+08:00", "2026-09-06T18:30:00+08:00"),
+    ("2026-09-07T08:00:00+08:00", "2026-09-06T10:30:00Z"),
+])
+def test_elapsed_auto_or_explicit_historical_cutoff_uses_original_calendar(
+    tmp_path, monkeypatch, moment, cutoff,
+):
+    import pandas as pd
+    import stock_analyzer.ops.research_data_job as job
+    import stock_analyzer.ops.research_health as health
+    calls = []
+    clock_calls = _freeze_cli_clock(monkeypatch, datetime.fromisoformat(moment))
+    class Calendar:
+        def fetch_trade_calendar(self, start, through):
+            calls.append(("calendar", through))
+            days = list(pd.date_range(start, through).date)
+            return pd.DataFrame({"cal_date": days, "is_open": [
+                day in {date(2026, 9, 4), date(2026, 9, 7)} for day in days]})
+    config = SimpleNamespace(local_archive_dir=tmp_path / "archive",
+                             local_warehouse_dir=tmp_path / "warehouse")
+    @contextmanager
+    def lock(path):
+        calls.append(("lock", path))
+        yield
+    def collect(runtime, **kwargs):
+        calls.append(("stage", kwargs))
+        return ()
+    runtime = SimpleNamespace(config=config, tushare=Calendar(), warehouse=object())
+    monkeypatch.setattr("stock_analyzer.config.AppConfig.load", lambda: config)
+    monkeypatch.setattr(job, "research_job_lock", lock)
+    monkeypatch.setattr(job, "build_research_data_runtime", lambda _: runtime)
+    monkeypatch.setattr(job, "run_research_stage", collect)
+    monkeypatch.setattr(health, "build_research_health_report", lambda *a, **k: _health_report())
+    monkeypatch.setattr(health, "write_health_report", lambda report, output: (output / "health.json", None))
+    arguments = ["data", "run-stage", "--stage", "pre-research", "--data-date", "auto"]
+    if cutoff is not None:
+        arguments.extend(["--as-of", cutoff])
+    result = runner.invoke(app, arguments)
+    assert result.exit_code == 0, result.output
+    assert len(clock_calls) == 1
+    assert calls == [
+        ("lock", config.local_warehouse_dir), ("calendar", date(2026, 9, 7)),
+        ("stage", {"stage": "pre-research", "data_date": date(2026, 9, 4),
+                   "as_of": datetime.fromisoformat("2026-09-06T18:30:00+08:00"),
+                   "already_locked": True}),
+    ]

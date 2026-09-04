@@ -473,11 +473,18 @@ def _refresh_published_events(
         return EventBackfillService(
             runtime.tushare, runtime.cninfo, runtime.warehouse,
         ).backfill_published_events(start=start, through=through, resume=False)
-    except Exception as exc:
-        summary = _failed_step_summary("published-events", start, exc)
-        summary.through = through
-        summary.issues.insert(0, "可选公司结构化事件补采受限")
-        return summary
+    except Exception:
+        channels = ("holder_trade", "share_float", "repurchase")
+        return BackfillSummary(
+            scope="published-events", start=start, through=through, failed=1,
+            issues=["可选公司结构化事件补采受限：published_events_entry_failed"],
+            capabilities={
+                "published_event_statuses": dict.fromkeys(channels, "failed"),
+                "published_event_failures": {
+                    channel: [f"{start}..{through}:entry_failed"] for channel in channels
+                },
+            },
+        )
 
 
 def _refresh_announced_fundamentals(

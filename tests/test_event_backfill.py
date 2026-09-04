@@ -1,6 +1,7 @@
 from datetime import date, datetime, timezone
 
 import pandas as pd
+import pytest
 import stock_analyzer.data.event_backfill as event_backfill_module
 
 from stock_analyzer.data.event_backfill import EventBackfillService
@@ -1201,3 +1202,89 @@ def test_partial_published_month_does_not_skip_remaining_historical_facts(tmp_pa
     assert date(2026, 6, 30) in set(holder["ann_date"])
     assert date(2026, 6, 30) in set(repurchase["announcement_date"])
     assert date(2026, 6, 30) in set(floats["float_date"])
+
+
+@pytest.mark.parametrize("failure", [
+    "none", "empty", "stk_holdertrade", "repurchase",
+    "share_float_partial", "share_float_failed", "all",
+])
+def test_published_event_channels_are_independent_and_report_safe_statuses(tmp_path, failure):
+    calls = []
+    class Client:
+        def call_paged(self, endpoint, **kwargs):
+            assert endpoint in {"stk_holdertrade", "repurchase", "share_float"}
+            calls.append((endpoint, kwargs))
+            fails = (
+                failure == "all" or failure == endpoint
+                or endpoint == "share_float" and (
+                    failure == "share_float_failed"
+                    or failure == "share_float_partial" and kwargs["ann_date"] == "20260905"
+                )
+            )
+            if fails:
+                raise RuntimeError("token=secret-test-token Authorization: secret-test-header")
+            if failure == "empty":
+                return pd.DataFrame()
+            frame = getattr(ActionPro(), endpoint)(**kwargs)
+            if endpoint == "share_float":
+                frame["holder_name"] = kwargs["ann_date"]
+            return frame
+
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    result = EventBackfillService(Client(), object(), warehouse).backfill_published_events(
+        start=date(2026, 9, 4), through=date(2026, 9, 6), resume=True,
+    )
+    expected = {"holder_trade": "complete", "share_float": "complete", "repurchase": "complete"}
+    if failure == "all":
+        expected = dict.fromkeys(expected, "failed")
+    elif failure in {"stk_holdertrade", "repurchase"}:
+        expected["holder_trade" if failure == "stk_holdertrade" else failure] = "failed"
+    elif failure.startswith("share_float_"):
+        expected["share_float"] = failure.removeprefix("share_float_")
+    assert result.capabilities["published_event_statuses"] == expected
+    failures = result.capabilities["published_event_failures"]
+    assert set(failures) == set(expected)
+    for channel, status in expected.items():
+        assert bool(failures[channel]) == (status != "complete")
+    assert [kwargs["ann_date"] for endpoint, kwargs in calls if endpoint == "share_float"] == [
+        "20260904", "20260905", "20260906",
+    ]
+    assert len(calls) == 5
+    counts = {"holder_trade": 1, "repurchase": 1, "share_float": 3}
+    for channel, dataset in (
+        ("holder_trade", ResearchDatasetId.HOLDER_TRADE),
+        ("repurchase", ResearchDatasetId.REPURCHASE),
+        ("share_float", ResearchDatasetId.SHARE_FLOAT),
+    ):
+        count = 0 if failure == "empty" or expected[channel] == "failed" else counts[channel]
+        if expected[channel] == "partial":
+            count = 2
+        assert len(warehouse.read_current(dataset)) == count
+    serialized = str(result.capabilities) + str(result.issues)
+    assert "secret-test" not in serialized
+    assert "Authorization" not in serialized
+    assert (result.failed > 0 or result.limited > 0) == (failure not in {"none", "empty"})
+    with event_backfill_module.connect_research_warehouse(warehouse.duckdb_path, read_only=True) as connection:
+        assert connection.execute(
+            "select count(*) from research_watermarks where dataset_id like 'event_partition_check%'"
+        ).fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("endpoint,channel", [
+    ("stk_holdertrade", "holder_trade"), ("repurchase", "repurchase"),
+])
+def test_published_month_failure_keeps_later_range_and_reports_partial(tmp_path, endpoint, channel):
+    calls = []
+    class Client:
+        def call_paged(self, name, **kwargs):
+            calls.append((name, kwargs))
+            if name == endpoint and kwargs["start_date"] == "20260831":
+                raise RuntimeError("upstream unavailable")
+            return pd.DataFrame()
+
+    result = EventBackfillService(Client(), object(), ResearchWarehouse(tmp_path)).backfill_published_events(
+        start=date(2026, 8, 31), through=date(2026, 9, 1),
+    )
+    assert result.capabilities["published_event_statuses"][channel] == "partial"
+    assert result.capabilities["published_event_failures"][channel] == ["2026-08-31..2026-08-31"]
+    assert len(calls) == 6

@@ -37,6 +37,9 @@ def _derived_summary(*, failed: tuple[str, ...] = ()):  # business-stage fixture
 def _published_summary(**options):
     return BackfillSummary(
         scope="published-events", start=options["start"], through=options["through"],
+        capabilities={"published_event_statuses": dict.fromkeys(
+            ("holder_trade", "share_float", "repurchase"), "complete"),
+            "published_event_failures": {name: [] for name in ("holder_trade", "share_float", "repurchase")}},
     )
 
 
@@ -960,7 +963,7 @@ def test_published_event_stage_window_and_optional_failure(
             calls.append("published-events")
             if fail_published:
                 raise RuntimeError("holder publication channel unavailable")
-            return summary("published-events")
+            return _published_summary(**kwargs)
     def derive(*args, **kwargs):
         assert calls[-1] == "published-events"
         assert kwargs["as_of"] == cutoff
@@ -987,7 +990,8 @@ def test_published_event_stage_window_and_optional_failure(
     assert len(published) == 1
     if fail_published:
         assert published[0].failed or published[0].limited
-        assert "holder publication channel unavailable" in ";".join(published[0].issues)
+        assert published[0].capabilities["published_event_statuses"] == dict.fromkeys(
+            ("holder_trade", "share_float", "repurchase"), "failed")
     if stage == "pre-research":
         assert calls == ["announcements", "published-events", "derived"]
         assert result[-1].failed == 0
@@ -998,3 +1002,34 @@ def test_published_event_stage_window_and_optional_failure(
     with connect_research_warehouse(warehouse.duckdb_path, read_only=True) as connection:
         saved = connection.execute("select summary_json from research_ingestion_runs").fetchone()[0]
     assert "published-events" in saved
+
+
+@pytest.mark.parametrize("failure_point", ["constructor", "entry"])
+def test_published_entry_failure_marks_all_channels_without_leaking_error(tmp_path, monkeypatch, failure_point):
+    import stock_analyzer.ops.research_data_job as job
+    from stock_analyzer.ops.research_health import build_research_health_report
+
+    class Events:
+        def __init__(self, *args):
+            if failure_point == "constructor":
+                raise RuntimeError("token=secret-test-token")
+        def backfill_published_events(self, **kwargs):
+            raise RuntimeError("Authorization: secret-test-header")
+
+    monkeypatch.setattr(job, "EventBackfillService", Events)
+    formation = date(2026, 9, 4)
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    runtime = SimpleNamespace(warehouse=warehouse, tushare=object(), cninfo=object())
+    result = job._refresh_published_events(runtime, start=formation, through=date(2026, 9, 6))
+    assert result.start == formation and result.through == date(2026, 9, 6)
+    assert result.capabilities["published_event_statuses"] == dict.fromkeys(
+        ("holder_trade", "share_float", "repurchase"), "failed")
+    assert all(result.capabilities["published_event_failures"].values())
+    assert "secret-test" not in str(result.model_dump())
+    assert "Authorization" not in str(result.model_dump())
+    # Through the real stage recorder and health reader, nested statuses survive.
+    monkeypatch.setattr(job, "_run_research_stage_impl", lambda *a, **k: (result,))
+    job.run_research_stage(runtime, stage="pre-research", data_date=formation,
+                           as_of=datetime.fromisoformat("2026-09-06T18:30:00+08:00"))
+    report = build_research_health_report(warehouse, formation)
+    assert report.latest_stage_runs[0].capabilities == result.capabilities

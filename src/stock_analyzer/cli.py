@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time, timedelta, timezone
+from pathlib import Path
 from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
@@ -51,6 +52,52 @@ def _health_research_state(report: Any) -> tuple[bool, tuple[str, ...]]:
     if announcement_status not in {"cninfo_complete", "exchange_complete"}:
         limitations.append("行动日前公告补采未完成")
     return core_ready, tuple(limitations)
+
+
+def _validated_formal_health(path: Path, current: Any, data_date: date):
+    from stock_analyzer.ops.research_health import ResearchHealthReport
+
+    try:
+        frozen = ResearchHealthReport.model_validate_json(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if frozen.data_date != data_date:
+        return None
+
+    def latest_pre(report):
+        runs = [
+            run for run in report.latest_stage_runs
+            if run.stage == "pre-research" and run.data_date == data_date
+        ]
+        return max(runs, key=lambda run: (
+            run.started_at.replace(tzinfo=timezone.utc)
+            if run.started_at.utcoffset() is None else run.started_at,
+            run.run_id,
+        ), default=None)
+
+    saved_run, current_run = latest_pre(frozen), latest_pre(current)
+    if saved_run is None or current_run is None or saved_run.run_id != current_run.run_id:
+        return None
+    try:
+        cutoffs = [
+            datetime.fromisoformat(run.capabilities.get("research_as_of", ""))
+            for run in (saved_run, current_run)
+        ]
+    except (TypeError, ValueError):
+        return None
+    if any(cutoff.utcoffset() is None for cutoff in cutoffs) or cutoffs[0] != cutoffs[1]:
+        return None
+    if not _health_research_state(frozen)[0]:
+        return None
+    return frozen
+
+
+def _health_markdown_matches(path: Path, data_date: date) -> bool:
+    try:
+        content = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        return False
+    return f"# {data_date} 数据健康摘要" in content.splitlines()
 
 
 def _print_limited_research(limitations: tuple[str, ...]) -> None:
@@ -113,10 +160,13 @@ def data_run_stage(
         _fail("--as-of is only valid for pre-research")
     cutoff = None
     if stage == "pre-research":
+        local_now = datetime.now(ZoneInfo("Asia/Shanghai"))
         if as_of in {None, "auto"}:
+            if local_now.time() < time(18, 30):
+                typer.echo("pre-research: no_action_day; automatic cutoff has not occurred")
+                return
             cutoff = datetime.combine(
-                datetime.now(ZoneInfo("Asia/Shanghai")).date(),
-                time(18, 30), ZoneInfo("Asia/Shanghai"),
+                local_now.date(), time(18, 30), ZoneInfo("Asia/Shanghai"),
             )
         else:
             try:
@@ -126,6 +176,8 @@ def data_run_stage(
                 cutoff = cutoff.astimezone(ZoneInfo("Asia/Shanghai"))
             except ValueError:
                 _fail("--as-of must be auto or an ISO datetime with timezone")
+            if cutoff > local_now:
+                _fail("pre-research cutoff has not occurred")
 
     config = AppConfig.load()
     warehouse_root = getattr(config, "local_warehouse_dir", None)
@@ -200,18 +252,13 @@ def _execute_data_stage(
     )
     health_root = runtime.config.local_archive_dir / "data_health"
     health_path = health_root / f"{parsed}.json"
-    preserve_formal = (
-        stage != "pre-research"
-        and health_path.is_file()
-        and (health_root / f"{parsed}.md").is_file()
-        and any(
-            item.stage == "pre-research"
-            and getattr(item, "data_date", None) == parsed
-            and item.capabilities.get("research_as_of")
-            for item in health.latest_stage_runs
-        )
+    frozen = (
+        _validated_formal_health(health_path, health, parsed)
+        if stage != "pre-research" else None
     )
-    if preserve_formal:
+    if frozen is not None:
+        if not _health_markdown_matches(health_root / f"{parsed}.md", parsed):
+            write_health_report(frozen, health_root)
         typer.echo("事实补采已完成；保留18:30正式健康快照")
     else:
         health_path, _ = write_health_report(health, health_root)

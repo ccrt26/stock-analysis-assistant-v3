@@ -222,32 +222,58 @@ class EventBackfillService:
     ) -> BackfillSummary:
         """Refresh publication-date events, never treating a partial month as complete."""
         summary = BackfillSummary(scope="published-events", start=start, through=through)
+        channels = ("holder_trade", "share_float", "repurchase")
+        failures: dict[str, list[str]] = {channel: [] for channel in channels}
+        completed = dict.fromkeys(channels, 0)
         # Always re-query this narrow window, even on resume: late rows can arrive
         # in an existing partition. Partial windows do not write checked watermarks.
         for month_start, month_end in _month_ranges(start, through):
             partition = month_start.strftime("%Y-%m")
-            for dataset, endpoint, normalize, options in (
-                (ResearchDatasetId.HOLDER_TRADE, "stk_holdertrade", _holder_row, {"limit": 3000}),
-                (ResearchDatasetId.REPURCHASE, "repurchase", _repurchase_row, {}),
+            for channel, dataset, endpoint, normalize, options in (
+                ("holder_trade", ResearchDatasetId.HOLDER_TRADE, "stk_holdertrade", _holder_row, {"limit": 3000}),
+                ("repurchase", ResearchDatasetId.REPURCHASE, "repurchase", _repurchase_row, {}),
             ):
-                frame = self.tushare.call_paged(
-                    endpoint,
-                    start_date=_yyyymmdd(month_start),
-                    end_date=_yyyymmdd(month_end),
-                    **options,
-                ).drop_duplicates(ignore_index=True)
-                self._require_dates_in_range(
-                    frame, "ann_date", month_start, month_end, endpoint,
-                )
-                self._commit(
-                    dataset, partition, endpoint,
-                    [normalize(row) for row in frame.to_dict(orient="records")],
-                    through, summary,
-                )
+                try:
+                    frame = self.tushare.call_paged(
+                        endpoint,
+                        start_date=_yyyymmdd(month_start),
+                        end_date=_yyyymmdd(month_end),
+                        **options,
+                    ).drop_duplicates(ignore_index=True)
+                    self._require_dates_in_range(
+                        frame, "ann_date", month_start, month_end, endpoint,
+                    )
+                    self._commit(
+                        dataset, partition, endpoint,
+                        [normalize(row) for row in frame.to_dict(orient="records")],
+                        through, summary,
+                    )
+                except Exception:
+                    failures[channel].append(f"{month_start}..{month_end}")
+                else:
+                    completed[channel] += 1
         current = start
         while current <= through:
-            self._backfill_share_float_announcements(current, summary)
+            try:
+                self._backfill_share_float_announcements(current, summary)
+            except Exception:
+                failures["share_float"].append(current.isoformat())
+            else:
+                completed["share_float"] += 1
             current += timedelta(days=1)
+        summary.capabilities["published_event_statuses"] = {
+            channel: ("partial" if completed[channel] else "failed")
+            if failures[channel] else "complete"
+            for channel in channels
+        }
+        summary.capabilities["published_event_failures"] = failures
+        for channel in channels:
+            if failures[channel]:
+                summary.limited += 1
+                summary.issues.extend(
+                    f"{channel}:{window}:request_or_write_failed"
+                    for window in failures[channel]
+                )
         return summary
 
     def backfill_suspensions(
