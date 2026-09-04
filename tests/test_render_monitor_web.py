@@ -17,6 +17,15 @@ from tools.render_monitor_web import (
     scan_history,
     trigger_of,
 )
+from tools import render_monitor_web as renderer
+
+
+@pytest.fixture(autouse=True)
+def _isolated_selection_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """隔离选股轨迹目录：真实 research-trace 不得漏进测试。"""
+    monkeypatch.setattr(
+        renderer, "SELECTION_DIR", tmp_path / "local_archive" / "forward_selection"
+    )
 
 
 def _episode(
@@ -342,6 +351,130 @@ def test_conditional_event_uses_first_reaction_reference(tmp_path: Path) -> None
     )
     assert payload2["stocks"][0]["ref"] is None
     assert payload2["stocks"][0]["refKind"] is None
+
+
+def test_d0_entries_from_latest_trace_only(tmp_path: Path) -> None:
+    """D0：最新报告页面把次日生效的新推荐以"待定价"列出；历史页面永不追加。"""
+    selection_dir = tmp_path / "local_archive" / "forward_selection"
+    selection_dir.mkdir(parents=True)
+    old_selection_dir = renderer.SELECTION_DIR
+    renderer.SELECTION_DIR = selection_dir
+    try:
+        trace = {
+            "trace_version": "forward-selection-trace-v1",
+            "formation_date": "2026-09-02",
+            "action_date": "2026-09-03",
+            "as_of": "2026-09-03T09:00:00+08:00",
+            "candidate_ledger": [
+                {
+                    "ts_code": "600003.SH",
+                    "name": "新推荐股",
+                    "final_fate": "selected",
+                    "primary_reason": "连续跑赢市场且成交放大。",
+                },
+                {
+                    "ts_code": "600004.SH",
+                    "name": "落选股",
+                    "final_fate": "rejected",
+                    "primary_reason": "强度不足。",
+                },
+            ],
+            "research_result": {
+                "selected_stocks": [
+                    {
+                        "ts_code": "600003.SH",
+                        "strongest_counterevidence": "涨幅集中在最近三日。",
+                    }
+                ]
+            },
+        }
+        (selection_dir / "research-trace-2026-09-02.json").write_text(
+            json.dumps(trace, ensure_ascii=False), encoding="utf-8"
+        )
+        # 非最新的 09-01 也有配对轨迹：历史页面不得追加 D0
+        old_trace = dict(trace, formation_date="2026-09-01", action_date="2026-09-02")
+        (selection_dir / "research-trace-2026-09-01.json").write_text(
+            json.dumps(old_trace, ensure_ascii=False), encoding="utf-8"
+        )
+        formal = _episode("e-formal", "600000.SH", "示例股份")
+        snapshot = _snapshot([formal])
+        # 生产语义：最新报告/快照在盘上（否则"最新日期"闸门不成立）
+        (tmp_path / "snapshot-2026-09-02.json").write_text(
+            json.dumps(snapshot, ensure_ascii=False), encoding="utf-8"
+        )
+        (tmp_path / "monitor-report-2026-09-02.json").write_text(
+            json.dumps(_report([_alert("e-formal")]), ensure_ascii=False),
+            encoding="utf-8",
+        )
+        (tmp_path / "snapshot-2026-09-01.json").write_text(
+            json.dumps(
+                _snapshot([_episode("e-old", "600009.SH", "旧股")]),
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        (tmp_path / "monitor-report-2026-09-01.json").write_text(
+            json.dumps(_report([]), ensure_ascii=False), encoding="utf-8"
+        )
+        payload = build_payload(
+            tmp_path, tmp_path, date(2026, 9, 2), _report([_alert("e-formal")]), snapshot
+        )
+        codes = [s["code"] for s in payload["stocks"]]
+        assert "600003.SH" in codes and "600004.SH" not in codes
+        d0 = next(s for s in payload["stocks"] if s["code"] == "600003.SH")
+        assert d0["d0"] is True and d0["days"] == 0
+        assert d0["stage"] == "待定价" and d0["stageType"] == "pending"
+        assert d0["ref"] is None and d0["recDate"] == "2026-09-03"
+        assert d0["reasonFull"] == "连续跑赢市场且成交放大。"
+        assert d0["reasonRisk"] == "涨幅集中在最近三日。"
+        assert d0["recIndex"] == len(payload["dates"]) - 1
+        assert any(event[2] == "正式推荐" for event in d0["events"])
+        # 历史日期不追加 D0
+        old_payload = build_payload(
+            tmp_path,
+            tmp_path,
+            date(2026, 9, 1),
+            _report([]),
+            _snapshot([_episode("e-old", "600009.SH", "旧股")]),
+        )
+        assert all(not s.get("d0") for s in old_payload["stocks"])
+        assert "600003.SH" not in [s["code"] for s in old_payload["stocks"]]
+    finally:
+        renderer.SELECTION_DIR = old_selection_dir
+
+
+@pytest.mark.parametrize("engine,status,recognition,expected", [
+    ("independent_demand_acceleration", "active", "confirmed", 1),
+    ("fresh_event_pending", "conditional", "pending", 0),
+    ("anchor_only", "inactive", "not_applicable", 0),
+])
+def test_d0_v4_only_displays_confirmed_formal_recommendations(
+    tmp_path, engine, status, recognition, expected,
+):
+    selection = renderer.SELECTION_DIR
+    selection.mkdir(parents=True)
+    trace = {
+        "trace_version": "daily-research-trace-v4",
+        "formation_date": "2026-09-02", "action_date": "2026-09-03",
+        "as_of": "2026-09-02T18:30:00+08:00",
+        "candidate_ledger": [{
+            "ts_code": "600003.SH", "name": "新推荐股", "final_fate": "selected",
+            "primary_reason": "已有研究判断",
+            "research_thesis": {
+                "engine_type": engine, "engine_status": status,
+                "market_recognition": {"status": recognition},
+            },
+        }],
+        "research_result": {"selected_stocks": []},
+    }
+    (selection / "research-trace-2026-09-02.json").write_text(json.dumps(trace), encoding="utf-8")
+    (tmp_path / "monitor-report-2026-09-02.json").write_text(json.dumps(_report([])), encoding="utf-8")
+    payload = build_payload(tmp_path, tmp_path, date(2026, 9, 2), _report([]), _snapshot([]))
+    assert len(payload["stocks"]) == expected
+    if expected:
+        assert payload["stocks"][0]["d0"] is True
+        assert payload["stocks"][0]["ref"] is None
+        assert payload["stocks"][0]["events"][0][2] == "正式推荐"
 
 
 class TestRender:

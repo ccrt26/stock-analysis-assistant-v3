@@ -105,6 +105,23 @@ def _index_date(monitor_dir: Path) -> str | None:
 @pytest.fixture(autouse=True)
 def _hermetic_renderer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(renderer, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        renderer, "SELECTION_DIR", tmp_path / "local_archive" / "forward_selection"
+    )
+
+
+def test_trace_change_triggers_rerender(tmp_path: Path) -> None:
+    monitor_dir = tmp_path / "local_archive" / "forward_monitor"
+    selection_dir = tmp_path / "local_archive" / "forward_selection"
+    _write_day(monitor_dir, "2026-09-02")
+    _write_calendar(tmp_path, [("2026-09-03", True)])
+    assert _run(tmp_path, "2026-09-03") == 0
+    selection_dir.mkdir(parents=True, exist_ok=True)
+    trace_path = selection_dir / "research-trace-2026-09-02.json"
+    trace_path.write_text('{"formation_date": "2026-09-02"}', encoding="utf-8")
+    assert _run(tmp_path, "2026-09-03") == 0  # 轨迹纳入哈希：变化触发重渲染
+    log_text = (monitor_dir / updater.LOG_NAME).read_text(encoding="utf-8")
+    assert log_text.count("rendered=2026-09-02") == 2
 
 
 def test_first_run_writes_single_index_for_latest_day(tmp_path: Path) -> None:

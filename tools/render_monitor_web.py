@@ -22,6 +22,8 @@ from typing import Any
 
 import pandas as pd
 
+from stock_analyzer.ops.forward_selection import selection_output_class
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 MONITOR_DIR = PROJECT_ROOT / "local_archive" / "forward_monitor"
 SELECTION_DIR = PROJECT_ROOT / "local_archive" / "forward_selection"
@@ -894,6 +896,101 @@ def _events_for(
     return events
 
 
+def sw_industry_code_map(
+    root: Path, as_of: datetime, codes: list[str], level: str = "L2"
+) -> dict[str, str]:
+    """个股的申万行业代码（industry_member，时点有效），用于 D0 条目的行业兜底分组。"""
+    if not codes:
+        return {}
+    path = (
+        root / "local_warehouse" / "facts" / "industry_member"
+        / "classification_version=SW2021" / "data.parquet"
+    )
+    if not path.is_file():
+        return {}
+    frame = _cutoff_frame(pd.read_parquet(path), _as_utc_cutoff(as_of))
+    frame = frame.loc[
+        frame["ts_code"].astype(str).isin(codes)
+        & frame["level"].astype(str).eq(level)
+    ]
+    if frame.empty:
+        return {}
+    frame = frame.copy()
+    frame["vf"] = pd.to_datetime(frame["valid_from"], errors="coerce")
+    frame["vt"] = pd.to_datetime(frame["valid_to"], errors="coerce")
+    as_of_day = _as_utc_cutoff(as_of).tz_localize(None).date()
+    result: dict[str, str] = {}
+    for row in frame.itertuples():
+        current = str(getattr(row, "is_current")) in {"1", "1.0", "True", "true"}
+        covers = (pd.isna(row.vf) or row.vf.date() <= as_of_day) and (
+            pd.isna(row.vt) or row.vt.date() >= as_of_day
+        )
+        if not (current or covers):
+            continue
+        result.setdefault(str(row.ts_code), str(row.industry_code))
+    return result
+
+
+def load_d0_entries(
+    selection_dir: Path, monitor_dir: Path, analysis_date: date
+) -> tuple[list[dict[str, Any]], str]:
+    """当晚定稿的最新报告才追加 D0：读取配对选股轨迹的 selected 候选。
+
+    返回 (D0 条目列表, 轨迹 action_date)。历史日期（非最新候选报告）永不追加
+    D0，保持历史页面语义不变；轨迹缺失 / 格式不符时返回空。
+    """
+    archived = archived_dates(monitor_dir)
+    if not archived or max(archived) != analysis_date:
+        return [], ""
+    trace_path = selection_dir / f"research-trace-{analysis_date.isoformat()}.json"
+    if not trace_path.is_file():
+        return [], ""
+    try:
+        trace = json.loads(trace_path.read_text(encoding="utf-8"))
+        trace_formation = str(trace.get("formation_date") or "")
+        trace_action = str(trace.get("action_date") or "")
+        if trace_formation != analysis_date.isoformat():
+            return [], ""
+        if not trace_action or trace_action <= analysis_date.isoformat():
+            return [], ""
+        risk_by_code: dict[str, str] = {}
+        priority_by_code: dict[str, int] = {}
+        research = trace.get("research_result") or {}
+        for item in research.get("selected_stocks") or []:
+            if not isinstance(item, dict):
+                continue
+            code = str(item.get("ts_code") or "")
+            risk_by_code[code] = str(item.get("strongest_counterevidence") or "")
+            priority = item.get("priority")
+            if isinstance(priority, (int, float)):
+                priority_by_code[code] = int(priority)
+        entries: list[dict[str, Any]] = []
+        for item in trace.get("candidate_ledger") or []:
+            if not isinstance(item, dict) or str(item.get("final_fate")) != "selected":
+                continue
+            if selection_output_class(
+                trace_version=str(trace.get("trace_version") or ""),
+                candidate=item,
+            ) not in {"confirmed_active", "legacy_v1_not_rewritten"}:
+                continue
+            code = str(item.get("ts_code") or "")
+            if not code:
+                continue
+            entries.append(
+                {
+                    "ts_code": code,
+                    "name": str(item.get("name") or code),
+                    "reason": str(item.get("primary_reason") or ""),
+                    "risk": risk_by_code.get(code, ""),
+                    "priority": priority_by_code.get(code, 99),
+                }
+            )
+        entries.sort(key=lambda item: item["priority"])
+        return entries, trace_action
+    except (OSError, json.JSONDecodeError, ValueError):
+        return [], ""
+
+
 def build_payload(
     root: Path,
     monitor_dir: Path,
@@ -935,7 +1032,16 @@ def build_payload(
     names = group_name_map(SELECTION_DIR)
     catalog = industry_catalog_names(root)
 
-    codes = sorted({str(item["ts_code"]) for item in selected})
+    # D0：最新报告页面把次日开盘前生效的新推荐以"待定价"列出（数据来自配对选股轨迹）
+    d0_entries, d0_action_iso = load_d0_entries(
+        SELECTION_DIR, monitor_dir, analysis_date
+    )
+    displayed_codes = {str(item["ts_code"]) for item in selected}
+    d0_entries = [entry for entry in d0_entries if entry["ts_code"] not in displayed_codes]
+
+    codes = sorted(
+        {str(item["ts_code"]) for item in selected} | {entry["ts_code"] for entry in d0_entries}
+    )
     group_codes = sorted(
         {
             str(item["original_group_code"])
@@ -951,6 +1057,13 @@ def build_payload(
     sessions = list_sessions(root, start, analysis_date) or [analysis_date]
 
     as_of_dt = datetime.fromisoformat(as_of)
+    # D0 条目无研究分组：用申万二级行业代码兜底，行业曲线与名称随之可得
+    d0_group_map = sw_industry_code_map(
+        root, as_of_dt, [entry["ts_code"] for entry in d0_entries]
+    )
+    for entry in d0_entries:
+        entry["group_code"] = d0_group_map.get(entry["ts_code"], "")
+    group_codes = sorted(set(group_codes) | {entry["group_code"] for entry in d0_entries if entry["group_code"]})
     group_members = group_member_map(root, as_of_dt, group_codes)
     profiles = company_profile_map(root, as_of_dt, codes)
     industry_chains = industry_chain_map(root, as_of_dt, codes)
@@ -1096,6 +1209,45 @@ def build_payload(
                 "candles": bars,
                 "reviews": reviews,
                 "events": _events_for(action_iso, episode, review_items),
+            }
+        )
+    # D0 条目：只有推荐结论与历史价格背景，参考价/收益/复盘一律留空待 D1 定价
+    for entry in d0_entries:
+        ts_code = entry["ts_code"]
+        group_code = entry.get("group_code") or ""
+        rec_index = max(0, len(sessions) - 1)
+        stocks_payload.append(
+            {
+                "code": ts_code,
+                "name": entry["name"],
+                "recDate": d0_action_iso,
+                "recIndex": rec_index,
+                "ref": None,
+                "refKind": None,
+                "days": 0,
+                "phase": "primary",
+                "stage": "待定价",
+                "stageType": "pending",
+                "attention": False,
+                "trigger": "",
+                "suspended": False,
+                "d0": True,
+                "company": profiles.get(ts_code) or None,
+                "reasonFull": entry["reason"],
+                "reasonRisk": entry["risk"],
+                "industryName": names.get(group_code) or catalog.get(group_code) or None,
+                "industrySource": facts.get("industry_kind", {}).get(group_code, "none"),
+                "industry": industry_series.get(group_code, []),
+                "candles": candle_series.get(ts_code, []),
+                "reviews": [],
+                "events": [
+                    [
+                        d0_action_iso[5:],
+                        "rec",
+                        "正式推荐",
+                        _short(entry["reason"], 48),
+                    ]
+                ],
             }
         )
     stocks_payload.sort(key=lambda item: (item["recDate"], item["code"]), reverse=True)
@@ -1256,6 +1408,7 @@ select.quietbtn option{background:var(--panel);color:var(--ink);font-size:13px}
 .stage-sideways{color:var(--amber)}.stage-sideways::before{background:var(--amber)}
 .stage-weak{color:var(--down)}.stage-weak::before{background:var(--down)}
 .stage-paused{color:var(--ink3)}.stage-paused::before{background:var(--ink3)}
+.stage-pending{color:var(--accent)}.stage-pending::before{background:var(--accent)}
 .pbar{width:86px;height:3px;background:var(--hair2);border-radius:2px;overflow:hidden;margin-top:6px}
 .pbar i{display:block;height:100%;background:var(--ink2)}
 /* ---------- 个股：正文页 ---------- */
@@ -1516,9 +1669,10 @@ function metrics(s){
 }
 function nearTarget(s){const m = metrics(s);return m.cur != null && m.toT < 10}
 function nextCheck(s){
-  if(s.suspended)return"待复牌";
-  for(const d of [5,10,20])if(s.days < d)return"D" + d;
-  return"已结束";
+ if(s.d0)return"待定价";
+ if(s.suspended)return"待复牌";
+ for(const d of [5,10,20])if(s.days < d)return"D" + d;
+ return"已结束";
 }
 function showToast(msg){const el = $("toast");el.textContent = msg;el.classList.add("show");setTimeout(() => el.classList.remove("show"),1800)}
 function cssVar(n){return getComputedStyle(document.body).getPropertyValue(n).trim()}
@@ -1560,7 +1714,8 @@ function drawChart(){
  const vLine = (x,y1,y2,col,dash,op) => `<line x1="${x.toFixed(1)}" x2="${x.toFixed(1)}" y1="${y1}" y2="${y2}" stroke="${col}" stroke-width="${(1.1 * UX).toFixed(2)}" ${dash ? `stroke-dasharray="${dash}"` : ""} opacity="${op ?? 1}"/>`;
  const hLine = (yy,col,dash) => `<line x1="${padL}" x2="${W - padR}" y1="${yy.toFixed(1)}" y2="${yy.toFixed(1)}" stroke="${col}" stroke-width="${(1.2 * UX).toFixed(2)}" stroke-dasharray="${dash}" opacity=".9"/>`;
  const recMark = () => {const rx = xi(s.recIndex);
-  return vLine(rx,pT,pB,L.accent,"4 4",.6) + pill(rx,pT + 11,s.refKind === "event" ? "事件定价 D1" : "推荐 D1",L.accent,"#fff",{anchor:"middle"});};
+  const mark = s.d0 ? "推荐 D0" : (s.refKind === "event" ? "事件定价 D1" : "推荐 D1");
+  return vLine(rx,pT,pB,L.accent,"4 4",.6) + pill(rx,pT + 11,mark,L.accent,"#fff",{anchor:"middle"});};
  if(!relMode){
   const refs = s.ref != null ? [s.ref,s.ref * 1.2] : [];
   const vals = s.candles.flatMap(d => d[1] != null && d[2] != null ? [d[1],d[2]] : []).concat(refs);
@@ -1844,9 +1999,13 @@ function renderDetail(){
  const s = cur,m = metrics(s);
  $("dName").textContent = s.name;
  $("dCode").textContent = s.code;
- const phaseText = s.suspended ? "无法执行" : (s.phase === "primary" ? "观察中" : s.phase === "passive_tail" ? "尾段观察" : "已结束");
- $("dStatus").textContent = `${phaseText} · 第 ${s.days} / 20 个交易日` +
-  (s.ref == null ? " · 无推荐参考价" : (s.refKind === "event" ? " · 参考价=事件首日开盘" : ""));
+ if(s.d0){
+  $("dStatus").textContent = `D0 · ${s.recDate} 开盘前生效 · 待定价`;
+ }else{
+  const phaseText = s.suspended ? "无法执行" : (s.phase === "primary" ? "观察中" : s.phase === "passive_tail" ? "尾段观察" : "已结束");
+  $("dStatus").textContent = `${phaseText} · 第 ${s.days} / 20 个交易日` +
+   (s.ref == null ? " · 无推荐参考价" : (s.refKind === "event" ? " · 参考价=事件首日开盘" : ""));
+ }
  $("dCompany").textContent = s.company || "";
  const rb = $("rReason");
  if(s.reasonFull){

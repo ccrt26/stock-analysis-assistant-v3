@@ -99,15 +99,20 @@ def _sha256_file(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def input_digest(monitor_dir: Path, day: date) -> tuple[str, bool]:
-    """report + snapshot + 当日台账的字节哈希；台账缺失以固定占位参与哈希。"""
+def input_digest(
+    monitor_dir: Path, selection_dir: Path, day: date
+) -> tuple[str, bool]:
+    """report + snapshot + 当日台账 + 配对选股轨迹的字节哈希；缺失件以固定占位参与。"""
     iso = day.isoformat()
     ledger_path = monitor_dir / f"daily-formal-reviews-{iso}.json"
     ledger_exists = ledger_path.is_file()
+    trace_path = selection_dir / f"research-trace-{iso}.json"
+    trace_exists = trace_path.is_file()
     parts = [
         f"monitor-report:{_sha256_file(monitor_dir / f'monitor-report-{iso}.json')}",
         f"snapshot:{_sha256_file(monitor_dir / f'snapshot-{iso}.json')}",
         f"ledger:{_sha256_file(ledger_path)}" if ledger_exists else LEDGER_PLACEHOLDER,
+        f"trace:{_sha256_file(trace_path)}" if trace_exists else "trace:missing",
     ]
     return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest(), ledger_exists
 
@@ -190,7 +195,9 @@ def run_update(
     today: date,
     *,
     force: bool = False,
+    selection_dir: Path | None = None,
 ) -> int:
+    selection_dir = selection_dir or project_root / "local_archive" / "forward_selection"
     calendar = read_trade_calendar(project_root)
     candidates = scan_candidate_dates(monitor_dir)
     latest = candidates[-1] if candidates else None
@@ -200,7 +207,7 @@ def run_update(
     pending: list[tuple[date, str]] = []
     ledger_warnings: list[date] = []
     for day in candidates:
-        digest, ledger_exists = input_digest(monitor_dir, day)
+        digest, ledger_exists = input_digest(monitor_dir, selection_dir, day)
         if not ledger_exists:
             ledger_warnings.append(day)
         record = published.get(day.isoformat())
