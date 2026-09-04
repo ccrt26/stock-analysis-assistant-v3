@@ -198,9 +198,23 @@ def _execute_data_stage(
     health = build_research_health_report(
         runtime.warehouse, parsed, full_history=False
     )
-    health_path, _ = write_health_report(
-        health, runtime.config.local_archive_dir / "data_health"
+    health_root = runtime.config.local_archive_dir / "data_health"
+    health_path = health_root / f"{parsed}.json"
+    preserve_formal = (
+        stage != "pre-research"
+        and health_path.is_file()
+        and (health_root / f"{parsed}.md").is_file()
+        and any(
+            item.stage == "pre-research"
+            and getattr(item, "data_date", None) == parsed
+            and item.capabilities.get("research_as_of")
+            for item in health.latest_stage_runs
+        )
     )
+    if preserve_formal:
+        typer.echo("事实补采已完成；保留18:30正式健康快照")
+    else:
+        health_path, _ = write_health_report(health, health_root)
     typer.echo(
         f"stage health: core_complete={str(health.complete_core_date).lower()} "
         f"output={health_path}"
@@ -309,6 +323,14 @@ def _resolve_research_stage_date(client, stage: str, now: datetime) -> date | No
             return None
         candidates = [value for value in open_dates if value < tomorrow]
     elif stage == "evening":
+        calendar_dates = set(calendar["cal_date"])
+        if today not in calendar_dates:
+            _fail("trade calendar does not cover today")
+        if today not in open_dates:
+            if tomorrow not in calendar_dates:
+                _fail("trade calendar does not cover tomorrow")
+            if tomorrow not in open_dates:
+                return None
         candidates = [
             value for value in open_dates
             if value < today or (value == today and local_now.time() >= time(15))

@@ -8,7 +8,8 @@ import pytest
 from stock_analyzer.ops import preopen_safety as safety
 
 
-def _fixture(tmp_path, monkeypatch, *, open_day=True, trace=True, announcements=None, suspended=None, fail=False):
+def _fixture(tmp_path, monkeypatch, *, open_day=True, trace=True, announcements=None, suspended=None, fail=False,
+             checked_at="2026-09-07T08:45:00+08:00"):
     archive = tmp_path / "local_archive"
     root = archive / "forward_selection"
     root.mkdir(parents=True)
@@ -63,7 +64,7 @@ def _fixture(tmp_path, monkeypatch, *, open_day=True, trace=True, announcements=
     monkeypatch.setattr(safety, "LocalForwardData", lambda *args: SimpleNamespace(trading_day_status=lambda _: open_day))
     monkeypatch.setattr(safety, "EventBackfillService", lambda *args, **kwargs: SimpleNamespace(backfill_announcements=backfill))
     result = safety.prepare_preopen_safety(
-        config, clock=lambda: datetime.fromisoformat("2026-09-07T08:45:00+08:00"),
+        config, clock=lambda: datetime.fromisoformat(checked_at),
         build_runtime=lambda _: runtime,
     )
     assert all(path.read_bytes() == contents for path, contents in before.items())
@@ -110,3 +111,28 @@ def test_safety_source_failure_is_not_no_changes(tmp_path, monkeypatch):
     result, _ = _fixture(tmp_path, monkeypatch, fail=True)
     assert result["status"] == "data_limited"
     assert "suspension" in ";".join(result["limitations"])
+
+
+def test_safety_allows_last_second_before_open(tmp_path, monkeypatch):
+    result, calls = _fixture(tmp_path, monkeypatch, checked_at="2026-09-07T09:29:59+08:00")
+    assert result["status"] == "no_new_changes"
+    assert calls == ["announcements", "suspend_d"]
+
+
+@pytest.mark.parametrize("checked_at", ["2026-09-07T09:30:00+08:00",
+                                       "2026-09-07T10:00:00+08:00"])
+@pytest.mark.parametrize("trace", [True, False])
+def test_late_safety_is_invalid_without_fetch_or_formal_changes(tmp_path, monkeypatch, checked_at, trace):
+    result, calls = _fixture(tmp_path, monkeypatch, checked_at=checked_at, trace=trace)
+    assert result["status"] == "data_limited"
+    assert "安全检查启动时已经开盘，不能作为开盘前提醒" in ";".join(result["limitations"])
+    assert calls == []
+    assert result["new_announcements"] == result["suspended_stocks"] == []
+
+
+def test_closed_day_takes_precedence_over_late_safety(tmp_path, monkeypatch):
+    result, calls = _fixture(tmp_path, monkeypatch, open_day=False,
+                             checked_at="2026-09-07T10:00:00+08:00")
+    assert result["status"] == "no_action_day"
+    assert calls == []
+    assert result["limitations"] == []

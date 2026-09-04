@@ -1,6 +1,8 @@
-from datetime import date
+from datetime import date, datetime
 from contextlib import contextmanager
 from types import SimpleNamespace
+
+import pytest
 
 from typer.testing import CliRunner
 
@@ -436,3 +438,124 @@ def test_stage_cutoff_option_and_validation_before_runtime():
                                     "--data-date", "auto", "--as-of", cutoff])
         assert result.exit_code == 2
         assert "as-of" in result.output
+
+
+@pytest.mark.parametrize("stage", ["evening", "close"])
+@pytest.mark.parametrize("files,cutoff,same_date,preserve", [
+    (("json", "md"), "2026-09-06T18:30:00+08:00", True, True),
+    (("json", "md"), "", True, False),
+    (("json", "md"), "2026-09-06T18:30:00+08:00", False, False),
+    (("json",), "2026-09-06T18:30:00+08:00", True, False),
+    (("md",), "2026-09-06T18:30:00+08:00", True, False),
+    ((), "2026-09-06T18:30:00+08:00", True, False),
+])
+def test_maintenance_preserves_only_existing_formal_health(
+    tmp_path, monkeypatch, stage, files, cutoff, same_date, preserve,
+):
+    import stock_analyzer.ops.research_data_job as job
+    import stock_analyzer.ops.research_health as health
+    from stock_analyzer.storage.research_warehouse import ResearchWarehouse
+    from stock_analyzer.storage.research_schema import connect_research_warehouse
+
+    formation = date(2026, 9, 4)
+    config = SimpleNamespace(local_archive_dir=tmp_path / "archive")
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    runtime = SimpleNamespace(config=config, warehouse=warehouse)
+    report = health.build_research_health_report(warehouse, formation)
+    report.latest_stage_runs = (health.StageRunHealth(
+        stage="pre-research", data_date=formation if same_date else date(2026, 9, 3),
+        run_id="formal", status="limited",
+        started_at=datetime.fromisoformat("2026-09-06T18:32:00+08:00"),
+        finished_at=datetime.fromisoformat("2026-09-06T18:40:00+08:00"),
+        issues=(), capabilities={"research_as_of": cutoff},
+    ),)
+    output = config.local_archive_dir / "data_health"
+    output.mkdir(parents=True)
+    for suffix in files:
+        (output / f"{formation}.{suffix}").write_text("frozen", encoding="utf-8")
+    fact_calls = []
+    def collect(*args, **kwargs):
+        fact_calls.append(kwargs["stage"])
+        return (BackfillSummary(scope="events", start=formation, through=formation, committed=1),)
+    monkeypatch.setattr(job, "_run_research_stage_impl", collect)
+    monkeypatch.setattr(job, "build_research_data_runtime", lambda _: runtime)
+    monkeypatch.setattr("stock_analyzer.config.AppConfig.load", lambda: config)
+    monkeypatch.setattr(health, "build_research_health_report", lambda *a, **k: report)
+
+    result = runner.invoke(app, ["data", "run-stage", "--stage", stage,
+                                 "--data-date", formation.isoformat()])
+
+    assert result.exit_code == 0, result.output
+    assert fact_calls == [stage]
+    with connect_research_warehouse(warehouse.duckdb_path, read_only=True) as connection:
+        assert connection.execute(
+            "select stage, status from research_ingestion_runs"
+        ).fetchall() == [(stage, "succeeded")]
+    for suffix in ("json", "md"):
+        contents = (output / f"{formation}.{suffix}").read_text(encoding="utf-8")
+        assert (contents == "frozen") is preserve
+    assert ("保留18:30正式健康快照" in result.output) is preserve
+
+
+def test_pre_research_always_writes_both_formal_health_files(tmp_path, monkeypatch):
+    import stock_analyzer.ops.research_data_job as job
+    import stock_analyzer.ops.research_health as health
+    from stock_analyzer.storage.research_warehouse import ResearchWarehouse
+
+    formation = date(2026, 9, 4)
+    config = SimpleNamespace(local_archive_dir=tmp_path / "archive")
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    runtime = SimpleNamespace(config=config, warehouse=warehouse)
+    report = health.build_research_health_report(warehouse, formation)
+    report.latest_stage_runs = (health.StageRunHealth(
+        stage="pre-research", data_date=formation, run_id="formal", status="limited",
+        started_at=datetime.fromisoformat("2026-09-06T18:32:00+08:00"),
+        finished_at=datetime.fromisoformat("2026-09-06T18:40:00+08:00"),
+        issues=(), capabilities={"research_as_of": "2026-09-06T18:30:00+08:00"},
+    ),)
+    for feature in report.derived_features:
+        feature.ready = True
+    monkeypatch.setattr(job, "build_research_data_runtime", lambda _: runtime)
+    monkeypatch.setattr(job, "_run_research_stage_impl", lambda *a, **k: ())
+    monkeypatch.setattr("stock_analyzer.config.AppConfig.load", lambda: config)
+    monkeypatch.setattr(health, "build_research_health_report", lambda *a, **k: report)
+    output = config.local_archive_dir / "data_health"
+    for _ in range(2):
+        result = runner.invoke(app, ["data", "run-stage", "--stage", "pre-research",
+            "--data-date", formation.isoformat(), "--as-of", "2026-09-06T18:30:00+08:00"])
+        assert result.exit_code == 0, result.output
+        for suffix in ("json", "md"):
+            path = output / f"{formation}.{suffix}"
+            assert path.is_file() and path.read_text(encoding="utf-8") != "old"
+            path.write_text("old", encoding="utf-8")
+
+
+@pytest.mark.parametrize("at", ["2026-09-05T18:00:00+08:00",
+                              "2026-09-05T21:30:00+08:00",
+                              "2026-10-03T18:00:00+08:00",
+                              "2026-10-03T21:30:00+08:00"])
+def test_evening_no_action_day_exits_zero_without_fact_collection(tmp_path, monkeypatch, at):
+    import pandas as pd
+    import stock_analyzer.cli as cli
+    import stock_analyzer.ops.research_data_job as job
+    now = datetime.fromisoformat(at)
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return now.astimezone(tz)
+    class Calendar:
+        def fetch_trade_calendar(self, start, through):
+            days = list(pd.date_range(start, through).date)
+            return pd.DataFrame({
+                "cal_date": days,
+                "is_open": [day in {date(2026, 9, 4), date(2026, 9, 30)} for day in days],
+            })
+    config = SimpleNamespace(local_archive_dir=tmp_path / "archive")
+    monkeypatch.setattr(cli, "datetime", Clock)
+    monkeypatch.setattr("stock_analyzer.config.AppConfig.load", lambda: config)
+    monkeypatch.setattr(job, "build_research_data_runtime", lambda _: SimpleNamespace(tushare=Calendar()))
+    monkeypatch.setattr(job, "run_research_stage", lambda *a, **k: pytest.fail("休市中间日不得补事实"))
+    result = runner.invoke(app, ["data", "run-stage", "--stage", "evening", "--data-date", "auto"])
+    assert result.exit_code == 0, result.output
+    assert "no_action_day" in result.output
+    assert not config.local_archive_dir.exists()

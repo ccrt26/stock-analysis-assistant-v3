@@ -372,7 +372,7 @@ def test_event_backfill_stores_official_announcement_and_structured_actions(tmp_
     assert summary.failed == 0
 
 
-def test_evening_weekend_extension_changes_only_the_announcement_end_date(tmp_path):
+def test_evening_extends_announcements_and_published_events_not_pledge_or_suspension(tmp_path):
     class TrackingActionPro(ActionPro):
         def __init__(self):
             super().__init__()
@@ -406,7 +406,7 @@ def test_evening_weekend_extension_changes_only_the_announcement_end_date(tmp_pa
             return []
 
     friday = date(2026, 8, 21)
-    monday = date(2026, 8, 24)
+    sunday = date(2026, 8, 23)
     pro = TrackingActionPro()
     announcements = TrackingAnnouncementClient()
     service = EventBackfillService(
@@ -418,15 +418,21 @@ def test_evening_weekend_extension_changes_only_the_announcement_end_date(tmp_pa
     service.backfill(
         start=friday,
         through=friday,
-        announcement_through=monday,
+        announcement_through=sunday,
         trading_dates=(friday,),
         resume=False,
     )
 
-    assert announcements.calls == [(friday, monday)]
-    assert pro.holder_calls[0]["end_date"] == "20260821"
-    assert pro.float_calls[0]["ann_date"] == "20260821"
-    assert pro.repurchase_calls[0]["end_date"] == "20260821"
+    service.backfill_published_events(start=friday, through=sunday, resume=False)
+
+    assert announcements.calls == [(friday, sunday)]
+    assert pro.holder_calls[-1]["start_date"] == "20260821"
+    assert pro.holder_calls[-1]["end_date"] == "20260823"
+    assert [call["ann_date"] for call in pro.float_calls[-3:]] == [
+        "20260821", "20260822", "20260823",
+    ]
+    assert pro.repurchase_calls[-1]["start_date"] == "20260821"
+    assert pro.repurchase_calls[-1]["end_date"] == "20260823"
     assert pro.pledge_calls[0]["end_date"] == "20260821"
     assert pro.suspension_calls == ["20260821"]
 
@@ -1095,3 +1101,103 @@ def test_first_week_refreshes_previous_month_for_late_event_arrivals(tmp_path):
     ]
     assert pro.holder_ranges == expected_text
     assert pro.repurchase_ranges == expected_text
+
+
+def test_published_events_refresh_weekend_without_advancing_availability(tmp_path):
+    from stock_analyzer.storage.research_query import ResearchQuery
+
+    class PublishedPro(ActionPro):
+        def __init__(self):
+            super().__init__()
+            self.calls = []
+
+        def stk_holdertrade(self, **kwargs):
+            self.calls.append(("holder", kwargs["start_date"], kwargs["end_date"]))
+            return pd.concat([
+                super(PublishedPro, self).stk_holdertrade(end_date=day)
+                for day in ("20260904", "20260905", "20260906")
+            ], ignore_index=True)
+
+        def repurchase(self, **kwargs):
+            self.calls.append(("repurchase", kwargs["start_date"], kwargs["end_date"]))
+            return pd.concat([
+                super(PublishedPro, self).repurchase(end_date=day)
+                for day in ("20260904", "20260905", "20260906")
+            ], ignore_index=True)
+
+        def share_float(self, **kwargs):
+            self.calls.append(("share_float", kwargs["ann_date"]))
+            frame = super().share_float(**kwargs)
+            frame["holder_name"] = kwargs["ann_date"]
+            return frame
+
+        def pledge_stat(self, **kwargs):
+            raise AssertionError("published events must not fetch pledge")
+
+        def suspend_d(self, **kwargs):
+            raise AssertionError("published events must not fetch suspension")
+
+    pro = PublishedPro()
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    service = EventBackfillService(TushareResearchClient(pro, pacer=lambda _: None), object(), warehouse)
+    cutoff = datetime.fromisoformat("2026-09-06T18:30:00+08:00")
+    query = ResearchQuery(warehouse)
+    for resume in (False, True):
+        result = service.backfill_published_events(
+            start=date(2026, 9, 4), through=date(2026, 9, 6), resume=resume,
+        )
+        assert result.scope == "published-events"
+        assert result.failed == 0
+        for dataset in (ResearchDatasetId.HOLDER_TRADE, ResearchDatasetId.REPURCHASE,
+                        ResearchDatasetId.SHARE_FLOAT):
+            rows = warehouse.read_current(dataset)
+            assert len(rows) == 3
+            assert set(rows["availability_precision"]) == {"date_conservative"}
+            visible = query.dataset_as_of(dataset, cutoff)
+            assert len(visible) == 2
+            assert set(pd.to_datetime(visible["available_at"], utc=True).astype(str)) == {
+                "2026-09-04 16:00:00+00:00", "2026-09-05 16:00:00+00:00",
+            }
+            assert len(query.dataset_as_of(dataset, datetime.fromisoformat(
+                "2026-09-07T00:00:00+08:00"))) == 3
+            assert warehouse.revision_rows(dataset) == []
+    expected = [("holder", "20260904", "20260906"),
+                ("repurchase", "20260904", "20260906"),
+                ("share_float", "20260904"), ("share_float", "20260905"),
+                ("share_float", "20260906")]
+    assert sorted(pro.calls) == sorted(expected * 2)
+    future = warehouse.read_current(ResearchDatasetId.SHARE_FLOAT, partition_value="2028-06")
+    assert set(future["float_date"]) == {date(2028, 6, 20)}
+    with event_backfill_module.connect_research_warehouse(warehouse.duckdb_path, read_only=True) as connection:
+        assert connection.execute(
+            "select count(*) from research_watermarks where dataset_id like 'event_partition_check%'"
+        ).fetchone()[0] == 0
+
+
+def test_partial_published_month_does_not_skip_remaining_historical_facts(tmp_path):
+    class HistoricalPro(ActionPro):
+        def share_float(self, **kwargs):
+            frame = super().share_float(**kwargs)
+            if "ann_date" in kwargs:
+                frame["float_date"] = "20260620"
+            return frame
+
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    service = EventBackfillService(
+        TushareResearchClient(HistoricalPro(), pacer=lambda _: None),
+        type("EmptyCninfo", (), {"fetch_announcements": lambda *args: []})(), warehouse,
+    )
+    service.backfill_published_events(start=date(2026, 6, 15), through=date(2026, 6, 15))
+    for dataset in (ResearchDatasetId.HOLDER_TRADE, ResearchDatasetId.REPURCHASE,
+                    ResearchDatasetId.SHARE_FLOAT):
+        assert len(warehouse.read_current(dataset, partition_value="2026-06")) == 1
+
+    service.backfill(start=date(2026, 6, 1), through=date(2026, 8, 10),
+                     trading_dates=(), resume=True)
+
+    holder = warehouse.read_current(ResearchDatasetId.HOLDER_TRADE, partition_value="2026-06")
+    repurchase = warehouse.read_current(ResearchDatasetId.REPURCHASE, partition_value="2026-06")
+    floats = warehouse.read_current(ResearchDatasetId.SHARE_FLOAT, partition_value="2026-06")
+    assert date(2026, 6, 30) in set(holder["ann_date"])
+    assert date(2026, 6, 30) in set(repurchase["announcement_date"])
+    assert date(2026, 6, 30) in set(floats["float_date"])

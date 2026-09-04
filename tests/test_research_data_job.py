@@ -34,6 +34,12 @@ def _derived_summary(*, failed: tuple[str, ...] = ()):  # business-stage fixture
     )
 
 
+def _published_summary(**options):
+    return BackfillSummary(
+        scope="published-events", start=options["start"], through=options["through"],
+    )
+
+
 class ClosedCalendarClient:
     def __init__(self):
         self.calls = []
@@ -244,6 +250,8 @@ def test_evening_only_collects_facts_and_reconciles(monkeypatch):
             raise AssertionError(dataset)
 
     class EventService:
+        backfill_published_events = staticmethod(_published_summary)
+
         def __init__(self, *args, **kwargs):
             pass
 
@@ -306,6 +314,8 @@ def test_evening_continues_industry_and_theme_refresh_after_event_failure(monkey
             return pd.DataFrame()
 
     class EventService:
+        backfill_published_events = staticmethod(_published_summary)
+
         def __init__(self, *args, **kwargs):
             pass
 
@@ -366,6 +376,7 @@ def test_evening_continues_theme_refresh_after_industry_failure(monkeypatch):
         job,
         "EventBackfillService",
         lambda *args, **kwargs: SimpleNamespace(
+            backfill_published_events=_published_summary,
             backfill=lambda **options: BackfillSummary(
                 scope="events",
                 start=date(2026, 7, 13),
@@ -462,6 +473,8 @@ def test_pre_research_only_checks_current_date_facts_and_then_derives(
     )
 
     class EventService:
+        backfill_published_events = staticmethod(_published_summary)
+
         def __init__(self, *args, **kwargs):
             pass
 
@@ -551,6 +564,7 @@ def test_pre_research_repairs_only_missing_theme_daily_partition(monkeypatch):
         job,
         "EventBackfillService",
         lambda *args, **kwargs: SimpleNamespace(
+            backfill_published_events=_published_summary,
             backfill_announcements=lambda **options: order.append("announcements")
             or BackfillSummary(
                 scope="announcements",
@@ -609,6 +623,7 @@ def test_feature_failure_is_returned_as_a_failed_data_stage(monkeypatch):
         job,
         "EventBackfillService",
         lambda *args, **kwargs: SimpleNamespace(
+            backfill_published_events=_published_summary,
             backfill_announcements=lambda **options: BackfillSummary(
                 scope="events",
                 start=date(2026, 7, 13),
@@ -836,9 +851,10 @@ def test_pre_research_requires_timezone_cutoff_before_any_source_call():
                                data_date=date(2026, 9, 4), as_of=cutoff)
 
 
-def test_sunday_pre_research_exact_order_cutoff_and_margin_lag(monkeypatch):
+@pytest.mark.parametrize("cutoff_text", ["2026-09-04T18:30:00+08:00", "2026-09-06T18:30:00+08:00"])
+def test_pre_research_exact_order_published_window_cutoff_and_margin_lag(monkeypatch, cutoff_text):
     import stock_analyzer.ops.research_data_job as job
-    cutoff = datetime.fromisoformat("2026-09-06T18:30:00+08:00")
+    cutoff = datetime.fromisoformat(cutoff_text)
     formation = date(2026, 9, 4)
     order = []
     def summary(scope):
@@ -848,7 +864,7 @@ def test_sunday_pre_research_exact_order_cutoff_and_margin_lag(monkeypatch):
             assert dataset == ResearchDatasetId.ANNOUNCEMENT
             return pd.DataFrame([{
                 "ts_code": "000001.SZ", "title": "2026年半年度报告",
-                "announcement_time": "2026-09-06T18:29:00+08:00",
+                "announcement_time": cutoff.replace(minute=29).isoformat(),
             }])
     def core(**options):
         assert options == dict(start=formation, through=formation, resume=True)
@@ -858,6 +874,10 @@ def test_sunday_pre_research_exact_order_cutoff_and_margin_lag(monkeypatch):
         assert options["through"] == cutoff.date()
         order.append("announcements")
         return summary("announcements")
+    def published(**options):
+        assert options == dict(start=formation, through=cutoff.date(), resume=False)
+        order.append("published-events")
+        return summary("published-events")
     def financial(**options):
         assert options["codes"] == ("000001.SZ",)
         assert options["through"] == cutoff.date()
@@ -878,7 +898,7 @@ def test_sunday_pre_research_exact_order_cutoff_and_margin_lag(monkeypatch):
         return _derived_summary()
     monkeypatch.setattr(job, "_trading_dates", lambda *args: (date(2026, 9, 3), formation))
     monkeypatch.setattr(job, "ResearchBackfillService", lambda *args: SimpleNamespace(backfill_market_core=core))
-    monkeypatch.setattr(job, "EventBackfillService", lambda *args, **kwargs: SimpleNamespace(backfill_announcements=announcements))
+    monkeypatch.setattr(job, "EventBackfillService", lambda *args, **kwargs: SimpleNamespace(backfill_announcements=announcements, backfill_published_events=published))
     monkeypatch.setattr(job, "FundamentalBackfillService", lambda *args: SimpleNamespace(backfill=financial))
     monkeypatch.setattr(job, "_daily_partition_passed", lambda *args: True)
     monkeypatch.setattr(job, "select_minute_candidate_scope", lambda *args: ())
@@ -888,7 +908,7 @@ def test_sunday_pre_research_exact_order_cutoff_and_margin_lag(monkeypatch):
     monkeypatch.setattr(job, "run_research_features", derived)
     runtime = SimpleNamespace(tushare=object(), warehouse=Warehouse(), cninfo=object(), minute_fetcher=None)
     result = run_research_stage(runtime, stage="pre-research", data_date=formation, as_of=cutoff)
-    assert order == ["core", "announcements", "financial", "minutes", "margin", "reconcile", "derived"]
+    assert order == ["core", "announcements", "published-events", "financial", "minutes", "margin", "reconcile", "derived"]
     assert result[-1].capabilities["research_as_of"] == cutoff.isoformat(timespec="seconds")
     assert result[-1].failed == 0
 
@@ -904,3 +924,77 @@ def test_failed_core_derivation_does_not_advertise_a_new_research_cutoff(monkeyp
     )
     assert result[-1].failed == 1
     assert "research_as_of" not in result[-1].capabilities
+
+
+@pytest.mark.parametrize("stage,late_hour", [("evening", 18), ("evening", 21), ("pre-research", 18)])
+@pytest.mark.parametrize("fail_published", [False, True])
+def test_published_event_stage_window_and_optional_failure(
+    tmp_path, monkeypatch, stage, late_hour, fail_published,
+):
+    import stock_analyzer.ops.research_data_job as job
+
+    formation = date(2026, 9, 4)
+    cutoff = datetime.fromisoformat("2026-09-06T18:30:00+08:00")
+    class StageClock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cutoff.replace(hour=late_hour).astimezone(tz)
+    monkeypatch.setattr(job, "datetime", StageClock)
+    calls = []
+    def summary(scope):
+        return BackfillSummary(scope=scope, start=formation, through=formation)
+    class Events:
+        def __init__(self, *args, **kwargs):
+            pass
+        def backfill(self, **kwargs):
+            assert kwargs["through"] == formation
+            assert kwargs["announcement_through"] == cutoff.date()
+            assert kwargs["trading_dates"] == (formation,)
+            calls.append("full-events")
+            return summary("events")
+        def backfill_announcements(self, **kwargs):
+            calls.append("announcements")
+            return summary("announcements")
+        def backfill_published_events(self, **kwargs):
+            assert kwargs == dict(start=formation, through=cutoff.date(), resume=False)
+            calls.append("published-events")
+            if fail_published:
+                raise RuntimeError("holder publication channel unavailable")
+            return summary("published-events")
+    def derive(*args, **kwargs):
+        assert calls[-1] == "published-events"
+        assert kwargs["as_of"] == cutoff
+        calls.append("derived")
+        return _derived_summary()
+    monkeypatch.setattr(job, "EventBackfillService", Events)
+    monkeypatch.setattr(job, "_trading_dates", lambda *args: (formation,))
+    monkeypatch.setattr(job, "ResearchBackfillService", lambda *args: SimpleNamespace(
+        backfill_market_core=lambda **kwargs: summary("market-core")))
+    monkeypatch.setattr(job, "ClassificationBackfillService", lambda *args: SimpleNamespace(
+        refresh_daily=lambda *args, **kwargs: summary("classifications")))
+    monkeypatch.setattr(job, "_daily_partition_passed", lambda *args: True)
+    monkeypatch.setattr(job, "_refresh_announced_fundamentals", lambda *args, **kwargs: [])
+    monkeypatch.setattr(job, "select_minute_candidate_scope", lambda *args: ())
+    monkeypatch.setattr(job, "TradingStructureBackfillService", lambda *args, **kwargs: SimpleNamespace(
+        backfill_minute_bars=lambda **kwargs: summary("minute-bars")))
+    monkeypatch.setattr(job, "reconcile_research_gaps", lambda *args: None)
+    monkeypatch.setattr(job, "run_research_features", derive)
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    runtime = SimpleNamespace(warehouse=warehouse, tushare=object(), cninfo=object(), minute_fetcher=None)
+    result = run_research_stage(runtime, stage=stage, data_date=formation,
+                                as_of=cutoff if stage == "pre-research" else None)
+    published = [item for item in result if item.scope == "published-events"]
+    assert len(published) == 1
+    if fail_published:
+        assert published[0].failed or published[0].limited
+        assert "holder publication channel unavailable" in ";".join(published[0].issues)
+    if stage == "pre-research":
+        assert calls == ["announcements", "published-events", "derived"]
+        assert result[-1].failed == 0
+        assert result[-1].capabilities["research_as_of"] == cutoff.isoformat()
+    else:
+        assert calls == ["full-events", "published-events"]
+        assert all(item.scope != "derived-research-features" for item in result)
+    with connect_research_warehouse(warehouse.duckdb_path, read_only=True) as connection:
+        saved = connection.execute("select summary_json from research_ingestion_runs").fetchone()[0]
+    assert "published-events" in saved

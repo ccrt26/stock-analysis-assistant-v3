@@ -213,6 +213,43 @@ class EventBackfillService:
         _merge_summary(summary, suspension_summary)
         return summary
 
+    def backfill_published_events(
+        self,
+        *,
+        start: date,
+        through: date,
+        resume: bool = False,
+    ) -> BackfillSummary:
+        """Refresh publication-date events, never treating a partial month as complete."""
+        summary = BackfillSummary(scope="published-events", start=start, through=through)
+        # Always re-query this narrow window, even on resume: late rows can arrive
+        # in an existing partition. Partial windows do not write checked watermarks.
+        for month_start, month_end in _month_ranges(start, through):
+            partition = month_start.strftime("%Y-%m")
+            for dataset, endpoint, normalize, options in (
+                (ResearchDatasetId.HOLDER_TRADE, "stk_holdertrade", _holder_row, {"limit": 3000}),
+                (ResearchDatasetId.REPURCHASE, "repurchase", _repurchase_row, {}),
+            ):
+                frame = self.tushare.call_paged(
+                    endpoint,
+                    start_date=_yyyymmdd(month_start),
+                    end_date=_yyyymmdd(month_end),
+                    **options,
+                ).drop_duplicates(ignore_index=True)
+                self._require_dates_in_range(
+                    frame, "ann_date", month_start, month_end, endpoint,
+                )
+                self._commit(
+                    dataset, partition, endpoint,
+                    [normalize(row) for row in frame.to_dict(orient="records")],
+                    through, summary,
+                )
+        current = start
+        while current <= through:
+            self._backfill_share_float_announcements(current, summary)
+            current += timedelta(days=1)
+        return summary
+
     def backfill_suspensions(
         self,
         *,
@@ -519,9 +556,8 @@ class EventBackfillService:
         total_shares = self._latest_total_shares(through)
         for month_start, month_end in _month_ranges(window_start, window_end):
             partition = month_start.strftime("%Y-%m")
-            if resume and partition != current_month and (
-                self._complete(ResearchDatasetId.SHARE_FLOAT, partition)
-                or self._partition_checked(ResearchDatasetId.SHARE_FLOAT, partition)
+            if resume and partition != current_month and self._partition_checked(
+                ResearchDatasetId.SHARE_FLOAT, partition
             ):
                 summary.skipped += 1
                 continue
@@ -653,8 +689,13 @@ class EventBackfillService:
             and partition < current_month
             and not refresh_previous_month
             and (
-                self._complete(dataset, partition)
-                or self._partition_checked(dataset, partition)
+                self._partition_checked(dataset, partition)
+                or (
+                    dataset not in {
+                        ResearchDatasetId.HOLDER_TRADE, ResearchDatasetId.REPURCHASE,
+                    }
+                    and self._complete(dataset, partition)
+                )
             )
         )
 

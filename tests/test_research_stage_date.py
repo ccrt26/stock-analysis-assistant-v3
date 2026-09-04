@@ -68,3 +68,35 @@ def test_missing_calendar_is_not_assumed_a_closed_day():
     with pytest.raises(Exception):
         _resolve_research_stage_date(MissingCalendar(), "close",
             datetime(2026, 9, 4, 17, 30, tzinfo=ZoneInfo("Asia/Shanghai")))
+
+
+@pytest.mark.parametrize("at,expected", [
+    ("2026-09-04T18:00:00+08:00", date(2026, 9, 4)),
+    ("2026-09-05T18:00:00+08:00", None),
+    ("2026-09-05T21:30:00+08:00", None),
+    ("2026-09-06T18:00:00+08:00", date(2026, 9, 4)),
+    ("2026-09-06T21:30:00+08:00", date(2026, 9, 4)),
+    ("2026-10-03T18:00:00+08:00", None),
+    ("2026-10-03T21:30:00+08:00", None),
+    ("2026-10-08T18:00:00+08:00", date(2026, 9, 30)),
+    ("2026-10-08T21:30:00+08:00", date(2026, 9, 30)),
+])
+def test_evening_runs_only_when_today_or_tomorrow_trades(at, expected):
+    class Calendar:
+        def fetch_trade_calendar(self, start, through):
+            days = list(pd.date_range(start, through).date)
+            open_days = {date(2026, 9, 4), date(2026, 9, 7),
+                         date(2026, 9, 30), date(2026, 10, 9)}
+            return pd.DataFrame({"cal_date": days, "is_open": [day in open_days for day in days]})
+    assert _resolve_research_stage_date(Calendar(), "evening", datetime.fromisoformat(at)) == expected
+
+
+@pytest.mark.parametrize("missing_day", [date(2026, 9, 5), date(2026, 9, 6)])
+def test_evening_missing_required_calendar_is_not_a_no_action_day(missing_day):
+    class Calendar(WeekendCalendar):
+        def fetch_trade_calendar(self, start, through):
+            frame = super().fetch_trade_calendar(start, through)
+            return frame.loc[frame["cal_date"] != missing_day]
+    with pytest.raises(Exception):
+        _resolve_research_stage_date(Calendar(), "evening",
+            datetime.fromisoformat("2026-09-05T18:00:00+08:00"))

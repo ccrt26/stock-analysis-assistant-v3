@@ -2664,3 +2664,59 @@ def test_normal_sunday_freezes_friday_prices_and_monday_action(tmp_path):
     assert result.formation_date == "2026-09-04"
     assert result.action_date == "2026-09-07"
     assert result.selection_as_of == "2026-09-06T18:30:00+08:00"
+
+
+def test_late_record_trace_uses_health_frozen_before_evening_retry(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from stock_analyzer.cli import _execute_data_stage
+    from stock_analyzer.data.research_backfill import BackfillSummary
+    from stock_analyzer.ops.forward_selection import LocalForwardData
+    from stock_analyzer.ops import research_health as health
+
+    trace = _v4_trace()
+    formation, action = date(2026, 8, 25), date(2026, 8, 26)
+    cutoff = datetime(2026, 8, 25, 18, 30, tzinfo=SHANGHAI)
+    fake = FakeData(open_dates=[formation, action])
+    frozen = fake.health_report(formation)
+    archive = tmp_path / "archive"
+    output = archive / "data_health"
+    output.mkdir(parents=True)
+    json_path, md_path = output / f"{formation}.json", output / f"{formation}.md"
+    json_path.write_text(json.dumps(frozen), encoding="utf-8")
+    md_path.write_text("18:30正式健康", encoding="utf-8")
+    before = (json_path.read_bytes(), md_path.read_bytes())
+    maintenance = json.loads(json.dumps(frozen))
+    maintenance["derived_features"][1]["ready"] = False
+    pre = frozen["latest_stage_runs"][0]
+    config = SimpleNamespace(local_archive_dir=archive)
+    report = SimpleNamespace(complete_core_date=True, latest_stage_runs=(
+        SimpleNamespace(**{**pre, "data_date": formation}),
+    ))
+    monkeypatch.setattr(health, "build_research_health_report", lambda *a, **k: report)
+    def write_maintenance(report, root):
+        json_path.write_text(json.dumps(maintenance), encoding="utf-8")
+        md_path.write_text("21:30维护健康", encoding="utf-8")
+        return json_path, md_path
+    monkeypatch.setattr(health, "write_health_report", write_maintenance)
+    _execute_data_stage(config, stage="evening", data_date=formation.isoformat(),
+        as_of=None, already_locked=False,
+        build_runtime=lambda _: SimpleNamespace(config=config, warehouse=object()),
+        run_stage=lambda *a, **k: (BackfillSummary(
+            scope="events", start=formation, through=formation, committed=1),))
+    fake.health_report = LocalForwardData(tmp_path / "warehouse", archive).health_report
+    pending = tmp_path / "pending.json"
+    pending.write_text(json.dumps(trace), encoding="utf-8")
+    csv_path = tmp_path / "forward.csv"
+    _write_csv(csv_path, [])
+
+    result = record_daily_trace(trace, pending_path=pending, archive_dir=archive,
+        csv_path=csv_path, data=fake,
+        clock=lambda: datetime(2026, 8, 25, 21, 45, tzinfo=SHANGHAI),
+        formation_date=formation, action_date=action, selection_as_of=cutoff,
+        sleep=lambda _: pytest.fail("late record must not wait"))
+
+    assert result.status == "selection_frozen", result.error
+    assert result.industry_research_available and result.theme_research_available
+    assert (json_path.read_bytes(), md_path.read_bytes()) == before
+    assert json.loads((archive / f"research-trace-{formation}.json").read_text()) == trace
+    assert _read_csv(csv_path)[0]["selection_as_of"] == "2026-08-25T18:30:00+08:00"

@@ -341,6 +341,9 @@ def _run_research_stage_impl(
             )
         except Exception as exc:
             summaries.append(_failed_step_summary("events", data_date, exc))
+        summaries.append(_refresh_published_events(
+            runtime, start=data_date, through=published_through.date(),
+        ))
 
         classifications = ClassificationBackfillService(
             runtime.tushare, runtime.warehouse
@@ -394,6 +397,9 @@ def _run_research_stage_impl(
             summaries.append(
                 _failed_step_summary("announcements", data_date, exc)
             )
+        summaries.append(_refresh_published_events(
+            runtime, start=data_date, through=as_of.date(),
+        ))
 
         classifications = ClassificationBackfillService(
             runtime.tushare, runtime.warehouse
@@ -458,6 +464,20 @@ def _run_research_stage_impl(
             runtime, summaries, data_date=data_date, as_of=as_of,
         )
     raise ValueError(f"unsupported research data stage: {stage}")
+
+
+def _refresh_published_events(
+    runtime: ResearchDataRuntime, *, start: date, through: date,
+) -> BackfillSummary:
+    try:
+        return EventBackfillService(
+            runtime.tushare, runtime.cninfo, runtime.warehouse,
+        ).backfill_published_events(start=start, through=through, resume=False)
+    except Exception as exc:
+        summary = _failed_step_summary("published-events", start, exc)
+        summary.through = through
+        summary.issues.insert(0, "可选公司结构化事件补采受限")
+        return summary
 
 
 def _refresh_announced_fundamentals(

@@ -40,6 +40,8 @@ def prepare_preopen_safety(
             raise ValueError("action day calendar missing")
         if not is_open:
             result["status"] = "no_action_day"
+        elif checked_at >= datetime.combine(today, time(9, 30), SHANGHAI):
+            result["limitations"].append("安全检查启动时已经开盘，不能作为开盘前提醒")
         else:
             traces = []
             for path in sorted((config.local_archive_dir / "forward_selection").glob("research-trace-*.json")):
