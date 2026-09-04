@@ -1,9 +1,10 @@
-"""检查 codex 日报产出并把最新复盘观察渲染成本地 WEB 页面。
+"""检查 codex 日报产出并把最新复盘观察更新到统一地址 index.html。
 
-幂等脚本：只渲染"snapshot + report 成对出现且输入有变化"的日期；休市日或 codex
-未产出时安静退出（exit 0），与手动兜底是同一条命令。休市口径与数据管道一致：
-读本地交易日历（SSE trade_calendar）的 is_open，非交易日默认不启动（对齐
-src/stock_analyzer/ops/research_data_job.py 的 close 阶段约定）。
+幂等脚本：只渲染"snapshot + report 成对出现且输入有变化"的日期；页面只维护一个
+固定地址 `local_archive/forward_monitor/index.html`（永远等于最新一天的日报），
+不再每天生成按日期命名的页面。休市日或 codex 未产出时安静退出（exit 0），与手动
+兜底是同一条命令。休市口径与数据管道一致：读本地交易日历（SSE trade_calendar）
+的 is_open，非交易日默认不启动（对齐 research_data_job 的 close 阶段约定）。
 
 用法：
     ./.venv/bin/python tools/update_monitor_web.py                    # 自动 / 手动共用
@@ -32,6 +33,7 @@ except ImportError:  # 直接以脚本方式运行（python tools/update_monitor
 BEIJING = timezone(timedelta(hours=8))
 STATE_NAME = ".web-publish-state.json"
 LOG_NAME = "web-update.log"
+INDEX_NAME = "index.html"
 SNAPSHOT_RE = re.compile(r"^snapshot-(\d{4}-\d{2}-\d{2})\.json$")
 LEDGER_PLACEHOLDER = "ledger:missing"
 
@@ -132,8 +134,7 @@ def save_state(state_path: Path, state: dict) -> None:
     os.replace(tmp, state_path)
 
 
-def validate_rendered(monitor_dir: Path, day: date) -> tuple[bool, int]:
-    html_path = monitor_dir / f"monitor-report-{day.isoformat()}.html"
+def validate_rendered(html_path: Path, day: date) -> tuple[bool, int]:
     if not html_path.is_file():
         return False, 0
     try:
@@ -154,11 +155,33 @@ def log_line(monitor_dir: Path, message: str) -> None:
         fh.write(f"[{stamp}] {message}\n")
 
 
-def render_date(day: date, monitor_dir: Path | None) -> None:
-    argv = ["--date", day.isoformat()]
-    if monitor_dir is not None:
-        argv += ["--monitor-dir", str(monitor_dir)]
-    renderer.main(argv)
+def render_date(day: date, monitor_dir: Path, out_path: Path) -> None:
+    renderer.main(["--date", day.isoformat(), "--monitor-dir", str(monitor_dir), "--out", str(out_path)])
+
+
+def _tmp_index_path(monitor_dir: Path) -> Path:
+    return monitor_dir / f"{INDEX_NAME}.{os.getpid()}.tmp"
+
+
+def index_is_healthy(monitor_dir: Path, latest: date | None) -> bool:
+    if latest is None:
+        return True
+    return validate_rendered(monitor_dir / INDEX_NAME, latest)[0]
+
+
+def rebuild_index(monitor_dir: Path, latest: date) -> None:
+    """把最新候选日期重渲染并原子重建统一地址 index.html。"""
+    tmp = _tmp_index_path(monitor_dir)
+    try:
+        render_date(latest, monitor_dir, tmp)
+        ok, stocks = validate_rendered(tmp, latest)
+        if not ok:
+            raise RuntimeError("index.html 重建产物校验失败")
+        os.replace(tmp, monitor_dir / INDEX_NAME)
+        log_line(monitor_dir, f"rebuilt index.html -> {latest.isoformat()} stocks={stocks}")
+    finally:
+        if tmp.exists():
+            tmp.unlink()
 
 
 def run_update(
@@ -170,6 +193,7 @@ def run_update(
 ) -> int:
     calendar = read_trade_calendar(project_root)
     candidates = scan_candidate_dates(monitor_dir)
+    latest = candidates[-1] if candidates else None
     state = load_state(monitor_dir / STATE_NAME)
     published = state.setdefault("published", {})
 
@@ -183,25 +207,26 @@ def run_update(
         if force or not isinstance(record, dict) or record.get("input_sha256") != digest:
             pending.append((day, digest))
 
-    gate = "open" if calendar.get(today) else None
-    if gate is None and today in calendar:
-        gate = "closed"
-    elif gate is None:
-        gate = "uncovered"
+    gate = "open" if calendar.get(today) else ("closed" if today in calendar else "uncovered")
 
-    if gate == "closed" and not pending:
-        log_line(monitor_dir, f"today={today} gate=closed pending=0 休市，不启动")
-        return 0
-    if gate == "uncovered":
-        if today.weekday() >= 5 and not pending:
+    if not pending:
+        # 自愈：在一切早退之前检查统一地址（缺失 / 落后 / 不可解析则重建最新日期）
+        if latest is not None and not index_is_healthy(monitor_dir, latest):
+            try:
+                rebuild_index(monitor_dir, latest)
+            except Exception as exc:
+                log_line(monitor_dir, f"index.html 重建失败：{exc} status=error")
+                return 1
+        if gate == "closed":
+            log_line(monitor_dir, f"today={today} gate=closed pending=0 休市，不启动")
+            return 0
+        if gate == "uncovered" and today.weekday() >= 5:
             log_line(monitor_dir, f"today={today} gate=uncovered weekend pending=0 休市（日历未覆盖，按周末跳过）")
             return 0
+    if gate == "uncovered" and today.weekday() < 5:
         log_line(monitor_dir, f"today={today} gate=uncovered weekday=按周一至周五候选继续，日历未覆盖请尽快补齐")
 
-    if pending:
-        gate_label = {"open": "trade_day", "closed": "closed_defensive", "uncovered": "uncovered"}[gate]
-        log_line(monitor_dir, f"today={today} gate={gate_label} pending={len(pending)}")
-    else:
+    if not pending:
         complete = set(candidates)
         incomplete = [
             day
@@ -217,6 +242,8 @@ def run_update(
             log_line(monitor_dir, f"today={today} gate={gate} pending=0 无新增日报，等待 codex 或手动处理")
         return 0
 
+    gate_label = {"open": "trade_day", "closed": "closed_defensive", "uncovered": "uncovered"}[gate]
+    log_line(monitor_dir, f"today={today} gate={gate_label} pending={len(pending)}")
     pending_days = {day for day, _ in pending}
     for day in [d for d in ledger_warnings if d in pending_days]:
         log_line(monitor_dir, f"{day.isoformat()} 台账缺失，仅渲染报告与快照（警告）")
@@ -224,11 +251,14 @@ def run_update(
     failures: list[date] = []
     for day, digest in pending:
         iso = day.isoformat()
+        tmp = _tmp_index_path(monitor_dir)
         try:
-            render_date(day, monitor_dir)
-            ok, stocks = validate_rendered(monitor_dir, day)
+            render_date(day, monitor_dir, tmp)
+            ok, stocks = validate_rendered(tmp, day)
             if not ok:
                 raise RuntimeError("渲染产物校验失败（HTML 缺失 / payload 不可解析 / 日期不一致）")
+            if latest is not None and day == latest:
+                os.replace(tmp, monitor_dir / INDEX_NAME)
             published[iso] = {
                 "input_sha256": digest,
                 "rendered_at": datetime.now(BEIJING).isoformat(timespec="seconds"),
@@ -239,6 +269,9 @@ def run_update(
         except Exception as exc:
             failures.append(day)
             log_line(monitor_dir, f"rendered={iso} status=error error={exc}")
+        finally:
+            if tmp.exists():
+                tmp.unlink()
 
     if failures:
         log_line(

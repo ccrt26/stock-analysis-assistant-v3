@@ -1986,6 +1986,11 @@ def main(argv: list[str] | None = None) -> int:
         "--date", default=None, help="analysis date (YYYY-MM-DD), default latest snapshot"
     )
     parser.add_argument("--monitor-dir", default=None, help="override monitor archive directory")
+    parser.add_argument(
+        "--out",
+        default=None,
+        help="override output HTML path (default monitor-report-<date>.html in monitor dir)",
+    )
     args = parser.parse_args(argv)
 
     monitor_dir = Path(args.monitor_dir) if args.monitor_dir else MONITOR_DIR
@@ -1993,7 +1998,11 @@ def main(argv: list[str] | None = None) -> int:
     report, snapshot, _report_path, _snapshot_path = load_artifacts(monitor_dir, analysis_date)
     payload = build_payload(PROJECT_ROOT, monitor_dir, analysis_date, report, snapshot)
     html = render(payload)
-    out_path = monitor_dir / f"monitor-report-{analysis_date.isoformat()}.html"
+    out_path = (
+        Path(args.out)
+        if args.out
+        else monitor_dir / f"monitor-report-{analysis_date.isoformat()}.html"
+    )
     out_path.write_text(html, encoding="utf-8")
     print("status=rendered")
     print(f"analysis_date={analysis_date.isoformat()}")
