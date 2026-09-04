@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 
 
 def test_daily_prompt_is_v4_only() -> None:
@@ -200,7 +201,7 @@ def test_unique_user_output_hides_event_leads_and_uses_four_sections() -> None:
 
     headings = (
         "今天的市场情况",
-        "正式推荐股票的走势复盘",
+        "正式推荐股票的今日复盘",
         "目前仍开放的正式推荐股票数量",
         "今天明确推荐的股票",
     )
@@ -214,9 +215,7 @@ def test_unique_user_output_hides_event_leads_and_uses_four_sections() -> None:
         "比较股",
     ):
         assert forbidden not in user_output
-    assert user_output.index(headings[0]) < user_output.index(headings[1])
-    assert user_output.index(headings[1]) < user_output.index(headings[2])
-    assert user_output.index(headings[2]) < user_output.index(headings[3])
+    assert re.findall(r"^## (.+)$", user_output, re.M) == list(headings)
 
     for phrase in (
         "所有主动推荐的今日结论",
@@ -323,3 +322,19 @@ def test_archived_execution_instruction_is_a_verbatim_copy() -> None:
     )
 
     assert archived.read_bytes() == source.read_bytes()
+
+
+def test_unique_output_assigns_disjoint_headings_to_reviews_and_new_recommendations() -> None:
+    text = Path("ops/forward-selection-prompt.md").read_text(encoding="utf-8")
+    output = text.split("### 唯一用户输出格式", 1)[1]
+    review = output.split("## 正式推荐股票的今日复盘", 1)[1].split("## 目前仍开放", 1)[0]
+    recommendation = output.split("## 今天明确推荐的股票", 1)[1]
+    review_headings = re.findall(r"^\*\*(.+)\*\*$", review, re.M)
+    recommendation_headings = re.findall(r"^\*\*(.+)\*\*$", recommendation, re.M)
+    assert review_headings == ["今天发生了什么", "相比上次判断", "接下来1—3个交易日"]
+    assert recommendation_headings == [
+        "公司主要做什么", "为什么会选它", "行业或外部变化", "股票自身表现",
+        "公司经营", "主要不利因素", "综合判断", "什么情况会让我改变看法",
+    ]
+    assert set(review_headings).isdisjoint(recommendation_headings)
+    assert "复盘部分直接采用本次已记录的正式复盘Markdown，不重新摘要" in text

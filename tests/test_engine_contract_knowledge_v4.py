@@ -80,7 +80,8 @@ def test_entry_timing_and_review_skills_keep_selection_and_review_separate() -> 
     assert "不能一边说核心持续性没有验证一边正式推荐" in orchestrator
     assert "reviewing-stock-recommendations" in review
     assert "具体推荐日期" in review
-    assert "距离20%观察目标" in review
+    assert "当前收盘相对推荐参考价、期间最高收盘和最深下跌" in review
+    assert "## 20日目标的可实现性" in review
     assert "不新增定时任务" in review
     assert interface["interface"]["display_name"] == "正式推荐复盘"
 
@@ -115,7 +116,7 @@ def test_review_skill_requires_causal_comparison_expectation_phase_and_outlook()
     ):
         assert phrase in price
     assert (
-        "推荐日期和当时判断、到今天走到哪里、我的分析、接下来更可能怎样"
+        "今天发生了什么、相比上次判断、接下来1—3个交易日"
         in orchestrator
     )
 
@@ -133,7 +134,7 @@ def test_review_skill_requires_an_analyst_style_view_update() -> None:
     for phrase in (
         "一个中心问题",
         "一句话观点更新",
-        "与上一次复盘比较",
+        "与上一次复盘的比较填写当天 `view_change` 和 `view_change_reason`",
         "后续基准判断",
         "观点更新稿",
         "事实与观点分开",

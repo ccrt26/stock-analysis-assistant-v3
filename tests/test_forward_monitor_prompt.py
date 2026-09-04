@@ -60,7 +60,7 @@ def test_existing_daily_prompt_stays_v4_and_adds_monitor_in_same_task() -> None:
     assert "不得重复执行新选股" in text
     assert "今天的市场情况" in text
     user_output = text.split("### 唯一用户输出格式", maxsplit=1)[1]
-    assert "正式推荐股票的走势复盘" in user_output
+    assert "正式推荐股票的今日复盘" in user_output
     assert "目前仍开放的正式推荐股票数量" in user_output
     assert "今天明确推荐的股票" in user_output
     assert "等待首个交易日确认的事件线索" not in user_output
@@ -91,7 +91,7 @@ def test_daily_prompts_separate_confirmed_recommendations_from_event_leads() -> 
     assert "conditional 不进入正式推荐数量" in selection
     assert "不得虚构收益" in selection
     assert "conditional_event" in monitor
-    assert "不得出现在“正式推荐股票的走势复盘”中" in monitor
+    assert "不得出现在“正式推荐股票的今日复盘”中" in monitor
     assert "不得单列给用户凑内容" in monitor
     assert "fresh_event_pending 仍属于正式推荐" not in selection
 
@@ -119,10 +119,9 @@ def test_forward_monitor_prompt_uses_previous_state_and_strict_report_contract()
     assert "pool_summary" in text
     assert "必须与 snapshot 完全一致" in text
     assert "原始完整判断" in text
-    assert "推荐日期和当时判断" in text
-    assert "到今天走到哪里" in text
-    assert "我的分析" in text
-    assert "接下来更可能怎样" in text
+    assert "今天发生了什么" in text
+    assert "相比上次判断" in text
+    assert "接下来1—3个交易日" in text
     assert "推荐后实际怎么走" not in text
     assert "为什么今天要说它" not in text
     assert "内部成对比较继续用于判断" in text
@@ -136,7 +135,7 @@ def test_forward_monitor_prompt_uses_previous_state_and_strict_report_contract()
     assert "original_reason_plain_language" in text
     assert "original_key_risk_plain_language" in text
     assert "真实成对价格路径" in text
-    assert "正式推荐股票的走势复盘" in text
+    assert "正式推荐股票的今日复盘" in text
     assert "`confirmed_active` 和 `legacy_v1_not_rewritten` 两类正式推荐记录" in text
     assert "detailed_review_stock_count" in text
     assert "最长时间未详细复盘" in text
@@ -189,12 +188,12 @@ def test_review_skill_requires_daily_briefs_and_cautious_tracking_exit() -> None
 def test_public_review_only_lists_explicit_formal_recommendations() -> None:
     text = Path("ops/forward-monitor-prompt.md").read_text(encoding="utf-8")
 
-    assert "正式推荐股票的走势复盘" in text
+    assert "正式推荐股票的今日复盘" in text
     assert "confirmed_active" in text
     assert "legacy_v1_not_rewritten" in text
     assert "conditional_event" in text
-    assert "不得出现在“正式推荐股票的走势复盘”中" in text
-    assert "我的分析" in text
+    assert "不得出现在“正式推荐股票的今日复盘”中" in text
+    assert "今天发生了什么" in text
     assert "不得单列给用户凑内容" in text
 
 
@@ -248,7 +247,7 @@ def test_all_five_stock_research_skills_define_a_review_phase() -> None:
     assert "第20个交易日首次形成前20天最终结论" in orchestrator
     assert "之后可以更新当前走势评价" in orchestrator
     assert "比较记录的 `final_twenty_day_review` 始终为空" in orchestrator
-    assert "用户标题使用 `action_date`" in orchestrator
+    assert "用户当前状态和简短前缀使用 `action_date`" in orchestrator
     assert "为什么在这个时间选择它" in orchestrator
     assert "支持选择的独立原因" in orchestrator
     assert "什么情况会让我改变看法" in orchestrator
@@ -350,10 +349,9 @@ def test_review_prompt_uses_dated_review_skill_and_one_retry_for_missing_data() 
     ):
         assert phrase in text
     for heading in (
-        "推荐日期和当时判断",
-        "到今天走到哪里",
-        "我的分析",
-        "接下来更可能怎样",
+        "今天发生了什么",
+        "相比上次判断",
+        "接下来1—3个交易日",
     ):
         assert heading in text
 
@@ -418,3 +416,39 @@ def test_review_skill_makes_future_direction_a_reasoned_judgment() -> None:
         "不按每天1%线性推算",
     ):
         assert phrase in skill
+
+
+def test_prompts_make_daily_ledger_the_only_public_body_source() -> None:
+    paths = [
+        "ops/forward-monitor-prompt.md", "ops/forward-selection-prompt.md",
+        ".agents/skills/reviewing-stock-recommendations/SKILL.md",
+        ".agents/skills/orchestrating-stock-research/SKILL.md",
+    ]
+    for path in paths:
+        text = Path(path).read_text(encoding="utf-8")
+        for phrase in ("DailyFormalReviewV1.current_review", "逐字复制", "view_change_reason",
+                       "今天发生了什么", "相比上次判断", "接下来1—3个交易日",
+                       "D1", "D20", "历史锚点"):
+            assert phrase in text, (path, phrase)
+        for old in ("推荐日期和当时判断", "到今天走到哪里", "我的分析", "接下来更可能怎样"):
+            assert old not in text, (path, old)
+
+
+def test_outlook_conditions_are_defined_relative_to_current_direction() -> None:
+    for path in ("ops/forward-monitor-prompt.md", ".agents/skills/reviewing-stock-recommendations/SKILL.md"):
+        text = Path(path).read_text(encoding="utf-8")
+        assert "支持当前 outlook_1_3d" in text
+        rows = [line for line in text.splitlines() if line.startswith("| `")]
+        expected = {
+            "strengthening": ("提高收盘", "连续收低"),
+            "weakening": ("降低收盘", "提高收盘"),
+            "overheated": ("冲高回落", "更高收盘"),
+            "range_or_wait": ("原区间", "突破区间"),
+            "event_pending": ("仍缺少", "出现完整可交易价格"),
+        }
+        for state, (supports, changes) in expected.items():
+            row = next(row for row in rows if f"`{state}`" in row)
+            columns = row.split("|")
+            assert supports in columns[2]
+            assert changes in columns[3]
+        assert "`continuation_possible`" in text and "`invalidated`" in text

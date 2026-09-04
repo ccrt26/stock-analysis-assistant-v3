@@ -298,9 +298,9 @@ OUTLOOK_TEXT = {
     "strengthening": "未来1—3个交易日更可能继续走强",
     "continuation_possible": "未来1—3个交易日更可能震荡偏强",
     "range_or_wait": "未来1—3个交易日更可能横盘整理或等待新变化",
-    "weakening": "未来1—3个交易日更可能继续回落或弱势震荡",
+    "weakening": "未来1—3个交易日更可能震荡偏下",
     "overheated": "未来1—3个交易日更可能高位剧烈波动并出现回吐",
-    "invalidated": "原判断已不成立，短期不再以继续走强为基准",
+    "invalidated": "未来1—3个交易日更可能继续偏弱",
     "event_pending": "先等待事件或复牌后的实际交易反应，方向暂时无法判断",
 }
 STAGE_MAP = {
@@ -427,7 +427,7 @@ def scan_history(
     """逐日读取已归档 snapshot + report + 每日复盘台账，汇总每条记录的复盘历史。
 
     报告只覆盖当天重点（<=8 条详评）；每日台账覆盖全部正式推荐的简评。
-    同一条记录同一天两者都有时，正文与增强/转弱条件以报告为准，结构化观点字段以台账为准。
+    同一条记录同一天两者都有时，正文、观点变化和方向以台账为准；正反条件保留报告原值。
     """
     merged: dict[tuple[str, str], dict[str, Any]] = {}
     for day in archived_dates(monitor_dir):
@@ -530,17 +530,9 @@ def scan_history(
             if existing is None:
                 merged[key] = item
             else:
-                existing["viewLabel"] = label
-                existing["viewReason"] = item["viewReason"]
-                existing["outlookReason"] = (
-                    existing.get("outlookReason") or item["outlookReason"]
-                )
-                existing["assessmentText"] = (
-                    existing.get("assessmentText") or item["assessmentText"]
-                )
-                existing["viewChanged"] = bool(existing["viewChanged"]) or view_changed
-                if not existing.get("fromTo"):
-                    existing["fromTo"] = from_to
+                # DailyFormalReviewV1 is the single source of today's view.
+                # Conditions only exist in the detailed report; do not recreate them.
+                merged[key] = {**item, "confirm": existing["confirm"], "risk": existing["risk"]}
     history: dict[str, list[dict[str, Any]]] = {}
     for (episode_id, _day), item in merged.items():
         history.setdefault(episode_id, []).append(item)
@@ -1276,7 +1268,7 @@ select.quietbtn option{background:var(--panel);color:var(--ink);font-size:13px}
 .titleline .code{font-size:13px;color:var(--ink3);letter-spacing:.04em}
 .titleline .state{font-size:11.5px;color:var(--ink2);border:1px solid var(--hair);border-radius:999px;padding:3px 11px;letter-spacing:.05em}
 .companyline{margin:10px 0 0;font-size:13px;color:var(--ink2);line-height:1.7;max-width:62em}
-/* 入选理由块 */
+/* 历史推荐背景 */
 .reason-block{margin:16px 0 0;padding:13px 18px 12px;border:1px solid var(--hair);border-left:3px solid var(--accent);border-radius:0 10px 10px 0;background:var(--panel2)}
 .reason-block p{margin:0;font-size:13px;line-height:1.9;color:var(--ink2);max-width:62em}
 .reason-block .risk{margin-top:8px;padding-top:8px;border-top:1px dashed var(--hair2);font-size:12px;color:var(--ink3)}
@@ -1859,8 +1851,8 @@ function renderDetail(){
  const rb = $("rReason");
  if(s.reasonFull){
   rb.style.display = "";
-  rb.innerHTML = `<span class="cap">入选理由 · ${s.recDate} 开盘前</span><p>${esc(s.reasonFull)}</p>` +
-   (s.reasonRisk ? `<p class="risk"><b>当时最强反证</b>${esc(s.reasonRisk)}</p>` : "");
+  rb.innerHTML = `<span class="cap">历史推荐背景 · ${s.recDate} 开盘前</span><p>${esc(s.reasonFull)}</p>` +
+   (s.reasonRisk ? `<p class="risk"><b>当时主要担心</b>${esc(s.reasonRisk)}</p>` : "");
  }else rb.style.display = "none";
  document.querySelectorAll("#chartSeg button").forEach(b => b.classList.toggle("on",(b.dataset.m === "rel") === relMode));
  updateLegend(s);
@@ -1921,11 +1913,11 @@ function renderReview(){
   $("rCopy").textContent = r.copy;
   const rows = [];
   if(r.assessmentText)rows.push(["当日结论",`<b>${esc(r.assessmentText)}</b>`]);
-  if(r.facts && r.facts.length)rows.push(["关键事实",r.facts.map(f => `<span class="fx">${esc(f)}</span>`).join('<span style="color:var(--ink3)"> · </span>')]);
+  if(r.facts && r.facts.length)rows.push(["关键变化",r.facts.map(f => `<span class="fx">${esc(f)}</span>`).join('<span style="color:var(--ink3)"> · </span>')]);
   if(r.viewLabel)rows.push(["观点变化",`${esc(r.viewLabel)}${r.viewReason ? ` — ${esc(r.viewReason)}` : ""}`]);
   if(r.base)rows.push(["未来1—3日",`${esc(r.base)}${r.outlookReason ? ` — ${esc(r.outlookReason)}` : ""}`]);
   $("rReview").innerHTML = rows.length
-   ? `<span class="cap">复盘内容 · D${r.day} · ${DATES[candleIdxOfDay(s,r.day)] || ""}</span>` + rows.map(x => `<div class="rev-row"><span class="rk">${x[0]}</span><span class="rv">${x[1]}</span></div>`).join("")
+   ? `<span class="cap">每日复盘 · D${r.day} · ${DATES[candleIdxOfDay(s,r.day)] || ""}</span>` + rows.map(x => `<div class="rev-row"><span class="rk">${x[0]}</span><span class="rv">${x[1]}</span></div>`).join("")
    : "";
  }
  const bl = $("backLatest");

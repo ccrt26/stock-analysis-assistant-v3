@@ -14,6 +14,7 @@ from tools.render_monitor_web import (
     compute_view_change,
     render,
     stage_of,
+    scan_history,
     trigger_of,
 )
 
@@ -279,9 +280,12 @@ class TestBuildPayload:
         assert conditional_stock["ref"] is None
         assert formal_stock["reasonFull"] == "板块扩散且个股领先。"
         assert formal_stock["reasonRisk"] == "涨幅集中在最近3日。"
-        # 复盘历史与事件时间线：报告正文 + 台账结构化字段合并
+        # 复盘历史与事件时间线：台账正文与观点字段合并
         review = formal_stock["reviews"][-1]
-        assert review["headline"] == "观点更新第一句。"  # 正文以报告为准
+        assert review["headline"] == "台账简评正文。"
+        assert review["copy"] == "台账简评正文。"
+        assert review["base"] == "未来1—3个交易日更可能震荡偏下"
+        assert review["outlookReason"] == "路径向下且相对优势消失。"
         assert review["viewChanged"] is True
         assert review["viewLabel"] == "观点减弱"  # 观点字段以台账为准
         assert review["viewReason"] == "收盘连续两日回落。"
@@ -351,7 +355,7 @@ class TestRender:
         # V4 版式标志
         for marker in (
             "推荐观察台", "重点观察", "全部观察", "观察进度", "距 20%",
-            "下一检查日", "入选理由", "复盘内容", "公司与观察事件",
+            "下一检查日", "历史推荐背景", "每日复盘", "公司与观察事件",
             "交易日尺" if False else "dayruler",
             "K线", "相对表现", "缩起",
         ):
@@ -446,3 +450,34 @@ def test_cli_renders(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
     assert "status=rendered" in out and "stock_count=1" in out
     html = (monitor_dir / "monitor-report-2026-09-02.html").read_text(encoding="utf-8")
     assert "重点观察" in html and "全部观察" in html and "缩起" in html
+
+
+def test_html_distinguishes_history_from_daily_update_without_losing_chart() -> None:
+    html = render({"stocks": [], "dates": [], "market": []})
+    detail = html.split("function renderDetail(){", 1)[1].split("function updateLegend", 1)[0]
+    review = html.split("function renderReview(){", 1)[1].split("function renderEvents", 1)[0]
+    assert "历史推荐背景" in detail and "当时主要担心" in detail
+    assert "入选理由 ·" not in detail
+    for label in ("每日复盘", "当日结论", "关键变化", "观点变化", "未来1—3日"):
+        assert label in review
+    for element in ("chartSvg", "timeline", "events"):
+        assert f'id="{element}"' in html
+    assert "reasonFull" not in review and "reasonRisk" not in review
+
+
+def test_web_daily_unchanged_view_does_not_inherit_detail_change(tmp_path: Path) -> None:
+    episode = _episode("e1", "600000.SH", "示例股份")
+    report = _report([_alert("e1")])
+    snapshot = _snapshot([episode])
+    for name, value in (("snapshot", snapshot), ("monitor-report", report)):
+        (tmp_path / f"{name}-2026-09-02.json").write_text(json.dumps(value), encoding="utf-8")
+    (tmp_path / "daily-formal-reviews-2026-09-02.json").write_text(json.dumps({"reviews": [{
+        "episode_id": "e1", "day_number": 2, "current_review": "今天变化仍未改变原判断。",
+        "current_assessment": "partly_supported", "view_change": "unchanged",
+        "view_change_reason": "没有新的决定性事实。", "outlook_1_3d": "range_or_wait",
+        "outlook_reason_plain_language": "收盘仍在原区间。",
+    }]}), encoding="utf-8")
+    review = scan_history(tmp_path, date(2026, 9, 2))["e1"][0]
+    assert review["copy"] == "今天变化仍未改变原判断。"
+    assert review["viewChanged"] is False and review["fromTo"] is None
+    assert review["viewReason"] == "没有新的决定性事实。"

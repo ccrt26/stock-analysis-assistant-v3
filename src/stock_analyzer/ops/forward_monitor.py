@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import tempfile
 from dataclasses import asdict, dataclass
 from datetime import date, datetime
@@ -1072,6 +1073,7 @@ def record_forward_monitor(
             if new_daily_workflow:
                 daily = daily_reviews[episode_id]
                 detailed_values = {
+                    "current_review": review.current_review,
                     "current_assessment": review.current_assessment,
                     "best_supported_explanation": (
                         review.best_supported_explanation
@@ -1082,6 +1084,7 @@ def record_forward_monitor(
                     "final_twenty_day_review": final_review,
                 }
                 daily_values = {
+                    "current_review": daily.current_review,
                     "current_assessment": daily.current_assessment,
                     "best_supported_explanation": (
                         daily.best_supported_explanation
@@ -1340,19 +1343,21 @@ def _render_markdown(
         if episode_ids
     ]
     lines = [
-        f"# {report.analysis_date.isoformat()} 正式推荐股票的走势复盘",
+        f"# {report.analysis_date.isoformat()} 正式推荐股票的今日复盘",
         "",
         "## 今天的市场情况",
         "",
         f"{overview.what_changed.rstrip('。！？!? ；; ')}。{overview.implication_for_monitored_stocks}",
         "",
     ]
+    daily_by_id = (
+        {review.episode_id: review for review in daily_ledger.reviews}
+        if daily_ledger is not None
+        else {}
+    )
     if daily_ledger is None:
-        lines.extend(["## 正式推荐股票的走势复盘", ""])
+        lines.extend(["## 正式推荐股票的今日复盘", ""])
     if daily_ledger is not None:
-        daily_by_id = {
-            review.episode_id: review for review in daily_ledger.reviews
-        }
         active_items = [
             (episode, daily_by_id[str(episode["episode_id"])])
             for episode in episodes.values()
@@ -1425,73 +1430,68 @@ def _render_markdown(
         )
     for alert, episode_ids in public_alerts:
         reviews = {item.episode_id: item for item in alert.episode_reviews}
-        original_paragraphs: list[str] = []
-        progress_paragraphs: list[str] = []
-        analysis_paragraphs: list[str] = []
+        status_paragraphs: list[str] = []
+        update_paragraphs: list[str] = []
+        change_paragraphs: list[str] = []
+        final_paragraphs: list[str] = []
         multiple = len(episode_ids) > 1
         for episode_id in episode_ids:
             episode = episodes[episode_id]
             review = reviews[episode_id]
+            daily = daily_by_id[episode_id] if daily_ledger is not None else None
             day_number = int(episode["day_number"])
             action = date.fromisoformat(str(episode["action_date"]))
             action_text = f"{action.year}年{action.month}月{action.day}日"
-            prefix = f"{action_text}那次推荐：" if multiple else ""
-            limitations = set(episode.get("data_limitations") or [])
-            recommendation_date = _recommendation_date_sentence(episode)
-            original = (
-                f"{recommendation_date} "
-                f"{review.original_reason_plain_language.rstrip('。！？!? ；; ')}。"
-                f"{review.original_key_risk_plain_language.rstrip('。！？!? ；; ')}。"
+            prefix = (
+                f"{action_text}推荐（第{day_number}个交易日）："
+                if multiple else ""
             )
-            if "missing_original_research_thesis" in limitations:
-                original += " 当时留下的原始判断不完整，因此这次只能复盘价格表现，不能逐项审查当时的理由。"
-            if "missing_original_referenced_decisions" in limitations:
-                original += " 当时留下的部分价格依据或首个交易日观察条件不完整，因此这部分不能事后补写。"
-            original_paragraphs.append(f"{prefix}{original}")
+            status_paragraphs.append(_render_compact_review_status(episode))
+            if day_number == 1:
+                status_paragraphs.append(_render_first_day_background(episode, review))
 
-            progress = _render_target_progress(episode).removeprefix(
-                f"{recommendation_date} "
+            update_paragraphs.append(
+                f"{prefix}{daily.current_review if daily is not None else review.current_review}"
             )
-            progress_paragraphs.append(f"{prefix}{progress}")
-
-            analysis = review.current_review
             if alert.alert_type == "late_activation" and day_number > 20:
-                analysis = (
-                    f"{analysis.rstrip('。！？!? ；; ')}。"
-                    "这只股票在前20个交易日结束后才开始明显走强，"
+                update_paragraphs.append(
+                    f"{prefix}这只股票在前20个交易日结束后才开始明显走强，"
                     "因此不会改变前20天的原评价结果。"
                 )
-            final = review.final_twenty_day_review
+            change_paragraphs.append(f"{prefix}{_render_view_change(daily)}")
+            final = (
+                daily.final_twenty_day_review
+                if daily is not None else review.final_twenty_day_review
+            )
             if final is not None:
-                analysis = (
-                    f"{analysis.rstrip('。！？!? ；; ')}。"
-                    "前20个交易日最后结果："
-                    f"{_render_final_twenty_day_review(episode, final)}"
+                final_paragraphs.append(
+                    f"{prefix}{_render_final_twenty_day_review(episode, final)}"
                 )
-            analysis_paragraphs.append(f"{prefix}{analysis}")
 
         lines.extend(
             [
                 f"### {alert.name}（{alert.ts_code}）",
                 "",
-                "**推荐日期和当时判断**",
+                "\n\n".join(status_paragraphs),
                 "",
-                *original_paragraphs,
+                "**今天发生了什么**",
                 "",
-                "**到今天走到哪里**",
+                "\n\n".join(update_paragraphs),
                 "",
-                *progress_paragraphs,
+                "**相比上次判断**",
                 "",
-                "**我的分析**",
+                "\n\n".join(change_paragraphs),
                 "",
-                *analysis_paragraphs,
-                "",
-                "**接下来更可能怎样**",
+                "**接下来1—3个交易日**",
                 "",
                 _render_public_outlook(alert),
                 "",
             ]
         )
+        if final_paragraphs:
+            lines.extend(
+                ["**20个交易日最终复盘**", "", "\n\n".join(final_paragraphs), ""]
+            )
     lines.extend(
         [
             "## 目前还在跟踪多少只",
@@ -1505,6 +1505,54 @@ def _render_markdown(
         ]
     )
     return "\n".join(lines)
+
+
+def _render_compact_review_status(episode: dict[str, Any]) -> str:
+    action = date.fromisoformat(str(episode["action_date"]))
+    parts = [
+        f"当前状态：{action.year}年{action.month}月{action.day}日推荐 · "
+        f"推荐后的第{int(episode['day_number'])}个交易日"
+    ]
+    if "entry_open" in episode and _number(episode.get("entry_open")) is None:
+        parts.append("没有可靠的推荐参考价，暂时无法计算涨跌")
+    else:
+        current = _number(episode.get("current_close_return_since_entry"))
+        highest = _number(episode.get("current_max_close_return_since_entry"))
+        lowest = _number(episode.get("current_mae_since_entry"))
+        if current is not None:
+            parts.append(f"收盘较推荐参考价{_plain_movement(current)}")
+        if highest is not None:
+            parts.append(f"期间最高收盘{_plain_movement(highest)}")
+        if lowest is not None:
+            parts.append(_plain_low_point(lowest))
+    return "；".join(parts) + "。"
+
+
+def _render_first_day_background(
+    episode: dict[str, Any], review: ForwardEpisodeReviewV1,
+) -> str:
+    if "missing_original_research_thesis" in (episode.get("data_limitations") or []):
+        return (
+            "原推荐背景：当时留下的原始判断不完整，因此这次只能复盘价格表现，"
+            "不能逐项审查当时的理由。"
+        )
+    # Presentation-only sentence clipping; the frozen source fields stay intact.
+    reason = re.split(r"[。！？!?\n]", review.original_reason_plain_language, maxsplit=1)[0]
+    risk = re.split(r"[。！？!?\n]", review.original_key_risk_plain_language, maxsplit=1)[0]
+    return f"原推荐背景：{reason.rstrip('；; ')}；{risk.rstrip('；; ')}。"
+
+
+def _render_view_change(daily: DailyFormalReviewV1 | None) -> str:
+    if daily is None:
+        return "历史记录未保存与上次判断的比较。"
+    label = {
+        "first_review": "",
+        "unchanged": "判断没有实质变化",
+        "strengthened": "判断增强",
+        "weakened": "判断减弱",
+        "invalidated": "原判断已被事实否定",
+    }[daily.view_change]
+    return f"{label}：{daily.view_change_reason}" if label else daily.view_change_reason
 
 
 def _render_tracking_counts(
@@ -1580,6 +1628,18 @@ def _render_current_assessment(value: str) -> str:
     return labels[value]
 
 
+def _outlook_confirmation_label(outlook: str) -> str:
+    return {
+        "strengthening": "会进一步支持向上判断的表现",
+        "continuation_possible": "会进一步支持震荡偏上判断的表现",
+        "range_or_wait": "会继续支持横盘判断的表现",
+        "weakening": "会进一步支持偏弱判断的表现",
+        "overheated": "会进一步支持高位震荡偏下判断的表现",
+        "invalidated": "会进一步支持偏弱判断的表现",
+        "event_pending": "会继续维持暂时无法判断的事实",
+    }[outlook]
+
+
 def _render_public_outlook(alert: ForwardMonitorAlertV2) -> str:
     baselines = {
         "event_pending": "目前没有足够的可交易事实判断方向",
@@ -1600,8 +1660,8 @@ def _render_public_outlook(alert: ForwardMonitorAlertV2) -> str:
         paragraphs.append(f"主要原因是：{reason}。")
     paragraphs.extend(
         [
-            f"支持这个判断的后续表现：{confirmation}。",
-            f"需要改变判断的后续表现：{invalidation}。",
+            f"{_outlook_confirmation_label(alert.outlook_1_3d)}：{confirmation}。",
+            f"会让我改变当前判断的表现：{invalidation}。",
         ]
     )
     return "\n\n".join(paragraphs)
