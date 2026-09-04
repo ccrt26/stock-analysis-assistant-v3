@@ -30,17 +30,17 @@ def _health_research_state(report: Any) -> tuple[bool, tuple[str, ...]]:
         limitations.append("行业研究数据不可用")
     if not features.get("stock_trading_context", False):
         limitations.append("个股交易背景不可用")
-    next_morning = next(
+    pre_research = next(
         (
             item
             for item in getattr(report, "latest_stage_runs", ())
-            if getattr(item, "stage", "") == "next-morning"
+            if getattr(item, "stage", "") == "pre-research"
         ),
         None,
     )
     capabilities = (
-        getattr(next_morning, "capabilities", {})
-        if next_morning is not None
+        getattr(pre_research, "capabilities", {})
+        if pre_research is not None
         else {}
     )
     announcement_status = (
@@ -99,12 +99,33 @@ def data_backfill(
 def data_run_stage(
     stage: str = typer.Option(..., "--stage"),
     data_date: str = typer.Option(..., "--data-date"),
+    as_of: Optional[str] = typer.Option(None, "--as-of"),
 ) -> None:
     from stock_analyzer.ops.research_data_job import (
         build_research_data_runtime,
         research_job_lock,
         run_research_stage,
     )
+
+    if stage not in {"close", "evening", "pre-research"}:
+        _fail(f"unknown research data stage: {stage}")
+    if stage != "pre-research" and as_of is not None:
+        _fail("--as-of is only valid for pre-research")
+    cutoff = None
+    if stage == "pre-research":
+        if as_of in {None, "auto"}:
+            cutoff = datetime.combine(
+                datetime.now(ZoneInfo("Asia/Shanghai")).date(),
+                time(18, 30), ZoneInfo("Asia/Shanghai"),
+            )
+        else:
+            try:
+                cutoff = datetime.fromisoformat(as_of)
+                if cutoff.utcoffset() is None:
+                    raise ValueError("timezone required")
+                cutoff = cutoff.astimezone(ZoneInfo("Asia/Shanghai"))
+            except ValueError:
+                _fail("--as-of must be auto or an ISO datetime with timezone")
 
     config = AppConfig.load()
     warehouse_root = getattr(config, "local_warehouse_dir", None)
@@ -113,6 +134,7 @@ def data_run_stage(
             config,
             stage=stage,
             data_date=data_date,
+            as_of=cutoff,
             already_locked=False,
             build_runtime=build_research_data_runtime,
             run_stage=run_research_stage,
@@ -123,6 +145,7 @@ def data_run_stage(
             config,
             stage=stage,
             data_date=data_date,
+            as_of=cutoff,
             already_locked=True,
             build_runtime=build_research_data_runtime,
             run_stage=run_research_stage,
@@ -134,6 +157,7 @@ def _execute_data_stage(
     *,
     stage: str,
     data_date: str,
+    as_of: datetime | None,
     already_locked: bool,
     build_runtime,
     run_stage,
@@ -143,17 +167,20 @@ def _execute_data_stage(
         _resolve_research_stage_date(
             runtime.tushare,
             stage,
-            datetime.now(ZoneInfo("Asia/Shanghai")),
+            as_of or datetime.now(ZoneInfo("Asia/Shanghai")),
         )
         if data_date == "auto"
         else date.fromisoformat(data_date)
     )
+    if parsed is None:
+        typer.echo(f"{stage}: no_action_day; no research data stage required")
+        return
+    kwargs = {"stage": stage, "data_date": parsed}
+    if as_of is not None:
+        kwargs["as_of"] = as_of
     if already_locked:
-        summaries = run_stage(
-            runtime, stage=stage, data_date=parsed, already_locked=True
-        )
-    else:
-        summaries = run_stage(runtime, stage=stage, data_date=parsed)
+        kwargs["already_locked"] = True
+    summaries = run_stage(runtime, **kwargs)
     for item in summaries:
         typer.echo(
             f"{stage}/{item.scope}: committed={item.committed} skipped={item.skipped} "
@@ -178,7 +205,7 @@ def _execute_data_stage(
         f"stage health: core_complete={str(health.complete_core_date).lower()} "
         f"output={health_path}"
     )
-    if stage == "close":
+    if stage in {"close", "evening"}:
         core_ready = not any(
             item.failed or item.waiting_upstream for item in summaries
         )
@@ -203,7 +230,12 @@ def _execute_data_stage(
     )
     combined = tuple(dict.fromkeys((*limitations, *stage_limitations)))
     if combined:
-        _print_limited_research(combined)
+        if stage == "pre-research":
+            _print_limited_research(combined)
+        else:
+            typer.echo("事实采集存在限制；正式研究就绪由 pre-research 独立判断")
+            for limitation in combined:
+                typer.echo(f"- {limitation}")
 
 
 @data_app.command("derive")
@@ -257,29 +289,30 @@ def data_health(
     )
 
 
-def _resolve_research_stage_date(client, stage: str, now: datetime) -> date:
+def _resolve_research_stage_date(client, stage: str, now: datetime) -> date | None:
     local_now = now.astimezone(ZoneInfo("Asia/Shanghai"))
     today = local_now.date()
-    calendar = client.fetch_trade_calendar(today - timedelta(days=14), today)
+    tomorrow = today + timedelta(days=1)
+    calendar = client.fetch_trade_calendar(today - timedelta(days=30), tomorrow)
     open_dates = sorted(
-        value
-        for value in calendar.loc[calendar["is_open"], "cal_date"].tolist()
-        if value <= today
+        value for value in calendar.loc[calendar["is_open"], "cal_date"].tolist()
+        if value <= tomorrow
     )
-    if not open_dates:
-        _fail("cannot resolve a trading date for research data stage")
-
-    cutoffs = {
-        "close": time(18, 30),
-        "evening": time(21, 30),
-    }
-    if stage == "next-morning":
-        candidates = [value for value in open_dates if value < today]
-    elif stage in cutoffs:
-        today_is_open = today in open_dates
-        if today_is_open and local_now.time() >= cutoffs[stage]:
-            return today
-        candidates = [value for value in open_dates if value < today]
+    if stage == "close":
+        if today not in set(calendar["cal_date"]):
+            _fail("trade calendar does not cover today")
+        return today if today in open_dates and local_now.time() >= time(17, 30) else None
+    if stage == "pre-research":
+        if tomorrow not in set(calendar["cal_date"]):
+            _fail("trade calendar does not cover tomorrow")
+        if tomorrow not in open_dates:
+            return None
+        candidates = [value for value in open_dates if value < tomorrow]
+    elif stage == "evening":
+        candidates = [
+            value for value in open_dates
+            if value < today or (value == today and local_now.time() >= time(15))
+        ]
     else:
         _fail(f"unknown research data stage: {stage}")
     if not candidates:

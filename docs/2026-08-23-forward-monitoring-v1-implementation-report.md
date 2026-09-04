@@ -1,5 +1,7 @@
 # 选出股票后的轻量跟踪 V1 实施报告
 
+> 历史记录：本文保留当时方案与事实，不作为当前运行入口或调度依据。当前时序以 `docs/architecture/current-v3-architecture.md` 和 `ops/forward-selection-prompt.md` 为准。
+
 ## 修改文件
 
 - 新增 `src/stock_analyzer/ops/forward_monitor.py`：提供 `register`、`prepare`、`record`。

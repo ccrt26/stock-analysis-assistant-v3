@@ -1,15 +1,17 @@
-# 现有 09:05 每日任务中的股票跟踪步骤
+# 现有 18:45 每日任务中的股票跟踪步骤
 
-这一步每天只运行一次，属于现有 09:05 任务，不创建新的 Scheduled Task，也不新增定时任务。程序处理全部跟踪记录；每个 active 正式推荐 episode 在每个已收盘交易日都必须生成一条简短 AI 复盘，再从当日需复盘的正式推荐中选最多8只做详细复盘。面向用户时先展示全部主动推荐的今日结论，再按“今天发生了什么、相比上次判断、接下来1—3个交易日”展开重点股票，不展示内部字段名、英文值或交易日缩写。
+这一步在下个交易日前一自然日晚间每天只运行一次，属于现有 18:45 任务，不创建新的 Scheduled Task，也不新增定时任务。程序处理全部跟踪记录；每个 active 正式推荐 episode 在每个已收盘交易日都必须生成一条简短 AI 复盘，再从当日需复盘的正式推荐中选最多8只做详细复盘。面向用户时先展示全部主动推荐的今日结论，再按“今天发生了什么、相比上次判断、接下来1—3个交易日”展开重点股票，不展示内部字段名、英文值或交易日缩写。
 
 ## 1. 程序准备全部跟踪记录
 
-当天收盘数据可靠后运行：
+只在 selection prepare 确认明天为交易日后运行；若明天休市，不另加复盘。周日复盘分析日为周五，selection 与 monitor 共用周日18:30截止。长假同理，在下个交易日前一自然日晚间使用最近已收盘交易日。
+
+使用 selection prepare 原样返回的形成日与截止时间运行：
 
 ```bash
 ./.venv/bin/python -m stock_analyzer.ops.forward_monitor prepare \
-  --analysis-date <已收盘交易日> \
-  --as-of <带时区截止时间>
+  --analysis-date <formation_date> \
+  --as-of <selection_as_of>
 ```
 
 程序处理全部跟踪记录，并生成 `local_archive/forward_monitor/snapshot-<analysis_date>.json`。snapshot 的 `daily_review_episode_ids` 是当天必须逐条简评的正式推荐记录，`evaluation_only_episode_ids` 是已停止普通日评但仍保留D20评价的记录，`detailed_review_candidate_codes` 是当天可进入详细复盘的股票。不得建立人工维护的第二套股票池，不得打分。
@@ -55,15 +57,12 @@ D1、D3、D5、D10、D20 不决定是否生成每日简评，只决定当天加�
 
 ```bash
 ./.venv/bin/python -m stock_analyzer data run-stage \
-  --stage close \
-  --data-date <analysis_date>
-
-./.venv/bin/python -m stock_analyzer data run-stage \
-  --stage next-morning \
-  --data-date <analysis_date>
+  --stage pre-research \
+  --data-date <analysis_date> \
+  --as-of <selection_as_of>
 ```
 
-只有价格或市场缺失时运行 `close`；只有行业、主题或公告缺失时运行 `next-morning`。补数后重新运行一次 monitor prepare，仍缺失就明确具体限制，不得循环重试。不得为一只股票执行全市场财务回填、增加数据源或增加任务。
+`pre-research` 按分区精确补缺，并按同一个18:30截止重建派生结果；不得用当前时间或默认日末截止替代 `selection_as_of`。补数后重新运行一次 monitor prepare，仍缺失就明确具体限制，不得循环重试。不得为一只股票执行全市场财务回填、增加数据源或增加任务。
 
 若缺少的公司财务或公告正文会直接改变原推荐判断，公司 Skill 沿现有官方链接定向读取一次；无关月报、例行公告、单个公告标题或非核心细节不得主导整只股票的复盘。仍无法取得时只说明哪一项无法核对，继续分析其他已有事实。只有推荐参考价或整段行情确实不存在，才能说不能评价距离20%观察目标的进展。
 

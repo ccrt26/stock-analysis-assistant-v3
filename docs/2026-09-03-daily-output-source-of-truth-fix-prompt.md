@@ -1,5 +1,7 @@
 # 每日股票任务最终输出链路诊断与修复——Codex执行指令 V1.0
 
+> 历史记录：本文保留当时方案与事实，不作为当前运行入口或调度依据。当前时序以 `docs/architecture/current-v3-architecture.md` 和 `ops/forward-selection-prompt.md` 为准。
+
 > **直接执行本文件。**
 >
 > 当前 `main` 中的选股说明和复盘 Skill 已经更新，但 2026-09-03 用户收到的自动任务回复又变成：

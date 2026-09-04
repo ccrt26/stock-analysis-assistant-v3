@@ -53,17 +53,22 @@ logs/
 
 这些目录及 `.env.local` 都被Git忽略，不应提交、移动或清空。
 
-## 三个数据任务
+## 三个数据阶段、四个定时入口
 
-项目保留三个 `launchd` 模板：
+项目保留四个 `launchd` 模板，执行三个数据阶段（21:30复用 evening）：
 
 | 阶段 | 时间 | 命令 |
 | --- | --- | --- |
-| 收盘 | 18:30 | `data run-stage --stage close --data-date auto` |
-| 晚间 | 21:30 | `data run-stage --stage evening --data-date auto` |
-| 次晨 | 09:00 | `data run-stage --stage next-morning --data-date auto` |
+| 收盘 | 17:30 | `data run-stage --stage close --data-date auto` |
+| 晚间事实 | 18:00 | `data run-stage --stage evening --data-date auto` |
+| 研究前准备 | 18:32 | `data run-stage --stage pre-research --data-date auto --as-of auto` |
+| 晚间事实重试 | 21:30 | `data run-stage --stage evening --data-date auto` |
 
-模板位于 `ops/launchd/`。任务只更新本地事实、派生观察和健康摘要。
+模板位于 `ops/launchd/`。任务只更新本地事实、派生观察和健康摘要。17:30、18:00、18:32、21:30均按上海时间设计；加载前用 `/usr/sbin/systemsetup -gettimezone` 确认Mac系统时区为 `Asia/Shanghai`，否则停止加载，不自行改时区。
+
+正式AI任务每天18:45检查明天是否交易日；只有明天开市才生成已有推荐复盘、0—5只新推荐及完整合并报告。截止固定为当晚18:30，价格只到形成日收盘，核心数据最晚等到18:55。周日用周五行情及周日18:30之前的公开事实，为周一提供报告；长假在下个交易日前一自然日晚间运行，不提前到节前，也不另加休市前晚复盘。20:30是交付目标，不新增守护服务。
+
+21:30只补采事实，不重算正式派生结果或改写已冻结报告。08:45的独立Codex安全提醒只按 `ops/preopen-safety-prompt.md` 检查昨晚正式推荐与条件事件线索的新公告及当前停牌，不新增或替换股票、不改顺序和原判断；停牌只是当前观察，不写正式停牌分区。
 
 ## 安装与配置
 
@@ -140,18 +145,18 @@ python tools/repair_research_data_gaps.py --dry-run
 python tools/repair_research_data_gaps.py --execute
 ```
 
-三个写任务在初始化 DuckDB 前共用同一全局锁。`close` 只按收盘阶段的失败或等待决定非零退出；`evening` 与 `next-morning` 还检查各自应产出的研究观察。可选分钟受限会进入健康报告，但不会单独令核心日线任务失败。
+数据写任务在初始化 DuckDB 前共用同一全局锁。`close` 保留完整核心数据；`evening` 保留公告、股东变动、解禁、回购、质押、停牌与分类、公告触发财务刷新，只采事实。`pre-research` 才精确补核心缺口、补截止前公告、行业/主题和财务，并显式按18:30生成四类研究观察。融资融券T+1不属于前晚形成日核心输入，只补形成日前已到可用时间的历史缺口；分钟仍为可选能力，权限受限不阻断核心研究。
 
-## 人工补跑早晨研究
+## 人工补跑晚间研究
 
-当天早晨的研究没有启动或失败时，可以在稍后安全补跑：
+原计划前晚研究没有启动或失败时，可以在稍后安全补跑：
 
 ```bash
 python -m stock_analyzer.ops.forward_selection prepare \
   --rerun-date YYYY-MM-DD
 ```
 
-日期填写原计划推荐日期。程序会自动找到前一个交易日，并把研究截止时间固定为原计划推荐日上海时间 09:05；不会把实际补跑时间、当天盘中行情或当前价格当成早晨条件。无参数 `prepare` 仍只允许在 09:05—09:30 使用。
+日期填写原计划推荐日期（行动日）。程序会自动找到前一个交易日，并把截止时间固定为行动日前一自然日上海时间18:30；不会把补跑时间或当前价格当成当时条件。无参数 `prepare` 只允许18:45—18:55启动。数据补跑必须使用 `data run-stage --stage pre-research --data-date <formation_date> --as-of <selection_as_of>`，不得使用默认日末截止。已冻结的完整显式上下文超过18:55后仍能完成和记录，不延长事实或行情边界。
 
 市场情况和价格分析是正式研究的最低条件，任何一项不可用都会停止推荐。行业研究、个股交易背景或行动日前公告补采缺失时，可以继续受限研究，但返回结果会明确列出本次不能使用的内容；不会拿名称、概念或当前行情补猜。完整步骤以 `ops/forward-selection-prompt.md` 为准。
 
@@ -181,4 +186,4 @@ Python代码可以使用：
 python -m pytest -q
 ```
 
-测试覆盖当前数据获取、事实仓、时点查询、派生观察、健康检查、三个数据任务、每日推荐和选出后的走势复盘边界。
+测试覆盖当前数据获取、事实仓、时点查询、派生观察、健康检查、三个数据阶段及四个定时入口、每日推荐和选出后的走势复盘边界。

@@ -1,4 +1,4 @@
-# Codex 原生 09:05 Scheduled Task 提示
+# Codex 原生 18:45 Scheduled Task 提示
 
 这是当前个人 A 股助手的正式每日推荐研究。只执行研究，不开发或修改程序，不改写 Skill，不启动新的 Codex/模型进程，不读取未来行情。
 
@@ -24,7 +24,9 @@
 ./.venv/bin/python -m stock_analyzer.ops.forward_selection prepare
 ```
 
-若为交易日且返回可靠的 `formation_date`，先用该已收盘日期和带时区截止时间运行：
+正常研究在次日前一自然日18:45启动，固定使用当天18:30上海时间截止；核心数据最晚等到18:55。这里的次日就是 `action_date`，必须为交易日，不能自动跳过休息日提前推荐。若明天不是交易日（`non_trading_day`），正常说明无需生成报告并结束，不运行复盘或新选股；周末和长假统一在下个交易日前一自然日晚间运行。周日使用周五行情、周日18:30公告，为周一提供复盘和推荐。20:30只是交付目标，不新增守护服务。
+
+若返回 `ready_for_research`、`ready_for_research_limited` 或 `already_selected`，用返回的可靠 `formation_date` 和原始 `selection_as_of` 运行：
 
 ```bash
 ./.venv/bin/python -m stock_analyzer.ops.forward_monitor prepare \
@@ -46,11 +48,16 @@
 
 内部继续保留 `formation_date`、`action_date` 和 `selection_as_of`。面向用户只用普通日期说明：
 
-> 我们在<action_date>开盘前选择这只股票，使用的是截至<formation_date>收盘能够取得的信息。
+> 本报告使用截至<selection_as_of>（上海时间）能够取得的公开信息，
+> 以及截至<formation_date>收盘的价格数据，供<action_date>交易日参考。
+> 截止时间以后至开盘前的新公告不属于本次正式研究范围；
+> 足以影响参与条件的变化由次晨安全提醒单独说明。
+
+正常报告开头必须使用上面这段完整说明。21:30只补采事实，不重算或改写本次正式研究；次晨08:45只按 `ops/preopen-safety-prompt.md` 提醒，不重新选股。
 
 复盘时在当前状态行用 `<action_date>` 对应的推荐日期作简短前缀，并保留推荐后的交易日序号。
 
-### 用户要求补跑早晨失败任务时
+### 用户要求补跑晚间失败任务时
 
 先运行：
 
@@ -59,12 +66,13 @@
   --rerun-date <原计划推荐日期>
 ```
 
-这个命令会把截止时间固定为原计划推荐日期上海时间 09:05，并由交易日历确定前一个交易日，不使用当前时间或当前价格。如果返回 `data_not_ready`，使用返回的原始 `formation_date` 运行：
+这个命令会把截止时间固定为原计划推荐日期前一自然日上海时间18:30，并由交易日历确定前一个交易日，不使用当前时间或当前价格。如果返回 `data_not_ready`，使用返回的原始 `formation_date` 和 `selection_as_of` 定向补一次：
 
 ```bash
 ./.venv/bin/python -m stock_analyzer data run-stage \
-  --stage next-morning \
-  --data-date <formation_date>
+  --stage pre-research \
+  --data-date <formation_date> \
+  --as-of <selection_as_of>
 ```
 
 然后再次运行：
@@ -81,13 +89,13 @@
 - `theme_research_available=false`：不得使用主题日行情或主题传播证据；不得因为主题缺失而停止行业、公司或个股价格路径。
 - `stock_context_available=false`：不得引用个股交易背景独有字段；市场、公司和价格仍可研究。
 - `announcement_status=exchange_partial`：只允许列在 `announcement_exchanges` 的交易所使用行动日前新公告形成 `fresh_event_pending`；未覆盖交易所不得把“没有取到”写成“没有公告”。
-- `announcement_status=announcement_unavailable`：公司 Skill 可以使用形成日及更早的正式事实，但不得形成刚在行动日前公开、尚无完整交易日的候选，也不得声称完整检查了行动日开盘前新公告。
+- `announcement_status=announcement_unavailable`：公司 Skill 可以使用形成日及更早的正式事实，但不得形成刚在行动日前公开、尚无完整交易日的候选，也不得声称完整检查了研究截止前新公告。
 
 `complete_core_date` 只作诊断，不再决定能否研究。`prepare` 返回的市场、价格、行业、主题、个股背景、`announcement_status`、`announcement_exchanges` 和限制才是本次真实能力边界。
 
 若已经存在同一 `formation_date` 的正式选择，prepare 返回 `already_selected`，不得重复选股，但仍可继续已有股票走势复盘。
 
-补跑报告开头必须原样说明：“这是对<日期>早晨任务的补跑。研究只使用当日09:05前能够看到的信息；原开盘观察时点已经过去，当前价格不能替代当时的参与条件。”不得把补跑结果称为当前价格下的新推荐，也不得用盘中走势改写原判断。
+补跑报告开头必须在固定报告开头后补充说明：“这是对<日期>交易日前晚任务的补跑。研究仍使用原计划交易日前一自然日18:30的固定截止；当前价格不能替代当时的参与条件。”不得把补跑结果称为当前价格下的新推荐，也不得用盘中走势改写原判断。
 
 ## 2. 唯一研究合同
 

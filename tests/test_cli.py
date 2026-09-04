@@ -18,7 +18,7 @@ def _health_report(
     sector_ready: bool = True,
     stock_ready: bool = True,
     price_ready: bool = True,
-    next_morning_status: str = "succeeded",
+    pre_research_status: str = "succeeded",
     announcement_status: str | None = None,
 ):
     features = (
@@ -32,13 +32,13 @@ def _health_report(
         derived_features=features,
         latest_stage_runs=(
             SimpleNamespace(
-                stage="next-morning",
-                status=next_morning_status,
+                stage="pre-research",
+                status=pre_research_status,
                 capabilities={
                     "announcement_status": announcement_status
                     or (
                         "cninfo_complete"
-                        if next_morning_status in {"succeeded", "limited"}
+                        if pre_research_status in {"succeeded", "limited"}
                         else "announcement_unavailable"
                     ),
                     "announcement_exchanges": ["SSE", "SZSE"],
@@ -125,7 +125,7 @@ def test_scheduled_stage_returns_nonzero_when_required_facts_are_incomplete(
     monkeypatch.setattr(
         job,
         "run_research_stage",
-        lambda runtime, *, stage, data_date: (
+        lambda runtime, *, stage, data_date, **kwargs: (
             BackfillSummary(
                 scope="market-core",
                 start=date(2026, 8, 4),
@@ -179,7 +179,7 @@ def test_close_stage_does_not_require_evening_derived_features(
     monkeypatch.setattr(
         job,
         "run_research_stage",
-        lambda runtime, *, stage, data_date: (
+        lambda runtime, *, stage, data_date, **kwargs: (
             BackfillSummary(
                 scope="market-core",
                 start=date(2026, 8, 4),
@@ -285,7 +285,7 @@ def test_scheduled_stage_optional_waiting_returns_zero_when_core_is_ready(
     monkeypatch.setattr(
         job,
         "run_research_stage",
-        lambda runtime, *, stage, data_date: (
+        lambda runtime, *, stage, data_date, **kwargs: (
             BackfillSummary(
                 scope="events",
                 start=date(2026, 8, 4),
@@ -300,7 +300,7 @@ def test_scheduled_stage_optional_waiting_returns_zero_when_core_is_ready(
         health,
         "build_research_health_report",
         lambda warehouse, data_date, full_history: _health_report(
-            next_morning_status="waiting_upstream"
+            pre_research_status="waiting_upstream"
         ),
     )
     monkeypatch.setattr(
@@ -315,7 +315,7 @@ def test_scheduled_stage_optional_waiting_returns_zero_when_core_is_ready(
             "data",
             "run-stage",
             "--stage",
-            "next-morning",
+            "pre-research",
             "--data-date",
             "2026-08-04",
         ],
@@ -338,7 +338,7 @@ def test_scheduled_stage_optional_feature_failure_returns_zero(
     monkeypatch.setattr(
         job,
         "run_research_stage",
-        lambda runtime, *, stage, data_date: (
+        lambda runtime, *, stage, data_date, **kwargs: (
             BackfillSummary(
                 scope="derived-research-features",
                 start=date(2026, 8, 4),
@@ -368,7 +368,7 @@ def test_scheduled_stage_optional_feature_failure_returns_zero(
             "data",
             "run-stage",
             "--stage",
-            "next-morning",
+            "pre-research",
             "--data-date",
             "2026-08-04",
         ],
@@ -425,3 +425,14 @@ def test_derive_core_failure_returns_two(tmp_path, monkeypatch):
     )
 
     assert result.exit_code == 2, result.output
+
+
+def test_stage_cutoff_option_and_validation_before_runtime():
+    help_result = runner.invoke(app, ["data", "run-stage", "--help"])
+    assert "--as-of" in help_result.output
+    for stage, cutoff in (("close", "auto"), ("evening", "auto"),
+                          ("pre-research", "2026-09-06T18:30:00")):
+        result = runner.invoke(app, ["data", "run-stage", "--stage", stage,
+                                    "--data-date", "auto", "--as-of", cutoff])
+        assert result.exit_code == 2
+        assert "as-of" in result.output

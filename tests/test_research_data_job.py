@@ -24,6 +24,7 @@ def _derived_summary(*, failed: tuple[str, ...] = ()):  # business-stage fixture
             "market_context",
             "sector_hotspot",
             "stock_trading_context",
+            "price_analysis_context",
         ) if not failed else (),
         skipped_feature_sets=(),
         failed_feature_sets=failed,
@@ -132,7 +133,8 @@ def test_stage_exception_is_recorded_as_failed_with_finished_time(
 
     with pytest.raises(RuntimeError, match="simulated stage failure"):
         run_research_stage(
-            runtime, stage="next-morning", data_date=date(2026, 7, 13)
+            runtime, stage="pre-research", data_date=date(2026, 7, 13),
+            as_of=datetime.fromisoformat("2026-07-13T18:30:00+08:00")
         )
 
     with connect_research_warehouse(
@@ -158,7 +160,7 @@ def test_stage_interrupts_orphan_running_rows_before_starting_new_run(
         connection.execute(
             """
             insert into research_ingestion_runs
-            values ('orphan', 'orphan', 'next-morning', '2026-09-01',
+            values ('orphan', 'orphan', 'pre-research', '2026-09-01',
                     'running', now() - interval '1 day', null, null)
             """
         )
@@ -225,7 +227,7 @@ def test_close_stage_never_derives_partial_research_features(monkeypatch):
     assert summaries == (expected,)
 
 
-def test_evening_derives_only_after_fact_commits_and_reconciliation(monkeypatch):
+def test_evening_only_collects_facts_and_reconciles(monkeypatch):
     import stock_analyzer.ops.research_data_job as job
 
     order = []
@@ -271,7 +273,7 @@ def test_evening_derives_only_after_fact_commits_and_reconciliation(monkeypatch)
     monkeypatch.setattr(
         job,
         "run_research_features",
-        lambda warehouse, data_date: order.append("derive") or _derived_summary(),
+        lambda warehouse, data_date, **kwargs: order.append("derive") or _derived_summary(),
         raising=False,
     )
     runtime = SimpleNamespace(
@@ -288,11 +290,8 @@ def test_evening_derives_only_after_fact_commits_and_reconciliation(monkeypatch)
         "industry_daily_proxy",
         "theme_daily",
         "reconcile",
-        "derive",
     ]
-    assert summaries[-1].scope == "derived-research-features"
-    assert summaries[-1].committed == 3
-    assert summaries[-1].issues == ["2026-07-13 已完成三类研究观察。"]
+    assert all(item.scope != "derived-research-features" for item in summaries)
 
 
 def test_evening_continues_industry_and_theme_refresh_after_event_failure(monkeypatch):
@@ -329,7 +328,7 @@ def test_evening_continues_industry_and_theme_refresh_after_event_failure(monkey
     monkeypatch.setattr(job, "EventBackfillService", EventService)
     monkeypatch.setattr(job, "ClassificationBackfillService", ClassificationService)
     monkeypatch.setattr(job, "reconcile_research_gaps", lambda *args: None)
-    monkeypatch.setattr(job, "run_research_features", lambda *args: _derived_summary())
+    monkeypatch.setattr(job, "run_research_features", lambda *args, **kwargs: _derived_summary())
     runtime = SimpleNamespace(
         tushare=object(),
         cninfo=object(),
@@ -348,7 +347,6 @@ def test_evening_continues_industry_and_theme_refresh_after_event_failure(monkey
     assert {summary.scope for summary in summaries} >= {
         "industry_daily_proxy",
         "theme_daily",
-        "derived-research-features",
     }
 
 
@@ -391,7 +389,7 @@ def test_evening_continues_theme_refresh_after_industry_failure(monkeypatch):
 
     monkeypatch.setattr(job, "ClassificationBackfillService", ClassificationService)
     monkeypatch.setattr(job, "reconcile_research_gaps", lambda *args: None)
-    monkeypatch.setattr(job, "run_research_features", lambda *args: _derived_summary())
+    monkeypatch.setattr(job, "run_research_features", lambda *args, **kwargs: _derived_summary())
     runtime = SimpleNamespace(
         tushare=object(),
         cninfo=object(),
@@ -441,11 +439,13 @@ def test_fundamental_refresh_scope_uses_actual_financial_disclosures_only():
     )
 
     assert select_fundamental_refresh_codes(
-        announcements, date(2026, 8, 4)
+        announcements,
+        published_from=datetime.fromisoformat("2026-08-04T00:00:00+08:00"),
+        published_through=datetime.fromisoformat("2026-08-04T23:59:59+08:00"),
     ) == ("000001.SZ", "000003.SZ")
 
 
-def test_next_morning_only_checks_current_date_facts_and_then_derives(
+def test_pre_research_only_checks_current_date_facts_and_then_derives(
     monkeypatch,
 ):
     import stock_analyzer.ops.research_data_job as job
@@ -475,8 +475,8 @@ def test_next_morning_only_checks_current_date_facts_and_then_derives(
         def __init__(self, *args, **kwargs):
             pass
 
-        def backfill(self, **kwargs):
-            assert kwargs["resume"] is False
+        def backfill_minute_bars(self, **kwargs):
+            assert kwargs["resume"] is True
             order.append("trading-structure")
             return trading
 
@@ -500,7 +500,7 @@ def test_next_morning_only_checks_current_date_facts_and_then_derives(
     monkeypatch.setattr(
         job,
         "run_research_features",
-        lambda warehouse, data_date: order.append("derive") or _derived_summary(),
+        lambda warehouse, data_date, **kwargs: order.append("derive") or _derived_summary(),
         raising=False,
     )
     runtime = SimpleNamespace(
@@ -512,7 +512,8 @@ def test_next_morning_only_checks_current_date_facts_and_then_derives(
     )
 
     summaries = run_research_stage(
-        runtime, stage="next-morning", data_date=date(2026, 7, 13)
+        runtime, stage="pre-research", data_date=date(2026, 7, 13),
+            as_of=datetime.fromisoformat("2026-07-13T18:30:00+08:00")
     )
 
     assert order == [
@@ -525,7 +526,7 @@ def test_next_morning_only_checks_current_date_facts_and_then_derives(
     assert event_options == [
         {
             "start": date(2026, 7, 13),
-            "through": date(2026, 7, 16),
+            "through": date(2026, 7, 13),
             "resume": False,
             "fallback_to_exchanges": True,
         }
@@ -533,7 +534,7 @@ def test_next_morning_only_checks_current_date_facts_and_then_derives(
     assert summaries[-1].scope == "derived-research-features"
 
 
-def test_next_morning_repairs_only_missing_theme_daily_partition(monkeypatch):
+def test_pre_research_repairs_only_missing_theme_daily_partition(monkeypatch):
     import stock_analyzer.ops.research_data_job as job
 
     order = []
@@ -576,7 +577,7 @@ def test_next_morning_repairs_only_missing_theme_daily_partition(monkeypatch):
         job,
         "TradingStructureBackfillService",
         lambda *args, **kwargs: SimpleNamespace(
-            backfill=lambda **options: order.append("trading")
+            backfill_minute_bars=lambda **options: order.append("trading")
             or BackfillSummary(
                 scope="trading-structure",
                 start=date(2026, 7, 13),
@@ -585,7 +586,7 @@ def test_next_morning_repairs_only_missing_theme_daily_partition(monkeypatch):
         ),
     )
     monkeypatch.setattr(job, "reconcile_research_gaps", lambda *args: None)
-    monkeypatch.setattr(job, "run_research_features", lambda *args: _derived_summary())
+    monkeypatch.setattr(job, "run_research_features", lambda *args, **kwargs: _derived_summary())
     runtime = SimpleNamespace(
         tushare=object(),
         cninfo=object(),
@@ -594,7 +595,8 @@ def test_next_morning_repairs_only_missing_theme_daily_partition(monkeypatch):
         minute_fetcher=None,
     )
 
-    run_research_stage(runtime, stage="next-morning", data_date=date(2026, 7, 13))
+    run_research_stage(runtime, stage="pre-research", data_date=date(2026, 7, 13),
+            as_of=datetime.fromisoformat("2026-07-13T18:30:00+08:00"))
 
     assert order == ["announcements", "theme_daily", "trading"]
 
@@ -620,7 +622,7 @@ def test_feature_failure_is_returned_as_a_failed_data_stage(monkeypatch):
         job,
         "TradingStructureBackfillService",
         lambda *args, **kwargs: SimpleNamespace(
-            backfill=lambda **options: BackfillSummary(
+            backfill_minute_bars=lambda **options: BackfillSummary(
                 scope="trading-structure",
                 start=date(2026, 7, 13),
                 through=date(2026, 7, 13),
@@ -631,7 +633,7 @@ def test_feature_failure_is_returned_as_a_failed_data_stage(monkeypatch):
     monkeypatch.setattr(
         job,
         "run_research_features",
-        lambda *args: _derived_summary(failed=("sector_hotspot",)),
+        lambda *args, **kwargs: _derived_summary(failed=("sector_hotspot",)),
         raising=False,
     )
     runtime = SimpleNamespace(
@@ -640,7 +642,8 @@ def test_feature_failure_is_returned_as_a_failed_data_stage(monkeypatch):
     )
 
     summaries = run_research_stage(
-        runtime, stage="next-morning", data_date=date(2026, 7, 13)
+        runtime, stage="pre-research", data_date=date(2026, 7, 13),
+            as_of=datetime.fromisoformat("2026-07-13T18:30:00+08:00")
     )
 
     assert summaries[-1].scope == "derived-research-features"
@@ -803,3 +806,101 @@ def test_proxy_partition_with_active_gap_is_not_treated_as_passed(tmp_path):
         ResearchDatasetId.INDUSTRY_DAILY_PROXY,
         date(2026, 9, 2),
     )
+
+
+def test_financial_window_includes_weekend_but_not_after_cutoff():
+    announcements = pd.DataFrame([
+        {"ts_code": code, "title": "2026年半年度报告", "announcement_time": published}
+        for code, published in [
+            ("000001.SZ", "2026-09-04T00:00:00+08:00"),
+            ("000002.SZ", "2026-09-06T18:30:00+08:00"),
+            ("000003.SZ", "2026-09-06T18:30:01+08:00"),
+            ("000004.SZ", "2026-09-03T23:59:59+08:00"),
+        ]
+    ])
+    options = dict(
+        published_from=datetime.fromisoformat("2026-09-04T00:00:00+08:00"),
+        published_through=datetime.fromisoformat("2026-09-06T18:30:00+08:00"),
+    )
+    assert select_fundamental_refresh_codes(announcements, **options) == ("000001.SZ", "000002.SZ")
+    with pytest.raises(ValueError, match="timezone"):
+        select_fundamental_refresh_codes(announcements, **{
+            **options, "published_through": datetime(2026, 9, 6, 18, 30),
+        })
+
+
+def test_pre_research_requires_timezone_cutoff_before_any_source_call():
+    for cutoff in (None, datetime(2026, 9, 6, 18, 30)):
+        with pytest.raises(ValueError, match="as_of"):
+            run_research_stage(SimpleNamespace(), stage="pre-research",
+                               data_date=date(2026, 9, 4), as_of=cutoff)
+
+
+def test_sunday_pre_research_exact_order_cutoff_and_margin_lag(monkeypatch):
+    import stock_analyzer.ops.research_data_job as job
+    cutoff = datetime.fromisoformat("2026-09-06T18:30:00+08:00")
+    formation = date(2026, 9, 4)
+    order = []
+    def summary(scope):
+        return BackfillSummary(scope=scope, start=formation, through=formation)
+    class Warehouse:
+        def read_current(self, dataset):
+            assert dataset == ResearchDatasetId.ANNOUNCEMENT
+            return pd.DataFrame([{
+                "ts_code": "000001.SZ", "title": "2026年半年度报告",
+                "announcement_time": "2026-09-06T18:29:00+08:00",
+            }])
+    def core(**options):
+        assert options == dict(start=formation, through=formation, resume=True)
+        order.append("core")
+        return summary("market-core")
+    def announcements(**options):
+        assert options["through"] == cutoff.date()
+        order.append("announcements")
+        return summary("announcements")
+    def financial(**options):
+        assert options["codes"] == ("000001.SZ",)
+        assert options["through"] == cutoff.date()
+        order.append("financial")
+        return summary("financial")
+    def minutes(**options):
+        assert options["trading_dates"] == (formation,)
+        order.append("minutes")
+        return BackfillSummary(scope="minute-bars", start=formation, through=formation, limited=1)
+    def margin(**options):
+        assert options["trading_dates"] == (date(2026, 9, 3),)
+        assert options["resume"] is True
+        order.append("margin")
+        return summary("margin")
+    def derived(warehouse, data_date, *, as_of):
+        assert (data_date, as_of) == (formation, cutoff)
+        order.append("derived")
+        return _derived_summary()
+    monkeypatch.setattr(job, "_trading_dates", lambda *args: (date(2026, 9, 3), formation))
+    monkeypatch.setattr(job, "ResearchBackfillService", lambda *args: SimpleNamespace(backfill_market_core=core))
+    monkeypatch.setattr(job, "EventBackfillService", lambda *args, **kwargs: SimpleNamespace(backfill_announcements=announcements))
+    monkeypatch.setattr(job, "FundamentalBackfillService", lambda *args: SimpleNamespace(backfill=financial))
+    monkeypatch.setattr(job, "_daily_partition_passed", lambda *args: True)
+    monkeypatch.setattr(job, "select_minute_candidate_scope", lambda *args: ())
+    monkeypatch.setattr(job, "TradingStructureBackfillService", lambda *args, **kwargs: SimpleNamespace(
+        backfill_minute_bars=minutes, backfill_margin_details=margin))
+    monkeypatch.setattr(job, "reconcile_research_gaps", lambda *args: order.append("reconcile"))
+    monkeypatch.setattr(job, "run_research_features", derived)
+    runtime = SimpleNamespace(tushare=object(), warehouse=Warehouse(), cninfo=object(), minute_fetcher=None)
+    result = run_research_stage(runtime, stage="pre-research", data_date=formation, as_of=cutoff)
+    assert order == ["core", "announcements", "financial", "minutes", "margin", "reconcile", "derived"]
+    assert result[-1].capabilities["research_as_of"] == cutoff.isoformat(timespec="seconds")
+    assert result[-1].failed == 0
+
+
+def test_failed_core_derivation_does_not_advertise_a_new_research_cutoff(monkeypatch):
+    import stock_analyzer.ops.research_data_job as job
+    monkeypatch.setattr(job, "reconcile_research_gaps", lambda _: None)
+    monkeypatch.setattr(job, "run_research_features",
+                        lambda *args, **kwargs: _derived_summary(failed=("market_context",)))
+    result = job._finalize_stage_with_research_features(
+        SimpleNamespace(warehouse=object()), [], data_date=date(2026, 9, 4),
+        as_of=datetime.fromisoformat("2026-09-06T18:30:00+08:00"),
+    )
+    assert result[-1].failed == 1
+    assert "research_as_of" not in result[-1].capabilities

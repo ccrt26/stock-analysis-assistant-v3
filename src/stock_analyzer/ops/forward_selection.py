@@ -25,7 +25,9 @@ from stock_analyzer.analysis.price_scenario_validation import SCENARIO_SPECS
 
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
-SELECTION_START = time(9, 5)
+RESEARCH_CUTOFF = time(18, 30)
+SELECTION_START = time(18, 45)
+READINESS_DEADLINE = time(18, 55)
 READINESS_POLL_SECONDS = 30
 MARKET_OPEN = time(9, 30)
 INDUSTRY_RESEARCH_LIMITATION = "申万一级行业代理不可用，本次不使用行业证据"
@@ -1898,11 +1900,11 @@ def _prepare_selection_context(
     if rerun_date is not None:
         action_date = rerun_date
         selection_as_of = datetime.combine(
-            rerun_date,
-            SELECTION_START,
+            rerun_date - timedelta(days=1),
+            RESEARCH_CUTOFF,
             SHANGHAI,
         )
-        if rerun_date > started.date():
+        if selection_as_of > started:
             return None, RunSummary(
                 status="invalid_selection_context",
                 action_date=rerun_date.isoformat(),
@@ -1911,14 +1913,14 @@ def _prepare_selection_context(
                 **summary_base,
             )
     elif not explicit_context and (
-        started.time() < SELECTION_START or started.time() >= MARKET_OPEN
+        started.time() < SELECTION_START or started.time() >= READINESS_DEADLINE
     ):
         return None, RunSummary(status="outside_selection_window", **summary_base)
 
     if action_date is None:
-        action_date = started.date()
+        action_date = started.date() + timedelta(days=1)
     if selection_as_of is None:
-        selection_as_of = started
+        selection_as_of = datetime.combine(started.date(), RESEARCH_CUTOFF, SHANGHAI)
     selection_as_of = _shanghai(selection_as_of)
     market_open = datetime.combine(action_date, MARKET_OPEN, SHANGHAI)
     if selection_as_of >= market_open:
@@ -1984,6 +1986,7 @@ def _prepare_selection_context(
         readiness_error,
     ) = _wait_until_data_ready(
         data=data,
+        selection_as_of=selection_as_of,
         formation_date=formation_date,
         action_date=action_date,
         clock=clock,
@@ -2172,6 +2175,7 @@ def _archived_conditional_selection_keys(
 def _wait_until_data_ready(
     *,
     data: ForwardData,
+    selection_as_of: datetime,
     formation_date: date,
     action_date: date,
     clock: Callable[[], datetime],
@@ -2192,7 +2196,7 @@ def _wait_until_data_ready(
     tuple[str, ...],
     str,
 ]:
-    market_open = datetime.combine(action_date, MARKET_OPEN, SHANGHAI)
+    deadline = datetime.combine(action_date - timedelta(days=1), READINESS_DEADLINE, SHANGHAI)
     while True:
         checked_at = _shanghai(clock())
         report = data.health_report(formation_date)
@@ -2232,12 +2236,14 @@ def _wait_until_data_ready(
         )
         sector_ready = industry_ready or theme_ready
         stock_ready = feature_ready.get("stock_trading_context", False)
-        stage = _next_morning_stage(report, formation_date)
+        stage = _pre_research_stage(report, formation_date)
         stage_status = str(stage.get("status", ""))
         raw_capabilities = stage.get("capabilities", {})
         capabilities = (
             raw_capabilities if isinstance(raw_capabilities, dict) else {}
         )
+        cutoff_matches = capabilities.get("research_as_of") == selection_as_of.isoformat(timespec="seconds")
+        core_ready = core_ready and cutoff_matches
         announcement_status = str(
             capabilities.get("announcement_status", "announcement_unavailable")
         )
@@ -2269,7 +2275,7 @@ def _wait_until_data_ready(
         elif not preopen_ready:
             limitation_items.append(PREOPEN_REFRESH_LIMITATION)
         if stage_status == "failed":
-            limitation_items.append("次晨任务存在失败步骤，按已确认可用通道受限研究")
+            limitation_items.append("晚间研究准备任务存在失败步骤，按已确认可用通道受限研究")
         limitations = tuple(dict.fromkeys(limitation_items))
 
         if core_ready and not limitations:
@@ -2315,11 +2321,11 @@ def _wait_until_data_ready(
                 announcement_status,
                 announcement_exchanges,
                 limitations,
-                "next_morning_stage_failed",
+                "pre_research_stage_failed" if cutoff_matches else "pre_research_cutoff_missing_or_mismatch",
             )
 
-        can_wait = run_mode == "normal" and checked_at < market_open
-        if explicit_context and checked_at >= market_open:
+        can_wait = run_mode == "normal" and checked_at < deadline
+        if explicit_context and checked_at >= deadline:
             can_wait = False
         optional_stage_may_finish = stage_status in {
             "",
@@ -2354,20 +2360,20 @@ def _wait_until_data_ready(
                 announcement_status,
                 announcement_exchanges,
                 limitations,
-                "next_morning_data_not_ready_by_market_open",
+                "pre_research_data_not_ready_by_deadline" if cutoff_matches else "pre_research_cutoff_missing_or_mismatch",
             )
-        remaining = (market_open - checked_at).total_seconds()
+        remaining = (deadline - checked_at).total_seconds()
         sleep(min(float(READINESS_POLL_SECONDS), remaining))
 
 
-def _next_morning_stage(
+def _pre_research_stage(
     report: dict[str, Any],
     formation_date: date,
 ) -> dict[str, Any]:
     rows = [
         row
         for row in report.get("latest_stage_runs", [])
-        if row.get("stage") == "next-morning"
+        if row.get("stage") == "pre-research"
         and row.get("data_date") == formation_date.isoformat()
     ]
     if not rows:

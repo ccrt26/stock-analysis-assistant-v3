@@ -1,5 +1,7 @@
 # A股入选时机与专用复盘 Skill 优化——Codex 执行指令 V1.0
 
+> 历史记录：本文保留当时方案与事实，不作为当前运行入口或调度依据。当前时序以 `docs/architecture/current-v3-architecture.md` 和 `ops/forward-selection-prompt.md` 为准。
+
 > **直接执行本文件，不要改写成另一份泛化方案。**
 >
 > 本任务解决两个实质问题：

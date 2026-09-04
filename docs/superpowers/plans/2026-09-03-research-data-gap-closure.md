@@ -1,5 +1,7 @@
 # 研究数据缺口闭环实施计划
 
+> 历史记录：本文保留当时方案与事实，不作为当前运行入口或调度依据。当前时序以 `docs/architecture/current-v3-architecture.md` 和 `ops/forward-selection-prompt.md` 为准。
+
 > 执行时使用 `superpowers:executing-plans`，严格测试先行；设计依据见 `docs/superpowers/specs/2026-09-03-research-data-gap-closure-design.md`。唯一一次独立审查结论为“通过（以修订版为准）”，下列内容已吸收该修订并拥有执行优先级。
 
 目标：修复健康检查盲区和已确认的可修复缺口，并将正确官方接口的权限阻塞、财务版本冲突及可选分钟受限准确呈现。

@@ -72,12 +72,32 @@ class TradingStructureBackfillService:
         resume: bool = True,
         include_minutes: bool = True,
     ) -> BackfillSummary:
+        dates = tuple(trading_dates)
+        summary = self.backfill_margin_details(
+            trading_dates=dates, through=through, resume=resume,
+        )
+        if not include_minutes:
+            return summary
+        minutes = self.backfill_minute_bars(
+            trading_dates=dates, through=through, candidate_codes=candidate_codes,
+            index_codes=index_codes, resume=resume,
+        )
+        summary.scope = "trading-structure"
+        for field in ("committed", "skipped", "waiting_upstream", "limited", "failed"):
+            setattr(summary, field, getattr(summary, field) + getattr(minutes, field))
+        summary.issues.extend(minutes.issues)
+        summary.limitations_checked = minutes.limitations_checked
+        return summary
+
+    def backfill_margin_details(
+        self, *, trading_dates: Iterable[date], through: date, resume: bool = True,
+    ) -> BackfillSummary:
         dates = tuple(sorted(set(trading_dates)))
         if not dates:
             raise ValueError("trading-structure backfill requires trading dates")
         margin_dates = dates[-250:]
         summary = BackfillSummary(
-            scope="trading-structure", start=margin_dates[0], through=through
+            scope="margin-detail", start=margin_dates[0], through=through
         )
         for trading_date in margin_dates:
             partition = trading_date.isoformat()
@@ -136,12 +156,19 @@ class TradingStructureBackfillService:
             )
             summary.committed += 1
 
-        if not include_minutes:
-            summary.scope = "margin-detail"
-            return summary
+        return summary
 
+    def backfill_minute_bars(
+        self, *, trading_dates: Iterable[date], through: date,
+        candidate_codes: tuple[str, ...], index_codes: tuple[str, ...],
+        resume: bool = True,
+    ) -> BackfillSummary:
+        dates = tuple(sorted(set(trading_dates)))
+        if not dates:
+            raise ValueError("minute backfill requires trading dates")
+        summary = BackfillSummary(scope="minute-bars", start=dates[-20:][0], through=through)
         requested_codes = tuple(sorted(set(candidate_codes) | set(index_codes)))
-        minute_dates = margin_dates[-20:]
+        minute_dates = dates[-20:]
         scopes = self._freeze_minute_scopes(minute_dates, requested_codes)
         codes = tuple(sorted({code for values in scopes.values() for code in values}))
         summary.limitations_checked = bool(codes)
@@ -281,22 +308,6 @@ class TradingStructureBackfillService:
                         source_endpoint="stk_mins",
                     )
         return summary
-
-    def backfill_margin_details(
-        self,
-        *,
-        trading_dates: Iterable[date],
-        through: date,
-        resume: bool = True,
-    ) -> BackfillSummary:
-        return self.backfill(
-            trading_dates=trading_dates,
-            through=through,
-            candidate_codes=(),
-            index_codes=(),
-            resume=resume,
-            include_minutes=False,
-        )
 
     def _freeze_minute_scopes(
         self,

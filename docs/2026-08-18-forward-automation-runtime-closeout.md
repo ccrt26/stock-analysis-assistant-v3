@@ -1,5 +1,7 @@
 # Forward 自动化运行收口
 
+> 历史记录：本文保留当时方案与事实，不作为当前运行入口或调度依据。当前时序以 `docs/architecture/current-v3-architecture.md` 和 `ops/forward-selection-prompt.md` 为准。
+
 ## 1. 本轮目标
 
 本轮目标是把已经存在的每日 Forward 自动化真正收口为这台 Mac 上可以无人值守运行的个人任务：

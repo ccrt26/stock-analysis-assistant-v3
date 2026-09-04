@@ -1,5 +1,7 @@
 # 本地股票研究数据与实际能力盘点
 
+> 历史记录：本文保留当时方案与事实，不作为当前运行入口或调度依据。当前时序以 `docs/architecture/current-v3-architecture.md` 和 `ops/forward-selection-prompt.md` 为准。
+
 **盘点日期：** 2026-08-21
 
 **盘点性质：** 只读事实盘点；不修改选股逻辑、数据合同、派生公式、Forward 记录或五个 Skill

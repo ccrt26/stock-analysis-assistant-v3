@@ -150,27 +150,31 @@ data derive
 data health
 ```
 
-`ops/launchd/` 保留收盘、晚间和次晨三个数据任务模板。它们只更新本地事实、派生观察和健康摘要，不运行最终选股、不发布报告、不交易。晚间的事件、申万一级行业代理和主题日行情是独立步骤：一个普通异常会写入该步骤摘要，但不会阻断另外两项。次晨只重取行动日前公告，并按分区质量补形成日真正缺失的行业代理或主题日行情，不整包重跑晚间事件。
+`ops/launchd/` 保留四个数据定时模板：17:30 close、18:00 evening、18:32 pre-research、21:30 evening-retry；仅三个数据阶段，重试复用 evening。close 保留完整核心市场采集。evening 保留完整事件链、分类和公告触发财务刷新，公告延伸到实际上海自然日，其他事件业务日期仍截止形成日，只采事实不计算正式派生。pre-research 依次精确补核心、补截止前公告、补行业/主题、按公告精确时间窗刷新财务、取可选分钟、补形成日前已到T+1的融资融券历史缺口，最后以显式18:30截止生成四类研究观察。21:30不重算或改写正式研究。
+
+所有数据模板按上海时间设计，加载前用 `/usr/sbin/systemsetup -gettimezone` 确认 `Asia/Shanghai`，否则停止加载。
 
 公告元数据以巨潮为主源。只有巨潮请求、权限、限流、分页完整性或响应格式等来源边界错误才切换到上交所和深交所官方接口；本地程序、存储、合同或时间边界错误仍显式失败。交易所备用路径只保存代码、名称、标题、精确公开时间、官方链接和稳定来源编号，不建设 PDF 全文系统。两所都完整为 `exchange_complete`，只有一所完整为 `exchange_partial`，均不可用为 `announcement_unavailable`。来源状态和覆盖交易所进入现有阶段摘要，不增加数据库表。
 
-交易日上午约 09:05 的最终研究由 Codex 原生 Scheduled Task 在当前项目中直接调用 `$orchestrating-stock-research`，总控在同一个顶层会话内使用四个专业 Skill；仓库代码不通过 Python 启动第二个 Codex，也没有第四个 AI LaunchAgent。`prepare` 冻结上一交易日、行动日和带时区的 `as_of`，等待次晨数据并结算到期 D20；Codex 只生成 `pending-trace-<formation_date>.json` 一份 `daily-research-trace-v4` 完整轨迹。`record-trace` 校验结构、日期、合格股票、候选守恒、唯一决定引用、已确认价格支持的最小形成日数值，以及 `fresh_event_pending` 的事件时点和等待窗口，从其中抽取现有 `ResearchResult` 调用 `record_daily_selection`，写入现有 Forward CSV 后将完整轨迹原子归档为 `research-trace-<formation_date>.json`。程序不判断事件语义、材料性、内部分类、传播或价格解释是否正确。既有 v1/v2/v3 归档不迁移、不倒填；现有 `record` 命令、`ResearchResult`、Forward CSV 字段和 D20 结算保持不变，完整 trace 不写入 DuckDB。
+下个交易日前一自然日晚间18:45的最终研究由 Codex 原生 Scheduled Task 在当前项目中直接调用 `$orchestrating-stock-research`，总控在同一个顶层会话内使用四个专业 Skill；仓库代码不通过 Python 启动第二个 Codex，也没有 AI LaunchAgent。`prepare` 冻结上一交易日、行动日和带时区的 `as_of`，等待晚间研究准备数据并结算到期 D20；Codex 只生成 `pending-trace-<formation_date>.json` 一份 `daily-research-trace-v4` 完整轨迹。`record-trace` 校验结构、日期、合格股票、候选守恒、唯一决定引用、已确认价格支持的最小形成日数值，以及 `fresh_event_pending` 的事件时点和等待窗口，从其中抽取现有 `ResearchResult` 调用 `record_daily_selection`，写入现有 Forward CSV 后将完整轨迹原子归档为 `research-trace-<formation_date>.json`。程序不判断事件语义、材料性、内部分类、传播或价格解释是否正确。既有 v1/v2/v3 归档不迁移、不倒填；现有 `record` 命令、`ResearchResult`、Forward CSV 字段和 D20 结算保持不变，完整 trace 不写入 DuckDB。
 
-次晨任务的数据日期仍是上一交易日，公告补采延长到上海实际运行日，股东变动、回购、质押、解禁和停牌仍截止上一交易日。`prepare` 保持最初冻结的 `as_of`，事实查询继续过滤 `available_at <= as_of`。市场观察和价格分析是正式研究的最低条件；行业、主题、个股交易背景和公告是独立可选通道。`complete_core_date` 保留为健康诊断，不再作为 `prepare` Gate。最低条件完整而可选通道缺失时，研究受限继续，只禁止对应证据。正常早晨对运行中、等待上游或尚无记录的可选任务每30秒检查一次，最晚到09:30；可选任务明确失败且最低条件完整时立即进入受限研究，最低条件不完整时停止推荐。
+正常任务的 `action_date` 是当前上海自然日的次日，必须开市；`formation_date` 是行动日前最近交易日；`selection_as_of` 固定为行动日前一自然日18:30。明天休市则不产生复盘或新推荐，周日使用周五行情和周日18:30以前的事实，为周一准备，长假同理。`prepare` 只认同形成日最新 pre-research，且其 capabilities.research_as_of 必须逐字等于 selection_as_of；缺失或不匹配不能用旧派生放行。市场观察和价格分析仍是最低条件，行业、主题、个股背景、公告和分钟仍为可选通道；complete_core_date 只作诊断。正常18:45启动，每30秒检查一次，最晚等到18:55；可选步骤已失败但核心可用时进入受限研究，核心缺失停止推荐。20:30只是交付目标，不新增服务或看门狗。
 
-人工补跑复用同一个 `prepare`，通过 `--rerun-date` 指定原计划推荐日期：前一个交易日由日历确定，`selection_as_of` 固定为行动日上海时间09:05。补跑和已过09:30的历史显式上下文只检查一次，不等待；次晨任务实际在下午完成不再单独构成阻断，因为事实查询仍按 `available_at <= selection_as_of` 过滤，行情仍截断在形成日。新 V4 轨迹把本次市场、价格、行业、主题、个股背景、公告状态和覆盖交易所写入 `runtime_capabilities`；`record-trace` 拒绝扩大能力声明。公告部分覆盖时，`fresh_event_pending` 只允许用于已完整覆盖的交易所；行业或主题不可用时，只禁用对应板块证据，不修改其他 V4 规则。
+人工补跑复用同一个 `prepare`，通过 `--rerun-date` 指定原计划推荐日期：前一个交易日由日历确定，`selection_as_of` 固定为行动日前一自然日上海时间18:30。补跑和已过18:55的历史显式上下文只检查一次，不等待；pre-research 必须使用同一个显式截止，晚于计划完成不单独构成阻断，因为事实查询仍按 `available_at <= selection_as_of` 过滤，行情仍截断在形成日。新 V4 轨迹把本次市场、价格、行业、主题、个股背景、公告状态和覆盖交易所写入 `runtime_capabilities`；`record-trace` 拒绝扩大能力声明。公告部分覆盖时，`fresh_event_pending` 只允许用于已完整覆盖的交易所；行业或主题不可用时，只禁用对应板块证据，不修改其他 V4 规则。
 
 ### 5.7 选出后的跟踪与走势复盘
 
-`src/stock_analyzer/ops/forward_monitor.py` 复用现有 09:05 任务，提供 `register`、`prepare`、`record` 三个命令。程序每天记录全部仍开放的选择记录，并根据固定变化原因临时生成当天重点集合；AI 和五个现有 Skill 只复盘这个小集合，用户日报最多8只股票。同一股票可以合并显示，但每次推荐或比较记录分别读取自己的上一轮复盘；每条记录保留原推荐理由、实际引用的决定和完整研究结论，面向用户只展示不加入后来事实的通俗改写。它不建立第二套人工股票池，不打分，也不增加任务、数据库或服务。
+`src/stock_analyzer/ops/forward_monitor.py` 复用现有18:45任务，提供 `register`、`prepare`、`record` 三个命令。程序每天记录全部仍开放的选择记录，并根据固定变化原因临时生成当天重点集合；AI 和五个现有 Skill 只复盘这个小集合，用户日报最多8只股票。同一股票可以合并显示，但每次推荐或比较记录分别读取自己的上一轮复盘；每条记录保留原推荐理由、实际引用的决定和完整研究结论，面向用户只展示不加入后来事实的通俗改写。它不建立第二套人工股票池，不打分，也不增加任务、数据库或服务。
 
 同一股票当天同时有入选和对照记录时只生成一条提醒，但必须引用全部重点记录并显示两个原角色。
 
 推荐后的第1—20个交易日是固定主评价期，第1、3、5、10、20个交易日做完整复盘。正式推荐记录在第20个交易日形成最终复盘并冻结；未保存时持续作为最高优先级提醒，直到成功保存。比较记录继续保存价格路径和成对比较，但不形成荐股最终结论。第21—30个交易日可以更新当前走势观察，不能改写前20天的固定结论。面向用户的记录日期使用原计划观察日；同一股票当天共同事实只显示一次。推荐股与当时备选股只在同次研究、同一原计划观察日、相同观察窗口且两边路径完整时比较，数值由程序从真实路径计算。新生成的报告使用修正后的 `DailyForwardMonitorReportV2`；本地尚无正式 V2 最终日报，因此没有新增 V3，历史 V1 报告继续可读且不迁移。完整说明见 `docs/architecture/forward-monitoring-v1.md`。
 
-研究超过 18 分钟或 09:30 后完成仍可保存，只要冻结的 `as_of` 早于行动日 09:30，且所有行情交易日期不晚于形成日、所有事实满足 `available_at <= as_of`。合规结果统一按 `selection` 语义写入被 Git 忽略的 `local_archive/forward_selection/forward-selection-log.csv`；历史 `validation_mode` 只为 CSV 兼容保留，不再形成 forward/reconstructed 两套推荐。历史记录首次由 `docs/forward-selection-log.csv` 初始化，之后只在 D1—D20 行情完整时一次性结算。
+研究超过18:55后完成仍可保存，只要沿用已取得的显式上下文，冻结的 `as_of` 仍为行动日前一自然日18:30，且所有行情交易日期不晚于形成日、所有事实满足 `available_at <= as_of`。合规结果统一按 `selection` 语义写入被 Git 忽略的 `local_archive/forward_selection/forward-selection-log.csv`；历史 `validation_mode` 只为 CSV 兼容保留，不再形成 forward/reconstructed 两套推荐。历史记录首次由 `docs/forward-selection-log.csv` 初始化，之后只在 D1—D20 行情完整时一次性结算。
 
-如果本次确实完成了当天新选择且合并报告生成时已过09:30，只在“今天新推荐的股票”前提示：“本次研究只使用了今天开盘前能够看到的信息，但现在已经超过原本计划观察的开盘时点。不要把当前价格当成当时可以参与的价格，也不要用盘中走势重新改写开盘前的研究结论。”不改变原研究、不重读盘中价格、不重跑。
+如果本次确实完成了当天新选择且合并报告生成时已过行动日09:30，只在“今天新推荐的股票”前提示：“本次研究只使用了今天开盘前能够看到的信息，但现在已经超过原本计划观察的开盘时点。不要把当前价格当成当时可以参与的价格，也不要用盘中走势重新改写开盘前的研究结论。”不改变原研究、不重读盘中价格、不重跑。
+
+次晨08:45由独立Codex任务读取 `ops/preopen-safety-prompt.md`，运行 `preopen_safety prepare`。只检查昨晚V4名单（正式推荐与明确非正式的条件事件）截止后新增公告和今天 suspend_d 当前停牌观察；只写安全提醒JSON，停牌不进入正式事实分区。不重新选股、不改顺序、不改理由或复盘，不读集合竞价和盘中价格。
 
 `select_minute_candidate_scope` 中的确定性排序只用于限制可选分钟数据的采集范围，属于数据成本控制，不是投资评分或最终候选排名；分钟数据也不是目标架构的每日必需输入。
 
@@ -227,7 +231,7 @@ data health
 | 一个总控 + 四个专业研究 Skill | 已实现 | `.agents/skills/` |
 | 候选与决定轨迹追溯、历史形成日模拟和调优诊断方法 | 已实现为 `daily-research-trace-v4` 与 Skill 流程 | 每只候选结构化记录内部分类和状态、市场识别、披露新颖性及适用的板块传播证据，并分开记录催化、传播、价格确认、剩余路径、经营依据、风险和未知；程序校验结构、引用、最小价格数值与条件事件边界，AI 仍负责语义解释与取舍；手动 D20 复盘只有 Prompt，不是常驻 Python 服务 |
 | 选出后的第1—30个交易日跟踪与走势复盘 | 已实现 | 程序全量记录，临时派生当天重点，用户日报最多8只；同一股票合并显示、每条推荐或比较记录分别复盘，第20个交易日的最终结论按记录冻结，第21—30个交易日只更新当前观察；真实配对路径支持推荐股与备选股比较；V2 报告保存结构化复盘，历史 V1 继续可读 |
-| 每日自动端到端 AI 选股 | 仓库侧准备和归档已实现；触发由 Codex 原生 Scheduled Task 配置 | 约 09:05 顶层任务直接调用总控 Skill；`prepare`/`record-trace` 不启动模型，只冻结边界、检查数据、校验一份 trace、抽取现有 Forward 结果、归档和结算 D20 |
+| 每日自动端到端 AI 选股 | 仓库侧准备和归档已实现；触发由 Codex 原生 Scheduled Task 配置 | 18:45顶层任务直接调用总控 Skill；`prepare`/`record-trace` 不启动模型，只冻结边界、检查数据、校验一份 trace、抽取现有 Forward 结果、归档和结算 D20 |
 | AI 调用前的研究结果缓存、候选 memo 缓存和断点恢复 | 未实现 | 目前只有事实/派生层哈希、清单与跳过重算 |
 | 自动报告渲染、云端发布、Supabase 和交易执行 | 有意不存在 | 旧 V3 路径已从 `main` 删除，不得当作备用能力 |
 | GitHub 中的真实本地研究数据 | 有意不存在 | `local_warehouse/`、`local_archive/`、`logs/`、`.env*` 被忽略 |

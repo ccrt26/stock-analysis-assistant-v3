@@ -21,7 +21,7 @@ exec .venv/bin/python -m stock_analyzer data run-stage --stage evening --data-da
     ]]></string>
   </array>
   <key>StartCalendarInterval</key>
-  <dict><key>Hour</key><integer>21</integer><key>Minute</key><integer>30</integer></dict>
+  <dict><key>Hour</key><integer>18</integer><key>Minute</key><integer>0</integer></dict>
   <key>RunAtLoad</key><false/>
   <key>KeepAlive</key><false/>
   <key>StandardOutPath</key>

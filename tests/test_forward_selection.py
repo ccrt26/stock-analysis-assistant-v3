@@ -103,10 +103,10 @@ class FakeData:
             except StopIteration:
                 pass
         finished = self.stage_finished_at or datetime.combine(
-            formation_date + timedelta(days=1),
+            formation_date,
             datetime.min.time(),
             SHANGHAI,
-        ).replace(hour=9, minute=2)
+        ).replace(hour=18, minute=32)
         started = self.stage_started_at or finished.replace(minute=0)
         feature_names = (
             "market_context",
@@ -165,7 +165,7 @@ class FakeData:
             ],
             "latest_stage_runs": [] if self.stage_status is None else [
                 {
-                    "stage": "next-morning",
+                    "stage": "pre-research",
                     "data_date": formation_date.isoformat(),
                     "status": self.stage_status,
                     "started_at": started.isoformat(),
@@ -173,6 +173,7 @@ class FakeData:
                     "capabilities": {
                         "announcement_status": announcement_status,
                         "announcement_exchanges": exchanges,
+                        "research_as_of": datetime.combine(formation_date, datetime.min.time(), SHANGHAI).replace(hour=18, minute=30).isoformat(),
                     },
                 }
             ],
@@ -273,7 +274,7 @@ def _one_stock_trace() -> dict:
         "trace_version": "daily-research-trace-v3",
         "formation_date": "2026-08-18",
         "action_date": "2026-08-19",
-        "as_of": "2026-08-19T09:10:00+08:00",
+        "as_of": "2026-08-18T18:30:00+08:00",
         "market_search_context": (
             "普通股票参与宽度与指数同步，继续比较个股增量。"
         ),
@@ -365,7 +366,7 @@ def _one_stock_trace() -> dict:
 def _v4_trace() -> dict:
     formation = date(2026, 8, 25)
     action = date(2026, 8, 26)
-    as_of = datetime(2026, 8, 26, 9, 5, tzinfo=SHANGHAI)
+    as_of = datetime(2026, 8, 25, 18, 30, tzinfo=SHANGHAI)
     return {
         "trace_version": "daily-research-trace-v4",
         "formation_date": formation.isoformat(),
@@ -531,7 +532,7 @@ def _v4_fresh_event_trace() -> dict:
     trace["research_result"]["selected_stocks"][0][
         "opportunity_type"
     ] = "company_catalyst"
-    event_time = "2026-08-25T19:34:27+08:00"
+    event_time = "2026-08-25T17:34:27+08:00"
     thesis = candidate["research_thesis"]
     thesis.update(
         engine_type="fresh_event_pending",
@@ -682,7 +683,7 @@ def _record_trace_for_test(
         open_dates=[date(2026, 8, 18), date(2026, 8, 19)]
     )
     moment = selection_as_of or datetime(
-        2026, 8, 19, 9, 10, tzinfo=SHANGHAI
+        2026, 8, 18, 18, 30, tzinfo=SHANGHAI
     )
     summary = record_daily_trace(
         trace,
@@ -693,7 +694,7 @@ def _record_trace_for_test(
         clock=_clock(moment),
         formation_date=formation_date,
         action_date=action_date,
-        selection_as_of=moment,
+        selection_as_of=moment.replace(hour=18, minute=30),
     )
     archive = archive_dir / f"research-trace-{formation_date.isoformat()}.json"
     return summary, pending, archive, csv_path
@@ -779,7 +780,7 @@ def test_afternoon_rerun_freezes_the_original_preopen_context(
     assert summary.research_mode == "full"
     assert summary.action_date == "2026-08-26"
     assert summary.formation_date == "2026-08-25"
-    assert summary.selection_as_of == "2026-08-26T09:05:00+08:00"
+    assert summary.selection_as_of == "2026-08-25T18:30:00+08:00"
     assert summary.selection_as_of != current.isoformat(timespec="seconds")
 
 
@@ -848,7 +849,7 @@ def test_rerun_date_cannot_mix_with_explicit_context() -> None:
                 "--action-date",
                 "2026-08-26",
                 "--as-of",
-                "2026-08-26T09:05:00+08:00",
+                "2026-08-25T18:30:00+08:00",
             ]
         )
 
@@ -898,7 +899,7 @@ def test_non_trading_day_does_not_call_codex_or_write(tmp_path: Path) -> None:
     research = FakeResearch(_empty_result())
     summary, csv_path = _run(
         tmp_path,
-        now=_clock(datetime(2026, 8, 22, 9, 10, tzinfo=SHANGHAI)),
+        now=_clock(datetime(2026, 8, 21, 18, 45, tzinfo=SHANGHAI)),
         data=FakeData(
             open_dates=[date(2026, 8, 21)],
             action_date_status=False,
@@ -919,7 +920,7 @@ def test_missing_action_date_calendar_is_data_not_ready_not_non_trading(
     research = FakeResearch(_empty_result())
     summary, csv_path = _run(
         tmp_path,
-        now=_clock(datetime(2026, 8, 19, 9, 5, tzinfo=SHANGHAI)),
+        now=_clock(datetime(2026, 8, 18, 18, 45, tzinfo=SHANGHAI)),
         data=FakeData(
             open_dates=[date(2026, 8, 18)],
             action_date_status=None,
@@ -934,7 +935,7 @@ def test_missing_action_date_calendar_is_data_not_ready_not_non_trading(
     assert _read_csv(csv_path) == original
 
 
-def test_next_morning_data_becoming_ready_during_wait_continues(
+def test_pre_research_data_becoming_ready_during_wait_continues(
     tmp_path: Path,
 ) -> None:
     research = FakeResearch(_empty_result())
@@ -942,7 +943,7 @@ def test_next_morning_data_becoming_ready_during_wait_continues(
         open_dates=[date(2026, 8, 18), date(2026, 8, 19)],
         ready_states=[False, True],
     )
-    start = datetime(2026, 8, 19, 9, 5, tzinfo=SHANGHAI)
+    start = datetime(2026, 8, 18, 18, 45, tzinfo=SHANGHAI)
     later = start.replace(second=30)
     sleeps: list[float] = []
 
@@ -961,16 +962,16 @@ def test_next_morning_data_becoming_ready_during_wait_continues(
     assert len(_read_csv(csv_path)) == 1
 
 
-def test_unready_next_morning_data_keeps_waiting_past_0915(tmp_path: Path) -> None:
+def test_unready_pre_research_data_keeps_waiting_until_1854(tmp_path: Path) -> None:
     research = FakeResearch(_empty_result())
     checks = [
-        datetime(2026, 8, 19, 9, 5 + second // 60, second % 60, tzinfo=SHANGHAI)
-        for second in range(0, 11 * 60 + 1, 30)
+        datetime(2026, 8, 18, 18, 45 + second // 60, second % 60, tzinfo=SHANGHAI)
+        for second in range(0, 9 * 60 + 1, 30)
     ]
     sleeps: list[float] = []
     data = FakeData(
         open_dates=[date(2026, 8, 18), date(2026, 8, 19)],
-        ready_states=[False] * 21 + [True],
+        ready_states=[False] * 17 + [True],
     )
     summary, csv_path = _run(
         tmp_path,
@@ -981,17 +982,17 @@ def test_unready_next_morning_data_keeps_waiting_past_0915(tmp_path: Path) -> No
     )
 
     assert summary.status == "selection_frozen"
-    assert data.health_calls == 23
-    assert sleeps == [30] * 21
+    assert data.health_calls == 19
+    assert sleeps == [30] * 17
     assert research.calls == 1
     assert len(_read_csv(csv_path)) == 1
-    assert summary.selection_as_of == checks[0].isoformat(timespec="seconds")
+    assert summary.selection_as_of == checks[0].replace(minute=30).isoformat(timespec="seconds")
 
 
-def test_failed_next_morning_stage_with_missing_core_returns_without_sleeping(
+def test_failed_pre_research_stage_with_missing_core_returns_without_sleeping(
     tmp_path: Path,
 ) -> None:
-    start = datetime(2026, 8, 19, 9, 5, tzinfo=SHANGHAI)
+    start = datetime(2026, 8, 18, 18, 45, tzinfo=SHANGHAI)
     research = FakeResearch(_empty_result())
 
     summary, _ = _run(
@@ -1007,16 +1008,16 @@ def test_failed_next_morning_stage_with_missing_core_returns_without_sleeping(
     )
 
     assert summary.status == "data_not_ready"
-    assert summary.error == "next_morning_stage_failed"
-    assert summary.selection_as_of == start.isoformat(timespec="seconds")
+    assert summary.error == "pre_research_stage_failed"
+    assert summary.selection_as_of == start.replace(hour=18, minute=30).isoformat(timespec="seconds")
     assert research.calls == 0
 
 
-def test_waiting_upstream_keeps_checking_until_0930_then_runs_limited(
+def test_waiting_upstream_keeps_checking_until_1855_then_runs_limited(
     tmp_path: Path,
 ) -> None:
-    start = datetime(2026, 8, 19, 9, 29, 30, tzinfo=SHANGHAI)
-    market_open = start.replace(minute=30, second=0)
+    start = datetime(2026, 8, 18, 18, 54, 30, tzinfo=SHANGHAI)
+    market_open = start.replace(minute=55, second=0)
     csv_path = tmp_path / "forward.csv"
     _write_csv(csv_path, [])
     sleeps: list[float] = []
@@ -1038,10 +1039,10 @@ def test_waiting_upstream_keeps_checking_until_0930_then_runs_limited(
     assert "行动日前公告补采未完成" in "；".join(summary.limitations)
 
 
-def test_failed_next_morning_with_core_ready_runs_limited_immediately(
+def test_failed_pre_research_with_core_ready_runs_limited_immediately(
     tmp_path: Path,
 ) -> None:
-    start = datetime(2026, 8, 19, 9, 5, tzinfo=SHANGHAI)
+    start = datetime(2026, 8, 18, 18, 45, tzinfo=SHANGHAI)
     csv_path = tmp_path / "forward.csv"
     _write_csv(csv_path, [])
 
@@ -1052,7 +1053,7 @@ def test_failed_next_morning_with_core_ready_runs_limited_immediately(
             stage_status="failed",
         ),
         clock=_clock(start, start),
-        sleep=lambda _seconds: pytest.fail("次晨任务失败后不得继续等待"),
+        sleep=lambda _seconds: pytest.fail("晚间研究准备任务失败后不得继续等待"),
     )
 
     assert summary.status == "ready_for_research_limited"
@@ -1224,7 +1225,7 @@ def test_missing_core_feature_blocks_rerun_without_waiting(
     assert summary.research_mode == ""
     assert summary.formation_date == "2026-08-25"
     assert summary.action_date == "2026-08-26"
-    assert summary.selection_as_of == "2026-08-26T09:05:00+08:00"
+    assert summary.selection_as_of == "2026-08-25T18:30:00+08:00"
 
 
 def test_health_summary_for_another_date_cannot_enable_rerun(
@@ -1280,12 +1281,12 @@ def test_historical_rerun_accepts_afternoon_stage_completion_without_sleep(
 
     assert summary.status == "ready_for_research"
     assert summary.preopen_event_refresh_complete is True
-    assert summary.selection_as_of == "2026-08-26T09:05:00+08:00"
+    assert summary.selection_as_of == "2026-08-25T18:30:00+08:00"
 
 
-def test_unready_next_morning_stage_stops_at_market_open(tmp_path: Path) -> None:
-    start = datetime(2026, 8, 19, 9, 5, tzinfo=SHANGHAI)
-    market_open = start.replace(hour=9, minute=30)
+def test_unready_pre_research_stage_stops_at_readiness_deadline(tmp_path: Path) -> None:
+    start = datetime(2026, 8, 18, 18, 45, tzinfo=SHANGHAI)
+    market_open = start.replace(hour=18, minute=55)
     sleeps: list[float] = []
 
     def finite_sleep(seconds: float) -> None:
@@ -1307,8 +1308,8 @@ def test_unready_next_morning_stage_stops_at_market_open(tmp_path: Path) -> None
     )
 
     assert summary.status == "data_not_ready"
-    assert summary.error == "next_morning_data_not_ready_by_market_open"
-    assert summary.selection_as_of == start.isoformat(timespec="seconds")
+    assert summary.error == "pre_research_data_not_ready_by_deadline"
+    assert summary.selection_as_of == start.replace(hour=18, minute=30).isoformat(timespec="seconds")
     assert sleeps == [30]
     assert research.calls == 0
 
@@ -1323,7 +1324,7 @@ def test_existing_forward_empty_decision_is_idempotent(tmp_path: Path) -> None:
     research = FakeResearch(_one_stock_result())
     summary, csv_path = _run(
         tmp_path,
-        now=_clock(datetime(2026, 8, 19, 9, 10, tzinfo=SHANGHAI)),
+        now=_clock(datetime(2026, 8, 18, 18, 45, tzinfo=SHANGHAI)),
         data=FakeData(open_dates=[date(2026, 8, 18), date(2026, 8, 19)]),
         research=research,
         rows=[existing],
@@ -1347,7 +1348,7 @@ def test_existing_reconstructed_decision_blocks_duplicate_selection(
         validation_mode="reconstructed",
     )
     research = FakeResearch(_one_stock_result())
-    moment = datetime(2026, 8, 19, 9, 10, tzinfo=SHANGHAI)
+    moment = datetime(2026, 8, 18, 18, 45, tzinfo=SHANGHAI)
     summary, csv_path = _run(
         tmp_path,
         now=_clock(moment, moment, moment),
@@ -1365,7 +1366,7 @@ def test_top_level_result_uses_selection_semantics_and_frozen_context(
     tmp_path: Path,
 ) -> None:
     research = FakeResearch(_one_stock_result())
-    moment = datetime(2026, 8, 19, 9, 10, tzinfo=SHANGHAI)
+    moment = datetime(2026, 8, 18, 18, 45, tzinfo=SHANGHAI)
 
     summary, csv_path = _run(
         tmp_path,
@@ -1380,7 +1381,7 @@ def test_top_level_result_uses_selection_semantics_and_frozen_context(
     assert {row["validation_mode"] for row in rows} == {"selection"}
     assert rows[-1]["final_fate"] == "selected"
     assert rows[-1]["priority"] == "1"
-    assert rows[-1]["selection_as_of"] == "2026-08-19T09:10:00+08:00"
+    assert rows[-1]["selection_as_of"] == "2026-08-18T18:30:00+08:00"
     assert research.prompt == "top-level Codex result"
 
 
@@ -1395,7 +1396,7 @@ def test_complete_trace_records_the_same_forward_rows_and_is_archived(
     _write_csv(direct_csv, [])
     _write_csv(trace_csv, [])
     archive_dir = tmp_path / "archive"
-    moment = datetime(2026, 8, 19, 9, 10, tzinfo=SHANGHAI)
+    moment = datetime(2026, 8, 18, 18, 45, tzinfo=SHANGHAI)
     data = FakeData(open_dates=[date(2026, 8, 18), date(2026, 8, 19)])
 
     direct = record_daily_selection(
@@ -1405,7 +1406,7 @@ def test_complete_trace_records_the_same_forward_rows_and_is_archived(
         clock=_clock(moment, moment),
         formation_date=date(2026, 8, 18),
         action_date=date(2026, 8, 19),
-        selection_as_of=moment,
+        selection_as_of=moment.replace(hour=18, minute=30),
     )
     recorded = record_daily_trace(
         trace,
@@ -1416,7 +1417,7 @@ def test_complete_trace_records_the_same_forward_rows_and_is_archived(
         clock=_clock(moment, moment),
         formation_date=date(2026, 8, 18),
         action_date=date(2026, 8, 19),
-        selection_as_of=moment,
+        selection_as_of=moment.replace(hour=18, minute=30),
     )
 
     archive = archive_dir / "research-trace-2026-08-18.json"
@@ -1474,7 +1475,7 @@ def test_v4_trace_archives_conditional_but_only_writes_confirmed_active(
         ),
         formation_date=date(2026, 8, 25),
         action_date=date(2026, 8, 26),
-        selection_as_of=datetime(2026, 8, 26, 9, 5, tzinfo=SHANGHAI),
+        selection_as_of=datetime(2026, 8, 25, 18, 30, tzinfo=SHANGHAI),
     )
 
     rows = _read_csv(csv_path)
@@ -1500,7 +1501,7 @@ def test_v4_conditional_only_trace_archives_as_zero_formal_selection(
         ),
         formation_date=date(2026, 8, 25),
         action_date=date(2026, 8, 26),
-        selection_as_of=datetime(2026, 8, 26, 9, 5, tzinfo=SHANGHAI),
+        selection_as_of=datetime(2026, 8, 25, 18, 30, tzinfo=SHANGHAI),
     )
 
     rows = _read_csv(csv_path)
@@ -1520,7 +1521,7 @@ def test_already_selected_recovers_when_trace_archive_is_missing(
     csv_path = tmp_path / "forward.csv"
     _write_csv(csv_path, [])
     archive_dir = tmp_path / "archive"
-    moment = datetime(2026, 8, 19, 9, 10, tzinfo=SHANGHAI)
+    moment = datetime(2026, 8, 18, 18, 45, tzinfo=SHANGHAI)
     data = FakeData(open_dates=[date(2026, 8, 18), date(2026, 8, 19)])
 
     first = record_daily_selection(
@@ -1530,7 +1531,7 @@ def test_already_selected_recovers_when_trace_archive_is_missing(
         clock=_clock(moment),
         formation_date=date(2026, 8, 18),
         action_date=date(2026, 8, 19),
-        selection_as_of=moment,
+        selection_as_of=moment.replace(hour=18, minute=30),
     )
     recovered, pending, archive, _ = _record_trace_for_test(
         trace,
@@ -1616,7 +1617,7 @@ def test_trace_date_mismatch_is_rejected_without_writing_or_moving(
     pending.write_text(json.dumps(trace, ensure_ascii=False), encoding="utf-8")
     csv_path = tmp_path / "forward.csv"
     _write_csv(csv_path, [])
-    moment = datetime(2026, 8, 19, 9, 10, tzinfo=SHANGHAI)
+    moment = datetime(2026, 8, 18, 18, 45, tzinfo=SHANGHAI)
 
     summary = record_daily_trace(
         trace,
@@ -1627,7 +1628,7 @@ def test_trace_date_mismatch_is_rejected_without_writing_or_moving(
         clock=_clock(moment),
         formation_date=date(2026, 8, 18),
         action_date=date(2026, 8, 19),
-        selection_as_of=moment,
+        selection_as_of=moment.replace(hour=18, minute=30),
     )
 
     assert summary.status == "invalid_result"
@@ -1658,7 +1659,7 @@ def test_limited_record_trace_rejects_sector_basis_when_sector_is_unavailable(
         clock=_clock(current, current),
         formation_date=date(2026, 8, 25),
         action_date=date(2026, 8, 26),
-        selection_as_of=datetime(2026, 8, 26, 9, 5, tzinfo=SHANGHAI),
+        selection_as_of=datetime(2026, 8, 25, 18, 30, tzinfo=SHANGHAI),
         sleep=lambda _seconds: pytest.fail("下午归档不得等待"),
     )
 
@@ -1690,7 +1691,7 @@ def test_limited_record_trace_rejects_fresh_event_when_preopen_is_incomplete(
         clock=_clock(current, current),
         formation_date=date(2026, 8, 25),
         action_date=date(2026, 8, 26),
-        selection_as_of=datetime(2026, 8, 26, 9, 5, tzinfo=SHANGHAI),
+        selection_as_of=datetime(2026, 8, 25, 18, 30, tzinfo=SHANGHAI),
         sleep=lambda _seconds: pytest.fail("下午归档不得等待"),
     )
 
@@ -1718,7 +1719,7 @@ def test_record_trace_requires_v4_runtime_capabilities(tmp_path: Path) -> None:
         clock=_clock(current, current),
         formation_date=date(2026, 8, 25),
         action_date=date(2026, 8, 26),
-        selection_as_of=datetime(2026, 8, 26, 9, 5, tzinfo=SHANGHAI),
+        selection_as_of=datetime(2026, 8, 25, 18, 30, tzinfo=SHANGHAI),
     )
 
     assert summary.status == "invalid_result"
@@ -1754,7 +1755,7 @@ def test_exchange_partial_allows_fresh_event_only_for_covered_szse(tmp_path: Pat
         clock=_clock(current, current),
         formation_date=date(2026, 8, 25),
         action_date=date(2026, 8, 26),
-        selection_as_of=datetime(2026, 8, 26, 9, 5, tzinfo=SHANGHAI),
+        selection_as_of=datetime(2026, 8, 25, 18, 30, tzinfo=SHANGHAI),
     )
 
     assert summary.status == "selection_frozen"
@@ -1789,7 +1790,7 @@ def test_exchange_partial_rejects_fresh_event_for_uncovered_szse(tmp_path: Path)
         clock=_clock(current, current),
         formation_date=date(2026, 8, 25),
         action_date=date(2026, 8, 26),
-        selection_as_of=datetime(2026, 8, 26, 9, 5, tzinfo=SHANGHAI),
+        selection_as_of=datetime(2026, 8, 25, 18, 30, tzinfo=SHANGHAI),
     )
 
     assert summary.status == "invalid_result"
@@ -1834,7 +1835,7 @@ def test_trace_candidate_conservation_and_price_references_are_enforced(
     pending.write_text(json.dumps(trace, ensure_ascii=False), encoding="utf-8")
     csv_path = tmp_path / "forward.csv"
     _write_csv(csv_path, [])
-    moment = datetime(2026, 8, 19, 9, 10, tzinfo=SHANGHAI)
+    moment = datetime(2026, 8, 18, 18, 45, tzinfo=SHANGHAI)
 
     summary = record_daily_trace(
         trace,
@@ -1845,7 +1846,7 @@ def test_trace_candidate_conservation_and_price_references_are_enforced(
         clock=_clock(moment),
         formation_date=date(2026, 8, 18),
         action_date=date(2026, 8, 19),
-        selection_as_of=moment,
+        selection_as_of=moment.replace(hour=18, minute=30),
     )
 
     assert summary.status == "invalid_result"
@@ -1892,8 +1893,9 @@ def test_candidate_market_recognition_must_reference_daily_environment(
     assert summary.error == "market_recognition_environment_mismatch"
 
 
+@pytest.mark.parametrize("event_time", ["2026-08-18T18:30:01+08:00", "2026-08-19T10:00:00+08:00"])
 def test_candidate_company_event_time_must_not_exceed_trace_as_of(
-    tmp_path: Path,
+    tmp_path: Path, event_time,
 ) -> None:
     trace = _trace_with_nearest_nonselection()
     novelty = trace["candidate_ledger"][1]["research_thesis"][
@@ -1901,7 +1903,7 @@ def test_candidate_company_event_time_must_not_exceed_trace_as_of(
     ]
     novelty.update(
         event_id="FUTURE-EVENT",
-        event_available_at="2026-08-19T10:00:00+08:00",
+        event_available_at=event_time,
     )
 
     summary, _, _, _ = _record_trace_for_test(trace, tmp_path)
@@ -2009,7 +2011,7 @@ def test_selected_fresh_event_pending_accepts_material_after_close_event(
             "new_information_level": "major_new_information",
             "basis": "首次披露的重大资产收购形成新信息。",
             "event_id": "ANN-NEW",
-            "event_available_at": "2026-08-18T19:34:27+08:00",
+            "event_available_at": "2026-08-18T17:34:27+08:00",
         },
         action_condition_decision_id="price-confirmation",
     )
@@ -2021,7 +2023,7 @@ def test_selected_fresh_event_pending_accepts_material_after_close_event(
         evidence_status_at_use="provisional",
         formation_values={
             "event_id": "ANN-NEW",
-            "event_available_at": "2026-08-18T19:34:27+08:00",
+            "event_available_at": "2026-08-18T17:34:27+08:00",
             "reaction_start_date": "2026-08-19",
             "reaction_window_status": "awaiting_first_session",
         },
@@ -2072,7 +2074,7 @@ def test_fresh_event_pending_rejects_repeat_or_nonincremental_disclosure(
             "new_information_level": "major_new_information",
             "basis": "形成日收盘后事件。",
             "event_id": "ANN-NEW",
-            "event_available_at": "2026-08-18T19:34:27+08:00",
+            "event_available_at": "2026-08-18T17:34:27+08:00",
         },
         action_condition_decision_id="price-confirmation",
     )
@@ -2084,7 +2086,7 @@ def test_fresh_event_pending_rejects_repeat_or_nonincremental_disclosure(
         evidence_status_at_use="provisional",
         formation_values={
             "event_id": "ANN-NEW",
-            "event_available_at": "2026-08-18T19:34:27+08:00",
+            "event_available_at": "2026-08-18T17:34:27+08:00",
             "reaction_start_date": "2026-08-19",
             "reaction_window_status": "awaiting_first_session",
         },
@@ -2369,7 +2371,7 @@ def test_invalid_top_level_output_never_writes(
     result: dict | Exception,
 ) -> None:
     research = FakeResearch(result)
-    moment = datetime(2026, 8, 19, 9, 10, tzinfo=SHANGHAI)
+    moment = datetime(2026, 8, 18, 18, 45, tzinfo=SHANGHAI)
     summary, csv_path = _run(
         tmp_path,
         now=_clock(moment, moment, moment),
@@ -2390,7 +2392,7 @@ def test_incomplete_research_is_not_frozen_as_an_empty_selection(
         point_in_time_evidence_verified=False,
         failure_reason="本地事实仓查询失败",
     )
-    moment = datetime(2026, 8, 19, 9, 10, tzinfo=SHANGHAI)
+    moment = datetime(2026, 8, 18, 18, 45, tzinfo=SHANGHAI)
 
     summary, csv_path = _run(
         tmp_path,
@@ -2405,7 +2407,7 @@ def test_incomplete_research_is_not_frozen_as_an_empty_selection(
 
 
 def test_result_finishing_after_open_is_still_written(tmp_path: Path) -> None:
-    start = datetime(2026, 8, 19, 9, 10, tzinfo=SHANGHAI)
+    start = datetime(2026, 8, 18, 18, 45, tzinfo=SHANGHAI)
     summary, csv_path = _run(
         tmp_path,
         now=_clock(start, start, start.replace(hour=10, minute=30)),
@@ -2421,7 +2423,7 @@ def test_retry_after_open_uses_explicit_preopen_selection_context(
     tmp_path: Path,
 ) -> None:
     current = datetime(2026, 8, 20, 11, 0, tzinfo=SHANGHAI)
-    frozen = datetime(2026, 8, 20, 9, 5, 2, tzinfo=SHANGHAI)
+    frozen = datetime(2026, 8, 19, 18, 30, tzinfo=SHANGHAI)
     summary, csv_path = _run(
         tmp_path,
         now=_clock(current, current, current),
@@ -2435,9 +2437,9 @@ def test_retry_after_open_uses_explicit_preopen_selection_context(
     rows = _read_csv(csv_path)
     assert summary.status == "selection_frozen"
     assert summary.formation_date == "2026-08-19"
-    assert summary.selection_as_of == "2026-08-20T09:05:02+08:00"
+    assert summary.selection_as_of == "2026-08-19T18:30:00+08:00"
     assert rows[0]["action_date"] == "2026-08-20"
-    assert rows[0]["as_of"] == "2026-08-20T09:05:02+08:00"
+    assert rows[0]["as_of"] == "2026-08-19T18:30:00+08:00"
     assert rows[0]["validation_mode"] == "selection"
 
 
@@ -2461,7 +2463,7 @@ def test_retry_rejects_selection_cutoff_at_market_open(tmp_path: Path) -> None:
 
 
 def test_empty_selection_is_explicitly_frozen(tmp_path: Path) -> None:
-    moment = datetime(2026, 8, 19, 9, 10, tzinfo=SHANGHAI)
+    moment = datetime(2026, 8, 18, 18, 45, tzinfo=SHANGHAI)
     summary, csv_path = _run(
         tmp_path,
         now=_clock(moment, moment, moment),
@@ -2593,9 +2595,9 @@ def test_runtime_log_is_initialized_once_from_docs_history(tmp_path: Path) -> No
     assert _read_csv(runtime_log) == [_row(formation_date="keep-local")]
 
 
-def test_repository_keeps_only_the_three_data_launchd_templates() -> None:
+def test_repository_keeps_only_the_four_data_launchd_templates() -> None:
     root = Path(__file__).resolve().parents[1]
-    expected = {"close", "evening", "next-morning"}
+    expected = {"close", "evening", "pre-research", "evening-retry"}
     actual = {
         path.name.removesuffix(".plist.example").removeprefix(
             "com.ccrt.stock-analysis-assistant.research-data-"
@@ -2608,3 +2610,57 @@ def test_repository_keeps_only_the_three_data_launchd_templates() -> None:
         root
         / "ops/launchd/com.ccrt.stock-analysis-assistant.forward-selection.plist.example"
     ).exists()
+
+
+@pytest.mark.parametrize("research_as_of", [None, "2026-09-04T18:30:00+08:00", "2026-09-06T18:30:00+08:00"])
+def test_sunday_context_requires_exact_pre_research_cutoff(tmp_path, research_as_of):
+    csv_path = tmp_path / "forward.csv"
+    _write_csv(csv_path, [])
+    class SundayData(FakeData):
+        def health_report(self, formation_date):
+            report = super().health_report(formation_date)
+            report["latest_stage_runs"] = [{
+                "stage": "pre-research", "data_date": formation_date.isoformat(),
+                "status": "succeeded", "started_at": "2026-09-06T18:32:00+08:00",
+                "capabilities": {"research_as_of": research_as_of,
+                                 "announcement_status": "cninfo_complete"},
+            }]
+            # An older successful run with the right cutoff cannot override the latest run.
+            report["latest_stage_runs"].insert(0, {
+                "stage": "pre-research", "data_date": formation_date.isoformat(),
+                "status": "succeeded", "started_at": "2026-09-06T18:31:00+08:00",
+                "capabilities": {"research_as_of": "2026-09-06T18:30:00+08:00",
+                                 "announcement_status": "cninfo_complete"},
+            })
+            return report
+    cutoff = datetime.fromisoformat("2026-09-06T18:30:00+08:00")
+    now = datetime.fromisoformat("2026-09-06T18:56:00+08:00")
+    result = prepare_daily_selection(
+        csv_path=csv_path, data=SundayData(open_dates=[date(2026, 9, 4), date(2026, 9, 7)]),
+        clock=lambda: now, sleep=lambda _: pytest.fail("deadline reached"),
+        formation_date=date(2026, 9, 4), action_date=date(2026, 9, 7), selection_as_of=cutoff,
+    )
+    if research_as_of == cutoff.isoformat():
+        assert result.status == "ready_for_research"
+    else:
+        assert result.status == "data_not_ready"
+        assert result.error == "pre_research_cutoff_missing_or_mismatch"
+
+
+def test_normal_sunday_freezes_friday_prices_and_monday_action(tmp_path):
+    csv_path = tmp_path / "forward.csv"
+    _write_csv(csv_path, [])
+    class SundayData(FakeData):
+        def health_report(self, formation_date):
+            report = super().health_report(formation_date)
+            report["latest_stage_runs"][0]["stage"] = "pre-research"
+            report["latest_stage_runs"][0]["capabilities"]["research_as_of"] = "2026-09-06T18:30:00+08:00"
+            return report
+    result = prepare_daily_selection(csv_path=csv_path,
+        data=SundayData(open_dates=[date(2026, 9, 4), date(2026, 9, 7)]),
+        clock=lambda: datetime(2026, 9, 6, 18, 45, tzinfo=SHANGHAI),
+        sleep=lambda _: pytest.fail("ready without sleep"))
+    assert result.status == "ready_for_research"
+    assert result.formation_date == "2026-09-04"
+    assert result.action_date == "2026-09-07"
+    assert result.selection_as_of == "2026-09-06T18:30:00+08:00"

@@ -4,7 +4,7 @@
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>com.ccrt.stock-analysis-assistant.research-data-next-morning</string>
+  <string>com.ccrt.stock-analysis-assistant.research-data-pre-research</string>
   <key>WorkingDirectory</key>
   <string>__PROJECT_ROOT__</string>
   <key>ProgramArguments</key>
@@ -17,16 +17,16 @@ set -a
 source .env.local >/dev/null 2>&1
 set +a
 export PROJECT_ROOT="$PWD"
-exec .venv/bin/python -m stock_analyzer data run-stage --stage next-morning --data-date auto
+exec .venv/bin/python -m stock_analyzer data run-stage --stage pre-research --data-date auto --as-of auto
     ]]></string>
   </array>
   <key>StartCalendarInterval</key>
-  <dict><key>Hour</key><integer>9</integer><key>Minute</key><integer>0</integer></dict>
+  <dict><key>Hour</key><integer>18</integer><key>Minute</key><integer>32</integer></dict>
   <key>RunAtLoad</key><false/>
   <key>KeepAlive</key><false/>
   <key>StandardOutPath</key>
-  <string>__PROJECT_ROOT__/logs/research-data/next-morning.out.log</string>
+  <string>__PROJECT_ROOT__/logs/research-data/pre-research.out.log</string>
   <key>StandardErrorPath</key>
-  <string>__PROJECT_ROOT__/logs/research-data/next-morning.err.log</string>
+  <string>__PROJECT_ROOT__/logs/research-data/pre-research.err.log</string>
 </dict>
 </plist>

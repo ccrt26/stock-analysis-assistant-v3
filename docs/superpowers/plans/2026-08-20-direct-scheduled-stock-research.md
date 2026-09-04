@@ -1,5 +1,7 @@
 # 顶层定时股票研究与价格场景输入实施计划
 
+> 历史记录：本文保留当时方案与事实，不作为当前运行入口或调度依据。当前时序以 `docs/architecture/current-v3-architecture.md` 和 `ops/forward-selection-prompt.md` 为准。
+
 > **执行方式：** 当前工作区已经包含尚未提交的价格 Skill、市场 Skill 和验证代码，本计划在原工作区内按测试先行逐项执行，不创建会丢失这些状态的新 worktree。
 
 **目标：** 让晚间和次晨任务持久化当前价格 Skill 的完整场景就绪输入，移除 Python 启动内层 Codex 的研究路径，并把 09:05 AI 研究收敛为 Codex 原生 Scheduled Task 直接调用总控 Skill。

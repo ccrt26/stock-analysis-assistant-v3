@@ -4,14 +4,15 @@ from pathlib import Path
 
 def test_research_data_launchd_uses_one_fixed_data_only_service_per_stage():
     expected = {
-        "close": {"Hour": 18, "Minute": 30},
-        "evening": {"Hour": 21, "Minute": 30},
-        "next-morning": {"Hour": 9, "Minute": 0},
+        "close": {"Hour": 17, "Minute": 30},
+        "evening": {"Hour": 18, "Minute": 0},
+        "pre-research": {"Hour": 18, "Minute": 32},
+        "evening-retry": {"Hour": 21, "Minute": 30},
     }
     paths = sorted(Path("ops/launchd").glob(
         "com.ccrt.stock-analysis-assistant.research-data-*.plist.example"
     ))
-    assert len(paths) == 3
+    assert len(paths) == 4
     for path in paths:
         stage = path.name.removeprefix(
             "com.ccrt.stock-analysis-assistant.research-data-"
@@ -20,7 +21,9 @@ def test_research_data_launchd_uses_one_fixed_data_only_service_per_stage():
         command = " ".join(data["ProgramArguments"])
         assert data["Label"].endswith(f"research-data-{stage}")
         assert data["StartCalendarInterval"] == expected[stage]
-        assert f"--stage {stage}" in command
+        assert f"--stage {'evening' if stage == 'evening-retry' else stage}" in command
+        if stage == "pre-research":
+            assert "--as-of auto" in command
         assert "--data-date auto" in command
         assert "date +%H" not in command
         assert "case " not in command

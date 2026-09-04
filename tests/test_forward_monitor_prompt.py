@@ -71,7 +71,7 @@ def test_existing_daily_prompt_stays_v4_and_adds_monitor_in_same_task() -> None:
     assert "09:30" in text
     assert "不得改变 `selection_as_of`" in text
     assert "- 发动机类型和状态" not in text
-    assert text.count("09:05 Scheduled Task") == 1
+    assert text.count("18:45 Scheduled Task") == 1
 
 
 def test_daily_prompts_separate_confirmed_recommendations_from_event_leads() -> None:
@@ -452,3 +452,13 @@ def test_outlook_conditions_are_defined_relative_to_current_direction() -> None:
             assert supports in columns[2]
             assert changes in columns[3]
         assert "`continuation_possible`" in text and "`invalidated`" in text
+
+
+def test_monitor_shares_evening_cutoff_with_selection():
+    text = Path("ops/forward-monitor-prompt.md").read_text(encoding="utf-8")
+    assert "18:45" in text
+    assert "周日" in text and "周五" in text
+    assert "--stage pre-research" in text
+    assert "--as-of <selection_as_of>" in text
+    assert "next-morning" not in text
+    assert "09:05" not in text

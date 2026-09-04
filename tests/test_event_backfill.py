@@ -372,7 +372,7 @@ def test_event_backfill_stores_official_announcement_and_structured_actions(tmp_
     assert summary.failed == 0
 
 
-def test_next_morning_extension_changes_only_the_announcement_end_date(tmp_path):
+def test_evening_weekend_extension_changes_only_the_announcement_end_date(tmp_path):
     class TrackingActionPro(ActionPro):
         def __init__(self):
             super().__init__()

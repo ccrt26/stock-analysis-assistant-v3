@@ -1,5 +1,7 @@
 # A股每日简评、8只详评、观察节点与主动跟踪——Codex执行指令 V4.0
 
+> 历史记录：本文保留当时方案与事实，不作为当前运行入口或调度依据。当前时序以 `docs/architecture/current-v3-architecture.md` 和 `ops/forward-selection-prompt.md` 为准。
+
 > **直接执行本文件，不要改写成另一份泛化方案。**
 >
 > 本轮只建设和优化股票推荐后的复盘分析与正式记录：

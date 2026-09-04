@@ -7,6 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pandas as pd
+import pytest
 
 from stock_analyzer.data.research_contracts import ResearchDatasetId
 
@@ -202,8 +203,9 @@ def test_market_scope_excludes_star_bse_and_special_treatment() -> None:
     }
 
 
+@pytest.mark.parametrize("cutoff", [None, "2026-07-13T18:30:00+08:00"])
 def test_job_uses_calendar_windows_strict_manifests_and_exact_contracts(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch, cutoff
 ) -> None:
     import stock_analyzer.ops.research_features as job
 
@@ -218,7 +220,8 @@ def test_job_uses_calendar_windows_strict_manifests_and_exact_contracts(
     monkeypatch.setattr(job, "compute_stock_context_features", _capture_stock(captured))
     monkeypatch.setattr(job, "compute_price_analysis_features", _capture_price(captured))
 
-    summary = job.run_research_features(warehouse, ANALYSIS_DATE)
+    explicit = datetime.fromisoformat(cutoff) if cutoff else None
+    summary = job.run_research_features(warehouse, ANALYSIS_DATE, as_of=explicit)
 
     snapshots = [call[1] for call in warehouse.calls if call[0] == "snapshot"]
     equity_windows = [
@@ -245,7 +248,7 @@ def test_job_uses_calendar_windows_strict_manifests_and_exact_contracts(
     assert sorted(map(len, adjustment_windows)) == [82, 82, 82, 251]
     assert index_windows and max(map(len, index_windows)) == 251
     assert valuation_windows and len(max(valuation_windows, key=len)) == 300
-    assert summary.as_of.isoformat() == "2026-07-13T23:59:59+08:00"
+    assert summary.as_of.isoformat() == (cutoff or "2026-07-13T23:59:59+08:00")
     assert summary.failed_feature_sets == ()
     assert summary.committed_feature_sets == (
         "market_context",
@@ -291,7 +294,7 @@ def test_job_uses_calendar_windows_strict_manifests_and_exact_contracts(
     )
     assert all(
         call["input_manifest"]["fact_snapshot"]["as_of"]
-        == "2026-07-13T15:59:59+00:00"
+        == (explicit.astimezone(timezone.utc).isoformat() if explicit else "2026-07-13T15:59:59+00:00")
         for call in warehouse.commits
     )
     assert all("plain_language_summary" in call["input_manifest"] for call in warehouse.commits)

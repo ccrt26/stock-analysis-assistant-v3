@@ -315,3 +315,19 @@ def test_minute_error_for_one_code_does_not_drop_remaining_codes(tmp_path):
     assert summary.issues == ["minute_bar:000001.SZ:provider_error"]
     minute = warehouse.read_current(ResearchDatasetId.MINUTE_BAR)
     assert set(minute["instrument_code"]) == {"000002.SZ"}
+
+
+def test_minute_only_backfill_never_calls_margin_endpoint(tmp_path):
+    pro = Pro()
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    service = TradingStructureBackfillService(
+        TushareResearchClient(pro, pacer=lambda method: None), warehouse,
+        minute_fetcher=minute_fetcher, minute_pacer=lambda: None,
+    )
+    summary = service.backfill_minute_bars(
+        trading_dates=(date(2026, 7, 10),), through=date(2026, 7, 10),
+        candidate_codes=("000001.SZ",), index_codes=(), resume=False,
+    )
+    assert summary.committed == 1
+    assert pro.margin_calls == []
+    assert warehouse.read_current(ResearchDatasetId.MARGIN_DETAIL).empty

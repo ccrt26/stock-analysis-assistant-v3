@@ -5,7 +5,7 @@ import json
 import re
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from functools import partial
 from pathlib import Path
 from typing import Any
@@ -238,18 +238,27 @@ def run_research_stage(
     *,
     stage: str,
     data_date: date,
+    as_of: datetime | None = None,
     already_locked: bool = False,
 ) -> tuple[BackfillSummary, ...]:
+    if stage not in {"close", "evening", "pre-research"}:
+        raise ValueError(f"unsupported research data stage: {stage}")
+    if stage == "pre-research":
+        if as_of is None or as_of.utcoffset() is None:
+            raise ValueError("pre-research requires timezone-aware as_of")
+        as_of = as_of.astimezone(SHANGHAI)
+    elif as_of is not None:
+        raise ValueError("as_of is only valid for pre-research")
     warehouse = getattr(runtime, "warehouse", None)
     if warehouse is None or not hasattr(warehouse, "duckdb_path"):
-        return _run_research_stage_impl(runtime, stage=stage, data_date=data_date)
+        return _run_research_stage_impl(runtime, stage=stage, data_date=data_date, as_of=as_of)
     if already_locked:
         return _run_research_stage_locked(
-            runtime, stage=stage, data_date=data_date
+            runtime, stage=stage, data_date=data_date, as_of=as_of
         )
     with research_job_lock(warehouse.root):
         return _run_research_stage_locked(
-            runtime, stage=stage, data_date=data_date
+            runtime, stage=stage, data_date=data_date, as_of=as_of
         )
 
 
@@ -258,13 +267,14 @@ def _run_research_stage_locked(
     *,
     stage: str,
     data_date: date,
+    as_of: datetime | None = None,
 ) -> tuple[BackfillSummary, ...]:
     warehouse = runtime.warehouse
     interrupt_orphan_runs(warehouse)
     run_id = _begin_stage_run(warehouse, stage, data_date)
     try:
         summaries = _run_research_stage_impl(
-            runtime, stage=stage, data_date=data_date
+            runtime, stage=stage, data_date=data_date, as_of=as_of
         )
     except Exception as exc:
         _finish_failed_stage_run(warehouse, run_id, exc)
@@ -278,6 +288,7 @@ def _run_research_stage_impl(
     *,
     stage: str,
     data_date: date,
+    as_of: datetime | None = None,
 ) -> tuple[BackfillSummary, ...]:
     if stage == "close":
         calendar = runtime.tushare.fetch_trade_calendar(data_date, data_date)
@@ -306,6 +317,7 @@ def _run_research_stage_impl(
         runtime.warehouse, data_date - timedelta(days=10), data_date
     )
     if stage == "evening":
+        published_through = datetime.now(SHANGHAI)
         summaries: list[BackfillSummary] = []
         try:
             summaries.append(
@@ -319,6 +331,7 @@ def _run_research_stage_impl(
                 ).backfill(
                     start=data_date,
                     through=data_date,
+                    announcement_through=published_through.date(),
                     trading_dates=(
                         (data_date,) if data_date in trading_dates else ()
                     ),
@@ -349,34 +362,18 @@ def _run_research_stage_impl(
                     _failed_step_summary(dataset.value, data_date, exc)
                 )
 
-        try:
-            announcements = runtime.warehouse.read_current(
-                ResearchDatasetId.ANNOUNCEMENT
-            )
-            affected_codes = select_fundamental_refresh_codes(
-                announcements,
-                data_date,
-            )
-            if affected_codes:
-                summaries.append(
-                    FundamentalBackfillService(
-                        runtime.tushare, runtime.warehouse
-                    ).backfill(
-                        start=data_date - timedelta(days=5 * 366),
-                        through=data_date,
-                        codes=affected_codes,
-                        resume=False,
-                    )
-                )
-        except Exception as exc:
-            summaries.append(
-                _failed_step_summary("fundamental-refresh", data_date, exc)
-            )
-        return _finalize_stage_with_research_features(
-            runtime, summaries, data_date=data_date
-        )
-    if stage == "next-morning":
+        summaries.extend(_refresh_announced_fundamentals(
+            runtime, data_date=data_date, published_through=published_through,
+        ))
+        return _finalize_stage_summaries(runtime, summaries)
+    if stage == "pre-research":
         summaries = []
+        try:
+            summaries.append(ResearchBackfillService(
+                runtime.tushare, runtime.warehouse,
+            ).backfill_market_core(start=data_date, through=data_date, resume=True))
+        except Exception as exc:
+            summaries.append(_failed_step_summary("market-core", data_date, exc))
         try:
             summaries.append(
                 EventBackfillService(
@@ -388,7 +385,7 @@ def _run_research_stage_impl(
                     ),
                 ).backfill_announcements(
                     start=data_date,
-                    through=_shanghai_today(),
+                    through=as_of.date(),
                     resume=False,
                     fallback_to_exchanges=True,
                 )
@@ -422,31 +419,64 @@ def _run_research_stage_impl(
                     _failed_step_summary(dataset.value, data_date, exc)
                 )
 
+        summaries.extend(_refresh_announced_fundamentals(
+            runtime, data_date=data_date, published_through=as_of,
+        ))
+        trading = TradingStructureBackfillService(
+            runtime.tushare, runtime.warehouse, minute_fetcher=runtime.minute_fetcher,
+        )
         try:
             candidates = select_minute_candidate_scope(
                 runtime.warehouse, data_date
             )
             summaries.append(
-                TradingStructureBackfillService(
-                    runtime.tushare,
-                    runtime.warehouse,
-                    minute_fetcher=runtime.minute_fetcher,
-                ).backfill(
+                trading.backfill_minute_bars(
                     trading_dates=(data_date,),
                     through=data_date,
                     candidate_codes=candidates,
                     index_codes=BROAD_INDEX_CODES,
-                    resume=False,
+                    resume=True,
                 )
             )
         except Exception as exc:
             summaries.append(
                 _failed_step_summary("trading-structure", data_date, exc)
             )
+        margin_dates = tuple(
+            value for value in trading_dates
+            if value < data_date
+            and datetime.combine(value + timedelta(days=1), time(8), SHANGHAI) <= as_of
+        )
+        if margin_dates:
+            try:
+                summaries.append(trading.backfill_margin_details(
+                    trading_dates=margin_dates, through=data_date, resume=True,
+                ))
+            except Exception as exc:
+                summaries.append(_failed_step_summary("margin-detail", data_date, exc))
         return _finalize_stage_with_research_features(
-            runtime, summaries, data_date=data_date
+            runtime, summaries, data_date=data_date, as_of=as_of,
         )
     raise ValueError(f"unsupported research data stage: {stage}")
+
+
+def _refresh_announced_fundamentals(
+    runtime: ResearchDataRuntime, *, data_date: date, published_through: datetime,
+) -> list[BackfillSummary]:
+    try:
+        codes = select_fundamental_refresh_codes(
+            runtime.warehouse.read_current(ResearchDatasetId.ANNOUNCEMENT),
+            published_from=datetime.combine(data_date, time.min, SHANGHAI),
+            published_through=published_through,
+        )
+        if not codes:
+            return []
+        return [FundamentalBackfillService(runtime.tushare, runtime.warehouse).backfill(
+            start=data_date - timedelta(days=5 * 366),
+            through=published_through.date(), codes=codes, resume=False,
+        )]
+    except Exception as exc:
+        return [_failed_step_summary("fundamental-refresh", data_date, exc)]
 
 
 def _shanghai_today() -> date:
@@ -491,8 +521,14 @@ def _failed_step_summary(
 
 def select_fundamental_refresh_codes(
     announcements: pd.DataFrame,
-    data_date: date,
+    *,
+    published_from: datetime,
+    published_through: datetime,
 ) -> tuple[str, ...]:
+    if published_from.utcoffset() is None or published_through.utcoffset() is None:
+        raise ValueError("financial publication window requires timezone-aware datetimes")
+    if published_from > published_through:
+        raise ValueError("financial publication window is reversed")
     if announcements.empty or not {
         "announcement_time",
         "title",
@@ -511,7 +547,7 @@ def select_fundamental_refresh_codes(
         )
     )
     selected = announcements.loc[
-        (published.dt.date == data_date) & financial,
+        (published >= published_from) & (published <= published_through) & financial,
         "ts_code",
     ]
     return tuple(sorted(selected.dropna().astype(str).unique()))
@@ -646,12 +682,13 @@ def _finalize_stage_with_research_features(
     summaries: list[BackfillSummary],
     *,
     data_date: date,
+    as_of: datetime | None = None,
 ) -> tuple[BackfillSummary, ...]:
     """Finish fact bookkeeping, then compute the governed local observations."""
 
     fact_summaries = _finalize_stage_summaries(runtime, summaries)
     try:
-        derived = run_research_features(runtime.warehouse, data_date)
+        derived = run_research_features(runtime.warehouse, data_date, as_of=as_of)
         derived_summary = BackfillSummary(
             scope="derived-research-features",
             start=data_date,
@@ -663,6 +700,9 @@ def _finalize_stage_with_research_features(
             failed=len(derived.failed_feature_sets),
             issues=[derived.plain_language_summary, *derived.errors],
         )
+        completed = set(derived.committed_feature_sets) | set(derived.skipped_feature_sets)
+        if {"market_context", "price_analysis_context"} <= completed:
+            derived_summary.capabilities["research_as_of"] = as_of.isoformat(timespec="seconds")
     except Exception as exc:
         derived_summary = BackfillSummary(
             scope="derived-research-features",

@@ -259,7 +259,7 @@ def test_health_stage_runs_are_scoped_to_the_requested_data_date(tmp_path):
         connection.execute(
             """
             insert into research_ingestion_runs values
-            ('target-next', 'target-next', 'next-morning', '2026-08-04',
+            ('target-next', 'target-next', 'pre-research', '2026-08-04',
              'limited', now() - interval '1 day', now() - interval '1 day',
              '{}')
             """
@@ -267,7 +267,7 @@ def test_health_stage_runs_are_scoped_to_the_requested_data_date(tmp_path):
         connection.execute(
             """
             insert into research_ingestion_runs values
-            ('later-next', 'later-next', 'next-morning', '2026-08-05',
+            ('later-next', 'later-next', 'pre-research', '2026-08-05',
              'succeeded', now(), now(), '{}')
             """
         )
@@ -295,6 +295,7 @@ def test_health_exposes_structured_announcement_capabilities_from_stage_summary(
                     "cninfo_status": "failed",
                     "sse_status": "complete",
                     "szse_status": "failed",
+                    "research_as_of": "2026-08-26T18:30:00+08:00",
                 },
             }
         ]
@@ -303,7 +304,7 @@ def test_health_exposes_structured_announcement_capabilities_from_stage_summary(
         connection.execute(
             """
             insert into research_ingestion_runs values
-            ('next', 'next', 'next-morning', '2026-08-26', 'limited',
+            ('next', 'next', 'pre-research', '2026-08-26', 'limited',
              now(), now(), ?)
             """,
             [__import__("json").dumps(summary)],
@@ -314,6 +315,7 @@ def test_health_exposes_structured_announcement_capabilities_from_stage_summary(
     stage = report.latest_stage_runs[0]
     assert stage.capabilities["announcement_status"] == "exchange_partial"
     assert stage.capabilities["announcement_exchanges"] == ["SSE"]
+    assert stage.capabilities["research_as_of"] == "2026-08-26T18:30:00+08:00"
 
 
 def test_health_rejects_nonpositive_and_overlapping_revision_intervals(tmp_path):

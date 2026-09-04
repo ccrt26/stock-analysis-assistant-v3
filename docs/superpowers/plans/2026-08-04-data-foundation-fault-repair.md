@@ -1,5 +1,7 @@
 # Data Foundation Fault Repair Implementation Plan
 
+> 历史记录：本文保留当时方案与事实，不作为当前运行入口或调度依据。当前时序以 `docs/architecture/current-v3-architecture.md` 和 `ops/forward-selection-prompt.md` 为准。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 修复申万行业目录重复有效期和公告公开时间倒序，并以可恢复、幂等迁移修复现有 DuckDB + Parquet 数据。

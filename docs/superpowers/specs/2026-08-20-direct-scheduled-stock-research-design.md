@@ -1,5 +1,7 @@
 # 顶层定时股票研究与价格指标持久化设计
 
+> 历史记录：本文保留当时方案与事实，不作为当前运行入口或调度依据。当前时序以 `docs/architecture/current-v3-architecture.md` 和 `ops/forward-selection-prompt.md` 为准。
+
 **日期：** 2026-08-20
 
 ## 目标

@@ -12,13 +12,13 @@ def test_daily_prompt_is_v4_only() -> None:
     assert "engine_type: company_event" not in text
     assert "engine_status=fresh_event_pending" not in text
     assert text.count("stock_analyzer.ops.forward_selection prepare") == 3
-    assert "用户要求补跑早晨失败任务时" in text
+    assert "用户要求补跑晚间失败任务时" in text
     assert text.count("--rerun-date <原计划推荐日期>") == 2
     assert "ready_for_research_limited" in text
     assert "受限模式必须把不可用通道交给总控，不得补猜" in text
     assert (
-        "这是对<日期>早晨任务的补跑。研究只使用当日09:05前能够看到的信息；"
-        "原开盘观察时点已经过去，当前价格不能替代当时的参与条件。"
+        "这是对<日期>交易日前晚任务的补跑。研究仍使用原计划交易日前一自然日18:30的固定截止；"
+        "当前价格不能替代当时的参与条件。"
         in text
     )
     assert "已过原行动窗口" not in text
@@ -189,7 +189,7 @@ def test_selection_prompt_separates_confirmation_from_price_already_paid() -> No
     ):
         assert phrase in prompt
 
-    assert "我们在<action_date>开盘前选择这只股票" in prompt
+    assert "供<action_date>交易日参考" in prompt
     user_output = prompt.split("### 唯一用户输出格式", maxsplit=1)[1]
     for forbidden in ("冻结时点", "冻结结论", "正常双向成交", "农业样本"):
         assert forbidden not in user_output
@@ -338,3 +338,16 @@ def test_unique_output_assigns_disjoint_headings_to_reviews_and_new_recommendati
     ]
     assert set(review_headings).isdisjoint(recommendation_headings)
     assert "复盘部分直接采用本次已记录的正式复盘Markdown，不重新摘要" in text
+
+
+def test_evening_prompt_freezes_cutoff_and_skips_preholiday_reports():
+    text = Path("ops/forward-selection-prompt.md").read_text(encoding="utf-8")
+    for phrase in ("18:45", "18:55", "次日前一自然日", "--stage pre-research",
+                   "--as-of <selection_as_of>", "明天不是交易日", "本报告使用截至<selection_as_of>"):
+        assert phrase in text
+    assert "next-morning" not in text
+    assert "09:05" not in text
+    assert "截止时间以后至开盘前的新公告不属于本次正式研究范围" in text
+    safety = Path("ops/preopen-safety-prompt.md").read_text(encoding="utf-8")
+    for phrase in ("preopen_safety prepare", "暂缓参与", "不得重新选股", "不得增加或替换股票"):
+        assert phrase in safety
