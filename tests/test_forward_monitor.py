@@ -99,7 +99,7 @@ def test_target_progress_uses_real_return_not_linear_daily_progress() -> None:
     text = _render_target_progress(_target_progress_episode())
 
     assert "2026年8月25日开盘前被正式推荐" in text
-    assert "推荐后的第6个交易日" in text
+    assert "入选后第6个交易日" in text
     assert "离20%的观察目标还差17.32个百分点" in text
     assert "期间最高上涨4.66%" in text
     assert "最深下跌1.63%" in text
@@ -2149,13 +2149,13 @@ def test_v2_report_requires_one_review_per_episode() -> None:
 @pytest.mark.parametrize(
     ("day_number", "expected"),
     [
-        (1, "推荐后的第一个交易日"),
-        (2, "推荐后的第二个交易日"),
-        (10, "推荐后的第十个交易日"),
-        (11, "推荐后的第十一个交易日"),
-        (20, "推荐后的第二十个交易日"),
-        (21, "推荐后的第二十一个交易日"),
-        (30, "推荐后的第三十个交易日"),
+        (1, "D1"),
+        (2, "D2"),
+        (10, "D10"),
+        (11, "D11"),
+        (20, "D20"),
+        (21, "延长观察第1天"),
+        (30, "延长观察第10天"),
     ],
 )
 def test_human_trading_day(day_number: int, expected: str) -> None:
@@ -2436,7 +2436,7 @@ def test_markdown_uses_plain_chinese_and_natural_review_sections(
 
     assert "今天的市场情况" in markdown
     assert "正式推荐股票的今日复盘" in markdown
-    assert "推荐后的第1个交易日" in markdown
+    assert "当前D1/20" in markdown
     headings = (
         "今天发生了什么",
         "相比上次判断",
@@ -2474,11 +2474,11 @@ def test_markdown_uses_plain_chinese_and_natural_review_sections(
     assert "判断改变条件：" not in markdown
     assert "。。" not in markdown
     assert "如果若" not in markdown
-    assert "2026年8月3日推荐" in markdown
+    assert "2026年8月3日入选" in markdown
     assert "当初看中它" not in markdown
     assert "冻结结论" not in markdown
     for forbidden in (
-        "D1", "D2", "D10", "D20", "发动机", "行动日", "行动窗口",
+        "推荐后的第", "发动机", "行动日", "行动窗口",
         "原角色", "MFE", "MAE", "selected", "comparator",
         "nearest_nonselection", "episode", "episode_ids", "engine_type",
         "engine_status", "确认条件", "失效条件", "基础情形",
@@ -2558,7 +2558,7 @@ def test_markdown_renders_direction_specific_conditions(
     assert "。。" not in markdown
 
 
-def test_markdown_names_the_second_trading_day_without_d_label(
+def test_markdown_names_the_second_trading_day_with_d_label(
     tmp_path: Path,
 ) -> None:
     trace = _single_selected_trace(
@@ -2602,8 +2602,8 @@ def test_markdown_names_the_second_trading_day_without_d_label(
     )
     markdown = Path(summary.markdown_file).read_text(encoding="utf-8")
 
-    assert "推荐后的第2个交易日" in markdown
-    assert "D2" not in markdown
+    assert "当前D2/20" in markdown
+    assert "推荐后的第" not in markdown
 
 
 def test_late_activation_markdown_uses_plain_tail_explanation(tmp_path: Path) -> None:
@@ -2656,7 +2656,7 @@ def test_late_activation_markdown_uses_plain_tail_explanation(tmp_path: Path) ->
     )
     markdown = Path(summary.markdown_file).read_text(encoding="utf-8")
 
-    assert "推荐后的第21个交易日" in markdown
+    assert "延长观察第1天" in markdown
     assert "收盘较推荐参考价上涨21.00%" in markdown
     assert "前20个交易日收盘上涨20.00%" in markdown
     assert markdown.count("前20个交易日结束后，原判断和具体股票都基本合理。") == 1
@@ -2700,7 +2700,7 @@ def test_day_twenty_markdown_adds_final_review_section(tmp_path: Path) -> None:
     )
     markdown = Path(summary.markdown_file).read_text(encoding="utf-8")
 
-    assert "推荐后的第20个交易日" in markdown
+    assert "当前D20/20" in markdown
     assert "收盘较推荐参考价上涨20.00%" in markdown
     assert "期间最高收盘上涨20.00%" in markdown
     assert "盘中最高上涨25.00%" not in markdown
@@ -2717,7 +2717,8 @@ def test_day_twenty_markdown_adds_final_review_section(tmp_path: Path) -> None:
     ):
         assert markdown.count(heading) == 1
     assert "前20天最终判断中，最薄弱的是" not in markdown
-    assert "D20" not in markdown
+    assert "当前D20/20" in markdown
+    assert "推荐后的第" not in markdown
 
 
 def test_markdown_explains_missing_original_thesis_and_unmatched_alternative(
@@ -2979,7 +2980,7 @@ def test_each_episode_has_its_own_maturity_and_final_review(
     assert reviews[old_episode["episode_id"]]["final_twenty_day_review"] == _final_review()
     assert reviews[new_episode["episode_id"]]["final_twenty_day_review"] is None
     assert markdown.count("### 银龙股份（603969.SH）") == 1
-    assert "2026年8月3日推荐（第20个交易日）" in markdown
+    assert "2026年8月3日推荐（当前D20/20）" in markdown
     assert markdown.count("前20个交易日结束后，原判断和具体股票都基本合理。") == 1
     for heading in (
         "今天发生了什么",
@@ -3402,7 +3403,7 @@ def test_markdown_keeps_raw_jargon_only_in_snapshot_json(tmp_path: Path) -> None
     assert persisted_snapshot["episodes"][0]["original_primary_reason"] == jargon
     assert "当时看好它是因为公司出现了新变化" in markdown
     for forbidden in (
-        "发动机", "行动日", "D1", "D20", "首次定价",
+        "发动机", "行动日", "推荐后的第", "首次定价",
         "条件性通道", "量价共振", "主升",
     ):
         assert forbidden not in markdown
@@ -4894,7 +4895,7 @@ def test_new_markdown_lists_every_active_review_then_only_the_detailed_stocks(
 
     assert "## 所有主动推荐的今日结论" in markdown
     assert (
-        "| 股票 | 推荐后第几日 | 当前涨跌 | 当前走势 | 是否仍在预期内 | "
+        "| 股票 | 当前观察日 | 当前涨跌 | 当前走势 | 是否仍在预期内 | "
         "未来1—3日 | 主动跟踪 |"
     ) in markdown
     assert "股票2" in markdown
@@ -4997,7 +4998,12 @@ def test_daily_markdown_updates_the_view_without_repeating_original_recommendati
     assert re.findall(r"^\*\*(.+)\*\*$", detail, re.M) == [
         "今天发生了什么", "相比上次判断", "接下来1—3个交易日",
     ]
-    assert detail.startswith(f"当前状态：2026年8月3日推荐 · 推荐后的第{day_number}个交易日；")
+    expected_day = (
+        f"当前D{day_number}/20"
+        if day_number <= 20
+        else f"20日核心观察已完成 · 延长观察第{day_number - 20}天"
+    )
+    assert detail.startswith(f"当前状态：2026年8月3日入选 · {expected_day}；")
     for value in ("推荐日期和当时判断", "到今天走到哪里", "我的分析", "综合判断", "什么情况会让我改变看法",
                   alert["episode_reviews"][0]["original_reason_plain_language"],
                   alert["episode_reviews"][0]["original_key_risk_plain_language"]):
@@ -5071,7 +5077,7 @@ def test_compact_status_only_shows_available_price_facts(entry, current, highest
         current_max_close_return_since_entry=highest, current_mae_since_entry=lowest,
     )
     status = _render_daily_case(snapshot, daily, alert).split("当前状态：", 1)[1].split("\n", 1)[0]
-    assert "推荐后的第3个交易日" in status and expected in status
+    assert "当前D3/20" in status and expected in status
     assert "None" not in status and "nan" not in status
     if current is None:
         assert "收盘较推荐参考价" not in status
@@ -5170,7 +5176,7 @@ def test_combined_report_separates_weak_daily_update_from_new_recommendation(tmp
     (tmp_path / "combined-review-example.md").write_text(combined, encoding="utf-8")
     detail = monitor.split("### 银龙股份（603969.SH）\n\n", 1)[1].split("\n\n## ", 1)[0]
     assert detail.strip().split("\n\n") == [
-        "当前状态：2026年8月3日推荐 · 推荐后的第3个交易日；收盘较推荐参考价下跌6.00%；期间最高收盘上涨2.00%；期间最深下跌8.00%。",
+        "当前状态：2026年8月3日入选 · 当前D3/20；收盘较推荐参考价下跌6.00%；期间最高收盘上涨2.00%；期间最深下跌8.00%。",
         "**今天发生了什么**", daily["current_review"],
         "**相比上次判断**", "原判断已被事实否定：" + daily["view_change_reason"],
         "**接下来1—3个交易日**", "未来1—3个交易日更可能继续偏弱。",
@@ -5186,7 +5192,7 @@ def test_combined_report_separates_weak_daily_update_from_new_recommendation(tmp
         "公司经营", "主要不利因素", "综合判断", "什么情况会让我改变看法",
     ]
     assert combined.index("### 银龙股份") < combined.index("## 今天明确推荐的股票")
-    for internal in ("invalidated", "current_review", "episode", "D3", "系统检测到"):
+    for internal in ("invalidated", "current_review", "episode", "推荐后的第", "系统检测到"):
         assert internal not in combined
 
 
@@ -5216,7 +5222,7 @@ def test_multiple_daily_episodes_keep_their_own_dates_updates_and_view_changes()
     assert markdown.count("### 银龙股份（603969.SH）") == 1
     for heading in ("今天发生了什么", "相比上次判断", "接下来1—3个交易日"):
         assert markdown.count(f"**{heading}**") == 1
-    assert "2026年8月3日推荐（第3个交易日）：" + daily["current_review"] in markdown
-    assert "2026年8月4日推荐（第2个交易日）：" + second_daily["current_review"] in markdown
-    assert "2026年8月4日推荐（第2个交易日）：判断减弱：最新收盘未能继续提高。" in markdown
+    assert "2026年8月3日推荐（当前D3/20）：" + daily["current_review"] in markdown
+    assert "2026年8月4日推荐（当前D2/20）：" + second_daily["current_review"] in markdown
+    assert "2026年8月4日推荐（当前D2/20）：判断减弱：最新收盘未能继续提高。" in markdown
     assert "原推荐背景" not in markdown

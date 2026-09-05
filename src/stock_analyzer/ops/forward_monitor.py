@@ -1375,7 +1375,7 @@ def _render_markdown(
             [
                 "## 所有主动推荐的今日结论",
                 "",
-                "| 股票 | 推荐后第几日 | 当前涨跌 | 当前走势 | 是否仍在预期内 | 未来1—3日 | 主动跟踪 |",
+                "| 股票 | 当前观察日 | 当前涨跌 | 当前走势 | 是否仍在预期内 | 未来1—3日 | 主动跟踪 |",
                 "|---|---:|---:|---|---|---|---|",
             ]
         )
@@ -1442,8 +1442,13 @@ def _render_markdown(
             day_number = int(episode["day_number"])
             action = date.fromisoformat(str(episode["action_date"]))
             action_text = f"{action.year}年{action.month}月{action.day}日"
+            day_text = (
+                f"当前D{day_number}/20"
+                if day_number <= 20
+                else f"延长观察第{day_number - 20}天"
+            )
             prefix = (
-                f"{action_text}推荐（第{day_number}个交易日）："
+                f"{action_text}推荐（{day_text}）："
                 if multiple else ""
             )
             status_paragraphs.append(_render_compact_review_status(episode))
@@ -1499,7 +1504,7 @@ def _render_markdown(
             (
                 _render_tracking_counts(snapshot, episodes, daily_ledger)
                 if daily_ledger is not None
-                else f"仍开放 {pool.selected_count} 只已确认正式推荐股票；推荐后的前20个交易日有 {formal_primary_count} 条正式记录，之后继续低成本观察的有 {formal_tail_count} 条正式记录。"
+                else f"仍开放 {pool.selected_count} 只已确认正式推荐股票；入选后的前20个交易日有 {formal_primary_count} 条正式记录，之后继续低成本观察的有 {formal_tail_count} 条正式记录。"
             ),
             "",
         ]
@@ -1509,9 +1514,14 @@ def _render_markdown(
 
 def _render_compact_review_status(episode: dict[str, Any]) -> str:
     action = date.fromisoformat(str(episode["action_date"]))
+    review_day = int(episode["day_number"])
+    day_text = (
+        f"当前D{review_day}/20"
+        if review_day <= 20
+        else f"20日核心观察已完成 · 延长观察第{review_day - 20}天"
+    )
     parts = [
-        f"当前状态：{action.year}年{action.month}月{action.day}日推荐 · "
-        f"推荐后的第{int(episode['day_number'])}个交易日"
+        f"当前状态：{action.year}年{action.month}月{action.day}日入选 · {day_text}"
     ]
     if "entry_open" in episode and _number(episode.get("entry_open")) is None:
         parts.append("没有可靠的推荐参考价，暂时无法计算涨跌")
@@ -1770,30 +1780,9 @@ def _render_pair_comparison(
 def _human_trading_day(day_number: int) -> str:
     if not 1 <= day_number <= 30:
         raise ValueError("day_number must be between 1 and 30")
-    digits = {
-        1: "一",
-        2: "二",
-        3: "三",
-        4: "四",
-        5: "五",
-        6: "六",
-        7: "七",
-        8: "八",
-        9: "九",
-    }
-    if day_number < 10:
-        number = digits[day_number]
-    elif day_number == 10:
-        number = "十"
-    elif day_number < 20:
-        number = f"十{digits[day_number - 10]}"
-    elif day_number == 20:
-        number = "二十"
-    elif day_number < 30:
-        number = f"二十{digits[day_number - 20]}"
-    else:
-        number = "三十"
-    return f"推荐后的第{number}个交易日"
+    if day_number <= 20:
+        return f"D{day_number}"
+    return f"延长观察第{day_number - 20}天"
 
 
 def _recommendation_date_sentence(episode: dict[str, Any]) -> str:
@@ -1826,7 +1815,7 @@ def _render_target_progress(episode: dict[str, Any]) -> str:
         else "持平0.00%"
     )
     parts = [
-        f"{recommendation_date} 到今天是推荐后的第{day_number}个交易日，"
+        f"{recommendation_date} 到今天是入选后第{day_number}个交易日，"
         f"收盘较参考价{movement}"
     ]
     current_reached_target = current >= 0.20 - 1e-12
@@ -1888,7 +1877,7 @@ def _render_price_summary(episodes: list[dict[str, Any]]) -> str:
     for episode in episodes:
         day = _human_trading_day(int(episode["day_number"]))
         if episode.get("role") == "comparator":
-            day = f"该次研究后的{day.removeprefix('推荐后的')}"
+            day = f"该次研究后{day}"
         current = _number(episode.get("current_close_return_since_entry"))
         if current is None:
             summaries.append(f"{day}这条记录的价格路径不完整，暂时无法可靠计算涨跌。")

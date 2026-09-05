@@ -423,7 +423,7 @@ def test_d0_entries_from_latest_trace_only(tmp_path: Path) -> None:
         assert "600003.SH" in codes and "600004.SH" not in codes
         d0 = next(s for s in payload["stocks"] if s["code"] == "600003.SH")
         assert d0["d0"] is True and d0["days"] == 0
-        assert d0["stage"] == "待定价" and d0["stageType"] == "pending"
+        assert d0["stage"] == "待首日观察" and d0["stageType"] == "pending"
         assert d0["ref"] is None and d0["recDate"] == "2026-09-03"
         assert d0["reasonFull"] == "连续跑赢市场且成交放大。"
         assert d0["reasonRisk"] == "涨幅集中在最近三日。"
@@ -503,6 +503,14 @@ class TestRender:
         # 日期选择与个股选择器存在
         assert 'id="dateSelect"' in html
         assert 'id="stockPick"' in html
+        # 用户展示口径：入选日 + D1—D20 + 延长观察；不再出现 D0 与旧 D 标记
+        assert "待首日观察" in html and "延长观察第" in html
+        assert "20个交易日核心观察完成" in html and "推荐日" in html and "事件首日" in html
+        template_only = "\n".join(
+            line for line in html.split("\n") if not line.lstrip().startswith("const DATA =")
+        )
+        for forbidden in ("D0", "推荐 D1", "事件定价 D1", "推荐 D0"):
+            assert forbidden not in template_only
         # 无外部资源引用
         assert "<script src=" not in html and "<link " not in html and "<img" not in html
         page_json = html.split("DATA = ", 1)[1].split(";\nconst DATES", 1)[0]

@@ -1032,7 +1032,7 @@ def build_payload(
     names = group_name_map(SELECTION_DIR)
     catalog = industry_catalog_names(root)
 
-    # D0：最新报告页面把次日开盘前生效的新推荐以"待定价"列出（数据来自配对选股轨迹）
+    # D0：最新报告页面把次日开盘前生效的新推荐以"待首日观察"列出（数据来自配对选股轨迹）
     d0_entries, d0_action_iso = load_d0_entries(
         SELECTION_DIR, monitor_dir, analysis_date
     )
@@ -1226,7 +1226,7 @@ def build_payload(
                 "refKind": None,
                 "days": 0,
                 "phase": "primary",
-                "stage": "待定价",
+                "stage": "待首日观察",
                 "stageType": "pending",
                 "attention": False,
                 "trigger": "",
@@ -1651,6 +1651,12 @@ function storeSet(k,v){try{return localStorage.setItem(k,v)}catch(e){}}
 let cur = stocks[0], selDay = null, selReview = null, hoverI = -1, hoverY = 0, relMode = false, activeFilter = "all", keyCollapsed = false,
  keyDate = DATA.analysis_date, sortKey = null, sortDir = -1;
 const pct = v => v == null ? "—" : (v > 0 ? "+" : "") + v.toFixed(2) + "%";
+function dayLabel(n){return n > 20 ? `延长观察第${n - 20}天` : `D${n}`}
+function progressText(s){
+ if(s.d0)return"待首日观察";
+ if(s.days > 20)return`延长观察第${s.days - 20}天`;
+ return`D${s.days}/20`;
+}
 const cls = v => v == null ? "dim" : (v >= 0 ? "up" : "down");
 function dayClose(s,i){return s.candles[i] ? s.candles[i][3] : null}
 function candleIdxOfDay(s,day){return s.recIndex + day - 1}
@@ -1669,7 +1675,7 @@ function metrics(s){
 }
 function nearTarget(s){const m = metrics(s);return m.cur != null && m.toT < 10}
 function nextCheck(s){
- if(s.d0)return"待定价";
+ if(s.d0)return"待首日观察";
  if(s.suspended)return"待复牌";
  for(const d of [5,10,20])if(s.days < d)return"D" + d;
  return"已结束";
@@ -1713,8 +1719,8 @@ function drawChart(){
   return g;};
  const vLine = (x,y1,y2,col,dash,op) => `<line x1="${x.toFixed(1)}" x2="${x.toFixed(1)}" y1="${y1}" y2="${y2}" stroke="${col}" stroke-width="${(1.1 * UX).toFixed(2)}" ${dash ? `stroke-dasharray="${dash}"` : ""} opacity="${op ?? 1}"/>`;
  const hLine = (yy,col,dash) => `<line x1="${padL}" x2="${W - padR}" y1="${yy.toFixed(1)}" y2="${yy.toFixed(1)}" stroke="${col}" stroke-width="${(1.2 * UX).toFixed(2)}" stroke-dasharray="${dash}" opacity=".9"/>`;
- const recMark = () => {const rx = xi(s.recIndex);
-  const mark = s.d0 ? "推荐 D0" : (s.refKind === "event" ? "事件定价 D1" : "推荐 D1");
+ const recMark = () => {if(s.d0)return"";const rx = xi(s.recIndex);
+  const mark = s.refKind === "event" ? "事件首日" : "推荐日";
   return vLine(rx,pT,pB,L.accent,"4 4",.6) + pill(rx,pT + 11,mark,L.accent,"#fff",{anchor:"middle"});};
  if(!relMode){
   const refs = s.ref != null ? [s.ref,s.ref * 1.2] : [];
@@ -1823,6 +1829,7 @@ function drawChart(){
  const hits = s.candles.map((_,i) => `<rect class="hit" data-i="${i}" x="${(padL + slot * i).toFixed(1)}" y="${pT}" width="${slot.toFixed(1)}" height="${(vB - pT).toFixed(1)}" fill="transparent"/>`).join("");
  svg.innerHTML = out + hits;
  function chartSelect(i){
+  if(s.d0){showToast("该股已入选，待首日观察");return}
   if(i < s.recIndex){showToast("推荐日之前，仅作背景参考");return}
   if(s.suspended){showToast("停牌期间无行情");return}
   const d = i - s.recIndex + 1,rev = s.reviews.find(r => r.day === d);
@@ -1844,7 +1851,8 @@ function syncHover(){
  const g = svg.querySelector("#xhg");
  if(hoverI < 0 || !G || !s.candles[hoverI] || s.candles[hoverI][3] == null){if(g)g.innerHTML = "";tip.style.display = "none";return}
  const L = chartColors(),x = G.padL + G.slot * (hoverI + .5),d = s.candles[hoverI];
- const day = hoverI >= s.recIndex ? `D${hoverI - s.recIndex + 1}` : "推荐前";
+ const dn = hoverI - s.recIndex + 1;
+ const day = (s.d0 || dn < 1) ? "推荐前" : (dn <= 20 ? `D${dn}` : `延长观察第${dn - 20}天`);
  let cross = `<line x1="${x.toFixed(1)}" x2="${x.toFixed(1)}" y1="${G.pT}" y2="${G.vB}" stroke="${L.soft}" stroke-width="1" stroke-dasharray="3 3" opacity=".7"/>`;
  if(!relMode){
   const yc = G.yF(d[3]);
@@ -1914,7 +1922,7 @@ function renderStories(){
   const trig = isToday ? s.trigger : (r.checkpoint ? `${r.checkpoint} 检查日` : (r.viewChanged ? (r.fromTo || "观点调整") : "每日复盘"));
   return `<div class="story" data-code="${s.code}">
    <div class="story-no">${String(i + 1).padStart(2,"0")}</div>
-   <div><div class="story-name">${esc(s.name)}<small>${s.code} · ${isToday ? `第 ${s.days} 个交易日` : `${r.date.slice(5)} 复盘`}</small></div>
+   <div><div class="story-name">${esc(s.name)}<small>${s.code} · ${isToday ? (s.d0 ? `${s.recDate.slice(5)}入选 · 待首日观察` : (s.days > 20 ? `延长观察第${s.days - 20}天` : `${s.recDate.slice(5)}入选 · 当前D${s.days}/20`)) : `${r.date.slice(5)} 复盘`}</small></div>
     <div class="story-headline">${r && r.viewChanged ? '<span class="hlmark">▍</span>' : ""}${r ? esc(r.headline) : "这天没有针对这条记录的复盘观点。"}</div></div>
    <div class="story-side"><span class="story-ret ${cls(ret)}">${pct(ret)}</span>
     <span class="story-tags"><span class="trigger">${esc(trig)}</span><span class="stage stage-${s.stageType}">${esc(s.stage)}</span>${r && r.viewChanged ? `<span class="before-after">${esc(r.fromTo || "观点调整")}</span>` : ""}</span></div>
@@ -1954,10 +1962,12 @@ function renderLedger(){
  const rows = sortedRows(filteredStocks());
  $("ledgerRows").innerHTML = rows.map(s => {
   const m = metrics(s);
-  const prog = s.ref == null ? 0 : Math.max(0,Math.min(100,m.cur / 20 * 100));
+  let progCell = progressText(s),progBar = "";
+  if(!s.d0){const prog = s.ref == null ? 0 : Math.max(0,Math.min(100,m.cur / 20 * 100));
+   progBar = `<div class="pbar"><i style="width:${s.days > 20 ? 100 : prog}%"></i></div>`;}
   return `<tr class="tr" data-code="${s.code}">
    <td><span class="l-name">${esc(s.name)}</span><span class="l-code">${s.code}</span></td>
-   <td class="l-dim">D${s.days}/20<div class="pbar"><i style="width:${prog}%"></i></div></td>
+   <td class="l-dim">${progCell}${progBar}</td>
    <td><span class="l-ret ${cls(m.cur)}">${pct(m.cur)}</span> <span class="l-dim">/ ${pct(m.max)}</span></td>
    <td class="${cls(m.cur)}">${m.toT == null ? "—" : m.toT.toFixed(1) + "pp"}</td>
    <td><span class="stage stage-${s.stageType}">${esc(s.stage)}</span></td>
@@ -2000,10 +2010,11 @@ function renderDetail(){
  $("dName").textContent = s.name;
  $("dCode").textContent = s.code;
  if(s.d0){
-  $("dStatus").textContent = `D0 · ${s.recDate} 开盘前生效 · 待定价`;
+  $("dStatus").textContent = `入选日：${s.recDate} · 已入选，待首日观察`;
  }else{
-  const phaseText = s.suspended ? "无法执行" : (s.phase === "primary" ? "观察中" : s.phase === "passive_tail" ? "尾段观察" : "已结束");
-  $("dStatus").textContent = `${phaseText} · 第 ${s.days} / 20 个交易日` +
+  const core = s.days > 20 ? `20日核心观察已完成 · 延长观察第${s.days - 20}天`
+   : `当前D${s.days}/20` + (s.days === 20 ? " · 20个交易日核心观察完成" : "");
+  $("dStatus").textContent = (s.suspended ? "无法执行 · " : "") + `${s.recDate}入选 · ` + core +
    (s.ref == null ? " · 无推荐参考价" : (s.refKind === "event" ? " · 参考价=事件首日开盘" : ""));
  }
  $("dCompany").textContent = s.company || "";
@@ -2058,16 +2069,16 @@ function renderTimeline(){
 function renderReview(){
  const s = cur,r = selReview,latest = latestReview(s);
  let badges = "";
- if(r && latest && r.day !== latest.day)badges += `<button class="textlink" id="backLatest">回到最新（D${latest.day}）</button>`;
+ if(r && latest && r.day !== latest.day)badges += `<button class="textlink" id="backLatest">回到最新（${dayLabel(latest.day)}）</button>`;
  if(r && r.viewChanged)badges += `<span class="badge">${esc(r.fromTo || r.viewLabel || "观点调整")}</span>`;
  $("rBadges").innerHTML = badges;
  if(!r){
-  $("rDate").textContent = selDay != null ? `第 ${selDay} 个交易日 · ${DATES[candleIdxOfDay(s,selDay)] || ""}` : `${s.recDate} 推荐`;
+  $("rDate").textContent = selDay != null ? `${s.recDate}入选 · 当前${dayLabel(selDay)}/20 · ${DATES[candleIdxOfDay(s,selDay)] || ""}` : `${s.recDate}入选`;
   $("rHeadline").textContent = latest ? "当日无复盘正文" : "这只股票还没有被复盘过";
   $("rCopy").textContent = "每个收盘日都会生成简短复盘；没有正文的日期通常是当日没有可评价的新事实。可在上方查看当日价格与成交" + (latest ? "，或回到最新观点。" : "。");
   $("rReview").innerHTML = "";
  }else{
-  $("rDate").textContent = `${s.recDate} 推荐 · 第 ${r.day} 个交易日 · ${DATES[candleIdxOfDay(s,r.day)] || ""}`;
+  $("rDate").textContent = `${s.recDate}入选 · 当前${dayLabel(r.day)}/20 · ${DATES[candleIdxOfDay(s,r.day)] || ""}`;
   $("rHeadline").textContent = r.headline;
   $("rCopy").textContent = r.copy;
   const rows = [];
@@ -2076,7 +2087,7 @@ function renderReview(){
   if(r.viewLabel)rows.push(["观点变化",`${esc(r.viewLabel)}${r.viewReason ? ` — ${esc(r.viewReason)}` : ""}`]);
   if(r.base)rows.push(["未来1—3日",`${esc(r.base)}${r.outlookReason ? ` — ${esc(r.outlookReason)}` : ""}`]);
   $("rReview").innerHTML = rows.length
-   ? `<span class="cap">每日复盘 · D${r.day} · ${DATES[candleIdxOfDay(s,r.day)] || ""}</span>` + rows.map(x => `<div class="rev-row"><span class="rk">${x[0]}</span><span class="rv">${x[1]}</span></div>`).join("")
+   ? `<span class="cap">每日复盘 · ${dayLabel(r.day)} · ${DATES[candleIdxOfDay(s,r.day)] || ""}</span>` + rows.map(x => `<div class="rev-row"><span class="rk">${x[0]}</span><span class="rv">${x[1]}</span></div>`).join("")
    : "";
  }
  const bl = $("backLatest");
