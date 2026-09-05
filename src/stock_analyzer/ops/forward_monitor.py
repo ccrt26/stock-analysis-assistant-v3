@@ -567,6 +567,22 @@ def prepare_forward_monitor(
         sorted(all_path_days),
         as_of,
     )
+    # 复盘价格上下文窗口：analysis_date 截止后的最后61个市场会话（60前序+分析日）
+    context_session_dates = [
+        day for day in sessions if day <= analysis_date
+    ][-61:]
+    missing_context_days = sorted(
+        set(context_session_dates) - set(price_path_cache)
+    )
+    if missing_context_days:
+        price_path_cache.update(
+            _daily_price_cache(root, missing_context_days, as_of)
+        )
+    benchmark_daily = _benchmark_daily_cache(
+        root,
+        context_session_dates,
+        as_of,
+    )
     observations: list[dict[str, Any]] = []
     for episode_id in sorted(episode_windows):
         base, source_as_of, day_number, phase, path_days = episode_windows[
@@ -674,6 +690,55 @@ def prepare_forward_monitor(
             if str(item["episode_id"]) in daily_review_id_set
         }
     )
+    # 复盘价格上下文：只覆盖当日需日评的正式推荐episode及其同批配对episode。
+    # 在attention/tracking/角色/配对/重点选择全部确定后接线，不改变任何既有字段。
+    observation_by_id = {str(item["episode_id"]): item for item in observations}
+    review_context_ids = set(daily_review_episode_ids)
+    for episode_id in daily_review_episode_ids:
+        paired_id = (
+            observation_by_id[episode_id].get("pair_context") or {}
+        ).get("paired_episode_id")
+        if paired_id and str(paired_id) in observation_by_id:
+            review_context_ids.add(str(paired_id))
+    for episode_id in sorted(review_context_ids):
+        item = observation_by_id[episode_id]
+        window = episode_windows.get(episode_id)
+        if window is None:
+            continue
+        base = window[0]
+        ts_code = str(item["ts_code"])
+        context = _build_review_price_context(
+            action_date=date.fromisoformat(str(base["action_date"])),
+            analysis_date=analysis_date,
+            session_dates=context_session_dates,
+            adjusted_history=_adjusted_path(
+                price_path_cache,
+                ts_code,
+                context_session_dates,
+            ),
+            normalization_factor=_analysis_day_factor(
+                price_path_cache,
+                ts_code,
+                analysis_date,
+            ),
+            benchmark_daily=benchmark_daily,
+        )
+        price_row = price_by_code.get(ts_code) or {}
+        context["basis"] = {
+            "formation_date": str(base.get("formation_date") or ""),
+            "action_date": str(base.get("action_date") or ""),
+            "source_as_of": str(base.get("source_as_of") or ""),
+            "analysis_date": analysis_date.isoformat(),
+            "as_of": as_of.isoformat(),
+            "benchmark_code": "000300.SH",
+            "benchmark_name": "沪深300",
+            "price_basis": "raw_times_factor_div_analysis_factor",
+            "price_basis_date": analysis_date.isoformat(),
+            "amount_unit": "CNY",
+            "primary_industry_code": price_row.get("primary_industry_code"),
+            "primary_industry_name": price_row.get("primary_industry_name"),
+        }
+        item["review_context"] = context
     summary_payload = {
         "open_episode_count": len(open_episodes),
         "distinct_stock_count": len({item["ts_code"] for item in open_episodes}),
@@ -1072,8 +1137,8 @@ def record_forward_monitor(
                 )
             if new_daily_workflow:
                 daily = daily_reviews[episode_id]
+                # 正文允许日评与详评各自展开；结构化结论仍必须一致。
                 detailed_values = {
-                    "current_review": review.current_review,
                     "current_assessment": review.current_assessment,
                     "best_supported_explanation": (
                         review.best_supported_explanation
@@ -1084,7 +1149,6 @@ def record_forward_monitor(
                     "final_twenty_day_review": final_review,
                 }
                 daily_values = {
-                    "current_review": daily.current_review,
                     "current_assessment": daily.current_assessment,
                     "best_supported_explanation": (
                         daily.best_supported_explanation
@@ -1456,7 +1520,7 @@ def _render_markdown(
                 status_paragraphs.append(_render_first_day_background(episode, review))
 
             update_paragraphs.append(
-                f"{prefix}{daily.current_review if daily is not None else review.current_review}"
+                f"{prefix}{review.current_review}"
             )
             if alert.alert_type == "late_activation" and day_number > 20:
                 update_paragraphs.append(
@@ -1541,15 +1605,22 @@ def _render_compact_review_status(episode: dict[str, Any]) -> str:
 def _render_first_day_background(
     episode: dict[str, Any], review: ForwardEpisodeReviewV1,
 ) -> str:
-    if "missing_original_research_thesis" in (episode.get("data_limitations") or []):
-        return (
-            "原推荐背景：当时留下的原始判断不完整，因此这次只能复盘价格表现，"
-            "不能逐项审查当时的理由。"
-        )
     # Presentation-only sentence clipping; the frozen source fields stay intact.
     reason = re.split(r"[。！？!?\n]", review.original_reason_plain_language, maxsplit=1)[0]
     risk = re.split(r"[。！？!?\n]", review.original_key_risk_plain_language, maxsplit=1)[0]
-    return f"原推荐背景：{reason.rstrip('；; ')}；{risk.rstrip('；; ')}。"
+    summary = "；".join(
+        part for part in (reason.rstrip("；; "), risk.rstrip("；; ")) if part
+    )
+    if "missing_original_research_thesis" in (episode.get("data_limitations") or []):
+        if summary:
+            return (
+                "原推荐背景（原始完整判断未保存，以下为当时留存的摘要）："
+                f"{summary}。"
+            )
+        return "原推荐背景：当时留下的原始判断不完整，无法逐项展示。"
+    if not summary:
+        return "原推荐背景：当时留下的理由摘要在本记录中不可用。"
+    return f"原推荐背景：{summary}。"
 
 
 def _render_view_change(daily: DailyFormalReviewV1 | None) -> str:
@@ -2287,6 +2358,361 @@ def _adjusted_path(
             }
         )
     return result
+
+
+def _analysis_day_factor(
+    cache: dict[date, tuple[pd.DataFrame, pd.DataFrame]],
+    ts_code: str,
+    analysis_date: date,
+) -> float | None:
+    frames = cache.get(analysis_date)
+    if frames is None:
+        return None
+    _, factors = frames
+    factors = factors.loc[factors["ts_code"].astype(str).eq(ts_code)]
+    if factors.empty:
+        return None
+    return _number(factors.iloc[-1].get("adj_factor"))
+
+
+def _benchmark_daily_cache(
+    root: Path,
+    window_days: list[date],
+    as_of: datetime,
+) -> list[dict[str, Any]]:
+    """只读取窗口内 index_daily 分区并过滤 000300.SH，按日期返回 open/close。"""
+    cutoff = pd.Timestamp(as_of).tz_convert("UTC")
+    result: list[dict[str, Any]] = []
+    for day in window_days:
+        path = (
+            root / "local_warehouse" / "facts" / "index_daily"
+            / f"trade_date={day.isoformat()}" / "data.parquet"
+        )
+        if not path.is_file():
+            continue
+        frame = pd.read_parquet(path)
+        if "available_at" in frame.columns:
+            available = pd.to_datetime(frame["available_at"], utc=True, errors="coerce")
+            frame = frame.loc[available.notna() & available.le(cutoff)]
+        if "index_code" not in frame.columns or frame.empty:
+            continue
+        frame = frame.loc[frame["index_code"].astype(str).eq("000300.SH")]
+        if frame.empty:
+            continue
+        row = frame.iloc[-1]
+        open_value = _number(row.get("open"))
+        close_value = _number(row.get("close"))
+        if open_value is None or close_value is None:
+            continue
+        result.append(
+            {
+                "trade_date": day,
+                "open": float(open_value),
+                "close": float(close_value),
+            }
+        )
+    return result
+
+
+def _build_review_price_context(
+    *,
+    action_date: date,
+    analysis_date: date,
+    session_dates: list[date],
+    adjusted_history: list[dict[str, Any]],
+    normalization_factor: float | None,
+    benchmark_daily: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """为单条episode构建带固定口径的复盘价格上下文。
+
+    adjusted_history 沿用 _adjusted_path 记录结构（raw×当日复权因子，amount为元）；
+    normalization_factor 是分析日复权因子F；全部人民币价位先除以F归一。
+    benchmark_daily 仅含 000300.SH 的 trade_date/open/close。
+    纯计算：不读写文件、不选股、不解释形态。
+    """
+    limitations: list[str] = []
+    history_by_date: dict[date, dict[str, Any]] = {}
+    for row in adjusted_history:
+        day = _as_date(row.get("date"))
+        if day is not None:
+            history_by_date[day] = row
+    sessions_in_window = [
+        day for day in session_dates if _as_date(day) is not None and _as_date(day) <= analysis_date
+    ]
+    benchmark_by_date: dict[date, dict[str, Any]] = {}
+    for row in benchmark_daily:
+        day = _as_date(row.get("trade_date"))
+        if day is not None:
+            benchmark_by_date[day] = row
+
+    action_row = history_by_date.get(action_date)
+    analysis_row = history_by_date.get(analysis_date)
+    entry_adjusted = _number(action_row.get("open")) if action_row else None
+    analysis_close_adjusted = (
+        _number(analysis_row.get("close")) if analysis_row else None
+    )
+
+    def _norm(value: float | None) -> float | None:
+        if value is None or normalization_factor is None or normalization_factor <= 0:
+            return None
+        return value / normalization_factor
+
+    # ---- post_entry_sessions：行动日至分析日，最多30个市场会话 ----
+    entry_normalized = _norm(entry_adjusted)
+    post_days = [
+        day
+        for day in sessions_in_window
+        if action_date <= day <= analysis_date
+    ][:30]
+    post_entry_sessions: list[dict[str, Any]] = []
+    for day in post_days:
+        row = history_by_date.get(day)
+        raw_values = {
+            name: (_number(row.get(name)) if row else None)
+            for name in ("open", "high", "low", "close")
+        }
+        amount = _number(row.get("amount")) if row else None
+        close_return: float | None = None
+        high_return: float | None = None
+        if entry_adjusted is not None and entry_adjusted > 0:
+            if raw_values["close"] is not None:
+                close_return = raw_values["close"] / entry_adjusted - 1.0
+            if raw_values["high"] is not None:
+                high_return = raw_values["high"] / entry_adjusted - 1.0
+        post_entry_sessions.append(
+            {
+                "date": day.isoformat(),
+                "open": _norm(raw_values["open"]),
+                "high": _norm(raw_values["high"]),
+                "low": _norm(raw_values["low"]),
+                "close": _norm(raw_values["close"]),
+                "amount": amount,
+                "close_return": close_return,
+                "high_return": high_return,
+            }
+        )
+
+    # ---- recent_sessions：分析日及前4个市场会话 ----
+    recent_sessions: list[dict[str, Any]] = []
+    window_index = {day: index for index, day in enumerate(sessions_in_window)}
+    recent_days = sessions_in_window[-5:]
+    for day in recent_days:
+        row = history_by_date.get(day)
+        index = window_index[day]
+        prev_row = (
+            history_by_date.get(sessions_in_window[index - 1])
+            if index - 1 >= 0
+            else None
+        )
+        close_value = _number(row.get("close")) if row else None
+        prev_close = _number(prev_row.get("close")) if prev_row else None
+        amount_value = _number(row.get("amount")) if row else None
+        prev_amount = _number(prev_row.get("amount")) if prev_row else None
+        close_return_1d = (
+            close_value / prev_close - 1.0
+            if close_value is not None and prev_close is not None and prev_close > 0
+            else None
+        )
+        amount_change_1d = (
+            amount_value / prev_amount - 1.0
+            if amount_value is not None and prev_amount is not None and prev_amount > 0
+            else None
+        )
+        ratio_days = sessions_in_window[max(0, index - 19): index + 1]
+        ratio_amounts = [
+            _number(history_by_date.get(ratio_day, {}).get("amount"))
+            for ratio_day in ratio_days
+        ]
+        amount_ratio_including_today_20d: float | None = None
+        if (
+            len(ratio_days) == 20
+            and amount_value is not None
+            and all(value is not None for value in ratio_amounts)
+        ):
+            average = sum(ratio_amounts) / len(ratio_amounts)
+            if average > 0:
+                amount_ratio_including_today_20d = amount_value / average
+        recent_sessions.append(
+            {
+                "date": day.isoformat(),
+                "open": _norm(_number(row.get("open")) if row else None),
+                "high": _norm(_number(row.get("high")) if row else None),
+                "low": _norm(_number(row.get("low")) if row else None),
+                "close": _norm(close_value),
+                "amount": amount_value,
+                "close_return_1d": close_return_1d,
+                "amount_change_1d": amount_change_1d,
+                "amount_ratio_including_today_20d": (
+                    amount_ratio_including_today_20d
+                ),
+            }
+        )
+
+    # ---- benchmark_windows：1/3/5/20个close-to-close窗口 ----
+    benchmark_windows: list[dict[str, Any]] = []
+    last_day = sessions_in_window[-1] if sessions_in_window else None
+    for horizon in (1, 3, 5, 20):
+        start_index = len(sessions_in_window) - 1 - horizon
+        window_item: dict[str, Any] = {
+            "days": horizon,
+            "start_date": None,
+            "end_date": None,
+            "return": None,
+        }
+        if last_day is not None and start_index >= 0:
+            start_day = sessions_in_window[start_index]
+            start_close = benchmark_by_date.get(start_day, {}).get("close")
+            end_close = benchmark_by_date.get(last_day, {}).get("close")
+            window_item["start_date"] = start_day.isoformat()
+            window_item["end_date"] = last_day.isoformat()
+            if start_close is not None and end_close is not None and start_close > 0:
+                window_item["return"] = end_close / start_close - 1.0
+        benchmark_windows.append(window_item)
+
+    # ---- benchmark_return_since_entry / stock_excess_since_entry ----
+    benchmark_action = benchmark_by_date.get(action_date, {})
+    benchmark_return_since_entry: float | None = None
+    benchmark_open = benchmark_action.get("open")
+    benchmark_last_close = (
+        benchmark_by_date.get(last_day, {}).get("close") if last_day else None
+    )
+    if (
+        benchmark_open is not None
+        and benchmark_open > 0
+        and benchmark_last_close is not None
+        and last_day is not None
+        and action_date <= last_day
+    ):
+        benchmark_return_since_entry = benchmark_last_close / benchmark_open - 1.0
+    stock_excess_since_entry: float | None = None
+    if (
+        entry_adjusted is not None
+        and entry_adjusted > 0
+        and analysis_close_adjusted is not None
+        and benchmark_return_since_entry is not None
+    ):
+        stock_return = analysis_close_adjusted / entry_adjusted - 1.0
+        stock_excess_since_entry = stock_return - benchmark_return_since_entry
+
+    # ---- price_levels ----
+    prior60_days = sessions_in_window[-61:-1]
+    prior60_high: float | None = None
+    prior60_high_date: str | None = None
+    prior60_close_high: float | None = None
+    prior60_close_high_date: str | None = None
+    if len(prior60_days) == 60 and all(day in history_by_date for day in prior60_days):
+        highs = [
+            (_number(history_by_date[day].get("high")), day)
+            for day in prior60_days
+        ]
+        closes = [
+            (_number(history_by_date[day].get("close")), day)
+            for day in prior60_days
+        ]
+        if all(value is not None for value, _ in highs):
+            prior60_high_adjusted = max(value for value, _ in highs)
+            prior60_high = _norm(prior60_high_adjusted)
+            prior60_high_date = max(
+                day for value, day in highs if value == prior60_high_adjusted
+            ).isoformat()
+        if all(value is not None for value, _ in closes):
+            prior60_close_high_adjusted = max(value for value, _ in closes)
+            prior60_close_high = _norm(prior60_close_high_adjusted)
+            prior60_close_high_date = max(
+                day for value, day in closes if value == prior60_close_high_adjusted
+            ).isoformat()
+    atr20: float | None = None
+    atr_days = sessions_in_window[-20:]
+    if (
+        len(sessions_in_window) >= 21
+        and len(atr_days) == 20
+        and all(day in history_by_date for day in atr_days)
+    ):
+        tr_values: list[float] = []
+        for day in atr_days:
+            index = window_index[day]
+            prev_close = _number(
+                history_by_date.get(sessions_in_window[index - 1], {}).get("close")
+            )
+            row = history_by_date[day]
+            high = _number(row.get("high"))
+            low = _number(row.get("low"))
+            close = _number(row.get("close"))
+            if None in (high, low, close, prev_close):
+                tr_values = []
+                break
+            tr_values.append(
+                max(
+                    high - low,
+                    abs(high - prev_close),
+                    abs(low - prev_close),
+                )
+            )
+        if tr_values:
+            atr20_adjusted = sum(tr_values) / len(tr_values)
+            atr20 = _norm(atr20_adjusted)
+    entry_reference_price = entry_normalized
+    current_close = _norm(analysis_close_adjusted)
+    target_price = (
+        entry_reference_price * 1.20
+        if entry_reference_price is not None
+        else None
+    )
+    remaining_return_to_target = (
+        target_price / current_close - 1.0
+        if target_price is not None and current_close is not None and current_close > 0
+        else None
+    )
+    remaining_atr_to_target = (
+        (target_price - current_close) / atr20
+        if target_price is not None and current_close is not None and atr20 not in (None, 0.0)
+        else None
+    )
+    price_levels = {
+        "entry_reference_price": entry_reference_price,
+        "current_close": current_close,
+        "prior60_high": prior60_high,
+        "prior60_high_date": prior60_high_date,
+        "prior60_close_high": prior60_close_high,
+        "prior60_close_high_date": prior60_close_high_date,
+        "atr20": atr20,
+        "target_price": target_price,
+        "remaining_return_to_target": remaining_return_to_target,
+        "remaining_atr_to_target": remaining_atr_to_target,
+    }
+
+    # ---- limitations：只记录新字段自身的缺口 ----
+    if normalization_factor is None:
+        limitations.append("review_context_missing_analysis_day_factor")
+    if action_row is None or entry_adjusted is None:
+        limitations.append("review_context_missing_action_day_open")
+    if analysis_row is None or analysis_close_adjusted is None:
+        limitations.append("review_context_missing_analysis_day_close")
+    if len(prior60_days) < 60 or prior60_high is None or prior60_close_high is None:
+        limitations.append("review_context_incomplete_prior60")
+    if atr20 is None:
+        limitations.append("review_context_incomplete_atr20")
+    if any(
+        session_amount_ratio is None
+        for session_amount_ratio in (
+            item["amount_ratio_including_today_20d"] for item in recent_sessions
+        )
+    ):
+        limitations.append("review_context_incomplete_amount_history")
+    if not benchmark_by_date:
+        limitations.append("review_context_missing_benchmark_history")
+    elif benchmark_return_since_entry is None:
+        limitations.append("review_context_missing_benchmark_entry_open")
+
+    return {
+        "post_entry_sessions": post_entry_sessions,
+        "recent_sessions": recent_sessions,
+        "benchmark_windows": benchmark_windows,
+        "benchmark_return_since_entry": benchmark_return_since_entry,
+        "stock_excess_since_entry": stock_excess_since_entry,
+        "price_levels": price_levels,
+        "limitations": limitations,
+    }
 
 
 def _first_event_reaction(path: list[dict[str, Any]]) -> dict[str, Any] | None:

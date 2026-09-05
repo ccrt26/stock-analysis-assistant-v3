@@ -165,7 +165,7 @@ def test_review_skill_avoids_new_template_and_uses_traceable_minimum_facts() -> 
         "previous_episode_review.current_assessment",
         "previous_episode_review.best_supported_explanation",
         "仅仅换了一种措辞，不叫观点改变",
-        "D20 是唯一允许串起完整过程的复盘",
+        "D20 是唯一形成完整最终结论的复盘",
         "第21—30日",
     ):
         assert phrase in review

@@ -346,7 +346,7 @@ research_result:
 
 ## Review 阶段
 
-`phase: review` 只复盘已经冻结的原判断，不重新推荐股票。市场、行业、公司和价格四个专业 Skill 的 review 阶段只提供各自事实与解释；`reviewing-stock-recommendations` 负责跨时间综合，先填写每日账本的 `DailyFormalReviewV1.current_review`，再逐字复制到现有 `ForwardEpisodeReviewV1.current_review`；日评正文是当天公开观点更新的唯一语义来源，不允许详评再撰写第二份。总控只检查记录、推荐日期、证据和结论是否一致，不重复维护第二套复盘方法。每条记录优先读取自己的 `previous_daily_formal_review`，历史没有日评时才使用 `previous_episode_review`，不得借用同一股票另一条记录的上次结论。同一股票可以合并显示，但当天共同事实只展示一次，也不另建评分、概率或第二套备选股票库。
+`phase: review` 只复盘已经冻结的原判断，不重新推荐股票。市场、行业、公司和价格四个专业 Skill 的 review 阶段只提供各自事实与解释；`reviewing-stock-recommendations` 负责跨时间综合，先填写每日账本的 `DailyFormalReviewV1.current_review`，再把同一判断独立展开为重点详评 `ForwardEpisodeReviewV1.current_review`：两者共享事实与结构化结论，正文各自成文，观点变化说明仍来自当天日评。总控只检查记录、推荐日期、证据和结论是否一致，不重复维护第二套复盘方法。每条记录优先读取自己的 `previous_daily_formal_review`，历史没有日评时才使用 `previous_episode_review`，不得借用同一股票另一条记录的上次结论。同一股票可以合并显示，但当天共同事实只展示一次，也不另建评分、概率或第二套备选股票库。
 
 同一只股票可以合并显示，但每次推荐或比较记录必须有自己的 `ForwardEpisodeReviewV1`。正式推荐第1至第19个交易日只说明当前判断，`final_twenty_day_review` 保持为空；第20个交易日首次形成前20天最终结论，漏跑时必须持续优先结案，之后可以更新当前走势评价，但必须原样保留这个最终结论。比较记录的 `final_twenty_day_review` 始终为空，只用于评价推荐股是否选得更合适。用户当前状态和简短前缀使用 `action_date`；前20天最终段只使用固定 `d20_*` 和冻结结论，第21至第30个交易日的当前走势不能改写它。只有存在完整成对价格路径时，正式推荐才能判断“方向大体正确但具体股票选错”。
 

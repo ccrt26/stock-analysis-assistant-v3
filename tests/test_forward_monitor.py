@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -2760,10 +2760,10 @@ def test_markdown_explains_missing_original_thesis_and_unmatched_alternative(
     )
     markdown = Path(summary.markdown_file).read_text(encoding="utf-8")
 
-    assert (
-        "当时留下的原始判断不完整，因此这次只能复盘价格表现，不能逐项审查当时的理由。"
-        in markdown
-    )
+    assert "只能复盘价格表现" not in markdown
+    assert "原推荐背景（原始完整判断未保存，以下为当时留存的摘要）：" in markdown
+    assert "当时看好它自身的价格表现连续强于市场和同类" in markdown
+    assert "当时最担心的是这股强势不能持续" in markdown
     assert "当时没有留下能够严格匹配的备选股票" not in markdown
     assert "和当时最接近的备选相比" not in markdown
 
@@ -5052,11 +5052,10 @@ def test_daily_d20_has_one_separate_final_review() -> None:
 def test_daily_view_change_comes_directly_from_ledger(change: str, label: str) -> None:
     snapshot, daily, alert = _daily_render_case()
     daily.update(view_change=change, view_change_reason="今天决定判断的事实说明。")
-    # Deliberately bypass record validation to prove the renderer itself uses the ledger.
-    alert["episode_reviews"][0]["current_review"] = "另一份不应公开的详评正文。"
+    # 正文与观点变化来源不同：正文读详评，观点变化读台账。
+    alert["episode_reviews"][0]["current_review"] = "另一份独立展开的详评正文。"
     markdown = _render_daily_case(snapshot, daily, alert)
-    assert daily["current_review"] in markdown
-    assert "另一份不应公开" not in markdown
+    assert alert["episode_reviews"][0]["current_review"] in markdown
     paragraph = markdown.split("**相比上次判断**\n\n", 1)[1].split("\n\n", 1)[0]
     assert label in paragraph
     assert paragraph.endswith(daily["view_change_reason"])
@@ -5083,30 +5082,76 @@ def test_compact_status_only_shows_available_price_facts(entry, current, highest
         assert "收盘较推荐参考价" not in status
 
 
-@pytest.mark.parametrize("drift", [True, False])
-def test_daily_and_detailed_current_review_must_match_before_save(tmp_path: Path, drift: bool) -> None:
+def test_daily_and_detail_text_may_differ(tmp_path: Path) -> None:
+    snapshot, daily, alert = _daily_render_case(10)
+    daily["current_review"] = "日评：整理尚未结束。"
+    detail = "详评：原来期待的相对强势仍需逐日检验。" * 40
+    assert len(detail) > 600
+    alert["episode_reviews"][0]["current_review"] = detail
+    snapshot_path = tmp_path / "snapshot.json"
+    snapshot_path.write_text(json.dumps(snapshot), encoding="utf-8")
+    _record_daily_review_for_snapshot(tmp_path, snapshot, daily)
+    pending = tmp_path / "pending.json"
+    pending.write_text(json.dumps(_report_payload(snapshot, alerts=[alert])),
+                       encoding="utf-8")
+    result = record_forward_monitor(
+        snapshot_file=snapshot_path, report_file=pending, project_root=tmp_path
+    )
+    assert result.status == "recorded"
+    markdown = Path(result.markdown_file).read_text(encoding="utf-8")
+    assert detail in markdown
+    assert daily["view_change_reason"] in markdown
+
+
+def test_daily_and_detail_text_may_be_identical(tmp_path: Path) -> None:
     snapshot, daily, alert = _daily_render_case()
     snapshot_path = tmp_path / "snapshot.json"
     snapshot_path.write_text(json.dumps(snapshot), encoding="utf-8")
     _record_daily_review_for_snapshot(tmp_path, snapshot, daily)
-    if drift:
-        alert["episode_reviews"][0]["current_review"] = "详评阶段重新写了不同观点。"
     pending = tmp_path / "pending.json"
     pending.write_text(json.dumps(_report_payload(snapshot, alerts=[alert])), encoding="utf-8")
-    ledger_path = tmp_path / "local_archive/forward_monitor/daily-formal-reviews-2026-08-31.json"
-    original = ledger_path.read_bytes()
-    if drift:
-        with pytest.raises(ValueError, match=daily["episode_id"]):
-            record_forward_monitor(snapshot_file=snapshot_path, report_file=pending, project_root=tmp_path)
-        assert pending.exists()
-        assert not (ledger_path.parent / "monitor-report-2026-08-31.json").exists()
+    result = record_forward_monitor(snapshot_file=snapshot_path, report_file=pending, project_root=tmp_path)
+    assert result.status == "recorded"
+    markdown = Path(result.markdown_file).read_text(encoding="utf-8")
+    assert markdown.count(daily["current_review"]) == 1
+    assert markdown.count(daily["view_change_reason"]) == 1
+
+
+@pytest.mark.parametrize("conflict", ["assessment", "explanation", "outlook"])
+def test_detail_conflicting_structured_fields_still_rejected(
+    tmp_path: Path, conflict: str
+) -> None:
+    snapshot, daily, alert = _daily_render_case()
+    alert["episode_reviews"][0]["current_review"] = "另一份合法的独立详评正文。"
+    review = alert["episode_reviews"][0]
+    if conflict == "assessment":
+        review["current_assessment"] = "contradicted"
+    elif conflict == "explanation":
+        review["best_supported_explanation"] = "market_common_move"
     else:
-        result = record_forward_monitor(snapshot_file=snapshot_path, report_file=pending, project_root=tmp_path)
-        assert result.status == "recorded"
-        markdown = Path(result.markdown_file).read_text(encoding="utf-8")
-        assert markdown.count(daily["current_review"]) == 1
-        assert markdown.count(daily["view_change_reason"]) == 1
-    assert ledger_path.read_bytes() == original
+        alert["outlook_1_3d"] = "invalidated"
+    snapshot_path = tmp_path / "snapshot.json"
+    snapshot_path.write_text(json.dumps(snapshot), encoding="utf-8")
+    _record_daily_review_for_snapshot(tmp_path, snapshot, daily)
+    pending = tmp_path / "pending.json"
+    pending.write_text(json.dumps(_report_payload(snapshot, alerts=[alert])), encoding="utf-8")
+    with pytest.raises(ValueError, match=daily["episode_id"]):
+        record_forward_monitor(snapshot_file=snapshot_path, report_file=pending, project_root=tmp_path)
+
+
+def test_detail_conflicting_d20_final_review_still_rejected(tmp_path: Path) -> None:
+    snapshot, daily, alert = _daily_render_case(20)
+    alert["episode_reviews"][0]["current_review"] = "D20详评正文，与日评允许不同。"
+    final = json.loads(json.dumps(daily["final_twenty_day_review"]))
+    final["overall_review"] += "详评阶段改写的结论不应被接受。"
+    alert["episode_reviews"][0]["final_twenty_day_review"] = final
+    snapshot_path = tmp_path / "snapshot.json"
+    snapshot_path.write_text(json.dumps(snapshot), encoding="utf-8")
+    _record_daily_review_for_snapshot(tmp_path, snapshot, daily)
+    pending = tmp_path / "pending.json"
+    pending.write_text(json.dumps(_report_payload(snapshot, alerts=[alert])), encoding="utf-8")
+    with pytest.raises(ValueError, match=daily["episode_id"]):
+        record_forward_monitor(snapshot_file=snapshot_path, report_file=pending, project_root=tmp_path)
 
 
 def test_combined_report_separates_weak_daily_update_from_new_recommendation(tmp_path: Path) -> None:
@@ -5210,7 +5255,10 @@ def test_multiple_daily_episodes_keep_their_own_dates_updates_and_view_changes()
     }
     alert["episode_ids"].append(newer["episode_id"])
     alert["day_numbers"] = [2, 3]
-    alert["episode_reviews"].append(_episode_review(newer["episode_id"]))
+    alert["episode_reviews"].append({
+        **_episode_review(newer["episode_id"]),
+        "current_review": "较晚推荐的详评：仍在整理，成交未恢复。",
+    })
     ledger = DailyFormalReviewLedgerV1.model_validate({
         "ledger_version": DAILY_FORMAL_REVIEWS_VERSION,
         "analysis_date": snapshot["analysis_date"], "as_of": snapshot["as_of"],
@@ -5223,6 +5271,242 @@ def test_multiple_daily_episodes_keep_their_own_dates_updates_and_view_changes()
     for heading in ("今天发生了什么", "相比上次判断", "接下来1—3个交易日"):
         assert markdown.count(f"**{heading}**") == 1
     assert "2026年8月3日推荐（当前D3/20）：" + daily["current_review"] in markdown
-    assert "2026年8月4日推荐（当前D2/20）：" + second_daily["current_review"] in markdown
+    assert "2026年8月4日推荐（当前D2/20）：较晚推荐的详评：仍在整理，成交未恢复。" in markdown
     assert "2026年8月4日推荐（当前D2/20）：判断减弱：最新收盘未能继续提高。" in markdown
     assert "原推荐背景" not in markdown
+
+
+
+def _seed_full_context_project(
+    tmp_path: Path,
+    *,
+    index_rows: dict[date, list[dict]] | None = None,
+) -> list[date]:
+    """30个持仓内会话 + 45个推荐前会话，保证61日复盘上下文窗口完整。"""
+    trace = _single_selected_trace(
+        formation_date="2026-07-30",
+        action_date="2026-07-31",
+    )
+    archive = tmp_path / "local_archive/forward_selection"
+    archive.mkdir(parents=True)
+    _write_trace(archive / "research-trace-2026-07-31.json", trace)
+    sessions = _seed_monitor_project(tmp_path, trace=trace, session_count=30)
+    action = date.fromisoformat(trace["action_date"])
+    pre_days = [
+        stamp.date()
+        for stamp in pd.bdate_range(end=action - timedelta(days=1), periods=45)
+    ]
+    calendar_path = (
+        tmp_path
+        / "local_warehouse/facts/trade_calendar/cal_year=2026/data.parquet"
+    )
+    calendar = pd.read_parquet(calendar_path)
+    extra_calendar = pd.DataFrame(
+        [
+            {
+                "exchange": "SSE",
+                "cal_date": day,
+                "is_open": True,
+                "available_at": datetime(2026, 1, 1, tzinfo=SHANGHAI),
+            }
+            for day in pre_days
+        ]
+    )
+    pd.concat([calendar, extra_calendar], ignore_index=True).to_parquet(
+        calendar_path, index=False
+    )
+    codes = ["001301.SZ", "603969.SH"]
+    for day in pre_days:
+        for name in ("equity_daily", "adj_factor"):
+            row = {
+                "trade_date": day,
+                "ts_code": None,
+                "available_at": datetime.combine(
+                    day, datetime.min.time(), SHANGHAI
+                ).replace(hour=16),
+            }
+            if name == "equity_daily":
+                row.update(open=10.0, close=10.0, high=10.5, low=9.5, amount=100.0)
+            else:
+                row.update(adj_factor=1.0)
+            frames = []
+            for code in codes:
+                frames.append({**row, "ts_code": code})
+            _write_parquet(
+                tmp_path,
+                f"local_warehouse/facts/{name}/trade_date={day}/data.parquet",
+                frames,
+            )
+    for day, rows in (index_rows or {}).items():
+        _write_parquet(
+            tmp_path,
+            f"local_warehouse/facts/index_daily/trade_date={day}/data.parquet",
+            rows,
+        )
+    return sessions
+
+
+def _index_rows(day: date, code: str, *, open_: float, close: float) -> dict:
+    return {
+        "trade_date": day,
+        "index_code": code,
+        "open": open_,
+        "close": close,
+        "available_at": datetime.combine(
+            day, datetime.min.time(), SHANGHAI
+        ).replace(hour=16),
+    }
+
+
+def test_prepare_review_context_excludes_sessions_after_analysis_date(
+    tmp_path: Path,
+) -> None:
+    sessions = _seed_full_context_project(tmp_path)
+    analysis_date = sessions[28]
+    as_of = datetime.combine(
+        sessions[29], datetime.min.time(), SHANGHAI
+    ).replace(hour=9)
+    summary = prepare_forward_monitor(
+        analysis_date=analysis_date,
+        as_of=as_of,
+        project_root=tmp_path,
+    )
+    snapshot = json.loads(Path(summary.snapshot_file).read_text(encoding="utf-8"))
+    assert snapshot["daily_review_episode_ids"]
+    for episode in snapshot["episodes"]:
+        if "review_context" not in episode:
+            continue
+        context = episode["review_context"]
+        dates = [item["date"] for item in context["post_entry_sessions"]]
+        dates += [item["date"] for item in context["recent_sessions"]]
+        assert sessions[29].isoformat() not in dates
+        assert context["recent_sessions"][-1]["date"] == analysis_date.isoformat()
+        assert context["basis"]["analysis_date"] == analysis_date.isoformat()
+
+
+def test_prepare_review_context_ignores_available_at_overflow_rows(
+    tmp_path: Path,
+) -> None:
+    sessions = _seed_full_context_project(tmp_path)
+    analysis_date = sessions[29]
+    as_of = datetime.combine(
+        analysis_date, datetime.min.time(), SHANGHAI
+    ).replace(hour=18)
+    poison_time = as_of.replace(hour=23)
+    equity_dir = (
+        tmp_path
+        / "local_warehouse/facts/equity_daily"
+        / f"trade_date={analysis_date}/data.parquet"
+    )
+    poisoned = pd.read_parquet(equity_dir)
+    late = poisoned.iloc[[0]].copy()
+    late["close"] = 99.0
+    late["available_at"] = poison_time
+    pd.concat([poisoned, late], ignore_index=True).to_parquet(equity_dir, index=False)
+    factor_dir = (
+        tmp_path
+        / "local_warehouse/facts/adj_factor"
+        / f"trade_date={analysis_date}/data.parquet"
+    )
+    poisoned_factor = pd.read_parquet(factor_dir)
+    late_factor = poisoned_factor.iloc[[0]].copy()
+    late_factor["adj_factor"] = 9.9
+    late_factor["available_at"] = poison_time
+    pd.concat([poisoned_factor, late_factor], ignore_index=True).to_parquet(
+        factor_dir, index=False
+    )
+    summary = prepare_forward_monitor(
+        analysis_date=analysis_date,
+        as_of=as_of,
+        project_root=tmp_path,
+    )
+    snapshot = json.loads(Path(summary.snapshot_file).read_text(encoding="utf-8"))
+    episode = next(
+        item
+        for item in snapshot["episodes"]
+        if item["episode_id"] in snapshot["daily_review_episode_ids"]
+    )
+    context = episode["review_context"]
+    levels = context["price_levels"]
+    # 越界行不参与：分析日收盘仍为 10+0.1*30=13.0，因子仍为 1.0。
+    assert levels["current_close"] == pytest.approx(13.0)
+    assert episode["current_close_return_since_entry"] == pytest.approx(0.30)
+    assert episode["target_atr_distance_20pct"] == pytest.approx(4.0)
+    assert context["recent_sessions"][-1]["close"] == pytest.approx(13.0)
+
+
+def test_prepare_review_context_uses_only_hs300_in_mixed_index_partitions(
+    tmp_path: Path,
+) -> None:
+    action_day = date(2026, 7, 31)
+    sessions = _seed_full_context_project(
+        tmp_path,
+        index_rows={
+            action_day: [
+                _index_rows(action_day, "000300.SH", open_=4000.0, close=4001.0),
+                _index_rows(action_day, "000001.SH", open_=3000.0, close=3001.0),
+            ],
+        },
+    )
+    analysis_date = sessions[29]
+    last_day_rows = [
+        _index_rows(analysis_date, "000300.SH", open_=4080.0, close=4080.0),
+        _index_rows(analysis_date, "000001.SH", open_=3300.0, close=3300.0),
+    ]
+    _write_parquet(
+        tmp_path,
+        f"local_warehouse/facts/index_daily/trade_date={analysis_date}/data.parquet",
+        last_day_rows,
+    )
+    summary = _prepare(tmp_path, analysis_date)
+    episode = next(
+        item
+        for item in summary["episodes"]
+        if item["episode_id"] in summary["daily_review_episode_ids"]
+    )
+    context = episode["review_context"]
+    # 沪深300：4000→4080 即 +2%；上证行（+10%）不得混入。
+    assert context["benchmark_return_since_entry"] == pytest.approx(0.02)
+    assert context["stock_excess_since_entry"] == pytest.approx(0.30 - 0.02)
+    assert context["basis"]["benchmark_code"] == "000300.SH"
+    assert context["basis"]["benchmark_name"] == "沪深300"
+    windows = {item["days"]: item for item in context["benchmark_windows"]}
+    assert windows[20]["return"] is None  # 起点收盘缺失时窗口为空
+    assert windows[20]["end_date"] == analysis_date.isoformat()
+
+
+def test_prepare_review_context_keeps_legacy_metrics_and_pair_shapes(
+    tmp_path: Path,
+) -> None:
+    sessions = _seed_full_context_project(tmp_path)
+    analysis_date = sessions[29]
+    summary = _prepare(tmp_path, analysis_date)
+    episode = next(
+        item
+        for item in summary["episodes"]
+        if item["episode_id"] in summary["daily_review_episode_ids"]
+    )
+    context = episode["review_context"]
+    # 旧指标不变：入口收益、D20、目标ATR距离与配对形状全部保持既有含义。
+    assert episode["current_close_return_since_entry"] == pytest.approx(0.30)
+    assert episode["d20_close_return_since_entry"] == pytest.approx(0.20)
+    assert episode["target_atr_distance_20pct"] == pytest.approx(4.0)
+    assert episode["pair_context"]["pair_status"] == "unavailable"
+    # 新字段口径：basis 与既有相对行业字段边界清晰。
+    assert context["basis"]["price_basis"] == "raw_times_factor_div_analysis_factor"
+    assert context["basis"]["primary_industry_code"] == "801000.SI"
+    assert context["basis"]["source_as_of"] == "2026-07-31T09:10:00+08:00"
+    post = context["post_entry_sessions"]
+    assert post[0]["date"] == sessions[0].isoformat()
+    assert post[-1]["close_return"] == pytest.approx(0.30)
+    assert len(post) == 30  # 行动日至分析日最多30个市场会话
+    levels = context["price_levels"]
+    assert levels["prior60_high"] is not None  # 61日窗口完整时前高可算
+    assert levels["atr20"] is not None
+    assert levels["target_price"] == pytest.approx(12.0)  # 入口10 × 1.2
+    assert "review_context_missing_action_day_open" not in context["limitations"]
+    # 快照中只有当日需日评的episode获得review_context。
+    with_context = {
+        item["episode_id"] for item in summary["episodes"] if "review_context" in item
+    }
+    assert with_context == set(summary["daily_review_episode_ids"])

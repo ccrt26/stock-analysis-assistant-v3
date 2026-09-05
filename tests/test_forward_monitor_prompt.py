@@ -418,7 +418,7 @@ def test_review_skill_makes_future_direction_a_reasoned_judgment() -> None:
         assert phrase in skill
 
 
-def test_prompts_make_daily_ledger_the_only_public_body_source() -> None:
+def test_prompts_keep_daily_body_and_expanded_detail_separate() -> None:
     paths = [
         "ops/forward-monitor-prompt.md", "ops/forward-selection-prompt.md",
         ".agents/skills/reviewing-stock-recommendations/SKILL.md",
@@ -426,11 +426,13 @@ def test_prompts_make_daily_ledger_the_only_public_body_source() -> None:
     ]
     for path in paths:
         text = Path(path).read_text(encoding="utf-8")
-        for phrase in ("DailyFormalReviewV1.current_review", "逐字复制", "view_change_reason",
+        for phrase in ("DailyFormalReviewV1.current_review", "ForwardEpisodeReviewV1.current_review",
+                       "view_change_reason",
                        "今天发生了什么", "相比上次判断", "接下来1—3个交易日",
                        "D1", "D20", "历史锚点"):
             assert phrase in text, (path, phrase)
-        for old in ("推荐日期和当时判断", "到今天走到哪里", "我的分析", "接下来更可能怎样"):
+        for old in ("推荐日期和当时判断", "到今天走到哪里", "我的分析", "接下来更可能怎样",
+                    "必须逐字复制", "再逐字复制到"):
             assert old not in text, (path, old)
 
 

@@ -350,7 +350,7 @@ local_archive/forward_selection/pending-trace-<formation_date>.json
 | 股票 | 推荐后第几日 | 当前涨跌 | 当前走势 | 是否仍在预期内 | 未来1—3日 | 主动跟踪 |
 ```
 
-每个 active 正式推荐一行；当前走势只写向上、横盘、向下或无法评价，主动跟踪只写继续或今日停止。
+每个 active 正式推荐一行；当前走势只写向上、横盘、向下或无法评价，主动跟踪只写继续或今日停止。简表内容读取当日台账 `DailyFormalReviewV1.current_review` 的结构化结论。
 
 ### 今天重点复盘的8只股票
 
@@ -358,7 +358,7 @@ active 正式推荐不足8只时按实际数量改标题并全部详细复盘；
 
 **今天发生了什么**
 
-直接采用 `DailyFormalReviewV1.current_review`，说明今天发生了什么及当前看法。详评的 `current_review` 必须逐字复制，不能另写第二份正文。
+展示独立展开的详评正文 `ForwardEpisodeReviewV1.current_review`：说明今天发生了什么、当前看法及重点日的阶段展开。详评与日评共享事实与结构化结论，但不逐字复制；观点变化说明仍读取当天日评的 `view_change` 与 `view_change_reason`。
 
 **相比上次判断**
 

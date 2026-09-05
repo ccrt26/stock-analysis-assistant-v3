@@ -429,7 +429,8 @@ def scan_history(
     """逐日读取已归档 snapshot + report + 每日复盘台账，汇总每条记录的复盘历史。
 
     报告只覆盖当天重点（<=8 条详评）；每日台账覆盖全部正式推荐的简评。
-    同一条记录同一天两者都有时，正文、观点变化和方向以台账为准；正反条件保留报告原值。
+    同一条记录同一天两者都有时：结构化观点/方向/标题与 summary_copy 以台账为准，
+    长正文 copy 与正反条件保留报告详评；只有台账时 copy 回退为简评正文。
     """
     merged: dict[tuple[str, str], dict[str, Any]] = {}
     for day in archived_dates(monitor_dir):
@@ -472,6 +473,7 @@ def scan_history(
                     "checkpoint": episode.get("checkpoint"),
                     "headline": _first_sentence(str(review.get("current_review") or "")),
                     "copy": str(review.get("current_review") or ""),
+                    "summary_copy": str(review.get("current_review") or ""),
                     "facts": _review_facts(episode),
                     "base": OUTLOOK_TEXT.get(str(alert.get("outlook_1_3d")), ""),
                     "outlookReason": str(alert.get("outlook_reason_plain_language") or ""),
@@ -514,6 +516,7 @@ def scan_history(
                 "checkpoint": review.get("checkpoint"),
                 "headline": _first_sentence(str(review.get("current_review") or "")),
                 "copy": str(review.get("current_review") or ""),
+                "summary_copy": str(review.get("current_review") or ""),
                 "facts": _review_facts(episode),
                 "base": OUTLOOK_TEXT.get(str(review.get("outlook_1_3d")), ""),
                 "outlookReason": str(review.get("outlook_reason_plain_language") or ""),
@@ -532,9 +535,14 @@ def scan_history(
             if existing is None:
                 merged[key] = item
             else:
-                # DailyFormalReviewV1 is the single source of today's view.
-                # Conditions only exist in the detailed report; do not recreate them.
-                merged[key] = {**item, "confirm": existing["confirm"], "risk": existing["risk"]}
+                # DailyFormalReviewV1 is the single source of today's view;
+                # the detailed report keeps its own expanded body and conditions.
+                merged[key] = {
+                    **item,
+                    "copy": existing["copy"],
+                    "confirm": existing["confirm"],
+                    "risk": existing["risk"],
+                }
     history: dict[str, list[dict[str, Any]]] = {}
     for (episode_id, _day), item in merged.items():
         history.setdefault(episode_id, []).append(item)
@@ -640,14 +648,12 @@ def _business_sentence(introduction: str, main_business: str, limit: int = 130) 
 
 
 def _compose_company_line(
-    biz: str | None, chain: str | None, themes: list[str] | None, theme_stamp: str
+    biz: str | None, themes: list[str] | None, theme_stamp: str
 ) -> str | None:
-    """个股介绍段落：做什么 + 申万行业链 + 主题指数（概念），全部来自本地事实。"""
+    """个股介绍段落：做什么 + 主题指数（概念），全部来自本地事实。"""
     parts: list[str] = []
     if biz:
         parts.append(biz)
-    if chain:
-        parts.append(f"按申万行业分类属于{chain}。")
     if themes:
         parts.append(f"主题指数成分：{'、'.join(themes)}（最新记录{theme_stamp}）。")
     return "".join(parts) if parts else None
@@ -672,47 +678,6 @@ def company_profile_map(root: Path, as_of: datetime, codes: list[str]) -> dict[s
         if biz:
             profiles[ts_code] = biz
     return profiles
-
-
-def industry_chain_map(root: Path, as_of: datetime, codes: list[str]) -> dict[str, str]:
-    """申万行业链（一级—二级—三级，industry_member，时点有效），如 汽车—汽车零部件。"""
-    if not codes:
-        return {}
-    path = (
-        root / "local_warehouse" / "facts" / "industry_member"
-        / "classification_version=SW2021" / "data.parquet"
-    )
-    if not path.is_file():
-        return {}
-    frame = _cutoff_frame(pd.read_parquet(path), _as_utc_cutoff(as_of))
-    frame = frame.loc[frame["ts_code"].astype(str).isin(codes)]
-    if frame.empty:
-        return {}
-    frame = frame.copy()
-    frame["vf"] = pd.to_datetime(frame["valid_from"], errors="coerce")
-    frame["vt"] = pd.to_datetime(frame["valid_to"], errors="coerce")
-    as_of_day = _as_utc_cutoff(as_of).tz_localize(None).date()
-    chains: dict[str, dict[str, str]] = {}
-    for row in frame.itertuples():
-        current = str(getattr(row, "is_current")) in {"1", "1.0", "True", "true"}
-        covers = (pd.isna(row.vf) or row.vf.date() <= as_of_day) and (
-            pd.isna(row.vt) or row.vt.date() >= as_of_day
-        )
-        if not (current or covers):
-            continue
-        level = str(row.level)
-        name = str(row.industry_name)
-        if not name or name == "nan":
-            continue
-        by_level = chains.setdefault(str(row.ts_code), {})
-        if level not in by_level:
-            by_level[level] = name
-    result: dict[str, str] = {}
-    for ts_code, by_level in chains.items():
-        ordered = [by_level[key] for key in ("L1", "L2", "L3") if key in by_level]
-        if ordered:
-            result[ts_code] = "—".join(ordered)
-    return result
 
 
 def theme_names_map(
@@ -830,69 +795,97 @@ def _events_for(
     episode: dict[str, Any],
     review_items: list[dict[str, Any]],
 ) -> list[list[str]]:
-    """公司与观察事件时间线：只收录研究结论（推荐 / 检查日 / 观点调整 / 里程碑）。"""
+    """公司与观察事件时间线：一天一条、公历日期、标题描述当天发生的事。
+
+    D1 检查日与入选日必然同天，不重复收录（内容在正文交易日尺可看）；
+    同日多个事件按 观点调整 > 里程碑 > 检查日 优先级保留一条。
+    描述不截断，收起 / 展开由页面 CSS 处理。
+    """
     events: list[list[str]] = [
         [
             action_iso[5:],
             "rec",
             "正式推荐",
-            _short(
-                str(
-                    episode.get("original_selection_reason")
-                    or episode.get("original_primary_reason")
-                    or ""
-                ),
-                48,
+            str(
+                episode.get("original_selection_reason")
+                or episode.get("original_primary_reason")
+                or ""
             ),
         ]
     ]
+    by_date: dict[str, tuple[int, list[str]]] = {}
+    order: list[str] = []
     for item in review_items:
+        date_key = item["date"][5:]
+        summary = item.get("summary_copy") or item.get("copy", "")
         if item.get("viewChanged"):
-            events.append(
+            candidate = (
+                2,
                 [
-                    item["date"][5:],
+                    date_key,
                     "view",
                     "观点调整",
-                    item.get("fromTo")
-                    or item.get("viewReason")
-                    or "观点发生变化",
-                ]
+                    item.get("fromTo") or item.get("viewReason") or summary,
+                ],
             )
-        elif item.get("checkpoint") in {"D1", "D3", "D5", "D10", "D20"}:
-            events.append(
-                [
-                    item["date"][5:],
-                    "check",
-                    f"{item['checkpoint']} 检查日",
-                    _short(item.get("headline", ""), 48),
-                ]
-            )
+        elif item.get("checkpoint") in {"D3", "D5", "D10", "D20"}:
+            candidate = (0, [date_key, "check", "", summary])
+        else:
+            continue
+        if date_key in by_date:
+            if candidate[0] > by_date[date_key][0]:
+                by_date[date_key] = candidate
+        else:
+            by_date[date_key] = candidate
+            order.append(date_key)
     first_close = episode.get("current_first_close_hit_20pct_date")
     if first_close:
-        events.append(
-            [str(first_close)[5:], "milestone", "收盘达到20%", "推荐后收盘首次达到约20%涨幅"]
+        candidate = (
+            1,
+            [str(first_close)[5:], "milestone", "收盘达到20%", "推荐后收盘首次达到约20%涨幅"],
         )
+        if candidate[1][0] in by_date:
+            if candidate[0] > by_date[candidate[1][0]][0]:
+                by_date[candidate[1][0]] = candidate
+        else:
+            by_date[candidate[1][0]] = candidate
+            order.append(candidate[1][0])
     first_high = episode.get("current_first_high_hit_20pct_date")
     if first_high and not first_close:
-        events.append(
+        candidate = (
+            1,
             [
                 str(first_high)[5:],
                 "milestone",
                 "盘中触及20%",
                 "盘中最高价涨幅一度达到约20%，收盘尚未达到",
-            ]
+            ],
         )
+        if candidate[1][0] in by_date:
+            if candidate[0] > by_date[candidate[1][0]][0]:
+                by_date[candidate[1][0]] = candidate
+        else:
+            by_date[candidate[1][0]] = candidate
+            order.append(candidate[1][0])
     frozen = episode.get("frozen_twenty_day_review")
     if frozen:
-        events.append(
+        candidate = (
+            1,
             [
                 str(episode.get("analysis_date"))[5:],
                 "milestone",
                 "20日观察结束",
-                _short(str(frozen.get("overall_review") or ""), 48),
-            ]
+                str(frozen.get("overall_review") or ""),
+            ],
         )
-    events.sort(key=lambda item: item[0])
+        if candidate[1][0] in by_date:
+            if candidate[0] > by_date[candidate[1][0]][0]:
+                by_date[candidate[1][0]] = candidate
+        else:
+            by_date[candidate[1][0]] = candidate
+            order.append(candidate[1][0])
+    for date_key in sorted(order):
+        events.append(by_date[date_key][1])
     return events
 
 
@@ -1066,7 +1059,6 @@ def build_payload(
     group_codes = sorted(set(group_codes) | {entry["group_code"] for entry in d0_entries if entry["group_code"]})
     group_members = group_member_map(root, as_of_dt, group_codes)
     profiles = company_profile_map(root, as_of_dt, codes)
-    industry_chains = industry_chain_map(root, as_of_dt, codes)
     theme_map = theme_names_map(root, as_of_dt, codes)
     theme_stamp = theme_snapshot_stamp(root, as_of_dt)
     facts = collect_market_facts(
@@ -1190,7 +1182,6 @@ def build_payload(
                 "suspended": suspended,
                 "company": _compose_company_line(
                     profiles.get(ts_code),
-                    industry_chains.get(ts_code),
                     theme_map.get(ts_code),
                     theme_stamp,
                 )
@@ -1421,15 +1412,18 @@ select.quietbtn option{background:var(--panel);color:var(--ink);font-size:13px}
 .titleline .code{font-size:13px;color:var(--ink3);letter-spacing:.04em}
 .titleline .state{font-size:11.5px;color:var(--ink2);border:1px solid var(--hair);border-radius:999px;padding:3px 11px;letter-spacing:.05em}
 .companyline{margin:10px 0 0;font-size:13px;color:var(--ink2);line-height:1.7;max-width:62em}
-/* 历史推荐背景 */
+/* 推荐理由（仅 D1 / 待首日观察显示） */
 .reason-block{margin:16px 0 0;padding:13px 18px 12px;border:1px solid var(--hair);border-left:3px solid var(--accent);border-radius:0 10px 10px 0;background:var(--panel2)}
 .reason-block p{margin:0;font-size:13px;line-height:1.9;color:var(--ink2);max-width:62em}
 .reason-block .risk{margin-top:8px;padding-top:8px;border-top:1px dashed var(--hair2);font-size:12px;color:var(--ink3)}
 .reason-block .risk b{color:var(--down);font-weight:650;margin-right:8px;font-size:11px;letter-spacing:.1em}
 /* 数字行 */
 .ticker-strip{display:flex;border-bottom:1px solid var(--hair);padding:18px 0;overflow-x:auto;scrollbar-width:none}
+.quote-strip{padding:16px 0 10px;border-bottom:0}
+.quote-strip + .ticker-strip{padding-top:6px}
+.quote-strip .tv{font-variant-numeric:tabular-nums}
 .ticker-strip::-webkit-scrollbar{display:none}
-.tick{flex:1 0 auto;min-width:118px;padding:2px 22px;border-left:1px solid var(--hair2)}
+.tick{flex:1 1 0;min-width:118px;padding:2px 22px;border-left:1px solid var(--hair2)}
 .tick:first-child{border-left:0;padding-left:0}
 .tick .tl{font-size:10.5px;letter-spacing:.16em;color:var(--ink3);margin-bottom:8px}
 .tick .tv{font-size:23px;font-weight:750;font-variant-numeric:tabular-nums;letter-spacing:-.01em}
@@ -1472,7 +1466,7 @@ body.dark .day-btn .vcdot{box-shadow:0 0 0 3px rgba(224,166,62,.2)}
 .textlink{font-size:12px;color:var(--blue);border-bottom:1px solid rgba(44,95,224,.35);padding-bottom:1px}
 .textlink:hover{border-bottom-color:var(--blue)}
 .r-headline{font-family:var(--serif);font-size:clamp(22px,2vw,29px);font-weight:800;line-height:1.45;margin:0 0 16px;letter-spacing:.005em}
-.r-copy{font-size:14.5px;line-height:2.05;color:var(--soft2,var(--ink2));margin:0;max-width:40em}
+.r-copy{font-size:14.5px;line-height:2.05;color:var(--soft2,var(--ink2));margin:0;max-width:40em;white-space:pre-line}
 body.dark .r-copy{color:var(--ink2)}
 /* 复盘内容（按所选交易日填充） */
 .rev-grid{margin-top:18px;border-top:1px solid var(--hair2);padding-top:12px}
@@ -1496,7 +1490,11 @@ body.dark .r-copy{color:var(--ink2)}
 .e-dot.rec{background:var(--blue)}.e-dot.view{background:var(--amber)}.e-dot.milestone{background:var(--ink)}
 .e-dot.check{background:var(--blue);opacity:.55}
 .e-title{font-size:12px;font-weight:650;display:block;margin-bottom:3px}
-.e-desc{font-size:11px;color:var(--ink3);line-height:1.65;display:block}
+.e-check{font-style:normal;font-size:9.5px;font-weight:500;color:var(--ink3);margin-left:6px;letter-spacing:.05em}
+.e-desc{font-size:11px;color:var(--ink3);line-height:1.65;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.event-row.open .e-desc{display:block;-webkit-line-clamp:unset}
+.event-row{cursor:pointer}
+.event-row.open .e-dot{background:var(--accent)}
 /* 页脚 */
 .colophon{margin-top:64px;padding-top:16px;border-top:1px solid var(--hair);font-size:11px;color:var(--ink3);line-height:1.9;display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap}
 /* 提示 */
@@ -1593,6 +1591,7 @@ body.dark .r-copy{color:var(--ink2)}
           <p class="companyline" id="dCompany"></p>
         </div>
       </div>
+      <div class="ticker-strip quote-strip" id="quoteStrip"></div>
       <div class="ticker-strip" id="tickerStrip"></div>
 
       <div class="chart-sec">
@@ -1656,6 +1655,27 @@ function progressText(s){
  if(s.d0)return"待首日观察";
  if(s.days > 20)return`延长观察第${s.days - 20}天`;
  return`D${s.days}/20`;
+}
+function latestQuote(s){
+ for(let i = s.candles.length - 1;i >= 0;i--){const d = s.candles[i];
+  if(d && d[3] != null)return{i,d,prev:i > 0 ? s.candles[i - 1] : null}}
+ return null;
+}
+function renderQuoteStrip(s){
+ const q = latestQuote(s),el = $("quoteStrip");
+ if(!q){el.innerHTML = "";return}
+ const {i,d,prev} = q;
+ const dayChg = prev && prev[3] != null ? (d[3] / prev[3] - 1) * 100 : null;
+ const haltNote = s.suspended ? `${DATES[i]}停牌前` : "";
+ const cells = [
+  ["开盘",d[0] == null ? "—" : d[0].toFixed(2),"dim",haltNote],
+  ["收盘",d[3].toFixed(2),dayChg == null ? "dim" : cls(dayChg),
+   s.suspended ? haltNote : (dayChg == null ? "无前收对照" : `当日 ${pct(dayChg)}`)],
+  ["最高",d[1] == null ? "—" : d[1].toFixed(2),"dim",""],
+  ["最低",d[2] == null ? "—" : d[2].toFixed(2),"dim",""],
+  ["成交额",d[4] == null ? "—" : d[4] + "亿","dim",""],
+ ];
+ el.innerHTML = cells.map(c => `<div class="tick"><div class="tl">${c[0]}</div><div class="tv ${c[2]}">${c[1]}</div><div class="ts">${c[3]}</div></div>`).join("");
 }
 const cls = v => v == null ? "dim" : (v >= 0 ? "up" : "down");
 function dayClose(s,i){return s.candles[i] ? s.candles[i][3] : null}
@@ -2020,10 +2040,11 @@ function renderDetail(){
  $("dCompany").textContent = s.company || "";
  const rb = $("rReason");
  if(s.reasonFull){
-  rb.style.display = "";
-  rb.innerHTML = `<span class="cap">历史推荐背景 · ${s.recDate} 开盘前</span><p>${esc(s.reasonFull)}</p>` +
+  rb.dataset.has = "1";
+  rb.innerHTML = `<span class="cap">推荐理由 · ${s.recDate} 入选</span><p>${esc(s.reasonFull)}</p>` +
    (s.reasonRisk ? `<p class="risk"><b>当时主要担心</b>${esc(s.reasonRisk)}</p>` : "");
- }else rb.style.display = "none";
+ }else rb.dataset.has = "";
+ rb.style.display = "none";
  document.querySelectorAll("#chartSeg button").forEach(b => b.classList.toggle("on",(b.dataset.m === "rel") === relMode));
  updateLegend(s);
  const cells = [
@@ -2033,7 +2054,7 @@ function renderDetail(){
   ["期间最深",pct(m.mae),m.mae != null && m.mae < 0 ? "down" : "dim","观察回撤"],
   ["距 20% 目标",m.toT == null ? "—" : m.toT.toFixed(2) + "pp","dim",s.suspended ? "停牌，无推荐参考价" : "达 20% 即到目标"]];
  $("tickerStrip").innerHTML = cells.map(c => `<div class="tick"><div class="tl">${c[0]}</div><div class="tv ${c[2]}">${c[1]}</div><div class="ts">${c[3]}</div></div>`).join("");
- renderEvents();renderTimeline();renderReview();drawChart();
+ renderQuoteStrip(s);renderEvents();renderTimeline();renderReview();drawChart();
 }
 function updateLegend(s){
  $("refLegend").style.display = s.ref != null && !relMode ? "" : "none";
@@ -2090,12 +2111,42 @@ function renderReview(){
    ? `<span class="cap">每日复盘 · ${dayLabel(r.day)} · ${DATES[candleIdxOfDay(s,r.day)] || ""}</span>` + rows.map(x => `<div class="rev-row"><span class="rk">${x[0]}</span><span class="rv">${x[1]}</span></div>`).join("")
    : "";
  }
+ const rb = $("rReason");
+ const stageDay = r && ["D5","D10","D20"].includes(r.checkpoint);
+ rb.style.display = rb.dataset.has && (s.d0 || selDay === 1 || stageDay) ? "" : "none";
  const bl = $("backLatest");
  if(bl)bl.onclick = () => {selDay = latest.day;selReview = latest;renderTimeline();renderReview();drawChart()};
 }
+function eventTitle(s,e){
+ const i = DATES.indexOf(e[0]);
+ const r = cur.reviews.find(x => x.date.slice(5) === e[0]);
+ const cp = r && r.checkpoint ? `${r.checkpoint}检查` : null;
+ if(e[1] === "rec")return{t:"正式推荐",d:e[3],cp:null};
+ if(e[1] === "milestone")return{t:e[2],d:e[3],cp};
+ if(e[1] === "view"){
+  const t = r && r.viewLabel === "判断失效" ? "判断失效" : "观点调整";
+  const lead = r && r.fromTo ? `从“${r.fromTo}”。` : "";
+  return{t,d:lead + (r ? (r.summary_copy || r.copy) : e[3]),cp};
+ }
+ // check：按当日事实命名（阶段新高 / 冲高回落 / 阶段回落 / 阶段整理）
+ const close = s.candles[i] ? s.candles[i][3] : null;
+ const closes = [];for(let j = Math.max(0,s.recIndex);j <= i;j++)if(s.candles[j] && s.candles[j][3] != null)closes.push(s.candles[j][3]);
+ const prevC = (() => {for(let j = i - 1;j >= 0;j--)if(s.candles[j] && s.candles[j][3] != null)return s.candles[j][3];return null})();
+ const maxC = closes.length ? Math.max(...closes) : null;
+ const dayChg = close != null && prevC ? close / prevC - 1 : null;
+ let t = "阶段整理";
+ if(close != null && maxC != null && close >= maxC)t = "阶段新高";
+ else if(close != null && maxC && close / maxC - 1 <= -0.03)t = "冲高回落";
+ else if(dayChg != null && dayChg <= -0.02)t = "阶段回落";
+ return{t,d:r ? (r.summary_copy || r.copy) : e[3],cp};
+}
 function renderEvents(){
- const map = {rec:"rec",view:"view",milestone:"milestone",check:"check",mute:"mute"};
- $("events").innerHTML = cur.events.map(e => `<div class="event-row"><span class="e-date">${esc(e[0])}</span><span class="e-dot ${map[e[1]] || ""}"></span><div><b class="e-title">${esc(e[2])}</b><span class="e-desc">${esc(e[3])}</span></div></div>`).join("");
+ $("events").innerHTML = cur.events.map((e,idx) => {
+  const v = eventTitle(cur,e);
+  const long = v.d && v.d.length > 60;
+  return `<div class="event-row" data-ev="${idx}"><span class="e-date">${esc(e[0])}</span><span class="e-dot ${e[1] === "view" ? "view" : e[1] === "milestone" ? "milestone" : e[1] === "rec" ? "rec" : "check"}"></span><div><b class="e-title">${esc(v.t)}</b>${v.cp ? `<i class="e-check">${esc(v.cp)}</i>` : ""}<span class="e-desc">${esc(v.d)}</span></div></div>`;
+ }).join("");
+ document.querySelectorAll(".event-row").forEach(row => row.onclick = () => row.classList.toggle("open"));
 }
 
 /* ---------- 导航 / 主题 / 启动 ---------- */

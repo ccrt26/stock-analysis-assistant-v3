@@ -289,10 +289,11 @@ class TestBuildPayload:
         assert conditional_stock["ref"] is None
         assert formal_stock["reasonFull"] == "板块扩散且个股领先。"
         assert formal_stock["reasonRisk"] == "涨幅集中在最近3日。"
-        # 复盘历史与事件时间线：台账正文与观点字段合并
+        # 复盘历史与事件时间线：结构化观点字段以台账为准，正文保留详评
         review = formal_stock["reviews"][-1]
         assert review["headline"] == "台账简评正文。"
-        assert review["copy"] == "台账简评正文。"
+        assert review["copy"] == "观点更新第一句。后续解释。"
+        assert review["summary_copy"] == "台账简评正文。"
         assert review["base"] == "未来1—3个交易日更可能震荡偏下"
         assert review["outlookReason"] == "路径向下且相对优势消失。"
         assert review["viewChanged"] is True
@@ -488,7 +489,7 @@ class TestRender:
         # V4 版式标志
         for marker in (
             "推荐观察台", "重点观察", "全部观察", "观察进度", "距 20%",
-            "下一检查日", "历史推荐背景", "每日复盘", "公司与观察事件",
+            "下一检查日", "推荐理由", "每日复盘", "公司与观察事件",
             "交易日尺" if False else "dayruler",
             "K线", "相对表现", "缩起",
         ):
@@ -503,6 +504,9 @@ class TestRender:
         # 日期选择与个股选择器存在
         assert 'id="dateSelect"' in html
         assert 'id="stockPick"' in html
+        # 公司简介不含申万行业链句子；详情页带最新行情条
+        assert "按申万行业分类属于" not in html
+        assert 'id="quoteStrip"' in html and "成交额" in html and "停牌前" in html
         # 用户展示口径：入选日 + D1—D20 + 延长观察；不再出现 D0 与旧 D 标记
         assert "待首日观察" in html and "延长观察第" in html
         assert "20个交易日核心观察完成" in html and "推荐日" in html and "事件首日" in html
@@ -597,7 +601,7 @@ def test_html_distinguishes_history_from_daily_update_without_losing_chart() -> 
     html = render({"stocks": [], "dates": [], "market": []})
     detail = html.split("function renderDetail(){", 1)[1].split("function updateLegend", 1)[0]
     review = html.split("function renderReview(){", 1)[1].split("function renderEvents", 1)[0]
-    assert "历史推荐背景" in detail and "当时主要担心" in detail
+    assert "推荐理由" in detail and "当时主要担心" in detail
     assert "入选理由 ·" not in detail
     for label in ("每日复盘", "当日结论", "关键变化", "观点变化", "未来1—3日"):
         assert label in review
@@ -619,6 +623,113 @@ def test_web_daily_unchanged_view_does_not_inherit_detail_change(tmp_path: Path)
         "outlook_reason_plain_language": "收盘仍在原区间。",
     }]}), encoding="utf-8")
     review = scan_history(tmp_path, date(2026, 9, 2))["e1"][0]
-    assert review["copy"] == "今天变化仍未改变原判断。"
+    # 正文保留报告详评；结构化观点仍以台账为准，不继承详评计算出的变化。
+    assert review["copy"] == "观点更新第一句。后续解释。"
+    assert review["summary_copy"] == "今天变化仍未改变原判断。"
     assert review["viewChanged"] is False and review["fromTo"] is None
     assert review["viewReason"] == "没有新的决定性事实。"
+
+
+def _write_history_inputs(
+    tmp_path: Path,
+    *,
+    report: dict | None,
+    ledger: dict | None,
+    snapshot: dict,
+    day: str = "2026-09-02",
+) -> None:
+    (tmp_path / f"snapshot-{day}.json").write_text(json.dumps(snapshot), encoding="utf-8")
+    if report is not None:
+        (tmp_path / f"monitor-report-{day}.json").write_text(json.dumps(report), encoding="utf-8")
+    if ledger is not None:
+        (tmp_path / f"daily-formal-reviews-{day}.json").write_text(json.dumps(ledger), encoding="utf-8")
+
+
+def _ledger_review(episode_id: str, text: str, view_change: str = "weakened") -> dict:
+    return {
+        "episode_id": episode_id, "day_number": 2, "checkpoint": None,
+        "current_assessment": "weakening", "current_path": "down",
+        "best_supported_explanation": "market_common_move",
+        "current_weak_or_failed_link": "price_and_volume_confirmation",
+        "current_review": text, "view_change": view_change,
+        "view_change_reason": "收盘连续两日回落。", "outlook_1_3d": "weakening",
+        "outlook_reason_plain_language": "路径向下且相对优势消失。",
+        "tracking_decision": "keep_active_tracking",
+        "tracking_decision_reason": "仍在观察窗口内。",
+        "review_origin": "live", "final_twenty_day_review": None,
+    }
+
+
+def test_scan_history_keeps_detail_copy_with_daily_summary(tmp_path: Path) -> None:
+    daily_text = "简评A：市场共同回落。"
+    detail_text = "详评B：当初期待的板块扩散需要逐日检验，" + "目前仍有两个交易日未恢复。" * 30
+    episode = _episode("e1", "600000.SH", "示例股份")
+    snapshot = _snapshot([episode])
+    report = _report([_alert("e1")])
+    report["alerts"][0]["episode_reviews"][0]["current_review"] = detail_text
+    ledger = {
+        "ledger_version": "daily-formal-reviews-v1", "analysis_date": "2026-09-02",
+        "as_of": "2026-09-03T09:00:00+08:00",
+        "reviews": [_ledger_review("e1", daily_text)],
+    }
+    _write_history_inputs(tmp_path, report=report, ledger=ledger, snapshot=snapshot)
+    review = scan_history(tmp_path, date(2026, 9, 2))["e1"][0]
+    assert review["summary_copy"] == daily_text
+    assert review["copy"] == detail_text
+    assert review["headline"] == daily_text  # 今日标题仍来自日评
+    assert review["viewLabel"] == "观点减弱"  # 观点变化仍来自日评
+    assert review["viewReason"] == "收盘连续两日回落。"
+    assert review["base"] == "未来1—3个交易日更可能震荡偏下"
+    assert review["confirm"] == "增强条件。" and review["risk"] == "改变条件。"  # 条件保留report
+
+
+def test_scan_history_ledger_only_input_still_readable(tmp_path: Path) -> None:
+    episode = _episode("e1", "600000.SH", "示例股份")
+    snapshot = _snapshot([episode])
+    ledger = {
+        "ledger_version": "daily-formal-reviews-v1", "analysis_date": "2026-09-02",
+        "as_of": "2026-09-03T09:00:00+08:00",
+        "reviews": [_ledger_review("e1", "只有日评的正文。")],
+    }
+    _write_history_inputs(tmp_path, report=None, ledger=ledger, snapshot=snapshot)
+    review = scan_history(tmp_path, date(2026, 9, 2))["e1"][0]
+    assert review["copy"] == "只有日评的正文。"
+    assert review["summary_copy"] == "只有日评的正文。"
+
+
+def test_scan_history_report_only_input_still_readable(tmp_path: Path) -> None:
+    episode = _episode("e1", "600000.SH", "示例股份")
+    snapshot = _snapshot([episode])
+    report = _report([_alert("e1")])
+    _write_history_inputs(tmp_path, report=report, ledger=None, snapshot=snapshot)
+    review = scan_history(tmp_path, date(2026, 9, 2))["e1"][0]
+    assert review["copy"] == "观点更新第一句。后续解释。"
+    assert review["summary_copy"] == "观点更新第一句。后续解释。"
+
+
+def test_scan_history_same_stock_two_episodes_do_not_swap_texts(tmp_path: Path) -> None:
+    first = _episode("e-a", "600000.SH", "示例股份")
+    second = _episode("e-b", "600000.SH", "示例股份二")
+    second["action_date"] = "2026-08-24"
+    snapshot = _snapshot([first, second])
+    detail_a = "详评A：第一条记录的独立展开。"
+    detail_b = "详评B：第二条记录的独立展开。"
+    report = _report([
+        _alert("e-a"), _alert("e-b", name="示例股份二", ts_code="600000.SH"),
+    ])
+    report["alerts"][0]["episode_reviews"][0]["current_review"] = detail_a
+    report["alerts"][1]["episode_reviews"][0]["current_review"] = detail_b
+    ledger = {
+        "ledger_version": "daily-formal-reviews-v1", "analysis_date": "2026-09-02",
+        "as_of": "2026-09-03T09:00:00+08:00",
+        "reviews": [
+            _ledger_review("e-a", "简评A。"),
+            _ledger_review("e-b", "简评B。"),
+        ],
+    }
+    _write_history_inputs(tmp_path, report=report, ledger=ledger, snapshot=snapshot)
+    history = scan_history(tmp_path, date(2026, 9, 2))
+    assert history["e-a"][0]["copy"] == detail_a
+    assert history["e-a"][0]["summary_copy"] == "简评A。"
+    assert history["e-b"][0]["copy"] == detail_b
+    assert history["e-b"][0]["summary_copy"] == "简评B。"
