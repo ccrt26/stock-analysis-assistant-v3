@@ -1529,6 +1529,7 @@ body.dark .chart-tip{box-shadow:0 14px 36px rgba(0,0,0,.5)}
 .day-btn.active b,.day-btn.active span{color:var(--paper)}
 .day-btn.future{opacity:.32;cursor:default}
 .day-btn .vcdot{position:absolute;top:5px;right:7px;width:5px;height:5px;border-radius:50%;background:var(--amber)}
+.day-btn .nodedot{position:absolute;top:5px;left:7px;width:5px;height:5px;border-radius:50%;background:var(--down)}
 .day-btn .recdot{position:absolute;top:5px;right:7px;width:5px;height:5px;border-radius:50%;background:var(--blue)}
 body.dark .day-btn .vcdot{box-shadow:0 0 0 3px rgba(224,166,62,.2)}
 /* 正文 + 边栏 */
@@ -1538,6 +1539,8 @@ body.dark .day-btn .vcdot{box-shadow:0 0 0 3px rgba(224,166,62,.2)}
 .article-top .adate{font-size:11.5px;letter-spacing:.14em;color:var(--ink3);font-variant-numeric:tabular-nums}
 .article-top .abadges{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .badge{font-size:10.5px;font-weight:650;letter-spacing:.06em;color:var(--amber)}
+.badge-kind{color:var(--down);border:1px solid var(--down);border-radius:4px;padding:1px 6px}
+.checkpoint .badge-kind{color:var(--down)}
 .badge::before{content:"▍";margin-right:2px}
 .textlink{font-size:12px;color:var(--blue);border-bottom:1px solid rgba(44,95,224,.35);padding-bottom:1px}
 .textlink:hover{border-bottom-color:var(--blue)}
@@ -2153,7 +2156,7 @@ function renderTimeline(){
   const label = r ? (dayRet(s,d) != null ? pct(dayRet(s,d)) : "事件") : (hasC ? pct(dayRet(s,d)) : "—");
   const canClick = (r || hasC) && !future;
   html += `<button class="day-btn ${r || hasC ? "observed" : ""} ${future ? "future" : ""} ${selDay === d ? "active" : ""}" data-day="${d}" ${canClick ? "" : "disabled"}>
-   ${r && r.viewChanged ? '<i class="vcdot" title="观点调整"></i>' : ""}${d === 1 && r ? '<i class="recdot" title="推荐日复盘"></i>' : ""}
+   ${r && r.review_kind === "checkpoint_detail" ? '<i class="nodedot" title="关键节点复盘"></i>' : ""}${r && r.viewChanged ? '<i class="vcdot" title="观点调整"></i>' : ""}${d === 1 && r ? '<i class="recdot" title="推荐日复盘"></i>' : ""}
    <b>D${d}</b><span>${future ? "—" : label}</span></button>`;
  }
  $("timeline").innerHTML = html;
@@ -2166,6 +2169,10 @@ function renderTimeline(){
 function renderReview(){
  const s = cur,r = selReview,latest = latestReview(s);
  let badges = "";
+ const kindLabel = r ? (r.review_kind === "checkpoint_detail" ? `关键节点复盘${r.checkpoint ? " · " + r.checkpoint : ""}`
+    : r.review_kind === "regular_detail" ? "今日深入复盘"
+    : r.review_kind === "brief" ? "今日简评" : "") : "";
+ if(r && kindLabel)badges += `<span class="badge badge-kind">${esc(kindLabel)}</span>`;
  if(r && latest && r.day !== latest.day)badges += `<button class="textlink" id="backLatest">回到最新（${dayLabel(latest.day)}）</button>`;
  if(r && r.viewChanged)badges += `<span class="badge">${esc(r.fromTo || r.viewLabel || "观点调整")}</span>`;
  $("rBadges").innerHTML = badges;
