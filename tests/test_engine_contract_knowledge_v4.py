@@ -156,7 +156,7 @@ def test_review_skill_avoids_new_template_and_uses_traceable_minimum_facts() -> 
     ).read_text(encoding="utf-8")
 
     for phrase in (
-        "最多4个，不设最低数量",
+        "不设固定数量指标",
         "不得为了满足数量凑事实",
         "可以是一段，也可以是两三段",
         "通常不必写“这是首次复盘”",

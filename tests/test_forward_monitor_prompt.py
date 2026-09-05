@@ -22,9 +22,10 @@ def test_forward_monitor_prompt_limits_ai_work_and_report_size() -> None:
     assert "每天只运行一次" in text
     assert "市场 Skill 每天只分析一次" in text
     assert "程序处理全部跟踪记录" in text
-    assert "每个 active 正式推荐 episode" in text
-    assert "详细复盘恰好8只不同股票" in text
-    assert "不足8只时全部详细复盘" in text
+    assert "到达 D1/D3/D5/D10/D20 检查节点" in text
+    assert "普通详评股（从非节点股票按优先级选最多8只）" in text
+    assert "剩余股票只写简评" in text
+    assert "不得为详评另配隐藏简评" in text
     assert "不创建新的 Scheduled Task" in text
     assert "不得把全部股票交给 AI" not in text
     assert "AI 只研究今天确实发生变化的股票" not in text
@@ -37,11 +38,11 @@ def test_forward_monitor_prompt_limits_ai_work_and_report_size() -> None:
     assert "ForwardEpisodeReviewV1" in text
     assert "FrozenTwentyDayReviewV1" in text
     priorities = [
-        "1. 今日停止", "2. D20", "3. 观点明显变化", "4. 达到20%",
-        "5. 重要公司事项", "6. D10", "7. D5", "8. D3", "9. D1",
+        "1. 今日停止", "2. 观点明显变化", "3. 达到20%",
+        "4. 重要公司事项", "5. 必要时按最长时间未详评轮换补足",
     ]
     priority_block = text.split(
-        "8只详细复盘按以下顺序选择：",
+        "普通详评（非节点股，最多8只）按以下顺序考虑：",
         maxsplit=1,
     )[1]
     positions = [priority_block.index(value) for value in priorities]
@@ -128,7 +129,7 @@ def test_forward_monitor_prompt_uses_previous_state_and_strict_report_contract()
     assert "第20个交易日必须首次形成" in text
     assert "当前：D" not in text
     assert "roles" in text
-    assert "该股票当天全部正式简评 episode" in text
+    assert "该股票当天全部需更新判断的正式 episode" in text
     assert "每条记录分别复盘" in text
     assert "final_twenty_day_review" in text
     assert "第21至第30个交易日不得改写" in text
@@ -137,8 +138,9 @@ def test_forward_monitor_prompt_uses_previous_state_and_strict_report_contract()
     assert "真实成对价格路径" in text
     assert "正式推荐股票的今日复盘" in text
     assert "`confirmed_active` 和 `legacy_v1_not_rewritten` 两类正式推荐记录" in text
-    assert "detailed_review_stock_count" in text
-    assert "最长时间未详细复盘" in text
+    assert "checkpoint_review_stock_count" in text
+    assert "regular_detail_stock_limit" in text
+    assert "最长时间未详评轮换补足" in text
     assert "比较记录的 `final_twenty_day_review` 始终为空" in text
 
 
@@ -155,12 +157,12 @@ def test_daily_review_prompt_defines_tracking_and_checkpoint_outputs() -> None:
         "横盘",
         "数据暂缺",
         "未达到20%",
-        "D1 评价第一天实际反应",
-        "D3 评价早期持续性",
-        "D5 形成第一周小结",
-        "D10 形成中期小结",
-        "D20 形成最终复盘",
-        "D1、D3、D5、D10、D20 不决定是否生成每日简评",
+        "D1 当天原条件下是否可执行",
+        "D3 早期反应是否延续",
+        "D5 第一周路径与新增证据",
+        "D10 前半程对账",
+        "D20 前20日结果与最终结论",
+        "不新增其他节点",
     ):
         assert phrase in text
 
@@ -180,7 +182,7 @@ def test_review_skill_requires_daily_briefs_and_cautious_tracking_exit() -> None
         "无法执行",
         "停止主动跟踪后",
         "D20",
-        "8只详细复盘",
+        "最多8只普通详评",
     ):
         assert phrase in text
 
@@ -296,8 +298,8 @@ def test_review_prompt_aligns_current_review_with_existing_renderer() -> None:
         "不再重复完整推荐日期",
         "不再重复距离20%目标的固定进度句",
         "不再重复未来1—3个交易日的完整展望",
-        "日常复盘只写增量",
-        "事件复盘",
+        "简评只写当天重要增量",
+        "事件详评",
         "D20 最终复盘",
         "字段和值",
         "outlook_reason_plain_language",
@@ -477,3 +479,7 @@ def test_review_prompt_pins_plain_language_standard_and_style_anchor() -> None:
         assert phrase in monitor
     for phrase in ("直接说事，不表演通俗", "人话优先"):
         assert phrase in skill
+    # 软数量配额已被三路互斥方案删除，不得回潮。
+    for legacy in ("最多4个", "60—140", "150—320", "180—350", "400—800"):
+        assert legacy not in monitor
+        assert legacy not in skill

@@ -423,14 +423,23 @@ def ledger_dates(monitor_dir: Path) -> list[date]:
     return days
 
 
+def _parse_as_of(value: Any) -> datetime | None:
+    try:
+        parsed = datetime.fromisoformat(str(value))
+    except (TypeError, ValueError):
+        return None
+    return parsed
+
+
 def scan_history(
     monitor_dir: Path, analysis_date: date
 ) -> dict[str, list[dict[str, Any]]]:
     """逐日读取已归档 snapshot + report + 每日复盘台账，汇总每条记录的复盘历史。
 
-    报告只覆盖当天重点（<=8 条详评）；每日台账覆盖全部正式推荐的简评。
-    同一条记录同一天两者都有时：结构化观点/方向/标题与 summary_copy 以台账为准，
-    长正文 copy 与正反条件保留报告详评；只有台账时 copy 回退为简评正文。
+    三路新档：节点/普通详评正文取自 report（账本该类正文为空），简评取自台账；
+    结构化观点以台账为准，合并仅限同分析日、同 as_of、同 episode。
+    旧档（无 checkpoint 字段）：同日同episode两者都有时，结构化观点/方向/标题与
+    summary_copy 以台账为准，长正文 copy 与正反条件保留报告详评。
     """
     merged: dict[tuple[str, str], dict[str, Any]] = {}
     for day in archived_dates(monitor_dir):
@@ -448,6 +457,10 @@ def scan_history(
             if isinstance(item, dict)
         }
         for alert in report.get("alerts", []):
+            alert_checkpoint = any(
+                str(episode_id) in set(snapshot.get("checkpoint_review_episode_ids") or [])
+                for episode_id in alert.get("episode_ids", [])
+            )
             for review in alert.get("episode_reviews", []):
                 episode_id = str(review.get("episode_id"))
                 episode = episodes.get(episode_id)
@@ -469,11 +482,16 @@ def scan_history(
                     )
                 merged[(episode_id, day.isoformat())] = {
                     "date": day.isoformat(),
+                    "as_of": str(snapshot.get("as_of") or ""),
                     "day": int(episode.get("day_number") or 0),
                     "checkpoint": episode.get("checkpoint"),
                     "headline": _first_sentence(str(review.get("current_review") or "")),
                     "copy": str(review.get("current_review") or ""),
                     "summary_copy": str(review.get("current_review") or ""),
+                    "review_kind": (
+                        "checkpoint_detail" if alert_checkpoint
+                        else "regular_detail"
+                    ),
                     "facts": _review_facts(episode),
                     "base": OUTLOOK_TEXT.get(str(alert.get("outlook_1_3d")), ""),
                     "outlookReason": str(alert.get("outlook_reason_plain_language") or ""),
@@ -495,14 +513,22 @@ def scan_history(
             continue
         snapshot_path = monitor_dir / f"snapshot-{day.isoformat()}.json"
         episodes: dict[str, dict[str, Any]] = {}
+        day_three_route = False
+        checkpoint_ids: set[str] = set()
         if snapshot_path.is_file():
             snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
+            day_three_route = "checkpoint_review_episode_ids" in snapshot
+            checkpoint_ids = {
+                str(value)
+                for value in snapshot.get("checkpoint_review_episode_ids") or []
+            }
             episodes = {
                 str(item.get("episode_id")): item
                 for item in snapshot.get("episodes", [])
                 if isinstance(item, dict)
             }
         ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
+        ledger_as_of = _parse_as_of(ledger.get("as_of"))
         for review in ledger.get("reviews", []):
             episode_id = str(review.get("episode_id"))
             episode = episodes.get(episode_id, {})
@@ -510,6 +536,56 @@ def scan_history(
             view_changed = view_change in {"strengthened", "weakened", "invalidated"}
             label = VIEW_CHANGE_TEXT.get(view_change, "维持原判断")
             from_to = label if view_changed else None
+            key = (episode_id, day.isoformat())
+            structured = {
+                "day": int(review.get("day_number") or 0),
+                "checkpoint": review.get("checkpoint"),
+                "facts": _review_facts(episode),
+                "base": OUTLOOK_TEXT.get(str(review.get("outlook_1_3d")), ""),
+                "outlookReason": str(review.get("outlook_reason_plain_language") or ""),
+                "assessmentText": ASSESSMENT_TEXT.get(
+                    str(review.get("current_assessment")), ""
+                ),
+                "viewLabel": label,
+                "viewReason": str(review.get("view_change_reason") or ""),
+                "viewChanged": view_changed,
+                "fromTo": from_to,
+            }
+            detail_body_missing = (
+                day_three_route and not review.get("current_review")
+            )
+            if detail_body_missing:
+                existing = merged.get(key)
+                same_as_of = (
+                    existing is not None
+                    and ledger_as_of is not None
+                    and _parse_as_of(existing.get("as_of")) == ledger_as_of
+                )
+                structured["review_kind"] = str(
+                    review.get("review_kind")
+                    or (
+                        "checkpoint_detail"
+                        if episode_id in checkpoint_ids
+                        else "regular_detail"
+                    )
+                )
+                if existing is not None and same_as_of:
+                    # 账本提供结构化观点；详评正文与条件保留自报告。
+                    existing.update(structured)
+                    continue
+                if existing is None:
+                    item = {
+                        "date": day.isoformat(),
+                        "as_of": str(ledger.get("as_of") or ""),
+                        "headline": "详评正文未保存",
+                        "copy": "详评正文未保存。",
+                        "summary_copy": "详评正文未保存。",
+                        "confirm": "",
+                        "risk": "",
+                        **structured,
+                    }
+                    merged[key] = item
+                continue
             item = {
                 "date": day.isoformat(),
                 "day": int(review.get("day_number") or 0),
@@ -517,6 +593,7 @@ def scan_history(
                 "headline": _first_sentence(str(review.get("current_review") or "")),
                 "copy": str(review.get("current_review") or ""),
                 "summary_copy": str(review.get("current_review") or ""),
+                "review_kind": str(review.get("review_kind") or "brief"),
                 "facts": _review_facts(episode),
                 "base": OUTLOOK_TEXT.get(str(review.get("outlook_1_3d")), ""),
                 "outlookReason": str(review.get("outlook_reason_plain_language") or ""),
@@ -530,7 +607,6 @@ def scan_history(
                 "viewChanged": view_changed,
                 "fromTo": from_to,
             }
-            key = (episode_id, day.isoformat())
             existing = merged.get(key)
             if existing is None:
                 merged[key] = item

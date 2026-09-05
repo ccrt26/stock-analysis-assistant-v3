@@ -72,7 +72,8 @@ class PrepareSummary:
     evaluation_only_count: int
     completed_formal_count: int
     daily_review_episode_count: int
-    detailed_review_stock_count: int
+    checkpoint_review_stock_count: int
+    regular_detail_stock_limit: int
 
 
 class MarketOverviewV1(BaseModel):
@@ -217,7 +218,8 @@ class DailyFormalReviewV1(BaseModel):
         "remaining_room", "company_risk", "timing", "execution",
         "stock_selection", "unknown",
     ]
-    current_review: str = Field(min_length=1, max_length=600)
+    current_review: str | None = Field(default=None, min_length=1, max_length=600)
+    review_kind: Literal["brief", "regular_detail", "checkpoint_detail"] | None = None
     view_change: Literal[
         "first_review", "unchanged", "strengthened", "weakened",
         "invalidated",
@@ -235,6 +237,15 @@ class DailyFormalReviewV1(BaseModel):
     tracking_decision_reason: str = Field(min_length=1, max_length=300)
     review_origin: Literal["live", "copied_live_archive", "backfill"]
     final_twenty_day_review: FrozenTwentyDayReviewV1 | None = None
+
+    @model_validator(mode="after")
+    def validate_review_body(self) -> "DailyFormalReviewV1":
+        if self.review_kind in {None, "brief"}:
+            if not self.current_review:
+                raise ValueError("brief or legacy review requires current_review")
+        elif self.current_review is not None:
+            raise ValueError("detailed review must not carry a separate brief")
+        return self
 
 
 class DailyFormalReviewLedgerV1(BaseModel):
@@ -324,7 +335,7 @@ class DailyForwardMonitorReportV2(BaseModel):
     as_of: datetime
     market_overview: MarketOverviewV1
     pool_summary: MonitorPoolSummaryV1
-    alerts: list[ForwardMonitorAlertV2] = Field(max_length=8)
+    alerts: list[ForwardMonitorAlertV2]
     unreported_attention_count: int = Field(ge=0)
     routine_summary: str = Field(min_length=1)
 
@@ -683,12 +694,28 @@ def prepare_forward_monitor(
         for item in formal_episodes
         if item.get("tracking_status") == "evaluation_only"
     )
+    # 三路互斥分组：节点股（K）全部详评；非节点股剔除后才是普通详评候选。
+    node_codes, non_node_codes = _checkpoint_review_scope(
+        snapshot={
+            "daily_review_episode_ids": daily_review_episode_ids,
+            "episodes": observations,
+            "required_final_review_episode_ids": required_final_review_episode_ids,
+        }
+    )
+    checkpoint_review_episode_ids = sorted(
+        str(item["episode_id"])
+        for item in formal_episodes
+        if str(item["episode_id"]) in daily_review_id_set
+        and str(item["ts_code"]) in node_codes
+    )
     detailed_review_candidate_codes = sorted(
-        {
+        code
+        for code in {
             str(item["ts_code"])
             for item in formal_episodes
             if str(item["episode_id"]) in daily_review_id_set
         }
+        if code in non_node_codes
     )
     # 复盘价格上下文：只覆盖当日需日评的正式推荐episode及其同批配对episode。
     # 在attention/tracking/角色/配对/重点选择全部确定后接线，不改变任何既有字段。
@@ -768,7 +795,8 @@ def prepare_forward_monitor(
             for item in formal_episodes
         ),
         "daily_review_episode_count": len(daily_review_episode_ids),
-        "detailed_review_stock_count": min(
+        "checkpoint_review_stock_count": len(node_codes),
+        "regular_detail_stock_limit": min(
             8,
             len(detailed_review_candidate_codes),
         ),
@@ -788,6 +816,7 @@ def prepare_forward_monitor(
                 required_final_review_episode_ids
             ),
             "daily_review_episode_ids": daily_review_episode_ids,
+            "checkpoint_review_episode_ids": checkpoint_review_episode_ids,
             "evaluation_only_episode_ids": evaluation_only_episode_ids,
             "detailed_review_candidate_codes": (
                 detailed_review_candidate_codes
@@ -905,6 +934,15 @@ def record_daily_formal_reviews(
                     f"final twenty day review is frozen: {review.episode_id}"
                 )
 
+    if "checkpoint_review_episode_ids" in snapshot:
+        _three_route_grouping(
+            snapshot=snapshot,
+            daily_reviews={
+                review.episode_id: review for review in ledger.reviews
+            },
+            episodes=episodes,
+        )
+
     output = ledger.model_dump(mode="json")
     monitor_dir = Path(project_root) / "local_archive" / "forward_monitor"
     final_path = (
@@ -1007,6 +1045,11 @@ def record_forward_monitor(
         "daily_review_episode_ids" in snapshot
         and daily_ledger_path.is_file()
     )
+    three_route = "checkpoint_review_episode_ids" in snapshot
+    if three_route and not daily_ledger_path.is_file():
+        raise ValueError(
+            "three-route snapshot requires the daily formal review ledger"
+        )
     daily_reviews: dict[str, DailyFormalReviewV1] = {}
     daily_ledger: DailyFormalReviewLedgerV1 | None = None
     if new_daily_workflow:
@@ -1027,27 +1070,29 @@ def record_forward_monitor(
         }
         if set(daily_reviews) != expected_daily_ids:
             raise ValueError("daily formal review ledger does not match snapshot")
-        expected_detail_count = int(
-            snapshot_summary.get("detailed_review_stock_count", 0)
-        )
-        if len(report.alerts) != expected_detail_count:
-            raise ValueError(
-                "detailed review stock count does not match snapshot"
+        if not three_route:
+            expected_detail_count = int(
+                snapshot_summary.get("detailed_review_stock_count", 0)
             )
+            if len(report.alerts) != expected_detail_count:
+                raise ValueError(
+                    "detailed review stock count does not match snapshot"
+                )
     reported_episode_ids: set[str] = set()
+    daily_codes = {
+        str(episodes.get(episode_id, {}).get("ts_code"))
+        for episode_id in daily_reviews
+    }
     for alert in report.alerts:
         attention_item = attention.get(alert.ts_code)
-        if new_daily_workflow:
+        stock_in_daily = alert.ts_code in daily_codes
+        if stock_in_daily:
             expected_code_ids = {
                 episode_id
                 for episode_id in daily_reviews
                 if str(episodes.get(episode_id, {}).get("ts_code"))
                 == alert.ts_code
             }
-            if not expected_code_ids:
-                raise ValueError(
-                    f"detail stock is not a daily formal review: {alert.ts_code}"
-                )
             expected_name = next(
                 str(episodes[episode_id].get("name", ""))
                 for episode_id in expected_code_ids
@@ -1056,14 +1101,14 @@ def record_forward_monitor(
                 raise ValueError(
                     f"alert stock name does not match snapshot: {alert.ts_code}"
                 )
-        else:
-            if attention_item is None:
-                raise ValueError(f"alert stock is not in snapshot attention set: {alert.ts_code}")
+        elif attention_item is not None:
             if alert.name != str(attention_item.get("name", "")):
                 raise ValueError(f"alert stock name does not match snapshot: {alert.ts_code}")
+        else:
+            raise ValueError(f"alert stock is not in snapshot attention set: {alert.ts_code}")
         if len(alert.episode_ids) != len(set(alert.episode_ids)):
             raise ValueError(f"alert contains duplicate episode ids: {alert.ts_code}")
-        if new_daily_workflow:
+        if stock_in_daily:
             if set(alert.episode_ids) != expected_code_ids:
                 raise ValueError(
                     f"alert must include all stock daily review episodes: {alert.ts_code}"
@@ -1135,7 +1180,7 @@ def record_forward_monitor(
                 raise ValueError(
                     "direction_right_stock_wrong requires a complete pair"
                 )
-            if new_daily_workflow:
+            if episode_id in daily_reviews:
                 daily = daily_reviews[episode_id]
                 # 正文允许日评与详评各自展开；结构化结论仍必须一致。
                 detailed_values = {
@@ -1212,7 +1257,28 @@ def record_forward_monitor(
         )
     }
     reported_codes = {alert.ts_code for alert in report.alerts}
-    if new_daily_workflow:
+    if three_route:
+        node_codes, regular_codes, expected_report_codes = (
+            _three_route_grouping(
+                snapshot=snapshot,
+                daily_reviews=daily_reviews,
+                episodes=episodes,
+            )
+        )
+        _, non_node_codes = _checkpoint_review_scope(snapshot=snapshot)
+        reported_daily = reported_codes & daily_codes
+        if reported_daily != expected_report_codes:
+            raise ValueError(
+                "report stocks must be exactly the checkpoint and regular "
+                "detail stocks"
+            )
+        _validate_regular_detail_priority(
+            non_node_codes=non_node_codes,
+            daily_reviews=daily_reviews,
+            episodes=episodes,
+            regular_codes=regular_codes,
+        )
+    elif new_daily_workflow:
         _validate_detailed_review_priority(
             snapshot=snapshot,
             daily_reviews=daily_reviews,
@@ -1328,6 +1394,105 @@ def _validate_pair_context(
         )
 
 
+def _checkpoint_review_scope(*, snapshot: dict[str, Any]) -> tuple[set[str], set[str]]:
+    """按股票代码划分当日合格推荐：节点股（K）与非节点股。
+
+    任一合格episode到达 D1/D3/D5/D10/D20，或属于待补 D20 结案名单，
+    该股票全部合格episode统一进入节点区。返回 (node_codes, non_node_codes)。
+    """
+    daily_ids = set(snapshot.get("daily_review_episode_ids", []))
+    eligible = [
+        e for e in snapshot.get("episodes", [])
+        if isinstance(e, dict)
+        and e.get("episode_id") in daily_ids
+        and e.get("role") == "selected"
+        and _episode_selection_output_class(e) in PUBLIC_FORMAL_OUTPUT_CLASSES
+    ]
+    pending = set(snapshot.get("required_final_review_episode_ids", []))
+    nodes = {
+        str(e["ts_code"]) for e in eligible
+        if int(e.get("day_number", 0)) in {1, 3, 5, 10, 20}
+        or str(e.get("episode_id")) in pending
+    }
+    non_nodes = {str(e["ts_code"]) for e in eligible} - nodes
+    return nodes, non_nodes
+
+
+def _three_route_grouping(
+    *,
+    snapshot: dict[str, Any],
+    daily_reviews: dict[str, DailyFormalReviewV1],
+    episodes: dict[str, dict[str, Any]],
+) -> tuple[set[str], set[str], set[str]]:
+    """三路互斥分组校验：同股唯一显式kind，节点全覆盖，普通详评≤8且非节点。
+
+    返回 (node_codes, regular_codes, expected_report_codes)。
+    """
+    node_codes, non_node_codes = _checkpoint_review_scope(snapshot=snapshot)
+    kinds_by_code: dict[str, set[str | None]] = {}
+    for episode_id, review in daily_reviews.items():
+        code = str(episodes.get(episode_id, {}).get("ts_code"))
+        kinds_by_code.setdefault(code, set()).add(review.review_kind)
+    if any(
+        len(kinds) != 1 or None in kinds for kinds in kinds_by_code.values()
+    ):
+        raise ValueError("new reviews require one explicit kind per stock")
+    kind_by_code = {
+        code: next(iter(kinds)) for code, kinds in kinds_by_code.items()
+    }
+    checkpoint_codes = {
+        code for code, kind in kind_by_code.items()
+        if kind == "checkpoint_detail"
+    }
+    if checkpoint_codes != node_codes:
+        raise ValueError("checkpoint reviews must exactly cover checkpoint stocks")
+    regular_codes = {
+        code for code, kind in kind_by_code.items() if kind == "regular_detail"
+    }
+    if regular_codes - non_node_codes or len(regular_codes) > 8:
+        raise ValueError(
+            "regular details must be non-checkpoint stocks and at most eight"
+        )
+    return node_codes, regular_codes, node_codes | regular_codes
+
+
+def _validate_regular_detail_priority(
+    *,
+    non_node_codes: set[str],
+    daily_reviews: dict[str, DailyFormalReviewV1],
+    episodes: dict[str, dict[str, Any]],
+    regular_codes: set[str],
+) -> None:
+    """非节点股中停止跟踪与重要观点变化是优先项：≤8只必须全部入选详评；
+    超过8只时详评恰好8只且只能从优先股中选，其余以简评披露变化。"""
+    by_code: dict[str, list[DailyFormalReviewV1]] = {}
+    for episode_id, review in daily_reviews.items():
+        code = str(episodes.get(episode_id, {}).get("ts_code"))
+        if code in non_node_codes:
+            by_code.setdefault(code, []).append(review)
+    priority_codes = {
+        code
+        for code, reviews in by_code.items()
+        if any(
+            review.tracking_decision == "stop_active_tracking"
+            or review.view_change in {"strengthened", "weakened", "invalidated"}
+            for review in reviews
+        )
+    }
+    if len(priority_codes) <= 8:
+        missing = priority_codes - regular_codes
+        if missing:
+            raise ValueError(
+                "regular details omit a stop or key view change: "
+                + ",".join(sorted(missing))
+            )
+    elif len(regular_codes) != 8 or regular_codes - priority_codes:
+        raise ValueError(
+            "with more than eight priority stocks, regular details must be "
+            "exactly eight priority stocks"
+        )
+
+
 def _validate_detailed_review_priority(
     *,
     snapshot: dict[str, Any],
@@ -1385,6 +1550,86 @@ def _public_formal_episode_ids(
     ]
 
 
+def _render_detail_stock_block(
+    alert: ForwardMonitorAlertV2,
+    episode_ids: list[str],
+    episodes: dict[str, dict[str, Any]],
+    daily_by_id: dict[str, DailyFormalReviewV1],
+) -> list[str]:
+    lines: list[str] = []
+    status_paragraphs: list[str] = []
+    update_paragraphs: list[str] = []
+    change_paragraphs: list[str] = []
+    final_paragraphs: list[str] = []
+    multiple = len(episode_ids) > 1
+    for episode_id in episode_ids:
+        episode = episodes[episode_id]
+        review = next(
+            item for item in alert.episode_reviews
+            if item.episode_id == episode_id
+        )
+        daily = daily_by_id.get(episode_id)
+        day_number = int(episode["day_number"])
+        action = date.fromisoformat(str(episode["action_date"]))
+        action_text = f"{action.year}年{action.month}月{action.day}日"
+        day_text = (
+            f"当前D{day_number}/20"
+            if day_number <= 20
+            else f"延长观察第{day_number - 20}天"
+        )
+        prefix = (
+            f"{action_text}推荐（{day_text}）："
+            if multiple else ""
+        )
+        status_paragraphs.append(_render_compact_review_status(episode))
+        if day_number == 1:
+            status_paragraphs.append(_render_first_day_background(episode, review))
+
+        update_paragraphs.append(
+            f"{prefix}{review.current_review}"
+        )
+        if alert.alert_type == "late_activation" and day_number > 20:
+            update_paragraphs.append(
+                f"{prefix}这只股票在前20个交易日结束后才开始明显走强，"
+                "因此不会改变前20天的原评价结果。"
+            )
+        change_paragraphs.append(f"{prefix}{_render_view_change(daily)}")
+        final = (
+            daily.final_twenty_day_review
+            if daily is not None else review.final_twenty_day_review
+        )
+        if final is not None:
+            final_paragraphs.append(
+                f"{prefix}{_render_final_twenty_day_review(episode, final)}"
+            )
+
+    lines.extend(
+        [
+            f"### {alert.name}（{alert.ts_code}）",
+            "",
+            "\n\n".join(status_paragraphs),
+            "",
+            "**今天发生了什么**",
+            "",
+            "\n\n".join(update_paragraphs),
+            "",
+            "**相比上次判断**",
+            "",
+            "\n\n".join(change_paragraphs),
+            "",
+            "**接下来1—3个交易日**",
+            "",
+            _render_public_outlook(alert),
+            "",
+        ]
+    )
+    if final_paragraphs:
+        lines.extend(
+            ["**20个交易日最终复盘**", "", "\n\n".join(final_paragraphs), ""]
+        )
+    return lines
+
+
 def _render_markdown(
     report: DailyForwardMonitorReportV2,
     snapshot: dict[str, Any],
@@ -1419,9 +1664,106 @@ def _render_markdown(
         if daily_ledger is not None
         else {}
     )
+    three_route = "checkpoint_review_episode_ids" in snapshot
     if daily_ledger is None:
         lines.extend(["## 正式推荐股票的今日复盘", ""])
-    if daily_ledger is not None:
+    if three_route:
+        checkpoint_ids = set(
+            snapshot.get("checkpoint_review_episode_ids", [])
+        )
+        node_codes, _ = _checkpoint_review_scope(snapshot=snapshot)
+        checkpoint_alerts = [
+            (alert, episode_ids)
+            for alert, episode_ids in public_alerts
+            if alert.ts_code in node_codes
+        ]
+        regular_alerts = [
+            (alert, episode_ids)
+            for alert, episode_ids in public_alerts
+            if alert.ts_code not in node_codes
+        ]
+        # 关键节点复盘
+        lines.extend([f"## 关键节点复盘（{len(checkpoint_alerts)}只）", ""])
+        if not checkpoint_alerts:
+            lines.extend(["今日无关键节点复盘。", ""])
+        for alert, episode_ids in checkpoint_alerts:
+            node_days = sorted(
+                int(episodes[episode_id]["day_number"])
+                for episode_id in episode_ids
+                if episode_id in checkpoint_ids
+                and int(episodes[episode_id]["day_number"]) in {1, 3, 5, 10, 20}
+            )
+            if node_days:
+                reason = f"本次深入复盘原因：到达第{node_days[-1]}个交易日检查节点"
+            else:
+                reason = "本次深入复盘原因：补20个交易日最终结论"
+            lines.extend([reason, ""])
+            lines.extend(
+                _render_detail_stock_block(
+                    alert, episode_ids, episodes, daily_by_id
+                )
+            )
+        # 今日深入复盘
+        lines.extend([f"## 今日深入复盘（{len(regular_alerts)}只）", ""])
+        if not regular_alerts:
+            lines.extend(["今日无深入复盘。", ""])
+        for alert, episode_ids in regular_alerts:
+            lines.extend(
+                _render_detail_stock_block(
+                    alert, episode_ids, episodes, daily_by_id
+                )
+            )
+        # 今日简评
+        brief_items = [
+            (episodes[review.episode_id], review)
+            for review in daily_ledger.reviews
+            if review.review_kind == "brief"
+            and review.episode_id in episodes
+        ]
+        brief_items.sort(
+            key=lambda item: (
+                str(item[0].get("action_date", "")),
+                str(item[0].get("ts_code", "")),
+                str(item[0].get("episode_id", "")),
+            )
+        )
+        lines.extend([f"## 今日简评（{len(brief_items)}只）", ""])
+        if not brief_items:
+            lines.extend(["今日无简评。", ""])
+        else:
+            lines.extend(
+                [
+                    "| 股票 | 当前观察日 | 当前涨跌 | 今日简评 | 未来1—3日 | 主动跟踪 |",
+                    "|---|---:|---:|---|---|---|",
+                ]
+            )
+            for episode, review in brief_items:
+                current = _number(
+                    episode.get("current_close_return_since_entry")
+                )
+                current_text = (
+                    _format_return(current)
+                    if current is not None
+                    else "无法计算"
+                )
+                brief_text = " ".join(
+                    review.current_review.splitlines()
+                ).replace("|", r"\|")
+                tracking_text = (
+                    "继续"
+                    if review.tracking_decision == "keep_active_tracking"
+                    else "今日停止"
+                )
+                lines.append(
+                    "| "
+                    f"{episode.get('name')}（{episode.get('ts_code')}） | "
+                    f"{review.day_number} | {current_text} | "
+                    f"{brief_text} | "
+                    f"{_daily_outlook_label(review.outlook_1_3d)} | "
+                    f"{tracking_text} |"
+                )
+            lines.append("")
+    elif daily_ledger is not None:
         active_items = [
             (episode, daily_by_id[str(episode["episode_id"])])
             for episode in episodes.values()
@@ -1485,81 +1827,19 @@ def _render_markdown(
         and item.get("monitor_phase") == "passive_tail"
         for item in episodes.values()
     )
-    if not public_alerts:
-        lines.extend(
-            [
-                "今天没有被明确推荐过、同时又出现需要说明变化的股票。",
-                "",
-            ]
-        )
-    for alert, episode_ids in public_alerts:
-        reviews = {item.episode_id: item for item in alert.episode_reviews}
-        status_paragraphs: list[str] = []
-        update_paragraphs: list[str] = []
-        change_paragraphs: list[str] = []
-        final_paragraphs: list[str] = []
-        multiple = len(episode_ids) > 1
-        for episode_id in episode_ids:
-            episode = episodes[episode_id]
-            review = reviews[episode_id]
-            daily = daily_by_id[episode_id] if daily_ledger is not None else None
-            day_number = int(episode["day_number"])
-            action = date.fromisoformat(str(episode["action_date"]))
-            action_text = f"{action.year}年{action.month}月{action.day}日"
-            day_text = (
-                f"当前D{day_number}/20"
-                if day_number <= 20
-                else f"延长观察第{day_number - 20}天"
-            )
-            prefix = (
-                f"{action_text}推荐（{day_text}）："
-                if multiple else ""
-            )
-            status_paragraphs.append(_render_compact_review_status(episode))
-            if day_number == 1:
-                status_paragraphs.append(_render_first_day_background(episode, review))
-
-            update_paragraphs.append(
-                f"{prefix}{review.current_review}"
-            )
-            if alert.alert_type == "late_activation" and day_number > 20:
-                update_paragraphs.append(
-                    f"{prefix}这只股票在前20个交易日结束后才开始明显走强，"
-                    "因此不会改变前20天的原评价结果。"
-                )
-            change_paragraphs.append(f"{prefix}{_render_view_change(daily)}")
-            final = (
-                daily.final_twenty_day_review
-                if daily is not None else review.final_twenty_day_review
-            )
-            if final is not None:
-                final_paragraphs.append(
-                    f"{prefix}{_render_final_twenty_day_review(episode, final)}"
-                )
-
-        lines.extend(
-            [
-                f"### {alert.name}（{alert.ts_code}）",
-                "",
-                "\n\n".join(status_paragraphs),
-                "",
-                "**今天发生了什么**",
-                "",
-                "\n\n".join(update_paragraphs),
-                "",
-                "**相比上次判断**",
-                "",
-                "\n\n".join(change_paragraphs),
-                "",
-                "**接下来1—3个交易日**",
-                "",
-                _render_public_outlook(alert),
-                "",
-            ]
-        )
-        if final_paragraphs:
+    if not three_route:
+        if not public_alerts:
             lines.extend(
-                ["**20个交易日最终复盘**", "", "\n\n".join(final_paragraphs), ""]
+                [
+                    "今天没有被明确推荐过、同时又出现需要说明变化的股票。",
+                    "",
+                ]
+            )
+        for alert, episode_ids in public_alerts:
+            lines.extend(
+                _render_detail_stock_block(
+                    alert, episode_ids, episodes, daily_by_id
+                )
             )
     lines.extend(
         [
@@ -2992,6 +3272,42 @@ def _previous_snapshot(monitor_dir: Path, analysis_date: date) -> dict[str, Any]
     return payload if isinstance(payload, dict) and payload.get("snapshot_version") == SNAPSHOT_VERSION else None
 
 
+def _detail_report_bodies(
+    monitor_dir: Path,
+    ledger_date: date,
+    ledger_as_of: datetime,
+) -> dict[str, str]:
+    """从同分析日、解析后同 as_of 的 monitor report 恢复详评正文。
+
+    只读内存上下文，不写回任何文件；缺报告或身份不匹配返回空映射。
+    """
+    report_path = monitor_dir / f"monitor-report-{ledger_date.isoformat()}.json"
+    if not report_path.is_file():
+        return {}
+    try:
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(report, dict):
+        return {}
+    if str(report.get("analysis_date")) != ledger_date.isoformat():
+        return {}
+    report_as_of = _as_datetime(report.get("as_of"))
+    if report_as_of is None or report_as_of != ledger_as_of:
+        return {}
+    bodies: dict[str, str] = {}
+    for alert in report.get("alerts", []):
+        if not isinstance(alert, dict):
+            continue
+        for review in alert.get("episode_reviews", []):
+            if not isinstance(review, dict):
+                continue
+            text = review.get("current_review")
+            if isinstance(text, str) and text:
+                bodies[str(review.get("episode_id"))] = text
+    return bodies
+
+
 def _daily_review_history(
     monitor_dir: Path,
     analysis_date: date,
@@ -3014,6 +3330,7 @@ def _daily_review_history(
     latest: dict[str, dict[str, Any]] = {}
     latest_live: dict[str, dict[str, Any]] = {}
     frozen: dict[str, dict[str, Any]] = {}
+    report_bodies: dict[date, dict[str, str]] = {}
     for ledger_date, path in sorted(ledgers):
         try:
             ledger = DailyFormalReviewLedgerV1.model_validate_json(
@@ -3021,8 +3338,18 @@ def _daily_review_history(
             )
         except (OSError, ValueError):
             continue
+        if any(review.current_review is None for review in ledger.reviews):
+            report_bodies[ledger_date] = _detail_report_bodies(
+                monitor_dir,
+                ledger_date,
+                ledger.as_of,
+            )
         for review in ledger.reviews:
             payload = review.model_dump(mode="json")
+            if payload["current_review"] is None:
+                payload["current_review"] = report_bodies[ledger_date].get(
+                    review.episode_id
+                )
             latest[review.episode_id] = payload
             if review.review_origin == "live":
                 previous_live = latest_live.get(review.episode_id, {})

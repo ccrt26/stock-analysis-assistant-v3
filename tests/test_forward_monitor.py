@@ -20,6 +20,7 @@ from stock_analyzer.ops.forward_monitor import (
     ForwardEpisodeReviewV1,
     ForwardMonitorAlertV2,
     _attention_reasons,
+    _checkpoint_review_scope,
     _human_trading_day,
     _parse_args,
     _render_markdown,
@@ -908,6 +909,7 @@ def test_public_markdown_hides_conditional_event_but_keeps_internal_json(
     )
     alert = _alert("603969.SH", episode["episode_id"])
     alert["original_engine_types"] = ["fresh_event_pending"]
+    _write_three_route_ledger(tmp_path, snapshot, [alert])
     pending = tmp_path / "pending-conditional.json"
     pending.write_text(
         json.dumps(
@@ -927,7 +929,7 @@ def test_public_markdown_hides_conditional_event_but_keeps_internal_json(
     assert saved["alerts"]
     assert "银龙股份" not in markdown
     assert "等待首个交易日确认" not in markdown
-    assert "今天没有被明确推荐过" in markdown
+    assert "今日无关键节点复盘。" in markdown
 
 
 def test_conditional_event_never_requires_or_accepts_a_d20_final_review(
@@ -2058,12 +2060,23 @@ def test_record_rejects_omitting_one_attention_episode_for_the_same_stock(
 
 def test_report_model_rejects_more_than_eight_or_duplicate_stocks() -> None:
     snapshot = {"analysis_date": "2026-08-03", "as_of": "2026-08-03T18:00:00+08:00", "summary": {"open_episode_count": 9, "distinct_stock_count": 9, "attention_stock_count": 9, "selected_count": 9, "comparator_count": 0, "primary_count": 9, "passive_tail_count": 0, "closed_count": 0}}
-    nine = [_alert(f"00000{i}.SZ", f"e{i}") for i in range(9)]
-    with pytest.raises(ValidationError):
-        DailyForwardMonitorReportV2.model_validate(_report_payload(snapshot, alerts=nine))
     duplicate = [_alert("000001.SZ", "e1"), _alert("000001.SZ", "e2")]
     with pytest.raises(ValidationError):
         DailyForwardMonitorReportV2.model_validate(_report_payload(snapshot, alerts=duplicate))
+    # V2 不再限制 alerts 总数（三路互斥后节点详评另计），重复仍拒绝。
+    thirteen = [_alert(f"{i:06d}.SZ", f"e{i}") for i in range(13)]
+    big_snapshot = {**snapshot, "summary": {**snapshot["summary"], "open_episode_count": 13, "distinct_stock_count": 13, "attention_stock_count": 13, "selected_count": 13, "primary_count": 13}}
+    report = DailyForwardMonitorReportV2.model_validate(
+        _report_payload(big_snapshot, alerts=thirteen)
+    )
+    assert len(report.alerts) == 13
+    v1_payload = _report_payload(
+        snapshot, alerts=[_alert(f"00000{i}.SZ", f"e{i}") for i in range(9)],
+        report_version="daily-forward-monitor-report-v1",
+    )
+    v1_payload["routine_summary"] = "其余股票继续按程序记录。"
+    with pytest.raises(ValidationError):
+        DailyForwardMonitorReportV1.model_validate(v1_payload)
 
 
 def test_report_accepts_eight_alerts_and_counts_the_rest() -> None:
@@ -2255,9 +2268,11 @@ def test_record_is_idempotent_and_preserves_conflicting_pending_report(tmp_path:
     snapshot = _prepare(tmp_path, sessions[0])
     snapshot_path = tmp_path / f"local_archive/forward_monitor/snapshot-{sessions[0]}.json"
     episode_id = snapshot["episodes"][0]["episode_id"]
+    alerts = [_alert("603969.SH", episode_id)]
+    _write_three_route_ledger(tmp_path, snapshot, alerts)
     payload = _report_payload(
         snapshot,
-        alerts=[_alert("603969.SH", episode_id)],
+        alerts=alerts,
     )
     first_pending = tmp_path / "first-pending.json"
     first_pending.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
@@ -2323,9 +2338,11 @@ def test_record_recovers_missing_markdown_without_rewriting_json(
     snapshot_path = (
         tmp_path / f"local_archive/forward_monitor/snapshot-{sessions[0]}.json"
     )
+    alerts = [_alert("603969.SH", snapshot["episodes"][0]["episode_id"])]
+    _write_three_route_ledger(tmp_path, snapshot, alerts)
     payload = _report_payload(
         snapshot,
-        alerts=[_alert("603969.SH", snapshot["episodes"][0]["episode_id"])],
+        alerts=alerts,
     )
     first_pending = tmp_path / "first-pending.json"
     first_pending.write_text(
@@ -2417,6 +2434,7 @@ def test_markdown_uses_plain_chinese_and_natural_review_sections(
         "而不是只随大盘或行业同步上涨，也没有新的公司事项足以解释。推荐时期待的"
         "持续强势已经实现，目前更接近上涨后整理；未来一至三个交易日更可能震荡偏强。"
     )
+    _write_three_route_ledger(tmp_path, snapshot, [alert])
     pending = tmp_path / "markdown-pending.json"
     pending.write_text(
         json.dumps(
@@ -2589,6 +2607,7 @@ def test_markdown_names_the_second_trading_day_with_d_label(
     alert = _alert("603969.SH", snapshot["episodes"][0]["episode_id"])
     alert["day_numbers"] = [2]
     alert["alert_type"] = "new_event"
+    _write_three_route_ledger(tmp_path, snapshot, [alert])
     pending = tmp_path / "pending-d2.json"
     pending.write_text(
         json.dumps(_report_payload(snapshot, alerts=[alert]), ensure_ascii=False),
@@ -2643,6 +2662,7 @@ def test_late_activation_markdown_uses_plain_tail_explanation(tmp_path: Path) ->
     alert["episode_reviews"][0]["final_twenty_day_review"] = _final_review(
         "unknown"
     )
+    _write_three_route_ledger(tmp_path, snapshot, [alert])
     pending = tmp_path / "pending-late-activation.json"
     pending.write_text(
         json.dumps(_report_payload(snapshot, alerts=[alert]), ensure_ascii=False),
@@ -2687,6 +2707,7 @@ def test_day_twenty_markdown_adds_final_review_section(tmp_path: Path) -> None:
         current_assessment="supported",
         final_twenty_day_review=_final_review(),
     )
+    _write_three_route_ledger(tmp_path, snapshot, [alert])
     pending = tmp_path / "pending-day-twenty.json"
     pending.write_text(
         json.dumps(_report_payload(snapshot, alerts=[alert]), ensure_ascii=False),
@@ -2777,6 +2798,9 @@ def test_record_requires_attention_stock_and_writes_short_json_and_markdown(tmp_
     snapshot = _prepare(tmp_path, sessions[0])
     snapshot_path = tmp_path / f"local_archive/forward_monitor/snapshot-{sessions[0]}.json"
     episode_id = snapshot["episodes"][0]["episode_id"]
+    _write_three_route_ledger(
+        tmp_path, snapshot, [_alert("603969.SH", episode_id)]
+    )
     invalid_file = tmp_path / "invalid.json"
     invalid_file.write_text(json.dumps(_report_payload(snapshot, alerts=[_alert("999999.SZ", episode_id)])), encoding="utf-8")
     with pytest.raises(ValueError, match="attention"):
@@ -2890,6 +2914,8 @@ def _record_review_payload(
     alert["day_numbers"] = snapshot["attention_stocks"][0]["day_numbers"]
     alert["roles"] = snapshot["attention_stocks"][0]["roles"]
     alert["episode_reviews"] = [review]
+    if "checkpoint_review_episode_ids" in snapshot:
+        _write_three_route_ledger(tmp_path, snapshot, [alert])
     pending_path.write_text(
         json.dumps(
             _report_payload(snapshot, alerts=[alert]),
@@ -4231,6 +4257,9 @@ def _daily_formal_review(
     tracking_decision: str = "keep_active_tracking",
     review_origin: str = "live",
     final: dict | None = None,
+    review_kind: str | None = None,
+    outlook_1_3d: str = "range_or_wait",
+    outlook_reason_plain_language: str = "最近收盘没有形成新的方向。",
 ) -> dict:
     return {
         "episode_id": episode_id,
@@ -4241,10 +4270,11 @@ def _daily_formal_review(
         "best_supported_explanation": "stock_specific_move",
         "current_weak_or_failed_link": current_weak_or_failed_link,
         "current_review": "当前走势横盘，原判断没有出现实质变化。",
+        "review_kind": review_kind,
         "view_change": view_change,
         "view_change_reason": "与上一交易日相比，决定判断的事实没有变化。",
-        "outlook_1_3d": "range_or_wait",
-        "outlook_reason_plain_language": "最近收盘没有形成新的方向。",
+        "outlook_1_3d": outlook_1_3d,
+        "outlook_reason_plain_language": outlook_reason_plain_language,
         "tracking_decision": tracking_decision,
         "tracking_decision_reason": "原推荐最重要的判断仍未被事实否定。",
         "review_origin": review_origin,
@@ -4296,12 +4326,28 @@ def test_daily_formal_review_models_define_the_v1_contract() -> None:
     assert set(DailyFormalReviewV1.model_fields) == {
         "episode_id", "day_number", "checkpoint", "current_assessment",
         "current_path", "best_supported_explanation",
-        "current_weak_or_failed_link", "current_review", "view_change",
-        "view_change_reason", "outlook_1_3d",
+        "current_weak_or_failed_link", "current_review", "review_kind",
+        "view_change", "view_change_reason", "outlook_1_3d",
         "outlook_reason_plain_language", "tracking_decision",
         "tracking_decision_reason", "review_origin",
         "final_twenty_day_review",
     }
+    brief_body = dict(json.loads(json.dumps(payload))["reviews"][0])
+    brief_body.update(review_kind="brief", current_review="简评正文。")
+    DailyFormalReviewLedgerV1.model_validate({**payload, "reviews": [brief_body]})
+    detail_body = dict(brief_body)
+    detail_body.update(review_kind="checkpoint_detail", current_review=None)
+    DailyFormalReviewLedgerV1.model_validate({**payload, "reviews": [detail_body]})
+    detail_with_brief = dict(detail_body, current_review="不应存在的简评。")
+    with pytest.raises(ValidationError):
+        DailyFormalReviewLedgerV1.model_validate(
+            {**payload, "reviews": [detail_with_brief]}
+        )
+    brief_without_body = dict(brief_body, current_review=None)
+    with pytest.raises(ValidationError):
+        DailyFormalReviewLedgerV1.model_validate(
+            {**payload, "reviews": [brief_without_body]}
+        )
     invalid = json.loads(json.dumps(payload))
     invalid["reviews"][0]["current_path"] = "震荡偏上"
     with pytest.raises(ValidationError):
@@ -4477,6 +4523,7 @@ def _record_daily_review_for_snapshot(
     snapshot: dict,
     review: dict,
 ) -> None:
+    _derive_review_kinds(snapshot, [review])
     monitor_dir = root / "local_archive/forward_monitor"
     monitor_dir.mkdir(parents=True, exist_ok=True)
     snapshot_path = monitor_dir / f"snapshot-{snapshot['analysis_date']}.json"
@@ -4488,7 +4535,7 @@ def _record_daily_review_for_snapshot(
                 "ledger_version": DAILY_FORMAL_REVIEWS_VERSION,
                 "analysis_date": snapshot["analysis_date"],
                 "as_of": snapshot["as_of"],
-                "reviews": [review],
+                "reviews": [_clean_review_for_ledger(review)],
             }
         ),
         encoding="utf-8",
@@ -4521,7 +4568,9 @@ def test_prepare_includes_every_active_formal_episode_in_daily_reviews(
     assert d2["episodes"][0]["tracking_status"] == "active"
     assert d2["summary"]["active_tracking_count"] == 1
     assert d2["summary"]["daily_review_episode_count"] == 1
-    assert d2["summary"]["detailed_review_stock_count"] == 1
+    assert d2["summary"]["checkpoint_review_stock_count"] == 0
+    assert d2["summary"]["regular_detail_stock_limit"] == 1
+    assert d2["checkpoint_review_episode_ids"] == []
     assert d2["detailed_review_candidate_codes"] == ["603969.SH"]
 
 
@@ -4687,7 +4736,10 @@ def _daily_detail_alert(episode: dict, daily_review: dict) -> dict:
         episode_reviews=[
             {
                 **_episode_review(episode["episode_id"]),
-                "current_review": daily_review["current_review"],
+                "current_review": (
+                    daily_review.get("_detail_body")
+                    or daily_review["current_review"]
+                ),
                 "current_assessment": daily_review["current_assessment"],
                 "best_supported_explanation": (
                     daily_review["best_supported_explanation"]
@@ -4706,7 +4758,41 @@ def _daily_detail_alert(episode: dict, daily_review: dict) -> dict:
     return alert
 
 
+def _derive_review_kinds(snapshot: dict, reviews: list[dict]) -> None:
+    """三路快照的测试账本默认派生 kind：节点股checkpoint，非节点regular。
+
+    详评正文按新合同不属于账本，移入 `_detail_body` 供报告 alert 沿用。
+    """
+    if "checkpoint_review_episode_ids" not in snapshot:
+        return
+    node_codes, _ = _checkpoint_review_scope(snapshot=snapshot)
+    for review in reviews:
+        if review.get("review_kind"):
+            continue
+        episode = next(
+            (
+                item for item in snapshot["episodes"]
+                if item.get("episode_id") == review["episode_id"]
+            ),
+            {},
+        )
+        kind = (
+            "checkpoint_detail"
+            if episode.get("ts_code") in node_codes
+            else "regular_detail"
+        )
+        if kind != "brief":
+            review["_detail_body"] = review.get("current_review")
+            review["current_review"] = None
+        review["review_kind"] = kind
+
+
+def _clean_review_for_ledger(review: dict) -> dict:
+    return {key: value for key, value in review.items() if not key.startswith("_")}
+
+
 def _write_daily_ledger(root: Path, snapshot: dict, reviews: list[dict]) -> None:
+    _derive_review_kinds(snapshot, reviews)
     monitor_dir = root / "local_archive/forward_monitor"
     monitor_dir.mkdir(parents=True, exist_ok=True)
     (monitor_dir / f"daily-formal-reviews-{snapshot['analysis_date']}.json").write_text(
@@ -4715,7 +4801,9 @@ def _write_daily_ledger(root: Path, snapshot: dict, reviews: list[dict]) -> None
                 "ledger_version": DAILY_FORMAL_REVIEWS_VERSION,
                 "analysis_date": snapshot["analysis_date"],
                 "as_of": snapshot["as_of"],
-                "reviews": reviews,
+                "reviews": [
+                    _clean_review_for_ledger(review) for review in reviews
+                ],
             }
         ),
         encoding="utf-8",
@@ -5510,3 +5598,382 @@ def test_prepare_review_context_keeps_legacy_metrics_and_pair_shapes(
         item["episode_id"] for item in summary["episodes"] if "review_context" in item
     }
     assert with_context == set(summary["daily_review_episode_ids"])
+
+
+def test_three_routes_five_nodes_eight_details_eight_briefs(tmp_path: Path):
+    snapshot, reviews = _multi_daily_formal_snapshot(21)
+    node_ids = []
+    for i, (episode, review) in enumerate(zip(snapshot["episodes"], reviews)):
+        kind = "checkpoint_detail" if i < 5 else "regular_detail" if i < 13 else "brief"
+        review["review_kind"] = kind
+        if i < 5:
+            episode.update(day_number=10, checkpoint="D10")
+            review.update(day_number=10, checkpoint="D10")
+            node_ids.append(episode["episode_id"])
+        review["current_review"] = None if i < 13 else f"简评正文{i}。"
+    snapshot["checkpoint_review_episode_ids"] = node_ids
+    snapshot["detailed_review_candidate_codes"] = [
+        e["ts_code"] for e in snapshot["episodes"][5:]]
+    snapshot["summary"].pop("detailed_review_stock_count", None)
+    snapshot["summary"].update(checkpoint_review_stock_count=5, regular_detail_stock_limit=8)
+    snapshot_path = tmp_path / "snapshot.json"
+    snapshot_path.write_text(json.dumps(snapshot), encoding="utf-8")
+    ledger_pending = tmp_path / "pending-ledger.json"
+    ledger_pending.write_text(json.dumps({
+        "ledger_version": DAILY_FORMAL_REVIEWS_VERSION,
+        "analysis_date": snapshot["analysis_date"], "as_of": snapshot["as_of"],
+        "reviews": reviews,
+    }), encoding="utf-8")
+    saved_ledger = record_daily_formal_reviews(
+        snapshot_file=snapshot_path, review_file=ledger_pending, project_root=tmp_path)
+    assert saved_ledger.review_count == 21
+    alerts = []
+    for i in range(13):
+        alert = _daily_detail_alert(snapshot["episodes"][i], reviews[i])
+        alert["episode_reviews"][0]["current_review"] = f"唯一详评正文{i}。"
+        alerts.append(alert)
+    pending = tmp_path / "pending-report.json"
+    pending.write_text(json.dumps(_report_payload(snapshot, alerts=alerts)), encoding="utf-8")
+    result = record_forward_monitor(
+        snapshot_file=snapshot_path, report_file=pending, project_root=tmp_path)
+    assert result.alert_count == 13
+    markdown = Path(result.markdown_file).read_text(encoding="utf-8")
+    assert "关键节点复盘（5只）" in markdown
+    assert "今日深入复盘（8只）" in markdown
+    assert "今日简评（8只）" in markdown
+    for i in range(13):
+        assert markdown.count(f"唯一详评正文{i}。") == 1
+    for i in range(13, 21):
+        assert markdown.count(f"简评正文{i}。") == 1
+    stored = json.loads(Path(saved_ledger.json_file).read_text(encoding="utf-8"))
+    assert sum(r["current_review"] is not None for r in stored["reviews"]) == 8
+
+
+def test_prepare_groups_same_stock_episodes_into_checkpoint_scope(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from stock_analyzer.ops import forward_monitor as forward_monitor_module
+
+    trace_a = _single_selected_trace(
+        formation_date="2026-07-30", action_date="2026-07-31",
+    )
+    trace_b = _single_selected_trace(
+        formation_date="2026-08-04", action_date="2026-08-05",
+    )
+    archive = tmp_path / "local_archive/forward_selection"
+    archive.mkdir(parents=True)
+    _write_trace(archive / "research-trace-2026-07-31.json", trace_a)
+    _write_trace(archive / "research-trace-2026-08-05.json", trace_b)
+    sessions = _seed_monitor_project(tmp_path, trace=trace_a, session_count=13)
+
+    calls: dict[str, dict] = {}
+    original_scope = forward_monitor_module._checkpoint_review_scope
+
+    def spy(*, snapshot: dict) -> tuple[set[str], set[str]]:
+        calls["snapshot"] = snapshot
+        return original_scope(snapshot=snapshot)
+
+    monkeypatch.setattr(
+        forward_monitor_module, "_checkpoint_review_scope", spy
+    )
+    summary = _prepare(tmp_path, sessions[-1])
+    assert {"daily_review_episode_ids", "episodes",
+            "required_final_review_episode_ids"} <= set(calls["snapshot"])
+    episode_ids = {e["episode_id"] for e in summary["episodes"]}
+    assert len(episode_ids) == 2
+    # 同股一条到节点（第10日），该股全部合格episode统一进节点区。
+    assert len(summary["checkpoint_review_episode_ids"]) == 2
+    assert set(summary["checkpoint_review_episode_ids"]) == episode_ids
+    assert summary["detailed_review_candidate_codes"] == []
+    assert summary["summary"]["checkpoint_review_stock_count"] == 1
+    assert summary["summary"]["regular_detail_stock_limit"] == 0
+
+
+def _write_three_route_ledger(
+    tmp_path: Path,
+    snapshot: dict,
+    alerts: list[dict] | None = None,
+) -> None:
+    """为 prepare 生成的三路快照写默认派生账本（详评正文在报告中）。
+
+    结构化判断默认与 alert/episode_review 保持一致，满足一致性校验。
+    """
+    alerts = alerts or []
+    episodes = {e["episode_id"]: e for e in snapshot["episodes"]}
+    alert_by_code = {a["ts_code"]: a for a in alerts}
+    alert_review_by_id = {
+        r["episode_id"]: r
+        for a in alerts
+        for r in a["episode_reviews"]
+    }
+    reviews = []
+    for episode_id in snapshot["daily_review_episode_ids"]:
+        episode = episodes[episode_id]
+        ar = alert_review_by_id.get(episode_id, {})
+        a = alert_by_code.get(episode.get("ts_code"), {})
+        day_number = int(episode["day_number"])
+        final = ar.get("final_twenty_day_review")
+        if final is None and day_number >= 20:
+            final = _final_review()
+        reviews.append(
+            _daily_formal_review(
+                episode_id,
+                day_number=day_number,
+                checkpoint=episode.get("checkpoint"),
+                current_assessment=ar.get(
+                    "current_assessment", "partly_supported"
+                ),
+                current_weak_or_failed_link=ar.get(
+                    "current_weak_or_failed_link", "none"
+                ),
+                final=final,
+                outlook_1_3d=a.get("outlook_1_3d", "range_or_wait"),
+                outlook_reason_plain_language=a.get(
+                    "outlook_reason_plain_language",
+                    "最近收盘没有形成新的方向。",
+                ),
+            )
+        )
+    _write_daily_ledger(tmp_path, snapshot, reviews)
+
+
+def _three_route_case(
+    count_nodes: int,
+    count_regular: int,
+    count_briefs: int,
+    *,
+    node_day: int = 10,
+) -> tuple[dict, list[dict]]:
+    snapshot, reviews = _multi_daily_formal_snapshot(
+        count_nodes + count_regular + count_briefs
+    )
+    node_ids = []
+    node_checkpoint = f"D{node_day}" if node_day in {1, 3, 5, 10, 20} else None
+    for i, (episode, review) in enumerate(
+        zip(snapshot["episodes"], reviews)
+    ):
+        if i < count_nodes:
+            episode.update(day_number=node_day, checkpoint=node_checkpoint)
+            review.update(day_number=node_day, checkpoint=node_checkpoint)
+            node_ids.append(episode["episode_id"])
+        if i < count_nodes + count_regular:
+            kind = "checkpoint_detail" if i < count_nodes else "regular_detail"
+            review["review_kind"] = kind
+            review["_body"] = f"唯一详评正文{i}。"
+            review["current_review"] = None
+        else:
+            review["review_kind"] = "brief"
+            review["current_review"] = f"简评正文{i}。"
+    snapshot["checkpoint_review_episode_ids"] = node_ids
+    snapshot["detailed_review_candidate_codes"] = [
+        e["ts_code"] for e in snapshot["episodes"][count_nodes:]
+    ]
+    snapshot["summary"].pop("detailed_review_stock_count", None)
+    snapshot["summary"].update(
+        checkpoint_review_stock_count=count_nodes,
+        regular_detail_stock_limit=min(8, count_regular + count_briefs),
+    )
+    return snapshot, reviews
+
+
+def _record_three_route(tmp_path: Path, snapshot: dict, reviews: list[dict]):
+    snapshot_path = tmp_path / "snapshot.json"
+    snapshot_path.write_text(json.dumps(snapshot), encoding="utf-8")
+    ledger_pending = tmp_path / "pending-ledger.json"
+    ledger_pending.write_text(json.dumps({
+        "ledger_version": DAILY_FORMAL_REVIEWS_VERSION,
+        "analysis_date": snapshot["analysis_date"],
+        "as_of": snapshot["as_of"],
+        "reviews": [_clean_review_for_ledger(r) for r in reviews],
+    }), encoding="utf-8")
+    record_daily_formal_reviews(
+        snapshot_file=snapshot_path,
+        review_file=ledger_pending,
+        project_root=tmp_path,
+    )
+    episodes = {e["episode_id"]: e for e in snapshot["episodes"]}
+    review_by_id = {r["episode_id"]: r for r in reviews}
+    alerts = []
+    seen_codes: set[str] = set()
+    for review in reviews:
+        episode = episodes[review["episode_id"]]
+        if review["review_kind"] == "brief" or episode["ts_code"] in seen_codes:
+            continue
+        seen_codes.add(episode["ts_code"])
+        alert = _daily_detail_alert(episode, review)
+        alert["episode_reviews"][0]["current_review"] = review["_body"]
+        alerts.append(alert)
+    pending = tmp_path / "pending-report.json"
+    pending.write_text(
+        json.dumps(_report_payload(snapshot, alerts=alerts)),
+        encoding="utf-8",
+    )
+    return snapshot_path, pending
+
+
+def test_three_routes_nine_nodes_plus_eight_regular_accepted(tmp_path: Path) -> None:
+    snapshot, reviews = _three_route_case(9, 8, 4)
+    snapshot_path, pending = _record_three_route(tmp_path, snapshot, reviews)
+    result = record_forward_monitor(
+        snapshot_file=snapshot_path, report_file=pending, project_root=tmp_path
+    )
+    assert result.alert_count == 17
+    markdown = Path(result.markdown_file).read_text(encoding="utf-8")
+    assert "关键节点复盘（9只）" in markdown
+    assert "今日深入复盘（8只）" in markdown
+    assert "今日简评（4只）" in markdown
+    assert "今日深入复盘（9只）" not in markdown
+
+
+def test_three_routes_rejects_nine_regular_details(tmp_path: Path) -> None:
+    snapshot, reviews = _three_route_case(9, 9, 3)
+    # 9只普通详评超过上限：在账本阶段即被拒绝。
+    with pytest.raises(ValueError, match="regular details"):
+        _record_three_route(tmp_path, snapshot, reviews)
+
+
+def test_three_routes_zero_nodes_all_briefs_accepted(tmp_path: Path) -> None:
+    snapshot, reviews = _three_route_case(0, 0, 5)
+    snapshot_path, pending = _record_three_route(tmp_path, snapshot, reviews)
+    result = record_forward_monitor(
+        snapshot_file=snapshot_path, report_file=pending, project_root=tmp_path
+    )
+    markdown = Path(result.markdown_file).read_text(encoding="utf-8")
+    assert "今日无关键节点复盘。" in markdown
+    assert "今日无深入复盘。" in markdown
+    assert "今日简评（5只）" in markdown
+
+
+def test_three_routes_missing_node_coverage_rejected(tmp_path: Path) -> None:
+    snapshot, reviews = _three_route_case(2, 2, 2)
+    snapshot_path, pending = _record_three_route(tmp_path, snapshot, reviews)
+    # 漏掉一只节点股的报告：从报告移除该股 alert，账本保持完整。
+    dropped = snapshot["checkpoint_review_episode_ids"][0]
+    payload = json.loads(pending.read_text(encoding="utf-8"))
+    payload["alerts"] = [
+        a for a in payload["alerts"]
+        if dropped not in a["episode_ids"]
+    ]
+    pending.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(
+        ValueError,
+        match="report stocks must be exactly the checkpoint and regular",
+    ):
+        record_forward_monitor(
+            snapshot_file=snapshot_path,
+            report_file=pending,
+            project_root=tmp_path,
+        )
+
+
+def test_three_routes_brief_stock_cannot_carry_alert(tmp_path: Path) -> None:
+    snapshot, reviews = _three_route_case(1, 1, 2)
+    brief_review = next(r for r in reviews if r["review_kind"] == "brief")
+    brief_episode = next(
+        e for e in snapshot["episodes"]
+        if e["episode_id"] == brief_review["episode_id"]
+    )
+    snapshot_path, pending = _record_three_route(tmp_path, snapshot, reviews)
+    payload = json.loads(pending.read_text(encoding="utf-8"))
+    payload["alerts"].append(
+        _daily_detail_alert(brief_episode, brief_review)
+    )
+    pending.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(ValueError, match="exactly the checkpoint and regular"):
+        record_forward_monitor(
+            snapshot_file=snapshot_path,
+            report_file=pending,
+            project_root=tmp_path,
+        )
+
+
+def test_three_routes_regular_priority_over_eight_enforced(tmp_path: Path) -> None:
+    # 9只非节点股出现重要观点变化：只能8只详评（全部来自优先股）＋1只简评。
+    snapshot, reviews = _three_route_case(0, 8, 1)
+    for review in reviews:
+        review["view_change"] = "weakened"
+    snapshot_path, pending = _record_three_route(tmp_path, snapshot, reviews)
+    result = record_forward_monitor(
+        snapshot_file=snapshot_path, report_file=pending, project_root=tmp_path
+    )
+    assert result.alert_count == 8
+
+    # 优先股不足8只时必须全部纳入详评：重要变化落在简评股上即拒绝。
+    case2 = tmp_path / "case2"
+    case2.mkdir()
+    snapshot2, reviews2 = _three_route_case(0, 2, 3)
+    for review in reviews2:
+        if review["review_kind"] == "brief":
+            review["view_change"] = "weakened"
+    snapshot_path2, pending2 = _record_three_route(case2, snapshot2, reviews2)
+    with pytest.raises(ValueError, match="omit a stop or key view change"):
+        record_forward_monitor(
+            snapshot_file=snapshot_path2,
+            report_file=pending2,
+            project_root=case2,
+        )
+
+
+def test_three_routes_new_snapshot_without_ledger_fails(tmp_path: Path) -> None:
+    snapshot, reviews = _three_route_case(1, 1, 1)
+    snapshot_path = tmp_path / "snapshot.json"
+    snapshot_path.write_text(json.dumps(snapshot), encoding="utf-8")
+    episodes = {e["episode_id"]: e for e in snapshot["episodes"]}
+    detail_review = next(r for r in reviews if r["review_kind"] != "brief")
+    alert = _daily_detail_alert(
+        episodes[detail_review["episode_id"]], detail_review
+    )
+    alert["episode_reviews"][0]["current_review"] = detail_review["_body"]
+    pending = tmp_path / "pending-report.json"
+    pending.write_text(
+        json.dumps(_report_payload(snapshot, alerts=[alert])),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="requires the daily formal review ledger"):
+        record_forward_monitor(
+            snapshot_file=snapshot_path,
+            report_file=pending,
+            project_root=tmp_path,
+        )
+
+
+def test_next_day_prepare_restores_detail_body_from_report(tmp_path: Path) -> None:
+    trace = _single_selected_trace(
+        formation_date="2026-07-31", action_date="2026-08-03",
+    )
+    archive = tmp_path / "local_archive/forward_selection"
+    archive.mkdir(parents=True)
+    _write_trace(archive / "research-trace-2026-07-31.json", trace)
+    sessions = _seed_monitor_project(tmp_path, trace=trace, session_count=12)
+    snapshot = _prepare(tmp_path, sessions[9])
+    episode_id = snapshot["daily_review_episode_ids"][0]
+    detail_text = "D10详评正文：前半程对账的唯一公开正文。"
+    daily = _daily_formal_review(
+        episode_id, day_number=10, checkpoint="D10",
+        review_kind="checkpoint_detail",
+    )
+    daily["current_review"] = None
+    daily["_detail_body"] = detail_text
+    _record_daily_review_for_snapshot(tmp_path, snapshot, daily)
+    alert = _daily_detail_alert(snapshot["episodes"][0], daily)
+    alert["episode_reviews"][0]["current_review"] = detail_text
+    pending = tmp_path / "pending.json"
+    pending.write_text(json.dumps(_report_payload(snapshot, alerts=[alert])), encoding="utf-8")
+    record_forward_monitor(
+        snapshot_file=tmp_path / "local_archive/forward_monitor/snapshot-2026-08-31.json"
+        if False else Path(_snapshot_path_for(tmp_path, snapshot)),
+        report_file=pending,
+        project_root=tmp_path,
+    )
+    next_day = _prepare(tmp_path, sessions[10])
+    previous = next_day["episodes"][0]["previous_daily_formal_review"]
+    assert previous["current_review"] == detail_text
+    assert previous["review_kind"] == "checkpoint_detail"
+
+
+def _snapshot_path_for(tmp_path: Path, snapshot: dict) -> str:
+    return str(
+        tmp_path
+        / "local_archive/forward_monitor"
+        / f"snapshot-{snapshot['analysis_date']}.json"
+    )

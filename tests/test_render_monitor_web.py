@@ -733,3 +733,131 @@ def test_scan_history_same_stock_two_episodes_do_not_swap_texts(tmp_path: Path) 
     assert history["e-a"][0]["summary_copy"] == "简评A。"
     assert history["e-b"][0]["copy"] == detail_b
     assert history["e-b"][0]["summary_copy"] == "简评B。"
+
+
+def _write_three_route_day(
+    tmp_path: Path,
+    *,
+    episode_id: str = "e1",
+    code: str = "600000.SH",
+    day: str = "2026-09-02",
+    checkpoint_ids: list[str],
+    ledger_review: dict,
+    report_text: str = "详评正文：独立展开的唯一正文。",
+) -> None:
+    episode = _episode(episode_id, code, "示例股份")
+    snapshot = _snapshot([episode])
+    snapshot["checkpoint_review_episode_ids"] = checkpoint_ids
+    report = _report([_alert(episode_id)])
+    report["alerts"][0]["episode_reviews"][0]["current_review"] = report_text
+    ledger = {
+        "ledger_version": "daily-formal-reviews-v1",
+        "analysis_date": day,
+        "as_of": "2026-09-03T09:00:00+08:00",
+        "reviews": [ledger_review],
+    }
+    _write_history_inputs(
+        tmp_path, report=report, ledger=ledger, snapshot=snapshot, day=day
+    )
+
+
+def _three_route_ledger_review(
+    episode_id: str,
+    *,
+    kind: str,
+    text: str | None,
+) -> dict:
+    base = _ledger_review(episode_id, text or "")
+    base["review_kind"] = kind
+    base["current_review"] = text
+    return base
+
+
+def test_scan_history_merges_checkpoint_detail_from_report(tmp_path: Path) -> None:
+    detail_text = "节点详评正文：唯一公开对账。" + "补充阶段事实。" * 10
+    _write_three_route_day(
+        tmp_path,
+        checkpoint_ids=["e1"],
+        ledger_review=_three_route_ledger_review(
+            "e1", kind="checkpoint_detail", text=None
+        ),
+        report_text=detail_text,
+    )
+    history = scan_history(tmp_path, date(2026, 9, 2))
+    review = history["e1"][0]
+    assert review["copy"] == detail_text
+    assert review["summary_copy"] == detail_text
+    assert review["headline"].startswith("节点详评正文")
+    assert review["review_kind"] == "checkpoint_detail"
+    assert review["viewLabel"] == "观点减弱"
+    assert review["confirm"] == "增强条件。"
+
+
+def test_scan_history_merges_regular_detail_and_reads_brief(tmp_path: Path) -> None:
+    _write_three_route_day(
+        tmp_path,
+        checkpoint_ids=[],
+        ledger_review=_three_route_ledger_review(
+            "e1", kind="regular_detail", text=None
+        ),
+        report_text="普通详评正文。",
+    )
+    review = scan_history(tmp_path, date(2026, 9, 2))["e1"][0]
+    assert review["copy"] == "普通详评正文。"
+    assert review["summary_copy"] == "普通详评正文。"
+    assert review["review_kind"] == "regular_detail"
+
+    # 简评股没有alert：仅账本即可读。
+    tmp_brief = tmp_path / "brief"
+    tmp_brief.mkdir()
+    _write_history_inputs(
+        tmp_brief,
+        report=None,
+        ledger={
+            "ledger_version": "daily-formal-reviews-v1",
+            "analysis_date": "2026-09-02",
+            "as_of": "2026-09-03T09:00:00+08:00",
+            "reviews": [_ledger_review("e1", "只有简评正文。")],
+        },
+        snapshot=_snapshot([_episode("e1", "600000.SH", "示例股份")]),
+    )
+    brief_review = scan_history(tmp_brief, date(2026, 9, 2))["e1"][0]
+    assert brief_review["copy"] == "只有简评正文。"
+    assert brief_review["review_kind"] == "brief"
+
+
+def test_scan_history_detail_without_report_shows_placeholder(tmp_path: Path) -> None:
+    _write_three_route_day(
+        tmp_path,
+        checkpoint_ids=["e1"],
+        ledger_review=_three_route_ledger_review(
+            "e1", kind="checkpoint_detail", text=None
+        ),
+        report_text="不会被读到的正文。",
+    )
+    (tmp_path / "monitor-report-2026-09-02.json").unlink()
+    review = scan_history(tmp_path, date(2026, 9, 2))["e1"][0]
+    assert review["copy"] == "详评正文未保存。"
+    assert review["summary_copy"] == "详评正文未保存。"
+
+
+def test_scan_history_does_not_merge_across_different_as_of(tmp_path: Path) -> None:
+    detail_text = "详评正文保持不变。"
+    _write_three_route_day(
+        tmp_path,
+        checkpoint_ids=["e1"],
+        ledger_review=_three_route_ledger_review(
+            "e1", kind="checkpoint_detail", text=None
+        ),
+        report_text=detail_text,
+    )
+    # 账本 as_of 与报告不同：不得用账本结构化观点覆盖报告条目。
+    ledger_path = tmp_path / "daily-formal-reviews-2026-09-02.json"
+    ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
+    ledger["as_of"] = "2026-09-03T10:30:00+08:00"
+    ledger_path.write_text(json.dumps(ledger), encoding="utf-8")
+    review = scan_history(tmp_path, date(2026, 9, 2))["e1"][0]
+    assert review["copy"] == detail_text
+    # 账本未合并：观点标签保留报告自算结果，而非账本的“观点减弱”。
+    assert review["viewLabel"] == "观点调整"
+    assert review["viewReason"] == ""
