@@ -464,3 +464,16 @@ def test_monitor_shares_evening_cutoff_with_selection():
     assert "--as-of <selection_as_of>" in text
     assert "next-morning" not in text
     assert "09:05" not in text
+
+
+def test_review_prompt_pins_plain_language_standard_and_style_anchor() -> None:
+    monitor = Path("ops/forward-monitor-prompt.md").read_text(encoding="utf-8")
+    skill = Path(
+        ".agents/skills/reviewing-stock-recommendations/SKILL.md"
+    ).read_text(encoding="utf-8")
+
+    for phrase in ("直接说事，不表演通俗", "不打比方", "文风基准",
+                   "缩量整理两天后今天放量再攻"):
+        assert phrase in monitor
+    for phrase in ("直接说事，不表演通俗", "人话优先"):
+        assert phrase in skill
