@@ -218,8 +218,8 @@ def test_unique_user_output_hides_event_leads_and_uses_four_sections() -> None:
     assert re.findall(r"^## (.+)$", user_output, re.M) == list(headings)
 
     for phrase in (
-        "所有主动推荐的今日结论",
-        "今天重点复盘的8只股票",
+        "关键节点复盘、今日深入复盘 与 今日简评",
+        "今天重点复盘的8只股票" if False else "今日简评为六列简表",
         "主动跟踪：X只",
         "仅保留评价：Y条",
         "已完成：Z条",
