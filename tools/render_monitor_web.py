@@ -2178,12 +2178,15 @@ function renderReview(){
  $("rBadges").innerHTML = badges;
  if(!r){
   $("rDate").textContent = selDay != null ? `${s.recDate}入选 · 当前${dayLabel(selDay)}/20 · ${DATES[candleIdxOfDay(s,selDay)] || ""}` : `${s.recDate}入选`;
+  $("rHeadline").style.display = "";
   $("rHeadline").textContent = latest ? "当日无复盘正文" : "这只股票还没有被复盘过";
   $("rCopy").textContent = "每个收盘日都会生成简短复盘；没有正文的日期通常是当日没有可评价的新事实。可在上方查看当日价格与成交" + (latest ? "，或回到最新观点。" : "。");
   $("rReview").innerHTML = "";
  }else{
   $("rDate").textContent = `${s.recDate}入选 · 当前${dayLabel(r.day)}/20 · ${DATES[candleIdxOfDay(s,r.day)] || ""}`;
-  $("rHeadline").textContent = r.headline;
+  // 标题=正文首句的自动提取，正文已完整展示，避免同句重复
+  $("rHeadline").textContent = "";
+  $("rHeadline").style.display = "none";
   $("rCopy").textContent = r.copy;
   const rows = [];
   if(r.assessmentText)rows.push(["当日结论",`<b>${esc(r.assessmentText)}</b>`]);
