@@ -483,3 +483,21 @@ def test_review_prompt_pins_plain_language_standard_and_style_anchor() -> None:
     for legacy in ("最多4个", "60—140", "150—320", "180—350", "400—800"):
         assert legacy not in monitor
         assert legacy not in skill
+    # 节点深度统一：六项对账清单与银龙节点范例必须钉住。
+    for phrase in ("六项信息缺一不可", "该日尚无此项可对"):
+        assert phrase in monitor
+        assert phrase in skill
+    for phrase in ("节点范例（银龙股份", "首日复盘（执行性日）",
+                   "第 3 个交易日（持续性首检）", "第一周小结"):
+        assert phrase in monitor
+    # 旧“D10专属风格”框架不得残留在上位规则。
+    for stale in ("D10阶段对账风格", "阶段对账文风"):
+        for rule_path in (
+            "AGENTS.md",
+            "ops/forward-monitor-prompt.md",
+            ".agents/skills/orchestrating-stock-research/SKILL.md",
+            ".agents/skills/reviewing-stock-recommendations/SKILL.md",
+            "docs/architecture/forward-monitoring-v1.md",
+        ):
+            assert stale not in Path(rule_path).read_text(encoding="utf-8"), (
+                rule_path, stale)
