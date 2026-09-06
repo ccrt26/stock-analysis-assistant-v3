@@ -14,6 +14,7 @@ def test_repository_rules_preserve_the_full_daily_user_report() -> None:
     text = Path("AGENTS.md").read_text(encoding="utf-8")
 
     assert "正式每日选股与复盘自动任务属于用户报告生产" in text
+    assert "禁止用程序模板拼接生成" in text
 
 
 def test_forward_monitor_prompt_limits_ai_work_and_report_size() -> None:
@@ -484,12 +485,24 @@ def test_review_prompt_pins_plain_language_standard_and_style_anchor() -> None:
         assert legacy not in monitor
         assert legacy not in skill
     # 节点深度统一：六项对账清单与银龙节点范例必须钉住。
-    for phrase in ("六项信息缺一不可", "该日尚无此项可对"):
+    for phrase in ("六项信息缺一不可", "该日尚无此项可对",
+                   "事实—这说明什么—还不能证明什么"):
         assert phrase in monitor
         assert phrase in skill
-    for phrase in ("节点范例（银龙股份", "首日复盘（执行性日）",
-                   "第 3 个交易日（持续性首检）", "第一周小结"):
-        assert phrase in monitor
+    assert "节点范例（银龙股份" in monitor
+    assert "立场＋当前最重要的1—2个支持事实＋限制因素" in monitor
+    assert "条件句只允许收在节点详评结尾" in monitor
+    assert "判断给理由了吗" in monitor
+    assert "逐只撰写" in monitor
+    for opener in ("首日与大盘同步",
+                   "第三天出现了推荐后第一个有分量的证据",
+                   "第一周结束，当初的判断兑现了大半",
+                   "第十天，涨势停了三天"):
+        assert opener in monitor
+    # 旧标签式范例开头与旧D10样本不得回潮。
+    for stale in ("首日复盘（执行性日）", "第 3 个交易日（持续性首检）",
+                  "第一周小结", "缩量整理第三天"):
+        assert stale not in monitor
     # 旧“D10专属风格”框架不得残留在上位规则。
     for stale in ("D10阶段对账风格", "阶段对账文风"):
         for rule_path in (
