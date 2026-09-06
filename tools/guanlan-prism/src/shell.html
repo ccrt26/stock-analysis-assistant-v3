@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark light"><meta name="description" content="观澜 · 光场 PRISM V2：个人股票复盘工作台，独立离线交互演示。">
+<title>观澜 · 光场 PRISM — 收盘之后，看清变化</title>
+<style>/*__CSS__*/</style>
+</head>
+<body>
+<a class="skip-link" href="#content">跳到主要内容</a>
+<div class="ambient" aria-hidden="true"><canvas id="prismField"></canvas></div>
+<aside class="sidebar" id="sidebar">
+  <button class="brand" data-nav="overview" aria-label="观澜，返回总览"><span class="brand-mark"><svg viewBox="0 0 44 48" fill="none" aria-hidden="true"><defs><linearGradient id="brandPrism" x1="4" y1="0" x2="42" y2="47" gradientUnits="userSpaceOnUse"><stop stop-color="#c4ffe9"/><stop offset=".43" stop-color="#79ded9"/><stop offset="1" stop-color="#9896f5"/></linearGradient></defs><path d="M3 32 17 5 29 32 23 32 17 17 9 32Z" fill="url(#brandPrism)"/><path d="m23 32 9-20 10 20h-6l-4-9-4 9Z" fill="url(#brandPrism)" opacity=".75"/><path d="m5 38 12-23 12 23" stroke="url(#brandPrism)" stroke-width="1" opacity=".4"/><path d="m24 38 8-17 8 17" stroke="url(#brandPrism)" stroke-width="1" opacity=".2"/></svg></span><span><b>观澜</b><small>AFTERCLOSE / PRISM</small></span></button>
+  <div class="space-label">个人研究空间 <span>V.02</span></div>
+  <nav aria-label="主导航">
+    <button class="nav-item active" data-nav="overview"><span data-icon="grid"></span><span>总览工作台</span><kbd>1</kbd></button>
+    <button class="nav-item" data-nav="records"><span data-icon="layers"></span><span>全部观察</span><span class="nav-count" id="recordCount">35</span></button>
+    <button class="nav-item" data-nav="map"><span data-icon="orbit"></span><span>观察星图</span><span class="new-dot"></span></button>
+    <button class="nav-item" data-nav="journal"><span data-icon="history"></span><span>观点时间线</span></button>
+    <div class="nav-divider"></div>
+    <button class="nav-item" data-nav="favorites"><span data-icon="star"></span><span>我的收藏</span><span class="nav-count" id="favCount">0</span></button>
+  </nav>
+  <div class="side-note"><span class="side-orbit" aria-hidden="true"><svg viewBox="0 0 160 124" fill="none"><defs><linearGradient id="orbitPrism" x1="16" y1="21" x2="133" y2="110" gradientUnits="userSpaceOnUse"><stop stop-color="#94f7df"/><stop offset=".48" stop-color="#72afd7"/><stop offset="1" stop-color="#aa84ef"/></linearGradient></defs><g class="orbit-spin" stroke="url(#orbitPrism)" stroke-width=".65"><ellipse cx="80" cy="62" rx="54.00" ry="20.00" transform="rotate(-32.00 80 62)" opacity="0.411"/><ellipse cx="80" cy="62" rx="53.15" ry="21.25" transform="rotate(-28.90 80 62)" opacity="0.449"/><ellipse cx="80" cy="62" rx="52.30" ry="22.50" transform="rotate(-25.80 80 62)" opacity="0.488"/><ellipse cx="80" cy="62" rx="51.45" ry="23.75" transform="rotate(-22.70 80 62)" opacity="0.526"/><ellipse cx="80" cy="62" rx="50.60" ry="25.00" transform="rotate(-19.60 80 62)" opacity="0.565"/><ellipse cx="80" cy="62" rx="49.75" ry="26.25" transform="rotate(-16.50 80 62)" opacity="0.603"/><ellipse cx="80" cy="62" rx="48.90" ry="27.50" transform="rotate(-13.40 80 62)" opacity="0.642"/><ellipse cx="80" cy="62" rx="48.05" ry="28.75" transform="rotate(-10.30 80 62)" opacity="0.680"/><ellipse cx="80" cy="62" rx="47.20" ry="30.00" transform="rotate(-7.20 80 62)" opacity="0.642"/><ellipse cx="80" cy="62" rx="46.35" ry="31.25" transform="rotate(-4.10 80 62)" opacity="0.603"/><ellipse cx="80" cy="62" rx="45.50" ry="32.50" transform="rotate(-1.00 80 62)" opacity="0.565"/><ellipse cx="80" cy="62" rx="44.65" ry="33.75" transform="rotate(2.10 80 62)" opacity="0.526"/><ellipse cx="80" cy="62" rx="43.80" ry="35.00" transform="rotate(5.20 80 62)" opacity="0.488"/><ellipse cx="80" cy="62" rx="42.95" ry="36.25" transform="rotate(8.30 80 62)" opacity="0.449"/><ellipse cx="80" cy="62" rx="42.10" ry="37.50" transform="rotate(11.40 80 62)" opacity="0.411"/></g><circle cx="121" cy="43" r="2" fill="#b7f9ed"/><circle cx="80" cy="62" r="2" fill="#91c8df" fill-opacity=".65"/><path d="M76 62h8m-4-4v8" stroke="#aecdeb" stroke-width=".5" opacity=".4"/></svg></span><p>让每一次判断<br>都有迹可循。</p><span>观察 · 验证 · 再认识</span></div>
+  <div class="sidebar-bottom"><button class="snapshot-card" data-action="info"><span class="status-dot"></span><span>本地快照已载入<small>不连接实时行情</small></span><span data-icon="arrow-up-right"></span></button><div class="profile"><span class="avatar">L</span><span>我的股票助手<small>PRIVATE WORKSPACE</small></span><button class="icon-btn" data-action="info" aria-label="数据与口径说明"><span data-icon="info"></span></button></div></div>
+</aside>
+<div class="workspace">
+  <header class="topbar"><div class="breadcrumb"><span data-icon="compass"></span><span>研究空间</span><span class="slash">/</span><b id="breadcrumb">总览工作台</b></div><div class="top-tools"><button class="search-trigger" data-action="search"><span data-icon="search"></span><span>搜索股票、代码</span><kbd>⌘ K</kbd></button><button class="icon-btn" data-action="focus" aria-label="切换专注模式" title="专注模式"><span data-icon="expand"></span></button><button class="icon-btn motion-control" id="motionButton" aria-label="关闭视觉动效" aria-pressed="true" title="视觉动效"><span data-icon="sparkles"></span></button><button class="icon-btn" data-action="theme" aria-label="切换明暗主题" title="切换明暗"><span data-icon="sun"></span></button><span class="demo-tag">PRISM / V.02</span></div></header>
+  <main id="content" tabindex="-1"></main>
+  <footer class="footer"><span><span class="footer-logo">观澜</span> 独立思考，持续验证。</span><span><span id="snapshotFooter">正在载入快照元信息</span> <button data-action="info">数据说明 ↗</button></span></footer>
+</div>
+<div class="tooltip" id="tooltip" role="status"></div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<dialog id="searchDialog" class="search-dialog" aria-labelledby="searchLabel"><div class="search-input-wrap"><span data-icon="search"></span><label class="sr-only" for="commandInput" id="searchLabel">查找观察记录</label><input id="commandInput" placeholder="输入股票名称、代码或行业…" autocomplete="off"><button class="key-button" data-action="close-dialog">ESC</button></div><div class="search-hint">快速定位 · 同一股票的不同推荐分别保留</div><div id="searchResults" class="search-results"></div><div class="search-footer"><span>↑ ↓ 选择 &nbsp;&nbsp; ↵ 打开</span><span>只搜索当前快照</span></div></dialog>
+<dialog id="infoDialog" class="info-dialog" aria-labelledby="infoTitle"><button class="icon-btn dialog-close" data-action="close-dialog" aria-label="关闭"><span data-icon="close"></span></button><span class="eyebrow">ABOUT THIS DEMO</span><h2 id="infoTitle">漂亮的界面，<br>清楚的数据边界。</h2><div class="info-body"><h3>这是什么？</h3><p id="snapshotSummary"></p><h3>时间与口径</h3><p id="snapshotTiming"></p><p>“较参考价”＝收盘价÷原参考价−1；“距最高收盘回落”＝所选日收盘÷截至所选日的推荐后最高收盘−1；“现价仍需上涨”＝参考价×1.2÷所选日收盘−1。20%沿用原观察目标，不代表预测或承诺。</p><h3>价格与观点分开展示</h3><p>图表和数字由上传快照的价格数组计算，原推荐与复盘正文保持原文。原文、结构化观点或价格之间可能有不一致；本DEMO没有替原研究补事实或修结论。原阶段“资料不足”不等于股票不能交易。</p><p>相对表现统一以首个观察日收盘为100，与以推荐参考价计算的涨跌不是同一口径。行业沿用原HTML的行业序列，不冒充官方指数；缺失时断线。同代码不同推荐日期单独保留；待首日或缺少参考价的记录不计较参考价涨跌。</p><h3>光场与动效</h3><p>光环、边缘折射和鼠标高光仅作装饰，不代表行情或研究评分。右上角星光按钮可关闭视觉动效；系统要求减少动态效果时，装饰也会保持静止。关闭视觉动效不影响主动操作逐日回放。</p><h3>本地使用</h3><p>收藏与主题仅保存在当前浏览器；浏览器禁止存储时仍可使用当前会话。所有按钮只做展示、筛选、回看与导出，没有自动交易。快捷键：⌘/Ctrl K 搜索；1–4切换页面；Esc关闭弹窗。</p></div><button class="primary-btn" data-action="close-dialog">开始观察 <span data-icon="arrow-right"></span></button></dialog>
+<script id="snapshot" type="application/json">/*__DATA__*/</script>
+<script>/*__CORE__*/</script>
+<script>/*__APP__*/</script>
+<script>/*__EFFECTS__*/</script>
+</body></html>

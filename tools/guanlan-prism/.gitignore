@@ -1,0 +1,6 @@
+# 展示层源码入库；以下内容只保留在本地：
+# data/ 为个人研究快照示例（不得提交到 GitHub）；
+# dist/ 与 index.html 由 tools/build.py 从 src/ 重建。
+data/
+dist/
+index.html

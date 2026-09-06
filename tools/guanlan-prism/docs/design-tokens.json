@@ -1,0 +1,99 @@
+{
+  "name": "观澜 · 光场 PRISM",
+  "version": "2.0",
+  "authority": "src/prism.css (loaded after src/base.css)",
+  "themes": {
+    "dark": {
+      "--bg": "#070910",
+      "--side": "#0a0c16",
+      "--panel": "#101725",
+      "--panel-soft": "#0d1220",
+      "--panel-raised": "#1b2538",
+      "--text": "#edf3ff",
+      "--secondary": "#a2afc5",
+      "--muted": "#7789a3",
+      "--border": "#263147",
+      "--hair": "rgba(156,182,226,.10)",
+      "--accent": "#91f5df",
+      "--accent-deep": "#43d8c5",
+      "--accent-dim": "rgba(91,229,210,.09)",
+      "--up": "#ff8b9c",
+      "--down": "#60d7b2",
+      "--amber": "#e7bf81",
+      "--blue": "#91b5ff",
+      "--violet": "#aa9bff",
+      "--glass": "rgba(15,21,36,.84)",
+      "--shadow": "0 14px 45px rgba(0,0,0,.2), inset 0 1px 0 rgba(218,232,255,.035)",
+      "--glow-soft": "rgba(80,221,211,.13)",
+      "--edge": "linear-gradient(125deg,rgba(137,166,231,.4),rgba(152,234,238,.12) 30%,rgba(114,123,187,.15) 65%,rgba(132,106,227,.28))",
+      "--ease-out": "cubic-bezier(.16,1,.3,1)"
+    },
+    "light": {
+      "--bg": "#edf0f9",
+      "--side": "#f2f4fc",
+      "--panel": "#fbfcff",
+      "--panel-soft": "#eff3fc",
+      "--panel-raised": "#e4ebfa",
+      "--text": "#1a2947",
+      "--secondary": "#526786",
+      "--muted": "#667b97",
+      "--border": "#ccd6e8",
+      "--hair": "rgba(52,81,136,.09)",
+      "--accent": "#147d78",
+      "--accent-deep": "#209d93",
+      "--accent-dim": "rgba(20,125,120,.075)",
+      "--up": "#c34462",
+      "--down": "#188565",
+      "--amber": "#9d702a",
+      "--blue": "#4f77cc",
+      "--violet": "#7461bc",
+      "--glass": "rgba(250,252,255,.86)",
+      "--shadow": "0 15px 50px rgba(38,62,115,.055),inset 0 1px 0 #fff",
+      "--glow-soft": "rgba(102,169,247,.11)",
+      "--edge": "linear-gradient(125deg,rgba(76,115,173,.32),rgba(65,148,166,.2) 40%,rgba(124,104,187,.2))"
+    }
+  },
+  "layout": {
+    "sidebar_desktop_px": 228,
+    "sidebar_compact_px": 202,
+    "sidebar_rail_px": 72,
+    "mobile_bottom_navigation_px": 64,
+    "topbar_desktop_px": 74,
+    "topbar_mobile_px": 62,
+    "main_padding_desktop_px": 34,
+    "main_padding_mobile_px": 17,
+    "overview_gap_px": 20,
+    "stats_gap_desktop_px": 16,
+    "cards_gap_mobile_px": 10
+  },
+  "breakpoints_px": [
+    580,
+    760,
+    1050,
+    1250,
+    1650
+  ],
+  "motion": {
+    "entry_ms": 550,
+    "entry_easing": "cubic-bezier(.16,1,.3,1)",
+    "stat_stagger_ms": [
+      0,
+      45,
+      90,
+      135
+    ],
+    "chart_draw_ms": 1650,
+    "edge_glide_seconds": 13,
+    "sidebar_orbit_seconds": 22,
+    "canvas_min_frame_interval_ms": 32,
+    "canvas_device_pixel_ratio_cap": 1.75,
+    "stop_canvas_scroll_y_px": 430,
+    "reduced_motion": "static canvas + no decorative CSS animations/transitions; explicit user playback remains enabled"
+  },
+  "fonts": {
+    "source": "system fonts only; no downloadable font assets",
+    "sans": "var(--sans) in src/base.css",
+    "numbers": "var(--num) in src/base.css",
+    "mono": "var(--mono) in src/base.css"
+  }
+}
