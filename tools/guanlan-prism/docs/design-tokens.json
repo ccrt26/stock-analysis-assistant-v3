@@ -1,6 +1,6 @@
 {
   "name": "观澜 · 光场 PRISM",
-  "version": "2.0",
+  "version": "PRISM V3",
   "authority": "src/prism.css (loaded after src/base.css)",
   "themes": {
     "dark": {
@@ -95,5 +95,21 @@
     "sans": "var(--sans) in src/base.css",
     "numbers": "var(--num) in src/base.css",
     "mono": "var(--mono) in src/base.css"
+  },
+  "v3": {
+    "css_order": [
+      "base.css",
+      "prism.css",
+      "v3.css"
+    ],
+    "market_default_count": 4,
+    "deep_limit": 8,
+    "recommendation_visible": {
+      "desktop": 4,
+      "tablet": 2,
+      "phone": 1
+    },
+    "opinion_visible": 3,
+    "scrollbars": "persistent horizontal range and vertical ARIA scrollbar"
   }
 }

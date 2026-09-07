@@ -1,7 +1,8 @@
-/* 观澜 · Standalone presentation demo. All content stays local. */
+/* 观澜 · PRISM V3 standalone presentation demo. All content stays local. */
 (function(){
 'use strict';
 const DATA=JSON.parse(document.getElementById('snapshot').textContent);
+const R=window.GuanlanRules;
 const C=window.GuanlanCore, LAST=DATA.dates.length-1, stocks=DATA.stocks;
 const $=id=>document.getElementById(id);
 const escape=t=>String(t??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
@@ -9,23 +10,18 @@ const pct=v=>C.valid(v)?`${v>0?'+':''}${Math.abs(v)<0.00001?'0.00':v.toFixed(2)}
 const money=v=>C.valid(v)?v.toFixed(2):'—';
 const signedClass=v=>!C.valid(v)||Math.abs(v)<1e-8?'secondary':v>0?'positive':'negative';
 const byId=id=>stocks.find(s=>C.key(s)===id);
-const byName=name=>stocks.find(s=>s.name===name);
 const readStore=k=>{try{return localStorage.getItem(k)}catch{return null}};
 const writeStore=(k,v)=>{try{localStorage.setItem(k,v);return true}catch{return false}};
 let favorites=[];try{favorites=JSON.parse(readStore('guanlan.favorites')||'[]');if(!Array.isArray(favorites))favorites=[]}catch{}
-// Showcase order is presentation only, never a recommendation ranking.
-// Production renderers set presentation.demoShowcase=false and retain source order.
+// The current day's upstream ordinary-deep review selection, at most 8 companies.
 const presentation=DATA.presentation||{};
-function chooseExamples(names, suppliedKeys=[]){
- const preferred=suppliedKeys.length?suppliedKeys.map(byId):presentation.demoShowcase===false?[]:names.map(byName);
- return [...new Map([...preferred.filter(Boolean),...stocks].map(s=>[C.key(s),s])).values()].slice(0,4);
-}
-const heroStocks=chooseExamples(['银龙股份','中国广核','德尔股份','杭氧股份'],presentation.heroKeys||[]);
+const deepSelection=R.deepReviews(DATA), deepGroups=deepSelection.groups;
+const heroStocks=deepGroups.map(g=>g.records[0].s);
 const displayDate=DATA.analysis_date.replaceAll('-','.');
 const displayWeekday=['SUN','MON','TUE','WED','THU','FRI','SAT'][new Date(DATA.analysis_date+'T12:00:00Z').getUTCDay()]||'';
-const state={page:'overview',filter:'all',query:'',sort:'date',direction:-1,cardMode:'focus',hero:0,
-  current:heroStocks.length?C.key(heroStocks[0]):'',end:LAST,chartMode:'line',reviewTab:'latest',journalDate:DATA.analysis_date,
-  onlyChanges:true,mapCurrent:heroStocks.length?C.key(heroStocks[0]):'',favorites:new Set(favorites),searchIndex:0,searchList:[],playing:false};
+const state={page:'overview',query:'',sort:'date',direction:-1,hero:0,heroRecord:0,railLeft:0,filters:R.defaultFilters(),journalMode:'directions',
+  current:stocks.length?C.key(heroStocks[0]||stocks[0]):'',end:LAST,chartMode:'line',reviewTab:'latest',journalDate:DATA.analysis_date,
+  mapCurrent:stocks.length?C.key(heroStocks[0]||stocks[0]):'',favorites:new Set(favorites),searchIndex:0,searchList:[],playing:false};
 let playback=null,toastTimer=null,resizeTimer=null,plotId=0;
 const paths={
  grid:'<rect x="3" y="3" width="6" height="6" rx="1.3"/><rect x="15" y="3" width="6" height="6" rx="1.3"/><rect x="3" y="15" width="6" height="6" rx="1.3"/><rect x="15" y="15" width="6" height="6" rx="1.3"/>',
@@ -64,7 +60,12 @@ const paths={
 const icon=name=>`<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">${paths[name]||paths.pulse}</svg>`;
 function hydrate(root=document){root.querySelectorAll('[data-icon]').forEach(el=>{el.innerHTML=icon(el.dataset.icon)})}
 function tone(r){return C.reviewTone(r)}
-function viewPill(r,fallback='尚无复盘'){return `<span class="pill ${tone(r)}">${r&&r.viewChanged?icon(r.viewLabel==='观点增强'?'trend':r.viewLabel==='判断失效'?'close':'minus'):''}${escape(r?.viewLabel||fallback)}</span>`}
+function viewPill(r,fallback='尚未复盘'){
+ const raw=r?.viewLabel||fallback,label=raw==='维持原判断'?'维持原判':raw;
+ const cls=label==='判断失效'||label==='原判断失效'?'invalid':label==='观点增强'?'support':label==='观点减弱'?'weak':label==='维持原判'?'partial':'neutral';
+ return `<span class="pill ${cls}">${['观点增强','观点减弱','判断失效'].includes(label)?icon(label==='观点增强'?'trend':label==='判断失效'?'close':'minus'):''}${escape(label)}</span>`;
+}
+function ledgerPill(s){return viewPill({viewLabel:R.opinionLabel(s,DATA)})}
 function baseLabel(r){return r?r.base.replace(/^未来1—3个交易日更可能/,'').replace(/^先等待事件或复牌后的实际交易反应，方向暂时无法判断$/,'等待实际交易反应'):'尚无复盘观点'}
 // 复盘三路：节点详评 / 普通详评 / 简评；未知类型按源数据原样标注为完整复盘。
 function kindLabel(r){return !r?'':r.review_kind==='checkpoint_detail'?'节点详评':r.review_kind==='brief'?'简评':r.review_kind==='regular_detail'?'普通详评':'完整复盘'}
@@ -83,62 +84,74 @@ function intro(kicker,title,subtitle,extra='date'){
  return `<section class="intro"><div><span class="eyebrow">${kicker}</span><h1>${title}</h1><p>${subtitle}</p></div>${extra==='date'?`<div class="date-box">${icon('calendar')}<div><strong>${displayDate} <span class="muted">${displayWeekday}</span></strong><small>收盘快照 · 上海时间</small></div></div>`:extra}</section>`;
 }
 function plot(s,end=LAST,mode='line',hero=false){return `<svg class="chart main-plot" data-stock="${C.key(s)}" data-end="${end}" data-mode="${mode}" data-hero="${hero}" role="img" tabindex="0" aria-label="${escape(s.name)}截至${C.dateAt(end,DATA)}的${mode==='candle'?'K线':mode==='relative'?'相对表现':'收盘走势'}图"></svg>`}
-function card(s){const r=C.reviewAt(s,LAST,DATA),m=C.metrics(s,LAST);return `<article class="observation-card" data-open="${C.key(s)}" tabindex="0" role="button" aria-label="查看${escape(s.name)} ${s.recDate}观察"><div class="card-top"><div><h3 class="card-name">${escape(s.name)}</h3><div class="card-code">${s.code} · ${s.recDate.slice(5).replace('-','.')}</div></div>${star(s)}</div><div class="card-price-row"><strong class="num ${signedClass(m.ret)}">${pct(m.ret)}</strong>${spark(s)}</div><div class="card-caption">${s.d0?'推荐日尚未到达':m.ret===null?'暂无可靠参考价':'收盘较原参考价'}</div><div class="card-bottom">${viewPill(r,s.d0?'待首日观察':s.stage)}<span>${progress(s)}</span></div></article>`}
+function card(s){
+ const m=R.returnOnDate(s,DATA);
+ return `<article class="observation-card" data-open="${C.key(s)}" tabindex="0" role="button" aria-label="查看${escape(s.name)} ${s.recDate}推荐记录"><div class="card-top"><div><h3 class="card-name">${escape(s.name)}</h3><div class="card-code">${s.code}</div></div>${star(s)}</div><div class="card-price-row"><strong class="num ${signedClass(m)}">${pct(m)}</strong>${spark(s)}</div><div class="card-caption">${s.d0?'尚未开始观察 · 小图为推荐前走势':m===null?'本日无可计算的参考价表现':'收盘较原参考价'}</div><div class="card-bottom">${ledgerPill(s)}<span>${progress(s)}</span></div><div class="card-recommended">推荐日期 <time>${s.recDate.replaceAll('-','.')}</time>${s.refKind==='event'?'<span>事件条件记录</span>':''}</div></article>`;
+}
 function currentChanges(date=DATA.analysis_date){return stocks.flatMap(s=>s.reviews.filter(r=>r.date===date&&r.viewChanged).map(r=>({s,r})))}
+function marketSpark(row){
+ const vals=row.series.slice(-20),good=vals.filter(C.valid);
+ if(good.length<2)return '';
+ const lo=Math.min(...good),span=Math.max(...good)-lo||1;
+ const d=simplePath(vals,i=>2+i/Math.max(1,vals.length-1)*100,v=>29-(v-lo)/span*25);
+ return `<svg class="market-spark" viewBox="0 0 104 34" aria-label="近期日线收盘走势"><path d="${d}" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+}
+function marketSection(){
+ const rows=R.marketCards(DATA),ready=rows.filter(x=>x.close!==null).length;
+ return `<section class="market-section" aria-label="当日市场概览"><div class="market-caption"><span>当日市场 <small>MARKET OVERVIEW</small></span><span>${DATA.analysis_date} 收盘 · ${ready}/${rows.length} 项已提供${ready<rows.length?' <button class="text-button" data-action="market-info">缺项说明 ↗</button>':''}</span></div><div class="stats-grid market-grid" style="--market-count:${rows.length}">${rows.map(row=>`<article class="stat-card market-card ${row.close===null?'market-missing':''}" data-index="${row.code}"><div class="stat-title"><span>${escape(row.name)}</span><span class="index-code">${row.code}</span></div><div class="market-value num">${row.close===null?'—':money(row.close)}<span>点</span></div><div class="market-price-change ${signedClass(row.changePct)}">${row.close===null?`<span class="missing-label">${row.status==='stale'?'本日行情待更新':'快照未提供'}</span>`:`<b class="num">${pct(row.changePct)}</b><span class="num">${row.change===null?'无前收对照':`${row.change>0?'+':''}${money(row.change)} 点`}</span>`}${marketSpark(row)}</div><div class="market-card-foot"><span>${escape(row.description)}</span><span>${row.close!==null?'收盘快照':'待接入'}</span></div></article>`).join('')}</div></section>`;
+}
+function deepFocus(){
+ const group=deepGroups[state.hero],item=group?.records[state.heroRecord]||group?.records[0];
+ if(!item)return `<section class="panel hero-panel deep-empty"><div class="panel-head"><h2 class="panel-heading">${icon('pulse')}走势聚焦</h2><span class="deep-count">当日深度复盘 · 0 只</span></div><div class="empty">${icon('book')}<h3>本日没有选入普通深度复盘的股票</h3><p>节点详评和简评仍可从推荐股票清单查看。<br>不以近期推荐或历史记录补足名额。</p></div></section>`;
+ const {s,r}=item,m=C.metrics(s,LAST),hasRef=C.valid(s.ref)&&s.ref>0&&!s.d0;
+ return `<section class="panel hero-panel" data-deep-code="${s.code}" data-deep-record="${C.key(s)}"><div class="panel-head"><div class="panel-heading">${icon('pulse')}走势聚焦 <small>DEEP REVIEW</small></div><button class="small-link" data-open="${C.key(s)}">进入完整复盘 ${icon('arrow-up-right')}</button></div><div class="deep-toolbar"><span class="deep-count"><i></i>当日深度复盘 · ${deepGroups.length} 只</span><label class="sr-only" for="deepSelect">切换深度复盘股票</label><select id="deepSelect" class="select-input">${deepGroups.map((g,i)=>`<option value="${i}" ${i===state.hero?'selected':''}>${g.records[0].s.name}${g.records.length>1?` · ${g.records.length}次推荐`:''}</option>`).join('')}</select></div><div class="hero-top"><div class="stock-title"><div><h2>${escape(s.name)}</h2><small>${s.code} <span> · ${s.recDate.replaceAll('-','.')} 推荐</span></small></div></div><div class="hero-metric"><strong class="num ${signedClass(m.ret)}">${pct(m.ret)}</strong><small>第 ${r.day} 个交易日 · 收盘较参考价</small></div></div>${group.records.length>1?`<div class="episode-switch"><label for="deepEpisode">这只股票的推荐记录</label><select id="deepEpisode" class="select-input">${group.records.map((x,i)=>`<option value="${i}" ${i===state.heroRecord?'selected':''}>${x.s.recDate} 推荐</option>`).join('')}</select></div>`:''}<div class="hero-summary">${viewPill(r)}<span>${escape(r.viewReason||r.headline)}</span></div><div class="hero-outlook"><span>未来 1—3 个交易日</span><b>${escape(baseLabel(r))}</b></div><div class="hero-chart">${plot(s,LAST,'line',true)}</div><div class="hero-foot"><div class="mini-legend"><span><i class="legend-line"></i>收盘价</span>${hasRef?'<span><i class="legend-line dashed"></i>推荐参考价</span><span><i class="legend-line target"></i>20%观察目标</span>':''}</div><div class="hero-cycle"><span>${String(state.hero+1).padStart(2,'0')} / ${String(deepGroups.length).padStart(2,'0')}</span><button class="icon-btn" data-hero-step="-1" aria-label="上一只深度复盘股票" ${deepGroups.length<2?'disabled':''}>${icon('chevron-left')}</button><button class="icon-btn" data-hero-step="1" aria-label="下一只深度复盘股票" ${deepGroups.length<2?'disabled':''}>${icon('chevron-right')}</button></div></div><div class="deep-source">${deepSelection.overflow?`源记录有 ${deepSelection.totalStocks} 只普通详评，按源顺序展示上限 ${deepSelection.limit} 只。`:'名单来自本日普通详评；不占用节点详评名额，不另做选股排序。'}</div></section>`;
+}
+function transitionMarkup(x){return `<div class="direction-transition"><span class="direction-tag ${x.from}">${x.fromLabel}</span><span class="transition-arrow">→</span><span class="direction-tag ${x.to}">${x.toLabel}</span><small>短期判断</small></div>`}
+function opinionUpdates(){
+ const changes=R.directionUpdates(DATA);
+ return `<section class="panel changes-panel"><div class="panel-head"><h2 class="panel-heading">观点更新 <span class="change-total">${changes.length}</span></h2><button class="small-link" data-action="all-updates">全部 ${icon('arrow-up-right')}</button></div><p class="changes-caption">未来 1—3 日的方向判断发生切换</p><div class="updates-scroll-shell"><div class="change-list" id="opinionViewport" tabindex="0" role="region" aria-label="上下滚动查看全部观点更新">${changes.length?changes.map(x=>`<button class="change-item" data-update-key="${C.key(x.s)}" data-open="${C.key(x.s)}"><div class="change-title"><span class="change-name">${escape(x.s.name)}</span>${viewPill(x.r)}</div>${transitionMarkup(x)}<p>${escape(x.reason||'原报告未填写方向变化原因。')}</p><div class="update-meta"><span>推荐 ${x.s.recDate.slice(5).replace('-','.')} · 第 ${x.r.day} 天</span><span>${x.previous.date.slice(5).replace('-','.')} → ${x.r.date.slice(5).replace('-','.')}</span></div></button>`).join(''):`<div class="empty">${icon('check')}<h3>本日没有方向切换</h3><p>不把“同方向内信心增强或减弱”当作方向变化，也不为首次复盘补写上一观点。</p></div>`}</div><div id="updatesScrollbar" class="updates-scrollbar" role="scrollbar" aria-label="上下滚动观点更新" aria-controls="opinionViewport" aria-orientation="vertical" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0" tabindex="0"><span></span></div></div><div class="updates-foot"><span>${changes.length>3?'向下滚动，查看其余更新':'已显示本日全部更新'}</span><button class="text-button" data-action="direction-info">变化口径 ${icon('info')}</button></div></section>`;
+}
 function overview(){
- const valid=stocks.filter(s=>C.metrics(s,LAST).ret!==null),up=valid.filter(s=>C.metrics(s,LAST).ret>0).length,attention=stocks.filter(s=>s.attention).length,changes=currentChanges(),s=heroStocks[state.hero],m=C.metrics(s,LAST),r=C.reviewAt(s,LAST,DATA);
- const preferredChanges=presentation.demoShowcase===false?[]:['银龙股份','德尔股份','汉得信息','中国广核'].map(n=>changes.find(x=>x.s.name===n)).filter(Boolean);
- const featured=[...new Map([...preferredChanges,...changes].map(item=>[C.key(item.s),item])).values()].slice(0,4);
- const cards=state.cardMode==='focus'?chooseExamples(['中国广核','德尔股份','杭氧股份','鸿富瀚'],presentation.cardKeys||[]):stocks.slice(0,4);
- return `<div class="page-enter">${intro('AFTER THE CLOSE / BEFORE THE NEXT MOVE','收盘之后，<span class="intro-accent">看清变化。</span>','不止看涨跌，也看当初的判断，是否仍然成立。')}
- <div class="stats-grid">
- <button class="stat-card" data-nav="records"><div class="stat-title">观察记录 ${icon('layers')}</div><div class="stat-value"><b>${stocks.length}</b><small>条独立记录</small></div><div class="stat-mini">${new Set(stocks.map(s=>s.code)).size} 只股票 · 同股分次记录</div><div class="stat-graphic stat-bars" aria-hidden="true">${[9,16,12,22,18,26,20,30].map((h,i)=>`<i style="--h:${h}px;--o:${.16+i*.07}"></i>`).join('')}</div></button>
- <button class="stat-card" data-action="attention"><div class="stat-title">重点关注 ${icon('eye')}</div><div class="stat-value"><b>${attention.toString().padStart(2,'0')}</b><small>条</small></div><div class="stat-mini">沿用原报告的重点标记</div><div class="stat-graphic" aria-hidden="true" style="right:11px;bottom:15px;opacity:.45"><svg viewBox="0 0 68 28" fill="none"><path d="M1 17h14l7-11 8 18 9-17 5 10h20" stroke="var(--accent)" stroke-width="1.4"/></svg></div></button>
- <button class="stat-card" data-nav="journal"><div class="stat-title">本期观点调整 ${icon('history')}</div><div class="stat-value"><b>${changes.length}</b><small>条</small></div><div class="stat-mini">${changes.filter(x=>x.r.viewLabel==='观点增强').length} 条增强 · ${changes.filter(x=>x.r.viewLabel==='判断失效').length} 条失效</div></button>
- <button class="stat-card" data-action="positive"><div class="stat-title">高于参考价 ${icon('trend')}</div><div class="stat-value"><b>${up}</b><small>/ ${valid.length} 条可计算记录</small></div><div class="stat-track" aria-hidden="true"><i style="width:${up/valid.length*100}%"></i><i style="width:${(valid.length-up)/valid.length*100}%"></i></div></button>
- </div>
- <div class="overview-grid">
- <section class="panel hero-panel"><div class="panel-head"><div class="panel-heading">${icon('pulse')}走势聚焦 <small>OBSERVATION IN FOCUS</small></div><button class="small-link" data-open="${C.key(s)}">进入完整复盘 ${icon('arrow-up-right')}</button></div><div class="hero-top"><div class="stock-title"><span class="stock-token">${escape(s.name[0])}</span><div><h2>${escape(s.name)}</h2><small>${s.code} <span style="margin-left:7px">${escape(s.industryName)}</span></small></div></div><div class="hero-metric"><strong class="num ${signedClass(m.ret)}">${pct(m.ret)}</strong><small>推荐后第 ${s.days} 天 · 收盘较参考价</small></div></div><div class="hero-summary">${viewPill(r)}<span>${escape(r?.viewReason||s.reasonFull)}</span></div><div class="hero-chart">${plot(s,LAST,'line',true)}</div><div class="hero-foot"><div class="mini-legend"><span><i class="legend-line"></i>收盘价</span><span><i class="legend-line dashed"></i>推荐参考价</span><span><i class="legend-line target"></i>20%观察目标</span></div><div class="hero-cycle"><span>${String(state.hero+1).padStart(2,'0')} / ${String(heroStocks.length).padStart(2,'0')}</span><button class="icon-btn" data-hero-step="-1" aria-label="上一条聚焦记录">${icon('chevron-left')}</button><button class="icon-btn" data-hero-step="1" aria-label="下一条聚焦记录">${icon('chevron-right')}</button></div></div></section>
- <section class="panel changes-panel"><div class="panel-head"><h2 class="panel-heading">观点变化摘录 <span class="change-total">${changes.length}</span></h2><button class="small-link" data-nav="journal">全部 ${icon('arrow-up-right')}</button></div><div class="change-list">${featured.map(({s,r})=>`<button class="change-item" data-open="${C.key(s)}"><div class="change-title"><span class="change-name">${escape(s.name)}</span>${viewPill(r)}</div><div class="change-meta"><span>第 ${r.day} 天</span><span class="${signedClass(C.metrics(s,LAST).ret)}">${pct(C.metrics(s,LAST).ret)}</span></div><p>${escape(r.viewReason)}</p></button>`).join('')}</div></section>
- </div>
- <div class="section-heading"><h2>你的观察清单 <small>ON YOUR RADAR</small></h2><div class="section-actions"><div class="segmented" aria-label="切换卡片"><button class="${state.cardMode==='focus'?'active':''}" data-card-mode="focus">不同状态示例</button><button class="${state.cardMode==='recent'?'active':''}" data-card-mode="recent">近期推荐</button></div><button class="small-link" data-nav="records">全部 ${stocks.length} 条 ${icon('arrow-right')}</button></div></div>
- <div class="observation-cards">${cards.map(card).join('')}</div>
- <div class="overview-note">${icon('orbit')}<span><b>换个角度看全局。</b> 在观察星图中，比较每条记录的观察进度与价格表现。</span><button data-nav="map">探索观察星图 ↗</button></div>
- </div>`;
+ const cards=R.recommendations(DATA);
+ return `<div class="page-enter">${intro('AFTER THE CLOSE / BEFORE THE NEXT MOVE','收盘之后，<span class="intro-accent">看清变化。</span>','先看市场，再看需要深读的股票，以及真正改变的判断。')}${marketSection()}<div class="overview-grid">${deepFocus()}${opinionUpdates()}</div><div class="section-heading"><h2>推荐股票清单 <small>RECOMMENDATION RECORDS</small></h2><div class="section-actions"><button class="small-link" data-action="all-recommendations">全部 ${cards.length} 条 ${icon('arrow-right')}</button></div></div><div class="rail-description">按推荐日期由近到远 · 同一股票的不同推荐分别保留</div><div class="observation-cards recommendation-rail" id="recommendationRail" tabindex="0" role="region" aria-label="左右滚动推荐股票清单">${cards.length?cards.map(card).join(''):'<div class="empty"><h3>暂无推荐记录</h3><p>市场信息仍可查看，不填入示例股票。</p></div>'}</div><div class="rail-controls"><button class="icon-btn" data-rail-step="-1" aria-label="向左滚动推荐股票">${icon('chevron-left')}</button><input type="range" class="rail-scrollbar" id="railScrollbar" min="0" max="100" step="1" value="0" aria-label="左右滚动全部推荐股票"><button class="icon-btn" data-rail-step="1" aria-label="向右滚动推荐股票">${icon('chevron-right')}</button><span id="railPosition" class="mono"></span></div><div class="overview-note">${icon('orbit')}<span><b>换个角度看全局。</b> 在观察星图中，比较每条记录的观察进度与价格表现。</span><button data-nav="map">探索观察星图 ↗</button></div></div>`;
 }
 function filteredStocks(){
- let list=stocks.filter(s=>state.page!=='favorites'||state.favorites.has(C.key(s)));
- if(state.filter==='attention')list=list.filter(s=>s.attention);
- if(state.filter==='positive')list=list.filter(s=>C.metrics(s,LAST).ret>0);
- if(state.filter==='changes')list=list.filter(s=>s.reviews.some(r=>r.date===DATA.analysis_date&&r.viewChanged));
- if(state.filter==='pending')list=list.filter(s=>s.d0||s.ref===null);
- const q=state.query.trim().toLowerCase();if(q)list=list.filter(s=>`${s.name} ${s.code} ${s.industryName} ${s.recDate}`.toLowerCase().includes(q));
- return list.sort((a,b)=>{if(state.sort==='return'){const av=C.metrics(a,LAST).ret,bv=C.metrics(b,LAST).ret;if(av===null)return 1;if(bv===null)return -1;return (av-bv)*state.direction}
- if(state.sort==='days')return(a.days-b.days)*state.direction;return a.recDate.localeCompare(b.recDate)*state.direction});
+ let list=R.filterRecords(DATA,state.filters).filter(s=>state.page!=='favorites'||state.favorites.has(C.key(s)));
+ const q=state.query.trim().toLowerCase();if(q)list=list.filter(s=>`${s.name} ${s.code} ${s.recDate}`.toLowerCase().includes(q));
+ return list.sort((a,b)=>{
+  if(['return','close'].includes(state.sort)){const val=s=>state.sort==='close'?R.closeOnDate(s,DATA):R.returnOnDate(s,DATA),av=val(a),bv=val(b);if(av===null&&bv===null)return 0;if(av===null)return 1;if(bv===null)return -1;return (av-bv)*state.direction;}
+  if(state.sort==='days')return(a.days-b.days)*state.direction;
+  return a.recDate.localeCompare(b.recDate)*state.direction;
+ });
 }
-function tableRows(){return filteredStocks().map(s=>{const m=C.metrics(s,LAST),r=C.reviewAt(s,LAST,DATA);return `<tr data-open="${C.key(s)}" tabindex="0" role="button" aria-label="打开${escape(s.name)} ${s.recDate}的复盘"><td><div class="table-stock"><span class="stock-token sm">${escape(s.name[0])}</span><div><strong>${escape(s.name)}</strong><small>${s.code}</small></div></div></td><td><span class="mono secondary">${s.recDate.replaceAll('-','.')}</span></td><td>${progress(s)}<div class="table-progress"><i style="width:${Math.min(s.days/20,1)*100}%"></i></div></td><td><b class="num ${signedClass(m.ret)}">${pct(m.ret)}</b></td><td><span class="num secondary">${pct(m.max)}</span></td><td>${viewPill(r,s.d0?'待首日观察':s.stage)}<div class="card-caption">${escape(s.industryName)}</div></td><td><div style="display:flex;align-items:center;gap:10px">${star(s)}${icon('chevron-right')}</div></td></tr>`}).join('')}
+function tableRows(){return filteredStocks().map(s=>{
+ const ret=R.returnOnDate(s,DATA),close=R.closeOnDate(s,DATA),r=R.latest(s,DATA),invalid=R.isInvalid(s,DATA);
+ return `<tr data-open="${C.key(s)}" data-invalid="${invalid}" tabindex="0" role="button" aria-label="打开${escape(s.name)} ${s.recDate}的复盘"><td><div class="table-stock"><div><strong>${escape(s.name)}</strong><small>${s.code}</small></div></div></td><td><span class="mono secondary">${s.recDate.replaceAll('-','.')}</span></td><td>${progress(s)}<div class="table-progress"><i style="width:${Math.min(s.days/20,1)*100}%"></i></div></td><td><b class="num ${signedClass(ret)}">${pct(ret)}</b></td><td class="daily-close"><span class="num">${money(close)}</span>${close===null?`<small>${s.suspended?'当日停牌':'当日无行情'}</small>`:''}</td><td>${ledgerPill(s)}<small class="review-date-note">${r?`${r.date.slice(5).replace('-','.')} 复盘`:invalid?'沿用原记录失效状态':'未保存复盘'}</small></td><td><div style="display:flex;align-items:center;gap:10px">${star(s)}${icon('chevron-right')}</div></td></tr>`;
+}).join('')}
+function scopeDescription(){
+ const f=state.filters,n=stocks.filter(s=>R.isInvalid(s,DATA)).length;
+ const main=({default:`默认显示全部未失效记录 · 已隐藏 ${n} 条失效记录`,active:`全部（不含失效） · 已隐藏 ${n} 条失效记录`,invalid:'仅显示判断失效的记录',both:'全部 + 判断失效 · 包含所有推荐记录'})[f.scope];
+ return main+(f.positive?' · 高于参考价':'')+(f.opinion!=='any'?` · ${R.OPINION_OPTIONS.find(x=>x.value===f.opinion)?.label}`:'');
+}
 function records(){
- const fav=state.page==='favorites',labels=[['all','全部'],['attention','重点关注'],['changes','观点调整'],['positive','高于参考价'],['pending','待确认参考价']];
- return `<div class="page-enter">${intro(fav?'SAVED OBSERVATIONS':'EVERY THESIS / EVERY RECORD',fav?'留给自己，多看一眼。':'每一条判断，都留下记录。',fav?'收藏保存在当前浏览器，只是阅读清单，不是持仓。':'同一股票的不同推荐分别保留；价格表现不等于判断仍然成立。',`<button class="quiet-btn" data-action="export">${icon('download')}导出快照</button>`)}
- <div class="toolbar"><div class="filter-tabs" aria-label="筛选观察记录">${labels.map(([id,label])=>`<button class="filter-tab ${state.filter===id?'active':''}" data-filter="${id}" aria-pressed="${state.filter===id}">${label}</button>`).join('')}</div><div class="toolbar-right"><label class="inline-search">${icon('search')}<input id="recordSearch" placeholder="名称、代码、行业" aria-label="筛选股票" value="${escape(state.query)}"></label></div></div>
- <section class="panel"><div class="table-wrap"><table class="records-table"><thead><tr><th>股票 / 代码</th><th><button data-sort="date">推荐日期 ${state.sort==='date'?(state.direction<0?'↓':'↑'):'↕'}</button></th><th><button data-sort="days">观察进度 ${state.sort==='days'?(state.direction<0?'↓':'↑'):'↕'}</button></th><th><button data-sort="return">较参考价涨跌 ${state.sort==='return'?(state.direction<0?'↓':'↑'):'↕'}</button></th><th>最高收盘涨跌</th><th>最近复盘观点 / 行业</th><th></th></tr></thead><tbody id="tableRows">${tableRows()}</tbody></table></div><div class="empty" id="tableEmpty" ${filteredStocks().length?'hidden':''}>${icon(fav?'star':'search')}<h3>${fav&&!state.favorites.size?'还没有收藏记录':'没有匹配的观察记录'}</h3><p>${fav&&!state.favorites.size?'点股票旁的星标，就能在这里找到它。':'换一个名称、代码或筛选条件再看看。'}</p><button class="quiet-btn" data-nav="records">查看全部观察 ${icon('arrow-right')}</button></div><div class="table-bottom"><span id="tableCount">${filteredStocks().length} 条记录</span><span>数据口径见说明 · 无参考价不计算涨跌</span></div></section>
- </div>`;
+ const fav=state.page==='favorites',f=state.filters,allOn=['active','both'].includes(f.scope),invalidOn=['invalid','both'].includes(f.scope);
+ return `<div class="page-enter">${intro(fav?'SAVED OBSERVATIONS':'EVERY THESIS / EVERY RECORD',fav?'留给自己，多看一眼。':'每一条判断，都留下记录。',fav?'收藏保存在当前浏览器，只是阅读清单，不是持仓。':'同一股票的不同推荐分别保留；价格表现不等于判断仍然成立。',`<button class="quiet-btn" data-action="export">${icon('download')}导出快照</button>`)}<div class="toolbar records-toolbar"><div class="filter-tabs" aria-label="筛选观察记录"><button class="filter-tab ${allOn?'active':''} ${f.scope==='default'?'default-scope':''}" data-filter="all" aria-pressed="${allOn}">${allOn?icon('check'):''}全部</button><button class="filter-tab ${f.positive?'active':''}" data-filter="positive" aria-pressed="${f.positive}">${f.positive?icon('check'):''}高于参考价</button><label class="opinion-filter">复盘观点<select id="opinionFilter" class="select-input" aria-label="选择复盘观点">${R.OPINION_OPTIONS.map(x=>`<option value="${x.value}" ${f.opinion===x.value?'selected':''}>${x.label}</option>`).join('')}</select></label><span class="filter-separator"></span><button class="filter-tab invalid-filter ${invalidOn?'active':''}" data-filter="invalid" aria-pressed="${invalidOn}">${invalidOn?icon('check'):''}判断失效</button>${f.scope==='both'?'<button class="text-button only-invalid" data-filter="only-invalid">仅看失效</button>':''}</div><div class="toolbar-right"><label class="inline-search">${icon('search')}<input id="recordSearch" placeholder="名称、代码、推荐日期" aria-label="筛选股票" value="${escape(state.query)}"></label></div></div><div class="filter-summary"><span id="filterSummary">${scopeDescription()}</span><button class="text-button" data-action="filter-info">如何组合筛选 ${icon('info')}</button></div><section class="panel"><div class="table-wrap"><table class="records-table"><thead><tr><th>股票 / 代码</th><th><button data-sort="date">推荐日期 ${state.sort==='date'?(state.direction<0?'↓':'↑'):'↕'}</button></th><th><button data-sort="days">观察进度 ${state.sort==='days'?(state.direction<0?'↓':'↑'):'↕'}</button></th><th><button data-sort="return">较参考价涨跌 ${state.sort==='return'?(state.direction<0?'↓':'↑'):'↕'}</button></th><th><button data-sort="close">当日收盘价 ${state.sort==='close'?(state.direction<0?'↓':'↑'):'↕'}</button><small>${DATA.analysis_date.slice(5).replace('-','.')} · 元</small></th><th>复盘观点</th><th></th></tr></thead><tbody id="tableRows">${tableRows()}</tbody></table></div><div class="empty" id="tableEmpty" ${filteredStocks().length?'hidden':''}>${icon(fav?'star':'search')}<h3>${fav&&!state.favorites.size?'还没有收藏记录':'没有匹配的观察记录'}</h3><p>调整筛选或搜索词；缺失内容不以假数据补齐。</p><button class="quiet-btn" data-filter="reset">重置筛选 ${icon('arrow-right')}</button></div><div class="table-bottom"><span id="tableCount">${filteredStocks().length} 条记录</span><span>收盘价对应 ${DATA.analysis_date} · 不用停牌前价格冒充当日价格</span></div></section></div>`;
 }
-function mapSelection(s){if(!s)return '<div class="empty"><h3>暂无可展示记录</h3></div>';const m=C.metrics(s,LAST),r=C.reviewAt(s,LAST,DATA),q=C.quoteAt(s,LAST);return `<span class="eyebrow">SELECTED OBSERVATION</span><div class="stock-title"><span class="stock-token">${escape(s.name[0])}</span><div><h2>${escape(s.name)}</h2><small>${s.code}</small></div></div><div class="big-return ${signedClass(m.ret)}">${pct(m.ret)}</div><span class="source-hint">收盘较原参考价</span><dl><div><dt>观察进度</dt><dd>${progress(s)}</dd></div><div><dt>推荐日期</dt><dd class="mono">${s.recDate}</dd></div><div><dt>本期成交额</dt><dd class="mono">${money(q?.c[4])} 亿</dd></div></dl>${viewPill(r,s.stage)}<p>${escape(r?.viewReason||s.reasonFull.slice(0,90)+'…')}</p><button class="primary-btn" data-open="${C.key(s)}">阅读完整复盘 ${icon('arrow-right')}</button>`}
+function mapSelection(s){if(!s)return '<div class="empty"><h3>暂无可展示记录</h3></div>';const m=C.metrics(s,LAST),r=C.reviewAt(s,LAST,DATA),q=C.quoteAt(s,LAST);return `<span class="eyebrow">SELECTED OBSERVATION</span><div class="stock-title"><div><h2>${escape(s.name)}</h2><small>${s.code}</small></div></div><div class="big-return ${signedClass(m.ret)}">${pct(m.ret)}</div><span class="source-hint">收盘较原参考价</span><dl><div><dt>观察进度</dt><dd>${progress(s)}</dd></div><div><dt>推荐日期</dt><dd class="mono">${s.recDate}</dd></div><div><dt>本期成交额</dt><dd class="mono">${money(q?.c[4])} 亿</dd></div></dl>${viewPill(r,s.stage)}<p>${escape(r?.viewReason||s.reasonFull.slice(0,90)+'…')}</p><button class="primary-btn" data-open="${C.key(s)}">阅读完整复盘 ${icon('arrow-right')}</button>`}
 function mapPage(){return `<div class="page-enter">${intro('THE OBSERVATION ATLAS','每一次推荐，都有自己的坐标。','横向看观察天数，纵向看较参考价涨跌。一个光点，就是一次独立观察。')}
  <div class="map-layout"><section class="panel map-panel"><div class="panel-head"><h2 class="panel-heading">${icon('orbit')}观察星图 <small>PERFORMANCE × TIME</small></h2><span class="source-hint">${stocks.filter(s=>C.metrics(s,LAST).ret!==null).length} 条有参考价的记录</span></div><div class="map-wrap"><svg id="atlas" class="chart" role="img" aria-label="股票观察天数和较参考价涨跌散点图"></svg></div><div class="graph-key"><span class="chip-dot"></span>高于参考价 <span class="chip-dot down"></span>低于参考价 <span style="margin-left:8px">圆点大小＝本期成交额（压缩比例）</span></div><p class="map-note">悬停查看记录，点击进入复盘。无参考价的记录不绘制；这是表现分布，不是新的推荐排名。</p></section><aside class="panel map-selection" id="mapSelection">${mapSelection(byId(state.mapCurrent))}</aside></div></div>`}
 function journal(){
- const entries=stocks.flatMap(s=>s.reviews.filter(r=>r.date===state.journalDate&&(!state.onlyChanges||r.viewChanged)).map(r=>({s,r})));
- const changes=currentChanges(state.journalDate),enhanced=changes.filter(x=>x.r.viewLabel==='观点增强').length,weak=changes.filter(x=>x.r.viewLabel==='观点减弱').length,invalid=changes.filter(x=>x.r.viewLabel==='判断失效').length;
- return `<div class="page-enter">${intro('A JOURNAL OF CHANGING MINDS','好的复盘，也记录改变。','不只保留看对的时刻。理由增强、预期减弱、判断失效，都值得回看。',`<div class="segmented"><button data-journal-mode="changes" class="${state.onlyChanges?'active':''}">只看观点调整</button><button data-journal-mode="all" class="${!state.onlyChanges?'active':''}">当日全部复盘</button></div>`)}
- <div class="journal-layout"><aside class="journal-side"><h2>${state.journalDate.slice(-2)}<span class="muted" style="font-size:26px"> / ${state.journalDate.slice(5,7)}</span></h2><p>${state.journalDate.slice(0,4)} · 复盘归属日期<br>不是报告实际生成时点</p><dl><div><dt>观点增强</dt><dd class="accent">${enhanced.toString().padStart(2,'0')}</dd></div><div><dt>观点减弱</dt><dd class="amber">${weak.toString().padStart(2,'0')}</dd></div><div><dt>判断失效</dt><dd class="positive">${invalid.toString().padStart(2,'0')}</dd></div></dl><label class="sr-only" for="journalDate">复盘日期</label><select class="select-input" id="journalDate">${DATA.review_dates.map(d=>`<option value="${d}" ${d===state.journalDate?'selected':''}>${d.replaceAll('-',' / ')}</option>`).join('')}</select></aside><div class="journal-feed">${entries.length?entries.map(({s,r})=>{const index=DATA.dates.indexOf(r.date.slice(5)),m=C.metrics(s,index);return `<article class="journal-entry ${tone(r)}"><div class="panel"><div class="entry-top"><div style="display:flex;align-items:center;gap:10px"><span class="stock-token sm">${escape(s.name[0])}</span><h3>${escape(s.name)}</h3></div>${viewPill(r)}</div><p>${escape(r.viewReason||r.summary_copy)}</p><div class="entry-foot"><span>第 ${r.day} 天 <span style="margin:0 8px">·</span>${kindLabel(r)} <span style="margin:0 8px">·</span><span class="${signedClass(m.ret)}">${pct(m.ret)}</span> 较参考价</span><button class="small-link" data-open="${C.key(s)}" data-open-end="${index}">回到这一天 ${icon('arrow-up-right')}</button></div></div></article>`}).join(''):`<div class="empty">${icon('history')}<h3>这一天没有${state.onlyChanges?'观点调整':'复盘记录'}</h3><p>未记录的内容不会补写。</p></div>`}</div></div></div>`;
+ const d={...DATA,analysis_date:state.journalDate},updates=R.directionUpdates(d),byKey=new Map(updates.map(x=>[C.key(x.s),x]));
+ const entries=state.journalMode==='directions'?updates:stocks.flatMap(s=>s.reviews.filter(r=>r.date===state.journalDate&&(state.journalMode==='all'||r.viewChanged)).map(r=>({s,r})));
+ const labels=[['directions','方向更新'],['changes','全部观点调整'],['all','当日全部复盘']];
+ return `<div class="page-enter">${intro('A JOURNAL OF CHANGING MINDS','好的复盘，也记录改变。','方向更新比较相邻两次复盘的短期判断；它不等于当天涨跌，也不等于信心标签改变。',`<div class="segmented journal-modes">${labels.map(([id,label])=>`<button data-journal-mode="${id}" class="${state.journalMode===id?'active':''}">${label}</button>`).join('')}</div>`)}<div class="journal-layout"><aside class="journal-side"><h2>${state.journalDate.slice(-2)}<span class="muted" style="font-size:26px"> / ${state.journalDate.slice(5,7)}</span></h2><p>${state.journalDate.slice(0,4)} · 复盘归属日期<br>不是报告实际生成时点</p><dl><div><dt>本日方向更新</dt><dd class="accent">${updates.length}</dd></div><div><dt>转为上涨</dt><dd>${updates.filter(x=>x.to==='up').length}</dd></div><div><dt>转为下跌</dt><dd>${updates.filter(x=>x.to==='down').length}</dd></div></dl><label class="sr-only" for="journalDate">复盘日期</label><select class="select-input" id="journalDate">${DATA.review_dates.map(date=>`<option value="${date}" ${date===state.journalDate?'selected':''}>${date.replaceAll('-',' / ')}</option>`).join('')}</select></aside><div class="journal-feed">${entries.length?entries.map(({s,r})=>{const index=DATA.dates.findIndex(x=>x===r.date.slice(5)||x===r.date),m=C.metrics(s,index),x=byKey.get(C.key(s));return `<article class="journal-entry ${tone(r)}"><div class="panel"><div class="entry-top"><h3>${escape(s.name)}<small class="journal-code">${s.code} · ${s.recDate} 推荐</small></h3>${viewPill(r)}</div>${x?transitionMarkup(x):''}<p>${escape(state.journalMode==='directions'?(r.outlookReason||r.viewReason):(r.viewReason||r.summary_copy))}</p>${x?`<div class="transition-detail"><span>${x.previous.date}：${escape(x.previous.base)}</span><span>${r.date}：${escape(r.base)}</span></div><p class="journal-reason">相比上次：${escape(r.viewReason||'未保存比较原因')}</p>`:''}<div class="entry-foot"><span>第 ${r.day} 天 <span style="margin:0 8px">·</span>${kindLabel(r)} <span style="margin:0 8px">·</span><span class="${signedClass(m.ret)}">${pct(m.ret)}</span> 较参考价</span><button class="small-link" data-open="${C.key(s)}" data-open-end="${index}">回到这一天 ${icon('arrow-up-right')}</button></div></div></article>`}).join(''):`<div class="empty">${icon('history')}<h3>这一天没有${state.journalMode==='directions'?'方向更新':state.journalMode==='changes'?'观点调整':'复盘记录'}</h3><p>不将首次复盘或无法识别的方向计为变化。</p></div>`}</div></div></div>`;
 }
 function detail(){
  const s=byId(state.current),end=state.end,m=C.metrics(s,end),q=C.quoteAt(s,end),r=C.reviewAt(s,end,DATA),days=C.daysAt(s,end),isLatest=end===LAST;
  const fields=[['收盘价',q?'¥ '+money(q.c[3]):'—','',q?`${DATA.dates[q.i]} · 当日 ${pct(C.dayChange(s,q.i))}`:'没有有效报价'],['较参考价涨跌',pct(m.ret),signedClass(m.ret),s.ref?`原参考价 ¥ ${money(s.ref)}`:'暂无可靠推荐参考价'],['最高收盘涨跌',pct(m.max),signedClass(m.max),'仅统计推荐后的收盘'],['距最高收盘回落',pct(m.drawdown),signedClass(m.drawdown),'不是历史最大回撤'],['现价仍需上涨',pct(m.remaining),'',s.ref?`至20%目标 ¥ ${money(s.ref*1.2)}`:'目标尚不能计算']];
  const confirmLabel='支持这次走势判断的表现',riskLabel='会改变这次走势判断的表现';
  const events=s.reviews.filter(rv=>rv.date<=C.dateAt(end,DATA)).slice().reverse();
- return `<div class="page-enter"><button class="back-button" data-action="back">${icon('arrow-left')}返回观察清单</button><section class="detail-heading"><div class="stock-title"><span class="stock-token">${escape(s.name[0])}</span><div><h1>${escape(s.name)}</h1><small>${s.code} &nbsp; / &nbsp; ${escape(s.industryName)} &nbsp; / &nbsp; ${s.recDate.replaceAll('-','.')} 推荐</small></div></div><div class="detail-actions">${star(s)}<button class="quiet-btn" data-action="export-record">${icon('download')}导出记录</button><button class="primary-btn" data-action="play" ${s.d0||s.days<1?'disabled':''}>${icon(state.playing?'pause':'play')}<span>${state.playing?'暂停回看':'回放观察过程'}</span></button></div></section>
+ return `<div class="page-enter"><button class="back-button" data-action="back">${icon('arrow-left')}返回观察清单</button><section class="detail-heading"><div class="stock-title"><div><h1>${escape(s.name)}</h1><small>${s.code} &nbsp; / &nbsp; ${escape(s.industryName)} &nbsp; / &nbsp; ${s.recDate.replaceAll('-','.')} 推荐</small></div></div><div class="detail-actions">${star(s)}<button class="quiet-btn" data-action="export-record">${icon('download')}导出记录</button><button class="primary-btn" data-action="play" ${s.d0||s.days<1?'disabled':''}>${icon(state.playing?'pause':'play')}<span>${state.playing?'暂停回看':'回放观察过程'}</span></button></div></section>
  <div class="detail-metrics">${fields.map(([label,val,cls,sub])=>`<div class="detail-metric"><div class="label">${label}</div><strong class="num ${cls}">${val}</strong><small>${sub}</small></div>`).join('')}</div>
  <div class="detail-grid"><section class="panel"><div class="detail-chart-head"><h2>价格与成交<span>${C.dateAt(end,DATA).replaceAll('-','.')} / ${s.d0?'待首日观察':`第 ${days} 天`}</span></h2><div class="segmented" aria-label="图表类型">${[['line','收盘走势'],['candle','K 线'],['relative','相对表现']].map(([mode,label])=>`<button class="${state.chartMode===mode?'active':''}" data-chart-mode="${mode}" ${mode==='relative'&&(s.d0||s.ref===null)?'disabled':''}>${label}</button>`).join('')}</div></div><div class="detail-chart-wrap">${plot(s,end,state.chartMode)}</div><div class="chart-subnote">${state.chartMode==='relative'?`<span>首个观察日收盘＝100；与参考价收益口径不同。</span><span class="mini-legend"><span><i class="legend-line"></i>个股</span><span><i class="legend-line" style="background:var(--blue)"></i>${escape(s.industryName)}</span><span><i class="legend-line" style="background:var(--amber)"></i>${escape(DATA.market_name)}</span></span>`:`<span>${state.chartMode==='candle'?'红K：收盘≥开盘 · 绿K：收盘&lt;开盘':'实线：收盘'} &nbsp; 蓝虚线：参考价 &nbsp; 金虚线：20%目标</span><span>下方为成交额，单位：亿元</span>`}${!isLatest?'<span class="accent">正在回看：之后的走势与复盘已隐藏</span>':''}</div><div class="timeline-control"><div class="timeline-top"><span>${s.d0?'首个观察日尚未到达':`正在观察 <b>第 ${days} 天</b> / 20 个交易日`}</span><button class="small-link" data-action="latest" ${isLatest?'disabled':''}>回到最新 ${icon('arrow-right')}</button></div><div class="day-ruler" aria-label="选择观察交易日">${Array.from({length:20},(_,i)=>{const day=i+1,idx=s.recIndex+i,observed=!s.d0&&day<=s.days&&idx<=LAST,changed=s.reviews.some(rv=>rv.day===day&&rv.viewChanged);return `<button class="day-dot ${observed?'observed':''} ${day===days?'active':''} ${changed?'changed':''}" data-day="${day}" ${observed?'':'disabled'} title="${observed?`第${day}天 · ${DATA.dates[idx]}`:`第${day}天尚未观察`}" aria-label="第${day}天${observed?'':'尚未观察'}" aria-pressed="${day===days}">${day.toString().padStart(2,'0')}</button>`}).join('')}</div><div class="timeline-labels"><span>第一天</span><span>小金点＝观点发生变化</span><span>第二十天</span></div>${s.d0?'':`<input class="replay-range" id="replayRange" type="range" min="1" max="${Math.max(1,s.days)}" value="${Math.max(1,days)}" aria-label="拖动回看第几个交易日">`}</div></section>
  <aside class="panel opinion-panel"><span class="eyebrow">REVIEW / 原报告观点 <span>${r?r.date.slice(5).replace('-','.'):'—'}</span></span>${viewPill(r,s.d0?'待首日观察':'没有复盘记录')}<h3>${escape(baseLabel(r))}</h3><p>${escape(r?.outlookReason||(s.d0?'这条记录计划从下一交易日开始观察。现在只能阅读原推荐理由，不能计算推荐后涨跌。':'该条记录未附复盘正文；行情可以查看，但不能用价格自动补出研究结论。'))}</p><div class="opinion-separator"></div><div class="opinion-row"><label>${icon('check')}${confirmLabel}</label><p>${escape(r?.confirm||'原报告本次未填写')}</p></div><div class="opinion-row"><label>${icon('flag')}${riskLabel}</label><p>${escape(r?.risk||'原报告本次未填写')}</p></div><div class="pill-note">${isLatest?`原数据阶段：${escape(s.stage)} · 与研究观点分开保留`:'回看中的阶段仅依据所选日期前的复盘，不套用最新快照阶段。'}${r&&r.date!==C.dateAt(end,DATA)?`<br>所选日没有新复盘，显示最近的 ${r.date} 原记录。`:''}</div><button class="small-link" data-action="read-full">阅读原始判断 ${icon('arrow-right')}</button></aside></div>
@@ -255,20 +268,62 @@ function hideTip(){$('tooltip').style.display='none'}
 function toast(msg){clearTimeout(toastTimer);$('toast').textContent=msg;$('toast').classList.add('show');toastTimer=setTimeout(()=>$('toast').classList.remove('show'),2300)}
 function refreshCounts(){$('favCount').textContent=state.favorites.size;$('recordCount').textContent=stocks.length}
 function draw(){document.querySelectorAll('.main-plot').forEach(drawPlot);drawAtlas()}
+function setupOverviewScroll(){
+ const rail=$('recommendationRail'),slider=$('railScrollbar'),viewport=$('opinionViewport');
+ if(rail&&slider){
+  rail.scrollLeft=state.railLeft;
+  const sync=()=>{
+   const max=Math.max(0,rail.scrollWidth-rail.clientWidth);slider.max=String(max);slider.value=String(rail.scrollLeft);slider.disabled=max===0;state.railLeft=rail.scrollLeft;
+   const cards=[...rail.querySelectorAll('.observation-card')],visible=cards.map((c,i)=>({c,i})).filter(({c})=>c.offsetLeft+c.offsetWidth>rail.scrollLeft+3&&c.offsetLeft<rail.scrollLeft+rail.clientWidth-3);
+   $('railPosition').textContent=cards.length?`${visible.length?visible[0].i+1:1}–${visible.length?visible.at(-1).i+1:cards.length} / ${cards.length}`:'0 / 0';
+   slider.style.setProperty('--thumb-width',`${Math.max(30,slider.clientWidth*(rail.clientWidth/Math.max(1,rail.scrollWidth)))}px`);
+   document.querySelector('[data-rail-step="-1"]').disabled=rail.scrollLeft<2;
+   document.querySelector('[data-rail-step="1"]').disabled=rail.scrollLeft>=max-2;
+  };
+  rail.addEventListener('scroll',sync,{passive:true});sync();
+ }
+ if(viewport){
+  const rows=[...viewport.querySelectorAll('.change-item')];
+  if(rows.length){const h=rows.slice(0,3).reduce((n,r)=>n+r.getBoundingClientRect().height,0);viewport.style.height=`${Math.ceil(h)}px`;}
+  const bar=$('updatesScrollbar'),thumb=bar?.firstElementChild;
+  if(bar&&thumb){
+   const sync=()=>{
+    const max=Math.max(0,viewport.scrollHeight-viewport.clientHeight),track=bar.clientHeight;
+    const h=max?Math.max(34,track*viewport.clientHeight/viewport.scrollHeight):track;
+    thumb.style.height=`${h}px`;thumb.style.transform=`translateY(${max?(track-h)*viewport.scrollTop/max:0}px)`;
+    bar.setAttribute('aria-valuemax',String(max));bar.setAttribute('aria-valuenow',String(Math.round(viewport.scrollTop)));
+    bar.setAttribute('aria-disabled',String(max===0));bar.tabIndex=max?0:-1;
+   };
+   viewport.onscroll=sync;sync();
+   bar.onpointerdown=e=>{
+    e.preventDefault();bar.setPointerCapture(e.pointerId);bar.focus({preventScroll:true});
+    const rect=bar.getBoundingClientRect(),h=thumb.getBoundingClientRect().height;
+    const offset=e.target===thumb?e.clientY-thumb.getBoundingClientRect().top:h/2;
+    const move=event=>{const ratio=Math.max(0,Math.min(1,(event.clientY-rect.top-offset)/Math.max(1,rect.height-h)));viewport.scrollTop=ratio*(viewport.scrollHeight-viewport.clientHeight);sync();};
+    if(e.target!==thumb)move(e);bar.onpointermove=move;
+    bar.onpointerup=()=>{bar.onpointermove=null;};bar.onlostpointercapture=()=>{bar.onpointermove=null;};
+   };
+   bar.onkeydown=e=>{
+    const amounts={ArrowDown:55,ArrowUp:-55,PageDown:viewport.clientHeight,PageUp:-viewport.clientHeight,End:viewport.scrollHeight,Home:-viewport.scrollHeight};
+    if(Object.hasOwn(amounts,e.key)){e.preventDefault();viewport.scrollTop+=amounts[e.key];sync();}
+   };
+  }
+ }
+}
 function render(scroll=false){
  hideTip();
  const names={overview:'总览工作台',records:'全部观察',map:'观察星图',journal:'观点时间线',favorites:'我的收藏',detail:'个股复盘'};
  $('breadcrumb').textContent=names[state.page];
  document.querySelectorAll('.nav-item').forEach(b=>{const active=b.dataset.nav===state.page||(state.page==='detail'&&b.dataset.nav==='records');b.classList.toggle('active',active);if(active)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current')});
- $('content').innerHTML=!stocks.length?`<div class="page-enter">${intro('AFTER THE CLOSE / BEFORE THE NEXT MOVE','暂无观察记录。','本次快照没有观察记录，不填入示例股票，也不生成新的判断。')}<section class="panel"><div class="empty">${icon('layers')}<h3>暂无观察记录</h3><p>接入一份包含观察记录的快照后，页面会在原位置展示内容。</p></div></section></div>`:state.page==='overview'?overview():state.page==='map'?mapPage():state.page==='journal'?journal():state.page==='detail'?detail():records();
- hydrate();refreshCounts();draw();
+ $('content').innerHTML=!stocks.length&&state.page!=='overview'?`<div class="page-enter">${intro('AFTER THE CLOSE / BEFORE THE NEXT MOVE','暂无观察记录。','本次快照没有观察记录，不填入示例股票，也不生成新的判断。')}<section class="panel"><div class="empty">${icon('layers')}<h3>暂无观察记录</h3><p>接入一份包含观察记录的快照后，页面会在原位置展示内容。</p></div></section></div>`:state.page==='overview'?overview():state.page==='map'?mapPage():state.page==='journal'?journal():state.page==='detail'?detail():records();
+ hydrate();refreshCounts();setupOverviewScroll();draw();
  document.dispatchEvent(new CustomEvent("guanlan:render",{detail:{page:state.page}}));
  if(scroll){window.scrollTo({top:0,behavior:'instant'});$('content').focus({preventScroll:true});}
  document.title=state.page==='detail'?`${byId(state.current).name} · 观澜 · 光场 PRISM`:'观澜 · 光场 PRISM — 收盘之后，看清变化';
 }
 function stopPlayback(){if(playback)clearInterval(playback);playback=null;state.playing=false}
 let returnPage='overview';
-function navigate(page){stopPlayback();if(page!==state.page){state.filter='all';state.query=''}state.page=page;render(true)}
+function navigate(page){stopPlayback();if(page!==state.page){state.filters=R.defaultFilters();if(page==='favorites')state.filters.scope='both';state.query=''}state.page=page;render(true)}
 function openStock(id,end=LAST){const s=byId(id);if(!s)return;stopPlayback();if(state.page!=='detail')returnPage=state.page;state.current=id;state.end=Math.max(s.d0?LAST:s.recIndex,Math.min(LAST,end));state.chartMode='line';state.reviewTab='latest';state.page='detail';closeDialogs();render(true)}
 function setDay(day,rerender=true){const s=byId(state.current);if(s.d0||day<1||day>s.days)return;state.end=Math.min(LAST,s.recIndex+day-1);if(rerender)render(false)}
 // Update the day without replacing the native range input during a drag.
@@ -311,7 +366,7 @@ function searchResults(){
  const q=$('commandInput').value.trim().toLowerCase();
  state.searchList=stocks.filter(s=>!q||`${s.name} ${s.code} ${s.industryName} ${s.recDate}`.toLowerCase().includes(q)).slice(0,q?35:8);
  state.searchIndex=Math.max(0,Math.min(state.searchIndex,state.searchList.length-1));
- $('searchResults').innerHTML=state.searchList.length?state.searchList.map((s,i)=>{const m=C.metrics(s,LAST);return `<button class="search-result ${i===state.searchIndex?'active':''}" data-open="${C.key(s)}"><span class="stock-token sm">${escape(s.name[0])}</span><span class="search-info"><strong>${escape(s.name)}</strong><small>${s.code} · ${s.recDate} 推荐 · ${escape(s.industryName)}</small></span><span class="num ${signedClass(m.ret)}">${pct(m.ret)}</span>${icon('arrow-up-right')}</button>`}).join(''):`<div class="empty"><h3>没有找到匹配记录</h3><p>试试股票名称、六位代码或行业名称。</p></div>`;
+ $('searchResults').innerHTML=state.searchList.length?state.searchList.map((s,i)=>{const m=C.metrics(s,LAST);return `<button class="search-result ${i===state.searchIndex?'active':''}" data-open="${C.key(s)}"><span class="search-info"><strong>${escape(s.name)}</strong><small>${s.code} · ${s.recDate} 推荐 · ${escape(s.industryName)}</small></span><span class="num ${signedClass(m.ret)}">${pct(m.ret)}</span>${icon('arrow-up-right')}</button>`}).join(''):`<div class="empty"><h3>没有找到匹配记录</h3><p>试试股票名称、六位代码或行业名称。</p></div>`;
 }
 function openSearch(){stopPlayback();$('commandInput').value='';state.searchIndex=0;searchResults();$('searchDialog').showModal();document.body.classList.add('modal-open');$('commandInput').focus()}
 function openInfo(){$('infoDialog').showModal();document.body.classList.add('modal-open')}
@@ -322,15 +377,18 @@ document.addEventListener('click',e=>{
  if(el.dataset.star){e.stopPropagation();toggleStar(el.dataset.star);return}
  if(el.dataset.open){openStock(el.dataset.open,el.dataset.openEnd?Number(el.dataset.openEnd):LAST);return}
  if(el.dataset.nav){navigate(el.dataset.nav);return}
- if(el.dataset.heroStep){state.hero=(state.hero+Number(el.dataset.heroStep)+heroStocks.length)%heroStocks.length;render(false);return}
- if(el.dataset.cardMode){state.cardMode=el.dataset.cardMode;render(false);return}
- if(el.dataset.filter){state.filter=el.dataset.filter;render(false);return}
+ if(el.dataset.heroStep&&deepGroups.length){state.hero=(state.hero+Number(el.dataset.heroStep)+deepGroups.length)%deepGroups.length;state.heroRecord=0;render(false);return}
+ if(el.dataset.railStep){const rail=$('recommendationRail');rail.scrollBy({left:Number(el.dataset.railStep)*(rail.clientWidth+16),behavior:matchMedia('(prefers-reduced-motion:reduce)').matches?'instant':'smooth'});return}
+ if(el.dataset.filter){state.filters=R.filterAction(state.filters,el.dataset.filter);if(['all','reset'].includes(el.dataset.filter))state.query='';render(false);return}
  if(el.dataset.sort){if(state.sort===el.dataset.sort)state.direction*=-1;else{state.sort=el.dataset.sort;state.direction=-1}render(false);return}
  if(el.dataset.chartMode){state.chartMode=el.dataset.chartMode;render(false);return}
  if(el.dataset.day){stopPlayback();setDay(Number(el.dataset.day));return}
  if(el.dataset.reviewTab){state.reviewTab=el.dataset.reviewTab;const y=window.scrollY;render(false);window.scrollTo({top:y,behavior:'instant'});return}
- if(el.dataset.journalMode){state.onlyChanges=el.dataset.journalMode==='changes';render(false);return}
+ if(el.dataset.journalMode){state.journalMode=el.dataset.journalMode;render(false);return}
  switch(el.dataset.action){
+  case'all-updates':navigate('journal');state.journalMode='directions';state.journalDate=DATA.analysis_date;render(true);break;
+  case'all-recommendations':navigate('records');state.filters={...R.defaultFilters(),scope:'both'};render(true);break;
+  case'market-info':case'direction-info':case'filter-info':openInfo();document.getElementById(el.dataset.action.replace('-info','')+'Policy')?.scrollIntoView({block:'start'});break;
   case'search':openSearch();break;
   case'info':openInfo();break;
   case'close-dialog':closeDialogs();break;
@@ -341,8 +399,6 @@ document.addEventListener('click',e=>{
   case'play':play();break;
   case'latest':stopPlayback();state.end=LAST;render(false);break;
   case'back':navigate(returnPage);break;
-  case'attention':navigate('records');state.filter='attention';render(false);break;
-  case'positive':navigate('records');state.filter='positive';render(false);break;
   case'read-full':state.reviewTab='latest';render(false);$('reviewPanel').scrollIntoView({behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'instant':'smooth',block:'start'});break;
  }
 });
@@ -352,6 +408,12 @@ document.addEventListener('input',e=>{
  if(e.target.id==='replayRange'){const day=Number(e.target.value);stopPlayback();setDay(day,false);refreshDetailDay();}
 });
 document.addEventListener('change',e=>{if(e.target.id==='journalDate'){state.journalDate=e.target.value;render(false)}});
+document.addEventListener('input',e=>{if(e.target.id==='railScrollbar'){$('recommendationRail').scrollLeft=Number(e.target.value);}});
+document.addEventListener('change',e=>{
+ if(e.target.id==='deepSelect'){state.hero=Number(e.target.value);state.heroRecord=0;render(false);}
+ if(e.target.id==='deepEpisode'){state.heroRecord=Number(e.target.value);render(false);}
+ if(e.target.id==='opinionFilter'){state.filters=R.filterAction(state.filters,'opinion',e.target.value);render(false);}
+});
 document.addEventListener('keydown',e=>{
  const typing=['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName),modal=!!document.querySelector('dialog[open]');
  if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='k'){e.preventDefault();if($('searchDialog').open)closeDialogs();else if(!modal)openSearch();return}
@@ -362,7 +424,7 @@ document.addEventListener('keydown',e=>{
  if(['Enter',' '].includes(e.key)&&e.target.matches('[role="button"]:not(button)')){e.preventDefault();e.target.click();}
 });
 document.querySelectorAll('dialog').forEach(d=>{d.addEventListener('close',()=>{if(!document.querySelector('dialog[open]'))document.body.classList.remove('modal-open')});d.addEventListener('click',e=>{if(e.target===d){const r=d.getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)closeDialogs()}})});
-window.addEventListener('resize',()=>{clearTimeout(resizeTimer);resizeTimer=setTimeout(draw,100)});
+window.addEventListener('resize',()=>{clearTimeout(resizeTimer);resizeTimer=setTimeout(()=>{setupOverviewScroll();draw()},100)});
 document.addEventListener('visibilitychange',()=>{if(document.hidden){stopPlayback();if(state.page==='detail')render(false)}});
 if(readStore('guanlan.theme')==='light')document.body.classList.add('light');
 // Bind snapshot metadata; never leave the demo's date/count in a new report.
@@ -370,7 +432,9 @@ const footerNode=$('snapshotFooter'),summaryNode=$('snapshotSummary'),timingNode
 if(footerNode)footerNode.textContent=`上传报告快照 · 行情截至 ${displayDate} · 非实时行情，非账户收益`;
 if(summaryNode)summaryNode.textContent=`这是基于上传的观察日报制作的独立交互展示稿。载入${stocks.length}条观察记录，不访问网络、不连接券商，也不生成新的选股结论。`;
 if(timingNode)timingNode.textContent=`行情截至${DATA.analysis_date}。原快照截止为${DATA.as_of||'源报告未提供'}。逐日回看按复盘日期展示；部分报告在之后生成，因此这不是严格按当时可见信息运行的历史回测。`;
+const availableMarkets=R.marketCards(DATA);
+if($('marketSnapshotStatus'))$('marketSnapshotStatus').textContent=`本次快照：${availableMarkets.filter(x=>x.close!==null).length}/${availableMarkets.length}项已提供。${availableMarkets.filter(x=>x.close===null).length?'未提供或非本日数据：'+availableMarkets.filter(x=>x.close===null).map(x=>x.name).join('、')+'。':'所有配置指数均有本日收盘。'}`;
 hydrate();refreshCounts();render();
 // Exposed read-only inspection hooks for the included tests, not an external API.
-window.GUANLAN={snapshot:DATA,getState:()=>({...state,favorites:[...state.favorites]}),core:C};
+window.GUANLAN={snapshot:DATA,getState:()=>({...state,favorites:[...state.favorites]}),core:C,rules:R};
 })();
