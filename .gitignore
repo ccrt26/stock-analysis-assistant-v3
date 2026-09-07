@@ -18,3 +18,6 @@ local_archive/
 *.egg-info/
 supabase/.temp/
 .wrangler/
+
+# 本机 Skill 路径与项目插件开关不进入版本库
+/.codex/config.toml

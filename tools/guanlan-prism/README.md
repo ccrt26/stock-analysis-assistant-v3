@@ -1,84 +1,53 @@
-# 观澜 · 光场 PRISM V2
+# 观澜 · 光场 PRISM：当前仓库接入
 
-**这是一套已经能运行的前端成品，不是一份需要重新设计的方案。**
+本目录保存已接入股票助手的前端成品源码。当前入口是仓库根目录的 `tools/render_prism_web.py`：复用 `tools/render_monitor_web.py` 的冻结数据，再调用本目录 `tools/build.py` 中的 `render_html()`，生成独立单文件离线页面。
 
-本版继承用户认可的「观澜 AFTERCLOSE」功能与信息布局，升级配色、玻璃面板、光场、边缘反射、文字层级与交互动效。原行情数组、参考价、推荐理由、复盘正文均保留。交付日期：2026-09-06。
+## 从真实归档生成页面
 
-## 先看成品
+在股票助手仓库根目录运行：
 
-打开 `dist/guanlan-prism.html`。它是单文件版，CSS、JavaScript、图标、数据都已经包含在里面，不需要安装软件包、启动后端或调用模型。
+```bash
+./.venv/bin/python tools/render_prism_web.py --help
+./.venv/bin/python tools/render_prism_web.py
+```
 
-修改源码时打开根目录 `index.html`。它与单文件版来自同一套源码，但 CSS 和 JavaScript 分开加载。整个目录一起保留，不要只拿走 index.html。
+默认读取最新已有 snapshot 和对应已保存报告，输出到归档目录下的 `prism-report-<date>.html`。可以用 `--date YYYY-MM-DD` 选择已有归档日期，用 `--out` 指定输出文件，用 `--monitor-dir` 指定验证副本目录。命令会生成页面；只检查参数时使用 `--help`。
 
-页面右上角的星光按钮控制装饰动效；太阳按钮切换明暗；搜索支持 ⌘/Ctrl K。系统开启“减少动态效果”时，光场会静止，星光按钮会说明这一状态。这不影响主动点击“回放观察过程”。
+Prism 不覆盖原有 monitor HTML 或 `index.html`，也不增加定时任务。`tools/update_monitor_web.py` 仍是既有 monitor 页面本地更新入口，不能把它描述为已经自动更新全部 Prism 页面。
 
-## 交给 GLM5.3
+## 数据与正文边界
 
-**把整个压缩包提供给 GLM5.3，并要求先读根目录 `GLM5.3_执行指令.md`。不要只提供截图。**
+- 页面呈现已经冻结的事实和 AI 正文，不新增荐股、不修改理由、不接入实时行情。
+- 节点详评、普通详评、简评按源 `review_kind` 展示；详评正文来自报告，简评正文来自账本。同股不同推荐日期保留独立记录。
+- 原文中即使存在措辞或判断问题，也不由前端静默改写；应该在研究流程中核对来源与判断。
+- 程序排版与数据内联不等于程序创作复盘正文；本地页面生成不代表云端发布授权。
 
-需要它做的是“移植现成前端 + 对接原有数据”，不是“参考此设计重新写一版”。HTML 结构、两份 CSS 的加载顺序、Canvas 效果、SVG 图表、交互代码都已经给齐。
-
-## 目录导航
+## 当前源码
 
 | 路径 | 用途 |
 |---|---|
-| `dist/guanlan-prism.html` | 直接体验的单文件成品，也是视觉与交互基准 |
-| `index.html` | 拆分源码的预览入口，由构建脚本生成 |
-| `src/shell.html` | 页面外壳：品牌、导航、顶栏、弹窗、内容容器 |
-| `src/base.css` | 继承的布局与组件基础；不要省略 |
-| `src/prism.css` | V2 完整视觉、响应式与动效样式；必须在 base.css 后加载 |
-| `src/app.js` | 页面生成、导航、搜索、筛选、收藏、图表、时间轴与导出 |
-| `src/core.js` | 确定性展示计算；不产生新选股或研究结论 |
-| `src/effects.js` | 独立光场与鼠标高光，不读取股票数据 |
-| `data/snapshot.json` | 原示例快照，35 条独立观察记录 |
-| `assets/brand.svg` | 独立的品牌矢量原稿；运行版已内联同样图形 |
-| `tools/build.py` | 标准库构建脚本，也提供 `render_html()` 接入函数 |
-| `docs/` | 视觉、交互、数据、接入、验收与改动说明 |
-| `previews/` | 本代码在浏览器中实际渲染的多页面效果图 |
-| `tests/` | 可运行检查、截图脚本与本次执行结果 |
+| `src/shell.html` | 页面外壳 |
+| `src/base.css`、`src/prism.css` | 基础布局与视觉，按此顺序加载 |
+| `src/app.js` | 页面、筛选、图表和交互 |
+| `src/core.js` | 确定性展示计算 |
+| `src/effects.js` | 独立装饰动效 |
+| `tools/build.py` | 接收适配数据并生成 HTML |
+| `docs/03-数据接口与口径.md` | 原包数据接口及示例口径说明，实际输入由仓库适配器提供 |
 
-## 源码修改后重新构建
+修改源码后，通过仓库 `tools/render_prism_web.py` 重新生成页面，不只修改生成产物。
 
-需要 Python 3.11 或更高版本；运行成品 HTML 不需要 Python。
+## 验证
+
+在仓库根目录运行现有相关测试：
 
 ```bash
-# 在解压后的 guanlan-prism-v2 目录中运行
-python3 tools/build.py
+./.venv/bin/python -m pytest tests/test_render_prism_web.py tests/test_render_monitor_web.py tests/test_update_monitor_web.py -q
 ```
 
-这会同步重建 `dist/guanlan-prism.html` 和 `index.html`。**只修改 src 中的源文件，不要只改 dist，否则下一次构建会把改动覆盖。**
+这些测试检查数据适配、正文来源、三类展示和本地更新边界；通过它们不等于已经完成浏览器视觉或所有平台交互验收。实际页面调整按任务需要使用浏览器验证。
 
-接入兼容的真实快照时：
+## 原始交付资料
 
-```bash
-python3 tools/build.py --data /实际路径/新快照.json --out /实际路径/新的观察报告.html
-```
+本目录 `docs/` 保留原前端成品包的设计、接入和验收说明。原包中“交给 GLM5.3”、示例快照、固定日期、截图和解压目录命令属于历史交付背景，不是当前任务指令或当前事实。当前集成已完成，不需要重新交接给指定模型；仓库不保证原包的 `data/snapshot.json`、`dist/`、`previews/`、`tests/` 等交付产物全部存在，应使用上面的真实仓库入口。
 
-`--data` 模式默认使用输入记录的顺序作为展示顺序，不把本例中的固定股票当成新一轮推荐。它不修改输入文件，也不修改包内原快照。字段合同见 `docs/03-数据接口与口径.md`。
-
-## 检查与截图
-
-仅测试需要 Node（运行内置 node:test）和 Python Playwright；运行页面不需要 Node、不需要 npm install。
-
-```bash
-python3 -m pip install -r requirements-test.txt
-python3 -m playwright install chromium
-python3 tests/run_all.py
-python3 tests/capture.py
-```
-
-测试默认寻找 `chromium` 可执行文件；找不到时使用 Playwright 的 Chromium。也可以通过 `CHROMIUM_PATH` 指定现有浏览器路径。
-
-在本机检查真正的文件打开与跨刷新存储：
-
-```bash
-python3 tests/prism_browser_test.py --file
-```
-
-本次受管理浏览器阻止 `file://` 导航，因此交付前使用“将完整 HTML 装入 Chromium 页面”的方式验证渲染与交互，**未把本机双击、跨刷新存储或 Safari 测试写成已经完成**。详细证据与限制见 `docs/05-验收与已知限制.md`。
-
-## 本版范围
-
-这是展示层，不是新的荐股系统。没有访问你的本地事实仓、没有接入新的实时行情、没有修改 GitHub 仓库。行情快照截至 2026-09-04，原快照截止为 2026-09-06 18:30（上海时间）。视图里的涨跌不是账户收益。原文与数组有不一致时，图表用数组，正文保留原文。
-
-本包不附带任何字体文件，也没有 CDN、在线图片、在线图标或在线图表库依赖。
+页面不附带字体文件，也不依赖 CDN、在线图片、图标或图表服务。

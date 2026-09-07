@@ -34,7 +34,7 @@
   --as-of <selection_as_of>
 ```
 
-然后读取 `ops/forward-monitor-prompt.md`。市场 Skill 每天只分析一次，同一份市场结果同时用于已有股票跟踪和当天新选股。先根据 monitor snapshot 为 `daily_review_episode_ids` 生成全部每日简评，调用 `record-daily-formal-reviews` 保存 `daily-formal-reviews-<analysis_date>.json`；再按 `detailed_review_stock_count` 生成并 `record` 当天重点详评 `monitor-report`。只有 selection 返回 `ready_for_research` 或 `ready_for_research_limited` 时才继续当天 V4 新选股。
+然后读取 `ops/forward-monitor-prompt.md`。市场 Skill 每天只分析一次，同一份市场结果同时用于已有股票跟踪和当天新选股。先为 monitor snapshot 的 `daily_review_episode_ids` 形成全部结构化判断草稿，再按 `checkpoint_review_episode_ids` 确定节点股、从非节点中选0—8只普通详评、其余归简评；各写唯一正文并核对一致性后，先调用 `record-daily-formal-reviews` 保存账本，再 `record` 全部节点详评和普通详评的 `monitor-report`。`checkpoint_review_stock_count` 是节点股数，`regular_detail_stock_limit` 是普通详评上限，不是必写篇数；账本只保存简评类正文。只有 selection 返回 `ready_for_research` 或 `ready_for_research_limited` 时才继续当天 V4 新选股。
 
 若 selection 返回 `already_selected`，仍可生成跟踪报告，但不得重复执行新选股。若当天没有仍在跟踪的记录，跳过跟踪明细，正常执行新选股。若返回 `non_trading_day`、数据缺口或错误，说明真实状态，不补猜。
 
@@ -124,7 +124,7 @@ stock_analyzer.ops.forward_selection.DailyResearchTraceV4
 ## 3. 五个 Skill 的执行顺序
 
 1. 市场 Skill 读取当日 `market_context`，输出六种之一的 `market_propagation_mode`，并按事实填写可并存的 `market_risk_overlays`；市场不输出股票。这一步只运行一次，并把结果同时交给跟踪和新选股。
-2. 板块、公司和价格三个 Skill 在相同冻结边界和完整合格股票范围内独立发现，提交前不读取彼此候选。
+2. 板块、公司和价格三个 Skill 在相同冻结边界和完整合格股票范围内分别依据自己负责的事实发现线索，不把其他视角的候选或结论当作本视角来源。同一会话中的视角分工不等于独立上下文盲审。
 3. 公司 Skill 按“新增性 → 阶段 → 主营联系 → 材料性 → 财务传导 → 兑现时间 → 失败条款”核对主要事件，不判断价格接受。
 4. 板块 Skill 按“共同动力 → leader/core 角色 → 同板块近邻”严格区分 `sector_broad_diffusion` 与 `sector_leader_cluster`，不替价格 Skill 判断个股完整连续性和余量。
 5. 总控按股票代码归并候选，先确定结构化 `engine_type`、`engine_status` 和 `market_recognition`，再把同一批少量候选交给四个专业 Skill 独立验证。
@@ -237,7 +237,7 @@ local_archive/forward_selection/pending-trace-<formation_date>.json
 
 内部归档和最终给用户的回复必须分开：
 
-- snapshot、V4 trace、比较记录、最近替代和程序要求的本地 JSON/Markdown 继续完整生成，供内部研究、校验和以后评价使用，不得删减或改写合同。`daily-formal-reviews-<analysis_date>.json` 保存全部每日简评，`DailyForwardMonitorReportV2` 只保存当天最多8只重点详评；没有公开的事件候选仍完整保留在 snapshot、事实仓和 trace。
+- snapshot、V4 trace、比较记录、最近替代和程序要求的本地 JSON/Markdown 继续完整生成，供内部研究、校验和以后评价使用，不得删减或改写合同。`daily-formal-reviews-<analysis_date>.json` 保存全部结构化判断及仅简评类正文，`DailyForwardMonitorReportV2` 保存全部节点详评和最多8只普通详评的唯一正文；没有公开的事件候选仍完整保留在 snapshot、事实仓和 trace。
 - 最终回复的正式复盘只展示派生为 `confirmed_active` 的股票。比较股、最近替代股、未入选候选、未决股票和只在内部关注的股票都不展示、不点名，也不披露它们的表现或数量。
 - `fresh_event_pending + conditional + pending` 继续作为 `conditional_event` 保留在内部 V4 trace；原有的 `selected` 身份、优先级、事件公司证据和首个交易日观察条件保持不变。conditional 不进入正式推荐数量，不写入“今天明确推荐的股票”，也不得虚构收益或在用户报告中单列。
 - 同一股票同时有正式推荐和比较记录时，对外只讲正式推荐记录；内部仍保留完整比较。
@@ -358,7 +358,7 @@ local_archive/forward_selection/pending-trace-<formation_date>.json
 
 **今天发生了什么**
 
-展示独立展开的详评正文 `ForwardEpisodeReviewV1.current_review`：说明今天发生了什么、当前看法及重点日的阶段展开。详评与日评共享事实与结构化结论，但不逐字复制；观点变化说明仍读取当天日评的 `view_change` 与 `view_change_reason`。
+展示独立展开的详评正文 `ForwardEpisodeReviewV1.current_review`：说明今天发生了什么、当前看法及重点日的阶段展开。详评与当天账本的结构化结论一致，账本不另写详评股的简评正文；观点变化说明仍读取当天日评的 `view_change` 与 `view_change_reason`。
 
 **相比上次判断**
 

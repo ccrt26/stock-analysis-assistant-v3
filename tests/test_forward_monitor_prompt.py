@@ -478,7 +478,7 @@ def test_review_prompt_pins_plain_language_standard_and_style_anchor() -> None:
     for phrase in ("直接说事，不表演通俗", "不打比方", "文风基准",
                    "缩量整理两天后今天放量再攻"):
         assert phrase in monitor
-    for phrase in ("直接说事，不表演通俗", "人话优先"):
+    for phrase in ("直接说事，不表演通俗", "事实、时点、口径和来源必须准确且可追溯"):
         assert phrase in skill
     # 软数量配额已被三路互斥方案删除，不得回潮。
     for legacy in ("最多4个", "60—140", "150—320", "180—350", "400—800"):
@@ -514,3 +514,29 @@ def test_review_prompt_pins_plain_language_standard_and_style_anchor() -> None:
         ):
             assert stale not in Path(rule_path).read_text(encoding="utf-8"), (
                 rule_path, stale)
+
+
+def test_current_entrypoints_do_not_restore_the_legacy_review_flow() -> None:
+    # Regression: these obsolete instructions coexisted with the new body validator.
+    paths = (
+        "ops/forward-selection-prompt.md",
+        "ops/forward-monitor-prompt.md",
+        ".agents/skills/orchestrating-stock-research/SKILL.md",
+        ".agents/skills/reviewing-stock-recommendations/SKILL.md",
+        "docs/architecture/current-v3-architecture.md",
+        "docs/architecture/forward-monitoring-v1.md",
+    )
+    obsolete = (
+        "detailed_review_stock_count",
+        "生成全部每日简评",
+        "保存全部每日简评",
+        "必须逐条简评",
+        "正文各自成文",
+        "日报最多8只",
+        "两者冲突时，说人话优先",
+        "正文直接采用 `DailyFormalReviewV1.current_review`",
+    )
+    for path in paths:
+        text = Path(path).read_text(encoding="utf-8")
+        for instruction in obsolete:
+            assert instruction not in text, (path, instruction)

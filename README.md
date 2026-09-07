@@ -25,16 +25,23 @@ GitHub 不包含被忽略的 `local_warehouse/`、`local_archive/`、`logs/`、`
 - 使用业务键、时间边界、文件哈希和数据契约检查落库质量；
 - 将元数据保存在 `local_warehouse/research.duckdb`；
 - 将事实保存在 `local_warehouse/facts/` 的 Parquet 分区；
-- 将当前三类确定性观察保存在 `local_warehouse/derived/`；
+- 将当前市场、板块、个股和价格四类确定性观察保存在 `local_warehouse/derived/`；
 - 通过 `ResearchQuery` 按明确时点读取历史可见事实；
 - 生成每日数据健康摘要；
 - 由五个 Skill 按当前研究问题调阅 `src/stock_analyzer/knowledge/` 中的本地知识。
 - 通过 `.agents/skills/` 中的五个 Skill 组织市场、板块、公司、价格和最终比较研究；
+- 由 `reviewing-stock-recommendations` 综合四个专业 Skill 的复盘事实，总控检查一致性；
 - 保存每日推荐当时的完整判断，并在之后的第1—20个交易日复盘真实走势；同一股票可以合并展示，但每次推荐或比较都读取自己的上一轮复盘并分别评价。正式推荐到第20个交易日后会优先完成最终复盘，漏跑时持续提醒到成功保存；比较对象不形成荐股最终结论。第21—30个交易日只更新后续走势观察。
 
-给用户看的每日合并报告统一使用“今天的市场情况”“之前研究过的股票走势复盘”“目前还在跟踪多少只”“今天新推荐的股票”等通俗标题。推荐日期使用原计划观察日；同一股票当天共同的市场、行业、公司和个股变化只展示一次，每条记录分别说明原判断和实际路径。第20天固定结论与第21—30天当前走势分开显示。报告不直接展示冻结记录中的内部说法，也不把当前价格改写成原推荐价格。推荐股和当时备选股只有在真实记录能够可靠对应、观察窗口一致且两边价格路径完整时才比较。
+给用户看的每日合并报告使用“今天的市场情况”“正式推荐股票的今日复盘”“目前仍开放的正式推荐股票数量”“今天明确推荐的股票”。当天需复盘的正式 episode 全部生成结构化判断；节点股全部详评并完成六项对账，非节点最多8只普通详评并覆盖四项，其余只写简评。先形成判断草稿、按三路写唯一正文并核对，再先保存日评账本、后保存详评报告。账本只存简评正文，报告只存两类详评正文，同股各次推荐分别对账，比较记录只作内部评价。D20完整结案只展示并冻结一次，D21—D30不改写它。具体规则见[复盘架构](docs/architecture/forward-monitoring-v1.md)和当前运行 Prompt。
 
 GitHub 不保存真实行情事实。最新可用日期应以本地健康检查和事实仓查询结果为准，不要依赖 README 中的固定日期。
+
+## 本地报告展示
+
+`tools/render_monitor_web.py` 将已冻结报告渲染为静态 HTML；`tools/render_prism_web.py` 复用同一份数据生成独立的 Prism 页面；`tools/update_monitor_web.py` 是现有本地更新入口。渲染只呈现已保存正文和确定性数据，不重新研究、不接入实时行情、不发布到云端。具体入口见 [Prism 说明](tools/guanlan-prism/README.md)。
+
+项目协作与插件适用范围见 `AGENTS.md`。本机 Superpowers 限制通过被 Git 忽略的 `.codex/config.toml` 配置，其他机器须在自己的受信任项目中设置；模型与插件是否生效应读取实际任务和加载结果，不能仅凭当前对话模型判断。
 
 ## 本地目录
 
@@ -45,7 +52,9 @@ local_warehouse/
 └── derived/
 
 local_archive/
-└── data_health/
+├── data_health/
+├── forward_selection/
+└── forward_monitor/
 
 logs/
 └── research-data/
