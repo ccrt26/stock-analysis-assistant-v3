@@ -20,6 +20,8 @@
 
 ## 2. 生成全部结构化判断并按三路分配正文
 
+开始写作前读取 `.agents/skills/reviewing-stock-recommendations/SKILL.md`，包括“按已有合同逐篇执行与复查”，并读取本 Prompt 的已批准范文。四项／六项是必答内容，不是作文模板；按已有合同逐篇完成证据核对、内容落位与外层去重复检查，不另改分析框架或呈现。
+
 只处理 snapshot 的 `daily_review_episode_ids`。每个 ID 恰好一条 `DailyFormalReviewV1`，总体写入 `DailyFormalReviewLedgerV1`，版本固定为 `daily-formal-reviews-v1`。conditional、比较股、落选股、未决股、evaluation_only 普通日期和 completed 记录不得进入。
 
 先用 snapshot 的 `checkpoint_review_episode_ids`（节点股的全部合格episode）把当日股票分成三组：K＝节点详评股，D＝普通详评股（从非节点股票按优先级选最多8只），B＝其余简评股。三组互斥，合起来覆盖全部当日需更新判断的股票；同一股票当天只进入一组。
@@ -28,7 +30,7 @@
 
 每条记录填写 `review_kind`（同股所有episode一致）：节点股为 `checkpoint_detail`，普通详评股为 `regular_detail`，简评股为 `brief`。只有简评类写 `DailyFormalReviewV1.current_review`（600字符硬上限，说完即停）；两类详评的 `current_review` 必须为空，详评正文只写入 monitor-report 的 `ForwardEpisodeReviewV1.current_review`，不得为详评另配隐藏简评。结构化判断（当前结论、主要解释、薄弱环节、观点变化、展望、跟踪决定）三类都要完整填写；上轮观点读取规则不变。
 
-生成顺序：全部结构化判断草稿→摘出 K→非节点中选 D→其余 B→各写唯一正文→同一执行者核对来源与结构化一致性→先 record 账本、后 record 报告。节点详评正文逐只撰写，禁止用程序模板拼接生成；历史补写只按小批量进行（每批不超过8只）并逐批自检。保存前发现详评改变了判断，先同步未保存草稿，不能事后改已保存账本。观点变化说明以当天日评的结构化字段为准，详评不另造一份。
+生成顺序：全部结构化判断草稿→摘出 K→非节点中选 D→其余 B→各写唯一正文→同一执行者核对来源与结构化一致性→先 record 账本、后 record 报告。两类详评正文逐只撰写，禁止用程序模板拼接生成；历史补写只按小批量进行（每批不超过8只）并逐批自检。保存前发现详评改变了判断，先同步未保存草稿，不能事后改已保存账本。观点变化说明以当天日评的结构化字段为准，详评不另造一份。
 
 先生成：
 

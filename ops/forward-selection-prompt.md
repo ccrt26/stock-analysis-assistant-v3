@@ -340,6 +340,8 @@ local_archive/forward_selection/pending-trace-<formation_date>.json
 
 ## 正式推荐股票的今日复盘
 
+复盘写作与逐篇复查按 `.agents/skills/reviewing-stock-recommendations/SKILL.md` 和复盘 Prompt 的已批准范文执行；本合并步骤只读取正式结果，不重新改写分析或呈现。
+
 直接采用本次已记录的正式复盘 Markdown，只展示明确正式推荐过的股票，并依次包含：
 
 ### 关键节点复盘、今日深入复盘 与 今日简评
