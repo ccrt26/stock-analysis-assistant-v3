@@ -8,8 +8,12 @@ tools/guanlan-prism/docs/03-数据接口与口径.md），并做两处展示层�
 2. presentation：默认四个市场代码与 deepLimit=8（可用 --indices 调整三至五项）。
 
 当日普通详评名单直接由页面规则从 regular_detail 标记推导（上游无显式排序
-名单时不编造 dailyDeepReview）。不修改选股、复盘、V4 渲染器或定时任务；
-不覆盖 monitor-report-*.html 与 index.html，新页面写入 prism-report-<date>.html。
+名单时不编造 dailyDeepReview）。不修改选股、复盘、V4 渲染器或定时任务。
+
+输出两个文件：
+1. prism-report-<date>.html —— 按日期留档，历史可回看；
+2. prism.html —— 固定地址，内容不变时原子跳过，永远等于最新已渲染日报。
+用户只需记住固定地址 prism.html。
 
 用法：
     ./.venv/bin/python tools/render_prism_web.py                  # 最新一个 snapshot
@@ -22,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import os
 import sys
 from datetime import date, datetime
 from pathlib import Path
@@ -102,6 +107,11 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="comma-separated market codes (3-5), default 000001.SH,399001.SZ,399006.SZ,000688.SH",
     )
+    parser.add_argument(
+        "--no-publish",
+        action="store_true",
+        help="skip publishing the fixed prism.html entry (dated file is still written)",
+    )
     args = parser.parse_args(argv)
 
     renderer, adapt, prism = load_modules()
@@ -129,9 +139,23 @@ def main(argv: list[str] | None = None) -> int:
         if args.out
         else monitor_dir / f"prism-report-{analysis_date.isoformat()}.html"
     )
-    out_path.write_text(html, encoding="utf-8")
+    # 幂等：同一输入重复运行不重写留档文件，也不触碰固定地址的修改时间。
+    if out_path.exists() and out_path.read_text(encoding="utf-8") == html:
+        print("status=unchanged")
+    else:
+        out_path.write_text(html, encoding="utf-8")
+        print("status=rendered")
+    if not args.no_publish:
+        # 固定地址：原子替换，永远等于最新已渲染日报；失败不破坏旧页面。
+        fixed_path = monitor_dir / "prism.html"
+        if not fixed_path.exists() or fixed_path.read_text(encoding="utf-8") != html:
+            tmp_path = fixed_path.with_name(f"{fixed_path.name}.tmp-{os.getpid()}")
+            tmp_path.write_text(html, encoding="utf-8")
+            os.replace(tmp_path, fixed_path)
+            print(f"published={fixed_path}")
+        else:
+            print(f"published=unchanged {fixed_path}")
     provided = [row for row in display_snapshot.get("marketIndices", []) if row.get("close") is not None]
-    print("status=rendered")
     print(f"analysis_date={analysis_date.isoformat()}")
     print(f"html_file={out_path}")
     print(f"stock_count={len(payload['stocks'])}")

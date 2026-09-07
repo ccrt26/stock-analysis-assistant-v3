@@ -120,3 +120,11 @@ def test_cli_renders_with_market_enrichment(
     printed = capsys.readouterr().out
     assert "market_rows_loaded=0" in printed
     assert "market_provided=0/4" in printed
+    # 固定地址随渲染发布，与留档内容一致；重复运行幂等。
+    fixed = tmp_path / "prism.html"
+    assert fixed.is_file() and fixed.read_text(encoding="utf-8") == text
+    first_fixed_mtime = fixed.stat().st_mtime_ns
+    assert prism_cli.main(["--out", str(out)]) == 0
+    capsys.readouterr()
+    assert fixed.read_text(encoding="utf-8") == text
+    assert fixed.stat().st_mtime_ns == first_fixed_mtime
