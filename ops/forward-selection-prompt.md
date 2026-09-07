@@ -36,6 +36,8 @@
 
 然后读取 `ops/forward-monitor-prompt.md`。市场 Skill 每天只分析一次，同一份市场结果同时用于已有股票跟踪和当天新选股。先为 monitor snapshot 的 `daily_review_episode_ids` 形成全部结构化判断草稿，再按 `checkpoint_review_episode_ids` 确定节点股、从非节点中选0—8只普通详评、其余归简评；各写唯一正文并核对一致性后，先调用 `record-daily-formal-reviews` 保存账本，再 `record` 全部节点详评和普通详评的 `monitor-report`。`checkpoint_review_stock_count` 是节点股数，`regular_detail_stock_limit` 是普通详评上限，不是必写篇数；账本只保存简评类正文。只有 selection 返回 `ready_for_research` 或 `ready_for_research_limited` 时才继续当天 V4 新选股。
 
+本次有普通详评时，按复盘 Prompt 实际读取 `.agents/skills/reviewing-stock-recommendations/references/regular-review-calibration.md`，先完成首篇写作与事实、告知目的检查再续写；不要依赖此前对话的记忆或只读取 Skill 的简介。无普通详评时跳过，方法与检查细节仅由复盘 Skill／Prompt 维护。
+
 若 selection 返回 `already_selected`，仍可生成跟踪报告，但不得重复执行新选股。若当天没有仍在跟踪的记录，跳过跟踪明细，正常执行新选股。若返回 `non_trading_day`、数据缺口或错误，说明真实状态，不补猜。
 
 把返回的以下三个字段作为唯一时间边界：
@@ -341,6 +343,8 @@ local_archive/forward_selection/pending-trace-<formation_date>.json
 ## 正式推荐股票的今日复盘
 
 复盘写作与逐篇复查按 `.agents/skills/reviewing-stock-recommendations/SKILL.md` 和复盘 Prompt 的已批准范文执行；本合并步骤只读取正式结果，不重新改写分析或呈现。
+
+合并与网页刷新后，逐只核对普通详评的告知标题和分析正文与正式记录一致；不能因文件已存在而保留旧正文，也不能由合并步骤另拟标题或摘要。首篇检查过程留在本任务运行记录，最终回复仍只输出完整股票报告。
 
 直接采用本次已记录的正式复盘 Markdown，只展示明确正式推荐过的股票，并依次包含：
 

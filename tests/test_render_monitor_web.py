@@ -826,6 +826,49 @@ def test_scan_history_merges_regular_detail_and_reads_brief(tmp_path: Path) -> N
     assert brief_review["review_kind"] == "brief"
 
 
+@pytest.mark.parametrize("kind", ["regular_detail", "checkpoint_detail"])
+def test_explicit_regular_title_preserves_source_and_checkpoint_behavior(
+    tmp_path: Path, kind: str,
+) -> None:
+    title = "示例股份｜尚未触及上次观察位，连续回落使短期转为偏弱"
+    body = "当前收盘仍在原观察位上方。判断依据是连续回落。\n\n其余原文和数字保持不变。"
+    source = title + "\n\n" + body
+    _write_three_route_day(
+        tmp_path,
+        checkpoint_ids=["e1"] if kind == "checkpoint_detail" else [],
+        ledger_review=_three_route_ledger_review("e1", kind=kind, text=None),
+        report_text=source,
+    )
+    review = scan_history(tmp_path, date(2026, 9, 2))["e1"][0]
+    assert review["copy"] == source
+    assert review["summary_copy"] == source
+    assert review["headline"] == (
+        title if kind == "regular_detail" else renderer._first_sentence(source)
+    )
+    assert review["viewReason"] == "收盘连续两日回落。"
+    assert review["confirm"] == "增强条件。" and review["risk"] == "改变条件。"
+
+
+@pytest.mark.parametrize("source", [
+    "旧稿第一句。\n\n后续解释。",
+    "其他股份｜标题不属于这条记录\n\n后续解释。",
+    "示例股份｜\n\n后续解释。",
+    "示例股份｜只有标题而没有正文",
+    "示例股份｜第一段包含\n另一行，不能当作单行标题\n\n后续解释。",
+])
+def test_regular_title_does_not_reinterpret_legacy_or_incomplete_text(
+    tmp_path: Path, source: str,
+) -> None:
+    _write_three_route_day(
+        tmp_path, checkpoint_ids=[],
+        ledger_review=_three_route_ledger_review("e1", kind="regular_detail", text=None),
+        report_text=source,
+    )
+    review = scan_history(tmp_path, date(2026, 9, 2))["e1"][0]
+    assert review["copy"] == source
+    assert review["headline"] == renderer._first_sentence(source)
+
+
 def test_scan_history_detail_without_report_shows_placeholder(tmp_path: Path) -> None:
     _write_three_route_day(
         tmp_path,

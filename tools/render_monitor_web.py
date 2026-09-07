@@ -373,6 +373,18 @@ def _first_sentence(text: str) -> str:
     return match.group(0) if match else text.strip()
 
 
+def _regular_review_title(text: str, name: str) -> str:
+    """读取 AI 已写的标题首段，不推断或改写研究结论。"""
+    title, separator, body = text.partition("\n\n")
+    prefix = f"{name}｜"
+    if (
+        name and separator and body.strip() and "\n" not in title
+        and title.startswith(prefix) and title[len(prefix):].strip()
+    ):
+        return title
+    return ""
+
+
 def _review_facts(episode: dict[str, Any]) -> list[str]:
     def pct(value: float) -> str:
         return f"{'+' if value > 0 else ''}{value * 100:.2f}%"
@@ -572,6 +584,12 @@ def scan_history(
                 if existing is not None and same_as_of:
                     # 账本提供结构化观点；详评正文与条件保留自报告。
                     existing.update(structured)
+                    if structured["review_kind"] == "regular_detail":
+                        title = _regular_review_title(
+                            existing["copy"], str(episode.get("name") or "")
+                        )
+                        if title:
+                            existing["headline"] = title
                     continue
                 if existing is None:
                     item = {
@@ -2184,10 +2202,11 @@ function renderReview(){
   $("rReview").innerHTML = "";
  }else{
   $("rDate").textContent = `${s.recDate}入选 · 当前${dayLabel(r.day)}/20 · ${DATES[candleIdxOfDay(s,r.day)] || ""}`;
-  // 标题=正文首句的自动提取，正文已完整展示，避免同句重复
-  $("rHeadline").textContent = "";
-  $("rHeadline").style.display = "none";
-  $("rCopy").textContent = r.copy;
+  // 普通详评的明确标题单独展示，源 copy 保持完整；旧稿沿用原显示。
+  const titled = r.review_kind === "regular_detail" && r.headline.startsWith(s.name + "｜") && r.copy.startsWith(r.headline + "\\n\\n");
+  $("rHeadline").textContent = titled ? r.headline : "";
+  $("rHeadline").style.display = titled ? "" : "none";
+  $("rCopy").textContent = titled ? r.copy.slice(r.headline.length + 2) : r.copy;
   const rows = [];
   if(r.assessmentText)rows.push(["当日结论",`<b>${esc(r.assessmentText)}</b>`]);
   if(r.facts && r.facts.length)rows.push(["关键变化",r.facts.map(f => `<span class="fx">${esc(f)}</span>`).join('<span style="color:var(--ink3)"> · </span>')]);

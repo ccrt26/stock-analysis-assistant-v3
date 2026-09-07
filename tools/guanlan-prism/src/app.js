@@ -162,6 +162,7 @@ function reviewBody(s,r,end){
  if(state.reviewTab==='company')return `<div class="review-meta"><span>COMPANY PROFILE</span><span>来自上传报告</span></div><h3>${escape(s.name)}</h3><div class="copy"><p>${escape(s.company)}</p></div><p class="source-hint">沿用上传快照中的公司资料，未做最新公告或财务核验。</p>`;
  if(!r)return `<div class="empty">${icon('book')}<h3>${s.d0?'第一天的故事，还没开始。':'这一天还没有复盘文字。'}</h3><p>${s.d0?'价格图只展示推荐前的历史走势。':'仅保留源数据已有的价格，不以走势图代写结论。'}</p><button class="quiet-btn" data-review-tab="original">看看当初为什么选择它 ${icon('arrow-right')}</button></div>`;
  const copy=(r.copy||r.summary_copy||'').split(/\n\s*\n/).filter(Boolean);
+ if(r.review_kind==='regular_detail'&&copy.length>1&&copy[0]===r.headline&&r.headline.startsWith(s.name+'｜'))copy.shift();
  return `<div class="review-meta"><span>${r.date.replaceAll('-','.')} / 第${r.day}天</span><span>${kindLabel(r)}</span>${viewPill(r)}</div><h3>${escape(r.headline)}</h3><div class="copy">${copy.map(p=>`<p>${escape(p)}</p>`).join('')}</div>${s.name==='德尔股份'&&r.date==='2026-09-04'?'<div class="warning-note">原文数字提示：本段写“收26.56”，而上传的价格数组中本日收盘为26.65。图表采用价格数组；正文保留原文，没有静默修正。</div>':''}<p class="source-hint">原报告全文保留，包含原有措辞及可能不一致的数字。上方图表与指标仅由价格数组计算。${r.as_of?`<br>原记录生成截止：${escape(r.as_of)}`:''}</p>`;
 }
 function drawPlot(svg){

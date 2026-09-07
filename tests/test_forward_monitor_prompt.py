@@ -491,7 +491,8 @@ def test_review_prompt_pins_plain_language_standard_and_style_anchor() -> None:
         assert phrase in skill
     assert "节点范例（银龙股份" in monitor
     assert "立场＋当前最重要的1—2个支持事实＋限制因素" in monitor
-    assert "条件句只允许收在节点详评结尾" in monitor
+    # 普通详评也需要核对已发生的观察条件，并保留第四项的后续观察。
+    assert "条件句只允许收在节点详评结尾" not in monitor
     assert "判断给理由了吗" in monitor
     assert "逐只撰写" in monitor
     for opener in ("首日与大盘同步",
