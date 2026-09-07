@@ -467,10 +467,19 @@ def _complete_minute_units(
         _complete_minute_pairs,
     )
 
-    frame = warehouse.read_current_partitions(
-        ResearchDatasetId.MINUTE_BAR,
-        [value.isoformat() for value in trading_dates],
-    )
+    dataset = ResearchDatasetId.MINUTE_BAR
+    requested = [value.isoformat() for value in trading_dates]
+    manifest = warehouse.partition_manifest(dataset, partition_values=requested)
+    registered = set(manifest["partition_value"].astype(str)) if not manifest.empty else set()
+    # Only a genuinely absent optional partition is a coverage gap. Orphan files
+    # and registered-but-missing/damaged partitions must still fail strict reads.
+    present = [
+        value for value in requested
+        if value in registered or warehouse._partition_path(dataset, value).exists()
+    ]
+    if not present:
+        return set()
+    frame = warehouse.read_current_partitions(dataset, present)
     return _complete_minute_pairs(frame)
 
 
@@ -553,6 +562,9 @@ def _latest_stage_runs(
         capabilities: dict[str, Any] = {}
         if payload.get("message"):
             issues.append(str(payload["message"]))
+        if payload.get("health_error"):
+            error = payload["health_error"]
+            issues.append(f"健康摘要失败：{error['error_type']}: {error['message']}")
         for summary in payload.get("summaries", []):
             issues.extend(str(item) for item in summary.get("issues", []))
             raw_capabilities = summary.get("capabilities", {})

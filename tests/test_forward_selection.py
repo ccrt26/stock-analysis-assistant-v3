@@ -2746,6 +2746,122 @@ PUBLISHED_LIMITATIONS = {
 }
 
 
+def test_normal_prepare_waits_for_current_health_snapshot(tmp_path):
+    class FinishingData(FakeData):
+        def health_report(self, formation_date):
+            if self.health_calls == 0:
+                self.health_calls += 1
+                return {"readiness_error": "pre_research_health_stale"}
+            return super().health_report(formation_date)
+    csv_path = tmp_path / "forward.csv"
+    _write_csv(csv_path, [])
+    sleeps = []
+    result = prepare_daily_selection(csv_path=csv_path,
+        data=FinishingData(open_dates=[date(2026, 8, 25), date(2026, 8, 26)]),
+        clock=lambda: datetime(2026, 8, 25, 18, 45, tzinfo=SHANGHAI), sleep=sleeps.append)
+    assert result.status == "ready_for_research"
+    assert sleeps == [30]
+
+
+@pytest.mark.parametrize("failure", ["build", "write"])
+def test_stage_health_failure_blocks_old_snapshot_and_recovers(tmp_path, monkeypatch, failure):
+    from types import SimpleNamespace
+    from stock_analyzer.cli import _execute_data_stage
+    from stock_analyzer.data.research_backfill import BackfillSummary
+    from stock_analyzer.ops.forward_selection import LocalForwardData
+    from stock_analyzer.ops import research_data_job as job, research_health as health
+    from stock_analyzer.storage.research_warehouse import ResearchWarehouse
+    from stock_analyzer.storage.research_schema import connect_research_warehouse
+    from stock_analyzer.storage.research_gap_registry import ResearchGapRegistry
+    from stock_analyzer.data.research_contracts import FactBatch, ResearchDatasetId
+
+    formation, action = date(2026, 8, 25), date(2026, 8, 26)
+    cutoff = datetime(2026, 8, 25, 18, 30, tzinfo=SHANGHAI)
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    warehouse.commit_batch(FactBatch(
+        dataset_id=ResearchDatasetId.TRADE_CALENDAR, partition_value="2026",
+        source_name="test", source_endpoint="trade_cal", ingestion_run_id="calendar",
+        ingested_at=cutoff, default_available_at=cutoff,
+        records=[{"exchange": "SSE", "cal_date": day, "is_open": True,
+                  "pretrade_date": formation} for day in (formation, action)]))
+    archive = tmp_path / "archive"
+    config = SimpleNamespace(local_archive_dir=archive)
+    runtime = SimpleNamespace(warehouse=warehouse, config=config)
+    with connect_research_warehouse(warehouse.duckdb_path) as connection:
+        connection.execute("insert into research_watermarks values ('minute_scope', '2026-08-25', '[\"000001.SZ\"]', now(), 'scope')")
+    ResearchGapRegistry(warehouse.duckdb_path).record(
+        ResearchDatasetId.MINUTE_BAR, formation, scope_key="000001.SZ",
+        status="unsupported_optional", reason_category="access_or_rate_limit",
+        source_name="tushare", source_endpoint="stk_mins")
+    monkeypatch.setattr(job, "_run_research_stage_impl", lambda *a, **kw: (
+        BackfillSummary(scope="derived-research-features", start=formation, through=formation,
+            committed=4, capabilities={"research_as_of": cutoff.isoformat(),
+                "announcement_status": "cninfo_complete", "announcement_exchanges": ["SSE", "SZSE"]}),))
+    original_build, original_write = health.build_research_health_report, health.write_health_report
+    def ready_health(*args, **kwargs):
+        report = original_build(*args, **kwargs)
+        minutes = next(item for item in report.datasets if item.dataset_id == "minute_bar")
+        assert minutes.expected_units == 1 and minutes.complete_units == 0
+        assert minutes.status_counts == {"unsupported_optional": 1}
+        for feature in report.derived_features:
+            feature.ready = True  # Stand-in for the four completed derived outputs.
+        for dataset in report.datasets:
+            if dataset.dataset_id in {"industry_daily_proxy", "theme_daily"}:
+                dataset.data_date_partition_ready = True
+        return report
+    monkeypatch.setattr(health, "build_research_health_report", ready_health)
+    def execute():
+        _execute_data_stage(config, stage="pre-research", data_date=formation.isoformat(),
+            as_of=cutoff, already_locked=False, build_runtime=lambda _: runtime, run_stage=job.run_research_stage)
+    execute()
+    data = LocalForwardData(warehouse.root, archive)
+    csv_path = tmp_path / "forward.csv"
+    _write_csv(csv_path, [])
+    def prepare():
+        return prepare_daily_selection(csv_path=csv_path, data=data, rerun_date=action,
+            clock=lambda: cutoff.replace(hour=23), sleep=lambda _: pytest.fail("rerun must not wait"))
+    assert prepare().status == "ready_for_research"
+
+    def fail_build(*args, **kwargs):
+        raise ValueError("damaged minute partition")
+    def fail_write(report, output):
+        original_write(report, output)  # JSON may already be written before Markdown fails.
+        raise OSError("health Markdown write failed")
+    target = "build_research_health_report" if failure == "build" else "write_health_report"
+    monkeypatch.setattr(health, target, fail_build if failure == "build" else fail_write)
+    with pytest.raises((ValueError, OSError)):
+        execute()
+    result = prepare()
+    assert result.status == "data_not_ready"
+    assert result.error == "pre_research_health_failed"
+    assert not result.market_research_available and not result.price_research_available
+    assert ("damaged minute partition" if failure == "build" else "health Markdown write failed") in result.limitations[0]
+    with connect_research_warehouse(warehouse.duckdb_path, read_only=True) as connection:
+        payload = json.loads(connection.execute("select cast(summary_json as varchar) from research_ingestion_runs order by started_at desc limit 1").fetchone()[0])
+    assert payload["summaries"][0]["capabilities"]["research_as_of"] == cutoff.isoformat()
+    assert payload["health_error"]["error_type"] == ("ValueError" if failure == "build" else "OSError")
+
+    monkeypatch.setattr(health, "build_research_health_report", ready_health)
+    monkeypatch.setattr(health, "write_health_report", original_write)
+    repaired = ready_health(warehouse, formation, full_history=False)
+    original_write(repaired, archive / "data_health")
+    assert prepare().status == "ready_for_research_limited"  # Same run, health rebuilt.
+    for feature in repaired.derived_features:
+        if feature.feature_set == "market_context":
+            feature.ready = False
+    original_write(repaired, archive / "data_health")
+    assert prepare().status == "data_not_ready"
+    execute()  # New run with its own health also recovers.
+    assert prepare().status == "ready_for_research"
+    job.run_research_stage(runtime, stage="pre-research", data_date=formation, as_of=cutoff)
+    assert prepare().error == "pre_research_health_stale"
+    execute()
+    # A later maintenance failure cannot invalidate the formal pre-research snapshot.
+    job.run_research_stage(runtime, stage="evening", data_date=formation)
+    job.record_stage_health_failure(warehouse, job.latest_stage_run_id(warehouse, "evening", formation), OSError("maintenance failed"))
+    assert prepare().status == "ready_for_research"
+
+
 @pytest.mark.parametrize("failed_channel", [None, "complete", *PUBLISHED_LIMITATIONS, "all"])
 @pytest.mark.parametrize("status", ["failed", "partial"])
 def test_prepare_exposes_only_failed_published_event_channels(tmp_path, failed_channel, status):

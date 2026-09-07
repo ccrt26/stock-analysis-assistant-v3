@@ -150,7 +150,7 @@ data derive
 data health
 ```
 
-`ops/launchd/` 保留四个数据定时模板：17:30 close、18:00 evening、18:32 pre-research、21:30 evening-retry；仅三个数据阶段，重试复用 evening。close 保留完整核心市场采集。evening 仅在今天交易或明天交易时运行，周六和长假中间日返回 no_action_day；保留完整事件链、分类和公告触发财务刷新，公告及按公开日期更新的增减持、解禁、回购延伸到实际上海自然日，质押和停牌仍保持各自原有日期语义，只采事实不计算正式派生。pre-research 依次精确补核心、补截止前公告和公开日期结构化事件、补行业/主题、按公告精确时间窗刷新财务、取可选分钟、补形成日前已到T+1的融资融券历史缺口，最后以显式18:30截止生成四类研究观察。结构化事件仍遵守原 available_at；周日只有日期的事实不得提前用于周日18:30，解禁保留未来 float_date。部分窗口不写整月 checked 水印，三类事件的历史恢复不以分区存在代替完整检查。21:30不重算或改写正式研究；同形成日已有有效 pre-research 截止记录且正式JSON/Markdown均存在时，后续 evening/close 保留18:32正式健康快照，事实补采和阶段记录照常。pre-research及手工 data health 仍正常写健康报告。
+`ops/launchd/` 保留四个数据定时模板：17:30 close、18:00 evening、18:32 pre-research、21:30 evening-retry；仅三个数据阶段，重试复用 evening。close 保留完整核心市场采集。evening 仅在今天交易或明天交易时运行，周六和长假中间日返回 no_action_day；保留完整事件链、分类和公告触发财务刷新，公告及按公开日期更新的增减持、解禁、回购延伸到实际上海自然日，质押和停牌仍保持各自原有日期语义，只采事实不计算正式派生。pre-research 依次精确补核心、补截止前公告和公开日期结构化事件、补行业/主题、按公告精确时间窗刷新财务、补形成日前已到T+1的融资融券历史缺口，最后以显式18:30截止生成四类研究观察。结构化事件仍遵守原 available_at；周日只有日期的事实不得提前用于周日18:30，解禁保留未来 float_date。部分窗口不写整月 checked 水印，三类事件的历史恢复不以分区存在代替完整检查。21:30不重算或改写正式研究；同形成日已有有效 pre-research 截止记录且正式JSON/Markdown均存在时，后续 evening/close 保留18:32正式健康快照，事实补采和阶段记录照常。pre-research及手工 data health 仍正常写健康报告。
 
 所有数据模板按上海时间设计，加载前用 `/usr/sbin/systemsetup -gettimezone` 确认 `Asia/Shanghai`，否则停止加载。
 
@@ -158,7 +158,7 @@ data health
 
 下个交易日前一自然日晚间18:45的最终研究由 Codex 原生 Scheduled Task 在当前项目中直接调用 `$orchestrating-stock-research`，总控在同一个顶层会话内使用四个专业 Skill；仓库代码不通过 Python 启动第二个 Codex，也没有 AI LaunchAgent。`prepare` 冻结上一交易日、行动日和带时区的 `as_of`，等待晚间研究准备数据并结算到期 D20；Codex 只生成 `pending-trace-<formation_date>.json` 一份 `daily-research-trace-v4` 完整轨迹。`record-trace` 校验结构、日期、合格股票、候选守恒、唯一决定引用、已确认价格支持的最小形成日数值，以及 `fresh_event_pending` 的事件时点和等待窗口，从其中抽取现有 `ResearchResult` 调用 `record_daily_selection`，写入现有 Forward CSV 后将完整轨迹原子归档为 `research-trace-<formation_date>.json`。程序不判断事件语义、材料性、内部分类、传播或价格解释是否正确。既有 v1/v2/v3 归档不迁移、不倒填；现有 `record` 命令、`ResearchResult`、Forward CSV 字段和 D20 结算保持不变，完整 trace 不写入 DuckDB。
 
-正常任务的 `action_date` 是当前上海自然日的次日，必须开市；`formation_date` 是行动日前最近交易日；`selection_as_of` 固定为行动日前一自然日18:30。明天休市则不产生复盘或新推荐，周日使用周五行情和周日18:30以前的事实，为周一准备，长假同理。`prepare` 只认同形成日最新 pre-research，且其 capabilities.research_as_of 必须逐字等于 selection_as_of；缺失或不匹配不能用旧派生放行。市场观察和价格分析仍是最低条件，行业、主题、个股背景、公告和分钟仍为可选通道；complete_core_date 只作诊断。正常18:45启动，每30秒检查一次，最晚等到18:55；可选步骤已失败但核心可用时进入受限研究，核心缺失停止推荐。20:30只是交付目标，不新增服务或看门狗。
+正常任务的 `action_date` 是当前上海自然日的次日，必须开市；`formation_date` 是行动日前最近交易日；`selection_as_of` 固定为行动日前一自然日18:30。明天休市则不产生复盘或新推荐，周日使用周五行情和周日18:30以前的事实，为周一准备，长假同理。`prepare` 只认同形成日最新 pre-research，且其 capabilities.research_as_of 必须逐字等于 selection_as_of；缺失或不匹配不能用旧派生放行。健康快照还须对应同形成日最新 pre-research 的 run_id，且 generated_at 不早于该 run 的 finished_at；健康生成或写出失败保存在现有阶段 summary_json，prepare 优先给出明确失败原因，不能用旧健康放行。同 run 成功重建健康或新 pre-research 成功生成匹配健康后恢复，close/evening 后续失败不废弃已验证正式快照。市场观察和价格分析仍是最低条件，行业、主题、个股背景、公告和分钟仍为可选通道；complete_core_date 只作诊断。正常18:45启动，每30秒检查一次，最晚等到18:55；可选步骤已失败但核心可用时进入受限研究，核心缺失停止推荐。20:30只是交付目标，不新增服务或看门狗。
 
 人工补跑复用同一个 `prepare`，通过 `--rerun-date` 指定原计划推荐日期：前一个交易日由日历确定，`selection_as_of` 固定为行动日前一自然日上海时间18:30。补跑和已过18:55的历史显式上下文只检查一次，不等待；pre-research 必须使用同一个显式截止，晚于计划完成不单独构成阻断，因为事实查询仍按 `available_at <= selection_as_of` 过滤，行情仍截断在形成日。新 V4 轨迹把本次市场、价格、行业、主题、个股背景、公告状态和覆盖交易所写入 `runtime_capabilities`；`record-trace` 拒绝扩大能力声明。公告部分覆盖时，`fresh_event_pending` 只允许用于已完整覆盖的交易所；行业或主题不可用时，只禁用对应板块证据，不修改其他 V4 规则。
 
@@ -180,7 +180,7 @@ data health
 
 次晨08:45由独立Codex任务读取 `ops/preopen-safety-prompt.md`，运行 `preopen_safety prepare`。只检查昨晚V4名单（正式推荐与明确非正式的条件事件）截止后新增公告和今天 suspend_d 当前停牌观察；只写安全提醒JSON，停牌不进入正式事实分区。不重新选股、不改顺序、不改理由或复盘，不读集合竞价和盘中价格。先判休市；交易日09:30及之后才启动时返回 data_limited，明确已经错过开盘前检查时点，不再请求公告或停牌，也不声称无变化。
 
-`select_minute_candidate_scope` 中的确定性排序只用于限制可选分钟数据的采集范围，属于数据成本控制，不是投资评分或最终候选排名；分钟数据也不是目标架构的每日必需输入。
+每日阶段及默认 `all` / `trading-structure` 补数均不再采集分钟，也不创建新的分钟 scope。保留历史分钟事实、缺口及低层显式按需采集和读取能力；`select_minute_candidate_scope` 仅保留按需采集的成本控制用途。整日分钟分区无登记且无实体文件时按覆盖缺口统计，已登记缺文件、实体文件无登记及损坏仍严格报错。
 
 ## 6. AI 层：五个选股 Skill 与选后复盘
 

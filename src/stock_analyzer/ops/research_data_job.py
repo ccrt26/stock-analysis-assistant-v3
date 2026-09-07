@@ -163,17 +163,14 @@ def run_research_backfill(
             )
         )
     if scope in {"all", "trading-structure"}:
-        candidates = select_minute_candidate_scope(runtime.warehouse, through)
         summaries.append(
             TradingStructureBackfillService(
                 runtime.tushare,
                 runtime.warehouse,
                 minute_fetcher=runtime.minute_fetcher,
-            ).backfill(
+            ).backfill_margin_details(
                 trading_dates=trading_dates,
                 through=through,
-                candidate_codes=candidates,
-                index_codes=BROAD_INDEX_CODES,
                 resume=resume,
             )
         )
@@ -431,23 +428,6 @@ def _run_research_stage_impl(
         trading = TradingStructureBackfillService(
             runtime.tushare, runtime.warehouse, minute_fetcher=runtime.minute_fetcher,
         )
-        try:
-            candidates = select_minute_candidate_scope(
-                runtime.warehouse, data_date
-            )
-            summaries.append(
-                trading.backfill_minute_bars(
-                    trading_dates=(data_date,),
-                    through=data_date,
-                    candidate_codes=candidates,
-                    index_codes=BROAD_INDEX_CODES,
-                    resume=True,
-                )
-            )
-        except Exception as exc:
-            summaries.append(
-                _failed_step_summary("trading-structure", data_date, exc)
-            )
         margin_dates = tuple(
             value for value in trading_dates
             if value < data_date
@@ -692,6 +672,36 @@ def _finish_failed_stage_run(
             set status = 'failed', finished_at = now(), summary_json = ?
             where run_id = ?
             """,
+            [json.dumps(payload, ensure_ascii=False), run_id],
+        )
+
+
+def latest_stage_run_id(warehouse: ResearchWarehouse, stage: str, data_date: date) -> str | None:
+    """Resolve the run just completed while the caller holds the shared job lock."""
+    with connect_research_warehouse(warehouse.duckdb_path, read_only=True) as connection:
+        row = connection.execute(
+            """select run_id from research_ingestion_runs
+               where stage = ? and data_date = ?
+               order by started_at desc, run_id desc limit 1""",
+            [stage, data_date],
+        ).fetchone()
+    return str(row[0]) if row else None
+
+
+def record_stage_health_failure(warehouse: ResearchWarehouse, run_id: str, exc: Exception) -> None:
+    """Keep source/derived results when the subsequent health publication fails."""
+    with connect_research_warehouse(warehouse.duckdb_path) as connection:
+        row = connection.execute(
+            "select cast(summary_json as varchar) from research_ingestion_runs where run_id = ?",
+            [run_id],
+        ).fetchone()
+        if row is None:
+            raise ValueError(f"research stage run missing: {run_id}")
+        payload = json.loads(row[0]) if row[0] else {}
+        payload["health_error"] = {"error_type": type(exc).__name__, "message": str(exc)}
+        connection.execute(
+            """update research_ingestion_runs
+               set status = 'failed', finished_at = now(), summary_json = ? where run_id = ?""",
             [json.dumps(payload, ensure_ascii=False), run_id],
         )
 

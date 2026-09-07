@@ -645,9 +645,49 @@ class LocalForwardData:
 
     def health_report(self, formation_date: date) -> dict[str, Any]:
         path = self.archive_root / "data_health" / f"{formation_date}.json"
-        if not path.is_file():
-            return {}
-        return json.loads(path.read_text(encoding="utf-8"))
+        try:
+            report = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+        except json.JSONDecodeError:
+            report = {}
+        database = self.warehouse_root / "research.duckdb"
+        if not database.is_file():
+            return report
+        from stock_analyzer.storage.research_schema import connect_research_warehouse
+
+        with connect_research_warehouse(database, read_only=True) as connection:
+            row = connection.execute(
+                """select run_id, cast(finished_at as varchar), cast(summary_json as varchar)
+                   from research_ingestion_runs
+                   where stage = 'pre-research' and data_date = ?
+                   order by started_at desc, run_id desc limit 1""",
+                [formation_date],
+            ).fetchone()
+        if row is None:
+            return report
+        stage = _pre_research_stage(report, formation_date)
+        try:
+            generated = datetime.fromisoformat(report.get("generated_at", ""))
+            finished = datetime.fromisoformat(row[1]) if row[1] else None
+            current = bool(
+                stage.get("run_id") == row[0]
+                and generated.tzinfo is not None
+                and finished is not None and finished.tzinfo is not None
+                and generated >= finished
+            )
+        except (TypeError, ValueError):
+            current = False
+        if not current:
+            payload = json.loads(row[2]) if row[2] else {}
+            error = payload.get("health_error")
+            # Never combine a new run's cutoff with an older health snapshot.
+            return {
+                "readiness_error": "pre_research_health_failed" if error else "pre_research_health_stale",
+                "readiness_detail": (
+                    f"健康摘要失败：{error['error_type']}: {error['message']}"
+                    if error else "健康摘要尚未对应本次晚间研究准备，请检查阶段日志或重新生成健康摘要"
+                ),
+            }
+        return report
 
     def eligible_securities(self, on_date: date) -> dict[str, str]:
         paths = sorted(
@@ -2200,6 +2240,19 @@ def _wait_until_data_ready(
     while True:
         checked_at = _shanghai(clock())
         report = data.health_report(formation_date)
+        if report.get("readiness_error"):
+            if (
+                report["readiness_error"] == "pre_research_health_stale"
+                and run_mode == "normal" and checked_at < deadline
+            ):
+                sleep(READINESS_POLL_SECONDS)
+                continue
+            return (
+                "", False, False, False, False, False, False, False,
+                "announcement_unavailable", (),
+                (str(report.get("readiness_detail", "健康摘要不可用")),),
+                str(report["readiness_error"]),
+            )
         feature_ready = {
             str(item.get("feature_set", "")): bool(item.get("ready"))
             for item in report.get("derived_features", [])

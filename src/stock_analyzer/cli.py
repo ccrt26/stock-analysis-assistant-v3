@@ -247,21 +247,35 @@ def _execute_data_stage(
         write_health_report,
     )
 
-    health = build_research_health_report(
-        runtime.warehouse, parsed, full_history=False
+    from stock_analyzer.ops.research_data_job import (
+        latest_stage_run_id,
+        record_stage_health_failure,
     )
-    health_root = runtime.config.local_archive_dir / "data_health"
-    health_path = health_root / f"{parsed}.json"
-    frozen = (
-        _validated_formal_health(health_path, health, parsed)
-        if stage != "pre-research" else None
+
+    run_id = (
+        latest_stage_run_id(runtime.warehouse, stage, parsed)
+        if getattr(runtime.warehouse, "duckdb_path", None) is not None else None
     )
-    if frozen is not None:
-        if not _health_markdown_matches(health_root / f"{parsed}.md", parsed):
-            write_health_report(frozen, health_root)
-        typer.echo("事实补采已完成；保留18:30正式健康快照")
-    else:
-        health_path, _ = write_health_report(health, health_root)
+    try:
+        health = build_research_health_report(
+            runtime.warehouse, parsed, full_history=False
+        )
+        health_root = runtime.config.local_archive_dir / "data_health"
+        health_path = health_root / f"{parsed}.json"
+        frozen = (
+            _validated_formal_health(health_path, health, parsed)
+            if stage != "pre-research" else None
+        )
+        if frozen is not None:
+            if not _health_markdown_matches(health_root / f"{parsed}.md", parsed):
+                write_health_report(frozen, health_root)
+            typer.echo("事实补采已完成；保留18:30正式健康快照")
+        else:
+            health_path, _ = write_health_report(health, health_root)
+    except Exception as exc:
+        if run_id is not None:
+            record_stage_health_failure(runtime.warehouse, run_id, exc)
+        raise
     typer.echo(
         f"stage health: core_complete={str(health.complete_core_date).lower()} "
         f"output={health_path}"

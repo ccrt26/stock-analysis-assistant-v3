@@ -534,8 +534,6 @@ def test_pre_research_only_checks_current_date_facts_and_then_derives(
 
     assert order == [
         "late-events",
-        "candidate-scope",
-        "trading-structure",
         "reconcile",
         "derive",
     ]
@@ -548,6 +546,30 @@ def test_pre_research_only_checks_current_date_facts_and_then_derives(
         }
     ]
     assert summaries[-1].scope == "derived-research-features"
+
+
+@pytest.mark.parametrize("scope", ["all", "trading-structure"])
+def test_default_backfill_only_collects_margin_not_minutes(monkeypatch, scope):
+    import stock_analyzer.ops.research_data_job as job
+    day = date(2026, 9, 7)
+    calls = []
+    def summary(**kwargs):
+        return BackfillSummary(scope="test", start=day, through=day)
+    def margin(**kwargs):
+        calls.append(kwargs)
+        return summary()
+    monkeypatch.setattr(job, "_trading_dates", lambda *a: (day,))
+    monkeypatch.setattr(job, "reconcile_research_gaps", lambda *a: None)
+    monkeypatch.setattr(job, "select_minute_candidate_scope", lambda *a: pytest.fail("no default minute scope"))
+    monkeypatch.setattr(job, "ResearchBackfillService", lambda *a: SimpleNamespace(backfill_market_core=summary))
+    for name in ("ClassificationBackfillService", "FundamentalBackfillService", "EventBackfillService"):
+        monkeypatch.setattr(job, name, lambda *a, **kw: SimpleNamespace(backfill=summary))
+    monkeypatch.setattr(job, "TradingStructureBackfillService", lambda *a, **kw: SimpleNamespace(backfill_margin_details=margin))
+    runtime = SimpleNamespace(tushare=object(), cninfo=object(), warehouse=object(),
+                              minute_fetcher=lambda **kw: pytest.fail("no default minute API"),
+                              exchange_announcements=object())
+    job.run_research_backfill(runtime, start=day, through=day, scope=scope, resume=True)
+    assert calls == [dict(trading_dates=(day,), through=day, resume=True)]
 
 
 def test_pre_research_repairs_only_missing_theme_daily_partition(monkeypatch):
@@ -615,7 +637,7 @@ def test_pre_research_repairs_only_missing_theme_daily_partition(monkeypatch):
     run_research_stage(runtime, stage="pre-research", data_date=date(2026, 7, 13),
             as_of=datetime.fromisoformat("2026-07-13T18:30:00+08:00"))
 
-    assert order == ["announcements", "theme_daily", "trading"]
+    assert order == ["announcements", "theme_daily"]
 
 
 def test_feature_failure_is_returned_as_a_failed_data_stage(monkeypatch):
@@ -887,9 +909,7 @@ def test_pre_research_exact_order_published_window_cutoff_and_margin_lag(monkeyp
         order.append("financial")
         return summary("financial")
     def minutes(**options):
-        assert options["trading_dates"] == (formation,)
-        order.append("minutes")
-        return BackfillSummary(scope="minute-bars", start=formation, through=formation, limited=1)
+        pytest.fail("daily preparation must not collect minutes")
     def margin(**options):
         assert options["trading_dates"] == (date(2026, 9, 3),)
         assert options["resume"] is True
@@ -904,14 +924,14 @@ def test_pre_research_exact_order_published_window_cutoff_and_margin_lag(monkeyp
     monkeypatch.setattr(job, "EventBackfillService", lambda *args, **kwargs: SimpleNamespace(backfill_announcements=announcements, backfill_published_events=published))
     monkeypatch.setattr(job, "FundamentalBackfillService", lambda *args: SimpleNamespace(backfill=financial))
     monkeypatch.setattr(job, "_daily_partition_passed", lambda *args: True)
-    monkeypatch.setattr(job, "select_minute_candidate_scope", lambda *args: ())
+    monkeypatch.setattr(job, "select_minute_candidate_scope", lambda *args: pytest.fail("daily minute scope must not be created"))
     monkeypatch.setattr(job, "TradingStructureBackfillService", lambda *args, **kwargs: SimpleNamespace(
         backfill_minute_bars=minutes, backfill_margin_details=margin))
     monkeypatch.setattr(job, "reconcile_research_gaps", lambda *args: order.append("reconcile"))
     monkeypatch.setattr(job, "run_research_features", derived)
     runtime = SimpleNamespace(tushare=object(), warehouse=Warehouse(), cninfo=object(), minute_fetcher=None)
     result = run_research_stage(runtime, stage="pre-research", data_date=formation, as_of=cutoff)
-    assert order == ["core", "announcements", "published-events", "financial", "minutes", "margin", "reconcile", "derived"]
+    assert order == ["core", "announcements", "published-events", "financial", "margin", "reconcile", "derived"]
     assert result[-1].capabilities["research_as_of"] == cutoff.isoformat(timespec="seconds")
     assert result[-1].failed == 0
 

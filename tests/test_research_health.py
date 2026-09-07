@@ -1,6 +1,7 @@
 from datetime import date, datetime, timedelta, timezone
 
 import pandas as pd
+import pytest
 
 from stock_analyzer.data.research_contracts import FactBatch, ResearchDatasetId
 from stock_analyzer.analysis.hotspot_features import HOTSPOT_FORMULA_VERSION
@@ -140,10 +141,12 @@ def test_health_gap_counts_exclude_resolved_history(tmp_path):
     assert "resolved" not in report.gap_counts
 
 
-def test_minute_health_checks_frozen_code_date_units_not_partition_presence(tmp_path):
+@pytest.mark.parametrize("coverage", ["partial", "absent", "mixed", "missing_file", "orphan", "corrupt"])
+def test_minute_health_checks_frozen_code_date_units_not_partition_presence(tmp_path, coverage):
     warehouse = ResearchWarehouse(tmp_path / "warehouse")
     day = date(2026, 7, 10)
-    warehouse.commit_batch(_calendar_batch([day]))
+    days = [day, day + timedelta(days=3)] if coverage == "mixed" else [day]
+    warehouse.commit_batch(_calendar_batch(days))
     observed = datetime.now(timezone.utc)
     rows = []
     for minute in list(pd.date_range("2026-07-10 09:31", periods=120, freq="min")) + list(
@@ -157,15 +160,15 @@ def test_minute_health_checks_frozen_code_date_units_not_partition_presence(tmp_
             "frequency": "1min", "open": 10.0, "high": 10.2,
             "low": 9.9, "close": 10.1, "volume": 1.0, "amount": 10.0,
         })
-    warehouse.commit_batch(
-        FactBatch(
+    batch = FactBatch(
             dataset_id=ResearchDatasetId.MINUTE_BAR,
             partition_value=day.isoformat(),
             source_name="tushare", source_endpoint="stk_mins",
             ingestion_run_id="minutes", ingested_at=observed,
             default_available_at=observed, records=rows,
         )
-    )
+    if coverage != "absent":
+        warehouse.commit_batch(batch)
     with connect_research_warehouse(warehouse.duckdb_path) as connection:
         connection.execute(
             """
@@ -174,14 +177,27 @@ def test_minute_health_checks_frozen_code_date_units_not_partition_presence(tmp_
                     '["000001.SZ", "000002.SZ"]', now(), 'scope')
             """
         )
+        if coverage == "mixed":
+            connection.execute("insert into research_watermarks values ('minute_scope', '2026-07-13', '[\"000001.SZ\"]', now(), 'scope2')")
+        if coverage == "orphan":
+            connection.execute("delete from research_fact_partitions where dataset_id = 'minute_bar'")
+    path = warehouse._partition_path(ResearchDatasetId.MINUTE_BAR, day.isoformat())
+    if coverage == "missing_file":
+        path.unlink()
+    elif coverage == "corrupt":
+        path.write_bytes(b"corrupted")
+    if coverage in {"missing_file", "orphan", "corrupt"}:
+        with pytest.raises((ValueError, FileNotFoundError)):
+            build_research_health_report(warehouse, days[-1], full_history=True)
+        return
 
-    report = build_research_health_report(warehouse, day, full_history=True)
+    report = build_research_health_report(warehouse, days[-1], full_history=True)
     minute = next(item for item in report.datasets if item.dataset_id == "minute_bar")
 
-    assert minute.expected_units == 2
-    assert minute.complete_units == 1
-    assert minute.status_counts["unclassified_missing"] == 1
-    assert minute.unclassified_missing_samples == ("2026-07-10/000002.SZ",)
+    assert minute.expected_units == (3 if coverage == "mixed" else 2)
+    assert minute.complete_units == (0 if coverage == "absent" else 1)
+    assert minute.status_counts["unclassified_missing"] == minute.expected_units - minute.complete_units
+    assert "2026-07-10/000002.SZ" in minute.unclassified_missing_samples
 
 
 def test_full_history_health_audits_files_without_loading_all_facts_into_pandas(
