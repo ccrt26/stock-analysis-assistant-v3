@@ -230,8 +230,10 @@ function journal(){
 function detail(){
  const s=byId(state.current),end=state.end,m=C.metrics(s,end),q=C.lastAvailableQuote(s,end),eq=C.quoteOnIndex(s,end),r=C.reviewAt(s,end,DATA),days=C.daysAt(s,end),isLatest=end===LAST;
  const closeSub=eq?`${DATA.dates[eq.i]} · 当日 ${pct(C.dayChange(s,eq.i))}`:q?`本日无有效报价；最近有效报价 ${DATA.dates[q.i]}`:'没有有效报价';
- const volSub=m.volToday===null?'当日缺成交额':(m.volN?`当日 ${money(m.volToday)} 亿 · 前${m.volN}日均 ${money(m.volBase)} 亿`:'前5日无有效成交额');
- const fields=[['收盘价',eq?'¥ '+money(eq.c[3]):'—','',closeSub],['较参考价涨跌',pct(m.ret),signedClass(m.ret),s.ref?`原参考价 ¥ ${money(s.ref)}`:'暂无可靠推荐参考价'],['推荐以来最大回落',pct(m.maxDrawdown),signedClass(m.maxDrawdown),'收盘口径 · 自推荐日起'],['量能较5日均量',pct(m.volDelta),signedClass(m.volDelta),volSub],['现价仍需上涨',pct(m.remaining),'',s.ref?`至${Math.round(OBS.target*100)}%观察目标 ¥ ${money(targetPrice(s))}`:'目标尚不能计算']];
+ const prevBar=end>0?s.candles[end-1]:null,prevAmt=prevBar&&C.valid(prevBar[4])?prevBar[4]:null;
+ const amtSub=prevAmt===null?'前一交易日无成交额数据':(eq&&C.valid(eq.c[4])?`较前一日 ${pct((eq.c[4]/prevAmt-1)*100)}`:'当日缺成交额');
+ const volSub=m.volToday===null?'当日缺成交额':(m.volN?`前${m.volN}日均 ${money(m.volBase)} 亿`:'前5日无有效成交额');
+ const fields=[['收盘价',eq?'¥ '+money(eq.c[3]):'—','',closeSub],['较参考价涨跌',pct(m.ret),signedClass(m.ret),s.ref?`原参考价 ¥ ${money(s.ref)}`:'暂无可靠推荐参考价'],['当日成交额',eq&&C.valid(eq.c[4])?`${money(eq.c[4])} 亿`:'—','',amtSub],['量能较5日均量',pct(m.volDelta),signedClass(m.volDelta),volSub],['现价仍需上涨',pct(m.remaining),'',s.ref?`至${Math.round(OBS.target*100)}%观察目标 ¥ ${money(targetPrice(s))}`:'目标尚不能计算']];
  const confirmLabel='支持这次走势判断的表现',riskLabel='会改变这次走势判断的表现';
  const events=s.reviews.filter(rv=>rv.date<=C.dateAt(end,DATA)).slice().reverse();
  return `<div class="page-enter"><button class="back-button" data-action="back">${icon('arrow-left')}返回观察清单</button><section class="detail-heading"><div class="stock-title"><div><h1>${escape(s.name)}</h1><small>${s.code} &nbsp; / &nbsp; ${escape(s.industryName)} &nbsp; / &nbsp; ${dateWord(s).d.replaceAll('-','.')} ${dateWord(s).w}${s.d0?` · 首日观察 ${s.recDate.replaceAll('-','.')}`:''}</small></div></div><div class="detail-actions">${star(s)}<button class="quiet-btn" data-action="export-record">${icon('download')}导出记录</button><button class="primary-btn" data-action="play" ${s.d0||s.days<1?'disabled':''}>${icon(state.playing?'pause':'play')}<span>${state.playing?'暂停回看':'回放观察过程'}</span></button></div></section>
