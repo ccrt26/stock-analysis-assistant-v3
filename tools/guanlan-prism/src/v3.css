@@ -36,7 +36,6 @@
 .hero-outlook b {font-weight:500;color:var(--text);}
 .hero-chart {min-height:250px;flex:1;margin-top:15px;}
 .hero-foot {gap:12px;flex-wrap:wrap;}
-.deep-source {padding:0 24px 12px;color:var(--muted);font-size:9px;line-height:1.6;}
 .episode-switch {display:flex;align-items:center;gap:12px;padding:12px 24px 0;font-size:10px;}
 .episode-switch .select-input {width:auto;}
 .deep-empty {min-height:580px;}
@@ -169,7 +168,6 @@
  .hero-foot {padding:12px 17px;gap:12px;}
  .mini-legend {gap:8px;font-size:8px;}
  .hero-cycle {margin-left:auto;}
- .deep-source {padding:0 17px 13px;font-size:8px;}
  .changes-caption {margin:10px 17px;font-size:9px;}
  .changes-panel .change-list {padding-left:17px;padding-right:12px;}
  .changes-panel .change-item {min-height:195px;padding:18px 0;}
