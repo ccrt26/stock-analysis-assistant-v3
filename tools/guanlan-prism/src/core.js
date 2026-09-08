@@ -61,19 +61,33 @@
     return null;
   }
   const quoteAt=lastAvailableQuote; // 旧调用名：历史曲线最近有效价，不得冒充当日价。
-  // 当日指标（exact-date）：报告日缺真实收盘时 ret/drawdown/remaining 为 null；
-  // max/high 是已发生的历史极值，可独立保留（F07/T17）。
+  // 当日指标（exact-date）：报告日缺真实收盘时 ret/remaining/volDelta 等依赖当日
+  // 真实值的字段为 null；maxDrawdown 是已发生的历史路径极值，可独立保留（F07/T17）。
   function metrics(s,end){
-    const empty={ret:null,max:null,drawdown:null,remaining:null,high:null,close:null};
+    const empty={ret:null,maxDrawdown:null,remaining:null,high:null,close:null,
+      volDelta:null,volToday:null,volBase:null,volN:null};
     if(s.d0||!valid(s.ref)||s.ref<=0||!Number.isInteger(end)||end<s.recIndex)return empty;
     const post=s.candles.slice(s.recIndex,end+1);
     if(!post.length)return empty;
     const closes=post.map(c=>c&&valid(c[3])?c[3]:null);
-    const peaks=closes.filter(valid),highs=post.map(c=>c&&valid(c[1])?c[1]:null).filter(valid);
-    const peak=peaks.length?Math.max(...peaks):null,close=closes[closes.length-1];
+    const highs=post.map(c=>c&&valid(c[1])?c[1]:null).filter(valid);
+    const close=closes[closes.length-1];
     const ratio=(v,base)=>valid(v)&&valid(base)&&base>0?(v/base-1)*100:null;
-    return {ret:ratio(close,s.ref),max:ratio(peak,s.ref),drawdown:ratio(close,peak),
-      remaining:ratio(s.ref*1.2,close),high:highs.length?ratio(Math.max(...highs),s.ref):null,close};
+    // 最大回落：各日收盘÷截至该日的运行峰值收盘−1 取最小值；无有效收盘时为 null。
+    let peak=null,maxDrawdown=null;
+    for(const v of closes){
+      if(!valid(v))continue;
+      if(peak===null||v>peak)peak=v;
+      if(peak>0){const dd=(v/peak-1)*100;if(maxDrawdown===null||dd<maxDrawdown)maxDrawdown=dd;}
+    }
+    // 量能：当日成交额 vs 前 5 个交易日有效成交额均值（不含当日，可跨推荐日边界）。
+    const amountAt=i=>{const c=s.candles[i];return c&&valid(c[4])?c[4]:null;};
+    const volToday=amountAt(end),base=[];
+    for(let i=end-1;i>=Math.max(0,end-5);i--){const a=amountAt(i);if(a!==null)base.push(a);}
+    const volBase=base.length?base.reduce((a,b)=>a+b,0)/base.length:null;
+    return {ret:ratio(close,s.ref),maxDrawdown,remaining:ratio(s.ref*1.2,close),
+      high:highs.length?ratio(Math.max(...highs),s.ref):null,close,
+      volDelta:ratio(volToday,volBase),volToday,volBase,volN:base.length};
   }
   function reviewAt(s,end,d){const date=dateAt(end,d);return [...s.reviews].filter(r=>r.date<=date).sort((a,b)=>a.date.localeCompare(b.date)).at(-1)||null;}
   function normalize(values,start,end){

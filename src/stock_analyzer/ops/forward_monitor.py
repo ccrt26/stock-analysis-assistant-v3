@@ -1630,6 +1630,21 @@ def _render_detail_stock_block(
     return lines
 
 
+def _brief_table_text(review_text: str, stock_name: str) -> str:
+    """简评表 cell：首段为与股票名一致的“股票名｜”标题时去前缀加粗，旧稿原样。"""
+    joined = " ".join(review_text.splitlines())
+    if not stock_name:
+        return joined
+    title, separator, body = review_text.partition("\n\n")
+    prefix = f"{stock_name}｜"
+    if (
+        separator and body.strip() and "\n" not in title
+        and title.startswith(prefix) and title[len(prefix):].strip()
+    ):
+        return f"**{title[len(prefix):].strip()}** " + " ".join(body.splitlines())
+    return joined
+
+
 def _render_markdown(
     report: DailyForwardMonitorReportV2,
     snapshot: dict[str, Any],
@@ -1746,8 +1761,8 @@ def _render_markdown(
                     if current is not None
                     else "无法计算"
                 )
-                brief_text = " ".join(
-                    review.current_review.splitlines()
+                brief_text = _brief_table_text(
+                    review.current_review, str(episode.get("name") or "")
                 ).replace("|", r"\|")
                 tracking_text = (
                     "继续"

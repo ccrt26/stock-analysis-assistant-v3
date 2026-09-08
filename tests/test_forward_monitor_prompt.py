@@ -555,3 +555,26 @@ def test_current_entrypoints_do_not_restore_the_legacy_review_flow() -> None:
         text = Path(path).read_text(encoding="utf-8")
         for instruction in obsolete:
             assert instruction not in text, (path, instruction)
+
+
+def test_review_prompt_fixes_brief_quality_and_title_contract() -> None:
+    monitor = Path("ops/forward-monitor-prompt.md").read_text(encoding="utf-8")
+    skill = Path(
+        ".agents/skills/reviewing-stock-recommendations/SKILL.md"
+    ).read_text(encoding="utf-8")
+
+    for text in (monitor, skill):
+        # 简评标题与普通详评同格式，标题首段计入600字符。
+        assert "首个独立单行段落" in text
+        assert "股票名｜" in text
+        assert "600字符硬上限，含标题首段" in text
+        assert "无此标题的旧稿沿用原格式" in text
+        assert "节点详评及无此标题的旧稿沿用原格式" not in text
+        # 落点锚定原推荐链条的具体一环，不写笼统强弱。
+        assert "伤的是或撑的是" in text
+        # 中心问题从上轮悬念来，不是当天涨幅榜。
+        assert "优先从上一轮的观察条件和明示未知里来" in text
+    # 用户批准的简评范文钉住质量基准，标注事实须替换。
+    assert "银龙股份｜缩量小涨，独立强势还在，要盯的重新变成量能。" in monitor
+    assert "事实为当日真实数据" in monitor
+    assert "简评范例" in monitor

@@ -176,6 +176,8 @@ data health
 
 研究超过18:55后完成仍可保存，只要沿用已取得的显式上下文，冻结的 `as_of` 仍为行动日前一自然日18:30，且所有行情交易日期不晚于形成日、所有事实满足 `available_at <= as_of`。合规结果统一按 `selection` 语义写入被 Git 忽略的 `local_archive/forward_selection/forward-selection-log.csv`；历史 `validation_mode` 只为 CSV 兼容保留，不再形成 forward/reconstructed 两套推荐。历史记录首次由 `docs/forward-selection-log.csv` 初始化，之后只在 D1—D20 行情完整时一次性结算。
 
+正式推荐归档后，晚间任务的共同收尾可顺序生成公司介绍：方法见 `.agents/skills/writing-company-introductions/SKILL.md`，运行顺序见 `ops/company-introduction-prompt.md`，程序入口为 `stock_analyzer.ops.company_introduction`（prepare 只读备料、record 单篇保存、单股只读入口）。介绍是正式推荐的附属资料，按原 `(ts_code, action_date)` 身份与原 as_of 保存于 `local_archive/company_introductions/`，不进入 DuckDB、Forward CSV、V4 trace、snapshot 或复盘模型，不参与正式身份判定，也不是第六个选股视角；介绍生成失败不撤销推荐、不阻断网页同步。Prism"公司资料"页签按原推荐身份读取介绍（身份无法核对时保持缺项），旧 `company` 简要字符串保留兼容；收尾在"本轮新增保存了介绍或首次同步失败"时按原参数再同步一次，第二次失败不循环重试。历史补写（`--include-legacy` 或单股入口）沿用原 trace 身份与截止，不放宽晚间严格同步合同，不重建历史 D0。 公司介绍按每次推荐低频生成；本地覆盖或读取能力不足时，由执行者围绕核心问题临时取得原截止前公开的官方 WEB 资料，失效链接按文档身份改用其他官方入口，不固定补读次数。正式身份已核实而事实仓发生已知读取故障时，备料保留原 context/scope 并明确 gaps，可用已核实 official_document 补足，原保存校验不变；不新增长期采集或自动维护事实仓。
+
 如果本次确实完成了当天新选择且合并报告生成时已过行动日09:30，只在“今天新推荐的股票”前提示：“本次研究只使用了今天开盘前能够看到的信息，但现在已经超过原本计划观察的开盘时点。不要把当前价格当成当时可以参与的价格，也不要用盘中走势重新改写开盘前的研究结论。”不改变原研究、不重读盘中价格、不重跑。
 
 次晨08:45由独立Codex任务读取 `ops/preopen-safety-prompt.md`，运行 `preopen_safety prepare`。只检查昨晚V4名单（正式推荐与明确非正式的条件事件）截止后新增公告和今天 suspend_d 当前停牌观察；只写安全提醒JSON，停牌不进入正式事实分区。不重新选股、不改顺序、不改理由或复盘，不读集合竞价和盘中价格。先判休市；交易日09:30及之后才启动时返回 data_limited，明确已经错过开盘前检查时点，不再请求公告或停牌，也不声称无变化。
@@ -242,6 +244,7 @@ data health
 | 每日自动端到端 AI 选股 | 仓库侧准备和归档已实现；触发由 Codex 原生 Scheduled Task 配置 | 18:45顶层任务直接调用总控 Skill；`prepare`/`record-trace` 不启动模型，只冻结边界、检查数据、校验一份 trace、抽取现有 Forward 结果、归档和结算 D20 |
 | AI 调用前的研究结果缓存、候选 memo 缓存和断点恢复 | 未实现 | 目前只有事实/派生层哈希、清单与跳过重算 |
 | 冻结报告的本地呈现 | 已实现 | monitor Markdown、`tools/render_monitor_web.py`静态HTML、`tools/render_prism_web.py`的Prism集成及`tools/update_monitor_web.py`本地更新；只呈现已保存事实和AI正文，不生成新判断 |
+| 正式推荐的公司介绍（附属资料） | 已实现 | `stock_analyzer.ops.company_introduction` + `writing-company-introductions` Skill + `ops/company-introduction-prompt.md`；正式身份 trace 备料、AI 逐篇写作、record 校验保存到 `local_archive/company_introductions/`，Prism 公司资料页签按原推荐身份展示；不进入正式研究/复盘产物，不自动选股 |
 | 云端发布、Supabase 和交易执行 | 有意不存在 | 当前本地呈现不恢复旧 V3 云端路径，不得把插件能力当作项目已有架构 |
 | GitHub 中的真实本地研究数据 | 有意不存在 | `local_warehouse/`、`local_archive/`、`logs/`、`.env*` 被忽略 |
 

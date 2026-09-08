@@ -5844,6 +5844,36 @@ def test_three_routes_zero_nodes_all_briefs_accepted(tmp_path: Path) -> None:
     assert "今日简评（5只）" in markdown
 
 
+def test_three_routes_brief_table_bold_title_without_name_prefix(
+    tmp_path: Path,
+) -> None:
+    snapshot, reviews = _three_route_case(0, 0, 2)
+    reviews[0]["current_review"] = (
+        "股票1｜缩量小涨，独立强势还在，要盯的重新变成量能。\n\n"
+        "今天大盘走弱它仍收高，单日缩量证明不了买盘在退。"
+    )
+    reviews[1]["current_review"] = "其他股份｜标题不属于这条记录\n\n后续解释。"
+    snapshot_path, pending = _record_three_route(tmp_path, snapshot, reviews)
+    result = record_forward_monitor(
+        snapshot_file=snapshot_path, report_file=pending, project_root=tmp_path
+    )
+    markdown = Path(result.markdown_file).read_text(encoding="utf-8")
+    titled_row = next(
+        line for line in markdown.splitlines() if line.startswith("| 股票1（")
+    )
+    assert (
+        "**缩量小涨，独立强势还在，要盯的重新变成量能。** "
+        "今天大盘走弱它仍收高，单日缩量证明不了买盘在退。"
+    ) in titled_row
+    # 去掉与股票列重复的名称前缀，正文完整跟随。
+    assert "股票1｜" not in titled_row
+    mismatched_row = next(
+        line for line in markdown.splitlines() if line.startswith("| 股票2（")
+    )
+    # 标题前缀与行内股票名不一致时按旧稿原样拼接，不改写。
+    assert "其他股份｜标题不属于这条记录  后续解释。" in mismatched_row
+
+
 def test_three_routes_missing_node_coverage_rejected(tmp_path: Path) -> None:
     snapshot, reviews = _three_route_case(2, 2, 2)
     snapshot_path, pending = _record_three_route(tmp_path, snapshot, reviews)

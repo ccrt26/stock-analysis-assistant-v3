@@ -824,7 +824,7 @@ def test_scan_history_merges_regular_detail_and_reads_brief(tmp_path: Path) -> N
 
 
 @pytest.mark.parametrize("kind", ["regular_detail", "checkpoint_detail"])
-def test_explicit_regular_title_preserves_source_and_checkpoint_behavior(
+def test_explicit_detail_title_preserves_source(
     tmp_path: Path, kind: str,
 ) -> None:
     title = "示例股份｜尚未触及上次观察位，连续回落使短期转为偏弱"
@@ -839,13 +839,12 @@ def test_explicit_regular_title_preserves_source_and_checkpoint_behavior(
     review = scan_history(tmp_path, date(2026, 9, 2))["e1"][0]
     assert review["copy"] == source
     assert review["summary_copy"] == source
-    assert review["headline"] == (
-        title if kind == "regular_detail" else renderer._first_sentence(source)
-    )
+    assert review["headline"] == title
     assert review["viewReason"] == "收盘连续两日回落。"
     assert review["confirm"] == "增强条件。" and review["risk"] == "改变条件。"
 
 
+@pytest.mark.parametrize("kind", ["regular_detail", "checkpoint_detail"])
 @pytest.mark.parametrize("source", [
     "旧稿第一句。\n\n后续解释。",
     "其他股份｜标题不属于这条记录\n\n后续解释。",
@@ -853,16 +852,65 @@ def test_explicit_regular_title_preserves_source_and_checkpoint_behavior(
     "示例股份｜只有标题而没有正文",
     "示例股份｜第一段包含\n另一行，不能当作单行标题\n\n后续解释。",
 ])
-def test_regular_title_does_not_reinterpret_legacy_or_incomplete_text(
-    tmp_path: Path, source: str,
+def test_detail_title_does_not_reinterpret_legacy_or_incomplete_text(
+    tmp_path: Path, source: str, kind: str,
 ) -> None:
     _write_three_route_day(
-        tmp_path, checkpoint_ids=[],
-        ledger_review=_three_route_ledger_review("e1", kind="regular_detail", text=None),
+        tmp_path, checkpoint_ids=["e1"] if kind == "checkpoint_detail" else [],
+        ledger_review=_three_route_ledger_review("e1", kind=kind, text=None),
         report_text=source,
     )
     review = scan_history(tmp_path, date(2026, 9, 2))["e1"][0]
     assert review["copy"] == source
+    assert review["headline"] == renderer._first_sentence(source)
+
+
+@pytest.mark.parametrize("source", [
+    "示例股份｜缩量小涨，独立强势还在，要盯的重新变成量能。\n\n"
+    "今天大盘跌0.36%，它收涨0.25%至8.14元，连续第三天创推荐后收盘新高。",
+    "旧稿第一句。\n\n后续解释。",
+    "其他股份｜标题不属于这条记录\n\n后续解释。",
+    "示例股份｜\n\n后续解释。",
+    "示例股份｜只有标题而没有正文",
+])
+def test_brief_headline_reads_ai_title_with_legacy_fallback(
+    tmp_path: Path, source: str,
+) -> None:
+    # 生产中简评股只出现在台账、不进报告：按纯账本路径读取。
+    episode = _episode("e1", "600000.SH", "示例股份")
+    snapshot = _snapshot([episode])
+    snapshot["checkpoint_review_episode_ids"] = []
+    ledger = {
+        "ledger_version": "daily-formal-reviews-v1",
+        "analysis_date": "2026-09-02",
+        "as_of": "2026-09-03T09:00:00+08:00",
+        "reviews": [_three_route_ledger_review("e1", kind="brief", text=source)],
+    }
+    _write_history_inputs(tmp_path, report=None, ledger=ledger, snapshot=snapshot)
+    review = scan_history(tmp_path, date(2026, 9, 2))["e1"][0]
+    assert review["review_kind"] == "brief"
+    title = renderer._regular_review_title(source, "示例股份")
+    expected = title if title else renderer._first_sentence(source)
+    assert review["headline"] == expected
+    # 简评正文与时间线摘要保留含标题的全文，裁剪只发生在展示层。
+    assert review["copy"] == source
+    assert review["summary_copy"] == source
+
+
+def test_brief_headline_falls_back_when_snapshot_missing(tmp_path: Path) -> None:
+    source = "示例股份｜缩量小涨。\n\n今天大盘走弱它仍收高。"
+    episode = _episode("e1", "600000.SH", "示例股份")
+    snapshot = _snapshot([episode])
+    snapshot["checkpoint_review_episode_ids"] = []
+    ledger = {
+        "ledger_version": "daily-formal-reviews-v1",
+        "analysis_date": "2026-09-02",
+        "as_of": "2026-09-03T09:00:00+08:00",
+        "reviews": [_three_route_ledger_review("e1", kind="brief", text=source)],
+    }
+    _write_history_inputs(tmp_path, report=None, ledger=ledger, snapshot=snapshot)
+    (tmp_path / "snapshot-2026-09-02.json").unlink()
+    review = scan_history(tmp_path, date(2026, 9, 2))["e1"][0]
     assert review["headline"] == renderer._first_sentence(source)
 
 

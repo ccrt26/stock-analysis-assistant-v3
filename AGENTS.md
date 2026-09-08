@@ -7,6 +7,7 @@
 - 选股先读 `.agents/skills/orchestrating-stock-research/SKILL.md`，按需调用市场、板块、公司、价格四个专业 Skill；仅这五个参与选股。正式复盘另读 `.agents/skills/reviewing-stock-recommendations/SKILL.md`，综合四专业 `phase: review` 事实，总控查一致性，不重新发现或选股。
 - 用户指定尚未买入的单股买入决策研究，读 `.agents/skills/analyzing-stock-buy-decision/SKILL.md` 并按 `ops/buy-decision-prompt.md` 运行；该流程不走正式推荐／复盘发布合同，不进入 Forward CSV 或冻结历史，原推荐目标价与观察期仅作背景，保留禁止自动交易、仓位与收益承诺的边界。
 - 正式每日研究与复盘开始前必须读 `ops/forward-selection-prompt.md` 和 `ops/forward-monitor-prompt.md`，遵守时间、三路互斥、节点六项／普通详评四项、正文唯一存放及 D20 冻结合同。次晨提醒读 `ops/preopen-safety-prompt.md`。沿用现有报告模型和任务，不自行新增任务。
+- 公司介绍是正式推荐的附属资料：运行顺序见 `ops/company-introduction-prompt.md`，方法见 `.agents/skills/writing-company-introductions/SKILL.md`，按原推荐身份与原 as_of 保存于 `local_archive/company_introductions/`；它不参与选股、不是第六个视角，不进入 Forward CSV、V4 trace 或复盘正文，不承诺收益、不给目标价。
 - 季度／半年产业研究先读 `docs/industry-research/00_逐步执行操作手册.md` 和 `docs/industry-research/01_全局执行规范.md`，与短周期选股分离。
 
 ## 研究与数据边界

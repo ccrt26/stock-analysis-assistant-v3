@@ -22,6 +22,10 @@ from typing import Any
 
 import pandas as pd
 
+from stock_analyzer.ops.company_introduction import (
+    default_intro_root,
+    load_introductions_for_display,
+)
 from stock_analyzer.ops.forward_selection import selection_output_class
 
 try:
@@ -445,6 +449,16 @@ def _regular_review_title(text: str, name: str) -> str:
     return ""
 
 
+def _review_headline(review: dict[str, Any], episode: dict[str, Any]) -> str:
+    """简评优先取 AI 标题首段，取不到（含旧稿）回退首句；详评路径不变。"""
+    text = str(review.get("current_review") or "")
+    if str(review.get("review_kind") or "brief") == "brief":
+        title = _regular_review_title(text, str(episode.get("name") or ""))
+        if title:
+            return title
+    return _first_sentence(text)
+
+
 def _raw_code(value: Any) -> str | None:
     """原样透传枚举字符串；空值输出 None，不猜测默认值。"""
     if value in (None, ""):
@@ -661,7 +675,7 @@ def scan_history(
                 if existing is not None and same_as_of:
                     # 账本提供结构化观点；详评正文与条件保留自报告。
                     existing.update(structured)
-                    if structured["review_kind"] == "regular_detail":
+                    if structured["review_kind"] in {"regular_detail", "checkpoint_detail"}:
                         title = _regular_review_title(
                             existing["copy"], str(episode.get("name") or "")
                         )
@@ -685,7 +699,7 @@ def scan_history(
                 "date": day.isoformat(),
                 "day": int(review.get("day_number") or 0),
                 "checkpoint": review.get("checkpoint"),
-                "headline": _first_sentence(str(review.get("current_review") or "")),
+                "headline": _review_headline(review, episode),
                 "copy": str(review.get("current_review") or ""),
                 "summary_copy": str(review.get("current_review") or ""),
                 "review_kind": str(review.get("review_kind") or "brief"),
@@ -1163,8 +1177,10 @@ def build_payload(
     report: dict[str, Any],
     snapshot: dict[str, Any],
     selection_dir: Path | None = None,
+    intro_root: Path | None = None,
 ) -> dict[str, Any]:
     selection_dir = selection_dir or SELECTION_DIR
+    intro_root = intro_root or default_intro_root(root)
     as_of = str(report.get("as_of") or snapshot.get("as_of"))
     episodes = {
         str(item.get("episode_id")): item
@@ -1511,6 +1527,26 @@ def build_payload(
             }
         )
     stocks_payload.sort(key=lambda item: (item["recDate"], item["code"]), reverse=True)
+
+    # 公司介绍按原推荐身份 (ts_code, action_date) 绑定，D0 与后续 episode 同一
+    # 只读加载路径；身份无法对照原 trace 证明时保持缺项，不取同代码最新一篇。
+    if stocks_payload:
+        intros = load_introductions_for_display(
+            selection_dir,
+            intro_root,
+            [
+                (
+                    item["code"],
+                    item["recDate"],
+                    item.get("formedOn"),
+                )
+                for item in stocks_payload
+            ],
+        )
+        for item in stocks_payload:
+            intro = intros.get((item["code"], item["recDate"]))
+            if intro is not None:
+                item["companyIntroduction"] = intro
 
     date_files = [
         {"file": f"monitor-report-{day.isoformat()}.html", "label": day.isoformat()}
@@ -2385,8 +2421,8 @@ function renderReview(){
   $("rReview").innerHTML = "";
  }else{
   $("rDate").textContent = `${s.recDate}入选 · 当前${dayLabel(r.day)}/20 · ${DATES[candleIdxOfDay(s,r.day)] || ""}`;
-  // 普通详评的明确标题单独展示，源 copy 保持完整；旧稿沿用原显示。
-  const titled = r.review_kind === "regular_detail" && r.headline.startsWith(s.name + "｜") && r.copy.startsWith(r.headline + "\\n\\n");
+  // 明确的首段标题单独展示，源 copy 保持完整；旧稿沿用原显示。
+  const titled = (r.review_kind === "regular_detail" || r.review_kind === "checkpoint_detail" || r.review_kind === "brief") && r.headline.startsWith(s.name + "｜") && r.copy.startsWith(r.headline + "\\n\\n");
   $("rHeadline").textContent = titled ? r.headline : "";
   $("rHeadline").style.display = titled ? "" : "none";
   $("rCopy").textContent = titled ? r.copy.slice(r.headline.length + 2) : r.copy;

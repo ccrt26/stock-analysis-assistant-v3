@@ -241,8 +241,10 @@ def test_js_core_exact_vs_last_available_quote(js_src):
     assert out["exact"] is False                 # 报告日 bar 为空 → 无当日价
     assert out["last_i"] == 1 and out["last_close"] == 120  # 最近有效价带真实序号
     assert out["m"]["ret"] is None and out["m"]["close"] is None
-    assert out["m"]["drawdown"] is None and out["m"]["remaining"] is None
-    assert out["m"]["max"] == pytest.approx(20.0)           # 历史峰值仍为 +20%
+    assert out["m"]["remaining"] is None
+    assert out["m"]["maxDrawdown"] == pytest.approx(0.0)    # 历史路径极值仍可算：一路新高无回落
+    assert out["m"]["volDelta"] is None and out["m"]["volToday"] is None  # 当日缺额 → 当日量能为空
+    assert out["m"]["volBase"] == pytest.approx(1.5) and out["m"]["volN"] == 2
     # 有效日上的当日指标按 exact 口径
     out2 = _run_js(js_src, """(C)=>{
       const s={code:'X.SZ',recDate:'2026-12-31',recIndex:0,ref:100,days:2,d0:null,
@@ -250,6 +252,49 @@ def test_js_core_exact_vs_last_available_quote(js_src):
       return C.metrics(s,1);
     }""")
     assert out2["ret"] == pytest.approx(20.0) and out2["close"] == 120
+    assert out2["maxDrawdown"] == pytest.approx(0.0)
+    assert out2["volDelta"] == pytest.approx(100.0) and out2["volN"] == 1  # 窗口不足5日按实际天数计
+
+
+def test_js_core_max_drawdown_and_volume_window(js_src):
+    """最大回落（收盘口径）与量能5日窗口：真实回落、回看截断、缺失额、单日与全缺。"""
+    out = _run_js(js_src, """(C)=>{
+      const s={code:'X.SZ',recDate:'2026-01-05',recIndex:0,ref:100,days:6,d0:null,
+        candles:[
+          [100,102,99,110,3],
+          [110,120,108,120,null],
+          [120,121,110,99,2],
+          [99,104,95,105,4],
+          [105,108,100,90,6],
+          [90,109,89,109,15],
+        ],reviews:[]};
+      const empty=C.metrics({code:'Y.SZ',recDate:'2026-01-05',recIndex:0,ref:100,days:3,d0:true,candles:[],reviews:[]},0);
+      const single=C.metrics({code:'Z.SZ',recDate:'2026-01-05',recIndex:0,ref:100,days:1,d0:null,
+        candles:[[100,101,99,105,7]],reviews:[]},0);
+      const blind=C.metrics({code:'W.SZ',recDate:'2026-01-05',recIndex:0,ref:100,days:2,d0:null,
+        candles:[[null,null,null,null,null],[null,null,null,null,null]],reviews:[]},1);
+      return {latest:C.metrics(s,5),replay:C.metrics(s,3),first:C.metrics(s,0),empty,single,blind};
+    }""")
+    latest, replay = out["latest"], out["replay"]
+    # 峰值 120 后最深回到 90 → -25%；回看第 4 天看不到之后更深的回落（-17.5%）。
+    assert latest["maxDrawdown"] == pytest.approx(-25.0)
+    assert replay["maxDrawdown"] == pytest.approx(-17.5)
+    # 量能：基线取前 5 个交易日有效额 [6,4,2,3]（跳过 i1 缺失）均值 3.75，当日 15 → +300%。
+    assert latest["volDelta"] == pytest.approx(300.0)
+    assert latest["volBase"] == pytest.approx(3.75) and latest["volN"] == 4
+    assert latest["volToday"] == pytest.approx(15.0)
+    # 回看第 4 天：基线窗口与当日额都只用 ≤end 的数据。
+    assert replay["volDelta"] == pytest.approx(60.0) and replay["volN"] == 2
+    # 首日无基线窗口 → 量能指标为空，但字段键恒在。
+    assert out["first"]["volDelta"] is None and out["first"]["volN"] == 0
+    assert out["first"]["volBase"] is None
+    # 待首日观察：空对象字段键齐全，全部为 null。
+    for key in ("ret", "maxDrawdown", "remaining", "close", "volDelta", "volToday", "volBase", "volN"):
+        assert out["empty"][key] is None
+    # 单个有效收盘：无回落即 0，而不是 null。
+    assert out["single"]["maxDrawdown"] == pytest.approx(0.0)
+    # 全缺收盘：历史极值也无从谈起 → null。
+    assert out["blind"]["maxDrawdown"] is None
 
 
 def test_list_sessions_keeps_missing_quote_days(tmp_path):
@@ -620,3 +665,67 @@ def test_data_issues_only_from_real_gaps(tmp_path):
     issues = payload2["stocks"][0]["dataIssues"]
     assert issues and set(issues[0]) == set(entry)
     assert issues[0]["code"] == "missing_rec_session"
+
+
+@pytest.mark.parametrize("kind", ["checkpoint_detail", "regular_detail", "brief"])
+@pytest.mark.parametrize("explicit_title", [True, False])
+def test_review_title_display_once_preserves_source(js_src, kind, explicit_title):
+    """执行两个页面的实际显示函数；标题去重复只影响显示，不改源正文。"""
+    from tools import render_monitor_web as monitor
+
+    title = "示例股份｜相对强势延续，缩量整理仍维持原判"
+    body = "当初期待相对强势。阶段表现已部分兑现。\n\n量能回升仍是目标障碍。"
+    source = title + "\n\n" + body if explicit_title else "当初期待什么。\n\n" + body
+    review = {
+        "review_kind": kind, "day": 10, "date": "2026-09-03",
+        "headline": title if explicit_title else monitor._first_sentence(source),
+        "copy": source, "summary_copy": source,
+    }
+    # 从实际输出/源文件读取函数，避免测试复制一份标题处理实现。
+    monitor_fn = "function renderReview(){" + monitor.render({}).split(
+        "function renderReview(){", 1
+    )[1].split("function eventTitle", 1)[0]
+    prism_fn = "function reviewBody(s,r,end){" + (js_src / "app.js").read_text(
+        encoding="utf-8"
+    ).split("function reviewBody(s,r,end){", 1)[1].split("function drawPlot", 1)[0]
+    script = r"""
+const fs=require('fs'),vm=require('vm');
+const input=JSON.parse(fs.readFileSync(0,'utf8'));
+const r=input.review,s={name:input.name,recDate:'2026-08-21'};
+const nodes={};
+const $=id=>nodes[id]||(nodes[id]={textContent:'',innerHTML:'',style:{},dataset:{}});
+const monitor={cur:s,selReview:r,latestReview:()=>r,dayLabel:String,esc:String,
+  $,selDay:10,DATES:[r.date],candleIdxOfDay:()=>0};
+vm.runInNewContext(input.monitor_fn+';renderReview();',monitor);
+const prism={s,r,state:{reviewTab:'latest'},C:{dateAt:()=>r.date},DATA:{},
+  escape:String,kindLabel:()=>r.review_kind,viewPill:()=>''};
+const html=vm.runInNewContext(input.prism_fn+';reviewBody(s,r,0);',prism);
+process.stdout.write(JSON.stringify({headline:nodes.rHeadline.textContent,
+  display:nodes.rHeadline.style.display,body:nodes.rCopy.textContent,html,review:r}));
+"""
+    result = subprocess.run(
+        ["node", "-e", script],
+        input=json.dumps({
+            "name": "示例股份", "review": review,
+            "monitor_fn": monitor_fn, "prism_fn": prism_fn,
+        }),
+        capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    rendered = json.loads(result.stdout)
+    assert rendered["review"] == review
+    if explicit_title:
+        assert rendered["headline"] == title
+        assert rendered["display"] == ""
+        assert rendered["body"] == body
+        assert rendered["html"].count(title) == 1
+        assert f"<h3>{title}</h3>" in rendered["html"]
+    else:
+        # monitor 旧稿仍只显示原文；Prism 保留旧首句标题及完整原文。
+        assert rendered["headline"] == ""
+        assert rendered["display"] == "none"
+        assert rendered["body"] == source
+        assert f'<h3>{review["headline"]}</h3>' in rendered["html"]
+        assert "<p>当初期待什么。</p>" in rendered["html"]
+    for paragraph in body.split("\n\n"):
+        assert f"<p>{paragraph}</p>" in rendered["html"]
