@@ -74,11 +74,22 @@ def _write_day(monitor_dir: Path, day: str, *, with_ledger: bool = True) -> None
         )
 
 
-def _write_calendar(root: Path, rows: list[tuple[str, bool]]) -> None:
+def _write_calendar(root: Path, rows: list[tuple[str, bool]], *, full: bool = True) -> None:
+    """写本地 SSE 交易日历；full=True 时先给 2026 年全年周一至周五开市的底表，
+    再用 rows 覆盖。full=False 用于构造覆盖不足的场景（T14）。"""
+    base_rows: list[tuple[str, bool]] = []
+    if full:
+        from datetime import date as _date, timedelta as _timedelta
+
+        day = _date(2026, 6, 1)
+        while day <= _date(2026, 12, 31):
+            base_rows.append((day.isoformat(), day.weekday() < 5))
+            day += _timedelta(days=1)
+    base_rows.extend(rows)
     frame = pd.DataFrame(
         [
             {"exchange": "SSE", "cal_date": day, "is_open": is_open}
-            for day, is_open in rows
+            for day, is_open in base_rows
         ]
     )
     for day, _ in rows:
@@ -97,9 +108,8 @@ def _run(root: Path, today: str, *extra: str) -> int:
 
 def _index_date(monitor_dir: Path) -> str | None:
     html = (monitor_dir / updater.INDEX_NAME).read_text(encoding="utf-8")
-    return json.loads(
-        html.split("DATA = ", 1)[1].split(";\nconst DATES", 1)[0].replace("<\\/", "</")
-    ).get("analysis_date")
+    payload = updater.parse_payload(html)
+    return None if payload is None else payload.get("analysis_date")
 
 
 @pytest.fixture(autouse=True)
@@ -205,13 +215,15 @@ def test_closed_calendar_day_skips(tmp_path: Path) -> None:
     assert "休市，不启动" in log_text
 
 
-def test_calendar_uncovered_weekday_warns_and_proceeds(tmp_path: Path) -> None:
+def test_calendar_coverage_gap_fails_render(tmp_path: Path) -> None:
+    """T14：日历覆盖不足 → 渲染明确失败（exit 1），不发布页面，不拿行情目录补日历。"""
     monitor_dir = tmp_path / "local_archive" / "forward_monitor"
     _write_day(monitor_dir, "2026-09-02")
-    _write_calendar(tmp_path, [("2026-08-31", True)])  # 日历不含 2026-09-02（周三）
-    assert _run(tmp_path, "2026-09-02") == 0
+    _write_calendar(tmp_path, [("2026-08-31", True)], full=False)  # 只有一条，覆盖不足
+    assert _run(tmp_path, "2026-09-02") == 1
     log_text = (monitor_dir / updater.LOG_NAME).read_text(encoding="utf-8")
-    assert "gate=uncovered" in log_text and "周一至周五候选" in log_text
+    assert "交易日历" in log_text and "status=error" in log_text
+    assert not (monitor_dir / updater.INDEX_NAME).exists()
 
 
 def test_corrupted_state_rebuilds(tmp_path: Path) -> None:
@@ -287,3 +299,46 @@ def test_index_self_heal_failure_returns_error(tmp_path: Path, monkeypatch: pyte
     assert not (monitor_dir / updater.INDEX_NAME).exists()
     log_text = (monitor_dir / updater.LOG_NAME).read_text(encoding="utf-8")
     assert "index.html 重建失败" in log_text
+
+
+def test_renderer_source_change_rebuilds_latest_only(tmp_path: Path) -> None:
+    """T47：渲染源码变化 → 只重建最新入口，不重算历史日（F12）。"""
+    monitor_dir = tmp_path / "local_archive" / "forward_monitor"
+    _write_day(monitor_dir, "2026-09-01")
+    _write_day(monitor_dir, "2026-09-02")
+    _write_calendar(tmp_path, [("2026-09-03", True)])
+    assert _run(tmp_path, "2026-09-03") == 0
+    log_text = (monitor_dir / updater.LOG_NAME).read_text(encoding="utf-8")
+    baseline_counts = {d: log_text.count(f"rendered={d}") for d in ("2026-09-01", "2026-09-02")}
+    assert baseline_counts == {"2026-09-01": 1, "2026-09-02": 1}
+    # 模拟源码签名变化：直接改状态文件中记录的签名（不真的改源码）。
+    state_path = monitor_dir / updater.STATE_NAME
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    state["renderer_sha256"] = "stale-signature"
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+    assert _run(tmp_path, "2026-09-03") == 0
+    log_text = (monitor_dir / updater.LOG_NAME).read_text(encoding="utf-8")
+    # 只有最新日期 2026-09-02 重渲染一次；历史日不重做。
+    assert log_text.count("rendered=2026-09-02") == 2
+    assert log_text.count("rendered=2026-09-01") == 1
+    # 最新 index 已更新，历史日期未发布新页面。
+    assert _index_date(monitor_dir) == "2026-09-02"
+    assert not (monitor_dir / "monitor-report-2026-09-01.html").exists()
+
+
+def test_validate_rendered_parses_reformatted_payload(tmp_path: Path) -> None:
+    """T46：模板排版/换行变化但 JSON 不变 → 载荷校验仍正确，不依赖 `;\\nconst DATES`。"""
+    day = date(2026, 9, 2)
+    payload = {"analysis_date": "2026-09-02", "stocks": [{"code": "600000.SH"}]}
+    page_json = json.dumps(payload, ensure_ascii=False).replace("</", "<\\/")
+    reformatted = (
+        "<html><body><script>\n  const   DATA =\n" + page_json + "\n;\n\n"
+        "  const   DATES   =  DATA.dates ;\n</script></body></html>"
+    )
+    html_path = tmp_path / "index.html"
+    html_path.write_text(reformatted, encoding="utf-8")
+    ok, stocks = updater.validate_rendered(html_path, day)
+    assert ok is True and stocks == 1
+    broken = html_path.read_text(encoding="utf-8").replace("2026-09-02", "2026-09-01")
+    html_path.write_text(broken, encoding="utf-8")
+    assert updater.validate_rendered(html_path, day)[0] is False

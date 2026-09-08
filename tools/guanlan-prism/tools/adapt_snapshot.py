@@ -8,8 +8,15 @@ import csv
 import json
 import math
 import re
+import sys
 from pathlib import Path
 from typing import Any, Mapping, Sequence
+
+try:
+    import web_display_contract
+except ImportError:  # 本文件可能被 spec_from_file_location 以独立模块加载
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import web_display_contract
 
 DEFAULT_CODES = ['000001.SH', '399001.SZ', '399006.SZ', '000688.SH']
 INDEX_NAMES = {'000001.SH':'上证指数','399001.SZ':'深证成指','399006.SZ':'创业板指','000688.SH':'科创50','899050.BJ':'北证50'}
@@ -94,7 +101,9 @@ def enrich_snapshot(snapshot: Mapping[str, Any], *, market_rows: Sequence[Mappin
         for code, daily in rows_by_code.items():
             newest = max(daily)
             selected = dict(daily[newest])
-            dates = [x if len(x)==10 else f"{d['analysis_date'][:4]}-{x}" for x in d['dates']]
+            # 日期定位用完整 ISO（sessionDates 优先；旧 MM-DD 走受约束的兼容转换）。
+            dates = web_display_contract.resolve_session_dates(
+                d.get('dates'), d['analysis_date'], d.get('sessionDates'))
             selected['series'] = [daily.get(date,{}).get('close') for date in dates if date<=d['analysis_date']]
             result.append(selected)
         d['marketIndices'] = result

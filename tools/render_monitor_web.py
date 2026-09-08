@@ -24,6 +24,11 @@ import pandas as pd
 
 from stock_analyzer.ops.forward_selection import selection_output_class
 
+try:
+    import web_display_contract
+except ImportError:  # 兼容 `python tools/render_monitor_web.py` 直接运行
+    from tools import web_display_contract  # type: ignore[no-redef]
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 MONITOR_DIR = PROJECT_ROOT / "local_archive" / "forward_monitor"
 SELECTION_DIR = PROJECT_ROOT / "local_archive" / "forward_selection"
@@ -105,19 +110,74 @@ def _single_number(value: Any) -> float | None:
     return None if pd.isna(number) else float(number)
 
 
-def list_sessions(root: Path, start: date, end: date) -> list[date]:
-    days: set[date] = set()
-    for dataset in ("equity_daily", "index_daily"):
-        base = root / "local_warehouse" / "facts" / dataset
-        for path in base.glob("trade_date=*/data.parquet"):
-            raw = path.parent.name.removeprefix("trade_date=")
+# 交易日历中允许的最大连续无记录天数：正常周末 2 天、最长法定长假 8 天；
+# 超过该缺口说明日历没有覆盖所需范围，必须明确失败而不是拿行情目录补日历。
+MAX_CALENDAR_GAP_DAYS = 10
+
+
+def read_trade_calendar(root: Path) -> dict[date, bool]:
+    """本地 SSE 交易日历（cal_date → is_open），与数据管道同一数据源。"""
+    calendar: dict[date, bool] = {}
+    base = root / "local_warehouse" / "facts" / "trade_calendar"
+    for path in base.glob("cal_year=*/data.parquet"):
+        try:
+            frame = pd.read_parquet(path)
+        except Exception:
+            continue
+        for row in frame.itertuples():
             try:
-                day = date.fromisoformat(raw)
+                day = date.fromisoformat(str(row.cal_date)[:10])
             except ValueError:
                 continue
-            if start <= day <= end:
-                days.add(day)
-    return sorted(days)
+            if str(row.exchange) == "SSE" and pd.notna(row.is_open):
+                calendar[day] = bool(row.is_open)
+    return calendar
+
+
+def list_sessions(root: Path, start: date, end: date) -> list[date]:
+    """用本地 SSE trade_calendar 推导 [start, end] 的交易日序列。
+
+    不再以行情分区文件是否存在决定开市日；有交易日但缺行情时由调用方保留
+    空位（null），保证观察天数不被数据缺口缩短。日历覆盖不足时明确失败。
+    """
+    calendar = read_trade_calendar(root)
+    if not calendar:
+        raise ValueError(
+            f"本地交易日历为空（{root / 'local_warehouse' / 'facts' / 'trade_calendar'}），"
+            f"无法推导 {start.isoformat()}—{end.isoformat()} 的交易日；请先补齐 trade_calendar，"
+            "不得用行情目录或周历代替"
+        )
+    sessions: list[date] = []
+    gap = 0
+    gap_start: date | None = None
+    day = start
+    while day <= end:
+        is_open = calendar.get(day)
+        if is_open is True:
+            sessions.append(day)
+            gap = 0
+        else:
+            # is_open 为 False（明确休市）与日历无记录都算缺口；只有连续缺口过长
+            # 才判定为覆盖不足（正常周末与法定长假不会超过 MAX_CALENDAR_GAP_DAYS）。
+            if is_open is None:
+                gap += 1
+                if gap == 1:
+                    gap_start = day
+                if gap > MAX_CALENDAR_GAP_DAYS:
+                    raise ValueError(
+                        f"本地交易日历未覆盖 {gap_start.isoformat()} 起连续 {gap} 天"
+                        f"（窗口 {start.isoformat()}—{end.isoformat()}），无法可靠推导交易日；"
+                        "请先补齐 trade_calendar，不得猜测"
+                    )
+            else:
+                gap = 0
+        day += timedelta(days=1)
+    if not sessions:
+        raise ValueError(
+            f"本地交易日历在 {start.isoformat()}—{end.isoformat()} 内没有任何开市日，"
+            "无法生成展示时间轴"
+        )
+    return sessions
 
 
 def _chain_levels(daily_returns: list[float | None]) -> list[float | None]:
@@ -385,6 +445,13 @@ def _regular_review_title(text: str, name: str) -> str:
     return ""
 
 
+def _raw_code(value: Any) -> str | None:
+    """原样透传枚举字符串；空值输出 None，不猜测默认值。"""
+    if value in (None, ""):
+        return None
+    return str(value)
+
+
 def _review_facts(episode: dict[str, Any]) -> list[str]:
     def pct(value: float) -> str:
         return f"{'+' if value > 0 else ''}{value * 100:.2f}%"
@@ -392,7 +459,7 @@ def _review_facts(episode: dict[str, Any]) -> list[str]:
     if not episode.get("formal_return_started") or episode.get("entry_open") is None:
         limitations = episode.get("data_limitations") or []
         if "missing_price_path" in limitations:
-            return ["停牌中", "无可参与价格"]
+            return ["价格数据缺失", "无可参与价格"]
         return ["暂无可靠推荐参考价"]
     facts: list[str] = []
     current = episode.get("current_close_return_since_entry")
@@ -492,6 +559,7 @@ def scan_history(
                         f"{MONITOR_STATE_TEXT.get(str(previous_state), previous_state)}"
                         f" → {MONITOR_STATE_TEXT.get(str(current_state), current_state)}"
                     )
+                outlook_raw = alert.get("outlook_1_3d")
                 merged[(episode_id, day.isoformat())] = {
                     "date": day.isoformat(),
                     "as_of": str(snapshot.get("as_of") or ""),
@@ -510,6 +578,12 @@ def scan_history(
                     "assessmentText": ASSESSMENT_TEXT.get(
                         str(review.get("current_assessment")), ""
                     ),
+                    # 结构化枚举严格透传；报告路径没有 view_change 字段，保持 null，
+                    # 由台账路径合并时补齐（F02/E4：缺值不默认 unchanged）。
+                    "viewChange": None,
+                    "assessmentCode": _raw_code(review.get("current_assessment")),
+                    "outlookCode": _raw_code(outlook_raw),
+                    "outlookDirection": web_display_contract.outlook_direction(outlook_raw),
                     "viewLabel": "观点调整" if view["changed"] else "维持原判断",
                     "viewReason": "",
                     "confirm": str(alert.get("confirmation_condition") or ""),
@@ -544,9 +618,11 @@ def scan_history(
         for review in ledger.get("reviews", []):
             episode_id = str(review.get("episode_id"))
             episode = episodes.get(episode_id, {})
-            view_change = str(review.get("view_change") or "unchanged")
+            # 保留原始枚举：缺值/未知值不再默认成“维持原判断”（F02/E4）。
+            raw_view_change = review.get("view_change")
+            view_change = _raw_code(raw_view_change)
             view_changed = view_change in {"strengthened", "weakened", "invalidated"}
-            label = VIEW_CHANGE_TEXT.get(view_change, "维持原判断")
+            label = VIEW_CHANGE_TEXT.get(view_change) if view_change else None
             from_to = label if view_changed else None
             key = (episode_id, day.isoformat())
             structured = {
@@ -558,6 +634,7 @@ def scan_history(
                 "assessmentText": ASSESSMENT_TEXT.get(
                     str(review.get("current_assessment")), ""
                 ),
+                **web_display_contract.review_enums(review),
                 "viewLabel": label,
                 "viewReason": str(review.get("view_change_reason") or ""),
                 "viewChanged": view_changed,
@@ -618,6 +695,7 @@ def scan_history(
                 "assessmentText": ASSESSMENT_TEXT.get(
                     str(review.get("current_assessment")), ""
                 ),
+                **web_display_contract.review_enums(review),
                 "viewLabel": label,
                 "viewReason": str(review.get("view_change_reason") or ""),
                 "confirm": "",
@@ -897,7 +975,7 @@ def _events_for(
     """
     events: list[list[str]] = [
         [
-            action_iso[5:],
+            action_iso,
             "rec",
             "正式推荐",
             str(
@@ -910,7 +988,7 @@ def _events_for(
     by_date: dict[str, tuple[int, list[str]]] = {}
     order: list[str] = []
     for item in review_items:
-        date_key = item["date"][5:]
+        date_key = item["date"]
         summary = item.get("summary_copy") or item.get("copy", "")
         if item.get("viewChanged"):
             candidate = (
@@ -936,7 +1014,7 @@ def _events_for(
     if first_close:
         candidate = (
             1,
-            [str(first_close)[5:], "milestone", "收盘达到20%", "推荐后收盘首次达到约20%涨幅"],
+            [str(first_close), "milestone", "收盘达到20%", "推荐后收盘首次达到约20%涨幅"],
         )
         if candidate[1][0] in by_date:
             if candidate[0] > by_date[candidate[1][0]][0]:
@@ -949,7 +1027,7 @@ def _events_for(
         candidate = (
             1,
             [
-                str(first_high)[5:],
+                str(first_high),
                 "milestone",
                 "盘中触及20%",
                 "盘中最高价涨幅一度达到约20%，收盘尚未达到",
@@ -1084,7 +1162,9 @@ def build_payload(
     analysis_date: date,
     report: dict[str, Any],
     snapshot: dict[str, Any],
+    selection_dir: Path | None = None,
 ) -> dict[str, Any]:
+    selection_dir = selection_dir or SELECTION_DIR
     as_of = str(report.get("as_of") or snapshot.get("as_of"))
     episodes = {
         str(item.get("episode_id")): item
@@ -1118,15 +1198,22 @@ def build_payload(
             view_flags[episode_id] = view["changed"]
 
     history = scan_history(monitor_dir, analysis_date)
-    names = group_name_map(SELECTION_DIR)
+    names = group_name_map(selection_dir)
     catalog = industry_catalog_names(root)
 
-    # D0：最新报告页面把次日开盘前生效的新推荐以"待首日观察"列出（数据来自配对选股轨迹）
+    # D0：最新报告页面把次日开盘前生效的新推荐以"待首日观察"列出（数据来自配对选股轨迹）。
+    # 去重身份是 (完整代码, action_date)：同股在更晚行动日的再次入选必须保留，不被旧记录滤掉（F05）。
     d0_entries, d0_action_iso = load_d0_entries(
-        SELECTION_DIR, monitor_dir, analysis_date
+        selection_dir, monitor_dir, analysis_date
     )
-    displayed_codes = {str(item["ts_code"]) for item in selected}
-    d0_entries = [entry for entry in d0_entries if entry["ts_code"] not in displayed_codes]
+    displayed_ids = {
+        (str(item["ts_code"]), str(item.get("action_date") or "")) for item in selected
+    }
+    d0_entries = [
+        entry
+        for entry in d0_entries
+        if (entry["ts_code"], d0_action_iso) not in displayed_ids
+    ]
 
     codes = sorted(
         {str(item["ts_code"]) for item in selected} | {entry["ts_code"] for entry in d0_entries}
@@ -1143,7 +1230,7 @@ def build_payload(
         default=analysis_date.isoformat(),
     )
     start = date.fromisoformat(earliest_action) - timedelta(days=20)
-    sessions = list_sessions(root, start, analysis_date) or [analysis_date]
+    sessions = list_sessions(root, start, analysis_date)
 
     as_of_dt = datetime.fromisoformat(as_of)
     # D0 条目无研究分组：用申万二级行业代码兜底，行业曲线与名称随之可得
@@ -1160,7 +1247,8 @@ def build_payload(
     facts = collect_market_facts(
         root, as_of_dt, sessions, group_codes, codes, group_members=group_members
     )
-    # 全局裁剪：从第一个有任何事实的交易日开始，保证 DATES / market / industry / candles 对齐
+    # 全局裁剪：从第一个有任何事实的交易日开始，保证 DATES / market / industry / candles 对齐；
+    # 但任何正在展示记录的首日观察日期（含事件首定价日）不得被裁掉（F04）。
     candidates = [
         index
         for index in (_first_index_with_data(facts["market"]),
@@ -1181,7 +1269,18 @@ def build_payload(
                       ])
         if index is not None
     ]
-    trim = min(candidates) if candidates else 0
+    session_isos = [day.isoformat() for day in sessions]
+    required_indices = [
+        session_isos.index(iso)
+        for iso in {
+            str(item.get("action_date") or "")
+            for item in selected
+            if item.get("action_date")
+        }
+        if iso in session_isos
+    ]
+    trim_candidates = candidates + required_indices
+    trim = min(trim_candidates) if trim_candidates else 0
     sessions = sessions[trim:]
     market_series = facts["market"][trim:]
     industry_series = {
@@ -1190,13 +1289,30 @@ def build_payload(
     candle_series = {code: values[trim:] for code, values in facts["candles"].items()}
 
     stocks_payload: list[dict[str, Any]] = []
+    identity_seen: dict[tuple[str, str], str] = {}
     for episode in selected:
         episode_id = str(episode["episode_id"])
         ts_code = str(episode["ts_code"])
         action_iso = str(episode.get("action_date") or analysis_date.isoformat())
-        rec_index = next(
-            (i for i, day in enumerate(sessions) if day.isoformat() == action_iso), 0
+        # 首日观察日期不在交易日序列时不得用数组第 0 日顶替（F04）：
+        # recIndex/ref 保持缺失，并输出 dataIssues 说明具体缺口。
+        rec_index: int | None = next(
+            (i for i, day in enumerate(sessions) if day.isoformat() == action_iso), None
         )
+        data_issues: list[dict[str, Any]] = []
+        if rec_index is None:
+            data_issues.append(
+                {
+                    "code": "missing_rec_session",
+                    "recordKey": f"{ts_code}:{action_iso}",
+                    "reviewDate": None,
+                    "message": (
+                        f"首日观察日期 {action_iso} 不在本地交易日历的交易日序列中，"
+                        "参考价与推荐后表现未计算；请核对该记录的 action_date。"
+                    ),
+                    "origin": "display_data_adapter",
+                }
+            )
         raw_candles = candle_series.get(ts_code, [])
         # 与全局交易日窗口严格对齐（事件/推荐日之前仅作背景，图中淡化显示）
         bars = [list(bar) for bar in raw_candles]
@@ -1207,10 +1323,22 @@ def build_payload(
             "legacy_v1_not_rewritten",
         }
         if formal:
-            action_bar = bars[rec_index] if rec_index < len(bars) else None
+            action_bar = (
+                bars[rec_index] if rec_index is not None and rec_index < len(bars) else None
+            )
             if action_bar and action_bar[0] is not None:
                 ref = action_bar[0]
                 ref_kind = "formal"
+            elif rec_index is not None:
+                data_issues.append(
+                    {
+                        "code": "missing_entry_quote",
+                        "recordKey": f"{ts_code}:{action_iso}",
+                        "reviewDate": None,
+                        "message": "首日开盘价缺失，未计算较参考价表现；不改用其他日期的价格。",
+                        "origin": "display_data_adapter",
+                    }
+                )
         else:
             # 事件等待型：程序记录的事件首次定价日为观察起点，参考价取当日原始开盘价
             reaction = episode.get("first_event_reaction") or {}
@@ -1231,8 +1359,25 @@ def build_payload(
                 ref = bars[reaction_index][0]
                 rec_index = reaction_index
                 ref_kind = "event"
-        has_post = any(bar[3] is not None for bar in bars[rec_index:])
-        suspended = not has_post
+        # 有无推荐后价格不等于停牌（F04）：只有明确的停牌/执行状态才能标停牌；
+        # 缺价格路径仅输出 dataIssues，不改变研究的阶段与失效状态。
+        has_post = rec_index is not None and any(
+            bar[3] is not None for bar in bars[rec_index:]
+        )
+        suspended = False
+        if rec_index is not None and not has_post:
+            data_issues.append(
+                {
+                    "code": "missing_price_path",
+                    "recordKey": f"{ts_code}:{action_iso}",
+                    "reviewDate": None,
+                    "message": (
+                        "推荐后暂无可用收盘数据，较参考价表现留空；"
+                        "这是价格数据缺失，不等于停牌或无法执行。"
+                    ),
+                    "origin": "display_data_adapter",
+                }
+            )
 
         alert = alert_by_episode[episode_id][0] if episode_id in alert_by_episode else None
         if alert:
@@ -1248,8 +1393,6 @@ def build_payload(
             stage_label, stage_type = "等待事件", "paused"
         else:
             stage_label, stage_type = "暂无复盘", "paused"
-        if suspended:
-            stage_label, stage_type = "无法执行", "paused"
 
         thesis = episode.get("original_research_thesis") or {}
         company_info = thesis.get("company_information") or {}
@@ -1257,6 +1400,17 @@ def build_payload(
         reviews = [item for item in review_items if not item.get("eventOnly")]
         group_code = str(episode.get("original_group_code") or "")
         industry_kind = facts.get("industry_kind", {}).get(group_code, "none")
+        # UI 身份仍是 code:recDate；同一身份出现两个不同真实 episode 时明确报错，
+        # 不取最后一条静默覆盖（F05/E3）。
+        identity = (ts_code, action_iso)
+        previous_episode = identity_seen.get(identity)
+        if previous_episode is not None and previous_episode != episode_id:
+            raise ValueError(
+                f"同一记录身份 {ts_code}:{action_iso} 对应多个 episode"
+                f"（{previous_episode} / {episode_id}），展示身份无法唯一对应；"
+                "请先在上游解决冲突，不得静默覆盖"
+            )
+        identity_seen[identity] = episode_id
         stocks_payload.append(
             {
                 "code": ts_code,
@@ -1265,6 +1419,7 @@ def build_payload(
                 "formedOn": (
                     str(episode["formation_date"]) if episode.get("formation_date") else None
                 ),
+                "episodeId": episode_id,
                 "recIndex": rec_index,
                 "ref": ref,
                 "refKind": ref_kind,
@@ -1279,6 +1434,18 @@ def build_payload(
                     else ""
                 ),
                 "suspended": suspended,
+                "dataIssues": data_issues,
+                "trackingStatus": (
+                    str(episode.get("tracking_status") or "") or None
+                ),
+                "trackingExitDate": (
+                    str(episode["tracking_exit_date"])
+                    if episode.get("tracking_exit_date")
+                    else None
+                ),
+                "trackingExitReason": (
+                    str(episode.get("tracking_exit_reason") or "") or None
+                ),
                 "company": _compose_company_line(
                     profiles.get(ts_code),
                     theme_map.get(ts_code),
@@ -1312,6 +1479,7 @@ def build_payload(
                 "name": entry["name"],
                 "recDate": d0_action_iso,
                 "formedOn": analysis_date.isoformat(),
+                "episodeId": None,
                 "recIndex": rec_index,
                 "ref": None,
                 "refKind": None,
@@ -1323,6 +1491,7 @@ def build_payload(
                 "trigger": "",
                 "suspended": False,
                 "d0": True,
+                "dataIssues": [],
                 "company": profiles.get(ts_code) or None,
                 "reasonFull": entry["reason"],
                 "reasonRisk": entry["risk"],
@@ -1333,7 +1502,7 @@ def build_payload(
                 "reviews": [],
                 "events": [
                     [
-                        d0_action_iso[5:],
+                        d0_action_iso,
                         "rec",
                         "正式推荐",
                         _short(entry["reason"], 48),
@@ -1356,14 +1525,22 @@ def build_payload(
         | {analysis_date.isoformat()},
         reverse=True,
     )
+    session_dates = [day.isoformat() for day in sessions]
     return {
+        # 展示数据合同版本 2：新增 sessionDates 完整交易日定位（E1）。
+        "displaySchemaVersion": 2,
         "analysis_date": analysis_date.isoformat(),
         "as_of": as_of,
         "market_name": MARKET_NAME,
-        "dates": [day.isoformat()[5:] for day in sessions],
+        # 完整 ISO 交易日序列：定位与比较一律用它（F03/E1）。
+        "sessionDates": session_dates,
+        # MM-DD 仅保留给旧 V4 布局显示，不参与年份比较或查找。
+        "dates": [day[5:] for day in session_dates],
         "market": market_series,
         "date_files": date_files,
         "review_dates": review_dates,
+        "sourceInfo": web_display_contract.source_info(),
+        "observationPolicy": web_display_contract.observation_policy(),
         "stocks": stocks_payload,
     }
 
@@ -2319,6 +2496,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--monitor-dir", default=None, help="override monitor archive directory")
     parser.add_argument(
+        "--selection-dir",
+        default=None,
+        help="override selection archive directory (default SELECTION_DIR under project root)",
+    )
+    parser.add_argument(
         "--out",
         default=None,
         help="override output HTML path (default monitor-report-<date>.html in monitor dir)",
@@ -2326,9 +2508,13 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     monitor_dir = Path(args.monitor_dir) if args.monitor_dir else MONITOR_DIR
+    selection_dir = Path(args.selection_dir) if args.selection_dir else SELECTION_DIR
     analysis_date = resolve_date(monitor_dir, args.date)
     report, snapshot, _report_path, _snapshot_path = load_artifacts(monitor_dir, analysis_date)
-    payload = build_payload(PROJECT_ROOT, monitor_dir, analysis_date, report, snapshot)
+    payload = build_payload(
+        PROJECT_ROOT, monitor_dir, analysis_date, report, snapshot,
+        selection_dir=selection_dir,
+    )
     html = render(payload)
     out_path = (
         Path(args.out)

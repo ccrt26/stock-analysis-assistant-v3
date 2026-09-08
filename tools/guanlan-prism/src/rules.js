@@ -4,10 +4,12 @@
  */
 (function(root){
 'use strict';
-const valid=v=>typeof v==='number'&&Number.isFinite(v);
-const key=s=>`${s.code}:${s.recDate}`;
-const dateAt=(i,d)=>d.dates[i]?.length===10?d.dates[i]:`${d.analysis_date.slice(0,4)}-${d.dates[i]}`;
-const indexOfDate=d=>d.dates.findIndex((_,i)=>dateAt(i,d)===d.analysis_date);
+const C=(typeof root.GuanlanCore!=='undefined')?root.GuanlanCore
+ :(typeof require==='function'?require('./core.js'):null);
+if(!C)throw new Error('rules.js 必须在 core.js 之后加载');
+const valid=C.valid,key=C.key;
+// 完整日期解析只此一份（core.js）；MM-DD 仅作显示，不参与比较与定位。
+const dateAt=C.dateAt,indexOfDate=C.indexOfDate;
 function orderedReviews(s,date){return (s.reviews||[]).filter(r=>r.date<=date).slice().sort((a,b)=>a.date.localeCompare(b.date)||(a.as_of||'').localeCompare(b.as_of||''));}
 function latest(s,d){return orderedReviews(s,d.analysis_date).at(-1)||null;}
 function recommendations(d){return [...d.stocks].sort((a,b)=>b.recDate.localeCompare(a.recDate));}
@@ -44,10 +46,17 @@ const BASE_DIRECTIONS=Object.freeze({
  '未来1—3个交易日更可能继续偏弱':'down',
  '未来1—3个交易日更可能高位剧烈波动并出现回吐':'down'
 });
+// 结构化枚举 outlookCode 的同一三类归并；event_pending/空/未识别 → null（与 Python 合同一致）。
+const OUTLOOK_CODE_DIRECTION=Object.freeze({
+ strengthening:'up',continuation_possible:'up',range_or_wait:'sideways',
+ weakening:'down',overheated:'down',invalidated:'down'});
 const DIRECTION_LABELS=Object.freeze({up:'上涨',sideways:'横盘',down:'下跌'});
 function direction(r){
  if(!r)return null;
- if(Object.prototype.hasOwnProperty.call(r,'outlookDirection'))return DIRECTION_LABELS[r.outlookDirection]?r.outlookDirection:null;
+ if(Object.prototype.hasOwnProperty.call(r,'outlookDirection'))
+  return DIRECTION_LABELS[r.outlookDirection]?r.outlookDirection:null;
+ if(Object.prototype.hasOwnProperty.call(r,'outlookCode'))
+  return OUTLOOK_CODE_DIRECTION[r.outlookCode]??null;
  return BASE_DIRECTIONS[r.base]||null;
 }
 function directionUpdates(d){
@@ -64,7 +73,13 @@ function isInvalid(s,d){
  // Optional current lifecycle value must be copied from the research system.
  if(typeof s.invalidated==='boolean')return s.invalidated;
  const r=latest(s,d);
- if(r)return r.viewLabel==='判断失效'||r.assessmentText==='推荐后的事实与核心预期相反';
+ if(r){
+  // 结构化枚举优先；旧快照才按精确中文映射，不从涨跌或关键词猜。
+  if(r.viewChange==='invalidated'||r.assessmentCode==='contradicted')return true;
+  if(Object.prototype.hasOwnProperty.call(r,'viewChange')&&r.viewChange!=null&&r.viewChange!=='invalidated')
+   return false;
+  return r.viewLabel==='判断失效'||r.assessmentText==='推荐后的事实与核心预期相反';
+ }
  return ['原判断失效','判断失效'].includes(s.stage);
 }
 const OPINION_OPTIONS=Object.freeze([
@@ -75,18 +90,34 @@ const OPINION_OPTIONS=Object.freeze([
  {value:'first',label:'首次复盘'},
  {value:'unreviewed',label:'尚未复盘'}
 ]);
+// 已知枚举 → 筛选值；旧快照按精确中文兼容；未知枚举标 unrecognized，不猜。
+const VIEW_CHANGE_CODES=Object.freeze({strengthened:'strengthened',weakened:'weakened',
+ unchanged:'maintained',first_review:'first',invalidated:'invalidated'});
+const LEGACY_VIEW_LABELS=Object.freeze({'观点增强':'strengthened','观点减弱':'weakened',
+ '维持原判断':'maintained','维持原判':'maintained','首次复盘':'first','判断失效':'invalidated'});
+function viewCode(r){
+ if(!r)return null;
+ if(Object.prototype.hasOwnProperty.call(r,'viewChange')){
+  const v=r.viewChange;
+  return v==null||v===''?null:VIEW_CHANGE_CODES[v]||'unrecognized';
+ }
+ return LEGACY_VIEW_LABELS[r.viewLabel]||null;
+}
 function opinionCode(s,d){
  if(isInvalid(s,d))return 'invalidated';
- const label=latest(s,d)?.viewLabel;
- return ({'观点增强':'strengthened','观点减弱':'weakened','维持原判断':'maintained','维持原判':'maintained','首次复盘':'first'})[label]||'unreviewed';
+ const code=viewCode(latest(s,d));
+ return ['strengthened','weakened','maintained','first'].includes(code)?code
+  :code==='unrecognized'?'unrecognized':'unreviewed';
 }
-function opinionLabel(s,d){const code=opinionCode(s,d);return code==='invalidated'?'判断失效':OPINION_OPTIONS.find(x=>x.value===code)?.label||'尚未复盘';}
+function opinionLabel(s,d){const code=opinionCode(s,d);
+ return code==='invalidated'?'判断失效':code==='unrecognized'?'未识别状态'
+  :OPINION_OPTIONS.find(x=>x.value===code)?.label||'尚未复盘';}
 function closeOnDate(s,d){
- const i=indexOfDate(d);if(i<0)return null;
+ const i=indexOfDate(d,d.analysis_date);if(i<0)return null;
  const close=s.candles[i]?.[3];return valid(close)?close:null;
 }
 function returnOnDate(s,d){
- const close=closeOnDate(s,d),i=indexOfDate(d);
+ const close=closeOnDate(s,d),i=indexOfDate(d,d.analysis_date);
  return s.d0||!valid(s.ref)||s.ref<=0||close===null||i<s.recIndex?null:(close/s.ref-1)*100;
 }
 function defaultFilters(){return {scope:'default',positive:false,opinion:'any'};}
@@ -119,8 +150,11 @@ const INDEX_META=Object.freeze({
  '899050.BJ':{name:'北证50',description:'北交所市场观察'}
 });
 function marketCards(d){
- const codes=[...new Set(d.presentation?.marketCodes||['000001.SH','399001.SZ','399006.SZ','000688.SH'])];
- const i=indexOfDate(d);
+ // 指数名单由输入提供（正式生成器复用 adapt_snapshot.DEFAULT_CODES）；
+ // 仅当旧快照自带 market 序列时才回退到上证一条，不建第二套前端业务名单。
+ const codes=[...new Set(d.presentation?.marketCodes
+  ||((Array.isArray(d.market)&&d.market.some(x=>x!=null))?['000001.SH']:[]))];
+ const i=indexOfDate(d,d.analysis_date);
  return codes.map(code=>{
   let row=(d.marketIndices||[]).find(x=>x.code===code);
   if(!row&&code==='000001.SH'&&d.market_name==='上证指数'&&i>=0){
@@ -157,7 +191,7 @@ function atlasGroups(d){
 function atlasGroupClose(records,d){
  // 价格属于股票不属于推荐：同股同日（dates 同一序号）的有效收盘取第一份副本；
  // 不跨日拼接、不叠加，任何一条都不用上一交易日价格冒充报告日价格。
- const i=indexOfDate(d);if(i<0)return null;
+ const i=indexOfDate(d,d.analysis_date);if(i<0)return null;
  for(const s of records){const c=s.candles[i]?.[3];if(valid(c))return c;}
  return null;
 }
@@ -165,8 +199,8 @@ function atlasPlottable(s,close,d){
  // 返回不可绘制原因；null 表示该记录可绘制。绝不静默换基准或按 0% 绘制。
  if(s.d0)return '待首日观察';
  if(!valid(s.ref)||s.ref<=0)return '缺参考价';
- const i=indexOfDate(d);
- if(i<0||!valid(s.recIndex)||s.recIndex<0||s.recIndex>i)return '交易日历不足';
+ const i=indexOfDate(d,d.analysis_date);
+ if(!valid(s.recIndex)||s.recIndex<0||s.recIndex>i)return '交易日历不足';
  if(!valid(close))return '报告日无真实收盘';
  return null;
 }
@@ -177,7 +211,7 @@ function atlasBasis(group,d){
  const close=atlasGroupClose(group.records,d);
  const reason=atlasPlottable(anchor,close,d);
  if(reason)return {anchor,close,plottable:false,reason,ret:null,day:null};
- const i=indexOfDate(d);
+ const i=indexOfDate(d,d.analysis_date);
  return {anchor,close,plottable:true,reason:null,ret:(close/anchor.ref-1)*100,day:i-anchor.recIndex+1};
 }
 function atlasRecordPoint(s,group,d){
@@ -185,7 +219,7 @@ function atlasRecordPoint(s,group,d){
  const close=atlasGroupClose(group.records,d);
  const reason=atlasPlottable(s,close,d);
  if(reason)return {s,close,plottable:false,reason,ret:null,day:null};
- const i=indexOfDate(d);
+ const i=indexOfDate(d,d.analysis_date);
  return {s,close,plottable:true,reason:null,ret:(close/s.ref-1)*100,day:i-s.recIndex+1};
 }
 function atlasBadge(group){
@@ -207,6 +241,6 @@ function atlasRange(stockPoints,recordPoints){
  const pad=Math.max((hi-lo)*.18,1.2);lo-=pad;hi+=pad;
  return {lo,hi,maxDay:Math.max(...days,1),basis:ATLAS_BASIS_LABEL};
 }
-const api={BASE_DIRECTIONS,DIRECTION_LABELS,OPINION_OPTIONS,INDEX_META,ATLAS_BASIS_LABEL,key,indexOfDate,latest,recommendations,deepReviews,direction,directionUpdates,isInvalid,opinionCode,opinionLabel,closeOnDate,returnOnDate,defaultFilters,filterAction,filterRecords,marketCards,atlasGroups,atlasGroupClose,atlasPlottable,atlasBasis,atlasRecordPoint,atlasBadge,atlasRange};
+const api={BASE_DIRECTIONS,DIRECTION_LABELS,OUTLOOK_CODE_DIRECTION,OPINION_OPTIONS,INDEX_META,ATLAS_BASIS_LABEL,key,viewCode,indexOfDate:(d,iso)=>C.indexOfDate(d,iso),latest,recommendations,deepReviews,direction,directionUpdates,isInvalid,opinionCode,opinionLabel,closeOnDate,returnOnDate,defaultFilters,filterAction,filterRecords,marketCards,atlasGroups,atlasGroupClose,atlasPlottable,atlasBasis,atlasRecordPoint,atlasBadge,atlasRange};
 if(typeof module!=='undefined'&&module.exports)module.exports=api;else root.GuanlanRules=api;
 })(typeof window!=='undefined'?window:globalThis);

@@ -117,6 +117,11 @@ def input_digest(
     return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest(), ledger_exists
 
 
+def renderer_signature() -> str:
+    """渲染器源码签名：源码变化时只触发最新入口重建，不重算历史日期（F12/T47）。"""
+    return _sha256_file(Path(renderer.__file__))
+
+
 def load_state(state_path: Path) -> dict:
     """状态文件损坏 / 不可读时视为空，全量重渲染重建。"""
     try:
@@ -139,17 +144,26 @@ def save_state(state_path: Path, state: dict) -> None:
     os.replace(tmp, state_path)
 
 
+def parse_payload(html: str) -> dict | None:
+    """真正解析 V4 页面内嵌 JSON；不依赖 `DATA = ` 与 `;\\nconst DATES` 的换行排版（T46）。"""
+    match = re.search(r"\bconst\s+DATA\s*=\s*", html)
+    if not match:
+        return None
+    try:
+        value, _ = json.JSONDecoder().raw_decode(html[match.end():])
+    except ValueError:
+        return None
+    return value if isinstance(value, dict) else None
+
+
 def validate_rendered(html_path: Path, day: date) -> tuple[bool, int]:
     if not html_path.is_file():
         return False, 0
     try:
-        html = html_path.read_text(encoding="utf-8")
-        payload = json.loads(
-            html.split("DATA = ", 1)[1].split(";\nconst DATES", 1)[0].replace("<\\/", "</")
-        )
-    except Exception:
+        payload = parse_payload(html_path.read_text(encoding="utf-8"))
+    except OSError:
         return False, 0
-    if str(payload.get("analysis_date")) != day.isoformat():
+    if payload is None or str(payload.get("analysis_date")) != day.isoformat():
         return False, 0
     return True, len(payload.get("stocks") or [])
 
@@ -160,8 +174,21 @@ def log_line(monitor_dir: Path, message: str) -> None:
         fh.write(f"[{stamp}] {message}\n")
 
 
-def render_date(day: date, monitor_dir: Path, out_path: Path) -> None:
-    renderer.main(["--date", day.isoformat(), "--monitor-dir", str(monitor_dir), "--out", str(out_path)])
+def render_date(
+    day: date,
+    monitor_dir: Path,
+    out_path: Path,
+    selection_dir: Path | None = None,
+) -> None:
+    """目录参数一路贯穿渲染入口，不允许内部绕回模块级默认目录（F12/T48）。"""
+    argv = [
+        "--date", day.isoformat(),
+        "--monitor-dir", str(monitor_dir),
+        "--out", str(out_path),
+    ]
+    if selection_dir is not None:
+        argv += ["--selection-dir", str(selection_dir)]
+    renderer.main(argv)
 
 
 def _tmp_index_path(monitor_dir: Path) -> Path:
@@ -174,11 +201,13 @@ def index_is_healthy(monitor_dir: Path, latest: date | None) -> bool:
     return validate_rendered(monitor_dir / INDEX_NAME, latest)[0]
 
 
-def rebuild_index(monitor_dir: Path, latest: date) -> None:
+def rebuild_index(
+    monitor_dir: Path, latest: date, selection_dir: Path | None = None
+) -> None:
     """把最新候选日期重渲染并原子重建统一地址 index.html。"""
     tmp = _tmp_index_path(monitor_dir)
     try:
-        render_date(latest, monitor_dir, tmp)
+        render_date(latest, monitor_dir, tmp, selection_dir=selection_dir)
         ok, stocks = validate_rendered(tmp, latest)
         if not ok:
             raise RuntimeError("index.html 重建产物校验失败")
@@ -204,15 +233,23 @@ def run_update(
     state = load_state(monitor_dir / STATE_NAME)
     published = state.setdefault("published", {})
 
+    signature = renderer_signature()
+    signature_changed = state.get("renderer_sha256") != signature
+
     pending: list[tuple[date, str]] = []
     ledger_warnings: list[date] = []
+    day_digests: dict[date, str] = {}
     for day in candidates:
         digest, ledger_exists = input_digest(monitor_dir, selection_dir, day)
+        day_digests[day] = digest
         if not ledger_exists:
             ledger_warnings.append(day)
         record = published.get(day.isoformat())
         if force or not isinstance(record, dict) or record.get("input_sha256") != digest:
             pending.append((day, digest))
+    # 渲染源码变化：只把最新日期补进待渲染（重建统一入口），不强制重做历史日（T47）。
+    if signature_changed and latest is not None and all(day != latest for day, _ in pending):
+        pending.append((latest, day_digests[latest]))
 
     gate = "open" if calendar.get(today) else ("closed" if today in calendar else "uncovered")
 
@@ -220,7 +257,7 @@ def run_update(
         # 自愈：在一切早退之前检查统一地址（缺失 / 落后 / 不可解析则重建最新日期）
         if latest is not None and not index_is_healthy(monitor_dir, latest):
             try:
-                rebuild_index(monitor_dir, latest)
+                rebuild_index(monitor_dir, latest, selection_dir=selection_dir)
             except Exception as exc:
                 log_line(monitor_dir, f"index.html 重建失败：{exc} status=error")
                 return 1
@@ -260,7 +297,7 @@ def run_update(
         iso = day.isoformat()
         tmp = _tmp_index_path(monitor_dir)
         try:
-            render_date(day, monitor_dir, tmp)
+            render_date(day, monitor_dir, tmp, selection_dir=selection_dir)
             ok, stocks = validate_rendered(tmp, day)
             if not ok:
                 raise RuntimeError("渲染产物校验失败（HTML 缺失 / payload 不可解析 / 日期不一致）")
@@ -271,6 +308,7 @@ def run_update(
                 "rendered_at": datetime.now(BEIJING).isoformat(timespec="seconds"),
                 "stocks": stocks,
             }
+            state["renderer_sha256"] = signature
             save_state(monitor_dir / STATE_NAME, state)
             log_line(monitor_dir, f"rendered={iso} stocks={stocks} status=ok")
         except Exception as exc:

@@ -39,6 +39,12 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 PRISM_ROOT = PROJECT_ROOT / "tools" / "guanlan-prism"
 MARKET_SOURCE = "本地事实仓 index_daily（available_at ≤ 报告 as_of）"
 
+try:
+    import web_display_contract
+except ImportError:  # 兼容 `python tools/render_prism_web.py` 直接运行
+    sys.path.insert(0, str(PROJECT_ROOT / "tools"))
+    import web_display_contract  # type: ignore[no-redef]
+
 
 def load_modules():
     """与 tests/update_monitor_web 复用同一 render_monitor_web 模块实例。"""
@@ -253,8 +259,15 @@ def render(args, renderer, adapt, prism, monitor_dir: Path) -> int:
     codes = [c.strip() for c in args.indices.split(",") if c.strip()] if args.indices else list(adapt.DEFAULT_CODES)
     if not 3 <= len(codes) <= 5:
         raise ValueError("--indices must contain 3 to 5 codes")
-    year = payload["analysis_date"][:4]
-    sessions = [date.fromisoformat(f"{year}-{d}") for d in payload["dates"]]
+    # 日期定位一律用完整 ISO sessionDates（E1）；无 sessionDates 的旧载荷走
+    # web_display_contract 的受约束兼容转换，跨年无法证明年份时明确失败。
+    session_isos = payload.get("sessionDates")
+    sessions = [
+        date.fromisoformat(value)
+        for value in web_display_contract.resolve_session_dates(
+            payload["dates"], payload["analysis_date"], session_isos
+        )
+    ]
     as_of = datetime.fromisoformat(payload["as_of"])
     market_rows = local_index_rows(renderer, PROJECT_ROOT, codes, sessions, as_of)
     display_snapshot = adapt.enrich_snapshot(

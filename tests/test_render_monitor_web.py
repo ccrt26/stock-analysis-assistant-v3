@@ -20,12 +20,30 @@ from tools.render_monitor_web import (
 from tools import render_monitor_web as renderer
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture( autouse=True)
 def _isolated_selection_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """隔离选股轨迹目录：真实 research-trace 不得漏进测试。"""
     monkeypatch.setattr(
         renderer, "SELECTION_DIR", tmp_path / "local_archive" / "forward_selection"
     )
+
+
+@pytest.fixture(autouse=True)
+def _local_trade_calendar(tmp_path: Path) -> None:
+    """临时交易日历：周一至周五开市。list_sessions 只以它推导交易日（F04/T13）。"""
+    days = pd.date_range("2026-06-01", "2026-12-31", freq="D")
+    frame = pd.DataFrame(
+        {
+            "exchange": "SSE",
+            "cal_date": days.strftime("%Y-%m-%d"),
+            "is_open": days.dayofweek < 5,
+        }
+    )
+    day_dir = (
+        tmp_path / "local_warehouse" / "facts" / "trade_calendar" / "cal_year=2026"
+    )
+    day_dir.mkdir(parents=True)
+    frame.to_parquet(day_dir / "data.parquet")
 
 
 def _episode(

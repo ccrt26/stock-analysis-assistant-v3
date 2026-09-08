@@ -14,7 +14,7 @@
 |---|---|
 | 首页换成市场行情 | 默认上证、深证成指、创业板指、科创50四项；配置可为三项或五项；只读取本报告交易日行情 |
 | 走势聚焦最多八只 | 当日普通详评 `regular_detail`，不是节点详评，不是最近四条；按源名单/源顺序，可直接选择和左右切换 |
-| 推荐股票清单 | 35条全部进入横向滚动轨道；桌面四张、平板两张、手机一张；常驻可拖动滚动条及左右按钮 |
+| 推荐股票清单 | 全部N条进入横向滚动轨道（数量由数据计算，无截断）；桌面四张、平板两张、手机一张；常驻可拖动滚动条及左右按钮 |
 | 观点更新 | 相邻两次复盘的未来1—3日方向在上涨/横盘/下跌之间切换；前三条完整原因，常驻竖向滚动条，全量入口 |
 | 全部观察列修改 | 股票首字块全局删除；最高收盘涨跌替换为当日收盘价；复盘观点列不含行业 |
 | 失效与观点筛选 | 默认不含失效；直接选择失效为仅失效；先选全部再选失效为完整并集；复盘观点下拉没有失效选项 |
@@ -23,11 +23,11 @@
 
 ## 示例数据的重要说明
 
-价格归属交易日是 **2026-09-04**，原快照截止为 **2026-09-06 18:30（上海时间）**，不是实时行情。原快照35条记录、34只股票；同一股票的不同推荐分别保留。
+价格归属交易日是 **2026-09-04**，原快照截止为 **2026-09-06 18:30（上海时间）**，不是实时行情。原快照35条记录、34只股票；同一股票的不同推荐分别保留。以上是这份示例的固定描述；页面上的所有数量（清单条数、方向更新数、筛选集合、市场卡数）一律由当前数据计算，不写死在程序里。
 
 原快照仅提供上证指数日线。其余三项指数已做好布局和接口，但如实显示“快照未提供”。这不是网络加载失败，也不是已接入全部市场；GLM须从用户已有本地指数数据中补字段，不能随机生成点位。市场卡片的小图是近期日线收盘，不是分时图。
 
-本示例实际对应：8只当日普通详评、7条方向更新、11条已失效记录；默认清单24条，完整并集35条。数字由数据计算，不写死在界面中。观点原文不改，既有文字与价格可能不一致；示例中德尔股份旧稿的26.56与价格数组的26.65差异仅在旧错误表述仍存在时提示；正式正文修订后不再显示这条旧稿提示。
+观点原文不改，既有文字与价格可能不一致；正文按原文展示，页面不做原文数字核对，也不含任何按股票名/日期/价格定制的提示分支。检测到的确定性数据缺口（如首日开盘价缺失）通过结构化 dataIssues 在对应记录处提示。
 
 ## 文件入口
 
@@ -59,14 +59,18 @@ python3 tools/build.py --data /实际路径/展示快照.json --out /实际路�
 
 ## 复现验证
 
+在本仓库根目录（需要 `.venv`、Node.js 与 Playwright Chromium）：
+
 ```bash
-python3 -m pip install -r requirements-test.txt
-python3 -m playwright install chromium
-python3 tests/run_all.py
-python3 tests/capture.py
+.venv/bin/python -m pytest -q tests/test_prism_web_contract.py
+.venv/bin/python -m pytest -q tests/test_render_prism_web.py tests/test_render_monitor_web.py \
+    tests/test_update_monitor_web.py tests/test_prism_atlas.py
+.venv/bin/python tests/check_prism_web_browser.py --out /tmp/prism-web-shots
+.venv/bin/python tests/check_prism_atlas_browser.py \
+    --html local_archive/forward_monitor/prism-report-2026-09-07.html --out /tmp/prism-atlas-shots
 ```
 
-运行页面不需要上面这些开发依赖。测试需要Node.js和Playwright；环境有可用Chromium时可设置 `CHROMIUM_PATH`。不要把浏览器、依赖缓存或字体打包进交付目录。
+浏览器验收支持 `--browser-executable` 显式指定浏览器；缺省使用已安装的 Playwright Chromium，依赖缺失时明确失败（退出码 2）。页面源码语法可用 `node --check src/{core,rules,app}.js` 单独核对。真实报告验收的期望值由 Python 从页面内嵌快照独立计算；固定数字断言只存在于明确标注的合成回归样本中。不要把浏览器、依赖缓存或字体打包进交付目录。
 
 ## 给 GLM 的一句话
 

@@ -43,7 +43,8 @@ def test_prism_sources_present() -> None:
     for rel in PRISM_SOURCES:
         assert (PRISM_ROOT / rel).is_file(), f"missing vendored source: {rel}"
     builder = _load_prism_builder()
-    html = builder.render_html({"stocks": [], "dates": []})
+    html = builder.render_html({"analysis_date": "2026-09-07", "dates": ["09-07"],
+                                "market": [3000.0], "stocks": []})
     # 单文件版内联资源，不残留外链；CSS 必须保持 base → prism → v3 的加载顺序。
     for ref in ("base.css", "prism.css", "v3.css", "rules.js", "app.js"):
         assert f'src="{ref}"' not in html and f'href="{ref}"' not in html
@@ -87,6 +88,8 @@ def test_cli_renders_with_market_enrichment(
         "analysis_date": "2026-01-05",
         "as_of": "2026-01-04T18:30:00+08:00",
         "market_name": "上证指数",
+        # 跨年快照：完整 ISO sessionDates 定位（E1/T09）；dates 仅作旧布局显示。
+        "sessionDates": ["2025-12-30", "2026-01-02", "2026-01-05"],
         "dates": ["12-30", "01-02", "01-05"],
         "market": [4000.0, 4010.0, None],
         "date_files": [],
@@ -133,6 +136,8 @@ def test_cli_renders_with_market_enrichment(
 @pytest.fixture
 def completed_archive(tmp_path, monkeypatch):
     """独立的正式空日报；实际模型验证，事实仓读取隔离到临时目录。"""
+    import pandas as pd
+
     from tools import render_monitor_web as renderer
     from tools import render_prism_web as cli
 
@@ -143,6 +148,17 @@ def completed_archive(tmp_path, monkeypatch):
     monkeypatch.setattr(renderer, "MONITOR_DIR", monitor)
     monkeypatch.setattr(renderer, "SELECTION_DIR", selection)
     monkeypatch.setattr(cli, "PROJECT_ROOT", tmp_path)
+    # 临时交易日历（周一至周五开市）：build_payload 的交易日序列来源（F04/E2）。
+    days = pd.date_range("2026-06-01", "2026-12-31", freq="D")
+    calendar_frame = pd.DataFrame(
+        {"exchange": "SSE", "cal_date": days.strftime("%Y-%m-%d"),
+         "is_open": days.dayofweek < 5}
+    )
+    calendar_dir = (
+        tmp_path / "local_warehouse" / "facts" / "trade_calendar" / "cal_year=2026"
+    )
+    calendar_dir.mkdir(parents=True)
+    calendar_frame.to_parquet(calendar_dir / "data.parquet")
     day, action, cutoff = "2026-09-04", "2026-09-07", "2026-09-06T18:30:00+08:00"
     counts = dict.fromkeys(("open_episode_count", "distinct_stock_count", "selected_count",
                            "comparator_count", "primary_count", "passive_tail_count",
@@ -300,7 +316,7 @@ def test_historical_render_never_downgrades_fixed_page(completed_archive):
     _, _, builder = cli.load_modules()
     fixed = paths["report"].parent / "prism.html"
     newer = builder.render_html({"analysis_date": "2026-09-07", "as_of": "2026-09-07T18:30:00+08:00",
-                                 "stocks": [], "dates": [], "market": []})
+                                 "stocks": [], "dates": ["09-07"], "market": [3000.0]})
     fixed.write_text(newer, encoding="utf-8")
     assert cli.main(args) == 0
     assert fixed.read_text(encoding="utf-8") == newer
