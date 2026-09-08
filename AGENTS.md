@@ -5,6 +5,7 @@
 - 首次了解或涉及架构时读 `docs/architecture/current-v3-architecture.md`；已读且未变不重复通读，局部任务按需读。历史设计不自动生效；未经用户批准不恢复旧 V3 评分、Gate、关注池、报告发布、Supabase、Cloudflare 或交易路径。
 - 程序管事实、时点、存储、确定性计算和质量；AI/Skill 管问题、解释、因果、比较、反证、未知及取舍。用户明确指令优先于 Skill；Skill 管研究方法，`ops/` Prompt 管运行与报告，代码核对实际合同；冲突须说明，不为通过校验倒退用户要求。
 - 选股先读 `.agents/skills/orchestrating-stock-research/SKILL.md`，按需调用市场、板块、公司、价格四个专业 Skill；仅这五个参与选股。正式复盘另读 `.agents/skills/reviewing-stock-recommendations/SKILL.md`，综合四专业 `phase: review` 事实，总控查一致性，不重新发现或选股。
+- 用户指定尚未买入的单股买入决策研究，读 `.agents/skills/analyzing-stock-buy-decision/SKILL.md` 并按 `ops/buy-decision-prompt.md` 运行；该流程不走正式推荐／复盘发布合同，不进入 Forward CSV 或冻结历史，原推荐目标价与观察期仅作背景，保留禁止自动交易、仓位与收益承诺的边界。
 - 正式每日研究与复盘开始前必须读 `ops/forward-selection-prompt.md` 和 `ops/forward-monitor-prompt.md`，遵守时间、三路互斥、节点六项／普通详评四项、正文唯一存放及 D20 冻结合同。次晨提醒读 `ops/preopen-safety-prompt.md`。沿用现有报告模型和任务，不自行新增任务。
 - 季度／半年产业研究先读 `docs/industry-research/00_逐步执行操作手册.md` 和 `docs/industry-research/01_全局执行规范.md`，与短周期选股分离。
 

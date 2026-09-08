@@ -208,6 +208,10 @@ data health
 
 每个专业 Skill 都可在发现阶段提交线索，并在验证阶段围绕少量候选独立回答能够改变最终取舍的问题。市场直接读一行 `market_context`；板块和价格先用 DuckDB 投影、过滤派生表；公司第一轮只查新增结构化事实。不把全量派生表或公告正文送入模型，补证最多一轮。
 
+### 6.3 按需单股买入决策（不属于正式选股／复盘）
+
+用户指定一只尚未买入的股票、希望按本次可能买到的价格判断是否值得参与时，运行按需买入研究：方法见 `.agents/skills/analyzing-stock-buy-decision/SKILL.md`，运行顺序见 `ops/buy-decision-prompt.md`，设计细节见 `docs/architecture/buy-decision-v1.md`。程序经 `ResearchWarehouse(root, read_only=True)` 只读备料并复算 AI 明确提出的价位方案；判断与唯一正文 `report.md` 由 AI 完成。原推荐目标价与观察期仅作背景；不走正式推荐／复盘发布合同，不进入 Forward CSV 或冻结历史；不接券商、不下单、不决定仓位、不承诺收益。
+
 ## 7. 一次研究应如何运行
 
 1. **冻结边界**：确定形成日、行动日、`as_of`、研究目标和完整合格股票范围。

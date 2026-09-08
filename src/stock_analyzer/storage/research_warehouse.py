@@ -94,13 +94,17 @@ class FactRecoveryError(RuntimeError):
 
 
 class ResearchWarehouse:
-    def __init__(self, root: Path) -> None:
+    def __init__(self, root: Path, *, read_only: bool = False) -> None:
         self.root = Path(root)
         self.facts_root = self.root / "facts"
         self.staging_root = self.root / ".staging"
         self.journal_root = self.root / ".fact-promotions"
         self.lock_path = self.root / ".facts.lock"
         self.duckdb_path = self.root / "research.duckdb"
+        self.read_only = bool(read_only)
+        if self.read_only:
+            self._init_read_only()
+            return
         self.root.mkdir(parents=True, exist_ok=True)
         with self._file_lock(exclusive=True):
             with connect_research_warehouse(self.duckdb_path) as connection:
@@ -117,7 +121,51 @@ class ResearchWarehouse:
             self._recover_unjournaled_backups()
             self._ensure_fact_key_index()
 
+    def _init_read_only(self) -> None:
+        """显式只读打开：不创建、不恢复、不迁移、不建索引、不建锁文件。"""
+
+        if not self.root.is_dir():
+            raise FileNotFoundError(
+                f"research warehouse root does not exist: {self.root}"
+            )
+        if not self.duckdb_path.is_file():
+            raise FileNotFoundError(
+                f"research warehouse database does not exist: {self.duckdb_path}"
+            )
+        journals = (
+            sorted(self.journal_root.glob("*.json"))
+            if self.journal_root.is_dir()
+            else []
+        )
+        if journals:
+            raise FactRecoveryError(
+                "research warehouse has unreconciled fact journals; run the "
+                f"normal write-mode maintenance flow first: {journals[0]}"
+            )
+        backups = (
+            sorted(self.facts_root.rglob("*.parquet.previous"))
+            if self.facts_root.is_dir()
+            else []
+        )
+        if backups:
+            raise FactRecoveryError(
+                "research warehouse has unreconciled fact backups; run the "
+                f"normal write-mode maintenance flow first: {backups[0]}"
+            )
+        with connect_research_warehouse(
+            self.duckdb_path, read_only=True
+        ) as connection:
+            connection.execute("select 1").fetchone()
+
+    def _require_writable(self) -> None:
+        if self.read_only:
+            raise PermissionError(
+                "research warehouse is open in read_only mode; "
+                "write methods are rejected"
+            )
+
     def commit_batch(self, batch: FactBatch) -> FactCommitResult:
+        self._require_writable()
         with self._file_lock(exclusive=True):
             return self._commit_batch_locked(batch)
 
@@ -249,6 +297,7 @@ class ResearchWarehouse:
 
     @contextmanager
     def _file_lock(self, *, exclusive: bool):
+        self._require_writable()
         with self.lock_path.open("a+b") as handle:
             operation = fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH
             fcntl.flock(handle.fileno(), operation)
@@ -661,6 +710,7 @@ class ResearchWarehouse:
         dataset_id: ResearchDatasetId | str,
         keep_from_partition: str,
     ) -> tuple[str, ...]:
+        self._require_writable()
         with self._file_lock(exclusive=True):
             return self._prune_partitions_before_locked(
                 dataset_id,
@@ -724,6 +774,7 @@ class ResearchWarehouse:
         batches: Iterable[FactBatch],
     ) -> None:
         """Atomically replace one dataset after rebuilding all current partitions."""
+        self._require_writable()
         with self._file_lock(exclusive=True):
             self._replace_dataset_batches_locked(dataset_id, batches)
 
