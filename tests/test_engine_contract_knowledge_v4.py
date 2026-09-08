@@ -146,8 +146,20 @@ def test_review_skill_requires_an_analyst_style_view_update() -> None:
         "当作固定开头"
         in review
     )
-    assert "只用最少且可追溯的决定性事实" in interface["default_prompt"]
-    assert "D20才串起完整过程" in interface["default_prompt"]
+    for phrase in (
+        "$reviewing-stock-recommendations",
+        "ops/forward-monitor-prompt.md",
+        "已批准范文",
+        "普通详评四项",
+        "节点六项",
+        "简评合同",
+        "逐篇分析和复查",
+        "不重新选股",
+    ):
+        assert phrase in interface["default_prompt"]
+    assert "普通详评覆盖四项" in review
+    assert "节点详评覆盖六项" in review
+    assert "事实、时点、口径和来源必须准确且可追溯" in review
 
 
 def test_review_skill_avoids_new_template_and_uses_traceable_minimum_facts() -> None:
@@ -162,13 +174,24 @@ def test_review_skill_avoids_new_template_and_uses_traceable_minimum_facts() -> 
         "通常不必写“这是首次复盘”",
         "每一项具体",
         "能够追溯到",
-        "previous_episode_review.current_assessment",
-        "previous_episode_review.best_supported_explanation",
         "仅仅换了一种措辞，不叫观点改变",
         "D20 是唯一形成完整最终结论的复盘",
         "第21—30日",
     ):
         assert phrase in review
+
+    history_anchor = review.split("## 上一轮观点的真实锚点", 1)[1].split(
+        "\n## ", 1
+    )[0]
+    assert "优先读取本记录自己的 `previous_daily_formal_review`" in history_anchor
+    assert "历史没有日评记录时才兼容读取 `previous_episode_review`" in history_anchor
+    for field in (
+        "current_assessment",
+        "best_supported_explanation",
+        "current_weak_or_failed_link",
+        "current_review",
+    ):
+        assert f"- `{field}`" in history_anchor
 
     for old in (
         "只使用2—4个决定性事实",
