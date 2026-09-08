@@ -1091,12 +1091,14 @@ def build_payload(
         for item in snapshot.get("episodes", [])
         if isinstance(item, dict)
     }
+    # 事件等待型条件记录（conditional_event）按复盘合同不进日报与台账、永不复盘，
+    # 网页与日报同口径只展示正式推荐（含次日待首日）；记录本身仍留在 snapshot/trace。
     selected = [
         episode
         for episode in episodes.values()
         if episode.get("role") == "selected"
         and inferred_output_class(episode)
-        in {"confirmed_active", "legacy_v1_not_rewritten", "conditional_event"}
+        in {"confirmed_active", "legacy_v1_not_rewritten"}
     ]
     selected.sort(
         key=lambda item: (
@@ -1260,6 +1262,9 @@ def build_payload(
                 "code": ts_code,
                 "name": str(episode.get("name") or ts_code),
                 "recDate": action_iso,
+                "formedOn": (
+                    str(episode["formation_date"]) if episode.get("formation_date") else None
+                ),
                 "recIndex": rec_index,
                 "ref": ref,
                 "refKind": ref_kind,
@@ -1306,6 +1311,7 @@ def build_payload(
                 "code": ts_code,
                 "name": entry["name"],
                 "recDate": d0_action_iso,
+                "formedOn": analysis_date.isoformat(),
                 "recIndex": rec_index,
                 "ref": None,
                 "refKind": None,

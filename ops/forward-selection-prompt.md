@@ -14,7 +14,7 @@
 - 不得追加Git、工作区、测试和文件清理汇报；
 - 复盘部分直接采用本次已记录的正式复盘Markdown，不重新摘要。
 
-只有执行失败时，才改为技术错误说明。
+只有研究或正式归档失败时，才改为技术错误说明。研究已归档但网页同步失败时，仍交付完整股票报告，仅在报告末尾附一行“研究已归档，网页同步失败：<具体错误>”。
 
 ## 1. 每日准备与共同市场判断
 
@@ -38,7 +38,7 @@
 
 本次有普通详评时，按复盘 Prompt 实际读取 `.agents/skills/reviewing-stock-recommendations/references/regular-review-calibration.md`，先完成首篇写作与事实、告知目的检查再续写；不要依赖此前对话的记忆或只读取 Skill 的简介。无普通详评时跳过，方法与检查细节仅由复盘 Skill／Prompt 维护。
 
-若 selection 返回 `already_selected`，仍可生成跟踪报告，但不得重复执行新选股。若当天没有仍在跟踪的记录，跳过跟踪明细，正常执行新选股。若返回 `non_trading_day`、数据缺口或错误，说明真实状态，不补猜。
+若 selection 返回 `already_selected`，仍可生成跟踪报告，但不得重复执行新选股。若 snapshot 的 `daily_review_episode_ids` 为空，只跳过逐股写作，仍通过既有 `record-daily-formal-reviews`、`record` 保存 `reviews=[]` 的空账本和 `alerts=[]` 的空详评报告；报告汇总、未详评数量及市场内容使用真实 snapshot 和本次共同市场判断，不一律填零、不借用旧报告。正常继续新选股或共同收尾。若返回 `non_trading_day`、数据缺口或错误，说明真实状态，不补猜。
 
 把返回的以下三个字段作为唯一时间边界：
 
@@ -227,6 +227,25 @@ local_archive/forward_selection/pending-trace-<formation_date>.json
 ```
 
 只有返回 `selection_frozen` 或 `already_selected` 才算完成。若返回结构或证据校验错误，不得退回旧版轨迹，不得删减 V4 字段，应按错误定位当前 V4 JSON。
+
+### 研究归档后的网页同步（共同收尾）
+
+正常新选股、selection prepare 返回 `already_selected` 后的复盘更新，以及人工补跑，都必须在正式归档成功后执行本步，再输出合并报告。`already_selected` 分支直接核对已有正式 trace，不重复选股或再写 trace。休市、不具备研究条件或正式归档失败时不调用网页同步。
+
+先确认日评账本与复盘报告的记录结果均为 `recorded` 或 `already_recorded`；本次执行了新选股时，`record-trace` 必须返回 `selection_frozen` 或 `already_selected`。`review_conflict`、`report_conflict`、`invalid_result`、结构校验错误或仅存在 pending 文件，都不算归档成功。没有需逐股复盘的记录也须完成前述合法空账本、空报告归档。
+
+逐字使用 selection prepare 返回的三个时间字段，在项目根目录运行：
+
+```bash
+./.venv/bin/python tools/render_prism_web.py \
+  --date <formation_date> \
+  --action-date <action_date> \
+  --as-of <selection_as_of>
+```
+
+不得省略参数后让脚本猜最新日期，也不得用当前日期或时间替代。程序只读取正式 trace、snapshot、日评账本、复盘报告及原有本地事实，校验归档与时点一致后更新本地 Prism；不改写研究、Forward CSV、复盘或冻结结论。它不是云端上传命令。
+
+检查退出码及输出：退出码 0 且 `published=` 为文件路径或 `unchanged` 表示固定网页已就绪；`published=skipped_newer` 表示仅更新本次日期页，保留较新首页，不得称首页已切换到补跑日期。同步失败时保留已完成研究和上一版固定网页，交付完整合并报告并附前述一行具体错误；后续恢复只重新执行同一同步命令，不重跑研究。进程若在归档后、调用命令前中断，补跑恢复时仍须执行本步。
 
 最终向用户只给出一份合并报告，使用通俗说法，不向用户展示 `formation_date`、`engine_type` 等内部字段名：
 

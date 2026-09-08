@@ -12,12 +12,13 @@ tools/guanlan-prism/docs/03-数据接口与口径.md），并做两处展示层�
 
 输出两个文件：
 1. prism-report-<date>.html —— 按日期留档，历史可回看；
-2. prism.html —— 固定地址，内容不变时原子跳过，永远等于最新已渲染日报。
+2. prism.html —— 固定地址，内容不变时跳过，旧日期不会覆盖较新的日报。
 用户只需记住固定地址 prism.html。
 
 用法：
     ./.venv/bin/python tools/render_prism_web.py                  # 最新一个 snapshot
     ./.venv/bin/python tools/render_prism_web.py --date 2026-09-02
+    ./.venv/bin/python tools/render_prism_web.py --date 2026-09-07 --action-date 2026-09-08 --as-of 2026-09-07T18:30:00+08:00
     ./.venv/bin/python tools/render_prism_web.py --out 任意路径.html
     ./.venv/bin/python tools/render_prism_web.py --indices 000001.SH,399001.SZ
 """
@@ -25,9 +26,12 @@ tools/guanlan-prism/docs/03-数据接口与口径.md），并做两处展示层�
 from __future__ import annotations
 
 import argparse
+import fcntl
 import importlib.util
+import json
 import os
 import sys
+import tempfile
 from datetime import date, datetime
 from pathlib import Path
 
@@ -89,6 +93,107 @@ def local_index_rows(
     return rows
 
 
+def checked_cutoff(value: str) -> datetime:
+    cutoff = datetime.fromisoformat(value)
+    if cutoff.tzinfo is None or cutoff.utcoffset() is None:
+        raise ValueError("as_of must include a timezone")
+    return cutoff
+
+
+def load_completed_archives(renderer, monitor_dir, analysis_date, action_date, as_of):
+    """只读核对正式归档；不调用 prepare/record，不重新判断研究结论。"""
+    from stock_analyzer.ops import forward_monitor as monitor
+    from stock_analyzer.ops.forward_selection import DailyResearchTraceV4
+
+    iso = analysis_date.isoformat()
+    paths = {
+        "trace": renderer.SELECTION_DIR / f"research-trace-{iso}.json",
+        "snapshot": monitor_dir / f"snapshot-{iso}.json",
+        "ledger": monitor_dir / f"daily-formal-reviews-{iso}.json",
+        "report": monitor_dir / f"monitor-report-{iso}.json",
+        "markdown": monitor_dir / f"monitor-report-{iso}.md",
+    }
+    inputs = {path: path.read_bytes() for path in paths.values()}
+    if any(not content.strip() for content in inputs.values()):
+        raise ValueError("formal archive contains an empty file")
+    raw = {key: json.loads(inputs[path]) for key, path in paths.items() if key != "markdown"}
+    trace = DailyResearchTraceV4.model_validate(raw["trace"])
+    ledger = monitor.DailyFormalReviewLedgerV1.model_validate(raw["ledger"])
+    report = monitor.DailyForwardMonitorReportV2.model_validate(raw["report"])
+    snapshot = raw["snapshot"]
+    if not isinstance(snapshot, dict) or snapshot.get("snapshot_version") != monitor.SNAPSHOT_VERSION:
+        raise ValueError("formal snapshot version is invalid")
+    if (trace.formation_date != analysis_date or trace.action_date != action_date
+            or report.analysis_date != analysis_date or ledger.analysis_date != analysis_date
+            or snapshot.get("analysis_date") != iso):
+        raise ValueError("formal archive dates do not match the requested dates")
+    if action_date <= analysis_date or as_of >= datetime.combine(action_date, datetime.min.time(), tzinfo=as_of.tzinfo):
+        raise ValueError("requested cutoff must precede action_date")
+    cutoffs = [raw[key].get("as_of", "") for key in ("trace", "snapshot", "ledger", "report")]
+    if any(checked_cutoff(value) != as_of for value in cutoffs):
+        raise ValueError("formal archive as_of does not match the requested cutoff")
+    if not trace.research_result.research_completed or not trace.research_result.point_in_time_evidence_verified:
+        raise ValueError("formal selection research is not complete")
+
+    expected_ids = snapshot.get("daily_review_episode_ids")
+    episode_rows = snapshot.get("episodes")
+    if not isinstance(expected_ids, list) or not isinstance(episode_rows, list):
+        raise ValueError("formal snapshot is missing its daily review scope")
+    episodes = {row["episode_id"]: row for row in episode_rows}
+    daily = {review.episode_id: review for review in ledger.reviews}
+    if (len(episodes) != len(episode_rows) or len(expected_ids) != len(set(expected_ids))
+            or set(daily) != set(expected_ids) or set(daily) - set(episodes)):
+        raise ValueError("daily ledger must exactly cover snapshot episodes")
+    for episode_id, review in daily.items():
+        episode = episodes[episode_id]
+        if (episode.get("role") != "selected"
+                or monitor._episode_selection_output_class(episode) not in monitor.PUBLIC_FORMAL_OUTPUT_CLASSES
+                or review.day_number != episode.get("day_number")):
+            raise ValueError(f"daily review episode identity mismatch: {episode_id}")
+    _, _, report_codes = monitor._three_route_grouping(
+        snapshot=snapshot, daily_reviews=daily, episodes=episodes,
+    )
+    if {alert.ts_code for alert in report.alerts} != report_codes:
+        raise ValueError("report must exactly cover checkpoint and regular detail stocks")
+    for alert in report.alerts:
+        ids = {episode_id for episode_id in daily if episodes[episode_id].get("ts_code") == alert.ts_code}
+        if (set(alert.episode_ids) != ids or len(alert.episode_ids) != len(ids)
+                or any(episodes[episode_id].get("name") != alert.name for episode_id in ids)):
+            raise ValueError(f"report episode identity mismatch: {alert.ts_code}")
+        for review in alert.episode_reviews:
+            original = daily[review.episode_id]
+            for field in ("current_assessment", "best_supported_explanation", "current_weak_or_failed_link", "final_twenty_day_review"):
+                if getattr(review, field) != getattr(original, field):
+                    raise ValueError(f"report contradicts daily ledger: {review.episode_id}")
+    counts = report.pool_summary.model_dump()
+    summary = snapshot.get("summary", {})
+    expected_counts = {key: summary.get(key) for key in counts if key != "routine_stock_count"}
+    expected_counts["routine_stock_count"] = (
+        summary.get("distinct_stock_count", 0) - summary.get("attention_stock_count", 0)
+    )
+    attention_codes = {row["ts_code"] for row in snapshot.get("attention_stocks", [])}
+    if counts != expected_counts or report.unreported_attention_count != len(attention_codes - report_codes):
+        raise ValueError("report summary does not match snapshot")
+    return raw["report"], snapshot, inputs
+
+
+def write_html(path: Path, html: str) -> bool:
+    """每个文件独立原子替换；相同内容不触碰修改时间。"""
+    if path.exists() and path.read_text(encoding="utf-8") == html:
+        return False
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent,
+                                         prefix=path.name + ".tmp-", delete=False) as stream:
+            temporary = Path(stream.name)
+            stream.write(html)
+        os.replace(temporary, path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+    return True
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Render the frozen daily monitor review as the PRISM V3 display page"
@@ -97,6 +202,8 @@ def main(argv: list[str] | None = None) -> int:
         "--date", default=None, help="analysis date (YYYY-MM-DD), default latest snapshot"
     )
     parser.add_argument("--monitor-dir", default=None, help="override monitor archive directory")
+    parser.add_argument("--action-date", help="expected action date; enables completed-archive checks")
+    parser.add_argument("--as-of", help="expected frozen cutoff with timezone; requires --date and --action-date")
     parser.add_argument(
         "--out",
         default=None,
@@ -113,19 +220,39 @@ def main(argv: list[str] | None = None) -> int:
         help="skip publishing the fixed prism.html entry (dated file is still written)",
     )
     args = parser.parse_args(argv)
+    if (args.action_date is not None or args.as_of is not None) and not all(
+        (args.date, args.action_date, args.as_of)
+    ):
+        parser.error("automatic sync requires --date, --action-date and --as-of together")
 
     renderer, adapt, prism = load_modules()
     monitor_dir = Path(args.monitor_dir) if args.monitor_dir else renderer.MONITOR_DIR
+    try:
+        # 锁只串行本脚本，不锁住研究；研究归档变化在发布前另外核对。
+        with (monitor_dir / ".prism-render.lock").open("a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return render(args, renderer, adapt, prism, monitor_dir)
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        print(f"status=error error={error}", file=sys.stderr)
+        return 1
+
+
+def render(args, renderer, adapt, prism, monitor_dir: Path) -> int:
     analysis_date: date = renderer.resolve_date(monitor_dir, args.date)
-    report, snapshot, _report_path, _snapshot_path = renderer.load_artifacts(
-        monitor_dir, analysis_date
-    )
+    inputs = {}
+    if args.action_date is not None:
+        report, snapshot, inputs = load_completed_archives(
+            renderer, monitor_dir, analysis_date, date.fromisoformat(args.action_date),
+            checked_cutoff(args.as_of),
+        )
+    else:
+        report, snapshot, _, _ = renderer.load_artifacts(monitor_dir, analysis_date)
     payload = renderer.build_payload(
         PROJECT_ROOT, monitor_dir, analysis_date, report, snapshot
     )
     codes = [c.strip() for c in args.indices.split(",") if c.strip()] if args.indices else list(adapt.DEFAULT_CODES)
     if not 3 <= len(codes) <= 5:
-        parser.error("--indices must contain 3 to 5 codes")
+        raise ValueError("--indices must contain 3 to 5 codes")
     year = payload["analysis_date"][:4]
     sessions = [date.fromisoformat(f"{year}-{d}") for d in payload["dates"]]
     as_of = datetime.fromisoformat(payload["as_of"])
@@ -134,24 +261,27 @@ def main(argv: list[str] | None = None) -> int:
         payload, market_rows=market_rows or None, market_codes=codes
     )
     html = prism.render_html(display_snapshot)
+    if adapt.read_snapshot_text(html) != display_snapshot:
+        raise ValueError("rendered HTML does not contain the expected snapshot")
     out_path = (
         Path(args.out)
         if args.out
         else monitor_dir / f"prism-report-{analysis_date.isoformat()}.html"
     )
-    # 幂等：同一输入重复运行不重写留档文件，也不触碰固定地址的修改时间。
-    if out_path.exists() and out_path.read_text(encoding="utf-8") == html:
-        print("status=unchanged")
-    else:
-        out_path.write_text(html, encoding="utf-8")
-        print("status=rendered")
+    fixed_path = monitor_dir / "prism.html"
+    if out_path.resolve() == fixed_path.resolve():
+        raise ValueError("--out must not target prism.html; use the default dated output")
+    newer_fixed = False
+    if not args.no_publish and fixed_path.exists():
+        current = adapt.read_snapshot_text(fixed_path.read_text(encoding="utf-8"))
+        newer_fixed = date.fromisoformat(current["analysis_date"]) > analysis_date
+    if any(path.read_bytes() != content for path, content in inputs.items()):
+        raise ValueError("formal archives changed during rendering; retry sync only")
+    print("status=rendered" if write_html(out_path, html) else "status=unchanged")
     if not args.no_publish:
-        # 固定地址：原子替换，永远等于最新已渲染日报；失败不破坏旧页面。
-        fixed_path = monitor_dir / "prism.html"
-        if not fixed_path.exists() or fixed_path.read_text(encoding="utf-8") != html:
-            tmp_path = fixed_path.with_name(f"{fixed_path.name}.tmp-{os.getpid()}")
-            tmp_path.write_text(html, encoding="utf-8")
-            os.replace(tmp_path, fixed_path)
+        if newer_fixed:
+            print(f"published=skipped_newer {fixed_path}")
+        elif write_html(fixed_path, html):
             print(f"published={fixed_path}")
         else:
             print(f"published=unchanged {fixed_path}")

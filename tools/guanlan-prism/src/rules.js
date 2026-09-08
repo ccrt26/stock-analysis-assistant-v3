@@ -137,6 +137,76 @@ function marketCards(d){
    status:close!==null?'available':row&&!fresh?'stale':'missing'};
  });
 }
-const api={BASE_DIRECTIONS,DIRECTION_LABELS,OPINION_OPTIONS,INDEX_META,key,indexOfDate,latest,recommendations,deepReviews,direction,directionUpdates,isInvalid,opinionCode,opinionLabel,closeOnDate,returnOnDate,defaultFilters,filterAction,filterRecords,marketCards};
+// ---- 观察星图：同股合并（仅展示层派生，冻结输入与记录身份不改）。 ----
+// 输入历史无法证明覆盖完整推荐史，界面对外只能称“本报告最早记录”，不得称历史首次。
+const ATLAS_BASIS_LABEL='本报告最早记录';
+function atlasGroups(d){
+ // 按完整股票代码（含交易所）分组，不按中文名；原始 stocks 数组与顺序不动。
+ // 独立身份沿用 code:recDate：同一身份重复载入只算一次入选，也不按收益另选副本。
+ const byCode=new Map();
+ for(const s of d.stocks){
+  let g=byCode.get(s.code);
+  if(!g){g={code:s.code,name:s.name,records:[]};byCode.set(s.code,g);}
+  if(!g.records.some(x=>key(x)===key(s)))g.records.push(s);
+ }
+ const groups=[...byCode.values()];
+ for(const g of groups)g.records.sort((a,b)=>a.recDate.localeCompare(b.recDate));
+ groups.sort((a,b)=>a.records[0].recDate.localeCompare(b.records[0].recDate));
+ return groups;
+}
+function atlasGroupClose(records,d){
+ // 价格属于股票不属于推荐：同股同日（dates 同一序号）的有效收盘取第一份副本；
+ // 不跨日拼接、不叠加，任何一条都不用上一交易日价格冒充报告日价格。
+ const i=indexOfDate(d);if(i<0)return null;
+ for(const s of records){const c=s.candles[i]?.[3];if(valid(c))return c;}
+ return null;
+}
+function atlasPlottable(s,close,d){
+ // 返回不可绘制原因；null 表示该记录可绘制。绝不静默换基准或按 0% 绘制。
+ if(s.d0)return '待首日观察';
+ if(!valid(s.ref)||s.ref<=0)return '缺参考价';
+ const i=indexOfDate(d);
+ if(i<0||!valid(s.recIndex)||s.recIndex<0||s.recIndex>i)return '交易日历不足';
+ if(!valid(close))return '报告日无真实收盘';
+ return null;
+}
+function atlasBasis(group,d){
+ // 股票视图主点：最早入选日+原参考价+该日到报告日的交易日序号成套使用；
+ // 之后再入选只更新次数与明细，不替换锚点，不平均、不挑选收益更好的一次。
+ const anchor=group.records[0];
+ const close=atlasGroupClose(group.records,d);
+ const reason=atlasPlottable(anchor,close,d);
+ if(reason)return {anchor,close,plottable:false,reason,ret:null,day:null};
+ const i=indexOfDate(d);
+ return {anchor,close,plottable:true,reason:null,ret:(close/anchor.ref-1)*100,day:i-anchor.recIndex+1};
+}
+function atlasRecordPoint(s,group,d){
+ // 记录视图点：用该次自己的参考价与交易日序号；报告日收盘与股票视图同源同日。
+ const close=atlasGroupClose(group.records,d);
+ const reason=atlasPlottable(s,close,d);
+ if(reason)return {s,close,plottable:false,reason,ret:null,day:null};
+ const i=indexOfDate(d);
+ return {s,close,plottable:true,reason:null,ret:(close/s.ref-1)*100,day:i-s.recIndex+1};
+}
+function atlasBadge(group){
+ // 次数=本报告包含的独立入选记录数；每天复盘与重复载入不计数，不代表终身次数。
+ const n=group.records.length;if(n<2)return null;
+ const pending=group.records.filter(s=>s.d0).length;
+ const events=group.records.filter(s=>s.refKind==='event').length;
+ const tags=[];
+ if(events===n)tags.push('条件观察');else if(events)tags.push('含条件观察');
+ if(pending)tags.push(`含${pending}次待首日`);
+ return {count:n,short:`入选 ${n} 次`,full:`入选 ${n} 次`+(tags.length?` · ${tags.join(' · ')}`:'')};
+}
+function atlasRange(stockPoints,recordPoints){
+ // 两种模式共用同一真实数据范围：必含 0 与全部可绘制点并留余量，不做固定 ±12% 裁切。
+ const rets=[],days=[];
+ for(const p of[...stockPoints,...recordPoints])if(p.plottable){rets.push(p.ret);days.push(p.day);}
+ if(!rets.length)return null;
+ let lo=Math.min(0,...rets),hi=Math.max(0,...rets);
+ const pad=Math.max((hi-lo)*.18,1.2);lo-=pad;hi+=pad;
+ return {lo,hi,maxDay:Math.max(...days,1),basis:ATLAS_BASIS_LABEL};
+}
+const api={BASE_DIRECTIONS,DIRECTION_LABELS,OPINION_OPTIONS,INDEX_META,ATLAS_BASIS_LABEL,key,indexOfDate,latest,recommendations,deepReviews,direction,directionUpdates,isInvalid,opinionCode,opinionLabel,closeOnDate,returnOnDate,defaultFilters,filterAction,filterRecords,marketCards,atlasGroups,atlasGroupClose,atlasPlottable,atlasBasis,atlasRecordPoint,atlasBadge,atlasRange};
 if(typeof module!=='undefined'&&module.exports)module.exports=api;else root.GuanlanRules=api;
 })(typeof window!=='undefined'?window:globalThis);

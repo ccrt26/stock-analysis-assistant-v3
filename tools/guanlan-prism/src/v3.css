@@ -211,3 +211,33 @@
 .updates-scrollbar[aria-disabled="true"] {opacity:.18;cursor:default;}
 .updates-scrollbar:focus-visible {outline:1px solid var(--blue);outline-offset:4px;}
 @media(max-width:600px){.updates-scroll-shell{margin-right:10px;gap:9px;}}
+
+/* ---- 观察星图：同股合并展示（V3.1 展示层附加） ---- */
+.map-toolbar {display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;padding:0 24px 16px;}
+.map-stats {font:10px var(--mono);letter-spacing:.09em;color:var(--muted);}
+.map-count-badge {display:inline-flex;align-items:center;gap:7px;border:1px solid var(--accent);color:var(--accent);border-radius:999px;padding:4px 12px;font-size:11px;margin:4px 0 16px;width:fit-content;}
+.map-count-badge .icon {width:13px;height:13px;}
+.map-basis-missing {font-size:11px;color:var(--amber);line-height:1.8;margin:14px 0;}
+.map-latest-block {border-left:2px solid var(--accent);background:rgba(88,148,126,.07);padding:9px 12px;font-size:11px;color:var(--secondary);line-height:1.9;margin:16px 0 4px;border-radius:0 8px 8px 0;}
+.map-episodes-title {font:10px var(--mono);letter-spacing:.16em;color:var(--muted);margin:18px 0 2px;}
+.map-episode {border:1px solid var(--hair);border-radius:10px;padding:10px 12px;margin:10px 0;}
+.map-episode.is-invalid {border-color:var(--down);}
+.map-episode-head {display:flex;align-items:center;gap:8px;}
+.map-episode-head>b:first-child {flex:1;}
+.map-episode-type {font-size:9px;color:var(--muted);border:1px solid var(--hair);border-radius:999px;padding:1px 8px;white-space:nowrap;}
+.map-episode dl {font-size:10.5px;margin:9px 0 7px;}
+.map-episode dl div {display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--hair);padding:6px 0;}
+.map-episode dl dt {color:var(--muted);}
+.map-episode dl dd {margin:0;}
+.map-anchor-note {font-size:10px;color:var(--muted);line-height:1.8;margin-top:14px;}
+.map-pending {padding:4px 24px 10px;}
+.map-pending-title {font:10px var(--mono);letter-spacing:.12em;color:var(--muted);}
+.map-pending-list {display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;}
+.map-pending-item {display:flex;flex-direction:column;align-items:flex-start;gap:2px;border:1px dashed var(--hair);border-radius:9px;padding:7px 11px;font-size:10px;color:var(--secondary);text-align:left;}
+.map-pending-item b {color:var(--text);font-size:11px;}
+.map-pending-item:hover {border-color:var(--accent);}
+.map-dot {outline:none;}
+.map-dot:focus-visible .bubble-core {stroke:var(--text);stroke-width:2;}
+@media(max-width:1250px){.map-toolbar{padding:0 20px 14px;}}
+/* 移动端：选中面板不再隐藏，随单列布局放在星图下方。 */
+@media(max-width:1050px){.map-selection{display:block;padding:18px;}.map-toolbar{padding:0 17px 12px;}.map-pending{padding:4px 17px 10px;}}

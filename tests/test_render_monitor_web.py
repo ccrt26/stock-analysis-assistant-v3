@@ -272,9 +272,9 @@ class TestBuildPayload:
             snapshot,
         )
         codes = [s["code"] for s in payload["stocks"]]
-        assert codes == ["600000.SH", "600001.SH"]  # 比较股不进入，推荐日倒序
+        # 比较股与事件等待型条件记录都不进入：网页只展示正式推荐，与日报口径一致。
+        assert codes == ["600000.SH"]
         formal_stock = payload["stocks"][0]
-        conditional_stock = payload["stocks"][1]
         # V4 字段全部存在
         for key in (
             "code", "name", "recDate", "recIndex", "ref", "days", "stage", "stageType",
@@ -283,10 +283,8 @@ class TestBuildPayload:
         ):
             assert key in formal_stock
         assert formal_stock["attention"] is True
-        assert conditional_stock["attention"] is False
         # 正式记录的推荐参考价来自推荐日原始开盘价（无行情时为 None）
         assert formal_stock["ref"] is None or isinstance(formal_stock["ref"], float)
-        assert conditional_stock["ref"] is None
         assert formal_stock["reasonFull"] == "板块扩散且个股领先。"
         assert formal_stock["reasonRisk"] == "涨幅集中在最近3日。"
         # 复盘历史与事件时间线：结构化观点字段以台账为准，正文保留详评
@@ -314,44 +312,25 @@ class TestBuildPayload:
         assert payload["review_dates"] == ["2026-09-02"]
 
 
-def test_conditional_event_uses_first_reaction_reference(tmp_path: Path) -> None:
-    """事件等待型：有事件首次定价且有当日行情时，参考价=事件日原始开盘价，观察起点对齐事件日。"""
-    import pandas as pd
-
+def test_conditional_event_leads_never_displayed(tmp_path: Path) -> None:
+    """事件等待型条件记录不进网页：有无事件首次定价都不展示，与日报口径一致。"""
     from tools.render_monitor_web import build_payload
 
-    eq_dir = tmp_path / "local_warehouse" / "facts" / "equity_daily" / "trade_date=2026-09-02"
-    eq_dir.mkdir(parents=True)
-    pd.DataFrame(
-        [{"ts_code": "600001.SH", "open": 10.0, "high": 10.4, "low": 9.9, "close": 10.2,
-          "amount": 1.0e8, "available_at": pd.Timestamp("2026-09-02T08:00:00Z")}]
-    ).to_parquet(eq_dir / "data.parquet")
     episode = _episode(
         "e-cond", "600001.SH", "条件股",
         output_class="conditional_event", entry_open=None,
         action_date="2026-09-02",
     )
     episode["first_event_reaction"] = {"trade_date": "2026-09-02", "open": 10.0}
-    payload = build_payload(
-        tmp_path, tmp_path, date(2026, 9, 2), _report([]), _snapshot([episode])
-    )
-    stock = payload["stocks"][0]
-    assert stock["ref"] == 10.0
-    assert stock["refKind"] == "event"
-    assert stock["recIndex"] == stock["candles"].index(
-        next(bar for bar in stock["candles"] if bar[3] is not None)
-    )
-    # 无事件定价记录的事件型仍无参考价（如停牌股），不编造
     suspended = _episode(
         "e-cond2", "600002.SH", "停牌条件股",
         output_class="conditional_event", entry_open=None,
         action_date="2026-09-02",
     )
-    payload2 = build_payload(
-        tmp_path, tmp_path, date(2026, 9, 2), _report([]), _snapshot([suspended])
+    payload = build_payload(
+        tmp_path, tmp_path, date(2026, 9, 2), _report([]), _snapshot([episode, suspended])
     )
-    assert payload2["stocks"][0]["ref"] is None
-    assert payload2["stocks"][0]["refKind"] is None
+    assert payload["stocks"] == []
 
 
 def test_d0_entries_from_latest_trace_only(tmp_path: Path) -> None:

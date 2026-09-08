@@ -76,6 +76,20 @@ def test_existing_daily_prompt_stays_v4_and_adds_monitor_in_same_task() -> None:
     assert text.count("18:45 Scheduled Task") == 1
 
 
+def test_daily_prompt_syncs_completed_archives_in_shared_tail() -> None:
+    text = Path("ops/forward-selection-prompt.md").read_text(encoding="utf-8")
+    tail = text.split("### 研究归档后的网页同步（共同收尾）", 1)[1].split("最终向用户", 1)[0]
+    for required in ("already_selected", "人工补跑", "recorded", "already_recorded",
+                     "selection_frozen", "review_conflict", "report_conflict",
+                     "tools/render_prism_web.py", "--date <formation_date>",
+                     "--action-date <action_date>", "--as-of <selection_as_of>",
+                     "published=skipped_newer", "不重跑研究"):
+        assert required in tail
+    assert "休市、不具备研究条件或正式归档失败时不调用网页同步" in tail
+    assert "reviews=[]" in text and "alerts=[]" in text
+    assert "研究已归档但网页同步失败时，仍交付完整股票报告" in text
+
+
 def test_daily_prompts_separate_confirmed_recommendations_from_event_leads() -> None:
     selection = Path("ops/forward-selection-prompt.md").read_text(
         encoding="utf-8"
