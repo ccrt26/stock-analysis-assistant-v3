@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Validate the published A-share Skill optimization sample."""
+"""Validate an exported A-share Skill optimization sample package (v2 and v3).
+
+Validation is driven entirely by the package's own manifest and files: date
+ranges and record counts are read from the package, never from hard-coded
+historical constants. Legacy v2 packages (with the review workbook and without
+the v3-only files) remain validatable.
+"""
 
 from __future__ import annotations
 
@@ -13,28 +19,6 @@ from pathlib import Path
 from typing import Any, Iterable
 
 
-EXPECTED = {
-    "formal_selections": 25,
-    "unique_selected_stocks": 24,
-    "action_dates": 8,
-    "research_runs": 8,
-    "candidate_ledger": 78,
-    "decision_trace": 126,
-    "review_contracts": 78,
-    "monitor_episodes": 39,
-    "monitor_alerts": 31,
-    "monitor_reviews": 26,
-    "candidate_outcomes": 78,
-    "conditional_event_outcomes": 4,
-    "daily_price_volume": 115,
-    "market_context": 8,
-    "sector_context": 54,
-    "price_context": 78,
-}
-START_ACTION_DATE = "2026-08-20"
-END_ACTION_DATE = "2026-08-31"
-OUTCOME_THROUGH_DATE = "2026-08-31"
-WORKBOOK_NAME = "A股Skill优化样本_2026-08-20至2026-08-31.xlsx"
 PRIVATE_PATTERNS = (
     re.compile(r"/Users/"),
     re.compile(r"/home/"),
@@ -42,6 +26,16 @@ PRIVATE_PATTERNS = (
     re.compile(r"(?i)(api[_-]?key|access[_-]?token|refresh[_-]?token|password|secret)\s*[:=]\s*[^\s,}\]]+"),
 )
 FORMULA_ERRORS = ("#REF!", "#DIV/0!", "#VALUE!", "#NAME?", "#NUM!", "#NULL!")
+FIXED_D20_STATUSES = {
+    "not_applicable",
+    "no_reliable_entry",
+    "not_mature",
+    "missing_path",
+    "complete",
+}
+FATES = {"selected", "rejected", "unresolved"}
+FORMAL_CLASSES = {"confirmed_active", "legacy_v1_not_rewritten"}
+REVIEW_KINDS = {"checkpoint_detail", "regular_detail", "brief"}
 
 
 def sha256(path: Path) -> str:
@@ -71,6 +65,10 @@ def assert_unique(values: Iterable[str], label: str) -> None:
         raise ValueError(f"duplicate {label}")
 
 
+def parse_bool(text: str | None) -> bool:
+    return str(text).strip().lower() in {"true", "1", "yes"}
+
+
 def scan_public_safety(package_dir: Path) -> None:
     for path in package_dir.rglob("*"):
         if not path.is_file():
@@ -82,19 +80,20 @@ def scan_public_safety(package_dir: Path) -> None:
                     raise ValueError(
                         f"public-safety pattern {pattern.pattern!r} in {path.name}"
                     )
-    workbook_path = package_dir / WORKBOOK_NAME
-    with zipfile.ZipFile(workbook_path) as archive:
-        for member in archive.namelist():
-            if not member.endswith(".xml"):
-                continue
-            text = archive.read(member).decode("utf-8", errors="ignore")
-            for pattern in PRIVATE_PATTERNS:
-                if pattern.search(text):
-                    raise ValueError(
-                        f"public-safety pattern {pattern.pattern!r} in workbook {member}"
-                    )
-            if any(error in text for error in FORMULA_ERRORS):
-                raise ValueError(f"formula error token in workbook {member}")
+    workbook_paths = sorted(package_dir.glob("*.xlsx"))
+    for workbook_path in workbook_paths:
+        with zipfile.ZipFile(workbook_path) as archive:
+            for member in archive.namelist():
+                if not member.endswith(".xml"):
+                    continue
+                text = archive.read(member).decode("utf-8", errors="ignore")
+                for pattern in PRIVATE_PATTERNS:
+                    if pattern.search(text):
+                        raise ValueError(
+                            f"public-safety pattern {pattern.pattern!r} in workbook {member}"
+                        )
+                if any(error in text for error in FORMULA_ERRORS):
+                    raise ValueError(f"formula error token in workbook {member}")
 
 
 def validate_checksums(package_dir: Path, manifest: dict[str, Any]) -> None:
@@ -117,15 +116,15 @@ def validate_checksums(package_dir: Path, manifest: dict[str, Any]) -> None:
 
 def validate_package(package_dir: Path) -> dict[str, Any]:
     manifest = json.loads((package_dir / "manifest.json").read_text(encoding="utf-8"))
-    if manifest["action_date_start"] != START_ACTION_DATE:
-        raise ValueError("unexpected action-date start")
-    if manifest["action_date_end"] != END_ACTION_DATE:
-        raise ValueError("unexpected action-date end")
-    if manifest["outcome_through_date"] != OUTCOME_THROUGH_DATE:
-        raise ValueError("unexpected outcome boundary")
-    for key, expected in EXPECTED.items():
-        if int(manifest["record_counts"][key]) != expected:
-            raise ValueError(f"manifest count mismatch for {key}")
+    package_version = str(manifest.get("package_version") or "")
+    is_v3 = package_version.endswith("-v3")
+    start_action_date = str(manifest["action_date_start"])
+    end_action_date = str(manifest["action_date_end"])
+    outcome_through = str(manifest["outcome_through_date"])
+    if end_action_date < start_action_date:
+        raise ValueError("manifest action-date end precedes start")
+    if outcome_through < start_action_date:
+        raise ValueError("outcome boundary precedes action-date start")
 
     data_dir = package_dir / "data"
     selections = read_csv(data_dir / "formal_selections.csv")
@@ -140,8 +139,26 @@ def validate_package(package_dir: Path) -> dict[str, Any]:
     market = read_jsonl(data_dir / "market_context.jsonl")
     sector = read_jsonl(data_dir / "sector_context.jsonl")
     price = read_jsonl(data_dir / "price_context.jsonl")
-    candidate_outcomes = read_csv(data_dir / "candidate_outcomes.csv")
-    conditional_outcomes = read_csv(data_dir / "conditional_event_outcomes.csv")
+    has_candidate_outcomes = (data_dir / "candidate_outcomes.csv").is_file()
+    has_conditional_outcomes = (
+        data_dir / "conditional_event_outcomes.csv"
+    ).is_file()
+    if is_v3 and not (has_candidate_outcomes and has_conditional_outcomes):
+        raise ValueError("v3 package is missing candidate/conditional outcome files")
+    candidate_outcomes = (
+        read_csv(data_dir / "candidate_outcomes.csv") if has_candidate_outcomes else []
+    )
+    conditional_outcomes = (
+        read_csv(data_dir / "conditional_event_outcomes.csv")
+        if has_conditional_outcomes
+        else []
+    )
+    candidate_daily: list[dict[str, str]] = []
+    daily_reviews: list[dict[str, Any]] = []
+    if is_v3:
+        candidate_daily = read_csv(data_dir / "candidate_daily_price_volume.csv")
+        daily_reviews = read_jsonl(data_dir / "daily_formal_reviews.jsonl")
+
     actual_counts = {
         "formal_selections": len(selections),
         "unique_selected_stocks": len({row["ts_code"] for row in selections}),
@@ -153,88 +170,160 @@ def validate_package(package_dir: Path) -> dict[str, Any]:
         "monitor_episodes": len(monitor_episodes),
         "monitor_alerts": len(monitor_alerts),
         "monitor_reviews": len(monitor_reviews),
-        "candidate_outcomes": len(candidate_outcomes),
-        "conditional_event_outcomes": len(conditional_outcomes),
         "daily_price_volume": len(daily),
         "market_context": len(market),
         "sector_context": len(sector),
         "price_context": len(price),
     }
-    if actual_counts != EXPECTED:
-        raise ValueError(f"actual record counts differ: {actual_counts}")
+    if has_candidate_outcomes:
+        actual_counts["candidate_outcomes"] = len(candidate_outcomes)
+    if has_conditional_outcomes:
+        actual_counts["conditional_event_outcomes"] = len(conditional_outcomes)
+    if is_v3:
+        actual_counts["candidate_daily_price_volume"] = len(candidate_daily)
+        actual_counts["daily_formal_reviews"] = len(daily_reviews)
+    declared = manifest.get("record_counts") or {}
+    for key, actual in actual_counts.items():
+        if key in declared and int(declared[key]) != actual:
+            raise ValueError(
+                f"manifest count mismatch for {key}: declared {declared[key]}, actual {actual}"
+            )
+    if is_v3:
+        missing_declared = [key for key in actual_counts if key not in declared]
+        if missing_declared:
+            raise ValueError(
+                f"manifest does not declare counts for: {sorted(missing_declared)}"
+            )
 
-    if min(row["action_date"] for row in selections) != START_ACTION_DATE:
-        raise ValueError("formal selections do not start at requested boundary")
-    if max(row["action_date"] for row in selections) != END_ACTION_DATE:
-        raise ValueError("formal selections do not end at requested boundary")
-    if max(row["trade_date"] for row in daily) > OUTCOME_THROUGH_DATE:
-        raise ValueError("daily outcome exceeds requested boundary")
-    if any(row["action_date"] > END_ACTION_DATE for row in candidates):
-        raise ValueError("candidate action date exceeds boundary")
-    if any(row["action_date"] > END_ACTION_DATE for row in research_runs):
-        raise ValueError("research-run action date exceeds boundary")
+    # Boundary checks: every record must sit inside the manifest-declared range.
+    if any(
+        not start_action_date <= row["action_date"] <= end_action_date
+        for row in selections
+    ):
+        raise ValueError("formal selection outside declared action-date range")
+    if any(
+        not start_action_date <= str(row.get("action_date") or "") <= end_action_date
+        for row in research_runs
+    ):
+        raise ValueError("research-run action date outside declared range")
+    if any(
+        not start_action_date <= str(row.get("action_date") or "") <= end_action_date
+        for row in candidates
+    ):
+        raise ValueError("candidate action date outside declared range")
+    if any(row["trade_date"] > outcome_through for row in daily):
+        raise ValueError("daily outcome exceeds declared boundary")
+    if any(row["trade_date"] > outcome_through for row in candidate_daily):
+        raise ValueError("candidate daily outcome exceeds declared boundary")
+
+    # Identity and coverage checks that hold for any batch size, including empty.
     assert_unique((row["event_key"] for row in selections), "formal event_key")
     assert_unique((row["run_id"] for row in research_runs), "research run_id")
-    selection_keys = {row["event_key"] for row in selections}
-    if {row["event_key"] for row in daily} != selection_keys:
-        raise ValueError("daily paths do not cover every formal selection")
-    if {row["selection_output_class"] for row in selections} != {
-        "confirmed_active",
-        "legacy_v1_not_rewritten",
-    }:
+    if selections:
+        if min(row["action_date"] for row in selections) < start_action_date:
+            raise ValueError("formal selections precede the declared start")
+        selection_keys = {row["event_key"] for row in selections}
+        if {row["event_key"] for row in daily} != selection_keys:
+            raise ValueError("daily paths do not cover every formal selection")
+    class_values = {row.get("selection_output_class") or None for row in selections}
+    invalid_classes = class_values - FORMAL_CLASSES
+    if invalid_classes - {None} or (None in invalid_classes and is_v3):
         raise ValueError("formal selections contain an invalid output class")
-    if {row["final_fate"] for row in candidate_outcomes} != {
-        "selected",
-        "rejected",
-        "unresolved",
-    }:
-        raise ValueError("candidate outcomes do not cover every final fate")
-    candidate_outcome_keys = {
-        (row["run_id"], row["ts_code"]) for row in candidate_outcomes
-    }
-    if candidate_outcome_keys != {
-        (row["run_id"], row["ts_code"]) for row in candidates
-    }:
-        raise ValueError("candidate outcomes do not cover the candidate ledger")
-    if any(
-        row["condition_result"] not in {"met", "not_met", "unknown"}
-        for row in conditional_outcomes
-    ):
-        raise ValueError("conditional outcome has an invalid condition result")
-    if any(
-        row["formal_return_started"].lower() != "false"
-        or row["reliable_entry_available"].lower() != "false"
-        or row["reliable_entry_price"]
-        or row["outcome_close_return"]
-        or row["outcome_max_close_return"]
-        or row["outcome_mae"]
-        for row in conditional_outcomes
-    ):
-        raise ValueError("conditional outcome incorrectly starts a formal return")
-    selected_contracts = [row for row in contracts if row["final_fate"] == "selected"]
-    if len(selected_contracts) != len(selections) + len(conditional_outcomes):
+    if has_candidate_outcomes:
+        if {row["final_fate"] for row in candidate_outcomes} - FATES:
+            raise ValueError("candidate outcomes contain an unknown final fate")
+        candidate_outcome_keys = {
+            (row["run_id"], row["ts_code"]) for row in candidate_outcomes
+        }
+        if candidate_outcome_keys != {
+            (row["run_id"], row["ts_code"]) for row in candidates
+        }:
+            raise ValueError("candidate outcomes do not cover the candidate ledger")
+        if any(row.get("outcome_usage") not in (None, "", "candidate_price_comparison") for row in candidate_outcomes):
+            raise ValueError("candidate outcome has an invalid outcome_usage")
+        fixed_statuses = {
+            row["fixed_d20_status"] for row in candidate_outcomes if row.get("fixed_d20_status")
+        }
+        if fixed_statuses - FIXED_D20_STATUSES:
+            raise ValueError("candidate outcome has an invalid fixed_d20_status")
+    if has_conditional_outcomes:
+        conditional_keys = {
+            (row.get("run_id"), row.get("ts_code")) for row in conditional_outcomes
+        }
+        if has_candidate_outcomes:
+            for row in candidate_outcomes:
+                if (row["run_id"], row["ts_code"]) in conditional_keys:
+                    if row.get("fixed_d20_status") not in (None, "", "not_applicable"):
+                        raise ValueError("conditional candidate must not carry a fixed formal D20 result")
+        if any(
+            row["condition_result"] not in {"met", "not_met", "unknown"}
+            for row in conditional_outcomes
+        ):
+            raise ValueError("conditional outcome has an invalid condition result")
+        if any(
+            parse_bool(row.get("formal_return_started"))
+            or parse_bool(row.get("reliable_entry_available"))
+            or row.get("reliable_entry_price")
+            or row.get("outcome_close_return")
+            or row.get("outcome_max_close_return")
+            or row.get("outcome_mae")
+            for row in conditional_outcomes
+        ):
+            raise ValueError("conditional outcome incorrectly starts a formal return")
+    selected_contracts = [row for row in contracts if row.get("final_fate") == "selected"]
+    expected_formal_count = len(selections) + (
+        len(conditional_outcomes) if has_conditional_outcomes else 0
+    )
+    if selected_contracts and len(selected_contracts) != expected_formal_count:
         raise ValueError("selected contracts do not split into formal and conditional")
     candidate_keys = {(row["run_id"], row["ts_code"]) for row in candidates}
-    if any((row["run_id"], row["ts_code"]) not in candidate_keys for row in price):
+    if any((row.get("run_id"), row.get("ts_code")) not in candidate_keys for row in price):
         raise ValueError("price context has a row outside the candidate ledger")
-    if any(row.get("trace_payload", {}).get("action_date") > END_ACTION_DATE for row in research_runs):
+    candidate_event_keys = {
+        f"formal:{row['formation_date']}:{row['ts_code']}:candidate-{row.get('final_fate') or 'unknown'}"
+        for row in candidates
+    }
+    if any(row["event_key"] not in candidate_event_keys for row in candidate_daily):
+        raise ValueError("candidate daily path has a row outside the candidate ledger")
+    if any(row.get("action_date") and str(row["action_date"]) > end_action_date for row in research_runs):
         raise ValueError("embedded trace exceeds action-date boundary")
-    if not (package_dir / WORKBOOK_NAME).is_file():
-        raise ValueError("review workbook is missing")
-    with zipfile.ZipFile(package_dir / WORKBOOK_NAME) as workbook:
-        workbook.testzip()
-        workbook_xml = workbook.read("xl/workbook.xml").decode("utf-8")
-        if len(re.findall(r"<(?:\w+:)?sheet\s", workbook_xml)) != 11:
-            raise ValueError("review workbook should contain 11 sheets")
+    if is_v3:
+        review_keys = [
+            (str(row.get("episode_id")), str(row.get("analysis_date")))
+            for row in daily_reviews
+        ]
+        assert_unique(review_keys, "daily review (episode_id, analysis_date)")
+        if any(row.get("review_kind") not in REVIEW_KINDS for row in daily_reviews):
+            raise ValueError("daily review has an invalid review_kind")
+
+    workbook_paths = sorted(package_dir.glob("*.xlsx"))
+    declared_sheets = manifest.get("workbook_sheets")
+    for workbook_path in workbook_paths:
+        with zipfile.ZipFile(workbook_path) as workbook:
+            if workbook.testzip() is not None:
+                raise ValueError(f"corrupt workbook archive: {workbook_path.name}")
+            if declared_sheets is not None:
+                workbook_xml = workbook.read("xl/workbook.xml").decode("utf-8")
+                sheets = len(re.findall(r"<(?:\w+:)?sheet\s", workbook_xml))
+                if sheets != int(declared_sheets):
+                    raise ValueError(
+                        f"workbook sheet count {sheets} differs from declared {declared_sheets}"
+                    )
 
     validate_checksums(package_dir, manifest)
     scan_public_safety(package_dir)
+    maturity: dict[str, int] = {}
+    for row in selections:
+        status = row.get("fixed_d20_status") or "unknown"
+        maturity[status] = maturity.get(status, 0) + 1
     return {
         "status": "PASS",
+        "package_version": package_version,
         "record_counts": actual_counts,
-        "workbook_sheets": 11,
+        "fixed_d20_maturity": maturity,
         "checksums_verified": len(manifest["files"]),
         "privacy_scan": "PASS",
+        "workbook_checked": len(workbook_paths),
     }
 
 
