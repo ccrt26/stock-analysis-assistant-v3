@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import re
 import tempfile
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from datetime import date, datetime
 from pathlib import Path
@@ -195,6 +197,33 @@ class FrozenTwentyDayReviewV1(BaseModel):
     overall_review: str = Field(min_length=1)
 
 
+class CurrentOpportunityV1(BaseModel):
+    """当前机会意见：与原推荐评价相互独立的一个对象，权威存储在日评账本。"""
+
+    model_config = ConfigDict(
+        extra="forbid", str_strip_whitespace=True, allow_inf_nan=False
+    )
+    reference_close: float | None = Field(default=None, gt=0)
+    reference_date: date | None = None
+    outlook_5_10d: Literal["up", "sideways", "down", "unclear"]
+    outlook_reason: str = Field(min_length=1)
+    participation: Literal["consider", "wait", "avoid", "insufficient"]
+    participation_reason: str = Field(min_length=1)
+    change_condition: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_reference_pairing(self) -> "CurrentOpportunityV1":
+        if (self.reference_close is None) != (self.reference_date is None):
+            raise ValueError(
+                "reference_close and reference_date must be present together"
+            )
+        if self.participation == "consider" and self.reference_close is None:
+            raise ValueError(
+                "consider requires a current reference close and date"
+            )
+        return self
+
+
 class DailyFormalReviewV1(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
@@ -237,6 +266,7 @@ class DailyFormalReviewV1(BaseModel):
     tracking_decision_reason: str = Field(min_length=1, max_length=300)
     review_origin: Literal["live", "copied_live_archive", "backfill"]
     final_twenty_day_review: FrozenTwentyDayReviewV1 | None = None
+    current_opportunity: CurrentOpportunityV1 | None = None
 
     @model_validator(mode="after")
     def validate_review_body(self) -> "DailyFormalReviewV1":
@@ -246,6 +276,30 @@ class DailyFormalReviewV1(BaseModel):
         elif self.current_review is not None:
             raise ValueError("detailed review must not carry a separate brief")
         return self
+
+
+def current_opportunity_changed(
+    previous_review: Mapping[str, Any] | None,
+    current_review: Mapping[str, Any],
+) -> bool:
+    """当前机会意见是否发生实质变化：方向或参与改变，或1—3日节奏改变。
+
+    输入使用现有 JSON 字典或模型的 model_dump(mode="json") 结果；
+    上一日没有该对象时不视为变化（首次引入不把全体股票当成观点大变）。
+    """
+    if previous_review is None:
+        return False
+    before = previous_review.get("current_opportunity")
+    after = current_review.get("current_opportunity")
+    if not isinstance(before, Mapping) or not isinstance(after, Mapping):
+        return False
+    if any(before.get(key) != after.get(key)
+           for key in ("outlook_5_10d", "participation")):
+        return True
+    previous_short = previous_review.get("outlook_1_3d")
+    current_short = current_review.get("outlook_1_3d")
+    return bool(previous_short and current_short
+                and previous_short != current_short)
 
 
 class DailyFormalReviewLedgerV1(BaseModel):
@@ -821,6 +875,7 @@ def prepare_forward_monitor(
             "detailed_review_candidate_codes": (
                 detailed_review_candidate_codes
             ),
+            "current_opportunity_required": True,
         },
     )
     return PrepareSummary(
@@ -863,6 +918,7 @@ def record_daily_formal_reviews(
         raise ValueError(
             "daily review episode ids must exactly match snapshot"
         )
+    opportunity_required = bool(snapshot.get("current_opportunity_required"))
     episodes = {
         str(item.get("episode_id")): item
         for item in snapshot.get("episodes", [])
@@ -883,6 +939,39 @@ def record_daily_formal_reviews(
             raise ValueError("daily review day_number does not match snapshot")
         if review.checkpoint != episode.get("checkpoint"):
             raise ValueError("daily review checkpoint does not match snapshot")
+
+        if (
+            opportunity_required
+            and review.review_origin == "live"
+            and review.current_opportunity is None
+        ):
+            raise ValueError(
+                "this snapshot requires a current opportunity object: "
+                + review.episode_id
+            )
+        if review.current_opportunity is not None:
+            opportunity = review.current_opportunity
+            if (
+                opportunity.reference_date is not None
+                and opportunity.reference_date != ledger.analysis_date
+            ):
+                raise ValueError(
+                    "current opportunity reference_date must be the snapshot "
+                    f"analysis date: {review.episode_id}"
+                )
+            if opportunity.reference_close is not None:
+                price_levels = (
+                    (episode.get("review_context") or {}).get("price_levels") or {}
+                )
+                current_close = _number(price_levels.get("current_close"))
+                if current_close is None or not math.isclose(
+                    opportunity.reference_close, current_close,
+                    rel_tol=0.0, abs_tol=1e-9,
+                ):
+                    raise ValueError(
+                        "current opportunity reference_close must equal the "
+                        f"episode analysis-day close: {review.episode_id}"
+                    )
 
         historical = review.review_origin in {
             "copied_live_archive", "backfill",
@@ -932,6 +1021,30 @@ def record_daily_formal_reviews(
             if final_review != frozen:
                 raise ValueError(
                     f"final twenty day review is frozen: {review.episode_id}"
+                )
+
+    if opportunity_required:
+        same_stock: dict[str, list[DailyFormalReviewV1]] = {}
+        for review in ledger.reviews:
+            if review.review_origin != "live" or review.current_opportunity is None:
+                continue
+            code = str(episodes.get(review.episode_id, {}).get("ts_code"))
+            same_stock.setdefault(code, []).append(review)
+        for code, reviews in same_stock.items():
+            signatures = {
+                (
+                    review.current_opportunity.reference_close,
+                    str(review.current_opportunity.reference_date),
+                    review.current_opportunity.outlook_5_10d,
+                    review.current_opportunity.participation,
+                    review.current_opportunity.change_condition,
+                )
+                for review in reviews
+            }
+            if len(signatures) > 1:
+                raise ValueError(
+                    "same-stock live reviews on one analysis date must share "
+                    f"one current opportunity object: {code}"
                 )
 
     if "checkpoint_review_episode_ids" in snapshot:
@@ -1476,6 +1589,12 @@ def _validate_regular_detail_priority(
         if any(
             review.tracking_decision == "stop_active_tracking"
             or review.view_change in {"strengthened", "weakened", "invalidated"}
+            or current_opportunity_changed(
+                episodes.get(
+                    review.episode_id, {}
+                ).get("previous_daily_formal_review"),
+                review.model_dump(mode="json"),
+            )
             for review in reviews
         )
     }
@@ -1609,6 +1728,13 @@ def _render_detail_stock_block(
             "",
             "\n\n".join(status_paragraphs),
             "",
+        ]
+    )
+    opportunity_lines = _render_current_opportunity(alert, daily_by_id)
+    if opportunity_lines:
+        lines.extend(opportunity_lines)
+    lines.extend(
+        [
             "**今天发生了什么**",
             "",
             "\n\n".join(update_paragraphs),
@@ -1883,13 +2009,13 @@ def _render_compact_review_status(episode: dict[str, Any]) -> str:
         f"当前状态：{action.year}年{action.month}月{action.day}日入选 · {day_text}"
     ]
     if "entry_open" in episode and _number(episode.get("entry_open")) is None:
-        parts.append("没有可靠的推荐参考价，暂时无法计算涨跌")
+        parts.append("没有可靠的原推荐参考价，暂时无法计算涨跌")
     else:
         current = _number(episode.get("current_close_return_since_entry"))
         highest = _number(episode.get("current_max_close_return_since_entry"))
         lowest = _number(episode.get("current_mae_since_entry"))
         if current is not None:
-            parts.append(f"收盘较推荐参考价{_plain_movement(current)}")
+            parts.append(f"收盘较原推荐参考价{_plain_movement(current)}")
         if highest is not None:
             parts.append(f"期间最高收盘{_plain_movement(highest)}")
         if lowest is not None:
@@ -1916,6 +2042,57 @@ def _render_first_day_background(
     if not summary:
         return "原推荐背景：当时留下的理由摘要在本记录中不可用。"
     return f"原推荐背景：{summary}。"
+
+
+def _render_current_opportunity(
+    alert: ForwardMonitorAlertV2,
+    daily_by_id: dict[str, DailyFormalReviewV1],
+) -> list[str]:
+    """当前机会区域：只读已保存账本对象；缺失时整块不显示。"""
+    rows: list[str] = []
+    seen: set[tuple] = set()
+    multiple = len(alert.episode_ids) > 1
+    for episode_id in alert.episode_ids:
+        daily = daily_by_id.get(episode_id)
+        if daily is None or daily.current_opportunity is None:
+            continue
+        row = daily.current_opportunity
+        direction = {
+            "up": "更可能向上",
+            "sideways": "更可能横盘整理",
+            "down": "更可能偏弱",
+            "unclear": "目前没有足够事实判断方向",
+        }[row.outlook_5_10d]
+        participation = {
+            "consider": "当前条件下可考虑参与",
+            "wait": "等待所述条件",
+            "avoid": "当前暂不参与",
+            "insufficient": "关键资料不足，暂不能形成参与意见",
+        }[row.participation]
+        signature = (direction, participation, row.outlook_reason)
+        if signature in seen:
+            continue
+        seen.add(signature)
+        reference = (
+            f"以{row.reference_date.isoformat()}收盘 {row.reference_close:g} 元为参照"
+            if row.reference_close is not None and row.reference_date is not None
+            else "本日无可信收盘，未形成价格参照"
+        )
+        rows.extend(
+            [
+                f"**当前机会**（截至原 as_of；{reference}）",
+                "",
+                f"未来5—10个交易日：{direction}。{row.outlook_reason}",
+                "",
+                f"当前参与意见：{participation}。{row.participation_reason}",
+                "",
+                f"改变判断的主要事实：{row.change_condition}",
+                "",
+            ]
+        )
+        if multiple:
+            break
+    return rows
 
 
 def _render_view_change(daily: DailyFormalReviewV1 | None) -> str:
@@ -2169,7 +2346,7 @@ def _render_target_progress(episode: dict[str, Any]) -> str:
     ):
         return (
             f"{recommendation_date} "
-            "没有可靠的推荐参考价，因此不能计算距离20%目标的进展。"
+            "没有可靠的原推荐参考价，因此不能计算距离原20%观察目标的进展。"
         )
 
     day_number = int(episode["day_number"])
@@ -2186,7 +2363,7 @@ def _render_target_progress(episode: dict[str, Any]) -> str:
     ]
     current_reached_target = current >= 0.20 - 1e-12
     if not current_reached_target:
-        parts[-1] += f"，离20%的观察目标还差{(0.20 - current) * 100:.2f}个百分点。"
+        parts[-1] += f"，离原20%观察目标还差{(0.20 - current) * 100:.2f}个百分点。"
     else:
         parts[-1] += "。"
 
@@ -2227,7 +2404,7 @@ def _render_target_progress(episode: dict[str, Any]) -> str:
     )
     if close_hit:
         parts.append(
-            "收盘已经达到20%的观察目标，继续记录到第20个交易日，"
+            "收盘已经达到原20%观察目标，继续记录到第20个交易日，"
             "判断达到后是否明显回吐。"
         )
     elif high_hit:

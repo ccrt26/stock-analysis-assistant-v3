@@ -176,7 +176,7 @@ def test_daily_review_prompt_defines_tracking_and_checkpoint_outputs() -> None:
         "D3 早期反应是否延续",
         "D5 第一周路径与新增证据",
         "D10 前半程对账",
-        "D20 前20日结果与最终结论",
+        "D20 当前意见与固定结案同时存在",
         "不新增其他节点",
     ):
         assert phrase in text

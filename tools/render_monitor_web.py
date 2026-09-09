@@ -649,6 +649,7 @@ def scan_history(
                     str(review.get("current_assessment")), ""
                 ),
                 **web_display_contract.review_enums(review),
+                "currentOpportunity": web_display_contract.current_opportunity_for_display(review),
                 "viewLabel": label,
                 "viewReason": str(review.get("view_change_reason") or ""),
                 "viewChanged": view_changed,
@@ -710,6 +711,7 @@ def scan_history(
                     str(review.get("current_assessment")), ""
                 ),
                 **web_display_contract.review_enums(review),
+                "currentOpportunity": web_display_contract.current_opportunity_for_display(review),
                 "viewLabel": label,
                 "viewReason": str(review.get("view_change_reason") or ""),
                 "confirm": "",
@@ -2521,6 +2523,7 @@ function renderReview(){
   if(r.facts && r.facts.length)rows.push(["关键变化",r.facts.map(f => `<span class="fx">${esc(f)}</span>`).join('<span style="color:var(--ink3)"> · </span>')]);
   if(r.viewLabel)rows.push(["观点变化",`${esc(r.viewLabel)}${r.viewReason ? ` — ${esc(r.viewReason)}` : ""}`]);
   if(r.base)rows.push(["未来1—3日",`${esc(r.base)}${r.outlookReason ? ` — ${esc(r.outlookReason)}` : ""}`]);
+  if(r.currentOpportunity){const co=r.currentOpportunity;rows.push(["未来5—10日",`<b>${esc(co.directionText)}</b>${co.outlookReason ? ` — ${esc(co.outlookReason)}` : ""}`]);rows.push(["参与意见",`<b>${esc(co.participationText)}</b>${co.participationReason ? ` — ${esc(co.participationReason)}` : ""}`]);rows.push(["改变判断",esc(co.changeCondition)]);}
   $("rReview").innerHTML = rows.length
    ? `<span class="cap">每日复盘 · ${dayLabel(r.day)} · ${DATES[candleIdxOfDay(s,r.day)] || ""}</span>` + rows.map(x => `<div class="rev-row"><span class="rk">${x[0]}</span><span class="rv">${x[1]}</span></div>`).join("")
    : "";

@@ -101,7 +101,7 @@ def test_target_progress_uses_real_return_not_linear_daily_progress() -> None:
 
     assert "2026年8月25日开盘前被正式推荐" in text
     assert "入选后第6个交易日" in text
-    assert "离20%的观察目标还差17.32个百分点" in text
+    assert "离原20%观察目标还差17.32个百分点" in text
     assert "期间最高上涨4.66%" in text
     assert "最深下跌1.63%" in text
 
@@ -127,7 +127,7 @@ def test_target_progress_distinguishes_intraday_touch_from_close_hit() -> None:
 
     assert "盘中曾达到20%" in intraday
     assert "收盘没有保持" in intraday
-    assert "收盘已经达到20%的观察目标" in close
+    assert "收盘已经达到原20%观察目标" in close
     assert "继续记录到第20个交易日" in close
 
 
@@ -141,8 +141,8 @@ def test_target_progress_says_when_entry_reference_is_unavailable() -> None:
         )
     )
 
-    assert "没有可靠的推荐参考价" in text
-    assert "不能计算距离20%目标的进展" in text
+    assert "没有可靠的原推荐参考价" in text
+    assert "不能计算距离原20%观察目标的进展" in text
 
 
 def _trace(
@@ -2677,7 +2677,7 @@ def test_late_activation_markdown_uses_plain_tail_explanation(tmp_path: Path) ->
     markdown = Path(summary.markdown_file).read_text(encoding="utf-8")
 
     assert "延长观察第1天" in markdown
-    assert "收盘较推荐参考价上涨21.00%" in markdown
+    assert "收盘较原推荐参考价上涨21.00%" in markdown
     assert "前20个交易日收盘上涨20.00%" in markdown
     assert markdown.count("前20个交易日结束后，原判断和具体股票都基本合理。") == 1
     assert (
@@ -2722,7 +2722,7 @@ def test_day_twenty_markdown_adds_final_review_section(tmp_path: Path) -> None:
     markdown = Path(summary.markdown_file).read_text(encoding="utf-8")
 
     assert "当前D20/20" in markdown
-    assert "收盘较推荐参考价上涨20.00%" in markdown
+    assert "收盘较原推荐参考价上涨20.00%" in markdown
     assert "期间最高收盘上涨20.00%" in markdown
     assert "盘中最高上涨25.00%" not in markdown
     assert "最深下跌5.00%" in markdown
@@ -3175,7 +3175,7 @@ def test_later_current_review_may_change_while_final_review_stays_frozen(
     saved_review = saved["alerts"][0]["episode_reviews"][0]
     assert saved_review["current_assessment"] == "weakening"
     assert saved_review["final_twenty_day_review"] == frozen
-    assert "收盘较推荐参考价上涨50.00%" in markdown
+    assert "收盘较原推荐参考价上涨50.00%" in markdown
     assert "第21个交易日后的走势已经转弱" in markdown
     assert "前20个交易日结束后，原判断和具体股票都基本合理" in markdown
     assert "前20天最终判断中，最薄弱的是" not in markdown
@@ -4279,6 +4279,15 @@ def _daily_formal_review(
         "tracking_decision_reason": "原推荐最重要的判断仍未被事实否定。",
         "review_origin": review_origin,
         "final_twenty_day_review": final,
+        "current_opportunity": {
+            "reference_close": None,
+            "reference_date": None,
+            "outlook_5_10d": "up",
+            "outlook_reason": "中期支持仍在，近期先整理。",
+            "participation": "wait",
+            "participation_reason": "方向偏上但当前价格不支持追入。",
+            "change_condition": "原支持消失时重新判断。",
+        },
     }
 
 
@@ -4330,7 +4339,7 @@ def test_daily_formal_review_models_define_the_v1_contract() -> None:
         "view_change", "view_change_reason", "outlook_1_3d",
         "outlook_reason_plain_language", "tracking_decision",
         "tracking_decision_reason", "review_origin",
-        "final_twenty_day_review",
+        "final_twenty_day_review", "current_opportunity",
     }
     brief_body = dict(json.loads(json.dumps(payload))["reviews"][0])
     brief_body.update(review_kind="brief", current_review="简评正文。")
@@ -5153,7 +5162,7 @@ def test_daily_view_change_comes_directly_from_ledger(change: str, label: str) -
 
 
 @pytest.mark.parametrize("entry,current,highest,lowest,expected", [
-    (None, None, None, None, "没有可靠的推荐参考价"),
+    (None, None, None, None, "没有可靠的原推荐参考价"),
     (10.0, None, 0.12, -0.04, "期间最高收盘上涨12.00%"),
     (10.0, -0.08, -0.02, -0.10, "期间最高收盘下跌2.00%"),
 ])
@@ -5167,7 +5176,7 @@ def test_compact_status_only_shows_available_price_facts(entry, current, highest
     assert "当前D3/20" in status and expected in status
     assert "None" not in status and "nan" not in status
     if current is None:
-        assert "收盘较推荐参考价" not in status
+        assert "收盘较原推荐参考价" not in status
 
 
 def test_daily_and_detail_text_may_differ(tmp_path: Path) -> None:
@@ -5309,7 +5318,11 @@ def test_combined_report_separates_weak_daily_update_from_new_recommendation(tmp
     (tmp_path / "combined-review-example.md").write_text(combined, encoding="utf-8")
     detail = monitor.split("### 银龙股份（603969.SH）\n\n", 1)[1].split("\n\n## ", 1)[0]
     assert detail.strip().split("\n\n") == [
-        "当前状态：2026年8月3日入选 · 当前D3/20；收盘较推荐参考价下跌6.00%；期间最高收盘上涨2.00%；期间最深下跌8.00%。",
+        "当前状态：2026年8月3日入选 · 当前D3/20；收盘较原推荐参考价下跌6.00%；期间最高收盘上涨2.00%；期间最深下跌8.00%。",
+        "**当前机会**（截至原 as_of；本日无可信收盘，未形成价格参照）",
+        "未来5—10个交易日：更可能向上。中期支持仍在，近期先整理。",
+        "当前参与意见：等待所述条件。方向偏上但当前价格不支持追入。",
+        "改变判断的主要事实：原支持消失时重新判断。",
         "**今天发生了什么**", daily["current_review"],
         "**相比上次判断**", "原判断已被事实否定：" + daily["view_change_reason"],
         "**接下来1—3个交易日**", "未来1—3个交易日更可能继续偏弱。",

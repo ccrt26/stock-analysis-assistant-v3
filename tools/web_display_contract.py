@@ -156,6 +156,63 @@ def observation_policy() -> dict[str, Any]:
     }
 
 
+# ---------------------------------------------------------------------------
+# 当前机会对象（current-opportunity-v1）：载荷侧预算中文文案，前端只渲染。
+# ---------------------------------------------------------------------------
+
+DIRECTION_5_10D: Mapping[str, str] = {
+    "up": "更可能向上",
+    "sideways": "更可能横盘整理",
+    "down": "更可能偏弱",
+    "unclear": "目前没有足够事实判断方向",
+}
+
+PARTICIPATION: Mapping[str, str] = {
+    "consider": "当前条件下可考虑参与",
+    "wait": "等待所述条件",
+    "avoid": "当前暂不参与",
+    "insufficient": "关键资料不足，暂不能形成参与意见",
+}
+
+
+def current_opportunity_for_display(review: Mapping[str, Any]) -> dict[str, Any] | None:
+    """从日评账本 review 提取已保存的当前机会对象；缺失或枚举未识别返回 None。
+
+    只做字段透传与文案映射：方向/参与中文在载荷侧生成，前端不自行推断，
+    不把 unknown 归并为 sideways，也不从涨幅或原 assessment 推导买卖。
+    """
+    if not isinstance(review, Mapping):
+        return None
+    row = review.get("current_opportunity")
+    if not isinstance(row, Mapping):
+        return None
+    direction_code = str(row.get("outlook_5_10d") or "")
+    participation_code = str(row.get("participation") or "")
+    direction = DIRECTION_5_10D.get(direction_code)
+    participation = PARTICIPATION.get(participation_code)
+    if direction is None or participation is None:
+        return None
+    reference_close = row.get("reference_close")
+    reference_date = row.get("reference_date")
+    if reference_close is not None and reference_date is not None:
+        reference_pair: dict[str, Any] = {
+            "referenceClose": float(reference_close),
+            "referenceDate": str(reference_date),
+        }
+    else:
+        reference_pair = {"referenceClose": None, "referenceDate": None}
+    return {
+        "directionCode": direction_code,
+        "directionText": direction,
+        "outlookReason": str(row.get("outlook_reason") or ""),
+        "participationCode": participation_code,
+        "participationText": participation,
+        "participationReason": str(row.get("participation_reason") or ""),
+        "changeCondition": str(row.get("change_condition") or ""),
+        **reference_pair,
+    }
+
+
 def source_info(
     kind: str = "frozen_archive",
     label: str = "本地冻结复盘归档",
