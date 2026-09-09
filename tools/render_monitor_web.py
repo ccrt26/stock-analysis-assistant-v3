@@ -1170,6 +1170,68 @@ def load_d0_entries(
         return [], ""
 
 
+def extract_daily_statement(
+    selection_dir: Path, formed_on: str, name: str, ts_code: str
+) -> tuple[str, str]:
+    """从形成日日报中逐字提取该股「名称（代码）」小节正文。
+
+    返回 (statement, miss_reason)。miss_reason 为 "" 表示提取成功；
+    "no_report" 表示形成日无日报存档；"not_found" / "ambiguous" 表示
+    小节未找到或不唯一（同日同名小节多于一个时宁缺毋滥，不猜第一个）。
+    正文不含小节标题行，取标题行之后到下一个任意级 markdown 标题为止。
+    """
+    formed_on = str(formed_on or "").strip()
+    name = str(name or "").strip()
+    code6 = str(ts_code or "").split(".")[0].strip()
+    if not formed_on or not name or not re.fullmatch(r"\d{6}", code6):
+        return "", "no_report"
+    report_path = selection_dir / f"daily-research-{formed_on}.md"
+    if not report_path.is_file():
+        return "", "no_report"
+    title_re = re.compile(rf"{re.escape(name)}（{code6}(?:\.(?:SH|SZ|BJ))?）")
+    try:
+        lines = report_path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return "", "no_report"
+    hits: list[int] = []
+    for index, line in enumerate(lines):
+        heading = re.match(r"^(#{2,6})\s+(.+?)\s*$", line)
+        if heading and title_re.fullmatch(heading.group(2)):
+            hits.append(index)
+    if not hits:
+        return "", "not_found"
+    if len(hits) > 1:
+        return "", "ambiguous"
+    start = hits[0] + 1
+    end = len(lines)
+    for index in range(start, len(lines)):
+        if lines[index].lstrip().startswith("#"):
+            end = index
+            break
+    body = "\n".join(lines[start:end]).strip()
+    return (body, "") if body else ("", "not_found")
+
+
+def _statement_missing_issue(
+    ts_code: str, formed_on: str, name: str, miss_reason: str
+) -> dict[str, Any] | None:
+    """日报存在但小节缺失/不唯一才是真实缺口（T32/T33）；
+    形成日本无日报存档属正常历史事实，静默回落，由页脚文案如实说明。"""
+    if miss_reason == "no_report":
+        return None
+    message = (
+        f"形成日 {formed_on} 日报中未找到唯一「{name}（{ts_code}）」小节，"
+        "展示回落为存档理由摘要。"
+    )
+    return {
+        "code": "statement_missing",
+        "recordKey": f"{ts_code}:{formed_on}",
+        "reviewDate": None,
+        "message": message,
+        "origin": "display_data_adapter",
+    }
+
+
 def build_payload(
     root: Path,
     monitor_dir: Path,
@@ -1427,6 +1489,21 @@ def build_payload(
                 "请先在上游解决冲突，不得静默覆盖"
             )
         identity_seen[identity] = episode_id
+        formed_on_iso = (
+            str(episode["formation_date"]) if episode.get("formation_date") else ""
+        )
+        statement_full, statement_miss = extract_daily_statement(
+            selection_dir,
+            formed_on_iso,
+            str(episode.get("name") or ts_code),
+            ts_code,
+        )
+        if statement_miss:
+            issue = _statement_missing_issue(
+                ts_code, formed_on_iso, str(episode.get("name") or ts_code), statement_miss
+            )
+            if issue:
+                data_issues.append(issue)
         stocks_payload.append(
             {
                 "code": ts_code,
@@ -1451,6 +1528,7 @@ def build_payload(
                 ),
                 "suspended": suspended,
                 "dataIssues": data_issues,
+                "statementFull": statement_full,
                 "trackingStatus": (
                     str(episode.get("tracking_status") or "") or None
                 ),
@@ -1489,6 +1567,17 @@ def build_payload(
         ts_code = entry["ts_code"]
         group_code = entry.get("group_code") or ""
         rec_index = max(0, len(sessions) - 1)
+        d0_formed = analysis_date.isoformat()
+        d0_statement, d0_miss = extract_daily_statement(
+            selection_dir, d0_formed, str(entry.get("name") or ts_code), ts_code
+        )
+        d0_issues: list[dict[str, Any]] = []
+        if d0_miss:
+            issue = _statement_missing_issue(
+                ts_code, d0_formed, str(entry.get("name") or ts_code), d0_miss
+            )
+            if issue:
+                d0_issues.append(issue)
         stocks_payload.append(
             {
                 "code": ts_code,
@@ -1507,7 +1596,8 @@ def build_payload(
                 "trigger": "",
                 "suspended": False,
                 "d0": True,
-                "dataIssues": [],
+                "dataIssues": d0_issues,
+                "statementFull": d0_statement,
                 "company": profiles.get(ts_code) or None,
                 "reasonFull": entry["reason"],
                 "reasonRisk": entry["risk"],

@@ -9,6 +9,12 @@ let DATE_ERROR=null;
 try{C.resolveDates(DATA)}catch(error){DATE_ERROR=error.message}
 const $=id=>document.getElementById(id);
 const escape=t=>String(t??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+// 日报原文的受限渲染：先整体转义，再只还原 markdown 粗体、链接与换行三种结构；
+// 链接地址经 safeHref 白名单校验，其余字符一律不解释，保证原文逐字未改。
+const richText=t=>escape(t)
+ .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g,(m,txt,href)=>{const u=safeHref(href);return u?`<a href="${u}" target="_blank" rel="noopener noreferrer">${txt}</a>`:txt;})
+ .replace(/\*\*([^*\n]+)\*\*/g,'<strong>$1</strong>')
+ .replace(/\n/g,'<br>');
 const pct=v=>C.valid(v)?`${v>0?'+':''}${Math.abs(v)<0.00001?'0.00':v.toFixed(2)}%`:'—';
 const money=v=>C.valid(v)?v.toFixed(2):'—';
 const signedClass=v=>!C.valid(v)||Math.abs(v)<1e-8?'secondary':v>0?'positive':'negative';
@@ -277,7 +283,14 @@ function companyTabBody(s){
  return `<div class="review-meta"><span>COMPANY PROFILE</span><span>暂缺</span></div><h3>${escape(s.name)}</h3><div class="copy"><p>这次推荐的完整公司介绍暂未生成。</p></div><p class="source-hint">介绍缺失是资料暂缺，不代表公司经营变化。</p>`;
 }
 function reviewBody(s,r,end){
- if(state.reviewTab==='original')return `<div class="review-meta"><span>ORIGINAL THESIS</span><span>${dateWord(s).d} · ${escape(s.refKind==='event'?'事件条件记录':'原推荐记录')}</span></div><h3>当时看中的是什么，<br>最担心的又是什么。</h3><div class="copy"><p>${escape(s.reasonFull)}</p></div><div class="original-risk"><h4>原推荐中写下的风险</h4><p>${escape(s.reasonRisk||'原记录未附风险文字。')}</p></div><p class="source-hint">以上为原报告文本。时间轴变化不会改写最初的推荐理由。</p>`;
+ if(state.reviewTab==='original'){
+  const riskBlock=`<div class="original-risk"><h4>原推荐中写下的风险</h4><p>${escape(s.reasonRisk||'原记录未附风险文字。')}</p></div>`;
+  if(s.statementFull){
+   const paras=s.statementFull.split(/\n{2,}/).map(p=>'<p>'+richText(p)+'</p>').join('');
+   return `<div class="review-meta"><span>ORIGINAL THESIS</span><span>${dateWord(s).d} · ${escape(s.refKind==='event'?'事件条件记录':'原推荐记录')}</span></div><h3>当时看中的是什么，<br>最担心的又是什么。</h3><div class="copy">${paras}</div>${riskBlock}<p class="source-hint">以上为推荐形成日（${escape(s.formedOn||'')||'日期缺失'}）日报中的逐股原文，逐字未改。时间轴变化不会改写最初的推荐理由。</p>`;
+  }
+  return `<div class="review-meta"><span>ORIGINAL THESIS</span><span>${dateWord(s).d} · ${escape(s.refKind==='event'?'事件条件记录':'原推荐记录')}</span></div><h3>当时看中的是什么，<br>最担心的又是什么。</h3><div class="copy"><p>${escape(s.reasonFull)}</p></div>${riskBlock}<p class="source-hint">当日日报原文未存档，以上为当时存档的推荐理由摘要，逐字未改。时间轴变化不会改写最初的推荐理由。</p>`;
+ }
  if(state.reviewTab==='company')return companyTabBody(s);
  if(!r)return `<div class="empty">${icon('book')}<h3>${s.d0?'第一天的故事，还没开始。':'这一天还没有复盘文字。'}</h3><p>${s.d0?'价格图只展示首日观察前的历史走势。':'仅保留源数据已有的价格，不以走势图代写结论。'}</p><button class="quiet-btn" data-review-tab="original">看看当初为什么选择它 ${icon('arrow-right')}</button></div>`;
  const selectedDate=C.dateAt(end,DATA);
