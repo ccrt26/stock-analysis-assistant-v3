@@ -682,12 +682,12 @@ def test_review_title_display_once_preserves_source(js_src, kind, explicit_title
         "copy": source, "summary_copy": source,
     }
     # 从实际输出/源文件读取函数，避免测试复制一份标题处理实现。
-    monitor_fn = "function renderReview(){" + monitor.render({}).split(
-        "function renderReview(){", 1
+    monitor_fn = "function finalMetrics(f){" + monitor.render({}).split(
+        "function finalMetrics(f){", 1
     )[1].split("function eventTitle", 1)[0]
-    prism_fn = "function reviewBody(s,r,end){" + (js_src / "app.js").read_text(
+    prism_fn = "function finalReviewBody(r){" + (js_src / "app.js").read_text(
         encoding="utf-8"
-    ).split("function reviewBody(s,r,end){", 1)[1].split("function drawPlot", 1)[0]
+    ).split("function finalReviewBody(r){", 1)[1].split("function drawPlot", 1)[0]
     script = r"""
 const fs=require('fs'),vm=require('vm');
 const input=JSON.parse(fs.readFileSync(0,'utf8'));

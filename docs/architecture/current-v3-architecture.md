@@ -313,3 +313,9 @@ data health
 ## A股短周期发动机 V4
 
 唯一合同：`docs/architecture/a-share-short-horizon-engine-contract-v4.md`。V4只收紧研究合同，不改变事实仓、Forward CSV、D20、数据源、定时任务或11个价格场景。
+
+### D20 交付与本地展示修复（2026-09-10）
+
+冻结结论与报告交付由既有台账/报告分别读取：跨来源按日期保留最早有效冻结；仅存台账的结案仍是节点待办，晚于 D30 也不丢失。D30 后只允许补交并完成，不延长原 D20 结果或原 D30 价格窗口。下一日读取与 WEB 沿用同一冻结来源，WEB 回看不显示未来结论。
+
+默认 `render_prism_web.py` 收尾用同一冻结 payload 更新 Prism 和原 monitor 日期页面、固定入口；显式 `--out` 保留原 Prism 行为，`--no-publish` 不更新固定入口。研究导出将注册回放按原 episode_id 独立纳入，数量与原 V1 正式选股分开。

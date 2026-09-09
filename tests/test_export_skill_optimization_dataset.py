@@ -1265,3 +1265,64 @@ def test_T21_whole_missing_day_inside_fixed_window_reports_calendar_date(tmp_pat
     assert fields["fixed_d20_status"] == "missing_path"
     assert fields["fixed_d20_missing_dates"] == [planned_missing]
     assert fields["fixed_d20_terminal_return"] is None
+
+
+def test_repair_registered_replay_keeps_its_identity_and_ended_history(tmp_path: Path) -> None:
+    code = "600150.SH"
+    formal_id = f"formal:2026-08-19:{code}:selected"
+    replay_id = f"replay:2026-08-19:{code}:selected"
+    trace = _v4_trace("2026-08-20", "2026-08-19", [_active_candidate(code, "中国船舶", "selected")])
+    # 旧 V1 选股身份与注册 V4 回放分别存在，不按同代码合并。
+    trace["trace_version"] = "daily-research-trace-v1"
+    log = {"formation_date": "2026-08-19", "action_date": "2026-08-20",
+           "as_of": trace["as_of"], "ts_code": code, "name": "中国船舶",
+           "final_fate": "selected", "priority": "1", "opportunity_type": "independent_price_anomaly",
+           "selection_reason": "理由", "strongest_counterevidence": "反证",
+           "nearest_comparison": "", "validation_mode": "selection"}
+    source = _write_source_root(tmp_path / "source", traces=[trace], log_rows=[log],
+                                open_days=["2026-08-20", "2026-08-21"], with_monitor=False)
+    monitor = source / "local_archive/forward_monitor"
+    monitor.mkdir()
+    replay = {"episode_id": replay_id, "source_type": "registered_replay",
+              "source_as_of": "2026-08-20T09:00:00+08:00", "formation_date": "2026-08-19",
+              "action_date": "2026-08-20", "ts_code": code, "role": "selected",
+              "original_selection_reason": "回放独有理由"}
+    outside = {**replay, "episode_id": "outside", "action_date": "2026-08-24"}
+    future = {**replay, "episode_id": "future", "source_as_of": "2026-08-25T09:00:00+08:00"}
+    (monitor / "registered-episodes.json").write_text(json.dumps({"episodes": [replay, outside, future]}))
+    for day, rows in [("2026-08-20", [replay]), ("2026-08-21", []),
+                       ("2026-08-24", [{**replay, "future_fact": "must not leak"}])]:
+        (monitor / f"snapshot-{day}.json").write_text(json.dumps({
+            "analysis_date": day, "as_of": f"{day}T18:30:00+08:00", "episodes": rows,
+        }))
+    for day in ("2026-08-20", "2026-08-24"):
+        reviews = [{"episode_id": replay_id, "current_review": "回放原文"},
+                   {"episode_id": formal_id, "current_review": "原正式原文"},
+                   {"episode_id": "outside", "current_review": "越界原文"}]
+        (monitor / f"monitor-report-{day}.json").write_text(json.dumps({
+            "analysis_date": day, "as_of": f"{day}T18:30:00+08:00",
+            "alerts": [{"episode_ids": [r["episode_id"] for r in reviews], "episode_reviews": reviews}],
+        }))
+        (monitor / f"daily-formal-reviews-{day}.json").write_text(json.dumps({
+            "analysis_date": day, "as_of": f"{day}T18:30:00+08:00", "reviews": [{**row, "review_kind": "brief"} for row in reviews],
+        }))
+    output = tmp_path / "package"
+    counts = export_dataset(source, output, start_action_date="2026-08-20",
+                            end_action_date="2026-08-20", outcome_through_date="2026-08-21",
+                            exported_at="2026-09-10T12:00:00+08:00")
+    assert counts["formal_selections"] == 1
+    assert counts["registered_replay_episodes"] == 1
+    assert counts["monitor_reviews"] == 2
+    assert counts["daily_formal_reviews"] == 2
+    episodes = [json.loads(line) for line in (output / "data/monitor_episodes.jsonl").read_text().splitlines()]
+    assert episodes[0]["episode_id"] == replay_id
+    assert episodes[0]["source_as_of"] == replay["source_as_of"]
+    assert episodes[0]["snapshot_analysis_date"] == "2026-08-20"
+    assert "future_fact" not in episodes[0]
+    assert "source_id" not in episodes[0]
+    import csv
+    with (output / "data/formal_selections.csv").open(encoding="utf-8-sig") as handle:
+        selected = list(csv.DictReader(handle))
+    assert selected[0]["event_key"] == formal_id
+    assert selected[0]["selection_output_class"] == "legacy_v1_not_rewritten"
+    validate_package(output)

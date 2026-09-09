@@ -424,13 +424,13 @@ def _seed_monitor_project(
         root,
         (
             "local_warehouse/derived/sector_hotspot/"
-            f"analysis_date={analysis_day}/formula_version=sector-hotspot-v3/"
+            f"analysis_date={analysis_day}/formula_version=sector-hotspot-v4/"
             "data.parquet"
         ),
         [
             {
                 "analysis_date": analysis_day,
-                "formula_version": "sector-hotspot-v3",
+                "formula_version": "sector-hotspot-v4",
                 "group_code": "801000.SI",
                 "group_type": "industry",
                 "relative_return_3d": 0.02,
@@ -2676,7 +2676,7 @@ def test_late_activation_markdown_uses_plain_tail_explanation(tmp_path: Path) ->
     )
     markdown = Path(summary.markdown_file).read_text(encoding="utf-8")
 
-    assert "延长观察第1天" in markdown
+    assert "第21个交易日 · 补交20日结案" in markdown
     assert "收盘较原推荐参考价上涨21.00%" in markdown
     assert "前20个交易日收盘上涨20.00%" in markdown
     assert markdown.count("前20个交易日结束后，原判断和具体股票都基本合理。") == 1
@@ -3577,11 +3577,13 @@ def test_prepare_restores_earliest_frozen_twenty_day_review(
             {
                 "report_version": "daily-forward-monitor-report-v2",
                 "analysis_date": sessions[19].isoformat(),
+                "as_of": f"{sessions[19]}T18:00:00+08:00",
                 "alerts": [
                     {
                         "episode_reviews": [
                             {
                                 "episode_id": episode_id,
+                                "current_review": "旧合同中已交付的D20正文。",
                                 "final_twenty_day_review": _final_review(),
                             }
                         ]
@@ -4634,7 +4636,8 @@ def test_stop_tracking_skips_ordinary_days_but_returns_for_d20(
         ),
     )
     d21 = _prepare(tmp_path, sessions[20])
-    assert d21["episodes"][0]["tracking_status"] == "completed"
+    assert d21["episodes"][0]["tracking_status"] == "evaluation_only"
+    assert d21["required_final_review_episode_ids"] == [episode_id]
     assert d21["episodes"][0]["tracking_exit_date"] == str(sessions[0])
     assert "原推荐" in d21["episodes"][0]["tracking_exit_reason"]
 
@@ -6020,3 +6023,164 @@ def _snapshot_path_for(tmp_path: Path, snapshot: dict) -> str:
         / "local_archive/forward_monitor"
         / f"snapshot-{snapshot['analysis_date']}.json"
     )
+
+
+def _repair_project(root: Path, count: int = 33) -> list[date]:
+    trace = _single_selected_trace(formation_date="2026-07-31", action_date="2026-08-03")
+    archive = root / "local_archive/forward_selection"
+    archive.mkdir(parents=True)
+    _write_trace(archive / "research-trace-2026-07-31.json", trace)
+    return _seed_monitor_project(root, trace=trace, session_count=count)
+
+
+def _repair_save_final(root: Path, snapshot: dict, *, report: bool = True,
+                       decision: str = "complete_observation") -> None:
+    episode = snapshot["episodes"][0]
+    daily = _daily_formal_review(
+        episode["episode_id"], day_number=episode["day_number"],
+        checkpoint=episode["checkpoint"], final=_final_review(),
+        tracking_decision=decision,
+    )
+    _record_daily_review_for_snapshot(root, snapshot, daily)
+    if report:
+        alert = _daily_detail_alert(episode, daily)
+        pending = root / "pending-detail.json"
+        pending.write_text(json.dumps(_report_payload(snapshot, alerts=[alert])), encoding="utf-8")
+        record_forward_monitor(snapshot_file=Path(_snapshot_path_for(root, snapshot)),
+                               report_file=pending, project_root=root)
+
+
+@pytest.mark.parametrize("close_day", [20, 21, 31, 32, 70])
+@pytest.mark.parametrize("interrupted", [False, True])
+def test_repair_late_final_is_delivered_without_extending_original_window(
+    tmp_path: Path, close_day: int, interrupted: bool,
+) -> None:
+    sessions = _repair_project(tmp_path, max(close_day + 1, 33))
+    d20 = _prepare(tmp_path, sessions[19])
+    episode_id = d20["episodes"][0]["episode_id"]
+    old_ledger = None
+    if interrupted:
+        _repair_save_final(tmp_path, d20, report=False)
+        ledger_path = tmp_path / f"local_archive/forward_monitor/daily-formal-reviews-{sessions[19]}.json"
+        old_ledger = ledger_path.read_bytes()
+    pending = _prepare(tmp_path, sessions[close_day - 1])
+    assert pending["required_final_review_episode_ids"] == [episode_id]
+    assert pending["daily_review_episode_ids"] == [episode_id]
+    assert pending["checkpoint_review_episode_ids"] == [episode_id]
+    episode = pending["episodes"][0]
+    assert episode["tracking_status"] == "evaluation_only"
+    assert episode["d20_close_return_since_entry"] == pytest.approx(0.2)
+    if close_day > 30:
+        assert episode["current_close_return_since_entry"] == pytest.approx(0.3)
+        # 当前意见的参照仍为本次收盘，不是第30日收盘。
+        assert episode["review_context"]["price_levels"]["current_close"] == pytest.approx(10 + close_day * 0.1)
+    _repair_save_final(tmp_path, pending)
+    if old_ledger:
+        assert ledger_path.read_bytes() == old_ledger
+    following = _prepare(tmp_path, sessions[close_day])
+    assert following["required_final_review_episode_ids"] == []
+    assert following["daily_review_episode_ids"] == []
+    if following["episodes"]:
+        assert following["episodes"][0]["tracking_status"] == "completed"
+    md = (tmp_path / f"local_archive/forward_monitor/monitor-report-{sessions[close_day - 1]}.md").read_text()
+    assert md.count(_final_review()["overall_review"]) == 1
+    if close_day > 20:
+        assert "补交20日结案" in md
+
+
+@pytest.mark.parametrize("change", ["empty_body", "wrong_id", "wrong_as_of", "wrong_date", "changed_final", "malformed_rows"])
+def test_repair_only_matching_report_completes_frozen_ledger(tmp_path: Path, change: str) -> None:
+    sessions = _repair_project(tmp_path)
+    d20 = _prepare(tmp_path, sessions[19])
+    _repair_save_final(tmp_path, d20)
+    report_path = tmp_path / f"local_archive/forward_monitor/monitor-report-{sessions[19]}.json"
+    report = json.loads(report_path.read_text())
+    review = report["alerts"][0]["episode_reviews"][0]
+    if change == "empty_body": review["current_review"] = " "
+    if change == "wrong_id": review["episode_id"] = "wrong"
+    if change == "wrong_as_of": report["as_of"] = f"{sessions[19]}T19:00:00+08:00"
+    if change == "wrong_date": report["analysis_date"] = str(sessions[18])
+    if change == "changed_final": review["final_twenty_day_review"]["overall_review"] = "不是冻结结论"
+    if change == "malformed_rows": report["alerts"] = [None, {"episode_reviews": [None]}]
+    report_path.write_text(json.dumps(report))
+    pending = _prepare(tmp_path, sessions[20])
+    assert pending["required_final_review_episode_ids"] == [d20["episodes"][0]["episode_id"]]
+    assert pending["episodes"][0]["frozen_twenty_day_review"] == _final_review()
+
+
+def test_repair_earliest_legacy_report_survives_later_ledger_and_cutoff(tmp_path: Path) -> None:
+    from stock_analyzer.ops.forward_monitor import final_review_history
+    sessions = _repair_project(tmp_path)
+    d20 = _prepare(tmp_path, sessions[19])
+    _repair_save_final(tmp_path, d20)
+    monitor = tmp_path / "local_archive/forward_monitor"
+    # 无台账的旧报告沿原合同交付，不需要追讨。
+    (monitor / f"daily-formal-reviews-{sessions[19]}.json").unlink()
+    later = _daily_formal_review(d20["episodes"][0]["episode_id"], day_number=21,
+                                checkpoint=None, final=_final_review("unknown"))
+    (monitor / f"daily-formal-reviews-{sessions[20]}.json").write_text(json.dumps({
+        "ledger_version": DAILY_FORMAL_REVIEWS_VERSION, "analysis_date": str(sessions[20]),
+        "as_of": f"{sessions[20]}T18:00:00+08:00", "reviews": [later],
+    }))
+    history = final_review_history(monitor, sessions[21])
+    item = history[later["episode_id"]]
+    assert item["final_twenty_day_review"] == _final_review()
+    assert item["analysis_date"] == str(sessions[19])
+    assert item["report_delivered"] is True
+    assert final_review_history(monitor, sessions[18]) == {}
+    assert final_review_history(monitor, sessions[19], as_of=datetime.fromisoformat(f"{sessions[19]}T17:00:00+08:00")) == {}
+
+
+@pytest.mark.parametrize("endpoint", [25, 30])
+def test_repair_completed_d20_can_follow_existing_extension_endpoints(tmp_path: Path, endpoint: int) -> None:
+    sessions = _repair_project(tmp_path)
+    d20 = _prepare(tmp_path, sessions[19])
+    _repair_save_final(tmp_path, d20, decision="keep_active_tracking")
+    extension = _prepare(tmp_path, sessions[endpoint - 1])
+    assert extension["daily_review_episode_ids"]
+    assert extension["required_final_review_episode_ids"] == []
+    assert extension["episodes"][0]["tracking_status"] == "active"
+    _repair_save_final(tmp_path, extension)
+    assert _prepare(tmp_path, sessions[endpoint])["daily_review_episode_ids"] == []
+
+
+def test_repair_cannot_use_after_d30_to_start_another_extension(tmp_path: Path) -> None:
+    snapshot = _daily_formal_snapshot(day_number=31)
+    snapshot["episodes"][0]["final_review_pending"] = False
+    with pytest.raises(ValueError, match="after D30"):
+        _repair_save_final(tmp_path, snapshot, decision="keep_active_tracking")
+
+
+def test_repair_v4_sector_context_is_read_but_missing_group_stays_missing(tmp_path: Path) -> None:
+    sessions = _repair_project(tmp_path, 2)
+    _write_parquet(tmp_path, "local_warehouse/facts/industry_member/membership/data.parquet", [{
+        "ts_code": "603969.SH", "industry_system": "SW2021", "level": "L2",
+        "industry_code": "801000.SI", "valid_from": "2026-01-01", "valid_to": None,
+        "available_at": "2026-01-01T00:00:00+08:00",
+    }])
+    episode = _prepare(tmp_path, sessions[-1])["episodes"][0]
+    assert episode["sector_relative_return_3d"] == pytest.approx(0.02)
+    assert episode["sector_breadth_5d"] == pytest.approx(0.7)
+    sector_file = tmp_path / f"local_warehouse/derived/sector_hotspot/analysis_date={sessions[-1]}/formula_version=sector-hotspot-v4/data.parquet"
+    frame = pd.read_parquet(sector_file)
+    frame["group_code"] = "different-L1-group"
+    frame.to_parquet(sector_file)
+    missing = _prepare(tmp_path, sessions[-1])["episodes"][0]
+    assert missing["sector_relative_return_3d"] is None
+    assert missing["sector_breadth_5d"] is None
+
+
+def test_repair_brief_markdown_displays_current_opportunity_once() -> None:
+    snapshot, daily, _ = _daily_render_case(2)
+    snapshot["checkpoint_review_episode_ids"] = []
+    daily["review_kind"] = "brief"
+    report = DailyForwardMonitorReportV2.model_validate(_report_payload(snapshot, alerts=[]))
+    ledger = DailyFormalReviewLedgerV1.model_validate({
+        "ledger_version": DAILY_FORMAL_REVIEWS_VERSION, "analysis_date": snapshot["analysis_date"],
+        "as_of": snapshot["as_of"], "reviews": [daily],
+    })
+    md = _render_markdown(report, snapshot, ledger)
+    opportunity = daily["current_opportunity"]
+    for key in ("participation_reason", "outlook_reason", "change_condition"):
+        assert md.count(opportunity[key]) == 1
+    assert md.count(daily["current_review"]) == 1

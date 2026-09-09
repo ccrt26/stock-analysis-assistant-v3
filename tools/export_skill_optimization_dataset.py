@@ -619,21 +619,44 @@ def build_monitor_records(
     outcome_through_date: str,
     valid_episode_ids: set[str] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
-    snapshot, snapshot_analysis_date, snapshot_source = load_latest_monitor_snapshot(
-        monitor_dir, outcome_through_date
-    )
-    episodes = [
-        dict(row)
-        for row in snapshot.get("episodes") or []
-        if row.get("source_type") == "formal"
-        and start_action_date <= str(row.get("action_date") or "") <= end_action_date
-    ]
-    for episode in episodes:
-        episode["snapshot_analysis_date"] = snapshot_analysis_date
-        episode["snapshot_as_of"] = snapshot.get("as_of")
-        episode["source_file"] = snapshot_source
+    registry_path = monitor_dir / "registered-episodes.json"
+    registered = load_json(registry_path).get("episodes", []) if registry_path.is_file() else []
+    registered = [dict(row) for row in registered
+                  if row.get("source_type") == "registered_replay"
+                  and start_action_date <= str(row.get("action_date") or "") <= end_action_date
+                  and str(row.get("source_as_of") or "")[:10] <= outcome_through_date]
+    by_id = {
+        str(row["episode_id"]): {
+            **row, "source_file": registry_path.name,
+            "snapshot_analysis_date": None, "snapshot_as_of": None,
+        } for row in registered
+    }
+    valid_episode_ids = (set(valid_episode_ids) | set(by_id)
+                         if valid_episode_ids is not None else None)
+    # 逐身份取截止前最新可得快照，已退出最新快照的历史不能丢失。
+    for path in canonical_archive_paths(monitor_dir, "snapshot"):
+        day = path.stem.removeprefix("snapshot-")
+        if day > outcome_through_date:
+            continue
+        snapshot = load_json(path)
+        if snapshot.get("analysis_date", day) != day:
+            continue
+        for row in snapshot.get("episodes") or []:
+            episode_id = str(row.get("episode_id") or "")
+            if row.get("source_type") not in {"formal", "registered_replay"}:
+                continue
+            if valid_episode_ids is not None and episode_id not in valid_episode_ids:
+                continue
+            if not start_action_date <= str(row.get("action_date") or "") <= end_action_date:
+                continue
+            by_id[episode_id] = {
+                **by_id.get(episode_id, {}), **dict(row),
+                "snapshot_analysis_date": day, "snapshot_as_of": snapshot.get("as_of"),
+                "source_file": path.name,
+            }
+    episodes = [by_id[key] for key in sorted(by_id)]
     if valid_episode_ids is None:
-        valid_episode_ids = {str(row["episode_id"]) for row in episodes}
+        valid_episode_ids = set(by_id)
     alerts: list[dict[str, Any]] = []
     reviews: list[dict[str, Any]] = []
     for path in canonical_archive_paths(monitor_dir, "monitor-report"):
@@ -1612,7 +1635,8 @@ def write_readme(
 - `data/candidate_ledger.jsonl`：所有明确进入候选账的股票；
 - `data/decision_trace.jsonl`：研究 trace 中实际引用的结构化决策证据；
 - `data/review_contracts.jsonl`：发动机、催化、传播、价格确认、剩余路径、反证、关键未知和行动条件引用；
-- `data/monitor_episodes.jsonl`：最新快照中本批正式 episode 记录；
+- `data/monitor_episodes.jsonl`：本批身份截至结果截止日的最新可得历史观察（已退出最新快照仍保留）；注册回放按原 episode_id 独立纳入，保留原来源字段，无快照则只有注册原记录；
+- `manifest.record_counts.registered_replay_episodes`：注册回放独立数量（含原角色）；不加入原 V1 `formal_selections`，不跨身份补齐结果；
 - `data/monitor_alerts.jsonl` 与 `data/monitor_reviews.jsonl`：已生成的提醒和逐 episode 复盘（报告侧唯一详评正文）；
 - `data/daily_formal_reviews.jsonl`：每日判断账本（账本侧唯一简评正文；详评行正文为空属正常分工）；
 - `data/daily_price_volume.csv`：每条正式入选事件按交易日历编号的逐日路径（最多 30 个交易日，含沪深300对照）；
@@ -1826,7 +1850,6 @@ def export_dataset(
         outcome_through_date,
         valid_episode_ids=batch_episode_ids,
     )
-    monitor_episode_ids = {str(row["episode_id"]) for row in monitor_episodes}
     formal_episode_ids = batch_episode_ids
     monitor_episode_ids = {str(row["episode_id"]) for row in monitor_episodes}
     daily_reviews, ledger_conflicts = load_daily_formal_review_records(
@@ -1939,6 +1962,9 @@ def export_dataset(
     )
     counts["review_contracts"] = write_jsonl(
         data_dir / "review_contracts.jsonl", review_contracts
+    )
+    counts["registered_replay_episodes"] = sum(
+        row.get("source_type") == "registered_replay" for row in monitor_episodes
     )
     counts["monitor_episodes"] = write_jsonl(
         data_dir / "monitor_episodes.jsonl", monitor_episodes

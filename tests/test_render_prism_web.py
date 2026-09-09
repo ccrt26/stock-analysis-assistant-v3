@@ -356,3 +356,30 @@ def test_fixed_replace_failure_keeps_previous_page(completed_archive, monkeypatc
     assert cli.main(args + ["--indices", "000001.SH,399001.SZ,399006.SZ"]) == 1
     assert fixed.read_bytes() == old
     assert not list(fixed.parent.glob("prism*.tmp-*"))
+
+
+def test_repair_default_sync_updates_both_pages_without_changing_archives(completed_archive):
+    from tools.update_monitor_web import parse_payload
+    cli, paths, args = completed_archive
+    original = {p: p.read_bytes() for p in paths.values()}
+    assert cli.main(args) == 0
+    monitor = paths["report"].parent
+    index = monitor / "index.html"
+    assert parse_payload(index.read_text())["analysis_date"] == "2026-09-04"
+    stamp = index.stat().st_mtime_ns
+    assert cli.main(args) == 0
+    assert index.stat().st_mtime_ns == stamp
+    assert {p: p.read_bytes() for p in paths.values()} == original
+    renderer, _, _ = cli.load_modules()
+    newer = {"analysis_date": "2026-09-07", "dates": [], "stocks": [], "market": []}
+    index.write_text(renderer.render(newer))
+    old_index = index.read_bytes()
+    assert cli.main(args) == 0
+    assert index.read_bytes() == old_index
+    assert cli.main([*args, "--no-publish"]) == 0
+    assert index.read_bytes() == old_index
+    index.unlink()
+    assert cli.main([*args, "--no-publish"]) == 0
+    assert not index.exists()
+    assert cli.main([*args, "--out", str(monitor / "custom.html")]) == 0
+    assert not index.exists()

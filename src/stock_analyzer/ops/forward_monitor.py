@@ -16,6 +16,7 @@ import numpy as np
 import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from stock_analyzer.analysis.hotspot_features import HOTSPOT_FORMULA_VERSION
 from stock_analyzer.ops.forward_selection import (
     MarketPropagationModeV4,
     selection_output_class,
@@ -228,7 +229,7 @@ class DailyFormalReviewV1(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     episode_id: str = Field(min_length=1)
-    day_number: int = Field(ge=1, le=30)
+    day_number: int = Field(ge=1)
     checkpoint: Literal[
         "D1", "D3", "D5", "D10", "D20", "D25", "D30",
     ] | None = None
@@ -551,18 +552,18 @@ def prepare_forward_monitor(
         monitor_dir,
         analysis_date,
     )
-    previous_daily_reviews, previous_live_reviews, daily_frozen_reviews = (
+    previous_daily_reviews, previous_live_reviews, _ = (
         _daily_review_history(monitor_dir, analysis_date)
     )
     last_detailed_reviews = _last_detailed_review_dates(
         monitor_dir,
         analysis_date,
     )
-    frozen_reviews = _earliest_frozen_reviews(
-        monitor_dir,
-        analysis_date,
-    )
-    frozen_reviews = {**frozen_reviews, **daily_frozen_reviews}
+    final_history = final_review_history(monitor_dir, analysis_date, as_of=as_of)
+    frozen_reviews = {
+        episode_id: item["final_twenty_day_review"]
+        for episode_id, item in final_history.items()
+    }
     price_by_code = {
         str(row.get("ts_code")): row
         for row in _derived_rows(
@@ -586,7 +587,7 @@ def prepare_forward_monitor(
             root,
             "sector_hotspot",
             analysis_date,
-            "sector-hotspot-v3",
+            HOTSPOT_FORMULA_VERSION,
             as_of,
         )
     }
@@ -598,6 +599,14 @@ def prepare_forward_monitor(
         tuple[dict[str, Any], datetime | None, int, str, list[date]],
     ] = {}
     all_path_days: set[date] = set()
+    pending_pair_ids = {
+        str(base.get("original_nearest_alternative_episode_id"))
+        for episode_id, base in episodes_by_id.items()
+        if str(base.get("role")) == "selected"
+        and _episode_selection_output_class(base) in PUBLIC_FORMAL_OUTPUT_CLASSES
+        and not final_history.get(episode_id, {}).get("report_delivered", False)
+        and base.get("original_nearest_alternative_episode_id")
+    }
     for episode_id in sorted(episodes_by_id):
         base = episodes_by_id[episode_id]
         source_as_of = _as_datetime(base.get("source_as_of"))
@@ -608,7 +617,13 @@ def prepare_forward_monitor(
         if not elapsed:
             continue
         day_number = len(elapsed)
-        if day_number > 31:
+        pending_final = (
+            day_number >= 20
+            and str(base.get("role")) == "selected"
+            and _episode_selection_output_class(base) in PUBLIC_FORMAL_OUTPUT_CLASSES
+            and not final_history.get(episode_id, {}).get("report_delivered", False)
+        )
+        if day_number > 31 and not pending_final and episode_id not in pending_pair_ids:
             continue
         phase = (
             "primary"
@@ -683,6 +698,16 @@ def prepare_forward_monitor(
             in PUBLIC_FORMAL_OUTPUT_CLASSES
             and str(observation.get("role")) == "selected"
         ):
+            observation["final_review_pending"] = (
+                day_number >= 20
+                and not final_history.get(episode_id, {}).get("report_delivered", False)
+            )
+            if day_number >= 20:
+                observation["d20_end_date"] = path_days[19].isoformat()
+            if observation["final_review_pending"]:
+                observation["attention_reasons"] = list(dict.fromkeys(
+                    ["pending_final_review", *observation["attention_reasons"]]
+                ))
             latest_live = previous_live_reviews.get(episode_id)
             tracking_status = _tracking_status(
                 observation,
@@ -723,11 +748,7 @@ def prepare_forward_monitor(
     required_final_review_episode_ids = sorted(
         str(item["episode_id"])
         for item in observations
-        if item["monitor_phase"] != "closed"
-        and _episode_selection_output_class(item)
-        in PUBLIC_FORMAL_OUTPUT_CLASSES
-        and int(item["day_number"]) >= 20
-        and item.get("frozen_twenty_day_review") is None
+        if item.get("final_review_pending")
     )
     open_episodes = [item for item in observations if item["monitor_phase"] != "closed"]
     formal_episodes = [
@@ -992,9 +1013,20 @@ def record_daily_formal_reviews(
             raise ValueError(
                 "stop_active_tracking requires contradiction or non-execution"
             )
+        pending_final = (
+            day_number >= 20
+            and (episode.get("final_review_pending") is True
+                 or episode.get("frozen_twenty_day_review") is None)
+        )
+        if day_number > 30 and (
+            not pending_final
+            or (not historical and review.tracking_decision != "complete_observation")
+        ):
+            raise ValueError("after D30 only a pending final review may be completed")
         if (
             review.tracking_decision == "complete_observation"
             and day_number not in {20, 25, 30}
+            and not pending_final
         ):
             raise ValueError(
                 "complete_observation is allowed only at an observation endpoint"
@@ -1285,6 +1317,7 @@ def record_forward_monitor(
             if (
                 is_formal_selection
                 and final_review is not None
+                and frozen_raw is None
                 and final_review["decision_review"]
                 == "direction_right_stock_wrong"
                 and (episode.get("pair_context") or {}).get("pair_status")
@@ -1730,7 +1763,7 @@ def _render_detail_stock_block(
             "",
         ]
     )
-    opportunity_lines = _render_current_opportunity(alert, daily_by_id)
+    opportunity_lines = _render_current_opportunity(alert.episode_ids, daily_by_id)
     if opportunity_lines:
         lines.extend(opportunity_lines)
     lines.extend(
@@ -1904,6 +1937,15 @@ def _render_markdown(
                     f"{tracking_text} |"
                 )
             lines.append("")
+            displayed_codes: set[str] = set()
+            for episode, review in brief_items:
+                code = str(episode.get("ts_code"))
+                if review.current_opportunity is not None and code not in displayed_codes:
+                    displayed_codes.add(code)
+                    lines.extend([
+                        f"**{episode.get('name')}：当前方向与参与意见**", "",
+                        *_render_current_opportunity([review.episode_id], daily_by_id), "",
+                    ])
     elif daily_ledger is not None:
         active_items = [
             (episode, daily_by_id[str(episode["episode_id"])])
@@ -2005,9 +2047,13 @@ def _render_compact_review_status(episode: dict[str, Any]) -> str:
         if review_day <= 20
         else f"20日核心观察已完成 · 延长观察第{review_day - 20}天"
     )
+    if episode.get("final_review_pending") and review_day > 20:
+        day_text = f"第{review_day}个交易日 · 补交20日结案"
     parts = [
         f"当前状态：{action.year}年{action.month}月{action.day}日入选 · {day_text}"
     ]
+    if review_day > 30:
+        parts.append("以下原观察价格统计截至第30个交易日")
     if "entry_open" in episode and _number(episode.get("entry_open")) is None:
         parts.append("没有可靠的原推荐参考价，暂时无法计算涨跌")
     else:
@@ -2045,14 +2091,14 @@ def _render_first_day_background(
 
 
 def _render_current_opportunity(
-    alert: ForwardMonitorAlertV2,
+    episode_ids: list[str],
     daily_by_id: dict[str, DailyFormalReviewV1],
 ) -> list[str]:
     """当前机会区域：只读已保存账本对象；缺失时整块不显示。"""
     rows: list[str] = []
     seen: set[tuple] = set()
-    multiple = len(alert.episode_ids) > 1
-    for episode_id in alert.episode_ids:
+    multiple = len(episode_ids) > 1
+    for episode_id in episode_ids:
         daily = daily_by_id.get(episode_id)
         if daily is None or daily.current_opportunity is None:
             continue
@@ -2321,8 +2367,10 @@ def _render_pair_comparison(
 
 
 def _human_trading_day(day_number: int) -> str:
-    if not 1 <= day_number <= 30:
-        raise ValueError("day_number must be between 1 and 30")
+    if day_number < 1:
+        raise ValueError("day_number must be positive")
+    if day_number > 30:
+        return f"第{day_number}个交易日 · 补交20日结案"
     if day_number <= 20:
         return f"D{day_number}"
     return f"延长观察第{day_number - 20}天"
@@ -3596,6 +3644,8 @@ def _tracking_status(
     episode: dict[str, Any],
     latest_live_review: dict[str, Any] | None,
 ) -> Literal["active", "evaluation_only", "completed"]:
+    if episode.get("final_review_pending"):
+        return "evaluation_only"
     if episode.get("monitor_phase") == "closed":
         return "completed"
     decision = (
@@ -3620,6 +3670,8 @@ def _needs_daily_formal_review(
     episode: dict[str, Any],
     latest_live_review: dict[str, Any] | None,
 ) -> bool:
+    if episode.get("final_review_pending"):
+        return True
     status = episode.get("tracking_status")
     day_number = int(episode.get("day_number", 0))
     if status == "evaluation_only":
@@ -3720,43 +3772,100 @@ def _previous_episode_reviews(
     return {}
 
 
-def _earliest_frozen_reviews(
+def final_review_history(
     monitor_dir: Path,
     analysis_date: date,
+    *,
+    as_of: datetime | None = None,
 ) -> dict[str, dict[str, Any]]:
-    reports: list[tuple[date, Path]] = []
-    for path in monitor_dir.glob("monitor-report-*.json"):
+    """读取最早冻结及报告交付事实；不写回台账，不以跟踪决定代替交付。"""
+    days: set[date] = set()
+    for prefix in ("daily-formal-reviews", "monitor-report"):
+        for path in monitor_dir.glob(f"{prefix}-*.json"):
+            try:
+                day = date.fromisoformat(path.stem.removeprefix(prefix + "-"))
+            except ValueError:
+                continue
+            if day <= analysis_date:
+                days.add(day)
+    history: dict[str, dict[str, Any]] = {}
+    for day in sorted(days):
+        ledger_path = monitor_dir / f"daily-formal-reviews-{day}.json"
+        ledger = None
+        if ledger_path.is_file():
+            try:
+                ledger = DailyFormalReviewLedgerV1.model_validate_json(ledger_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if ledger.analysis_date != day or (as_of is not None and ledger.as_of > as_of):
+                continue
+        report_path = monitor_dir / f"monitor-report-{day}.json"
         try:
-            report_date = date.fromisoformat(
-                path.stem.removeprefix("monitor-report-")
-            )
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            report = {}
+        try:
+            report_stamp = _as_datetime(report.get("as_of")) if isinstance(report, dict) else None
         except ValueError:
+            report_stamp = None
+        valid_report = (
+            isinstance(report, dict)
+            and report.get("report_version") == "daily-forward-monitor-report-v2"
+            and report.get("analysis_date") == day.isoformat()
+            and report_stamp is not None
+            and (as_of is None or report_stamp <= as_of)
+            and (ledger is None or report_stamp == ledger.as_of)
+        )
+        daily = {r.episode_id: r for r in ledger.reviews} if ledger else {}
+        for review in daily.values():
+            if review.final_twenty_day_review is not None:
+                history.setdefault(review.episode_id, {
+                    "final_twenty_day_review": review.final_twenty_day_review.model_dump(mode="json"),
+                    "analysis_date": day.isoformat(),
+                    "as_of": ledger.as_of.isoformat(),
+                    "report_delivered": False,
+                })
+        if not valid_report:
             continue
-        if report_date <= analysis_date:
-            reports.append((report_date, path))
-    frozen: dict[str, dict[str, Any]] = {}
-    for _, path in sorted(reports):
-        try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            continue
-        if (
-            not isinstance(payload, dict)
-            or payload.get("report_version")
-            != "daily-forward-monitor-report-v2"
-        ):
-            continue
-        for alert in payload.get("alerts", []):
+        for alert in report.get("alerts", []):
             if not isinstance(alert, dict):
                 continue
             for review in alert.get("episode_reviews", []):
                 if not isinstance(review, dict):
                     continue
-                episode_id = str(review.get("episode_id", ""))
-                final_review = review.get("final_twenty_day_review")
-                if episode_id and isinstance(final_review, dict):
-                    frozen.setdefault(episode_id, _json_value(final_review))
-    return frozen
+                episode_id = str(review.get("episode_id") or "")
+                try:
+                    final = FrozenTwentyDayReviewV1.model_validate(review.get("final_twenty_day_review")).model_dump(mode="json")
+                except ValueError:
+                    continue
+                matched = daily.get(episode_id)
+                if ledger is not None and (
+                    matched is None or matched.final_twenty_day_review is None
+                    or matched.final_twenty_day_review.model_dump(mode="json") != final
+                ):
+                    continue
+                if not episode_id:
+                    continue
+                item = history.setdefault(episode_id, {
+                    "final_twenty_day_review": final,
+                    "analysis_date": day.isoformat(),
+                    "as_of": report_stamp.isoformat(),
+                    "report_delivered": False,
+                })
+                body = review.get("current_review")
+                if (episode_id in alert.get("episode_ids", [])
+                        and isinstance(body, str) and body.strip()
+                        and item["final_twenty_day_review"] == final):
+                    item["report_delivered"] = True
+    return history
+
+
+def _earliest_frozen_reviews(
+    monitor_dir: Path,
+    analysis_date: date,
+) -> dict[str, dict[str, Any]]:
+    return {key: item["final_twenty_day_review"]
+            for key, item in final_review_history(monitor_dir, analysis_date).items()}
 
 
 def _attach_pair_contexts(observations: list[dict[str, Any]]) -> None:

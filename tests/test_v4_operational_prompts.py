@@ -312,16 +312,16 @@ def test_review_priority_delivery_documents_match_the_new_public_contract() -> N
         assert forbidden not in sample
 
 
-def test_archived_execution_instruction_is_a_verbatim_copy() -> None:
-    source = Path(
-        "/Users/ccrt/Downloads/"
-        "Codex执行指令_重点复盘未来判断与荐股展示优化_V1.0.md"
-    )
-    archived = Path(
-        "docs/2026-09-03-review-priority-outlook-format-prompt.md"
-    )
-
-    assert archived.read_bytes() == source.read_bytes()
+def test_archived_execution_instruction_preserves_original_scope() -> None:
+    # 历史原件已入库；验收其关键原始范围，不依赖个人 Downloads。
+    text = Path("docs/2026-09-03-review-priority-outlook-format-prompt.md").read_text(encoding="utf-8")
+    assert "每日推荐与复盘展示的最后一轮实质调整" in text
+    assert "29d22491edd4f5bbda85513268819a8a3ace45b3" in text
+    assert "这是个人股票助手，不是研究平台" in text
+    assert "不扩大为新的评分体系、消息平台或第二套复盘流程" in text
+    current = Path("ops/forward-monitor-prompt.md").read_text(encoding="utf-8")
+    assert "final_twenty_day_review.overall_review" in current
+    assert "当前机会" in current
 
 
 def test_unique_output_assigns_disjoint_headings_to_reviews_and_new_recommendations() -> None:

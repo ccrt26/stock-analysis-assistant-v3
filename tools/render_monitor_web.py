@@ -698,6 +698,7 @@ def scan_history(
                 continue
             item = {
                 "date": day.isoformat(),
+                "as_of": str(ledger.get("as_of") or ""),
                 "day": int(review.get("day_number") or 0),
                 "checkpoint": review.get("checkpoint"),
                 "headline": _review_headline(review, episode),
@@ -731,8 +732,31 @@ def scan_history(
                     "confirm": existing["confirm"],
                     "risk": existing["risk"],
                 }
+    from stock_analyzer.ops.forward_monitor import final_review_history
+
+    finals = final_review_history(monitor_dir, analysis_date)
     history: dict[str, list[dict[str, Any]]] = {}
     for (episode_id, _day), item in merged.items():
+        final = finals.get(episode_id)
+        # 最早冻结日期之前的回看没有后来结案；同日还须核对截止。
+        if final is not None and final["analysis_date"] <= _day:
+            item_stamp = _parse_as_of(item.get("as_of"))
+            final_stamp = _parse_as_of(final.get("as_of"))
+            if final["analysis_date"] < _day or (
+                item_stamp is not None and final_stamp is not None
+                and final_stamp <= item_stamp
+            ):
+                source_snapshot = monitor_dir / f"snapshot-{final['analysis_date']}.json"
+                metrics = {}
+                if source_snapshot.is_file():
+                    source = json.loads(source_snapshot.read_text(encoding="utf-8"))
+                    original = next((row for row in source.get("episodes", [])
+                                     if row.get("episode_id") == episode_id), {})
+                    metrics = {key: original.get(key) for key in (
+                        "d20_close_return_since_entry", "d20_max_close_return_since_entry",
+                        "d20_mae_since_entry",
+                    )}
+                item["finalTwentyDayReview"] = {**final, "metrics": metrics}
         history.setdefault(episode_id, []).append(item)
     for items in history.values():
         items.sort(key=lambda item: item["date"])
@@ -1055,14 +1079,16 @@ def _events_for(
         else:
             by_date[candidate[1][0]] = candidate
             order.append(candidate[1][0])
-    frozen = episode.get("frozen_twenty_day_review")
-    if frozen:
+    final_source = next((item["finalTwentyDayReview"] for item in review_items
+                         if item.get("finalTwentyDayReview")), None)
+    if final_source:
+        frozen = final_source["final_twenty_day_review"]
         candidate = (
             1,
             [
-                str(episode.get("analysis_date"))[5:],
+                final_source["analysis_date"],
                 "milestone",
-                "20日观察结束",
+                "20日固定结案",
                 str(frozen.get("overall_review") or ""),
             ],
         )
@@ -2495,6 +2521,10 @@ function renderTimeline(){
   b.onmouseleave = () => drawXh(-1);
  });
 }
+function finalMetrics(f){
+ const m=f.metrics||{};
+ return [["D20收盘",m.d20_close_return_since_entry],["期间最高收盘",m.d20_max_close_return_since_entry],["期间最深下跌",m.d20_mae_since_entry]].map(([label,value])=>label+"："+(value==null?"数据不足":(value*100).toFixed(2)+"%")).join("；");
+}
 function renderReview(){
  const s = cur,r = selReview,latest = latestReview(s);
  let badges = "";
@@ -2524,6 +2554,7 @@ function renderReview(){
   if(r.viewLabel)rows.push(["观点变化",`${esc(r.viewLabel)}${r.viewReason ? ` — ${esc(r.viewReason)}` : ""}`]);
   if(r.base)rows.push(["未来1—3日",`${esc(r.base)}${r.outlookReason ? ` — ${esc(r.outlookReason)}` : ""}`]);
   if(r.currentOpportunity){const co=r.currentOpportunity;rows.push(["未来5—10日",`<b>${esc(co.directionText)}</b>${co.outlookReason ? ` — ${esc(co.outlookReason)}` : ""}`]);rows.push(["参与意见",`<b>${esc(co.participationText)}</b>${co.participationReason ? ` — ${esc(co.participationReason)}` : ""}`]);rows.push(["改变判断",esc(co.changeCondition)]);}
+  if(r.finalTwentyDayReview){const f=r.finalTwentyDayReview;rows.push(["20个交易日固定结案",`<p>${esc(f.final_twenty_day_review.overall_review)}</p><p>${finalMetrics(f)}</p><small>原结论保存：${esc(f.analysis_date)} · 截止 ${esc(f.as_of)}</small>`]);}
   $("rReview").innerHTML = rows.length
    ? `<span class="cap">每日复盘 · ${dayLabel(r.day)} · ${DATES[candleIdxOfDay(s,r.day)] || ""}</span>` + rows.map(x => `<div class="rev-row"><span class="rk">${x[0]}</span><span class="rv">${x[1]}</span></div>`).join("")
    : "";
