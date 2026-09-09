@@ -84,4 +84,4 @@
 
 ## 不做事项
 
-不新增数据源、数据库表、服务、消息推送、Skill、Scheduled Task、评分、权重、概率模型、自动交易、仓位、止盈止损、盘中实时监控、新闻社交采集或公告全文库；不修改 V4 七种内部分类、V4 规则、Forward CSV、D20 口径或11个价格情形。现有本地 Markdown、静态 HTML 与 Prism 只呈现冻结结果，不属于云端发布。
+不新增数据源、数据库表、服务、消息推送、Skill、Scheduled Task、评分、权重、概率模型、自动交易、仓位、止盈止损、盘中实时监控、新闻社交采集或公告全文库；不修改 V4 七种内部分类、V4 规则、Forward CSV、D20 口径或11个价格情形。自 current-opportunity-v1 起的唯一兼容性新增：日评账本 `DailyFormalReviewV1` 增加可选 `current_opportunity` 对象（旧文件缺字段可原样读取，不迁移不回写），新 prepare 的 snapshot 带 `current_opportunity_required` 标志；这不授权任何其他新报告模型或 schema。现有本地 Markdown、静态 HTML 与 Prism 只呈现冻结结果，不属于云端发布。

@@ -63,6 +63,7 @@ Obsidian 股票知识子库：个股经历、写作范例、批量认识、优�
 
 ## 6. 与正式流程的接入
 
-- 每晚复盘与公司介绍写作前，可选读取子库 `00_已确认写作要点.md` 与至多两篇 `approved` 范例（见两个 ops Prompt 的入口段）；合同与文风基准始终优先，读取失败不阻断。
+- 每晚复盘写作前必须实际打开子库 `00_已确认写作要点.md`、当天出现类型的 `00_阅读指南.md` 与按类型/节点阶段选出的 `approved` 范文全文（见 ops Prompt 的分类入口段；无跨类型两篇上限）；公司介绍入口保持原行为。合同与文风基准始终优先，读取失败按现行规则降级一次并如实说明，不阻断正式研究。
+- 三类复盘的共同目的自 current-opportunity-v1 起是当前机会判断（未来5—10日方向、参与意见、改变条件），原推荐固定20日结案独立保留；详见 `docs/architecture/current-opportunity-review-v1.md`。
 - `ops/stock-knowledge-prompt.md` 是知识子库的唯一整理入口，仅人工触发。
 - 新研究自 `research-run-context-<action_date>.json` 起记录方法版本辅助信息；历史运行不补造，导出时按 `version_status=unknown` 处理。

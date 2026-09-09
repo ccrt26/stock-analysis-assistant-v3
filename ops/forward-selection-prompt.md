@@ -36,7 +36,7 @@
 
 然后读取 `ops/forward-monitor-prompt.md`。市场 Skill 每天只分析一次，同一份市场结果同时用于已有股票跟踪和当天新选股。先为 monitor snapshot 的 `daily_review_episode_ids` 形成全部结构化判断草稿，再按 `checkpoint_review_episode_ids` 确定节点股、从非节点中选0—8只普通详评、其余归简评；各写唯一正文并核对一致性后，先调用 `record-daily-formal-reviews` 保存账本，再 `record` 全部节点详评和普通详评的 `monitor-report`。`checkpoint_review_stock_count` 是节点股数，`regular_detail_stock_limit` 是普通详评上限，不是必写篇数；账本只保存简评类正文。只有 selection 返回 `ready_for_research` 或 `ready_for_research_limited` 时才继续当天 V4 新选股。
 
-进入任何复盘写作前（正常任务、`already_selected` 当日仅复盘、补跑路径均同），必须按 `ops/forward-monitor-prompt.md` 的分类知识库入口实际读取对应类型的指南与范文；具体读取范围、选择方法与失败降级仅由复盘 Skill／Prompt 维护，不依赖此前对话的记忆，也不把范文名单或知识库路径复制到本 Prompt。
+进入任何复盘写作前（正常任务、`already_selected` 当日仅复盘、补跑路径均同），必须按 `ops/forward-monitor-prompt.md` 的分类知识库入口实际读取对应类型的指南与范文，并按其当前机会合同为每条需复盘记录形成 `current_opportunity` 当前意见；具体读取范围、选择方法与失败降级仅由复盘 Skill／Prompt 维护，不依赖此前对话的记忆，也不把范文名单或知识库路径复制到本 Prompt。
 
 若 selection 返回 `already_selected`，仍可生成跟踪报告，但不得重复执行新选股。若 snapshot 的 `daily_review_episode_ids` 为空，只跳过逐股写作，仍通过既有 `record-daily-formal-reviews`、`record` 保存 `reviews=[]` 的空账本和 `alerts=[]` 的空详评报告；报告汇总、未详评数量及市场内容使用真实 snapshot 和本次共同市场判断，不一律填零、不借用旧报告。正常继续新选股或共同收尾。若返回 `non_trading_day`、数据缺口或错误，说明真实状态，不补猜。
 

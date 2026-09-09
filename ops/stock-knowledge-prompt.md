@@ -30,12 +30,12 @@
 
 ### 三、做一批优化复盘
 
-输入：一个行动日批次或数据包目录（`local_archive/skill_optimization/` 下的导出包）。
+输入：一个行动日批次或数据包目录（`local_archive/skill_optimization/` 下的导出包）。本模式只是知识库侧的整理入口；完整的批量研究方法、五环节问题清单、提案格式与"批准后才实施"流程以 `ops/selection-method-review-prompt.md` 为准（默认 diagnose 模式，不因"整理知识库"视为同意修改选择规则）。
 
 1. 先定本批研究问题，再看结果；成熟度以包内 `fixed_d20_status` 为准，未成熟记录不进完整 20 日分母，缺失记录单列。
 2. 用 `99_模板/批量复盘模板.md` 写草稿放入 `30_批量复盘/`，`status: draft`；五环节（市场／板块／公司／价格／总控）各自对照原判断、结果、支持例、反例与解释边界，字段名以 forward_monitor 实际字段为准（如 `weak_or_failed_link`、`decision_review`、`best_supported_explanation`），不新建平行标签体系。
 3. 只提出资料能支持的问题；最多给一项优先修改假设，没有充分依据就写"本批不改"。
-4. 用户明确批准某条方法修改后，才用 `99_模板/优化决定模板.md` 记入 `31_优化史.md`；知识库笔记本身不是对任何 Skill 的修改。
+4. 用户明确批准某条方法修改后，按 `ops/selection-method-review-prompt.md` 的 implement 流程实施，并用 `99_模板/优化决定模板.md` 记入 `31_优化史.md`；知识库笔记本身不是对任何 Skill 的修改。
 
 ## 通用边界
 
