@@ -539,21 +539,63 @@ def build_decision_records(
 
 
 def build_research_run_records(
-    traces: Sequence[tuple[str, Mapping[str, Any]]]
+    traces: Sequence[tuple[str, Mapping[str, Any]]],
+    selection_dir: Path | None = None,
 ) -> list[dict[str, Any]]:
-    return [
-        {
-            "run_id": build_run_id(str(trace["formation_date"]), str(trace["action_date"])),
-            "logical_source_id": f"frozen-selection/{trace['formation_date']}",
-            "trace_version": _trace_version(source_name, trace),
-            "source_file": source_name,
-            "formation_date": trace["formation_date"],
-            "action_date": trace["action_date"],
-            "selection_as_of": trace.get("as_of"),
-            "trace_payload": dict(trace),
-        }
-        for source_name, trace in traces
-    ]
+    records: list[dict[str, Any]] = []
+    for source_name, trace in traces:
+        action_date = str(trace["action_date"])
+        context: dict[str, Any] | None = None
+        version_status = "unknown"
+        version_missing_reason: str | None = "research_run_context_file_missing"
+        if selection_dir is not None:
+            context_path = selection_dir / f"research-run-context-{action_date}.json"
+            if context_path.is_file():
+                try:
+                    payload = json.loads(context_path.read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    payload = None
+                if isinstance(payload, dict):
+                    file_action = str(payload.get("action_date") or "")
+                    file_run_id = payload.get("run_id")
+                    if file_action and file_action != action_date:
+                        version_missing_reason = "research_run_context_action_date_mismatch"
+                    elif file_run_id and str(file_run_id) != build_run_id(
+                        str(trace["formation_date"]), action_date
+                    ):
+                        version_missing_reason = "research_run_context_run_id_mismatch"
+                    else:
+                        context = payload
+                        raw_status = str(payload.get("version_status") or "")
+                        version_status = (
+                            raw_status
+                            if raw_status in {
+                                "recorded_at_run", "uncommitted_method_changes",
+                            }
+                            else "unknown"
+                        )
+                        if version_status == "unknown":
+                            version_missing_reason = (
+                                None if raw_status else "research_run_context_status_unknown"
+                            )
+                        else:
+                            version_missing_reason = None
+        records.append(
+            {
+                "run_id": build_run_id(str(trace["formation_date"]), action_date),
+                "logical_source_id": f"frozen-selection/{trace['formation_date']}",
+                "trace_version": _trace_version(source_name, trace),
+                "source_file": source_name,
+                "formation_date": trace["formation_date"],
+                "action_date": action_date,
+                "selection_as_of": trace.get("as_of"),
+                "research_run_context": context,
+                "version_status": version_status,
+                "version_missing_reason": version_missing_reason,
+                "trace_payload": dict(trace),
+            }
+        )
+    return records
 
 
 def load_latest_monitor_snapshot(
@@ -575,6 +617,7 @@ def build_monitor_records(
     start_action_date: str,
     end_action_date: str,
     outcome_through_date: str,
+    valid_episode_ids: set[str] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
     snapshot, snapshot_analysis_date, snapshot_source = load_latest_monitor_snapshot(
         monitor_dir, outcome_through_date
@@ -589,7 +632,8 @@ def build_monitor_records(
         episode["snapshot_analysis_date"] = snapshot_analysis_date
         episode["snapshot_as_of"] = snapshot.get("as_of")
         episode["source_file"] = snapshot_source
-    valid_episode_ids = {str(row["episode_id"]) for row in episodes}
+    if valid_episode_ids is None:
+        valid_episode_ids = {str(row["episode_id"]) for row in episodes}
     alerts: list[dict[str, Any]] = []
     reviews: list[dict[str, Any]] = []
     for path in canonical_archive_paths(monitor_dir, "monitor-report"):
@@ -740,29 +784,6 @@ def _formula_version_from_path(path: Path) -> str | None:
     return None
 
 
-def _referenced_formula_versions(
-    decisions: Sequence[Mapping[str, Any]], formation_date: str
-) -> set[str]:
-    """Formula versions actually referenced by this formation date's decisions."""
-    found: set[str] = set()
-
-    def walk(value: Any) -> None:
-        if isinstance(value, Mapping):
-            for key, child in value.items():
-                if "formula_version" in str(key) and child not in (None, ""):
-                    found.add(str(child))
-                walk(child)
-        elif isinstance(value, (list, tuple)):
-            for child in value:
-                walk(child)
-
-    for decision in decisions:
-        if str(decision.get("formation_date")) != formation_date:
-            continue
-        walk(decision)
-    return found
-
-
 def build_derived_context_records(
     warehouse_root: Path,
     traces: Sequence[tuple[str, Mapping[str, Any]]],
@@ -778,7 +799,6 @@ def build_derived_context_records(
     sector_codes_by_formation: dict[str, set[str]] = defaultdict(set)
     for _, trace in traces:
         formation_date = str(trace["formation_date"])
-        referenced = _referenced_formula_versions(decisions, formation_date)
         market_path = _latest_formula_file(warehouse_root, "market_context", formation_date)
         if market_path is not None:
             version = _formula_version_from_path(market_path)
@@ -787,9 +807,10 @@ def build_derived_context_records(
                     {
                         "run_id": build_run_id(formation_date, str(trace["action_date"])),
                         "context_role": "formation_date_derived_audit_slice",
-                        "context_origin": (
-                            "frozen_used" if version in referenced else "retrospective_reconstruction"
-                        ),
+                        # 事后重读的派生行默认是重建；仅当存在逐记录的冻结输入
+                        # 引用证明该行就是当时输入时才允许 frozen_used，当前
+                        # 导出器没有这类逐行证据，公式版本字符串命中不足以证明。
+                        "context_origin": "retrospective_reconstruction",
                         "formula_version": version,
                         **row,
                     }
@@ -809,9 +830,7 @@ def build_derived_context_records(
                     {
                         "run_id": build_run_id(formation_date, str(trace["action_date"])),
                         "context_role": "candidate_formation_date_derived_audit_slice",
-                        "context_origin": (
-                            "frozen_used" if version in referenced else "retrospective_reconstruction"
-                        ),
+                        "context_origin": "retrospective_reconstruction",
                         "formula_version": version,
                         **normalized,
                     }
@@ -841,15 +860,10 @@ def build_derived_context_records(
     action_by_formation = {
         str(trace["formation_date"]): str(trace["action_date"]) for _, trace in traces
     }
-    referenced_by_formation = {
-        formation: _referenced_formula_versions(decisions, formation)
-        for formation in {str(row["formation_date"]) for row in candidates}
-    }
     for formation_date, codes in sorted(sector_codes_by_formation.items()):
         sector_path = _latest_formula_file(warehouse_root, "sector_hotspot", formation_date)
         if sector_path is None:
             continue
-        referenced = referenced_by_formation.get(formation_date, set())
         version = _formula_version_from_path(sector_path)
         frame = pd.read_parquet(sector_path)
         filtered = frame.loc[frame["group_code"].astype(str).isin(codes)]
@@ -860,9 +874,7 @@ def build_derived_context_records(
                         formation_date, action_by_formation[formation_date]
                     ),
                     "context_role": "referenced_group_formation_date_audit_slice",
-                    "context_origin": (
-                        "frozen_used" if version in referenced else "retrospective_reconstruction"
-                    ),
+                    "context_origin": "retrospective_reconstruction",
                     "formula_version": version,
                     **normalize_json(row),
                 }
@@ -1106,6 +1118,10 @@ def fixed_d20_fields(
         "fixed_d20_close_drawdown_at_end": None,
         "fixed_d20_range_missing_dates": [],
         "fixed_d20_note": None,
+        "fixed_d20_market_return": None,
+        "fixed_d20_excess_market_return": None,
+        "fixed_d20_market_basis": None,
+        "fixed_d20_market_missing_reason": None,
     }
     action_date = str(subject.get("action_date") or "")
     days_after = [day for day in trading_dates if action_date and day >= action_date]
@@ -1132,24 +1148,25 @@ def fixed_d20_fields(
         fields["fixed_d20_status"] = "not_mature"
         return fields
     first20 = [rows_by_number.get(number) for number in range(1, FIXED_D20_DAYS + 1)]
+    expected_dates = days_after[:FIXED_D20_DAYS]
     missing_closes = [
-        row["trade_date"]
-        for row in first20
+        expected
+        for expected, row in zip(expected_dates, first20)
         if row is None
         or row.get("data_status") != "available"
         or row.get("close") is None
         or row.get("adj_factor") is None
     ]
     missing_highs = [
-        row["trade_date"]
-        for row in first20
+        expected
+        for expected, row in zip(expected_dates, first20)
         if row is not None
         and row.get("data_status") == "available"
         and row.get("high") is None
     ]
     missing_lows = [
-        row["trade_date"]
-        for row in first20
+        expected
+        for expected, row in zip(expected_dates, first20)
         if row is not None
         and row.get("data_status") == "available"
         and row.get("low") is None
@@ -1162,6 +1179,17 @@ def fixed_d20_fields(
     fields["fixed_d20_status"] = "complete"
     fields["fixed_d20_end_date"] = first20[-1]["trade_date"]
     fields["fixed_d20_terminal_return"] = closes[-1] / entry_open - 1.0
+    day20_market = first20[-1].get("market_return_since_entry")
+    if day20_market is None:
+        fields["fixed_d20_market_missing_reason"] = (
+            "market_benchmark_missing_for_day20_or_action_open"
+        )
+    else:
+        fields["fixed_d20_market_return"] = day20_market
+        fields["fixed_d20_excess_market_return"] = (
+            fields["fixed_d20_terminal_return"] - day20_market
+        )
+        fields["fixed_d20_market_basis"] = "action_open_to_same_close"
     peak = closes[0]
     max_close = closes[0]
     max_drawdown = 0.0
@@ -1629,6 +1657,7 @@ def finalize_manifest(
     maturity_counts: Mapping[str, int],
     known_limitations: Sequence[str],
     ledger_conflicts: Sequence[str] = (),
+    current_opportunity_contract: str | None = None,
 ) -> None:
     payload_files = sorted(
         path
@@ -1665,6 +1694,11 @@ def finalize_manifest(
         "action_dates": sorted(set(selected_action_dates)),
         "research_action_dates": sorted(set(research_action_dates)),
         "fixed_d20_maturity": dict(maturity_counts),
+        **(
+            {"current_opportunity_contract": current_opportunity_contract}
+            if current_opportunity_contract
+            else {}
+        ),
         "files": file_entries,
         "privacy": {
             "contains_credentials": False,
@@ -1780,15 +1814,20 @@ def export_dataset(
     ]
     decisions = build_decision_records(traces)
     condition_records = load_condition_review_records(condition_review_file)
-    research_runs = build_research_run_records(traces)
+    research_runs = build_research_run_records(traces, selection_dir)
     review_contracts = build_review_contracts(candidates)
+    # 本批原始身份：正式 selection 的 event_key（与 episode_id 同构）。
+    # snapshot 只提供仍在池内的观察数据，已结束记录不得因不在最新快照而漏读。
+    batch_episode_ids = {str(row["event_key"]) for row in selections}
     monitor_episodes, monitor_alerts, monitor_reviews = build_monitor_records(
         monitor_dir,
         start_action_date,
         end_action_date,
         outcome_through_date,
+        valid_episode_ids=batch_episode_ids,
     )
-    formal_episode_ids = {str(row["event_key"]) for row in selections}
+    monitor_episode_ids = {str(row["episode_id"]) for row in monitor_episodes}
+    formal_episode_ids = batch_episode_ids
     monitor_episode_ids = {str(row["episode_id"]) for row in monitor_episodes}
     daily_reviews, ledger_conflicts = load_daily_formal_review_records(
         monitor_dir,
@@ -1879,6 +1918,10 @@ def export_dataset(
         "fixed_d20_close_drawdown_at_end",
         "fixed_d20_range_missing_dates",
         "fixed_d20_note",
+        "fixed_d20_market_return",
+        "fixed_d20_excess_market_return",
+        "fixed_d20_market_basis",
+        "fixed_d20_market_missing_reason",
         "formal_result_consistency",
         "formal_result_diff_fields",
     ]
@@ -1957,6 +2000,10 @@ def export_dataset(
         "fixed_d20_close_drawdown_at_end",
         "fixed_d20_range_missing_dates",
         "fixed_d20_note",
+        "fixed_d20_market_return",
+        "fixed_d20_excess_market_return",
+        "fixed_d20_market_basis",
+        "fixed_d20_market_missing_reason",
     ]
     counts["candidate_outcomes"] = write_csv(
         data_dir / "candidate_outcomes.csv",
@@ -2070,6 +2117,9 @@ def export_dataset(
         candidate_daily_prices,
         candidate_daily_fields,
     )
+    has_current_opportunity = any(
+        row.get("current_opportunity") is not None for row in daily_reviews
+    )
     maturity_counts: dict[str, int] = {
         status: sum(
             1 for row in selections if row.get("fixed_d20_status") == status
@@ -2133,6 +2183,9 @@ def export_dataset(
         selected_action_dates=[str(row["action_date"]) for row in selections],
         research_action_dates=[str(trace["action_date"]) for _, trace in traces],
         maturity_counts=maturity_counts,
+        current_opportunity_contract=(
+            "current-opportunity-v1" if has_current_opportunity else None
+        ),
         known_limitations=[
             "Sector and price derived contexts are referenced audit slices, not full-universe exports.",
             "Same-window sector benchmark series are not available locally; relative sector fields stay null with reasons.",

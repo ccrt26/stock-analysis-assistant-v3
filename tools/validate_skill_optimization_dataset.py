@@ -295,6 +295,33 @@ def validate_package(package_dir: Path) -> dict[str, Any]:
         assert_unique(review_keys, "daily review (episode_id, analysis_date)")
         if any(row.get("review_kind") not in REVIEW_KINDS for row in daily_reviews):
             raise ValueError("daily review has an invalid review_kind")
+    declared_contract = manifest.get("current_opportunity_contract")
+    if declared_contract not in (None, "", "current-opportunity-v1"):
+        raise ValueError("manifest declares an unknown current_opportunity_contract")
+    if is_v3 and declared_contract:
+        rows_with = [
+            row for row in daily_reviews if row.get("current_opportunity")
+        ]
+        if not rows_with:
+            raise ValueError(
+                "manifest declares current_opportunity_contract but no ledger "
+                "row carries a current_opportunity object"
+            )
+        for row in rows_with:
+            obj = row["current_opportunity"]
+            if str(obj.get("outlook_5_10d") or "") not in {
+                "up", "sideways", "down", "unclear",
+            } or str(obj.get("participation") or "") not in {
+                "consider", "wait", "avoid", "insufficient",
+            }:
+                raise ValueError(
+                    "current_opportunity has an invalid enum: "
+                    + str(row.get("episode_id"))
+                )
+    elif daily_reviews and any(row.get("current_opportunity") for row in daily_reviews):
+        raise ValueError(
+            "current_opportunity present without a declared contract in manifest"
+        )
 
     workbook_paths = sorted(package_dir.glob("*.xlsx"))
     declared_sheets = manifest.get("workbook_sheets")

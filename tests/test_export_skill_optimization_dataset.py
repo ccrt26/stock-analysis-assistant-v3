@@ -1103,3 +1103,165 @@ def test_T15_missing_middle_close_blocks_fixed_d20_but_high_only_gap_keeps_close
     assert fields2["fixed_d20_mfe"] is None
     assert fields2["fixed_d20_mae"] is not None
     assert fields2["fixed_d20_range_missing_dates"] == [day5]
+
+
+# ---------------------------------------------------------------------------
+# V3 连接测试：T17（已结束记录不漏导）/ T18（方法版本）/ T20（固定D20市场基准）
+# ---------------------------------------------------------------------------
+
+
+def test_T17_ended_episode_still_exports_its_saved_detail_reviews(tmp_path: Path) -> None:
+    trace = _v4_trace("2026-08-20", "2026-08-19", [_active_candidate("600150.SH", "中国船舶", "selected")])
+    log_rows = [
+        {
+            "formation_date": "2026-08-19", "action_date": "2026-08-20",
+            "as_of": "2026-08-19T18:30:00+08:00", "ts_code": "600150.SH",
+            "name": "中国船舶", "final_fate": "selected", "priority": "1",
+            "opportunity_type": "independent_price_anomaly",
+            "selection_reason": "理由", "strongest_counterevidence": "反证",
+            "nearest_comparison": "", "validation_mode": "selection",
+        }
+    ]
+    source = _write_source_root(
+        tmp_path / "source", traces=[trace], log_rows=log_rows,
+        open_days=["2026-08-20", "2026-08-21"],
+    )
+    # 最新快照不含该 episode；旧报告与账本含它的详评与结案材料
+    monitor_dir = source / "local_archive/forward_monitor"
+    monitor_dir.mkdir(parents=True, exist_ok=True)
+    (monitor_dir / "snapshot-2026-08-31.json").write_text(
+        json.dumps({"snapshot_version": "forward-monitor-snapshot-v1", "episodes": []}),
+        encoding="utf-8",
+    )
+    report = {
+        "analysis_date": "2026-08-21",
+        "as_of": "2026-08-21T18:30:00+08:00",
+        "alerts": [{
+            "alert_type": "routine_detail",
+            "episode_ids": ["formal:2026-08-19:600150.SH:selected"],
+            "episode_reviews": [{
+                "episode_id": "formal:2026-08-19:600150.SH:selected",
+                "current_review": "中国船舶｜正式归档的旧详评正文。",
+            }],
+        }],
+    }
+    (monitor_dir / "monitor-report-2026-08-21.json").write_text(
+        json.dumps(report, ensure_ascii=False), encoding="utf-8",
+    )
+    out = tmp_path / "package"
+
+    counts = export_dataset(
+        source, out,
+        start_action_date="2026-08-20", end_action_date="2026-08-20",
+        outcome_through_date="2026-08-21",
+        exported_at="2026-09-09T12:00:00+08:00",
+    )
+
+    assert counts["monitor_reviews"] == 1
+    rows = [json.loads(line) for line in
+            (out / "data/monitor_reviews.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert rows[0]["current_review"] == "中国船舶｜正式归档的旧详评正文。"
+
+
+def test_T18_method_run_context_versions_are_recorded_honestly(tmp_path: Path) -> None:
+    from tools.export_skill_optimization_dataset import build_research_run_records
+
+    def _trace(action, formation):
+        return {"formation_date": formation, "action_date": action,
+                "trace_version": "daily-research-trace-v4"}
+
+    traces = [("t1.json", _trace("2026-09-02", "2026-09-01")),
+              ("t2.json", _trace("2026-09-03", "2026-09-02")),
+              ("t3.json", _trace("2026-09-04", "2026-09-03"))]
+    sel = tmp_path / "forward_selection"
+    sel.mkdir(parents=True)
+    contexts = {
+        "2026-09-02": {"run_id": "formal:2026-09-01:2026-09-02",
+                       "action_date": "2026-09-02", "version_status": "recorded_at_run"},
+        "2026-09-03": {"run_id": "formal:WRONG:2026-09-03",
+                       "action_date": "2026-09-03", "version_status": "recorded_at_run"},
+        "2026-09-04": {"run_id": None, "action_date": "2026-09-04",
+                       "version_status": "uncommitted_method_changes"},
+    }
+    for action_date, payload in contexts.items():
+        (sel / f"research-run-context-{action_date}.json").write_text(
+            json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+    rows = build_research_run_records(traces, sel)
+
+    by_date = {row["action_date"]: row for row in rows}
+    assert by_date["2026-09-02"]["version_status"] == "recorded_at_run"
+    assert by_date["2026-09-02"]["research_run_context"]["version_status"] == "recorded_at_run"
+    assert by_date["2026-09-03"]["version_status"] == "unknown"
+    assert by_date["2026-09-03"]["version_missing_reason"] == "research_run_context_run_id_mismatch"
+    # run_id 为 null 的文件按其声明的 dirty 状态记录，不抛错
+    assert by_date["2026-09-04"]["version_status"] == "uncommitted_method_changes"
+    assert by_date["2026-09-04"]["version_missing_reason"] is None
+    # 无文件的运行 unknown
+    no_dir_rows = build_research_run_records(traces[:1], tmp_path / "missing")
+    assert no_dir_rows[0]["version_status"] == "unknown"
+
+
+def test_T20_fixed_d20_market_fields_use_day20_same_window(tmp_path: Path) -> None:
+    closes = {number: 1.02 for number in range(1, 21)}
+    planned_days = [f"2026-08-{day:02d}" if day <= 31 else f"2026-09-{day - 31:02d}"
+                    for day in range(20, 40)][:20]
+    root, open_days = _flat_path_rows(tmp_path, 20, closes)
+    index = {day: (1000.0, 1010.0) for day in open_days}
+    index[open_days[-1]] = (1000.0, 1060.0)
+    root = _make_warehouse(
+        tmp_path / "with-index", open_days=open_days,
+        equity={
+            day: [{"ts_code": "600150.SH", "open": 100.0, "high": 101.0,
+                   "low": 99.0, "close": 102.0}] for day in open_days
+        },
+        adj={day: {"600150.SH": 1.0} for day in open_days},
+        index=index,
+    )
+    trading_days = load_trading_dates(root, "2026-08-20", "2026-09-08")
+    benchmark = load_benchmark_daily(root, trading_days)
+    subject = _subject("formal:2026-08-19:600150.SH:selected")
+    rows = build_daily_price_volume_records(
+        root, [subject], "2026-09-08", trading_days, benchmark
+    )
+    fields = fixed_d20_fields(subject, rows, trading_days)
+    assert fields["fixed_d20_status"] == "complete"
+    assert fields["fixed_d20_market_return"] == pytest.approx(0.06)
+    assert fields["fixed_d20_excess_market_return"] == pytest.approx(
+        fields["fixed_d20_terminal_return"] - 0.06
+    )
+    assert fields["fixed_d20_market_basis"] == "action_open_to_same_close"
+
+    # 缺市场入口：字段为空并说明，不用最近5日替代
+    bare_root, bare_days = _flat_path_rows(tmp_path / "bare", 20, closes)
+    rows_bare = build_daily_price_volume_records(
+        bare_root, [subject], "2026-09-08", bare_days, {}
+    )
+    fields_bare = fixed_d20_fields(subject, rows_bare, bare_days)
+    assert fields_bare["fixed_d20_market_return"] is None
+    assert fields_bare["fixed_d20_market_missing_reason"]
+
+
+def test_T21_whole_missing_day_inside_fixed_window_reports_calendar_date(tmp_path: Path) -> None:
+    closes = {number: 1.02 for number in range(1, 21)}
+    planned_days = [f"2026-08-{day:02d}" if day <= 31 else f"2026-09-{day - 31:02d}"
+                    for day in range(20, 40)][:20]
+    planned_missing = planned_days[9]
+    equity = {
+        day: [{"ts_code": "600150.SH", "open": 100.0, "high": 101.0,
+               "low": 99.0,
+               "close": None if day == planned_missing else 102.0}]
+        for day in planned_days
+    }
+    root = _make_warehouse(
+        tmp_path, open_days=planned_days, equity=equity,
+        adj={day: {"600150.SH": 1.0} for day in planned_days},
+    )
+    open_days = planned_days
+    trading_days = load_trading_dates(root, "2026-08-20", "2026-09-08")
+    subject = _subject("formal:2026-08-19:600150.SH:selected")
+    rows = build_daily_price_volume_records(root, [subject], "2026-09-08", trading_days)
+    fields = fixed_d20_fields(subject, rows, trading_days)
+    assert fields["fixed_d20_status"] == "missing_path"
+    assert fields["fixed_d20_missing_dates"] == [planned_missing]
+    assert fields["fixed_d20_terminal_return"] is None
