@@ -9,6 +9,7 @@
 - 正式每日研究与复盘开始前必须读 `ops/forward-selection-prompt.md` 和 `ops/forward-monitor-prompt.md`，遵守时间、三路互斥、节点六项／普通详评四项、正文唯一存放及 D20 冻结合同。次晨提醒读 `ops/preopen-safety-prompt.md`。沿用现有报告模型和任务，不自行新增任务。
 - 公司介绍是正式推荐的附属资料：运行顺序见 `ops/company-introduction-prompt.md`，方法见 `.agents/skills/writing-company-introductions/SKILL.md`，按原推荐身份与原 as_of 保存于 `local_archive/company_introductions/`；它不参与选股、不是第六个视角，不进入 Forward CSV、V4 trace 或复盘正文，不承诺收益、不给目标价。
 - 季度／半年产业研究先读 `docs/industry-research/00_逐步执行操作手册.md` 和 `docs/industry-research/01_全局执行规范.md`，与短周期选股分离。
+- Obsidian 股票知识子库只沉淀认识、不改写正式记录：整理入口是 `ops/stock-knowledge-prompt.md`（仅人工触发），分层与口径见 `docs/architecture/stock-knowledge-and-skill-review-v1.md`。
 
 ## 研究与数据边界
 

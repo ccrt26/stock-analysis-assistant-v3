@@ -485,13 +485,16 @@ def test_monitor_shares_evening_cutoff_with_selection():
 
 def test_review_prompt_pins_plain_language_standard_and_style_anchor() -> None:
     monitor = Path("ops/forward-monitor-prompt.md").read_text(encoding="utf-8")
+    legacy_examples = Path(
+        ".agents/skills/reviewing-stock-recommendations/references/review-writing-legacy-examples.md"
+    ).read_text(encoding="utf-8")
     skill = Path(
         ".agents/skills/reviewing-stock-recommendations/SKILL.md"
     ).read_text(encoding="utf-8")
 
-    for phrase in ("直接说事，不表演通俗", "不打比方", "文风基准",
-                   "缩量整理两天后今天放量再攻"):
+    for phrase in ("直接说事，不表演通俗", "不打比方", "文风基准"):
         assert phrase in monitor
+    assert "缩量整理两天后今天放量再攻" in legacy_examples
     for phrase in ("直接说事，不表演通俗", "事实、时点、口径和来源必须准确且可追溯"):
         assert phrase in skill
     # 软数量配额已被三路互斥方案删除，不得回潮。
@@ -503,8 +506,11 @@ def test_review_prompt_pins_plain_language_standard_and_style_anchor() -> None:
                    "事实—这说明什么—还不能证明什么"):
         assert phrase in monitor
         assert phrase in skill
-    assert "节点范例（银龙股份" in monitor
     assert "立场＋当前最重要的1—2个支持事实＋限制因素" in monitor
+    # 历史样稿已迁出主 Prompt，改钉归档文件。
+    assert "节点范例（银龙股份" in legacy_examples
+    assert "历史样稿与更正记录" in legacy_examples
+    assert "节点范例（银龙股份" not in monitor
     # 普通详评也需要核对已发生的观察条件，并保留第四项的后续观察。
     assert "条件句只允许收在节点详评结尾" not in monitor
     assert "判断给理由了吗" in monitor
@@ -513,7 +519,7 @@ def test_review_prompt_pins_plain_language_standard_and_style_anchor() -> None:
                    "第三天出现了推荐后第一个有分量的证据",
                    "第一周结束，当初的判断兑现了大半",
                    "第十天，涨势停了三天"):
-        assert opener in monitor
+        assert opener in legacy_examples
     # 旧标签式范例开头与旧D10样本不得回潮。
     for stale in ("首日复盘（执行性日）", "第 3 个交易日（持续性首检）",
                   "第一周小结", "缩量整理第三天"):
@@ -562,6 +568,9 @@ def test_review_prompt_fixes_brief_quality_and_title_contract() -> None:
     skill = Path(
         ".agents/skills/reviewing-stock-recommendations/SKILL.md"
     ).read_text(encoding="utf-8")
+    legacy = Path(
+        ".agents/skills/reviewing-stock-recommendations/references/review-writing-legacy-examples.md"
+    ).read_text(encoding="utf-8")
 
     for text in (monitor, skill):
         # 简评标题与普通详评同格式，标题首段计入600字符。
@@ -574,7 +583,10 @@ def test_review_prompt_fixes_brief_quality_and_title_contract() -> None:
         assert "伤的是或撑的是" in text
         # 中心问题从上轮悬念来，不是当天涨幅榜。
         assert "优先从上一轮的观察条件和明示未知里来" in text
-    # 用户批准的简评范文钉住质量基准，标注事实须替换。
-    assert "银龙股份｜缩量小涨，独立强势还在，要盯的重新变成量能。" in monitor
-    assert "事实为当日真实数据" in monitor
-    assert "简评范例" in monitor
+    # 用户批准的简评范文钉住质量基准；样稿正文在历史归档文件中核对。
+    assert "简评范例" in legacy
+    assert "银龙股份｜缩量小涨，独立强势还在，要盯的重新变成量能。" in legacy
+    assert "事实为当日真实数据" in legacy
+    # 主 Prompt 保留分类知识库入口，不再内嵌全部范文全文。
+    assert "分类知识库入口" in monitor
+    assert "00_阅读指南.md" in monitor

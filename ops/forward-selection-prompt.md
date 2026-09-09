@@ -36,7 +36,7 @@
 
 然后读取 `ops/forward-monitor-prompt.md`。市场 Skill 每天只分析一次，同一份市场结果同时用于已有股票跟踪和当天新选股。先为 monitor snapshot 的 `daily_review_episode_ids` 形成全部结构化判断草稿，再按 `checkpoint_review_episode_ids` 确定节点股、从非节点中选0—8只普通详评、其余归简评；各写唯一正文并核对一致性后，先调用 `record-daily-formal-reviews` 保存账本，再 `record` 全部节点详评和普通详评的 `monitor-report`。`checkpoint_review_stock_count` 是节点股数，`regular_detail_stock_limit` 是普通详评上限，不是必写篇数；账本只保存简评类正文。只有 selection 返回 `ready_for_research` 或 `ready_for_research_limited` 时才继续当天 V4 新选股。
 
-本次有普通详评时，按复盘 Prompt 实际读取 `.agents/skills/reviewing-stock-recommendations/references/regular-review-calibration.md`，先完成首篇写作与事实、告知目的检查再续写；不要依赖此前对话的记忆或只读取 Skill 的简介。无普通详评时跳过，方法与检查细节仅由复盘 Skill／Prompt 维护。
+进入任何复盘写作前（正常任务、`already_selected` 当日仅复盘、补跑路径均同），必须按 `ops/forward-monitor-prompt.md` 的分类知识库入口实际读取对应类型的指南与范文；具体读取范围、选择方法与失败降级仅由复盘 Skill／Prompt 维护，不依赖此前对话的记忆，也不把范文名单或知识库路径复制到本 Prompt。
 
 若 selection 返回 `already_selected`，仍可生成跟踪报告，但不得重复执行新选股。若 snapshot 的 `daily_review_episode_ids` 为空，只跳过逐股写作，仍通过既有 `record-daily-formal-reviews`、`record` 保存 `reviews=[]` 的空账本和 `alerts=[]` 的空详评报告；报告汇总、未详评数量及市场内容使用真实 snapshot 和本次共同市场判断，不一律填零、不借用旧报告。正常继续新选股或共同收尾。若返回 `non_trading_day`、数据缺口或错误，说明真实状态，不补猜。
 
@@ -227,6 +227,33 @@ local_archive/forward_selection/pending-trace-<formation_date>.json
 ```
 
 只有返回 `selection_frozen` 或 `already_selected` 才算完成。若返回结构或证据校验错误，不得退回旧版轨迹，不得删减 V4 字段，应按错误定位当前 V4 JSON。
+
+### 方法版本辅助记录（仅新增研究，失败不撤销推荐）
+
+`record-trace` 返回 `selection_frozen` 后，把本次实际读取方法文件时记录的版本信息保存到：
+
+```text
+local_archive/forward_selection/research-run-context-<action_date>.json
+```
+
+全部字段使用真实读取值，不凭印象填写，不使用中文占位值：
+
+```json
+{
+  "run_id": "与本次冻结研究对应的既有 run_id",
+  "action_date": "从本次 trace 读取",
+  "recorded_at": "实际读取方法文件时的带时区时间",
+  "repo_commit": "实际 HEAD",
+  "method_revision": "方法文件集合最后一次相关提交",
+  "method_files": ["本次实际纳入版本核对的方法文件相对路径"],
+  "method_files_changed_locally": [],
+  "model_id": null,
+  "version_status": "recorded_at_run",
+  "source_trace": "原 trace 的仓库相对路径"
+}
+```
+
+方法文件集合固定为：五个选股 Skill 的 `SKILL.md`、`ops/forward-selection-prompt.md`、`docs/architecture/a-share-short-horizon-engine-contract-v4.md`，以及本次实际读取的 `src/stock_analyzer/knowledge/` 方法条目。在仓库根目录用 `git rev-parse HEAD`、`git log -1 --format=%H -- <实际路径列表>`、`git diff --name-only HEAD -- <同一列表>` 取得；路径列表由本次已读文件确定。方法文件有未提交修改时，只记录事实并把 `version_status` 标为 `uncommitted_method_changes`，不阻断正式选股，也不新增哈希或快照。`model_id` 只有运行环境明确提供时才记录，否则留空。该记录是辅助说明，不写入正式 trace，不改变推荐保存成功条件；保存失败时说明失败即可，不撤销已保存的正式推荐，不重跑研究。历史运行不补造此记录。
 
 ### 研究归档后的网页同步（共同收尾）
 
