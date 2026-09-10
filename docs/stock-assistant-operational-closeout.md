@@ -11,7 +11,7 @@
 
 ## 本轮完成
 
-1. **旧 WEB 固定入口下线**（用户 2026-09-10 授权）：删除 `local_archive/forward_monitor/index.html` 与 13 个 `monitor-report-*.html` 历史展示页；唯一保留 Prism 入口。正式 JSON/Markdown 未动；这些页面可由统一渲染入口按需重建。已知边界：`tools/render_prism_web.py` 默认渲染仍会重建旧 WEB 文件，是否移除该行为列为待用户单独授权的程序修改。
+1. **旧 WEB 固定入口下线**（用户 2026-09-10 授权，含后续批准停止生成）：删除 `local_archive/forward_monitor/index.html` 与 13 个 `monitor-report-*.html` 历史展示页；`tools/render_prism_web.py` 停止生成旧 WEB 页面；`tools/update_monitor_web.py`（旧固定地址维护工具，仅人工会话调用，无定时依赖）与其测试一并移除。WEB 相关测试 110 项通过；用 2026-09-09 真实归档实机验证默认渲染不再产生任何旧 WEB 文件。`tools/render_monitor_web.py` 保留为共享 payload 组装模块。
 2. **入口核查**：活动导航（根 AGENTS、架构文档、知识库整理入口）均指向 `ops/selection-method-review-prompt.md`；旧 `ops/periodic-research-review-prompt.md` 无活动引用（仅测试与历史文档引用，保留）。无修改需要。
 3. **知识库整理**（本地 Obsidian 子库，不入公开仓库）：三类复盘各一篇当前机会版候选范文（draft，数字与正式归档逐项核对）、配套改稿对照、银龙股份个股档案（注册回放身份）、`00_使用与恢复手册.md`（唯一网页入口、状态含义、按需买入研究指令模板、异常处理表）。候选采用待用户一次确认。
 4. **备份核查**：本机无既有有效备份（Time Machine 未配置、外置盘无股票资料副本）；需备份区合计约 55M。目的地待用户确认后执行一次手工副本与恢复抽测——在此之前，本地知识与归档仅存于内置盘。

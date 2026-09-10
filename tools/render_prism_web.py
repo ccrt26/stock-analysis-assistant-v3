@@ -10,10 +10,10 @@ tools/guanlan-prism/docs/03-数据接口与口径.md），并做两处展示层�
 当日普通详评名单直接由页面规则从 regular_detail 标记推导（上游无显式排序
 名单时不编造 dailyDeepReview）。不修改选股、复盘、V4 渲染器或定时任务。
 
-默认同时更新两套本地 WEB，共用同一冻结 payload。Prism 输出：
+只维护 Prism 一套本地 WEB（2026-09-10 用户批准停止生成旧 monitor 页面）：
 1. prism-report-<date>.html —— 按日期留档，历史可回看；
 2. prism.html —— 固定地址，内容不变时跳过，旧日期不会覆盖较新的日报。
-另写 monitor-report-<date>.html 与 index.html；显式 --out 保持原 Prism 行为，不额外更新旧 WEB。
+不再写 monitor-report-<date>.html 与 index.html（旧 WEB 已下线）。
 
 用法：
     ./.venv/bin/python tools/render_prism_web.py                  # 最新一个 snapshot
@@ -47,7 +47,7 @@ except ImportError:  # 兼容 `python tools/render_prism_web.py` 直接运行
 
 
 def load_modules():
-    """与 tests/update_monitor_web 复用同一 render_monitor_web 模块实例。"""
+    """与测试复用同一 render_monitor_web 模块实例（共享 payload 组装）。"""
     sys.path.insert(0, str(PROJECT_ROOT / "tools"))
     try:
         from tools import render_monitor_web
@@ -288,15 +288,6 @@ def render(args, renderer, adapt, prism, monitor_dir: Path) -> int:
     if not args.no_publish and fixed_path.exists():
         current = adapt.read_snapshot_text(fixed_path.read_text(encoding="utf-8"))
         newer_fixed = date.fromisoformat(current["analysis_date"]) > analysis_date
-    legacy_html = renderer.render(payload) if args.out is None else None
-    legacy_fixed = monitor_dir / "index.html"
-    newer_legacy = False
-    if legacy_html is not None and not args.no_publish and legacy_fixed.exists():
-        try:
-            current_legacy = adapt.read_snapshot_text(legacy_fixed.read_text(encoding="utf-8"))
-        except ValueError:
-            current_legacy = None
-        newer_legacy = bool(current_legacy and date.fromisoformat(current_legacy["analysis_date"]) > analysis_date)
     if any(path.read_bytes() != content for path, content in inputs.items()):
         raise ValueError("formal archives changed during rendering; retry sync only")
     print("status=rendered" if write_html(out_path, html) else "status=unchanged")
@@ -307,14 +298,6 @@ def render(args, renderer, adapt, prism, monitor_dir: Path) -> int:
             print(f"published={fixed_path}")
         else:
             print(f"published=unchanged {fixed_path}")
-    if legacy_html is not None:
-        write_html(monitor_dir / f"monitor-report-{analysis_date}.html", legacy_html)
-        if not args.no_publish:
-            if newer_legacy:
-                print("legacy_published=skipped_newer")
-            else:
-                changed = write_html(legacy_fixed, legacy_html)
-                print("legacy_published=" + ("updated" if changed else "unchanged"))
     provided = [row for row in display_snapshot.get("marketIndices", []) if row.get("close") is not None]
     print(f"analysis_date={analysis_date.isoformat()}")
     print(f"html_file={out_path}")
