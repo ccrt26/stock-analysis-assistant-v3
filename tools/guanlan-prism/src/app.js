@@ -299,7 +299,10 @@ function reviewBody(s,r,end){
   const riskBlock=originalRiskMarkup(s,hasStatement);
   if(hasStatement){
    const paras=s.statementFull.split(/\n{2,}/).map(p=>'<p>'+richText(p)+'</p>').join('');
-   return `<div class="review-meta"><span>ORIGINAL THESIS</span><span>${dateWord(s).d} · ${escape(s.refKind==='event'?'事件条件记录':'原推荐记录')}</span></div><h3>当时看中的是什么，<br>最担心的又是什么。</h3><div class="copy">${paras}</div>${riskBlock}<p class="source-hint">以上为推荐形成日（${escape(s.formedOn||'')||'日期缺失'}）日报中的逐股原文，逐字未改。时间轴变化不会改写最初的推荐理由。</p>`;
+   const hint=s.statementSource==='adopted_rewrite'
+    ?`以上为用户认可的表达范本（${escape(s.formedOn||'')||'日期缺失'}形成，非当时归档原文）。当时日报原文逐字保留于本地档案。`
+    :`以上为推荐形成日（${escape(s.formedOn||'')||'日期缺失'}）日报中的逐股原文，逐字未改。时间轴变化不会改写最初的推荐理由。`;
+   return `<div class="review-meta"><span>ORIGINAL THESIS</span><span>${dateWord(s).d} · ${escape(s.refKind==='event'?'事件条件记录':'原推荐记录')}</span></div><h3>当时看中的是什么，<br>最担心的又是什么。</h3><div class="copy">${paras}</div>${riskBlock}<p class="source-hint">${hint}</p>`;
   }
   return `<div class="review-meta"><span>ORIGINAL THESIS</span><span>${dateWord(s).d} · ${escape(s.refKind==='event'?'事件条件记录':'原推荐记录')}</span></div><h3>当时看中的是什么，<br>最担心的又是什么。</h3><div class="copy"><p>${escape(s.reasonFull)}</p></div>${riskBlock}<p class="source-hint">当日日报原文未存档，以上为当时存档的推荐理由摘要，逐字未改。时间轴变化不会改写最初的推荐理由。</p>`;
  }

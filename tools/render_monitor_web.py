@@ -1240,6 +1240,39 @@ def extract_daily_statement(
     return (body, "") if body else ("", "not_found")
 
 
+STATEMENT_OVERRIDES_NAME = "statement-overrides.json"
+
+
+def load_statement_overrides(monitor_dir: Path) -> dict[str, dict[str, Any]]:
+    """本机显示层替换表（local_archive 内，不入 Git）；键为 `ts_code:recDate`。
+
+    正式归档不因替换改动；文件缺失或损坏时按无替换处理。
+    """
+    path = monitor_dir / STATEMENT_OVERRIDES_NAME
+    if not path.is_file():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {key: value for key, value in data.items() if isinstance(value, dict)}
+
+
+def apply_statement_override(
+    overrides: dict[str, dict[str, Any]], ts_code: str, rec_iso: str, statement: str
+) -> tuple[str, str | None]:
+    """命中替换表时返回（范本正文, "adopted_rewrite"），否则原样返回。"""
+    entry = overrides.get(f"{ts_code}:{rec_iso}")
+    if not isinstance(entry, dict):
+        return statement, None
+    text = str(entry.get("statement") or "").strip()
+    if not text:
+        return statement, None
+    return text, "adopted_rewrite"
+
+
 def _statement_missing_issue(
     ts_code: str, formed_on: str, name: str, miss_reason: str
 ) -> dict[str, Any] | None:
@@ -1271,6 +1304,7 @@ def build_payload(
 ) -> dict[str, Any]:
     selection_dir = selection_dir or SELECTION_DIR
     intro_root = intro_root or default_intro_root(root)
+    statement_overrides = load_statement_overrides(monitor_dir)
     as_of = str(report.get("as_of") or snapshot.get("as_of"))
     episodes = {
         str(item.get("episode_id")): item
@@ -1526,6 +1560,9 @@ def build_payload(
             str(episode.get("name") or ts_code),
             ts_code,
         )
+        statement_full, statement_source = apply_statement_override(
+            statement_overrides, ts_code, action_iso, statement_full
+        )
         if statement_miss:
             issue = _statement_missing_issue(
                 ts_code, formed_on_iso, str(episode.get("name") or ts_code), statement_miss
@@ -1557,6 +1594,7 @@ def build_payload(
                 "suspended": suspended,
                 "dataIssues": data_issues,
                 "statementFull": statement_full,
+                "statementSource": statement_source,
                 "trackingStatus": (
                     str(episode.get("tracking_status") or "") or None
                 ),
@@ -1599,6 +1637,9 @@ def build_payload(
         d0_statement, d0_miss = extract_daily_statement(
             selection_dir, d0_formed, str(entry.get("name") or ts_code), ts_code
         )
+        d0_statement, d0_statement_source = apply_statement_override(
+            statement_overrides, ts_code, d0_action_iso, d0_statement
+        )
         d0_issues: list[dict[str, Any]] = []
         if d0_miss:
             issue = _statement_missing_issue(
@@ -1626,6 +1667,7 @@ def build_payload(
                 "d0": True,
                 "dataIssues": d0_issues,
                 "statementFull": d0_statement,
+                "statementSource": d0_statement_source,
                 "company": profiles.get(ts_code) or None,
                 "reasonFull": entry["reason"],
                 "reasonRisk": entry["risk"],
