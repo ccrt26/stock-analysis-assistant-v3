@@ -288,10 +288,16 @@ function finalReviewBody(r){
  const facts=[["D20收盘",m.d20_close_return_since_entry],["期间最高收盘",m.d20_max_close_return_since_entry],["期间最深下跌",m.d20_mae_since_entry]].map(([label,value])=>label+"："+(value==null?"数据不足":(value*100).toFixed(2)+"%")).join("；");
  return `<section class="final-review"><h4>20个交易日固定结案</h4><p>${escape(f.final_twenty_day_review.overall_review)}</p><p>${escape(facts)}</p><p class="source-hint">原结论保存：${escape(f.analysis_date)} · 截止 ${escape(f.as_of)}</p></section>`;
 }
+function originalRiskMarkup(s,collapsed=false){
+ const text=escape(s.reasonRisk||'原记录未附风险文字。');
+ if(collapsed)return `<details class="original-risk"><summary>原始风险摘录（展开核对）</summary><p>${text}</p></details>`;
+ return `<div class="original-risk"><h4>原推荐中写下的风险</h4><p>${text}</p></div>`;
+}
 function reviewBody(s,r,end){
  if(state.reviewTab==='original'){
-  const riskBlock=`<div class="original-risk"><h4>原推荐中写下的风险</h4><p>${escape(s.reasonRisk||'原记录未附风险文字。')}</p></div>`;
-  if(s.statementFull){
+  const hasStatement=typeof s.statementFull==='string'&&s.statementFull.trim().length>0;
+  const riskBlock=originalRiskMarkup(s,hasStatement);
+  if(hasStatement){
    const paras=s.statementFull.split(/\n{2,}/).map(p=>'<p>'+richText(p)+'</p>').join('');
    return `<div class="review-meta"><span>ORIGINAL THESIS</span><span>${dateWord(s).d} · ${escape(s.refKind==='event'?'事件条件记录':'原推荐记录')}</span></div><h3>当时看中的是什么，<br>最担心的又是什么。</h3><div class="copy">${paras}</div>${riskBlock}<p class="source-hint">以上为推荐形成日（${escape(s.formedOn||'')||'日期缺失'}）日报中的逐股原文，逐字未改。时间轴变化不会改写最初的推荐理由。</p>`;
   }

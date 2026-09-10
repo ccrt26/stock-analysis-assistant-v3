@@ -94,17 +94,28 @@ def test_detailed_recommendation_explanation_is_required_after_selection_freeze(
         "汇总表只能作为目录",
         "公司主要做什么",
         "为什么会选它",
-        "行业或外部变化",
-        "股票自身表现",
-        "公司经营",
-        "主要不利因素",
-        "综合判断",
         "什么情况会让我改变看法",
-        "每只约350—650字",
-        "没有某个维度的可靠支持，就不写该小标题",
-        "每段最多2—4句话",
+        "名单、顺序和内部研究结论在生成用户说明前已经确定",
+        "不再单设",
+        "作为必写栏目",
+        "主文中必须让读者看到重要风险",
+        "selection-writing-calibration.md",
     ):
         assert phrase in prompt
+
+    # 旧栏目模板与句数/字数门槛不再出现（2026-09-10 表达减负）。
+    for forbidden in (
+        "每只约350—650字",
+        "每段最多2—4句话",
+        "用2—4句话",
+        "没有某个维度的可靠支持，就不写该小标题",
+    ):
+        assert forbidden not in prompt
+
+    assert Path(
+        ".agents/skills/orchestrating-stock-research/references/"
+        "selection-writing-calibration.md"
+    ).is_file()
 
     for phrase in (
         "名单冻结后的用户说明",
@@ -136,13 +147,10 @@ def test_recommendation_prompt_uses_fact_first_plain_language() -> None:
     for phrase in (
         "公司主要做什么",
         "为什么会选它",
-        "行业或外部变化",
-        "股票自身表现",
-        "主要不利因素",
-        "综合判断",
         "什么情况会让我改变看法",
         "32只农业相关股票中",
         "事实本身不是推荐理由",
+        "数字按解释价值挑选",
     ):
         assert phrase in prompt
 
@@ -184,8 +192,7 @@ def test_selection_prompt_separates_confirmation_from_price_already_paid() -> No
         "最大上涨日之后",
         "不能一边说核心持续性没有验证一边正式推荐",
         "为什么会选它",
-        "股票自身表现",
-        "较早确认、正常启动还是已经偏晚",
+        "阶段名称代替实际说明",
     ):
         assert phrase in prompt
 
@@ -333,8 +340,7 @@ def test_unique_output_assigns_disjoint_headings_to_reviews_and_new_recommendati
     recommendation_headings = re.findall(r"^\*\*(.+)\*\*$", recommendation, re.M)
     assert review_headings == ["今天发生了什么", "相比上次判断", "接下来1—3个交易日"]
     assert recommendation_headings == [
-        "公司主要做什么", "为什么会选它", "行业或外部变化", "股票自身表现",
-        "公司经营", "主要不利因素", "综合判断", "什么情况会让我改变看法",
+        "公司主要做什么", "为什么会选它", "什么情况会让我改变看法",
     ]
     assert set(review_headings).isdisjoint(recommendation_headings)
     assert "复盘部分直接采用本次已记录的正式复盘Markdown，不重新摘要" in text
