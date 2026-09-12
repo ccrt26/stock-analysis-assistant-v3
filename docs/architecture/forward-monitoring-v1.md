@@ -55,7 +55,7 @@
 - 数据问题只在问题首次出现、内容发生变化或 D1、D3、D5、D10、D20、D25、D30 固定检查日提醒。
 - V2/V3 每条记录按自己的记录编号带入最近一份最终日报中的上一轮复盘；历史 V1 只保留原有股票级上次状态兼容，不伪装成记录级复盘。
 
-本地产物位于 `local_archive/forward_monitor/`，包括注册记录、每日 snapshot、日评账本和最终 JSON/Markdown；该目录不提交 GitHub。`tools/render_monitor_web.py` 与 `tools/render_prism_web.py` 将冻结结果渲染为本地 HTML，后者调用 Prism 的 `render_html()` 并写独立页面；`tools/update_monitor_web.py` 提供已有的本地更新入口，不创作正文、不增加研究任务。
+本地产物位于 `local_archive/forward_monitor/`，包括注册记录、每日 snapshot、日评账本和最终 JSON/Markdown；该目录不提交 GitHub。`tools/render_prism_web.py` 是唯一正式网页更新入口，读取 `tools/render_monitor_web.py` 整理的冻结数据并调用 Prism 的 `render_html()`，生成日期页和 `prism.html`；共享模块不再生成旧网页，不创作正文、不增加研究任务。
 
 ## CLI
 

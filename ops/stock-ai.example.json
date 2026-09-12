@@ -1,0 +1,46 @@
+{
+  "说明": "stock-ai 本地路由配置样例。复制为仓库根目录 .stock-ai.local.json 后按需修改；该文件不入 Git，不含密钥值，只记录来源。自动链路为 glm → deepseek；astra 由用户在 Codex App 手动执行，不参与自动任务。晚间研究不设总时限与模型时限（只有额度不足/不可用才接替）；次晨沿用 09:30 业务边界，无新增预算。失败/需处理时经 macOS osascript 提交一条原生通知（先落盘后通知）；本配置无通知相关键。",
+  "default_preference": "auto",
+  "tonight": null,
+  "zcode_cli": null,
+  "model_refs": {
+    "glm": "bigmodel/glm-5.3-flash",
+    "deepseek": "deepseek/deepseek-flash"
+  },
+  "base_urls": {
+    "glm": "https://open.bigmodel.cn/api/anthropic",
+    "deepseek": "https://api.deepseek.com/anthropic"
+  },
+  "prepare_timeout_minutes": {
+    "nightly": 15,
+    "preopen": 10
+  },
+  "key_sources": {
+    "glm": [
+      {
+        "kind": "env",
+        "name": "BIGMODEL_API_KEY"
+      },
+      {
+        "kind": "json",
+        "path": "~/.zcode/v2/config.json",
+        "pointer": [
+          "provider",
+          "builtin:bigmodel-coding-plan",
+          "options",
+          "apiKey"
+        ]
+      }
+    ],
+    "deepseek": [
+      {
+        "kind": "env",
+        "name": "DEEPSEEK_API_KEY"
+      },
+      {
+        "kind": "keychain",
+        "service": "在此填写你的钥匙串服务名"
+      }
+    ]
+  }
+}

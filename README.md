@@ -39,7 +39,7 @@ GitHub 不保存真实行情事实。最新可用日期应以本地健康检查�
 
 ## 本地报告展示
 
-`tools/render_monitor_web.py` 将已冻结报告渲染为静态 HTML；`tools/render_prism_web.py` 复用同一份数据生成独立的 Prism 页面；`tools/update_monitor_web.py` 是现有本地更新入口。渲染只呈现已保存正文和确定性数据，不重新研究、不接入实时行情、不发布到云端。具体入口见 [Prism 说明](tools/guanlan-prism/README.md)。
+`tools/render_prism_web.py` 是现有本地展示更新入口，生成 Prism 日期页和固定入口 `prism.html`；`tools/render_monitor_web.py` 仅提供共用的冻结数据整理函数。渲染只呈现已保存正文和确定性数据，不重新研究、不接入实时行情、不发布到云端。具体入口见 [Prism 说明](tools/guanlan-prism/README.md)。
 
 项目协作与插件适用范围见 `AGENTS.md`。本机 Superpowers 限制通过被 Git 忽略的 `.codex/config.toml` 配置，其他机器须在自己的受信任项目中设置；模型与插件是否生效应读取实际任务和加载结果，不能仅凭当前对话模型判断。
 

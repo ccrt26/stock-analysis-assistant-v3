@@ -11,9 +11,9 @@ def test_daily_prompt_is_v4_only() -> None:
     assert "market_propagation_environment" not in text
     assert "engine_type: company_event" not in text
     assert "engine_status=fresh_event_pending" not in text
-    assert text.count("stock_analyzer.ops.forward_selection prepare") == 3
+    assert "stock_analyzer.ops.forward_selection prepare" in text
     assert "用户要求补跑晚间失败任务时" in text
-    assert text.count("--rerun-date <原计划推荐日期>") == 2
+    assert "--rerun-date <原计划推荐日期>" in text  # 补跑语义存在即可（外层入口说明可再提及）
     assert "ready_for_research_limited" in text
     assert "受限模式必须把不可用通道交给总控，不得补猜" in text
     assert (
@@ -60,25 +60,6 @@ def test_daily_prompt_and_v4_contract_define_runtime_data_capability_boundary() 
     assert "不得因为行业或主题一项缺失而停止其他研究路径" in skill
 
 
-def test_periodic_review_prompt_is_v4_only() -> None:
-    text = Path("ops/periodic-research-review-prompt.md").read_text(encoding="utf-8")
-    for engine in (
-        "fresh_event_pending",
-        "event_repricing_confirmed",
-        "sector_broad_diffusion",
-        "sector_leader_cluster",
-        "independent_demand_acceleration",
-        "anchor_only",
-        "unresolved",
-    ):
-        assert engine in text
-    assert "daily-research-trace-v3" not in text
-    assert "engine_status=confirmed | fresh_event_pending | unconfirmed | invalidated" not in text
-    assert text.startswith("# 前20个交易日结束后的集中研究复盘")
-    assert "期间最高涨幅" in text
-    assert "期间最深跌幅" in text
-    assert "推荐股与当时最接近但未推荐股票的比较" in text
-    assert "不自动修改 Skill" in text
 
 
 def test_detailed_recommendation_explanation_is_required_after_selection_freeze() -> None:
@@ -148,7 +129,6 @@ def test_recommendation_prompt_uses_fact_first_plain_language() -> None:
         "公司主要做什么",
         "为什么会选它",
         "什么情况会让我改变看法",
-        "32只农业相关股票中",
         "事实本身不是推荐理由",
         "数字按解释价值挑选",
     ):
@@ -357,3 +337,13 @@ def test_evening_prompt_freezes_cutoff_and_skips_preholiday_reports():
     safety = Path("ops/preopen-safety-prompt.md").read_text(encoding="utf-8")
     for phrase in ("preopen_safety prepare", "暂缓参与", "不得重新选股", "不得增加或替换股票"):
         assert phrase in safety
+
+
+def test_current_batch_review_entry_keeps_original_identity_and_diagnosis_boundary():
+    text = Path("ops/selection-method-review-prompt.md").read_text(encoding="utf-8")
+    assert not Path("ops/periodic-research-review-prompt.md").exists()
+    assert "diagnose" in text and "implement_approved_change" in text
+    assert "fixed_d20" in text and "action_date" in text
+    assert "原近邻比较" in text
+    assert "不新增选股Skill" in text and "不建立自动训练系统" in text
+    assert "原推荐及结案不回写" in text

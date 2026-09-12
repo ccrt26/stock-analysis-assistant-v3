@@ -670,7 +670,7 @@ def test_data_issues_only_from_real_gaps(tmp_path):
 @pytest.mark.parametrize("kind", ["checkpoint_detail", "regular_detail", "brief"])
 @pytest.mark.parametrize("explicit_title", [True, False])
 def test_review_title_display_once_preserves_source(js_src, kind, explicit_title):
-    """执行两个页面的实际显示函数；标题去重复只影响显示，不改源正文。"""
+    """执行 Prism 的实际显示函数；标题去重复只影响显示，不改源正文。"""
     from tools import render_monitor_web as monitor
 
     title = "示例股份｜相对强势延续，缩量整理仍维持原判"
@@ -682,9 +682,6 @@ def test_review_title_display_once_preserves_source(js_src, kind, explicit_title
         "copy": source, "summary_copy": source,
     }
     # 从实际输出/源文件读取函数，避免测试复制一份标题处理实现。
-    monitor_fn = "function finalMetrics(f){" + monitor.render({}).split(
-        "function finalMetrics(f){", 1
-    )[1].split("function eventTitle", 1)[0]
     prism_fn = "function finalReviewBody(r){" + (js_src / "app.js").read_text(
         encoding="utf-8"
     ).split("function finalReviewBody(r){", 1)[1].split("function drawPlot", 1)[0]
@@ -692,22 +689,16 @@ def test_review_title_display_once_preserves_source(js_src, kind, explicit_title
 const fs=require('fs'),vm=require('vm');
 const input=JSON.parse(fs.readFileSync(0,'utf8'));
 const r=input.review,s={name:input.name,recDate:'2026-08-21'};
-const nodes={};
-const $=id=>nodes[id]||(nodes[id]={textContent:'',innerHTML:'',style:{},dataset:{}});
-const monitor={cur:s,selReview:r,latestReview:()=>r,dayLabel:String,esc:String,
-  $,selDay:10,DATES:[r.date],candleIdxOfDay:()=>0};
-vm.runInNewContext(input.monitor_fn+';renderReview();',monitor);
 const prism={s,r,state:{reviewTab:'latest'},C:{dateAt:()=>r.date},DATA:{},
   escape:String,kindLabel:()=>r.review_kind,viewPill:()=>''};
 const html=vm.runInNewContext(input.prism_fn+';reviewBody(s,r,0);',prism);
-process.stdout.write(JSON.stringify({headline:nodes.rHeadline.textContent,
-  display:nodes.rHeadline.style.display,body:nodes.rCopy.textContent,html,review:r}));
+process.stdout.write(JSON.stringify({html,review:r}));
 """
     result = subprocess.run(
         ["node", "-e", script],
         input=json.dumps({
             "name": "示例股份", "review": review,
-            "monitor_fn": monitor_fn, "prism_fn": prism_fn,
+            "prism_fn": prism_fn,
         }),
         capture_output=True, text=True, timeout=30,
     )
@@ -715,16 +706,10 @@ process.stdout.write(JSON.stringify({headline:nodes.rHeadline.textContent,
     rendered = json.loads(result.stdout)
     assert rendered["review"] == review
     if explicit_title:
-        assert rendered["headline"] == title
-        assert rendered["display"] == ""
-        assert rendered["body"] == body
         assert rendered["html"].count(title) == 1
         assert f"<h3>{title}</h3>" in rendered["html"]
     else:
-        # monitor 旧稿仍只显示原文；Prism 保留旧首句标题及完整原文。
-        assert rendered["headline"] == ""
-        assert rendered["display"] == "none"
-        assert rendered["body"] == source
+        # Prism 保留旧稿的首句标题及完整原文。
         assert f'<h3>{review["headline"]}</h3>' in rendered["html"]
         assert "<p>当初期待什么。</p>" in rendered["html"]
     for paragraph in body.split("\n\n"):

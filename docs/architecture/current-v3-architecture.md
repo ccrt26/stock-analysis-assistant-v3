@@ -156,7 +156,7 @@ data health
 
 公告元数据以巨潮为主源。只有巨潮请求、权限、限流、分页完整性或响应格式等来源边界错误才切换到上交所和深交所官方接口；本地程序、存储、合同或时间边界错误仍显式失败。交易所备用路径只保存代码、名称、标题、精确公开时间、官方链接和稳定来源编号，不建设 PDF 全文系统。两所都完整为 `exchange_complete`，只有一所完整为 `exchange_partial`，均不可用为 `announcement_unavailable`。来源状态和覆盖交易所进入现有阶段摘要，不增加数据库表。
 
-下个交易日前一自然日晚间18:45的最终研究由 Codex 原生 Scheduled Task 在当前项目中直接调用 `$orchestrating-stock-research`，总控在同一个顶层会话内使用四个专业 Skill；仓库代码不通过 Python 启动第二个 Codex，也没有 AI LaunchAgent。`prepare` 冻结上一交易日、行动日和带时区的 `as_of`，等待晚间研究准备数据并结算到期 D20；Codex 只生成 `pending-trace-<formation_date>.json` 一份 `daily-research-trace-v4` 完整轨迹。`record-trace` 校验结构、日期、合格股票、候选守恒、唯一决定引用、已确认价格支持的最小形成日数值，以及 `fresh_event_pending` 的事件时点和等待窗口，从其中抽取现有 `ResearchResult` 调用 `record_daily_selection`，写入现有 Forward CSV 后将完整轨迹原子归档为 `research-trace-<formation_date>.json`。程序不判断事件语义、材料性、内部分类、传播或价格解释是否正确。既有 v1/v2/v3 归档不迁移、不倒填；现有 `record` 命令、`ResearchResult`、Forward CSV 字段和 D20 结算保持不变，完整 trace 不写入 DuckDB。
+下个交易日前一自然日晚间18:45的最终研究由本地 launchd 任务（`com.ccrt.stock-analysis-assistant.ai-nightly`）经 `tools/stock_ai.py` 启动：外层固定时间、完成一次 prepare、按 GLM → DeepSeek 顺序无界面执行模型并核对产物；执行器为本机 ZCode CLI（显式模型、API 地址与密钥），Astra 仅由用户手动执行。模型在项目内完整读取 `ops/forward-selection-prompt.md`，总控在同一个模型会话内使用四个专业 Skill，不在研究过程中另起并行模型。`prepare` 冻结上一交易日、行动日和带时区的 `as_of`，等待晚间研究准备数据并结算到期 D20；模型只生成 `pending-trace-<formation_date>.json` 一份 `daily-research-trace-v4` 完整轨迹。`record-trace` 校验结构、日期、合格股票、候选守恒、唯一决定引用、已确认价格支持的最小形成日数值，以及 `fresh_event_pending` 的事件时点和等待窗口，从其中抽取现有 `ResearchResult` 调用 `record_daily_selection`，写入现有 Forward CSV 后将完整轨迹原子归档为 `research-trace-<formation_date>.json`。程序不判断事件语义、材料性、内部分类、传播或价格解释是否正确。既有 v1/v2/v3 归档不迁移、不倒填；现有 `record` 命令、`ResearchResult`、Forward CSV 字段和 D20 结算保持不变，完整 trace 不写入 DuckDB。
 
 正常任务的 `action_date` 是当前上海自然日的次日，必须开市；`formation_date` 是行动日前最近交易日；`selection_as_of` 固定为行动日前一自然日18:30。明天休市则不产生复盘或新推荐，周日使用周五行情和周日18:30以前的事实，为周一准备，长假同理。`prepare` 只认同形成日最新 pre-research，且其 capabilities.research_as_of 必须逐字等于 selection_as_of；缺失或不匹配不能用旧派生放行。健康快照还须对应同形成日最新 pre-research 的 run_id，且 generated_at 不早于该 run 的 finished_at；健康生成或写出失败保存在现有阶段 summary_json，prepare 优先给出明确失败原因，不能用旧健康放行。同 run 成功重建健康或新 pre-research 成功生成匹配健康后恢复，close/evening 后续失败不废弃已验证正式快照。市场观察和价格分析仍是最低条件，行业、主题、个股背景、公告和分钟仍为可选通道；complete_core_date 只作诊断。正常18:45启动，每30秒检查一次，最晚等到18:55；可选步骤已失败但核心可用时进入受限研究，核心缺失停止推荐。20:30只是交付目标，不新增服务或看门狗。
 
@@ -172,7 +172,7 @@ data health
 
 复盘执行顺序为全部结构化判断草稿→节点K→非节点普通详评D→其余简评B→各写唯一正文→核对来源及结构化一致性→先 `record-daily-formal-reviews` 保存账本、后 `record` 保存报告。简评正文只在账本，详评正文只在报告；程序读取历史时会恢复本 episode 上一轮详评正文，空的账本正文不是历史缺失。写作与字段分工以复盘 Skill 和 `ops/forward-monitor-prompt.md` 为准。
 
-冻结报告可由 `tools/render_monitor_web.py` 生成本地静态 HTML，`tools/render_prism_web.py` 复用同一数据并调用 Prism 的 `render_html()`，输出独立的 `prism-report-<date>.html` 和固定入口 `prism.html`；`tools/update_monitor_web.py` 仍维护原有 `index.html`。现有晚间任务在正式归档成功的共同收尾传入 `--date`、`--action-date`、`--as-of` 执行 Prism 同步，覆盖正常完成、已有选择与补跑。严格入口只读核对正式 V4 trace、snapshot、日评账本和复盘 JSON/Markdown 的日期、截止时刻及记录覆盖，允许合法空名单；每个页面独立原子替换，历史日期不覆盖较新首页。同步失败保留已完成研究和旧首页，完整报告附一行错误，不重新研究。旧手动渲染入口保持可用。它们保留原正文，不调用模型重写，不接入实时行情，不表示获准云端发布。
+`tools/render_prism_web.py` 使用 `tools/render_monitor_web.py` 的共享数据整理函数并调用 Prism 的 `render_html()`，输出 `prism-report-<date>.html` 和固定入口 `prism.html`；Prism 同步命令即现行的本地展示更新入口（原 `index.html` 旧入口已随 legacy monitor web 退役，仓库不存在 `tools/update_monitor_web.py`）。现有晚间任务在正式归档成功的共同收尾传入 `--date`、`--action-date`、`--as-of` 执行 Prism 同步，覆盖正常完成、已有选择与补跑。严格入口只读核对正式 V4 trace、snapshot、日评账本和复盘 JSON/Markdown 的日期、截止时刻及记录覆盖，允许合法空名单；每个页面独立原子替换，历史日期不覆盖较新首页。同步失败保留已完成研究和旧首页，完整报告附一行错误，不重新研究。共享模块保留数据函数，已退役的旧 HTML 模板与命令行入口不再保留。Prism 保留原正文，不调用模型重写，不接入实时行情，不表示获准云端发布。
 
 研究超过18:55后完成仍可保存，只要沿用已取得的显式上下文，冻结的 `as_of` 仍为行动日前一自然日18:30，且所有行情交易日期不晚于形成日、所有事实满足 `available_at <= as_of`。合规结果统一按 `selection` 语义写入被 Git 忽略的 `local_archive/forward_selection/forward-selection-log.csv`；历史 `validation_mode` 只为 CSV 兼容保留，不再形成 forward/reconstructed 两套推荐。历史记录首次由 `docs/forward-selection-log.csv` 初始化，之后只在 D1—D20 行情完整时一次性结算。
 
@@ -180,7 +180,7 @@ data health
 
 如果本次确实完成了当天新选择且合并报告生成时已过行动日09:30，只在“今天新推荐的股票”前提示：“本次研究只使用了今天开盘前能够看到的信息，但现在已经超过原本计划观察的开盘时点。不要把当前价格当成当时可以参与的价格，也不要用盘中走势重新改写开盘前的研究结论。”不改变原研究、不重读盘中价格、不重跑。
 
-次晨08:45由独立Codex任务读取 `ops/preopen-safety-prompt.md`，运行 `preopen_safety prepare`。只检查昨晚V4名单（正式推荐与明确非正式的条件事件）截止后新增公告和今天 suspend_d 当前停牌观察；只写安全提醒JSON，停牌不进入正式事实分区。不重新选股、不改顺序、不改理由或复盘，不读集合竞价和盘中价格。先判休市；交易日09:30及之后才启动时返回 data_limited，明确已经错过开盘前检查时点，不再请求公告或停牌，也不声称无变化。
+次晨08:45由本地 launchd 任务（`com.ccrt.stock-analysis-assistant.ai-preopen`）经 `tools/stock_ai.py` 启动，读取 `ops/preopen-safety-prompt.md` 并运行 `preopen_safety prepare`。只检查昨晚V4名单（正式推荐与明确非正式的条件事件）截止后新增公告和今天 suspend_d 当前停牌观察；只写安全提醒JSON，停牌不进入正式事实分区。不重新选股、不改顺序、不改理由或复盘，不读集合竞价和盘中价格。先判休市；交易日09:30及之后才启动时返回 data_limited，明确已经错过开盘前检查时点，不再请求公告或停牌，也不声称无变化。
 
 每日阶段及默认 `all` / `trading-structure` 补数均不再采集分钟，也不创建新的分钟 scope。保留历史分钟事实、缺口及低层显式按需采集和读取能力；`select_minute_candidate_scope` 仅保留按需采集的成本控制用途。整日分钟分区无登记且无实体文件时按覆盖缺口统计，已登记缺文件、实体文件无登记及损坏仍严格报错。
 
@@ -241,14 +241,14 @@ data health
 | 一个总控 + 四个专业研究 Skill | 已实现 | `.agents/skills/` |
 | 候选与决定轨迹追溯、历史形成日模拟和调优诊断方法 | 已实现为 `daily-research-trace-v4` 与 Skill 流程 | 每只候选结构化记录内部分类和状态、市场识别、披露新颖性及适用的板块传播证据，并分开记录催化、传播、价格确认、剩余路径、经营依据、风险和未知；程序校验结构、引用、最小价格数值与条件事件边界，AI 仍负责语义解释与取舍；手动 D20 复盘只有 Prompt，不是常驻 Python 服务 |
 | 选出后的第1—30个交易日跟踪与走势复盘 | 已实现 | 程序记录全部路径；正式日评账本保存全部结构化判断及仅简评正文，V2报告保存全部节点详评和0—8只普通详评；节点六项、普通详评四项，同股各episode分别对账；D20结论冻结，后续观察不改写；比较仅作内部评价，历史V1继续可读 |
-| 每日自动端到端 AI 选股 | 仓库侧准备和归档已实现；触发由 Codex 原生 Scheduled Task 配置 | 18:45顶层任务直接调用总控 Skill；`prepare`/`record-trace` 不启动模型，只冻结边界、检查数据、校验一份 trace、抽取现有 Forward 结果、归档和结算 D20 |
+| 每日自动端到端 AI 选股 | 已实现：本地 launchd（ai-nightly 18:45 / ai-preopen 08:45）经 `tools/stock_ai.py` 触发，GLM→DeepSeek 顺序无界面执行，Astra 仅手动 | 外层完成一次 `prepare` 后模型按 Prompt 执行；`prepare`/`record-trace` 不启动模型，只冻结边界、检查数据、校验一份 trace、抽取现有 Forward 结果、归档和结算 D20 |
 | AI 调用前的研究结果缓存、候选 memo 缓存和断点恢复 | 未实现 | 目前只有事实/派生层哈希、清单与跳过重算 |
-| 冻结报告的本地呈现 | 已实现 | monitor Markdown、`tools/render_monitor_web.py`静态HTML、`tools/render_prism_web.py`的Prism集成及`tools/update_monitor_web.py`本地更新；只呈现已保存事实和AI正文，不生成新判断 |
+| 冻结报告的本地呈现 | 已实现 | monitor Markdown 与 `tools/render_prism_web.py` 的 Prism 集成（共享数据由 `tools/render_monitor_web.py` 整理）（`tools/guanlan-prism/`，本地更新入口即后者的同步命令）；只呈现已保存事实和AI正文，不生成新判断 |
 | 正式推荐的公司介绍（附属资料） | 已实现 | `stock_analyzer.ops.company_introduction` + `writing-company-introductions` Skill + `ops/company-introduction-prompt.md`；正式身份 trace 备料、AI 逐篇写作、record 校验保存到 `local_archive/company_introductions/`，Prism 公司资料页签按原推荐身份展示；不进入正式研究/复盘产物，不自动选股 |
 | 云端发布、Supabase 和交易执行 | 有意不存在 | 当前本地呈现不恢复旧 V3 云端路径，不得把插件能力当作项目已有架构 |
 | GitHub 中的真实本地研究数据 | 有意不存在 | `local_warehouse/`、`local_archive/`、`logs/`、`.env*` 被忽略 |
 
-“Skill 已实现”表示研究方法、职责和输出合同存在；生产触发由项目绑定的 Codex 原生自动任务负责，模型与运行状态应读取实际任务配置，不能从当前对话模型或文档中推断。程序回归通过不证明每篇AI正文已经完成语义对账。
+“Skill 已实现”表示研究方法、职责和输出合同存在；生产触发由本地 launchd 任务（`tools/stock_ai.py`）负责，模型与运行状态应读取实际任务与本地结果索引，不能从当前对话模型或文档中推断。程序回归通过不证明每篇AI正文已经完成语义对账。
 
 ## 9. 7 月混合架构设计如何演进
 
@@ -318,4 +318,4 @@ data health
 
 冻结结论与报告交付由既有台账/报告分别读取：跨来源按日期保留最早有效冻结；仅存台账的结案仍是节点待办，晚于 D30 也不丢失。D30 后只允许补交并完成，不延长原 D20 结果或原 D30 价格窗口。下一日读取与 WEB 沿用同一冻结来源，WEB 回看不显示未来结论。
 
-默认 `render_prism_web.py` 收尾用同一冻结 payload 更新 Prism 和原 monitor 日期页面、固定入口；显式 `--out` 保留原 Prism 行为，`--no-publish` 不更新固定入口。研究导出将注册回放按原 episode_id 独立纳入，数量与原 V1 正式选股分开。
+默认 `render_prism_web.py` 收尾用冻结 payload 更新 Prism 日期页面和固定入口，不生成已退役旧 monitor 页面；显式 `--out` 保留原 Prism 行为，`--no-publish` 不更新固定入口。研究导出将注册回放按原 episode_id 独立纳入，数量与原 V1 正式选股分开。

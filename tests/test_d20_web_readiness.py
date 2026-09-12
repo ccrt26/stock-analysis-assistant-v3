@@ -1,4 +1,4 @@
-"""Use real ledger/report saving and both browser renderers for the D20 seam."""
+"""Use real ledger/report saving and the Prism browser renderer for the D20 seam."""
 from __future__ import annotations
 
 import importlib.util
@@ -19,7 +19,7 @@ def _load(path, name):
     return module
 
 
-def test_same_day_fixed_final_and_current_opinion_render_in_both_browsers(tmp_path):
+def test_same_day_fixed_final_and_current_opinion_render_in_prism(tmp_path):
     fixture = _load(ROOT / "tests/test_forward_monitor.py", "monitor_fixtures")
     sessions = fixture._repair_project(tmp_path)
     before = fixture._prepare(tmp_path, sessions[18])
@@ -59,25 +59,19 @@ def test_same_day_fixed_final_and_current_opinion_render_in_both_browsers(tmp_pa
         row["candles"] = [checker.candle(10, 12)] * 20
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-        for prism in (True, False):
-            errors = []
-            page = browser.new_page()
-            page.on("pageerror", lambda err: errors.append(str(err)))
-            page.set_content(builder.render_html(payload) if prism else renderer.render(payload))
-            if prism:
-                page.locator(f'[data-open="{ep["ts_code"]}:2026-08-03"]').first.click()
-                assert page.locator(".final-review").count() == 1
-                assert fixture._final_review()["overall_review"] in page.locator(".final-review").inner_text()
-                assert history[1]["currentOpportunity"]["participationReason"] in page.locator(".opinion-panel").inner_text()
-                page.locator('[data-day="19"]').first.click()
-                assert page.locator(".final-review").count() == 0
-                page.locator('[data-action="back"]').first.click()
-                page.locator(f'[data-open="{ep["ts_code"]}:2026-08-04"]').first.click()
-                assert page.locator(".final-review").count() == 0
-            else:
-                page.evaluate("openStock(" + repr(ep["ts_code"]) + ")")
-                assert fixture._final_review()["overall_review"] in page.locator("#rReview").inner_text()
-                assert history[1]["currentOpportunity"]["participationReason"] in page.locator("#rReview").inner_text()
-            assert errors == []
-            page.close()
+        errors = []
+        page = browser.new_page()
+        page.on("pageerror", lambda err: errors.append(str(err)))
+        page.set_content(builder.render_html(payload))
+        page.locator(f'[data-open="{ep["ts_code"]}:2026-08-03"]').first.click()
+        assert page.locator(".final-review").count() == 1
+        assert fixture._final_review()["overall_review"] in page.locator(".final-review").inner_text()
+        assert history[1]["currentOpportunity"]["participationReason"] in page.locator(".opinion-panel").inner_text()
+        page.locator('[data-day="19"]').first.click()
+        assert page.locator(".final-review").count() == 0
+        page.locator('[data-action="back"]').first.click()
+        page.locator(f'[data-open="{ep["ts_code"]}:2026-08-04"]').first.click()
+        assert page.locator(".final-review").count() == 0
+        assert errors == []
+        page.close()
         browser.close()

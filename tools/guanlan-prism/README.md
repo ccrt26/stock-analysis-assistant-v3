@@ -64,7 +64,7 @@ python3 tools/build.py --data /实际路径/展示快照.json --out /实际路�
 ```bash
 .venv/bin/python -m pytest -q tests/test_prism_web_contract.py
 .venv/bin/python -m pytest -q tests/test_render_prism_web.py tests/test_render_monitor_web.py \
-    tests/test_update_monitor_web.py tests/test_prism_atlas.py
+    tests/test_prism_atlas.py
 .venv/bin/python tests/check_prism_web_browser.py --out /tmp/prism-web-shots
 .venv/bin/python tests/check_prism_atlas_browser.py \
     --html local_archive/forward_monitor/prism-report-2026-09-07.html --out /tmp/prism-atlas-shots

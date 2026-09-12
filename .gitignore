@@ -22,5 +22,8 @@ supabase/.temp/
 # 本机 Skill 路径与项目插件开关不进入版本库
 /.codex/config.toml
 
+# 本机模型路由配置不进入版本库
+/.stock-ai.local.json
+
 # 本机草稿与临时脚本不进入版本库
 tmp/

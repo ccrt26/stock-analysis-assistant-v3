@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.ccrt.stock-analysis-assistant.ai-nightly</string>
+  <key>WorkingDirectory</key>
+  <string>__PROJECT_ROOT__</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>-lc</string>
+    <string><![CDATA[
+cd "__PROJECT_ROOT__"
+set -a
+source .env.local >/dev/null 2>&1
+set +a
+exec .venv/bin/python tools/stock_ai.py run nightly --scheduled
+    ]]></string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <dict><key>Hour</key><integer>18</integer><key>Minute</key><integer>45</integer></dict>
+  <key>RunAtLoad</key><false/>
+  <key>KeepAlive</key><false/>
+  <key>StandardOutPath</key>
+  <string>__PROJECT_ROOT__/logs/ai_tasks/launchd-nightly.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>__PROJECT_ROOT__/logs/ai_tasks/launchd-nightly.err.log</string>
+</dict>
+</plist>

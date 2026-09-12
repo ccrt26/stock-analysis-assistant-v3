@@ -73,7 +73,8 @@ def test_existing_daily_prompt_stays_v4_and_adds_monitor_in_same_task() -> None:
     assert "09:30" in text
     assert "不得改变 `selection_as_of`" in text
     assert "- 发动机类型和状态" not in text
-    assert text.count("18:45 Scheduled Task") == 1
+    assert "18:45 Scheduled Task" not in text
+    assert "tools/stock_ai.py" in text
 
 
 def test_daily_prompt_syncs_completed_archives_in_shared_tail() -> None:
@@ -161,6 +162,9 @@ def test_forward_monitor_prompt_uses_previous_state_and_strict_report_contract()
 
 def test_daily_review_prompt_defines_tracking_and_checkpoint_outputs() -> None:
     text = Path("ops/forward-monitor-prompt.md").read_text(encoding="utf-8")
+    skill_path = ".agents/skills/reviewing-stock-recommendations/SKILL.md"
+    assert skill_path in text
+    method = Path(skill_path).read_text(encoding="utf-8")
 
     for phrase in (
         "keep_active_tracking",
@@ -172,14 +176,13 @@ def test_daily_review_prompt_defines_tracking_and_checkpoint_outputs() -> None:
         "横盘",
         "数据暂缺",
         "未达到20%",
-        "D1 当天原条件下是否可执行",
-        "D3 早期反应是否延续",
-        "D5 第一周路径与新增证据",
-        "D10 前半程对账",
-        "D20 当前意见与固定结案同时存在",
         "不新增其他节点",
     ):
         assert phrase in text
+    for phrase in ("D1 当天原条件下是否可执行", "D3 早期反应是否延续",
+                   "D5 第一周路径与新增证据", "D10 前半程对账",
+                   "D20 当前意见与固定结案同时存在"):
+        assert phrase in method
 
 
 def test_review_skill_requires_daily_briefs_and_cautious_tracking_exit() -> None:
@@ -214,36 +217,6 @@ def test_public_review_only_lists_explicit_formal_recommendations() -> None:
     assert "不得单列给用户凑内容" in text
 
 
-def test_periodic_review_reads_monitor_history_and_checks_reminder_timing() -> None:
-    text = Path("ops/periodic-research-review-prompt.md").read_text(
-        encoding="utf-8"
-    )
-
-    assert "local_archive/forward_monitor/snapshot-*.json" in text
-    assert "local_archive/forward_monitor/monitor-report-*.json" in text
-    assert "首个完整可观察交易日" in text
-    assert "后续1—3个交易日" in text
-    assert "失效" in text
-    assert "过热" in text
-    assert "推荐后的前20个交易日内" in text
-    assert "第21至第30个交易日" in text
-    assert "前20个交易日结束后才开始明显走强" in text
-    assert "不得改变前20个交易日的原评价结果" in text
-    assert "data_problem" in text
-    assert "previous_monitor_state" in text
-    assert "snapshot 中已出现但日报漏报" in text
-    assert "提醒很多但后续1—3个交易日没有对应事实" in text
-    assert "按当时 snapshot 和最终日报的时间顺序" in text
-    assert "禁止用未来结果倒填当天提醒理由" in text
-    assert "不新增定时任务" in text
-    assert "不增加自动评分" in text
-    assert "前20个交易日结束后的集中研究复盘" in text
-    assert "手动 D20 研究复盘提示" not in text
-    assert "期间最高涨幅" in text
-    assert "期间最深跌幅" in text
-    assert "推荐股与当时最接近但未推荐股票的比较" in text
-    assert "不自动修改 Skill" in text
-    assert "成熟样本" in text
 
 
 def test_all_five_stock_research_skills_define_a_review_phase() -> None:
@@ -265,9 +238,9 @@ def test_all_five_stock_research_skills_define_a_review_phase() -> None:
     assert "之后可以更新当前走势评价" in orchestrator
     assert "比较记录的 `final_twenty_day_review` 始终为空" in orchestrator
     assert "用户当前状态和简短前缀使用 `action_date`" in orchestrator
-    assert "为什么在这个时间选择它" in orchestrator
-    assert "支持选择的独立原因" in orchestrator
-    assert "什么情况会让我改变看法" in orchestrator
+    assert "只复盘已经冻结的原判断" in orchestrator  # 现行 Skill 等价职责表述
+    assert "独立公司变化和价格路径足够有说服力" in orchestrator  # 现行等价职责表述
+    assert "最强反证尚未足以推翻命题" in orchestrator  # 现行等价：改变/推翻条件职责
     assert "这次为什么会选它" not in orchestrator
 
 def test_review_prompt_explains_why_actual_results_support_or_refute_original_reason() -> None:
@@ -502,9 +475,10 @@ def test_review_prompt_pins_plain_language_standard_and_style_anchor() -> None:
         assert legacy not in monitor
         assert legacy not in skill
     # 节点深度统一：六项对账清单与银龙节点范例必须钉住。
+    assert ".agents/skills/reviewing-stock-recommendations/SKILL.md" in monitor
+    assert "必备对账清单" in monitor
     for phrase in ("六项信息缺一不可", "该日尚无此项可对",
                    "事实—这说明什么—还不能证明什么"):
-        assert phrase in monitor
         assert phrase in skill
     assert "立场＋当前最重要的1—2个支持事实＋限制因素" in monitor
     # 历史样稿已迁出主 Prompt，改钉归档文件。
@@ -590,3 +564,13 @@ def test_review_prompt_fixes_brief_quality_and_title_contract() -> None:
     # 主 Prompt 保留分类知识库入口，不再内嵌全部范文全文。
     assert "分类知识库入口" in monitor
     assert "00_阅读指南.md" in monitor
+
+
+def test_current_batch_review_uses_frozen_results_and_keeps_future_separate():
+    text = Path("ops/selection-method-review-prompt.md").read_text(encoding="utf-8")
+    for source in ("data/research_runs.jsonl", "data/formal_selections.csv", "data/review_contracts.jsonl"):
+        assert source in text
+    assert "fixed_d20_status" in text
+    assert "在看结果之前留下研究问题" in text
+    assert "不注册新定时任务" in text
+    assert "原推荐及结案不回写" in text

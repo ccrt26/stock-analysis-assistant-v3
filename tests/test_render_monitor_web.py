@@ -1,4 +1,4 @@
-"""render_monitor_web 的最小充分测试：观点变化判定、V4 数据组装与 HTML 输出。"""
+"""render_monitor_web 的最小充分测试：观点变化判定与 Prism 共享数据组装。"""
 
 from __future__ import annotations
 
@@ -12,7 +12,6 @@ import pytest
 from tools.render_monitor_web import (
     build_payload,
     compute_view_change,
-    render,
     stage_of,
     scan_history,
     trigger_of,
@@ -475,49 +474,6 @@ def test_d0_v4_only_displays_confirmed_formal_recommendations(
         assert payload["stocks"][0]["events"][0][2] == "正式推荐"
 
 
-class TestRender:
-    def test_html_matches_v4_and_escapes(self, tmp_path: Path) -> None:
-        formal = _episode("e-formal", "600000.SH", "示例股份")
-        payload = build_payload(
-            tmp_path, tmp_path, date(2026, 9, 2),
-            _report([_alert("e-formal")]), _snapshot([formal]),
-        )
-        html = render(payload)
-        # V4 版式标志
-        for marker in (
-            "推荐观察台", "重点观察", "全部观察", "观察进度", "距 20%",
-            "下一检查日", "推荐理由", "每日复盘", "公司与观察事件",
-            "交易日尺" if False else "dayruler",
-            "K线", "相对表现", "缩起",
-        ):
-            assert marker in html
-        # 用户要求：推荐理由对照并入入选理由块与公司与观察事件时间线
-        assert "推荐理由对照" not in html
-        assert "决定性事实" not in html and "基准判断" not in html
-        # 用户要求：删除今天先看什么；不出现自行改状态的按钮
-        assert "今天先看什么" not in html
-        assert "标记已买入" not in html
-        assert "延长到 30 日" not in html
-        # 日期选择与个股选择器存在
-        assert 'id="dateSelect"' in html
-        assert 'id="stockPick"' in html
-        # 公司简介不含申万行业链句子；详情页带最新行情条
-        assert "按申万行业分类属于" not in html
-        assert 'id="quoteStrip"' in html and "成交额" in html and "停牌前" in html
-        # 用户展示口径：入选日 + D1—D20 + 延长观察；不再出现 D0 与旧 D 标记
-        assert "待首日观察" in html and "延长观察第" in html
-        assert "20个交易日核心观察完成" in html and "推荐日" in html and "事件首日" in html
-        template_only = "\n".join(
-            line for line in html.split("\n") if not line.lstrip().startswith("const DATA =")
-        )
-        for forbidden in ("D0", "推荐 D1", "事件定价 D1", "推荐 D0"):
-            assert forbidden not in template_only
-        # 无外部资源引用
-        assert "<script src=" not in html and "<link " not in html and "<img" not in html
-        page_json = html.split("DATA = ", 1)[1].split(";\nconst DATES", 1)[0]
-        page = json.loads(page_json)
-        assert page["stocks"][0]["name"] == "示例股份"
-
 
 class TestWarehouseFacts:
     def test_collect_and_trim_use_raw_prices(self, tmp_path: Path) -> None:
@@ -575,36 +531,7 @@ class TestWarehouseFacts:
         assert facts["candles"]["600000.SH"][0][3] is None
 
 
-def test_cli_renders(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
-    from tools.render_monitor_web import main
 
-    monitor_dir = tmp_path / "forward_monitor"
-    monitor_dir.mkdir()
-    (monitor_dir / "snapshot-2026-09-02.json").write_text(
-        json.dumps(_snapshot([_episode("e-formal", "600000.SH", "示例股份")])), encoding="utf-8"
-    )
-    (monitor_dir / "monitor-report-2026-09-02.json").write_text(
-        json.dumps(_report([_alert("e-formal")])), encoding="utf-8"
-    )
-    exit_code = main(["--monitor-dir", str(monitor_dir)])
-    assert exit_code == 0
-    out = capsys.readouterr().out
-    assert "status=rendered" in out and "stock_count=1" in out
-    html = (monitor_dir / "monitor-report-2026-09-02.html").read_text(encoding="utf-8")
-    assert "重点观察" in html and "全部观察" in html and "缩起" in html
-
-
-def test_html_distinguishes_history_from_daily_update_without_losing_chart() -> None:
-    html = render({"stocks": [], "dates": [], "market": []})
-    detail = html.split("function renderDetail(){", 1)[1].split("function updateLegend", 1)[0]
-    review = html.split("function renderReview(){", 1)[1].split("function renderEvents", 1)[0]
-    assert "推荐理由" in detail and "当时主要担心" in detail
-    assert "入选理由 ·" not in detail
-    for label in ("每日复盘", "当日结论", "关键变化", "观点变化", "未来1—3日"):
-        assert label in review
-    for element in ("chartSvg", "timeline", "events"):
-        assert f'id="{element}"' in html
-    assert "reasonFull" not in review and "reasonRisk" not in review
 
 
 def test_web_daily_unchanged_view_does_not_inherit_detail_change(tmp_path: Path) -> None:
