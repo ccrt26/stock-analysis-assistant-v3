@@ -48,7 +48,7 @@ function judgment(s){
  return `<article class="panel instrument"><div class="panel-heading"><h3>近期复盘判断</h3><span class="index">02 / OUTLOOK</span></div><div class="instrument-sub">从已有复盘看变化，不再重复画价格</div><div class="judgment-heading"><b>${label}</b><span>最新 · 未来 1—3 个交易日</span></div><svg class="judgment-chart" viewBox="0 0 360 148" role="img" aria-label="最近${rows.length}次保存的短期方向，点击圆点读原文">${h}</svg><div class="instrument-footer"><span>方向分类，不是概率或评分</span><span>点圆点读原文 ↗</span></div></article>`;
 }
 function drawWidgets(animate=false){if(!$('instruments'))return;const s=current();if(!s)return;$('instruments').innerHTML=observeDial(s)+judgment(s)+activityDial(s);if(animate&&motion())document.querySelectorAll('.gauge-active').forEach((p,i)=>{p.style.strokeDasharray='1';p.animate([{strokeDashoffset:'1'},{strokeDashoffset:'0'}],{duration:850+i*80,easing:'cubic-bezier(.2,.65,.3,1)'})})}
-function relativeRows(s,rows){return [{name:s.name,color:'var(--down)',values:D.comparison(s,'stock')},{name:s.industryName||'行业对照',color:'var(--blue)',values:D.comparison(s,'industry')},{name:raw.market_name||'市场对照',color:'var(--amber)',values:D.comparison(s,'market')}].map(series=>({...series,values:rows.map(r=>r.date?series.values[D.sessions.indexOf(r.date)]??null:null)}))}
+function relativeRows(s,rows){return [{name:s.name,color:'var(--text)',values:D.comparison(s,'stock')},{name:s.industryName||'行业对照',color:'var(--blue)',values:D.comparison(s,'industry')},{name:raw.market_name||'市场对照',color:'var(--amber)',values:D.comparison(s,'market')}].map(series=>({...series,values:rows.map(r=>r.date?series.values[D.sessions.indexOf(r.date)]??null:null)}))}
 function renderHeroChart(animate=false){const s=current();if(!s||!$('heroPlot'))return;const rows=M.windowRows(D.history(s),D.sessions,D.end,40);const hasRef=!s.d0&&s.recDate<=D.end&&V(s.ref);const rel=relativeRows(s,rows);
  C.chart($('heroPlot'),{rows,mode:state.mode,relative:rel,reference:hasRef?s.ref:null,target:hasRef?s.ref*(1+targetOf()):null,recDate:s.recDate,metric:state.metric,name:s.name,fullHistory:D.history(s),animate,motion:motion()});
  const dates=rows.filter(r=>r.date);$('chartRange').innerHTML=`最近 <strong>40</strong> 个交易日 · ${dates[0]?.date||'—'} — ${D.end} <span class="muted">${rows.filter(r=>V(r.close)).length}/40 日有价格</span>`;
@@ -126,10 +126,13 @@ function finalReviewBody(r){
  return `<section class="final-review"><h4>20个交易日固定结案</h4><p>${esc(f.final_twenty_day_review.overall_review)}</p><p>${esc(facts)}</p><p class="source-hint">原结论保存：${esc(f.analysis_date)} · 截止 ${esc(f.as_of)}</p></section>`;
 }
 const paragraphs=value=>String(value||'').split(/\n\s*\n/).filter(Boolean).map(p=>`<p class="original-copy">${esc(p)}</p>`).join('');
+const statementParagraphs=value=>String(value||'').split(/\n\s*\n/).filter(Boolean).map(p=>`<p class="original-copy">${esc(p).replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>').replace(/\n/g,'<br>')}</p>`).join('');
 function originalBody(s){
- const text=s.statementFull||s.reasonFull;
- const note=s.statementFull?(s.statementSource==='adopted_rewrite'?'用户认可的表达范本；当时归档原文仍保留在本地。':'推荐形成日日报中的逐股原文。'):'当时存档的推荐理由摘要；完整原文暂缺。';
- return `<h3>当初为什么选它</h3>${paragraphs(text)||'<p>原推荐理由暂缺。</p>'}<h3>原推荐中的风险</h3>${paragraphs(s.reasonRisk)||'<p>原记录未附风险文字。</p>'}<p class="reading-note">${note} 推荐形成日：${esc(s.formedOn||'未提供')}。切换日期不会改写原推荐理由。</p>`;
+ const hasFull=Boolean(String(s.statementFull||'').trim());
+ const note=hasFull?(s.statementSource==='adopted_rewrite'?'用户认可的表达范本；当时归档原文仍保留在本地。':'推荐形成日日报中的逐股原文。'):'历史摘要仅供核对，不能代替完整推荐论证。';
+ const body=hasFull?statementParagraphs(s.statementFull):'<p class="reading-note">尚缺完整推荐正文，可能尚未通过验收或尚未接通。</p>';
+ const summary=hasFull?'':`<h4>原推荐理由摘要</h4>${paragraphs(s.reasonFull)||'<p>原推荐理由暂缺。</p>'}`;
+ return `<h3>当初为什么选它</h3>${body}<details class="original-summary"><summary>${hasFull?'查看原记录风险摘要':'查看历史记录摘要（非完整正文）'}</summary>${summary}<h4>原推荐中的风险</h4>${paragraphs(s.reasonRisk)||'<p>原记录未附风险文字。</p>'}</details><p class="reading-note">${note} 推荐形成日：${esc(s.formedOn||'未提供')}。切换日期不会改写原推荐理由。</p>`;
 }
 function fullReview(s,r){
  if(!r)return '<p>所选日期没有保存复盘正文。可切换日期查看已有记录；不把旧复盘当作当天结论。</p>';

@@ -182,9 +182,15 @@ ST、退市和重大官方风险使用 `rules.seed.yaml` 中的正式边界。�
 - 行动日是否可能正常参与；
 - 最强反证和关键未知是什么。
 
-只允许一轮定向补证。补证不能借机重新扫描全市场。四个 Skill 不重复输出大段相同事实；每个 Skill 对每只深度候选最多保留 1—2 条真正改变取舍的证据。总控在四路提交后解决冲突，不按投票、证据数量、场景数量或固定分数排序。
+正式选股冻结前的共同验证围绕决定性问题收敛，不以固定一轮或证据条数停止。先区分本地缺记录、覆盖不足、查询失败、版本不可回放与尚未读取/解释；只补现有少量候选会改变取舍的证据，足够回答、已无可靠新线索或时点无法核验时收束。公司外部补证按公司 Skill 的 `phase: validation` 段执行；其他视角维持各自来源边界，不扩大能力声明，不重新扫描全市场。四路只保留真正改变判断的事实和必要出处，合并重复信息；总控解决冲突，不按投票、证据数量、场景数量或固定分数排序。
 
 ### 6. 作出最终取舍
+
+在 `record-trace` 前，把已有 thesis 和拟定理由合成一次完整判断：市场环境怎样支持或限制机会，行业变化靠什么延续，公司怎样实际受益，价格/成交及有解释价值的指标怎样确认或反驳；据此回答为什么是现在、为什么本股优于近邻、目标路径面临什么价格障碍与参与代价、最强反证为什么尚未推翻或已经改变去留。各视角不必都积极，不强制逐项列指标；独立价格路径不需补造经营催化。
+
+未来约 20 日的机会不能只由经营增长推出；低累计涨幅可能来自反复回落，区间位置和 ATR 距离不证明路径畅通或目标成功概率。等待确认和较早参与都有代价，按本股证据取舍，不将某篇范文的等待/突破条件变成通用门槛。若参与参考价改变，重新解释目标和代价，不沿用旧价收益测算。
+
+按运行 Prompt 在此时实际读取教学及时间上适用的范文，核对具体推荐说明草稿与结构化判断。决定性问题未答清时返回本轮验证、修正去留或保留未决，再保存最终 trace；不为了写成推荐而只润色理由。使用既有 `primary_reason`、thesis 和比较记录保存实质判断，不新增评分、通过标志或研究产物。冻结后的补写仍不能暗改原判断。
 
 输出 0—5 只：
 
@@ -300,7 +306,7 @@ research_result:
   empty_reason: "空名单时填真实原因；有入选时留空"
 ```
 
-`research_result` 继续严格符合现有 `ResearchResult`，其中 `skills_used` 为实际使用的五个 Skill。每条 `decision_trace` 使用唯一 `decision_id` 并引用候选账中的股票；`formation_values` 只放真正用于当时判断的少量标量，不保存整行派生事实。每只候选都必须有结构化 V4 `research_thesis`。`active` 入选必须引用本股票的公司证据和至少一条满足最小原始数值合同的价格 `support`；`fresh_event_pending + conditional` 必须引用公司重大新事件和同一事件的价格 `action_condition`，不得伪装成支持；板块发动机还须保存对应扩散或领导集群证据。实际入选股和 `nearest_nonselections` 每只保留 1—2 条真正改变取舍的价格证据，场景不合适时可使用 `raw_price`。
+`research_result` 继续严格符合现有 `ResearchResult`，其中 `skills_used` 为实际使用的五个 Skill。每条 `decision_trace` 使用唯一 `decision_id` 并引用候选账中的股票；`formation_values` 只放真正用于当时判断的少量标量，不保存整行派生事实。每只候选都必须有结构化 V4 `research_thesis`。`active` 入选必须引用本股票的公司证据和至少一条满足最小原始数值合同的价格 `support`；`fresh_event_pending + conditional` 必须引用公司重大新事件和同一事件的价格 `action_condition`，不得伪装成支持；板块发动机还须保存对应扩散或领导集群证据。研究事实与补证不设固定条数。保存时，实际入选股和 `nearest_nonselections` 仍按既有合同用每股 1—2 条价格 decision 承载支持与反证；多项相关原值、比较和出处放入这些记录的标量 `formation_values`，不要把记录数量误当成只准读取 1—2 个事实或删去关键反证。场景不合适时可使用 `raw_price`。
 
 `research_result.selected_stocks` 和 `candidate_ledger.final_fate` 是冻结 trace 身份，不在本轮回写。消费端只派生 `selection_output_class`：四种已确认发动机的 `active + confirmed` 是 `confirmed_active`；`fresh_event_pending + conditional + pending` 是 `conditional_event`。后者不进入正式推荐数量、Forward 正式选择行或正式收益评价。
 
@@ -334,7 +340,7 @@ research_result:
 
 完整原值、证据角色、近邻比较与原理由按原合同保存。对外只使用解释本次判断必要的数字；经营数据仅是基础时不包装成新的短期上涨原因。阶段名称不能代替为什么现在选择、又有什么代价的说明。
 
-格式与定向阅读仅由`ops/forward-selection-prompt.md`的“今天明确推荐的股票”维护；写作教学见`references/selection-writing-calibration.md`，按该Prompt读取，不在本Skill重复另一份用户模板。范文不能改名单、改条件、添加公司催化或改变判断强度。
+格式与定向阅读仅由`ops/forward-selection-prompt.md`的“今天明确推荐的股票”维护；写作教学见`references/selection-writing-calibration.md`。拟定名单保存前按该 Prompt 实读并检查成稿；范文只教论证和表达，不能提供本股事实、催化或取舍。冻结后不得借范文改名单、条件或判断强度。
 
 公司简介只帮助用户理解公司，不得反过来改变名单和排序。
 

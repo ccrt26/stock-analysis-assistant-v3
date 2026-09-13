@@ -72,7 +72,12 @@ def check_primary_details(pg, snapshot, out):
     pg.screenshot(path=str(out/'a2-full-review.png'))
     pg.click('[data-detail-tab="original"]')
     text=pg.locator('.reading-body').text_content()
-    check("原推荐理由完整保留", all(p in text for p in original_paragraphs(stock.get('statementFull') or stock.get('reasonFull'))))
+    expected=stock.get('statementFull') or stock.get('reasonFull')
+    # Markdown 加粗是格式；实际文字、标点和数字仍逐段核对。
+    check("原推荐理由完整保留", all(p.replace('**','') in text for p in original_paragraphs(expected)))
+    if not stock.get('statementFull'):
+        check("完整正文缺项明确可见",'尚缺完整推荐正文' in pg.locator('.reading-body').inner_text()
+              and '非完整正文' in pg.locator('.original-summary summary').inner_text())
     pg.click('[data-detail-tab="company"]')
     intro=stock['companyIntroduction'];company_text=pg.locator('.reading-body').text_content()
     check("公司介绍完整段落及原截止可读",all(p in company_text for sec in intro['sections'] for p in sec['paragraphs'])

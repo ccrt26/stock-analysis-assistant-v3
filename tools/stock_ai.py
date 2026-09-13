@@ -1088,6 +1088,51 @@ def retry_prism_sync(formation: str, action: str, as_of: str,
     return False, output.strip()[-400:]
 
 
+def archive_accepted_report(formation: str, reply_path: Path) -> tuple[bool, str]:
+    """仅供统一完成校验通过后的调用方使用；精确保存已核对全文，不覆盖旧正文。"""
+    target = PROJECT_ROOT / "local_archive" / "forward_selection" / f"daily-research-{formation}.md"
+    temporary = None
+    try:
+        body = reply_path.read_bytes()
+        if not body.strip():
+            return False, "推荐正文保存失败：已验收回复为空"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if target.exists():
+            if target.read_bytes() == body:
+                return True, "unchanged"
+            return False, "推荐正文已存在不同内容；保留原正文与本次回复，需核对冲突"
+        with tempfile.NamedTemporaryFile(dir=target.parent, prefix=".daily-research-", delete=False) as handle:
+            temporary = Path(handle.name)
+            handle.write(body)
+            handle.flush()
+            os.fsync(handle.fileno())
+        try:
+            # 发布完整文件且不覆盖并发出现的正文；临时名在 finally 清理。
+            os.link(temporary, target)
+        except FileExistsError:
+            if target.read_bytes() == body:
+                return True, "unchanged"
+            return False, "推荐正文已存在不同内容；保留原正文与本次回复，需核对冲突"
+        return True, "created"
+    except OSError as exc:
+        return False, f"推荐正文保存失败：{exc}"
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
+def sync_accepted_report(formation: str, action: str, as_of: str,
+                         reply_path: Path, timeout_seconds: int,
+                         *, skip_unchanged_sync: bool = False) -> tuple[bool, str]:
+    """调用方必须先通过 verify_completed_run；正文衔接失败不重跑研究。"""
+    saved, message = archive_accepted_report(formation, reply_path)
+    if not saved:
+        return False, message
+    if skip_unchanged_sync and message == "unchanged" and prism_page_present(formation):
+        return True, "unchanged"
+    return retry_prism_sync(formation, action, as_of, timeout_seconds)
+
+
 def strict_archive_check(formation: str, action: str, as_of: str) -> tuple[bool, str]:
     """复用 render_prism_web.load_completed_archives 的正式归档严格校验。"""
     try:
@@ -1601,6 +1646,9 @@ def finish_task(
     extra: dict | None = None,
 ) -> int:
     """统一收尾：先落盘终态与错误依据 → 按策略 Mac 通知一次 → 索引附通知结果。"""
+    if task == "nightly" and result_status == "研究已归档但展示待更新" \
+            and state_route_evidence_matches(state) is False:
+        detail += "；模型身份不一致仍待核对。"
     if result_status == "完整完成":
         matches = state_route_evidence_matches(state)
         if matches is False:
@@ -1710,6 +1758,14 @@ def run_nightly(args: argparse.Namespace, config: dict, lock: TaskLock,
                 state["formation_date"], state["action_date"],
                 state["selection_as_of"], reply_path)
             if ok:
+                synced, sync_msg = sync_accepted_report(
+                    state["formation_date"], state["action_date"],
+                    state["selection_as_of"], reply_path, 600, skip_unchanged_sync=True)
+                if not synced:
+                    return finish_task(
+                        "nightly", path.name, state, "研究已归档但展示待更新",
+                        f"研究与合并回复复核通过，正文衔接或同步失败：{sync_msg}。保留研究，按原身份恢复。",
+                        EXIT_FAIL, stage="展示")
                 if state_route_evidence_matches(state) is False:
                     return finish_task("nightly", path.name, state, "完整完成",
                                        "既有归档复核通过，但模型身份问题仍需核对。", EXIT_OK)
@@ -1820,7 +1876,7 @@ def run_nightly(args: argparse.Namespace, config: dict, lock: TaskLock,
         if ok:
             state["final_reply"] = str(reply_target.relative_to(PROJECT_ROOT))
             state["archive"] = str(archive_dir.relative_to(PROJECT_ROOT))
-            synced, sync_msg = retry_prism_sync(formation, action, as_of, 600)
+            synced, sync_msg = sync_accepted_report(formation, action, as_of, reply_target, 600)
             note = ""
             if synced:
                 note = "（首页未切到本历史日）" if "skipped_newer" in sync_msg else ""
@@ -1857,7 +1913,7 @@ def run_nightly(args: argparse.Namespace, config: dict, lock: TaskLock,
             state["archive"] = str(archive_dir.relative_to(PROJECT_ROOT))
             ok, issues, categories = verify_completed_run(formation, action, as_of, reply_target)
             if ok:
-                synced, sync_msg = retry_prism_sync(formation, action, as_of, 600)
+                synced, sync_msg = sync_accepted_report(formation, action, as_of, reply_target, 600)
                 return finish_task(
                     "nightly", path.name, state,
                     "完整完成" if synced else "研究已归档但展示待更新",
@@ -2013,7 +2069,7 @@ def finish_nightly_success(
             EXIT_FAIL, stage=stage_, extra={"provider": provider},
         )
     # 权威同步：接受 unchanged；skipped_newer 注明首页未切。
-    synced, sync_msg = retry_prism_sync(formation, action, as_of, sync_timeout)
+    synced, sync_msg = sync_accepted_report(formation, action, as_of, reply_target, sync_timeout)
     if not synced:
         return finish_task(
             "nightly", state_name, state, "研究已归档但展示待更新",

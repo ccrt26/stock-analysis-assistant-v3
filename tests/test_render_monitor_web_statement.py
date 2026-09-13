@@ -214,3 +214,25 @@ def test_payload_marks_gap_when_report_exists_but_section_missing(tmp_path: Path
     assert len(issues) == 1
     assert issues[0]["recordKey"] == "600000.SH:2026-08-31"
     assert issues[0]["origin"] == "display_data_adapter"
+
+
+def test_merged_report_selects_recommendation_not_same_stock_review(tmp_path):
+    _write_report(tmp_path, '2026-09-11',
+        '## 正式推荐股票的今日复盘\n### 中国巨石（600176.SH）\n旧次推荐的复盘。\n'
+        '## 今天明确推荐的股票\n### 中国巨石（600176.SH）\n**为什么会选它**\n\n本次完整说明。\n'
+        '### 另一公司（000001.SZ）\n其他股票。\n')
+    body, issue = extract_daily_statement(tmp_path, '2026-09-11', '中国巨石', '600176.SH')
+    assert issue == '' and body == '**为什么会选它**\n\n本次完整说明。'
+
+
+@pytest.mark.parametrize('report', [
+    '# 今天的市场情况\n### 中国巨石（600176.SH）\n错误分区。\n',
+    '### 今天明确推荐的股票\n### 中国巨石（600176.SH）\n错误层级。\n',
+    '## 正式推荐股票的今日复盘\n### 中国巨石（600176.SH）\n不能冒充推荐。\n',
+    '## 今天明确推荐的股票\n### 中国巨石（600176.SH）\n一处。\n'
+    '## 今天明确推荐的股票\n### 中国巨石（600176.SH）\n另一处。\n',
+])
+def test_malformed_merged_report_never_falls_back_to_whole_file(tmp_path, report):
+    _write_report(tmp_path, '2026-09-11', report)
+    body, issue = extract_daily_statement(tmp_path, '2026-09-11', '中国巨石', '600176.SH')
+    assert body == '' and issue in {'not_found', 'ambiguous'}

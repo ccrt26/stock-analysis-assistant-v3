@@ -418,6 +418,10 @@ def test_nightly_success_records_complete_result(isolated, monkeypatch, capsys):
     assert timeouts["glm"] is None
 
 
+    canonical = isolated / f"local_archive/forward_selection/daily-research-{state['formation_date']}.md"
+    assert canonical.read_bytes() == (isolated / state["final_reply"]).read_bytes()
+
+
 def test_nightly_quota_failure_falls_back_no_budget_split(isolated, monkeypatch, fake_keys):
     """额度失败接替备用；使用本测试临时配置，不回落真实凭据来源。"""
     path, calls, timeouts, _p = prepared_run(
@@ -523,10 +527,16 @@ def test_nightly_completed_normal_state_blocks_same_evening(isolated, monkeypatc
     monkeypatch.setattr(stock_ai, "strict_archive_check", lambda f, a, s: (True, "alerts=3"))
     monkeypatch.setattr(stock_ai, "forward_csv_matches_trace", lambda f, a, s: (True, ""))
     monkeypatch.setattr(stock_ai, "merged_report_issues", lambda r, f, a, s: [])
+    monkeypatch.setattr(stock_ai, "retry_prism_sync", lambda *a, **k: (True, "published=unchanged"))
     monkeypatch.setattr(stock_ai, "run_prepare", lambda *a, **k: (_ for _ in ()).throw(AssertionError))
     monkeypatch.setattr(stock_ai, "run_agent", lambda *a, **k: (_ for _ in ()).throw(AssertionError))
     assert stock_ai.run_nightly(Args(), {}, None, now=now) == stock_ai.EXIT_OK
     assert "不会重新研究" in capsys.readouterr().out
+
+
+    saved = json.loads(path.read_text())
+    canonical = isolated / f"local_archive/forward_selection/daily-research-{saved['formation_date']}.md"
+    assert canonical.read_bytes() == (isolated / saved["final_reply"]).read_bytes()
 
 
 def test_nightly_completed_rerun_blocks_identical_rerun_only(isolated, monkeypatch, capsys):
@@ -546,11 +556,17 @@ def test_nightly_completed_rerun_blocks_identical_rerun_only(isolated, monkeypat
     monkeypatch.setattr(stock_ai, "strict_archive_check", lambda f, a, s: (True, "alerts=3"))
     monkeypatch.setattr(stock_ai, "forward_csv_matches_trace", lambda f, a, s: (True, ""))
     monkeypatch.setattr(stock_ai, "merged_report_issues", lambda r, f, a, s: [])
+    monkeypatch.setattr(stock_ai, "retry_prism_sync", lambda *a, **k: (True, "published=unchanged"))
     monkeypatch.setattr(stock_ai, "run_prepare", lambda *a, **k: (_ for _ in ()).throw(AssertionError))
     monkeypatch.setattr(stock_ai, "run_agent", lambda *a, **k: (_ for _ in ()).throw(AssertionError))
     assert stock_ai.run_nightly(Args(rerun_date="2026-09-11"), {}, None,
                                 now=at("2026-09-11", 20, 0)) == stock_ai.EXIT_OK
     assert "不会重新研究" in capsys.readouterr().out
+
+
+    saved = json.loads(path.read_text())
+    canonical = isolated / f"local_archive/forward_selection/daily-research-{saved['formation_date']}.md"
+    assert canonical.read_bytes() == (isolated / saved["final_reply"]).read_bytes()
 
 
 def test_nightly_completed_without_identity_is_not_success(isolated, monkeypatch, capsys):
@@ -876,6 +892,10 @@ def test_same_identity_reply_reuse_from_other_slot(isolated, monkeypatch):
     assert (isolated / "local_archive/ai_tasks/nightly/rerun-2026-09-14/final-reply.md").exists()
     state = json.loads(path.read_text(encoding="utf-8"))
     assert state["result"]["status"] == "完整完成"
+
+
+    canonical = isolated / f"local_archive/forward_selection/daily-research-{state['formation_date']}.md"
+    assert canonical.read_bytes() == (isolated / state["final_reply"]).read_bytes()
 
 
 def test_reply_with_other_identity_not_reused(isolated, monkeypatch):
@@ -1924,3 +1944,106 @@ def test_prism_readiness_requires_a2_pages_not_frozen_backup(tmp_path, monkeypat
     (monitor / "style-preview" / "prism-a2.html").write_text("new primary")
     assert stock_ai.prism_page_present("2026-09-11")
     assert not stock_ai.prism_page_present("2026-09-10")
+
+
+@pytest.mark.parametrize('passed', [False, True])
+def test_accepted_body_only_published_after_complete_verification(isolated, monkeypatch, passed):
+    source = isolated / 'model-final.md'
+    body = '## 今天明确推荐的股票\r\n\r\n### 示例（000001.SZ）\r\n完整正文。\r\n'.encode()
+    source.write_bytes(body)
+    archive = isolated / 'local_archive/ai_tasks/nightly/test'
+    target = archive / 'final-reply.md'
+    canonical = isolated / 'local_archive/forward_selection/daily-research-2026-09-11.md'
+    calls = []
+    def verify(*args):
+        assert not canonical.exists()
+        return passed, ([] if passed else ['正文缺失']), {'report': [] if passed else ['正文缺失']}
+    def sync(*args):
+        assert canonical.read_bytes() == body
+        calls.append(args)
+        return True, 'published=unchanged'
+    monkeypatch.setattr(stock_ai, 'verify_completed_run', verify)
+    monkeypatch.setattr(stock_ai, 'retry_prism_sync', sync)
+    state = {'task': 'nightly', 'attempts': []}
+    result = stock_ai.finish_nightly_success(state, 'nightly-test.json', 'glm', source,
+        '2026-09-11', '2026-09-14', '2026-09-13T18:30:00+08:00', archive, target)
+    assert result == (stock_ai.EXIT_OK if passed else stock_ai.EXIT_FAIL)
+    assert canonical.exists() is passed
+    assert bool(calls) is passed
+    assert target.read_bytes() == body  # 失败也保留原回复，不能把它冒充已验收正文
+
+
+def test_accepted_body_atomic_idempotent_and_conflict_keeps_both(isolated):
+    source = isolated / 'reply.md'
+    source.write_bytes(b'Original\r\n\r\nbody\n')
+    target = isolated / 'local_archive/forward_selection/daily-research-2026-09-11.md'
+    assert stock_ai.archive_accepted_report('2026-09-11', source) == (True, 'created')
+    initial = target.stat().st_mtime_ns
+    assert stock_ai.archive_accepted_report('2026-09-11', source) == (True, 'unchanged')
+    assert target.stat().st_mtime_ns == initial
+    source.write_text('不同的已核对回复')
+    ok, message = stock_ai.archive_accepted_report('2026-09-11', source)
+    assert not ok and '不同内容' in message
+    assert target.read_bytes() == b'Original\r\n\r\nbody\n'
+    assert source.read_text() == '不同的已核对回复'
+    assert list(target.parent.glob('.daily-research-*')) == []
+
+
+def test_accepted_body_write_failure_is_recoverable_without_partial_file(isolated, monkeypatch):
+    source = isolated / 'reply.md'
+    source.write_text('完整报告')
+    target = isolated / 'local_archive/forward_selection/daily-research-2026-09-11.md'
+    link = stock_ai.os.link
+    monkeypatch.setattr(stock_ai.os, 'link', lambda *a: (_ for _ in ()).throw(OSError('写入失败')))
+    ok, message = stock_ai.archive_accepted_report('2026-09-11', source)
+    assert not ok and '写入失败' in message
+    assert not target.exists()
+    assert list(target.parent.glob('.daily-research-*')) == []
+    monkeypatch.setattr(stock_ai.os, 'link', link)
+    assert stock_ai.archive_accepted_report('2026-09-11', source) == (True, 'created')
+    assert target.read_text() == '完整报告'
+
+
+def test_existing_ready_report_published_without_model(isolated, monkeypatch):
+    now = at('2026-09-13', 19, 30)
+    path, calls, _, _ = prepared_run(isolated, monkeypatch, now=now)
+    reply = isolated / 'local_archive/ai_tasks/nightly/rerun-2026-09-14/final-reply.md'
+    reply.parent.mkdir(parents=True)
+    reply.write_text('既有完整报告')
+    assert stock_ai.run_nightly(Args(), {}, None, now=now) == stock_ai.EXIT_OK
+    assert not [c for c in calls if c[0] == 'model']
+    state = json.loads(path.read_text())
+    canonical = isolated / f"local_archive/forward_selection/daily-research-{state['formation_date']}.md"
+    assert canonical.read_bytes() == reply.read_bytes()
+
+
+def test_display_failure_preserves_model_identity_problem(isolated, monkeypatch):
+    monkeypatch.setattr(stock_ai, 'state_route_evidence_matches', lambda state: False)
+    state = {'task': 'nightly', 'attempts': [], 'model_evidence': {'consistent': False}}
+    stock_ai.finish_task('nightly', 'nightly-conflict.json', state, '研究已归档但展示待更新',
+                         '正文冲突，研究与合并回复核验通过', stock_ai.EXIT_FAIL, stage='展示')
+    assert state['result']['status'] == '研究已归档但展示待更新'
+    assert '模型身份不一致仍待核对' in state['result']['detail']
+    assert state['model_evidence'] == {'consistent': False}
+
+
+@pytest.mark.parametrize('failure', ['conflict', 'write_error'])
+def test_delivery_problem_after_acceptance_does_not_sync_or_claim_complete(isolated, monkeypatch, failure):
+    source = isolated / 'model-final.md'
+    source.write_text('本次完整报告')
+    archive = isolated / 'local_archive/ai_tasks/nightly/test'
+    canonical = isolated / 'local_archive/forward_selection/daily-research-2026-09-11.md'
+    if failure == 'conflict':
+        canonical.parent.mkdir(parents=True)
+        canonical.write_text('已有不同正文')
+    else:
+        monkeypatch.setattr(stock_ai.os, 'link', lambda *a: (_ for _ in ()).throw(OSError('模拟磁盘写入失败')))
+    monkeypatch.setattr(stock_ai, 'verify_completed_run', lambda *a: (True, [], {}))
+    monkeypatch.setattr(stock_ai, 'retry_prism_sync', lambda *a: (_ for _ in ()).throw(AssertionError('不应同步')))
+    state = {'task': 'nightly', 'attempts': []}
+    code = stock_ai.finish_nightly_success(state, 'nightly-delivery.json', 'glm', source,
+        '2026-09-11', '2026-09-14', '2026-09-13T18:30:00+08:00', archive, archive/'final-reply.md')
+    assert code == stock_ai.EXIT_FAIL
+    assert state['result']['status'] == '研究已归档但展示待更新'
+    assert (archive/'final-reply.md').read_text() == '本次完整报告'
+    assert canonical.read_text() == '已有不同正文' if failure == 'conflict' else not canonical.exists()

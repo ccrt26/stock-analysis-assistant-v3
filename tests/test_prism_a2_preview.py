@@ -97,6 +97,9 @@ def test_invalid_calendar_or_nonfinite_input_cannot_render(snapshot):
 
 
 def test_old_a2_command_delegates_to_formal_sync(monkeypatch):
+    tools_dir = str(ROOT / "tools")
+    if tools_dir not in sys.path:
+        sys.path.insert(0, tools_dir)
     import render_prism_web
     calls=[]
     monkeypatch.setattr(render_prism_web,'main',lambda args:calls.append(args) or 0)
@@ -149,3 +152,20 @@ assert.deepEqual(seg[0][0],[0,0]);assert.deepEqual(seg[0][3],[1,2]);assert.deepE
 console.log('ok');
 """
     assert node_eval(script) == "ok"
+
+
+def test_original_body_separates_missing_summary_and_preserves_adopted_identity():
+    source = (A2 / 'overview.js').read_text()
+    functions = source[source.index('const paragraphs='):source.index('function fullReview')]
+    script = "const esc=v=>String(v??'').replace(/[&<>\"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',\"'\":'&#39;'}[c]));\n" + functions
+    result = json.loads(node_eval(script + '\nconsole.log(JSON.stringify(['
+        'originalBody({reasonFull:"历史摘要",reasonRisk:"原风险"}),'
+        'originalBody({statementFull:"**判断**\\n\\n正文<script>alert(1)</script>",statementSource:"adopted_rewrite",reasonFull:"不应混入正文的摘要"})]));'))
+    missing, adopted = result
+    assert '尚缺完整推荐正文' in missing
+    assert '<summary>查看历史记录摘要（非完整正文）</summary>' in missing
+    assert '历史摘要' in missing and '原风险' in missing
+    assert '<strong>判断</strong>' in adopted
+    assert '&lt;script&gt;' in adopted and '<script>' not in adopted
+    assert '用户认可的表达范本' in adopted
+    assert '不应混入正文的摘要' not in adopted

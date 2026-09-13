@@ -1198,6 +1198,7 @@ def extract_daily_statement(
     返回 (statement, miss_reason)。miss_reason 为 "" 表示提取成功；
     "no_report" 表示形成日无日报存档；"not_found" / "ambiguous" 表示
     小节未找到或不唯一（同日同名小节多于一个时宁缺毋滥，不猜第一个）。
+    合并报告限定在新推荐分区；独立旧日报兼容原口径。
     正文不含小节标题行，取标题行之后到下一个任意级 markdown 标题为止。
     """
     formed_on = str(formed_on or "").strip()
@@ -1213,6 +1214,29 @@ def extract_daily_statement(
         lines = report_path.read_text(encoding="utf-8").splitlines()
     except OSError:
         return "", "no_report"
+    # 合并日报只从新推荐分区取正文；同股复盘不能冒充本次推荐。
+    sections = []
+    for index, line in enumerate(lines):
+        heading = re.match(r"^(#{1,6})[ \t]+(.+?)[ \t]*$", line)
+        if heading:
+            sections.append((index, len(heading.group(1)), heading.group(2)))
+    recommendation_sections = [(index, level) for index, level, title in sections
+                               if title == "今天明确推荐的股票"]
+    if len(recommendation_sections) > 1:
+        return "", "ambiguous"
+    if recommendation_sections:
+        section_index, level = recommendation_sections[0]
+        if level != 2:
+            return "", "not_found"
+        section_start = section_index + 1
+        section_end = next(
+            (index for index in range(section_start, len(lines))
+             if re.match(r"^#{1,2}[ \t]+", lines[index])), len(lines))
+        lines = lines[section_start:section_end]
+    elif any(title in {"今天的市场情况", "正式推荐股票的今日复盘", "目前仍开放的正式推荐股票数量"}
+             for _, _, title in sections):
+        return "", "not_found"
+    # 没有合并报告结构的既有独立日报仍沿用原提取口径。
     hits: list[int] = []
     for index, line in enumerate(lines):
         heading = re.match(r"^(#{2,6})\s+(.+?)\s*$", line)
