@@ -1909,3 +1909,18 @@ def test_verify_uses_the_same_exact_identity_as_real_tasks(
     args = stock_ai.build_parser().parse_args(["verify", "--provider", "glm"])
     assert stock_ai.cmd_verify(args) == (stock_ai.EXIT_OK if expected_ok else stock_ai.EXIT_FAIL)
     assert stock_ai.load_local_config()["verify"]["glm"]["ok"] is expected_ok
+
+
+def test_prism_readiness_requires_a2_pages_not_frozen_backup(tmp_path, monkeypatch):
+    monkeypatch.setattr(stock_ai, "PROJECT_ROOT", tmp_path)
+    monitor = tmp_path / "local_archive" / "forward_monitor"
+    monitor.mkdir(parents=True)
+    (monitor / "prism.html").write_text("frozen backup")
+    (monitor / "prism-report-2026-09-11.html").write_text("frozen dated backup")
+    assert not stock_ai.prism_page_present("2026-09-11")
+    (monitor / "prism-a2-report-2026-09-11.html").write_text("new dated")
+    assert not stock_ai.prism_page_present("2026-09-11")
+    (monitor / "style-preview").mkdir()
+    (monitor / "style-preview" / "prism-a2.html").write_text("new primary")
+    assert stock_ai.prism_page_present("2026-09-11")
+    assert not stock_ai.prism_page_present("2026-09-10")

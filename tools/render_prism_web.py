@@ -1,4 +1,4 @@
-"""把已冻结的每日走势复盘渲染成「观澜 · 光场 PRISM V3」展示页面。
+"""把已冻结的每日走势复盘渲染成「观澜 · A2」主用展示页面。
 
 复用 tools/render_monitor_web.build_payload 输出的同一份数据（字段合同见
 tools/guanlan-prism/docs/03-数据接口与口径.md），并做两处展示层附加：
@@ -10,10 +10,11 @@ tools/guanlan-prism/docs/03-数据接口与口径.md），并做两处展示层�
 当日普通详评名单直接由页面规则从 regular_detail 标记推导（上游无显式排序
 名单时不编造 dailyDeepReview）。不修改选股、复盘、V4 渲染器或定时任务。
 
-只维护 Prism 一套本地 WEB（2026-09-10 用户批准停止生成旧 monitor 页面）：
-1. prism-report-<date>.html —— 按日期留档，历史可回看；
-2. prism.html —— 固定地址，内容不变时跳过，旧日期不会覆盖较新的日报。
-不再写 monitor-report-<date>.html 与 index.html（旧 WEB 已下线）。
+主用 A2（2026-09-13 用户批准）：
+1. prism-a2-report-<date>.html —— 新版按日期留档；
+2. style-preview/prism-a2.html —— 保留现有主用地址，旧日期不覆盖较新页面。
+prism.html 及 prism-report-* 保留为停更备用，不作为数据来源，不再写入。
+价量补充日线随 HTML 一起内嵌，使用同一报告截止，不需要外部侧表文件。
 
 用法：
     ./.venv/bin/python tools/render_prism_web.py                  # 最新一个 snapshot
@@ -55,7 +56,7 @@ def load_modules():
         import render_monitor_web  # type: ignore[no-redef]
 
     modules = {}
-    for name in ("build", "adapt_snapshot"):
+    for name in ("build_preview_a2", "adapt_snapshot"):
         spec = importlib.util.spec_from_file_location(
             f"guanlan_prism_{name}", PRISM_ROOT / "tools" / f"{name}.py"
         )
@@ -64,7 +65,7 @@ def load_modules():
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         modules[name] = module
-    return render_monitor_web, modules["adapt_snapshot"], modules["build"]
+    return render_monitor_web, modules["adapt_snapshot"], modules["build_preview_a2"]
 
 
 def local_index_rows(
@@ -187,6 +188,7 @@ def write_html(path: Path, html: str) -> bool:
     """每个文件独立原子替换；相同内容不触碰修改时间。"""
     if path.exists() and path.read_text(encoding="utf-8") == html:
         return False
+    path.parent.mkdir(parents=True, exist_ok=True)
     temporary = None
     try:
         with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent,
@@ -202,7 +204,7 @@ def write_html(path: Path, html: str) -> bool:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Render the frozen daily monitor review as the PRISM V3 display page"
+        description="Render the frozen daily monitor review as the A2 primary display page"
     )
     parser.add_argument(
         "--date", default=None, help="analysis date (YYYY-MM-DD), default latest snapshot"
@@ -213,7 +215,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--out",
         default=None,
-        help="override output HTML path (default prism-report-<date>.html in monitor dir)",
+        help="override output HTML path (default prism-a2-report-<date>.html); backup paths are forbidden",
     )
     parser.add_argument(
         "--indices",
@@ -223,7 +225,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--no-publish",
         action="store_true",
-        help="skip publishing the fixed prism.html entry (dated file is still written)",
+        help="skip publishing style-preview/prism-a2.html (dated A2 file is still written)",
     )
     args = parser.parse_args(argv)
     if (args.action_date is not None or args.as_of is not None) and not all(
@@ -273,17 +275,22 @@ def render(args, renderer, adapt, prism, monitor_dir: Path) -> int:
     display_snapshot = adapt.enrich_snapshot(
         payload, market_rows=market_rows or None, market_codes=codes
     )
-    html = prism.render_html(display_snapshot)
+    series = prism.assemble_series(PROJECT_ROOT, renderer, display_snapshot)
+    html = prism.render_html(display_snapshot, series)
     if adapt.read_snapshot_text(html) != display_snapshot:
         raise ValueError("rendered HTML does not contain the expected snapshot")
     out_path = (
         Path(args.out)
         if args.out
-        else monitor_dir / f"prism-report-{analysis_date.isoformat()}.html"
+        else monitor_dir / f"prism-a2-report-{analysis_date.isoformat()}.html"
     )
-    fixed_path = monitor_dir / "prism.html"
+    fixed_path = monitor_dir / "style-preview" / "prism-a2.html"
     if out_path.resolve() == fixed_path.resolve():
-        raise ValueError("--out must not target prism.html; use the default dated output")
+        raise ValueError("--out must not target the fixed A2 entry; use the default dated output")
+    for path in (out_path, out_path.resolve()):
+        if (path.suffix != ".html" or path.name in ("prism.html", "index.html")
+                or path.name.startswith(("prism-report-", "monitor-report-"))):
+            raise ValueError("--out must be an HTML file outside retired/backup page paths")
     newer_fixed = False
     if not args.no_publish and fixed_path.exists():
         current = adapt.read_snapshot_text(fixed_path.read_text(encoding="utf-8"))

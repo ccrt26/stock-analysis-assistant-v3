@@ -1,6 +1,6 @@
 # 股票分析助手 V3：当前架构与实现状态
 
-**更新日期：** 2026-09-08
+**更新日期：** 2026-09-13
 
 **适用范围：** GitHub `main` 分支
 
@@ -172,7 +172,7 @@ data health
 
 复盘执行顺序为全部结构化判断草稿→节点K→非节点普通详评D→其余简评B→各写唯一正文→核对来源及结构化一致性→先 `record-daily-formal-reviews` 保存账本、后 `record` 保存报告。简评正文只在账本，详评正文只在报告；程序读取历史时会恢复本 episode 上一轮详评正文，空的账本正文不是历史缺失。写作与字段分工以复盘 Skill 和 `ops/forward-monitor-prompt.md` 为准。
 
-`tools/render_prism_web.py` 使用 `tools/render_monitor_web.py` 的共享数据整理函数并调用 Prism 的 `render_html()`，输出 `prism-report-<date>.html` 和固定入口 `prism.html`；Prism 同步命令即现行的本地展示更新入口（原 `index.html` 旧入口已随 legacy monitor web 退役，仓库不存在 `tools/update_monitor_web.py`）。现有晚间任务在正式归档成功的共同收尾传入 `--date`、`--action-date`、`--as-of` 执行 Prism 同步，覆盖正常完成、已有选择与补跑。严格入口只读核对正式 V4 trace、snapshot、日评账本和复盘 JSON/Markdown 的日期、截止时刻及记录覆盖，允许合法空名单；每个页面独立原子替换，历史日期不覆盖较新首页。同步失败保留已完成研究和旧首页，完整报告附一行错误，不重新研究。共享模块保留数据函数，已退役的旧 HTML 模板与命令行入口不再保留。Prism 保留原正文，不调用模型重写，不接入实时行情，不表示获准云端发布。
+`tools/render_prism_web.py` 使用 `tools/render_monitor_web.py` 的共享数据整理函数并调用 A2 的 `render_html()`，直接从正式归档输出 `prism-a2-report-<date>.html` 和固定入口 `style-preview/prism-a2.html`（保留用户现有地址）；价量补充日线按同一报告截止从本地事实读取并内嵌。`prism.html` 及旧 `prism-report-*` 保留为停更备用，不再参与取数或写入；Prism 同步命令即现行的本地展示更新入口（原 `index.html` 旧入口已随 legacy monitor web 退役，仓库不存在 `tools/update_monitor_web.py`）。现有晚间任务在正式归档成功的共同收尾传入 `--date`、`--action-date`、`--as-of` 执行 Prism 同步，覆盖正常完成、已有选择与补跑。严格入口只读核对正式 V4 trace、snapshot、日评账本和复盘 JSON/Markdown 的日期、截止时刻及记录覆盖，允许合法空名单；每个页面独立原子替换，历史日期不覆盖较新首页。同步失败保留已完成研究和旧首页，完整报告附一行错误，不重新研究。共享模块保留数据函数，已退役的旧 HTML 模板与命令行入口不再保留。A2 的走势、完整复盘、原推荐及公司资料在页内阅读；所选历史日期只截断当前冻结数据的展示范围，不声称重新取得当时快照，公司资料保持原推荐身份和截止。A2 保留原正文，不调用模型重写，不接入实时行情，不表示获准云端发布。
 
 研究超过18:55后完成仍可保存，只要沿用已取得的显式上下文，冻结的 `as_of` 仍为行动日前一自然日18:30，且所有行情交易日期不晚于形成日、所有事实满足 `available_at <= as_of`。合规结果统一按 `selection` 语义写入被 Git 忽略的 `local_archive/forward_selection/forward-selection-log.csv`；历史 `validation_mode` 只为 CSV 兼容保留，不再形成 forward/reconstructed 两套推荐。历史记录首次由 `docs/forward-selection-log.csv` 初始化，之后只在 D1—D20 行情完整时一次性结算。
 

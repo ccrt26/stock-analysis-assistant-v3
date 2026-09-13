@@ -107,7 +107,8 @@ def test_cli_renders_with_market_enrichment(
     # 屏蔽本地事实仓读取：无数据时页面保持“快照未提供”。
     monkeypatch.setattr(renderer, "_read_day_frames", lambda root, name, day, cutoff: None)
 
-    out = tmp_path / "prism-report-2026-01-05.html"
+    monkeypatch.setattr(renderer, "list_sessions", lambda *a: [date.fromisoformat(d) for d in payload["sessionDates"]])
+    out = tmp_path / "prism-a2-report-2026-01-05.html"
     rc = prism_cli.main(["--out", str(out)])
     assert rc == 0
     assert out.is_file()
@@ -124,7 +125,7 @@ def test_cli_renders_with_market_enrichment(
     assert "market_rows_loaded=0" in printed
     assert "market_provided=0/4" in printed
     # 固定地址随渲染发布，与留档内容一致；重复运行幂等。
-    fixed = tmp_path / "prism.html"
+    fixed = tmp_path / "style-preview" / "prism-a2.html"
     assert fixed.is_file() and fixed.read_text(encoding="utf-8") == text
     first_fixed_mtime = fixed.stat().st_mtime_ns
     assert prism_cli.main(["--out", str(out)]) == 0
@@ -149,7 +150,7 @@ def completed_archive(tmp_path, monkeypatch):
     monkeypatch.setattr(renderer, "SELECTION_DIR", selection)
     monkeypatch.setattr(cli, "PROJECT_ROOT", tmp_path)
     # 临时交易日历（周一至周五开市）：build_payload 的交易日序列来源（F04/E2）。
-    days = pd.date_range("2026-06-01", "2026-12-31", freq="D")
+    days = pd.date_range("2026-01-01", "2026-12-31", freq="D")
     calendar_frame = pd.DataFrame(
         {"exchange": "SSE", "cal_date": days.strftime("%Y-%m-%d"),
          "is_open": days.dayofweek < 5}
@@ -211,7 +212,7 @@ def test_completed_weekend_empty_report_sync_is_idempotent(completed_archive):
     cli, paths, args = completed_archive
     originals = {p: p.read_bytes() for p in paths.values()}
     assert cli.main(args) == 0
-    fixed = paths["report"].parent / "prism.html"
+    fixed = paths["report"].parent / "style-preview" / "prism-a2.html"
     html = fixed.read_text(encoding="utf-8")
     payload = json.loads(html.split('<script id="snapshot" type="application/json">')[1].split("</script>")[0])
     assert payload["analysis_date"] == "2026-09-04"
@@ -239,7 +240,7 @@ def test_strict_sync_requires_all_three_parameters(args):
 def test_missing_formal_archive_preserves_fixed_page(completed_archive, missing):
     cli, paths, args = completed_archive
     assert cli.main(args) == 0
-    fixed = paths["report"].parent / "prism.html"
+    fixed = paths["report"].parent / "style-preview" / "prism-a2.html"
     old = fixed.read_bytes()
     paths[missing].unlink()
     assert cli.main(args) == 1
@@ -257,7 +258,7 @@ def test_archive_date_or_cutoff_mismatch_cannot_publish(completed_archive, key, 
     cli, paths, args = completed_archive
     change_archive(paths[key], **{field: value})
     assert cli.main(args) == 1
-    assert not (paths["report"].parent / "prism.html").exists()
+    assert not (paths["report"].parent / "style-preview" / "prism-a2.html").exists()
 
 
 def test_empty_markdown_and_naive_requested_cutoff_are_rejected(completed_archive):
@@ -314,30 +315,31 @@ def test_daily_review_identity_and_detail_coverage(completed_archive):
 def test_historical_render_never_downgrades_fixed_page(completed_archive):
     cli, paths, args = completed_archive
     _, _, builder = cli.load_modules()
-    fixed = paths["report"].parent / "prism.html"
+    fixed = paths["report"].parent / "style-preview" / "prism-a2.html"
     newer = builder.render_html({"analysis_date": "2026-09-07", "as_of": "2026-09-07T18:30:00+08:00",
-                                 "stocks": [], "dates": ["09-07"], "market": [3000.0]})
+                                 "stocks": [], "dates": ["09-07"], "sessionDates": ["2026-09-07"], "market": [3000.0]})
+    fixed.parent.mkdir(parents=True, exist_ok=True)
     fixed.write_text(newer, encoding="utf-8")
     assert cli.main(args) == 0
     assert fixed.read_text(encoding="utf-8") == newer
-    assert (fixed.parent / "prism-report-2026-09-04.html").is_file()
+    assert (paths["report"].parent / "prism-a2-report-2026-09-04.html").is_file()
 
 
 def test_changed_archive_or_broken_render_keeps_previous_page(completed_archive, monkeypatch):
     cli, paths, args = completed_archive
     assert cli.main(args) == 0
-    fixed = paths["report"].parent / "prism.html"
+    fixed = paths["report"].parent / "style-preview" / "prism-a2.html"
     old = fixed.read_bytes()
     renderer, adapt, builder = cli.load_modules()
     original_render = builder.render_html
-    def changed(snapshot):
+    def changed(snapshot, series):
         paths["markdown"].write_text("归档被另一个运行更新。", encoding="utf-8")
-        return original_render(snapshot)
+        return original_render(snapshot, series)
     monkeypatch.setattr(builder, "render_html", changed)
     monkeypatch.setattr(cli, "load_modules", lambda: (renderer, adapt, builder))
     assert cli.main(args) == 1
     assert fixed.read_bytes() == old
-    monkeypatch.setattr(builder, "render_html", lambda snapshot: "not a complete HTML snapshot")
+    monkeypatch.setattr(builder, "render_html", lambda snapshot, series: "not a complete HTML snapshot")
     assert cli.main(args) == 1
     assert fixed.read_bytes() == old
 
@@ -345,7 +347,7 @@ def test_changed_archive_or_broken_render_keeps_previous_page(completed_archive,
 def test_fixed_replace_failure_keeps_previous_page(completed_archive, monkeypatch):
     cli, paths, args = completed_archive
     assert cli.main(args) == 0
-    fixed = paths["report"].parent / "prism.html"
+    fixed = paths["report"].parent / "style-preview" / "prism-a2.html"
     old = fixed.read_bytes()
     original_replace = cli.os.replace
     def fail_fixed(source, destination):
@@ -364,7 +366,7 @@ def test_default_render_does_not_resurrect_legacy_pages(completed_archive):
     original = {p: p.read_bytes() for p in paths.values()}
     monitor = paths["report"].parent
     assert cli.main(args) == 0
-    assert (monitor / "prism-report-2026-09-04.html").is_file()
+    assert (monitor / "prism-a2-report-2026-09-04.html").is_file()
     assert not (monitor / "index.html").exists()
     assert not (monitor / "monitor-report-2026-09-04.html").exists()
     assert cli.main([*args, "--no-publish"]) == 0
@@ -374,3 +376,43 @@ def test_default_render_does_not_resurrect_legacy_pages(completed_archive):
     assert not (monitor / "index.html").exists()
     assert not (monitor / "monitor-report-2026-09-04.html").exists()
     assert {p: p.read_bytes() for p in paths.values()} == original
+
+
+@pytest.mark.parametrize("name", ["prism.html", "prism-report-2026-09-04.html", "index.html", "monitor-report-2026-09-04.html", "snapshot.json", "style-preview/prism-a2.html"])
+def test_explicit_output_cannot_overwrite_backup_or_fixed_entry(completed_archive, name):
+    cli, paths, args = completed_archive
+    out = paths["report"].parent / name
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text("existing content")
+    assert cli.main([*args, "--out", str(out)]) == 1
+    assert out.read_text() == "existing content"
+
+
+def test_backup_and_old_dated_pages_are_neither_inputs_nor_outputs(completed_archive):
+    cli, paths, args = completed_archive
+    monitor = paths["report"].parent
+    backups = [monitor / "prism.html", monitor / "prism-report-2026-09-04.html"]
+    for p in backups:
+        p.write_text("opaque frozen backup: not a parseable snapshot")
+    before = {p: (p.read_bytes(), p.stat().st_mtime_ns) for p in backups}
+    assert cli.main(args) == 0
+    assert cli.main([*args, "--no-publish"]) == 0
+    assert {p: (p.read_bytes(), p.stat().st_mtime_ns) for p in backups} == before
+    for p in backups:
+        p.unlink()
+    assert cli.main(args) == 0
+    assert all(not p.exists() for p in backups)
+
+
+def test_supplement_conflict_preserves_previous_page(completed_archive, monkeypatch):
+    cli, paths, args = completed_archive
+    assert cli.main(args) == 0
+    fixed = paths["report"].parent / "style-preview" / "prism-a2.html"
+    before = fixed.read_bytes()
+    renderer, adapt, builder = cli.load_modules()
+    def conflict(*args):
+        raise ValueError("补充日线与冻结快照冲突")
+    monkeypatch.setattr(builder, "assemble_series", conflict)
+    monkeypatch.setattr(cli, "load_modules", lambda: (renderer, adapt, builder))
+    assert cli.main(args) == 1
+    assert fixed.read_bytes() == before

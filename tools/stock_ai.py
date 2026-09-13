@@ -1063,10 +1063,10 @@ def monitor_artifacts_status(formation: str) -> tuple[bool, bool]:
 
 
 def prism_page_present(formation: str) -> bool:
-    """render_prism_web.py 的实际产物：monitor 目录下 dated 页 + 固定 prism.html。"""
+    """主用 A2 的日期页和固定页；备用 prism.html 的存在不代表同步成功。"""
     monitor_dir = PROJECT_ROOT / "local_archive" / "forward_monitor"
-    dated = monitor_dir / f"prism-report-{formation}.html"
-    fixed = monitor_dir / "prism.html"
+    dated = monitor_dir / f"prism-a2-report-{formation}.html"
+    fixed = monitor_dir / "style-preview" / "prism-a2.html"
     return dated.exists() and fixed.exists()
 
 

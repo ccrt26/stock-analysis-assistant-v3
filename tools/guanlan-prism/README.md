@@ -1,77 +1,43 @@
-# 观澜 · 光场 PRISM V3｜六项修改版
+# 观澜 · A2 主用展示
 
-这是一套已实现的静态复盘前端，不是效果图，也不是让模型重新设计的提示词。保留 PRISM V2 的视觉、导航、图表、回放、星图、收藏、导出与明暗切换，按用户最后的六条要求修改首页和清单。
+A2 是日常主用的本地收盘研究页面。保留已确认的黑白界面、量价图表、总览、全部观察、观点时间线、星图和浏览器收藏；个股详情可阅读走势、完整复盘、当初的推荐理由及推荐时点公司资料。
 
-## 先打开成品
+## 入口与更新
 
-直接用浏览器打开 `dist/guanlan-prism.html`。这是推荐体验入口，样式、脚本、图标、快照均已内嵌；不需要服务器或网络。根目录 `index.html` 是拆分资源预览，必须与 `src/` 放在一起。
+- 主用：`http://127.0.0.1:8940/style-preview/prism-a2.html`。路径沿用，不因转正更换书签。
+- 备用：`http://127.0.0.1:8940/prism.html`。只保留停更内容，页面标明最后数据日期。
+- 新日期页：`local_archive/forward_monitor/prism-a2-report-<date>.html`。
+- 旧 `prism-report-*` 不重建、不删除。旧 `src/` 与 `tools/build.py` 保留作备用源码参考，不是日常同步入口。
 
-交给 GLM5.3 时，提供整个文件夹/ZIP，并让它先读根目录 `GLM5.3_执行指令.md`。不要只发截图或单个 HTML 让它猜源码。
-
-## 六项已经落实的行为
-
-| 用户要求 | V3 成品行为 |
-|---|---|
-| 首页换成市场行情 | 默认上证、深证成指、创业板指、科创50四项；配置可为三项或五项；只读取本报告交易日行情 |
-| 走势聚焦最多八只 | 当日普通详评 `regular_detail`，不是节点详评，不是最近四条；按源名单/源顺序，箭头左右切换（同股多次入选另有记录下拉） |
-| 推荐股票清单 | 除判断失效外的全部记录进入横向滚动轨道（数量由数据计算，无截断，注明已隐藏失效条数）；桌面四张、平板两张、手机一张；常驻可拖动滚动条及左右按钮 |
-| 观点更新 | 相邻两次复盘的未来1—3日方向在上涨/横盘/下跌之间切换；前三条完整原因，常驻竖向滚动条，全量入口 |
-| 全部观察列修改 | 股票首字块全局删除；最高收盘涨跌替换为当日收盘价；复盘观点列不含行业 |
-| 失效与观点筛选 | 默认不含失效；直接选择失效为仅失效；先选全部再选失效为完整并集；复盘观点下拉没有失效选项 |
-
-**三套范围独立：**“走势聚焦”是深读名单，“观点更新”是方向切换名单，“推荐股票清单”是除判断失效外的全部推荐记录（含失效的完整列表在“全部观察”）。不要把它们联动成同一批股票。
-
-## 示例数据的重要说明
-
-价格归属交易日是 **2026-09-04**，原快照截止为 **2026-09-06 18:30（上海时间）**，不是实时行情。原快照35条记录、34只股票；同一股票的不同推荐分别保留。以上是这份示例的固定描述；页面上的所有数量（清单条数、方向更新数、筛选集合、市场卡数）一律由当前数据计算，不写死在程序里。
-
-原快照仅提供上证指数日线。其余三项指数已做好布局和接口，但如实显示“快照未提供”。这不是网络加载失败，也不是已接入全部市场；GLM须从用户已有本地指数数据中补字段，不能随机生成点位。市场卡片的小图是近期日线收盘，不是分时图。
-
-观点原文不改，既有文字与价格可能不一致；正文按原文展示，页面不做原文数字核对，也不含任何按股票名/日期/价格定制的提示分支。检测到的确定性数据缺口（如首日开盘价缺失）通过结构化 dataIssues 在对应记录处提示。
-
-## 文件入口
-
-- `src/`：完整页面结构、三层CSS、图表/交互、显示规则与装饰动效。
-- `tools/build.py`：无依赖构建；`render_html(snapshot)` 可被原生成程序直接调用。
-- `tools/adapt_snapshot.py`：可选的本地输入适配；读取JSON/旧HTML、附加已有指数日线与上游详评名单，不取数不做研究。
-- `data/snapshot.json`：原始示例快照，未重写价格或复盘。
-- `docs/`：视觉、六项业务规则、字段、接入步骤、验收限制和变更记录。
-- `tests/`：可运行测试、真实执行输出；`previews/`为真实浏览器截图。
-- `assets/brand.svg`：品牌矢量图。页面不依赖此文件也可单文件运行。
-
-## 构建与接入
-
-在本文件夹打开终端（Python 3.10或以上）：
+在仓库根目录，逐字使用已完成研究的三个时间字段：
 
 ```bash
-python3 tools/build.py
-python3 tools/build.py --data data/snapshot.json --out my-report.html
+./.venv/bin/python tools/render_prism_web.py \
+  --date <formation_date> --action-date <action_date> --as-of <selection_as_of>
 ```
 
-已有兼容JSON时直接构建。已有原始HTML或本地指数CSV时，可先适配：
+现有晚间任务在研究归档后执行同一命令，公司介绍补齐后按原规则再次同步；不新增任务。`tools/build_preview_a2.py` 的命令入口也转交同一同步命令，不再支持从备用 HTML 制作新版。可用 `--no-publish --out <临时路径.html>` 生成验收文件；备用、旧日期页和固定入口不能作为 `--out` 目标。
+
+程序直接复用正式归档的共享数据整理与归档完整性检查。个股及指数补充日线只取报告日之前、且报告截止前已可见的本地事实；与冻结收盘冲突时失败。全部资源及补充数据内嵌在 HTML，不请求实时行情，也不依赖外部 JSON。每个页面原子替换，失败保留旧首页，旧日期补跑不会覆盖较新首页。备用页不参与同步和就绪判断。
+
+## 阅读口径
+
+完整复盘与原推荐原文保留，不由模型改写；标题首段只展示一次。当前参与意见与 20 日固定结案分别展示。选择历史日期时图表截断至该日，显示该日实际保存的复盘；没有正文就说明没有，不把最近一篇冒充当天结论。这是按当前冻结数据回看，不是重新获取原时点快照。
+
+公司资料按该次推荐身份展示，所选日期不改变其研究截止；注明实际编写时间、来源与资料限制。缺项如实提示。收藏继续使用原 A2 浏览器存储，随网页更新保留，仅在本浏览器有效。
+
+## 源码与验证
+
+- `concept-a/overview-a2-shell.html`：主用壳层、导航及星图。
+- `concept-a/a2/`：量价数据适配、图表、交互及样式。
+- `tools/build_preview_a2.py`：A2 纯渲染、补充日线及兼容命令入口。
+- 仓库 `tools/render_prism_web.py`：唯一正式同步入口。
+
+在仓库根目录运行：
 
 ```bash
-python3 tools/adapt_snapshot.py --snapshot /实际路径/原报告.html --out /实际路径/展示快照.json
-python3 tools/build.py --data /实际路径/展示快照.json --out /实际路径/复盘展示.html
+./.venv/bin/python -m pytest -q tests/test_render_prism_web.py tests/test_prism_a2_preview.py tests/test_stock_ai.py tests/test_forward_monitor_prompt.py
+./.venv/bin/python tests/check_prism_a2_browser.py --url http://127.0.0.1:8940/style-preview/prism-a2.html --out /tmp/prism-a2-check
 ```
 
-有现成指数CSV时在第一条命令追加 `--market /实际路径/index-daily.csv`。不要因为这一参数而新增定时任务或重复采集。详细接口与示例见 `docs/03-数据接口与口径.md`。
-
-## 复现验证
-
-在本仓库根目录（需要 `.venv`、Node.js 与 Playwright Chromium）：
-
-```bash
-.venv/bin/python -m pytest -q tests/test_prism_web_contract.py
-.venv/bin/python -m pytest -q tests/test_render_prism_web.py tests/test_render_monitor_web.py \
-    tests/test_prism_atlas.py
-.venv/bin/python tests/check_prism_web_browser.py --out /tmp/prism-web-shots
-.venv/bin/python tests/check_prism_atlas_browser.py \
-    --html local_archive/forward_monitor/prism-report-2026-09-07.html --out /tmp/prism-atlas-shots
-```
-
-浏览器验收支持 `--browser-executable` 显式指定浏览器；缺省使用已安装的 Playwright Chromium，依赖缺失时明确失败（退出码 2）。页面源码语法可用 `node --check src/{core,rules,app}.js` 单独核对。真实报告验收的期望值由 Python 从页面内嵌快照独立计算；固定数字断言只存在于明确标注的合成回归样本中。不要把浏览器、依赖缓存或字体打包进交付目录。
-
-## 给 GLM 的一句话
-
-请按 `GLM5.3_执行指令.md` 直接移植成品，仅接入现有数据与报告生成入口；不得重做视觉、替换图表库、改选股/复盘结论或恢复旧的演示选股逻辑。
+浏览器检查需要已安装 Playwright Chromium。单元测试使用临时目录和独立样例，不读取或写入正式归档。真实页面检查核对内嵌快照及补充价量，并检查详情阅读和桌面/手机交互。实施方案见仓库 `docs/implementation/2026-09-13-prism-a2-primary.md`。
