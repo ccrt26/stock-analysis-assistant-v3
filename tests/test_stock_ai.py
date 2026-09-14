@@ -1865,6 +1865,94 @@ def test_merged_report_review_grouping_and_scoping(tmp_path, monkeypatch, fake_f
     assert any("未完整对应" in i for i in issues)
 
 
+
+def _three_route_report_env(root, monkeypatch, levels=(3, 2, 2)):
+    """独立复盘导出使用 ##，合并回复可能保留它或只降级部分分组。"""
+    monkeypatch.setattr(stock_ai, "PROJECT_ROOT", root)
+    identity = ("2026-09-10", "2026-09-11", "2026-09-10T18:30:00+08:00")
+    groups = [
+        ("checkpoint_detail", "关键节点复盘", "000001.SZ", "节点示例", "节点原文。"),
+        ("regular_detail", "今日深入复盘", "000002.SZ", "详评示例", "详评原文。"),
+        ("brief", "今日简评", "000003.SZ", "简评示例", "简评原文。"),
+    ]
+    alerts, reviews, blocks = [], [], []
+    for level, (kind, label, code, name, body) in zip(levels, groups):
+        eid = f"formal:2026-09-01:{code}:selected"
+        reviews.append({"episode_id": eid, "review_kind": kind})
+        heading = f"{'#' * level} {label}（1只）\n\n"
+        if kind == "brief":
+            blocks.append(heading + f"| {name}（{code}） | 8 | +1% | {body} | 横盘 | 继续 |\n")
+        else:
+            alerts.append({"ts_code": code, "name": name,
+                           "episode_reviews": [{"episode_id": eid, "current_review": body}]})
+            blocks.append(heading + f"### {name}（{code}）\n\n{body}\n")
+    write_report_archives(root, *identity, alerts=alerts, reviews=reviews)
+    return identity, make_report(review="\n".join(blocks))
+
+
+@pytest.mark.parametrize("levels", [(2, 2, 2), (3, 2, 2), (3, 3, 3), (4, 5, 6)])
+def test_merged_report_accepts_native_and_nested_review_headings(
+        tmp_path, monkeypatch, fake_forward_selection, levels):
+    identity, report = _three_route_report_env(tmp_path, monkeypatch, levels)
+    assert stock_ai.merged_report_issues(report, *identity) == []
+
+
+@pytest.mark.parametrize("mutation, expected", [
+    ("body", "未完整对应"),
+    ("brief_row", "简评表缺少股票行"),
+    ("outside", "缺少“今日深入复盘”子分区标题"),
+    ("duplicate", "重复“今日深入复盘”子分区标题"),
+])
+def test_native_review_headings_keep_content_and_scope_checks(
+        tmp_path, monkeypatch, fake_forward_selection, mutation, expected):
+    identity, report = _three_route_report_env(tmp_path, monkeypatch)
+    if mutation == "body":
+        # 正文挪到另一组也不能顶替本股票的原文。
+        report = report.replace("节点原文。", "被改写。")
+        report = report.replace("详评原文。", "详评原文。\n节点原文。")
+    elif mutation == "brief_row":
+        report = report.replace("| 简评示例（000003.SZ）", "| 无关股票（000004.SZ）")
+    elif mutation == "outside":
+        report = report.replace("## 今日深入复盘（1只）", "")
+        report += "\n## 今日深入复盘（1只）\n### 详评示例（000002.SZ）\n详评原文。\n"
+    else:
+        report = report.replace("## 今日深入复盘（1只）",
+                                "### 今日深入复盘（1只）\n\n## 今日深入复盘（1只）")
+    assert any(expected in issue for issue in stock_ai.merged_report_issues(report, *identity))
+
+
+@pytest.mark.parametrize("valid_body", [True, False])
+def test_native_heading_report_archived_verbatim_only_after_validation(
+        isolated, monkeypatch, fake_forward_selection, valid_body):
+    identity, report = _three_route_report_env(isolated, monkeypatch)
+    if not valid_body:
+        report = report.replace("详评原文。", "不对应的文字。")
+    source = isolated / "model-final.md"
+    source.write_bytes(report.replace("\n", "\r\n").encode())
+    original = source.read_bytes()
+    archive = isolated / "local_archive/ai_tasks/nightly/test"
+    canonical = isolated / f"local_archive/forward_selection/daily-research-{identity[0]}.md"
+    monkeypatch.setattr(stock_ai, "strict_archive_check", lambda *a: (True, ""))
+    monkeypatch.setattr(stock_ai, "forward_csv_matches_trace", lambda *a: (True, ""))
+    synced = []
+
+    def sync(*args):
+        assert canonical.read_bytes() == original
+        synced.append(args)
+        return True, "published=unchanged"
+
+    monkeypatch.setattr(stock_ai, "retry_prism_sync", sync)
+    state = {"task": "nightly", "attempts": []}
+    result = stock_ai.finish_nightly_success(
+        state, "nightly-test.json", "glm", source, *identity,
+        archive, archive / "final-reply.md")
+    assert result == (stock_ai.EXIT_OK if valid_body else stock_ai.EXIT_FAIL)
+    assert canonical.exists() is valid_body
+    assert bool(synced) is valid_body
+    assert source.read_bytes() == original
+    assert (archive / "final-reply.md").read_bytes() == original
+
+
 def test_merged_report_brief_row_and_lifecycle_checks(tmp_path, monkeypatch, fake_forward_selection):
     monkeypatch.setattr(stock_ai, "PROJECT_ROOT", tmp_path)
     formation, action, as_of = "2026-09-10", "2026-09-11", "2026-09-10T18:30:00+08:00"

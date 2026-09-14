@@ -1367,12 +1367,21 @@ def _review_section_issues(section: str, formation: str) -> list[str]:
     sub_texts: dict[str, str | None] = {}
     subgroup_starts = []
     for kind, label in REVIEW_SUBGROUPS.items():
-        match = re.search(rf"^#{{3,6}}[ \t]*{re.escape(label)}.*$", section, re.MULTILINE)
-        if match is None:
+        # 独立 monitor Markdown 的分组为 ##；合并时可保留或降级。
+        # section 已由四个必需总标题限定，分组归属不依赖模型补写 #。
+        matches = list(re.finditer(
+            rf"^#{{2,6}}[ \t]*{re.escape(label)}.*$", section, re.MULTILINE))
+        if not matches:
             if kind in needed_kinds:
                 issues.append(f"复盘分区缺少“{label}”子分区标题")
             sub_texts[kind] = None
             continue
+        if len(matches) != 1:
+            issues.append(f"复盘分区重复“{label}”子分区标题，无法唯一核对归属")
+            sub_texts[kind] = None
+            subgroup_starts.extend(match.start() for match in matches)
+            continue
+        match = matches[0]
         subgroup_starts.append(match.start())
         sub_texts[kind] = (match.start(), match.end())
     for kind in REVIEW_SUBGROUPS:
