@@ -107,14 +107,14 @@ def checked_cutoff(value: str) -> datetime:
     return cutoff
 
 
-def load_completed_archives(renderer, monitor_dir, analysis_date, action_date, as_of):
+def load_completed_archives(renderer, monitor_dir, analysis_date, action_date, as_of, *, selection_dir=None):
     """只读核对正式归档；不调用 prepare/record，不重新判断研究结论。"""
     from stock_analyzer.ops import forward_monitor as monitor
     from stock_analyzer.ops.forward_selection import DailyResearchTraceV4
 
     iso = analysis_date.isoformat()
     paths = {
-        "trace": renderer.SELECTION_DIR / f"research-trace-{iso}.json",
+        "trace": (selection_dir or renderer.SELECTION_DIR) / f"research-trace-{iso}.json",
         "snapshot": monitor_dir / f"snapshot-{iso}.json",
         "ledger": monitor_dir / f"daily-formal-reviews-{iso}.json",
         "report": monitor_dir / f"monitor-report-{iso}.json",

@@ -62,13 +62,13 @@ function renderFocus(animate=true){if(!$('focusContent'))return;const s=current(
  $('stockSelect').innerHTML=D.deep.map((g,i)=>`<option value="${i}">${esc(g.records[0].name)}</option>`).join('');
  $('focusName').textContent=s.name;$('stockSelect').value=String(state.focus);$('focusCount').textContent=`${String(state.focus+1).padStart(2,'0')} / ${String(D.deep.length).padStart(2,'0')}`;
  const r=D.latest(s),dir=D.direction(r),q=D.quote(s);const g=group();const recordSelect=g.records.length>1?`<select id="episodeSelect" aria-label="同股不同推荐记录">${g.records.map((x,i)=>`<option value="${i}" ${i===state.record?'selected':''}>${x.recDate} 开始观察</option>`).join('')}</select>`:'';
- $('focusContent').innerHTML=`<div class="instruments" id="instruments"></div><article class="panel hero-chart"><div class="chart-heading"><div><h3>${esc(s.name)} <span class="num ${tone(D.ret(s))}">${pct(D.ret(s))}</span></h3><p>${esc(s.code)} · 收盘 ${num(q.close)} 元 · 较原参考价 ${num(s.ref)} 元 · 第 ${D.daysObserved(s)??'—'} / ${daysOf()} 个交易日</p></div><div class="chart-tabs" role="group" aria-label="主图模式">${[['line','收盘走势'],['relative','相对走势'],['candle','K 线']].map(([mode,label])=>`<button data-chart-mode="${mode}" class="${mode===state.mode?'active':''}" aria-pressed="${mode===state.mode}">${label}</button>`).join('')}</div></div><div class="chart-context"><span id="chartRange"></span>${recordSelect}<div class="mini-tabs"><button data-metric="volumeShares" class="${state.metric==='volumeShares'?'active':''}">成交量</button><button data-metric="amountYuan" class="${state.metric==='amountYuan'?'active':''}">成交额</button></div></div><div id="heroPlot" class="chart-host"></div><div class="chart-foot"><div class="legend" id="chartLegend"></div><span id="chartPolicy"></span></div><div class="chart-note"><div class="note-tags">${opTag(s)}<span class="tag">未来 1—3 日 · ${dir?D.dirLabels[dir]:'未识别状态'}</span></div><p>${esc(r?.viewReason||r?.outlookReason||'尚无复盘原文。')}</p></div></article>`;
+ $('focusContent').innerHTML=`<div class="instruments" id="instruments"></div><article class="panel hero-chart"><div class="chart-heading"><div><h3>${esc(s.name)} <span class="num ${tone(D.ret(s))}">${pct(D.ret(s))}</span></h3><p>${esc(s.code)} · 收盘 ${num(q.close)} 元 · 原参考价 ${num(s.ref)} 元 · 价格涨跌（未复权） · 第 ${D.daysObserved(s)??'—'} / ${daysOf()} 个交易日</p></div><div class="chart-tabs" role="group" aria-label="主图模式">${[['line','收盘走势'],['relative','相对走势'],['candle','K 线']].map(([mode,label])=>`<button data-chart-mode="${mode}" class="${mode===state.mode?'active':''}" aria-pressed="${mode===state.mode}">${label}</button>`).join('')}</div></div><div class="chart-context"><span id="chartRange"></span>${recordSelect}<div class="mini-tabs"><button data-metric="volumeShares" class="${state.metric==='volumeShares'?'active':''}">成交量</button><button data-metric="amountYuan" class="${state.metric==='amountYuan'?'active':''}">成交额</button></div></div><div id="heroPlot" class="chart-host"></div><div class="chart-foot"><div class="legend" id="chartLegend"></div><span id="chartPolicy"></span></div><div class="chart-note"><div class="note-tags">${opTag(s)}<span class="tag">未来 1—3 日 · ${dir?D.dirLabels[dir]:'未识别状态'}</span></div><p>${esc(r?.viewReason||r?.outlookReason||'尚无复盘原文。')}</p></div></article>`;
  const changed=D.key(s)!==state.lastFocusKey;drawWidgets(animate&&changed);renderHeroChart(animate&&changed);state.lastFocusKey=D.key(s);
 }
 function setFocus(i,record=0){if(!D||!D.deep.length)return;const next=(i+D.deep.length)%D.deep.length;const s=D.deep[next].records[record]||D.deep[next].records[0];if(D.key(s)===state.lastFocusKey&&next===state.focus&&record===state.record)return;state.focus=next;state.record=record;renderFocus(true)}
 function markets(){if(!$('marketStrip'))return;const rows=D.markets();$('marketStrip').innerHTML=rows.map((m,i)=>{const fresh=m.trade_date===D.end,change=fresh&&V(m.close)&&V(m.previousClose)&&m.previousClose>0?(m.close/m.previousClose-1)*100:null;const series=(fresh?m.series||[]:[]).slice(-20).map(close=>({close}));return `<button class="market-card" data-index="${i}" aria-label="查看${esc(m.name)}最近50个交易日K线"><span class="market-name">${esc(m.name)} <small>${esc(m.code)}</small></span><span class="market-arrow">↗</span><div class="market-value">${num(fresh?m.close:null)}</div><div class="market-change ${tone(change)}">${pct(change)}</div>${series.length>=2?C.spark(series):''}</button>`}).join('')}
 function cards(){if(!$('stockRail'))return;const list=D.recommendations.filter(s=>!D.invalid(s));$('recordCount').textContent=`${list.length} 条记录 · 同股不同推荐分别保留`;$('recordNote').textContent=`按入选日期由近到远 · 已隐藏 ${D.recommendations.length-list.length} 条判断失效记录 · 小图固定为最近20个交易日，不是推荐后的收益曲线。`;
- $('stockRail').innerHTML=list.length?list.map(s=>{const q=D.quote(s),r=D.ret(s),rows=M.windowRows(D.history(s),D.sessions,D.end,20);return `<button class="panel stock-card" data-stock="${esc(D.key(s))}" aria-label="查看${esc(s.name)}这次推荐"><h3>${esc(s.name)}<span>↗</span></h3><span class="code">${esc(s.code)}</span><div class="price-row"><b>${num(q.close)}</b><span class="${tone(r)}">${pct(r)}</span></div><div class="price-label"><span>当日收盘 / 元</span><span>较原参考价</span></div>${opTag(s)}<div class="recent-label">最近 20 个交易日</div>${C.spark(rows,{markDate:s.recDate})}<div class="card-foot"><span>${s.d0?'待首日观察':`已观察 ${D.daysObserved(s)??'—'} 天`}</span><span>${s.formedOn?'推荐':'入选'} ${md(s.formedOn||s.recDate)}</span></div></button>`}).join(''):'<div class="panel empty-state">暂无未失效的推荐记录。</div>';
+ $('stockRail').innerHTML=list.length?list.map(s=>{const q=D.quote(s),r=D.ret(s),rows=M.windowRows(D.history(s),D.sessions,D.end,20);return `<button class="panel stock-card" data-stock="${esc(D.key(s))}" aria-label="查看${esc(s.name)}这次推荐"><h3>${esc(s.name)}<span>↗</span></h3><span class="code">${esc(s.code)}</span><div class="price-row"><b>${num(q.close)}</b><span class="${tone(r)}">${pct(r)}</span></div><div class="price-label"><span>当日收盘 / 元</span><span>价格涨跌（未复权）</span></div>${opTag(s)}<div class="recent-label">最近 20 个交易日</div>${C.spark(rows,{markDate:s.recDate})}<div class="card-foot"><span>${s.d0?'待首日观察':`已观察 ${D.daysObserved(s)??'—'} 天`}</span><span>${s.formedOn?'推荐':'入选'} ${md(s.formedOn||s.recDate)}</span></div></button>`}).join(''):'<div class="panel empty-state">暂无未失效的推荐记录。</div>';
  $('updatesCount').textContent=`${D.updates.length} 条更新 · 桌面每屏 3 条`;
  $('updatesRail').innerHTML=D.updates.length?D.updates.map((u,i)=>`<button class="panel update-card" data-update="${i}" aria-label="查看${esc(u.s.name)}观点更新原文"><div class="update-title"><h3>${esc(u.s.name)}</h3><time>${md(u.r.date)}</time></div><div class="transition"><b>${D.dirLabels[u.from]}</b><span>→</span><b>${D.dirLabels[u.to]}</b><span style="margin-left:auto;font-size:8px">未来 1—3 日</span></div><p>${esc(u.reason||'原文未提供变化原因。')}</p><div class="read-link"><span>原复盘对照</span><span>读完整记录 ↗</span></div></button>`).join(''):'<div class="panel empty-state">今天没有可识别的方向切换，不填充占位股票。</div>';
  setupRail('stockRail','stockScroll','stockPosition');setupRail('updatesRail','updatesScroll','updatesPosition');
@@ -126,24 +126,60 @@ function finalReviewBody(r){
  return `<section class="final-review"><h4>20个交易日固定结案</h4><p>${esc(f.final_twenty_day_review.overall_review)}</p><p>${esc(facts)}</p><p class="source-hint">原结论保存：${esc(f.analysis_date)} · 截止 ${esc(f.as_of)}</p></section>`;
 }
 const paragraphs=value=>String(value||'').split(/\n\s*\n/).filter(Boolean).map(p=>`<p class="original-copy">${esc(p)}</p>`).join('');
-const statementParagraphs=value=>String(value||'').split(/\n\s*\n/).filter(Boolean).map(p=>`<p class="original-copy">${esc(p).replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>').replace(/\n/g,'<br>')}</p>`).join('');
+function statementInline(value){
+ const text=String(value||'');let out='',last=0;
+ const tokens=/\[([^\]\n]+)\]\((?:<([^>\n]+)>|([^\)\n]+))\)|\*\*([^*]+)\*\*/g;
+ for(const m of text.matchAll(tokens)){
+  out+=esc(text.slice(last,m.index));
+  if(m[4])out+=`<strong>${esc(m[4])}</strong>`;
+  else{const href=safeHref(m[2]||m[3]);out+=href?`<a href="${esc(href)}" target="_blank" rel="noopener noreferrer">${esc(m[1])}</a>`:esc(m[1])}
+  last=m.index+m[0].length;
+ }
+ return out+esc(text.slice(last));
+}
+const statementParagraphs=value=>String(value||'').split(/\n\s*\n/).filter(Boolean).map(p=>{
+ const lines=p.split('\n');
+ if(lines.every(l=>/^\s*[-*] /.test(l)))return `<ul class="original-copy">${lines.map(l=>`<li>${statementInline(l.replace(/^\s*[-*] /,''))}</li>`).join('')}</ul>`;
+ return `<p class="original-copy">${statementInline(p).replace(/\n/g,'<br>')}</p>`;
+}).join('');
+function trackingNotice(s,day){
+ const exit=s.trackingExitDate;
+ if(!exit){return day===D.end&&s.trackingStatus==='evaluation_only'?'<section class="tracking-notice reading-note"><h3>已停止主动跟踪</h3><p>原记录缺少停止日期，停止原因需核对后展示。</p></section>':''}
+ if(day<exit)return '';
+ const prior=(s.reviews||[]).filter(r=>r.date<=day&&r.date<=exit).sort((a,b)=>a.date.localeCompare(b.date)).at(-1);
+ const closed=(s.reviews||[]).some(r=>r.date<=day&&r.finalTwentyDayReview);
+ const note=closed?'D20 固定结案已保存，可切换到结案日查看。':'停止后不再写普通每日复盘；仍保留价格观察和 D20 固定结案。';
+ return `<section class="tracking-notice reading-note"><h3>已停止主动跟踪 · ${esc(exit)}</h3><p>${esc(s.trackingExitReason||'原记录未保存停止原因，待补充。')}</p><p>${note}</p>${prior?`<button class="text-button" data-stock="${esc(D.key(s))}" data-date="${esc(prior.date)}" data-tab="review">查看停止前最后一篇复盘（${esc(prior.date)}） →</button>`:''}</section>`;
+}
+function formalReturnAt(s,day){
+ if(s.d0||!V(s.ref)||s.ref<=0||day<s.recDate)return null;
+ const value=(s.reviews||[]).find(r=>r.date===day)?.formalReturn;
+ if(V(value))return value*100;
+ return s.formalReturnDate===day&&V(s.formalReturn)?s.formalReturn*100:null;
+}
+function returnBasis(s,day){
+ return `<p class="return-basis">价格涨跌（未复权）：${pct(retAtDate(s,day))} · 复盘涨跌（复权）：${pct(formalReturnAt(s,day))}<br><span class="muted">都相对本次观察起点；复盘使用复权价格，分红送转可能使两者不同。缺少同日数据时显示“—”。</span></p>`;
+}
 function originalBody(s){
  const hasFull=Boolean(String(s.statementFull||'').trim());
- const note=hasFull?(s.statementSource==='adopted_rewrite'?'用户认可的表达范本；当时归档原文仍保留在本地。':'推荐形成日日报中的逐股原文。'):'历史摘要仅供核对，不能代替完整推荐论证。';
- const body=hasFull?statementParagraphs(s.statementFull):'<p class="reading-note">尚缺完整推荐正文，可能尚未通过验收或尚未接通。</p>';
+ const note=hasFull?(s.statementSource==='adopted_rewrite'?'用户认可的表达范本（后续修订稿）；原正式推荐记录不改写。':s.statementSource==='verified_recommendation'?'原回复的推荐分区已独立核对；整份合并日报尚未完成验收。':s.statementSource==='legacy_daily_report'?'已核对原推荐身份的历史日报原文。':'推荐形成日日报中的逐股原文。'):'历史摘要仅供核对，不能代替完整推荐论证。';
+ const body=hasFull?statementParagraphs(s.statementFull):`<p class="reading-note">${esc(s.statementNote||'尚缺完整推荐正文：原推荐的完整正文尚未归档，暂显示历史摘要。')}</p>`;
  const summary=hasFull?'':`<h4>原推荐理由摘要</h4>${paragraphs(s.reasonFull)||'<p>原推荐理由暂缺。</p>'}`;
  return `<h3>当初为什么选它</h3>${body}<details class="original-summary"><summary>${hasFull?'查看原记录风险摘要':'查看历史记录摘要（非完整正文）'}</summary>${summary}<h4>原推荐中的风险</h4>${paragraphs(s.reasonRisk)||'<p>原记录未附风险文字。</p>'}</details><p class="reading-note">${note} 推荐形成日：${esc(s.formedOn||'未提供')}。切换日期不会改写原推荐理由。</p>`;
 }
-function fullReview(s,r){
- if(!r)return '<p>所选日期没有保存复盘正文。可切换日期查看已有记录；不把旧复盘当作当天结论。</p>';
+function fullReview(s,r,day=r?.date||state.modal?.date||D.end){
+ const stop=trackingNotice(s,day);
+ if(!r)return stop||'<p>所选日期没有保存复盘正文。可切换日期查看已有记录；不把旧复盘当作当天结论。</p>';
  const o=r.currentOpportunity;
  const copy=String(r.copy||r.summary_copy||'').split(/\n\s*\n/).filter(Boolean);
  if(copy[0]===r.headline)copy.shift();
- return `<section class="full-review" data-review-date-text="${esc(r.date)}"><h3>${esc(r.headline||'原复盘')} · ${esc(r.date)}</h3><p>${esc(kindLabel(r))} · 第 ${esc(r.day)} 天 · ${esc(r.viewLabel||'观点标签暂缺')}</p>${paragraphs(copy.join('\n\n'))||'<p>本条复盘正文暂缺。</p>'}
+ return `${stop}<section class="full-review" data-review-date-text="${esc(r.date)}"><h3>${esc(r.headline||'原复盘')} · ${esc(r.date)}</h3><p>${esc(kindLabel(r))} · 第 ${esc(r.day)} 天 · ${esc(r.viewLabel||'观点标签暂缺')}</p>${paragraphs(copy.join('\n\n'))||'<p>本条复盘正文暂缺。</p>'}
  ${r.base?`<h3>未来 1—3 日</h3>${paragraphs(r.base)}${paragraphs(r.outlookReason)}`:''}
+ ${r.confirm?`<h3>进一步支持当前方向的表现</h3>${paragraphs(r.confirm)}`:''}
+ ${r.risk?`<h3>会让我改变判断的表现</h3>${paragraphs(r.risk)}`:''}
  ${r.viewReason?`<h3>与前次判断比较</h3>${paragraphs(r.viewReason)}`:''}
  ${o?`<section class="current-opportunity"><h3>未来 5—10 日 · 当前参与意见</h3>${paragraphs(o.directionText)}${paragraphs(o.outlookReason)}${paragraphs(o.participationText)}${paragraphs(o.participationReason)}<h4>改变判断的条件</h4>${paragraphs(o.changeCondition)}<p>参考收盘：${num(o.referenceClose)} 元 · ${esc(o.referenceDate||'未提供')}</p></section>`:''}
- ${finalReviewBody(r)}${(s.dataIssues||[]).filter(x=>!x.reviewDate||x.reviewDate===r.date).map(x=>`<p class="reading-note">${esc(x.message)}</p>`).join('')}
+ ${returnBasis(s,r.date)}${finalReviewBody(r)}${(s.dataIssues||[]).filter(x=>!x.reviewDate||x.reviewDate===r.date).map(x=>`<p class="reading-note">${esc(x.message)}</p>`).join('')}
  <p class="reading-note">原文按保存内容展示。记录截止：${esc(r.as_of||'原记录未提供')}。</p></section>`;
 }
 function stockNav(){
@@ -159,13 +195,13 @@ function drawModalChart(){
  const reading=!isIndex&&modal.tab!=='chart';win.classList.toggle('reading',reading);
  if(!isIndex)modalTitle(item.name,item.code,`${item.recDate} 开始观察 · 查看 ${end}`);
  if(reading){
-  const body=modal.tab==='company'?companyTabBody(item):modal.tab==='original'?originalBody(item):fullReview(item,review);
+  const body=modal.tab==='company'?companyTabBody(item):modal.tab==='original'?originalBody(item):fullReview(item,review,end);
   $('dialogContent').innerHTML=stockNav()+`<div class="reading-body">${body}</div>`;
   $('modalFooter').textContent=modal.tab==='company'?'公司资料固定于原推荐时点；不随查看日期更新':'按现有归档阅读；不重新生成研究结论';return;
  }
  const rows=M.windowRows(history,D.sessions,end,isIndex?50:40),q=rows.at(-1),available=rows.filter(r=>[r.open,r.high,r.low,r.close].every(V)).length;
  const ratio=V(q.close)&&V(rows.at(-2).close)&&rows.at(-2).close>0?(q.close/rows.at(-2).close-1)*100:null;
- $('dialogContent').innerHTML=(isIndex?'':stockNav())+`<div class="modal-toolbar"><div class="summary"><strong class="market-big">${num(q.close)}</strong><span class="${tone(ratio)}">${pct(ratio)}</span><span>· 截至 ${end} 收盘</span></div><div class="mini-tabs"><button data-modal-metric="volumeShares" class="${state.modalMetric==='volumeShares'?'active':''}">成交量</button><button data-modal-metric="amountYuan" class="${state.modalMetric==='amountYuan'?'active':''}">成交额</button></div></div><div id="modalChart" class="chart-host modal-chart"></div><div class="chart-foot"><div class="legend"><span><i></i>MA5</span><span><i class="industry"></i>MA10</span><span><i class="benchmark"></i>MA20</span><span>红：收 ≥ 开　绿：收 &lt; 开</span></div><span>每5个交易日标日期 · ${available}/${rows.length} 日有完整 K 线</span></div>${!isIndex?`<div class="chart-note"><p>${esc(review?.viewReason||review?.outlookReason||'所选日期没有复盘原文。')}</p><button class="text-button" data-detail-tab="review">阅读完整复盘 →</button></div>`:''}`;
+ $('dialogContent').innerHTML=(isIndex?'':stockNav())+`<div class="modal-toolbar"><div class="summary"><strong class="market-big">${num(q.close)}</strong><span class="${tone(ratio)}">${pct(ratio)}</span><span>· 截至 ${end} 收盘</span></div><div class="mini-tabs"><button data-modal-metric="volumeShares" class="${state.modalMetric==='volumeShares'?'active':''}">成交量</button><button data-modal-metric="amountYuan" class="${state.modalMetric==='amountYuan'?'active':''}">成交额</button></div></div><div id="modalChart" class="chart-host modal-chart"></div><div class="chart-foot"><div class="legend"><span><i></i>MA5</span><span><i class="industry"></i>MA10</span><span><i class="benchmark"></i>MA20</span><span>红：收 ≥ 开　绿：收 &lt; 开</span></div><span>每5个交易日标日期 · ${available}/${rows.length} 日有完整 K 线</span></div>${!isIndex?`<div class="chart-note">${trackingNotice(item,end)}${returnBasis(item,end)}<p>${esc(review?.viewReason||review?.outlookReason||'所选日期没有复盘原文。')}</p><button class="text-button" data-detail-tab="review">阅读完整复盘 →</button></div>`:''}`;
  const showRef=!isIndex&&!item.d0&&end>=item.recDate;
  C.chart($('modalChart'),{rows,mode:'candle',reference:showRef?item.ref:null,target:showRef&&V(item.ref)?item.ref*(1+targetOf()):null,recDate:isIndex?null:item.recDate,metric:state.modalMetric,name:item.name,fullHistory:history,isIndex:true,animate:false,motion:motion()});
  $('modalFooter').textContent=isIndex?'最近50个交易日 · 指数点位与成交':`按当前冻结数据截取至 ${end}；不代表重新取得当时快照`;
@@ -182,7 +218,7 @@ function openReview(s,r,previous,target){
  $('dialogContent').innerHTML=`<div class="reading-body">${previous?'<h3>前一次</h3>'+fullReview(s,previous):''}<h3>这一次</h3>${fullReview(s,r)}<button class="text-button" data-stock="${esc(D.key(s))}" data-date="${esc(r.date)}" data-tab="review">查看这次推荐详情 →</button></div>`;
  $('modalFooter').textContent='展示原复盘，不生成新结论';openWindow(target,true);
 }
-function openNotes(target){state.modal={type:'notes'};modalTitle('A2 使用说明','AFTERCLOSE','本地正式研究结果 · 主用展示');$('dialogContent').innerHTML=`<div class="reading-body"><h3>01　成交量与成交额分开</h3><p>右侧C形表盘：白色粗环是今天，灰色环是前一交易日，外圈是前5/10/20日均值。三个环共享角度刻度。均值不含今天；底部显示实际有效日数。较昨天是相邻交易日比较，不称同比。</p><h3>02　40日主图，只在换股票时动一次</h3><p>收盘与相对曲线使用保单调三次插值，经过原始每日点且不产生额外高低点。窗口固定最近40个交易日，每5个交易日标日期。重复选中同一记录、滚动、调整尺寸和切图表模式均不重播。</p><h3>03　价格明确的K线</h3><p>开高低收、右轴价格、最新收盘、窗口极值、MA5/10/20及成交栏可同屏查看。鼠标与方向键读取原始值。K线本身不做曲线平滑。</p><h3>04 / 05　清单和观点更新分成两排</h3><p>推荐清单占整行，小图固定最近20个交易日，观察起点有标记。观点更新在下一行，桌面每屏3张、手机1张，不截断原原因。</p><h3>06　指数近屏幕大小弹窗</h3><p>点击指数展开50个交易日K线，窗口从卡片位置展开、向原位置收回。点击空白、关闭按钮或Esc均可收起。缺开高低收时保持缺失，不从收盘折线伪造K线。</p><h3>07　图9改为近期复盘判断</h3><p>只使用已保存的短期方向，分上涨、横盘、下跌三个类别，点圆点看原文。不造“信心分”“爆发概率”等指标。</p><p class="reading-note">本页随正式研究归档更新。走势按所选日期截断；完整复盘按原文展示，公司资料固定在原推荐时点。旧版只作停更备用。</p></div>`;$('modalFooter').textContent='只展示本地已归档研究内容';openWindow(target,true);}
+function openNotes(target){state.modal={type:'notes'};modalTitle('A2 使用说明','AFTERCLOSE','本地正式研究结果 · 主用展示');$('dialogContent').innerHTML=`<div class="reading-body"><h3>01　成交量与成交额分开</h3><p>右侧C形表盘：白色粗环是今天，灰色环是前一交易日，外圈是前5/10/20日均值。三个环共享角度刻度。均值不含今天；底部显示实际有效日数。较昨天是相邻交易日比较，不称同比。</p><h3>02　40日主图，只在换股票时动一次</h3><p>收盘与相对曲线使用保单调三次插值，经过原始每日点且不产生额外高低点。窗口固定最近40个交易日，每5个交易日标日期。重复选中同一记录、滚动、调整尺寸和切图表模式均不重播。</p><h3>03　价格明确的K线</h3><p>开高低收、右轴价格、最新收盘、窗口极值、MA5/10/20及成交栏可同屏查看。鼠标与方向键读取原始值。K线本身不做曲线平滑。价格涨跌使用未复权报价；正式复盘使用复权价格，分红送转可能造成差异，两种口径在详情中分开展示。</p><h3>04 / 05　清单和观点更新分成两排</h3><p>推荐清单占整行，小图固定最近20个交易日，观察起点有标记。观点更新在下一行，桌面每屏3张、手机1张，不截断原原因。</p><h3>06　指数近屏幕大小弹窗</h3><p>点击指数展开50个交易日K线，窗口从卡片位置展开、向原位置收回。点击空白、关闭按钮或Esc均可收起。缺开高低收时保持缺失，不从收盘折线伪造K线。</p><h3>07　图9改为近期复盘判断</h3><p>只使用已保存的短期方向，分上涨、横盘、下跌三个类别，点圆点看原文。不造“信心分”“爆发概率”等指标。</p><p class="reading-note">本页随正式研究归档更新。走势按所选日期截断；完整复盘按原文展示，公司资料固定在原推荐时点。旧版只作停更备用。</p></div>`;$('modalFooter').textContent='只展示本地已归档研究内容';openWindow(target,true);}
 function renderAll(animate){markets();renderFocus(animate);cards()}
 function ensureData(){if(D)return;raw=JSON.parse($('snapshot').textContent);let extra={};try{extra=JSON.parse($('preview-series').textContent||'null')||{}}catch(e){extra={}}
  try{D=PrismData.create(raw,extra,window.GuanlanA2Rules)}catch(err){$('main').innerHTML='<div class="empty-state">展示数据无法载入：'+String(err.message).replace(/</g,'&lt;')+'</div>';throw err}
@@ -210,7 +246,7 @@ function recordsTable(rows){
  const th=(key,label,sub='')=>{const on=sort.key===key,arrow=on?(sort.dir===1?'↑':'↓'):'⇅';
   return `<th aria-sort="${on?(sort.dir===1?'ascending':'descending'):'none'}"><button class="th-sort" data-sort="${key}">${label}<span class="si">${arrow}</span></button>${sub?`<small class="th-sub">${sub}</small>`:''}</th>`};
  return `<div class="table-wrap"><table class="records-table"><thead><tr>
-  <th>股票 / 代码</th>${th('formedOn','推荐日期')}${th('days','观察进度')}${th('ret','较参考价涨跌')}${th('close','当日收盘价',`${D.end.slice(5).replace('-','.')} · 元`)}
+  <th>股票 / 代码</th>${th('formedOn','推荐日期')}${th('days','观察进度')}${th('ret','价格涨跌','未复权')}${th('close','当日收盘价',`${D.end.slice(5).replace('-','.')} · 元`)}
   <th>复盘观点</th><th class="th-star">收藏</th><th aria-hidden="true"></th>
  </tr></thead><tbody>
  ${sorted.map(s=>{const q=D.quote(s),r=window.GuanlanA2Rules.returnOnDate(s),days=D.daysObserved(s),lr=D.latest(s);
@@ -239,7 +275,7 @@ function renderRecords(){
  </div><input class="input" id="recordSearch" placeholder="搜索名称、代码或入选日期" aria-label="搜索观察记录" value="${esc(state.query)}"></div>
  <p class="scope-summary">${scope}${f.positive?'，且高于参考价':''} · ${rows.length} 条记录</p>
  ${recordsTable(rows)}
- <p class="scope-note">先点“判断失效”只看失效记录；先点“全部（未失效）”再点“判断失效”，显示含失效的完整并集。样例中的无参考价记录显示“—”，不是 0%。点击行查看该次推荐的 40 日 K 线。观察目标 20% 为原口径展示，不是预测。</p>`;
+ <p class="scope-note">先点“判断失效”只看失效记录；先点“全部（未失效）”再点“判断失效”，显示含失效的完整并集。样例中的无参考价记录显示“—”，不是 0%。价格涨跌按未复权报价计算；完整复盘同时显示正式复权涨跌，分红送转可能造成差异。点击行查看该次推荐的 40 日 K 线。观察目标 20% 为原口径展示，不是预测。</p>`;
 }
 function renderFavorites(){
  const rows=[...state.favorites].map(k=>raw.stocks.find(s=>D.key(s)===k)).filter(Boolean)
@@ -268,13 +304,13 @@ function renderJournal(){
    <button data-journal-mode="all" class="${state.journalMode==='all'?'active':''}">当日全部复盘</button>
   </div>
  </aside><div class="journal-feed">
- ${entries.length?entries.map(({s,r,x})=>{const ret=retAtDate(s,r.date);return `<article class="journal-entry"><div class="panel"><div class="entry-top"><h3>${esc(s.name)}<small>${s.code} · ${sameYear(r.date)?r.date.slice(5).replace('-','/'):r.date} ${s.formedOn?'推荐':'入选'}</small></h3>${opTagText(r.viewLabel||D.opinion(s),D.invalid(s))}</div>
+ ${entries.length?entries.map(({s,r,x})=>{const ret=retAtDate(s,r.date);return `<article class="journal-entry"><div class="panel"><div class="entry-top"><h3>${esc(s.name)}<small>${s.code} · 复盘 ${r.date} · 推荐 ${s.formedOn||s.recDate} · 开始观察 ${s.recDate}</small></h3>${opTagText(r.viewLabel||'观点标签暂缺',r.viewChange==='invalidated'||r.assessmentCode==='contradicted')}</div>
   ${x?`<div class="transition"><span class="tag ${x.from==='up'?'up':x.from==='down'?'down':''}">${x.fromLabel}</span><span class="arrow">→</span><span class="tag ${x.to==='up'?'up':x.to==='down'?'down':''}">${x.toLabel}</span><small class="muted">未来 1—3 日方向</small></div>
   <div class="entry-body"><p>${esc(r.outlookReason||r.viewReason||'原文未提供。')}</p>
   <div class="transition-detail"><span>${x.previous.date}：${esc(x.previous.base||'短期展望原文暂缺')}</span><span>${r.date}：${esc(r.base||'短期展望原文暂缺')}</span></div>
   <p class="journal-reason" style="font-size:10px;color:var(--muted);margin-top:8px">相比上次：${esc(r.viewReason||'未保存比较原因')}</p></div>`
    :`<div class="entry-body"><p>${esc(r.viewReason||r.summary_copy||'原文未提供。')}</p></div>`}
-  <div class="entry-foot"><span>第 ${r.day} 天 · ${kindLabel(r)} · <b class="${tone(ret)}">${pct(ret)}</b> 较参考价</span>
+  <div class="entry-foot"><span>第 ${r.day} 天 · ${kindLabel(r)} · <b class="${tone(ret)}">${pct(ret)}</b> 价格涨跌（未复权）</span>
   <button class="text-button" data-stock="${esc(D.key(s))}" data-date="${esc(r.date)}" data-tab="review">回到这一天 →</button></div></div></article>`}).join('')
   :`<div class="panel empty-state">这一天没有${state.journalMode==='directions'?'方向更新':state.journalMode==='changes'?'观点调整':'复盘记录'}。不把“同方向内信心增强或减弱”当作方向变化，也不为首次复盘补写上一观点。</div>`}
  </div></div>`;

@@ -1937,7 +1937,10 @@ def test_native_heading_report_archived_verbatim_only_after_validation(
     synced = []
 
     def sync(*args):
-        assert canonical.read_bytes() == original
+        if valid_body:
+            assert canonical.read_bytes() == original
+        else:
+            assert not canonical.exists()  # 独立推荐展示不保存半份日报
         synced.append(args)
         return True, "published=unchanged"
 
@@ -1948,7 +1951,7 @@ def test_native_heading_report_archived_verbatim_only_after_validation(
         archive, archive / "final-reply.md")
     assert result == (stock_ai.EXIT_OK if valid_body else stock_ai.EXIT_FAIL)
     assert canonical.exists() is valid_body
-    assert bool(synced) is valid_body
+    assert len(synced) == 1  # 复盘文字失败不阻断已核对推荐，但任务仍失败
     assert source.read_bytes() == original
     assert (archive / "final-reply.md").read_bytes() == original
 

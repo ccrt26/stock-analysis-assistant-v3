@@ -319,3 +319,5 @@ data health
 冻结结论与报告交付由既有台账/报告分别读取：跨来源按日期保留最早有效冻结；仅存台账的结案仍是节点待办，晚于 D30 也不丢失。D30 后只允许补交并完成，不延长原 D20 结果或原 D30 价格窗口。下一日读取与 WEB 沿用同一冻结来源，WEB 回看不显示未来结论。
 
 默认 `render_prism_web.py` 收尾用冻结 payload 更新 Prism 日期页面和固定入口，不生成已退役旧 monitor 页面；显式 `--out` 保留原 Prism 行为，`--no-publish` 不更新固定入口。研究导出将注册回放按原 episode_id 独立纳入，数量与原 V1 正式选股分开。
+
+A2 推荐正文另有只读的独立展示路径（`tools/statement_display.py`）：形成日日报不存在时，仅从同 formation/action/带时区 as_of 的 nightly state 明确关联原回复，复用严格归档、CSV 与推荐分区核对。推荐分区通过不要求其他合并文字通过；此时整份任务仍待修复，不写半份 daily-research。认可稿优先并标明后续修订。completed 复核仍调用确定性渲染器，模板或认可稿改变也能刷新。阅读补缺操作见 `ops/web-display-maintenance.md`。

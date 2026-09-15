@@ -87,3 +87,7 @@ ZCode CLI 无交互执行原有运行 Prompt：
 - 执行日志（JSONL/JSON 事件、Prompt、prepare 日志）：`logs/ai_tasks/`。
 - 正式报告归档与网页展示沿用原有位置（`local_archive/forward_selection/`、
   `local_archive/forward_monitor/` 与本地 A2 页面）。网页同步继续沿用现有晚间收尾与恢复调用；主用是 `style-preview/prism-a2.html`，日期页是 `prism-a2-report-<date>.html`。旧 `prism.html` 与 `prism-report-*` 为停更备用，不再同步。
+
+## 正文显示与完整完成
+
+整份日报仍须严格归档、CSV 和全部合并分区核对通过。仅合并文字失败时，已独立核对的推荐分区允许同步显示，任务仍记“合并报告待修复”，不重跑模型、不归档半份日报。completed 复核也会调用渲染器，让认可稿或模板更新生效；相同网页由渲染器保持不写入。历史补缺与停止原因说明见 `ops/web-display-maintenance.md`。

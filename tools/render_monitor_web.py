@@ -22,8 +22,9 @@ from stock_analyzer.ops.forward_selection import selection_output_class
 
 try:
     import web_display_contract
+    import statement_display
 except ImportError:  # 支持 tools 包导入与 Prism 脚本导入
-    from tools import web_display_contract  # type: ignore[no-redef]
+    from tools import web_display_contract, statement_display  # type: ignore[no-redef]
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 MONITOR_DIR = PROJECT_ROOT / "local_archive" / "forward_monitor"
@@ -579,6 +580,9 @@ def scan_history(
                         else "regular_detail"
                     ),
                     "facts": _review_facts(episode),
+                    "formalReturn": (episode.get("current_close_return_since_entry")
+                                     if episode.get("entry_open") and _parse_as_of(report.get("as_of")) is not None
+                                     and _parse_as_of(report.get("as_of")) == _parse_as_of(snapshot.get("as_of")) else None),
                     "base": OUTLOOK_TEXT.get(str(alert.get("outlook_1_3d")), ""),
                     "outlookReason": str(alert.get("outlook_reason_plain_language") or ""),
                     "assessmentText": ASSESSMENT_TEXT.get(
@@ -624,6 +628,10 @@ def scan_history(
         for review in ledger.get("reviews", []):
             episode_id = str(review.get("episode_id"))
             episode = episodes.get(episode_id, {})
+            same_snapshot_cutoff = (ledger_as_of is not None
+                                    and ledger_as_of == _parse_as_of(snapshot.get("as_of"))) if snapshot_path.is_file() else False
+            formal_return = (episode.get("current_close_return_since_entry")
+                             if same_snapshot_cutoff and episode.get("entry_open") else None)
             # 保留原始枚举：缺值/未知值不再默认成“维持原判断”（F02/E4）。
             raw_view_change = review.get("view_change")
             view_change = _raw_code(raw_view_change)
@@ -635,6 +643,7 @@ def scan_history(
                 "day": int(review.get("day_number") or 0),
                 "checkpoint": review.get("checkpoint"),
                 "facts": _review_facts(episode),
+                "formalReturn": formal_return,
                 "base": OUTLOOK_TEXT.get(str(review.get("outlook_1_3d")), ""),
                 "outlookReason": str(review.get("outlook_reason_plain_language") or ""),
                 "assessmentText": ASSESSMENT_TEXT.get(
@@ -698,6 +707,7 @@ def scan_history(
                 "summary_copy": str(review.get("current_review") or ""),
                 "review_kind": str(review.get("review_kind") or "brief"),
                 "facts": _review_facts(episode),
+                "formalReturn": formal_return,
                 "base": OUTLOOK_TEXT.get(str(review.get("outlook_1_3d")), ""),
                 "outlookReason": str(review.get("outlook_reason_plain_language") or ""),
                 "assessmentText": ASSESSMENT_TEXT.get(
@@ -1209,11 +1219,17 @@ def extract_daily_statement(
     report_path = selection_dir / f"daily-research-{formed_on}.md"
     if not report_path.is_file():
         return "", "no_report"
-    title_re = re.compile(rf"{re.escape(name)}（{code6}(?:\.(?:SH|SZ|BJ))?）")
     try:
-        lines = report_path.read_text(encoding="utf-8").splitlines()
-    except OSError:
-        return "", "no_report"
+        text = report_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        return "", "read_error"
+    return extract_statement_text(text, name, ts_code)
+
+
+def extract_statement_text(text: str, name: str, ts_code: str) -> tuple[str, str]:
+    code6 = ts_code.split(".")[0]
+    title_re = re.compile(rf"{re.escape(name)}（{code6}(?:\.(?:SH|SZ|BJ))?）")
+    lines = text.splitlines()
     # 合并日报只从新推荐分区取正文；同股复盘不能冒充本次推荐。
     sections = []
     for index, line in enumerate(lines):
@@ -1256,6 +1272,21 @@ def extract_daily_statement(
     return (body, "") if body else ("", "not_found")
 
 
+def display_statement(selection_dir: Path, formation: str, action: str,
+                      name: str, code: str, cache: dict) -> tuple[str, str | None, str]:
+    text, miss = extract_daily_statement(selection_dir, formation, name, code)
+    if miss != "no_report":
+        return text, "daily_report" if text else None, miss
+    identity = (formation, action)
+    if identity not in cache:
+        cache[identity] = statement_display.fallback_report(selection_dir, formation, action)
+    report, source, miss = cache[identity]
+    if not report:
+        return "", None, miss
+    text, miss = extract_statement_text(report, name, code)
+    return text, source if text else None, miss
+
+
 STATEMENT_OVERRIDES_NAME = "statement-overrides.json"
 
 
@@ -1296,10 +1327,8 @@ def _statement_missing_issue(
     形成日本无日报存档属正常历史事实，静默回落，由页脚文案如实说明。"""
     if miss_reason == "no_report":
         return None
-    message = (
-        f"形成日 {formed_on} 日报中未找到唯一「{name}（{ts_code}）」小节，"
-        "展示回落为存档理由摘要。"
-    )
+    message = (f"{name}（{ts_code}），形成日 {formed_on}："
+               + statement_display.MESSAGES.get(miss_reason, "推荐正文待核对。"))
     return {
         "code": "statement_missing",
         "recordKey": f"{ts_code}:{formed_on}",
@@ -1444,6 +1473,7 @@ def build_payload(
     }
     candle_series = {code: values[trim:] for code, values in facts["candles"].items()}
 
+    statement_cache: dict = {}
     stocks_payload: list[dict[str, Any]] = []
     identity_seen: dict[tuple[str, str], str] = {}
     for episode in selected:
@@ -1570,16 +1600,14 @@ def build_payload(
         formed_on_iso = (
             str(episode["formation_date"]) if episode.get("formation_date") else ""
         )
-        statement_full, statement_miss = extract_daily_statement(
-            selection_dir,
-            formed_on_iso,
-            str(episode.get("name") or ts_code),
-            ts_code,
+        statement_full, original_source, statement_miss = display_statement(
+            selection_dir, formed_on_iso, action_iso,
+            str(episode.get("name") or ts_code), ts_code, statement_cache,
         )
         statement_full, statement_source = apply_statement_override(
             statement_overrides, ts_code, action_iso, statement_full
         )
-        if statement_miss:
+        if statement_miss and not statement_full:
             issue = _statement_missing_issue(
                 ts_code, formed_on_iso, str(episode.get("name") or ts_code), statement_miss
             )
@@ -1610,7 +1638,11 @@ def build_payload(
                 "suspended": suspended,
                 "dataIssues": data_issues,
                 "statementFull": statement_full,
-                "statementSource": statement_source,
+                "statementSource": statement_source or original_source,
+                "statementStatus": statement_miss if not statement_full else None,
+                "statementNote": statement_display.MESSAGES.get(statement_miss) if not statement_full else None,
+                "formalReturn": episode.get("current_close_return_since_entry") if ref is not None else None,
+                "formalReturnDate": analysis_date.isoformat(),
                 "trackingStatus": (
                     str(episode.get("tracking_status") or "") or None
                 ),
@@ -1650,14 +1682,14 @@ def build_payload(
         group_code = entry.get("group_code") or ""
         rec_index = max(0, len(sessions) - 1)
         d0_formed = analysis_date.isoformat()
-        d0_statement, d0_miss = extract_daily_statement(
-            selection_dir, d0_formed, str(entry.get("name") or ts_code), ts_code
+        d0_statement, d0_original_source, d0_miss = display_statement(
+            selection_dir, d0_formed, d0_action_iso, str(entry.get("name") or ts_code), ts_code, statement_cache
         )
         d0_statement, d0_statement_source = apply_statement_override(
             statement_overrides, ts_code, d0_action_iso, d0_statement
         )
         d0_issues: list[dict[str, Any]] = []
-        if d0_miss:
+        if d0_miss and not d0_statement:
             issue = _statement_missing_issue(
                 ts_code, d0_formed, str(entry.get("name") or ts_code), d0_miss
             )
@@ -1683,7 +1715,9 @@ def build_payload(
                 "d0": True,
                 "dataIssues": d0_issues,
                 "statementFull": d0_statement,
-                "statementSource": d0_statement_source,
+                "statementSource": d0_statement_source or d0_original_source,
+                "statementStatus": d0_miss if not d0_statement else None,
+                "statementNote": statement_display.MESSAGES.get(d0_miss) if not d0_statement else None,
                 "company": profiles.get(ts_code) or None,
                 "reasonFull": entry["reason"],
                 "reasonRisk": entry["risk"],

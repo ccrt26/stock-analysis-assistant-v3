@@ -1122,23 +1122,22 @@ def archive_accepted_report(formation: str, reply_path: Path) -> tuple[bool, str
 
 
 def sync_accepted_report(formation: str, action: str, as_of: str,
-                         reply_path: Path, timeout_seconds: int,
-                         *, skip_unchanged_sync: bool = False) -> tuple[bool, str]:
+                         reply_path: Path, timeout_seconds: int) -> tuple[bool, str]:
     """调用方必须先通过 verify_completed_run；正文衔接失败不重跑研究。"""
     saved, message = archive_accepted_report(formation, reply_path)
     if not saved:
         return False, message
-    if skip_unchanged_sync and message == "unchanged" and prism_page_present(formation):
-        return True, "unchanged"
+    # 日报不变不能代表模板、认可稿和其他展示输入未变；渲染器负责幂等。
     return retry_prism_sync(formation, action, as_of, timeout_seconds)
 
 
-def strict_archive_check(formation: str, action: str, as_of: str) -> tuple[bool, str]:
+def strict_archive_check(formation: str, action: str, as_of: str, *, root: Path | None = None) -> tuple[bool, str]:
     """复用 render_prism_web.load_completed_archives 的正式归档严格校验。"""
+    root = root or PROJECT_ROOT
     try:
         import importlib.util as _importlib
         spec = _importlib.spec_from_file_location(
-            "stock_ai_render_prism", PROJECT_ROOT / "tools" / "render_prism_web.py")
+            "stock_ai_render_prism", Path(__file__).resolve().with_name("render_prism_web.py"))
         if spec is None or spec.loader is None:
             return False, "无法加载 render_prism_web"
         module = _importlib.module_from_spec(spec)
@@ -1148,10 +1147,11 @@ def strict_archive_check(formation: str, action: str, as_of: str) -> tuple[bool,
         from datetime import date as _date, datetime as _datetime
         report, _snapshot, _inputs = module.load_completed_archives(
             renderer,
-            PROJECT_ROOT / "local_archive" / "forward_monitor",
+            root / "local_archive" / "forward_monitor",
             _date.fromisoformat(formation),
             _date.fromisoformat(action),
             _datetime.fromisoformat(as_of),
+            selection_dir=root / "local_archive" / "forward_selection",
         )
         alerts = report.get("alerts", []) if isinstance(report, dict) else []
         return True, f"alerts={len(alerts)}"
@@ -1159,7 +1159,7 @@ def strict_archive_check(formation: str, action: str, as_of: str) -> tuple[bool,
         return False, f"{type(exc).__name__}: {exc}"
 
 
-def forward_csv_matches_trace(formation: str, action: str, as_of: str) -> tuple[bool, str]:
+def forward_csv_matches_trace(formation: str, action: str, as_of: str, *, root: Path | None = None) -> tuple[bool, str]:
     """按原程序规则核对 Forward CSV 与冻结轨迹逐字段对应。
 
     用 forward_selection 现有 _confirmed_active_research_result/_decision_rows
@@ -1167,6 +1167,7 @@ def forward_csv_matches_trace(formation: str, action: str, as_of: str) -> tuple[
     已有静态研究字段；不比较 D20 等后续可变评价字段。
     解析/导入异常转成明确的核对失败，不吞掉、不当成空选。
     """
+    root = root or PROJECT_ROOT
     try:
         from stock_analyzer.ops.forward_selection import (
             DailyResearchTraceV4,
@@ -1174,10 +1175,10 @@ def forward_csv_matches_trace(formation: str, action: str, as_of: str) -> tuple[
             _decision_rows,
             _read_forward_log,
         )
-        csv_path = PROJECT_ROOT / "local_archive" / "forward_selection" / "forward-selection-log.csv"
+        csv_path = root / "local_archive" / "forward_selection" / "forward-selection-log.csv"
         if not csv_path.exists():
             return False, "缺少 Forward CSV"
-        trace_path = PROJECT_ROOT / "local_archive" / "forward_selection" / f"research-trace-{formation}.json"
+        trace_path = root / "local_archive" / "forward_selection" / f"research-trace-{formation}.json"
         if not trace_path.exists():
             return False, "缺少正式轨迹"
         trace_obj = DailyResearchTraceV4.model_validate(json.loads(trace_path.read_text(encoding="utf-8")))
@@ -1258,14 +1259,14 @@ def _stock_segment(text: str, code: str) -> str | None:
     return None
 
 
-def _formal_recommendation_list(formation: str) -> list[dict] | None:
+def _formal_recommendation_list(formation: str, *, root: Path | None = None) -> list[dict] | None:
     """正式推荐名单（confirmed_active 口径，与 Forward CSV 同源）；取不到返回 None。"""
     try:
         from stock_analyzer.ops.forward_selection import (
             DailyResearchTraceV4,
             _confirmed_active_research_result,
         )
-        path = (PROJECT_ROOT / "local_archive" / "forward_selection"
+        path = ((root or PROJECT_ROOT) / "local_archive" / "forward_selection"
                 / f"research-trace-{formation}.json")
         trace = DailyResearchTraceV4.model_validate(json.loads(path.read_text(encoding="utf-8")))
         result = _confirmed_active_research_result(trace)
@@ -1274,10 +1275,11 @@ def _formal_recommendation_list(formation: str) -> list[dict] | None:
         return None
 
 
-def _recommendation_section_issues(section: str, formation: str) -> list[str]:
+def _recommendation_section_issues(section: str, formation: str, *, root: Path | None = None) -> list[str]:
     """推荐分区必须与正式名单逐只对应：目录表、### 逐只标题、正文存在性。"""
     issues: list[str] = []
-    stocks = _formal_recommendation_list(formation)
+    stocks = (_formal_recommendation_list(formation) if root is None
+              else _formal_recommendation_list(formation, root=root))
     if stocks is None:
         return [f"无法从正式轨迹取得正式推荐名单，推荐分区无法核对（形成日 {formation}）"]
     expected = [(str(s.get("ts_code", "")), str(s.get("name", "")), s.get("priority"))
@@ -1292,7 +1294,7 @@ def _recommendation_section_issues(section: str, formation: str) -> list[str]:
     codes = [code for _name, code in headings]
     if not expected:
         # 合法空选：无股票标题、有明确空名单说明，不强迫选股、不填补空缺。
-        if headings:
+        if re.search(r"(?:^#{2,6}|^\*\*|^\|).*?\d{6}\.(?:SH|SZ)", section, re.MULTILINE):
             issues.append("正式名单为空，推荐分区却出现股票标题："
                           + "、".join(f"{name}（{code}）" for name, code in headings))
         if not re.search(r"没有[^。\n]{0,40}推荐|空名单|空表", section):
@@ -1303,6 +1305,16 @@ def _recommendation_section_issues(section: str, formation: str) -> list[str]:
     for name, code in headings:
         if code not in expected_codes:
             issues.append(f"推荐分区出现非正式推荐股票：{name}（{code}）")
+    expected_names = {code: name for code, name, _priority in expected}
+    for name, code in headings:
+        if code in expected_names and name != expected_names[code]:
+            issues.append(f"推荐标题名称与正式名单不一致：{name}（{code}）")
+    # 其他层级/加粗股票标题不能躲过正式 ### 标题核对。
+    all_stock_headings = list(re.finditer(
+        r"^(?:#{2,6}[ \t]+|\*\*)[^\n]*?（\d{6}(?:\.(?:SH|SZ))?）[^\n]*$",
+        section, re.MULTILINE))
+    if len(all_stock_headings) != len(headings):
+        issues.append("推荐分区存在不符合逐股标题格式的股票标题")
     matched = [code for code in codes if code in expected_codes]
     missing = [code for code in expected_codes if code not in matched]
     for code in missing:
@@ -1317,6 +1329,10 @@ def _recommendation_section_issues(section: str, formation: str) -> list[str]:
         rf"^\|[ \t]*\d+[ \t]*\|[^|\n]*?（{STOCK_CODE_PATTERN}）", section, re.MULTILINE)]
     if table_codes and table_codes != expected_codes:
         issues.append("推荐目录表与正式名单不一致")
+    for match in re.finditer(
+            rf"^\|[ \t]*\d+[ \t]*\|[ \t]*([^|\n]+?)（{STOCK_CODE_PATTERN}）", section, re.MULTILINE):
+        if match.group(1).strip() != expected_names.get(match.group(2)):
+            issues.append("推荐目录表名称与正式名单不一致")
     heading_iter = list(re.finditer(
         rf"^### ([^#\n]+?)（{STOCK_CODE_PATTERN}）[ \t]*$", section, re.MULTILINE))
     for i, m in enumerate(heading_iter):
@@ -1333,6 +1349,38 @@ def _recommendation_section_issues(section: str, formation: str) -> list[str]:
         if not prose:
             issues.append(f"推荐正文没有实际说明文字：{label}（{code}）")
     return issues
+
+
+def accepted_recommendation_section(reply_text: str, formation: str,
+                                    *, root: Path | None = None) -> tuple[str, list[str]]:
+    """独立核对推荐分区；通过不代表整份日报验收通过。"""
+    text = reply_text.replace("\r\n", "\n")
+    matches = list(re.finditer(r"^## 今天明确推荐的股票[ \t]*$", text, re.MULTILINE))
+    if len(matches) != 1:
+        return "", ["推荐分区标题缺失或不唯一"]
+    start = matches[0].end()
+    boundary = re.search(r"^#{1,2}[ \t]+", text[start:], re.MULTILINE)
+    section = text[start:start + boundary.start()] if boundary else text[start:]
+    issues = _recommendation_section_issues(section, formation, root=root)
+    return ("" if issues else "## 今天明确推荐的股票\n" + section.strip()), issues
+
+
+def sync_verified_recommendation(formation: str, action: str, as_of: str,
+                                 reply_path: Path, categories: dict,
+                                 timeout_seconds: int = 600) -> str:
+    """仅合并文字失败时交付已独立核对的原推荐；不归档半份日报、不改变失败状态。"""
+    if categories.get("archive") or categories.get("csv"):
+        return ""
+    try:
+        _section, issues = accepted_recommendation_section(
+            reply_path.read_text(encoding="utf-8"), formation)
+    except (OSError, UnicodeError):
+        return ""
+    if issues:
+        return ""
+    synced, message = retry_prism_sync(formation, action, as_of, timeout_seconds)
+    return ("已同步独立核对的推荐正文；完整日报仍待修复。" if synced
+            else f"推荐分区核对通过，但展示同步失败：{message}。")
 
 
 def _review_section_issues(section: str, formation: str) -> list[str]:
@@ -1769,7 +1817,7 @@ def run_nightly(args: argparse.Namespace, config: dict, lock: TaskLock,
             if ok:
                 synced, sync_msg = sync_accepted_report(
                     state["formation_date"], state["action_date"],
-                    state["selection_as_of"], reply_path, 600, skip_unchanged_sync=True)
+                    state["selection_as_of"], reply_path, 600)
                 if not synced:
                     return finish_task(
                         "nightly", path.name, state, "研究已归档但展示待更新",
@@ -1785,10 +1833,12 @@ def run_nightly(args: argparse.Namespace, config: dict, lock: TaskLock,
                 )
                 return EXIT_OK
             status_, stage_ = completion_failure(categories)
+            display_note = sync_verified_recommendation(
+                state["formation_date"], state["action_date"], state["selection_as_of"], reply_path, categories)
             return finish_task(
                 "nightly", path.name, state, status_,
                 "旧完成状态复核未通过：" + "；".join(issues)
-                + "。保留研究，不换模型、不重跑。",
+                + "。保留研究，不换模型、不重跑。" + display_note,
                 EXIT_FAIL, stage=stage_,
             )
         # 已标“完整完成”却缺时间身份或报告路径：不能直接返回成功。
@@ -1901,9 +1951,12 @@ def run_nightly(args: argparse.Namespace, config: dict, lock: TaskLock,
             )
         # 归档在但合并报告/CSV 不合格：保留研究，据实定级，不重新发现股票。
         status_, stage_ = completion_failure(categories)
+        state["final_reply"] = str(reply_target.relative_to(PROJECT_ROOT))
+        save_state(path, state)
+        display_note = sync_verified_recommendation(formation, action, as_of, reply_target, categories)
         return finish_task(
             "nightly", path.name, state, status_,
-            "；".join(issues) + "。保留研究，不换模型、不重跑、不同步掩盖。",
+            "；".join(issues) + "。保留研究，不换模型、不重跑。" + display_note,
             EXIT_FAIL, stage=stage_,
         )
     if art["trace_ok"] and art["ledger_ok"] and art["report_ok"]:
@@ -2072,9 +2125,11 @@ def finish_nightly_success(
     ok, issues, categories = verify_completed_run(formation, action, as_of, reply_target)
     if not ok:
         status_, stage_ = completion_failure(categories)
+        display_note = sync_verified_recommendation(
+            formation, action, as_of, reply_target, categories, sync_timeout)
         return finish_task(
             "nightly", state_name, state, status_,
-            "；".join(issues) + "。保留研究产物与原始问题，不换模型、不重跑、不同步掩盖。",
+            "；".join(issues) + "。保留研究产物与原始问题，不换模型、不重跑。" + display_note,
             EXIT_FAIL, stage=stage_, extra={"provider": provider},
         )
     # 权威同步：接受 unchanged；skipped_newer 注明首页未切。
