@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import html as html_module
 import importlib.util
 import json
 import math
@@ -223,7 +224,13 @@ def render_html(snapshot: dict, series: dict | None = None) -> str:
     }
     # 只扫描原始模板一次，正文中相同标记按原文保留。
     pattern = re.compile("(" + "|".join(re.escape(marker) for marker in MARKERS) + ")")
-    return "".join(replacements.get(chunk, chunk) for chunk in pattern.split(template))
+    rendered = "".join(replacements.get(chunk, chunk) for chunk in pattern.split(template))
+    delivery = snapshot.get("delivery") or {}
+    if delivery.get("message"):
+        notice = ('<aside id="delivery-status" role="status" style="padding:10px 24px;border-bottom:1px solid var(--line);font-size:12px;color:var(--secondary)">'
+                  + html_module.escape(delivery["message"]) + '</aside>')
+        rendered = rendered.replace('<div class="app">', notice + '\n<div class="app">', 1)
+    return rendered
 
 
 def main(argv: list[str] | None = None) -> int:

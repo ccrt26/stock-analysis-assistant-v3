@@ -82,7 +82,7 @@ description: Write a readable, evidence-backed A-share company introduction at t
 - 逐字沿用原 `formation_date`、`action_date` 和带时区的 `as_of`；估值交易日不晚于 formation_date，事实在 as_of 可用。`generated_at` 记录实际写作时间，不倒填。
 - 现在取得的官方文件可以用于历史介绍，但所依据的版本必须在原截止已经公开。来源的 `available_at` 按核实的历史公开时间填写，`retrieved_at` 是实际取得时间。日期证据不能确定是否早于当天截止时，不凭空填零点来通过校验；以后更正的版本不能覆盖此前未知。
 - 本地来源保留 dataset、block_id、locator、available_at 和引用的关键原值 values，与原 facts-file 对应。
-- 外部官方来源沿用 `official_document`，记录真实 URL、文档/页码/表格定位、公开时间依据 `availability_basis`、`retrieved_at` 及所引关键原值。不手改 facts-file 或伪装 warehouse 行。
+- 外部官方来源沿用 `official_document`，记录真实 URL、文档/页码/表格定位、公开时间依据 `availability_basis`、`retrieved_at` 及所引关键原值。不手改 facts-file 或伪装 warehouse 行。按运行 Prompt 取得并实际读取原件，`evidence_path` 关联该次取得记录；不能把下载失败、搜索摘要或记忆写成已核实来源。程序保存时回读原件与提取正文，AI 仍负责逐条确认数字、口径及增长归因。
 - 官方原文可补充本地缺失的数值和解释，也可纠正不适用的自动计算。合并/重述有疑点时先找官方调整后同期及口径说明；核实后可用，仍不明才省略同比，不能因程序没算就放弃核对。
 - 金额、占比和毛利率用现有计算结果或临时 Python 核算，保留必要原值、单位、分母和公式。不让 AI 心算替代确定性计算，不用半年利润乘二重算 TTM。
 - 区分数据不存在、覆盖不足、查询失败、快照不可回放和真实无记录；本地 gaps/quality_note 是取数信息，不直接成为公司经营风险。

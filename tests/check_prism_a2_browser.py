@@ -49,6 +49,18 @@ def original_paragraphs(value):
     return [p for p in re.split(r"\n\s*\n", value or "") if p]
 
 
+def statement_visible_parts(value):
+    # 链接/标题/列表转为 HTML 后，地址和 Markdown 标记不属于可见正文。
+    # 只移除这些格式，数字、日期和原有文字仍逐段保留检查。
+    for paragraph in original_paragraphs(value):
+        lines = paragraph.splitlines()
+        parts = lines if lines and all(re.match(r"^\s*[-*] ", line) for line in lines) else [paragraph]
+        for part in parts:
+            part = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r"\1", part)
+            part = re.sub(r"^\s*(?:#{1,6}|[-*]) ", "", part)
+            yield part.replace("**", "")
+
+
 def check_primary_details(pg, snapshot, out):
     check("主用身份已替换预览提示", "主用展示" in pg.locator("body").inner_text()
           and "非正式发布页" not in pg.locator("body").inner_text())
@@ -74,7 +86,7 @@ def check_primary_details(pg, snapshot, out):
     text=pg.locator('.reading-body').text_content()
     expected=stock.get('statementFull') or stock.get('reasonFull')
     # Markdown 加粗是格式；实际文字、标点和数字仍逐段核对。
-    check("原推荐理由完整保留", all(p.replace('**','') in text for p in original_paragraphs(expected)))
+    check("原推荐理由完整保留", all(p in text for p in statement_visible_parts(expected)))
     if not stock.get('statementFull'):
         check("完整正文缺项明确可见",'尚缺完整推荐正文' in pg.locator('.reading-body').inner_text()
               and '非完整正文' in pg.locator('.original-summary summary').inner_text())

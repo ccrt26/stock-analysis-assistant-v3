@@ -215,6 +215,7 @@ class IntroSource(BaseModel):
     url: str | None = None
     availability_basis: str | None = None
     retrieved_at: datetime | None = None
+    evidence_path: str | None = None
 
     @model_validator(mode="after")
     def validate_source(self) -> "IntroSource":
@@ -823,7 +824,9 @@ def _financial_blocks(
                 "rows": records,
             }
             blocks.append(business_block)
-        _attach_business_shares(business_block)
+        income_block = next((b for b in blocks if b.get("dataset") == "income_statement"
+                             and b.get("report_period") == period), None)
+        _attach_business_shares(business_block, income_block)
     else:
         gatherer.note_gap(
             ResearchDatasetId.MAIN_BUSINESS.value,
@@ -892,10 +895,7 @@ def _financial_computed(
     # 毛利率只用营业成本（oper_cost/operate_cost）；total_cogs 是营业总成本，
     # 含期间费用，用它算出的是"1-总成本率"而不是毛利率。
     cost = _first_number(income, "oper_cost", "operate_cost")
-    cost_basis_field = "oper_cost"
-    if cost is None:
-        cost = _first_number(income, "total_cogs")
-        cost_basis_field = "total_cogs（营业总成本，含期间费用，非毛利率口径）"
+    cost_basis_field = "oper_cost" if _first_number(income, "oper_cost") is not None else "operate_cost"
     attr_profit = _first_number(income, "n_income_attr_p")
     cash_flow = _first_number(cashflow, "n_cashflow_act")
     money_entry("营业收入", revenue, income.get("block_id") if income else None, "revenue")
@@ -907,7 +907,7 @@ def _financial_computed(
         "经营活动现金流净额", cash_flow,
         cashflow.get("block_id") if cashflow else None, "n_cashflow_act",
     )
-    if revenue and cost:
+    if revenue and cost is not None:
         entries.append(
             {
                 "key": "毛利率（由收入与营业成本计算）",
@@ -1048,36 +1048,45 @@ def _financial_computed(
     return entries
 
 
-def _attach_business_shares(block: dict[str, Any] | None) -> None:
-    """同一分类内的收入占比；分母明确，缺其他/合计行时合计不等于 100%。"""
-
-    if not block or "rows" not in block:
+def _attach_business_shares(block: dict[str, Any] | None,
+                            income: dict[str, Any] | None = None) -> None:
+    """只使用明确汇总或同期间收入作分母，不把汇总与明细重复相加。"""
+    if not block or not block.get("rows"):
         return
-    groups: dict[str, float] = {}
+    block.pop("computed_shares", None)
+    block.pop("share_limitations", None)
+    totals = {"产品", "地区", "行业", "合计", "总计", "营业收入", "主营业务合计"}
+    groups: dict[tuple, list[dict]] = {}
     for row in block["rows"]:
-        sales = row.get("bz_sales")
-        classification = str(row.get("classification") or "未分类")
-        if isinstance(sales, (int, float)) and math.isfinite(float(sales)):
-            groups[classification] = groups.get(classification, 0.0) + float(sales)
-    shares: dict[str, dict[str, Any]] = {}
-    for classification, total in groups.items():
-        if total <= 0:
+        key = (row.get("classification"), row.get("report_period"), row.get("curr_type"))
+        groups.setdefault(key, []).append(row)
+    shares, limitations = {}, []
+    for (classification, period, currency), rows in groups.items():
+        explicit = [r.get("bz_sales") for r in rows if r.get("bz_item") in totals]
+        explicit = [float(v) for v in explicit if isinstance(v, (int, float)) and math.isfinite(v) and v > 0]
+        total = explicit[0] if explicit and all(math.isclose(v, explicit[0]) for v in explicit) else None
+        basis = "同分类明确汇总行"
+        if not explicit and income and currency == "CNY" and period == income.get("report_period"):
+            total = _first_number(income, "revenue", "total_revenue")
+            basis = "同期间人民币营业收入"
+        if not classification or classification == "provider_unspecified" or not period or not currency or not total:
+            limitations.append(f"{classification}/{period}/{currency} 缺少可核对分母或明确分类，仅提供金额")
             continue
-        for row in block["rows"]:
-            if str(row.get("classification") or "未分类") != classification:
+        for row in rows:
+            sales, name = row.get("bz_sales"), row.get("bz_item")
+            if name in totals:
                 continue
-            sales = row.get("bz_sales")
-            if isinstance(sales, (int, float)) and float(sales) >= 0:
-                shares[f"{classification}|{row.get('bz_item')}"] = {
-                    "share": float(sales) / total,
-                    "formatted": f"{float(sales) / total * 100:.1f}%",
-                    "basis": (
-                        f"{classification} 内 bz_sales {sales} / 同分类合计 {total}；"
-                        "分类之间不得混加，合计可能小于全部收入"
-                    ),
+            if isinstance(sales, (int, float)) and math.isfinite(sales) and 0 <= sales <= total:
+                shares[f"{classification}|{name}"] = {
+                    "share": sales / total, "formatted": f"{sales / total * 100:.1f}%",
+                    "basis": f"{currency} {period} {classification} 内 bz_sales {sales} / {basis} {total}；分类之间不得混加，不将局部明细强凑100%",
                 }
+            else:
+                limitations.append(f"{classification}/{name} 金额超出可解释范围，未计算占比")
     if shares:
         block["computed_shares"] = shares
+    if limitations:
+        block["share_limitations"] = limitations
 
 
 def _valuation_block(
@@ -1138,9 +1147,9 @@ def _valuation_block(
             {
                 "key": "总市值",
                 "value": float(total_mv),
-                "formatted": f"{float(total_mv) / 1e4:.0f}亿元",
+                "formatted": f"{float(total_mv) / 1e8:.2f}亿元",
                 "basis": (
-                    f"{block['block_id']}.total_mv 原值 {total_mv}（万元口径按来源），"
+                    f"{block['block_id']}.total_mv 原值 {total_mv}（仓库已统一为元），"
                     "展示口径须对照来源单位"
                 ),
             }
@@ -1256,6 +1265,7 @@ def prepare_formal_context(
     action_date: str | None = None,
     as_of: str | None = None,
     include_legacy: bool = False,
+    include_existing: bool = False,
     project_root: Path | None = None,
     warehouse_root: Path | None = None,
     intro_root: Path | None = None,
@@ -1335,8 +1345,9 @@ def prepare_formal_context(
     stocks: dict[str, Any] = {}
     warehouse_gaps: list[dict[str, Any]] = []
     used_partitions: dict[str, list[str]] = {}
-    missing_codes = [item["ts_code"] for item in scope if item["intro_status"] == "missing"]
-    if missing_codes:
+    requested = {"missing", "reusable"} if include_existing else {"missing"}
+    requested_codes = [item["ts_code"] for item in scope if item["intro_status"] in requested]
+    if requested_codes:
         wh_root = (
             Path(warehouse_root)
             if warehouse_root is not None
@@ -1356,7 +1367,7 @@ def prepare_formal_context(
             }
             warehouse_gaps.append(open_gap)
         for item in scope:
-            if item["intro_status"] != "missing":
+            if item["intro_status"] not in requested:
                 continue
             code = item["ts_code"]
             if open_gap is not None:
@@ -1504,6 +1515,7 @@ def record_introduction(
     facts_file: Path,
     intro_root: Path | None = None,
     project_root: Path | None = None,
+    replace: bool = False,
 ) -> dict[str, Any]:
     """校验单篇介绍并保存；已有有效同身份文件直接复用，不覆盖冲突或损坏文件。"""
 
@@ -1620,24 +1632,52 @@ def record_introduction(
                 action_date=action,
                 as_of=as_of,
             ):
-                return {
-                    "status": "already_exists",
-                    "path": str(target),
-                    "ts_code": intro.ts_code,
-                    "action_date": action,
-                    "note": "已有有效同身份介绍，直接复用，不更新 generated_at 或正文",
-                }
-            raise ValueError(
-                f"existing file has a conflicting identity: {target}; "
-                "record will not overwrite it automatically"
-            )
+                if not replace:
+                    return {
+                        "status": "already_exists", "path": str(target),
+                        "ts_code": intro.ts_code, "action_date": action,
+                        "note": "已有有效同身份介绍，直接复用，不更新 generated_at 或正文",
+                    }
+            else:
+                raise ValueError(
+                    f"existing file has a conflicting identity: {target}; "
+                    "record will not overwrite it automatically"
+                )
         except ValidationError as error:
             raise ValueError(
                 f"existing file is unreadable as an introduction: {target} "
                 f"({error}); record will not overwrite it automatically"
             ) from error
 
+    from stock_analyzer.ops.official_evidence import read_evidence
+    import shutil
+    evidence = []
+    for index, source in enumerate(intro.sources):
+        if source.kind != "official_document":
+            continue
+        if not source.evidence_path or not source.url:
+            raise ValueError(f"official source {source.id} requires fetched evidence_path and url")
+        path = Path(source.evidence_path)
+        if not path.is_absolute():
+            path = Path(intro_file).parent / path
+        read_evidence(path, source.url, source.retrieved_at)
+        if source.retrieved_at > intro.generated_at:
+            raise ValueError("official evidence was retrieved after the introduction was written")
+        evidence.append((index, path))
     payload = intro.model_dump(mode="json")
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    for index, path in evidence:
+        destination = target.parent / "evidence" / intro.ts_code / stamp / f"source-{index}"
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.mkdir()
+        receipt = json.loads(path.read_text(encoding="utf-8"))
+        for filename in ("receipt.json", receipt["original"], "text.txt"):
+            shutil.copy2(path.parent / filename, destination / filename)
+        payload["sources"][index]["evidence_path"] = str((destination / "receipt.json").relative_to(target.parent))
+    if target.exists():
+        backup = intro_root / "revisions" / action / intro.ts_code / f"{stamp}.json"
+        backup.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(target, backup)
     _atomic_write_json(target, payload)
     return {
         "status": "recorded",
@@ -1710,7 +1750,12 @@ def load_introductions_for_display(
             as_of=str(trace.get("as_of") or ""),
         ):
             continue
-        result[(ts_code, action_date)] = intro.model_dump(mode="json")
+        displayed = intro.model_dump(mode="json")
+        for source in displayed["sources"]:
+            evidence_path = source.pop("evidence_path", None)
+            if source["kind"] == "official_document":
+                source["evidenceAvailable"] = bool(evidence_path and (path.parent / evidence_path).is_file())
+        result[(ts_code, action_date)] = displayed
     return result
 
 
@@ -1743,6 +1788,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         action="store_true",
         help="仅限用户明确要求补写历史正式类别（legacy_v1_not_rewritten）时使用",
     )
+    prepare_parser.add_argument("--include-existing", action="store_true", help="用户授权修订时，也为已有有效同身份介绍重新备料")
     prepare_parser.add_argument("--code", help="单股入口：ts_code，如 600583.SH")
     prepare_parser.add_argument("--price-date", help="单股估值参考日上界（YYYY-MM-DD）")
     prepare_parser.add_argument("--output", help="facts-file 输出路径（缺省打印到标准输出）")
@@ -1756,9 +1802,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     record_parser.add_argument("--facts-file", required=True)
     record_parser.add_argument("--project-root", default=None)
     record_parser.add_argument("--intro-root", default=None)
+    record_parser.add_argument("--replace", action="store_true", help="用户授权修订同身份介绍；保留旧稿")
+    evidence_parser = subparsers.add_parser("evidence", help="按需取得官方原件和可回读正文")
+    evidence_parser.add_argument("--url", required=True)
+    evidence_parser.add_argument("--output-dir", required=True)
     args = parser.parse_args(argv)
     try:
-        if args.command == "prepare":
+        if args.command == "evidence":
+            from stock_analyzer.ops.official_evidence import fetch_evidence
+            print(f"evidence_path={fetch_evidence(args.url, Path(args.output_dir))}")
+        elif args.command == "prepare":
             if args.code:
                 if args.formation_date or args.action_date:
                     parser.error(
@@ -1787,6 +1840,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     action_date=args.action_date,
                     as_of=args.as_of,
                     include_legacy=args.include_legacy,
+                    include_existing=args.include_existing,
                     project_root=(
                         Path(args.project_root) if args.project_root else None
                     ),
@@ -1805,13 +1859,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             summary = record_introduction(
                 intro_file=Path(args.intro_file),
                 facts_file=Path(args.facts_file),
+                replace=args.replace,
                 intro_root=Path(args.intro_root) if args.intro_root else None,
                 project_root=(
                     Path(args.project_root) if args.project_root else None
                 ),
             )
             print(json.dumps(summary, ensure_ascii=False))
-    except (ValueError, FileNotFoundError, PermissionError) as error:
+    except (ValueError, OSError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 2
     return 0

@@ -12,6 +12,8 @@ except ImportError:
 
 
 MESSAGES = {
+    "generating": "本轮仍在生成，完整推荐正文尚未交付；当前可查看已保存摘要。",
+    "report_failed": "本轮已经结束，但推荐正文尚未通过验收；需要修复后再交付。",
     "no_report": "原推荐的完整正文尚未归档，暂显示历史摘要。",
     "not_found": "已找到形成日日报，但没有找到这只股票的推荐正文，需核对原文归属。",
     "ambiguous": "原文中存在重复的推荐小节，尚不能确定应展示哪一段。",
@@ -89,7 +91,10 @@ def fallback_report(selection_dir: Path, formation: str, action: str) -> tuple[s
     if problem:
         return "", "", problem
     if not replies:
-        return "", "", "legacy_unverified" if legacy_unverified else "no_report"
+        task = task_for_identity(root, formation, action, cutoff_text)
+        state = (task or {}).get("status")
+        missing = "generating" if state == "running" else "report_failed" if state in ("failed", "cancelled", "canceled") else "no_report"
+        return "", "", "legacy_unverified" if legacy_unverified else missing
     archive_ok, _ = stock_ai.strict_archive_check(formation, action, cutoff_text, root=root)
     csv_ok, _ = stock_ai.forward_csv_matches_trace(formation, action, cutoff_text, root=root)
     if not archive_ok or not csv_ok:
@@ -98,3 +103,49 @@ def fallback_report(selection_dir: Path, formation: str, action: str) -> tuple[s
     if issues:
         return "", "", "recommendation_invalid"
     return section, "verified_recommendation", ""
+
+
+def task_for_identity(root: Path, formation: str, action: str, cutoff: str) -> dict | None:
+    """只读关联该次研究的最近任务；不把其他日期或截止的状态带入。"""
+    wanted = aware(cutoff)
+    if wanted is None:
+        return None
+    states = []
+    for path in (root / "local_archive/ai_tasks/state").glob("nightly-*.json"):
+        try:
+            state = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if (state.get("formation_date") == formation and state.get("action_date") == action
+                and aware(state.get("selection_as_of")) == wanted):
+            states.append((path.stat().st_mtime_ns, state))
+    return max(states, key=lambda item: item[0])[1] if states else None
+
+
+def delivery_summary(root: Path, formation: str, cutoff: str, stocks: list[dict]) -> dict:
+    trace = root / "local_archive/forward_selection" / f"research-trace-{formation}.json"
+    try:
+        action = json.loads(trace.read_text(encoding="utf-8"))["action_date"]
+    except (OSError, ValueError, KeyError):
+        return {}
+    task = task_for_identity(root, formation, action, cutoff)
+    current = [s for s in stocks if s.get("formedOn") == formation and s.get("recDate") == action]
+    status = (task or {}).get("status", "unknown")
+    result = (task or {}).get("result") or {}
+    if status == "running":
+        message = "本轮仍在生成，已保存新名单；完整报告尚未交付。"
+    elif status == "completed":
+        message = "本轮报告已交付。"
+    elif status in ("failed", "cancelled", "canceled"):
+        stage = result.get("stage")
+        message = f"本轮{stage or '任务'}未完成，已保存内容保留；缺项不会继续自动补写。"
+    else:
+        message = "当前显示已保存内容；没有关联的完整任务交付状态。"
+    complete = sum(bool(s.get("statementFull")) for s in current)
+    intros = sum(bool(s.get("companyIntroduction")) for s in current)
+    message += f" 今日推荐正文 {complete}/{len(current)}，公司介绍 {intros}/{len(current)}。"
+    historical = sum(not s.get("statementFull") for s in stocks if s not in current)
+    if historical:
+        message += f" 另有 {historical} 条历史推荐正文待补。"
+    return {"status": status, "message": message, "formationDate": formation,
+            "recommendations": complete, "introductions": intros, "total": len(current)}

@@ -318,6 +318,15 @@ def render(args, renderer, adapt, prism, monitor_dir: Path) -> int:
         + ",".join(f"{row['code']}:{'yes' if row.get('trade_date') == analysis_date.isoformat() and row.get('close') is not None else 'no'}" for row in display_snapshot.get("marketIndices", []))
     )
     print(f"market_provided={len(provided)}/{len(codes)}")
+    if not args.no_publish:
+        try:
+            from tools.prism_publish import publish_fixed_page
+        except ImportError:
+            from prism_publish import publish_fixed_page
+        ok, publication = publish_fixed_page(PROJECT_ROOT, fixed_path)
+        print(publication)
+        if not ok:
+            return 2
     return 0
 
 

@@ -125,7 +125,7 @@ function companyTabBody(s){
    const link=href?` <a href="${esc(href)}" target="_blank" rel="noopener noreferrer">原文</a>`:'';
    const meta=src.kind==='warehouse'
      ?`本地事实仓 · ${esc(src.dataset||'')}${src.report_period?' · 报告期 '+esc(src.report_period):''}`
-     :`官方文件 · 公开依据：${esc(src.availability_basis||'')}${src.retrieved_at?' · 实际补读 '+esc(introStamp(src.retrieved_at)):''}`;
+     :`${src.evidenceAvailable?'已留存官方原文':'历史官方引用（原文未留存）'} · 公开依据：${esc(src.availability_basis||'')}${src.retrieved_at?' · 实际补读 '+esc(introStamp(src.retrieved_at)):''}`;
    return `<li><b>${esc(src.id)}</b> ${esc(src.title||'')}<span class="intro-src-meta">${meta} · 可用 ${esc(introStamp(src.available_at))}${src.locator?' · '+esc(src.locator):''}</span>${link}</li>`;
   }).join('');
   const lims=(intro.limitations||[]).length?`<div class="intro-limit"><h4>资料限制</h4><ul>${intro.limitations.map(l=>'<li>'+esc(l)+'</li>').join('')}</ul></div>`:'';

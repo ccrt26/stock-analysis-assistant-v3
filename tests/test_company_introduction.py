@@ -398,7 +398,7 @@ def test_computed_values_units_ratios_and_yoy(project):
     entries = {entry["key"]: entry for entry in computed["entries"]}
     assert entries["营业收入"]["formatted"] == "12.00亿元"
     assert entries["归母净利润"]["formatted"] == "1.00亿元"
-    assert entries["毛利率（由收入与营业成本计算）"]["formatted"] == "8.3%"
+    assert "毛利率（由收入与营业成本计算）" not in entries  # 缺营业成本，不能用总成本冒充
     assert entries["营业收入同比"]["formatted"] == "20.0%"
     assert entries["归母净利润同比"]["formatted"] == "11.1%"
     assert entries["经营活动现金流净额（上年同期）"]["formatted"] == "0.70亿元"
@@ -409,17 +409,18 @@ def test_computed_values_units_ratios_and_yoy(project):
     valuation = next(b for b in facts["blocks"] if b["block_id"].startswith("valuation-"))
     assert valuation["row"]["trade_date"] == "2026-08-21"
     assert valuation["row"]["pe_ttm"] == 13.0
+    assert valuation["computed_entries"][0]["formatted"] == "270.00亿元"
 
 
 def test_business_shares_are_within_classification_only(project):
     facts = _stock_facts(project)
     business = next(b for b in facts["blocks"] if b["block_id"].startswith("main-business"))
     shares = business["computed_shares"]
-    # product 分类内 6/11 与 5/11；region 不并入 product 合计
-    assert shares["product|工程设计"]["share"] == pytest.approx(6.0 / 11.0)
-    assert shares["product|工程建造"]["share"] == pytest.approx(5.0 / 11.0)
+    # 不把不完整明细的和当总收入；使用同期间利润表 12 亿作分母
+    assert shares["product|工程设计"]["share"] == pytest.approx(6.0 / 12.0)
+    assert shares["product|工程建造"]["share"] == pytest.approx(5.0 / 12.0)
     assert "region|境内" in shares
-    assert shares["region|境内"]["share"] == pytest.approx(1.0)
+    assert shares["region|境内"]["share"] == pytest.approx(11.0 / 12.0)
 
 
 def test_yoy_guard_is_reported_when_shapes_differ():
@@ -530,18 +531,34 @@ def _write_facts_file(project, result) -> Path:
     return path
 
 
-def _record(project, intro: dict, facts_path: Path, expect_error: str | None = None):
+def _record(project, intro: dict, facts_path: Path, expect_error: str | None = None,
+            *, replace=False, attach_evidence=True):
+    from stock_analyzer.ops.official_evidence import extract_original
+    for source in intro["sources"]:
+        if source["kind"] != "official_document" or not attach_evidence or source.get("evidence_path"):
+            continue
+        evidence = project["root"] / "synthetic-evidence"
+        evidence.mkdir(exist_ok=True)
+        raw = "<html><p>这是合同测试合成的公司原始文件。工程设计收入六亿元，业务介绍用于回读核对。</p></html>".encode()
+        kind, text = extract_original(raw, "text/html; charset=utf-8")
+        (evidence / "original.html").write_bytes(raw)
+        (evidence / "text.txt").write_text(text)
+        (evidence / "receipt.json").write_text(json.dumps({
+            "schema": "official-evidence-v1", "url": source["url"], "final_url": source["url"],
+            "retrieved_at": source["retrieved_at"], "content_type": "text/html; charset=utf-8",
+            "original": "original.html", "text": "text.txt"}))
+        source["evidence_path"] = str(evidence / "receipt.json")
     intro_path = project["root"] / "tmp-intro.json"
     intro_path.write_text(json.dumps(intro, ensure_ascii=False), encoding="utf-8")
     if expect_error is None:
         return ci.record_introduction(
             intro_file=intro_path, facts_file=facts_path,
-            intro_root=project["intro_root"], project_root=project["root"],
+            intro_root=project["intro_root"], project_root=project["root"], replace=replace,
         )
     with pytest.raises(ValueError, match=expect_error):
         ci.record_introduction(
             intro_file=intro_path, facts_file=facts_path,
-            intro_root=project["intro_root"], project_root=project["root"],
+            intro_root=project["intro_root"], project_root=project["root"], replace=replace,
         )
     return None
 
@@ -1120,3 +1137,69 @@ def test_read_failure_isolated_per_stock_and_metadata_includes_every_stock(proje
     for stock in result["stocks"].values():
         assert all(gap in result["warehouse_gaps"] for gap in stock["gaps"])
     assert result["used_partitions"]["income_statement"] == ["2025-06-30", "2026-06-30"]
+
+
+def test_new_official_source_requires_actual_readback(project):
+    facts = _write_facts_file(project, _prepare(project))
+    _record(project, _sample_intro(), facts, expect_error="requires fetched evidence", attach_evidence=False)
+
+
+def test_replace_keeps_old_copy_and_rejects_unread_source_before_change(project):
+    facts = _write_facts_file(project, _prepare(project))
+    _record(project, _sample_intro(), facts)
+    target = project["intro_root"] / ACTION / f"{CODE}.json"
+    original = target.read_bytes()
+    changed = _sample_intro()
+    changed["sections"][0]["paragraphs"] = ["经用户授权修订的介绍正文。"]
+    _record(project, changed, facts, expect_error="requires fetched evidence", replace=True, attach_evidence=False)
+    assert target.read_bytes() == original
+    _record(project, changed, facts, replace=True)
+    assert target.read_bytes() != original
+    revisions = list((project["intro_root"] / "revisions" / ACTION / CODE).glob("*.json"))
+    assert len(revisions) == 1 and revisions[0].read_bytes() == original
+    saved = json.loads(target.read_text())
+    receipt = target.parent / saved["sources"][1]["evidence_path"]
+    assert receipt.is_file() and not Path(saved["sources"][1]["evidence_path"]).is_absolute()
+    assert set(p.name for p in receipt.parent.iterdir()) == {"receipt.json", "text.txt", "original.html"}
+
+
+def test_old_same_identity_introduction_still_reuses_without_new_evidence(project):
+    facts = _write_facts_file(project, _prepare(project))
+    _record(project, _sample_intro(), facts)
+    target = project["intro_root"] / ACTION / f"{CODE}.json"
+    old = json.loads(target.read_text())
+    old["sources"][1].pop("evidence_path")
+    target.write_text(json.dumps(old))
+    original = target.read_bytes()
+    assert _record(project, _sample_intro(), facts, attach_evidence=False)["status"] == "already_exists"
+    assert target.read_bytes() == original
+
+
+def test_business_explicit_total_not_double_counted_or_mixed():
+    block = {"rows": [
+        {"classification": c, "curr_type": currency, "report_period": "2026-06-30",
+         "bz_item": name, "bz_sales": amount}
+        for c, currency, name, amount in [
+            ("product", "CNY", "产品", 100), ("product", "CNY", "玻纤", 97),
+            ("product", "CNY", "其他", 3), ("region", "CNY", "地区", 100),
+            ("region", "CNY", "境内", 80), ("region", "USD", "境外", 9),
+            ("provider_unspecified", "CNY", "其他口径", 1000)]]}
+    ci._attach_business_shares(block)
+    assert block["computed_shares"]["product|玻纤"]["share"] == .97
+    assert block["computed_shares"]["region|境内"]["share"] == .8
+    assert "product|产品" not in block["computed_shares"]
+    assert "region|境外" not in block["computed_shares"]
+    assert "provider_unspecified|其他口径" not in block["computed_shares"]
+    assert block["share_limitations"]
+
+
+def test_authorized_revision_can_prepare_existing_without_touching_article(project):
+    facts = _write_facts_file(project, _prepare(project))
+    _record(project, _sample_intro(), facts)
+    target = project["intro_root"] / ACTION / f"{CODE}.json"
+    original = target.read_bytes()
+    assert _prepare(project)["stocks"] == {}
+    updated = _prepare(project, include_existing=True)
+    assert CODE in updated["stocks"] and updated["stocks"][CODE]["blocks"]
+    assert updated["scope"][0]["intro_status"] == "reusable"
+    assert target.read_bytes() == original

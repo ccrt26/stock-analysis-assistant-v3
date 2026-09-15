@@ -1357,7 +1357,7 @@ def _statement_missing_issue(
 ) -> dict[str, Any] | None:
     """日报存在但小节缺失/不唯一才是真实缺口（T32/T33）；
     形成日本无日报存档属正常历史事实，静默回落，由页脚文案如实说明。"""
-    if miss_reason == "no_report":
+    if miss_reason in {"no_report", "generating"}:
         return None
     message = (f"{name}（{ts_code}），形成日 {formed_on}："
                + statement_display.MESSAGES.get(miss_reason, "推荐正文待核对。"))
@@ -1809,6 +1809,7 @@ def build_payload(
     return {
         # 展示数据合同版本 2：新增 sessionDates 完整交易日定位（E1）。
         "displaySchemaVersion": 2,
+        "delivery": statement_display.delivery_summary(root, analysis_date.isoformat(), str(as_of), stocks_payload),
         "analysis_date": analysis_date.isoformat(),
         "as_of": as_of,
         "market_name": MARKET_NAME,

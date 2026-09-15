@@ -475,6 +475,8 @@ def mark_terminal(task: str, status: str, detail: str, exit_code: int) -> int:
     slot_key = _LAST_STATE_PATH.name if _LAST_STATE_PATH else task
     if _LAST_STATE_PATH:
         save_state(_LAST_STATE_PATH, state)
+        refresh_terminal_display(task, state)
+        save_state(_LAST_STATE_PATH, state)
     notification = mac_notify_result(task, slot_key, result_status, detail, state)
     entry = {
         "task": task,
@@ -1344,8 +1346,17 @@ def _recommendation_section_issues(section: str, formation: str, *, root: Path |
         for sub in RECO_BOLD_SUBHEADINGS:
             if f"**{sub}**" not in body:
                 issues.append(f"推荐正文缺少小标题“{sub}”：{label}（{code}）")
-        prose = [line for line in body.splitlines()
-                 if line.strip() and not line.strip().startswith(("|", "#", "**", ">"))]
+        # 小标题后同行说明、整段加粗都是真实正文，不能按行首 ** 丢弃。
+        prose = []
+        for line in body.splitlines():
+            line = line.strip()
+            if not line or line.startswith(("|", "#")):
+                continue
+            for sub in RECO_BOLD_SUBHEADINGS:
+                line = line.replace(f"**{sub}**", "")
+            line = re.sub(r"[*_`>\s：:—-]", "", line)
+            if line:
+                prose.append(line)
         if not prose:
             issues.append(f"推荐正文没有实际说明文字：{label}（{code}）")
     return issues
@@ -1486,6 +1497,8 @@ def merged_report_issues(reply_text: str, formation: str, action: str,
         spans.append((heading, span))
         if span is None:
             issues.append(f"缺少必需总标题：## {heading}")
+        elif len(re.findall(rf"^## {re.escape(heading)}[ \t]*$", normalized, re.MULTILINE)) != 1:
+            issues.append(f"重复必需总标题：## {heading}")
     if issues:
         return issues
     positions = [span[0] for _h, span in spans]
@@ -1691,6 +1704,20 @@ def write_preopen_prompt(prepare_result: dict, attempt_dir: Path) -> Path:
     return path
 
 
+def refresh_terminal_display(task: str, state: dict) -> None:
+    """终态保存后仅刷新一次；研究结果与展示/推送结果分别记录。"""
+    if task != "nightly" or not all(state.get(k) for k in ("formation_date", "action_date", "selection_as_of")):
+        return
+    formation = state["formation_date"]
+    if not (PROJECT_ROOT / "local_archive/forward_monitor" / f"monitor-report-{formation}.json").is_file():
+        return
+    try:
+        ok, detail = retry_prism_sync(formation, state["action_date"], state["selection_as_of"], 600)
+    except (OSError, ValueError) as error:
+        ok, detail = False, str(error)
+    state["display_refresh"] = {"status": "updated" if ok else "failed", "detail": detail}
+
+
 def finish_task(
     task: str,
     slot_key: str,
@@ -1722,7 +1749,14 @@ def finish_task(
         **(extra or {}),
     }
     save_state(STATE_DIR / slot_key, state)
-    notification = mac_notify_result(task, slot_key, result_status, detail, state)
+    refresh_terminal_display(task, state)
+    display_failed = state.get("display_refresh", {}).get("status") == "failed"
+    if display_failed:
+        detail += "；终态展示刷新失败：" + state["display_refresh"]["detail"]
+        state["result"]["detail"] = detail
+    save_state(STATE_DIR / slot_key, state)
+    notification_status = "研究已归档但展示待更新" if display_failed and exit_code == EXIT_OK else result_status
+    notification = mac_notify_result(task, slot_key, notification_status, detail, state)
     entry = {
         "task": task,
         "slot": slot_key.replace(".json", ""),
@@ -1736,6 +1770,7 @@ def finish_task(
         "final_reply": state.get("final_reply", ""),
         "archive": state.get("archive", ""),
         "mac_notification": notification,
+        "display_refresh": state.get("display_refresh"),
     }
     if log_dir:
         entry["log_dir"] = log_dir
@@ -1930,8 +1965,9 @@ def run_nightly(args: argparse.Namespace, config: dict, lock: TaskLock,
             EXIT_FAIL, stage="归档核对",
         )
     if art["trace_ok"] and art["ledger_ok"] and art["report_ok"] and art["reply_ok"]:
-        # 严格核验：统一完成检查（归档 + CSV 逐字段 + 合并报告）后再收尾。
-        ok, issues, categories = verify_completed_run(formation, action, as_of, reply_target)
+        # 同身份恢复仍先从原稿装配，不让模型重新抄写复盘。
+        assemble_saved_reply(state, reply_target, formation, action, as_of)
+        ok, issues, categories = verify_assembled_reply(state, formation, action, as_of, reply_target)
         if ok:
             state["final_reply"] = str(reply_target.relative_to(PROJECT_ROOT))
             state["archive"] = str(archive_dir.relative_to(PROJECT_ROOT))
@@ -1973,7 +2009,8 @@ def run_nightly(args: argparse.Namespace, config: dict, lock: TaskLock,
             state["source_model_mismatch"] = state_route_evidence_matches(source_state) is False
             state["final_reply"] = str(reply_target.relative_to(PROJECT_ROOT))
             state["archive"] = str(archive_dir.relative_to(PROJECT_ROOT))
-            ok, issues, categories = verify_completed_run(formation, action, as_of, reply_target)
+            assemble_saved_reply(state, reply_target, formation, action, as_of)
+            ok, issues, categories = verify_assembled_reply(state, formation, action, as_of, reply_target)
             if ok:
                 synced, sync_msg = sync_accepted_report(formation, action, as_of, reply_target, 600)
                 return finish_task(
@@ -2102,6 +2139,30 @@ def state_route_evidence_matches(state: dict) -> bool | None:
     return matches
 
 
+def verify_assembled_reply(state: dict, formation: str, action: str, as_of: str, reply_target: Path):
+    ok, issues, categories = verify_completed_run(formation, action, as_of, reply_target)
+    if state.get("reply_assembly", {}).get("status") == "failed":
+        message = "原复盘装配失败：" + state["reply_assembly"]["detail"]
+        categories.setdefault("report", []).append(message)
+        issues.append(message)
+        ok = False
+    return ok, issues, categories
+
+
+def assemble_saved_reply(state: dict, reply_target: Path, formation: str, action: str, as_of: str) -> None:
+    """交付与中断恢复共用；原响应保留，源不一致时交给完成校验明确报错。"""
+    try:
+        try:
+            from tools.nightly_report import assemble_file
+        except ImportError:
+            from nightly_report import assemble_file
+        assembled = assemble_file(reply_target, formation, action, as_of, root=PROJECT_ROOT)
+        state["reply_assembly"] = {"status": "assembled" if assembled else "unchanged",
+                                   "source": f"monitor-report-{formation}.md"}
+    except (OSError, ValueError) as error:
+        state["reply_assembly"] = {"status": "failed", "detail": str(error)}
+
+
 def finish_nightly_success(
     state: dict,
     state_name: str,
@@ -2116,13 +2177,14 @@ def finish_nightly_success(
 ) -> int:
     archive_dir.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(final_path, reply_target)
+    assemble_saved_reply(state, reply_target, formation, action, as_of)
     state["final_reply"] = str(reply_target.relative_to(PROJECT_ROOT))
     state["archive"] = str(archive_dir.relative_to(PROJECT_ROOT))
     save_state(STATE_DIR / state_name, state)
 
     # 统一完成检查：归档严格校验 + CSV 逐字段 + 合并报告核对。
     # 检查未通过时不得以网页发布、文件非空或退出码替代必要检查。
-    ok, issues, categories = verify_completed_run(formation, action, as_of, reply_target)
+    ok, issues, categories = verify_assembled_reply(state, formation, action, as_of, reply_target)
     if not ok:
         status_, stage_ = completion_failure(categories)
         display_note = sync_verified_recommendation(

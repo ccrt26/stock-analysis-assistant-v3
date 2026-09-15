@@ -48,6 +48,8 @@ def isolated(tmp_path, monkeypatch, mac_log):
     monkeypatch.setattr(stock_ai, "INDEX_PATH", tmp_path / "local_archive" / "ai_tasks" / "index.jsonl")
     monkeypatch.setattr(stock_ai, "LOG_DIR", tmp_path / "logs" / "ai_tasks")
     monkeypatch.setattr(stock_ai, "LOCK_PATH", tmp_path / "local_archive" / "ai_tasks" / "task.lock")
+    # 此文件隔离测试调度/验收；真实源装配在 test_web_delivery.py 覆盖。
+    monkeypatch.setattr(stock_ai, "assemble_saved_reply", lambda *a: None)
     stock_ai.EvidenceBox.store.clear()  # 模型证据不跨测试残留
     # 凭据隔离：默认来源替换为临时环境变量，真实钥匙串/凭据文件不可达。
     monkeypatch.setattr(stock_ai, "DEFAULT_KEY_SOURCES", {
@@ -802,7 +804,7 @@ def test_missing_heading_with_sync_success_still_fails(isolated, monkeypatch, fa
     assert state["result"]["status"] == "合并报告待修复"
     assert "缺少必需总标题" in state["result"]["detail"]
     assert [c for c in calls if c[0] == "model"] == [("model", "glm")]
-    assert sync_calls == []  # 检查未通过不得用网页同步放行
+    assert len(sync_calls) == 1  # 刷新失败终态，不写已验收正文、不改变失败结果
 
 
 def test_csv_mismatch_after_model_with_sync_success_still_fails(isolated, monkeypatch, fake_forward_selection):
@@ -830,7 +832,7 @@ def test_csv_mismatch_after_model_with_sync_success_still_fails(isolated, monkey
     assert state["result"]["status"] == "失败"
     assert "行数不一致" in state["result"]["detail"]
     assert [c for c in calls if c[0] == "model"] == [("model", "glm")]
-    assert sync_calls == []
+    assert len(sync_calls) == 1  # 失败终态仍需刷新；正式归档核对仍拒绝通过
 
 
 def test_completed_recheck_csv_mismatch_with_sync_success_still_fails(isolated, monkeypatch, mac_log):

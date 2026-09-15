@@ -321,3 +321,7 @@ data health
 默认 `render_prism_web.py` 收尾用冻结 payload 更新 Prism 日期页面和固定入口，不生成已退役旧 monitor 页面；显式 `--out` 保留原 Prism 行为，`--no-publish` 不更新固定入口。研究导出将注册回放按原 episode_id 独立纳入，数量与原 V1 正式选股分开。
 
 A2 推荐正文另有只读的独立展示路径（`tools/statement_display.py`）：形成日日报不存在时，仅从同 formation/action/带时区 as_of 的 nightly state 明确关联原回复，复用严格归档、CSV 与推荐分区核对。推荐分区通过不要求其他合并文字通过；此时整份任务仍待修复，不写半份 daily-research。认可稿优先并标明后续修订。completed 复核仍调用确定性渲染器，模板或认可稿改变也能刷新。阅读补缺操作见 `ops/web-display-maintenance.md`。
+
+### 2026-09-15 交付补充
+
+日报复盘和跟踪统计由 `tools/nightly_report.py` 从正式记录装配，保留模型原响应，再按原合同验收。公司介绍新保存的官方引用带可回读原件，修订保留旧稿；历史介绍保持原身份读取。WEB 关联同一次任务的生成/失败/完成状态，终态保存后刷新。现有 Prism 公网页可经本机显式配置的发布仓库同步，默认仍只生成本地页面；不是恢复旧报告发布架构。运行、取证与人工补缺见 `ops/web-display-maintenance.md`。
