@@ -32,3 +32,5 @@ tmp/
 tools/guanlan-prism/concept-a/*.backup-*.html
 tools/guanlan-prism/tools/*.backup-*.py
 tools/guanlan-prism/concept-a/a2/*.backup-before-armory.*
+tools/guanlan-prism/concept-a/a2/*.backup-before-modal.*
+tools/guanlan-prism/concept-a/a2/*.backup-before-dial.*

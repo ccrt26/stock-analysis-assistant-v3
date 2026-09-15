@@ -25,6 +25,7 @@
 .instrument{min-height:292px;position:relative}
 .panel-heading{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:19px 20px 0}
 .panel-heading h3{font-size:12px;font-weight:500}
+.panel-heading .heading-main{display:flex;align-items:center;gap:10px;min-width:0}
 .panel-heading .index{font:8px var(--mono);letter-spacing:.07em;color:var(--muted)}
 .instrument-sub{font-size:9px;color:var(--muted);padding:5px 20px 0}
 .observe-body{display:flex;align-items:center;justify-content:center;gap:13px;padding:8px 15px 9px;height:213px}
@@ -33,6 +34,7 @@
 .observe-meta strong{font:18px var(--mono);color:var(--secondary);display:block;margin:6px 0 14px}
 .observe-meta hr{border:0;height:1px;background:var(--line);margin:10px 0 12px}
 .instrument-footer{font-size:9px;color:var(--muted);display:flex;justify-content:space-between;gap:10px;padding:0 20px 13px}
+#instruments .judgment-instrument>.instrument-footer{justify-content:flex-end}
 .judgment-heading{display:flex;align-items:baseline;justify-content:space-between;padding:13px 20px 1px}
 .judgment-heading b{font-size:18px;font-weight:400;letter-spacing:.04em}
 .judgment-heading span{font-size:9px;color:var(--muted)}
@@ -40,7 +42,7 @@
 .review-node{cursor:pointer;outline:none}
 .review-node:hover circle,.review-node:focus-visible circle{stroke:var(--text);stroke-width:4;paint-order:stroke;stroke-opacity:.15}
 .review-node:hover line{stroke:var(--text)}
-.volume-tools{display:flex;align-items:center;justify-content:space-between;gap:9px;padding:10px 20px 0}
+.volume-tools{display:flex;align-items:center;justify-content:flex-end;gap:9px;padding:10px 20px 0}
 .mini-tabs,.chart-tabs{display:flex;align-items:center;border:1px solid var(--line);border-radius:4px;padding:2px;white-space:nowrap}
 .mini-tabs button{font-size:9px;color:var(--muted);padding:3px 7px;border-radius:2px}
 .mini-tabs button.active{background:#ffffff0d;color:var(--text)}
@@ -58,7 +60,6 @@
 .activity-legend .activity-separator{height:1px;background:var(--line);margin:9px 0}
 .activity-legend .ratio{font:17px var(--mono);color:var(--text)}
 .activity-legend .ratio-label{font-size:8px}
-.volume-foot{font-size:8px;color:var(--muted);padding:0 19px 13px;line-height:1.7}
 .empty-state{padding:50px 20px;text-align:center;color:var(--muted);font-size:11px}
 /* 全宽主图：40 个交易日，三模式 */
 .hero-chart{margin-top:15px}
@@ -252,6 +253,25 @@ span.op-weakened{color:var(--down)}
 .armory-stats{display:flex;justify-content:space-between;padding:2px 0 0;gap:10px;max-width:320px;margin:0 auto}
 .armory-stats div b{display:block;font:16px var(--mono);letter-spacing:-.02em;color:var(--text);font-weight:400}
 .armory-stats div span{display:block;font-size:8px;color:var(--muted);margin-top:2px;letter-spacing:.05em}
-.armory-needle{transform-box:view-box;animation:needle-in .92s cubic-bezier(.2,.65,.3,1) both}
-@keyframes needle-in{from{transform:rotate(-200deg)}to{transform:rotate(0deg)}}
+.armory-needle{transform-box:view-box;animation:none}
+#instruments .observe-instrument.is-entering .armory-needle{animation:needle-in .85s cubic-bezier(.2,.65,.3,1) both}
+@keyframes needle-in{from{transform:rotate(var(--needle-start,0deg))}to{transform:rotate(0deg)}}
 @media(prefers-reduced-motion:reduce){.armory-needle{animation:none!important}}
+/* 桌面（≥1081px）：脚注删除后以实测高度保留三卡外框；左仪表与日期/参考价居中成列；
+   右卡工具条与“仪表+图例”两列组合整体居中（组合限宽 420px，圆心不放整卡中央）。 */
+@media(min-width:1081px){
+ #instruments{--focus-card-height:334.2px}
+ #instruments>.instrument{min-height:var(--focus-card-height)}
+ #instruments .observe-body.armory-body{display:flex;flex-direction:column;align-items:center;gap:18px;height:auto;padding:6px 18px 0}
+ #instruments .observe-dial.armory-dial{flex:none;display:block;width:100%;max-width:328px;height:auto;margin:0 auto}
+ #instruments .armory-stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:16.5%;width:100%;max-width:328px;margin:0 auto;padding:0;text-align:center}
+ #instruments .volume-instrument .volume-tools{width:calc(100% - 40px);max-width:420px;margin:0 auto;padding:10px 0 0}
+ #instruments .volume-instrument .activity-body{display:grid;grid-template-columns:minmax(0,210fr) minmax(0,196fr);align-items:center;column-gap:24px;width:calc(100% - 40px);max-width:460px;margin:6px auto 0;padding:0}
+ #instruments .volume-instrument .activity-dial{width:100%;max-width:210px;height:198px;min-width:0;justify-self:start}
+ #instruments .volume-instrument .activity-legend{min-width:0;width:auto;flex:none;padding:4px 0 0}
+}
+/* 桌面窄档（1081–1290px）：沿用原 165px 仪表宽，列距收窄为 14px */
+@media(min-width:1081px) and (max-width:1290px){
+ #instruments .volume-instrument .activity-body{column-gap:14px}
+ #instruments .volume-instrument .activity-dial{max-width:165px}
+}

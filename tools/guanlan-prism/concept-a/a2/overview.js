@@ -12,7 +12,7 @@ const tone=v=>V(v)?v>0?'up':v<0?'down':'muted':'muted';
 const md=d=>d?d.slice(5).replace('-',' / '):'—';
 const reduced=matchMedia('(prefers-reduced-motion: reduce)');
 let D=null,raw=null;
-const state={focus:0,record:0,mode:'line',metric:'volumeShares',period:5,motion:!reduced.matches,modal:null,modalMetric:'amountYuan',focusAnimations:0,lastFocusKey:null,
+const state={focus:0,record:0,mode:'line',metric:'amountYuan',period:5,motion:!reduced.matches,modal:null,modalMetric:'amountYuan',modalMode:'candle',focusAnimations:0,lastFocusKey:null,
  filters:{scope:'default',positive:false,opinion:'any'},query:'',journalDate:null,journalMode:'directions',
  recordsSort:{key:'formedOn',dir:-1},favorites:(()=>{try{return new Set(JSON.parse(localStorage.getItem('guanlan.a2.favorites')||'[]'))}catch{return new Set()}})()};
 const motion=()=>state.motion&&!reduced.matches;
@@ -21,7 +21,7 @@ const policy=()=>raw.observationPolicy||{},daysOf=()=>{const p=policy();return V
 const polar=(cx,cy,r,d)=>[cx+r*Math.cos(d*Math.PI/180),cy+r*Math.sin(d*Math.PI/180)];
 const arc=(cx,cy,r,start,end)=>{let a=polar(cx,cy,r,start),b=polar(cx,cy,r,end);return `M${a.join(',')} A${r} ${r} 0 ${end-start>180?1:0} 1 ${b.join(',')}`};
 function activityDial(s){
- const field=state.metric,amount=field==='amountYuan',a=M.activity(D.history(s),state.period,field),factor=amount?1e8:1e6,unit=amount?'亿元':'万手',label=amount?'成交额':'成交量';
+ const a=M.activity(D.history(s),state.period,'amountYuan'),factor=1e8,unit='亿元',label='成交量';
  const ratios=[a.ratio,a.previousRatio,1];const max= Math.max(2,Math.ceil(Math.max(...ratios.filter(V))*2)/2);
  let h='';
  for(let i=0;i<=54;i++){const deg=-135+270*i/54,p=polar(120,112,i%9===0?111:113,deg),q=polar(120,112,116,deg);h+=`<line x1="${p[0]}" y1="${p[1]}" x2="${q[0]}" y2="${q[1]}" stroke="var(--secondary)" opacity="${i%9===0?.5:.2}" stroke-width=".7"/>`}
@@ -30,30 +30,35 @@ function activityDial(s){
  const one=polar(120,112,111,-135+270/max),two=polar(120,112,119,-135+270/max);
  if(V(a.base)&&a.base>0)h+=`<line x1="${one[0]}" y1="${one[1]}" x2="${two[0]}" y2="${two[1]}" stroke="var(--text)" stroke-width="1.5"/>`;
  h+=`<text x="120" y="110" text-anchor="middle" fill="var(--text)" style="font:32px var(--mono);letter-spacing:-1.5px">${num(V(a.today)?a.today/factor:null)}</text><text x="120" y="130" text-anchor="middle" fill="var(--muted)" font-size="9">今日${label} / ${unit}</text><text x="120" y="223" text-anchor="middle" fill="var(--muted)" style="font:8px var(--mono)">0 — ${max.toFixed(1)} ×</text>`;
- return `<article class="panel instrument volume-instrument"><div class="panel-heading"><h3>成交活跃度</h3><span class="index">03 / ACTIVITY</span></div><div class="instrument-sub">同一刻度，比较今天、昨天与近期均值</div><div class="volume-tools"><div class="mini-tabs" aria-label="仪表指标"><button data-metric="volumeShares" class="${!amount?'active':''}" aria-pressed="${!amount}">成交量</button><button data-metric="amountYuan" class="${amount?'active':''}" aria-pressed="${amount}">成交额</button></div><div class="avg-tabs" aria-label="均值基线">${[5,10,20].map(n=>`<button data-period="${n}" class="${n===state.period?'active':''}" aria-pressed="${n===state.period}">${n}日</button>`).join('')}</div></div><div class="activity-body"><svg class="activity-dial" viewBox="0 0 240 230" role="img" aria-label="${label}三层同刻度仪表，今天${num(V(a.today)?a.today/factor:null)}${unit}，较前一交易日${pct(a.previousPct)}">${h}</svg><div class="activity-legend"><div class="value-line"><span><i class="swatch"></i>今天</span><strong>${num(V(a.today)?a.today/factor:null)}</strong></div><div class="value-line"><span><i class="swatch previous"></i>昨天</span><strong>${num(V(a.previous)?a.previous/factor:null)}</strong></div><div class="value-line"><span><i class="swatch average"></i>前${state.period}日均值</span><strong>${num(V(a.base)?a.base/factor:null)}</strong></div><div class="activity-separator"></div><div class="value-line"><span>较昨天</span><strong>${pct(a.previousPct)}</strong></div><span class="ratio-label">今天 / 前${state.period}日均值</span><div class="ratio">${num(a.ratio)} <small style="font-size:9px;color:var(--muted)">倍</small></div></div></div><div class="volume-foot">基线不含今日 · 有效 ${a.n} / ${state.period} 个交易日${a.n<state.period?'（基线不完整）':''} · ${unit}${V(a.base)&&a.base>0?'':' · 均值基线暂缺'}<br>${amount?'金额单位为人民币亿元；与成交量分开展示。':'1 万手 = 100 万股；不是盘中行情软件的“量比”。'}</div></article>`;
+ return `<article class="panel instrument volume-instrument"><div class="panel-heading"><div class="heading-main"><h3>成交活跃度</h3><div class="mini-tabs" aria-label="仪表指标"><button class="active" aria-pressed="true">成交量</button></div></div><span class="index">03 / ACTIVITY</span></div><div class="instrument-sub">同一刻度，比较今天、昨天与近期均值</div><div class="volume-tools"><div class="avg-tabs" aria-label="均值基线">${[5,10,20].map(n=>`<button data-period="${n}" class="${n===state.period?'active':''}" aria-pressed="${n===state.period}">${n}日</button>`).join('')}</div></div><div class="activity-body"><svg class="activity-dial" viewBox="0 0 240 230" role="img" aria-label="${label}三层同刻度仪表，今天${num(V(a.today)?a.today/factor:null)}${unit}，较前一交易日${pct(a.previousPct)}">${h}</svg><div class="activity-legend"><div class="value-line"><span><i class="swatch"></i>今天</span><strong>${num(V(a.today)?a.today/factor:null)}</strong></div><div class="value-line"><span><i class="swatch previous"></i>昨天</span><strong>${num(V(a.previous)?a.previous/factor:null)}</strong></div><div class="value-line"><span><i class="swatch average"></i>前${state.period}日均值</span><strong>${num(V(a.base)?a.base/factor:null)}</strong></div><div class="activity-separator"></div><div class="value-line"><span>较昨天</span><strong>${pct(a.previousPct)}</strong></div><span class="ratio-label">今天 / 前${state.period}日均值</span><div class="ratio">${num(a.ratio)} <small style="font-size:9px;color:var(--muted)">倍</small></div></div></div></article>`;
 }
 function observeDial(s){
- const n=D.daysObserved(s),days=daysOf(),ratio=Math.max(0,Math.min(1,(n||0)/days));
- // Armory 仪表（紧凑版）：适配原观察体 213px 高的方框，面板盒尺寸不变
- // 200° 厚环（白=已观察/深灰=剩余）+ 环面短刻度 + 黑针小圆顶 + 中央大数字
- const CX=170,CY=120,R=96,W=20,START=190,SWEEP=200;
+ const n=D.daysObserved(s),days=daysOf();
+ const known=V(n)&&V(days)&&days>0;
+ const progress=known?Math.max(0,Math.min(1,n/days)):0;
+ const valueAngle=180-180*progress;
+ // 半圆观察仪表（布局评审稿 V1，参数锁定）：180° 上半圆厚环 + 外缘暗环 + 内外刻度
+ // + 短针 + 白色半环轴心；中心(200,196)、主环半径158宽28、外暗环半径180宽22、针长44。
+ const CX=200,CY=196;
  const P=(r,a)=>[CX+r*Math.cos(a*Math.PI/180),CY-r*Math.sin(a*Math.PI/180)];
- const arcPath=(r,a0,a1)=>{const p0=P(r,a0),p1=P(r,a1);const large=(a0-a1)>180?1:0;
-   return `M${p0[0].toFixed(1)},${p0[1].toFixed(1)} A${r} ${r} 0 ${large} 1 ${p1[0].toFixed(1)},${p1[1].toFixed(1)}`};
- const aVal=START-SWEEP*ratio;
+ const arcPath=(r,a0,a1)=>{const p0=P(r,a0),p1=P(r,a1);
+   return `M${p0[0].toFixed(3)},${p0[1].toFixed(3)} A${r},${r} 0 ${a0-a1>180?1:0} 1 ${p1[0].toFixed(3)},${p1[1].toFixed(3)}`};
  let h='';
- for(let k=0;k<=64;k++){const a=START-SWEEP*k/64;const p1=P(R+W/2+3,a),p2=P(R+W/2+8,a);
-   h+=`<line x1="${p1[0].toFixed(1)}" y1="${p1[1].toFixed(1)}" x2="${p2[0].toFixed(1)}" y2="${p2[1].toFixed(1)}" stroke="var(--secondary)" opacity="${k%2?0.4:0.22}" stroke-width="1.2"/>`;}
- h+=`<path d="${arcPath(R,START,START-SWEEP)}" fill="none" stroke="#33363b" stroke-width="${W}"/>`;
- h+=`<path class="gauge-active" pathLength="1" d="${arcPath(R,START,aVal)}" fill="none" stroke="var(--text)" stroke-width="${W}"/>`;
- for(let k=1;k<13;k++){const a=START-SWEEP*k/13;const p1=P(R-W/2+3,a),p2=P(R+W/2-3,a);
-   const onWhite=a>aVal;
-   h+=`<line x1="${p1[0].toFixed(1)}" y1="${p1[1].toFixed(1)}" x2="${p2[0].toFixed(1)}" y2="${p2[1].toFixed(1)}" stroke="${onWhite?'#0b0c0e':'#6a7078'}" opacity="${onWhite?.85:.6}" stroke-width="1.8"/>`;}
- const tip=P(R-W/2-8,aVal),tail=P(10,aVal+180);
- h+=`<g class="armory-needle" style="transform-origin:${CX}px ${CY}px"><line x1="${tail[0].toFixed(1)}" y1="${tail[1].toFixed(1)}" x2="${tip[0].toFixed(1)}" y2="${tip[1].toFixed(1)}" stroke="#0b0c0e" stroke-width="3.6" stroke-linecap="round"/><line x1="${tail[0].toFixed(1)}" y1="${tail[1].toFixed(1)}" x2="${tip[0].toFixed(1)}" y2="${tip[1].toFixed(1)}" stroke="var(--text)" stroke-width="1" stroke-linecap="round"/></g>`;
- h+=`<path d="M${CX-17},${CY+1} a17,17 0 0 1 34,0 z" fill="#0b0c0e" stroke="var(--text)" stroke-width="1.1"/><circle cx="${CX}" cy="${CY-5}" r="1.8" fill="var(--text)"/>`;
- h+=`<text x="${CX}" y="${CY-30}" text-anchor="middle" fill="var(--text)" style="font:44px var(--mono);letter-spacing:-1.5px">${V(n)?String(n).padStart(2,'0'):'—'}</text>`;
- return `<article class="panel instrument"><div class="panel-heading"><h3>观察进度</h3><span class="index">01 / DURATION</span></div><div class="instrument-sub">知道看到哪里，也从哪里开始</div><div class="observe-body armory-body"><svg class="observe-dial armory-dial" viewBox="0 0 340 196" role="img" aria-label="已观察${n}个交易日，窗口${days}日，指针指向当前进度">${h}</svg><div class="armory-stats"><div><b>${md(s.formedOn||s.recDate)}</b><span>本次${s.formedOn?'推荐':'入选'}</span></div><div><b>${num(s.ref)}</b><span>原参考价 / 元</span></div></div><div class="instrument-footer"><span>观察天数，不是成功概率</span></div></article>`;
+ h+=`<path d="${arcPath(180,180,0)}" fill="none" stroke="#1c1d1f" stroke-width="22"/>`;
+ for(let k=0;k<81;k++){const a=180-180*k/80,p1=P(179,a),p2=P(185,a);
+   h+=`<line x1="${p1[0].toFixed(3)}" y1="${p1[1].toFixed(3)}" x2="${p2[0].toFixed(3)}" y2="${p2[1].toFixed(3)}" stroke="var(--muted)" stroke-width="1.6" stroke-linecap="round" opacity=".48"/>`}
+ h+=`<path d="${arcPath(158,180,0)}" fill="none" stroke="#33363b" stroke-width="28"/>`;
+ if(known&&progress>0)h+=`<path class="gauge-active" pathLength="1" d="${arcPath(158,180,valueAngle)}" fill="none" stroke="var(--text)" stroke-width="28"/>`;
+ for(let k=1;k<=11;k++){const a=180-15*k,p1=P(141,a),p2=P(151,a);
+   const onWhite=known&&a>valueAngle;
+   h+=`<line x1="${p1[0].toFixed(3)}" y1="${p1[1].toFixed(3)}" x2="${p2[0].toFixed(3)}" y2="${p2[1].toFixed(3)}" stroke="${onWhite?'#111112':'#aaaeb2'}" stroke-width="2.1" stroke-linecap="round"/>`}
+ h+=`<text x="200" y="132" text-anchor="middle" fill="var(--text)" style="font:68px var(--mono);letter-spacing:-2px">${V(n)?String(n).padStart(2,'0'):'—'}</text>`;
+ h+=`<path d="M9 196H56 M344 196H391" stroke="var(--muted)" stroke-width="1.1"/>`;
+ h+=`<path d="M178,196 A22,22 0 0 1 222,196 L211,196 A11,11 0 0 0 189,196 Z" fill="var(--text)"/>`;
+ if(known){const tip=P(44,valueAngle);
+   h+=`<g class="armory-needle" style="--needle-start:${(-180*progress).toFixed(3)}deg;transform-origin:200px 196px"><line x1="200" y1="196" x2="${tip[0].toFixed(3)}" y2="${tip[1].toFixed(3)}" stroke="#0b0c0e" stroke-width="4.5" stroke-linecap="round"/><line x1="200" y1="196" x2="${tip[0].toFixed(3)}" y2="${tip[1].toFixed(3)}" stroke="var(--text)" stroke-width="1.6" stroke-linecap="round"/></g>`}
+ const label=known?`已观察${n}个交易日，窗口${days}日，指针指向当前进度`:'观察天数暂缺';
+ return `<article class="panel instrument observe-instrument"><div class="panel-heading"><h3>观察进度</h3><span class="index">01 / DURATION</span></div><div class="instrument-sub">知道看到哪里，也从哪里开始</div><div class="observe-body armory-body"><svg class="observe-dial armory-dial" viewBox="0 0 400 208" role="img" aria-label="${label}">${h}</svg><div class="armory-stats"><div><b>${md(s.formedOn||s.recDate)}</b><span>本次${s.formedOn?'推荐':'入选'}</span></div><div><b>${num(s.ref)}</b><span>原参考价 / 元</span></div></div></div></article>`;
 }
 function judgment(s){
  const daily=new Map();D.ordered(s).forEach(r=>daily.set(r.date,r));const rows=[...daily.values()].slice(-7),r=rows.at(-1),dir=D.direction(r),label=dir?D.dirLabels[dir]:'方向未识别';let h='';
@@ -61,12 +66,12 @@ function judgment(s){
  for(const [code,y] of Object.entries(ys))h+=`<text x="42" y="${y+3}" text-anchor="end" fill="var(--muted)" font-size="8">${D.dirLabels[code]}</text><line x1="55" y1="${y}" x2="346" y2="${y}" stroke="var(--line)" stroke-dasharray="2 5"/>`;
  rows.forEach((r,i)=>{const d=D.direction(r),yy=ys[d]??118,last=i===rows.length-1;h+=`<g class="review-node" tabindex="0" role="button" data-review-date="${r.date}" aria-label="查看${r.date}原复盘，${D.dirLabels[d]||'方向未识别'}"><line x1="${x(i)}" y1="122" x2="${x(i)}" y2="${yy}" stroke="var(--secondary)" opacity="${last?.8:.35}"/><circle cx="${x(i)}" cy="${yy}" r="${last?4:2.8}" fill="${d?'var(--text)':'var(--panel)'}" stroke="var(--secondary)" stroke-width="1"/><text x="${x(i)}" y="139" text-anchor="middle" fill="var(--muted)" style="font:7.5px var(--mono)">${r.date.slice(5).replace('-','/')}</text><title>${esc(r.base||'方向未识别')}</title></g>`});
  if(!rows.length)h+=`<text x="206" y="72" text-anchor="middle" fill="var(--muted)" font-size="10">尚无保存的复盘</text>`;
- return `<article class="panel instrument"><div class="panel-heading"><h3>近期复盘判断</h3><span class="index">02 / OUTLOOK</span></div><div class="instrument-sub">从已有复盘看变化，不再重复画价格</div><div class="judgment-heading"><b>${label}</b><span>最新 · 未来 1—3 个交易日</span></div><svg class="judgment-chart" viewBox="0 0 360 148" role="img" aria-label="最近${rows.length}次保存的短期方向，点击圆点读原文">${h}</svg><div class="instrument-footer"><span>方向分类，不是概率或评分</span><span>点圆点读原文 ↗</span></div></article>`;
+ return `<article class="panel instrument judgment-instrument"><div class="panel-heading"><h3>近期复盘判断</h3><span class="index">02 / OUTLOOK</span></div><div class="instrument-sub">从已有复盘看变化，不再重复画价格</div><div class="judgment-heading"><b>${label}</b><span>最新 · 未来 1—3 个交易日</span></div><svg class="judgment-chart" viewBox="0 0 360 148" role="img" aria-label="最近${rows.length}次保存的短期方向，点击圆点读原文">${h}</svg><div class="instrument-footer"><span>点圆点读原文 ↗</span></div></article>`;
 }
-function drawWidgets(animate=false){if(!$('instruments'))return;const s=current();if(!s)return;$('instruments').innerHTML=observeDial(s)+judgment(s)+activityDial(s);if(animate&&motion())document.querySelectorAll('.gauge-active').forEach((p,i)=>{p.style.strokeDasharray='1';p.animate([{strokeDashoffset:'1'},{strokeDashoffset:'0'}],{duration:850+i*80,easing:'cubic-bezier(.2,.65,.3,1)'})})}
+function drawWidgets(animate=false){if(!$('instruments'))return;const s=current();if(!s)return;$('instruments').innerHTML=observeDial(s)+judgment(s)+activityDial(s);if(animate&&motion()){$('instruments').firstElementChild.classList.toggle('is-entering',D.key(s)!==state.lastFocusKey);document.querySelectorAll('.gauge-active').forEach((p,i)=>{p.style.strokeDasharray='1';p.animate([{strokeDashoffset:'1'},{strokeDashoffset:'0'}],{duration:850+i*80,easing:'cubic-bezier(.2,.65,.3,1)'})})}}
 function relativeRows(s,rows){return [{name:s.name,color:'var(--text)',values:D.comparison(s,'stock')},{name:s.industryName||'行业对照',color:'var(--blue)',values:D.comparison(s,'industry')},{name:raw.market_name||'市场对照',color:'var(--amber)',values:D.comparison(s,'market')}].map(series=>({...series,values:rows.map(r=>r.date?series.values[D.sessions.indexOf(r.date)]??null:null)}))}
 function renderHeroChart(animate=false){const s=current();if(!s||!$('heroPlot'))return;const rows=M.windowRows(D.history(s),D.sessions,D.end,40);const hasRef=!s.d0&&s.recDate<=D.end&&V(s.ref);const rel=relativeRows(s,rows);
- C.chart($('heroPlot'),{rows,mode:state.mode,relative:rel,reference:hasRef?s.ref:null,target:hasRef?s.ref*(1+targetOf()):null,recDate:s.recDate,metric:state.metric,name:s.name,fullHistory:D.history(s),animate,motion:motion()});
+ C.chart($('heroPlot'),{rows,mode:state.mode,relative:rel,reference:hasRef?s.ref:null,target:hasRef?s.ref*(1+targetOf()):null,recDate:s.recDate,metric:'amountYuan',name:s.name,fullHistory:D.history(s),animate,motion:motion()});
  const dates=rows.filter(r=>r.date);$('chartRange').innerHTML=`最近 <strong>40</strong> 个交易日 · ${dates[0]?.date||'—'} — ${D.end} <span class="muted">${rows.filter(r=>V(r.close)).length}/40 日有价格</span>`;
  let legend=state.mode==='relative'?`<span><i class="own"></i>个股</span><span><i class="industry"></i>${esc(s.industryName||'行业对照')}</span><span><i class="benchmark"></i>${esc(raw.market_name||'市场对照')}</span>`:state.mode==='candle'?`<span><i></i>MA5</span><span><i class="industry"></i>MA10</span><span><i class="benchmark"></i>MA20</span><span>红：收 ≥ 开　绿：收 &lt; 开</span>`:`<span><i></i>收盘价</span><span><i class="reference"></i>原参考价</span><span><i class="target"></i>原观察目标</span>`;
  $('chartLegend').innerHTML=legend;$('chartPolicy').textContent=state.mode==='relative'?'基准固定为首个观察日收盘＝100；与较参考价涨跌口径不同。':state.mode==='candle'?'真实开高低收 · 右轴价格 · 鼠标或左右键查看逐日数值':'圆滑连接实际收盘点，不改原始数值 · 每5个交易日标注日期';
@@ -78,7 +83,7 @@ function renderFocus(animate=true){if(!$('focusContent'))return;const s=current(
  $('stockSelect').innerHTML=D.deep.map((g,i)=>`<option value="${i}">${esc(g.records[0].name)}</option>`).join('');
  $('focusName').textContent=s.name;$('stockSelect').value=String(state.focus);$('focusCount').textContent=`${String(state.focus+1).padStart(2,'0')} / ${String(D.deep.length).padStart(2,'0')}`;
  const r=D.latest(s),dir=D.direction(r),q=D.quote(s);const g=group();const recordSelect=g.records.length>1?`<select id="episodeSelect" aria-label="同股不同推荐记录">${g.records.map((x,i)=>`<option value="${i}" ${i===state.record?'selected':''}>${x.recDate} 开始观察</option>`).join('')}</select>`:'';
- $('focusContent').innerHTML=`<div class="instruments" id="instruments"></div><article class="panel hero-chart"><div class="chart-heading"><div><h3>${esc(s.name)} <span class="num ${tone(D.ret(s))}">${pct(D.ret(s))}</span></h3><p>${esc(s.code)} · 收盘 ${num(q.close)} 元 · 原参考价 ${num(s.ref)} 元 · 价格涨跌（未复权） · 第 ${D.daysObserved(s)??'—'} / ${daysOf()} 个交易日</p></div><div class="chart-tabs" role="group" aria-label="主图模式">${[['line','收盘走势'],['relative','相对走势'],['candle','K 线']].map(([mode,label])=>`<button data-chart-mode="${mode}" class="${mode===state.mode?'active':''}" aria-pressed="${mode===state.mode}">${label}</button>`).join('')}</div></div><div class="chart-context"><span id="chartRange"></span>${recordSelect}<div class="mini-tabs"><button data-metric="volumeShares" class="${state.metric==='volumeShares'?'active':''}">成交量</button><button data-metric="amountYuan" class="${state.metric==='amountYuan'?'active':''}">成交额</button></div></div><div id="heroPlot" class="chart-host"></div><div class="chart-foot"><div class="legend" id="chartLegend"></div><span id="chartPolicy"></span></div><div class="chart-note"><div class="note-tags">${opTag(s)}<span class="tag">未来 1—3 日 · ${dir?D.dirLabels[dir]:'未识别状态'}</span></div><p>${esc(r?.viewReason||r?.outlookReason||'尚无复盘原文。')}</p></div></article>`;
+ $('focusContent').innerHTML=`<div class="instruments" id="instruments"></div><article class="panel hero-chart"><div class="chart-heading"><div><h3>${esc(s.name)} <span class="num ${tone(D.ret(s))}">${pct(D.ret(s))}</span></h3><p>${esc(s.code)} · 收盘 ${num(q.close)} 元 · 原参考价 ${num(s.ref)} 元 · 价格涨跌（未复权） · 第 ${D.daysObserved(s)??'—'} / ${daysOf()} 个交易日</p></div><div class="chart-tabs" role="group" aria-label="主图模式">${[['line','收盘走势'],['relative','相对走势'],['candle','K 线']].map(([mode,label])=>`<button data-chart-mode="${mode}" class="${mode===state.mode?'active':''}" aria-pressed="${mode===state.mode}">${label}</button>`).join('')}</div></div><div class="chart-context"><span id="chartRange"></span>${recordSelect}</div><div id="heroPlot" class="chart-host"></div><div class="chart-foot"><div class="legend" id="chartLegend"></div><span id="chartPolicy"></span></div><div class="chart-note"><div class="note-tags">${opTag(s)}<span class="tag">未来 1—3 日 · ${dir?D.dirLabels[dir]:'未识别状态'}</span></div><p>${esc(r?.viewReason||r?.outlookReason||'尚无复盘原文。')}</p></div></article>`;
  const changed=D.key(s)!==state.lastFocusKey;drawWidgets(animate&&changed);renderHeroChart(animate&&changed);state.lastFocusKey=D.key(s);
 }
 function setFocus(i,record=0){if(!D||!D.deep.length)return;const next=(i+D.deep.length)%D.deep.length;const s=D.deep[next].records[record]||D.deep[next].records[0];if(D.key(s)===state.lastFocusKey&&next===state.focus&&record===state.record)return;state.focus=next;state.record=record;renderFocus(true)}
@@ -217,15 +222,27 @@ function drawModalChart(){
  }
  const rows=M.windowRows(history,D.sessions,end,isIndex?50:40),q=rows.at(-1),available=rows.filter(r=>[r.open,r.high,r.low,r.close].every(V)).length;
  const ratio=V(q.close)&&V(rows.at(-2).close)&&rows.at(-2).close>0?(q.close/rows.at(-2).close-1)*100:null;
- $('dialogContent').innerHTML=(isIndex?'':stockNav())+`<div class="modal-toolbar"><div class="summary"><strong class="market-big">${num(q.close)}</strong><span class="${tone(ratio)}">${pct(ratio)}</span><span>· 截至 ${end} 收盘</span></div><div class="mini-tabs"><button data-modal-metric="volumeShares" class="${state.modalMetric==='volumeShares'?'active':''}">成交量</button><button data-modal-metric="amountYuan" class="${state.modalMetric==='amountYuan'?'active':''}">成交额</button></div></div><div id="modalChart" class="chart-host modal-chart"></div><div class="chart-foot"><div class="legend"><span><i></i>MA5</span><span><i class="industry"></i>MA10</span><span><i class="benchmark"></i>MA20</span><span>红：收 ≥ 开　绿：收 &lt; 开</span></div><span>每5个交易日标日期 · ${available}/${rows.length} 日有完整 K 线</span></div>${!isIndex?`<div class="chart-note">${trackingNotice(item,end)}${returnBasis(item,end)}<p>${esc(review?.viewReason||review?.outlookReason||'所选日期没有复盘原文。')}</p><button class="text-button" data-detail-tab="review">阅读完整复盘 →</button></div>`:''}`;
+ // 个股弹窗与首页主图同构：三种模式可切、量度固定为成交额（按钮沿用「成交量」叫法）；指数弹窗保持 K 线 + 量额切换。
+ const mode=isIndex?'candle':state.modalMode;
+ const toolRight=isIndex
+  ?`<div class="mini-tabs"><button data-modal-metric="volumeShares" class="${state.modalMetric==='volumeShares'?'active':''}">成交量</button><button data-modal-metric="amountYuan" class="${state.modalMetric==='amountYuan'?'active':''}">成交额</button></div>`
+  :`<div class="chart-tabs" role="group" aria-label="主图模式">${[['line','收盘走势'],['relative','相对走势'],['candle','K 线']].map(([m,label])=>`<button data-modal-mode="${m}" class="${state.modalMode===m?'active':''}" aria-pressed="${state.modalMode===m}">${label}</button>`).join('')}</div>`;
+ const legend=isIndex||mode==='candle'
+  ?`<span><i></i>MA5</span><span><i class="industry"></i>MA10</span><span><i class="benchmark"></i>MA20</span><span>红：收 ≥ 开　绿：收 &lt; 开</span>`
+  :mode==='relative'
+  ?`<span><i></i>个股</span><span><i class="industry"></i>${esc(item.industryName||'行业对照')}</span><span><i class="benchmark"></i>${esc(raw.market_name||'市场对照')}</span>`
+  :`<span><i></i>收盘价</span><span><i class="reference"></i>原参考价</span><span><i class="target"></i>原观察目标</span>`;
+ const footRight=mode==='candle'?`每5个交易日标日期 · ${available}/${rows.length} 日有完整 K 线`
+  :mode==='relative'?'基准固定为首个观察日收盘＝100':`每5个交易日标日期 · ${rows.filter(r=>V(r.close)).length}/${rows.length} 日有价格`;
+ $('dialogContent').innerHTML=(isIndex?'':stockNav())+`<div class="modal-toolbar"><div class="summary"><strong class="market-big">${num(q.close)}</strong><span class="${tone(ratio)}">${pct(ratio)}</span><span>· 截至 ${end} 收盘</span></div>${toolRight}</div><div id="modalChart" class="chart-host modal-chart"></div><div class="chart-foot"><div class="legend">${legend}</div><span>${footRight}</span></div>${!isIndex?`<div class="chart-note">${trackingNotice(item,end)}${returnBasis(item,end)}<p>${esc(review?.viewReason||review?.outlookReason||'所选日期没有复盘原文。')}</p><button class="text-button" data-detail-tab="review">阅读完整复盘 →</button></div>`:''}`;
  const showRef=!isIndex&&!item.d0&&end>=item.recDate;
- C.chart($('modalChart'),{rows,mode:'candle',reference:showRef?item.ref:null,target:showRef&&V(item.ref)?item.ref*(1+targetOf()):null,recDate:isIndex?null:item.recDate,metric:state.modalMetric,name:item.name,fullHistory:history,isIndex:true,animate:false,motion:motion()});
+ C.chart($('modalChart'),{rows,mode,reference:showRef?item.ref:null,target:showRef&&V(item.ref)?item.ref*(1+targetOf()):null,recDate:isIndex?null:item.recDate,metric:isIndex?state.modalMetric:'amountYuan',relative:!isIndex?relativeRows(item,rows):[],name:item.name,fullHistory:history,isIndex:true,animate:false,motion:motion()});
  $('modalFooter').textContent=isIndex?'最近50个交易日 · 指数点位与成交':`按当前冻结数据截取至 ${end}；不代表重新取得当时快照`;
 }
 function openIndex(i,target){const item=D.markets()[i];state.modal={type:'index',item};state.modalMetric='amountYuan';modalTitle(item.name,item.code,'最近 50 个交易日 · K 线与成交 · 点击图表或移动鼠标查看每日价格');$('dialogContent').innerHTML='<div style="height:56vh"></div>';openWindow(target);drawModalChart();}
 function openStock(key,target,date=null,tab='chart'){
  ensureData();const item=raw.stocks.find(s=>D.key(s)===key);if(!item)return;
- state.modal={type:'stock',item,date:date||D.end,tab};state.modalMetric=state.metric;
+ state.modal={type:'stock',item,date:date||D.end,tab};
  modalTitle(item.name,item.code,`${item.recDate} 开始观察`);$('dialogContent').innerHTML='';
  openWindow(target,tab!=='chart');drawModalChart();
 }
@@ -351,7 +368,7 @@ document.addEventListener('click',e=>{
   if(state.page==='favorites')renderFavorites();else renderRecords();return}
  const fs=e.target.closest('[data-focus-step]');
  if(fs&&!fs.disabled)return setFocus(state.focus+Number(fs.dataset.focusStep));
- const b=e.target.closest('[data-index],[data-stock],[data-update],[data-review-date],[data-chart-mode],[data-metric],[data-period],[data-modal-metric],[data-rail]');
+ const b=e.target.closest('[data-index],[data-stock],[data-update],[data-review-date],[data-chart-mode],[data-modal-mode],[data-metric],[data-period],[data-modal-metric],[data-rail]');
  if(!b)return;
  if(b.dataset.index!==undefined)return openIndex(Number(b.dataset.index),b);
  if(b.dataset.stock)return openStock(b.dataset.stock,b,b.dataset.date,b.dataset.tab||'chart');
@@ -360,6 +377,7 @@ document.addEventListener('click',e=>{
  if(b.dataset.chartMode){if(state.mode===b.dataset.chartMode)return;state.mode=b.dataset.chartMode;document.querySelectorAll('[data-chart-mode]').forEach(x=>{x.classList.toggle('active',x.dataset.chartMode===state.mode);x.setAttribute('aria-pressed',String(x.dataset.chartMode===state.mode))});return renderHeroChart(false)}
  if(b.dataset.period){state.period=Number(b.dataset.period);return drawWidgets(true)}
  if(b.dataset.metric){state.metric=b.dataset.metric;drawWidgets(true);document.querySelectorAll('.chart-context [data-metric]').forEach(x=>x.classList.toggle('active',x.dataset.metric===state.metric));return renderHeroChart(false)}
+ if(b.dataset.modalMode){state.modalMode=b.dataset.modalMode;return drawModalChart()}
  if(b.dataset.modalMetric){state.modalMetric=b.dataset.modalMetric;return drawModalChart()}
  if(b.dataset.rail){const rail=$(b.dataset.rail);rail?.scrollBy({left:Number(b.dataset.step)*(rail.clientWidth+14),behavior:motion()?'smooth':'auto'})}
 });

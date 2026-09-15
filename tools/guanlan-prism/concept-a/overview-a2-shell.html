@@ -12,7 +12,7 @@
  --line:#ffffff14;--accent:#ebece8;--accent-rgb:235,236,232;--up:#f08b8e;--down:#79c9b2;--down-rgb:121,201,178;--amber:#d6ba8d;
  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC","Microsoft YaHei",sans-serif;
  --mono:"SFMono-Regular",Consolas,"Liberation Mono",monospace;
- --radius:4px;--previewh:52px}
+ --radius:4px;--previewh:0px}
 *{box-sizing:border-box}html{background:var(--bg)}
 body{margin:0;background:var(--bg);color:var(--text);font:14px/1.6 var(--sans);-webkit-font-smoothing:antialiased}
 button,input,select{font:inherit}button{cursor:pointer;color:inherit;border:0;background:none}
@@ -35,7 +35,7 @@ h1,h2,h3,p{margin:0}svg{display:block;overflow:visible}svg text{font-family:var(
 .icon-button svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
 select{background:var(--panel);color:var(--text);border:1px solid var(--line);padding:6px 9px;max-width:100%;border-radius:4px;font-size:11px}
 /* 顶部预览说明条：与页面本体分离，标明这是评审稿。 */
-.preview-bar{height:var(--previewh);position:sticky;top:0;z-index:60;background:#141518;display:flex;align-items:center;justify-content:space-between;padding:0 24px;gap:18px;border-bottom:1px solid #ffffff1c;color:#efefef}
+.preview-bar{display:none}
 .pv-label{display:flex;align-items:center;gap:12px;white-space:nowrap}
 .pv-chip{width:26px;height:26px;border:1px solid #ffffff2e;border-radius:5px;display:inline-flex;align-items:center;justify-content:center;font:600 13px var(--mono)}
 .pv-label strong{font-size:12px;letter-spacing:.04em;font-weight:500;display:block}
@@ -266,8 +266,7 @@ select{background:var(--panel);color:var(--text);border:1px solid var(--line);pa
  .footer{flex-direction:column;align-items:flex-start;gap:6px}.report-meta{display:none}.page-title h1{font-size:26px}
 }
 @media(max-width:720px){
- :root{--previewh:88px}
- .preview-bar{height:auto;min-height:var(--previewh);flex-wrap:wrap;padding:10px 14px;gap:6px}
+ :root{--previewh:0px}
  .pv-links{justify-content:flex-start}
  .app{display:block}
  .side{position:static;width:auto;height:auto;flex-direction:column;align-items:stretch;gap:10px;padding:12px 16px;border-right:0;border-bottom:1px solid var(--line);overflow:visible}
@@ -306,7 +305,6 @@ select{background:var(--panel);color:var(--text);border:1px solid var(--line);pa
     <span id="demoLabel" style="color:var(--amber)"></span>
     <button id="motionToggle" aria-pressed="true" style="color:var(--secondary)">动效 开启</button>
     <button id="notesButton" style="color:var(--secondary)">使用说明 ↗</button>
-    <span style="color:var(--muted)">停更备用：</span><a href="/prism.html" style="color:var(--secondary);border-bottom:1px solid var(--line)">旧版 ↗</a>
     <span style="color:var(--muted)">总览 · 星图 · 全部观察 · 观点时间线 · 我的收藏</span>
   </div>
 </header>
@@ -605,7 +603,7 @@ function opinionTagClass(s){
 }
 /* ---- 观察星图页 ---- */
 function foot(){
-  return `<footer class="footer"><span><strong>观澜</strong> &nbsp; 记录判断，而不是制造确定性。</span><span>A2 主用展示 &nbsp; <a class="text-button" href="/prism.html">停更备用版 ↗</a></span></footer>`;
+  return `<footer class="footer"><span><strong>观澜</strong> &nbsp; 记录判断，而不是制造确定性。</span><span>A2 主用展示</span></footer>`;
 }
 function atlasPage(){
   const stockView=state.mapMode==='stock';

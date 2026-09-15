@@ -201,22 +201,15 @@ def run(url: str, out: Path) -> int:
             pg.wait_for_timeout(500)
             rows = series["stocks"][code]["rows"]
             today, prev = rows[-1], rows[-2]
-            base_rows = [r for r in rows[-6:-1] if r["volumeShares"] is not None]
-            expect = {"today": today["volumeShares"] / 1e6, "prev": prev["volumeShares"] / 1e6,
-                      "base": sum(r["volumeShares"] for r in base_rows) / len(base_rows) / 1e6}
+            base_rows = [r for r in rows[-6:-1] if r["amountYuan"] is not None]
+            expect = {"today": today["amountYuan"] / 1e8, "prev": prev["amountYuan"] / 1e8,
+                      "base": sum(r["amountYuan"] for r in base_rows) / len(base_rows) / 1e8}
             got = pg.evaluate("""()=>{
               const v=[...document.querySelectorAll('.activity-legend .value-line strong')].map(x=>parseFloat(x.textContent));
               return {today:v[0],prev:v[1],base:v[2]};
             }""")
             ok = all(abs(got[k] - expect[k]) < 0.02 for k in expect)
-            check(f"{code} 成交量仪表读数（万手）", ok, f"got={got} expect={ {k: round(v,2) for k,v in expect.items()} }")
-            pg.click('[data-metric="amountYuan"]')
-            pg.wait_for_timeout(300)
-            got_amt = pg.evaluate("()=>parseFloat(document.querySelectorAll('.activity-legend .value-line strong')[0].textContent)")
-            ok_amt = abs(got_amt - today["amountYuan"] / 1e8) < 0.02
-            check(f"{code} 成交额仪表读数（亿元）", ok_amt, f"got={got_amt} expect={today['amountYuan']/1e8:.2f}")
-            pg.click('[data-metric="volumeShares"]')
-            pg.wait_for_timeout(300)
+            check(f"{code} 成交额仪表读数（亿元）", ok, f"got={got} expect={ {k: round(v,2) for k,v in expect.items()} }")
             checked += 1
         check("成交指标核对≥2只股票", checked >= 2, f"checked={checked}")
 

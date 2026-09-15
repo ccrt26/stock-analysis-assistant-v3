@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 from datetime import date, datetime
@@ -272,3 +273,123 @@ assert.equal(Cc[0],5/52*100);assert.equal(Cc[1],6/52*100);assert.equal(Cc[2],nul
 console.log('ok');
 """.replace("%(math)s", str(A2 / "display-math.js")).replace("%(access)s", str(A2 / "data-access.js"))
     assert node_eval(script) == "ok"
+
+# ---- 走势聚焦三卡布局微调（脚注删除 + 半圆观察仪表） ----
+
+# 从 overview.js 提取三个卡片函数，在 Node 里以桩（D.daysObserved/daysOf/V/md/num）
+# 直接调用真实实现；几何期望值由测试端按锁定参数独立计算后与 SVG 输出对照。
+_TIPFN_JS = ('const TIPFN=(h)=>{const g=h.match(/<g class="armory-needle"[^>]*>[\\s\\S]*?<\\/g>/);'
+             'if(!g)return null;'
+             'const m=g[0].match(/x2="(-?[\\d.]+)" y2="(-?[\\d.]+)"/);'
+             'return m?[Number(m[1]),Number(m[2])]:null;};')
+
+_CARD_STUBS = """
+const V=v=>v!==null&&v!==undefined&&Number.isFinite(v);
+const num=(v,d=2)=>V(v)?v.toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d}):'—';
+const md=d=>d?d.slice(5).replace('-',' / '):'—';
+const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const pct=v=>V(v)?`${v>0?'+':''}${v.toFixed(2)}%`:'—';
+let __days=20,__n=4;
+const daysOf=()=>__days;
+const state={metric:'volumeShares',period:5};
+const M={activity:()=>({today:146.39,previous:183.28,base:172,ratio:.85,previousRatio:1.066,n:5,previousPct:-20.13})};
+const D={daysObserved:()=>__n,history:()=>[],ordered:s=>s.__rows,direction:r=>r.__dir,
+ dirLabels:{up:'上涨',sideways:'横盘',down:'下跌'}};
+"""
+
+
+def _extract_fn(source: str, name: str) -> str:
+    """按花括号配对提取 overview.js 中单个函数源码（模板串内 ${} 均成对出现）。"""
+    start = source.index(f"function {name}(")
+    depth = 0
+    for i in range(source.index("{", start), len(source)):
+        if source[i] == "{":
+            depth += 1
+        elif source[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return source[start:i + 1]
+    raise AssertionError(f"{name} 花括号不成对")
+
+
+def _cards_script(body: str) -> str:
+    src = (A2 / "overview.js").read_text(encoding="utf-8")
+    helpers = "\n".join(re.search(rf"^{re.escape(decl)}.*$", src, re.M).group(0)
+                        for decl in ("const polar=", "const arc="))
+    fns = "\n".join(_extract_fn(src, name)
+                    for name in ("observeDial", "judgment", "activityDial"))
+    return _TIPFN_JS + _CARD_STUBS + helpers + "\n" + fns + "\n" + body
+
+
+def test_focus_cards_remove_defined_footnotes_and_keep_reading_hint():
+    """三卡删除指定脚注：左卡 footer、中卡方向分类说明、右卡整个 volume-foot；
+    中卡「点圆点读原文 ↗」保留并带 judgment-instrument 局部类。"""
+    body = """
+const s={formedOn:'2026-09-08',recDate:'2026-09-09',ref:38.84,
+ __rows:[{date:'2026-09-11',__dir:'up',base:'前评'},{date:'2026-09-14',__dir:'down',base:'今评'}]};
+const obs=observeDial(s);
+if(obs.includes('观察天数，不是成功概率'))throw new Error('左卡脚注仍在');
+if(obs.includes('instrument-footer'))throw new Error('左卡 footer 未整段删除');
+const judge=judgment(s);
+if(judge.includes('方向分类，不是概率或评分'))throw new Error('中卡方向分类说明仍在');
+if(!judge.includes('点圆点读原文 ↗'))throw new Error('中卡阅读提示丢失');
+if(!judge.includes('judgment-instrument'))throw new Error('中卡缺 judgment-instrument 类');
+const actVol=activityDial(s);
+if(actVol.includes('volume-foot')||actVol.includes('基线不含今日')||actVol.includes('100 万股'))
+ throw new Error('右卡成交量脚注仍在');
+state.metric='amountYuan';
+const actAmt=activityDial(s);
+if(actAmt.includes('volume-foot')||actAmt.includes('人民币亿元'))
+ throw new Error('右卡成交额脚注仍在');
+console.log('ok');
+"""
+    assert node_eval(_cards_script(body)) == "ok"
+
+
+def test_observe_dial_half_circle_needle_geometry_tracks_days_window():
+    """0/4/10/20 天针尖对应左端/左上/正上/右端；窗口取 daysOf()（4/10 不是固定除以20）；
+    viewBox 400×208、白色半环轴心、底端短基线、28 宽主环与 -36° 起针角。"""
+    body = """
+function expectTip(n,days){
+ __n=n;__days=days;
+ const out=observeDial({formedOn:'2026-09-08',recDate:'2026-09-09',ref:38.84});
+ const tip=TIPFN(out);
+ if(!tip)throw new Error('n='+n+'/'+days+' 未画出指针');
+ const a=(180-180*Math.max(0,Math.min(1,n/days)))*Math.PI/180;
+ const ex=[200+44*Math.cos(a),196-44*Math.sin(a)];
+ if(Math.abs(tip[0]-ex[0])>0.01||Math.abs(tip[1]-ex[1])>0.01)
+  throw new Error(`n=${n}/${days} 针尖 ${tip} 期望 ${ex}`);
+ return out;
+}
+expectTip(0,20);expectTip(4,20);expectTip(10,20);expectTip(20,20);expectTip(4,10);
+__n=4;__days=20;
+const out=observeDial({formedOn:'2026-09-08',recDate:'2026-09-09',ref:38.84});
+if(!out.includes('viewBox="0 0 400 208"'))throw new Error('viewBox 不是 400x208');
+if(!out.includes('M178,196 A22,22 0 0 1 222,196 L211,196 A11,11 0 0 0 189,196 Z'))throw new Error('轴心不是白色半环');
+if(!out.includes('M9 196H56 M344 196H391'))throw new Error('底部短基线缺失');
+if(!out.includes('stroke-width="28"'))throw new Error('主环宽 28 缺失');
+if(!out.includes('--needle-start:-36.000deg'))throw new Error('起针角不是 -36deg');
+console.log('ok');
+"""
+    assert node_eval(_cards_script(body)) == "ok"
+
+
+def test_observe_dial_missing_and_overflow_days_states():
+    """天数缺失显示“—”、不画针与白环、aria 写“观察天数暂缺”；超窗显示真实天数并停在右端。"""
+    body = """
+__n=null;__days=20;
+const miss=observeDial({formedOn:'2026-09-08',recDate:'2026-09-09',ref:38.84});
+if(!miss.includes('观察天数暂缺'))throw new Error('缺失时 aria 未写观察天数暂缺');
+if(miss.includes('armory-needle'))throw new Error('缺失时仍画出指针');
+if(miss.includes('gauge-active'))throw new Error('缺失时仍画出白色进度');
+if(miss.includes('>00<'))throw new Error('缺失时显示 00');
+if(!miss.includes('—'))throw new Error('缺失时未显示 —');
+__n=25;__days=20;
+const over=observeDial({formedOn:'2026-09-08',recDate:'2026-09-09',ref:38.84});
+if(!over.includes('>25<'))throw new Error('超窗未显示真实天数 25');
+const tip=TIPFN(over);
+if(!tip||Math.abs(tip[0]-244)>0.01||Math.abs(tip[1]-196)>0.01)throw new Error('超窗针尖未停在右端 '+tip);
+if(!over.includes('--needle-start:-180.000deg'))throw new Error('超窗起针角不是 -180deg');
+console.log('ok');
+"""
+    assert node_eval(_cards_script(body)) == "ok"
