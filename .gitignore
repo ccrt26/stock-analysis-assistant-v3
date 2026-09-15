@@ -31,3 +31,4 @@ tmp/
 # A 稿预览的本地迭代备份不进入版本库（正式内容见 overview-shell.html）
 tools/guanlan-prism/concept-a/*.backup-*.html
 tools/guanlan-prism/tools/*.backup-*.py
+tools/guanlan-prism/concept-a/a2/*.backup-before-armory.*

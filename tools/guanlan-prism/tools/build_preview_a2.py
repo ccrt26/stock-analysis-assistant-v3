@@ -21,6 +21,7 @@ MARKERS = ("/*__DATA__*/", "/*__SERIES__*/", "/*__A2CSS__*/",
            "/*__MATH__*/", "/*__DATAACCESS__*/", "/*__CHARTS__*/", "/*__OVERVIEW__*/")
 STOCK_SOURCE = "本地事实仓 equity_daily（available_at ≤ 报告 as_of）"
 INDEX_SOURCE = "本地事实仓 index_daily（available_at ≤ 报告 as_of）"
+THEME_SOURCE = "本地事实仓 theme_daily（available_at ≤ 报告 as_of）"
 SERIES_SESSIONS = 80
 
 
@@ -52,12 +53,13 @@ def _number(value):
     return out if math.isfinite(out) else None
 
 
-def _read_day(root, rmw, table: str, day: date, cutoff):
+def _read_day(root, rmw, table: str, day: date, cutoff, key: str | None = None):
     frame = rmw._read_day_frames(root, table, day, cutoff)
     if frame is None:
         return {}
+    if key is None:
+        key = "ts_code" if table == "equity_daily" else "index_code"
     rows = {}
-    key = "ts_code" if table == "equity_daily" else "index_code"
     for _, row in frame.iterrows():
         rows[str(row[key])] = row
     return rows
@@ -103,11 +105,37 @@ def assemble_series(root: Path, rmw, snapshot: dict) -> dict:
                     continue
                 item["date"] = iso
                 indices[code]["rows"].append(item)
-    check_series_against_snapshot(snapshot, {
-        "schemaVersion": 1, "analysis_date": analysis.isoformat(),
-        "sessionDates": [d.isoformat() for d in sessions], "stocks": stocks, "indices": indices})
-    return {"schemaVersion": 1, "analysis_date": analysis.isoformat(),
-            "sessionDates": [d.isoformat() for d in sessions], "stocks": stocks, "indices": indices}
+    # 主题指数对照（如中证传媒 399971.SZ）：仅当展示记录携带 industryCode 且该
+    # 代码不属于申万目录时读取 theme_daily 官方收盘；同主题一次读取多处共享。
+    comparison_codes = sorted(
+        {str(s["industryCode"]) for s in snapshot.get("stocks", []) if s.get("industryCode")}
+    )
+    comparisons: dict = {}
+    theme_needed: list[str] = []
+    if comparison_codes:
+        catalog_codes = set(rmw.industry_catalog_names(root).keys())
+        theme_needed = [code for code in comparison_codes if code not in catalog_codes]
+    if theme_needed:
+        for day in sessions:
+            iso = day.isoformat()
+            theme = _read_day(root, rmw, "theme_daily", day, cutoff, key="theme_code")
+            for code in theme_needed:
+                row = theme.get(code)
+                if row is None:
+                    continue
+                close = _number(row.get("close"))
+                if close is None or close <= 0:
+                    continue
+                comparisons.setdefault(
+                    code, {"source": THEME_SOURCE, "rows": []})["rows"].append(
+                    {"date": iso, "close": close})
+    series = {"schemaVersion": 1, "analysis_date": analysis.isoformat(),
+              "sessionDates": [d.isoformat() for d in sessions],
+              "stocks": stocks, "indices": indices}
+    if comparisons:
+        series["comparisons"] = comparisons
+    check_series_against_snapshot(snapshot, series)
+    return series
 
 
 def check_series_against_snapshot(snapshot: dict, series: dict) -> None:
@@ -146,6 +174,19 @@ def check_series_against_snapshot(snapshot: dict, series: dict) -> None:
             if (isinstance(close, (int, float)) and isinstance(extra_close, (int, float))
                     and abs(float(close) - float(extra_close)) > 0.005):
                 conflicts.append(f"{index['code']} {iso} 指数补充收盘 {extra_close} 与冻结 {close} 不一致")
+    for code, entry in (series.get("comparisons") or {}).items():
+        by_date = {r.get("date"): r.get("close") for r in entry.get("rows", []) if r.get("date")}
+        for stock in snapshot.get("stocks", []):
+            if stock.get("industryCode") != code:
+                continue
+            ind = stock.get("industry") or []
+            for i, iso in enumerate(stock.get("sessionDates") or snapshot.get("sessionDates", [])):
+                frozen = ind[i] if isinstance(ind, list) and i < len(ind) else None
+                extra_close = by_date.get(iso)
+                if (isinstance(frozen, (int, float)) and isinstance(extra_close, (int, float))
+                        and abs(float(frozen) - float(extra_close)) > 0.005):
+                    conflicts.append(
+                        f"{code} {iso} 主题对照补充收盘 {extra_close} 与冻结 {frozen} 不一致")
     if conflicts:
         raise ValueError("侧表与冻结快照冲突：" + "；".join(conflicts[:5]))
 

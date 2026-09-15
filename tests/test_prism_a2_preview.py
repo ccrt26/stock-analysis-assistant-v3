@@ -169,3 +169,106 @@ def test_original_body_separates_missing_summary_and_preserves_adopted_identity(
     assert '&lt;script&gt;' in adopted and '<script>' not in adopted
     assert '用户认可的表达范本' in adopted
     assert '不应混入正文的摘要' not in adopted
+
+
+def test_assemble_series_builds_theme_comparisons() -> None:
+    """携带 industryCode（非申万目录代码）的记录生成主题对照侧表；
+    申万代码不进 comparisons；close 来自真实 theme_daily 且与 80 日窗对齐。"""
+    from tools import render_monitor_web as rmw
+
+    sessions = ["2026-09-07", "2026-09-08", "2026-09-09", "2026-09-10", "2026-09-11"]
+    snap = {"analysis_date": "2026-09-11", "as_of": "2026-09-13T18:30:00+08:00",
+            "sessionDates": sessions, "dates": [d[5:] for d in sessions],
+            "market": [3000.] * len(sessions),
+            "stocks": [
+                {"code": "TEST1.SZ", "name": "主题对照样例", "recDate": "2026-09-10",
+                 "industryCode": "399971.SZ", "industry": [None] * len(sessions),
+                 "candles": [None] * len(sessions), "reviews": []},
+                {"code": "TEST2.SH", "name": "申万对照样例", "recDate": "2026-09-10",
+                 "industryCode": "801760.SI", "industry": [None] * len(sessions),
+                 "candles": [None] * len(sessions), "reviews": []}],
+            "presentation": {"marketCodes": ["000001.SH"]}}
+    series = build_preview_a2.assemble_series(ROOT, rmw, snap)
+    assert "399971.SZ" in series["comparisons"]
+    assert "801760.SI" not in series["comparisons"]  # 申万代码走既有行业路径
+    theme = series["comparisons"]["399971.SZ"]
+    assert theme["source"].startswith("本地事实仓 theme_daily")
+    dates = [r["date"] for r in theme["rows"]]
+    assert len(dates) == 80 and dates[-1] == "2026-09-11"  # assemble 固定 80 日窗
+    assert all(r["close"] is not None and r["close"] > 0 for r in theme["rows"])
+    last40 = [r for r in theme["rows"] if r["date"] >= "2026-07-20"]
+    assert len(last40) == 40 and all(r["close"] is not None for r in last40)
+
+
+def test_series_theme_conflict_against_snapshot_industry_raises() -> None:
+    from tools import render_monitor_web as rmw
+
+    snap = {"analysis_date": "2026-09-11", "as_of": "2026-09-13T18:30:00+08:00",
+            "sessionDates": [], "dates": [], "market": [],
+            "stocks": [{"code": "TEST1.SZ", "name": "主题对照样例", "recDate": "2026-09-10",
+                        "industryCode": "399971.SZ", "industry": [],
+                        "candles": [], "reviews": []}],
+            "presentation": {"marketCodes": []}}
+    series = build_preview_a2.assemble_series(ROOT, rmw, snap)
+    # 用真实主题收盘回填记录原窗口（一致 → 组装不报冲突）
+    snap["sessionDates"] = series["sessionDates"][-2:]
+    snap["stocks"][0]["industry"] = [
+        r["close"] for r in series["comparisons"]["399971.SZ"]["rows"][-2:]]
+    snap["candles"] = [[None] * 5 for _ in snap["sessionDates"]]
+    series2 = build_preview_a2.assemble_series(ROOT, rmw, snap)  # 一致：不报冲突
+    assert series2["comparisons"]["399971.SZ"]["rows"][-1]["close"] ==         snap["stocks"][0]["industry"][-1]
+    series2["comparisons"]["399971.SZ"]["rows"][-1]["close"] += 5.0
+    with pytest.raises(ValueError, match="冲突"):
+        build_preview_a2.check_series_against_snapshot(snap, series2)
+
+
+def test_comparison_merges_theme_supplement_by_industry_code() -> None:
+    """H/E/F/G：comparison() 按 industryCode 取主题补充序列并按各自 recDate 归一；
+    原快照窗口含 null 原样保留（不被补充覆盖）；基准缺失整条为空；
+    旧对象缺 industryCode 时仍走原 extra.stocks 兜底。"""
+    script = """
+const M=require('%(math)s');
+globalThis.PrismMath=M;
+require('%(access)s');
+const assert=require('assert');
+const rules={key:s=>s.code+':'+s.recDate,direction:()=>null,dirLabels:{up:'上涨',sideways:'横盘',down:'下跌'},
+ deepReviews:()=>({groups:[]}),orderedReviews:()=>[],latest:()=>null,opinionLabel:()=>'尚未复盘',
+ isInvalid:()=>false,returnOnDate:()=>null,daysAt:()=>0,recommendations:(d)=>d.stocks,
+ directionUpdates:()=>[]};
+const orig=['2026-08-31','2026-09-01','2026-09-02','2026-09-03','2026-09-04'];
+const mk=(code,name,recDate,industry,industryCode)=>({code,name,recDate,recIndex:orig.indexOf(recDate),
+ ref:10,industry,industryCode,candles:[],reviews:[]});
+const data={analysis_date:'2026-09-04',sessionDates:orig,
+ dates:orig,market:[100,100,100,100,100],market_name:'上证指数',
+ presentation:{marketCodes:['000001.SH']},
+ stocks:[mk('A.SZ','甲','2026-09-02',[null,100,105,null,102],'399971.SZ'),
+         mk('B.SH','乙','2026-09-02',[null,200,210,null,204],'000122.SH'),
+         mk('C.SZ','丙','2026-09-02',[null,50,52,null,51],null),
+         mk('D.SZ','丁','2026-08-31',[null,1,2,3,4],'399971.SZ')]};
+const rows399971=[['2026-08-27',8],['2026-08-28',9],['2026-08-31',10],['2026-09-01',11],
+ ['2026-09-02',20],['2026-09-03',21],['2026-09-04',19]].map(([date,close])=>({date,close}));
+const rows000122=[['2026-08-27',80],['2026-08-28',90],['2026-08-31',100],['2026-09-01',110],
+ ['2026-09-02',200],['2026-09-03',210],['2026-09-04',190]].map(([date,close])=>({date,close}));
+const extra={sessionDates:['2026-08-27','2026-08-28'],
+ comparisons:{'399971.SZ':{source:'t',rows:rows399971},'000122.SH':{source:'t',rows:rows000122}},
+ stocks:{'C.SZ':{industry:[{date:'2026-08-27',close:5},{date:'2026-08-28',close:6}]}}};
+const D=PrismData.create(data,extra,rules);
+const A=D.comparison(data.stocks[0],'industry');
+// 合并会话：08-27,08-28,08-31,09-01..09-04；基准=09-02 的 105
+const expect=[8/105*100,9/105*100,null,100/105*100,100,null,102/105*100];
+A.forEach((v,i)=>{ if(expect[i]===null)assert.equal(v,null);
+  else assert.ok(Math.abs(v-expect[i])<1e-9, i+' '+v); });
+assert.equal(A[2],null);      // 原窗口 null 不被补充覆盖
+assert.ok(A[0]!==null);       // 原日历之外用主题补充序列
+// E：另一记录用另一主题代码，各自归一，不串
+const B=D.comparison(data.stocks[1],'industry');
+assert.ok(Math.abs(B[0]-80/210*100)<1e-9 && Math.abs(B[6]-204/210*100)<1e-9);
+// F：基准日（recDate）行业值为 null → 整条为空
+const Dd=D.comparison(data.stocks[3],'industry');
+assert.ok(Dd.every(v=>v===null));
+// G：旧对象缺 industryCode → 原窗口外走 extra.stocks 兜底
+const Cc=D.comparison(data.stocks[2],'industry');
+assert.equal(Cc[0],5/52*100);assert.equal(Cc[1],6/52*100);assert.equal(Cc[2],null);
+console.log('ok');
+""".replace("%(math)s", str(A2 / "display-math.js")).replace("%(access)s", str(A2 / "data-access.js"))
+    assert node_eval(script) == "ok"

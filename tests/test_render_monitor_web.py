@@ -476,6 +476,51 @@ def test_d0_v4_only_displays_confirmed_formal_recommendations(
 
 
 class TestWarehouseFacts:
+    def test_theme_index_comparison_reads_theme_daily(self, tmp_path: Path) -> None:
+        """研究板块为主题指数时，对照序列读 theme_daily 官方收盘（kind=theme_index）；
+        截止后可见的行情不得进入；申万行业的既有路径不受影响。"""
+        from tools.render_monitor_web import collect_market_facts
+
+        root = tmp_path
+        stamp = pd.Timestamp("2026-09-03T01:00:00Z")
+        late = pd.Timestamp("2026-09-06T01:00:00Z")
+        for day in (date(2026, 8, 31), date(2026, 9, 1)):
+            for dataset, rows in {
+                "theme_daily": [
+                    {"theme_code": "000122.SH", "close": 800.0, "available_at": stamp},
+                    *([{"theme_code": "399971.SZ", "close": 950.0, "available_at": stamp}]
+                      if day.isoformat() == "2026-08-31" else
+                      [{"theme_code": "399971.SZ", "close": 999.0, "available_at": late}]),
+                ],
+                "industry_daily": [
+                    {"industry_code": "801760.SI", "close": 2600.0, "available_at": stamp},
+                ],
+                "index_daily": [
+                    {"index_code": "000001.SH", "close": 3000.0, "available_at": stamp},
+                ],
+                "equity_daily": [
+                    {"ts_code": "002602.SZ", "open": 10.0, "high": 11.0, "low": 9.0,
+                     "close": 10.5, "amount": 1e8, "available_at": stamp},
+                ],
+            }.items():
+                day_dir = root / "local_warehouse" / "facts" / dataset / f"trade_date={day.isoformat()}"
+                day_dir.mkdir(parents=True)
+                pd.DataFrame(rows).to_parquet(day_dir / "data.parquet")
+        facts = collect_market_facts(
+            root,
+            datetime.fromisoformat("2026-09-03T09:00:00+08:00"),
+            [date(2026, 8, 31), date(2026, 9, 1)],
+            ["399971.SZ", "000122.SH", "801760.SI"],
+            ["002602.SZ"],
+            group_members={"801760.SI": ["600000.SH"]},
+        )
+        assert facts["industry"]["399971.SZ"] == [950.0, None]  # 09-01 截止后 → 留空
+        assert facts["industry"]["000122.SH"] == [800.0, 800.0]
+        assert facts["industry"]["801760.SI"] == [2600.0, 2600.0]  # 申万路径不变
+        assert facts["industry_kind"]["399971.SZ"] == "theme_index"
+        assert facts["industry_kind"]["000122.SH"] == "theme_index"
+        assert facts["industry_kind"]["801760.SI"] == "index"
+
     def test_collect_and_trim_use_raw_prices(self, tmp_path: Path) -> None:
         from tools.render_monitor_web import collect_market_facts
 

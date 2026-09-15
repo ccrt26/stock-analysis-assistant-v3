@@ -202,7 +202,10 @@ def collect_market_facts(
 
     行业路径优先用行业成分等权日收益链接（二级目录没有官方指数日行情）；
     成员覆盖不足（<max(5, 30%)）的交易日如实断线，成分缺失时回退行业指数收盘。
+    研究记录的主题指数对照（group_code 不在行业日内行情中）读取 theme_daily
+    官方指数收盘，industry_kind 记为 theme_index；缺失仍如实空缺。
     """
+    theme_sourced: set[str] = set()
     cutoff = _as_utc_cutoff(as_of)
     candles: dict[str, list[list[float | None]]] = {code: [] for code in codes}
     market: list[float | None] = []
@@ -248,8 +251,35 @@ def collect_market_facts(
                     value = _single_number(row.get("close"))
                     if value is not None:
                         industry_close[code] = value
+        # 研究记录的主题指数对照（如中证传媒 399971.SZ）不在行业日内行情中，
+        # 按同一代码读取 theme_daily 官方收盘；不按名称或成员重算，缺失如实空缺。
+        theme_candidates = [code for code in group_codes if code not in industry_close]
+        theme_close: dict[str, float] = {}
+        if theme_candidates:
+            theme_frame = _read_day_frames(root, "theme_daily", day, cutoff)
+            if theme_frame is not None:
+                sub = theme_frame.loc[
+                    theme_frame["theme_code"].astype(str).isin(theme_candidates)
+                ]
+                for _, row in sub.iterrows():
+                    code = str(row["theme_code"])
+                    value = _single_number(row.get("close"))
+                    if value is None:
+                        continue
+                    if code in theme_close and theme_close[code] != value:
+                        raise ValueError(
+                            f"theme_daily {day.isoformat()} {code} 存在冲突收盘 "
+                            f"{theme_close[code]} / {value}；请先解决数据冲突再渲染"
+                        )
+                    theme_close[code] = value
+                for code in theme_candidates:
+                    if theme_close.get(code) is not None:
+                        theme_sourced.add(code)
         for code in group_codes:
-            industry[code].append(industry_close.get(code))
+            if code in theme_candidates:
+                industry[code].append(theme_close.get(code))
+            else:
+                industry[code].append(industry_close.get(code))
         for code, members in (group_members or {}).items():
             mean_ret: float | None = None
             if equity is not None and members:
@@ -271,7 +301,9 @@ def collect_market_facts(
         else:
             industry_levels[code] = industry[code]
             industry_kind[code] = (
-                "index" if any(value is not None for value in industry[code]) else "none"
+                "theme_index"
+                if code in theme_sourced
+                else ("index" if any(value is not None for value in industry[code]) else "none")
             )
     return {
         "candles": candles,
@@ -1669,6 +1701,7 @@ def build_payload(
                 "industryName": names.get(group_code) or catalog.get(group_code)
                 or (thesis.get("sector_broad_diffusion") or {}).get("group_name")
                 or (thesis.get("sector_leader_cluster") or {}).get("group_name"),
+                "industryCode": group_code,
                 "industrySource": industry_kind,
                 "industry": industry_series.get(group_code, []),
                 "candles": bars,
@@ -1722,6 +1755,7 @@ def build_payload(
                 "reasonFull": entry["reason"],
                 "reasonRisk": entry["risk"],
                 "industryName": names.get(group_code) or catalog.get(group_code) or None,
+                "industryCode": group_code,
                 "industrySource": facts.get("industry_kind", {}).get(group_code, "none"),
                 "industry": industry_series.get(group_code, []),
                 "candles": candle_series.get(ts_code, []),

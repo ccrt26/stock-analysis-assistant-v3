@@ -21,7 +21,7 @@
 .square{width:32px;height:32px;border:1px solid var(--line);border-radius:3px;display:inline-flex;align-items:center;justify-content:center;flex:none;color:var(--secondary);font-size:15px}
 .square:hover{color:var(--text);background:var(--raised);border-color:#ffffff35}
 /* 三个事实模块：观察进度｜近期复盘判断｜成交活跃度 */
-.instruments{display:grid;grid-template-columns:.84fr 1.07fr 1.18fr;gap:14px}
+.instruments{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
 .instrument{min-height:292px;position:relative}
 .panel-heading{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:19px 20px 0}
 .panel-heading h3{font-size:12px;font-weight:500}
@@ -82,7 +82,7 @@
 .legend i{display:inline-block;width:18px;height:1.5px;background:var(--accent);vertical-align:middle;margin-right:6px}
 .legend .industry{background:var(--blue)}
 .legend .benchmark{background:var(--amber)}
-.legend .own{background:var(--down)}
+.legend .own{background:var(--text)}
 .legend .reference{background:var(--blue)}
 .legend .target{background:var(--amber)}
 .chart-note{border-top:1px solid var(--line);padding:15px 23px;display:flex;gap:10px;align-items:flex-start;background:#ffffff01}
@@ -161,7 +161,7 @@ dialog::backdrop{background:#000b;backdrop-filter:blur(6px)}
 .spark-empty{height:69px;display:flex;align-items:center;justify-content:center;font-size:10px;color:var(--muted)}
 /* 响应式（只覆盖 A.02 新区块） */
 @media(max-width:480px){.pv-label{white-space:normal}.pv-label strong{font-size:10px}.pv-label small{font-size:8px}}
-@media(max-width:1290px){.instruments{grid-template-columns:.8fr 1fr 1.14fr;gap:10px}.observe-dial{width:130px}.observe-body{padding:8px;gap:5px}.observe-meta strong{font-size:15px}.panel-heading,.instrument-sub{padding-left:15px;padding-right:15px}.activity-dial{width:165px;height:198px}.activity-legend{min-width:97px;font-size:8px}.activity-legend strong{font-size:10px}.volume-tools{padding-left:14px;padding-right:14px}.market-value{font-size:23px}.market-card .market-name small{display:none}.market-card .mini-chart{width:62px;right:13px}.section-head h2 small{display:none}.stock-card{padding:18px 15px}.stock-card .price-row b{font-size:25px}}
+@media(max-width:1290px){.instruments{grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.observe-dial{width:130px}.observe-body{padding:8px;gap:5px}.observe-meta strong{font-size:15px}.panel-heading,.instrument-sub{padding-left:15px;padding-right:15px}.activity-dial{width:165px;height:198px}.activity-legend{min-width:97px;font-size:8px}.activity-legend strong{font-size:10px}.volume-tools{padding-left:14px;padding-right:14px}.market-value{font-size:23px}.market-card .market-name small{display:none}.market-card .mini-chart{width:62px;right:13px}.section-head h2 small{display:none}.stock-card{padding:18px 15px}.stock-card .price-row b{font-size:25px}}
 @media(max-width:1080px){.instruments{grid-template-columns:1fr 1fr}.instrument:first-child{grid-column:1 / -1;min-height:140px;display:grid;grid-template-columns:1fr 1.2fr}.instrument:first-child .panel-heading{grid-column:1;grid-row:1;align-self:end;padding-top:10px}.instrument:first-child .instrument-sub{grid-column:1;grid-row:2}.instrument:first-child .observe-body{grid-column:2;grid-row:1 / 4;height:144px}.instrument:first-child .observe-dial{height:133px;width:128px}.instrument:first-child .instrument-footer{grid-column:1;grid-row:3;font-size:8px}.activity-dial{width:195px}.activity-legend{font-size:9px}.activity-legend strong{font-size:12px}.updates-rail{grid-auto-columns:calc((100% - 14px)/2)}.stock-rail{grid-auto-columns:calc((100% - 28px)/3)}.market-card{padding:15px 12px}.market-value{font-size:22px}.chart-note{flex-wrap:wrap}.chart-note p{min-width:100%;font-size:11px}.ohlc-readout{gap:10px}}
 @media(max-width:760px){.market-strip{grid-template-columns:1fr 1fr}.market-card{min-height:116px;padding:16px}.market-card:nth-child(3){border-top:1px solid var(--line);border-left:0}.market-card:nth-child(4){border-top:1px solid var(--line)}.market-card .market-name{font-size:11px}.market-value{font-size:25px}.market-hint{font-size:8px;gap:12px}.market-hint>span:first-child{font-size:10px}.market-card .mini-chart{width:51px;height:25px;bottom:12px;right:12px}.section-head{flex-wrap:wrap;gap:10px}.focus-controls{width:100%;justify-content:flex-end}.focus-controls>span{margin-right:auto}.focus-controls select{max-width:150px}.instruments{grid-template-columns:1fr}.instrument:first-child{min-height:150px}.instrument:first-child .observe-body{height:156px}.instrument:first-child .observe-dial{width:129px;height:137px}.instrument{min-height:294px}.judgment-chart{height:148px}.activity-dial{width:205px;height:209px}.activity-legend{font-size:10px}.activity-legend strong{font-size:13px}.activity-body{flex-wrap:wrap;padding:0 8px}.activity-legend{min-width:0;width:100%;max-width:260px}.volume-tools{padding-left:18px;padding-right:18px}.chart-heading{padding:18px 16px 0;gap:10px;flex-wrap:wrap}.chart-heading h3{font-size:16px}.chart-heading h3 .num{font-size:22px}.chart-tabs{margin-left:auto}.chart-tabs button{font-size:10px}.chart-context{padding:12px 16px 0;font-size:8px}.chart-host{padding:0 6px}.chart-foot{padding:5px 16px 13px;font-size:8px}.chart-note{padding:13px 16px}.chart-note .tag{font-size:8px}.stock-rail{grid-auto-columns:100%}.updates-rail{grid-auto-columns:100%}.stock-card{padding:20px}.stock-card .price-row b{font-size:30px}.stock-card .mini-chart{height:89px}.stock-card .code{font-size:9px}.stock-card .card-foot{font-size:10px}.stock-card .recent-label{font-size:10px}.update-card{min-height:228px}.update-card p{font-size:12px}.section-meta{font-size:9px}.scope-note{font-size:9px}.modal-window{width:94vw;max-height:92dvh;border-radius:10px}.modal-head{padding:18px 17px 13px;gap:9px}.modal-head h2{font-size:18px;flex-wrap:wrap;gap:6px}.modal-head h2 small{font-size:8px}.modal-head p{font-size:8px}.modal-toolbar{padding:12px 17px 0;font-size:9px;flex-wrap:wrap;gap:8px}.modal-toolbar .market-big{font-size:27px}.modal-chart{padding:0 4px}.modal-footer{font-size:8px;padding:12px 17px;flex-wrap:wrap;gap:5px}.reading-body{padding:20px;font-size:12px}.reading-body h3{font-size:13px}.chart-tooltip{min-width:210px;font-size:10px;padding:11px;max-width:280px}.chart-tooltip strong{font-size:11px}.chart-tooltip dd{font-size:10px}footer{font-size:8px;flex-wrap:wrap;gap:6px}}
 /* 全部观察 · 观点时间线（架构沿用正式页，黑白样式） */
@@ -246,3 +246,12 @@ span.op-weakened{color:var(--down)}
 @media(max-width:760px){.stock-detail-nav{padding:13px 17px;gap:12px}.stock-detail-nav .mini-tabs{gap:5px}.stock-detail-nav .mini-tabs button{font-size:10px;padding:8px}.reading-body{min-width:0}.intro-section{min-width:0}}
 
 .reading-body .review-meta{display:flex;flex-wrap:wrap;gap:8px 16px}
+/* 观察进度：Armory 紧凑仪表（方框尺寸不变，仪表按 213px 观察体等比缩放） */
+.observe-body.armory-body{display:block;height:auto;padding:2px 10px 0}
+.observe-dial.armory-dial{display:block;width:100%;max-width:320px;height:auto;margin:0 auto}
+.armory-stats{display:flex;justify-content:space-between;padding:2px 0 0;gap:10px;max-width:320px;margin:0 auto}
+.armory-stats div b{display:block;font:16px var(--mono);letter-spacing:-.02em;color:var(--text);font-weight:400}
+.armory-stats div span{display:block;font-size:8px;color:var(--muted);margin-top:2px;letter-spacing:.05em}
+.armory-needle{transform-box:view-box;animation:needle-in .92s cubic-bezier(.2,.65,.3,1) both}
+@keyframes needle-in{from{transform:rotate(-200deg)}to{transform:rotate(0deg)}}
+@media(prefers-reduced-motion:reduce){.armory-needle{animation:none!important}}

@@ -29,7 +29,14 @@ function create(data,extra={},rules){
   });
  }
  const quote=s=>history(s).find(r=>r.date===end)||{};
- function comparison(s,field){const base=field==='stock'?history(s).map(r=>r.close):field==='industry'?sessions.map(date=>originalSet.has(date)?s.industry?.[original.indexOf(date)]??null:extra.stocks?.[s.code]?.industry?.find(r=>r.date===date)?.close??null):sessions.map(date=>originalSet.has(date)?data.market?.[original.indexOf(date)]??null:extra.indices?.[data.presentation?.marketCodes?.[0]]?.rows?.find(r=>r.date===date)?.close??null);return M.normalize(base,sessions.indexOf(s.recDate))}
+ function comparison(s,field){const base=field==='stock'?history(s).map(r=>r.close):field==='industry'?sessions.map(date=>{
+  // 原快照日历内沿用该记录行业数组（含 null，不被补充覆盖）；
+  // 原日历之外，携带 industryCode 的主题记录读取 comparisons 同日期官方收盘。
+  if(originalSet.has(date)){const v=s.industry?.[original.indexOf(date)];return v==null?null:v}
+  const code=s.industryCode;
+  if(code){const row=(extra.comparisons?.[code]?.rows||[]).find(r=>r.date===date);if(row&&row.close!=null)return row.close}
+  return extra.stocks?.[s.code]?.industry?.find(r=>r.date===date)?.close ?? null;
+ }):sessions.map(date=>originalSet.has(date)?data.market?.[original.indexOf(date)]??null:extra.indices?.[data.presentation?.marketCodes?.[0]]?.rows?.find(r=>r.date===date)?.close??null);return M.normalize(base,sessions.indexOf(s.recDate))}
  function markets(){const codes=data.presentation?.marketCodes||(data.market?.length?['000001.SH']:[]);return codes.map(code=>{let m=(data.marketIndices||[]).find(m=>m.code===code);if(!m&&code==='000001.SH')m={code,name:data.market_name,trade_date:end,close:data.market.at(-1),previousClose:data.market.at(-2),series:data.market};return m||{code,name:code,series:[],close:null}})}
  function indexHistory(m){const extraRows=(extra.indices?.[m.code]?.rows||[]).filter(r=>r.date<=end);return sessions.map(date=>{let r=extraRows.find(r=>r.date===date);if(date===end&&m.trade_date===end&&V(m.close)&&V(r?.close)&&Math.abs(m.close-r.close)>0.005){const message=`${m.code} ${date} 指数补充收盘与冻结值不一致`;if(!issues.includes(message))issues.push(message);r=null}return {date,open:null,high:null,low:null,close:null,volumeShares:null,amountYuan:null,...r}})}
  return {data,extra,end,sessions,original,issues,

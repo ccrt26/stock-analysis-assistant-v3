@@ -33,11 +33,27 @@ function activityDial(s){
  return `<article class="panel instrument volume-instrument"><div class="panel-heading"><h3>成交活跃度</h3><span class="index">03 / ACTIVITY</span></div><div class="instrument-sub">同一刻度，比较今天、昨天与近期均值</div><div class="volume-tools"><div class="mini-tabs" aria-label="仪表指标"><button data-metric="volumeShares" class="${!amount?'active':''}" aria-pressed="${!amount}">成交量</button><button data-metric="amountYuan" class="${amount?'active':''}" aria-pressed="${amount}">成交额</button></div><div class="avg-tabs" aria-label="均值基线">${[5,10,20].map(n=>`<button data-period="${n}" class="${n===state.period?'active':''}" aria-pressed="${n===state.period}">${n}日</button>`).join('')}</div></div><div class="activity-body"><svg class="activity-dial" viewBox="0 0 240 230" role="img" aria-label="${label}三层同刻度仪表，今天${num(V(a.today)?a.today/factor:null)}${unit}，较前一交易日${pct(a.previousPct)}">${h}</svg><div class="activity-legend"><div class="value-line"><span><i class="swatch"></i>今天</span><strong>${num(V(a.today)?a.today/factor:null)}</strong></div><div class="value-line"><span><i class="swatch previous"></i>昨天</span><strong>${num(V(a.previous)?a.previous/factor:null)}</strong></div><div class="value-line"><span><i class="swatch average"></i>前${state.period}日均值</span><strong>${num(V(a.base)?a.base/factor:null)}</strong></div><div class="activity-separator"></div><div class="value-line"><span>较昨天</span><strong>${pct(a.previousPct)}</strong></div><span class="ratio-label">今天 / 前${state.period}日均值</span><div class="ratio">${num(a.ratio)} <small style="font-size:9px;color:var(--muted)">倍</small></div></div></div><div class="volume-foot">基线不含今日 · 有效 ${a.n} / ${state.period} 个交易日${a.n<state.period?'（基线不完整）':''} · ${unit}${V(a.base)&&a.base>0?'':' · 均值基线暂缺'}<br>${amount?'金额单位为人民币亿元；与成交量分开展示。':'1 万手 = 100 万股；不是盘中行情软件的“量比”。'}</div></article>`;
 }
 function observeDial(s){
- const n=D.daysObserved(s),days=daysOf();let h='';for(let k=0;k<=40;k++){const p=polar(95,91,k%5===0?76:79,-135+k*270/40),q=polar(95,91,83,-135+k*270/40);h+=`<line x1="${p[0]}" y1="${p[1]}" x2="${q[0]}" y2="${q[1]}" stroke="var(--secondary)" opacity="${k%5===0?.6:.25}" stroke-width=".7"/>`}
- h+=`<path d="${arc(95,91,62,-135,135)}" fill="none" stroke="#ffffff08" stroke-width="15"/>`;
- if(n>0)h+=`<path d="${arc(95,91,62,-135,-135+270*Math.min(n/days,1))}" fill="none" stroke="var(--accent)" stroke-width="15"/>`;
- h+=`<text x="95" y="95" text-anchor="middle" fill="var(--text)" style="font:43px var(--mono);letter-spacing:-2px">${V(n)?String(n).padStart(2,'0'):'—'}</text><text x="95" y="117" text-anchor="middle" fill="var(--muted)" font-size="9">已观察交易日</text><text x="95" y="167" text-anchor="middle" fill="var(--muted)" font-size="8">本次窗口 ${days} 个交易日</text>`;
- return `<article class="panel instrument"><div class="panel-heading"><h3>观察进度</h3><span class="index">01 / DURATION</span></div><div class="instrument-sub">知道看到哪里，也知道从哪里开始</div><div class="observe-body"><svg class="observe-dial" viewBox="0 0 190 186" role="img" aria-label="已观察${n}个交易日，窗口${days}日">${h}</svg><div class="observe-meta">本次${s.formedOn?'推荐':'入选'}<strong>${md(s.formedOn||s.recDate)}</strong><hr>原参考价 / 元<strong>${num(s.ref)}</strong></div></div><div class="instrument-footer"><span>观察天数，不是成功概率</span></div></article>`;
+ const n=D.daysObserved(s),days=daysOf(),ratio=Math.max(0,Math.min(1,(n||0)/days));
+ // Armory 仪表（紧凑版）：适配原观察体 213px 高的方框，面板盒尺寸不变
+ // 200° 厚环（白=已观察/深灰=剩余）+ 环面短刻度 + 黑针小圆顶 + 中央大数字
+ const CX=170,CY=120,R=96,W=20,START=190,SWEEP=200;
+ const P=(r,a)=>[CX+r*Math.cos(a*Math.PI/180),CY-r*Math.sin(a*Math.PI/180)];
+ const arcPath=(r,a0,a1)=>{const p0=P(r,a0),p1=P(r,a1);const large=(a0-a1)>180?1:0;
+   return `M${p0[0].toFixed(1)},${p0[1].toFixed(1)} A${r} ${r} 0 ${large} 1 ${p1[0].toFixed(1)},${p1[1].toFixed(1)}`};
+ const aVal=START-SWEEP*ratio;
+ let h='';
+ for(let k=0;k<=64;k++){const a=START-SWEEP*k/64;const p1=P(R+W/2+3,a),p2=P(R+W/2+8,a);
+   h+=`<line x1="${p1[0].toFixed(1)}" y1="${p1[1].toFixed(1)}" x2="${p2[0].toFixed(1)}" y2="${p2[1].toFixed(1)}" stroke="var(--secondary)" opacity="${k%2?0.4:0.22}" stroke-width="1.2"/>`;}
+ h+=`<path d="${arcPath(R,START,START-SWEEP)}" fill="none" stroke="#33363b" stroke-width="${W}"/>`;
+ h+=`<path class="gauge-active" pathLength="1" d="${arcPath(R,START,aVal)}" fill="none" stroke="var(--text)" stroke-width="${W}"/>`;
+ for(let k=1;k<13;k++){const a=START-SWEEP*k/13;const p1=P(R-W/2+3,a),p2=P(R+W/2-3,a);
+   const onWhite=a>aVal;
+   h+=`<line x1="${p1[0].toFixed(1)}" y1="${p1[1].toFixed(1)}" x2="${p2[0].toFixed(1)}" y2="${p2[1].toFixed(1)}" stroke="${onWhite?'#0b0c0e':'#6a7078'}" opacity="${onWhite?.85:.6}" stroke-width="1.8"/>`;}
+ const tip=P(R-W/2-8,aVal),tail=P(10,aVal+180);
+ h+=`<g class="armory-needle" style="transform-origin:${CX}px ${CY}px"><line x1="${tail[0].toFixed(1)}" y1="${tail[1].toFixed(1)}" x2="${tip[0].toFixed(1)}" y2="${tip[1].toFixed(1)}" stroke="#0b0c0e" stroke-width="3.6" stroke-linecap="round"/><line x1="${tail[0].toFixed(1)}" y1="${tail[1].toFixed(1)}" x2="${tip[0].toFixed(1)}" y2="${tip[1].toFixed(1)}" stroke="var(--text)" stroke-width="1" stroke-linecap="round"/></g>`;
+ h+=`<path d="M${CX-17},${CY+1} a17,17 0 0 1 34,0 z" fill="#0b0c0e" stroke="var(--text)" stroke-width="1.1"/><circle cx="${CX}" cy="${CY-5}" r="1.8" fill="var(--text)"/>`;
+ h+=`<text x="${CX}" y="${CY-30}" text-anchor="middle" fill="var(--text)" style="font:44px var(--mono);letter-spacing:-1.5px">${V(n)?String(n).padStart(2,'0'):'—'}</text>`;
+ return `<article class="panel instrument"><div class="panel-heading"><h3>观察进度</h3><span class="index">01 / DURATION</span></div><div class="instrument-sub">知道看到哪里，也从哪里开始</div><div class="observe-body armory-body"><svg class="observe-dial armory-dial" viewBox="0 0 340 196" role="img" aria-label="已观察${n}个交易日，窗口${days}日，指针指向当前进度">${h}</svg><div class="armory-stats"><div><b>${md(s.formedOn||s.recDate)}</b><span>本次${s.formedOn?'推荐':'入选'}</span></div><div><b>${num(s.ref)}</b><span>原参考价 / 元</span></div></div><div class="instrument-footer"><span>观察天数，不是成功概率</span></div></article>`;
 }
 function judgment(s){
  const daily=new Map();D.ordered(s).forEach(r=>daily.set(r.date,r));const rows=[...daily.values()].slice(-7),r=rows.at(-1),dir=D.direction(r),label=dir?D.dirLabels[dir]:'方向未识别';let h='';
