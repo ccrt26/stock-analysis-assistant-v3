@@ -193,13 +193,6 @@ def test_public_publisher_pushes_unchanged_and_commits_only_homepage(tmp_path):
     assert git(remote,'rev-parse','main').stdout.strip()==local
 
 
-def test_unconfigured_publishing_stays_local(tmp_path,monkeypatch):
-    from tools.prism_publish import publish_fixed_page
-    monkeypatch.setattr(subprocess,'run',lambda *a,**k:pytest.fail('should remain local'))
-    ok,detail=publish_fixed_page(tmp_path,tmp_path/'page.html')
-    assert ok and detail.startswith('public=disabled')
-
-
 def test_source_failure_cannot_be_hidden_by_other_checks(tmp_path,monkeypatch):
     monkeypatch.setattr(stock_ai,'PROJECT_ROOT',tmp_path)
     state={}

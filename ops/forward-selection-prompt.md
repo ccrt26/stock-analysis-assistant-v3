@@ -271,7 +271,7 @@ local_archive/forward_selection/research-run-context-<action_date>.json
   --as-of <selection_as_of>
 ```
 
-不得省略参数后让脚本猜最新日期，也不得用当前日期或时间替代。程序只读取正式 trace、snapshot、日评账本、复盘报告及原有本地事实，校验归档与时点一致后更新本地 A2 主用页面 `style-preview/prism-a2.html` 和 `prism-a2-report-<formation_date>.html`；备用 `prism.html` 及旧 `prism-report-*` 停止同步，也不作为新版数据来源；不改写研究、Forward CSV、复盘或冻结结论。本地未配置 `web_publish.enabled` 时不上传；用户已启用现有 Prism 发布仓库时，同一命令也推送固定首页。推送成功不等于公网已经更新，公网可见性以实际页面为准。
+不得省略参数后让脚本猜最新日期，也不得用当前日期或时间替代。程序只读取正式 trace、snapshot、日评账本、复盘报告及原有本地事实，校验归档与时点一致后更新本地 A2 主用页面 `style-preview/prism-a2.html` 和 `prism-a2-report-<formation_date>.html`；备用 `prism.html` 及旧 `prism-report-*` 停止同步，也不作为新版数据来源；不改写研究、Forward CSV、复盘或冻结结论。渲染器不是云端上传命令，只生成本地页面；公网发布只经 `tools/publish_prism_a2.sh` 人工执行。推送成功不等于公网已经更新，公网可见性以实际页面为准。
 
 检查退出码及输出：退出码 0 且 `published=` 为文件路径或 `unchanged` 表示固定网页已就绪；`published=skipped_newer` 表示仅更新本次日期页，保留较新首页，不得称首页已切换到补跑日期。同步失败时保留已完成研究和上一版固定网页，交付完整合并报告并附前述一行具体错误；后续恢复只重新执行同一同步命令，不重跑研究。进程若在归档后、调用命令前中断，补跑恢复时仍须执行本步。
 
