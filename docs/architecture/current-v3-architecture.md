@@ -331,3 +331,9 @@ A2 推荐正文另有只读的独立展示路径（`tools/statement_display.py`�
 日报复盘和跟踪统计由 `tools/nightly_report.py` 从正式记录装配，保留模型原响应，再按原合同验收。公司介绍新保存的官方引用带可回读原件，修订保留旧稿；历史介绍保持原身份读取。WEB 关联同一次任务的生成/失败/完成状态，终态保存后刷新。现有 Prism 公网页仅经人工执行 `tools/publish_prism_a2.sh` 同步到发布仓库，渲染器默认只生成本地页面；不是恢复旧报告发布架构。运行、取证与人工补缺见 `ops/web-display-maintenance.md`。
 
 已知公告的原件读取复用 `official_evidence`：核对身份、版本和原公开时间后优先使用已有原件，再原链接/相对 pdf_path 与同身份官方入口。官方下载在函数内直连，不改变 Astra 代理；HTTP 状态、最终 URL 和失败诊断留取证记录，原 v1 receipt/read_evidence 保持兼容。本轮步骤可共用临时原件，不新建全文库；下载时刻不替代历史 available_at。
+
+### 信息型早确认与可见批量复盘（2026-09-17）
+
+用户批准在五Skill及V4合同增加可选 early_confirmation，仅给有实质新增信息、已完成首个有效响应交易日的公司/板块机会使用。旧记录默认None，纯价格仍检查多日连续性；不是新发动机、评分、关注池或收益口径。来源、实际可用时间、响应、成员与保留条件见V4合同第10节。
+
+现有Prism增加“选股方法复盘”，只读 local_archive/skill_optimization/ 的人工研究报告，并复用既有导出器函数计算下一批准备状态。tools/selection_method_review.py 不生成因果正文、不改规则、不新增任务。最新固定页的方法研究使用实际生成时间；日期归档页以原as_of过滤，分别渲染。说明见 docs/selection-method-review-guide.md。

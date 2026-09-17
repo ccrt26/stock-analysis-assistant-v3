@@ -58,9 +58,9 @@ V1透明解释条件：
 
 ## 5. 板块发动机
 
-`sector_broad_diffusion` 要求3/5日板块相对收益和成员中位数为正、上涨面均高于50%、5日成交份额增加、前三强正收益贡献低于80%，候选只能是 `leader_confirmed` 或 `core_diffusion_member`。
+未使用下述信息型早确认时，`sector_broad_diffusion` 要求3/5日板块相对收益和成员中位数为正、上涨面均高于50%、5日成交份额增加、前三强正收益贡献低于80%，候选只能是 `leader_confirmed` 或 `core_diffusion_member`。
 
-`sector_leader_cluster` 至少要求 `max(3, ceil(有效成员数×5%))` 只真实相关成员同步增强。每个记录成员都必须同时具有正的3日/5日相对市场收益和不低于75%的板块内5日百分位；5日成交份额增加，单一股票正收益贡献不高于60%，候选自身板块内百分位不低于75%。只有 `leader_confirmed` 和 `core_diffusion_member` 可以正式入选；不能用“补涨”升级落后成员。
+常规 `sector_leader_cluster` 至少要求 `max(3, ceil(有效成员数×5%))` 只真实相关成员同步增强。每个记录成员都必须同时具有正的3日/5日相对市场收益和不低于75%的板块内5日百分位；5日成交份额增加，单一股票正收益贡献不高于60%，候选自身板块内百分位不低于75%。只有 `leader_confirmed` 和 `core_diffusion_member` 可以正式入选；不能用“补涨”升级落后成员。
 
 ## 6. 披露链
 
@@ -92,3 +92,15 @@ V4 结果冻结后，程序按每条研究记录继续保存必要事实，但�
 公告状态只有 `cninfo_complete | exchange_complete | exchange_partial | announcement_unavailable`。`exchange_partial` 时，`fresh_event_pending` 只允许用于 `announcement_exchanges` 中完整覆盖的交易所；未覆盖交易所不得把查询失败解释为没有公告。`announcement_unavailable` 时不得形成行动日前新公告候选。所有公告仍必须满足 `available_at <= as_of`。
 
 跟踪程序不增加第六个 Skill，不计算总分，也不改变本合同七种 `engine_type`、四种 `engine_status`、一条正式推荐通道、一条事件线索通道和11个既有价格场景。
+
+## 10. 信息型早确认（可选；不改旧记录）
+
+`research_thesis.early_confirmation` 默认 null。只适用于 event_repricing_confirmed、sector_broad_diffusion、sector_leader_cluster；不是新发动机、候选池、评分或新收益口径。只对有实质新增信息的机会允许首个完整响应日后比较；无此对象沿用原合同。既有公司证据、价格 support 的观察日期、绝对价格、相对表现、成交和路径质量仍必需。程序检验元数据一致性，来源内容是否真实、材料性和当前入口是否值得由 Skill 判断。
+
+字段：information_decision_id、带时区 information_available_at、first_response_date、incremental_information、why_not_wait、remaining_path_basis、counterevidence_response。引用必须在 thesis.decision_ids 中、同股票、来自公司或板块 Skill 的 support；原 formation_values 包含实际 source_locator、available_at、source_read=true、new_information_level=substantive_new、information_kind=company_event/industry_change。信息须在首个响应日开盘前可用，收盘已完成且不晚于 formation_date/as_of；盘中未解决时点、重复、未知、仅标题均不可用。
+
+事件使用同 event_id 和实际 event_available_at 的 event-price-reaction-v3、至少一个完整可交易反应日；公司披露链仍必需。板块记录 member_responses=[{ts_code, return_1d, relative_market_1d, amount}]，每个值有限、相对市场为正、成交额正，成员无重复且候选包含其中，真实同组身份按形成日核验。板块首日价格 support 保留 reaction_start_date、observation_date、response_session_is_open=true、response_tradable=true；这些标注须来自真实交易日历与交易状态，不能为过校验补猜。
+
+板块 early 只豁免旧3/5日相对/中位收益、广度以及成员/候选5日75%位置条件。保留5日成交份额增加、广泛扩散前三贡献<80%、领导簇单股贡献≤60%、leader/core身份。领导簇人数仍为 max(3,ceil(有效成员×5%))，首日列表覆盖全部用于证明的同一簇成员，计数一致。广泛扩散另填 group_effective_member_count、group_observed_member_count、group_advancing_member_count、group_breadth_1d（上涨数/全部有效成员）、group_median_return_1d、group_relative_return_1d；整体多数上涨、中位及相对收益为正，缺失成员留在分母并解释覆盖。
+
+首日响应不声称持续趋势成立；5日仍弱或后续走弱均须回应。纯价格候选仍需要多日连续性。旧高、低位或ATR距离不单独证明未来20日余量。方法状态为已采用、待新样本验证；不用历史已知赢家证明优化有效。

@@ -232,3 +232,15 @@ review_question, case_interpretation, missing_evidence
 资料不足时交付已完成对照与精确缺口，不编原因、不无限重试、不扩建全市场回测。缺一项行业对照只限制对应归因，不使其他可评价部分失效。
 
 正式结果和研究数据包只读；分析产物放本地独立目录；KB存草稿与获批认识。没有明确发布授权不上传真实研究包、Obsidian全文或个人路径。
+
+## 可见交付合同（2026-09-17）
+
+研究不是盲盒，用户入口为现有Prism侧栏“选股方法复盘”。读 docs/selection-method-review-guide.md；准备状态只表示数据齐备，不代表AI研究已完成。默认仍 diagnose、人工触发；没有新后台任务、自动Skill修改或收益承诺。
+
+每批在 local_archive/skill_optimization/<batch_id>/ 唯一保存：source/（既有导出器和校验器），00_问题与范围.md（先固定范围），01_样本对照.csv（全部实际候选；未知空白），02_研究结论与后续验证.md（AI实际逐段撰写），review.json（元数据）。不得用模板程序生成因果正文。完整连续5个研究日而非挑5只股票；旧版/V4/条件事件分组，未满D20只作 preliminary，不因几个成熟样本就称整批完成。条件性但落选的候选保留原去留，不冒充入选条件事件。
+
+review.json 使用 {"batch_id":"目录名","revisions":[...]}；每个revision须有实际带时区 available_at、status=preliminary/complete、title、start_action_date、end_action_date、outcome_through_date、scope_file、samples_file、report_file、changes=[{before,after,cost,check}]、verification。文件引用限定批次目录内。后续修订写新的正文/CSV文件，追加新实际available_at，不覆盖旧正文配旧时间。正文包括数据分母、支持与反例、原近邻、执行偏差与方法假设、其他解释、缺失、原固定目标和待验证问题。真实报告和样本不上公开Git。
+
+新早确认已在本次用户授权内采用，但绩效尚待新样本检验；首个实际运行记录只能从真实run-context读取。后续批次仍从最早未完成的连续5个研究日开始，初步诊断不跳过未完成批次。原日评与D20结案不被改写。比较更早确认的收益与假启动、最深下跌、回撤、零入选日，不以减少样本美化指标，不因单个失败再次调参。
+
+最后调用既有 tools/render_prism_web.py 更新本地页。最新固定入口使用实际渲染时间加载事后研究，按日期HTML仍以原snapshot.as_of过滤；个股回看不改变方法页时钟。源码备份授权不等于真实研究的公网发布授权。

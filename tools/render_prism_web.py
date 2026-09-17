@@ -33,7 +33,7 @@ import json
 import os
 import sys
 import tempfile
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -397,6 +397,10 @@ def render(args, renderer, adapt, prism, monitor_dir: Path) -> int:
     display_snapshot = adapt.enrich_snapshot(
         payload, market_rows=market_rows or None, market_codes=codes
     )
+    from selection_method_review import build_method_page
+    display_snapshot["methodReviews"] = build_method_page(
+        PROJECT_ROOT, visible_at=as_of, through=analysis_date.isoformat(), live=False,
+    )
     series = prism.assemble_series(PROJECT_ROOT, renderer, display_snapshot)
     html = prism.render_html(display_snapshot, series)
     if adapt.read_snapshot_text(html) != display_snapshot:
@@ -423,10 +427,21 @@ def render(args, renderer, adapt, prism, monitor_dir: Path) -> int:
     if not args.no_publish:
         if newer_fixed:
             print(f"published=skipped_newer {fixed_path}")
-        elif write_html(fixed_path, html):
-            print(f"published={fixed_path}")
         else:
-            print(f"published=unchanged {fixed_path}")
+            # The dated artifact remains bound to its original cutoff. Only the
+            # newest fixed entry receives separately timestamped post-hoc studies.
+            latest_html = html
+            if analysis_date == renderer.resolve_date(monitor_dir, None):
+                latest_snapshot = dict(display_snapshot)
+                latest_snapshot["methodReviews"] = build_method_page(
+                    PROJECT_ROOT, visible_at=datetime.now(timezone.utc),
+                    through=analysis_date.isoformat(), live=True,
+                )
+                latest_html = prism.render_html(latest_snapshot, series)
+                if adapt.read_snapshot_text(latest_html) != latest_snapshot:
+                    raise ValueError("latest method snapshot mismatch")
+            changed = write_html(fixed_path, latest_html)
+            print(f"published={'updated' if changed else 'unchanged'} {fixed_path}")
     provided = [row for row in display_snapshot.get("marketIndices", []) if row.get("close") is not None]
     print(f"analysis_date={analysis_date.isoformat()}")
     print(f"html_file={out_path}")

@@ -222,3 +222,9 @@ evidence_sufficiency: sufficient | partial | insufficient
 ## 典型冲突
 
 净利润增长但经营现金流明显恶化时，把利润改善作为支持，把现金流恶化作为强反证或备选解释；不要用一个数字覆盖另一个。公司事件很强但市场、板块和价格未知时，只提交候选线索并请求其他视角验证。
+
+## 提前识别真正的新信息
+
+对可能改变近期供需、交付、利润或风险的实质变化，先核对完整官方来源、披露链、实际 available_at 和材料性，再交价格 Skill 检查首个完整交易日响应。允许总控按 V4 `early_confirmation` 提前比较，不因“还没连续涨几天”直接推迟研究。旧财报背景、同事项重复披露、标题或研究者首次看到旧消息均不适用。
+
+用于早确认的 support 决策 formation_values 必须保留 source_locator、available_at、source_read=true、new_information_level=substantive_new、information_kind=company_event（事件另保留 event_id）。这是来源核查记录，不是程序自动证明利好。事件身份与 company_information、event-price-reaction-v3 对齐。尚无完整反应日仍走已有 fresh_event_pending，不产生正式收益。

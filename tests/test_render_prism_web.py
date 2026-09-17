@@ -104,6 +104,14 @@ def test_cli_renders_with_market_enrichment(
         lambda monitor_dir, day: ({}, {}, monitor_dir / "r.json", monitor_dir / "s.json"),
     )
     monkeypatch.setattr(renderer, "build_payload", lambda *args, **kwargs: payload)
+    import selection_method_review
+    # Synthetic post-hoc research exercises the two HTML clocks without reading
+    # the developer's personal method archive.
+    def method_page(root, *, visible_at, through, live=False):
+        return {"clock": "latest" if live else "historical",
+                "visible_at": visible_at.isoformat(),
+                "reviews": [{"title": "synthetic later study"}] if live else []}
+    monkeypatch.setattr(selection_method_review, "build_method_page", method_page)
     # 屏蔽本地事实仓读取：无数据时页面保持“快照未提供”。
     monkeypatch.setattr(renderer, "_read_day_frames", lambda root, name, day, cutoff: None)
 
@@ -124,14 +132,20 @@ def test_cli_renders_with_market_enrichment(
     printed = capsys.readouterr().out
     assert "market_rows_loaded=0" in printed
     assert "market_provided=0/4" in printed
-    # 固定地址随渲染发布，与留档内容一致；重复运行幂等。
+    # Latest method research has its own clock. Historical stock facts remain
+    # identical, and repeated rendering cannot inject later research into history.
     fixed = tmp_path / "style-preview" / "prism-a2.html"
-    assert fixed.is_file() and fixed.read_text(encoding="utf-8") == text
-    first_fixed_mtime = fixed.stat().st_mtime_ns
+    latest = json.loads(fixed.read_text().split('<script id="snapshot" type="application/json">')[1].split("</script>")[0])
+    assert latest["methodReviews"]["reviews"] == [{"title": "synthetic later study"}]
+    assert embedded["methodReviews"]["reviews"] == []
+    assert embedded["methodReviews"]["visible_at"] == payload["as_of"]
+    assert {k:v for k,v in latest.items() if k != "methodReviews"} == {
+        k:v for k,v in embedded.items() if k != "methodReviews"}
+    first_history_mtime = out.stat().st_mtime_ns
     assert prism_cli.main(["--out", str(out)]) == 0
     capsys.readouterr()
-    assert fixed.read_text(encoding="utf-8") == text
-    assert fixed.stat().st_mtime_ns == first_fixed_mtime
+    assert out.read_text(encoding="utf-8") == text
+    assert out.stat().st_mtime_ns == first_history_mtime
 
 
 @pytest.fixture

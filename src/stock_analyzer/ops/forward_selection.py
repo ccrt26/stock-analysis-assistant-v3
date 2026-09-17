@@ -456,9 +456,39 @@ class SectorLeaderClusterEvidenceV4(BaseModel):
     unknowns: list[str] = Field(default_factory=list)
 
 
+class EarlyMemberResponseV4(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    ts_code: str = Field(min_length=9)
+    return_1d: float = Field(allow_inf_nan=False, strict=True)
+    relative_market_1d: float = Field(gt=0, allow_inf_nan=False, strict=True)
+    amount: float = Field(gt=0, allow_inf_nan=False, strict=True)
+
+
+class EarlyConfirmationV4(BaseModel):
+    """Optional evidence for information-led recognition, never a new engine."""
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    information_decision_id: str = Field(min_length=1)
+    information_available_at: datetime
+    first_response_date: date
+    incremental_information: str = Field(min_length=1)
+    why_not_wait: str = Field(min_length=1)
+    remaining_path_basis: str = Field(min_length=1)
+    counterevidence_response: str = Field(min_length=1)
+    member_responses: list[EarlyMemberResponseV4] = Field(default_factory=list)
+    group_effective_member_count: int | None = Field(default=None, ge=3)
+    group_observed_member_count: int | None = Field(default=None, ge=3)
+    group_advancing_member_count: int | None = Field(default=None, ge=0)
+    group_breadth_1d: float | None = Field(default=None, ge=0, le=1, allow_inf_nan=False)
+    group_median_return_1d: float | None = Field(default=None, allow_inf_nan=False)
+    group_relative_return_1d: float | None = Field(default=None, allow_inf_nan=False)
+
+
 class ResearchThesisV4(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
+    early_confirmation: EarlyConfirmationV4 | None = None
     engine_type: EngineTypeV4
     engine_status: EngineStatusV4
     market_recognition: MarketRecognitionV4
@@ -1571,12 +1601,16 @@ def _validate_trace_v4(
         thesis = candidate.research_thesis
         _validate_v4_engine_shape(candidate)
         _validate_v4_company_information(thesis.company_information, as_of=payload.as_of)
-        _validate_v4_sector_evidence(code, thesis)
         referenced = _resolve_v4_decisions(
             code=code,
             decision_ids=thesis.decision_ids,
             decisions_by_id=decisions_by_id,
         )
+        _validate_v4_early_confirmation(
+            candidate, referenced=referenced,
+            formation_date=payload.formation_date, as_of=payload.as_of,
+        )
+        _validate_v4_sector_evidence(code, thesis)
         if candidate.final_fate != "selected":
             continue
         _validate_v4_selected_candidate(
@@ -1640,6 +1674,108 @@ def _validate_v4_company_information(
         raise ValueError("company_information_not_applicable_mismatch")
 
 
+def _validate_v4_early_confirmation(
+    candidate: TraceCandidateV4, *, referenced: list[TraceDecision],
+    formation_date: date, as_of: datetime,
+) -> None:
+    thesis = candidate.research_thesis
+    early = thesis.early_confirmation
+    if early is None:
+        return
+    if thesis.engine_type not in {
+        "event_repricing_confirmed", "sector_broad_diffusion", "sector_leader_cluster",
+    }:
+        raise ValueError("early_confirmation_engine_invalid")
+    at = early.information_available_at
+    if at.tzinfo is None or at.utcoffset() is None:
+        raise ValueError("early_information_timezone_missing")
+    response_open = datetime.combine(early.first_response_date, MARKET_OPEN, SHANGHAI)
+    response_close = datetime.combine(early.first_response_date, time(15), SHANGHAI)
+    if (_shanghai(at) >= response_open or _shanghai(at) > _shanghai(as_of)
+            or early.first_response_date > formation_date or response_close > _shanghai(as_of)):
+        raise ValueError("early_confirmation_time_invalid")
+    information = next((item for item in referenced
+                        if item.decision_id == early.information_decision_id), None)
+    if (information is None or information.ts_code != candidate.ts_code
+            or information.source_skill not in {"researching-company-events", "researching-sectors-industries"}
+            or information.decision_role != "support"):
+        raise ValueError("early_information_reference_invalid")
+    values = information.formation_values
+    if (not isinstance(values.get("source_locator"), str) or not values["source_locator"].strip()
+            or values.get("new_information_level") != "substantive_new"
+            or values.get("information_kind") not in {"company_event", "industry_change"}
+            or values.get("source_read") is not True):
+        raise ValueError("early_information_source_invalid")
+    try:
+        source_time = datetime.fromisoformat(str(values.get("available_at", "")))
+    except ValueError:
+        raise ValueError("early_information_time_mismatch") from None
+    if source_time.tzinfo is None or _shanghai(source_time) != _shanghai(at):
+        raise ValueError("early_information_time_mismatch")
+    supports = [item for item in referenced
+                if item.source_skill == "analyzing-price-trading" and item.decision_role == "support"]
+    if not supports:
+        raise ValueError("early_price_support_missing")
+    for item in supports:
+        _validate_v4_price_support_values(item, formation_date=formation_date)
+    response_supports = [item for item in supports
+        if str(item.formation_values.get("reaction_start_date", "")) == early.first_response_date.isoformat()
+        and str(item.formation_values.get("observation_date", "")) >= early.first_response_date.isoformat()
+        and (item.evidence_id == EVENT_REACTION_EVIDENCE_ID or (
+            str(item.formation_values.get("observation_date", "")) == early.first_response_date.isoformat()
+            and item.formation_values.get("response_session_is_open") is True
+            and item.formation_values.get("response_tradable") is True
+        ))]
+    if not response_supports:
+        raise ValueError("early_response_start_mismatch")
+    if thesis.engine_type == "event_repricing_confirmed":
+        info = thesis.company_information
+        if (values.get("information_kind") != "company_event"
+                or info.new_information_level != "substantive_new"
+                or info.event_available_at is None or _shanghai(info.event_available_at) != _shanghai(at)
+                or values.get("event_id") != info.event_id):
+            raise ValueError("early_event_identity_mismatch")
+        matching_reaction = False
+        for item in response_supports:
+            if (item.evidence_id != EVENT_REACTION_EVIDENCE_ID
+                    or str(item.formation_values.get("event_id", "")) != info.event_id):
+                continue
+            try:
+                reaction_time = datetime.fromisoformat(str(item.formation_values.get("event_available_at", "")))
+            except ValueError:
+                continue
+            if reaction_time.tzinfo is not None and _shanghai(reaction_time) == _shanghai(at):
+                matching_reaction = True
+        if not matching_reaction:
+            raise ValueError("early_event_reaction_mismatch")
+        if early.member_responses:
+            raise ValueError("early_sector_members_not_applicable")
+        return
+    members = [row.ts_code for row in early.member_responses]
+    if len(members) < 3 or len(set(members)) != len(members) or candidate.ts_code not in members:
+        raise ValueError("early_sector_members_invalid")
+    if thesis.sector_leader_cluster is not None:
+        cluster = thesis.sector_leader_cluster
+        if set(members) != {row.ts_code for row in cluster.members}:
+            raise ValueError("early_sector_members_mismatch")
+        if cluster.qualifying_leader_count > cluster.effective_member_count:
+            raise ValueError("early_sector_member_count_invalid")
+    if thesis.sector_broad_diffusion is not None:
+        effective, observed = early.group_effective_member_count, early.group_observed_member_count
+        if (effective is None or observed is None or observed > effective or observed < len(members)
+                or early.group_advancing_member_count is None
+                or early.group_advancing_member_count > observed
+                or early.group_breadth_1d is None
+                or not math.isclose(early.group_breadth_1d,
+                                    early.group_advancing_member_count / effective, abs_tol=1e-6)):
+            # Missing constituents remain in the denominator; coverage is explicit.
+            raise ValueError("early_sector_breadth_coverage_invalid")
+        if not (early.group_breadth_1d is not None and early.group_breadth_1d > 0.5
+                and early.group_median_return_1d is not None and early.group_median_return_1d > 0
+                and early.group_relative_return_1d is not None and early.group_relative_return_1d > 0):
+            raise ValueError("early_sector_breadth_invalid")
+
+
 def _validate_v4_sector_evidence(code: str, thesis: ResearchThesisV4) -> None:
     broad = thesis.sector_broad_diffusion
     cluster = thesis.sector_leader_cluster
@@ -1647,12 +1783,14 @@ def _validate_v4_sector_evidence(code: str, thesis: ResearchThesisV4) -> None:
         if broad is None or cluster is not None:
             raise ValueError("sector_broad_diffusion_evidence_invalid")
         if not (
-            broad.relative_return_3d > 0.0
-            and broad.relative_return_5d > 0.0
-            and broad.median_return_3d > 0.0
-            and broad.median_return_5d > 0.0
-            and broad.breadth_3d > 0.5
-            and broad.breadth_5d > 0.5
+            (thesis.early_confirmation is not None or (
+                broad.relative_return_3d > 0.0
+                and broad.relative_return_5d > 0.0
+                and broad.median_return_3d > 0.0
+                and broad.median_return_5d > 0.0
+                and broad.breadth_3d > 0.5
+                and broad.breadth_5d > 0.5
+            ))
             and broad.turnover_share_change_5d > 0.0
             and broad.top3_positive_contribution < 0.80
             and broad.candidate_role in {"leader_confirmed", "core_diffusion_member"}
@@ -1677,12 +1815,14 @@ def _validate_v4_sector_evidence(code: str, thesis: ResearchThesisV4) -> None:
             cluster.required_leader_count == required
             and cluster.qualifying_leader_count >= required
             and len(cluster.members) == cluster.qualifying_leader_count
-            and member_conditions_hold
-            and cluster.relative_return_3d > 0.0
-            and cluster.relative_return_5d > 0.0
+            and (thesis.early_confirmation is not None or (
+                member_conditions_hold
+                and cluster.relative_return_3d > 0.0
+                and cluster.relative_return_5d > 0.0
+                and cluster.candidate_industry_percentile_5d >= 0.75
+            ))
             and cluster.turnover_share_change_5d > 0.0
             and cluster.top1_positive_contribution <= 0.60
-            and cluster.candidate_industry_percentile_5d >= 0.75
             and cluster.candidate_role in {"leader_confirmed", "core_diffusion_member"}
         ):
             raise ValueError("sector_leader_cluster_conditions_invalid")

@@ -76,7 +76,7 @@ def test_detailed_recommendation_explanation_is_required_after_selection_freeze(
         "公司主要做什么",
         "为什么会选它",
         "什么情况会让我改变看法",
-        "名单、顺序和内部研究结论在生成用户说明前已经确定",
+        "名单、顺序和内部研究结论在写作时已有明确拟定版本",
         "不再单设",
         "作为必写栏目",
         "主文中必须让读者看到重要风险",
@@ -154,7 +154,6 @@ def test_selection_prompt_requires_reasoning_not_a_fact_list() -> None:
         "哪些事实支持，哪些事实反对",
         "为什么最不利的事实暂时没有推翻推荐",
         "为什么是这只股票，而不是同行里另一只",
-        "五日多数涨幅来自一个涨停日时",
     ):
         assert phrase in prompt
 
@@ -164,18 +163,14 @@ def test_selection_prompt_requires_reasoning_not_a_fact_list() -> None:
 
 def test_selection_prompt_separates_confirmation_from_price_already_paid() -> None:
     prompt = Path("ops/forward-selection-prompt.md").read_text(encoding="utf-8")
-
-    for phrase in (
-        "获得的确认",
-        "已经付出的涨幅",
-        "去掉最大上涨日",
-        "最大上涨日之后",
-        "不能一边说核心持续性没有验证一边正式推荐",
-        "为什么会选它",
-        "阶段名称代替实际说明",
-    ):
+    price = Path(".agents/skills/analyzing-price-trading/SKILL.md").read_text(encoding="utf-8")
+    # The execution prompt delegates research criteria to Skills; do not restore
+    # a second copy of old multi-day gates to satisfy a wording assertion.
+    for phrase in ("价格连续性、单日贡献", "已经付出的涨幅", "为什么会选它"):
         assert phrase in prompt
-
+    for phrase in ("获得的确认", "已经付出的涨幅", "去掉最大上涨日", "最大上涨日之后",
+                   "纯价格型候选", "第一个完整、可交易的响应日", "不声称多日持续性成立"):
+        assert phrase in price
     assert "供<action_date>交易日参考" in prompt
     user_output = prompt.split("### 唯一用户输出格式", maxsplit=1)[1]
     for forbidden in ("冻结时点", "冻结结论", "正常双向成交", "农业样本"):

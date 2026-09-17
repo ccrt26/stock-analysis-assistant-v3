@@ -174,3 +174,9 @@ evidence_sufficiency: sufficient | partial | insufficient
 - 不输出热点总分、固定广度阈值、市场 Gate 或最终推荐；
 - 不用当前成员关系覆盖历史成员关系；
 - 数据不足时保留未知，不把单只强势股扩写成板块机会。
+
+## 新变化后的首日传播
+
+真实行业变化刚发生时，允许总控用 V4 `early_confirmation` 检查首个完整响应日，避免旧3/5日窗口把刚启动的成员排除。必须先读 V4 合同早确认章节。信息 support 的 formation_values 保留 source_locator、available_at、source_read=true、new_information_level=substantive_new、information_kind=industry_change；不能以行业今天上涨本身冒充新增产业信息。
+
+至少三只当时真实同组成员有正的首日相对市场收益和有效成交，候选在其中。广泛扩散保留全组分母、已观测数、上涨数及首日整体中位收益/相对收益；只挑三只上涨股不代表全行业。领导簇保留原 max(3,ceil(有效成员×5%))、完整成员清单与候选 leader/core 身份。只放宽旧3/5日强度/广度及5日百分位，成交份额与集中度约束保持；较长窗口偏弱要解释。无新增信息时旧合同照常，行业标签或单只涨停仍不能构成板块发动机。
