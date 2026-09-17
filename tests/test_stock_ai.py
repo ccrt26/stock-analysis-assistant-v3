@@ -50,6 +50,17 @@ def isolated(tmp_path, monkeypatch, mac_log):
     monkeypatch.setattr(stock_ai, "LOCK_PATH", tmp_path / "local_archive" / "ai_tasks" / "task.lock")
     # 此文件隔离测试调度/验收；真实源装配在 test_web_delivery.py 覆盖。
     monkeypatch.setattr(stock_ai, "assemble_saved_reply", lambda *a: None)
+    # These tests isolate scheduling/provider routes. Full prefreeze sequencing and
+    # recovery are covered independently in test_recommendation_pipeline.py.
+    import tools.recommendation_pipeline as pipeline
+    def fake_completion(host, state, path, directory, config, provider, prompt):
+        response, route = pipeline.run_stage(host, state, path, directory, "research", prompt,
+                                              provider, config, text_only=False)
+        final = directory / "reviewed-reply.md"
+        final.write_text(response)
+        return final, route
+    monkeypatch.setattr(pipeline, "complete", fake_completion)
+    monkeypatch.setattr(stock_ai, "run_managed_company_introductions", lambda *a, **k: None)
     stock_ai.EvidenceBox.store.clear()  # 模型证据不跨测试残留
     # 凭据隔离：默认来源替换为临时环境变量，真实钥匙串/凭据文件不可达。
     monkeypatch.setattr(stock_ai, "DEFAULT_KEY_SOURCES", {
@@ -64,6 +75,11 @@ def isolated(tmp_path, monkeypatch, mac_log):
         lambda message: (mac_log.append(message), (True, "测试接收器，未真实发送"))[1])
     monkeypatch.setattr(stock_ai, "_LAST_STATE_PATH", None)
     return tmp_path
+
+
+def astra_evidence():
+    return {"verified": True, "consistent": True, "provider": "openai", "model": "gpt-6-astra",
+            "request_model": "gpt-6-astra", "effort": "high", "auth_method": "chatgpt"}
 
 
 def write_config(isolated, **data):
@@ -203,6 +219,8 @@ def prepared_run(isolated, monkeypatch, now=None, rerun=None,
         calls.append(("model", provider))
         timeouts[provider] = timeout
         prompts.append(Path(prompt).read_text(encoding="utf-8"))
+        if provider == "astra":
+            stock_ai.EvidenceBox.record(provider, astra_evidence())
         if agent_side:
             agent_side(provider)
         script = agent_script or {}
@@ -257,7 +275,7 @@ def test_no_time_limit_model_receives_none_and_completes(isolated, monkeypatch):
     assert stock_ai.run_nightly(Args(), {}, None, now=at("2026-09-11", 19, 30)) == stock_ai.EXIT_OK
     state = json.loads(path.read_text(encoding="utf-8"))
     assert state["result"]["status"] == "完整完成"
-    assert timeouts["glm"] is None  # 无时限
+    assert timeouts["astra"] is None  # 无时限
 
 
 def test_no_budget_minutes_attribute(isolated):
@@ -271,13 +289,13 @@ def test_legacy_budget_config_cannot_restore_time_limit(isolated, monkeypatch):
     write_config(isolated,
                  budget_minutes={"nightly": 110, "preopen": 30},
                  key_sources={
-                     "glm": [{"kind": "env", "name": "STOCK_AI_TEST_GLM_KEY"}],
+                     "astra": [{"kind": "env", "name": "STOCK_AI_TEST_GLM_KEY"}],
                      "deepseek": [{"kind": "env", "name": "STOCK_AI_TEST_DS_KEY"}],
                  })
     path, _calls, timeouts, _prompts = prepared_run(isolated, monkeypatch)
     assert stock_ai.run_nightly(Args(), stock_ai.load_local_config(), None,
                                 now=at("2026-09-11", 19, 30)) == stock_ai.EXIT_OK
-    assert timeouts["glm"] is None
+    assert timeouts["astra"] is None
 
 
 def test_prepare_keeps_technical_bound(isolated, monkeypatch):
@@ -293,18 +311,16 @@ def test_prepare_keeps_technical_bound(isolated, monkeypatch):
 # ---------------------------------------------------------------- 路由
 
 
-def test_default_order_is_glm_deepseek_without_astra(isolated):
+def test_default_order_is_astra_glm_deepseek(isolated):
     order, _ = stock_ai.resolve_provider_order("nightly", None, {}, dt.date(2026, 9, 11))
-    assert order == ["glm", "deepseek"]
+    assert order == ["astra", "glm", "deepseek"]
+    assert stock_ai.resolve_provider_order("preopen", None, {}, dt.date(2026, 9, 11))[0] == ["glm", "deepseek"]
 
 
-def test_astra_is_never_attempted_automatically(isolated):
-    config = {"default_preference": "astra"}
-    order, source = stock_ai.resolve_provider_order("nightly", None, config, dt.date(2026, 9, 11))
-    assert order == ["glm", "deepseek"]
-    config2 = {"tonight": {"date": "2026-09-11", "preference": "astra"}}
-    order2, source2 = stock_ai.resolve_provider_order("nightly", None, config2, dt.date(2026, 9, 11))
-    assert order2 == ["glm", "deepseek"]
+def test_nightly_astra_override_does_not_change_preopen(isolated):
+    config = {"default_preference": "deepseek", "task_preferences": {"nightly":"auto"}}
+    assert stock_ai.resolve_provider_order("nightly", None, config, dt.date(2026, 9, 11))[0] == ["astra", "glm", "deepseek"]
+    assert stock_ai.resolve_provider_order("preopen", None, config, dt.date(2026, 9, 11))[0] == ["deepseek", "glm"]
 
 
 def test_tonight_override_only_binds_same_day_evening_task(isolated):
@@ -384,6 +400,7 @@ def test_nightly_sunday_evening_uses_sunday_cutoff_for_monday(isolated, monkeypa
     monkeypatch.setattr(stock_ai, "run_prepare", fake_run_prepare)
 
     def fake_agent(provider, prompt, final, jsonl, timeout, config, extra=None):
+        stock_ai.EvidenceBox.record(provider, astra_evidence())
         assert timeout is None  # 无时限
         final.write_text("报告", encoding="utf-8")
         return 0, ""
@@ -416,8 +433,8 @@ def test_nightly_success_records_complete_result(isolated, monkeypatch, capsys):
     assert stock_ai.run_nightly(Args(), {}, None, now=at("2026-09-11", 19, 30)) == stock_ai.EXIT_OK
     state = json.loads(path.read_text(encoding="utf-8"))
     assert state["result"]["status"] == "完整完成"
-    assert [c for c in calls if c[0] == "model"] == [("model", "glm")]
-    assert timeouts["glm"] is None
+    assert [c for c in calls if c[0] == "model"] == [("model", "astra")]
+    assert timeouts["astra"] is None
 
 
     canonical = isolated / f"local_archive/forward_selection/daily-research-{state['formation_date']}.md"
@@ -428,26 +445,26 @@ def test_nightly_quota_failure_falls_back_no_budget_split(isolated, monkeypatch,
     """额度失败接替备用；使用本测试临时配置，不回落真实凭据来源。"""
     path, calls, timeouts, _p = prepared_run(
         isolated, monkeypatch,
-        agent_script={"glm": (1, "Error: HTTP 402: provider quota exhausted")},
+        agent_script={"astra": (1, "[model-request-error] Error: HTTP 402: provider quota exhausted")},
     )
     assert stock_ai.run_nightly(Args(), stock_ai.load_local_config(), None,
                                 now=at("2026-09-11", 19, 30)) == stock_ai.EXIT_OK
     models = [c[1] for c in calls if c[0] == "model"]
-    assert models == ["glm", "deepseek"]  # 额度不足 → 接替
-    assert timeouts["deepseek"] is None  # 备用同样无时限
+    assert models == ["astra", "glm"]  # 额度不足 → 接替
+    assert timeouts["glm"] is None  # 备用同样无时限
     state = json.loads(path.read_text(encoding="utf-8"))
     outcomes = {a["provider"]: a["outcome"] for a in state["attempts"]}
-    assert outcomes == {"glm": "failed", "deepseek": "success"}
+    assert outcomes == {"astra": "failed", "glm": "success"}
 
 
 def test_nightly_local_error_does_not_fallback(isolated, monkeypatch):
     path, calls, _t, _p = prepared_run(
         isolated, monkeypatch,
-        agent_script={"glm": (1, "Traceback (most recent call last):\nFileNotFoundError: snapshot does not exist")},
+        agent_script={"astra": (1, "Traceback (most recent call last):\nFileNotFoundError: snapshot does not exist")},
     )
     assert stock_ai.run_nightly(Args(), {}, None, now=at("2026-09-11", 19, 30)) == stock_ai.EXIT_FAIL
     models = [c[1] for c in calls if c[0] == "model"]
-    assert models == ["glm"]  # 本地错误不接替
+    assert models == ["astra"]  # 本地错误不接替
     state = json.loads(path.read_text(encoding="utf-8"))
     assert "本地/数据" in state["attempts"][-1]["reason"]
 
@@ -455,11 +472,11 @@ def test_nightly_local_error_does_not_fallback(isolated, monkeypatch):
 def test_nightly_context_breaker_is_config_error_not_quota(isolated, monkeypatch):
     path, calls, _t, _p = prepared_run(
         isolated, monkeypatch,
-        agent_script={"glm": (1, "Error: Autocompact stopped because the context refilled within fewer than 3 tool turns")},
+        agent_script={"astra": (1, "Error: Autocompact stopped because the context refilled within fewer than 3 tool turns")},
     )
     assert stock_ai.run_nightly(Args(), {}, None, now=at("2026-09-11", 19, 30)) == stock_ai.EXIT_FAIL
     models = [c[1] for c in calls if c[0] == "model"]
-    assert models == ["glm"]  # 上下文配置/执行错误不当作额度问题接替
+    assert models == ["astra"]  # 上下文配置/执行错误不当作额度问题接替
     state = json.loads(path.read_text(encoding="utf-8"))
     assert "上下文" in state["attempts"][-1]["reason"]
 
@@ -468,16 +485,16 @@ def test_nightly_both_unavailable_saves_then_notifies_once(isolated, monkeypatch
     """模拟两路不可用：失败先落盘，再一次 Mac 通知；通知不参与模型链路。"""
     path, calls, _t, _p = prepared_run(
         isolated, monkeypatch,
-        agent_script={"glm": (1, "Error: HTTP 402: provider quota exhausted"),
-                      "deepseek": (1, "Error: HTTP 502 bad gateway")},
+        agent_script={"astra": (1, "[model-request-error] usage limit reached"), "glm": (1, "[model-request-error] Error: HTTP 402: provider quota exhausted"),
+                      "deepseek": (1, "[model-request-error] Error: HTTP 502 bad gateway")},
     )
     assert stock_ai.run_nightly(Args(), {}, None, now=at("2026-09-11", 19, 30)) == stock_ai.EXIT_FAIL
     models = [c[1] for c in calls if c[0] == "model"]
-    assert models == ["glm", "deepseek"]  # Astra 为 0
+    assert models == ["astra", "glm", "deepseek"]  # 每家只尝试一次
     entries = [json.loads(l) for l in stock_ai.INDEX_PATH.read_text(encoding="utf-8").splitlines()
                if l.strip()]
     failure = next(e for e in entries if e.get("result_status") == "失败")
-    assert [a["provider"] for a in failure["attempts"]] == ["glm", "deepseek"]
+    assert [a["provider"] for a in failure["attempts"]] == ["astra", "glm", "deepseek"]
     assert failure["mac_notification"]["ok"] is True
     assert failure["stage"] == "模型执行"
     assert len(mac_log) == 1
@@ -486,23 +503,12 @@ def test_nightly_both_unavailable_saves_then_notifies_once(isolated, monkeypatch
     assert state["result"]["status"] == "失败"
 
 
-def test_nightly_missing_key_skips_and_falls_back(isolated, monkeypatch):
+def test_nightly_astra_does_not_require_provider_api_keys(isolated, monkeypatch):
     monkeypatch.delenv("STOCK_AI_TEST_GLM_KEY", raising=False)
     monkeypatch.delenv("STOCK_AI_TEST_DS_KEY", raising=False)
-    seen = []
-
-    def fake_agent(provider, prompt, final, jsonl, timeout, config, extra=None):
-        seen.append(provider)
-        return 1, "401 unauthorized"
-
-    monkeypatch.setattr(stock_ai, "run_agent", fake_agent)
-    path, _c, _t, _p = prepared_run(isolated, monkeypatch)
-    assert stock_ai.run_nightly(Args(), {}, None, now=at("2026-09-11", 19, 30)) == stock_ai.EXIT_FAIL
-    assert seen == []
-    state = json.loads(path.read_text(encoding="utf-8"))
-    skipped = {a["provider"] for a in state["attempts"] if a["outcome"] == "skipped"}
-    assert skipped == {"glm", "deepseek"}
-    assert all("未启动" in a["reason"] for a in state["attempts"] if a["outcome"] == "skipped")
+    path, calls, _, _ = prepared_run(isolated, monkeypatch)
+    assert stock_ai.run_nightly(Args(), {}, None, now=at("2026-09-11", 19, 30)) == stock_ai.EXIT_OK
+    assert [c[1] for c in calls if c[0] == "model"] == ["astra"]
 
 
 def _completed_state(isolated, path, *, rerun="2026-09-14", identity=True):
@@ -606,6 +612,7 @@ def test_nightly_valid_prepare_reused(isolated, monkeypatch):
 
     def fake_agent(provider, prompt, final, jsonl, timeout, config, extra=None):
         assert timeout is None
+        stock_ai.EvidenceBox.record(provider, astra_evidence())
         final.write_text("报告", encoding="utf-8")
         return 0, ""
 
@@ -635,6 +642,7 @@ def test_nightly_broken_prepare_is_rerun_not_reused(isolated, monkeypatch):
     monkeypatch.setattr(stock_ai, "run_prepare", fake_run_prepare)
 
     def fake_agent(provider, prompt, final, jsonl, timeout, config, extra=None):
+        stock_ai.EvidenceBox.record(provider, astra_evidence())
         final.write_text("报告", encoding="utf-8")
         return 0, ""
 
@@ -671,6 +679,7 @@ def test_nightly_rerun_data_not_ready_supplements_once(isolated, monkeypatch):
 
     def fake_agent(provider, prompt, final, jsonl, timeout, config, extra=None):
         assert timeout is None
+        stock_ai.EvidenceBox.record(provider, astra_evidence())
         final.write_text("报告", encoding="utf-8")
         return 0, ""
 
@@ -803,7 +812,7 @@ def test_missing_heading_with_sync_success_still_fails(isolated, monkeypatch, fa
     state = json.loads(path.read_text(encoding="utf-8"))
     assert state["result"]["status"] == "合并报告待修复"
     assert "缺少必需总标题" in state["result"]["detail"]
-    assert [c for c in calls if c[0] == "model"] == [("model", "glm")]
+    assert [c for c in calls if c[0] == "model"] == [("model", "astra")]
     assert len(sync_calls) == 1  # 刷新失败终态，不写已验收正文、不改变失败结果
 
 
@@ -831,7 +840,7 @@ def test_csv_mismatch_after_model_with_sync_success_still_fails(isolated, monkey
     state = json.loads(path.read_text(encoding="utf-8"))
     assert state["result"]["status"] == "失败"
     assert "行数不一致" in state["result"]["detail"]
-    assert [c for c in calls if c[0] == "model"] == [("model", "glm")]
+    assert [c for c in calls if c[0] == "model"] == [("model", "astra")]
     assert len(sync_calls) == 1  # 失败终态仍需刷新；正式归档核对仍拒绝通过
 
 
@@ -915,7 +924,7 @@ def test_reply_with_other_identity_not_reused(isolated, monkeypatch):
         "result": {"status": "完整完成", "finished_at": "2026-08-10T20:00:00"},
         "attempts": []})
     assert stock_ai.run_nightly(Args(), {}, None, now=now) == stock_ai.EXIT_OK
-    assert [c for c in calls if c[0] == "model"] == [("model", "glm")]  # 未复用，走模型补全
+    assert [c for c in calls if c[0] == "model"] == [("model", "astra")]  # 未复用，走模型补全
 
 
 def test_find_existing_reply_requires_matching_as_of(isolated, monkeypatch):
@@ -1094,8 +1103,8 @@ def test_notify_failure_keeps_original_error(isolated, monkeypatch, mac_log):
     """Mac 通知提交失败：原研究失败保留并附提交失败原因，不循环发送、不改成功。"""
     path, _c, _t, _p = prepared_run(
         isolated, monkeypatch,
-        agent_script={"glm": (1, "Error: HTTP 402: provider quota exhausted"),
-                      "deepseek": (1, "Error: HTTP 502 bad gateway")},
+        agent_script={"glm": (1, "[model-request-error] rate limit"), "astra": (1, "[model-request-error] Error: HTTP 402: provider quota exhausted"),
+                      "deepseek": (1, "[model-request-error] Error: HTTP 502 bad gateway")},
     )
 
     def failing_macos(message):
@@ -1181,7 +1190,7 @@ def test_zcode_stderr_full_classification_and_retry_history(isolated, monkeypatc
         monkeypatch.setattr(stock_ai, "zcode_command", lambda config, script=script: [sys.executable, "-c", script])
         code, diagnostic = stock_ai.run_task_agent("glm", prompt, final, events, {}, state, path)
         assert code == 1
-        assert stock_ai.classify_failure(code, diagnostic)[1] is (index == 0)
+        assert stock_ai.classify_failure(code, diagnostic)[1] is False  # stderr alone is not a model-request receipt
     saved = events.with_suffix(".stderr.log").read_text()
     assert "quota exhausted" in saved and "runtime_24" in saved and errors[1] in saved
     assert "fake-secret-value" not in saved and "[REDACTED]" in saved
@@ -1397,14 +1406,14 @@ def test_task_lock_is_exclusive_and_recoverable(isolated):
 
 def test_classify_failure_categories():
     # 终端 API 错误：即使带 Traceback 也接替
-    assert stock_ai.classify_failure(1, "Traceback: provider HTTP 402 quota exhausted")[1] is True
-    assert stock_ai.classify_failure(1, "Error: HTTP 429 rate limit")[1] is True
-    assert stock_ai.classify_failure(1, "invalid api key")[1] is True
-    assert stock_ai.classify_failure(1, "error: model not found")[1] is True
-    assert stock_ai.classify_failure(1, "Error: HTTP 502 bad gateway")[1] is True
-    assert stock_ai.classify_failure(1, "Error: HTTP 503 service unavailable")[1] is True
+    assert stock_ai.classify_failure(1, "[model-request-error] Traceback: provider HTTP 402 quota exhausted")[1] is True
+    assert stock_ai.classify_failure(1, "[model-request-error] Error: HTTP 429 rate limit")[1] is True
+    assert stock_ai.classify_failure(1, "[model-request-error] invalid api key")[1] is True
+    assert stock_ai.classify_failure(1, "[model-request-error] error: model not found")[1] is True
+    assert stock_ai.classify_failure(1, "[model-request-error] Error: HTTP 502 bad gateway")[1] is True
+    assert stock_ai.classify_failure(1, "[model-request-error] Error: HTTP 503 service unavailable")[1] is True
     # 取消/中断/整轮超时优先于一切文本证据（含旧 HTTP 401/402/quota 字样）
-    assert stock_ai.classify_failure(124, "Error: HTTP 402: provider quota exhausted")[1] is False
+    assert stock_ai.classify_failure(124, "[model-request-error] Error: HTTP 402: provider quota exhausted")[1] is False
     assert stock_ai.classify_failure(130, "provider quota exhausted")[1] is False
     assert stock_ai.classify_failure(143, "HTTP 401 unauthorized")[1] is False
     assert stock_ai.classify_failure(-15, "HTTP 401 unauthorized")[1] is False
@@ -1644,9 +1653,9 @@ def test_example_config_has_no_real_values_no_budget_no_session_key():
 def test_usage_doc_maps_voice_commands_and_no_time_limit():
     doc = Path("ops/stock-ai-usage.md").read_text(encoding="utf-8")
     for phrase, command in [
-        ("以后用深度求索", "use deepseek"),
+        ("以后夜间用深度求索", "use deepseek --task nightly"),
         ("今晚用 DeepSeek", "tonight deepseek"),
-        ("恢复默认", "use auto"),
+        ("恢复夜间默认", "use auto --task nightly"),
         ("现在用哪个", "status"),
     ]:
         assert phrase in doc
@@ -1985,9 +1994,7 @@ def test_merged_report_brief_row_and_lifecycle_checks(tmp_path, monkeypatch, fak
     assert any("市场说明分区为空" in i for i in issues)
 
 
-@pytest.mark.parametrize("command", [["use", "random"], ["use", "astra"],
-                                     ["tonight", "astra"],
-                                     ["run", "nightly", "--provider", "astra"]])
+@pytest.mark.parametrize("command", [["use", "random"]])
 def test_removed_preferences_cannot_start_a_task(command, isolated, monkeypatch):
     monkeypatch.setattr(stock_ai, "run_agent", lambda *a, **k: pytest.fail("模型不得启动"))
     with pytest.raises(SystemExit) as error:
@@ -2017,6 +2024,7 @@ def test_verify_uses_the_same_exact_identity_as_real_tasks(
         (workspace / "result.txt").write_text("结果: 121\n")
         final.write_text("测试已完成")
         events.write_text('{"sessionId":"sess_fake"}')
+        stock_ai.EvidenceBox.record(provider, evidence)
         return 0, ""
     monkeypatch.setattr(stock_ai, "run_agent", fake_run)
     args = stock_ai.build_parser().parse_args(["verify", "--provider", "glm"])

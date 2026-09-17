@@ -27,7 +27,7 @@ def review_blocks(text: str) -> list[str]:
     return blocks
 
 
-def source_sections(root: Path, formation: str) -> tuple[str, str]:
+def source_sections(root: Path, formation: str, *, as_of: str | None = None) -> tuple[str, str]:
     from stock_analyzer.ops.forward_monitor import (
         DailyForwardMonitorReportV2, DailyFormalReviewLedgerV1, _render_markdown,
         _render_tracking_counts,
@@ -39,6 +39,13 @@ def source_sections(root: Path, formation: str) -> tuple[str, str]:
         (monitor / f"daily-formal-reviews-{formation}.json").read_text())
     snapshot = json.loads((monitor / f"snapshot-{formation}.json").read_text())
     saved = (monitor / f"monitor-report-{formation}.md").read_text()
+    if report.analysis_date.isoformat() != formation or ledger.analysis_date.isoformat() != formation:
+        raise ValueError("复盘文件身份与形成日不一致")
+    if as_of is not None:
+        from datetime import datetime
+        cutoff = datetime.fromisoformat(as_of)
+        if report.as_of != cutoff or ledger.as_of != cutoff or datetime.fromisoformat(snapshot["as_of"]) != cutoff:
+            raise ValueError("复盘报告、账本、快照与本轮截止不一致")
     expected = _render_markdown(report, snapshot, ledger)
     blocks = review_blocks(saved)
     if blocks != review_blocks(expected):
@@ -48,15 +55,7 @@ def source_sections(root: Path, formation: str) -> tuple[str, str]:
     return "\n\n".join(blocks) or "今天没有需要复盘的正式推荐股票。", counts
 
 
-def assemble_reply(draft: str, formation: str, action: str, as_of: str, *, root: Path) -> str:
-    try:
-        import stock_ai
-    except ImportError:
-        from tools import stock_ai
-    for check in (stock_ai.strict_archive_check, stock_ai.forward_csv_matches_trace):
-        ok, detail = check(formation, action, as_of, root=root)
-        if not ok:
-            raise ValueError(f"装配前正式归档核对失败：{detail}")
+def report_parts(draft: str) -> tuple[str, list[str]]:
     text = draft.replace("\r\n", "\n")
     spans = []
     for title in SECTIONS:
@@ -68,13 +67,38 @@ def assemble_reply(draft: str, formation: str, action: str, as_of: str, *, root:
         raise ValueError("交付草稿总分区顺序不正确")
     bodies = [text[m.end():spans[i+1].start() if i+1<len(spans) else len(text)].strip()
               for i, m in enumerate(spans)]
+    return text[:spans[0].start()].strip(), bodies
+
+
+def assemble_reply(draft: str, formation: str, action: str, as_of: str, *, root: Path, accepted_path: Path | None = None) -> str:
+    try:
+        import stock_ai
+    except ImportError:
+        from tools import stock_ai
+    for check in (stock_ai.strict_archive_check, stock_ai.forward_csv_matches_trace):
+        ok, detail = check(formation, action, as_of, root=root)
+        if not ok:
+            raise ValueError(f"装配前正式归档核对失败：{detail}")
+    preamble, bodies = report_parts(draft)
     bodies[1], bodies[2] = source_sections(root, formation)
-    return "\n\n".join(f"## {title}\n\n{body}" for title, body in zip(SECTIONS, bodies)) + "\n"
+    if accepted_path is not None:
+        accepted = json.loads(accepted_path.read_text())
+        trace = json.loads((root / "local_archive/forward_selection" / f"research-trace-{formation}.json").read_text())
+        if accepted.get("trace") != trace or accepted.get("research_issues") != []:
+            raise ValueError("采用正文与正式研究不一致或仍有未决问题")
+        problems = stock_ai._recommendation_section_issues(accepted["section"], formation, root=root)
+        if problems:
+            raise ValueError("；".join(problems))
+        bodies[3] = accepted["section"].strip()
+    assembled = "\n\n".join(f"## {title}\n\n{body}" for title, body in zip(SECTIONS, bodies)) + "\n"
+    return (preamble + "\n\n" if preamble else "") + assembled
 
 
 def assemble_file(path: Path, formation: str, action: str, as_of: str, *, root: Path) -> bool:
     draft = path.read_text(encoding="utf-8")
-    result = assemble_reply(draft, formation, action, as_of, root=root)
+    accepted_path = path.parent / "recommendation/accepted-recommendation.json"
+    result = assemble_reply(draft, formation, action, as_of, root=root,
+                            accepted_path=accepted_path if accepted_path.exists() else None)
     if result == draft:
         return False
     original = path.with_name("model-reply.md")

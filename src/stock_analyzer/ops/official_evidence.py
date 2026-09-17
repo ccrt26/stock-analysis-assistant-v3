@@ -9,6 +9,9 @@ import gzip
 from pathlib import Path
 import re
 import urllib.request
+import urllib.error
+from urllib.parse import urljoin, urlparse
+import shutil
 
 
 class _Text(HTMLParser):
@@ -70,11 +73,15 @@ def extract_original(raw: bytes, content_type: str) -> tuple[str, str]:
     return "html", text
 
 
-def fetch_evidence(url: str, directory: Path) -> Path:
+def fetch_evidence(url: str, directory: Path, *, connection: str = "direct") -> Path:
     if not url.startswith(("https://", "http://")):
         raise ValueError("官方资料 URL 必须是 HTTP(S)")
     request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-    with urllib.request.urlopen(request, timeout=30) as response:
+    if connection not in {"direct", "environment"}:
+        raise ValueError("connection 必须是 direct 或 environment")
+    # 只限定本份官方原件的连接；不修改进程环境或模型供应商网络。
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({})) if connection == "direct" else urllib.request.build_opener()
+    with opener.open(request, timeout=30) as response:
         if response.status != 200:
             raise ValueError(f"官方入口返回 HTTP {response.status}")
         raw = response.read()
@@ -89,6 +96,7 @@ def fetch_evidence(url: str, directory: Path) -> Path:
     (directory / "text.txt").write_text(text, encoding="utf-8")
     receipt = {"schema": "official-evidence-v1", "url": url, "final_url": final_url,
                "retrieved_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+               "http_status": 200, "connection": connection,
                "content_type": content_type, "original": f"original.{kind}", "text": "text.txt"}
     path = directory / "receipt.json"
     path.write_text(json.dumps(receipt, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -109,3 +117,105 @@ def read_evidence(path: Path, url: str, retrieved_at: datetime) -> dict:
     if name != f"original.{kind}" or text != (path.parent / "text.txt").read_text(encoding="utf-8"):
         raise ValueError("官方原件与保存的提取正文不一致")
     return receipt
+
+
+def announcement_url(announcement: dict) -> str:
+    url = announcement.get("url") or announcement.get("announcement_url")
+    pdf = announcement.get("pdf_path")
+    if pdf:
+        # A relative cninfo pdf_path is rooted at the static host, never the detail page.
+        return urljoin("https://static.cninfo.com.cn/", str(pdf))
+    if not url:
+        raise ValueError("已知公告缺少原文入口")
+    return str(url)
+
+
+def fetch_announcement(announcement: dict, directory: Path, *, as_of: datetime,
+                       existing_receipts=(), alternative_urls=()) -> Path:
+    """Retrieve only one known announcement; no search or new permanent full-text store.
+
+    Caller supplies official alternative URLs already matched to the same document.
+    Reuse preserves original retrieved_at. Historical availability comes only from
+    the known announcement metadata, never the current download time.
+    """
+    stamp = datetime.fromisoformat(str(announcement["available_at"]).replace("Z", "+00:00"))
+    if as_of.tzinfo is None or stamp.tzinfo is None or stamp > as_of:
+        raise ValueError("公告公开时点晚于截止或缺少时区")
+    url = announcement_url(announcement)
+    identity = {k: announcement.get(k) for k in ("ts_code", "announcement_id", "title", "available_at", "version")}
+    attempts = []
+    diagnostics = directory.with_name(directory.name + "-attempts.json")
+
+    def record():
+        diagnostics.parent.mkdir(parents=True, exist_ok=True)
+        diagnostics.write_text(json.dumps({"announcement": identity, "attempts": attempts}, ensure_ascii=False, indent=2))
+
+    def reuse(path):
+        receipt = json.loads(path.read_text())
+        read_evidence(path, receipt["url"], datetime.fromisoformat(receipt["retrieved_at"]))
+        prior = receipt.get("announcement")
+        if prior and prior != identity:
+            raise ValueError("已有原件的公告身份/版本/公开时间不同")
+        if not prior and url not in (receipt.get("url"), receipt.get("final_url")):
+            raise ValueError("已有原件缺少可核对的同版公告身份")
+        if path.parent.resolve() != directory.resolve():
+            shutil.copytree(path.parent, directory)
+        return directory / "receipt.json"
+
+    if directory.exists():
+        # The task's own previously fetched original is reused between stages.
+        return reuse(directory / "receipt.json")
+    for path in existing_receipts:
+        try:
+            result = reuse(Path(path))
+            attempts.append({"source": str(path), "status": "reused"}); record()
+            return result
+        except (OSError, ValueError, KeyError) as error:
+            attempts.append({"source": str(path), "status": "reuse_rejected", "detail": str(error)[:300]})
+    urls = [url]
+    if urlparse(url).hostname == "www.cninfo.com.cn" and "/finalpage/" in url:
+        urls.append(url.replace("www.cninfo.com.cn", "static.cninfo.com.cn", 1))
+    urls += list(alternative_urls)
+    for candidate in dict.fromkeys(urls):
+        try:
+            receipt_path = fetch_evidence(candidate, directory)
+            receipt = json.loads(receipt_path.read_text())
+            if candidate != url and candidate in alternative_urls:
+                # Same-title and issuer checks catch accidental alternative documents.
+                text = re.sub(r"\s|[，,。:：（）()]", "", (directory / "text.txt").read_text())
+                title = re.sub(r"\s|[，,。:：（）()]", "", str(identity.get("title") or ""))
+                code = str(identity.get("ts_code") or "").split(".")[0]
+                if not title or title not in text or not code or code not in text:
+                    # Keep the rejected download for diagnosis, never adopt it.
+                    directory.rename(directory.with_name(directory.name + f"-rejected-{len(attempts)}"))
+                    raise ValueError("备用原件不能核对同一发行人及公告标题")
+            receipt["announcement"] = identity
+            receipt_path.write_text(json.dumps(receipt, ensure_ascii=False, indent=2))
+            attempts.append({"url": candidate, "final_url": receipt["final_url"], "http_status": 200, "status": "readable"})
+            record()
+            return receipt_path
+        except (OSError, ValueError, urllib.error.URLError) as error:
+            attempts.append({"url": candidate, "http_status": getattr(error, "code", None),
+                             "status": "failed", "detail": f"{type(error).__name__}: {error}"[:300]})
+            record()
+    raise ValueError(f"同份公告原文仍不可取得；条款未知，诊断见 {diagnostics}")
+
+
+def main() -> int:
+    import argparse
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--announcement", type=Path, required=True, help="本份已知公告元数据 JSON")
+    parser.add_argument("--as-of", required=True)
+    parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument("--existing-receipt", action="append", default=[])
+    parser.add_argument("--alternative-url", action="append", default=[])
+    args = parser.parse_args()
+    path = fetch_announcement(json.loads(args.announcement.read_text()), args.output_dir,
+                              as_of=datetime.fromisoformat(args.as_of),
+                              existing_receipts=args.existing_receipt, alternative_urls=args.alternative_url)
+    print(f"evidence_path={path}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

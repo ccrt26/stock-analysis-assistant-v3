@@ -183,10 +183,11 @@ function returnBasis(s,day){
 }
 function originalBody(s){
  const hasFull=Boolean(String(s.statementFull||'').trim());
- const note=hasFull?(s.statementSource==='adopted_rewrite'?'用户认可的表达范本（后续修订稿）；原正式推荐记录不改写。':s.statementSource==='verified_recommendation'?'原回复的推荐分区已独立核对；整份合并日报尚未完成验收。':s.statementSource==='legacy_daily_report'?'已核对原推荐身份的历史日报原文。':'推荐形成日日报中的逐股原文。'):'历史摘要仅供核对，不能代替完整推荐论证。';
+ const note=hasFull?'':'历史摘要仅供核对，不能代替完整推荐论证。';
  const body=hasFull?statementParagraphs(s.statementFull):`<p class="reading-note">${esc(s.statementNote||'尚缺完整推荐正文：原推荐的完整正文尚未归档，暂显示历史摘要。')}</p>`;
  const summary=hasFull?'':`<h4>原推荐理由摘要</h4>${paragraphs(s.reasonFull)||'<p>原推荐理由暂缺。</p>'}`;
- return `<h3>当初为什么选它</h3>${body}<details class="original-summary"><summary>${hasFull?'查看原记录风险摘要':'查看历史记录摘要（非完整正文）'}</summary>${summary}<h4>原推荐中的风险</h4>${paragraphs(s.reasonRisk)||'<p>原记录未附风险文字。</p>'}</details><p class="reading-note">${note} 推荐形成日：${esc(s.formedOn||'未提供')}。切换日期不会改写原推荐理由。</p>`;
+ const history=hasFull?'':`<details class="original-summary"><summary>查看历史记录摘要（非完整正文）</summary>${summary}<h4>原推荐中的风险</h4>${paragraphs(s.reasonRisk)||'<p>原记录未附风险文字。</p>'}</details>`;
+ return `<h3>研究说明</h3>${body}${history}<p class="reading-note">${note} 推荐形成日：${esc(s.formedOn||'未提供')}。</p>`;
 }
 function fullReview(s,r,day=r?.date||state.modal?.date||D.end){
  const stop=trackingNotice(s,day);
@@ -203,10 +204,22 @@ function fullReview(s,r,day=r?.date||state.modal?.date||D.end){
  ${returnBasis(s,r.date)}${finalReviewBody(r)}${(s.dataIssues||[]).filter(x=>!x.reviewDate||x.reviewDate===r.date).map(x=>`<p class="reading-note">${esc(x.message)}</p>`).join('')}
  <p class="reading-note">原文按保存内容展示。记录截止：${esc(r.as_of||'原记录未提供')}。</p></section>`;
 }
+function researchRecords(s){
+ return raw.stocks.filter(x=>x.code===s.code&&(x.formedOn||x.recDate)<=D.end)
+  .sort((a,b)=>(b.formedOn||b.recDate).localeCompare(a.formedOn||a.recDate));
+}
+function researchItem(){const m=state.modal;return researchRecords(m.item).find(s=>D.key(s)===m.researchKey)||m.item}
 function stockNav(){
- const m=state.modal,s=m.item;const dates=D.sessions.filter(d=>d>=s.recDate||s.d0);
- if(!dates.includes(m.date))dates.push(m.date);dates.sort();
- return `<div class="stock-detail-nav"><nav class="mini-tabs" aria-label="个股阅读内容">${[['chart','走势'],['review','完整复盘'],['original','当初为什么选它'],['company','公司资料']].map(([id,label])=>`<button data-detail-tab="${id}" class="${m.tab===id?'active':''}" aria-pressed="${m.tab===id}">${label}</button>`).join('')}</nav><label>查看日期 <select id="detailDate" aria-label="个股查看日期">${dates.map(d=>`<option value="${d}" ${d===m.date?'selected':''}>${d}${s.reviews.some(r=>r.date===d)?' · 有复盘':''}</option>`).join('')}</select></label></div>`;
+ const m=state.modal,s=m.item;let picker;
+ if(m.tab==='original'){
+  const records=researchRecords(s),selected=researchItem();
+  picker=records.length>1?`<label>推荐日期 <select id="researchDate" aria-label="选择推荐日期">${records.map(x=>`<option value="${esc(D.key(x))}" ${D.key(x)===D.key(selected)?'selected':''}>${esc(x.formedOn||x.recDate)}</option>`).join('')}</select></label>`:`<label>推荐日期 ${esc(selected.formedOn||selected.recDate)}</label>`;
+ }else{
+  const dates=D.sessions.filter(d=>d>=s.recDate||s.d0);
+  if(!dates.includes(m.date))dates.push(m.date);dates.sort();
+  picker=`<label>查看日期 <select id="detailDate" aria-label="个股查看日期">${dates.map(d=>`<option value="${d}" ${d===m.date?'selected':''}>${d}${s.reviews.some(r=>r.date===d)?' · 有复盘':''}</option>`).join('')}</select></label>`;
+ }
+ return `<div class="stock-detail-nav"><nav class="mini-tabs" aria-label="个股阅读内容">${[['chart','走势'],['review','完整复盘'],['original','研究说明'],['company','公司资料']].map(([id,label])=>`<button data-detail-tab="${id}" class="${m.tab===id?'active':''}" aria-pressed="${m.tab===id}">${label}</button>`).join('')}</nav>${picker}</div>`;
 }
 function drawModalChart(){
  const modal=state.modal;if(!modal||!['index','stock'].includes(modal.type))return;
@@ -214,11 +227,11 @@ function drawModalChart(){
  const history=(isIndex?D.indexHistory(item):D.history(item)).filter(r=>r.date<=end);
  const review=isIndex?null:D.ordered(item).find(r=>r.date===end);
  const reading=!isIndex&&modal.tab!=='chart';win.classList.toggle('reading',reading);
- if(!isIndex)modalTitle(item.name,item.code,`${item.recDate} 开始观察 · 查看 ${end}`);
+ if(!isIndex)modalTitle(item.name,item.code,modal.tab==='original'?'':`${item.recDate} 开始观察 · 查看 ${end}`);
  if(reading){
-  const body=modal.tab==='company'?companyTabBody(item):modal.tab==='original'?originalBody(item):fullReview(item,review,end);
+  const body=modal.tab==='company'?companyTabBody(item):modal.tab==='original'?originalBody(researchItem()):fullReview(item,review,end);
   $('dialogContent').innerHTML=stockNav()+`<div class="reading-body">${body}</div>`;
-  $('modalFooter').textContent=modal.tab==='company'?'公司资料固定于原推荐时点；不随查看日期更新':'按现有归档阅读；不重新生成研究结论';return;
+  $('modalFooter').textContent=modal.tab==='original'?'':modal.tab==='company'?'公司资料固定于原推荐时点；不随查看日期更新':'按现有归档阅读；不重新生成研究结论';return;
  }
  const rows=M.windowRows(history,D.sessions,end,isIndex?50:40),q=rows.at(-1),available=rows.filter(r=>[r.open,r.high,r.low,r.close].every(V)).length;
  const ratio=V(q.close)&&V(rows.at(-2).close)&&rows.at(-2).close>0?(q.close/rows.at(-2).close-1)*100:null;
@@ -242,7 +255,7 @@ function drawModalChart(){
 function openIndex(i,target){const item=D.markets()[i];state.modal={type:'index',item};state.modalMetric='amountYuan';modalTitle(item.name,item.code,'最近 50 个交易日 · K 线与成交 · 点击图表或移动鼠标查看每日价格');$('dialogContent').innerHTML='<div style="height:56vh"></div>';openWindow(target);drawModalChart();}
 function openStock(key,target,date=null,tab='chart'){
  ensureData();const item=raw.stocks.find(s=>D.key(s)===key);if(!item)return;
- state.modal={type:'stock',item,date:date||D.end,tab};
+ state.modal={type:'stock',item,date:date||D.end,tab,researchKey:D.key(item)};
  modalTitle(item.name,item.code,`${item.recDate} 开始观察`);$('dialogContent').innerHTML='';
  openWindow(target,tab!=='chart');drawModalChart();
 }
@@ -255,6 +268,11 @@ function openNotes(target){state.modal={type:'notes'};modalTitle('A2 使用说�
 function renderAll(animate){markets();renderFocus(animate);cards()}
 function ensureData(){if(D)return;raw=JSON.parse($('snapshot').textContent);let extra={};try{extra=JSON.parse($('preview-series').textContent||'null')||{}}catch(e){extra={}}
  try{D=PrismData.create(raw,extra,window.GuanlanA2Rules)}catch(err){$('main').innerHTML='<div class="empty-state">展示数据无法载入：'+String(err.message).replace(/</g,'&lt;')+'</div>';throw err}
+ // 承接短暂归组版保存的股票收藏；原逐次收藏键继续沿用。
+ for(const code of [...state.favorites])if(/^\d{6}\.(SH|SZ|BJ)$/.test(code)){
+  const records=raw.stocks.filter(s=>s.code===code);
+  if(records.length){state.favorites.delete(code);records.forEach(s=>state.favorites.add(D.key(s)))}
+ }
  $('demoLabel').textContent='冻结快照 · 主用展示';
  const meta=$('reportMeta');if(meta)meta.innerHTML=`<span style="display:inline-block;width:4px;height:4px;border-radius:50%;background:var(--text);margin-right:6px;box-shadow:0 0 10px #f0f0eb40"></span> 收盘快照 · ${D.end.replaceAll('-','.')}<small style="display:block;color:var(--muted)">${esc(raw.sourceInfo?.label||'来源未提供')}</small>`;
 }
@@ -265,7 +283,13 @@ const OP_TAG_CLASS={'观点增强':'op-strengthened','观点减弱':'op-weakened
 const opTagText=(t,invalid)=>`<span class="tag ${invalid||t==='判断失效'?'invalid-pill':OP_TAG_CLASS[t]||'op-maintained'}">${esc(t)}</span>`;
 const opTag=s=>opTagText(D.opinion(s),D.invalid(s));
 function recordsRows(){const R=window.GuanlanA2Rules,f=state.filters;
- const base=R.filterRecords(raw,f);
+ /* 全部观察页同股只保留第一次入选的记录（最早 recDate）；其余入选仍在个股详情弹窗内完整保留。
+  * raw 与壳层 DATA 是两棵解析树，必须按稳定 key 比较，不能比对象引用。 */
+ const firstByCode=new Map();
+ for(const s of raw.stocks){const cur=firstByCode.get(s.code);
+  if(!cur||s.recDate<cur.recDate)firstByCode.set(s.code,s);}
+ const repKeys=new Set([...firstByCode.values()].map(s=>D.key(s)));
+ const base=R.filterRecords(raw,f).filter(s=>repKeys.has(D.key(s)));
  const q=state.query.trim().toLowerCase();
  return !q?base:base.filter(s=>`${s.name} ${s.code} ${s.recDate}`.toLowerCase().includes(q));
 }
@@ -298,7 +322,7 @@ function recordsTable(rows){
 function renderRecords(){
  const f=state.filters,rows=recordsRows();
  const scope=f.scope==='invalid'?'仅显示判断失效记录':f.scope==='both'?'显示包含失效记录的完整并集':'显示全部未失效记录';
- $('main').innerHTML=`<div class="page-title between"><div><div class="eyebrow">RECORDS / ALL OBSERVATIONS</div><h1>全部观察。</h1><p>每次入选分别保留；失效记录不删除，只是不进推荐清单。</p></div><div class="report-meta"><span class="dot"></span> 收盘快照 · 上海时间 ${D.end.slice(5).replace('-',' / ')}<small>${esc(D.end)} · 来源：${esc(raw.sourceInfo?.label||'本地归档')}</small></div></div>
+ $('main').innerHTML=`<div class="page-title between"><div><div class="eyebrow">RECORDS / ALL OBSERVATIONS</div><h1>全部观察。</h1><p>同一股票只保留一行，以第一次入选为准；其余入选在个股详情内查看。失效记录不删除，只是不进推荐清单。</p></div><div class="report-meta"><span class="dot"></span> 收盘快照 · 上海时间 ${D.end.slice(5).replace('-',' / ')}<small>${esc(D.end)} · 来源：${esc(raw.sourceInfo?.label||'本地归档')}</small></div></div>
  <div class="table-toolbar"><div class="filters">
   <button class="ghost ${['active','both'].includes(f.scope)?'active':''}" data-filter="all">${['active','both'].includes(f.scope)?'✓ ':''}全部（未失效）</button>
   <button class="ghost ${['invalid','both'].includes(f.scope)?'active':''}" data-filter="invalid">${['invalid','both'].includes(f.scope)?'✓ ':''}判断失效</button>
@@ -306,7 +330,7 @@ function renderRecords(){
   <button class="ghost" data-filter="reset">重置</button>
   <select id="recordOpinion" aria-label="复盘观点筛选">${window.GuanlanA2Rules.OPINION_OPTIONS.map(o=>`<option value="${o.value}" ${f.opinion===o.value?'selected':''}>${o.label}</option>`).join('')}</select>
  </div><input class="input" id="recordSearch" placeholder="搜索名称、代码或入选日期" aria-label="搜索观察记录" value="${esc(state.query)}"></div>
- <p class="scope-summary">${scope}${f.positive?'，且高于参考价':''} · ${rows.length} 条记录</p>
+ <p class="scope-summary">${scope}${f.positive?'，且高于参考价':''} · ${rows.length} 只股票（各保留第一次入选）</p>
  ${recordsTable(rows)}
  <p class="scope-note">先点“判断失效”只看失效记录；先点“全部（未失效）”再点“判断失效”，显示含失效的完整并集。样例中的无参考价记录显示“—”，不是 0%。价格涨跌按未复权报价计算；完整复盘同时显示正式复权涨跌，分红送转可能造成差异。点击行查看该次推荐的 40 日 K 线。观察目标 20% 为原口径展示，不是预测。</p>`;
 }
@@ -382,6 +406,7 @@ document.addEventListener('click',e=>{
  if(b.dataset.rail){const rail=$(b.dataset.rail);rail?.scrollBy({left:Number(b.dataset.step)*(rail.clientWidth+14),behavior:motion()?'smooth':'auto'})}
 });
 document.addEventListener('change',e=>{
+ if(e.target.id==='researchDate'&&state.modal?.type==='stock'&&state.modal.tab==='original'){state.modal.researchKey=e.target.value;drawModalChart();return}
  if(e.target.id==='detailDate'&&state.modal?.type==='stock'){state.modal.date=e.target.value;drawModalChart();return}
  if(e.target.id==='stockSelect')setFocus(Number(e.target.value));
  if(e.target.id==='episodeSelect')setFocus(state.focus,Number(e.target.value));

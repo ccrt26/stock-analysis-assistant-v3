@@ -172,6 +172,37 @@ select{background:var(--panel);color:var(--text);border:1px solid var(--line);pa
 .segmented button{padding:6px 12px;font-size:11px;color:var(--muted);border-radius:2px}
 .segmented button.active{background:var(--raised);color:var(--text)}
 .map-stats{font:10px var(--mono);color:var(--muted);letter-spacing:.02em}
+/* ---- 日期回看导航（原收盘快照徽标位置） ---- */
+.dateNav{display:flex;flex-direction:column;align-items:flex-end;gap:7px;position:relative}
+.dateNav-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.dn-arrow{width:30px;height:30px;display:grid;place-items:center;border:1px solid var(--line);border-radius:var(--radius);color:var(--secondary);background:var(--raised);transition:border-color .15s,color .15s}
+.dn-arrow:hover:not(:disabled){border-color:var(--accent);color:var(--text)}
+.dn-arrow:disabled{opacity:.28;cursor:default}
+.dn-date{display:flex;align-items:center;gap:9px;padding:6px 13px;border:1px solid var(--line);border-radius:var(--radius);background:var(--raised);transition:border-color .15s}
+.dn-date:hover{border-color:var(--accent)}
+.dn-date svg{width:13px;height:13px;color:var(--muted)}
+.dn-label{font:10px/1 var(--mono);letter-spacing:.12em;color:var(--muted)}
+.dn-value{font:15px/1 var(--mono);letter-spacing:.02em}
+.dn-value small{font-size:10px;color:var(--muted);margin-left:5px;letter-spacing:.08em}
+.dn-state{display:flex;align-items:center;gap:6px;font-size:10px;color:var(--secondary);letter-spacing:.04em;white-space:nowrap}
+.dn-state .sw{width:6px;height:6px;border-radius:50%;background:var(--accent);flex:none}
+.dateNav.review .dn-state .sw{background:var(--amber)}
+.dateNav.review .dn-date{border-color:#d6ba8d55;background:#d6ba8d0f}
+.dn-back{font-size:10px;color:var(--amber);padding:4px 10px;border:1px solid #d6ba8d44;border-radius:3px;letter-spacing:.06em;display:none}
+.dateNav.review .dn-back{display:inline-block}
+.dn-back:hover{border-color:var(--amber)}
+.cal-pop{position:absolute;top:calc(100% + 9px);right:0;z-index:40;background:var(--raised);border:1px solid var(--line);border-radius:6px;padding:14px 16px;display:none;box-shadow:0 14px 40px #000a;max-width:calc(100vw - 40px)}
+.cal-pop.open{display:flex;gap:18px;flex-wrap:wrap}
+.cal-month h4{font:10px var(--mono);color:var(--muted);letter-spacing:.14em;margin:0 0 8px;text-align:center}
+.cal-grid{display:grid;grid-template-columns:repeat(7,26px);gap:2px}
+.cal-grid .wd{font:9px var(--mono);color:var(--muted);text-align:center;padding:2px 0}
+.cal-grid button{width:26px;height:24px;border-radius:3px;font:11px var(--mono);color:var(--secondary);padding:0}
+.cal-grid button:hover:not(:disabled){background:var(--panel);color:var(--text)}
+.cal-grid button:disabled{color:#ffffff1f;cursor:default}
+.cal-grid button.today{color:var(--text);font-weight:600;box-shadow:inset 0 0 0 1px var(--accent)}
+.cal-grid button.sel{background:var(--accent);color:#08090a}
+.cal-grid button.past{color:var(--muted)}
+.cal-note{align-self:flex-end;font:9px var(--mono);color:var(--muted);letter-spacing:.06em}
 .map-layout{display:grid;grid-template-columns:minmax(0,1fr) 260px;gap:20px}
 .map-layout>section,.map-layout>aside{min-width:0}
 .map-layout>section{display:flex;flex-direction:column}
@@ -371,7 +402,7 @@ const OBS_DAYS=valid(POLICY.primaryDays)&&POLICY.primaryDays>0?POLICY.primaryDay
 const OBS_TARGET=valid(POLICY.targetReturn)?POLICY.targetReturn:0.2;
 const targetPrice=s=>valid(s.ref)?s.ref*(1+OBS_TARGET):null;
 function orderedReviews(s,date){return (s.reviews||[]).filter(r=>r.date<=date).slice().sort((a,b)=>a.date.localeCompare(b.date)||(a.as_of||'').localeCompare(b.as_of||''));}
-function latest(s){return orderedReviews(s,DATA.analysis_date).at(-1)||null;}
+function latest(s,date=DATA.analysis_date){return orderedReviews(s,date).at(-1)||null;}
 function recommendations(){return [...DATA.stocks].sort((a,b)=>b.recDate.localeCompare(a.recDate));}
 function deepReviews(){
   const rawLimit=DATA.presentation?.deepLimit;
@@ -420,14 +451,17 @@ function directionUpdates(data=DATA){
       fromLabel:DIRECTION_LABELS[from],toLabel:DIRECTION_LABELS[to]}];
   });
 }
-function isInvalid(s){
+function isInvalidFromReview(r){
+  if(!r)return false;
+  if(r.viewChange==='invalidated'||r.assessmentCode==='contradicted')return true;
+  if(Object.prototype.hasOwnProperty.call(r,'viewChange')&&r.viewChange!=null&&r.viewChange!=='invalidated')return false;
+  return r.viewLabel==='判断失效'||r.assessmentText==='推荐后的事实与核心预期相反';
+}
+/* 回看日期只按当时已保存复盘推导；s.invalidated/s.stage 是最新时点冻结值，回看时不读。 */
+function isInvalid(s,date=DATA.analysis_date){
+  if(date!==DATA.analysis_date)return isInvalidFromReview(latest(s,date));
   if(typeof s.invalidated==='boolean')return s.invalidated;
-  const r=latest(s);
-  if(r){
-    if(r.viewChange==='invalidated'||r.assessmentCode==='contradicted')return true;
-    if(Object.prototype.hasOwnProperty.call(r,'viewChange')&&r.viewChange!=null&&r.viewChange!=='invalidated')return false;
-    return r.viewLabel==='判断失效'||r.assessmentText==='推荐后的事实与核心预期相反';
-  }
+  if(isInvalidFromReview(latest(s)))return true;
   return ['原判断失效','判断失效'].includes(s.stage);
 }
 const VIEW_CHANGE_CODES={strengthened:'strengthened',weakened:'weakened',unchanged:'maintained',first_review:'first',invalidated:'invalidated'};
@@ -440,18 +474,18 @@ function viewCode(r){
   }
   return LEGACY_VIEW_LABELS[r.viewLabel]||null;
 }
-function opinionLabel(s){
-  if(isInvalid(s))return '判断失效';
-  const code=viewCode(latest(s));
+function opinionLabel(s,date=DATA.analysis_date){
+  if(isInvalid(s,date))return '判断失效';
+  const code=viewCode(latest(s,date));
   return {strengthened:'观点增强',weakened:'观点减弱',maintained:'维持原判',first:'首次复盘'}[code]
     ||(code==='unrecognized'?'未识别状态':'尚未复盘');
 }
 const OPINION_OPTIONS=Object.freeze([
  {value:'any',label:'全部复盘观点'},{value:'strengthened',label:'观点增强'},{value:'weakened',label:'观点减弱'},
  {value:'maintained',label:'维持原判'},{value:'first',label:'首次复盘'},{value:'unreviewed',label:'尚未复盘'}]);
-function opinionCode(s){
- if(isInvalid(s))return 'invalidated';
- const code=viewCode(latest(s));
+function opinionCode(s,date=DATA.analysis_date){
+ if(isInvalid(s,date))return 'invalidated';
+ const code=viewCode(latest(s,date));
  return ['strengthened','weakened','maintained','first'].includes(code)?code
   :code==='unrecognized'?'unrecognized':'unreviewed';
 }
@@ -473,15 +507,15 @@ function filterRecords(data,f){return recommendations(data).filter(s=>{
  if(f.opinion!=='any'&&opinionCode(s)!==f.opinion)return false;
  return true;
 });}
-function closeOnDate(s){
-  const i=indexOfDate(DATA.analysis_date);if(i<0)return null;
+function closeOnDate(s,date=DATA.analysis_date){
+  const i=indexOfDate(date);if(i<0)return null;
   const close=s.candles[i]?.[3];return valid(close)?close:null;
 }
-function returnOnDate(s){
-  const close=closeOnDate(s),i=indexOfDate(DATA.analysis_date);
+function returnOnDate(s,date=DATA.analysis_date){
+  const close=closeOnDate(s,date),i=indexOfDate(date);
   return s.d0||!valid(s.ref)||s.ref<=0||close===null||i<(s.recIndex??0)?null:(close/s.ref-1)*100;
 }
-function daysAt(s){return s.d0?0:Math.max(0,Math.min(s.days,LAST-s.recIndex+1));}
+function daysAt(s,date=DATA.analysis_date){const i=indexOfDate(date);return s.d0?0:Math.max(0,Math.min(s.days,i-(s.recIndex??0)+1));}
 function outlookText(r){
   if(!r)return '尚无复盘观点';
   const d=direction(r);
@@ -514,6 +548,13 @@ function marketCards(){
 }
 /* ---- 观察星图：同股合并与坐标派生（与正式页 rules.js 同口径，仅展示层） ---- */
 const ATLAS_BASIS_LABEL='本报告最早记录';
+function atlasAsOf(){
+  const date=state.mapDate||DATA.analysis_date;
+  const iV=indexOfDate(date);
+  return {date,iV:iV<0?LAST:iV,review:state.mapDate!=null&&state.mapDate!==DATA.analysis_date};
+}
+/* 在场＝recIndex<=iV（d0 条目 recIndex=LAST、recDate 为次日，回看时自然不在场）。 */
+function recordsAsOf(group,iV){return group.records.filter(s=>(s.recIndex??-1)<=iV);}
 function atlasGroups(){
   const byCode=new Map();
   for(const s of DATA.stocks){
@@ -526,30 +567,22 @@ function atlasGroups(){
   groups.sort((a,b)=>a.records[0].recDate.localeCompare(b.records[0].recDate));
   return groups;
 }
-function atlasGroupClose(records){
-  const i=indexOfDate(DATA.analysis_date);if(i<0)return null;
-  for(const s of records){const c=s.candles[i]?.[3];if(valid(c))return c;}
+function atlasGroupClose(records,iV){
+  for(const s of records){const c=s.candles[iV]?.[3];if(valid(c))return c;}
   return null;
 }
-function atlasPlottable(s,close){
+function atlasPlottable(s,close,iV){
   if(s.d0)return '待首日观察';
   if(!valid(s.ref)||s.ref<=0)return '缺参考价';
-  const i=indexOfDate(DATA.analysis_date);
-  if(!valid(s.recIndex)||s.recIndex<0||s.recIndex>i)return '交易日历不足';
-  if(!valid(close))return '报告日无真实收盘';
+  if(!valid(s.recIndex)||s.recIndex<0||s.recIndex>iV)return '交易日历不足';
+  if(!valid(close))return '所选日无真实收盘';
   return null;
 }
-function atlasBasis(group){
-  const anchor=group.records[0],close=atlasGroupClose(group.records),reason=atlasPlottable(anchor,close);
-  if(reason)return {anchor,close,plottable:false,reason,ret:null,day:null};
-  const i=indexOfDate(DATA.analysis_date);
-  return {anchor,close,plottable:true,reason:null,ret:(close/anchor.ref-1)*100,day:i-anchor.recIndex+1};
-}
-function atlasRecordPoint(s,group){
-  const close=atlasGroupClose(group.records),reason=atlasPlottable(s,close);
-  if(reason)return {s,close,plottable:false,reason,ret:null,day:null};
-  const i=indexOfDate(DATA.analysis_date);
-  return {s,close,plottable:true,reason:null,ret:(close/s.ref-1)*100,day:i-s.recIndex+1};
+function atlasRecordPoint(s,group,iV){
+  const close=atlasGroupClose(group.records,iV),reason=atlasPlottable(s,close,iV);
+  const day=s.d0?null:iV-(s.recIndex??-1)+1;
+  if(reason)return {s,close,plottable:false,reason,ret:null,day,inWindow:false};
+  return {s,close,plottable:true,reason:null,ret:(close/s.ref-1)*100,day,inWindow:day>=1&&day<=OBS_DAYS};
 }
 function atlasBadge(group){
   const n=group.records.length;if(n<2)return null;
@@ -567,15 +600,28 @@ function atlasRange(stockPoints,recordPoints){
   return {lo,hi,maxDay:Math.max(...days,1),basis:ATLAS_BASIS_LABEL};
 }
 function atlasData(){
-  const groups=atlasGroups();
-  const stock=groups.map(g=>({group:g,badge:atlasBadge(g),basis:atlasBasis(g)}));
+  const {iV}=atlasAsOf();
+  const groups=atlasGroups()
+    .map(g=>{const present=recordsAsOf(g,iV);return present.length?{code:g.code,name:g.name,records:present}:null})
+    .filter(Boolean);
   const record=[];
-  for(const g of groups)for(const s of g.records)record.push({group:g,s,point:atlasRecordPoint(s,g)});
-  return {groups,stock,record,range:atlasRange(stock.map(x=>x.basis),record.map(x=>x.point))};
+  for(const g of groups)for(const s of g.records)record.push({group:g,s,point:atlasRecordPoint(s,g,iV)});
+  /* 股票视角锚点＝最早的仍在观察期内的在场记录（组内全部出窗时不画点也不进暂未绘制，只在统计行计数）。 */
+  const stock=groups.map(g=>{
+    const badge=atlasBadge(g);
+    const anchorRow=record.find(x=>x.group===g&&x.point.day!=null&&x.point.day>=1&&x.point.day<=OBS_DAYS);
+    if(anchorRow){
+      const p=anchorRow.point;
+      return {group:g,badge,basis:{anchor:anchorRow.s,close:p.close,plottable:p.plottable,reason:p.reason,ret:p.ret,day:p.day}};
+    }
+    const d0=g.records.some(s=>s.d0);
+    return {group:g,badge,basis:{anchor:g.records[0],close:null,plottable:false,reason:d0?'待首日观察':'已出观察期',ret:null,day:null}};
+  });
+  return {groups,stock,record,range:atlasRange(stock.filter(x=>x.basis.plottable).map(x=>x.basis),record.filter(x=>x.point.inWindow).map(x=>x.point))};
 }
 function atlasRecordLabel(s){const sameYear=s.recDate.slice(0,4)===DATA.analysis_date.slice(0,4);return `${s.name} · ${sameYear?s.recDate.slice(5).replace('-','/'):s.recDate.replaceAll('-','/')}`}
 /* ---- 状态 ---- */
-const state={page:'overview',mapMode:'stock',mapGroup:null,mapCurrent:null,mapPreview:null};
+const state={page:'overview',mapMode:'stock',mapGroup:null,mapCurrent:null,mapPreview:null,mapDate:null};
 /* ---- 区块渲染 ---- */
 function overviewPage(){
   return `<div class="page-title between"><div><div class="eyebrow">AFTERCLOSE / OBSERVATION DESK</div><h1>收盘之后，看清变化。</h1><p>先看市场，再看量价，最后回到每一次判断。</p></div><div class="report-meta" id="reportMeta"></div></div>
@@ -597,24 +643,38 @@ function overviewPage(){
   <button class="square" data-rail="updatesRail" data-step="-1" aria-label="向左查看观点更新">←</button><button class="square" data-rail="updatesRail" data-step="1" aria-label="向右查看观点更新">→</button></div>
   <p class="scope-note">比较相邻两次已保存复盘的短期方向；不是涨跌排名，也不把观点增强等同于方向改变。</p></section>${foot()}`;
 }
-function opinionTagClass(s){
-  if(isInvalid(s))return 'down';
-  return opinionLabel(s)==='观点增强'?'accent':'';
+function opinionTagClass(s,date=DATA.analysis_date){
+  if(isInvalid(s,date))return 'down';
+  return opinionLabel(s,date)==='观点增强'?'accent':'';
 }
 /* ---- 观察星图页 ---- */
 function foot(){
   return `<footer class="footer"><span><strong>观澜</strong> &nbsp; 记录判断，而不是制造确定性。</span><span>A2 主用展示</span></footer>`;
 }
 function atlasPage(){
-  const stockView=state.mapMode==='stock';
+  const stockView=state.mapMode==='stock',asOf=atlasAsOf();
+  const mmdd=asOf.date.slice(5).replace('-','.'),wd='日一二三四五六'[new Date(asOf.date+'T00:00:00').getDay()];
   return `<div class="page-title between"><div><div class="eyebrow">THE OBSERVATION ATLAS</div><h1>每一只股票，一条观察主线。</h1></div>
-  <div class="report-meta"><span class="dot"></span> 收盘快照 · 上海时间 ${DATA.analysis_date.slice(5).replace('-',' / ')}<small>${esc(DATA.as_of||DATA.analysis_date)}</small></div></div>
+  <div class="dateNav${asOf.review?' review':''}" id="dateNav">
+    <div class="dateNav-row">
+      <button class="dn-arrow" data-map-date-step="-1" aria-label="上一个交易日"${asOf.iV<=0?' disabled':''}>◀</button>
+      <button class="dn-date" id="dnDateBtn" aria-haspopup="dialog" aria-expanded="false">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="2" y="3" width="12" height="11" rx="1.5"/><path d="M2 6.5h12M5.5 1.5v3M10.5 1.5v3"/></svg>
+        <span class="dn-label">${asOf.review?'回看':'收盘快照'}</span>
+        <span class="dn-value num">${mmdd}<small>周${wd}</small></span>
+      </button>
+      <button class="dn-arrow" data-map-date-step="1" aria-label="下一个交易日"${asOf.review?'':' disabled'}>▶</button>
+      <button class="dn-back" data-map-date-latest>回到最新</button>
+    </div>
+    <div class="dn-state"><span class="sw"></span><span>${asOf.review?`回看 ${asOf.date} · 原快照数据截至 ${esc(DATA.as_of||DATA.analysis_date)}`:`最新收盘 · 数据截至 ${esc(DATA.as_of||DATA.analysis_date)}`}</span></div>
+    <div class="cal-pop" id="calPop" role="dialog" aria-label="选择回看日期"></div>
+  </div></div>
   <div class="map-toolbar"><div class="segmented" role="group" aria-label="星图视图切换">
     <button class="${state.mapMode==='stock'?'active':''}" data-map-mode="stock" aria-pressed="${state.mapMode==='stock'}">按股票看</button>
     <button class="${state.mapMode==='record'?'active':''}" data-map-mode="record" aria-pressed="${state.mapMode==='record'}">按每次入选看</button></div>
     <span class="map-stats" id="mapStats"></span></div>
   <div class="map-layout"><section class="panel">
-    <div class="panel-head"><h2>观察星图 <span class="eyebrow">PERFORMANCE × TIME</span></h2><small class="muted">${stockView?'股票视角 · 一股一点':'记录视角 · 一次一点'}</small></div>
+    <div class="panel-head"><h2>观察星图 <span class="eyebrow">PERFORMANCE × TIME</span></h2><small class="muted">${stockView?'股票视角':'记录视角'} · 一股一点${asOf.review?` · 回看 ${asOf.date}`:''}</small></div>
     <div class="map-wrap" id="atlasWrap"></div>
     <div id="mapPending"></div>
     <div class="graph-key"><span><i></i>高于参考价</span><span><i class="down"></i>低于参考价</span></div></section>
@@ -632,43 +692,50 @@ function mapPanelContent(){
 }
 function groupPanel(item){
   if(!item)return `<div class="empty sel-empty"><h2>还没有选中的股票</h2><p>点击星图上的光点或“入选N次”徽标，这里展开这只股票的全部入选明细；悬停只作预览。</p></div>`;
-  const {group,badge,basis}=item,anchor=basis.anchor;
+  const {group,badge,basis}=item,anchor=basis.anchor,{date,iV,review}=atlasAsOf();
   const episodes=group.records.map((s,i)=>{
-    const p=atlasRecordPoint(s,group),invalid=isInvalid(s);
+    const p=atlasRecordPoint(s,group,iV),invalid=isInvalid(s,date);
     return `<div class="map-episode${invalid?' is-invalid':''}"><div class="map-episode-head"><b>${dateWord(s).d.replaceAll('-','.')}${group.records.length>1&&i===group.records.length-1?' <span class="muted">最新</span>':''}</b><span class="map-episode-type">${s.refKind==='event'?'事件条件':'正式推荐'}</span><b class="${tone(p.ret)}">${pct(p.ret)}</b></div>
-    <dl class="map-episode-meta"><div><dt>该次原参考价</dt><dd class="num">${number(s.ref)}</dd></div><div><dt>观察进度</dt><dd>${s.d0?'待首日观察':`第 ${daysAt(s)} 天 / ${OBS_DAYS}`}</dd></div><div><dt>这一轮复盘观点</dt><dd>${invalid?'<span class="tag invalid-pill">判断失效</span>':esc(opinionLabel(s))}</dd></div></dl>
+    <dl class="map-episode-meta"><div><dt>该次原参考价</dt><dd class="num">${number(s.ref)}</dd></div><div><dt>观察进度</dt><dd>${s.d0?'待首日观察':`第 ${daysAt(s,date)} 天 / ${OBS_DAYS}`}</dd></div><div><dt>这一轮复盘观点</dt><dd>${invalid?'<span class="tag invalid-pill">判断失效</span>':esc(opinionLabel(s,date))}</dd></div></dl>
     <button class="text-button" data-open="${key(s)}">查看这次复盘 →</button></div>`;}).join('');
   const latest=group.records.length>1?group.records.at(-1):null;
-  const latestPoint=latest?atlasRecordPoint(latest,group):null;
+  const latestPoint=latest?atlasRecordPoint(latest,group,iV):null;
   return `<div class="sel-body"><span class="eyebrow">SELECTED STOCK</span>
   <h2 class="sel-name">${esc(group.name)}</h2><small class="sel-code">${group.code}</small><small class="sel-since">${group.records[0].recDate.replaceAll('-','.')} 入选</small>
   ${badge?`<span class="tag accent">${esc(badge.full)}</span>`:''}
   <div class="sel-return num ${tone(basis.ret)}">${pct(basis.ret)}</div>
-  ${basis.plottable?`<dl class="sel-meta"><div><dt>最早记录原参考价</dt><dd>¥ ${number(anchor.ref)}</dd></div><div><dt>报告日收盘</dt><dd>¥ ${number(basis.close)}<small>${DATA.analysis_date}</small></dd></div><div><dt>距最早入选</dt><dd>第 ${basis.day} 个交易日</dd></div></dl>`
+  ${basis.plottable?`<dl class="sel-meta"><div><dt>最早记录原参考价</dt><dd>¥ ${number(anchor.ref)}</dd></div><div><dt>${review?'回看日收盘':'报告日收盘'}</dt><dd>¥ ${number(basis.close)}<small>${date}</small></dd></div><div><dt>距最早入选</dt><dd>第 ${basis.day} 个交易日</dd></div></dl>`
   :`<p class="sel-missing">最早基准无法计算：${esc(basis.reason)}。不换用最新参考价，也不按 0% 绘制；明细中仍可阅读各次记录。</p>`}
   ${latest&&latestPoint&&latestPoint.plottable?`<div class="sel-latest"><b>最新一次 ${latest.recDate.replaceAll('-','.')}</b>：自己的涨跌 <b class="num ${tone(latestPoint.ret)}">${pct(latestPoint.ret)}</b>（第 ${latestPoint.day} 个交易日，较该次参考价 ${number(latest.ref)}）。单列阅读，不替换主图基准。</div>`:''}
   <div class="sel-episodes-title">全部入选明细 · 按时间顺序</div>${episodes}</div>`;
 }
 function recordPanel(s){
   if(!s)return `<div class="empty sel-empty"><h2>还没有选中记录</h2><p>点击星图上的光点查看这一次入选的详情；每个点使用自己那次的日期与参考价。</p></div>`;
-  const i=indexOfDate(DATA.analysis_date),eq=s.candles[i],ret=returnOnDate(s),r=latest(s);
+  const {date}=atlasAsOf();
+  const i=indexOfDate(date),eq=s.candles[i],ret=returnOnDate(s,date),r=latest(s,date);
   return `<div class="sel-body"><span class="eyebrow">SELECTED OBSERVATION</span>
   <h2 class="sel-name">${esc(s.name)}</h2><small class="sel-code">${s.code}</small>
   <div class="sel-return num ${tone(ret)}">${pct(ret)}</div><span class="sel-hint">收盘较原参考价</span>
-  <dl class="sel-meta"><div><dt>观察进度</dt><dd>${s.d0?'待首日观察':`第 ${daysAt(s)} 天 / ${OBS_DAYS}`}</dd></div><div><dt>${dateWord(s).w}日期</dt><dd>${dateWord(s).d}</dd></div><div><dt>本期成交额</dt><dd>${eq&&valid(eq[4])?number(eq[4])+' 亿':'—'}</dd></div></dl>
-  ${isInvalid(s)?'<span class="tag invalid-pill">判断失效</span>':`<span class="tag ${opinionTagClass(s)}">${esc(opinionLabel(s))}</span>`}
+  <dl class="sel-meta"><div><dt>观察进度</dt><dd>${s.d0?'待首日观察':`第 ${daysAt(s,date)} 天 / ${OBS_DAYS}`}</dd></div><div><dt>${dateWord(s).w}日期</dt><dd>${dateWord(s).d}</dd></div><div><dt>本期成交额</dt><dd>${eq&&valid(eq[4])?number(eq[4])+' 亿':'—'}</dd></div></dl>
+  ${isInvalid(s,date)?'<span class="tag invalid-pill">判断失效</span>':`<span class="tag ${opinionTagClass(s,date)}">${esc(opinionLabel(s,date))}</span>`}
   <p class="sel-note">${esc(r?.viewReason||(s.reasonFull?s.reasonFull.slice(0,90)+'…':'原报告未填写复盘说明。'))}</p>
   <button class="text-button" data-open="${key(s)}">阅读完整复盘 →</button></div>`;
 }
 function updateMapPanel(){const el=$('mapSelection');if(el)el.innerHTML=mapPanelContent()}
 function updateMapMeta(a){
-  const stockView=state.mapMode==='stock',stats=$('mapStats'),pending=$('mapPending');
+  const stockView=state.mapMode==='stock',stats=$('mapStats'),pending=$('mapPending'),{date,iV}=atlasAsOf();
   if(stats){
-    const M=DATA.stocks.length,Z=stockView?a.stock.filter(x=>x.basis.plottable).length:a.record.filter(x=>x.point.plottable).length,T=stockView?a.stock.length:a.record.length,K=T-Z;
-    stats.textContent=stockView?`${a.stock.length}只股票 · ${M}条入选记录 · ${Z}只有坐标 · ${K}只暂未绘制`:`${a.groups.length}只股票 · ${M}条入选记录 · ${Z}条有坐标 · ${K}条暂未绘制`;
+    const present=DATA.stocks.filter(s=>(s.recIndex??-1)<=iV).length;
+    const over=DATA.stocks.filter(s=>!s.d0&&(s.recIndex??-1)>=0&&s.recIndex<=iV&&iV-s.recIndex+1>OBS_DAYS).length;
+    const Z=stockView?a.stock.filter(x=>x.basis.plottable).length:a.record.filter(x=>x.point.inWindow).length;
+    const K=stockView?a.stock.filter(x=>!x.basis.plottable&&x.basis.reason!=='已出观察期').length:a.record.filter(x=>!x.point.plottable).length;
+    stats.textContent=`截至 ${date} · `+(stockView
+      ?`${a.stock.length}只股票 · ${present}条在场记录 · ${Z}只有坐标 · ${K}只暂未绘制`
+      :`${a.groups.length}只股票 · ${present}条在场记录 · ${Z}条有坐标 · ${K}条暂未绘制`)
+      +(over?` · ${over}条已满${OBS_DAYS}日未显示`:'');
   }
   if(pending){
-    const rows=stockView?a.stock.filter(x=>!x.basis.plottable).map(item=>`<button class="map-pending-item" data-map-group="${esc(item.group.code)}"><b>${esc(item.group.name)}</b><span>${item.group.code} · 最早入选：${esc(item.basis.reason)}</span></button>`).join('')
+    const rows=stockView?a.stock.filter(x=>!x.basis.plottable&&x.basis.reason!=='已出观察期').map(item=>`<button class="map-pending-item" data-map-group="${esc(item.group.code)}"><b>${esc(item.group.name)}</b><span>${item.group.code} · 最早入选：${esc(item.basis.reason)}</span></button>`).join('')
       :a.record.filter(x=>!x.point.plottable).map(x=>`<button class="map-pending-item" data-map-id="${esc(key(x.s))}"><b>${esc(x.s.name)}</b><span>${x.s.recDate.replaceAll('-','.')} · ${esc(x.point.reason)}</span></button>`).join('');
     pending.innerHTML=rows?`<div class="map-pending"><span class="map-pending-title">暂未绘制 · 点击查看原因与明细</span><div class="map-pending-list">${rows}</div></div>`:'';
   }
@@ -678,6 +745,8 @@ function drawAtlas(){
   const a=atlasData(),stockView=state.mapMode==='stock';
   updateMapMeta(a);
   const W=Math.max(320,wrap.clientWidth||900),H=Math.max(360,wrap.clientHeight||(window.innerWidth<=720?400:520)),small=W<500,pad={l:small?46:56,r:small?22:44,t:34,b:46};
+  /* 点大小统一、不随成交额缩放（2026-09-17 用户确认）；amt 仅保留在悬停明细里。 */
+  const dotR=small?5.5:7;
   let dots=[];
   let out='';
   if(a.range){
@@ -695,15 +764,17 @@ function drawAtlas(){
     }
     const axisY=stockView?'较最早记录参考价涨跌':'较该次入选参考价涨跌';
     const axisX=stockView?`自${ATLAS_BASIS_LABEL}的首个观察日起的交易日 →`:'自该次入选的首个观察日起的交易日 →';
+    const asOf=atlasAsOf();
     out+=`<line x1="${pad.l}" x2="${W-pad.r}" y1="${y(0).toFixed(1)}" y2="${y(0).toFixed(1)}" stroke="var(--secondary)" stroke-dasharray="5 5" opacity=".5"/>`
-      +`<text x="${pad.l}" y="16" fill="var(--muted)" font-size="9">${axisY}</text><text x="${W-pad.r}" y="${H-5}" text-anchor="end" fill="var(--muted)" font-size="9">${axisX}</text>`;
-    const iLast=indexOfDate(DATA.analysis_date);
+      +`<text x="${pad.l}" y="16" fill="var(--muted)" font-size="9">${axisY}</text><text x="${W-pad.r}" y="${H-5}" text-anchor="end" fill="var(--muted)" font-size="9">${axisX}</text>`
+      +(asOf.review?`<text x="${W-pad.r}" y="16" text-anchor="end" fill="var(--amber)" font-size="9" letter-spacing="1">回看 ${asOf.date} · 非最新快照</text>`:'');
+    const iLast=asOf.iV;
     if(stockView)for(const item of a.stock){
       if(!item.basis.plottable)continue;
       const amt=item.group.records.map(s=>s.candles[iLast]?.[4]).find(valid);
       dots.push({id:item.group.code,attr:'data-map-group',rec:item.group.records[0],name:item.group.name,label:item.group.name,badge:item.badge?.short||null,day:item.basis.day,ret:item.basis.ret,amt:valid(amt)?amt:0,active:item.group.code===state.mapGroup});
     }else for(const x0 of a.record){
-      const p=x0.point;if(!p.plottable)continue;
+      const p=x0.point;if(!p.inWindow)continue;
       const amt=x0.s.candles[iLast]?.[4];
       dots.push({id:key(x0.s),attr:'data-map-id',rec:x0.s,name:x0.s.name,label:atlasRecordLabel(x0.s),badge:null,day:p.day,ret:p.ret,amt:valid(amt)?amt:0,active:key(x0.s)===state.mapCurrent});
     }
@@ -712,7 +783,7 @@ function drawAtlas(){
     const order=dots.map((_,i)=>i).sort((i,j)=>((dots[j].badge?2:0)+(dots[j].active?1:0))-((dots[i].badge?2:0)+(dots[i].active?1:0)));
     for(const i of order){
       if(small&&!dots[i].active)continue;
-      const d0=dots[i],xx=x(d0.day),yy=y(d0.ret),radius=d0.amt>0?Math.min(small?10:13,3+Math.sqrt(d0.amt)*1.15):3.5,fs=small?8:10;
+      const d0=dots[i],xx=x(d0.day),yy=y(d0.ret),radius=dotR,fs=small?8:10;
       const w=d0.label.length*fs+(d0.badge?d0.badge.length*(fs-1)+23:0);
       const rightX=xx+radius+8,leftX=xx-radius-8-w;
       const side=rightX>=pad.l-8&&rightX+w<=W-2?true:leftX>=pad.l-8&&leftX+w<=W-2?false:null;
@@ -725,7 +796,7 @@ function drawAtlas(){
     }
     const labelMarkup=(d0,i,fs)=>{
       if(labelY[i]==null)return '';
-      const xx=x(d0.day),yy=y(d0.ret),radius=d0.amt>0?Math.min(small?10:13,3+Math.sqrt(d0.amt)*1.15):3.5;
+      const xx=x(d0.day),yy=y(d0.ret),radius=dotR;
       const nameW=d0.label.length*fs,anchor=sideR[i]?'start':'end',tx=sideR[i]?xx+radius+8:xx-radius-8;
       let s=`<text x="${tx.toFixed(1)}" y="${labelY[i].toFixed(1)}" text-anchor="${anchor}" fill="var(--secondary)" font-size="${fs}">${esc(d0.label)}</text>`;
       if(d0.badge){
@@ -735,7 +806,7 @@ function drawAtlas(){
       return s;
     };
     dots.forEach((d0,i)=>{
-      const xx=x(d0.day),yy=y(d0.ret),radius=d0.amt>0?Math.min(small?10:13,3+Math.sqrt(d0.amt)*1.15):3.5,col=d0.ret>=0?'var(--up)':'var(--down)',fs=small?8:10;
+      const xx=x(d0.day),yy=y(d0.ret),radius=dotR,col=d0.ret>=0?'var(--up)':'var(--down)',fs=small?8:10;
       out+=`<g class="map-dot" ${d0.attr}="${esc(d0.id)}" tabindex="0" role="button" aria-label="${esc(d0.name)}，${d0.badge?esc(d0.badge)+'，':''}第${d0.day}个交易日，较参考价${pct(d0.ret)}">`
         +`<circle cx="${xx.toFixed(1)}" cy="${yy.toFixed(1)}" r="${(radius+9).toFixed(1)}" fill="${col}" opacity=".06"/>`
         +`<circle cx="${xx.toFixed(1)}" cy="${yy.toFixed(1)}" r="${(radius+4).toFixed(1)}" fill="none" stroke="${col}" stroke-opacity="${d0.active?.55:.12}"/>`
@@ -758,7 +829,7 @@ function drawAtlas(){
   svg.onpointermove=e=>{
     const dot=e.target.closest('.map-dot');if(!dot){hideTip();return}
     const id=stockView?dot.dataset.mapGroup:dot.dataset.mapId,d0=dots.find(z=>z.id===id);if(!d0)return;
-    showTip(`<b>${esc(d0.name)} · ${dateWord(d0.rec).d}${stockView?` · ${ATLAS_BASIS_LABEL}`:''}</b><dl><div><dt>自${stockView?'最早记录':'该次入选'}首个观察日起</dt><dd>第 ${d0.day} 天</dd></div><div><dt>较参考价</dt><dd class="${tone(d0.ret)}">${pct(d0.ret)}</dd></div><div><dt>当日成交额</dt><dd>${d0.amt>0?`${number(d0.amt)} 亿`:'缺失，用固定小圆'}</dd></div></dl><div class="tip-hint">${d0.active?'已固定选中':'点击固定选中'+(stockView?'这只股票':'这次观察')}</div>`,e);
+    showTip(`<b>${esc(d0.name)} · ${dateWord(d0.rec).d}${stockView?` · ${ATLAS_BASIS_LABEL}`:''}</b><dl><div><dt>自${stockView?'最早记录':'该次入选'}首个观察日起</dt><dd>第 ${d0.day} 天</dd></div><div><dt>较参考价</dt><dd class="${tone(d0.ret)}">${pct(d0.ret)}</dd></div><div><dt>当日成交额</dt><dd>${d0.amt>0?`${number(d0.amt)} 亿`:'缺失'}</dd></div></dl><div class="tip-hint">${d0.active?'已固定选中':'点击固定选中'+(stockView?'这只股票':'这次观察')}</div>`,e);
     if(state.mapPreview!==id){state.mapPreview=id;updateMapPanel()}
   };
   svg.onpointerleave=()=>{hideTip();if(state.mapPreview!==null){state.mapPreview=null;updateMapPanel()}};
@@ -784,9 +855,52 @@ function render(){
 /* ---- 交互 ---- */
 let toastTimer;
 function notify(msg){clearTimeout(toastTimer);const t=$('toast');t.textContent=msg;t.classList.add('show');toastTimer=setTimeout(()=>t.classList.remove('show'),2400)}
+/* ---- 日期回看：步进、日历弹层、回到最新 ---- */
+function stepMapDate(delta){
+  const {iV}=atlasAsOf(),next=iV+delta;
+  if(next<0||next>=SESSIONS.length)return;
+  state.mapDate=SESSIONS[next]===DATA.analysis_date?null:SESSIONS[next];
+  window.scrollTo(0,0);render();
+}
+function closeCal(){const pop=$('calPop');if(pop)pop.classList.remove('open');const b=$('dnDateBtn');if(b)b.setAttribute('aria-expanded','false')}
+function buildCal(){
+  const pop=$('calPop'),set=new Set(SESSIONS),cur=atlasAsOf().date,last=SESSIONS[SESSIONS.length-1];
+  let y=+SESSIONS[0].slice(0,4),m=+SESSIONS[0].slice(5,7);
+  const endY=+last.slice(0,4),endM=+last.slice(5,7);
+  let h='';
+  while(y<endY||(y===endY&&m<=endM)){
+    const dow=new Date(y,m-1,1).getDay(),days=new Date(y,m,0).getDate();
+    h+=`<div class="cal-month"><h4>${y}-${String(m).padStart(2,'0')}</h4><div class="cal-grid">`;
+    for(const w of '日一二三四五六')h+=`<span class="wd">${w}</span>`;
+    for(let i=0;i<dow;i++)h+='<span></span>';
+    for(let d=1;d<=days;d++){
+      const iso=`${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+      if(!set.has(iso)){h+=`<button disabled>${d}</button>`;continue;}
+      const cls=iso===cur?'sel':iso===last?'today':iso<cur?'past':'';
+      h+=`<button class="${cls}" data-map-date-pick="${iso}">${d}</button>`;
+    }
+    h+=`</div></div>`;
+    if(m===12){y++;m=1}else m++;
+  }
+  pop.innerHTML=h+`<span class="cal-note">仅交易日可选 · 范围在内嵌行情窗口内</span>`;
+}
+function toggleCal(){
+  const pop=$('calPop');if(!pop)return;
+  if(pop.classList.contains('open')){closeCal();return}
+  buildCal();pop.classList.add('open');$('dnDateBtn').setAttribute('aria-expanded','true');
+}
 document.addEventListener('click',e=>{
+  if(state.page==='map'&&!e.target.closest('#dateNav'))closeCal();
   const nav=e.target.closest('[data-nav]');
   if(nav){hideTip();state.page=nav.dataset.nav;window.scrollTo(0,0);render();return}
+  const calBtn=e.target.closest('#dnDateBtn');
+  if(calBtn){toggleCal();return}
+  const calPick=e.target.closest('[data-map-date-pick]');
+  if(calPick){state.mapDate=calPick.dataset.mapDatePick===DATA.analysis_date?null:calPick.dataset.mapDatePick;window.scrollTo(0,0);render();return}
+  const stepBtn=e.target.closest('[data-map-date-step]');
+  if(stepBtn){stepMapDate(+stepBtn.dataset.mapDateStep);return}
+  const latestBtn=e.target.closest('[data-map-date-latest]');
+  if(latestBtn){state.mapDate=null;window.scrollTo(0,0);render();return}
   const modeBtn=e.target.closest('[data-map-mode]');
   if(modeBtn){state.mapMode=modeBtn.dataset.mapMode;state.mapGroup=null;state.mapCurrent=null;state.mapPreview=null;window.scrollTo(0,0);render();return}
   const dot=e.target.closest('.map-dot');
@@ -808,6 +922,15 @@ document.addEventListener('keydown',e=>{
     if(state.mapMode==='stock')state.mapGroup=e.target.dataset.mapGroup;else state.mapCurrent=e.target.dataset.mapId;
     state.mapPreview=null;render();
   }
+  if(e.key==='Escape'){closeCal();return}
+  if(state.page!=='map'||(e.key!=='ArrowLeft'&&e.key!=='ArrowRight'))return;
+  const cal=$('calPop');
+  if(cal&&cal.classList.contains('open'))return;
+  const dlg=$('detailDialog');
+  if(dlg&&dlg.open)return;
+  const ae=document.activeElement;
+  if(ae&&(ae.tagName==='INPUT'||ae.tagName==='TEXTAREA'||ae.tagName==='SELECT'))return;
+  stepMapDate(e.key==='ArrowLeft'?-1:1);
 });
 let resizeTimer;
 window.addEventListener('resize',()=>{clearTimeout(resizeTimer);resizeTimer=setTimeout(()=>{render()},150)},{passive:true});

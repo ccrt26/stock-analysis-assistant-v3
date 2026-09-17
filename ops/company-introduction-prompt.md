@@ -2,6 +2,8 @@
 
 本文由 `ops/forward-selection-prompt.md` 的"研究归档后的网页同步（共同收尾）"调用，写作方法以 `.agents/skills/writing-company-introductions/SKILL.md` 为准。这是正式推荐归档后的附属资料生成，不改变研究阶段，不重跑选股或复盘，不读取未来数据。
 
+启动器 managed 模式中，外层先尝试展示并提供已完成的 facts-file，模型直接读取，不重复 prepare；只补 `missing`，返回保存结果和缺项。第二次同步由外层安排，不在模型内部重复执行。实际缺项按公司资料页面和任务状态呈现，不事后改写已经采用的推荐正文；手动完整执行仍按本文原收尾要求。
+
 ## 调用时机与范围
 
 正式归档成功并完成第一次网页同步后执行。时间上下文沿用 selection prepare 返回并已在收尾使用的三个字段：`formation_date`、`action_date`、`selection_as_of`，逐字传递，不得改写。
@@ -37,6 +39,8 @@
 ```
 
    PDF 读取使用项目 `documents` 可选依赖（`pip install -e '.[documents]'`）；环境缺依赖时按明确错误安装后重试，不能用记忆补填。
+
+   优先复用同身份、同版本且原公开时间已核对的既有官方原件；当前下载时间不能替代历史 available_at。下载函数内的直连不改变模型请求网络；HTTP 403 和非PDF响应只记取证失败。
 
    官方 source 的 `evidence_path` 指向返回的 `receipt.json`，`retrieved_at` 使用其中实际时间，`url` 与该次请求或最终响应 URL 对应。取证失败、PDF 未读到或只有搜索摘要时，不能自行填一条“已核实”的来源；继续寻找可读原文，仍不足则说明具体缺项。原件与提取正文会随文章保存在本地，不进入 GitHub。数字用既有计算或临时 Python 核算，不改原 facts-file，不把外部事实伪装成本地行。
 4. 按 Skill 逐篇写单篇 JSON（`schema_version=company-introduction-v1`），身份字段逐字使用 facts-file context 的值；`generated_at` 用当前上海时间。表头逐列清楚，正文解释经营含义，技术问题留工作记录。沿用 sections/sources/limitations，无需增加 schema 或输出状态。

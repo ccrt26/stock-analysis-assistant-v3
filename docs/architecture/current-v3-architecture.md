@@ -1,6 +1,6 @@
 # 股票分析助手 V3：当前架构与实现状态
 
-**更新日期：** 2026-09-13
+**更新日期：** 2026-09-17
 
 **适用范围：** GitHub `main` 分支
 
@@ -156,7 +156,11 @@ data health
 
 公告元数据以巨潮为主源。只有巨潮请求、权限、限流、分页完整性或响应格式等来源边界错误才切换到上交所和深交所官方接口；本地程序、存储、合同或时间边界错误仍显式失败。交易所备用路径只保存代码、名称、标题、精确公开时间、官方链接和稳定来源编号，不建设 PDF 全文系统。两所都完整为 `exchange_complete`，只有一所完整为 `exchange_partial`，均不可用为 `announcement_unavailable`。来源状态和覆盖交易所进入现有阶段摘要，不增加数据库表。
 
-下个交易日前一自然日晚间18:45的最终研究由本地 launchd 任务（`com.ccrt.stock-analysis-assistant.ai-nightly`）经 `tools/stock_ai.py` 启动：外层固定时间、完成一次 prepare、按 GLM → DeepSeek 顺序无界面执行模型并核对产物；执行器为本机 ZCode CLI（显式模型、API 地址与密钥），Astra 仅由用户手动执行。模型在项目内完整读取 `ops/forward-selection-prompt.md`，总控在同一个模型会话内使用四个专业 Skill，不在研究过程中另起并行模型。`prepare` 冻结上一交易日、行动日和带时区的 `as_of`，等待晚间研究准备数据并结算到期 D20；模型只生成 `pending-trace-<formation_date>.json` 一份 `daily-research-trace-v4` 完整轨迹。`record-trace` 校验结构、日期、合格股票、候选守恒、唯一决定引用、已确认价格支持的最小形成日数值，以及 `fresh_event_pending` 的事件时点和等待窗口，从其中抽取现有 `ResearchResult` 调用 `record_daily_selection`，写入现有 Forward CSV 后将完整轨迹原子归档为 `research-trace-<formation_date>.json`。程序不判断事件语义、材料性、内部分类、传播或价格解释是否正确。既有 v1/v2/v3 归档不迁移、不倒填；现有 `record` 命令、`ResearchResult`、Forward CSV 字段和 D20 结算保持不变，完整 trace 不写入 DuckDB。
+下个交易日前一自然日晚间18:45的最终研究由本地 launchd 任务（`com.ccrt.stock-analysis-assistant.ai-nightly`）经 `tools/stock_ai.py` 启动：外层固定时间、完成一次 prepare、夜间按 Astra high → GLM → DeepSeek 顺序无界面执行并核对产物；Astra 使用 Codex CLI、ChatGPT 登录与 workspace-write，GLM/DeepSeek 保留本机 ZCode CLI 和原认证。次晨仍为 GLM → DeepSeek。只有本次模型终端请求证实的额度/供应商故障才接替；PDF、工具、本地与研究合同失败不触发，同任务跨阶段及恢复跳过已失效路线。模型在项目内完整读取 `ops/forward-selection-prompt.md`，总控在同一个模型会话内使用四个专业 Skill，不在研究过程中另起并行模型。`prepare` 冻结上一交易日、行动日和带时区的 `as_of`，等待晚间研究准备数据并结算到期 D20；模型只生成 `pending-trace-<formation_date>.json` 一份 `daily-research-trace-v4` 完整轨迹。`record-trace` 校验结构、日期、合格股票、候选守恒、唯一决定引用、已确认价格支持的最小形成日数值，以及 `fresh_event_pending` 的事件时点和等待窗口，从其中抽取现有 `ResearchResult` 调用 `record_daily_selection`，写入现有 Forward CSV 后将完整轨迹原子归档为 `research-trace-<formation_date>.json`。程序不判断事件语义、材料性、内部分类、传播或价格解释是否正确。既有 v1/v2/v3 归档不迁移、不倒填；现有 `record` 命令、`ResearchResult`、Forward CSV 字段和 D20 结算保持不变，完整 trace 不写入 DuckDB。
+
+新研究在冻结前由总控交接研究判断及完整推荐草稿，启动器接续定向备料、局部润色和独立的全文忠实核对。`recommendation_context.py` 只读时点事实和原全市场派生，可在候选验证时按代码/截止/类别只读取数，提供各财务类别的本地可得期间、日期、行业层级/上涨数/同期限分母/覆盖、比较窗口、行情和可比财务，按需读取原行业跨日序列；不新增排名或决定名单。`tools/recommendation_pipeline.py` 给写作、审稿新的隔离执行器会话，注入正文实际引用的对象与期间、本轮事实、同版判断、总控稿、待改稿和适用教学范文。Astra 沿 Codex 实际会话协议核对完整输入、隔离与零工具调用，允许 CLI 声明内置工具；ZCode 沿原请求日志核验。缺日志不能当作零调用；各阶段独立保存实际模型、high/原推理档、会话与失败。正文只应用逐项列明的修改，审稿仍核对全文含义。模型全文中未列明的纯换行调整被丢弃、原段落保留；非换行文字不一致则不采用。文章表达偏差直接修，需改研究的问题定向返回总控并同步草稿；没有解决就保留 pending。阶段结果同时对应所用研究和总控稿，任一改变都不能复用旧结果；返研改变名单时事实与范文排除名单同步更新。旧版已有采用稿仍按原恢复规则处理，不视为通过新忠实核对。managed 研究子进程携带交接标记，原 `record`/`record-trace` CLI 在该阶段直接拒绝提前保存；外层正常保存与手动流程不带此标记。采用正文与准确对应的完整 trace 先原子保存在本轮任务目录，再执行既有 `record-trace`；恢复时检查原对应关系，CSV 已写但 trace 未移动只能恢复与保留内容逐字段相符的研究。各阶段保存各自的模型与会话证据，不覆盖研究阶段身份。
+
+`nightly_report.py` 从正式复盘及采用推荐正文原样装配，保留最前面的资料截止/补跑说明。第一次本地展示后，启动器沿原公司介绍合同补缺项；介绍失败不撤销推荐。手动完整研究仍按每日 Prompt 执行；历史冻结/补交不重新选股。A2 对读者显示“研究说明”，采用稿的版本和修改过程留在内部来源；认可的历史采用稿不自动回写原 trace 或进入复盘选股依据。没有新增任务、评分器、数据库或自动公网发布。
 
 正常任务的 `action_date` 是当前上海自然日的次日，必须开市；`formation_date` 是行动日前最近交易日；`selection_as_of` 固定为行动日前一自然日18:30。明天休市则不产生复盘或新推荐，周日使用周五行情和周日18:30以前的事实，为周一准备，长假同理。`prepare` 只认同形成日最新 pre-research，且其 capabilities.research_as_of 必须逐字等于 selection_as_of；缺失或不匹配不能用旧派生放行。健康快照还须对应同形成日最新 pre-research 的 run_id，且 generated_at 不早于该 run 的 finished_at；健康生成或写出失败保存在现有阶段 summary_json，prepare 优先给出明确失败原因，不能用旧健康放行。同 run 成功重建健康或新 pre-research 成功生成匹配健康后恢复，close/evening 后续失败不废弃已验证正式快照。市场观察和价格分析仍是最低条件，行业、主题、个股背景、公告和分钟仍为可选通道；complete_core_date 只作诊断。正常18:45启动，每30秒检查一次，最晚等到18:55；可选步骤已失败但核心可用时进入受限研究，核心缺失停止推荐。20:30只是交付目标，不新增服务或看门狗。
 
@@ -241,7 +245,7 @@ data health
 | 一个总控 + 四个专业研究 Skill | 已实现 | `.agents/skills/` |
 | 候选与决定轨迹追溯、历史形成日模拟和调优诊断方法 | 已实现为 `daily-research-trace-v4` 与 Skill 流程 | 每只候选结构化记录内部分类和状态、市场识别、披露新颖性及适用的板块传播证据，并分开记录催化、传播、价格确认、剩余路径、经营依据、风险和未知；程序校验结构、引用、最小价格数值与条件事件边界，AI 仍负责语义解释与取舍；手动 D20 复盘只有 Prompt，不是常驻 Python 服务 |
 | 选出后的第1—30个交易日跟踪与走势复盘 | 已实现 | 程序记录全部路径；正式日评账本保存全部结构化判断及仅简评正文，V2报告保存全部节点详评和0—8只普通详评；节点六项、普通详评四项，同股各episode分别对账；D20结论冻结，后续观察不改写；比较仅作内部评价，历史V1继续可读 |
-| 每日自动端到端 AI 选股 | 已实现：本地 launchd（ai-nightly 18:45 / ai-preopen 08:45）经 `tools/stock_ai.py` 触发，GLM→DeepSeek 顺序无界面执行，Astra 仅手动 | 外层完成一次 `prepare` 后模型按 Prompt 执行；`prepare`/`record-trace` 不启动模型，只冻结边界、检查数据、校验一份 trace、抽取现有 Forward 结果、归档和结算 D20 |
+| 每日自动端到端 AI 选股 | 已实现：本地 launchd（ai-nightly 18:45 / ai-preopen 08:45）经 `tools/stock_ai.py` 触发，夜间 Astra high→GLM→DeepSeek，次晨 GLM→DeepSeek | 外层完成一次 `prepare` 后模型按 Prompt 执行；`prepare`/`record-trace` 不启动模型，只冻结边界、检查数据、校验一份 trace、抽取现有 Forward 结果、归档和结算 D20 |
 | AI 调用前的研究结果缓存、候选 memo 缓存和断点恢复 | 未实现 | 目前只有事实/派生层哈希、清单与跳过重算 |
 | 冻结报告的本地呈现 | 已实现 | monitor Markdown 与 `tools/render_prism_web.py` 的 Prism 集成（共享数据由 `tools/render_monitor_web.py` 整理）（`tools/guanlan-prism/`，本地更新入口即后者的同步命令）；只呈现已保存事实和AI正文，不生成新判断 |
 | 正式推荐的公司介绍（附属资料） | 已实现 | `stock_analyzer.ops.company_introduction` + `writing-company-introductions` Skill + `ops/company-introduction-prompt.md`；正式身份 trace 备料、AI 逐篇写作、record 校验保存到 `local_archive/company_introductions/`，Prism 公司资料页签按原推荐身份展示；不进入正式研究/复盘产物，不自动选股 |
@@ -325,3 +329,5 @@ A2 推荐正文另有只读的独立展示路径（`tools/statement_display.py`�
 ### 2026-09-15 交付补充
 
 日报复盘和跟踪统计由 `tools/nightly_report.py` 从正式记录装配，保留模型原响应，再按原合同验收。公司介绍新保存的官方引用带可回读原件，修订保留旧稿；历史介绍保持原身份读取。WEB 关联同一次任务的生成/失败/完成状态，终态保存后刷新。现有 Prism 公网页仅经人工执行 `tools/publish_prism_a2.sh` 同步到发布仓库，渲染器默认只生成本地页面；不是恢复旧报告发布架构。运行、取证与人工补缺见 `ops/web-display-maintenance.md`。
+
+已知公告的原件读取复用 `official_evidence`：核对身份、版本和原公开时间后优先使用已有原件，再原链接/相对 pdf_path 与同身份官方入口。官方下载在函数内直连，不改变 Astra 代理；HTTP 状态、最终 URL 和失败诊断留取证记录，原 v1 receipt/read_evidence 保持兼容。本轮步骤可共用临时原件，不新建全文库；下载时刻不替代历史 available_at。

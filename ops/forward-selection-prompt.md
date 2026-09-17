@@ -1,5 +1,31 @@
 # 晚间正式研究运行提示
 
+## 启动器分工与手动执行
+
+`tools/stock_ai.py` 的 managed 新研究模式以外层说明为准：研究阶段完成完整 pending trace、与最终判断一致的完整推荐草稿、市场说明和正式复盘归档，暂不执行选股 record/record-trace、公司介绍或网页同步。总控在交接前实读写作教学和适用范文，推荐分区不能留待外层代写。总控在少量候选验证时即可按代码/截止/类别调用 `recommendation_context`；外层交稿后再准备正文实际引用对象与期间的核对材料，分别启动短上下文局部润色和全文忠实核对；实际需要改变研究的问题返回总控，并同步 pending 与草稿。正文和研究一致后由外层保存采用稿并执行既有 record-trace。外层原样装配正文，再同步本地页面、补缺失公司介绍。阶段日志和采用稿留在本轮 ai_tasks 目录。
+
+少量候选的通用事实入口（不需要先写 trace）：
+
+```bash
+./.venv/bin/python -m stock_analyzer.ops.recommendation_context \
+  --code <ts_code> --formation-date <formation_date> --as-of <as_of> \
+  --category financial --output <临时目录>/candidate-facts.json
+```
+
+可重复 `--code`/`--category`（financial/company/price/industry）；按需 `--period YYYY-MM-DD`、`--sector-date YYYY-MM-DD`。先核对各财务类别的本地可得期间，不把漏查写成未披露。行业上涨数、有效分母、比例、层级和窗口同包；动态变化需要同口径跨日资料，不能靠嵌套的3日/5日窗口直接推出趋势变化。上述是事实与口径核对，不替代总控的因果判断、比较和未知取舍。
+
+
+手动完整执行仍按本文完成写稿、成稿核对、record-trace 和共同收尾；不得跳过冻结前反查。已有冻结结果的补交不进入新研究流程。程序或模型失败不等于合法空名单。
+
+冻结前定向核对命令（只读事实仓，仅写指定临时材料；可追加 `--compare-code` 带入必要近邻）：
+
+```bash
+./.venv/bin/python -m stock_analyzer.ops.recommendation_context \
+  --trace local_archive/forward_selection/pending-trace-<formation_date>.json \
+  --output <本轮临时目录>/recommendation-context.json
+```
+
+
 这是当前个人 A 股助手的正式每日推荐研究。只执行研究，不开发或修改程序，不改写 Skill，不启动新的模型进程，不读取未来行情。本任务由本地启动器（launchd + `tools/stock_ai.py`）按时启动并在必要时接替模型；启动器只负责启动与结果识别，不参与研究判断。
 
 ## 最终回复唯一来源
@@ -132,7 +158,7 @@ stock_analyzer.ops.forward_selection.DailyResearchTraceV4
 5. 总控按股票代码归并候选，先确定结构化 `engine_type`、`engine_status` 和 `market_recognition`，再把同一批少量候选交给四个专业 Skill 独立验证。
 6. 价格 Skill 按“1/3/5 日连续性 → 单日贡献 → 有效收盘 → 成交推进 → 回落 → 组合余量”验证具体股票；对公司事件按需调用 `compute_event_reaction_features_v3`，不保存新表，不用旧版函数结果填充 V4 事件证据。
 7. 总控按“同发动机组内比较 → 跨发动机比较 → 逐只绝对质量判断”解决冲突，拟定 0—5 只或空名单。每增加一只都重新判断绝对质量；不能因为它是剩余候选中最好的一只而补位。不投票、不打分、不凑数。
-8. `record-trace` 之前，按本文件“推荐说明写作前的定向阅读”实读教学和适用范文，完成推荐说明草稿；由当前执行 AI 对照具体成稿核查第 7 节的完整论证、事实来源及与 thesis/条件的一致性。关键缺口按总控回到本轮验证并调整取舍，全部一致后再保存 trace。已有冻结结果的补写只忠实表达，冲突报错不暗改历史。
+8. managed 模式由总控交出 pending 和完整推荐草稿，外层只接续润色、忠实核对及保存；总控与手动完整执行均在 `record-trace` 之前，按本文件“推荐说明写作前的定向阅读”实读教学和适用范文，完成推荐说明草稿；由当前执行 AI 对照具体成稿核查第 7 节的完整论证、事实来源及与 thesis/条件的一致性。关键缺口按总控回到本轮验证并调整取舍，全部一致后再保存 trace（managed 模式由外层保存）。判断或总控草稿任一更新，旧写审结果不再沿用；返研改变名单时核对材料和适用范文随之更新。已有冻结结果的补写只忠实表达，冲突报错不暗改历史。
 
 ## 4. 七种发动机、一条正式推荐通道和一条事件线索通道
 
@@ -217,7 +243,7 @@ trace_version=daily-research-trace-v4
 local_archive/forward_selection/pending-trace-<formation_date>.json
 ```
 
-然后使用 `prepare` 返回的原值运行：
+手动完整执行在写作与审稿完成后使用 `prepare` 返回的原值运行；managed 模式由外层执行此命令，研究模型在交付 pending 后停止本节保存步骤：
 
 ```bash
 ./.venv/bin/python -m stock_analyzer.ops.forward_selection record-trace \
@@ -231,7 +257,7 @@ local_archive/forward_selection/pending-trace-<formation_date>.json
 
 ### 方法版本辅助记录（仅新增研究，失败不撤销推荐）
 
-`record-trace` 返回 `selection_frozen` 后，把本次实际读取方法文件时记录的版本信息保存到：
+`record-trace` 返回 `selection_frozen` 后保存以下辅助记录；managed 模式研究者在实际读取时即保存同样内容并标明 pending 身份，外层冻结后沿用，不能补造“已读”。保存位置：
 
 ```text
 local_archive/forward_selection/research-run-context-<action_date>.json
@@ -260,7 +286,7 @@ local_archive/forward_selection/research-run-context-<action_date>.json
 
 正常新选股、selection prepare 返回 `already_selected` 后的复盘更新，以及人工补跑，都必须在正式归档成功后执行本步，再输出合并报告。`already_selected` 分支直接核对已有正式 trace，不重复选股或再写 trace。休市、不具备研究条件或正式归档失败时不调用网页同步。
 
-先确认日评账本与复盘报告的记录结果均为 `recorded` 或 `already_recorded`；本次执行了新选股时，`record-trace` 必须返回 `selection_frozen` 或 `already_selected`。`review_conflict`、`report_conflict`、`invalid_result`、结构校验错误或仅存在 pending 文件，都不算归档成功。没有需逐股复盘的记录也须完成前述合法空账本、空报告归档。
+managed 模式本节及公司介绍由外层执行，研究模型不重复操作。手动完整执行先确认日评账本与复盘报告的记录结果均为 `recorded` 或 `already_recorded`；本次执行了新选股时，`record-trace` 必须返回 `selection_frozen` 或 `already_selected`。`review_conflict`、`report_conflict`、`invalid_result`、结构校验错误或仅存在 pending 文件，都不算归档成功。没有需逐股复盘的记录也须完成前述合法空账本、空报告归档。
 
 逐字使用 selection prepare 返回的三个时间字段，在项目根目录运行：
 
@@ -352,24 +378,13 @@ local_archive/forward_selection/research-run-context-<action_date>.json
 
 风险部分直接回答“最需要担心什么”。资料没有取得时写“这部分资料暂时不完整”，不能把资料缺失冒充公司经营风险。
 
-同一个数字可能支持，也可能反对推荐，不能机械解释：
-
-- 5日涨幅较大：说明股票已经启动；但若主要来自一天，也说明持续性不足。
-- 成交额放大：说明买卖活跃；只有价格持续上升、收盘稳固时才支持上涨，放量不涨反而是不利事实。
-- 行业大多数股票上涨：说明整个方向受到关注；它不能单独证明具体股票值得选。
-- 公司收入、利润、现金流改善：说明经营基础变好；它不能单独证明短期股价会继续上涨。
-- 股价接近近期高点：可能说明强势，也可能说明已经涨得较多；要看能否站稳，而不是机械判定好坏。
-- 五日多数涨幅来自一个涨停日时，这只能算一组单日价格变化，不能把同日形成的涨幅、放量、跑赢同行和突破分别当成四条支持。
-
-每只股票都要把**获得的确认**和**已经付出的涨幅**分开：前者说明上涨是否分布在多个普通交易日、是否持续强于市场和同行、成交增加后是否形成多个较高收盘；后者说明最近 5 日和 20 日已经涨了多少、最大上涨日贡献多少、最大上涨日之后是否继续上涨，以及当前位置是否已经停滞。
-
-先问“去掉最大上涨日以及同日带来的相对收益、成交放大和突破，还剩下什么独立支持”，再看“最大上涨日之后是否继续走强”。若最大上涨日就是截至当时的最后一个交易日，后续尚不可观察，且其余四日不涨，不能一边说核心持续性没有验证一边正式推荐。公司或行业新变化明确时可在多个普通交易日逐步增强后较早确认；纯价格型股票必须有更强的多日持续性。高位本身不支持也不否定，关键是突破后是否继续收稳。
+研究判据由总控及对应专业 Skill 维护：价格连续性、单日贡献、成交推进、回落和余量见价格 Skill；公司经营与短期催化的区别见公司 Skill；行业广度与本股差异见板块 Skill。写作只解释本轮已形成的取舍，不在这里维护第二份选股门槛。具体成稿若不能解释为什么接受风险，返回总控验证，而不是加一句更好听的话。
 
 具体写法按本节的首次推荐定向阅读入口，读取仓库教学与适用认可范文。用普通中文解释研究含义，不把内部术语、标签和流程直接搬到正文；不另维护一份逐词禁用表或重复例句。
 
 ### 唯一用户输出格式
 
-汇总表只能作为目录，不能代替逐只说明。名单、顺序和内部研究结论在生成用户说明前已经确定；下面的说明只负责把已有研究讲清楚，不得新增候选、删除股票、改变顺序、改写当时理由或重新运行选股。
+汇总表只能作为目录，不能代替逐只说明。名单、顺序和内部研究结论在写作时已有明确拟定版本，成稿核对后一起冻结；写作步骤本身无权更改取舍；下面的说明只负责把已有研究讲清楚，不得新增候选、删除股票、改变顺序、改写当时理由或重新运行选股。
 
 ## 今天的市场情况
 

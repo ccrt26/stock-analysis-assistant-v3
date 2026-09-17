@@ -1,26 +1,24 @@
 # 股票助手 AI 模型切换与定时任务使用说明
 
 两个正式 AI 任务（18:45 晚间研究、08:45 次晨安全提醒）由 macOS launchd 启动
-`tools/stock_ai.py`，自动链路为 GLM → DeepSeek（仅额度不足或不可用时接替），经本机
-ZCode CLI 无交互执行原有运行 Prompt：
+`tools/stock_ai.py`。18:45 夜间默认 **Astra high → GLM → DeepSeek**；08:45 次晨保持 **GLM → DeepSeek**。仅模型额度不足或供应商确实不可用时接替。
 
-- **GLM**：`bigmodel/glm-5.3-flash`，BigModel 个人套餐，思考档 max；
-- **DeepSeek**：`deepseek/deepseek-flash`（官方 API 名，对应 DeepSeek-V4.1-Flash，1M 上下文），默认思考模式；
-- **Astra**：不参与自动任务。GLM 与 DeepSeek 都失败时，工具只如实报失败；
-  由你在 Codex App 中手动让 Astra 补跑（晚间读取 `ops/forward-selection-prompt.md`，
-  次晨读取 `ops/preopen-safety-prompt.md`，沿用原 prepare 边界）。
+- **Astra**：`gpt-6-astra`、`high`，本机 Codex CLI 和现有 ChatGPT 登录；显式限制 ChatGPT 认证，不用 API Key、不启用 fast/priority、不改全局 Codex 配置。
+- **GLM**：`bigmodel/glm-5.3-flash`，ZCode CLI、BigModel 个人套餐，原思考 max。
+- **DeepSeek**：`deepseek/deepseek-flash`，ZCode CLI、官方 API，原默认思考。
 
+三路均不可用时保留产物如实停止；不自动重置额度。
 研究方法、Skill、归档合同与展示不变。
 
 ## 日常命令（项目根目录执行）
 
 ```bash
 ./.venv/bin/python tools/stock_ai.py status                 # 现在用哪个、最近结果
-./.venv/bin/python tools/stock_ai.py use deepseek           # 以后默认 DeepSeek
-./.venv/bin/python tools/stock_ai.py use glm                # 以后默认 GLM
-./.venv/bin/python tools/stock_ai.py use auto               # 恢复默认 GLM→DeepSeek
+./.venv/bin/python tools/stock_ai.py use deepseek --task nightly # 以后仅夜间优先 DeepSeek
+./.venv/bin/python tools/stock_ai.py use glm --task nightly  # 以后仅夜间优先 GLM
+./.venv/bin/python tools/stock_ai.py use auto --task nightly # 恢复夜间 Astra→GLM→DeepSeek
 ./.venv/bin/python tools/stock_ai.py tonight deepseek       # 只今晚用 DeepSeek
-./.venv/bin/python tools/stock_ai.py tonight glm            # 今晚切回 GLM
+./.venv/bin/python tools/stock_ai.py tonight astra          # 今晚使用 Astra high
 ./.venv/bin/python tools/stock_ai.py tonight clear          # 清除今晚覆盖
 ./.venv/bin/python tools/stock_ai.py run nightly --provider glm   # 人工跑/补跑晚间研究
 ./.venv/bin/python tools/stock_ai.py run nightly --rerun-date YYYY-MM-DD  # 按原行动日补跑
@@ -29,13 +27,13 @@ ZCode CLI 无交互执行原有运行 Prompt：
 ./.venv/bin/python tools/stock_ai.py install                # 预览定时任务安装
 ./.venv/bin/python tools/stock_ai.py install --apply        # 实际安装/更新两个 AI LaunchAgent
 ./.venv/bin/python tools/stock_ai.py uninstall              # 移除两个 AI LaunchAgent
-./.venv/bin/python tools/stock_ai.py verify --provider glm  # 一路模型的小型真实测试（glm/deepseek）
+./.venv/bin/python tools/stock_ai.py verify --provider astra # 一路模型的小型真实测试（astra/glm/deepseek）
 ```
 
 `status` 只读；`use`、`tonight` 只改本地配置（`.stock-ai.local.json`），均不请求模型 API。
 `tonight` 只绑定当天自然日晚间任务，次日自动失效；`use` 不打断已启动的任务；
-`--provider` 只影响本次调用，不持久化。晚间研究**不设总时限与模型时限**：
-执行到完成或明确失败；只有 GLM 额度不足或确实不可用才自动接替 DeepSeek；
+`--provider` 只影响本次调用，不持久化。优先级为本次 `--provider` → 当日 `tonight` → `use ... --task nightly/preopen` → 旧全局 `use` 偏好 → 分任务默认。显式首选之后按该任务固定默认次序补齐；例如夜间 `--provider glm` 为 GLM → Astra → DeepSeek。分任务 `auto` 明确恢复该任务默认，不被旧全局偏好覆盖；夜间 `auto` 同时清除今晚覆盖，保留影响次晨的旧全局设置。未指定 `--task` 的 `use glm/deepseek/auto` 仍操作旧全局偏好；已有分任务设置优先。Astra 仅允许夜间，次晨不增加 Astra 路线。晚间研究**不设总时限与模型时限**：
+执行到完成或明确失败；只有本次模型终端请求证实的额度、认证、型号、限流或模型连接故障才接替；
 本地/数据/归档问题如实失败，不靠换模型掩盖。模型目录覆盖自动写入
 `~/.zcode/cli/config.json`（DeepSeek 1M 上下文修正），不动模型选择与凭据。
 
@@ -45,14 +43,14 @@ ZCode CLI 无交互执行原有运行 Prompt：
 
 | 用户说法 | 执行命令 |
 |---|---|
-| “以后用深度求索跑股票任务” | `use deepseek` |
-| “以后用 GLM” | `use glm` |
+| “以后夜间用深度求索” | `use deepseek --task nightly` |
+| “以后夜间用 GLM” | `use glm --task nightly` |
 | “今晚用 DeepSeek” | `tonight deepseek` |
 | “今晚切回 GLM” | `tonight glm` |
-| “恢复默认” | `use auto` |
+| “恢复夜间默认” | `use auto --task nightly` |
 | “现在用哪个 AI” | `status` |
 
-执行后应复述实际保存的设置，例如：“已设置：今晚优先 DeepSeek，失败后按 GLM
+执行后应复述实际保存的设置，例如：“已设置：今晚优先 DeepSeek，失败后按 Astra、GLM
 接替；长期默认不变。”模型名或日期不明确时，先问清再执行，不猜测。
 
 ## 定时与迁移状态
@@ -71,13 +69,13 @@ ZCode CLI 无交互执行原有运行 Prompt：
   正常休市、正常无需变化不弹通知。任何通知都不调用 GLM、DeepSeek、Astra
   或 ZCode 对话接口。
 - 查看最近一次失败：运行 `status`，或直接让助手"查看最近一次失败原因"——
-  失败记录含日期、阶段、两条路线的实际尝试与原因、已完成产物和日志路径，
+  失败记录含日期、阶段、各条路线的实际尝试与原因、已完成产物和日志路径，
   无需自己翻技术文件。
-- 每路完整错误输出追加保存到对应 `events-<provider>.stderr.log`，包含每次退出码；
+- 每阶段原始事件、错误和最终回复保存到本阶段日志；ZCode 原重试日志继续追加保存。
   state/索引中的 attempts 保存退出码与日志路径。显示文字可以缩短，接替判断使用
-  本次完整错误依据，取消/超时仍不接替。
+  本次模型终端请求依据；工具输出里的 HTTP 403/429 不构成模型故障，取消/超时仍不接替。
 - `verify` 的验证记录区分两个层面：`configured_model` 是本次调用显式配置的模型，
-  `evidence_model` 来自 ZCode 会话请求记录（rollout）的实际主请求字段；两者一致才算
+  `evidence_model` 来自对应执行器的实际请求/会话协议；Codex 另核对 high、ChatGPT 传输端点与完整会话输入。两者一致才算
   通过。没有证据时不标注“已验证”。
 
 ## 结果位置
@@ -91,3 +89,18 @@ ZCode CLI 无交互执行原有运行 Prompt：
 ## 正文显示与完整完成
 
 整份日报仍须严格归档、CSV 和全部合并分区核对通过。仅合并文字失败时，已独立核对的推荐分区允许同步显示，任务仍记“合并报告待修复”，不重跑模型、不归档半份日报。completed 复核也会调用渲染器，让认可稿或模板更新生效；相同网页由渲染器保持不写入。历史补缺与停止原因说明见 `ops/web-display-maintenance.md`。
+
+## 推荐正文的执行与恢复
+
+新研究由同一个晚间任务按顺序完成：总控形成 pending 和完整推荐草稿 → 程序备齐时点事实 → 局部润色 → 新会话全文忠实核对 → 必要时返回总控同步判断和草稿 → 正文与理由一起冻结 → 原样合并交付。判断或总控稿改变后不复用旧写审；已有采用稿继续原恢复方式，不补称经过新审核。名单真正为空时不启动逐股写审。手动完整执行见每日 Prompt 的分工说明。
+
+阶段输入、输出、会话、实际型号、耗时及具体问题保存在本轮 `local_archive/ai_tasks/nightly/.../recommendation/`，任务状态的 `recommendation_stages` 保存阶段索引。`accepted-recommendation.json` 含采用正文及准确对应的待冻结 trace，仅用于同源交付与中断恢复，不是新的正式事实库。正常继续使用现有 `nightly --rerun-date`；程序复用已完成阶段，不重新选股。若明确提示 CSV/trace/采用稿冲突，保留产物核对具体差异，不能删除正式记录后重跑。
+
+所有阶段沿本轮有效路线，同任务 state 保存已失效供应商，研究/写审/返研/公司介绍和恢复均跳过；下次独立夜间任务重新 Astra 优先。CLI 缺失、权限、事实、研究质量、JSON 合同、PDF 和归档问题不接替。完整同源交接已保存而终端回传失败时先核对已有产物，只补缺失；冻结后不重新选股。公司介绍在第一次本地展示后补缺项，单独记录结果。连续几晚的成品质量要看实际文章和修正记录；程序验收通过不代表语义每天零错误。
+
+
+## 官方原件与通用事实
+
+少量候选验证可先调用 `python -m stock_analyzer.ops.recommendation_context --code 代码 --formation-date 日期 --as-of 带时区截止 --category financial --output 临时文件`；类别支持 financial/company/price/industry，`--period` 保留特定期间，`--sector-date` 按原截止读取行业跨日序列。期间摘要只说明本地可得，不等于公司是否披露。正文引用近邻及其他期间时保留对应事实，不能只留下价格。
+
+同份已知公告用 `python -m stock_analyzer.ops.official_evidence --announcement 元数据.json --as-of 带时区截止 --output-dir 临时目录`，可提供 `--existing-receipt` 或已核验同公告的 `--alternative-url`。优先复用同版原件，下载只在取证函数内使用明确直连。旧公司介绍 `fetch-evidence` 与 receipt 回读合同仍兼容。失败记录 HTTP 状态和诊断，不把错误页当 PDF，也不把取证失败变成模型接替理由。

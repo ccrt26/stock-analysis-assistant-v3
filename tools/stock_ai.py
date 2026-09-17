@@ -2,10 +2,8 @@
 """股票助手 AI 任务统一本地入口。
 
 两个正式 AI 定时任务（18:45 晚间研究、08:45 次晨安全提醒）由 macOS launchd
-启动本程序，本程序按本地路由配置选择模型路线（GLM → DeepSeek 自动接替，
-Astra 仅限用户在 Codex App 手动执行）无交互执行原有运行 Prompt：
-GLM/DeepSeek 走本机 ZCode CLI（显式模型、API 地址与密钥）。
-本入口不提供 Codex/Astra 执行路线。
+启动本程序。夜间 Astra high → GLM → DeepSeek；次晨保持 GLM → DeepSeek。
+Astra 走 Codex CLI / ChatGPT 登录；GLM/DeepSeek 保留 ZCode 与原认证。
 
 日期与截止一律以原 forward_selection prepare 的判定为准：本入口只按
 调度约定选择 prepare 的调用形态（无参 / --rerun-date），不自行推断交易日。
@@ -68,9 +66,11 @@ LAUNCHD_TASKS = {
 }
 
 DEFAULT_ORDER = ["glm", "deepseek"]
-ALL_PROVIDERS = ["glm", "deepseek", "astra"]
-# ALL_PROVIDERS 只用于识别历史记录；实际执行只允许 DEFAULT_ORDER 两路。
+NIGHTLY_ORDER = ["astra", "glm", "deepseek"]
+ALL_PROVIDERS = NIGHTLY_ORDER.copy()
+CODEX_CLI_DEFAULT = "/Applications/ChatGPT.app/Contents/Resources/codex"
 DEFAULT_MODEL_REFS = {
+    "astra": "gpt-6-astra",
     "glm": "bigmodel/glm-5.3-flash",
     "deepseek": "deepseek/deepseek-flash",
 }
@@ -82,7 +82,7 @@ KEY_ENV_NAMES = {"glm": "BIGMODEL_API_KEY", "deepseek": "DEEPSEEK_API_KEY"}
 PROVIDER_LABELS = {
     "glm": "GLM（ZCode CLI，BigModel 个人套餐 glm-5.3-flash，思考档 max）",
     "deepseek": "DeepSeek（ZCode CLI，官方 API deepseek-flash，默认思考模式）",
-    "astra": "Codex Astra（用户手动执行；自动任务不尝试）",
+    "astra": "GPT-6 Astra（Codex CLI，ChatGPT 登录，思考 high）",
 }
 ZCODE_CLI_DEFAULT = "/Applications/ZCode.app/Contents/Resources/glm/zcode.cjs"
 ZCODE_ROLLOUT_DIR = Path("~/.zcode/cli/rollout").expanduser()
@@ -117,7 +117,11 @@ PROVIDER_TERMINAL_PATTERNS = [
     "rate limit", "http 429",
     "connection refused", "connection reset",
     "model not found", "unknown model",
-    "service unavailable", "provider overloaded",
+    "service unavailable", "provider overloaded", "usage limit", "usage_limit",
+    "insufficient_quota", "rate_limit", "limit reached", "not supported",
+    "stream disconnected", "error sending request", "failed to connect",
+    "authentication", "not logged in", "token has expired", "forbidden",
+    "request timeout", "timed out", "model_not_found", "model_not_available",
 ]
 # 整轮取消/中断/超时退出码：先于一切文本判断，不接替（即便旧日志含供应商字样）。
 CANCELLATION_EXIT_CODES = {124, 130, 143}
@@ -128,6 +132,7 @@ LOCAL_SPECIFIC_PATTERNS = [
     "snapshot does not exist", "insufficient local data",
     "partition metadata missing", "forward log header is missing",
     "autocompact stopped", "context refilled", "duckdb",
+    "operation not permitted", "permission denied", "eacces",
 ]
 
 # 模型目录覆盖：补正 CLI 元数据（DeepSeek 官方 1M 上下文 / 384K 输出；
@@ -162,6 +167,7 @@ MAC_NOTIFY_TITLE = "股票AI任务"
 NO_NOTIFY_STATUSES = {"完整完成", "正常无需运行"}
 # 模型路线证据的预期完整三元组：(providerId, modelId, request.body.model)。
 EXPECTED_MODEL_EVIDENCE = {
+    "astra": ("openai", "gpt-6-astra", "gpt-6-astra"),
     "glm": ("bigmodel", "glm-5.3-flash", "glm-5.3-flash"),
     "deepseek": ("deepseek", "deepseek-flash", "deepseek-flash"),
 }
@@ -213,7 +219,7 @@ def tonight_override(config: dict, today: dt.date) -> str | None:
     if tonight.get("date") != today.isoformat():
         return None
     value = tonight.get("preference")
-    return value if value in {"glm", "deepseek"} else None
+    return value if value in ALL_PROVIDERS else None
 
 
 def key_sources(provider: str, config: dict) -> list[dict]:
@@ -295,6 +301,8 @@ def zcode_command(config: dict) -> list[str]:
 
 
 def model_ref(provider: str, config: dict) -> str:
+    if provider == "astra":
+        return "gpt-6-astra"
     override = (config.get("model_refs") or {}).get(provider)
     return override or DEFAULT_MODEL_REFS[provider]
 
@@ -318,27 +326,44 @@ def resolve_provider_order(
     config: dict,
     today: dt.date,
 ) -> tuple[list[str], str]:
-    """返回 (顺序, 说明)。
-
-    自动链路只在 GLM/DeepSeek 之间接替。Astra 由用户在 Codex App 中手动
-    执行，本工具的自动任务与接替绝不尝试 Astra。
-    """
+    """CLI > 今晚 > 分任务偏好 > 旧全局偏好 > 分任务默认。auto 明确恢复该任务默认。"""
+    defaults = NIGHTLY_ORDER if task == "nightly" else DEFAULT_ORDER
     if cli_provider:
-        order = [cli_provider] + [p for p in DEFAULT_ORDER if p != cli_provider]
-        return order, "本次 --provider 指定"
-    stored_pref = default_preference(config)
-    tonight_pref = tonight_override(config, today) if task == "nightly" else None
-    if tonight_pref in {"glm", "deepseek"}:
-        first = tonight_pref
-        source = f"今晚覆盖（{today.isoformat()}）"
-    elif stored_pref in {"glm", "deepseek"}:
-        first = stored_pref
-        source = "长期默认偏好"
+        if cli_provider not in defaults:
+            raise ValueError(f"{task} 不支持 {cli_provider}")
+        return [cli_provider] + [p for p in defaults if p != cli_provider], "本次 --provider 指定"
+    tonight = tonight_override(config, today) if task == "nightly" else None
+    prefs = config.get("task_preferences") or {}
+    if tonight:
+        first, source = tonight, f"今晚覆盖（{today.isoformat()}）"
+    elif task in prefs and prefs[task] in ["auto", *defaults]:
+        first, source = prefs[task], f"{task} 长期偏好"
     else:
-        first = "glm"
-        source = "默认顺序"
-    order = [first] + [p for p in DEFAULT_ORDER if p != first]
-    return order, source
+        first, source = default_preference(config), "旧全局偏好"
+        if first == "auto":
+            source = f"{task} 默认顺序"
+    if first == "auto":
+        first = defaults[0]
+    return [first] + [p for p in defaults if p != first], source
+
+
+def available_routes(state: dict, provider: str, *, fallback: bool = True) -> list[str]:
+    order = state.get("provider_order") or NIGHTLY_ORDER
+    ordered = [provider] + [p for p in order if p != provider] if fallback else [provider]
+    return [p for p in ordered if p not in state.get("unavailable_providers", {})]
+
+
+def mark_provider_unavailable(state: dict, provider: str, reason: str) -> None:
+    state.setdefault("unavailable_providers", {})[provider] = {
+        "at": now_shanghai().isoformat(), "reason": reason[-1000:]}
+
+
+def authentication_available(provider: str, config: dict) -> tuple[bool, str]:
+    # Codex 自己核验 ChatGPT 登录；不读取/复制 token，不提前误判 API 密钥缺失。
+    if provider == "astra":
+        return True, "ChatGPT 登录（由 Codex 实际请求核验）"
+    key, source = resolve_api_key(provider, config)
+    return bool(key), source
 
 
 # ---------------------------------------------------------------- 任务锁
@@ -714,9 +739,19 @@ def child_env(provider: str, config: dict) -> dict:
             "http_proxy", "https_proxy", "all_proxy",
         ):
             env.pop(name, None)
-    key, _source = resolve_api_key(provider, config)
+    if provider == "astra":
+        for name in ("_", "CODEX_THREAD_ID", "CODEX_PARENT_THREAD_ID", "CODEX_INTERNAL_ORIGINATOR_OVERRIDE",
+                     "OPENAI_API_KEY"):
+            env.pop(name, None)
+        env["LANG"] = "en_US.UTF-8"
+        env["PYTHONIOENCODING"] = "utf-8"
+    key, _source = resolve_api_key(provider, config) if provider in KEY_ENV_NAMES else (None, "")
     if key and provider in KEY_ENV_NAMES:
         env[KEY_ENV_NAMES[provider]] = key
+    if config.get("_handoff_only"):
+        env["STOCK_AI_RESEARCH_HANDOFF"] = "1"
+    else:
+        env.pop("STOCK_AI_RESEARCH_HANDOFF", None)
     # 无条件钉住本次工程根与包解析路径；临时副本测试与生产同一语义。
     env["PROJECT_ROOT"] = str(PROJECT_ROOT)
     env["PYTHONPATH"] = str(PROJECT_ROOT / "src") + os.pathsep + env.get("PYTHONPATH", "")
@@ -889,16 +924,36 @@ def run_zcode(
     timeout_seconds=None 表示无时限：等待模型执行到完成或明确失败。
     """
     ensure_model_catalog_config()
+    started = time.time()
     env = child_env(provider, config)
     env["ZCODE_MODEL"] = model_ref(provider, config)
     env["ZCODE_BASE_URL"] = provider_base_url(provider, config)
-    workdir = Path(config.get("_cwd") or PROJECT_ROOT)
+    isolation = tempfile.TemporaryDirectory(prefix="stock-text-") if config.get("_text_only") else None
+    workdir = Path(isolation.name if isolation else config.get("_cwd") or PROJECT_ROOT)
     prompt = prompt_path.read_text(encoding="utf-8")
     args = zcode_command(config) + [
         "--prompt", prompt,
         "--cwd", str(workdir),
         "--json",
     ]
+    if isolation:
+        settings = jsonl_path.with_suffix(".settings.json")
+        settings.write_text(json.dumps({
+            "features": {"memory": False, "skill": False, "mcp": False, "subagent": False},
+            "memory": {"use": False}, "plugins": {"enabled": False},
+            "skills": {"enabled": False, "includeInstructions": False},
+            "hooks": {"enabled": False},
+        }), encoding="utf-8")
+        project_settings = workdir / ".zcode/config.json"
+        project_settings.parent.mkdir()
+        shutil.copyfile(settings, project_settings)
+        # 0.16.5 advertises --settings/--allowed-tools but does not parse them.
+        # Project config and --disallowed-tools are supported by the installed CLI.
+        args += ["--disallowed-tools",
+                 "AskUserQuestion,Bash,Edit,EnterPlanMode,ExitPlanMode,Read,ReadSessionContext,"
+                 "TaskOutput,TaskStop,TodoRead,TodoWrite,WebFetch,WebSearch,Write,Glob,Grep,Skill,Agent,Task"]
+    # --attach only previews a long file and asks the model to Read the rest.
+    # Editors have no tools, so pass the complete text through --prompt.
     stderr_path = jsonl_path.with_suffix(".stderr.log")
     # 追加本次错误输出，保留此前尝试；直接写文件，中断时也有原始依据。
     with jsonl_path.open("wb") as out_handle, stderr_path.open(
@@ -943,17 +998,96 @@ def run_zcode(
             err_handle.write(stderr_text.encode())
             err_handle.write(f"\nexit_code={code}\n{failure_note}\n".encode())
             err_handle.truncate()
+    if isolation:
+        isolation.cleanup()
     if failure_note:
         return code, failure_note + "\n" + stderr_text
     payload = parse_zcode_output(jsonl_path)
+    if payload and (payload.get("projection") or {}).get("status") == "error":
+        code = EXIT_FAIL
+        stderr_text += f"\nError: terminal request (traceId: {payload.get('traceId', '')})"
     if code == 0:
         if payload and payload.get("response"):
             final_path.write_text(str(payload["response"]), encoding="utf-8")
             state_evidence = rollout_model_evidence(payload.get("sessionId"))
+            state_evidence["session_id"] = payload.get("sessionId")
+            state_evidence["usage"] = payload.get("usage", {})
+            if config.get("_text_only"):
+                state_evidence["context_evidence"] = text_session_evidence(payload.get("sessionId"), expected_prompt=prompt)
             EvidenceBox.record(provider, state_evidence)
         else:
             return 1, "ZCode 执行结束但未取得最终回复文本"
+    if code:
+        error, sid = zcode_terminal_error(stderr_text, started)
+        if sid:
+            evidence = rollout_model_evidence(sid)
+            evidence['session_id'] = sid
+            EvidenceBox.record(provider, evidence)
+        if error:
+            return code, '[model-request-error] ' + error
     return code, stderr_text
+
+
+def zcode_terminal_error(stderr: str, started: float) -> tuple[str, str | None]:
+    trace = re.findall(r"\(traceId: ([\w-]+)\)", stderr)
+    if not trace:
+        return '', None
+    # CLI catch prints its trace ID. Only a failed main request in that trace
+    # authorizes fallback; an HTTP error copied from a tool never does.
+    terminal = None
+    for path in ZCODE_ROLLOUT_DIR.glob('model-io-*.jsonl'):
+        if path.stat().st_mtime < started:
+            continue
+        for line in path.read_text(encoding='utf-8').splitlines():
+            event = json.loads(line)
+            if event.get('traceId') == trace[-1] and event.get('model', {}).get('role') == 'main':
+                terminal = event
+    if not terminal or not terminal.get('error'):
+        return '', terminal.get('sessionId') if terminal else None
+    error = terminal['error']
+    if isinstance(error, dict):
+        error = {k: error[k] for k in ('message','code','statusCode','status','httpStatus','name') if k in error}
+        status = error.get('statusCode') or error.get('status') or error.get('httpStatus')
+        if status:
+            error['http_status_text'] = f'HTTP {status}'
+    return json.dumps(error, ensure_ascii=False), terminal.get('sessionId')
+
+
+def text_session_evidence(session_id: str | None, *, expected_prompt: str | None = None) -> dict:
+    """Inspect actual model requests; do not equate a fresh cwd with isolation."""
+    if not session_id:
+        return {"verified": False}
+    path = ZCODE_ROLLOUT_DIR / f"model-io-sess_{session_id.removeprefix('sess_')}.jsonl"
+    tools, calls, request_chars, requests, input_present = set(), 0, 0, 0, False
+    if not path.exists():
+        return {"verified": False}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        event = json.loads(line)
+        body = (event.get("request") or {}).get("body") or {}
+        if not body:
+            continue
+        requests += 1
+        request = event.get("request") or {}
+        messages = request.get("messages") or body.get("messages") or []
+        request_chars += len(json.dumps(body, ensure_ascii=False)) + len(json.dumps(messages, ensure_ascii=False))
+        def contains(value):
+            if isinstance(value, str):
+                return expected_prompt is not None and expected_prompt in value
+            if isinstance(value, list):
+                return any(contains(v) for v in value)
+            if isinstance(value, dict):
+                return any(contains(v) for v in value.values())
+            return False
+        input_present = input_present or contains(messages)
+        calls += len((event.get("response") or {}).get("toolCalls") or [])
+        for tool in body.get("tools") or []:
+            tools.add(str((tool.get("function") or tool).get("name", "")))
+        for message in messages:
+            calls += len(message.get("tool_calls") or [])
+            if message.get("role") == "tool":
+                calls += 1
+    return {"verified": requests > 0, "request_count": requests, "request_chars": request_chars,
+            "offered_tools": sorted(tools), "tool_calls": calls, "input_present": input_present}
 
 
 class EvidenceBox:
@@ -970,6 +1104,137 @@ class EvidenceBox:
         return cls.store.get(provider, {})
 
 
+def codex_command(config: dict) -> list[str]:
+    binary = config.get("codex_cli") or shutil.which("codex") or CODEX_CLI_DEFAULT
+    return [str(Path(binary).resolve())]
+
+
+def codex_session_evidence(events: Path, diagnostic: str, prompt: str, cwd: Path) -> dict:
+    """Use Codex's actual turn input/output protocol, never the saved prompt alone."""
+    stream = [json.loads(line) for line in events.read_text().splitlines() if line.strip()]
+    sid = next((e.get("thread_id") for e in stream if e.get("type") == "thread.started"), None)
+    evidence = {"verified": False, "session_id": sid, "executor": "codex",
+                "context_evidence": {"verified": False}}
+    if not sid:
+        return evidence
+    home = Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex")))
+    paths = list((home / "sessions").glob(f"*/*/*/rollout-*-{sid}.jsonl"))
+    if len(paths) != 1:
+        evidence["note"] = "本会话原始协议记录缺失或不唯一"
+        return evidence
+    raw = paths[0].read_text()
+    events.with_suffix(".rollout.jsonl").write_text(raw)
+    protocol = [json.loads(line) for line in raw.splitlines() if line.strip()]
+    contexts = [e["payload"] for e in protocol if e.get("type") == "turn_context"]
+    models = {(c.get("model"), c.get("effort")) for c in contexts}
+    metadata = next((e["payload"] for e in protocol if e.get("type") == "session_meta"), {})
+    items = [e["payload"] for e in protocol if e.get("type") == "response_item"]
+    users = [c.get("text", "") for i in items if i.get("type") == "message" and i.get("role") == "user"
+             for c in i.get("content", [])]
+    injected = [c.get("text", "") for i in items if i.get("type") == "message" and i.get("role") == "developer"
+                for c in i.get("content", [])]
+    calls = [i for i in items if i.get("type", "").endswith("_call")]
+    completed = any(e.get("type") == "turn.completed" for e in stream)
+    tool_events = [e for e in stream if e.get("type") in {"item.started", "item.completed"}
+                   and e.get("item", {}).get("type") not in {"agent_message", "reasoning"}]
+    # Request transport + turn context together establish actual model/effort/auth.
+    auth = "chatgpt" if re.search(r"(?:wss|https)://chatgpt\.com/backend-api/codex/", diagnostic) else ""
+    actual_request = "model=gpt-6-astra" in diagnostic
+    isolated = (metadata.get("cwd") == str(cwd) and all(c.get("cwd") == str(cwd) for c in contexts)
+                and not metadata.get("forked_from_id") and not any(
+                    marker in text for text in injected for marker in
+                    ("<skills_instructions>", "<memory", "<app-context>", "<user_instructions>")))
+    usage = next((e.get("usage", {}) for e in reversed(stream) if e.get("type") == "turn.completed"), {})
+    evidence.update(verified=bool(contexts and actual_request and auth), provider=metadata.get("model_provider", ""),
+                    model="|".join(sorted({m or "" for m, _ in models})),
+                    request_model="gpt-6-astra" if actual_request else "", response_model="",
+                    effort="|".join(sorted({e or "" for _, e in models})), consistent=len(models) == 1,
+                    auth_method=auth, usage=usage, note="Codex 会话 turn_context、实际请求传输与 response_item 协议",
+                    protocol_path=str(events.with_suffix(".rollout.jsonl")),
+                    context_evidence={"verified": bool(contexts and completed), "input_present": prompt in users,
+                        "input_source": "codex rollout response_item(role=user)", "session_id": sid,
+                        "tool_calls": max(len(calls), len(tool_events)), "isolated": isolated,
+                        "offered_tools": None, "offered_tools_note": "CLI 可声明内置工具；以完整实际工具活动验收",
+                        "request_chars": sum(len(t) for t in users), "completed": completed})
+    return evidence
+
+
+def redact_codex_diagnostic(text: str) -> str:
+    # Transport INFO includes response cookies; retain endpoint/error evidence only.
+    return re.sub(r", headers:.*$", ", headers: [REDACTED]", text, flags=re.MULTILINE)
+
+
+def run_codex(prompt_path: Path, final_path: Path, jsonl_path: Path,
+              timeout_seconds: int | None, config: dict) -> tuple[int, str]:
+    env = child_env("astra", config)
+    # Scoped transport logging identifies the real endpoint; no auth request headers.
+    env["RUST_LOG"] = "codex_api=info,codex_core::client=info"
+    env["NO_COLOR"] = "1"
+    isolation = tempfile.TemporaryDirectory(prefix="stock-text-") if config.get("_text_only") else None
+    workdir = Path(isolation.name if isolation else config.get("_cwd") or PROJECT_ROOT).resolve()
+    prompt = prompt_path.read_text(encoding="utf-8")
+    args = codex_command(config) + ["exec", "--ignore-user-config", "--skip-git-repo-check",
+        "-C", str(workdir), "-m", "gpt-6-astra", "--sandbox", "workspace-write", "--json",
+        "--output-last-message", str(final_path.resolve())]
+    overrides = ['forced_login_method="chatgpt"', 'model_reasoning_effort="high"',
+        'approval_policy="never"', 'sandbox_workspace_write.network_access=true',
+        'features.memories=false', 'features.apps=false', 'features.remote_plugin=false',
+        'features.hooks=false', 'features.multi_agent=false', 'features.shell_snapshot=false']
+    if isolation:
+        overrides += ['web_search="disabled"', 'project_doc_max_bytes=0', 'features.shell_tool=false']
+        home = Path(env.get("CODEX_HOME", str(Path.home() / ".codex")))
+        skills = list((home / "skills").glob("**/SKILL.md"))
+        skills += list((Path.home() / ".agents/skills").glob("**/SKILL.md"))
+        overrides.append("skills.config=[" + ",".join(
+            '{path=' + json.dumps(str(path)) + ',enabled=false}' for p in skills for path in (p, p.parent)) + "]")
+    else:
+        overrides += ['web_search="live"']
+    for value in overrides:
+        args += ["-c", value]
+    args += ["-"]
+    stderr_path = jsonl_path.with_suffix(".stderr.log")
+    code, note = EXIT_FAIL, ""
+    try:
+        with jsonl_path.open("wb") as out, stderr_path.open("wb") as err:
+            proc = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=out, stderr=err,
+                                    cwd=workdir, env=env, start_new_session=True)
+            try:
+                proc.communicate(prompt.encode("utf-8"), timeout=timeout_seconds)
+                code = proc.returncode
+            except subprocess.TimeoutExpired:
+                terminate_process_group(proc)
+                code, note = 124, "执行超时终止"
+            except BaseException:
+                terminate_process_group(proc)
+                raise
+        diagnostic = redact_codex_diagnostic(stderr_path.read_text(encoding="utf-8", errors="replace"))
+        stderr_path.write_text(diagnostic, encoding="utf-8")
+        evidence = codex_session_evidence(jsonl_path, diagnostic, prompt, workdir)
+        EvidenceBox.record("astra", evidence)
+        stream = [json.loads(line) for line in jsonl_path.read_text().splitlines() if line.strip()]
+        # Only terminal model events; command outputs and assistant quotes are excluded.
+        terminal = [e.get("error", {}).get("message", "") for e in stream if e.get("type") == "turn.failed"]
+        if code and not terminal:
+            terminal = [e.get("message", "") for e in stream if e.get("type") == "error"]
+        if code and terminal and terminal[-1]:
+            return code, "[model-request-error] " + terminal[-1]
+        if code and re.search(r"(?im)^Error: (?:not logged in|authentication failed|your authentication token has expired)\b", diagnostic):
+            return code, "[model-request-error] " + diagnostic.strip()
+        if code:
+            return code, note or diagnostic[-2000:]
+        if not final_path.exists() or not final_path.stat().st_size:
+            return EXIT_FAIL, "Codex 结束但没有最终回复；保留阶段原件"
+        return code, ""
+    finally:
+        if stderr_path.exists():
+            raw = stderr_path.read_text(encoding="utf-8", errors="replace")
+            clean = redact_codex_diagnostic(raw)
+            if clean != raw:
+                stderr_path.write_text(clean, encoding="utf-8")
+        if isolation:
+            isolation.cleanup()
+
+
 def run_agent(
     provider: str,
     prompt_path: Path,
@@ -978,8 +1243,10 @@ def run_agent(
     timeout_seconds: int | None,
     config: dict,
 ) -> tuple[int, str]:
+    if provider == "astra":
+        return run_codex(prompt_path, final_path, jsonl_path, timeout_seconds, config)
     if provider not in DEFAULT_ORDER:
-        raise ValueError(f"本地执行仅支持 GLM/DeepSeek：{provider}")
+        raise ValueError(f"未知模型路线：{provider}")
     return run_zcode(provider, prompt_path, final_path, jsonl_path, timeout_seconds, config)
 
 
@@ -1012,6 +1279,7 @@ def run_task_agent(provider: str, prompt: Path, final: Path, events: Path,
                        reason=f"{type(exc).__name__}: {exc}")
         raise
     finally:
+        attempt["evidence"] = EvidenceBox.get(provider).copy()
         save_state(path, state)
 
 
@@ -1030,10 +1298,13 @@ def classify_failure(returncode: int, text: str) -> tuple[str, bool]:
     lowered = text.lower()
     if returncode in CANCELLATION_EXIT_CODES or returncode < 0 or "keyboardinterrupt" in lowered:
         return "取消/中断/超时终止", False
-    if any(pattern in lowered for pattern in PROVIDER_TERMINAL_PATTERNS):
-        return "供应商不可用/额度不足", True
     if any(pattern in lowered for pattern in LOCAL_SPECIFIC_PATTERNS):
         return "本地/数据/上下文错误", False
+    terminal_status = re.search(r"\b(?:http(?: error)?|status(?: code)?)[: =]+(?:401|402|403|429|500|502|503|504)\b", lowered)
+    unavailable_model = re.search(r"\bmodel\b[^\n]*\b(?:not available|unavailable|does not exist)\b", lowered)
+    if lowered.startswith("[model-request-error] ") and (terminal_status or unavailable_model or any(
+            pattern in lowered for pattern in PROVIDER_TERMINAL_PATTERNS)):
+        return "供应商不可用/额度不足", True
     if returncode != 0:
         return f"执行失败（退出码 {returncode}）", False
     return "执行异常", False
@@ -1161,7 +1432,7 @@ def strict_archive_check(formation: str, action: str, as_of: str, *, root: Path 
         return False, f"{type(exc).__name__}: {exc}"
 
 
-def forward_csv_matches_trace(formation: str, action: str, as_of: str, *, root: Path | None = None) -> tuple[bool, str]:
+def forward_csv_matches_trace(formation: str, action: str, as_of: str, *, root: Path | None = None, trace_payload: dict | None = None) -> tuple[bool, str]:
     """按原程序规则核对 Forward CSV 与冻结轨迹逐字段对应。
 
     用 forward_selection 现有 _confirmed_active_research_result/_decision_rows
@@ -1181,9 +1452,9 @@ def forward_csv_matches_trace(formation: str, action: str, as_of: str, *, root: 
         if not csv_path.exists():
             return False, "缺少 Forward CSV"
         trace_path = root / "local_archive" / "forward_selection" / f"research-trace-{formation}.json"
-        if not trace_path.exists():
+        if trace_payload is None and not trace_path.exists():
             return False, "缺少正式轨迹"
-        trace_obj = DailyResearchTraceV4.model_validate(json.loads(trace_path.read_text(encoding="utf-8")))
+        trace_obj = DailyResearchTraceV4.model_validate(trace_payload if trace_payload is not None else json.loads(trace_path.read_text(encoding="utf-8")))
         forward_result = _confirmed_active_research_result(trace_obj)
         fieldnames, rows = _read_forward_log(csv_path)
         identity_rows = [
@@ -1277,11 +1548,12 @@ def _formal_recommendation_list(formation: str, *, root: Path | None = None) -> 
         return None
 
 
-def _recommendation_section_issues(section: str, formation: str, *, root: Path | None = None) -> list[str]:
+def _recommendation_section_issues(section: str, formation: str, *, root: Path | None = None, stocks: list[dict] | None = None) -> list[str]:
     """推荐分区必须与正式名单逐只对应：目录表、### 逐只标题、正文存在性。"""
     issues: list[str] = []
-    stocks = (_formal_recommendation_list(formation) if root is None
-              else _formal_recommendation_list(formation, root=root))
+    if stocks is None:
+        stocks = (_formal_recommendation_list(formation) if root is None
+                  else _formal_recommendation_list(formation, root=root))
     if stocks is None:
         return [f"无法从正式轨迹取得正式推荐名单，推荐分区无法核对（形成日 {formation}）"]
     expected = [(str(s.get("ts_code", "")), str(s.get("name", "")), s.get("priority"))
@@ -1663,6 +1935,16 @@ def write_nightly_prompt(state: dict, attempt_dir: Path,
             "最终复盘与合并报告必须采用本轮正式 Markdown 与唯一正文；"
             "合并时不重写、不删减原推荐背景等已记录内容。\n"
         )
+    managed_note = ""
+    if state.get("recommendation_pipeline") == "prefreeze-v1" and not force_already_selected:
+        managed_note = (
+            "本次为 managed 新研究：你交付完整 pending trace、与最终判断一致的完整推荐草稿、市场说明和按原合同已归档的正式复盘。"
+            "不要执行 selection record/record-trace，不生成公司介绍，不同步网页。"
+            "少量候选验证时即可按代码/截止/类别调用 recommendation_context，核对财务可得期间与同口径行业事实；保留完整原因、反证、风险接受理由及改变条件。"
+            "实读现有写作教学和适用范文，最终回复用原四个总标题，推荐分区写完整可读草稿，不能留待外层代写。"
+            "外层接续局部润色、全文忠实核对和必要的研究返回；总控改判断时同步草稿，全部一致后才调用 record-trace。"
+            "这段分工覆盖 Prompt 中由同一模型写稿/保存/同步/介绍的手动执行步骤；复盘记录步骤仍须完成。\n"
+        )
     preamble = (
         "【外层启动说明（启动器生成，非研究内容）】\n"
         "本次任务由本地启动器 tools/stock_ai.py 经 launchd/人工命令启动，"
@@ -1671,7 +1953,7 @@ def write_nightly_prompt(state: dict, attempt_dir: Path,
         f"直接使用其中 formation_date={formation}、action_date={action}、"
         f"selection_as_of={as_of} 作为唯一时间边界，不得重复运行 prepare，"
         "不得改变这些值；若边界确认失败，按 Prompt 如实报告错误。\n"
-        f"{rerun_note}{selected_note}{recovery_note}"
+        f"{rerun_note}{selected_note}{recovery_note}{managed_note}"
         "工程内存在较大的 JSON/Markdown 文件：读取时必须分段或按需检索，"
         "禁止一次性读入超长文件，避免上下文溢出。\n"
         "prepare 摘要 JSON：\n"
@@ -1846,8 +2128,9 @@ def run_nightly(args: argparse.Namespace, config: dict, lock: TaskLock,
         if identity_ok:
             # 旧 completed 不能无条件成功：仍用统一完成检查复核。
             reply_path = PROJECT_ROOT / state["final_reply"]
-            ok, issues, categories = verify_completed_run(
-                state["formation_date"], state["action_date"],
+            assemble_saved_reply(state, reply_path, state["formation_date"], state["action_date"], state["selection_as_of"])
+            ok, issues, categories = verify_assembled_reply(
+                state, state["formation_date"], state["action_date"],
                 state["selection_as_of"], reply_path)
             if ok:
                 synced, sync_msg = sync_accepted_report(
@@ -1858,6 +2141,9 @@ def run_nightly(args: argparse.Namespace, config: dict, lock: TaskLock,
                         "nightly", path.name, state, "研究已归档但展示待更新",
                         f"研究与合并回复复核通过，正文衔接或同步失败：{sync_msg}。保留研究，按原身份恢复。",
                         EXIT_FAIL, stage="展示")
+                if state.get("company_introduction_pending"):
+                    run_managed_company_introductions(state, path, config, state_model_provider(state),
+                                                      reply_path.parent / "recommendation", reply_path)
                 if state_route_evidence_matches(state) is False:
                     return finish_task("nightly", path.name, state, "完整完成",
                                        "既有归档复核通过，但模型身份问题仍需核对。", EXIT_OK)
@@ -1974,6 +2260,8 @@ def run_nightly(args: argparse.Namespace, config: dict, lock: TaskLock,
             synced, sync_msg = sync_accepted_report(formation, action, as_of, reply_target, 600)
             note = ""
             if synced:
+                if state.get("company_introduction_pending"):
+                    run_managed_company_introductions(state, path, config, state_model_provider(state), archive_dir / "recommendation", reply_target)
                 note = "（首页未切到本历史日）" if "skipped_newer" in sync_msg else ""
                 return finish_task(
                     "nightly", path.name, state, "完整完成",
@@ -2002,6 +2290,13 @@ def run_nightly(args: argparse.Namespace, config: dict, lock: TaskLock,
             existing_reply, source_state = existing
             archive_dir.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(existing_reply, reply_target)
+            if source_state.get("recommendation_pipeline") == "prefreeze-v1":
+                state["recommendation_pipeline"] = "prefreeze-v1"
+                original = existing_reply.parent / "recommendation/accepted-recommendation.json"
+                target = archive_dir / "recommendation/accepted-recommendation.json"
+                if original.exists():
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copyfile(original, target)
             # 来源身份与正文一起复用；不能将来源已知不一致降成“未核验”。
             state["model_provider"] = state_model_provider(source_state)
             state["last_model"] = source_state.get("last_model", "")
@@ -2027,6 +2322,34 @@ def run_nightly(args: argparse.Namespace, config: dict, lock: TaskLock,
                 "复用后复核未通过：" + "；".join(issues), EXIT_FAIL, stage=stage_,
             )
 
+    # Managed new research resumes from retained artifacts, never from a fresh selection.
+    if state.get("recommendation_pipeline") == "prefreeze-v1" or not art["trace_ok"]:
+        state["recommendation_pipeline"] = "prefreeze-v1"
+        save_state(path, state)
+        order, _ = resolve_provider_order("nightly", args.provider, config, today)
+        state.setdefault("provider_order", order)
+        stage_dir = archive_dir / "recommendation"
+        prompt_path = write_nightly_prompt(state, stage_dir, force_already_selected=False, art=art)
+        try:
+            try:
+                from tools.recommendation_pipeline import complete
+            except ImportError:
+                from recommendation_pipeline import complete
+            final_path, provider = complete(
+                sys.modules[__name__], state, path, stage_dir, config, order[0], prompt_path.read_text())
+        except (OSError, ValueError, RuntimeError) as exc:
+            save_state(path, state)
+            return finish_task("nightly", path.name, state, "失败",
+                               f"推荐说明流程未完成：{exc}。已保存阶段产物，下次沿原身份恢复。",
+                               EXIT_FAIL, stage="推荐说明", log_dir=str(stage_dir))
+        state["company_introduction_pending"] = True
+        save_state(path, state)
+        result_code = finish_nightly_success(
+            state, path.name, provider, final_path, formation, action, as_of, archive_dir, reply_target)
+        # The first local display attempt must precede this optional attachment.
+        run_managed_company_introductions(state, path, config, provider, stage_dir, reply_target)
+        return result_code
+
     # ---- 顺序尝试各模型路线（每家一次；无时限；仅额度/不可用才接替）----
     order, order_source = resolve_provider_order(
         "nightly", args.provider, config, today
@@ -2036,7 +2359,8 @@ def run_nightly(args: argparse.Namespace, config: dict, lock: TaskLock,
     attempt_dir.mkdir(parents=True, exist_ok=True)
     last_fail = "没有已配置的模型路线"
 
-    for index, provider in enumerate(order):
+    state.setdefault("provider_order", order)
+    for index, provider in enumerate(available_routes(state, order[0])):
         # 每次接替前重新核对产物，并把当前中间状态写进该路 Prompt。
         art = assess_artifacts(
             formation, action, as_of,
@@ -2052,7 +2376,7 @@ def run_nightly(args: argparse.Namespace, config: dict, lock: TaskLock,
             state, attempt_dir,
             force_already_selected=art["trace_ok"], art=art,
         )
-        key, _source = resolve_api_key(provider, config)
+        key, _source = authentication_available(provider, config)
         if not key:
             state["attempts"].append(
                 {"provider": provider, "outcome": "skipped", "reason": "未启动（未配置，允许备用接替）",
@@ -2079,6 +2403,9 @@ def run_nightly(args: argparse.Namespace, config: dict, lock: TaskLock,
         save_state(path, state)
         last_fail = f"{provider}：{category}"
         print(f"- {provider}：{category}", flush=True)
+        if can_fallback:
+            mark_provider_unavailable(state, provider, diag)
+            save_state(path, state)
         if not can_fallback:
             break  # 本地/数据/取消类失败：不靠换模型掩盖
 
@@ -2089,8 +2416,7 @@ def run_nightly(args: argparse.Namespace, config: dict, lock: TaskLock,
     return finish_task(
         "nightly", path.name, state, "失败",
         f"实际尝试：{tried}；最后状态：{last_fail}。"
-        "如需 Astra 补跑，请在 Codex App 中手动执行（读取 "
-        + SELECTION_PROMPT + "，沿用原 prepare 边界）。",
+        "已有产物保留；沿原身份恢复只补缺失，不能重置已冻结研究。",
         EXIT_FAIL, stage="模型执行", log_dir=str(attempt_dir),
     )
 
@@ -2113,7 +2439,8 @@ def route_evidence_matches(provider: str, evidence: dict) -> bool | None:
         str(evidence.get("model", "")),
         str(evidence.get("request_model", "")),
     )
-    return actual == expected
+    return actual == expected and (provider != "astra" or (
+        evidence.get("effort") == "high" and evidence.get("auth_method") == "chatgpt"))
 
 
 def state_model_provider(state: dict) -> str:
@@ -2156,6 +2483,10 @@ def assemble_saved_reply(state: dict, reply_target: Path, formation: str, action
             from tools.nightly_report import assemble_file
         except ImportError:
             from nightly_report import assemble_file
+        if state.get("recommendation_pipeline") == "prefreeze-v1":
+            adopted = reply_target.parent / "recommendation/accepted-recommendation.json"
+            if not adopted.exists():
+                raise ValueError("managed 任务缺少与正式研究对应的采用正文，不能从其他草稿重新构造")
         assembled = assemble_file(reply_target, formation, action, as_of, root=PROJECT_ROOT)
         state["reply_assembly"] = {"status": "assembled" if assembled else "unchanged",
                                    "source": f"monitor-report-{formation}.md"}
@@ -2204,6 +2535,8 @@ def finish_nightly_success(
         )
     evidence = state.get("model_evidence", {}) or {}
     matches = route_evidence_matches(provider, evidence)
+    if provider == "astra" and matches is None:
+        matches = False
     if matches is True:
         route_text = "路线证据一致"
     elif matches is False:
@@ -2230,6 +2563,66 @@ def finish_nightly_success(
         "nightly", state_name, state, "完整完成", detail, EXIT_OK,
         stage="模型执行", extra={"provider": provider},
     )
+
+
+def run_managed_company_introductions(state: dict, path: Path, config: dict, provider: str,
+                                      directory: Path, reply: Path) -> None:
+    """Existing company-introduction workflow after freeze/display; failure is separate."""
+    try:
+        try:
+            from tools.recommendation_pipeline import run_stage, json_object
+        except ImportError:
+            from recommendation_pipeline import run_stage, json_object
+        if not _formal_recommendation_list(state["formation_date"]):
+            state["company_introduction_pending"] = False
+            return
+        from stock_analyzer.ops.company_introduction import (
+            prepare_formal_context, read_introduction_file, introduction_matches_identity,
+        )
+        facts = prepare_formal_context(formation_date=state["formation_date"], action_date=state["action_date"],
+                                       as_of=state["selection_as_of"], project_root=PROJECT_ROOT)
+        scope = facts["scope"]
+        if all(item["intro_status"] == "reusable" for item in scope):
+            state["company_introductions"] = {"status": "reused", "reused_count": len(scope), "missing": []}
+            state["company_introduction_pending"] = False
+            return
+        facts_path = directory / "company-introduction-facts.json"
+        facts_path.write_text(json.dumps(facts, ensure_ascii=False, indent=2))
+        prompt = (
+            "正式研究已经冻结，外层已经尝试第一次本地展示。只读取并执行 ops/company-introduction-prompt.md，"
+            "仅补缺失介绍；不重新选股、不改trace/CSV/复盘/推荐正文，不运行selection prepare，不公网发布。"
+            f"formation_date={state['formation_date']}，action_date={state['action_date']}，as_of={state['selection_as_of']}。"
+            f"外层已经按原合同备料：{facts_path}，直接读取，不重复prepare。按原合同补证、逐篇保存；外层负责第二次同步，本步骤不重复同步。"
+            "最后只返回JSON：recorded_count、reused_count、missing（股票和原因数组）。"
+        )
+        text, _ = run_stage(sys.modules[__name__], state, path, directory, "company-introductions",
+                            prompt, provider, config, text_only=False)
+        result = json_object(text)
+        if not isinstance(result.get("missing"), list) or not isinstance(result.get("recorded_count"), int):
+            raise ValueError("公司介绍缺少新增数与实际缺项结果")
+        missing, recorded = [], 0
+        for item in scope:
+            try:
+                intro = read_introduction_file(Path(item["intro_path"]))
+                if not introduction_matches_identity(intro, ts_code=item["ts_code"],
+                        formation_date=state["formation_date"], action_date=state["action_date"], as_of=state["selection_as_of"]):
+                    raise ValueError("介绍身份不一致")
+                recorded += item["intro_status"] == "missing"
+            except (OSError, ValueError) as exc:
+                missing.append({"ts_code": item["ts_code"], "name": item["name"], "reason": str(exc)})
+        result.update(missing=missing, recorded_count=recorded)
+        state["company_introductions"] = {"status": "finished", **result}
+        state["company_introduction_pending"] = bool(result["missing"])
+        display_failed = (state.get("result") or {}).get("status") == "研究已归档但展示待更新"
+        if result["recorded_count"] or display_failed:
+            synced, detail = sync_accepted_report(state["formation_date"], state["action_date"],
+                                                  state["selection_as_of"], reply, 600)
+            state["company_introductions"]["display"] = {"success": synced, "detail": detail}
+    except (OSError, ValueError, RuntimeError) as exc:
+        state["company_introductions"] = {"status": "failed", "detail": str(exc)}
+        print(f"公司介绍待补（正式推荐已保留）：{exc}")
+    finally:
+        save_state(path, state)
 
 
 # ---------------------------------------------------------------- 次晨任务
@@ -2322,7 +2715,7 @@ def run_preopen(args: argparse.Namespace, config: dict, lock: TaskLock,
     prompt_path = write_preopen_prompt(prepare_result, attempt_dir)
     last_fail = "没有已配置的模型路线"
     for provider in order:
-        key, _source = resolve_api_key(provider, config)
+        key, _source = authentication_available(provider, config)
         if not key:
             state["attempts"].append(
                 {"provider": provider, "outcome": "skipped", "reason": "未启动（未配置，允许备用接替）",
@@ -2403,9 +2796,12 @@ def cmd_status(_args: argparse.Namespace) -> int:
     print()
     pref = default_preference(config)
     pref_text = {
-        "auto": f"自动（{DEFAULT_ORDER_TEXT} 接替；Astra 仅手动）",
+        "auto": "按任务默认（夜间 Astra high → GLM → DeepSeek；次晨 GLM → DeepSeek）",
     }.get(pref, f"{PROVIDER_LABELS.get(pref, pref)} 优先")
-    print(f"长期默认：{pref_text}")
+    print(f"旧全局偏好：{pref_text}")
+    for task in ("nightly", "preopen"):
+        order, source = resolve_provider_order(task, None, config, today)
+        print(f"{task} 实际顺序（{source}）：{' → '.join(order)}")
     override = tonight_override(config, today)
     tonight = config.get("tonight")
     if override:
@@ -2422,19 +2818,22 @@ def cmd_status(_args: argparse.Namespace) -> int:
         print("当前任务：空闲")
     print()
     print("模型路线（自动接替顺序）：")
-    for provider in DEFAULT_ORDER:
+    for provider in ALL_PROVIDERS:
         verify = (config.get("verify") or {}).get(provider)
         verified_text = (
             f"已验证（{verify.get('at', '')[:16]}，配置 {verify.get('configured_model', '')}，"
             f"证据 {verify.get('evidence_model') or '未核验'}）"
             if verify and verify.get("ok") else "未验证（未做真实请求测试）"
         )
-        _key, source = resolve_api_key(provider, config)
+        _key, source = authentication_available(provider, config)
+        if provider == "astra":
+            print(f"  astra：{PROVIDER_LABELS[provider]}，{verified_text}")
+            continue
         print(
             f"  {provider}：ZCode CLI，模型 {model_ref(provider, config)}，"
             f"API {provider_base_url(provider, config)}，密钥来源：{source or '未找到'}，{verified_text}"
         )
-    print("  手工补跑：在 Codex 中执行原 Prompt；本地启动器不调用 Astra。")
+    print("  接替仅限本次模型请求证实的供应商故障；同任务恢复跳过已失效路线。")
     print()
     entries = []
     if INDEX_PATH.exists():
@@ -2527,20 +2926,20 @@ def cmd_status(_args: argparse.Namespace) -> int:
 
 def cmd_use(args: argparse.Namespace) -> int:
     config = load_local_config()
-    value = args.value
-    if value == "auto":
-        config["default_preference"] = "auto"
+    task = getattr(args, "task", None)
+    if args.value == "astra" and task != "nightly":
+        print("Astra 长期偏好请使用 use astra --task nightly；次晨安排不变")
+        return EXIT_USAGE
+    if task:
+        config.setdefault("task_preferences", {})[task] = args.value
+    else:
+        config["default_preference"] = args.value
+    if args.value == "auto" and task in (None, "nightly"):
         config["tonight"] = None
-        save_local_config(config)
-        print(f"已设置：恢复默认 {DEFAULT_ORDER_TEXT}（自动接替不使用 Astra），并清除尚未执行的今晚覆盖。")
-        return EXIT_OK
-    config["default_preference"] = value
     save_local_config(config)
-    rest = [p for p in DEFAULT_ORDER if p != value]
-    text = f"已设置：长期默认 {value} 优先，失败后按 {' → '.join(rest)} 接替。"
-    if tonight_override(config, now_shanghai().date()):
-        text += f" 注意：今晚覆盖（{tonight_override(config, now_shanghai().date())} 优先）仍然生效，优先于长期默认。"
-    print(text)
+    for name in ([task] if task else ["nightly", "preopen"]):
+        order, source = resolve_provider_order(name, None, config, now_shanghai().date())
+        print(f"已设置：{name}（{source}）：{' → '.join(order)}")
     return EXIT_OK
 
 
@@ -2562,7 +2961,7 @@ def cmd_tonight(args: argparse.Namespace) -> int:
         return EXIT_OK
     config["tonight"] = {"date": today.isoformat(), "preference": args.value}
     save_local_config(config)
-    rest = [p for p in DEFAULT_ORDER if p != args.value]
+    rest = [p for p in NIGHTLY_ORDER if p != args.value]
     print(
         f"已设置：{today.isoformat()} 晚间任务优先 {args.value}，失败后按 {' → '.join(rest)} 接替；"
         "次晨提醒与长期默认不变。"
@@ -2643,7 +3042,7 @@ def cmd_uninstall(_args: argparse.Namespace) -> int:
 def cmd_verify(args: argparse.Namespace) -> int:
     provider = args.provider
     config = load_local_config()
-    key, source = resolve_api_key(provider, config)
+    key, source = authentication_available(provider, config)
     if not key:
         print(f"结果：未验证\n{provider} 缺少可用密钥，无法真实测试。")
         return EXIT_FAIL
@@ -2672,8 +3071,7 @@ def cmd_verify(args: argparse.Namespace) -> int:
     )
     result_path = workspace / "result.txt"
     result_text = result_path.read_text(encoding="utf-8").strip() if result_path.exists() else ""
-    payload = parse_zcode_output(jsonl_path) or {}
-    evidence = rollout_model_evidence(payload.get("sessionId"))
+    evidence = EvidenceBox.get(provider)
     evidence_model = evidence.get("model", "") or evidence.get("request_model", "")
     evidence_ok = route_evidence_matches(provider, evidence) is True
     ok = (
@@ -2723,8 +3121,8 @@ def dry_run_nightly(args: argparse.Namespace, config: dict) -> int:
           + (f"（补跑行动日 {rerun_date}）" if rerun_date else ""))
     print(f"模型顺序（{source}）：{' → '.join(order)}")
     for provider in order:
-        _key, key_source = resolve_api_key(provider, config)
-        print(f"  {provider}: ZCode CLI 模型 {model_ref(provider, config)}，密钥：{key_source or '未找到'}")
+        _key, key_source = authentication_available(provider, config)
+        print(f"  {provider}: {PROVIDER_LABELS[provider]}，模型 {model_ref(provider, config)}，认证：{key_source or '未找到'}")
     print(f"Prompt 路径：{SELECTION_PROMPT}（含 {MONITOR_PROMPT}）")
     print("执行时限：无（执行到完成或明确失败；仅额度不足/不可用才接替）")
     print("计划动作：prepare → 按序无界面执行（每家一次）→ 同步命令核对归档 → 结果索引与通知")
@@ -2752,14 +3150,15 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("status", help="查看当前默认、今晚覆盖、运行状态与最近结果（不请求 API）")
 
     use = sub.add_parser("use", help="修改长期默认模型偏好")
-    use.add_argument("value", choices=["glm", "deepseek", "auto"])
+    use.add_argument("value", choices=[*ALL_PROVIDERS, "auto"])
+    use.add_argument("--task", choices=["nightly", "preopen"])
 
     tonight = sub.add_parser("tonight", help="只修改今晚晚间任务的首选模型")
-    tonight.add_argument("value", choices=["glm", "deepseek", "clear"])
+    tonight.add_argument("value", choices=[*ALL_PROVIDERS, "clear"])
 
     run = sub.add_parser("run", help="执行晚间研究或次晨提醒")
     run.add_argument("task", choices=["nightly", "preopen"])
-    run.add_argument("--provider", choices=["glm", "deepseek"], default=None)
+    run.add_argument("--provider", choices=ALL_PROVIDERS, default=None)
     run.add_argument("--rerun-date", default=None, metavar="YYYY-MM-DD",
                      help="原计划推荐日期（行动日）；与 forward_selection prepare 同义")
     run.add_argument("--scheduled", action="store_true",
@@ -2773,7 +3172,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("uninstall", help="移除两个 AI LaunchAgent").set_defaults(func=cmd_uninstall)
 
     verify = sub.add_parser("verify", help="对一路模型做小型真实能力测试（隔离目录，含模型证据核验）")
-    verify.add_argument("--provider", required=True, choices=["glm", "deepseek"])
+    verify.add_argument("--provider", required=True, choices=ALL_PROVIDERS)
     verify.set_defaults(func=cmd_verify)
     return parser
 
@@ -2791,6 +3190,9 @@ def main(argv: list[str] | None = None) -> int:
         pass
     args = build_parser().parse_args(argv)
     command = args.command
+    if command == "run" and args.task == "preopen" and args.provider == "astra":
+        print("次晨保持 GLM → DeepSeek；Astra 路线仅用于 nightly")
+        return EXIT_USAGE
     if command == "status":
         return cmd_status(args)
     if command == "use":

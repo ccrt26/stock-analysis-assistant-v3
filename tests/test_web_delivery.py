@@ -108,7 +108,7 @@ def test_fetch_and_read_actual_original(tmp_path,monkeypatch,kind):
     raw=pdf_bytes() if kind=='pdf' else b'<html><p>Company report original revenue and business facts for reading.</p></html>'
     content_type='application/pdf' if kind=='pdf' else 'text/html'
     response=Response(gzip.compress(raw) if kind=='gzip' else raw,content_type,encoding='gzip' if kind=='gzip' else '')
-    monkeypatch.setattr(evidence.urllib.request,'urlopen',lambda *a,**k:response)
+    monkeypatch.setattr(evidence.urllib.request,'build_opener',lambda *a:SimpleNamespace(open=lambda *a,**k:response))
     path=evidence.fetch_evidence(response.url,tmp_path/'source')
     receipt=json.loads(path.read_text());stamp=datetime.fromisoformat(receipt['retrieved_at'])
     evidence.read_evidence(path,response.url,stamp)
@@ -125,14 +125,14 @@ def test_fetch_and_read_actual_original(tmp_path,monkeypatch,kind):
     (b'<html><p>Company report original revenue and business facts.</p></html>','text/html',403),
 ])
 def test_bad_response_never_creates_evidence(tmp_path,monkeypatch,raw,kind,status):
-    monkeypatch.setattr(evidence.urllib.request,'urlopen',lambda *a,**k:Response(raw,kind,status))
+    monkeypatch.setattr(evidence.urllib.request,'build_opener',lambda *a:SimpleNamespace(open=lambda *a,**k:Response(raw,kind,status)))
     with pytest.raises(ValueError):evidence.fetch_evidence('https://example.invalid/report',tmp_path/'source')
     assert not (tmp_path/'source').exists()
 
 
 def test_receipt_url_and_time_cannot_be_claimed_arbitrarily(tmp_path,monkeypatch):
     response=Response(b'<html><p>Company report original revenue and business facts.</p></html>','text/html')
-    monkeypatch.setattr(evidence.urllib.request,'urlopen',lambda *a,**k:response)
+    monkeypatch.setattr(evidence.urllib.request,'build_opener',lambda *a:SimpleNamespace(open=lambda *a,**k:response))
     path=evidence.fetch_evidence(response.url,tmp_path/'source')
     stamp=datetime.fromisoformat(json.loads(path.read_text())['retrieved_at'])
     with pytest.raises(ValueError,match='URL'):

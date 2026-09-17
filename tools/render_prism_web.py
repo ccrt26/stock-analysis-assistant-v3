@@ -202,6 +202,123 @@ def write_html(path: Path, html: str) -> bool:
     return True
 
 
+def adopted_revision_payload(renderer, monitor_dir, analysis_date, report, snapshot):
+    """显式采用已保存修订；临时读取视图不改变原正式记录及后续真实名单。"""
+    config_path = monitor_dir / "display-revisions.json"
+    if not config_path.exists():
+        return None, {}
+    config_bytes = config_path.read_bytes()
+    config = json.loads(config_bytes)
+    if not isinstance(config, dict):
+        raise ValueError("display-revisions must be a date mapping")
+    inputs = {config_path: config_bytes}
+    revisions = []
+    for iso, entry in sorted(config.items()):
+        day = date.fromisoformat(iso)
+        if day.isoformat() != iso or not isinstance(entry, dict):
+            raise ValueError("invalid display revision identity")
+        if day > analysis_date:
+            continue
+        archive = (PROJECT_ROOT / entry["archive"]).resolve()
+        if not archive.is_relative_to((PROJECT_ROOT / "local_archive").resolve()):
+            raise ValueError("display revision must be a local archive")
+        adopted_at = checked_cutoff(entry["adopted_at"])
+        source_monitor = archive / "local_archive/forward_monitor"
+        source_selection = archive / "local_archive/forward_selection"
+        original_trace = renderer.SELECTION_DIR / f"research-trace-{iso}.json"
+        inputs[original_trace] = original_trace.read_bytes()
+        identity = json.loads(inputs[original_trace])
+        action = date.fromisoformat(identity["action_date"])
+        cutoff = checked_cutoff(identity["as_of"])
+        if adopted_at < cutoff:
+            raise ValueError("display adoption cannot precede research cutoff")
+        revised_report, revised_snapshot, revised_inputs = load_completed_archives(
+            renderer, source_monitor, day, action, cutoff, selection_dir=source_selection,
+        )
+        inputs.update(revised_inputs)
+        original_snapshot = monitor_dir / f"snapshot-{iso}.json"
+        inputs[original_snapshot] = original_snapshot.read_bytes()
+        original = json.loads(inputs[original_snapshot])
+        if (checked_cutoff(original["as_of"]) != cutoff
+                or set(original["daily_review_episode_ids"])
+                != set(revised_snapshot["daily_review_episode_ids"])):
+            raise ValueError("display revision must preserve original review scope and cutoff")
+        old_episodes = {item["episode_id"]: item for item in original["episodes"]}
+        new_episodes = {item["episode_id"]: item for item in revised_snapshot["episodes"]}
+        for episode_id in original["daily_review_episode_ids"]:
+            if any(old_episodes[episode_id].get(field) != new_episodes[episode_id].get(field)
+                   for field in ("ts_code", "formation_date", "action_date", "day_number")):
+                raise ValueError("display revision changes a historical episode identity")
+        daily = source_selection / f"daily-research-{iso}.md"
+        inputs[daily] = daily.read_bytes()
+        if not inputs[daily].strip():
+            raise ValueError("display revision is missing its complete daily report")
+        revisions.append((day, adopted_at, source_monitor, source_selection,
+                          revised_report, revised_snapshot, action))
+    if not revisions:
+        return None, inputs
+
+    with tempfile.TemporaryDirectory(prefix="prism-adopted-") as directory:
+        view = Path(directory)
+        view_monitor, view_selection = view / "monitor", view / "selection"
+        # 只复制展示会读取的文本归档，不复制事实仓、HTML 或正式 CSV。
+        for source, target, patterns in (
+            (monitor_dir, view_monitor, ("snapshot-*.json", "monitor-report-*.json",
+                                         "daily-formal-reviews-*.json", "statement-overrides.json")),
+            (renderer.SELECTION_DIR, view_selection, ("research-trace-*.json", "daily-research-*.md")),
+        ):
+            target.mkdir()
+            for pattern in patterns:
+                for path in source.glob(pattern):
+                    stamp = path.stem[-10:]
+                    if len(stamp) == 10 and stamp[:4].isdigit() and stamp > analysis_date.isoformat():
+                        continue
+                    inputs[path] = path.read_bytes()
+                    (target / path.name).write_bytes(inputs[path])
+        current = None
+        for day, adopted_at, source_monitor, source_selection, revised_report, revised_snapshot, action in revisions:
+            iso = day.isoformat()
+            for stem in ("snapshot", "monitor-report", "daily-formal-reviews"):
+                source = source_monitor / f"{stem}-{iso}.json"
+                (view_monitor / source.name).write_bytes(inputs[source])
+            if day == analysis_date:
+                current = (adopted_at, action)
+                report, snapshot = revised_report, revised_snapshot
+                for name in (f"research-trace-{iso}.json", f"daily-research-{iso}.md"):
+                    source = source_selection / name
+                    (view_selection / name).write_bytes(inputs[source])
+                # 已认可整份修订优先于更早的逐股文字覆盖。
+                overrides = view_monitor / "statement-overrides.json"
+                if overrides.exists():
+                    items = json.loads(overrides.read_bytes())
+                    overrides.write_text(json.dumps({key: value for key, value in items.items()
+                        if not key.endswith(":" + action.isoformat())}, ensure_ascii=False))
+        payload = renderer.build_payload(
+            PROJECT_ROOT, view_monitor, analysis_date, report, snapshot,
+            selection_dir=view_selection,
+        )
+    notes = [f"{day.isoformat()}复盘采用{adopted_at.date().isoformat()}修订版"
+             for day, adopted_at, *_ in revisions]
+    source_info = payload.setdefault("sourceInfo", {})
+    source_info["label"] = "本地归档 · " + "；".join(notes)
+    if current:
+        adopted_at, action = current
+        label = f"{analysis_date.isoformat()}修订版 · {adopted_at.date().isoformat()}采用"
+        source_info["label"] = label
+        stocks = [stock for stock in payload["stocks"] if stock.get("d0")]
+        for stock in stocks:
+            if not stock.get("statementFull"):
+                raise ValueError("adopted recommendation is missing its complete statement")
+            stock["statementSource"] = "adopted_rewrite"
+        payload["delivery"] = {
+            "status": "completed", "formationDate": analysis_date.isoformat(),
+            "message": label + f"。已采用完整修订归档，推荐正文 {len(stocks)}/{len(stocks)}。",
+            "recommendations": len(stocks), "total": len(stocks),
+            "introductions": sum(bool(stock.get("companyIntroduction")) for stock in stocks),
+        }
+    return payload, inputs
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Render the frozen daily monitor review as the A2 primary display page"
@@ -255,9 +372,14 @@ def render(args, renderer, adapt, prism, monitor_dir: Path) -> int:
         )
     else:
         report, snapshot, _, _ = renderer.load_artifacts(monitor_dir, analysis_date)
-    payload = renderer.build_payload(
-        PROJECT_ROOT, monitor_dir, analysis_date, report, snapshot
+    payload, revision_inputs = adopted_revision_payload(
+        renderer, monitor_dir, analysis_date, report, snapshot,
     )
+    inputs.update(revision_inputs)
+    if payload is None:
+        payload = renderer.build_payload(
+            PROJECT_ROOT, monitor_dir, analysis_date, report, snapshot
+        )
     codes = [c.strip() for c in args.indices.split(",") if c.strip()] if args.indices else list(adapt.DEFAULT_CODES)
     if not 3 <= len(codes) <= 5:
         raise ValueError("--indices must contain 3 to 5 codes")

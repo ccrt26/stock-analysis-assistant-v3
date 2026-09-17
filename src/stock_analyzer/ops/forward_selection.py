@@ -2697,6 +2697,10 @@ def _parse_main_args(argv: list[str] | None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_main_args(argv)
+    if os.environ.get("STOCK_AI_RESEARCH_HANDOFF") == "1" and args.command in {"record", "record-trace"}:
+        print(json.dumps({"status": "invalid_result", "error": "managed_research_must_handoff_pending_trace",
+                          "detail": "本阶段只交付pending；写作、审稿完成后由外层启动器保存正式选择。"}, ensure_ascii=False))
+        return 2
     project_root = Path(__file__).resolve().parents[3]
     csv_path = prepare_runtime_log(project_root)
     data = LocalForwardData(

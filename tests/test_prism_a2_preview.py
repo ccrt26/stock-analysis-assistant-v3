@@ -81,7 +81,7 @@ def test_render_embeds_snapshot_verbatim_and_replaces_template_only_once(snapsho
     assert payload == snapshot
     assert '<b>原文</b>' not in html
     assert '/*__MATH__*/' in payload["stocks"][0]["reasonFull"]
-    for token in ('atlasData','drawAtlas','side-nav','观察星图','GuanlanA2Rules','公司资料','完整复盘','主用展示','停更备用'):
+    for token in ('atlasData','drawAtlas','side-nav','观察星图','GuanlanA2Rules','公司资料','完整复盘','主用展示','停更备用','dateNav','回到最新'):
         assert token in html
     for retired in ('非正式发布页','样式评审稿','样式预览页不含个股详情'):
         assert retired not in html
@@ -168,7 +168,9 @@ def test_original_body_separates_missing_summary_and_preserves_adopted_identity(
     assert '历史摘要' in missing and '原风险' in missing
     assert '<strong>判断</strong>' in adopted
     assert '&lt;script&gt;' in adopted and '<script>' not in adopted
-    assert '用户认可的表达范本' in adopted
+    assert '研究说明' in adopted
+    assert '用户认可的表达范本' not in adopted
+    assert '后续修订稿' not in adopted
     assert '不应混入正文的摘要' not in adopted
 
 
