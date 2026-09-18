@@ -1,0 +1,180 @@
+{
+  "schema": "review-challenges-v1",
+  "note": "全部公司、代码与数字均为虚构；期望标签仅由测试包装层比对，不进入审稿请求。",
+  "materials": {
+    "teaching": "通用教学：把取舍讲清楚；条件逻辑原样保留；原因未核实不作归因。"
+  },
+  "cases": [
+    {
+      "id": "C1_condition_swap",
+      "kind": "review",
+      "packet": {
+        "identity": {
+          "ts_code": "000001.SZ",
+          "name": "甲公司",
+          "as_of": "2026-09-17T18:30:00+08:00",
+          "reference_price": 9.1
+        },
+        "conditions": {
+          "text": "如果甲公司收盘价连续3个交易日低于8.00元且行业多数成员下跌，会降低判断。"
+        },
+        "unknowns": "行业多数上涨能否持续未知。"
+      },
+      "article": "甲公司主营结论在此重复三次以占位：主营、选择理由、改变看法均已包含。改变看法：如果甲公司收盘价跌破8.00元或行业走弱，我就会降低判断。\n**公司主要做什么**\n甲公司做业务。\n**为什么会选它**\n依据充分。\n**什么情况会让我改变看法**\n如上文所述。",
+      "expect": {
+        "ready": false,
+        "min_blocking": 1,
+        "issue_kind": "fidelity"
+      }
+    },
+    {
+      "id": "C2_cash_attribution",
+      "kind": "review",
+      "packet": {
+        "identity": {
+          "ts_code": "000002.SZ",
+          "name": "乙公司",
+          "as_of": "2026-09-17T18:30:00+08:00"
+        },
+        "evidence": [
+          {
+            "id": "cash",
+            "fact": "上半年经营现金净额由-2.0亿元升至+3.0亿元",
+            "source_ref": "现金流量表（乙公司2026半年报）"
+          }
+        ],
+        "unknowns": "回款与支付节奏未披露明细。"
+      },
+      "article": "**公司主要做什么**\n乙公司做制造。\n**为什么会选它**\n上半年经营现金净额由-2.0亿元升至+3.0亿元，证明客户回款明显变好，销售质量显著改善。\n**什么情况会让我改变看法**\n现金流再次转负。",
+      "expect": {
+        "ready": false,
+        "min_blocking": 1,
+        "issue_kind": "fidelity"
+      }
+    },
+    {
+      "id": "C3_vol_to_days",
+      "kind": "review",
+      "packet": {
+        "identity": {
+          "ts_code": "000003.SZ",
+          "name": "丙公司",
+          "as_of": "2026-09-17T18:30:00+08:00"
+        },
+        "evidence": [
+          {
+            "id": "atr",
+            "fact": "近20日平均真实波幅约为现价的6%（历史波动尺度，非预测）",
+            "source_ref": "price_observations"
+          }
+        ],
+        "unknowns": "未来参与度未知。"
+      },
+      "article": "**公司主要做什么**\n丙公司做材料。\n**为什么会选它**\n近20日平均真实波幅约为现价的6%，按此推算大约4个月就能累计上涨20%，到达目标所需时间不长。\n**什么情况会让我改变看法**\n波动放大。",
+      "expect": {
+        "ready": false,
+        "min_blocking": 1,
+        "issue_kind": "fidelity"
+      }
+    },
+    {
+      "id": "C4_material_misreport",
+      "kind": "clarify",
+      "packet": {
+        "identity": {
+          "ts_code": "000004.SZ",
+          "name": "丁公司",
+          "as_of": "2026-09-17T18:30:00+08:00"
+        },
+        "comparisons": {
+          "text": "与戊公司比较现金质量。",
+          "items": [
+            {
+              "ts_code": "000005.SZ",
+              "name": "戊公司",
+              "facts": {
+                "cash_flow": [
+                  {
+                    "n_cashflow_act": 102.0
+                  }
+                ]
+              }
+            },
+            {
+              "ts_code": "000006.SZ",
+              "name": "己公司",
+              "facts": {
+                "cash_flow": [
+                  {
+                    "n_cashflow_act": -71.9
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "issue": {
+        "ts_code": "000004.SZ",
+        "quote": "丁与戊的现金流数据疑似标反",
+        "problem": "名称与数据归属疑似颠倒",
+        "evidence": "作者整理时产生怀疑",
+        "needed": "核对归属"
+      },
+      "expect": {
+        "resolution_type": "resolved_existing",
+        "blocking": false,
+        "evidence_min_chars": 10
+      }
+    },
+    {
+      "id": "C5_reasonable_unknown",
+      "kind": "review",
+      "packet": {
+        "identity": {
+          "ts_code": "000007.SZ",
+          "name": "庚公司",
+          "as_of": "2026-09-17T18:30:00+08:00"
+        },
+        "evidence": [
+          {
+            "id": "rev",
+            "fact": "上半年收入同比+31%（已核实总量）",
+            "source_ref": "利润表"
+          }
+        ],
+        "unknowns": "公司未披露分业务收入；增长由哪块业务驱动未知。"
+      },
+      "article": "**公司主要做什么**\n庚公司做设备。\n**为什么会选它**\n上半年收入同比+31%已核实；公司未披露分业务构成，增长由哪块业务驱动未知，但总量改善本身已经核实，作为背景支持本次判断。\n**什么情况会让我改变看法**\n收入转为下降。",
+      "expect": {
+        "ready": true,
+        "max_blocking": 0
+      }
+    },
+    {
+      "id": "C6_real_gap",
+      "kind": "review",
+      "packet": {
+        "identity": {
+          "ts_code": "000008.SZ",
+          "name": "辛公司",
+          "as_of": "2026-09-17T18:30:00+08:00"
+        },
+        "evidence": [
+          {
+            "id": "orders",
+            "fact": "公开资料与公告中未证实任何新订单",
+            "source_ref": "公告清单核查记录"
+          }
+        ],
+        "unknowns": "订单情况未知。"
+      },
+      "article": "**公司主要做什么**\n辛公司做工程。\n**为什么会选它**\n本次选择的核心是在手订单充沛带来的确定性，订单保障了未来收入。\n**什么情况会让我改变看法**\n订单取消。",
+      "expect": {
+        "ready": false,
+        "min_blocking": 1,
+        "issue_kind": "research"
+      }
+    }
+  ]
+}

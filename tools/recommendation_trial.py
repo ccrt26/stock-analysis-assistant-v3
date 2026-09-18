@@ -350,6 +350,92 @@ def _write_eval_files(trial_dir: Path, manifest: dict, summaries: list[dict],
     (trial_dir / "交给ChatGPT评估_运行说明.md").write_text("\n".join(notes), encoding="utf-8")
 
 
+def check_review(*, source_root: Path, fixtures: Path, output_dir: Path,
+                 provider: str = TRIAL_PROVIDER, fallback: bool = False,
+                 code_root: Path | None = None) -> int:
+    """真实GLM审稿/澄清挑战：走生产共用函数；期望只在包装层比对。"""
+    policy_error = validate_run_policy(provider, fallback)
+    if policy_error:
+        print(f"错误：{policy_error}", file=sys.stderr)
+        return EXIT_INPUT
+    spec = json.loads(fixtures.read_text(encoding="utf-8"))
+    code_root = code_root or Path(__file__).resolve().parents[1]
+    effective_config, config_record = load_source_config(source_root)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    pipeline.save_json(output_dir / "execution-config.json",
+                       {"policy": {"provider": provider, "fallback": fallback,
+                                   "provider_order": [provider]}, **config_record})
+    results = []
+    saw_error = saw_failed = False
+    for case in spec["cases"]:
+        cid = case["id"]
+        case_dir = output_dir / cid
+        state = {"task": "review-challenge", "provider_order": [provider], "attempts": [],
+                 "case": cid, "identity": case["packet"].get("identity", {})}
+        state_path = case_dir / "state.json"
+        record = {"id": cid, "kind": case.get("kind", "review")}
+        try:
+            if case.get("kind") == "clarify":
+                resolved = pipeline.resolve_article_issues(
+                    stock_ai, issues=[case["issue"]], packet=case["packet"],
+                    materials=spec.get("materials", {}), directory=case_dir, state=state,
+                    state_path=state_path, config=effective_config, provider=provider,
+                    fallback=fallback, allow_research_changes=False)
+                first = (resolved["resolutions"] or [{}])[0]
+                expect = case["expect"]
+                record.update(actual_type=first.get("type"),
+                              actual_blocking=first.get("blocking"),
+                              evidence_chars=len(str(first.get("evidence_text") or "")))
+                record["expectation_met"] = (
+                    record["actual_type"] == expect.get("resolution_type")
+                    and bool(first.get("blocking")) == bool(expect.get("blocking"))
+                    and record["evidence_chars"] >= expect.get("evidence_min_chars", 0))
+            else:
+                raw = pipeline.article_stage(
+                    stock_ai, state, state_path, case_dir, f"review-challenge-{cid}",
+                    pipeline.review_prompt(code_root, article=case["article"],
+                                           packet=case["packet"],
+                                           materials=spec.get("materials", {})),
+                    provider, effective_config, fallback=fallback,
+                    contract=pipeline.REVIEW_CONTRACT_VERSION,
+                    validate=pipeline.parse_review_output, run_scope=f"challenge-{cid}")
+                review = pipeline.parse_review_output(raw)
+                blocking = (len([i for i in review["readability_issues"] if i.get("blocking")])
+                            + len([i for i in review["fidelity_issues"] if i.get("blocking")])
+                            + len(review["research_issues"]))
+                kinds = set()
+                if review["fidelity_issues"]:
+                    kinds.add("fidelity")
+                if review["research_issues"]:
+                    kinds.add("research")
+                expect = case["expect"]
+                record.update(actual_ready=review["ready"], actual_blocking=blocking,
+                              actual_kinds=sorted(kinds),
+                              reader_summary=review["reader_summary"])
+                met = record["actual_ready"] == bool(expect.get("ready"))
+                if "min_blocking" in expect:
+                    met = met and blocking >= expect["min_blocking"]
+                if "max_blocking" in expect:
+                    met = met and blocking <= expect["max_blocking"]
+                if "issue_kind" in expect:
+                    met = met and expect["issue_kind"] in kinds
+                record["expectation_met"] = met
+        except (OSError, ValueError, RuntimeError) as exc:
+            record.update(expectation_met=False, error=f"{type(exc).__name__}: {exc}")
+            saw_error = True
+        pipeline.save_json(case_dir / "result.json", record)
+        pipeline.save_json(state_path, state)
+        results.append(record)
+        if not record.get("expectation_met") and not record.get("error"):
+            saw_failed = True
+    pipeline.save_json(output_dir / "challenge-results.json", results)
+    if saw_error:
+        return EXIT_INPUT
+    if saw_failed:
+        return EXIT_NEEDS_REVISION
+    return EXIT_OK
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -361,6 +447,13 @@ def main(argv: list[str] | None = None) -> int:
     p_prepare.add_argument("--output-dir", type=Path, required=True)
     p_prepare.add_argument("--code-root", type=Path,
                            default=Path(__file__).resolve().parents[1])
+
+    p_check = sub.add_parser("check-review", help="真实GLM审稿/澄清合成挑战（生产共用函数）")
+    p_check.add_argument("--source-root", type=Path, required=True)
+    p_check.add_argument("--provider", default=TRIAL_PROVIDER)
+    p_check.add_argument("--no-fallback", action="store_true")
+    p_check.add_argument("--fixtures", type=Path, required=True)
+    p_check.add_argument("--output-dir", type=Path, required=True)
 
     p_run = sub.add_parser("run", help="按 manifest 真实写文章（生产共用作者循环）")
     p_run.add_argument("--source-root", type=Path, required=True,
@@ -383,6 +476,16 @@ def main(argv: list[str] | None = None) -> int:
         if policy_error:
             print(f"错误：{policy_error}", file=sys.stderr)
             return EXIT_INPUT
+        if args.command == "check-review":
+            policy_error = validate_run_policy(args.provider, not args.no_fallback)
+            if policy_error:
+                print(f"错误：{policy_error}", file=sys.stderr)
+                return EXIT_INPUT
+            code = check_review(source_root=args.source_root, fixtures=args.fixtures,
+                                output_dir=args.output_dir, provider=args.provider,
+                                fallback=not args.no_fallback)
+            print(f"exit={code}; results={args.output_dir / 'challenge-results.json'}")
+            return code
         code = run(manifest_path=args.manifest, provider=args.provider,
                    fallback=not args.no_fallback, repeats=args.repeats,
                    output_dir=args.output_dir, source_root=args.source_root)

@@ -554,11 +554,13 @@ def _author_material(materials: dict) -> dict:
 
 
 def author_prompt(root: Path, *, packet: dict, materials: dict,
-                  prior_article: str | None = None, revision_issues: list | None = None) -> str:
+                  prior_article: str | None = None, revision_issues: list | None = None,
+                  issue_resolutions: list | None = None) -> str:
     if not isinstance(packet, dict) or not packet.get('identity'):
         raise ValueError('作者必须收到单股研究包，不能从零猜研究')
     value = {'packet': packet, 'writing_material': _author_material(materials),
-             'prior_article': prior_article, 'revision_issues': revision_issues or []}
+             'prior_article': prior_article, 'revision_issues': revision_issues or [],
+             'issue_resolutions': issue_resolutions or []}
     body = (root / 'ops/recommendation-authoring-prompt.md').read_text(encoding='utf-8')
     return body + '\n\n本次输入：\n' + json.dumps(value, ensure_ascii=False, separators=(',', ':'))
 
@@ -602,12 +604,20 @@ def parse_review_output(text: str) -> dict:
             if not isinstance(item, dict) or not all(str(item.get(k) or '').strip() for k in keys):
                 raise ValueError(f'{field}条目不完整')
         result[field] = items
+    for item in result['readability_issues']:
+        item['blocking'] = bool(item.get('blocking', True))
+    for item in result['fidelity_issues']:
+        item['blocking'] = True  # 与同版研究不一致的问题一律阻塞，不接受审稿降级
     result['ready'] = bool(value.get('ready'))
     result['ready_contradicted_by_issues'] = False
-    if result['ready'] and (result['readability_issues'] or result['fidelity_issues'] or result['research_issues']):
-        # 审稿模型偶发自相矛盾（列了问题又标ready）：问题优先，按未就绪处理并保留标记。
+    blocking = (result['research_issues']
+                or [i for i in result['readability_issues'] if i['blocking']]
+                or [i for i in result['fidelity_issues'] if i['blocking']])
+    if result['ready'] and (result['readability_issues'] or result['fidelity_issues']
+                            or result['research_issues']):
+        result['ready_contradicted_by_issues'] = bool(not blocking)
+    if blocking:
         result['ready'] = False
-        result['ready_contradicted_by_issues'] = True
     return result
 
 
@@ -653,7 +663,7 @@ def stage_entry_evidence(state: dict, stage: str) -> dict | None:
 
 def article_stage(host, state: dict, state_path: Path, directory: Path, stage: str, prompt: str,
                   provider: str, config: dict, *, fallback: bool, contract: str, validate,
-                  run_scope: str = 'managed'):
+                  run_scope: str = 'managed', text_only: bool = True):
     """未冻结作者/审稿阶段的输入身份复用。
 
     复用须同时满足：输入身份一致、已保存实际route符合本次路线策略
@@ -662,7 +672,7 @@ def article_stage(host, state: dict, state_path: Path, directory: Path, stage: s
     """
     path = directory / f'{stage}-result.json'
     identity = {'stage': stage, 'contract': contract, 'prompt': prompt,
-                'session': session_identity(host, provider, config, text_only=True),
+                'session': session_identity(host, provider, config, text_only=text_only),
                 'policy': {'provider': provider, 'fallback': fallback,
                            'provider_order': list(state.get('provider_order') or [])},
                 'run_scope': run_scope}
@@ -677,7 +687,7 @@ def article_stage(host, state: dict, state_path: Path, directory: Path, stage: s
                 pass
         retain_previous(path)
     raw, route = run_stage(host, state, state_path, directory, stage, prompt, provider, config,
-                           text_only=True, fallback=fallback)
+                           text_only=text_only, fallback=fallback)
     stage_execution = stage_entry_evidence(state, stage) or {'provider': route, 'evidence': {}}
     verified = stage_execution_verified(host, provider, fallback, stage_execution)
     save_json(path, {'input_identity': identity, 'raw': raw, 'route': route,
@@ -686,22 +696,131 @@ def article_stage(host, state: dict, state_path: Path, directory: Path, stage: s
     return raw
 
 
+CLARIFICATION_CONTRACT_VERSION = 'research-clarification-v1'
+RESOLUTION_TYPES = ('resolved_existing', 'resolved_added', 'retained_unknown',
+                    'requires_research_change', 'unresolved_blocking')
+BLOCKING_TYPES = ('requires_research_change', 'unresolved_blocking')
+
+
+def _assign_issue_ids(issues: list, prefix: str) -> list:
+    for index, issue in enumerate(issues, 1):
+        if not issue.get('issue_id'):
+            issue['issue_id'] = f'{prefix}{index:02d}'
+    return issues
+
+
+def parse_clarification_output(text: str) -> dict:
+    value = json_object(text)
+    resolutions = value.get('resolutions')
+    unresolved = value.get('unresolved')
+    if not isinstance(resolutions, list) or not isinstance(unresolved, list):
+        raise ValueError('澄清结果缺少resolutions/unresolved数组')
+    seen = set()
+    for item in resolutions:
+        if not isinstance(item, dict) or item.get('type') not in RESOLUTION_TYPES \
+                or not str(item.get('issue_id') or '').strip():
+            raise ValueError('澄清处理条目缺少issue_id或类型非法')
+        if item['type'] == 'retained_unknown' and len(str(item.get('author_instruction') or '')) < 12:
+            raise ValueError('retained_unknown 必须说明不作何种推断及当前意见为何仍成立')
+        seen.add(item['issue_id'])
+    for item in unresolved:
+        if not isinstance(item, dict) or not str(item.get('issue_id') or '').strip():
+            raise ValueError('unresolved条目缺少issue_id')
+        seen.add(item['issue_id'])
+    return {'resolutions': resolutions, 'unresolved': unresolved, 'covered': sorted(seen)}
+
+
+def resolve_article_issues(host, *, issues: list, packet: dict, materials: dict, directory: Path,
+                           state: dict, state_path: Path, config: dict, provider: str,
+                           fallback: bool, allow_research_changes: bool,
+                           clarification_limit: int = 2) -> dict:
+    """生产与试写共用的疑点处理入口：核对→必要补资料/澄清→分类处理。
+
+    返回 {'resolutions': [...], 'blocking': [...]}；每个原issue_id都有对应记录。
+    真实研究变更在生产交回研究负责人（blocking 保留给 complete 组织返研）；
+    固定研究试写直接阻塞为 needs_research。
+    """
+    if not issues:
+        return {'resolutions': [], 'blocking': []}
+    code = packet['identity']['ts_code']
+    counts = state.setdefault('article_cycle_counts', {}).setdefault(
+        f'{run_scope_key(packet, code)}', {'expression': 0, 'clarification': 0})
+    issues = _assign_issue_ids(copy.deepcopy(issues), 'A')
+    if counts['clarification'] >= clarification_limit:
+        blocking = [{'issue_id': i.get('issue_id'), 'type': 'unresolved_blocking',
+                     'changes_original_judgment': None,
+                     'author_instruction': '澄清轮次已达上限，保留待处理。',
+                     'blocking': True, 'note': 'original issue'} for i in issues]
+        return {'resolutions': blocking, 'blocking': list(blocking)}
+    counts['clarification'] += 1
+    stage = 'research-clarification'
+    payload = {'identity': packet['identity'], 'issues': issues,
+               'packet_excerpt': {k: packet.get(k) for k in
+                                  ('judgment', 'reasoning', 'counterevidence', 'conditions', 'unknowns')},
+               'allow_research_changes': allow_research_changes}
+    body = (host.PROJECT_ROOT / 'ops/research-clarification-prompt.md').read_text(encoding='utf-8')
+    prompt = body + '\n\n本次输入：\n' + json.dumps(payload, ensure_ascii=False, separators=(',', ':'))
+    raw = article_stage(host, state, state_path, directory, stage, prompt, provider, config,
+                        fallback=fallback, contract=CLARIFICATION_CONTRACT_VERSION,
+                        validate=parse_clarification_output, run_scope='clarification',
+                        text_only=False)
+    parsed = parse_clarification_output(raw)
+    (directory / f'{stage}-resolution.json').write_text(
+        json.dumps({'issues': issues, **parsed}, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+    by_id = {}
+    for item in parsed['resolutions']:
+        item['blocking'] = bool(item.get('blocking')) or item['type'] in BLOCKING_TYPES
+        by_id[item['issue_id']] = item
+    for item in parsed['unresolved']:
+        by_id.setdefault(item['issue_id'], {
+            'issue_id': item['issue_id'], 'type': 'unresolved_blocking',
+            'changes_original_judgment': None,
+            'author_instruction': f"未完成核实：{item.get('problem', '')}",
+            'blocking': True, 'note': 'unresolved'})
+    for issue in issues:
+        by_id.setdefault(issue['issue_id'], {
+            'issue_id': issue['issue_id'], 'type': 'unresolved_blocking',
+            'changes_original_judgment': None,
+            'author_instruction': '该问题未获得处理记录，不得视为已解决。', 'blocking': True,
+            'note': 'missing resolution'})
+    resolutions = [by_id[i['issue_id']] for i in issues]
+    if not allow_research_changes:
+        for item in resolutions:
+            if item.get('changes_original_judgment'):
+                item['blocking'] = True
+                if item['type'] == 'resolved_existing':
+                    item['type'] = 'requires_research_change'
+    blocking = [item for item in resolutions if item.get('blocking')]
+    return {'resolutions': resolutions, 'blocking': blocking}
+
+
+def run_scope_key(packet: dict, code: str) -> str:
+    scope = packet.get('_cycle_scope') or 'managed'
+    return f'{scope}:{code}'
+
+
 def run_article_cycle(host, *, packet: dict, materials: dict, directory: Path, state: dict,
                       state_path: Path, config: dict, provider: str, fallback: bool,
                       allow_research_changes: bool, expression_limit: int = 2,
-                      run_scope: str = 'managed') -> dict:
-    """生产与试写共用的作者循环：作者 → 审稿 → 有限表达修订。
+                      run_scope: str = 'managed', issue_resolver=None,
+                      prior_resolutions: list | None = None) -> dict:
+    """生产与试写共用的作者循环：作者 → 疑点核实 → 审稿 → 有限表达修订。
 
-    allow_research_changes=False 时研究问题直接返回 needs_research，不改研究、
-    不硬改判断；True 时由调用方（生产 complete）组织定向返研后重建材料再回到本函数。
+    作者/审稿提出的疑点先经 issue_resolver（生产与试写同一实现，默认
+    resolve_article_issues）核实处理：误读纠正与补资料回到作者；合理未知保留；
+    真实研究变更在固定研究试写返回 needs_research，生产由调用方组织返研后重建。
     run_scope 隔离同一运行内的独立重复：repeat-2 即使输入与 repeat-1 完全相同，
     也不得命中其阶段缓存。模型调用失败向上抛出，由调用方决定保存与续跑。
     """
     directory.mkdir(parents=True, exist_ok=True)
     code = packet['identity']['ts_code']
     tag = code.replace('.', '-')
+    if issue_resolver is None:
+        def issue_resolver(**kwargs):
+            return resolve_article_issues(host, allow_research_changes=allow_research_changes, **kwargs)
     stages = []
     executions = []
+    issue_resolutions: list[dict] = list(prior_resolutions or [])
     research_issues: list[dict] = []
     prior = None
     revision_issues = None
@@ -724,6 +843,7 @@ def run_article_cycle(host, *, packet: dict, materials: dict, directory: Path, s
                 'execution_verified': all(e['execution_verified'] for e in executions) if executions else False,
                 'stages_execution': executions,
                 'research_issues': research_issues,
+                'issue_resolutions': issue_resolutions,
                 'review': review, 'research_source': packet['source_refs'],
                 'provider': provider, 'fallback': fallback}
 
@@ -731,7 +851,8 @@ def run_article_cycle(host, *, packet: dict, materials: dict, directory: Path, s
         author_stage = f'author-{tag}' if prior is None else f'author-rev{round_index}-{tag}'
         stages.append(author_stage)
         prompt = author_prompt(host.PROJECT_ROOT, packet=packet, materials=materials,
-                               prior_article=prior, revision_issues=revision_issues)
+                               prior_article=prior, revision_issues=revision_issues,
+                               issue_resolutions=issue_resolutions or None)
         parsed = parse_author_output(article_stage(
             host, state, state_path, directory, author_stage, prompt, provider, config,
             fallback=fallback, contract=AUTHOR_CONTRACT_VERSION, validate=parse_author_output,
@@ -740,12 +861,10 @@ def run_article_cycle(host, *, packet: dict, materials: dict, directory: Path, s
         article = parsed['article']
         article_path = directory / f'{author_stage}-article.md'
         article_path.write_text(article + '\n', encoding='utf-8')
-        for issue in parsed['research_issues']:
+        author_issues = _assign_issue_ids(copy.deepcopy(parsed['research_issues']), 'A')
+        for issue in author_issues:
             if issue not in research_issues:
                 research_issues.append(issue)
-        if research_issues:
-            # 研究问题不由作者硬改：试写（False）直接返回；生产（True）由调用方返研后重建。
-            return result('needs_research')
         review_stage = f'review-{tag}' if prior is None else f'review-rev{round_index}-{tag}'
         stages.append(review_stage)
         review_raw = article_stage(
@@ -755,20 +874,51 @@ def run_article_cycle(host, *, packet: dict, materials: dict, directory: Path, s
             validate=parse_review_output, run_scope=run_scope)
         stage_execution(review_stage)
         review = parse_review_output(review_raw)
+        _assign_issue_ids(review['readability_issues'], f'R{round_index:02d}B')
+        _assign_issue_ids(review['fidelity_issues'], f'R{round_index:02d}F')
+        _assign_issue_ids(review['research_issues'], f'R{round_index:02d}S')
         (directory / f'{review_stage}-review.json').write_text(
             json.dumps(review, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+        research_pool = list(author_issues)
         for issue in review['research_issues']:
+            research_pool.append(issue)
             if issue not in research_issues:
                 research_issues.append(issue)
-        if research_issues:
-            return result('needs_research')
-        blocking = review['readability_issues'] + review['fidelity_issues']
-        if not blocking and review['ready']:
+        blocking = [i for i in review['readability_issues'] + review['fidelity_issues']
+                    if i.get('blocking')]
+        if research_pool:
+            resolved = issue_resolver(issues=research_pool, packet=packet, materials=materials,
+                                      directory=directory, state=state, state_path=state_path,
+                                      config=config, provider=provider, fallback=fallback)
+            issue_resolutions.extend(resolved['resolutions'])
+            (directory / f'{review_stage}-resolutions.json').write_text(
+                json.dumps(resolved, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+            if resolved['blocking']:
+                if not allow_research_changes:
+                    return result('needs_research')
+                # 生产：真实研究变更交调用方组织返研；非研究类阻塞按表达问题处理。
+                research_blocking = [r for r in resolved['blocking']
+                                     if r.get('type') in BLOCKING_TYPES
+                                     and r.get('changes_original_judgment') is not False]
+                if research_blocking:
+                    return result('needs_research')
+                blocking = blocking + [r for r in resolved['blocking']
+                                       if r not in research_blocking]
+        author_actions = [r for r in issue_resolutions
+                          if r.get('type') in ('resolved_existing', 'resolved_added')
+                          and str(r.get('author_instruction') or '').strip()
+                          and not r.get('delivered_to_author')]
+        if not blocking and not author_actions and review['ready']:
             return result('ready')
         if round_index >= expression_limit:
             break
+        for r in author_actions:
+            r['delivered_to_author'] = True
         prior = article
-        revision_issues = blocking
+        revision_issues = blocking + [
+            {'quote': '（研究澄清处理）', 'problem': r.get('author_instruction'),
+             'instruction': r.get('author_instruction'), 'blocking': True}
+            for r in author_actions]
     return result('needs_revision')
 
 
@@ -1006,6 +1156,10 @@ def _author_articles(host, state, state_path, directory, config, provider, root,
         stocks = _sorted_stocks(selected_result(trace)['selected_stocks'])
         statuses = {}
         articles_dir = directory / 'articles'
+        repair_context = {}
+        repair_handoff_path = directory / 'research-repair-handoff.json'
+        if repair_handoff_path.exists():
+            repair_context = read_json(repair_handoff_path)
         for stock in stocks:
             code = stock['ts_code']
             packet = build_article_packet(trace=trace, context=context, ts_code=code,
@@ -1015,7 +1169,8 @@ def _author_articles(host, state, state_path, directory, config, provider, root,
                 host, packet=packet, materials=material,
                 directory=articles_dir / code, state=state, state_path=state_path,
                 config=config, provider=provider, fallback=fallback,
-                allow_research_changes=True)
+                allow_research_changes=True,
+                prior_resolutions=repair_context.get('prior_resolutions'))
         unresolved = {c: s for c, s in statuses.items() if s['status'] != 'ready'}
         if not unresolved:
             return assemble_stock_section([(s, statuses[s['ts_code']]['article']) for s in stocks]), trace
@@ -1028,23 +1183,40 @@ def _author_articles(host, state, state_path, directory, config, provider, root,
             issues = [i for s in needs_research.values() for i in s['research_issues']]
             pending = root / 'local_archive/forward_selection' / f'pending-trace-{expected[0]}.json'
             research_reply = directory / 'research-reply.md'
-            prompt = ('你是本轮选股研究负责人，处理作者发现的下列具体研究问题。'
+            prompt = ('你是本轮选股研究负责人，处理作者/审稿发现的下列具体研究问题。'
                 '按原prepare身份核对原截止事实：只修研究与交接，不接管文章，不重新扫描全市场，'
                 '不运行prepare/record/record-trace，不生成网页或公司介绍。'
                 '需要改变研究时同步pending全部相关字段、去留、排序与selection-handoff.json；'
                 '市场说明因此改变时同步research-reply.md对应段落。'
                 '审稿或作者意见不自动成立，由你核对；已接受风险与明确未知仍保留。'
-                '只输出JSON，含resolutions数组（quote、evidence、decision）和unresolved数组；'
-                'unresolved仅列未处理且影响本次取舍的问题。完成文件更新后再返回JSON。\n'
+                '只输出JSON：{"resolutions":[{"issue_id","quote","evidence","decision",'
+                '"author_instruction","changes_original_judgment"}],"unresolved":[{"issue_id","problem"}]}；'
+                'resolutions逐条给到对应问题的处理与给作者的指引；unresolved仅列未处理且影响本次取舍的问题。'
+                '完成文件更新后再返回JSON。\n'
                 f'pending={pending}；完整报告={research_reply}；交接={directory / "selection-handoff.json"}\n'
                 + json.dumps({'identity': expected, 'issues': issues}, ensure_ascii=False))
-            run_stage(host, state, state_path, directory, 'research-repair', prompt,
-                      provider, config, text_only=False, fallback=fallback)
+            raw, _repair_route = run_stage(host, state, state_path, directory, 'research-repair', prompt,
+                                           provider, config, text_only=False, fallback=fallback)
+            resolved = json_object(raw)
+            if not isinstance(resolved.get('resolutions'), list) or not isinstance(resolved.get('unresolved'), list):
+                raise ValueError('研究负责人返回缺少resolutions/unresolved数组，原始输出已保留')
+            (directory / 'research-repair-resolution.json').write_text(
+                json.dumps({'issues': issues, **resolved}, ensure_ascii=False, indent=2) + '\n',
+                encoding='utf-8')
+            if resolved['unresolved']:
+                raise ValueError('研究负责人仍有未决问题，保留pending与处理记录，不冻结：'
+                                 + json.dumps(resolved['unresolved'], ensure_ascii=False)[:1500])
             revised = read_json(pending)
             if identity(revised) != expected:
                 raise ValueError('研究修复改变时间身份')
             validate_pending(root, revised, state.get('prepare', {}))
             save_json(directory / 'context-trace.json', revised)
+            # 处理结论回传作者：下一轮作者输入包含resolutions，缓存身份随之变化。
+            prior_resolutions = [
+                {**r, 'issue_id': r.get('issue_id') or f'RR{n:02d}', 'source': 'research-repair'}
+                for n, r in enumerate(resolved['resolutions'], 1)]
+            repair_context = {'prior_resolutions': prior_resolutions}
+            save_json(directory / 'research-repair-handoff.json', repair_context)
             continue
         details = {c: (s['research_issues'] or (s.get('review') or {}).get('readability_issues', []))
                    for c, s in unresolved.items()}

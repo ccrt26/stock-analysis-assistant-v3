@@ -91,6 +91,7 @@ def case(tmp_path, monkeypatch):
     ops.mkdir()
     (ops / 'recommendation-authoring-prompt.md').write_text('作者合同', encoding='utf-8')
     (ops / 'recommendation-review-prompt.md').write_text('审稿合同', encoding='utf-8')
+    (ops / 'research-clarification-prompt.md').write_text('澄清合同', encoding='utf-8')
     monkeypatch.setattr(pipeline, 'validate_pending', lambda *a: None)
     facts = {CODE: {'price_observations': [{'close': 10.5, 'fade_frequency_5d': 0.0,
                                             'price_location_60d': 0.21, 'unused_oscillator': 9}],
@@ -327,12 +328,18 @@ def test_packet_does_not_include_other_stock_full_history(case):
 
 
 def test_review_contradiction_is_resolved_as_not_ready():
-    contradicted = json.dumps({'reader_summary': 'x', 'readability_issues': [
-        {'quote': '原句', 'problem': '未解释', 'instruction': '补充解释'}],
-        'fidelity_issues': [], 'research_issues': [], 'ready': True}, ensure_ascii=False)
+    blocking_issue = {'quote': '原句', 'problem': '条件被改写', 'instruction': '恢复原条件',
+                      'evidence': '原条件为A且B', 'blocking': True}
+    contradicted = json.dumps({'reader_summary': 'x', 'readability_issues': [blocking_issue],
+                               'fidelity_issues': [], 'research_issues': [], 'ready': True},
+                              ensure_ascii=False)
     parsed = pipeline.parse_review_output(contradicted)
-    assert parsed['ready'] is False
-    assert parsed['ready_contradicted_by_issues'] is True
+    assert parsed['ready'] is False  # 存在阻塞意见时不得ready
+    minor_only = json.dumps({'reader_summary': 'x', 'readability_issues': [
+        {'quote': '原句', 'problem': '还可以更顺', 'instruction': '可改可不改', 'blocking': False}],
+        'fidelity_issues': [], 'research_issues': [], 'ready': True}, ensure_ascii=False)
+    ok = pipeline.parse_review_output(minor_only)
+    assert ok['ready'] is True  # 仅建议性意见不阻塞采用
 
 
 def test_packet_comparison_keeps_cashflow_cited_by_research(case):
@@ -382,6 +389,8 @@ def test_research_repair_returns_to_author(case, monkeypatch):
         if len([c for c in runner.calls if c['stage'].startswith('author')]) > 1 else author_output(),
         'review-': (lambda s, p: review_first if len([c for c in runner.calls if c['stage'].startswith('review')]) == 1
                     else review_output()),
+        'research-clarification': lambda s, p: clarification_output([], unresolved=[
+            {'issue_id': 'R00S01', 'problem': '需研究负责人核对'}]),
         'research-repair': repair,
         'monitor': lambda s, p: '复盘完成',
     })
@@ -392,8 +401,8 @@ def test_research_repair_returns_to_author(case, monkeypatch):
     monkeypatch.setattr(nightly_report, 'source_sections', lambda *a, **kw: ('正式复盘', '正式统计'))
     final, _ = pipeline.complete(stock_ai, case.state, case.state_path, case.directory, {}, 'glm', '研究')
     stage_names = [c['stage'] for c in runner.calls]
-    assert stage_names == ['author-000001-SZ', 'review-000001-SZ', 'research-repair',
-                           'author-000001-SZ', 'review-000001-SZ', 'monitor']
+    assert stage_names == ['author-000001-SZ', 'review-000001-SZ', 'research-clarification',
+                           'research-repair', 'author-000001-SZ', 'review-000001-SZ', 'monitor']
     assert 'review-after-research' not in stage_names
     assert frozen and revised_article in frozen[0]['section']
     assert frozen[0]['trace']['candidate_ledger'][0]['primary_reason'].startswith('总控')
@@ -517,6 +526,8 @@ def test_research_revision_invalidates_affected_articles(case, monkeypatch):
         'author-': author_produce,
         'review-': lambda s, p: review_output(research=[issue])
         if len([c for c in runner.calls if c['stage'].startswith('review')]) == 1 else review_output(),
+        'research-clarification': lambda s, p: clarification_output([], unresolved=[
+            {'issue_id': 'R00S01', 'problem': '需研究负责人核对'}]),
         'research-repair': repair,
         'monitor': lambda s, p: '复盘完成',
     })
@@ -674,3 +685,195 @@ def test_packet_composition_report(case):
     assert composition['total'] > 0
     for key in ('identity', 'judgment', 'reasoning', 'evidence', 'comparisons', 'facts', 'conditions'):
         assert key in composition
+
+
+# ---- P3：疑点核实、补资料与返研回作者 ----
+
+
+def clarification_output(resolutions, unresolved=None):
+    return json.dumps({'resolutions': resolutions, 'unresolved': unresolved or []}, ensure_ascii=False)
+
+
+def resolution(issue_id, type_='resolved_existing', **kw):
+    base = {'issue_id': issue_id, 'type': type_,
+            'evidence_text': '包内比较股事实：603650.SH 现金流-71.9%（facts.comparisons.items）',
+            'source_ref': 'packet.comparisons.items[1].facts.cash_flow',
+            'changes_original_judgment': False,
+            'author_instruction': '按包内事实修正表述，不改变原判断。', 'blocking': False}
+    base.update(kw)
+    return base
+
+
+def test_author_misread_resolves_without_research_change(case, monkeypatch):
+    issue = research_issue(quote='彤程现金流与宏和科技数据疑似颠倒', problem='名称与数据归属疑似颠倒',
+                           needed='核对归属')
+    calls = []
+
+    def stage(host, state, state_path, directory, stage_name, prompt, provider, config, *,
+              text_only, fallback):
+        calls.append(stage_name)
+        state.setdefault('recommendation_stages', []).append({
+            'stage': stage_name, 'provider': provider, 'configured_model': 'm',
+            'evidence': {'verified': True, 'consistent': True, 'provider': 'bigmodel-api',
+                         'model': 'GLM-5.3', 'request_model': 'GLM-5.3',
+                         'context_evidence': {'verified': True, 'offered_tools': None,
+                                              'tool_calls': 0, 'input_present': True}},
+            'status': 'completed'})
+        if stage_name.startswith('author-'):
+            return (author_output() if 'rev' in stage_name
+                    else author_output(issues=[issue])), 'glm'
+        if stage_name.startswith('review-'):
+            return review_output(), 'glm'
+        if stage_name == 'research-clarification':
+            assert text_only is False  # 澄清会话可以带只读工具，记录如实
+            assert '归属疑似颠倒' in prompt
+            return clarification_output([resolution('A01')]), 'glm'
+        raise AssertionError(stage_name)
+
+    monkeypatch.setattr(pipeline, 'run_stage', stage)
+    result, _ = run_cycle(case, stage)
+    assert result['status'] == 'ready'
+    assert 'research-clarification' in calls
+    rec = result['issue_resolutions']
+    assert rec[0]['issue_id'] == 'A01' and rec[0]['type'] == 'resolved_existing'
+
+
+def test_missing_evidence_added_and_returned_to_author(case, monkeypatch):
+    issue = research_issue(quote='解锁供给量级未知', problem='需要解锁股数', needed='读取公告')
+    calls = []
+
+    def stage(host, state, state_path, directory, stage_name, prompt, provider, config, *,
+              text_only, fallback):
+        calls.append(stage_name)
+        state.setdefault('recommendation_stages', []).append({
+            'stage': stage_name, 'provider': provider, 'configured_model': 'm',
+            'evidence': {'verified': True, 'consistent': True, 'provider': 'bigmodel-api',
+                         'model': 'GLM-5.3', 'request_model': 'GLM-5.3',
+                         'context_evidence': {'verified': True, 'offered_tools': None,
+                                              'tool_calls': 0, 'input_present': True}},
+            'status': 'completed'})
+        if stage_name == 'research-clarification':
+            return clarification_output([resolution('A01', 'resolved_added',
+                                                    author_instruction='补充解锁股数后再表述供给风险。')]), 'glm'
+        if stage_name.startswith('author-'):
+            if 'rev' in stage_name:
+                assert '补充解锁股数' in prompt  # 处理结论进入作者输入
+                return author_output(), 'glm'
+            return author_output(issues=[issue]), 'glm'
+        if stage_name.startswith('review-'):
+            return review_output(), 'glm'
+        raise AssertionError(stage_name)
+
+    monkeypatch.setattr(pipeline, 'run_stage', stage)
+    result, _ = run_cycle(case, stage)
+    assert result['status'] == 'ready'
+    assert any('author-rev1' in c for c in calls)
+
+
+def test_true_research_gap_blocks_fixed_research(case, monkeypatch):
+    issue = research_issue(quote='核心取舍依赖关键新订单', problem='研究未证实该订单存在',
+                           needed='研究核实订单')
+    record = []
+
+    def stage(host, state, state_path, directory, stage_name, prompt, provider, config, *,
+              text_only, fallback):
+        record.append(stage_name)
+        if stage_name == 'research-clarification':
+            return clarification_output([resolution('A01', 'requires_research_change',
+                                                    changes_original_judgment=True, blocking=True)]), 'glm'
+        if stage_name.startswith('author-'):
+            return author_output(issues=[issue]), 'glm'
+        if stage_name.startswith('review-'):
+            return review_output(), 'glm'
+        raise AssertionError(stage_name)
+
+    monkeypatch.setattr(pipeline, 'run_stage', stage)
+    result, _ = run_cycle(case, stage, allow_research_changes=False)
+    assert result['status'] == 'needs_research'
+    assert not any('author-rev' in c for c in record)
+    assert result['issue_resolutions'][0]['blocking'] is True
+
+
+def test_retained_unknown_does_not_block(case, monkeypatch):
+    issue = research_issue(quote='未披露细分业务贡献', problem='分业务收入未披露', needed='不要求补齐')
+    calls = []
+
+    def stage(host, state, state_path, directory, stage_name, prompt, provider, config, *,
+              text_only, fallback):
+        calls.append(stage_name)
+        if stage_name == 'research-clarification':
+            assert '未披露细分业务贡献' in prompt  # 原问题进入澄清请求
+            return clarification_output([resolution('A01', 'retained_unknown',
+                                                    author_instruction='不作业务归因推断；总量已核实仅作背景，当前意见由相对强弱证据支持。',
+                                                    note='总量已核实且仅作背景；细分缺失不影响本次相对强弱判断。')]), 'glm'
+        if stage_name.startswith('author-'):
+            return author_output(issues=[issue]), 'glm'
+        if stage_name.startswith('review-'):
+            return review_output(), 'glm'
+        raise AssertionError(stage_name)
+
+    monkeypatch.setattr(pipeline, 'run_stage', stage)
+    result, _ = run_cycle(case, stage)
+    assert result['status'] == 'ready'
+    assert result['issue_resolutions'][0]['type'] == 'retained_unknown'
+
+
+def test_unresolved_items_cannot_be_ignored(case, monkeypatch):
+    issue = research_issue()
+    def stage(host, state, state_path, directory, stage_name, prompt, provider, config, *,
+              text_only, fallback):
+        if stage_name == 'research-clarification':
+            return clarification_output([], unresolved=[{'issue_id': 'A01', 'problem': '资料查询失败'}]), 'glm'
+        if stage_name.startswith('author-'):
+            return author_output(issues=[issue]), 'glm'
+        if stage_name.startswith('review-'):
+            return review_output(), 'glm'
+        raise AssertionError(stage_name)
+
+    monkeypatch.setattr(pipeline, 'run_stage', stage)
+    result, _ = run_cycle(case, stage)
+    assert result['status'] == 'needs_research'
+    assert result['issue_resolutions'][0]['type'] == 'unresolved_blocking'
+
+
+def test_clarification_budget_is_bounded_and_persisted(case, monkeypatch):
+    issue = research_issue()
+    calls = []
+
+    def stage(host, state, state_path, directory, stage_name, prompt, provider, config, *,
+              text_only, fallback):
+        calls.append(stage_name)
+        if stage_name == 'research-clarification':
+            return clarification_output([], unresolved=[{'issue_id': 'A01', 'problem': '仍无法核实'}]), 'glm'
+        if stage_name.startswith('author-'):
+            return author_output(issues=[issue]), 'glm'
+        if stage_name.startswith('review-'):
+            return review_output(), 'glm'
+        raise AssertionError(stage_name)
+
+    monkeypatch.setattr(pipeline, 'run_stage', stage)
+    result, _ = run_cycle(case, stage)
+    assert result['status'] == 'needs_research'
+    result2, _ = run_cycle(case, stage)
+    assert result2['status'] == 'needs_research'
+    assert calls.count('research-clarification') == 2  # 两次运行合计至多2轮
+    result3, _ = run_cycle(case, stage)
+    assert calls.count('research-clarification') == 2  # 预算用尽后不再调用
+    assert result3['status'] == 'needs_research'
+    counts = case.state['article_cycle_counts']
+    assert any(v['clarification'] == 2 for v in counts.values())
+
+
+def test_review_severity_minor_suggestions_do_not_force_rewrite(case, monkeypatch):
+    minor = [{'quote': '某句', 'problem': '还可以更顺', 'instruction': '可改可不改', 'blocking': False}]
+    runner = stage_recorder({
+        'author-': lambda s, p: author_output(),
+        'review-': lambda s, p: json.dumps({'reader_summary': 'x', 'readability_issues': minor,
+                                            'fidelity_issues': [], 'research_issues': [],
+                                            'ready': True}, ensure_ascii=False),
+        'monitor': lambda s, p: '复盘完成',
+    })
+    monkeypatch.setattr(pipeline, 'run_stage', runner)
+    result, _ = run_cycle(case, runner)
+    assert result['status'] == 'ready'
+    assert result['review']['readability_issues'][0]['blocking'] is False

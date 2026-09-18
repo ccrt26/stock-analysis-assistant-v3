@@ -46,6 +46,7 @@ def case(tmp_path, monkeypatch):
     (root / 'ops').mkdir()
     (root / 'ops/recommendation-authoring-prompt.md').write_text('作者合同')
     (root / 'ops/recommendation-review-prompt.md').write_text('审稿合同')
+    (root / 'ops/research-clarification-prompt.md').write_text('澄清合同')
     return SimpleNamespace(root=root, pending=pending, trace=trace, directory=directory, state=state,
                            state_path=root/'state.json', section=section, identity=(formation,action,asof))
 
@@ -118,6 +119,8 @@ def test_substantive_issue_returns_to_research_before_any_freeze(case,monkeypatc
             ready=json.dumps({'reader_summary':'x','readability_issues':[],'fidelity_issues':[],
                               'research_issues':[],'ready':True})
             return (issue_review if len([s for s in stages if s.startswith('review-')])==1 else ready), 'glm'
+        if stage=='research-clarification':
+            return json.dumps({'resolutions':[],'unresolved':[{'issue_id':'R00S01','problem':'需研究核对'}]}),'glm'
         if stage=='monitor':return '复盘完成','glm'
         raise AssertionError(stage)
     monkeypatch.setattr(pipeline,'run_stage',stage)
@@ -125,7 +128,7 @@ def test_substantive_issue_returns_to_research_before_any_freeze(case,monkeypatc
     monkeypatch.setattr(stock_ai,'strict_archive_check',lambda *a,**kw:(True,''))
     monkeypatch.setattr(stock_ai,'forward_csv_matches_trace',lambda *a,**kw:(True,''))
     pipeline.complete(stock_ai,case.state,case.state_path,case.directory,{},'glm','')
-    assert stages==['author-000001-SZ','review-000001-SZ','research-repair',
+    assert stages==['author-000001-SZ','review-000001-SZ','research-clarification','research-repair',
                     'author-000001-SZ','review-000001-SZ','monitor']
     assert 'review-after-research' not in stages
     assert frozen[0]['trace']['candidate_ledger'][0]['primary_reason'].startswith('总控')
@@ -140,6 +143,8 @@ def test_unresolved_research_is_not_frozen_or_fabricated_empty(case,monkeypatch)
         if stage.startswith('review-'):
             return json.dumps({'reader_summary':'x','readability_issues':[],'fidelity_issues':[],
                                'research_issues':[issue],'ready':False}),'glm'
+        if stage=='research-clarification':
+            return json.dumps({'resolutions':[],'unresolved':[{'issue_id':'A01','problem':'仍无法核实'}]}),'glm'
         return '复盘完成','glm'
     monkeypatch.setattr(pipeline,'run_stage',stage)
     monkeypatch.setattr(pipeline,'freeze',lambda *a:pytest.fail('未决不得冻结'))

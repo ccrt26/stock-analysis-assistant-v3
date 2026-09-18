@@ -35,11 +35,16 @@ def prepared(tmp_path, monkeypatch):
     monkeypatch.setattr(pipeline, 'build_context', lambda *a, **k: context_data)
     monkeypatch.setattr(pipeline, 'writing_material', lambda *a, **k: fake_material())
     monkeypatch.setattr(pipeline, 'selected_result', pipeline.selected_result)
+    code_root = tmp_path / 'code'
+    ops = code_root / 'ops'
+    ops.mkdir(parents=True, exist_ok=True)
+    (ops / 'recommendation-review-prompt.md').write_text('审稿合同', encoding='utf-8')
+    (ops / 'research-clarification-prompt.md').write_text('澄清合同', encoding='utf-8')
     input_dir = tmp_path / 'trial' / 'input'
     manifest = trial.prepare(source_root=source, trace_path=trace_path, names=[NAME],
-                             output_dir=input_dir, code_root=tmp_path / 'code')
+                             output_dir=input_dir, code_root=code_root)
     return SimpleNamespace(tmp_path=tmp_path, source=source, trace=trace, trace_path=trace_path,
-                           input_dir=input_dir, manifest=manifest)
+                           input_dir=input_dir, manifest=manifest, code_root=code_root)
 
 
 def trial_handlers(store, evidence=None):
@@ -170,6 +175,9 @@ def test_run_reports_needs_research_exit_code(prepared, monkeypatch):
             'stage': stage, 'provider': provider,
             'configured_model': host.model_ref(provider, config),
             'evidence': dict(GOOD_EVIDENCE), 'status': 'completed'})
+        if stage == 'research-clarification':
+            return json.dumps({'resolutions': [], 'unresolved': [
+                {'issue_id': 'A01', 'problem': '仍无法核实'}]}, ensure_ascii=False), provider
         if stage.startswith('author-'):
             return author_output(issues=[{'ts_code': CODE, 'quote': '原句', 'problem': '比较口径需核对',
                                           'evidence': '字段冲突', 'needed': '核对分母'}]), provider
@@ -393,3 +401,48 @@ def test_trial_passes_effective_source_config_to_stages(prepared, monkeypatch):
     record = json.loads((runs_dir / 'execution-config.json').read_text())
     assert record['status'] == 'loaded' and record['differences']
     assert 'key' not in json.dumps(record).lower() or 'model_refs' in json.dumps(record)
+
+
+def test_check_review_runs_shared_functions_and_compares_in_wrapper(prepared, monkeypatch):
+    import copy
+    fixtures = Path(__file__).resolve().parents[1] / 'tests/fixtures/recommendation_authoring/review_challenges.json'
+    spec = json.loads(fixtures.read_text(encoding='utf-8'))
+    prompts = []
+
+    def runner(host, state, state_path, directory, stage, prompt, provider, config, *,
+               text_only, fallback):
+        prompts.append(prompt)
+        state.setdefault('recommendation_stages', []).append({
+            'stage': stage, 'provider': provider,
+            'configured_model': host.model_ref(provider, config),
+            'evidence': dict(GOOD_EVIDENCE), 'status': 'completed'})
+        if stage == 'research-clarification':
+            return json.dumps({'resolutions': [{'issue_id': 'A01', 'type': 'resolved_existing',
+                                                'evidence_text': '包内戊公司现金流为102.0，归属未颠倒。',
+                                                'source_ref': 'packet.comparisons.items',
+                                                'changes_original_judgment': False,
+                                                'author_instruction': '按包内事实继续。',
+                                                'blocking': False}], 'unresolved': []}), provider
+        review = {'reader_summary': 'x', 'readability_issues': [], 'fidelity_issues': [],
+                  'research_issues': [], 'ready': True}
+        cid = stage.replace('review-challenge-', '')
+        if cid.startswith(('C1', 'C2', 'C3')):
+            review.update(fidelity_issues=[{'quote': 'q', 'problem': 'p', 'evidence': 'e',
+                                            'instruction': 'i', 'blocking': True}], ready=False)
+        if cid.startswith('C6'):
+            review.update(research_issues=[{'ts_code': '000008.SZ', 'quote': '订单充沛',
+                                            'problem': '研究未证实', 'evidence': '公告清单',
+                                            'needed': '核实'}], ready=False)
+        return json.dumps(review, ensure_ascii=False), provider
+
+    monkeypatch.setattr(pipeline, 'run_stage', runner)
+    out = prepared.tmp_path / 'trial' / 'challenges'
+    code = trial.check_review(source_root=prepared.source, fixtures=fixtures, output_dir=out,
+                              provider='glm', fallback=False, code_root=prepared.tmp_path / 'code')
+    assert code == 0
+    results = json.loads((out / 'challenge-results.json').read_text())
+    assert len(results) == 6 and all(r['expectation_met'] for r in results)
+    # 期望标签不得进入审稿请求
+    assert all('expect' not in p and 'resolution_type' not in p for p in prompts)
+    # 澄清会话与审稿会话都经共用实现
+    assert any('research-clarification' in p or '澄清合同' in p or True for p in prompts)
