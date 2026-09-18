@@ -10,6 +10,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
 import stock_ai
 import recommendation_pipeline as pipeline
+from test_forward_selection import _v4_trace
 from stock_analyzer.ops import official_evidence as official
 from stock_analyzer.ops import recommendation_context as context
 
@@ -118,13 +119,13 @@ def test_child_env_retains_astra_proxy_and_cleans_parent_ids(monkeypatch):
     assert not any(k in env for k in ('_','CODEX_THREAD_ID','CODEX_PARENT_THREAD_ID','OPENAI_API_KEY'))
 
 
-def test_cited_neighbor_financial_periods_survive_editor_input(tmp_path):
-    (tmp_path/'ops').mkdir();(tmp_path/'ops/recommendation-editing-prompt.md').write_text('edit')
+def test_cited_financial_periods_survive_author_packet(tmp_path):
     rows=[{'report_period':'2024-12-31','revenue':10},{'report_period':'2025-03-31','revenue':20},{'report_period':'2026-06-30','revenue':30}]
-    ctx={'facts':{'600001.SH':{'income_statement':rows}},'proposed_judgment':{'result':{'selected_stocks':[]}}}
-    p=pipeline.editor_prompt(tmp_path,'review',ctx,{},'比较近邻2024年收入')
-    actual=json.loads(p.split('本次输入：\n')[1])
-    assert actual['context']['facts']['600001.SH']['income_statement'] == rows
+    ctx={'facts':{'000001.SZ':{'income_statement':rows}},'proposed_judgment':{},'gaps':[]}
+    trace=_v4_trace()
+    packet=pipeline.build_article_packet(trace=trace,context=ctx,ts_code='000001.SZ',
+                                         research_handoff=pipeline.handoff_from_trace(trace))
+    assert packet['facts']['own']['income_statement'] == rows
 
 
 def test_breadth_count_uses_same_window_denominator():
