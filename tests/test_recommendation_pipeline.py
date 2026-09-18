@@ -484,3 +484,19 @@ def test_terminal_delivery_error_recovers_complete_same_run_handoff(case,monkeyp
 def test_nonempty_incomplete_handoff_never_recovers(case):
     (case.directory/'research-reply.md').write_text('仅有非空片段')
     assert pipeline.recover_research_handoff(stock_ai,case.state,case.directory) is None
+
+
+def test_json_repairs_unescaped_inner_quotes_from_model_responses():
+    broken = json.dumps({'reader_summary': '前句，"引用原句"，后句。'}, ensure_ascii=False)
+    broken = broken.replace('\\"', '"', 1).replace('\\"', '"', 1) if False else (
+        '{"reader_summary": "前句，"引用原句"，后句。", "ready": true}')
+    assert pipeline.json_object(broken)['reader_summary'] == '前句，"引用原句"，后句。'
+    nested = ('{"readability_issues": [{"quote": "他说"很好"", "problem": "术语未解释", '
+              '"instruction": "首次出现解释"}], "ready": false}')
+    parsed = pipeline.json_object(nested)
+    assert parsed['readability_issues'][0]['quote'] == '他说"很好"'
+    assert parsed['ready'] is False
+    # 正常JSON与围栏行为不变。
+    assert pipeline.json_object('{"a": 1}') == {'a': 1}
+    with pytest.raises(ValueError, match='唯一'):
+        pipeline.json_object('```json\n{}\n```\n```json\n{}\n```')

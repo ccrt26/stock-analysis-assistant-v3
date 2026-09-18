@@ -37,15 +37,63 @@ def save_json(path: Path, value: dict) -> None:
             os.unlink(temp)
 
 
+def _escape_inner_quotes(text: str) -> str:
+    """模型在字符串值里直接引用含ASCII引号的原句时输出非法JSON。
+
+    仅在直接解析失败后使用：前瞻引号后的第一个非空白字符，属于结构符
+    （,:}]）视为字符串结束，否则按内容转义；不改动其他字符。
+    """
+    out = []
+    i, size = 0, len(text)
+    in_string = False
+    while i < size:
+        ch = text[i]
+        if not in_string:
+            if ch == '"':
+                in_string = True
+            out.append(ch)
+            i += 1
+            continue
+        if ch == '\\':
+            out.append(text[i:i + 2])
+            i += 2
+            continue
+        if ch == '"':
+            j = i + 1
+            while j < size and text[j] in ' \t\r\n':
+                j += 1
+            if j >= size or text[j] in ',:}]':
+                in_string = False
+                out.append(ch)
+            else:
+                out.append('\\"')
+            i += 1
+            continue
+        out.append(ch)
+        i += 1
+    return ''.join(out)
+
+
 def json_object(text: str) -> dict:
-    """Accept a JSON object or one explicit JSON fence, retaining the raw response."""
+    """Accept a JSON object, one explicit JSON fence, or the common unescaped-quote slip."""
+    stripped = text.strip()
     try:
-        value = json.loads(text.strip())
+        value = json.loads(stripped)
     except json.JSONDecodeError:
-        blocks = re.findall(r'```(?:json)?\s*(\{[\s\S]*?\})\s*```', text)
-        if len(blocks) != 1:
+        blocks = re.findall(r'```(?:json)?\s*(\{[\s\S]*?\})\s*```', stripped)
+        candidates = []
+        if len(blocks) == 1:
+            candidates.append(blocks[0])
+        candidates.append(_escape_inner_quotes(stripped))
+        value = None
+        for candidate in candidates:
+            try:
+                value = json.loads(candidate)
+                break
+            except json.JSONDecodeError:
+                continue
+        if value is None:
             raise ValueError('模型响应没有唯一可解析的JSON对象')
-        value = json.loads(blocks[0])
     if not isinstance(value, dict):
         raise ValueError('模型响应必须是JSON对象')
     return value
