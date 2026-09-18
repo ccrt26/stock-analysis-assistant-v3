@@ -298,9 +298,32 @@ def test_packet_does_not_include_other_stock_full_history(case):
                                            research_handoff=pipeline.handoff_from_trace(trace))
     text = json.dumps(packet, ensure_ascii=False)
     assert '另一只股票的独特研究叙述' not in text and '另一只反证' not in text
-    # 被点名比较的股票只带必要的观察事实，不带其财务整包研究。
+    # 被点名比较的股票带必要的观察与财务事实（比较若用现金流，现金流必须在包里），
+    # 但不带其研究判断与叙述整包。
     assert packet['comparisons']['facts']['600000.SH']['price_observations'] == [{'close': 8.0}]
-    assert 'income_statement' not in packet['comparisons']['facts']['600000.SH']
+    assert packet['comparisons']['facts']['600000.SH']['income_statement'] == [{'revenue': 2}]
+    assert '另一只股票的独特研究叙述' not in json.dumps(packet['comparisons'], ensure_ascii=False)
+
+
+def test_packet_comparison_keeps_cashflow_cited_by_research(case):
+    trace = copy.deepcopy(case.trace)
+    trace['research_result']['selected_stocks'][0]['nearest_comparison'] = (
+        '对比彤程新材：飞凯经营现金流同比增长约102%，彤程同期下降约72%。')
+    other_candidate = copy.deepcopy(trace['candidate_ledger'][0])
+    other_candidate['ts_code'] = '603650.SH'
+    other_candidate['name'] = '彤程新材'
+    other_candidate['final_fate'] = 'rejected'
+    trace['candidate_ledger'].append(other_candidate)
+    context_data = {'facts': {
+        CODE: {'cash_flow': [{'report_period': '2026-06-30', 'n_cashflow_act': 478}]},
+        '603650.SH': {'cash_flow': [{'report_period': '2026-06-30', 'n_cashflow_act': -120}],
+                      'financial_indicator': [{'report_period': '2026-06-30', 'ocf_yoy': -72.0}]}},
+        'proposed_judgment': {}, 'gaps': []}
+    packet = pipeline.build_article_packet(trace=trace, context=context_data, ts_code=CODE,
+                                           research_handoff=pipeline.handoff_from_trace(trace))
+    facts = packet['comparisons']['facts']['603650.SH']
+    assert facts['cash_flow'] == [{'report_period': '2026-06-30', 'n_cashflow_act': -120}]
+    assert facts['financial_indicator'] == [{'report_period': '2026-06-30', 'ocf_yoy': -72.0}]
 
 
 # ---- 任务4/5：作者循环、复盘分离、装配与历史恢复 ----

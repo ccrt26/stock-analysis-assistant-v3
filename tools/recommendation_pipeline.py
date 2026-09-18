@@ -360,7 +360,9 @@ def build_article_packet(*, trace: dict, context: dict, ts_code: str, research_h
         name = candidate.get('name') or ''
         if (name and name in mentions) or code in mentions:
             comparison_codes.append(code)
-    comparison_fields = ('price_observations', 'industry_observations', 'industry_breadth', 'comparison_windows')
+    comparison_fields = ('price_observations', 'industry_observations', 'industry_breadth',
+                         'comparison_windows', 'income_statement', 'balance_sheet', 'cash_flow',
+                         'financial_indicator', 'financial_availability', 'daily_basic')
     comparison_facts = {}
     for code in comparison_codes:
         other = (context.get('facts') or {}).get(code) or {}
