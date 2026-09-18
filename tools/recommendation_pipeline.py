@@ -427,11 +427,11 @@ def build_article_packet(*, trace: dict, context: dict, ts_code: str, research_h
                           'source': conditions_decision['decision_id']}
             condition_sources.append(str(conditions_decision['decision_id']))
     original_report = handoff_stock.get('original_report_conditions') or []
+    supplementary = []
     for item in original_report:
         text = str(item.get('text') or '').strip()
         if text and (not conditions or text not in conditions['text']):
-            conditions = conditions or {'text': text, 'source': item.get('source_ref')}
-            condition_sources.append(str(item.get('source_ref')))
+            supplementary.append({'text': text, 'source_ref': item.get('source_ref')})
     if conditions is None:
         gaps.append('conditions_missing：本股没有已确定的改变条件，按原样表达未知，不得套用模板')
 
@@ -518,7 +518,8 @@ def build_article_packet(*, trace: dict, context: dict, ts_code: str, research_h
         'comparisons': {'text': stock.get('nearest_comparison'), 'codes': comparison_codes,
                         'items': comparison_items},
         'counterevidence': counterevidence,
-        'conditions': dict(conditions, sources=condition_sources) if conditions else None,
+        'conditions': (dict(conditions, sources=condition_sources, supplementary=supplementary)
+                       if conditions else ({"supplementary": supplementary} if supplementary else None)),
         'unknowns': thesis.get('critical_unknown'),
         'facts': {'definitions': _referenced_definitions(own_facts, comparison_facts),
                   'own': own_facts,

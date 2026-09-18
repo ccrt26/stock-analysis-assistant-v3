@@ -446,3 +446,41 @@ def test_check_review_runs_shared_functions_and_compares_in_wrapper(prepared, mo
     assert all('expect' not in p and 'resolution_type' not in p for p in prompts)
     # 澄清会话与审稿会话都经共用实现
     assert any('research-clarification' in p or '澄清合同' in p or True for p in prompts)
+
+
+def test_prepare_rejects_conflicting_handoff_and_extracts_report_conditions(tmp_path, monkeypatch):
+    source = tmp_path / 'source'
+    trace = trace_with_conditions(_v4_trace())
+    trace_path = source / 'local_archive/forward_selection' / 'research-trace-x.json'
+    trace_path.parent.mkdir(parents=True)
+    trace_path.write_text(json.dumps(trace, ensure_ascii=False), encoding='utf-8')
+    monkeypatch.setattr(pipeline, 'build_context', lambda *a, **k: {'facts': {}, 'gaps': []})
+    monkeypatch.setattr(pipeline, 'writing_material', lambda *a, **k: fake_material())
+    import hashlib
+    digest = pipeline.trace_input_sha256(trace)
+    bad = tmp_path / 'handoff-wrong.json'
+    bad.write_text(json.dumps({'schema': 'selection-handoff-v2',
+                               'formation_date': trace['formation_date'],
+                               'action_date': trace['action_date'], 'as_of': trace['as_of'],
+                               'trace_sha256': 'deadbeef', 'stocks': {}}), encoding='utf-8')
+    with pytest.raises(ValueError, match='冲突'):
+        trial.prepare(source_root=source, trace_path=trace_path, names=[NAME],
+                      output_dir=tmp_path / 'out1', code_root=tmp_path, handoff_path=bad)
+    good = tmp_path / 'handoff-good.json'
+    good.write_text(json.dumps({'schema': 'selection-handoff-v2',
+                                'formation_date': trace['formation_date'],
+                                'action_date': trace['action_date'], 'as_of': trace['as_of'],
+                                'trace_sha256': digest,
+                                'stocks': {CODE: {'risk_acceptance': '多日确认结构，代价已知。'}}}),
+                    encoding='utf-8')
+    report = tmp_path / 'report.md'
+    report.write_text('### 平安银行（000001.SZ）\n参与条件原文：如果连续收盘跌回9.9元以下且行业转弱，会降低判断。\n',
+                      encoding='utf-8')
+    manifest = trial.prepare(source_root=source, trace_path=trace_path, names=[NAME],
+                             output_dir=tmp_path / 'out2', code_root=tmp_path,
+                             handoff_path=good, original_report_path=report)
+    packet = json.loads((tmp_path / 'out2' / 'packets' / f'{CODE}.json').read_text())
+    assert packet['reasoning']['risk_acceptance']['formed'] is True
+    assert '连续收盘跌回9.9元以下' in json.dumps(packet['conditions'], ensure_ascii=False)
+    assert any('daily-report' in s.get('source_ref', '') for s in packet['conditions']['supplementary'])
+    assert manifest['handoff_sources']

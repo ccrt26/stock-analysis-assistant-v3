@@ -44,8 +44,13 @@ def _code_commit(code_root: Path) -> str:
 
 
 def prepare(*, source_root: Path, trace_path: Path, names: list[str], output_dir: Path,
-            code_root: Path) -> dict:
-    """只读源历史与事实，写入试验目录的输入快照与 manifest；不调用正式 prepare。"""
+            code_root: Path, handoff_path: Path | None = None,
+            original_report_path: Path | None = None) -> dict:
+    """只读源历史与事实，写入试验目录的输入快照与 manifest；不调用正式 prepare。
+
+    handoff：现场已核实的 selection-handoff.json（v2须携带匹配的trace_sha256）。
+    original-report：原研究报告；仅逐股提取其中独有的条件原句及来源，不当写作模板。
+    """
     if not names:
         raise ValueError("至少指定一只股票名称")
     trace = json.loads(trace_path.read_text(encoding="utf-8"))
@@ -62,6 +67,41 @@ def prepare(*, source_root: Path, trace_path: Path, names: list[str], output_dir
     snapshot = output_dir / "source-trace.json"
     snapshot.write_text(json.dumps(trace, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     handoff = pipeline.handoff_from_trace(trace)
+    handoff_sources = []
+    conflicts = []
+    if handoff_path is not None:
+        supplied = json.loads(handoff_path.read_text(encoding="utf-8"))
+        supplied_digest = supplied.get("trace_sha256")
+        if (supplied.get("formation_date"), supplied.get("action_date"),
+                supplied.get("as_of")) != (formation, action, as_of):
+            conflicts.append(f"{handoff_path.name}: 时间身份与本trace不一致")
+        elif supplied_digest and supplied_digest != pipeline.trace_input_sha256(trace):
+            conflicts.append(f"{handoff_path.name}: trace_sha256 与本trace不匹配（判定为同日其他版本）")
+        else:
+            binding = "trace_sha256" if supplied_digest else "identity_only"
+            for code_key, extra in (supplied.get("stocks") or {}).items():
+                if code_key in handoff["stocks"] and isinstance(extra, dict):
+                    handoff["stocks"][code_key].update(extra)
+            handoff["market"] = str(supplied.get("market") or handoff["market"])
+            handoff["binding"] = binding
+            handoff["handoff_source"] = str(handoff_path)
+            handoff_sources.append({"path": handoff_path.name, "binding": binding})
+    if original_report_path is not None:
+        report_text = original_report_path.read_text(encoding="utf-8")
+        extracted = {}
+        for stock in stocks:
+            found = pipeline.extract_conditions_from_report(report_text, stock["ts_code"])
+            if found:
+                extracted[stock["ts_code"]] = found
+                handoff.setdefault("stocks", {}).setdefault(stock["ts_code"], {}).setdefault(
+                    "original_report_conditions", found)
+        (output_dir / "original-report-conditions.json").write_text(
+            json.dumps({"source": str(original_report_path), "conditions": extracted},
+                       ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        handoff_sources.append({"path": original_report_path.name,
+                                "usage": "condition-sentences-only"})
+    if conflicts:
+        raise ValueError("研究交接存在冲突，拒绝凭mtime挑选：" + "；".join(conflicts))
     cited = handoff["market"] + " " + " ".join(
         filter(None, (s.get("nearest_comparison") for s in result["selected_stocks"])))
     context = pipeline.build_context(source_root, trace, cited_text=cited)
@@ -100,6 +140,7 @@ def prepare(*, source_root: Path, trace_path: Path, names: list[str], output_dir
         "code_commit": _code_commit(code_root),
         "provider_policy": {"allowed": ["glm"], "fallback": False,
                             "note": "本轮试写显式锁定；正式任务的默认路线不变"},
+        "handoff_sources": handoff_sources,
         "authoring_contract": {"author": pipeline.AUTHOR_CONTRACT_VERSION,
                                "review": pipeline.REVIEW_CONTRACT_VERSION},
         "created_at": datetime.now().astimezone().isoformat(),
@@ -168,7 +209,8 @@ def validate_run_policy(provider: str, fallback: bool) -> str | None:
 
 
 def run(*, manifest_path: Path, provider: str, fallback: bool, repeats: int,
-        output_dir: Path, source_root: Path | None = None) -> int:
+        output_dir: Path, source_root: Path | None = None,
+        resume: bool = False) -> int:
     """对固定输入逐股×重复次数调用生产 run_article_cycle；返回约定退出码。
 
     article_status 与 execution_verified 分开记录：业务ready但证据未核验的稿
@@ -186,6 +228,10 @@ def run(*, manifest_path: Path, provider: str, fallback: bool, repeats: int,
     manifest, input_dir, material, _ = _load_inputs(manifest_path)
     effective_config, config_record = load_source_config(Path(source_root))
     runs_dir = output_dir
+    if runs_dir.exists() and any(runs_dir.iterdir()):
+        if not resume:
+            print(f"错误：输出目录非空且未指定 --resume，拒绝复用：{runs_dir}", file=sys.stderr)
+            return EXIT_INPUT
     runs_dir.mkdir(parents=True, exist_ok=True)
     pipeline.save_json(runs_dir / "execution-config.json",
                        {"policy": {"provider": provider, "fallback": fallback,
@@ -447,6 +493,10 @@ def main(argv: list[str] | None = None) -> int:
     p_prepare.add_argument("--output-dir", type=Path, required=True)
     p_prepare.add_argument("--code-root", type=Path,
                            default=Path(__file__).resolve().parents[1])
+    p_prepare.add_argument("--handoff", type=Path,
+                           help="已核实的selection-handoff.json（v2须含匹配trace_sha256）")
+    p_prepare.add_argument("--original-report", type=Path,
+                           help="原研究报告；仅提取其中独有的条件原句与来源")
 
     p_check = sub.add_parser("check-review", help="真实GLM审稿/澄清合成挑战（生产共用函数）")
     p_check.add_argument("--source-root", type=Path, required=True)
@@ -463,12 +513,15 @@ def main(argv: list[str] | None = None) -> int:
     p_run.add_argument("--no-fallback", action="store_true")
     p_run.add_argument("--repeats", type=int, default=1)
     p_run.add_argument("--output-dir", type=Path, required=True)
+    p_run.add_argument("--resume", action="store_true",
+                       help="仅恢复同一次未完成运行；不得隐式套用到全新实验")
 
     args = parser.parse_args(argv)
     try:
         if args.command == "prepare":
             prepare(source_root=args.source_root, trace_path=args.trace, names=args.names,
-                    output_dir=args.output_dir, code_root=args.code_root)
+                    output_dir=args.output_dir, code_root=args.code_root,
+                    handoff=args.handoff, original_report=args.original_report)
             print(f"manifest={args.output_dir / 'manifest.json'}")
             return EXIT_OK
         # 发出任何请求前拒绝非GLM或允许备用的参数；不依赖调用者记得关闭。
@@ -488,7 +541,8 @@ def main(argv: list[str] | None = None) -> int:
             return code
         code = run(manifest_path=args.manifest, provider=args.provider,
                    fallback=not args.no_fallback, repeats=args.repeats,
-                   output_dir=args.output_dir, source_root=args.source_root)
+                   output_dir=args.output_dir, source_root=args.source_root,
+                   resume=args.resume)
         print(f"exit={code}; runs={args.output_dir}")
         return code
     except (OSError, ValueError, RuntimeError) as exc:
