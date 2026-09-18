@@ -305,6 +305,15 @@ def test_packet_does_not_include_other_stock_full_history(case):
     assert '另一只股票的独特研究叙述' not in json.dumps(packet['comparisons'], ensure_ascii=False)
 
 
+def test_review_contradiction_is_resolved_as_not_ready():
+    contradicted = json.dumps({'reader_summary': 'x', 'readability_issues': [
+        {'quote': '原句', 'problem': '未解释', 'instruction': '补充解释'}],
+        'fidelity_issues': [], 'research_issues': [], 'ready': True}, ensure_ascii=False)
+    parsed = pipeline.parse_review_output(contradicted)
+    assert parsed['ready'] is False
+    assert parsed['ready_contradicted_by_issues'] is True
+
+
 def test_packet_comparison_keeps_cashflow_cited_by_research(case):
     trace = copy.deepcopy(case.trace)
     trace['research_result']['selected_stocks'][0]['nearest_comparison'] = (

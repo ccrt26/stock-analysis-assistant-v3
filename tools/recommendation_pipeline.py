@@ -463,8 +463,11 @@ def parse_review_output(text: str) -> dict:
                 raise ValueError(f'{field}条目不完整')
         result[field] = items
     result['ready'] = bool(value.get('ready'))
+    result['ready_contradicted_by_issues'] = False
     if result['ready'] and (result['readability_issues'] or result['fidelity_issues'] or result['research_issues']):
-        raise ValueError('审稿存在未决问题时不能标为ready')
+        # 审稿模型偶发自相矛盾（列了问题又标ready）：问题优先，按未就绪处理并保留标记。
+        result['ready'] = False
+        result['ready_contradicted_by_issues'] = True
     return result
 
 
