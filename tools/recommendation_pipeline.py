@@ -116,6 +116,10 @@ def json_object(text: str) -> dict:
         balanced = _balanced_json_block(stripped)
         if balanced is not None:
             candidates.append(balanced)
+        first, last = stripped.find('{'), stripped.rfind('}')
+        if first >= 0 and last > first:
+            # 模型可能在JSON后附加Sources等脚注：取首尾花括号之间整段再试。
+            candidates.append(stripped[first:last + 1])
     candidates.extend(_escape_inner_quotes(candidate) for candidate in list(candidates))
     value = None
     for candidate in candidates:

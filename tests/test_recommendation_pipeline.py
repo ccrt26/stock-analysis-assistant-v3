@@ -513,3 +513,10 @@ def test_json_accepts_preface_before_bare_json_body():
     assert value['resolutions'][0]['issue_id'] == 'A01'
     # 无围栏+前导说明：取第一段配平对象；这是对“说明文字+JSON”的宽容，不是第二套格式。
     assert pipeline.json_object('说明：{"a": 1}') == {"a": 1}
+
+
+def test_json_accepts_json_with_trailing_sources_footer():
+    body = '{"resolutions": [{"issue_id": "A01", "evidence_text": "包内事实核定"}], "unresolved": []}'
+    text = body + '\n\nSources: [新浪财经公告转载](https://money.finance.sina.com.cn)、[证券时报网](https://www.stcn.com)'
+    value = pipeline.json_object(text)
+    assert value['resolutions'][0]['issue_id'] == 'A01'
