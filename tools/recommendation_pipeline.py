@@ -74,26 +74,58 @@ def _escape_inner_quotes(text: str) -> str:
     return ''.join(out)
 
 
+def _balanced_json_block(text: str) -> str | None:
+    """提取第一段配平的{...}（尊重字符串与转义），用于模型在JSON前后加说明文字的情形。"""
+    start = text.find('{')
+    if start < 0:
+        return None
+    depth = 0
+    in_string = False
+    escaped = False
+    for index in range(start, len(text)):
+        ch = text[index]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif ch == '\\':
+                escaped = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+        elif ch == '{':
+            depth += 1
+        elif ch == '}':
+            depth -= 1
+            if depth == 0:
+                return text[start:index + 1]
+    return None
+
+
 def json_object(text: str) -> dict:
-    """Accept a JSON object, one explicit JSON fence, or the common unescaped-quote slip."""
+    """Accept a JSON object, one explicit JSON fence, a short preface before the
+    JSON body, or the common unescaped-quote slip."""
     stripped = text.strip()
-    try:
-        value = json.loads(stripped)
-    except json.JSONDecodeError:
-        blocks = re.findall(r'```(?:json)?\s*(\{[\s\S]*?\})\s*```', stripped)
-        candidates = []
-        if len(blocks) == 1:
-            candidates.append(blocks[0])
-        candidates.append(_escape_inner_quotes(stripped))
-        value = None
-        for candidate in candidates:
-            try:
-                value = json.loads(candidate)
-                break
-            except json.JSONDecodeError:
-                continue
-        if value is None:
-            raise ValueError('模型响应没有唯一可解析的JSON对象')
+    candidates = [stripped]
+    blocks = re.findall(r'```(?:json)?\s*(\{[\s\S]*?\})\s*```', stripped)
+    if len(blocks) == 1:
+        candidates.append(blocks[0])
+    if not blocks:
+        # 无围栏时允许一句简短说明加JSON正文；有围栏则维持“唯一围栏”原有合同。
+        balanced = _balanced_json_block(stripped)
+        if balanced is not None:
+            candidates.append(balanced)
+    candidates.extend(_escape_inner_quotes(candidate) for candidate in list(candidates))
+    value = None
+    for candidate in candidates:
+        try:
+            value = json.loads(candidate)
+            break
+        except json.JSONDecodeError:
+            continue
+    if value is None:
+        raise ValueError('模型响应没有唯一可解析的JSON对象')
     if not isinstance(value, dict):
         raise ValueError('模型响应必须是JSON对象')
     return value

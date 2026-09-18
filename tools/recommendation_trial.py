@@ -521,7 +521,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "prepare":
             prepare(source_root=args.source_root, trace_path=args.trace, names=args.names,
                     output_dir=args.output_dir, code_root=args.code_root,
-                    handoff=args.handoff, original_report=args.original_report)
+                    handoff_path=args.handoff, original_report_path=args.original_report)
             print(f"manifest={args.output_dir / 'manifest.json'}")
             return EXIT_OK
         # 发出任何请求前拒绝非GLM或允许备用的参数；不依赖调用者记得关闭。

@@ -505,3 +505,11 @@ def test_json_repairs_unescaped_inner_quotes_from_model_responses():
     assert pipeline.json_object('{"a": 1}') == {'a': 1}
     with pytest.raises(ValueError, match='唯一'):
         pipeline.json_object('```json\n{}\n```\n```json\n{}\n```')
+
+
+def test_json_accepts_preface_before_bare_json_body():
+    text = '核对完成：疑点可由包内事实核定。\n{"resolutions": [{"issue_id": "A01"}], "unresolved": []}'
+    value = pipeline.json_object(text)
+    assert value['resolutions'][0]['issue_id'] == 'A01'
+    # 无围栏+前导说明：取第一段配平对象；这是对“说明文字+JSON”的宽容，不是第二套格式。
+    assert pipeline.json_object('说明：{"a": 1}') == {"a": 1}
