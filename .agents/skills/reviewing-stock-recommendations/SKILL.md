@@ -7,7 +7,7 @@ description: Use only after a stock was explicitly recommended, to compare the d
 
 ## 唯一职责
 
-本 Skill 不发现候选、不选择股票、不改变历史推荐，也不是第六个选股视角。
+本 Skill 不发现候选、不选择股票、不改变历史推荐，也不是第六个选股视角。article-v1 分工下，本复盘职责由外层另起的独立复盘会话执行：与选股研究会话、逐股作者会话分开，只负责已有正式推荐的当日分析、分类、正文与原合同保存；复盘研究方法与分类不变。
 
 它只接收：
 

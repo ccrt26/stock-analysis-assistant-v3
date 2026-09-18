@@ -2,7 +2,7 @@
 
 ## 启动器分工与手动执行
 
-`tools/stock_ai.py` 的 managed 新研究模式以外层说明为准：研究阶段完成完整 pending trace、与最终判断一致的完整推荐草稿、市场说明和正式复盘归档，暂不执行选股 record/record-trace、公司介绍或网页同步。总控在交接前实读写作教学和适用范文，推荐分区不能留待外层代写。总控在少量候选验证时即可按代码/截止/类别调用 `recommendation_context`；外层交稿后再准备正文实际引用对象与期间的核对材料，分别启动短上下文局部润色和全文忠实核对；实际需要改变研究的问题返回总控，并同步 pending 与草稿。正文和研究一致后由外层保存采用稿并执行既有 record-trace。外层原样装配正文，再同步本地页面、补缺失公司介绍。阶段日志和采用稿留在本轮 ai_tasks 目录。
+`tools/stock_ai.py` 的 managed 新研究模式以外层说明为准（article-v1 分工）：选股研究会话只做选股研究，交付完整 pending trace、市场说明正文（含独立标题行 `## 今天的市场情况`）和 `selection-handoff.json`（市场正文与逐股研究取舍、证据引用、比较对象、改变条件及来源），暂不执行选股 record/record-trace、公司介绍或网页同步。正式复盘由外层另起的独立复盘会话按 `ops/forward-monitor-prompt.md` 执行，选股会话不做复盘；逐股最终推荐文章由作者会话按单股研究包与写作材料生成，选股会话不写四分区整篇日报、不写推荐正文。总控在少量候选验证时即可按代码/截止/类别调用 `recommendation_context`。作者或审稿发现需要改变研究的问题返回研究负责人，同步 pending 与交接后重建对应单股材料并回到作者。正文与研究一致后由外层保存采用稿并执行既有 record-trace，再原样装配正文、同步本地页面、补缺失公司介绍。阶段日志和采用稿留在本轮 ai_tasks 目录。
 
 少量候选的通用事实入口（不需要先写 trace）：
 
@@ -60,7 +60,7 @@
   --as-of <selection_as_of>
 ```
 
-然后读取 `ops/forward-monitor-prompt.md`。市场 Skill 每天只分析一次，同一份市场结果同时用于已有股票跟踪和当天新选股。先为 monitor snapshot 的 `daily_review_episode_ids` 形成全部结构化判断草稿，再按 `checkpoint_review_episode_ids` 确定节点股、从非节点中选0—8只普通详评、其余归简评；各写唯一正文并核对一致性后，先调用 `record-daily-formal-reviews` 保存账本，再 `record` 全部节点详评和普通详评的 `monitor-report`。`checkpoint_review_stock_count` 是节点股数，`regular_detail_stock_limit` 是普通详评上限，不是必写篇数；账本只保存简评类正文。只有 selection 返回 `ready_for_research` 或 `ready_for_research_limited` 时才继续当天 V4 新选股。
+然后读取 `ops/forward-monitor-prompt.md`。市场 Skill 每天只分析一次，同一份市场结果同时用于已有股票跟踪和当天新选股。先为 monitor snapshot 的 `daily_review_episode_ids` 形成全部结构化判断草稿，再按 `checkpoint_review_episode_ids` 确定节点股、从非节点中选0—8只普通详评、其余归简评；各写唯一正文并核对一致性后，先调用 `record-daily-formal-reviews` 保存账本，再 `record` 全部节点详评和普通详评的 `monitor-report`。`checkpoint_review_stock_count` 是节点股数，`regular_detail_stock_limit` 是普通详评上限，不是必写篇数；账本只保存简评类正文。只有 selection 返回 `ready_for_research` 或 `ready_for_research_limited` 时才继续当天 V4 新选股。managed 模式下本段复盘步骤由外层的独立复盘会话执行，选股会话跳过本段；手动完整执行仍按本段顺序完成。
 
 进入任何复盘写作前（正常任务、`already_selected` 当日仅复盘、补跑路径均同），必须按 `ops/forward-monitor-prompt.md` 的分类知识库入口实际读取对应类型的指南与范文，并按其当前机会合同为每条需复盘记录形成 `current_opportunity` 当前意见；具体读取范围、选择方法与失败降级仅由复盘 Skill／Prompt 维护，不依赖此前对话的记忆，也不把范文名单或知识库路径复制到本 Prompt。
 
