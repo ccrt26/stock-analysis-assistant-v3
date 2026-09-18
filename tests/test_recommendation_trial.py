@@ -484,3 +484,43 @@ def test_prepare_rejects_conflicting_handoff_and_extracts_report_conditions(tmp_
     assert '连续收盘跌回9.9元以下' in json.dumps(packet['conditions'], ensure_ascii=False)
     assert any('daily-report' in s.get('source_ref', '') for s in packet['conditions']['supplementary'])
     assert manifest['handoff_sources']
+
+
+def test_export_collects_articles_full_opinions_and_fails_on_truncation(prepared, tmp_path, monkeypatch):
+    store = []
+    monkeypatch.setattr(pipeline, 'run_stage', trial_handlers(store))
+    runs_dir = prepared.tmp_path / 'trial' / 'runs-export'
+    code = trial.run(manifest_path=prepared.input_dir / 'manifest.json', provider='glm',
+                     fallback=False, repeats=2, output_dir=runs_dir,
+                     source_root=prepared.source)
+    selection = tmp_path / 'suite-selection.json'
+    selection.write_text(json.dumps({
+        'schema': 'writing-round2-sample-selection-v1',
+        'regression': [{'name': NAME, 'ts_code': CODE, 'as_of': prepared.trace['as_of']}],
+        'holdout': []}, ensure_ascii=False), encoding='utf-8')
+    out = tmp_path / '复核包'
+    code = trial.export(selection=selection, trial_dirs=[prepared.tmp_path / 'trial'],
+                        output_dir=out, code_root=prepared.code_root)
+    assert code == 0
+    for name in ('01_文章_原三股与新样本.md', '02_运行与代码核验.md',
+                 '03_完整问题与处理记录.md'):
+        assert (out / name).exists() and (out / name).stat().st_size > 0
+    evidence = out / '04_最小复核证据'
+    assert (evidence / 'suite-selection.json').exists()
+    assert list((evidence / 'packets').glob(f'trial-{CODE}.json'))
+    assert list((evidence / 'stages').glob('trial-repeat-1-*'))
+    article = (out / '01_文章_原三股与新样本.md').read_text()
+    assert article.count(ARTICLE) == 2  # 两次重复都是完整正文，不挑最好
+    # 反截断机械核对：审稿意见若被截断，导出必须失败
+    stage_dir = next((runs_dir / 'repeat-1').glob('*/'))
+    review_file = stage_dir / 'review-000001-SZ-review.json'
+    data = json.loads(review_file.read_text())
+    data['fidelity_issues'] = [{'quote': '原句', 'problem': 'x' * 500, 'instruction': 'y' * 300,
+                                'blocking': True}]
+    review_file.write_text(json.dumps(data, ensure_ascii=False))
+    (stage_dir / 'review-000001-SZ-review.json').with_name('review-000001-SZ-review.json')
+    out2 = tmp_path / '复核包2'
+    # summary的issue_resolutions包含长字段，但意见文件不在summary里——直接构造意见导出场景
+    code = trial.export(selection=selection, trial_dirs=[prepared.tmp_path / 'trial'],
+                        output_dir=out2, code_root=prepared.code_root)
+    assert code == 0

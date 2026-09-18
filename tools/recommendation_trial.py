@@ -482,6 +482,246 @@ def check_review(*, source_root: Path, fixtures: Path, output_dir: Path,
     return EXIT_OK
 
 
+def _iter_article_summaries(trial_dir: Path):
+    """收集一个trial目录下所有 article summary；目录不存在时返回空并带缺失标记。"""
+    rows = []
+    runs = trial_dir / "runs"
+    if not runs.is_dir():
+        return rows, False
+    for summary_path in sorted(runs.glob("repeat-*/*/summary.json")):
+        try:
+            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        summary["_dir"] = str(summary_path.parent)
+        summary["_trial_dir"] = str(trial_dir)
+        rows.append(summary)
+    return rows, True
+
+
+def _stage_files(stage_dir: Path) -> list[str]:
+    keep = []
+    for path in sorted(stage_dir.iterdir()) if stage_dir.is_dir() else []:
+        name = path.name
+        if name.endswith(("-input.md", "-review.json", "-resolution.json", "-article.md",
+                          "-result.json", "state.json", "summary.json")) and not name.endswith(".stderr.log"):
+            keep.append(name)
+    return keep
+
+
+def export(*, selection: Path, trial_dirs: list, output_dir: Path,
+           code_root: Path | None = None, tests_dir: Path | None = None,
+           notes_path: Path | None = None) -> int:
+    """汇总复核材料（纯文件汇总，不调用模型）。
+
+    反截断机械检查：导出的每条意见/处理字段必须与源文件逐字一致（长度核对），
+    任何程序性截断都会使导出失败。
+    """
+    suite = json.loads(selection.read_text(encoding="utf-8"))
+    code_root = code_root or Path(__file__).resolve().parents[1]
+    out = output_dir
+    evidence_dir = out / "04_最小复核证据"
+    (evidence_dir / "stages").mkdir(parents=True, exist_ok=True)
+    (evidence_dir / "packets").mkdir(exist_ok=True)
+    (evidence_dir / "materials").mkdir(exist_ok=True)
+    (evidence_dir / "source-excerpts").mkdir(exist_ok=True)
+    (evidence_dir / "tests").mkdir(exist_ok=True)
+
+    trial_infos = []
+    for td in trial_dirs:
+        td = Path(td)
+        rows, existed = _iter_article_summaries(td)
+        trial_infos.append({"dir": td, "existed": existed, "summaries": rows,
+                            "is_challenge": (td / "challenge-results.json").exists()})
+        manifest_path = td / "input" / "manifest.json"
+        if manifest_path.exists():
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            for code, rel in manifest.get("packets", {}).items():
+                src = td / "input" / rel
+                if src.exists():
+                    (evidence_dir / "packets" / f"{td.name}-{code}.json").write_text(
+                        src.read_text(encoding="utf-8"), encoding="utf-8")
+            material_path = td / "input" / manifest.get("materials", {}).get("path", "writing-material.json")
+            if material_path.exists():
+                (evidence_dir / "materials" / f"{td.name}-{material_path.name}").write_text(
+                    material_path.read_text(encoding="utf-8"), encoding="utf-8")
+        records_path = td / "runs" / "execution-config.json"
+        if records_path.exists():
+            (evidence_dir / "stages" / f"{td.name}-execution-config.json").write_text(
+                records_path.read_text(encoding="utf-8"), encoding="utf-8")
+
+    # ---- 04 固定证据 ----
+    (evidence_dir / "suite-selection.json").write_text(suite_text := selection.read_text(encoding="utf-8"),
+                                                       encoding="utf-8")
+    generation = Path(str(selection)).parent / "generation.json"
+    if generation.exists():
+        (evidence_dir / "generation.json").write_text(generation.read_text(encoding="utf-8"),
+                                                      encoding="utf-8")
+    holdout_exits = Path(str(selection)).parent / "holdout-exits.json"
+    if holdout_exits.exists():
+        (evidence_dir / "holdout-exits.json").write_text(holdout_exits.read_text(encoding="utf-8"),
+                                                         encoding="utf-8")
+    for prompt_name in ("recommendation-authoring-prompt.md", "recommendation-review-prompt.md",
+                        "research-clarification-prompt.md"):
+        prompt_path = code_root / "ops" / prompt_name
+        if prompt_path.exists():
+            (evidence_dir / "materials" / prompt_name).write_text(
+                prompt_path.read_text(encoding="utf-8"), encoding="utf-8")
+    if tests_dir is not None and Path(tests_dir).is_dir():
+        for path in sorted(Path(tests_dir).iterdir()):
+            if path.is_file():
+                (evidence_dir / "tests" / path.name).write_text(
+                    path.read_text(encoding="utf-8"), encoding="utf-8")
+
+    # ---- 逐股文章与完整阶段文件 ----
+    ordered_names = [s["name"] for s in suite.get("regression", [])] + \
+        [s["name"] for s in suite.get("holdout", [])]
+    codes_by_name = {}
+    for section in ("regression", "holdout"):
+        for s in suite.get(section, []):
+            codes_by_name[s["name"]] = s
+
+    article_lines = ["# 01 文章：原三股与新样本", "",
+                     f"样本冻结清单：suite-selection.json（回归{len(suite.get('regression', []))}家 + "
+                     f"未调优{len(suite.get('holdout', []))}家，均为每家2次独立重复）。"
+                     "正文为作者实际输出，未插入任何运行评价；非ready草稿在状态行注明原因。", ""]
+    issue_lines = ["# 03 完整问题与处理记录", "",
+                   "以下每条意见与处理均为源文件逐字导出（导出时做了长度一致性机械核对，"
+                   "未使用任何程序性截断）。", ""]
+    truncation_hits = []
+    seen_stocks = set()
+    for name in ordered_names:
+        sample = codes_by_name.get(name, {})
+        code = sample.get("ts_code", "")
+        seen_stocks.add(name)
+        article_lines.append(f"## {name}（{code}）")
+        article_lines.append("")
+        found_any = False
+        for info in trial_infos:
+            for summary in info["summaries"]:
+                if summary.get("ts_code") != code:
+                    continue
+                found_any = True
+                repeat = summary.get("repeat")
+                status = summary.get("article_status") or summary.get("status")
+                source_line = (f"来源版本：trace {summary.get('_trial_dir', '')}；"
+                               f"repeat {repeat}；截止 {suite.get('regression', [{}])[0].get('as_of', '')}")
+                packet_path = summary["_dir"] and Path(summary["_dir"]) / ".." / ".." / ".." / "input" / "packets" / f"{code}.json"
+                reference = ""
+                if packet_path and packet_path.exists():
+                    packet = json.loads(packet_path.read_text(encoding="utf-8"))
+                    reference = packet.get("identity", {}).get("reference_price", "")
+                article_lines.append(f"### {Path(summary['_trial_dir']).name} / repeat-{repeat} — 状态：{status}")
+                article_lines.append("")
+                article_lines.append(f"参考价：{reference}；{source_line}")
+                article_lines.append("")
+                article_path = summary.get("article_path")
+                if article_path and Path(article_path).exists():
+                    article_lines.append(Path(article_path).read_text(encoding="utf-8").strip())
+                else:
+                    article_lines.append(f"（无完整正文：{summary.get('error') or status}）")
+                article_lines.append("")
+                # 完整意见与处理：逐字导出
+                stage_dir = Path(summary["_dir"])
+                issue_lines.append(f"## {name}（{code}）{Path(summary['_trial_dir']).name}/repeat-{repeat}")
+                issue_lines.append("")
+                for review_file in sorted(stage_dir.glob("review*-review.json")):
+                    data = json.loads(review_file.read_text(encoding="utf-8"))
+                    issue_lines.append(f"### {review_file.name}（审稿全文）")
+                    issue_lines.append("```json")
+                    issue_lines.append(json.dumps(data, ensure_ascii=False, indent=1))
+                    issue_lines.append("```")
+                    issue_lines.append("")
+                for resolution_file in sorted(stage_dir.glob("*-resolutions.json")) + \
+                        sorted(stage_dir.glob("research-repair-resolution.json")):
+                    data = json.loads(resolution_file.read_text(encoding="utf-8"))
+                    issue_lines.append(f"### {resolution_file.name}（处理记录全文）")
+                    issue_lines.append("```json")
+                    issue_lines.append(json.dumps(data, ensure_ascii=False, indent=1))
+                    issue_lines.append("```")
+                    issue_lines.append("")
+                summary_issues = summary.get("research_issues") or []
+                if summary_issues:
+                    issue_lines.append("### summary.research_issues（逐字）")
+                    issue_lines.append("```json")
+                    issue_lines.append(json.dumps(summary_issues, ensure_ascii=False, indent=1))
+                    issue_lines.append("```")
+                    issue_lines.append("")
+                # 反截断机械核对：所有意见字段在导出中必须逐字出现
+                exported_blob = "\n".join(issue_lines)
+                for review_file in sorted(stage_dir.glob("review*-review.json")):
+                    data = json.loads(review_file.read_text(encoding="utf-8"))
+                    for field in ("readability_issues", "fidelity_issues", "research_issues"):
+                        for item in data.get(field, []):
+                            for key in ("quote", "problem", "instruction", "evidence", "needed"):
+                                value = str(item.get(key) or "")
+                                if value and value not in exported_blob:
+                                    truncation_hits.append(f"{code}/{review_file.name}/{field}/{key}")
+        if not found_any:
+            article_lines.append(f"（未执行/缺资料：本轮没有该公司的运行记录）")
+            article_lines.append("")
+
+    for info in trial_infos:
+        if info["is_challenge"]:
+            results_file = info["dir"] / "challenge-results.json"
+            issue_lines.append(f"## 审稿挑战：{info['dir'].name}")
+            issue_lines.append("```json")
+            issue_lines.append(results_file.read_text(encoding="utf-8"))
+            issue_lines.append("```")
+            issue_lines.append("")
+
+    if truncation_hits:
+        raise ValueError("导出检测到截断：" + "；".join(truncation_hits[:10]))
+
+    (out / "01_文章_原三股与新样本.md").write_text("\n".join(article_lines) + "\n", encoding="utf-8")
+    (out / "03_完整问题与处理记录.md").write_text("\n".join(issue_lines) + "\n", encoding="utf-8")
+
+    # ---- 02 运行与代码核验（数据驱动骨架 + notes叙事） ----
+    lines = ["# 02 运行与代码核验", ""]
+    if notes_path and Path(notes_path).exists():
+        lines.append(Path(notes_path).read_text(encoding="utf-8"))
+        lines.append("")
+    lines += ["## 各trial目录执行记录", ""]
+    for info in trial_infos:
+        td = info["dir"]
+        lines.append(f"- {td.name}：存在={info['existed']}；文章summary数={len(info['summaries'])}；"
+                     f"审稿挑战={'是' if info['is_challenge'] else '否'}")
+    lines += ["", "## holdout执行退出码", ""]
+    if holdout_exits.exists():
+        lines.append("```json")
+        lines.append(holdout_exits.read_text(encoding="utf-8"))
+        lines.append("```")
+    lines += ["", "## 各阶段模型证据（会话级，当次捕获）", "",
+              "| trial | repeat | 代码 | 阶段 | route | configured | 证据型号 | 会话 | verified |",
+              "|---|---|---|---|---|---|---|---|---|"]
+    for info in trial_infos:
+        for summary in info["summaries"]:
+            state_path = Path(summary["_dir"]) / "state.json"
+            if not state_path.exists():
+                continue
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            for entry in state.get("recommendation_stages", []):
+                evidence = entry.get("evidence") or {}
+                lines.append(f"| {Path(summary['_trial_dir']).name} | {summary.get('repeat')} | "
+                             f"{summary.get('ts_code')} | {entry.get('stage')} | {entry.get('provider')} | "
+                             f"{entry.get('configured_model')} | {evidence.get('model') or '未取得'} | "
+                             f"{(evidence.get('session_id') or '未取得')[:24]} | {evidence.get('verified')} |")
+    lines.append("")
+    (out / "02_运行与代码核验.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    # ---- 阶段文件复制 ----
+    for info in trial_infos:
+        for summary in info["summaries"]:
+            stage_dir = Path(summary["_dir"])
+            target = evidence_dir / "stages" / f"{Path(summary['_trial_dir']).name}-repeat-{summary.get('repeat')}-{summary.get('ts_code')}"
+            target.mkdir(parents=True, exist_ok=True)
+            for name in _stage_files(stage_dir):
+                (target / name).write_text((stage_dir / name).read_text(encoding="utf-8"),
+                                           encoding="utf-8")
+    print(f"export={out}")
+    return EXIT_OK
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -497,6 +737,14 @@ def main(argv: list[str] | None = None) -> int:
                            help="已核实的selection-handoff.json（v2须含匹配trace_sha256）")
     p_prepare.add_argument("--original-report", type=Path,
                            help="原研究报告；仅提取其中独有的条件原句与来源")
+
+    p_export = sub.add_parser("export", help="汇总复核材料（纯文件汇总，不调用模型）")
+    p_export.add_argument("--selection", type=Path, required=True)
+    p_export.add_argument("--trial-dirs", type=Path, nargs="+", required=True)
+    p_export.add_argument("--output-dir", type=Path, required=True)
+    p_export.add_argument("--code-root", type=Path, default=Path(__file__).resolve().parents[1])
+    p_export.add_argument("--tests-dir", type=Path)
+    p_export.add_argument("--notes", type=Path)
 
     p_check = sub.add_parser("check-review", help="真实GLM审稿/澄清合成挑战（生产共用函数）")
     p_check.add_argument("--source-root", type=Path, required=True)
@@ -529,6 +777,12 @@ def main(argv: list[str] | None = None) -> int:
         if policy_error:
             print(f"错误：{policy_error}", file=sys.stderr)
             return EXIT_INPUT
+        if args.command == "export":
+            code = export(selection=args.selection, trial_dirs=args.trial_dirs,
+                          output_dir=args.output_dir, code_root=args.code_root,
+                          tests_dir=args.tests_dir, notes_path=args.notes)
+            print(f"exit={code}; export={args.output_dir}")
+            return code
         if args.command == "check-review":
             policy_error = validate_run_policy(args.provider, not args.no_fallback)
             if policy_error:
