@@ -475,20 +475,61 @@ def parse_review_output(text: str) -> dict:
 
 
 def session_identity(host, provider: str, config: dict, *, text_only: bool = True) -> dict:
-    """影响模型会话行为的显式配置；进入阶段缓存身份。"""
+    """影响模型会话行为的显式配置；进入阶段缓存身份。
+
+    executor_defaults 是执行器硬编码且不可经配置改变的实测行为（CLI 0.16.5 主请求
+    output_config.effort=max、thinking enabled），记录为实际默认，不提供虚假旋钮。
+    """
     return {'provider': provider, 'model_ref': host.model_ref(provider, config),
-            'base_url': host.provider_base_url(provider, config), 'text_only': text_only}
+            'base_url': host.provider_base_url(provider, config), 'text_only': text_only,
+            'executor_defaults': {'effort': 'max', 'thinking': 'enabled'}}
+
+
+def stage_execution_verified(host, provider: str, fallback: bool, entry: dict | None) -> bool:
+    """一次阶段调用的执行核验：实际route符合策略，且当次证据与该route期望一致。
+
+    源自缓存的复用同样走本检查；证据缺失/未核验/型号不符都返回False。
+    """
+    if not isinstance(entry, dict):
+        return False
+    route = entry.get('provider')
+    if not route:
+        return False
+    if not fallback and route != provider:
+        return False
+    evidence = entry.get('evidence') or {}
+    if not evidence.get('verified'):
+        return False
+    return host.route_evidence_matches(route, evidence) is not False
+
+
+def stage_entry_evidence(state: dict, stage: str) -> dict | None:
+    """取state中该阶段最近一次运行的路线与证据条目（retry同名属同一阶段）。"""
+    for entry in reversed(state.get('recommendation_stages') or []):
+        if entry.get('stage') == stage:
+            return {'provider': entry.get('provider'), 'evidence': entry.get('evidence') or {}}
+    return None
 
 
 def article_stage(host, state: dict, state_path: Path, directory: Path, stage: str, prompt: str,
-                  provider: str, config: dict, *, fallback: bool, contract: str, validate):
-    """未冻结作者/审稿阶段的输入身份复用：身份一致复用，缺失或不一致保留旧文件重建。"""
+                  provider: str, config: dict, *, fallback: bool, contract: str, validate,
+                  run_scope: str = 'managed'):
+    """未冻结作者/审稿阶段的输入身份复用。
+
+    复用须同时满足：输入身份一致、已保存实际route符合本次路线策略
+    （禁用备用时必须就是本次指定route）、当次模型证据通过核验。
+    旧缓存缺新身份或核验不过→保留旧文件并重建；恢复只把核验过的结果再用于同一输入。
+    """
     path = directory / f'{stage}-result.json'
     identity = {'stage': stage, 'contract': contract, 'prompt': prompt,
-                'session': session_identity(host, provider, config, text_only=True)}
+                'session': session_identity(host, provider, config, text_only=True),
+                'policy': {'provider': provider, 'fallback': fallback,
+                           'provider_order': list(state.get('provider_order') or [])},
+                'run_scope': run_scope}
     if path.exists():
         saved = read_json(path)
-        if saved.get('input_identity') == identity:
+        if (saved.get('input_identity') == identity and saved.get('execution_verified') is True
+                and stage_execution_verified(host, provider, fallback, saved.get('stage_execution'))):
             try:
                 validate(saved['raw'])
                 return saved['raw']
@@ -497,25 +538,30 @@ def article_stage(host, state: dict, state_path: Path, directory: Path, stage: s
         retain_previous(path)
     raw, route = run_stage(host, state, state_path, directory, stage, prompt, provider, config,
                            text_only=True, fallback=fallback)
-    validate(raw)
+    stage_execution = stage_entry_evidence(state, stage) or {'provider': route, 'evidence': {}}
+    verified = stage_execution_verified(host, provider, fallback, stage_execution)
     save_json(path, {'input_identity': identity, 'raw': raw, 'route': route,
-                     'contract': contract})
+                     'contract': contract, 'stage_execution': stage_execution,
+                     'execution_verified': verified})
     return raw
 
 
 def run_article_cycle(host, *, packet: dict, materials: dict, directory: Path, state: dict,
                       state_path: Path, config: dict, provider: str, fallback: bool,
-                      allow_research_changes: bool, expression_limit: int = 2) -> dict:
+                      allow_research_changes: bool, expression_limit: int = 2,
+                      run_scope: str = 'managed') -> dict:
     """生产与试写共用的作者循环：作者 → 审稿 → 有限表达修订。
 
     allow_research_changes=False 时研究问题直接返回 needs_research，不改研究、
     不硬改判断；True 时由调用方（生产 complete）组织定向返研后重建材料再回到本函数。
-    模型调用失败向上抛出，由调用方决定保存与续跑。
+    run_scope 隔离同一运行内的独立重复：repeat-2 即使输入与 repeat-1 完全相同，
+    也不得命中其阶段缓存。模型调用失败向上抛出，由调用方决定保存与续跑。
     """
     directory.mkdir(parents=True, exist_ok=True)
     code = packet['identity']['ts_code']
     tag = code.replace('.', '-')
     stages = []
+    executions = []
     research_issues: list[dict] = []
     prior = None
     revision_issues = None
@@ -523,11 +569,21 @@ def run_article_cycle(host, *, packet: dict, materials: dict, directory: Path, s
     article_path = None
     review = None
 
+    def stage_execution(stage_name):
+        saved = read_json(directory / f'{stage_name}-result.json')
+        executions.append({'stage': stage_name,
+                           'execution_verified': bool(saved.get('execution_verified')),
+                           'route': saved.get('route'),
+                           'evidence': (saved.get('stage_execution') or {}).get('evidence') or {}})
+
     def result(status):
         return {'status': status, 'ts_code': code, 'article': article,
                 'adopted': status == 'ready',
                 'article_path': str(article_path) if article_path else None,
-                'stages': stages, 'research_issues': research_issues,
+                'stages': stages,
+                'execution_verified': all(e['execution_verified'] for e in executions) if executions else False,
+                'stages_execution': executions,
+                'research_issues': research_issues,
                 'review': review, 'research_source': packet['source_refs'],
                 'provider': provider, 'fallback': fallback}
 
@@ -538,7 +594,9 @@ def run_article_cycle(host, *, packet: dict, materials: dict, directory: Path, s
                                prior_article=prior, revision_issues=revision_issues)
         parsed = parse_author_output(article_stage(
             host, state, state_path, directory, author_stage, prompt, provider, config,
-            fallback=fallback, contract=AUTHOR_CONTRACT_VERSION, validate=parse_author_output))
+            fallback=fallback, contract=AUTHOR_CONTRACT_VERSION, validate=parse_author_output,
+            run_scope=run_scope))
+        stage_execution(author_stage)
         article = parsed['article']
         article_path = directory / f'{author_stage}-article.md'
         article_path.write_text(article + '\n', encoding='utf-8')
@@ -554,7 +612,8 @@ def run_article_cycle(host, *, packet: dict, materials: dict, directory: Path, s
             host, state, state_path, directory, review_stage,
             review_prompt(host.PROJECT_ROOT, article=article, packet=packet, materials=materials),
             provider, config, fallback=fallback, contract=REVIEW_CONTRACT_VERSION,
-            validate=parse_review_output)
+            validate=parse_review_output, run_scope=run_scope)
+        stage_execution(review_stage)
         review = parse_review_output(review_raw)
         (directory / f'{review_stage}-review.json').write_text(
             json.dumps(review, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')

@@ -166,9 +166,13 @@ MAC_NOTIFY_TITLE = "股票AI任务"
 # 正常结果不弹通知；失败/部分完成/取消/错过窗口/占用未执行才提示一次。
 NO_NOTIFY_STATUSES = {"完整完成", "正常无需运行"}
 # 模型路线证据的预期完整三元组：(providerId, modelId, request.body.model)。
+# glm 一行为 2026-09-19 对本机 ZCode CLI 0.16.5 真实主请求的实测值：
+# 配置 bigmodel/glm-5.3-flash 经 BigModel 个人套餐解析为 providerId=bigmodel-api、
+# 上游模型标识 GLM-5.3（个人套餐的 GLM-5.3-Flash 服务在请求记录中的上游标识）。
+# astra 一行为 Codex/ChatGPT 路线原值；deepseek 未实测，保持原配置名，实跑后如需校准另做。
 EXPECTED_MODEL_EVIDENCE = {
     "astra": ("openai", "gpt-6-astra", "gpt-6-astra"),
-    "glm": ("bigmodel", "glm-5.3-flash", "glm-5.3-flash"),
+    "glm": ("bigmodel-api", "GLM-5.3", "GLM-5.3"),
     "deepseek": ("deepseek", "deepseek-flash", "deepseek-flash"),
 }
 
@@ -180,12 +184,14 @@ def now_shanghai() -> dt.datetime:
 # ---------------------------------------------------------------- 本地配置
 
 
-def load_local_config() -> dict:
-    if LOCAL_CONFIG_PATH.exists():
+def load_local_config(path: Path | None = None) -> dict:
+    config_path = path or LOCAL_CONFIG_PATH
+    if config_path.exists():
         try:
-            data = json.loads(LOCAL_CONFIG_PATH.read_text(encoding="utf-8"))
+            data = json.loads(config_path.read_text(encoding="utf-8"))
             if isinstance(data, dict):
                 return data
+            print(f"警告：本地配置不是JSON对象，按默认配置继续：{config_path}", file=sys.stderr)
         except (OSError, json.JSONDecodeError) as exc:
             print(f"警告：本地配置读取失败，按默认配置继续：{exc}", file=sys.stderr)
     return {}
@@ -779,14 +785,18 @@ def parse_zcode_output(jsonl_path: Path) -> dict | None:
 def rollout_model_evidence(session_id: str | None) -> dict:
     """从 ZCode 会话请求记录精确提取主请求模型证据。
 
-    只取 event.model.role=='main' 的 providerId/modelId 与 request.body.model；
-    压缩等辅助调用按角色区分，不并入。响应侧模型字段存在则附记，
-    不存在就注明未提供。取不到返回未核验标记。
+    兼容两种实测结构，只按白名单摘取字段（response.headers 含 set-cookie，整体排除）：
+    - CLI 0.16.5 实测（2026-09-19）：主请求以 type=model_io 且 querySource=main_turn 判定
+      （该版本没有 model.role 字段，旧匹配因此全部未核验）；请求侧证据取 model.{providerId,
+      modelId}、request.body.model、body.thinking.type、body.output_config.effort；
+      响应侧取 response.modelId、response.usage、response.responseId、finishReason。
+    - 旧结构：model.role=='main' 的三元组匹配保留兼容。
+    压缩等辅助请求（querySource 非 main_turn 且无 role）不并入。取不到返回未核验标记。
     """
+    empty = {"verified": False, "provider": "", "model": "", "request_model": "",
+             "response_model": "", "effort": "", "thinking": ""}
     if not session_id:
-        return {"verified": False, "provider": "", "model": "", "request_model": "",
-                "response_model": "", "effort": "",
-                "note": "未取得会话请求记录，模型证据未核验"}
+        return {**empty, "note": "未取得会话请求记录，模型证据未核验"}
     sid = session_id.removeprefix("sess_")
     path = ZCODE_ROLLOUT_DIR / f"model-io-sess_{sid}.jsonl"
     for _ in range(30):
@@ -794,13 +804,14 @@ def rollout_model_evidence(session_id: str | None) -> dict:
             break
         time.sleep(1)
     if not path.exists():
-        return {"verified": False, "provider": "", "model": "", "request_model": "",
-                "response_model": "", "effort": "",
-                "note": f"未找到请求记录 {path.name}，模型证据未核验"}
+        return {**empty, "note": f"未找到请求记录 {path.name}，模型证据未核验"}
     try:
         main_models: set[tuple[str, str, str]] = set()
+        main_extras: list[dict] = []
         response_model = ""
-        main_effort = ""
+        response_ids: set[str] = set()
+        finish_reasons: set[str] = set()
+        usage: dict = {}
         for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
             if not line.strip():
                 continue
@@ -810,41 +821,61 @@ def rollout_model_evidence(session_id: str | None) -> dict:
                 continue
             if not isinstance(event, dict):
                 continue
-            model = event.get("model")
+            model = event.get("model") or {}
             body = (event.get("request") or {}).get("body") or {}
-            if isinstance(model, dict) and model.get("role") == "main":
-                if isinstance(body, dict) and body.get("model"):
-                    main_models.add(
-                        (str(model.get("providerId", "")),
-                         str(model.get("modelId", "")),
-                         str(body.get("model", "")))
-                    )
-                    if not main_effort:
-                        main_effort = str(body.get("effort") or body.get("reasoning_effort") or "")
-            resp_model = (event.get("response") or {}).get("model") if isinstance(
-                event.get("response"), dict) else None
-            if isinstance(resp_model, str) and resp_model and not response_model:
-                response_model = resp_model
+            role = model.get("role") if isinstance(model, dict) else None
+            is_main = role == "main" or (
+                role is None and event.get("type") == "model_io"
+                and event.get("querySource") == "main_turn")
+            if not is_main:
+                continue
+            if isinstance(body, dict) and body.get("model"):
+                thinking = body.get("thinking") if isinstance(body.get("thinking"), dict) else {}
+                output_config = body.get("output_config") if isinstance(body.get("output_config"), dict) else {}
+                main_models.add((str(model.get("providerId", "")),
+                                 str(model.get("modelId", "")),
+                                 str(body.get("model", ""))))
+                main_extras.append({
+                    "thinking": str(thinking.get("type", "") or ""),
+                    "effort": str(output_config.get("effort", "")
+                                  or body.get("effort") or body.get("reasoning_effort") or ""),
+                })
+            response = event.get("response") if isinstance(event.get("response"), dict) else {}
+            if isinstance(response.get("modelId"), str) and response.get("modelId") and not response_model:
+                response_model = response["modelId"]
+            if isinstance(response.get("responseId"), str) and response.get("responseId"):
+                response_ids.add(response["responseId"])
+            if isinstance(response.get("finishReason"), str) and response.get("finishReason"):
+                finish_reasons.add(response["finishReason"])
+            if isinstance(response.get("usage"), dict) and not usage:
+                usage = {k: response["usage"].get(k) for k in
+                         ("inputTokens", "outputTokens", "totalTokens")
+                         if k in response["usage"]}
         if main_models:
             provider_ids = {item[0] for item in main_models}
             model_ids = {item[1] for item in main_models}
             request_models = {item[2] for item in main_models}
             consistent = len(main_models) == 1
+            thinking_values = sorted({e["thinking"] for e in main_extras})
+            effort_values = sorted({e["effort"] for e in main_extras})
             return {
                 "verified": True,
                 "provider": provider_ids.pop() if len(provider_ids) == 1 else "|".join(sorted(provider_ids)),
                 "model": model_ids.pop() if len(model_ids) == 1 else "|".join(sorted(model_ids)),
                 "request_model": request_models.pop() if len(request_models) == 1 else "|".join(sorted(request_models)),
                 "response_model": response_model,
-                "effort": main_effort,
+                "effort": effort_values[0] if len(effort_values) == 1 else "|".join(effort_values),
+                "thinking": thinking_values[0] if len(thinking_values) == 1 else "|".join(thinking_values),
                 "consistent": consistent,
+                "response_ids": sorted(response_ids)[:3],
+                "finish_reason": finish_reasons.pop() if len(finish_reasons) == 1 else "|".join(sorted(finish_reasons)),
+                "usage": usage,
+                "source_file": path.name,
                 "note": f"证据来源 {path.name}（主请求，共 {len(main_models)} 种）",
             }
     except OSError:
         pass
-    return {"verified": False, "provider": "", "model": "", "request_model": "",
-            "response_model": "", "effort": "",
-            "note": "请求记录中未找到主请求模型字段，模型证据未核验"}
+    return {**empty, "note": "请求记录中未找到主请求模型字段，模型证据未核验"}
 
 
 CAPACITY_FIELDS = ("contextWindow", "maxOutputTokens")

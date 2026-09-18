@@ -1496,12 +1496,12 @@ def test_rollout_evidence_missing_optional_fields_reported_not_fabricated(tmp_pa
 
 
 def test_route_evidence_matches_triples():
-    ok_glm = {"verified": True, "provider": "bigmodel", "model": "glm-5.3-flash",
-              "request_model": "glm-5.3-flash", "consistent": True}
+    ok_glm = {"verified": True, "provider": "bigmodel-api", "model": "GLM-5.3",
+              "request_model": "GLM-5.3", "consistent": True}
     assert stock_ai.route_evidence_matches("glm", ok_glm) is True
     # 完整值相等比较：混合型号/子串不算一致
     assert stock_ai.route_evidence_matches("glm", {**ok_glm, "model": "bigmodel|other"}) is False
-    assert stock_ai.route_evidence_matches("glm", {**ok_glm, "model": "glm-5.3"}) is False
+    assert stock_ai.route_evidence_matches("glm", {**ok_glm, "model": "GLM-5.3-Flash"}) is False
     assert stock_ai.route_evidence_matches("glm", {**ok_glm, "request_model": "other"}) is False
     assert stock_ai.route_evidence_matches("glm", {**ok_glm, "consistent": False}) is False
     assert stock_ai.route_evidence_matches("glm", {"verified": False, "provider": "bigmodel"}) is None
@@ -2016,8 +2016,8 @@ def test_verify_uses_the_same_exact_identity_as_real_tasks(
     workspace = isolated / "verify"
     workspace.mkdir()
     monkeypatch.setattr(stock_ai.tempfile, "mkdtemp", lambda **kwargs: str(workspace))
-    evidence = {"verified": True, "consistent": True, "provider": "bigmodel",
-                "model": "glm-5.3-flash", "request_model": "glm-5.3-flash"}
+    evidence = {"verified": True, "consistent": True, "provider": "bigmodel-api",
+                "model": "GLM-5.3", "request_model": "GLM-5.3"}
     evidence.update(evidence_change)
     monkeypatch.setattr(stock_ai, "rollout_model_evidence", lambda session: evidence)
     def fake_run(provider, prompt, final, events, timeout_seconds, config):

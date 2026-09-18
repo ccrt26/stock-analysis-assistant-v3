@@ -113,16 +113,87 @@ def _load_inputs(manifest_path: Path) -> tuple[dict, Path, dict, Path]:
     return manifest, input_dir, material, input_dir
 
 
+REQUIRED_GLM_MODEL = "bigmodel/glm-5.3-flash"
+TRIAL_PROVIDER = "glm"
+
+
+def load_source_config(source_root: Path) -> tuple[dict, dict]:
+    """显式读取源项目配置并归一为本轮有效配置；只读，不含密钥值进内存日志。
+
+    返回 (有效配置, 核验记录)。源配置损坏时回退默认但如实标记，
+    不允许静默回默认后宣称配置核验成功。
+    """
+    path = source_root / ".stock-ai.local.json"
+    if not path.exists():
+        record = {"source": str(path.name), "status": "default_missing",
+                  "note": "源配置不存在，使用默认配置与既有凭据来源"}
+        config = {}
+    else:
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                config, record = data, {"source": str(path.name), "status": "loaded"}
+            else:
+                config = {}
+                record = {"source": str(path.name), "status": "default_broken",
+                          "note": "源配置不是JSON对象，使用默认配置；配置核验不视为成功"}
+        except (OSError, json.JSONDecodeError) as exc:
+            config = {}
+            record = {"source": str(path.name), "status": "default_broken",
+                      "note": f"源配置读取失败（{type(exc).__name__}），使用默认配置；配置核验不视为成功"}
+    eff = json.loads(json.dumps(config))  # deep copy without importing copy
+    refs = eff.get("model_refs") if isinstance(eff.get("model_refs"), dict) else {}
+    current = refs.get(TRIAL_PROVIDER) or stock_ai.DEFAULT_MODEL_REFS.get(TRIAL_PROVIDER, "")
+    record["configured_model_ref"] = current
+    record["required_model_ref"] = REQUIRED_GLM_MODEL
+    if current != REQUIRED_GLM_MODEL:
+        eff.setdefault("model_refs", {})[TRIAL_PROVIDER] = REQUIRED_GLM_MODEL
+        record["differences"] = [f"model_refs.{TRIAL_PROVIDER}={current!r} 与要求不符，已在内存配置覆盖为 {REQUIRED_GLM_MODEL!r}；端点与认证不变"]
+    else:
+        record["differences"] = []
+    record["effective_base_url"] = stock_ai.provider_base_url(TRIAL_PROVIDER, eff)
+    return eff, record
+
+
+def validate_run_policy(provider: str, fallback: bool) -> str | None:
+    """发出任何请求前拒绝非GLM或允许备用的试写参数。"""
+    if provider != TRIAL_PROVIDER:
+        return f"试写只允许 provider={TRIAL_PROVIDER}，收到 {provider!r}"
+    if fallback:
+        return "试写必须禁用备用（--no-fallback）；不依赖调用者记得关闭"
+    return None
+
+
 def run(*, manifest_path: Path, provider: str, fallback: bool, repeats: int,
-        output_dir: Path) -> int:
-    """对固定输入逐股×重复次数调用生产 run_article_cycle；返回约定退出码。"""
+        output_dir: Path, source_root: Path | None = None) -> int:
+    """对固定输入逐股×重复次数调用生产 run_article_cycle；返回约定退出码。
+
+    article_status 与 execution_verified 分开记录：业务ready但证据未核验的稿
+    保留给阅读，整体不能按0退出。0 要求全部预期样本有结果行、全部ready且核验通过。
+    """
     if repeats < 1:
         raise ValueError("repeats 至少为1")
+    policy_error = validate_run_policy(provider, fallback)
+    if policy_error:
+        print(f"错误：{policy_error}", file=sys.stderr)
+        return EXIT_INPUT
+    if source_root is None:
+        print("错误：run 需要 --source-root 以显式装载源配置", file=sys.stderr)
+        return EXIT_INPUT
     manifest, input_dir, material, _ = _load_inputs(manifest_path)
+    effective_config, config_record = load_source_config(Path(source_root))
     runs_dir = output_dir
     runs_dir.mkdir(parents=True, exist_ok=True)
+    pipeline.save_json(runs_dir / "execution-config.json",
+                       {"policy": {"provider": provider, "fallback": fallback,
+                                   "provider_order": [provider]},
+                        **config_record})
     summaries = []
-    saw_input_error = saw_needs_research = saw_needs_revision = False
+    saw_input_error = bool(config_record.get("status") == "default_broken")
+    saw_needs_research = saw_needs_revision = False
+    expected = [(stock["ts_code"], repeat) for repeat in range(1, repeats + 1)
+                for stock in manifest["stocks"]]
+    done: set[tuple[str, int]] = set()
     for repeat in range(1, repeats + 1):
         repeat_dir = runs_dir / f"repeat-{repeat}"
         for stock in manifest["stocks"]:
@@ -133,28 +204,44 @@ def run(*, manifest_path: Path, provider: str, fallback: bool, repeats: int,
                      "attempts": [], "repeat": repeat, "ts_code": code,
                      "identity": manifest["identity"]}
             state_path = stock_dir / "state.json"
-            summary = {"repeat": repeat, "ts_code": code, "name": stock["name"]}
+            summary = {"repeat": repeat, "ts_code": code, "name": stock["name"],
+                       "config_status": config_record.get("status")}
             try:
                 cycle = pipeline.run_article_cycle(
                     stock_ai, packet=packet, materials=material, directory=stock_dir,
-                    state=state, state_path=state_path, config={}, provider=provider,
-                    fallback=fallback, allow_research_changes=False)
+                    state=state, state_path=state_path, config=effective_config,
+                    provider=provider, fallback=fallback, allow_research_changes=False,
+                    run_scope=f"repeat-{repeat}")
             except (OSError, ValueError, RuntimeError) as exc:
-                summary.update(status="failed", error=f"{type(exc).__name__}: {exc}")
+                summary.update(article_status="failed", status="failed",
+                               execution_verified=False,
+                               error=f"{type(exc).__name__}: {exc}")
                 saw_input_error = True
             else:
-                summary.update(status=cycle["status"], article_path=cycle.get("article_path"),
-                               stages=cycle["stages"], research_issues=cycle["research_issues"],
+                summary.update(article_status=cycle["status"], status=cycle["status"],
+                               article_path=cycle.get("article_path"),
+                               stages=cycle["stages"],
+                               research_issues=cycle["research_issues"],
+                               execution_verified=bool(cycle.get("execution_verified")),
+                               stages_execution=[
+                                   {k: e[k] for k in ("stage", "route", "execution_verified")}
+                                   for e in cycle.get("stages_execution", [])],
                                review_summary=(cycle.get("review") or {}).get("reader_summary"))
-                if cycle["status"] == "needs_research":
+                if not summary["execution_verified"]:
+                    saw_input_error = True
+                elif cycle["status"] == "needs_research":
                     saw_needs_research = True
                 elif cycle["status"] == "needs_revision":
                     saw_needs_revision = True
                 elif cycle["status"] != "ready":
                     saw_input_error = True
+            done.add((code, repeat))
             pipeline.save_json(stock_dir / "summary.json", summary)
             pipeline.save_json(state_path, state)
             summaries.append(summary)
+    missing = [combo for combo in expected if combo not in done]
+    if missing:
+        saw_input_error = True
     evidence = _evidence_lines(runs_dir)
     _write_eval_files(runs_dir.parent, manifest, summaries, evidence, provider, fallback)
     if saw_input_error:
@@ -180,12 +267,17 @@ def _evidence_lines(runs_dir: Path) -> list[dict]:
                 "repeat": state.get("repeat"), "ts_code": state.get("ts_code"),
                 "stage": entry.get("stage"), "provider": entry.get("provider"),
                 "configured_model": entry.get("configured_model"),
+                "evidence_provider": evidence.get("provider") or "",
                 "evidence_model": evidence.get("model") or evidence.get("request_model") or "",
+                "request_model": evidence.get("request_model") or "",
                 "response_model": evidence.get("response_model") or "",
+                "effort": evidence.get("effort") or "", "thinking": evidence.get("thinking") or "",
                 "session_id": evidence.get("session_id") or "",
+                "usage": evidence.get("usage") or {},
                 "status": entry.get("status"), "input": entry.get("input"),
                 "output": entry.get("output"),
                 "verified": bool(evidence.get("verified")),
+                "source_file": evidence.get("source_file") or "",
                 "note": evidence.get("note") or "",
             })
     return rows
@@ -268,6 +360,8 @@ def main(argv: list[str] | None = None) -> int:
                            default=Path(__file__).resolve().parents[1])
 
     p_run = sub.add_parser("run", help="按 manifest 真实写文章（生产共用作者循环）")
+    p_run.add_argument("--source-root", type=Path, required=True,
+                       help="源项目根；显式读取其 .stock-ai.local.json 作为配置（只读）")
     p_run.add_argument("--manifest", type=Path, required=True)
     p_run.add_argument("--provider", required=True)
     p_run.add_argument("--no-fallback", action="store_true")
@@ -281,9 +375,14 @@ def main(argv: list[str] | None = None) -> int:
                     output_dir=args.output_dir, code_root=args.code_root)
             print(f"manifest={args.output_dir / 'manifest.json'}")
             return EXIT_OK
+        # 发出任何请求前拒绝非GLM或允许备用的参数；不依赖调用者记得关闭。
+        policy_error = validate_run_policy(args.provider, not args.no_fallback)
+        if policy_error:
+            print(f"错误：{policy_error}", file=sys.stderr)
+            return EXIT_INPUT
         code = run(manifest_path=args.manifest, provider=args.provider,
                    fallback=not args.no_fallback, repeats=args.repeats,
-                   output_dir=args.output_dir)
+                   output_dir=args.output_dir, source_root=args.source_root)
         print(f"exit={code}; runs={args.output_dir}")
         return code
     except (OSError, ValueError, RuntimeError) as exc:

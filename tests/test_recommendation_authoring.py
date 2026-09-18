@@ -109,6 +109,15 @@ def stage_recorder(handlers):
     def runner(host, state, state_path, directory, stage, prompt, provider, config, *, text_only, fallback):
         calls.append({'stage': stage, 'provider': provider, 'fallback': fallback, 'text_only': text_only})
         prompts[stage] = prompt
+        state.setdefault('recommendation_stages', []).append({
+            'stage': stage, 'provider': provider,
+            'configured_model': host.model_ref(provider, config),
+            'evidence': {'verified': True, 'consistent': True, 'provider': 'bigmodel-api',
+                         'model': 'GLM-5.3', 'request_model': 'GLM-5.3', 'effort': 'max',
+                         'session_id': f'sess_{stage}',
+                         'context_evidence': {'verified': True, 'offered_tools': [],
+                                              'tool_calls': 0, 'input_present': True}},
+            'status': 'completed'})
         for prefix, produce in handlers.items():
             if stage.startswith(prefix):
                 return produce(stage, prompt), 'glm'

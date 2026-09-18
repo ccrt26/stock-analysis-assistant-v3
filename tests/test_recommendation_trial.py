@@ -10,6 +10,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
 import stock_ai
 import recommendation_pipeline as pipeline
 import recommendation_trial as trial
+from test_recommendation_authoring import case  # noqa: F401  复用作者链路夹具
+
+GOOD_EVIDENCE = {'verified': True, 'consistent': True, 'provider': 'bigmodel-api',
+                 'model': 'GLM-5.3', 'request_model': 'GLM-5.3', 'effort': 'max',
+                 'thinking': 'enabled', 'session_id': 'sess_case',
+                 'context_evidence': {'verified': True, 'offered_tools': [],
+                                      'tool_calls': 0, 'input_present': True}}
 from test_recommendation_authoring import (
     ARTICLE, CODE, NAME, author_output, review_output, trace_with_conditions, fake_material)
 from test_forward_selection import _v4_trace
@@ -35,12 +42,17 @@ def prepared(tmp_path, monkeypatch):
                            input_dir=input_dir, manifest=manifest)
 
 
-def trial_handlers(store):
+def trial_handlers(store, evidence=None):
     def runner(host, state, state_path, directory, stage, prompt, provider, config, *,
                text_only, fallback):
         store.append({'stage': stage, 'provider': provider, 'fallback': fallback,
                       'text_only': text_only})
         state.setdefault('provider_order', ['glm'])
+        state.setdefault('recommendation_stages', []).append({
+            'stage': stage, 'provider': provider,
+            'configured_model': host.model_ref(provider, config),
+            'evidence': dict(evidence if evidence is not None else GOOD_EVIDENCE),
+            'status': 'completed'})
         if provider != 'glm':
             raise AssertionError(f'试写出现非GLM路线：{provider}')
         if stage.startswith('author-'):
@@ -63,7 +75,8 @@ def test_trial_glm_failure_never_calls_other_provider(prepared, monkeypatch):
 
     monkeypatch.setattr(pipeline, 'run_stage', failing_stage)
     code = trial.run(manifest_path=prepared.input_dir / 'manifest.json', provider='glm',
-                     fallback=False, repeats=1, output_dir=prepared.tmp_path / 'trial' / 'runs')
+                     fallback=False, repeats=1, output_dir=prepared.tmp_path / 'trial' / 'runs',
+                     source_root=prepared.source)
     assert code == 2
     assert store and all(s['provider'] == 'glm' for s in store)
     assert all(s['fallback'] is False for s in store)
@@ -87,7 +100,8 @@ def test_trial_never_calls_formal_writes(prepared, monkeypatch):
     monkeypatch.setattr(pipeline, 'run_stage', trial_handlers(store))
     runs_dir = prepared.tmp_path / 'trial' / 'runs'
     code = trial.run(manifest_path=prepared.input_dir / 'manifest.json', provider='glm',
-                     fallback=False, repeats=2, output_dir=runs_dir)
+                     fallback=False, repeats=2, output_dir=runs_dir,
+                     source_root=prepared.source)
     assert code == 0
     article_file = runs_dir.parent / '交给ChatGPT评估_文章.md'
     text = article_file.read_text()
@@ -110,7 +124,8 @@ def test_trial_uses_production_authoring_entry(prepared, monkeypatch):
 
     monkeypatch.setattr(pipeline, 'run_article_cycle', cycle)
     code = trial.run(manifest_path=prepared.input_dir / 'manifest.json', provider='glm',
-                     fallback=False, repeats=1, output_dir=prepared.tmp_path / 'trial' / 'runs')
+                     fallback=False, repeats=1, output_dir=prepared.tmp_path / 'trial' / 'runs',
+                     source_root=prepared.source)
     assert code == 0 and len(calls) == 1
     assert calls[0]['provider'] == 'glm' and calls[0]['fallback'] is False
     assert calls[0]['allow_research_changes'] is False
@@ -151,6 +166,10 @@ def test_prepare_rejects_unknown_names(tmp_path, monkeypatch):
 def test_run_reports_needs_research_exit_code(prepared, monkeypatch):
     def runner(host, state, state_path, directory, stage, prompt, provider, config, *,
                text_only, fallback):
+        state.setdefault('recommendation_stages', []).append({
+            'stage': stage, 'provider': provider,
+            'configured_model': host.model_ref(provider, config),
+            'evidence': dict(GOOD_EVIDENCE), 'status': 'completed'})
         if stage.startswith('author-'):
             return author_output(issues=[{'ts_code': CODE, 'quote': '原句', 'problem': '比较口径需核对',
                                           'evidence': '字段冲突', 'needed': '核对分母'}]), provider
@@ -160,7 +179,217 @@ def test_run_reports_needs_research_exit_code(prepared, monkeypatch):
 
     monkeypatch.setattr(pipeline, 'run_stage', runner)
     code = trial.run(manifest_path=prepared.input_dir / 'manifest.json', provider='glm',
-                     fallback=False, repeats=1, output_dir=prepared.tmp_path / 'trial' / 'runs')
+                     fallback=False, repeats=1, output_dir=prepared.tmp_path / 'trial' / 'runs',
+                     source_root=prepared.source)
     assert code == 3
     notes = (prepared.tmp_path / 'trial' / '交给ChatGPT评估_运行说明.md').read_text()
     assert 'needs_research' in notes
+
+
+# ---- P1：配置、路线前置拒绝、缓存策略隔离与退出门 ----
+
+def _stage_mock(evidence, route='glm', calls=None, outputs=None):
+    def runner(host, state, state_path, directory, stage, prompt, provider, config, *,
+               text_only, fallback):
+        if calls is not None:
+            calls.append({'stage': stage, 'provider': provider, 'fallback': fallback,
+                          'config': config, 'text_only': text_only})
+        state.setdefault('recommendation_stages', []).append({
+            'stage': stage, 'provider': route, 'configured_model': host.model_ref(provider, config),
+            'evidence': dict(evidence), 'status': 'completed'})
+        if outputs is not None and stage in outputs:
+            return outputs[stage], route
+        if stage.startswith('author-'):
+            return author_output(), route
+        if stage.startswith('review-'):
+            return review_output(), route
+        raise AssertionError(stage)
+
+    return runner
+
+
+def test_load_source_config_reads_path_and_forces_required_model(tmp_path):
+    cfg = tmp_path / '.stock-ai.local.json'
+    cfg.write_text(json.dumps({'model_refs': {'glm': 'some/other-model'}, 'task_preferences': {'nightly': 'glm'}}),
+                   encoding='utf-8')
+    eff, record = trial.load_source_config(tmp_path)
+    assert record['status'] == 'loaded'
+    assert eff['model_refs']['glm'] == trial.REQUIRED_GLM_MODEL
+    assert record['differences'] and eff['task_preferences']['nightly'] == 'glm'
+    missing, record2 = trial.load_source_config(tmp_path / 'none')
+    assert record2['status'] == 'default_missing' and missing == {}
+    eff3, record3 = trial.load_source_config(tmp_path / 'none')
+    assert record3['status'] == 'default_missing'
+    baddir = tmp_path / 'baddir'
+    baddir.mkdir()
+    (baddir / '.stock-ai.local.json').write_text('{oops', encoding='utf-8')
+    _eff4, record4 = trial.load_source_config(baddir)
+    assert record4['status'] == 'default_broken'
+
+
+def test_validate_run_policy_rejects_non_glm_or_fallback():
+    assert trial.validate_run_policy('glm', False) is None
+    assert trial.validate_run_policy('deepseek', False)
+    assert trial.validate_run_policy('glm', True)
+    assert trial.validate_run_policy('astra', True)
+
+
+def test_trial_rejects_bad_policy_before_any_request(prepared, monkeypatch):
+    def forbid(*a, **k):
+        raise AssertionError('参数被拒后不得发出任何模型请求')
+
+    monkeypatch.setattr(pipeline, 'run_stage', forbid)
+    runs_dir = prepared.tmp_path / 'trial' / 'runs-policy'
+    code = trial.run(manifest_path=prepared.input_dir / 'manifest.json', provider='glm',
+                     fallback=True, repeats=1, output_dir=runs_dir,
+                     source_root=prepared.tmp_path / 'nonexistent-source')
+    assert code == 2
+
+
+def test_rollout_evidence_reads_cli_0_16_5_main_requests(tmp_path, monkeypatch):
+    sid = 'sess_evidence01'
+    path = tmp_path / f'model-io-{sid}.jsonl'
+    aux = {'type': 'model_io', 'querySource': 'compact', 'sessionId': sid,
+           'model': {'providerId': 'bigmodel-api', 'modelId': 'GLM-5.3'},
+           'request': {'body': {'model': 'GLM-5.3', 'messages': []}},
+           'response': {'modelId': 'GLM-5.3', 'usage': {'inputTokens': 1}}}
+    main = {'type': 'model_io', 'querySource': 'main_turn', 'sessionId': sid,
+            'traceId': 'trace1', 'requestId': 'req1',
+            'model': {'providerId': 'bigmodel-api', 'modelId': 'GLM-5.3'},
+            'request': {'body': {'model': 'GLM-5.3', 'thinking': {'type': 'enabled'},
+                                 'output_config': {'effort': 'max'}, 'messages': []}},
+            'response': {'modelId': 'GLM-5.3', 'finishReason': 'stop',
+                         'responseId': 'msg_1',
+                         'usage': {'inputTokens': 10, 'outputTokens': 20, 'totalTokens': 30},
+                         'headers': {'set-cookie': 'SECRET'}}}
+    path.write_text(json.dumps(aux) + '\n' + json.dumps(main) + '\n', encoding='utf-8')
+    monkeypatch.setattr(stock_ai, 'ZCODE_ROLLOUT_DIR', tmp_path)
+    evidence = stock_ai.rollout_model_evidence(sid)
+    assert evidence['verified'] is True and evidence['consistent'] is True
+    assert (evidence['provider'], evidence['model'], evidence['request_model']) == \
+        stock_ai.EXPECTED_MODEL_EVIDENCE['glm']
+    assert evidence['effort'] == 'max' and evidence['thinking'] == 'enabled'
+    assert evidence['response_model'] == 'GLM-5.3' and evidence['finish_reason'] == 'stop'
+    assert evidence['usage']['outputTokens'] == 20
+    blob = json.dumps(evidence)
+    assert 'SECRET' not in blob and 'headers' not in blob and 'set-cookie' not in blob
+    assert stock_ai.route_evidence_matches('glm', evidence) is True
+    legacy_sid = 'sess_legacy01'
+    legacy = tmp_path / f'model-io-{legacy_sid}.jsonl'
+    legacy.write_text(json.dumps({'model': {'role': 'main', 'providerId': 'openai',
+                                            'modelId': 'gpt-6-astra'},
+                                  'request': {'body': {'model': 'gpt-6-astra', 'effort': 'high'}},
+                                  'response': {'model': 'gpt-6-astra'}}) + '\n', encoding='utf-8')
+    monkeypatch.setattr(stock_ai, 'ZCODE_ROLLOUT_DIR', tmp_path)
+    legacy_evidence = stock_ai.rollout_model_evidence(legacy_sid)
+    assert legacy_evidence['verified'] is True and legacy_evidence['provider'] == 'openai'
+    monkeypatch.setattr(stock_ai, 'ZCODE_ROLLOUT_DIR', tmp_path)
+    assert stock_ai.rollout_model_evidence('sess_missing99')['verified'] is False
+
+
+def test_article_stage_refuses_cross_policy_cache(case, monkeypatch):
+    directory = case.directory / 'articles' / CODE
+    deepseek_evidence = dict(GOOD_EVIDENCE, provider='deepseek', model='deepseek-flash',
+                             request_model='deepseek-flash', session_id='sess_ds',
+                             context_evidence={'verified': True, 'offered_tools': None,
+                                               'tool_calls': 0, 'input_present': True,
+                                               'isolated': True})
+    calls = []
+    first = _stage_mock(deepseek_evidence, route='deepseek', calls=calls)
+    monkeypatch.setattr(pipeline, 'run_stage', first)
+    case.state['provider_order'] = ['glm', 'deepseek']
+    pipeline.article_stage(stock_ai, case.state, case.state_path, directory, 'author-000001-SZ',
+                           '同一段提示', 'glm', {}, fallback=True,
+                           contract=pipeline.AUTHOR_CONTRACT_VERSION,
+                           validate=pipeline.parse_author_output)
+    saved = pipeline.read_json(directory / 'author-000001-SZ-result.json')
+    assert saved['route'] == 'deepseek' and saved['execution_verified'] is True
+    calls.clear()
+    second = _stage_mock(GOOD_EVIDENCE, route='glm', calls=calls)
+    monkeypatch.setattr(pipeline, 'run_stage', second)
+    raw = pipeline.article_stage(stock_ai, case.state, case.state_path, directory,
+                                 'author-000001-SZ', '同一段提示', 'glm', {}, fallback=False,
+                                 contract=pipeline.AUTHOR_CONTRACT_VERSION,
+                                 validate=pipeline.parse_author_output)
+    assert [c['provider'] for c in calls] == ['glm']
+    saved2 = pipeline.read_json(directory / 'author-000001-SZ-result.json')
+    assert saved2['route'] == 'glm' and (directory / 'author-000001-SZ-result-previous-1.json').exists()
+
+
+def test_article_stage_cache_requires_verified_evidence(case, monkeypatch):
+    directory = case.directory / 'articles' / CODE
+    weak = dict(GOOD_EVIDENCE, verified=False)
+    calls = []
+    monkeypatch.setattr(pipeline, 'run_stage', _stage_mock(weak, calls=calls))
+    pipeline.article_stage(stock_ai, case.state, case.state_path, directory, 'author-000001-SZ',
+                           '同一段提示', 'glm', {}, fallback=False,
+                           contract=pipeline.AUTHOR_CONTRACT_VERSION,
+                           validate=pipeline.parse_author_output)
+    calls.clear()
+    monkeypatch.setattr(pipeline, 'run_stage', _stage_mock(GOOD_EVIDENCE, calls=calls))
+    pipeline.article_stage(stock_ai, case.state, case.state_path, directory, 'author-000001-SZ',
+                           '同一段提示', 'glm', {}, fallback=False,
+                           contract=pipeline.AUTHOR_CONTRACT_VERSION,
+                           validate=pipeline.parse_author_output)
+    assert len(calls) == 1  # 未核验的旧缓存不得复用
+
+
+def test_run_scope_separates_repeats(case, monkeypatch):
+    directory = case.directory / 'articles' / CODE
+    calls = []
+    mock = _stage_mock(GOOD_EVIDENCE, calls=calls)
+    monkeypatch.setattr(pipeline, 'run_stage', mock)
+    for scope in ('repeat-1', 'repeat-2'):
+        pipeline.article_stage(stock_ai, case.state, case.state_path, directory,
+                               'author-000001-SZ', '同一段提示', 'glm', {}, fallback=False,
+                               contract=pipeline.AUTHOR_CONTRACT_VERSION,
+                               validate=pipeline.parse_author_output, run_scope=scope)
+    assert len(calls) == 2
+
+
+def _prepared_run(prepared, monkeypatch, evidence, repeats=1):
+    store = []
+    monkeypatch.setattr(pipeline, 'run_stage', _stage_mock(evidence, calls=store))
+    runs_dir = prepared.tmp_path / 'trial' / f'runs-{abs(hash(evidence["session_id"]))}'
+    code = trial.run(manifest_path=prepared.input_dir / 'manifest.json', provider='glm',
+                     fallback=False, repeats=repeats, output_dir=runs_dir,
+                     source_root=prepared.tmp_path / 'source')
+    summaries = [json.loads(p.read_text()) for p in sorted(runs_dir.glob('repeat-*/*/summary.json'))]
+    return code, summaries, runs_dir
+
+
+def test_trial_ready_without_verified_evidence_exits_2(prepared, monkeypatch):
+    weak = dict(GOOD_EVIDENCE, verified=False, session_id='sess_weak')
+    code, summaries, runs_dir = _prepared_run(prepared, monkeypatch, weak)
+    assert code == 2
+    assert all(s['article_status'] == 'ready' for s in summaries)
+    assert all(s['execution_verified'] is False for s in summaries)
+    assert all(Path(s['article_path']).exists() for s in summaries)
+
+
+def test_trial_ready_with_matching_evidence_exits_0(prepared, monkeypatch):
+    good = dict(GOOD_EVIDENCE, session_id='sess_good')
+    code, summaries, runs_dir = _prepared_run(prepared, monkeypatch, good, repeats=2)
+    assert code == 0
+    assert len(summaries) == 2 and all(s['execution_verified'] for s in summaries)
+    config_record = json.loads((runs_dir / 'execution-config.json').read_text())
+    assert config_record['policy'] == {'provider': 'glm', 'fallback': False,
+                                       'provider_order': ['glm']}
+
+
+def test_trial_passes_effective_source_config_to_stages(prepared, monkeypatch):
+    cfg = prepared.source / '.stock-ai.local.json'
+    cfg.write_text(json.dumps({'model_refs': {'glm': 'wrong/model'}, 'marker_key': True}),
+                   encoding='utf-8')
+    calls = []
+    monkeypatch.setattr(pipeline, 'run_stage', _stage_mock(GOOD_EVIDENCE, calls=calls))
+    runs_dir = prepared.tmp_path / 'trial' / 'runs-cfg'
+    code = trial.run(manifest_path=prepared.input_dir / 'manifest.json', provider='glm',
+                     fallback=False, repeats=1, output_dir=runs_dir,
+                     source_root=prepared.source)
+    assert code == 0
+    assert calls and all(c['config']['model_refs']['glm'] == trial.REQUIRED_GLM_MODEL for c in calls)
+    assert any(c['config'].get('marker_key') is True for c in calls)
+    record = json.loads((runs_dir / 'execution-config.json').read_text())
+    assert record['status'] == 'loaded' and record['differences']
+    assert 'key' not in json.dumps(record).lower() or 'model_refs' in json.dumps(record)
