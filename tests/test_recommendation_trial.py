@@ -137,7 +137,12 @@ def test_trial_uses_production_authoring_entry(prepared, monkeypatch):
     assert calls[0]['packet']['identity']['ts_code'] == CODE
     assert not hasattr(trial, 'author_prompt') and not hasattr(trial, 'review_prompt')
     source = Path(trial.__file__).read_text()
-    assert '公司主要做什么' not in source and 'recommendation-authoring-prompt' not in source
+    assert '公司主要做什么' not in source  # 不自带作者Prompt模板
+    # 唯一允许的引用是export复制材料时的文件名
+    import re
+    occurrences = [line.strip() for line in source.splitlines() if 'recommendation-authoring-prompt' in line]
+    assert occurrences and all('prompt_name' in line or 'materials' in line or 'prompt_path' in line
+                               for line in occurrences)
 
 
 def test_prepare_freezes_inputs_and_manifest(prepared):
@@ -489,7 +494,7 @@ def test_prepare_rejects_conflicting_handoff_and_extracts_report_conditions(tmp_
 def test_export_collects_articles_full_opinions_and_fails_on_truncation(prepared, tmp_path, monkeypatch):
     store = []
     monkeypatch.setattr(pipeline, 'run_stage', trial_handlers(store))
-    runs_dir = prepared.tmp_path / 'trial' / 'runs-export'
+    runs_dir = prepared.tmp_path / 'trial' / 'runs'
     code = trial.run(manifest_path=prepared.input_dir / 'manifest.json', provider='glm',
                      fallback=False, repeats=2, output_dir=runs_dir,
                      source_root=prepared.source)
