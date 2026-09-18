@@ -721,6 +721,7 @@ def article_stage(host, state: dict, state_path: Path, directory: Path, stage: s
         retain_previous(path)
     raw, route = run_stage(host, state, state_path, directory, stage, prompt, provider, config,
                            text_only=text_only, fallback=fallback)
+    validate(raw)
     stage_execution = stage_entry_evidence(state, stage) or {'provider': route, 'evidence': {}}
     verified = stage_execution_verified(host, provider, fallback, stage_execution)
     save_json(path, {'input_identity': identity, 'raw': raw, 'route': route,
