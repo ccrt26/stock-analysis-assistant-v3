@@ -209,20 +209,42 @@ def handoff_from_trace(trace: dict) -> dict:
     return {'market': trace.get('market_search_context', ''), 'stocks': stocks}
 
 
+def trace_input_sha256(trace: dict) -> str:
+    """以规范化序列化计算研究输入指纹；同日不同内容的修订指纹不同。"""
+    import hashlib
+    return hashlib.sha256(
+        json.dumps(trace, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
+
+
 def selection_handoff(directory: Path, trace: dict) -> dict:
-    """selection-handoff.json 是选股负责人的暂存交接；身份不一致时回退trace提取。"""
+    """selection-handoff.json 是选股负责人的暂存交接。
+
+    v2 交接必须携带 trace_sha256（规范化研究输入指纹）：同日修订内容不同即指纹
+    不同，不凭相同日期认定同一研究。绑定不符按冲突记录并回退trace确定性提取。
+    """
     base = handoff_from_trace(trace)
     path = directory / 'selection-handoff.json'
     if not path.exists():
         return base
     try:
         data = read_json(path)
-        if (data.get('formation_date'), data.get('action_date'), data.get('as_of')) != identity(trace):
-            base['gaps'] = ['selection-handoff.json 身份与本版pending不一致，已忽略']
-            return base
     except (OSError, ValueError):
         base['gaps'] = ['selection-handoff.json 读取失败，已忽略']
         return base
+    if (data.get('formation_date'), data.get('action_date'), data.get('as_of')) != identity(trace):
+        base['gaps'] = ['selection-handoff.json 身份与本版pending不一致，已忽略']
+        return base
+    digest = data.get('trace_sha256')
+    if digest and digest != trace_input_sha256(trace):
+        base['gaps'] = [f'selection-handoff.json 的 trace_sha256 与本版pending不匹配（{str(digest)[:12]}…），判定为其他版本，已忽略']
+        return base
+    base['binding'] = 'trace_sha256' if digest else 'identity_only'
+    base['market'] = str(data.get('market') or base['market'])
+    base['handoff_source'] = 'selection-handoff.json'
+    for code, extra in (data.get('stocks') or {}).items():
+        if code in base['stocks'] and isinstance(extra, dict):
+            base['stocks'][code].update(extra)
+    return base
     base['market'] = str(data.get('market') or base['market'])
     base['handoff_source'] = 'selection-handoff.json'
     for code, extra in (data.get('stocks') or {}).items():
@@ -250,7 +272,8 @@ def _compact_own_facts(facts: dict, decisions: list) -> dict:
                      **{k: v for k, v in r.items() if k.startswith(prefixes) or k in ('quality_status', 'limitations')}}
                     for r in rows]
         if dataset == 'price_observations':
-            fields = {'ts_code', 'analysis_date', 'price_basis', 'primary_industry_code', 'primary_industry_name',
+            fields = {'ts_code', 'trade_date', 'open', 'high', 'low', 'close', 'pre_close', 'amount',
+                      'analysis_date', 'price_basis', 'primary_industry_code', 'primary_industry_name',
                       'primary_industry_level', 'industry_comparison_status', 'relative_continuity_5d', 'up_days_5d',
                       'mean_close_position_5d', 'upper_shadow_frequency_5d', 'fade_frequency_5d',
                       'volume_amplification_days_5d', 'volume_price_efficiency_5d', 'largest_positive_day_contribution_5d',
@@ -288,14 +311,66 @@ def _packet_evidence(trace, ts_code, thesis, as_of, gaps):
     for decision in decisions:
         role = decision.get('decision_role')
         if role in ('support', 'counter', 'comparison', 'discovery'):
-            values = {k: v for k, v in decision['formation_values'].items()
-                      if k not in ('no_account_identity', 'no_position_sizing')}
+            values = _slim_formation_values({k: v for k, v in decision['formation_values'].items()
+                                             if k not in ('no_account_identity', 'no_position_sizing')})
             evidence.append({'id': decision.get('decision_id'), 'content': values,
                              'source': f"decision_trace:{decision.get('decision_id')}",
                              'source_skill': decision.get('source_skill')})
     if not evidence:
         gaps.append('evidence_missing：本股决策轨迹没有可引用的形成值')
     return evidence
+
+
+CITED_DATASET_MARKERS = {
+    'balance_sheet': ('资产负债', '净资产', '总资产', '负债', '商誉', '货币资金'),
+    'daily_basic': ('市盈率', '市净率', '市值', '估值', '换手率'),
+}
+GLOBAL_DEFINITIONS = ('dates', 'units', 'price_basis', 'absence', 'industry')
+
+
+def _prune_uncited_financials(own: dict, cited_text: str) -> dict:
+    """仅当研究文本确实引用某类科目时才保留对应财务表；引用以关键词判定。"""
+    for dataset, markers in CITED_DATASET_MARKERS.items():
+        if dataset in own and not any(marker in cited_text for marker in markers):
+            own.pop(dataset)
+    return own
+
+
+def _referenced_definitions(own: dict, comparisons_facts: dict) -> dict:
+    """只携带实际出现字段的定义；全局语义（日期/单位/复权/缺失含义）始终保留。"""
+    referenced: set[str] = set()
+    for fact in [own, *[item for f in comparisons_facts.values() for item in [f]]]:
+        for dataset, rows in fact.items():
+            if isinstance(rows, list):
+                for row in rows:
+                    if isinstance(row, dict):
+                        referenced.update(row.keys())
+    return {k: DEFINITIONS[k] for k in DEFINITIONS
+            if k in GLOBAL_DEFINITIONS or k in referenced}
+
+
+def _slim_formation_values(values: dict) -> dict:
+    """决策证据中的数值/短字段保留；长文本归研究叙述字段，不在证据里重复整段。"""
+    return {k: v for k, v in values.items()
+            if not (isinstance(v, str) and len(v) > 120)}
+
+
+def extract_conditions_from_report(report_text: str, ts_code: str) -> list[dict]:
+    """从原研究报告的本股段落提取条件原句（逐字，不凑阈值）。"""
+    text = report_text.replace('\r\n', '\n')
+    headings = list(re.finditer(rf'^### ([^#\n]+?)（{re.escape(ts_code)}）[ \t]*$', text, re.M))
+    if not headings:
+        return []
+    start = headings[0].end()
+    nxt = re.search(r'^### ', text[start:], re.M)
+    body = text[start:start + nxt.start()] if nxt else text[start:]
+    found = []
+    for sentence in re.split(r'[。；\n]', body):
+        sentence = sentence.strip()
+        if ('如果' in sentence or '若' in sentence) and (
+                '降低判断' in sentence or '不参与' in sentence or '不追' in sentence or '放弃' in sentence):
+            found.append({'text': sentence, 'source_ref': f'daily-report#{ts_code}'})
+    return found
 
 
 def build_article_packet(*, trace: dict, context: dict, ts_code: str, research_handoff: dict) -> dict:
@@ -312,10 +387,14 @@ def build_article_packet(*, trace: dict, context: dict, ts_code: str, research_h
     handoff_stocks = research_handoff.get('stocks') or {}
     handoff_stock = handoff_stocks.get(ts_code) or {}
     ledger_entry = next((c for c in trace.get('candidate_ledger', []) if c['ts_code'] == ts_code), {})
+    gaps = list(research_handoff.get('gaps') or [])
+    if research_handoff.get('trace_sha256') and research_handoff['trace_sha256'] != trace_input_sha256(trace):
+        gaps.append(f"handoff trace_sha256 与本版pending不匹配（{str(research_handoff['trace_sha256'])[:12]}…），判定为其他版本，交接内容已全部忽略")
+        handoff_stock = {}
+        research_handoff = {k: v for k, v in research_handoff.items() if k not in ('trace_sha256', 'binding')}
     thesis = handoff_stock.get('thesis')
     if not isinstance(thesis, dict) or not thesis:
         thesis = ledger_entry.get('research_thesis') or {}
-    gaps = list(research_handoff.get('gaps') or [])
     decisions = [d for d in trace.get('decision_trace', [])
                  if d.get('ts_code') == ts_code and isinstance(d.get('formation_values'), dict)]
 
@@ -332,11 +411,27 @@ def build_article_packet(*, trace: dict, context: dict, ts_code: str, research_h
         gaps.append('reference_price_missing：原研究与上下文都没有可用参考价')
 
     conditions = None
-    conditions_decision = next((d for d in decisions if d.get('decision_role') == 'action_condition'), None)
-    if conditions_decision is not None and str(conditions_decision['formation_values'].get('condition') or '').strip():
-        conditions = {'text': conditions_decision['formation_values']['condition'],
-                      'tradability': conditions_decision['formation_values'].get('known_tradability'),
-                      'source': conditions_decision['decision_id']}
+    condition_sources = []
+    owner_conditions = handoff_stock.get('conditions')
+    if str(owner_conditions or '').strip() and (research_handoff.get('binding') == 'trace_sha256'
+                                                or research_handoff.get('trace_sha256')):
+        conditions = {'text': owner_conditions,
+                      'tradability': handoff_stock.get('conditions_tradability'),
+                      'source': 'selection-handoff.json'}
+        condition_sources.append('selection-handoff.json')
+    if conditions is None:
+        conditions_decision = next((d for d in decisions if d.get('decision_role') == 'action_condition'), None)
+        if conditions_decision is not None and str(conditions_decision['formation_values'].get('condition') or '').strip():
+            conditions = {'text': conditions_decision['formation_values']['condition'],
+                          'tradability': conditions_decision['formation_values'].get('known_tradability'),
+                          'source': conditions_decision['decision_id']}
+            condition_sources.append(str(conditions_decision['decision_id']))
+    original_report = handoff_stock.get('original_report_conditions') or []
+    for item in original_report:
+        text = str(item.get('text') or '').strip()
+        if text and (not conditions or text not in conditions['text']):
+            conditions = conditions or {'text': text, 'source': item.get('source_ref')}
+            condition_sources.append(str(item.get('source_ref')))
     if conditions is None:
         gaps.append('conditions_missing：本股没有已确定的改变条件，按原样表达未知，不得套用模板')
 
@@ -360,21 +455,55 @@ def build_article_packet(*, trace: dict, context: dict, ts_code: str, research_h
         name = candidate.get('name') or ''
         if (name and name in mentions) or code in mentions:
             comparison_codes.append(code)
-    comparison_fields = ('price_observations', 'industry_observations', 'industry_breadth',
-                         'comparison_windows', 'income_statement', 'balance_sheet', 'cash_flow',
-                         'financial_indicator', 'financial_availability', 'daily_basic')
+    comparison_fields = ('price_observations', 'comparison_windows', 'cash_flow',
+                         'financial_indicator')
+    comparison_names = {c['ts_code']: c for c in (research_handoff.get('stocks') or {}).values()
+                        if isinstance(c, dict) and c.get('name')}
+    comparison_items = []
     comparison_facts = {}
     for code in comparison_codes:
-        other = (context.get('facts') or {}).get(code) or {}
-        comparison_facts[code] = {k: other[k] for k in comparison_fields if k in other}
+        other = _compact_own_facts((context.get('facts') or {}).get(code) or {}, [])
+        facts = {k: other[k] for k in comparison_fields if k in other}
+        comparison_facts[code] = facts
+        comparison_items.append({'ts_code': code,
+                                 'name': comparison_names.get(code, {}).get('name')
+                                 or next((c.get('name') for c in trace.get('candidate_ledger', [])
+                                          if c.get('ts_code') == code), code),
+                                 'facts': facts})
 
-    reasoning = {'why_this_stock': handoff_stock.get('reasoning') or thesis.get('short_term_engine'),
-                 'market_recognition': (thesis.get('market_recognition') or {}).get('basis'),
-                 'why_now': thesis.get('catalyst'),
-                 'remaining_path': thesis.get('remaining_path'),
-                 'risk_acceptance': thesis.get('company_risk'),
-                 'propagation': thesis.get('propagation'),
-                 'fundamental_anchor': thesis.get('fundamental_anchor')}
+    owner_binding_ok = (research_handoff.get('binding') == 'trace_sha256'
+                        or (research_handoff.get('trace_sha256')
+                            and research_handoff['trace_sha256'] == trace_input_sha256(trace)))
+    formed = lambda text: bool(str(text or '').strip()) and owner_binding_ok
+    reasoning = {
+        'opinion': {'text': stock.get('selection_reason'), 'formed': True,
+                    'source': 'research_result.selected_stocks[].selection_reason'},
+        'main_basis': {'text': thesis.get('short_term_engine'), 'formed': True,
+                       'source': 'candidate_ledger.research_thesis.short_term_engine'},
+        'why_this': {'text': (thesis.get('market_recognition') or {}).get('basis'), 'formed': True,
+                     'source': 'candidate_ledger.research_thesis.market_recognition.basis'},
+        'remaining_path': {'text': thesis.get('remaining_path'), 'formed': True,
+                           'source': 'candidate_ledger.research_thesis.remaining_path'},
+        'why_now': {'formed': formed(handoff_stock.get('why_now')),
+                    'text': handoff_stock.get('why_now'),
+                    'related_field': {'name': 'catalyst', 'text': thesis.get('catalyst'),
+                                      'meaning': '研究记录的事件状态，不等于为何当前时点的论证'}},
+        'risk_context': {'text': thesis.get('company_risk'),
+                         'source': 'candidate_ledger.research_thesis.company_risk',
+                         'meaning': '研究记录的风险描述，不是接受理由'},
+    }
+    if formed(handoff_stock.get('risk_acceptance')):
+        reasoning['risk_acceptance'] = {'formed': True, 'text': handoff_stock.get('risk_acceptance'),
+                                        'source': 'selection-handoff.json'}
+    else:
+        gaps.append('risk_acceptance_missing：研究交接未单独形成接受风险的理由；'
+                    '判断原文中的取舍表述以 selection_reason 为准，不得由作者或程序补造')
+    own_facts = _compact_own_facts((context.get('facts') or {}).get(ts_code) or {}, decisions)
+    own_facts.pop('industry_breadth', None)  # 与industry_observations同源的派生重复
+    own_texts = ' '.join(str(x or '') for x in (
+        stock.get('selection_reason'), stock.get('nearest_comparison'),
+        json.dumps(thesis, ensure_ascii=False)))
+    own_facts = _prune_uncited_financials(own_facts, own_texts)
     packet = {
         'identity': {'ts_code': ts_code, 'name': stock.get('name'),
                      'formation_date': formation, 'action_date': action, 'as_of': as_of,
@@ -387,21 +516,32 @@ def build_article_packet(*, trace: dict, context: dict, ts_code: str, research_h
         'reasoning': reasoning,
         'evidence': _packet_evidence(trace, ts_code, thesis, as_of, gaps),
         'comparisons': {'text': stock.get('nearest_comparison'), 'codes': comparison_codes,
-                        'facts': comparison_facts},
+                        'items': comparison_items},
         'counterevidence': counterevidence,
-        'conditions': conditions,
+        'conditions': dict(conditions, sources=condition_sources) if conditions else None,
         'unknowns': thesis.get('critical_unknown'),
-        'facts': {'definitions': DEFINITIONS,
-                  'own': _compact_own_facts((context.get('facts') or {}).get(ts_code) or {}, decisions),
+        'facts': {'definitions': _referenced_definitions(own_facts, comparison_facts),
+                  'own': own_facts,
                   'market': context.get('market_facts') or []},
         'source_refs': {'trace_identity': list(identity(trace)),
+                        'trace_sha256': trace_input_sha256(trace),
                         'decision_ids': [d.get('decision_id') for d in decisions],
                         'source_skills': ledger_entry.get('source_skills') or [],
                         'handoff_source': research_handoff.get('handoff_source') or 'trace'},
         'gaps': gaps + [g for g in (context.get('gaps') or [])
                         if isinstance(g, dict) and g.get('ts_code') in (None, ts_code)],
     }
+    packet['composition'] = packet_composition(packet)
     return packet
+
+
+def packet_composition(packet: dict) -> dict:
+    """材料组成账：统一紧凑JSON序列化口径，逐组件字符数（不含composition自身）。"""
+    def size(value):
+        return len(json.dumps(value, ensure_ascii=False, separators=(',', ':')))
+    parts = {k: size(v) for k, v in packet.items() if k != 'composition'}
+    parts['total'] = size({k: v for k, v in packet.items() if k != 'composition'})
+    return parts
 
 
 # ---------------------------------------------------------------- 作者与审稿输入
@@ -682,8 +822,12 @@ def run_stage(host, state: dict, state_path: Path, directory: Path, stage: str,
                 saved_report = directory / 'research-reply.md'
                 handoff = (f'\n本阶段交接：本会话只做选股研究。把完整 pending trace 保存到 {pending}，'
                     f'把市场说明正文（含独立标题行 `## 今天的市场情况`）保存到 {saved_report}，'
-                    f'并把市场正文与逐股研究取舍（理由、证据引用、比较对象、改变条件及来源）'
-                    f'写入 {directory / "selection-handoff.json"}；完成后返回同一市场说明。'
+                    f'并把市场正文与逐股研究取舍写入 {directory / "selection-handoff.json"}：'
+                    'schema=selection-handoff-v2，含 formation_date/action_date/as_of、trace_sha256'
+                    '（对 pending trace 以 sort_keys 规范化JSON的SHA256）与逐股字段：'
+                    '当前意见及力度、主要依据、为何选本股、为何是当前时点/价格、最强反证、'
+                    '为何尚未推翻当前选择、实际确定的改变条件、必要未知与证据引用；'
+                    '未形成的解释不要用其他字段冒充。完成后返回同一市场说明。'
                     '不执行正式复盘（复盘由独立会话执行）、不写逐股最终推荐文章、'
                     '不生成四分区整篇日报、不运行 selection record/record-trace。'
                     '如已有中间研究，先按原身份核验，只补缺失，不重新从零扫描；'

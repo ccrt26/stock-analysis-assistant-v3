@@ -93,6 +93,9 @@ def prepare(*, source_root: Path, trace_path: Path, names: list[str], output_dir
                       "gaps": material["gaps"]},
         "packet_chars": {s["ts_code"]: len((packet_dir / f"{s['ts_code']}.json").read_text(encoding="utf-8"))
                          for s in stocks},
+        "packet_composition": {s["ts_code"]: json.loads(
+            (packet_dir / f"{s['ts_code']}.json").read_text(encoding="utf-8")).get("composition", {})
+            for s in stocks},
         "code_root": str(code_root),
         "code_commit": _code_commit(code_root),
         "provider_policy": {"allowed": ["glm"], "fallback": False,

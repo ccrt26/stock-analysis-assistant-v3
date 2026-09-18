@@ -92,13 +92,21 @@ def case(tmp_path, monkeypatch):
     (ops / 'recommendation-authoring-prompt.md').write_text('作者合同', encoding='utf-8')
     (ops / 'recommendation-review-prompt.md').write_text('审稿合同', encoding='utf-8')
     monkeypatch.setattr(pipeline, 'validate_pending', lambda *a: None)
-    facts = {CODE: {'price_observations': [{'close': 10.5}], 'industry_observations': []}}
-    monkeypatch.setattr(pipeline, 'build_context',
-                        lambda *a, **k: {'facts': facts, 'proposed_judgment': {}, 'gaps': []})
+    facts = {CODE: {'price_observations': [{'close': 10.5, 'fade_frequency_5d': 0.0,
+                                            'price_location_60d': 0.21, 'unused_oscillator': 9}],
+                    'industry_observations': [{'member_count': 5, 'breadth_5d': 0.8}],
+                    'equity_daily': [{'trade_date': '2026-08-25', 'close': 10.5}],
+                    'income_statement': [{'total_revenue': 1}], 'balance_sheet': [{'total_assets': 1}],
+                    'cash_flow': [{'n_cashflow_act': 1}], 'financial_indicator': [{'ocf_yoy': 5}],
+                    'main_business': [], 'announcement': [], 'company_profile': [],
+                    'industry_member': [], 'daily_basic': [{'pe_ttm': 9}],
+                    'comparison_windows': {'5d': {'base_close_date': '2026-08-25'}}}}
+    context_data = {'facts': facts, 'market_facts': [], 'proposed_judgment': {}, 'gaps': []}
+    monkeypatch.setattr(pipeline, 'build_context', lambda *a, **k: context_data)
     monkeypatch.setattr(pipeline, 'writing_material', lambda *a, **k: fake_material())
     return SimpleNamespace(root=root, pending=pending, trace=trace, directory=directory,
                            state=state, state_path=root / 'state.json',
-                           identity=(formation, action, asof),
+                           identity=(formation, action, asof), context=context_data,
                            monitor_dir=directory / 'monitor')
 
 
@@ -281,7 +289,7 @@ def test_packet_retains_counterevidence_conditions_and_sources(case):
     assert tuple(refs['trace_identity']) == case.identity
     assert f'{CODE}:conditions' in refs['decision_ids']
     # 删减上下文事实不丢反证与条件：缺失的只是可查询事实，不由包补写。
-    assert packet['comparisons']['facts'] == {}
+    assert packet['comparisons']['items'] == []
 
 
 def test_packet_does_not_include_other_stock_full_history(case):
@@ -301,7 +309,8 @@ def test_packet_does_not_include_other_stock_full_history(case):
     trace['research_result']['selected_stocks'][0]['nearest_comparison'] = '与浦发银行比较，平安自身相对更优。'
     context_data = {'facts': {
         CODE: {'price_observations': [{'close': 10.5}], 'income_statement': [{'revenue': 1}]},
-        '600000.SH': {'price_observations': [{'close': 8.0}], 'income_statement': [{'revenue': 2}]}},
+        '600000.SH': {'price_observations': [{'close': 8.0}], 'income_statement': [{'revenue': 2}],
+                      'cash_flow': [{'n_cashflow_act': 5}], 'financial_indicator': [{'ocf_yoy': 12.0}]}},
         'proposed_judgment': {}, 'gaps': []}
     packet = pipeline.build_article_packet(trace=trace, context=context_data, ts_code=CODE,
                                            research_handoff=pipeline.handoff_from_trace(trace))
@@ -309,8 +318,11 @@ def test_packet_does_not_include_other_stock_full_history(case):
     assert '另一只股票的独特研究叙述' not in text and '另一只反证' not in text
     # 被点名比较的股票带必要的观察与财务事实（比较若用现金流，现金流必须在包里），
     # 但不带其研究判断与叙述整包。
-    assert packet['comparisons']['facts']['600000.SH']['price_observations'] == [{'close': 8.0}]
-    assert packet['comparisons']['facts']['600000.SH']['income_statement'] == [{'revenue': 2}]
+    item = next(i for i in packet['comparisons']['items'] if i['ts_code'] == '600000.SH')
+    assert item['name'] == '浦发银行'
+    assert item['facts']['price_observations'] == [{'close': 8.0}]
+    assert item['facts']['cash_flow'] == [{'n_cashflow_act': 5}]
+    assert 'income_statement' not in item['facts']
     assert '另一只股票的独特研究叙述' not in json.dumps(packet['comparisons'], ensure_ascii=False)
 
 
@@ -339,9 +351,10 @@ def test_packet_comparison_keeps_cashflow_cited_by_research(case):
         'proposed_judgment': {}, 'gaps': []}
     packet = pipeline.build_article_packet(trace=trace, context=context_data, ts_code=CODE,
                                            research_handoff=pipeline.handoff_from_trace(trace))
-    facts = packet['comparisons']['facts']['603650.SH']
-    assert facts['cash_flow'] == [{'report_period': '2026-06-30', 'n_cashflow_act': -120}]
-    assert facts['financial_indicator'] == [{'report_period': '2026-06-30', 'ocf_yoy': -72.0}]
+    item = next(i for i in packet['comparisons']['items'] if i['ts_code'] == '603650.SH')
+    assert item['name'] == '彤程新材'
+    assert item['facts']['cash_flow'] == [{'report_period': '2026-06-30', 'n_cashflow_act': -120}]
+    assert item['facts']['financial_indicator'] == [{'report_period': '2026-06-30', 'ocf_yoy': -72.0}]
 
 
 # ---- 任务4/5：作者循环、复盘分离、装配与历史恢复 ----
@@ -534,3 +547,130 @@ def test_existing_frozen_run_keeps_original_recovery(case, monkeypatch):
     final, _ = pipeline.complete(stock_ai, case.state, case.state_path, case.directory, {}, 'glm', '研究')
     assert frozen[0]['section'] == section
     assert section in final.read_text()
+
+
+# ---- P2：研究交接→写作材料 ----
+
+
+def _own_texts(trace, code):
+    stock = next(s for s in trace['research_result']['selected_stocks'] if s['ts_code'] == code)
+    candidate = next(c for c in trace['candidate_ledger'] if c['ts_code'] == code)
+    return ' '.join([stock.get('selection_reason', ''), stock.get('nearest_comparison', ''),
+                     json.dumps(candidate.get('research_thesis', {}), ensure_ascii=False)])
+
+
+def test_packet_definitions_only_referenced_fields(case):
+    packet = pipeline.build_article_packet(
+        trace=case.trace, context=case.context, ts_code=CODE,
+        research_handoff=pipeline.handoff_from_trace(case.trace))
+    included_rows = packet['facts']['own'].get('price_observations', []) + \
+        packet['facts']['own'].get('industry_observations', [])
+    referenced = set()
+    for row in included_rows:
+        referenced.update(row.keys())
+    definitions = packet['facts']['definitions']
+    assert 'dates' in definitions and 'units' in definitions and 'absence' in definitions
+    for key in definitions:
+        assert key in ('dates', 'units', 'price_basis', 'absence', 'industry') or key in referenced
+    assert 'price_location_60d' not in definitions or 'price_location_60d' in referenced
+
+
+def test_packet_own_facts_omit_uncited_financials(case):
+    packet = pipeline.build_article_packet(
+        trace=case.trace, context=case.context, ts_code=CODE,
+        research_handoff=pipeline.handoff_from_trace(case.trace))
+    own = packet['facts']['own']
+    assert 'balance_sheet' not in own  # 判断文本未提及资产负债科目
+    texts = _own_texts(case.trace, CODE)
+    if '市盈率' in texts or '市值' in texts:
+        assert 'daily_basic' in own
+
+
+def test_packet_comparison_items_grouped_and_trimmed(case):
+    trace = copy.deepcopy(case.trace)
+    other = copy.deepcopy(trace['candidate_ledger'][0])
+    other['ts_code'] = '600000.SH'
+    other['name'] = '浦发银行'
+    other['final_fate'] = 'rejected'
+    trace['candidate_ledger'].append(other)
+    trace['research_result']['selected_stocks'][0]['nearest_comparison'] = '与浦发银行比较，现金流更稳。'
+    context_data = {'facts': {
+        CODE: {'price_observations': [{'close': 10.5}]},
+        '600000.SH': {'price_observations': [{'close': 8.0}], 'industry_observations': [{'x': 1}],
+                      'balance_sheet': [{'total_assets': 1}], 'cash_flow': [{'n_cashflow_act': 5}],
+                      'financial_indicator': [{'ocf_yoy': 12.0}]}},
+        'proposed_judgment': {}, 'gaps': []}
+    packet = pipeline.build_article_packet(trace=trace, context=context_data, ts_code=CODE,
+                                           research_handoff=pipeline.handoff_from_trace(trace))
+    items = packet['comparisons']['items']
+    assert items and items[0]['ts_code'] == '600000.SH' and items[0]['name'] == '浦发银行'
+    facts = items[0]['facts']
+    assert facts['price_observations'] == [{'close': 8.0}]
+    assert facts['cash_flow'] == [{'n_cashflow_act': 5}]
+    assert facts['financial_indicator'] == [{'ocf_yoy': 12.0}]
+    assert 'industry_observations' not in facts and 'balance_sheet' not in facts
+    assert 'facts' not in packet['comparisons']
+
+
+def test_packet_reasoning_no_field_aliasing(case):
+    packet = pipeline.build_article_packet(
+        trace=case.trace, context=case.context, ts_code=CODE,
+        research_handoff=pipeline.handoff_from_trace(case.trace))
+    reasoning = packet['reasoning']
+    assert 'risk_acceptance' not in reasoning
+    assert reasoning['risk_context']['text'] == '没有新催化。'
+    assert '不是接受理由' in reasoning['risk_context']['meaning']
+    assert reasoning['why_now']['formed'] is False
+    assert reasoning['why_now']['related_field']['name'] == 'catalyst'
+    assert reasoning['opinion']['formed'] is True
+    assert any('risk_acceptance' in g or '接受' in g for g in packet['gaps'])
+
+
+def test_owner_handoff_fields_flow_into_packet(case):
+    import hashlib
+    trace_bytes = json.dumps(case.trace, ensure_ascii=False, sort_keys=True).encode()
+    handoff = {'schema': 'selection-handoff-v2',
+               'formation_date': case.identity[0], 'action_date': case.identity[1],
+               'as_of': case.identity[2], 'trace_sha256': hashlib.sha256(trace_bytes).hexdigest(),
+               'market': '市场正文。',
+               'stocks': {CODE: {'risk_acceptance': '确认依赖多日结构，且现金流支撑盈利质量，追高代价已知。',
+                                 'why_now': '行业连续两日多数上涨后仍处于可接受位置。',
+                                 'conditions': '如果收盘连续两日低于9.8元且行业转弱，降低判断。'}}}
+    packet = pipeline.build_article_packet(trace=case.trace, context=case.context, ts_code=CODE,
+                                           research_handoff=handoff)
+    assert packet['reasoning']['risk_acceptance']['formed'] is True
+    assert '多日结构' in packet['reasoning']['risk_acceptance']['text']
+    assert packet['reasoning']['why_now']['formed'] is True
+    assert packet['conditions']['text'] == handoff['stocks'][CODE]['conditions']
+    assert packet['conditions']['source'] == 'selection-handoff.json'
+    assert not any('risk_acceptance' in g for g in packet['gaps'])
+
+
+def test_same_day_wrong_version_handoff_rejected(case):
+    handoff = {'schema': 'selection-handoff-v2',
+               'formation_date': case.identity[0], 'action_date': case.identity[1],
+               'as_of': case.identity[2], 'trace_sha256': 'deadbeef',
+               'market': '另一版市场正文。', 'stocks': {CODE: {'why_now': '另一版取舍。'}}}
+    packet = pipeline.build_article_packet(trace=case.trace, context=case.context, ts_code=CODE,
+                                           research_handoff=handoff)
+    assert packet['reasoning']['why_now']['formed'] is False
+    assert any('trace_sha256' in g or '不匹配' in g for g in packet['gaps'])
+
+
+def test_original_report_condition_extraction():
+    report = ('## 今天明确推荐的股票\n\n### 平安银行（000001.SZ）\n\n'
+              '参与条件原文：如果连续收盘跌回10.1元以下且行业转弱，会降低判断。\n'
+              '其他内容。\n\n### 另一只（600000.SH）\n\n无关。')
+    found = pipeline.extract_conditions_from_report(report, CODE)
+    assert found and '连续收盘跌回10.1元以下' in found[0]['text']
+    assert found[0]['source_ref'].endswith(CODE)
+
+
+def test_packet_composition_report(case):
+    packet = pipeline.build_article_packet(
+        trace=case.trace, context=case.context, ts_code=CODE,
+        research_handoff=pipeline.handoff_from_trace(case.trace))
+    composition = packet['composition']
+    assert composition['total'] > 0
+    for key in ('identity', 'judgment', 'reasoning', 'evidence', 'comparisons', 'facts', 'conditions'):
+        assert key in composition
