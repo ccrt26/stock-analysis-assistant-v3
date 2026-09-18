@@ -1,6 +1,7 @@
-"""Research-owned drafts, local edits, fidelity review, and unchanged delivery."""
+"""Selection research, per-stock full authoring, independent monitor, original contracts."""
 from __future__ import annotations
 
+import copy
 import csv
 import json
 import os
@@ -9,7 +10,14 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 
-from stock_analyzer.ops.recommendation_context import build_context, selected_result
+from stock_analyzer.ops.recommendation_context import DEFINITIONS, build_context, selected_result
+
+# 作者/审稿阶段输出合同版本；进入阶段缓存身份，合同变化即不复用旧结果。
+AUTHOR_CONTRACT_VERSION = 'article-author-v1'
+REVIEW_CONTRACT_VERSION = 'article-review-v1'
+# 正式推荐正文固定小标题；作者正文必须自带，程序只补逐股标题行。
+ARTICLE_SUBHEADINGS = ('公司主要做什么', '为什么会选它', '什么情况会让我改变看法')
+OBSERVATION_CONTRACT = '原推荐观察期为20个交易日，相对参考价+20%是原观察目标，不是收益承诺。'
 
 
 def read_json(path: Path) -> dict:
@@ -43,49 +51,6 @@ def json_object(text: str) -> dict:
     return value
 
 
-def parse_edit(text: str) -> dict:
-    value = json_object(text)
-    if not isinstance(value.get('section'), str) or not value['section'].strip():
-        raise ValueError('编辑结果缺少完整正文')
-    for field in ('research_issues', 'edits', 'checked_claims'):
-        if not isinstance(value.get(field), list):
-            raise ValueError(f'编辑结果缺少{field}数组')
-    for issue in value['research_issues']:
-        if not isinstance(issue, dict) or not all(issue.get(k) for k in ('ts_code','quote','problem','evidence')):
-            raise ValueError('研究问题必须有代码、原句、问题和依据')
-    return value
-
-
-def apply_edits(source: str, edited: dict) -> str:
-    """Apply non-overlapping edits against the actual input, never a new article."""
-    spans = []
-    for edit in edited['edits']:
-        if not isinstance(edit, dict):
-            raise ValueError('修改必须包含原文、原因和替换文字')
-        quote, reason, replacement = (edit.get(k) for k in ('quote', 'reason', 'replacement'))
-        if not isinstance(quote, str) or not quote.strip() or not isinstance(reason, str) or not reason.strip() or not isinstance(replacement, str):
-            raise ValueError('修改必须包含非空原文、原因和字符串替换文字')
-        if source.count(quote) != 1:
-            raise ValueError('修改原文必须在本阶段输入正文中唯一匹配')
-        if quote.strip() == source.strip():
-            raise ValueError('不能通过替换整篇正文重新写稿')
-        start = source.index(quote)
-        spans.append((start, start + len(quote), replacement))
-    spans.sort()
-    if any(left[1] > right[0] for left, right in zip(spans, spans[1:])):
-        raise ValueError('修改范围重叠；所有原文须来自同一输入正文')
-    result = source
-    for start, end, replacement in reversed(spans):
-        result = result[:start] + replacement + result[end:]
-    # A copied full article sometimes loses paragraph breaks. Keep the
-    # edit-derived layout; never adopt those unlisted formatting changes.
-    def without_linebreaks(text):
-        return text.replace('\r\n', '\n').replace('\n', '')
-    if result != edited['section'] and without_linebreaks(result) != without_linebreaks(edited['section']):
-        raise ValueError('完整正文与逐项修改不一致，不能采用未说明的改写')
-    return result
-
-
 def retain_previous(path: Path) -> None:
     """Keep obsolete local stage output for diagnosis, without using it again."""
     if path.exists():
@@ -96,6 +61,7 @@ def retain_previous(path: Path) -> None:
 
 
 def recommendation_draft(host, reply: Path, trace: dict) -> str:
+    """旧流程（研究会话写整篇四分区报告）的推荐分区提取，仅用于历史恢复。"""
     from nightly_report import report_parts
     section = report_parts(reply.read_text())[1][3]
     issues = host._recommendation_section_issues(
@@ -105,52 +71,41 @@ def recommendation_draft(host, reply: Path, trace: dict) -> str:
     return section
 
 
-def edit_stage(host, state, state_path, directory, config, provider, stage,
-               context, material, trace, research_draft, draft, prior_edits=None):
-    path = directory / f'{stage}-result.json'
-    source = {'trace': trace, 'research_section': research_draft, 'input_section': draft}
-    if path.exists():
-        saved = read_json(path)
-        if saved.get('source') == source:
-            apply_edits(draft, saved)
-            return saved
-        retain_previous(path)
-    prompt = editor_prompt(host.PROJECT_ROOT, stage, context, material, draft,
-                           research_draft=research_draft, prior_edits=prior_edits)
-    raw, _ = run_stage(host, state, state_path, directory, stage, prompt, provider, config, text_only=True)
-    result = parse_edit(raw)
-    canonical = apply_edits(draft, result)
-    if canonical != result['section']:
-        result['unlisted_linebreaks_discarded'] = True
-        result['section'] = canonical
-    result['source'] = source
-    save_json(path, result)
-    return result
+def writing_material(root: Path, cutoff: str, excluded_codes: list[str], *,
+                     teaching_root: Path | None = None, preferred_examples: list[str] | None = None) -> dict:
+    """写作材料：仓库教学、已确认要点正文、阅读指南正文与适用认可范文全文。
 
-
-def writing_material(root: Path, cutoff: str, excluded_codes: list[str]) -> dict:
-    teaching_path = root / '.agents/skills/orchestrating-stock-research/references/selection-writing-calibration.md'
-    result = {'teaching': teaching_path.read_text(), 'examples': [], 'read_paths': [str(teaching_path)], 'gaps': []}
+    teaching_root 缺省与 root 相同；知识库指针始终读 root 下的本地事实仓。
+    examples 按 approved 与资料截止过滤，排除本股答案；preferred_examples
+    只调整同批内的优先顺序，不放宽过滤条件。
+    """
+    teaching_root = teaching_root or root
+    teaching_path = teaching_root / '.agents/skills/orchestrating-stock-research/references/selection-writing-calibration.md'
+    result = {'teaching': teaching_path.read_text(encoding='utf-8'), 'examples': [], 'gaps': []}
     pointer = root / 'local_archive/knowledge-vault-path.txt'
     if not pointer.exists():
         result['gaps'].append('知识库路径未配置，使用仓库教学')
+        result['component_chars'] = {'teaching': len(result['teaching']), 'examples': []}
         return result
     vault = Path(pointer.read_text().strip())
-    guides = ['AGENTS.md', '10_方法与范文/00_已确认写作要点.md', '10_方法与范文/推荐说明范文/00_阅读指南.md']
-    # Read the general rules, but keep the editor focused on the scoped repository
-    # teaching and applicable examples. The guides select/scope these materials.
-    for relative in guides:
+    guides = {'AGENTS.md': 'vault_general_rules',
+              '10_方法与范文/00_已确认写作要点.md': 'confirmed_writing_guidance',
+              '10_方法与范文/推荐说明范文/00_阅读指南.md': 'reading_guide'}
+    # 指南与要点必须以正文进入作者输入；read_paths 只作来源记录。
+    for relative, field in guides.items():
         path = vault / relative
         try:
-            text = path.read_text()
-            if relative.endswith('00_已确认写作要点.md'):
-                result['confirmed_writing_guidance'] = text
-            result['read_paths'].append(str(path))
+            text = path.read_text(encoding='utf-8')
+            result[field] = text
         except OSError as exc:
+            result[field] = ''
             result['gaps'].append(f'{relative}: {exc}')
     directory = vault / '10_方法与范文/推荐说明范文'
-    for path in sorted(directory.glob('*.md'), reverse=True):
-        with path.open() as file:
+    candidates = []
+    for path in sorted(directory.glob('*.md')):
+        if path.name.startswith('00_'):
+            continue
+        with path.open(encoding='utf-8') as file:
             if file.readline().strip() != '---':
                 continue
             meta = {}
@@ -166,59 +121,428 @@ def writing_material(root: Path, cutoff: str, excluded_codes: list[str]) -> dict
                 continue
         except (ValueError, KeyError):
             continue
-        result['examples'].append({'source': path.name, 'text': path.read_text()})
-        result['read_paths'].append(str(path))
+        name = meta.get('name') or path.stem
+        preferred = any(p and (p in name or p in path.stem) for p in (preferred_examples or []))
+        candidates.append((0 if preferred else 1, path))
+    for _rank, path in sorted(candidates, key=lambda item: (item[0], item[1].name), reverse=False):
+        result['examples'].append({'source': path.name, 'text': path.read_text(encoding='utf-8')})
         if len(result['examples']) == 2:
             break
     if not result['examples']:
         result['gaps'].append('无时点适用且非本股答案的认可范文，使用通用教学')
+    result['component_chars'] = {
+        'teaching': len(result['teaching']),
+        'confirmed_writing_guidance': len(result.get('confirmed_writing_guidance') or ''),
+        'reading_guide': len(result.get('reading_guide') or ''),
+        'examples': [len(e['text']) for e in result['examples']],
+    }
     return result
 
 
-def editor_prompt(root: Path, stage: str, context: dict, material: dict, draft: str, *,
-                  research_draft: str | None = None, prior_edits: list | None = None) -> str:
-    if not isinstance(draft, str) or not draft.strip():
-        raise ValueError('编辑必须收到总控草稿，不能从零写作')
-    # Keep complete queried facts on disk; avoid repeated provenance fields and
-    # irrelevant financial history in the editor's input. All values stay intact.
-    import copy
-    compact = copy.deepcopy(context)
-    for code, facts in compact.get('facts', {}).items():
-        for dataset, rows in list(facts.items()):
-            if not isinstance(rows, list) or not rows or not isinstance(rows[0], dict):
-                continue
-            if dataset == 'industry_observations':
-                # Put denominator and window identity ahead of secondary observations.
-                identity_fields = ('group_type','group_code','group_name','level','member_count','observed_member_count','member_coverage_ratio')
-                prefixes = ('horizon_observed_member_count_', 'horizon_member_coverage_ratio_',
-                            'breadth_', 'equal_weight_return_', 'median_return_', 'relative_return_', 'turnover_share_change_', 'top3_positive_contribution_')
-                rows = [{**{k:r[k] for k in identity_fields if k in r},
-                         **{k:v for k,v in r.items() if k.startswith(prefixes) or k in ('quality_status','limitations')}} for r in rows]
-            if dataset == 'price_observations':
-                fields = {'ts_code','analysis_date','price_basis','primary_industry_code','primary_industry_name',
-                          'primary_industry_level','industry_comparison_status','relative_continuity_5d','up_days_5d',
-                          'mean_close_position_5d','upper_shadow_frequency_5d','fade_frequency_5d',
-                          'volume_amplification_days_5d','volume_price_efficiency_5d','largest_positive_day_contribution_5d',
-                          'sessions_since_largest_positive_day_5d','breakout_vs_prior60','price_location_60d','price_location_82d',
-                          'atr_ratio_20d','amount_ratio_last_20d','industry_return_rank_percentile_5d','target_atr_distance_20pct',
-                          'coverage_status','limitation_notes','indicator_coverage_status','indicator_limitation_notes',
-                          'limit_up_return_contribution_5d','realized_volatility_20d_annualized','available_price_sessions',
-                          'distance_to_prior_250d_high','breakout_prior_250d_high','liquidity_log10_amount'}
-                for decision in context.get('proposed_judgment', {}).get('decisions', []):
-                    if decision.get('ts_code') == code:
-                        fields.update(decision.get('formation_values', {}))
-                prefixes = ('return_', 'relative_market_', 'relative_industry_return_', 'industry_equal_weight_return_')
-                rows = [{k:v for k,v in r.items() if k in fields or k.startswith(prefixes)} for r in rows]
-            if dataset == 'equity_daily':
-                facts['equity_daily_source'] = {k: rows[-1].get(k) for k in ('source_name','source_endpoint','quality_status')}
-                rows = [{k:v for k,v in r.items() if k not in ('source_name','source_endpoint','quality_status','vol')} for r in rows]
-            facts[dataset] = rows
-    compact = {k:compact[k] for k in ('identity','definitions','facts','market_facts','gaps','proposed_judgment') if k in compact} | {k:v for k,v in compact.items() if k not in ('identity','definitions','facts','market_facts','gaps','proposed_judgment')}
-    value = {'stage': stage, 'context': compact, 'draft': draft,
-             'research_draft': research_draft if research_draft is not None else draft,
-             'prior_edits': prior_edits or []}
-    value['writing_material'] = material
-    return (root / 'ops/recommendation-editing-prompt.md').read_text() + '\n\n本次输入：\n' + json.dumps(value, ensure_ascii=False, separators=(',', ':'))
+# ---------------------------------------------------------------- 单股研究包
+
+
+def handoff_from_trace(trace: dict) -> dict:
+    """同版研究的确定性交接视图：只重排已保存字段，不补写研究结论。"""
+    result = selected_result(trace)
+    ledger = {c['ts_code']: c for c in trace.get('candidate_ledger', [])}
+    stocks = {}
+    for stock in result['selected_stocks']:
+        code = stock['ts_code']
+        thesis = (ledger.get(code, {}).get('research_thesis') or {})
+        stocks[code] = {
+            'selection_reason': stock.get('selection_reason'),
+            'strongest_counterevidence': stock.get('strongest_counterevidence'),
+            'nearest_comparison': stock.get('nearest_comparison'),
+            'opportunity_type': stock.get('opportunity_type'),
+            'priority': stock.get('priority'),
+            'thesis': thesis,
+        }
+    return {'market': trace.get('market_search_context', ''), 'stocks': stocks}
+
+
+def selection_handoff(directory: Path, trace: dict) -> dict:
+    """selection-handoff.json 是选股负责人的暂存交接；身份不一致时回退trace提取。"""
+    base = handoff_from_trace(trace)
+    path = directory / 'selection-handoff.json'
+    if not path.exists():
+        return base
+    try:
+        data = read_json(path)
+        if (data.get('formation_date'), data.get('action_date'), data.get('as_of')) != identity(trace):
+            base['gaps'] = ['selection-handoff.json 身份与本版pending不一致，已忽略']
+            return base
+    except (OSError, ValueError):
+        base['gaps'] = ['selection-handoff.json 读取失败，已忽略']
+        return base
+    base['market'] = str(data.get('market') or base['market'])
+    base['handoff_source'] = 'selection-handoff.json'
+    for code, extra in (data.get('stocks') or {}).items():
+        if code in base['stocks'] and isinstance(extra, dict):
+            base['stocks'][code].update(extra)
+    return base
+
+
+def _compact_own_facts(facts: dict, decisions: list) -> dict:
+    """单股事实的确定性裁剪：保留分母、窗口与相关指标，去掉无关衍生列。
+
+    只删列不改编号、单位或数值；与原 editor 输入的裁剪口径一致。
+    """
+    compact = copy.deepcopy(facts)
+    for dataset, rows in list(compact.items()):
+        if not isinstance(rows, list) or not rows or not isinstance(rows[0], dict):
+            continue
+        if dataset == 'industry_observations':
+            identity_fields = ('group_type', 'group_code', 'group_name', 'level', 'member_count',
+                               'observed_member_count', 'member_coverage_ratio')
+            prefixes = ('horizon_observed_member_count_', 'horizon_member_coverage_ratio_',
+                        'breadth_', 'equal_weight_return_', 'median_return_', 'relative_return_',
+                        'turnover_share_change_', 'top3_positive_contribution_')
+            rows = [{**{k: r[k] for k in identity_fields if k in r},
+                     **{k: v for k, v in r.items() if k.startswith(prefixes) or k in ('quality_status', 'limitations')}}
+                    for r in rows]
+        if dataset == 'price_observations':
+            fields = {'ts_code', 'analysis_date', 'price_basis', 'primary_industry_code', 'primary_industry_name',
+                      'primary_industry_level', 'industry_comparison_status', 'relative_continuity_5d', 'up_days_5d',
+                      'mean_close_position_5d', 'upper_shadow_frequency_5d', 'fade_frequency_5d',
+                      'volume_amplification_days_5d', 'volume_price_efficiency_5d', 'largest_positive_day_contribution_5d',
+                      'sessions_since_largest_positive_day_5d', 'breakout_vs_prior60', 'price_location_60d', 'price_location_82d',
+                      'atr_ratio_20d', 'amount_ratio_last_20d', 'industry_return_rank_percentile_5d', 'target_atr_distance_20pct',
+                      'coverage_status', 'limitation_notes', 'indicator_coverage_status', 'indicator_limitation_notes',
+                      'limit_up_return_contribution_5d', 'realized_volatility_20d_annualized', 'available_price_sessions',
+                      'distance_to_prior_250d_high', 'breakout_prior_250d_high', 'liquidity_log10_amount'}
+            for decision in decisions:
+                fields.update(decision.get('formation_values') or {})
+            prefixes = ('return_', 'relative_market_', 'relative_industry_return_', 'industry_equal_weight_return_')
+            rows = [{k: v for k, v in r.items() if k in fields or k.startswith(prefixes)} for r in rows]
+        if dataset == 'equity_daily':
+            compact['equity_daily_source'] = {k: rows[-1].get(k) for k in ('source_name', 'source_endpoint', 'quality_status')}
+            rows = [{k: v for k, v in r.items() if k not in ('source_name', 'source_endpoint', 'quality_status', 'vol')}
+                    for r in rows]
+        compact[dataset] = rows
+    return compact
+
+
+def _packet_evidence(trace, ts_code, thesis, as_of, gaps):
+    evidence = []
+    decisions = [d for d in trace.get('decision_trace', [])
+                 if d.get('ts_code') == ts_code and isinstance(d.get('formation_values'), dict)]
+    company = thesis.get('company_information') or {}
+    chain = company.get('disclosure_chain') or {}
+    if str(chain.get('comparison_basis') or '').strip():
+        evidence.append({'id': 'company_report', 'content': chain['comparison_basis'],
+                         'source': chain.get('formal_report') or
+                         'candidate_ledger.research_thesis.company_information.disclosure_chain',
+                         'available_at': as_of})
+    if str(company.get('basis') or '').strip():
+        evidence.append({'id': 'company_basis', 'content': company['basis'],
+                         'source': 'candidate_ledger.research_thesis.company_information.basis'})
+    for decision in decisions:
+        role = decision.get('decision_role')
+        if role in ('support', 'counter', 'comparison', 'discovery'):
+            values = {k: v for k, v in decision['formation_values'].items()
+                      if k not in ('no_account_identity', 'no_position_sizing')}
+            evidence.append({'id': decision.get('decision_id'), 'content': values,
+                             'source': f"decision_trace:{decision.get('decision_id')}",
+                             'source_skill': decision.get('source_skill')})
+    if not evidence:
+        gaps.append('evidence_missing：本股决策轨迹没有可引用的形成值')
+    return evidence
+
+
+def build_article_packet(*, trace: dict, context: dict, ts_code: str, research_handoff: dict) -> dict:
+    """把本版研究中属于这一只股票的判断、证据、条件组织成单股写作包。
+
+    只做确定性提取与既有事实的裁剪，不计算新分数、不发明取舍；研究未形成的
+    内容记入 gaps，不由本函数补出结论。
+    """
+    result = selected_result(trace)
+    stock = next((s for s in result['selected_stocks'] if s['ts_code'] == ts_code), None)
+    if stock is None:
+        raise ValueError(f'{ts_code} 不在本版正式名单中，不能为它写文章')
+    formation, action, as_of = identity(trace)
+    handoff_stocks = research_handoff.get('stocks') or {}
+    handoff_stock = handoff_stocks.get(ts_code) or {}
+    ledger_entry = next((c for c in trace.get('candidate_ledger', []) if c['ts_code'] == ts_code), {})
+    thesis = handoff_stock.get('thesis')
+    if not isinstance(thesis, dict) or not thesis:
+        thesis = ledger_entry.get('research_thesis') or {}
+    gaps = list(research_handoff.get('gaps') or [])
+    decisions = [d for d in trace.get('decision_trace', [])
+                 if d.get('ts_code') == ts_code and isinstance(d.get('formation_values'), dict)]
+
+    reference = None
+    price_decision = next((d for d in decisions
+                           if d.get('decision_role') == 'support' and d['formation_values'].get('close') is not None), None)
+    if price_decision is not None:
+        reference = price_decision['formation_values']['close']
+    else:
+        rows = ((context.get('facts') or {}).get(ts_code) or {}).get('price_observations') or []
+        if rows and rows[0].get('close') is not None:
+            reference = rows[0]['close']
+    if reference is None:
+        gaps.append('reference_price_missing：原研究与上下文都没有可用参考价')
+
+    conditions = None
+    conditions_decision = next((d for d in decisions if d.get('decision_role') == 'action_condition'), None)
+    if conditions_decision is not None and str(conditions_decision['formation_values'].get('condition') or '').strip():
+        conditions = {'text': conditions_decision['formation_values']['condition'],
+                      'tradability': conditions_decision['formation_values'].get('known_tradability'),
+                      'source': conditions_decision['decision_id']}
+    if conditions is None:
+        gaps.append('conditions_missing：本股没有已确定的改变条件，按原样表达未知，不得套用模板')
+
+    counterevidence = {'text': stock.get('strongest_counterevidence')}
+    for key in ('sector_broad_diffusion', 'sector_leader_cluster'):
+        block = thesis.get(key)
+        if isinstance(block, dict) and str(block.get('strongest_counterevidence') or '').strip():
+            counterevidence['related_sector'] = block['strongest_counterevidence']
+    if not str(counterevidence['text'] or '').strip():
+        gaps.append('counterevidence_missing：缺少最强反证')
+
+    mentions = str(stock.get('nearest_comparison') or '')
+    comparison_decision = next((d for d in decisions if d.get('decision_role') == 'comparison'), None)
+    if comparison_decision is not None:
+        mentions += ' ' + json.dumps(comparison_decision['formation_values'], ensure_ascii=False)
+    comparison_codes = []
+    for candidate in trace.get('candidate_ledger', []):
+        code = candidate['ts_code']
+        if code == ts_code:
+            continue
+        name = candidate.get('name') or ''
+        if (name and name in mentions) or code in mentions:
+            comparison_codes.append(code)
+    comparison_fields = ('price_observations', 'industry_observations', 'industry_breadth', 'comparison_windows')
+    comparison_facts = {}
+    for code in comparison_codes:
+        other = (context.get('facts') or {}).get(code) or {}
+        comparison_facts[code] = {k: other[k] for k in comparison_fields if k in other}
+
+    reasoning = {'why_this_stock': handoff_stock.get('reasoning') or thesis.get('short_term_engine'),
+                 'market_recognition': (thesis.get('market_recognition') or {}).get('basis'),
+                 'why_now': thesis.get('catalyst'),
+                 'remaining_path': thesis.get('remaining_path'),
+                 'risk_acceptance': thesis.get('company_risk'),
+                 'propagation': thesis.get('propagation'),
+                 'fundamental_anchor': thesis.get('fundamental_anchor')}
+    packet = {
+        'identity': {'ts_code': ts_code, 'name': stock.get('name'),
+                     'formation_date': formation, 'action_date': action, 'as_of': as_of,
+                     'reference_price': reference, 'observation_contract': OBSERVATION_CONTRACT},
+        'judgment': {'selection_reason': handoff_stock.get('selection_reason') or stock.get('selection_reason'),
+                     'opportunity_type': stock.get('opportunity_type'),
+                     'priority': stock.get('priority'),
+                     'engine_type': thesis.get('engine_type'),
+                     'engine_status': thesis.get('engine_status')},
+        'reasoning': reasoning,
+        'evidence': _packet_evidence(trace, ts_code, thesis, as_of, gaps),
+        'comparisons': {'text': stock.get('nearest_comparison'), 'codes': comparison_codes,
+                        'facts': comparison_facts},
+        'counterevidence': counterevidence,
+        'conditions': conditions,
+        'unknowns': thesis.get('critical_unknown'),
+        'facts': {'definitions': DEFINITIONS,
+                  'own': _compact_own_facts((context.get('facts') or {}).get(ts_code) or {}, decisions),
+                  'market': context.get('market_facts') or []},
+        'source_refs': {'trace_identity': list(identity(trace)),
+                        'decision_ids': [d.get('decision_id') for d in decisions],
+                        'source_skills': ledger_entry.get('source_skills') or [],
+                        'handoff_source': research_handoff.get('handoff_source') or 'trace'},
+        'gaps': gaps + [g for g in (context.get('gaps') or [])
+                        if isinstance(g, dict) and g.get('ts_code') in (None, ts_code)],
+    }
+    return packet
+
+
+# ---------------------------------------------------------------- 作者与审稿输入
+
+
+def _author_material(materials: dict) -> dict:
+    allowed = ('teaching', 'confirmed_writing_guidance', 'reading_guide', 'examples',
+               'component_chars', 'read_paths', 'gaps')
+    return {k: materials[k] for k in allowed if k in materials}
+
+
+def author_prompt(root: Path, *, packet: dict, materials: dict,
+                  prior_article: str | None = None, revision_issues: list | None = None) -> str:
+    if not isinstance(packet, dict) or not packet.get('identity'):
+        raise ValueError('作者必须收到单股研究包，不能从零猜研究')
+    value = {'packet': packet, 'writing_material': _author_material(materials),
+             'prior_article': prior_article, 'revision_issues': revision_issues or []}
+    body = (root / 'ops/recommendation-authoring-prompt.md').read_text(encoding='utf-8')
+    return body + '\n\n本次输入：\n' + json.dumps(value, ensure_ascii=False, separators=(',', ':'))
+
+
+def review_prompt(root: Path, *, article: str, packet: dict, materials: dict) -> str:
+    if not isinstance(article, str) or not article.strip():
+        raise ValueError('审稿必须收到完整文章')
+    value = {'article': article, 'packet': packet, 'writing_material': _author_material(materials)}
+    body = (root / 'ops/recommendation-review-prompt.md').read_text(encoding='utf-8')
+    return body + '\n\n本次输入：\n' + json.dumps(value, ensure_ascii=False, separators=(',', ':'))
+
+
+def parse_author_output(text: str) -> dict:
+    value = json_object(text)
+    article = value.get('article')
+    if not isinstance(article, str) or not article.strip():
+        raise ValueError('作者必须返回完整文章正文')
+    issues = value.get('research_issues')
+    if not isinstance(issues, list):
+        raise ValueError('作者结果缺少research_issues数组')
+    for issue in issues:
+        if not isinstance(issue, dict) or not all(
+                str(issue.get(k) or '').strip() for k in ('ts_code', 'quote', 'problem', 'evidence', 'needed')):
+            raise ValueError('研究问题必须含代码、原句、问题、依据和所需处理')
+    return {'article': article, 'research_issues': issues}
+
+
+def parse_review_output(text: str) -> dict:
+    value = json_object(text)
+    if not isinstance(value.get('reader_summary'), str) or not value['reader_summary'].strip():
+        raise ValueError('审稿必须先复述文章实际传达的判断')
+    result = {'reader_summary': value['reader_summary']}
+    fields = {'readability_issues': ('quote', 'problem', 'instruction'),
+              'fidelity_issues': ('quote', 'problem', 'evidence', 'instruction'),
+              'research_issues': ('ts_code', 'quote', 'problem', 'evidence', 'needed')}
+    for field, keys in fields.items():
+        items = value.get(field)
+        if not isinstance(items, list):
+            raise ValueError(f'审稿结果缺少{field}数组')
+        for item in items:
+            if not isinstance(item, dict) or not all(str(item.get(k) or '').strip() for k in keys):
+                raise ValueError(f'{field}条目不完整')
+        result[field] = items
+    result['ready'] = bool(value.get('ready'))
+    if result['ready'] and (result['readability_issues'] or result['fidelity_issues'] or result['research_issues']):
+        raise ValueError('审稿存在未决问题时不能标为ready')
+    return result
+
+
+# ---------------------------------------------------------------- 作者循环与阶段复用
+
+
+def session_identity(host, provider: str, config: dict, *, text_only: bool = True) -> dict:
+    """影响模型会话行为的显式配置；进入阶段缓存身份。"""
+    return {'provider': provider, 'model_ref': host.model_ref(provider, config),
+            'base_url': host.provider_base_url(provider, config), 'text_only': text_only}
+
+
+def article_stage(host, state: dict, state_path: Path, directory: Path, stage: str, prompt: str,
+                  provider: str, config: dict, *, fallback: bool, contract: str, validate):
+    """未冻结作者/审稿阶段的输入身份复用：身份一致复用，缺失或不一致保留旧文件重建。"""
+    path = directory / f'{stage}-result.json'
+    identity = {'stage': stage, 'contract': contract, 'prompt': prompt,
+                'session': session_identity(host, provider, config, text_only=True)}
+    if path.exists():
+        saved = read_json(path)
+        if saved.get('input_identity') == identity:
+            try:
+                validate(saved['raw'])
+                return saved['raw']
+            except (ValueError, KeyError, TypeError):
+                pass
+        retain_previous(path)
+    raw, route = run_stage(host, state, state_path, directory, stage, prompt, provider, config,
+                           text_only=True, fallback=fallback)
+    validate(raw)
+    save_json(path, {'input_identity': identity, 'raw': raw, 'route': route,
+                     'contract': contract})
+    return raw
+
+
+def run_article_cycle(host, *, packet: dict, materials: dict, directory: Path, state: dict,
+                      state_path: Path, config: dict, provider: str, fallback: bool,
+                      allow_research_changes: bool, expression_limit: int = 2) -> dict:
+    """生产与试写共用的作者循环：作者 → 审稿 → 有限表达修订。
+
+    allow_research_changes=False 时研究问题直接返回 needs_research，不改研究、
+    不硬改判断；True 时由调用方（生产 complete）组织定向返研后重建材料再回到本函数。
+    模型调用失败向上抛出，由调用方决定保存与续跑。
+    """
+    directory.mkdir(parents=True, exist_ok=True)
+    code = packet['identity']['ts_code']
+    tag = code.replace('.', '-')
+    stages = []
+    research_issues: list[dict] = []
+    prior = None
+    revision_issues = None
+    article = None
+    article_path = None
+    review = None
+
+    def result(status):
+        return {'status': status, 'ts_code': code, 'article': article,
+                'adopted': status == 'ready',
+                'article_path': str(article_path) if article_path else None,
+                'stages': stages, 'research_issues': research_issues,
+                'review': review, 'research_source': packet['source_refs'],
+                'provider': provider, 'fallback': fallback}
+
+    for round_index in range(1 + expression_limit):
+        author_stage = f'author-{tag}' if prior is None else f'author-rev{round_index}-{tag}'
+        stages.append(author_stage)
+        prompt = author_prompt(host.PROJECT_ROOT, packet=packet, materials=materials,
+                               prior_article=prior, revision_issues=revision_issues)
+        parsed = parse_author_output(article_stage(
+            host, state, state_path, directory, author_stage, prompt, provider, config,
+            fallback=fallback, contract=AUTHOR_CONTRACT_VERSION, validate=parse_author_output))
+        article = parsed['article']
+        article_path = directory / f'{author_stage}-article.md'
+        article_path.write_text(article + '\n', encoding='utf-8')
+        for issue in parsed['research_issues']:
+            if issue not in research_issues:
+                research_issues.append(issue)
+        if research_issues:
+            # 研究问题不由作者硬改：试写（False）直接返回；生产（True）由调用方返研后重建。
+            return result('needs_research')
+        review_stage = f'review-{tag}' if prior is None else f'review-rev{round_index}-{tag}'
+        stages.append(review_stage)
+        review_raw = article_stage(
+            host, state, state_path, directory, review_stage,
+            review_prompt(host.PROJECT_ROOT, article=article, packet=packet, materials=materials),
+            provider, config, fallback=fallback, contract=REVIEW_CONTRACT_VERSION,
+            validate=parse_review_output)
+        review = parse_review_output(review_raw)
+        (directory / f'{review_stage}-review.json').write_text(
+            json.dumps(review, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+        for issue in review['research_issues']:
+            if issue not in research_issues:
+                research_issues.append(issue)
+        if research_issues:
+            return result('needs_research')
+        blocking = review['readability_issues'] + review['fidelity_issues']
+        if not blocking and review['ready']:
+            return result('ready')
+        if round_index >= expression_limit:
+            break
+        prior = article
+        revision_issues = blocking
+    return result('needs_revision')
+
+
+def assemble_stock_section(entries: list) -> str:
+    """把采用文章按正式名单顺序装配为推荐分区；只补逐股标题行，不改正文。"""
+    parts = []
+    for stock, article in entries:
+        name, code = stock.get('name'), stock.get('ts_code')
+        body = (article or '').strip()
+        for sub in ARTICLE_SUBHEADINGS:
+            if f'**{sub}**' not in body:
+                raise ValueError(f'{name}（{code}）文章缺少小标题：{sub}')
+        parts.append(f'### {name}（{code}）\n\n{body}')
+    if not parts:
+        raise ValueError('没有可装配的采用文章')
+    return '\n\n'.join(parts) + '\n'
+
+
+def _sorted_stocks(stocks: list) -> list:
+    try:
+        return sorted(stocks, key=lambda s: int(s.get('priority')))
+    except (TypeError, ValueError):
+        return stocks
+
+
+# ---------------------------------------------------------------- 阶段执行
 
 
 def run_stage(host, state: dict, state_path: Path, directory: Path, stage: str,
@@ -244,15 +568,14 @@ def run_stage(host, state: dict, state_path: Path, directory: Path, stage: str,
             if stage == 'research':
                 pending = host.PROJECT_ROOT / 'local_archive/forward_selection' / f"pending-trace-{state['formation_date']}.json"
                 saved_report = directory / 'research-reply.md'
-                from nightly_report import source_sections
-                try:
-                    source_sections(host.PROJECT_ROOT, state['formation_date'], as_of=state['selection_as_of'])
-                    monitor = '正式复盘已通过原装配合同核对；直接复用，不能改写'
-                except (OSError, ValueError) as error:
-                    monitor = f'正式复盘仍有缺项：{error}'
-                handoff = (f'\n本阶段交接：完整报告必须先保存到 {saved_report}，再返回同一完整报告。'
-                    f'pending 路径为 {pending}，现有 pending={pending.exists()}；{monitor}。'
-                    '如已有中间研究，先按原身份核验，只补缺失，不重新从零扫描；未冻结研究改变须同步 pending 和完整稿。')
+                handoff = (f'\n本阶段交接：本会话只做选股研究。把完整 pending trace 保存到 {pending}，'
+                    f'把市场说明正文（含独立标题行 `## 今天的市场情况`）保存到 {saved_report}，'
+                    f'并把市场正文与逐股研究取舍（理由、证据引用、比较对象、改变条件及来源）'
+                    f'写入 {directory / "selection-handoff.json"}；完成后返回同一市场说明。'
+                    '不执行正式复盘（复盘由独立会话执行）、不写逐股最终推荐文章、'
+                    '不生成四分区整篇日报、不运行 selection record/record-trace。'
+                    '如已有中间研究，先按原身份核验，只补缺失，不重新从零扫描；'
+                    '未冻结研究改变须同步 pending 与交接文件。')
                 prompt_path = directory / f'{stem}-{route}-input.md'
                 prompt_path.write_text(prompt + handoff)
                 entry['input'] = str(prompt_path)
@@ -266,7 +589,7 @@ def run_stage(host, state: dict, state_path: Path, directory: Path, stage: str,
             if stage == 'research':
                 code, diag = host.run_task_agent(route, prompt_path, output, events, {**config, '_handoff_only': True}, state, state_path)
             else:
-                code, diag = host.run_agent(route, prompt_path, output, events, None, {**config, '_text_only': text_only, '_handoff_only': stage.startswith('research-')})
+                code, diag = host.run_agent(route, prompt_path, output, events, None, {**config, '_text_only': text_only, '_handoff_only': False})
             evidence = host.EvidenceBox.get(route).copy()
             entry.update(exit_code=code, evidence=evidence, status='completed' if code == 0 else 'failed')
             if stage == 'research':
@@ -314,16 +637,13 @@ def recover_research_handoff(host, state: dict, directory: Path) -> str | None:
     pending = host.PROJECT_ROOT / 'local_archive/forward_selection' / f"pending-trace-{state['formation_date']}.json"
     if not report.exists() or not pending.exists():
         return None
-    from nightly_report import source_sections, report_parts
+    from nightly_report import market_section_text
     try:
         trace = read_json(pending)
         if identity(trace) != (state['formation_date'], state['action_date'], state['selection_as_of']):
             return None
         validate_pending(host.PROJECT_ROOT, trace, state.get('prepare', {}))
-        report_parts(report.read_text())
-        source_sections(host.PROJECT_ROOT, state['formation_date'], as_of=state['selection_as_of'])
-        if selected_result(trace)['selected_stocks']:
-            recommendation_draft(host, report, trace)
+        market_section_text(report.read_text())
         return report.read_text()
     except (OSError, ValueError):
         return None
@@ -411,15 +731,79 @@ def replace_recommendation(report: str, section: str) -> str:
     return report[:match.end()] + '\n\n' + section.strip() + '\n'
 
 
+# ---------------------------------------------------------------- 生产主流程
+
+
+def _author_articles(host, state, state_path, directory, config, provider, root,
+                     trace, expected, *, fallback, repair_limit):
+    """逐股作者循环；研究问题触发定向返研后回到作者，不跳过成稿。"""
+    repair_count = 0
+    while True:
+        trace = read_json(directory / 'context-trace.json')
+        if identity(trace) != expected:
+            raise ValueError('作者循环开始前pending与本轮身份不一致')
+        context = build_context(root, trace, cited_text=handoff_from_trace(trace)['market'])
+        save_json(directory / 'recommendation-context.json', context)
+        material = writing_material(root, expected[2], list(context['facts']))
+        save_json(directory / 'writing-material.json', material)
+        handoff = selection_handoff(directory, trace)
+        stocks = _sorted_stocks(selected_result(trace)['selected_stocks'])
+        statuses = {}
+        articles_dir = directory / 'articles'
+        for stock in stocks:
+            code = stock['ts_code']
+            packet = build_article_packet(trace=trace, context=context, ts_code=code,
+                                          research_handoff=handoff)
+            save_json(articles_dir / f'{code}-packet.json', packet)
+            statuses[code] = run_article_cycle(
+                host, packet=packet, materials=material,
+                directory=articles_dir / code, state=state, state_path=state_path,
+                config=config, provider=provider, fallback=fallback,
+                allow_research_changes=True)
+        unresolved = {c: s for c, s in statuses.items() if s['status'] != 'ready'}
+        if not unresolved:
+            return assemble_stock_section([(s, statuses[s['ts_code']]['article']) for s in stocks]), trace
+        failed = {c: s for c, s in unresolved.items() if s['status'] == 'failed'}
+        if failed:
+            raise RuntimeError(f'作者阶段失败：{sorted(failed)}；保留产物等待续跑')
+        needs_research = {c: s for c, s in unresolved.items() if s['status'] == 'needs_research'}
+        if needs_research and repair_count < repair_limit:
+            repair_count += 1
+            issues = [i for s in needs_research.values() for i in s['research_issues']]
+            pending = root / 'local_archive/forward_selection' / f'pending-trace-{expected[0]}.json'
+            research_reply = directory / 'research-reply.md'
+            prompt = ('你是本轮选股研究负责人，处理作者发现的下列具体研究问题。'
+                '按原prepare身份核对原截止事实：只修研究与交接，不接管文章，不重新扫描全市场，'
+                '不运行prepare/record/record-trace，不生成网页或公司介绍。'
+                '需要改变研究时同步pending全部相关字段、去留、排序与selection-handoff.json；'
+                '市场说明因此改变时同步research-reply.md对应段落。'
+                '审稿或作者意见不自动成立，由你核对；已接受风险与明确未知仍保留。'
+                '只输出JSON，含resolutions数组（quote、evidence、decision）和unresolved数组；'
+                'unresolved仅列未处理且影响本次取舍的问题。完成文件更新后再返回JSON。\n'
+                f'pending={pending}；完整报告={research_reply}；交接={directory / "selection-handoff.json"}\n'
+                + json.dumps({'identity': expected, 'issues': issues}, ensure_ascii=False))
+            run_stage(host, state, state_path, directory, 'research-repair', prompt,
+                      provider, config, text_only=False, fallback=fallback)
+            revised = read_json(pending)
+            if identity(revised) != expected:
+                raise ValueError('研究修复改变时间身份')
+            validate_pending(root, revised, state.get('prepare', {}))
+            save_json(directory / 'context-trace.json', revised)
+            continue
+        details = {c: (s['research_issues'] or (s.get('review') or {}).get('readability_issues', []))
+                   for c, s in unresolved.items()}
+        raise ValueError(f'作者循环仍有未决问题，保留草稿不冻结：{json.dumps(details, ensure_ascii=False)[:2000]}')
+
+
 def complete(host, state: dict, state_path: Path, directory: Path, config: dict,
-             provider: str, research_prompt: str) -> tuple[Path, str]:
+             provider: str, research_prompt: str, *, fallback=True) -> tuple[Path, str]:
     root = host.PROJECT_ROOT
     expected = (state['formation_date'], state['action_date'], state['selection_as_of'])
     pending = root / 'local_archive/forward_selection' / f'pending-trace-{expected[0]}.json'
     frozen = pending.with_name(f'research-trace-{expected[0]}.json')
     accepted_path = directory / 'accepted-recommendation.json'
     research_reply = directory / 'research-reply.md'
-    state['recommendation_pipeline'] = 'prefreeze-v1'
+    state['recommendation_pipeline'] = 'article-v1'
     host.save_state(state_path, state)
     directory.mkdir(parents=True, exist_ok=True)
     if accepted_path.exists():
@@ -431,7 +815,8 @@ def complete(host, state: dict, state_path: Path, directory: Path, config: dict,
         if frozen.exists() or csv_has_formation(root, expected[0]):
             raise ValueError('已有正式选择但缺少与之对应的冻结前采用稿；保留原记录，不重新选股')
         if not research_reply.exists():
-            reply, provider = run_stage(host, state, state_path, directory, 'research', research_prompt, provider, config, text_only=False)
+            reply, provider = run_stage(host, state, state_path, directory, 'research', research_prompt,
+                                        provider, config, text_only=False, fallback=fallback)
             if frozen.exists() or csv_has_formation(root, expected[0]):
                 raise ValueError('研究阶段提前冻结，不能再进入写作改研究；保留产物等待核对')
             if not pending.exists():
@@ -444,142 +829,75 @@ def complete(host, state: dict, state_path: Path, directory: Path, config: dict,
             raise ValueError('pending研究与prepare身份不一致')
         repair_path = directory / 'research-resolution.json'
         repair = read_json(repair_path) if repair_path.exists() else None
-        # A started repair can have updated only one of the two files. Finish it
-        # before validating/using its draft or reusing any editorial output.
-        repairing = repair is not None and repair.get('status') == 'started'
-        if not repairing:
-            try:
-                validate_pending(root, trace, state.get('prepare', {}))
-            except ValueError as error:
-                save_json(repair_path, {'status': 'started', 'before_trace': trace,
-                    'issues': [{'quote': 'pending研究合同', 'problem': str(error), 'evidence': str(error)}]})
-                prompt = ('本轮pending未通过原有研究合同，按错误定向修正，不能删减必填证据、改时间或降回旧版。'
-                          '不运行prepare/record、不重新扫描股票、不生成网页。修正研究时同步推荐草稿。'
-                          f'pending={pending}；完整报告={research_reply}；'
-                          f'prepare={json.dumps(state["prepare"],ensure_ascii=False)}；错误={error}')
-                run_stage(host, state, state_path, directory, 'research-contract-repair', prompt, provider, config, text_only=False)
-                trace = read_json(pending)
-                if identity(trace) != expected:
-                    raise ValueError('合同修复改变时间身份')
-                validate_pending(root, trace, state.get('prepare', {}))
-                if selected_result(trace)['selected_stocks']:
-                    recommendation_draft(host, research_reply, trace)
+        if repair is not None and repair.get('status') == 'started' and 'before_section' in repair:
+            # 旧写审流程的定向修复检查点：按当前pending在新流程重建，不沿用旧稿。
+            retain_previous(repair_path)
+            repair = None
+        try:
+            validate_pending(root, trace, state.get('prepare', {}))
+            if repair is not None:
+                # 中断的合同修复已由上次会话完成：核对通过即清除检查点。
                 retain_previous(repair_path)
+        except ValueError as error:
+            save_json(repair_path, {'status': 'started', 'kind': 'contract', 'issues':
+                [{'quote': 'pending研究合同', 'problem': str(error), 'evidence': str(error)}]})
+            prompt = ('本轮pending未通过原有研究合同，按错误定向修正，不能删减必填证据、改时间或降回旧版。'
+                      '不运行prepare/record、不重新扫描股票、不生成网页、不写推荐文章。'
+                      '修正研究时同步pending；市场说明因此改变时同步research-reply.md对应段落。'
+                      f'pending={pending}；完整报告={research_reply}；'
+                      f'prepare={json.dumps(state["prepare"],ensure_ascii=False)}；错误={error}')
+            run_stage(host, state, state_path, directory, 'research-contract-repair', prompt,
+                      provider, config, text_only=False, fallback=fallback)
+            trace = read_json(pending)
+            if identity(trace) != expected:
+                raise ValueError('合同修复改变时间身份')
+            validate_pending(root, trace, state.get('prepare', {}))
+            retain_previous(repair_path)
+        if not pending.exists() or identity(read_json(pending)) != expected:
+            raise ValueError('pending研究与本轮身份不一致')
+        validate_pending(root, trace, state.get('prepare', {}))
+        save_json(directory / 'context-trace.json', trace)
+        result = selected_result(trace)
+        if result['selected_stocks']:
+            section, trace = _author_articles(host, state, state_path, directory, config,
+                                              provider, root, trace, expected,
+                                              fallback=fallback, repair_limit=1)
+        else:
+            section = '今天没有明确推荐的股票。' + result['empty_reason']
+            save_json(directory / 'context-trace.json', trace)
+        # 独立复盘会话：已有同版正式产物直接复用，缺失时由单独会话按原合同执行。
+        monitor_dir = directory / 'monitor'
+        ledger_ok, report_ok = host.monitor_artifacts_status(expected[0])
+        if not (ledger_ok and report_ok):
+            monitor_prompt = host.write_monitor_prompt(state, monitor_dir)
+            run_stage(host, state, state_path, monitor_dir, 'monitor', monitor_prompt.read_text(encoding='utf-8'),
+                      provider, config, text_only=False, fallback=fallback)
+        # 汇合核对：作者与复盘期间研究不得改变；复盘产物必须通过原装配合同。
+        if read_json(pending) != trace:
+            raise ValueError('写审与复盘期间研究改变，不能冻结旧结果')
         from nightly_report import source_sections
         source_sections(root, expected[0], as_of=expected[2])
-        if repair is None:
-            result = selected_result(trace)
-            if not result['selected_stocks']:
-                section = '今天没有明确推荐的股票。' + result['empty_reason']
-            else:
-                try:
-                    original = recommendation_draft(host, research_reply, trace)
-                except ValueError as error:
-                    save_json(repair_path, {'status': 'started', 'before_trace': trace, 'draft_only': True,
-                        'issues': [{'quote': '总控推荐草稿', 'problem': str(error), 'evidence': str(error)}]})
-                    prompt = ('你是本轮总控。按已有pending最终判断定向补齐推荐分区完整草稿，'
-                              '沿用三个逐股小标题；实读现有写作教学与适用范文。不得改名单、研究判断、时间，'
-                              '不得扫描、prepare、record或同步网页；不改市场和已归档复盘。'
-                              '若原研究有问题须如实报告，不自行绕过。只更新完整报告中的推荐分区后结束。'
-                              f'pending={pending}；完整报告={research_reply}；缺项={error}')
-                    run_stage(host, state, state_path, directory, 'research-draft-repair', prompt, provider, config, text_only=False)
-                    if read_json(pending) != trace:
-                        raise ValueError('补交总控稿改变了研究判断，须先完成总控同步核对')
-                    original = recommendation_draft(host, research_reply, trace)
-                    retain_previous(repair_path)
-                context = build_context(root, trace, cited_text=original)
-                save_json(directory / 'recommendation-context.json', context)
-                save_json(directory / 'context-trace.json', trace)
-                material = writing_material(root, expected[2], list(context['facts']))
-                save_json(directory / 'writing-material.json', material)
-                draft = edit_stage(host, state, state_path, directory, config, provider, 'writing',
-                                   context, material, trace, original, original)
-                reviewed = edit_stage(host, state, state_path, directory, config, provider, 'review',
-                                      context, material, trace, original, draft['section'], draft['edits'])
-                problems = []
-                for issue in draft['research_issues'] + reviewed['research_issues']:
-                    if issue not in problems:
-                        problems.append(issue)
-                if problems:
-                    repair = {'status': 'started', 'before_trace': trace,
-                              'before_section': original, 'issues': problems}
-                    save_json(repair_path, repair)
-                else:
-                    section = reviewed['section']
-        if repair is not None:
-            if repair.get('status') != 'completed':
-                # Legacy pending repairs also return to the owner; a prior editor
-                # article is never promoted to a research-authored draft.
-                repair_prompt = (
-                    '你是本轮总控研究者，处理冻结前的具体问题或完成中断的定向修复。'
-                    '读取总控及涉及的专业Skill，保持原prepare身份；只用原as_of内事实。'
-                    '不重新扫描全市场，不调用prepare/record，不生成公司介绍或网页。'
-                    '若repair中draft_only为true，本次只补齐草稿，不得改变before_trace中的名单和判断。'
-                    '审稿意见不自动成立，由你核对。只有文章说错且原研究和事实一致时修文章即可；'
-                    '实际需要改变研究时同步pending全部相关字段、去留和完整报告中的推荐草稿。'
-                    '不能让审稿者代写新判断；草稿须完整表达当前主因、证据、比较、反证、风险接受和条件。'
-                    '若上次只改了一份文件，本次先完成两份同步。保留报告四个总标题、市场说明和已归档复盘；'
-                    '研究确实影响市场说明时只同步对应段落。'
-                    '不靠全部改等待交差，不引入新阈值。已接受风险和明确未知仍保留，未决不要求未知清零。'
-                    '只输出JSON，含resolutions数组（quote、evidence、decision）和unresolved数组；'
-                    'unresolved仅列未处理且影响本次取舍的问题。完成文件更新后再返回JSON。\n'
-                    f'pending={pending}；完整报告={research_reply}；事实入口={directory / "recommendation-context.json"}\n'
-                    + json.dumps({'identity': expected, 'repair': repair}, ensure_ascii=False))
-                # Save the checkpoint before calling the researcher so interrupted
-                # trace-only or article-only changes are never mistaken for ready.
-                repair['status'] = 'started'
-                save_json(repair_path, repair)
-                raw, _ = run_stage(host, state, state_path, directory, 'research-repair', repair_prompt, provider, config, text_only=False)
-                resolved = json_object(raw)
-                if not isinstance(resolved.get('unresolved'), list) or not isinstance(resolved.get('resolutions'), list):
-                    raise ValueError('总控缺少逐项解决记录')
-                trace = read_json(pending)
-                if repair.get('draft_only') and trace != repair['before_trace']:
-                    raise ValueError('补交总控稿改变了研究判断，须先完成总控同步核对')
-                if identity(trace) != expected:
-                    raise ValueError('研究修复改变时间身份')
-                validate_pending(root, trace, state.get('prepare', {}))
-                result = selected_result(trace)
-                original = (recommendation_draft(host, research_reply, trace) if result['selected_stocks']
-                            else '今天没有明确推荐的股票。' + result['empty_reason'])
-                repair.update(status='completed', after_trace=trace, after_section=original,
-                              resolutions=resolved['resolutions'], unresolved=resolved['unresolved'])
-                save_json(repair_path, repair)
-            if repair['unresolved']:
-                raise ValueError('总控仍有未决研究问题；保留pending，未冻结')
-            trace = read_json(pending)
-            result = selected_result(trace)
-            original = (recommendation_draft(host, research_reply, trace) if result['selected_stocks']
-                        else '今天没有明确推荐的股票。' + result['empty_reason'])
-            if trace != repair['after_trace'] or original != repair['after_section']:
-                raise ValueError('研究修复后判断或总控稿改变，须先完成对应修复记录，不能套用旧稿')
-            if result['selected_stocks']:
-                context = build_context(root, trace, cited_text=original)
-                context['research_resolutions'] = repair['resolutions']
-                save_json(directory / 'resolved-context.json', context)
-                # Both facts and example exclusions follow the revised list.
-                material = writing_material(root, expected[2], list(context['facts']))
-                save_json(directory / 'resolved-writing-material.json', material)
-                reviewed = edit_stage(host, state, state_path, directory, config, provider, 'review-after-research',
-                                      context, material, trace, original, original)
-                if reviewed['research_issues']:
-                    raise ValueError('定向修复后仍有实质问题，保留具体问题等待总控继续，不冻结')
-                section = reviewed['section']
-            else:
-                section = original
-        # Edits may take time. Do not freeze if their source changed meanwhile.
-        if read_json(pending) != trace:
-            raise ValueError('写审期间研究改变，不能冻结旧结果')
-        if selected_result(trace)['selected_stocks'] and recommendation_draft(host, research_reply, trace) != original:
-            raise ValueError('写审期间总控稿改变，不能冻结旧结果')
-        from nightly_report import report_parts
-        report_parts(research_reply.read_text())  # Also validate the empty-list handoff.
         accepted = {'trace': trace, 'section': section.strip(), 'research_issues': []}
         validate_accepted(host, accepted, expected)
         save_json(accepted_path, accepted)  # Must precede the CSV write and trace move.
-    from nightly_report import source_sections
+    from nightly_report import market_section_text, report_parts, source_sections
     source_sections(root, expected[0], as_of=expected[2])
     freeze(host, root, accepted, pending, config)
     final = directory / 'reviewed-reply.md'
-    final.write_text(replace_recommendation(research_reply.read_text(), accepted['section']))
+    reply_text = research_reply.read_text()
+    try:
+        report_parts(reply_text)  # 旧流程四分区研究回复：按原衔接方式恢复，不另装配。
+        final.write_text(replace_recommendation(reply_text, accepted['section']))
+    except ValueError:
+        final.write_text(nightly_assemble_from_sources(
+            root, expected[0], expected[1], expected[2],
+            market_text=market_section_text(reply_text),
+            accepted_section=accepted['section'], accepted_path=accepted_path))
     return final, state.get('model_provider') or provider
+
+
+def nightly_assemble_from_sources(root, formation, action, as_of, *, market_text,
+                                  accepted_section, accepted_path):
+    from nightly_report import assemble_from_sources
+    return assemble_from_sources(root, formation, action, as_of, market_text=market_text,
+                                 accepted_section=accepted_section, accepted_path=accepted_path)

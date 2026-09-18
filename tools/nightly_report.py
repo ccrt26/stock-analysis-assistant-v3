@@ -70,6 +70,50 @@ def report_parts(draft: str) -> tuple[str, list[str]]:
     return text[:spans[0].start()].strip(), bodies
 
 
+def market_section_text(reply: str) -> str:
+    """选股研究会话交接中的市场说明正文；只截取到下一个一/二级标题。"""
+    text = reply.replace("\r\n", "\n")
+    match = re.search(r"^## 今天的市场情况[ \t]*$", text, re.M)
+    if not match:
+        raise ValueError("研究交接缺少市场说明分区")
+    start = match.end()
+    boundary = re.search(r"^#{1,2}[ \t]+", text[start:], re.M)
+    body = text[start:start + boundary.start()] if boundary else text[start:]
+    if not body.strip():
+        raise ValueError("市场说明分区为空")
+    return body.strip()
+
+
+def assemble_from_sources(root: Path, formation: str, action: str, as_of: str, *,
+                          market_text: str, accepted_section: str,
+                          accepted_path: Path | None = None) -> str:
+    """由各自产物装配原四个总标题：选股市场说明 + 已存复盘 + 正式统计 + 采用正文。
+
+    不调用模型、不改写任何来源正文；装配前核对与 assemble_reply 相同的正式合同。
+    """
+    try:
+        import stock_ai
+    except ImportError:
+        from tools import stock_ai
+    for check in (stock_ai.strict_archive_check, stock_ai.forward_csv_matches_trace):
+        ok, detail = check(formation, action, as_of, root=root)
+        if not ok:
+            raise ValueError(f"装配前正式归档核对失败：{detail}")
+    review_text, counts = source_sections(root, formation, as_of=as_of)
+    bodies = [market_text.strip(), review_text, counts, accepted_section.strip()]
+    if accepted_path is not None:
+        accepted = json.loads(accepted_path.read_text(encoding="utf-8"))
+        trace = json.loads((root / "local_archive/forward_selection" / f"research-trace-{formation}.json").read_text())
+        if accepted.get("trace") != trace or accepted.get("research_issues") != []:
+            raise ValueError("采用正文与正式研究不一致或仍有未决问题")
+        problems = stock_ai._recommendation_section_issues(accepted["section"], formation, root=root)
+        if problems:
+            raise ValueError("；".join(problems))
+        bodies[3] = accepted["section"].strip()
+    assembled = "\n\n".join(f"## {title}\n\n{body}" for title, body in zip(SECTIONS, bodies)) + "\n"
+    return assembled
+
+
 def assemble_reply(draft: str, formation: str, action: str, as_of: str, *, root: Path, accepted_path: Path | None = None) -> str:
     try:
         import stock_ai

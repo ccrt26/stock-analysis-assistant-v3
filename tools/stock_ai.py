@@ -1936,15 +1936,29 @@ def write_nightly_prompt(state: dict, attempt_dir: Path,
             "合并时不重写、不删减原推荐背景等已记录内容。\n"
         )
     managed_note = ""
-    if state.get("recommendation_pipeline") == "prefreeze-v1" and not force_already_selected:
+    if state.get("recommendation_pipeline") in ("prefreeze-v1", "article-v1") and not force_already_selected:
         managed_note = (
-            "本次为 managed 新研究：你交付完整 pending trace、与最终判断一致的完整推荐草稿、市场说明和按原合同已归档的正式复盘。"
+            "本次为 managed 新研究的选股研究会话（article-v1 分工）：你只做选股研究，交付完整 pending trace、"
+            "市场说明正文（含独立标题行 `## 今天的市场情况`，保存为 research-reply.md）和 selection-handoff.json"
+            "（市场正文与逐股研究取舍：理由、证据引用、比较对象、改变条件及来源）。"
             "不要执行 selection record/record-trace，不生成公司介绍，不同步网页。"
-            "少量候选验证时即可按代码/截止/类别调用 recommendation_context，核对财务可得期间与同口径行业事实；保留完整原因、反证、风险接受理由及改变条件。"
-            "实读现有写作教学和适用范文，最终回复用原四个总标题，推荐分区写完整可读草稿，不能留待外层代写。"
-            "外层接续局部润色、全文忠实核对和必要的研究返回；总控改判断时同步草稿，全部一致后才调用 record-trace。"
-            "这段分工覆盖 Prompt 中由同一模型写稿/保存/同步/介绍的手动执行步骤；复盘记录步骤仍须完成。\n"
+            "正式复盘由外层另起的独立复盘会话按 " + MONITOR_PROMPT + " 执行，本会话不做复盘；"
+            "逐股最终推荐文章由作者会话按单股研究包生成，本会话不写四分区整篇日报、不写推荐正文。"
+            "少量候选验证时即可按代码/截止/类别调用 recommendation_context，核对财务可得期间与同口径行业事实；"
+            "保留完整原因、反证、风险接受理由及改变条件。"
+            "这段分工覆盖 Prompt 中由同一模型写稿/复盘/保存/同步/介绍的手动执行步骤。\n"
         )
+    managed = state.get("recommendation_pipeline") in ("prefreeze-v1", "article-v1") and not force_already_selected
+    if managed:
+        prompt_reference = (
+            "\n请完整读取并严格执行项目根目录下的 " + SELECTION_PROMPT + "（managed 模式下的复盘由独立会话执行，"
+            "本会话不执行其中引用的 " + MONITOR_PROMPT + " 的复盘步骤）。"
+            "不要启动新的模型进程；不要修改代码；不要追加开发收尾说明。\n")
+    else:
+        prompt_reference = (
+            "\n请完整读取并严格执行项目根目录下的 " + SELECTION_PROMPT + "，"
+            "包括其中引用的 " + MONITOR_PROMPT + "。"
+            "不要启动新的模型进程；不要修改代码；不要追加开发收尾说明。\n")
     preamble = (
         "【外层启动说明（启动器生成，非研究内容）】\n"
         "本次任务由本地启动器 tools/stock_ai.py 经 launchd/人工命令启动，"
@@ -1958,12 +1972,43 @@ def write_nightly_prompt(state: dict, attempt_dir: Path,
         "禁止一次性读入超长文件，避免上下文溢出。\n"
         "prepare 摘要 JSON：\n"
         f"{json.dumps(state.get('prepare', {}), ensure_ascii=False)}\n"
-        "\n请完整读取并严格执行项目根目录下的 " + SELECTION_PROMPT + "，"
-        "包括其中引用的 " + MONITOR_PROMPT + "。"
-        "不要启动新的模型进程；不要修改代码；不要追加开发收尾说明。\n"
+        + prompt_reference
     )
     attempt_dir.mkdir(parents=True, exist_ok=True)
     path = attempt_dir / "prompt.md"
+    path.write_text(preamble, encoding="utf-8")
+    return path
+
+
+def write_monitor_prompt(state: dict, attempt_dir: Path) -> Path:
+    """独立复盘会话的启动说明：只负责已有正式推荐的当日复盘与原合同保存。"""
+    formation = state["formation_date"]
+    action = state["action_date"]
+    as_of = state["selection_as_of"]
+    rerun_note = ""
+    if state.get("rerun_mode"):
+        rerun_note = (
+            "这是对原计划任务的补跑：复盘仍使用原计划交易日前一自然日18:30的固定截止；"
+            "当前价格不能替代当时的事实。\n"
+        )
+    preamble = (
+        "【外层启动说明（启动器生成，非研究内容）】\n"
+        "本次为独立复盘会话（article-v1 分工）：只负责已有正式推荐的当日复盘分析、统一分类、"
+        "逐篇正文与原合同保存（record-daily-formal-reviews 与 monitor record，全部应复盘记录覆盖，"
+        "节点/详评/简评互斥与上限不变，D20固定结案不改）。"
+        "不重新选股、不写或改 pending 研究、不写逐股推荐文章、不装配日报、"
+        "不做网页同步、不生成公司介绍、不运行 selection prepare/record/record-trace。"
+        f"时间身份：formation_date={formation}，action_date={action}，selection_as_of={as_of}，不得改变。\n"
+        f"{rerun_note}"
+        "工程内存在较大的 JSON/Markdown 文件：读取时必须分段或按需检索，"
+        "避免上下文溢出。\n"
+        "prepare 摘要 JSON：\n"
+        f"{json.dumps(state.get('prepare', {}), ensure_ascii=False)}\n"
+        "\n请完整读取并严格执行项目根目录下的 " + MONITOR_PROMPT + "。"
+        "不要启动新的模型进程；不要修改代码；不要追加开发收尾说明。\n"
+    )
+    attempt_dir.mkdir(parents=True, exist_ok=True)
+    path = attempt_dir / "monitor-prompt.md"
     path.write_text(preamble, encoding="utf-8")
     return path
 
@@ -2290,8 +2335,8 @@ def run_nightly(args: argparse.Namespace, config: dict, lock: TaskLock,
             existing_reply, source_state = existing
             archive_dir.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(existing_reply, reply_target)
-            if source_state.get("recommendation_pipeline") == "prefreeze-v1":
-                state["recommendation_pipeline"] = "prefreeze-v1"
+            if source_state.get("recommendation_pipeline") in ("prefreeze-v1", "article-v1"):
+                state["recommendation_pipeline"] = source_state.get("recommendation_pipeline", "article-v1")
                 original = existing_reply.parent / "recommendation/accepted-recommendation.json"
                 target = archive_dir / "recommendation/accepted-recommendation.json"
                 if original.exists():
@@ -2323,8 +2368,8 @@ def run_nightly(args: argparse.Namespace, config: dict, lock: TaskLock,
             )
 
     # Managed new research resumes from retained artifacts, never from a fresh selection.
-    if state.get("recommendation_pipeline") == "prefreeze-v1" or not art["trace_ok"]:
-        state["recommendation_pipeline"] = "prefreeze-v1"
+    if state.get("recommendation_pipeline") in ("prefreeze-v1", "article-v1") or not art["trace_ok"]:
+        state["recommendation_pipeline"] = "article-v1"
         save_state(path, state)
         order, _ = resolve_provider_order("nightly", args.provider, config, today)
         state.setdefault("provider_order", order)
