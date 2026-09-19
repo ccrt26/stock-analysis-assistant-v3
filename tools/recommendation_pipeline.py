@@ -15,8 +15,8 @@ from stock_analyzer.ops.recommendation_context import DEFINITIONS, build_context
 # 作者/审稿阶段输出合同版本；进入阶段缓存身份，合同变化即不复用旧结果。
 # v2（2026-09-19）：作者输入含有效包与全部已核实处理；审稿输入含issue_resolutions、
 # pending_issue_checks，输出含issue_kind与issue_checks。
-AUTHOR_CONTRACT_VERSION = 'article-author-v3'
-REVIEW_CONTRACT_VERSION = 'article-review-v3'
+AUTHOR_CONTRACT_VERSION = 'article-author-v4'
+REVIEW_CONTRACT_VERSION = 'article-review-v4'
 CLARIFICATION_CONTRACT_VERSION = 'research-clarification-v2'
 # 正式推荐正文固定小标题；作者正文必须自带，程序只补逐股标题行。
 ARTICLE_SUBHEADINGS = ('公司主要做什么', '为什么会选它', '什么情况会让我改变看法')
@@ -745,9 +745,8 @@ def build_effective_packet(initial_packet: dict, resolutions: list) -> dict:
 
 
 def _author_material(materials: dict) -> dict:
-    allowed = ('teaching', 'confirmed_writing_guidance', 'reading_guide', 'examples',
-               'component_chars', 'read_paths', 'gaps')
-    return {k: materials[k] for k in allowed if k in materials}
+    """写作仅收到阅读指南和原规则选出的范文；其他字段保留在材料记录中，不叠加给作者。"""
+    return {key: materials[key] for key in ('reading_guide', 'examples') if key in materials}
 
 
 def author_prompt(root: Path, *, packet: dict, materials: dict,
