@@ -978,11 +978,14 @@ def run_zcode(
         project_settings = workdir / ".zcode/config.json"
         project_settings.parent.mkdir()
         shutil.copyfile(settings, project_settings)
-        # 0.16.5 advertises --settings/--allowed-tools but does not parse them.
-        # Project config and --disallowed-tools are supported by the installed CLI.
+        # Verified against CLI 0.16.9: project config and --disallowed-tools
+        # are parsed. Keep the original exclusions plus its workflow tools;
+        # actual request evidence must still prove that no tools were offered.
         args += ["--disallowed-tools",
                  "AskUserQuestion,Bash,Edit,EnterPlanMode,ExitPlanMode,Read,ReadSessionContext,"
-                 "TaskOutput,TaskStop,TodoRead,TodoWrite,WebFetch,WebSearch,Write,Glob,Grep,Skill,Agent,Task"]
+                 "TaskOutput,TaskStop,TodoRead,TodoWrite,WebFetch,WebSearch,Write,Glob,Grep,Skill,Agent,Task,"
+                 "AmendWorkflow,CreateWorkflow,EvalWorkflowSnippet,GetWorkflowRun,ListModels,"
+                 "ListSavedWorkflows,ListWorkflowRuns,ResolveWorkflowQuestion,ResumeWorkflowRun,SaveWorkflow"]
     # --attach only previews a long file and asks the model to Read the rest.
     # Editors have no tools, so pass the complete text through --prompt.
     stderr_path = jsonl_path.with_suffix(".stderr.log")

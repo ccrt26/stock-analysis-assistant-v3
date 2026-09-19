@@ -15,7 +15,7 @@ from stock_analyzer.ops.recommendation_context import DEFINITIONS, build_context
 # 作者/审稿阶段输出合同版本；进入阶段缓存身份，合同变化即不复用旧结果。
 # v2（2026-09-19）：作者输入含有效包与全部已核实处理；审稿输入含issue_resolutions、
 # pending_issue_checks，输出含issue_kind与issue_checks。
-AUTHOR_CONTRACT_VERSION = 'article-author-v4'
+AUTHOR_CONTRACT_VERSION = 'article-author-v4.1'
 REVIEW_CONTRACT_VERSION = 'article-review-v4'
 CLARIFICATION_CONTRACT_VERSION = 'research-clarification-v2'
 # 正式推荐正文固定小标题；作者正文必须自带，程序只补逐股标题行。
@@ -773,11 +773,42 @@ def review_prompt(root: Path, *, article: str, packet: dict, materials: dict,
     return body + '\n\n本次输入：\n' + json.dumps(value, ensure_ascii=False, separators=(',', ':'))
 
 
+def normalize_article_subheadings(article: str) -> str:
+    titles = {'公司主要做什么', '为什么会选它', '什么情况会让我改变看法'}
+    output = []
+    fence = None
+    fence_size = 0
+    for line in article.splitlines(keepends=True):
+        text = line.rstrip('\r\n')
+        ending = line[len(text):]
+        marker = re.match(r'^ {0,3}(`{3,}|~{3,})(.*)$', text)
+        if fence is not None:
+            output.append(line)
+            if marker and marker.group(1)[0] == fence and len(marker.group(1)) >= fence_size and not marker.group(2).strip():
+                fence = None
+            continue
+        if marker:
+            fence, fence_size = marker.group(1)[0], len(marker.group(1))
+            output.append(line)
+            continue
+        match = re.fullmatch(r' {0,3}#{2,3}[ \t]+(.+?)[ \t]*', text)
+        if match:
+            title = re.sub(r'[ \t]+#+[ \t]*$', '', match.group(1)).strip()
+            if title.startswith('**') and title.endswith('**'):
+                title = title[2:-2]
+            if title in titles:
+                output.append('**' + title + '**' + ending)
+                continue
+        output.append(line)
+    return ''.join(output)
+
+
 def parse_author_output(text: str) -> dict:
     value = json_object(text)
     article = value.get('article')
     if not isinstance(article, str) or not article.strip():
         raise ValueError('作者必须返回完整文章正文')
+    article = normalize_article_subheadings(article)
     issues = value.get('research_issues')
     if not isinstance(issues, list):
         raise ValueError('作者结果缺少research_issues数组')
@@ -1406,7 +1437,13 @@ def run_stage(host, state: dict, state_path: Path, directory: Path, stage: str,
                     scope = evidence.get('context_evidence', {})
                     tools_ok = (scope.get('isolated') is True if route == 'astra' else not scope.get('offered_tools'))
                     if not scope.get('verified') or not tools_ok or scope.get('tool_calls') != 0 or not scope.get('input_present'):
-                        raise ValueError(f'{stage}无法确认实际请求为无工具的短上下文')
+                        raise ValueError(
+                            f'{stage}纯文本会话隔离核验失败（要求无工具；短上下文不按字数判定）：'
+                            f'证据核验={scope.get("verified")!r}；'
+                            f'提供工具={scope.get("offered_tools", "未记录")!r}；'
+                            f'工具隔离通过={tools_ok!r}；'
+                            f'实际工具调用数={scope.get("tool_calls")!r}；'
+                            f'完整输入已找到={scope.get("input_present")!r}')
                 if stage == 'research' and route_matches is True:
                     recovered = recover_research_handoff(host, state, directory)
                     if recovered is not None:

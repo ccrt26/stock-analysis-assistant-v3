@@ -15,7 +15,7 @@ def issue(kind,blocking):return {'quote':'正文内真实引句','problem':'问�
 
 def test_candidate_module_and_contract_version():
     assert Path(p.__file__).resolve()==ROOT/'tools/recommendation_pipeline.py'
-    assert p.AUTHOR_CONTRACT_VERSION=='article-author-v4'
+    assert p.AUTHOR_CONTRACT_VERSION=='article-author-v4.1'
     assert p.REVIEW_CONTRACT_VERSION=='article-review-v4'
     assert p.CLARIFICATION_CONTRACT_VERSION=='research-clarification-v2'
 

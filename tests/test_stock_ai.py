@@ -2148,3 +2148,63 @@ def test_delivery_problem_after_acceptance_does_not_sync_or_claim_complete(isola
     assert state['result']['status'] == '研究已归档但展示待更新'
     assert (archive/'final-reply.md').read_text() == '本次完整报告'
     assert canonical.read_text() == '已有不同正文' if failure == 'conflict' else not canonical.exists()
+
+
+@pytest.mark.parametrize("text_only", [True, False])
+def test_zcode_text_only_process_args_and_settings(isolated, monkeypatch, text_only):
+    """Exercise run_zcode; replace only process transport, with isolated config/keys.
+
+    This proves argv and temporary settings, not the live CLI's offered tools.
+    """
+    catalog = isolated / "zcode-user.json"
+    catalog.write_text(json.dumps({"modelCatalog": {"overrides": stock_ai.MODEL_CATALOG_OVERRIDES}}))
+    before = catalog.read_bytes()
+    monkeypatch.setattr(stock_ai, "ZCODE_USER_CONFIG_PATH", catalog)
+    prompt = isolated / "full-input.md"
+    prompt.write_text("完整输入\n" * 100)
+    events = isolated / "events-glm.jsonl"
+    observed = {}
+
+    class Process:
+        returncode = 1  # No provider response is fabricated by this transport test.
+
+        def __init__(self, args, **kwargs):
+            observed["args"] = args
+            observed["cwd"] = Path(kwargs["cwd"])
+            observed["settings"] = (
+                json.loads((observed["cwd"] / ".zcode/config.json").read_text())
+                if text_only else None)
+            observed["model"] = kwargs["env"]["ZCODE_MODEL"]
+
+        def communicate(self, **kwargs):
+            assert kwargs["timeout"] is None
+
+    monkeypatch.setattr(stock_ai.subprocess, "Popen", Process)
+    code, _ = stock_ai.run_zcode("glm", prompt, isolated / "final.md", events, None,
+                                {"_text_only": text_only})
+    assert code == 1
+    args = observed["args"]
+    assert args[args.index("--prompt") + 1] == prompt.read_text()
+    assert observed["model"] == "bigmodel/glm-5.3-flash"
+    assert catalog.read_bytes() == before
+    if text_only:
+        excluded = set(args[args.index("--disallowed-tools") + 1].split(","))
+        assert excluded == set(
+            "AskUserQuestion,Bash,Edit,EnterPlanMode,ExitPlanMode,Read,ReadSessionContext,"
+            "TaskOutput,TaskStop,TodoRead,TodoWrite,WebFetch,WebSearch,Write,Glob,Grep,Skill,Agent,Task,"
+            "AmendWorkflow,CreateWorkflow,EvalWorkflowSnippet,GetWorkflowRun,ListModels,"
+            "ListSavedWorkflows,ListWorkflowRuns,ResolveWorkflowQuestion,ResumeWorkflowRun,SaveWorkflow".split(","))
+        assert observed["settings"] == {
+            "features": {"memory": False, "skill": False, "mcp": False, "subagent": False},
+            "memory": {"use": False}, "plugins": {"enabled": False},
+            "skills": {"enabled": False, "includeInstructions": False},
+            "hooks": {"enabled": False},
+        }
+        assert json.loads(events.with_suffix(".settings.json").read_text()) == observed["settings"]
+        assert observed["cwd"] != isolated and not observed["cwd"].exists()
+    else:
+        assert "--disallowed-tools" not in args
+        assert "--allowed-tools" not in args and "--settings" not in args
+        assert observed["cwd"] == isolated
+        assert not events.with_suffix(".settings.json").exists()
+        assert not (isolated / ".zcode/config.json").exists()
