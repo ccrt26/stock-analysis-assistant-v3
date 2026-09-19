@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import subprocess
 import sys
 from datetime import datetime
@@ -738,7 +739,10 @@ def export(*, selection: Path, trial_dirs: list, output_dir: Path,
             suite_codes[s["name"]] = s
     expected_rows = []
     if expected_samples_path is not None and Path(expected_samples_path).exists():
-        expected_rows = json.loads(Path(expected_samples_path).read_text(encoding="utf-8"))
+        expected_payload = json.loads(Path(expected_samples_path).read_text(encoding="utf-8"))
+        if isinstance(expected_payload, dict):
+            expected_payload = expected_payload.get("samples") or []
+        expected_rows = expected_payload if isinstance(expected_payload, list) else []
 
     article_lines = ["# 01 六个样本正文与状态", "",
                      "正文为作者实际输出，未插入任何运行评价；失败样本同时给出最后成功写出"
@@ -758,6 +762,17 @@ def export(*, selection: Path, trial_dirs: list, output_dir: Path,
         stage_dir = Path(summary["_dir"])
         trial_name = Path(summary["_trial_dir"]).name
         blocks = [f"### {trial_name} / repeat-{repeat} — 状态：{status}"]
+        state_path = stage_dir / "state.json"
+        if state_path.exists():
+            try:
+                failed_stages = [e.get("stage") for e in
+                                 json.loads(state_path.read_text(encoding="utf-8"))
+                                 .get("recommendation_stages", [])
+                                 if e.get("status") in ("failed", "model_mismatch")]
+                if failed_stages:
+                    blocks[0] += f"（含历史失败尝试 {sorted(set(failed_stages))}，原文见FAILED-*与state.json；按原state恢复）"
+            except (OSError, ValueError, json.JSONDecodeError):
+                pass
         blocks.append("")
         article_path = summary.get("article_path")
         if article_path and Path(article_path).exists():
@@ -867,6 +882,25 @@ def export(*, selection: Path, trial_dirs: list, output_dir: Path,
             for name in _stage_files(stage_dir):
                 (target / name).write_text((stage_dir / name).read_text(encoding="utf-8"),
                                            encoding="utf-8")
+            # 失败原响应：与result.raw不一致的原始模型输出（校验失败/被重试的尝试，
+            # 其原文只存在于transport输出文件，不在任何result内）。
+            for raw in sorted(stage_dir.glob("*-glm.md")):
+                stage_stem = raw.name[:-len("-glm.md")]
+                base_stage = re.sub(r"-retry-\d+$", "", stage_stem)
+                result_path = stage_dir / f"{base_stage}-result.json"
+                if not result_path.exists():
+                    continue
+                try:
+                    consumed_raw = json.loads(result_path.read_text(encoding="utf-8")).get("raw")
+                except (OSError, ValueError):
+                    continue
+                if raw.read_text(encoding="utf-8") == consumed_raw:
+                    continue  # 被消费的当次原文已在result内
+                failure_note = {"file": raw.name, "base_stage": base_stage,
+                                "note": "失败原响应（该尝试未通过校验未被消费；消费的是后续重试）"}
+                (target / f"FAILED-{raw.name}").write_text(
+                    json.dumps(failure_note, ensure_ascii=False) + "\n\n"
+                    + raw.read_text(encoding="utf-8"), encoding="utf-8")
 
     (out / "01_六个样本正文与状态.md").write_text("\n".join(article_lines) + "\n", encoding="utf-8")
     (out / "03_完整问题与处理记录.md").write_text("\n".join(issue_lines) + "\n", encoding="utf-8")
