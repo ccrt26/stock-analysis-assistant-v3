@@ -12,6 +12,8 @@
 
 每条处理含：issue_id、type、evidence_text（核实或补充的事实原摘）、source_ref、changes_original_judgment（布尔）、author_instruction（给作者的明确指引：如何修改或保留）、blocking（布尔）、note（如需要）。
 
+当处理是恢复包内已有条件或把某缺口标记为已解决时，附 effective_updates 供程序生成作者/审稿共用的有效材料：`conditions` 仅限 `{"text": ..., "source": ...}`，text 必须逐字来自来源原句（不得拼凑阈值或改写措辞），source 写包内位置；`resolved_gap_keys` 列出因此解决的原缺口键（如 `conditions_missing`）。按原截止补充的新事实用 `resolved_added`，必须另给 `published_at`（该材料的公开时间，带时区；下载或定位时间不是公开时间）。无法给出可核对来源时不写 effective_updates，如实按未决处理。
+
 只能给出包内或本次核实过的内容；不能编造事实、不能替研究形成新的接受风险理由、不能把"研究得更细"当作阻塞理由。作者无工具，你的 evidence_text 与 author_instruction 就是作者能看到的全部新信息，必须自足、具体、含出处。
 
 输出JSON（不用代码围栏）：{"resolutions": [...], "unresolved": [{"issue_id": ..., "problem": ...}]}。每个 issue_id 都必须有对应处理；没有发生的核实写明未完成。

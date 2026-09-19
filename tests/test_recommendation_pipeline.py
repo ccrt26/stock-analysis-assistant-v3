@@ -60,6 +60,18 @@ def article_for(section):
     return json.dumps({'article': body, 'research_issues': []}, ensure_ascii=False)
 
 
+def record_stage_evidence(state, stage, provider='glm'):
+    """V1.2执行核验要求证据含会话与型号；stub按真实GLM证据结构记录。"""
+    state.setdefault('recommendation_stages', []).append({
+        'stage': stage, 'provider': provider, 'configured_model': 'bigmodel/glm-5.3-flash',
+        'evidence': {'verified': True, 'consistent': True, 'provider': 'bigmodel-api',
+                     'model': 'GLM-5.3', 'request_model': 'GLM-5.3', 'effort': 'max',
+                     'session_id': f'sess_{stage}',
+                     'context_evidence': {'verified': True, 'offered_tools': [],
+                                          'tool_calls': 0, 'input_present': True}},
+        'status': 'completed'})
+
+
 def review_ready():
     return json.dumps({'reader_summary': '判断与条件清楚。', 'readability_issues': [],
                        'fidelity_issues': [], 'research_issues': [], 'ready': True}, ensure_ascii=False)
@@ -68,15 +80,18 @@ def review_ready():
 def test_write_review_retained_before_freeze_and_resume_without_models(case, monkeypatch):
     stages=[]
     def stage(*args,**kwargs):
-        stages.append(args[4])
-        if args[4].startswith('author-'):return article_for(case.section),'glm'
-        if args[4].startswith('review-'):return review_ready(),'glm'
-        if args[4]=='monitor':return '复盘完成','glm'
-        raise AssertionError(args[4])
+        stage_name=args[4]
+        stages.append(stage_name)
+        record_stage_evidence(kwargs.get('state') or args[1], stage_name)
+        if stage_name.startswith('author-'):return article_for(case.section),'glm'
+        if stage_name.startswith('review-'):return review_ready(),'glm'
+        if stage_name=='monitor':return '复盘完成','glm'
+        raise AssertionError(stage_name)
     monkeypatch.setattr(pipeline,'run_stage',stage)
     def freeze(host,root,accepted,pending,config):
         assert pipeline.read_json(case.directory/'accepted-recommendation.json') == accepted
-        assert stages == ['author-000001-SZ','review-000001-SZ','monitor']
+        # V1.2：独立复盘先行，随后推荐写作，两路都完成才汇合冻结。
+        assert stages == ['monitor','author-000001-SZ','review-000001-SZ']
         assert accepted['trace'] == case.trace
     monkeypatch.setattr(pipeline,'freeze',freeze)
     monkeypatch.setattr(stock_ai,'strict_archive_check',lambda *a,**kw:(True,''))
@@ -108,6 +123,7 @@ def test_substantive_issue_returns_to_research_before_any_freeze(case,monkeypatc
     stages=[]
     def stage(*args,**kw):
         stage=args[4];stages.append(stage)
+        record_stage_evidence(kw.get('state') or args[1], stage)
         if stage=='research-repair':
             dump(case.pending,revised)
             return json.dumps({'resolutions':[{'quote':issue['quote'],'evidence':'日线核对','decision':'修改证据含义，原因不变'}],'unresolved':[]}), 'glm'
@@ -128,16 +144,17 @@ def test_substantive_issue_returns_to_research_before_any_freeze(case,monkeypatc
     monkeypatch.setattr(stock_ai,'strict_archive_check',lambda *a,**kw:(True,''))
     monkeypatch.setattr(stock_ai,'forward_csv_matches_trace',lambda *a,**kw:(True,''))
     pipeline.complete(stock_ai,case.state,case.state_path,case.directory,{},'glm','')
-    assert stages==['author-000001-SZ','review-000001-SZ','research-clarification','research-repair',
-                    'author-000001-SZ','review-000001-SZ','monitor']
+    assert stages==['monitor','author-000001-SZ','review-000001-SZ','research-clarification','research-repair',
+                    'author-000001-SZ','review-000001-SZ']
     assert 'review-after-research' not in stages
     assert frozen[0]['trace']['candidate_ledger'][0]['primary_reason'].startswith('总控')
 
 
-def test_unresolved_research_is_not_frozen_or_fabricated_empty(case,monkeypatch):
+def test_unresolved_research_is_not_frozen_or_fabricated(case,monkeypatch):
     issue={'ts_code':'000001.SZ','quote':'原句','problem':'主因无证据','evidence':'资料缺项','needed':'补充证据'}
     def stage(*a,**k):
         stage=a[4]
+        record_stage_evidence(k.get('state') or a[1], stage)
         if stage=='research-repair':return json.dumps({'resolutions':[],'unresolved':[issue]}),'glm'
         if stage.startswith('author-'):return article_for(case.section),'glm'
         if stage.startswith('review-'):
@@ -148,7 +165,9 @@ def test_unresolved_research_is_not_frozen_or_fabricated_empty(case,monkeypatch)
         return '复盘完成','glm'
     monkeypatch.setattr(pipeline,'run_stage',stage)
     monkeypatch.setattr(pipeline,'freeze',lambda *a:pytest.fail('未决不得冻结'))
-    with pytest.raises(ValueError,match='未决'):pipeline.complete(stock_ai,case.state,case.state_path,case.directory,{},'glm','')
+    # V1.2：作者路径普通失败不再中断已完成的复盘，向上以部分完成上报。
+    with pytest.raises((ValueError,RuntimeError),match='未决'):
+        pipeline.complete(stock_ai,case.state,case.state_path,case.directory,{},'glm','')
     assert pipeline.read_json(case.pending)==case.trace
     assert not (case.directory/'accepted-recommendation.json').exists()
 
@@ -427,7 +446,8 @@ def test_company_companion_checks_actual_saved_files_and_keeps_research(case,mon
 
 def test_pending_change_during_monitoring_never_freezes(case,monkeypatch):
     def stage(*a,**kw):
-        stage=a[4]
+        stage=kw.get('stage') or a[4]
+        record_stage_evidence(kw.get('state') or a[1], stage)
         if stage=='monitor':
             changed=copy.deepcopy(case.trace);changed['market_search_context']='复盘期间被改动的研究'
             dump(case.pending,changed)
@@ -520,3 +540,84 @@ def test_json_accepts_json_with_trailing_sources_footer():
     text = body + '\n\nSources: [新浪财经公告转载](https://money.finance.sina.com.cn)、[证券时报网](https://www.stcn.com)'
     value = pipeline.json_object(text)
     assert value['resolutions'][0]['issue_id'] == 'A01'
+
+
+# ---- V1.2 A3/S4.3：两路普通失败互不阻断 ----
+
+
+def test_author_failure_still_completes_full_review(case, monkeypatch):
+    # 推荐一路普通失败：已完成的复盘保留，任务以部分完成上报，不冒充完整日报。
+    def stage(*a, **kw):
+        stage_name = a[4]
+        record_stage_evidence(kw.get('state') or a[1], stage_name)
+        if stage_name == 'monitor':
+            return '复盘完成', 'glm'
+        if stage_name.startswith('author-'):
+            raise RuntimeError('glm供应商均不可用；保留产物等待续跑')
+        raise AssertionError(stage_name)
+    monkeypatch.setattr(pipeline, 'run_stage', stage)
+    monkeypatch.setattr(pipeline, 'freeze', lambda *a: pytest.fail('部分完成不得冻结'))
+    with pytest.raises(RuntimeError, match='部分完成'):
+        pipeline.complete(stock_ai, case.state, case.state_path, case.directory, {}, 'glm', '')
+    assert any(e['stage'] == 'monitor' for e in case.state['recommendation_stages'])
+    assert not (case.directory / 'accepted-recommendation.json').exists()
+    assert not (case.directory / 'accepted-draft-checkpoint.json').exists()
+
+
+def test_monitor_failure_keeps_adopted_draft_checkpoint(case, monkeypatch):
+    # 复盘一路普通失败：推荐候选草稿保存检查点，不freeze、不冒充发布。
+    def stage(*a, **kw):
+        stage_name = a[4]
+        record_stage_evidence(kw.get('state') or a[1], stage_name)
+        if stage_name == 'monitor':
+            raise ValueError('复盘源稿与正式JSON不一致')
+        if stage_name.startswith('author-'):
+            return article_for(case.section), 'glm'
+        if stage_name.startswith('review-'):
+            return review_ready(), 'glm'
+        raise AssertionError(stage_name)
+    monkeypatch.setattr(pipeline, 'run_stage', stage)
+    monkeypatch.setattr(pipeline, 'freeze', lambda *a: pytest.fail('部分完成不得冻结'))
+    with pytest.raises(RuntimeError, match='部分完成'):
+        pipeline.complete(stock_ai, case.state, case.state_path, case.directory, {}, 'glm', '')
+    checkpoint = pipeline.read_json(case.directory / 'accepted-draft-checkpoint.json')
+    assert checkpoint['section'] == case.section.strip()
+    assert checkpoint['status'] == 'accepted-draft-pending-review'
+    assert not (case.directory / 'accepted-recommendation.json').exists()
+
+
+def test_checkpoint_resume_completes_without_models(case, monkeypatch):
+    # 恢复：上次运行的候选草稿检查点按原身份采用并补齐复盘，零写作模型调用。
+    dump(case.directory / 'accepted-draft-checkpoint.json',
+         {'trace': case.trace, 'section': case.section.strip(), 'research_issues': [],
+          'status': 'accepted-draft-pending-review'})
+    def stage(*a, **kw):
+        stage_name = a[4]
+        record_stage_evidence(kw.get('state') or a[1], stage_name)
+        if stage_name == 'monitor':
+            return '复盘完成', 'glm'
+        if stage_name.startswith(('author-', 'review-')):
+            pytest.fail('检查点恢复不得重新请求写作模型')
+        raise AssertionError(stage_name)
+    monkeypatch.setattr(pipeline, 'run_stage', stage)
+    frozen = []
+    monkeypatch.setattr(pipeline, 'freeze', lambda h, r, a, p, c: frozen.append(a))
+    monkeypatch.setattr(stock_ai, 'strict_archive_check', lambda *a, **kw: (True, ''))
+    monkeypatch.setattr(stock_ai, 'forward_csv_matches_trace', lambda *a, **kw: (True, ''))
+    final, _ = pipeline.complete(stock_ai, case.state, case.state_path, case.directory, {}, 'glm', '')
+    assert case.section in final.read_text() and frozen
+    # 已冻结后陈旧检查点不再保留。
+    assert not (case.directory / 'accepted-draft-checkpoint.json').exists()
+
+
+def test_user_cancel_stops_all_remaining_paths(case, monkeypatch):
+    # 取消不是普通失败：不吞掉、不继续任何后续路径。
+    def stage(*a, **kw):
+        if a[4] == 'monitor':
+            raise KeyboardInterrupt
+        raise AssertionError('取消后不得继续任何路径')
+    monkeypatch.setattr(pipeline, 'run_stage', stage)
+    with pytest.raises(KeyboardInterrupt):
+        pipeline.complete(stock_ai, case.state, case.state_path, case.directory, {}, 'glm', '')
+    assert not (case.directory / 'accepted-draft-checkpoint.json').exists()
+    assert not (case.directory / 'accepted-recommendation.json').exists()

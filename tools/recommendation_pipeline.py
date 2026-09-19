@@ -13,8 +13,11 @@ from pathlib import Path
 from stock_analyzer.ops.recommendation_context import DEFINITIONS, build_context, selected_result
 
 # 作者/审稿阶段输出合同版本；进入阶段缓存身份，合同变化即不复用旧结果。
-AUTHOR_CONTRACT_VERSION = 'article-author-v1'
-REVIEW_CONTRACT_VERSION = 'article-review-v1'
+# v2（2026-09-19）：作者输入含有效包与全部已核实处理；审稿输入含issue_resolutions、
+# pending_issue_checks，输出含issue_kind与issue_checks。
+AUTHOR_CONTRACT_VERSION = 'article-author-v2'
+REVIEW_CONTRACT_VERSION = 'article-review-v2'
+CLARIFICATION_CONTRACT_VERSION = 'research-clarification-v2'
 # 正式推荐正文固定小标题；作者正文必须自带，程序只补逐股标题行。
 ARTICLE_SUBHEADINGS = ('公司主要做什么', '为什么会选它', '什么情况会让我改变看法')
 OBSERVATION_CONTRACT = '原推荐观察期为20个交易日，相对参考价+20%是原观察目标，不是收益承诺。'
@@ -581,6 +584,163 @@ def packet_composition(packet: dict) -> dict:
     return parts
 
 
+# ---------------------------------------------------------------- 当前有效视图（V1.2 A1）
+
+# 审稿问题的小枚举：前五类影响含义，一律blocking；仅expression可为建议性小修。
+SEMANTIC_ISSUE_KINDS = ('condition', 'metric_basis', 'fact', 'inference', 'reasoning_gap')
+ISSUE_KINDS = SEMANTIC_ISSUE_KINDS + ('expression',)
+EFFECTIVE_RESOLUTION_TYPES = ('resolved_existing', 'resolved_added')
+
+
+def _source_ref_value(packet: dict, ref):
+    """解析包内source_ref（支持 a.b.c、[n] 下标与可选 packet. 前缀）。返回(是否找到, 值)。"""
+    text = str(ref or '').strip()
+    if text.startswith('packet.'):
+        text = text[len('packet.'):]
+    if not text:
+        return False, None
+    node = packet
+    for part in text.split('.'):
+        match = re.fullmatch(r'([A-Za-z0-9_\-]+)(?:\[(\d+)\])?', part)
+        if not match:
+            return False, None
+        key, index = match.group(1), match.group(2)
+        if not isinstance(node, dict) or key not in node:
+            return False, None
+        node = node[key]
+        if index is not None:
+            position = int(index)
+            if not isinstance(node, list) or position >= len(node):
+                return False, None
+            node = node[position]
+    return True, node
+
+
+def _iter_leaves(value):
+    if isinstance(value, dict):
+        for item in value.values():
+            yield from _iter_leaves(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from _iter_leaves(item)
+    else:
+        yield value
+
+
+def _evidence_matches_source(value, evidence_text) -> bool:
+    """确定性匹配：字符串源值归一化后互为包含；结构化源值按规范JSON或叶子值包含判定。"""
+    evidence = str(evidence_text or '').strip()
+    if not evidence:
+        return False
+    if isinstance(value, str):
+        source = value.strip()
+        return bool(source) and (evidence in source or source in evidence)
+    if value is None:
+        return False
+    serialized = json.dumps(value, ensure_ascii=False, sort_keys=True)
+    if evidence in serialized:
+        return True
+    return any(str(leaf).strip() and evidence in str(leaf) for leaf in _iter_leaves(value))
+
+
+def _published_before_as_of(published, as_of) -> bool:
+    """补充事实的公开时点证明：两侧都必须是带时区的ISO时间且公开不晚于原as_of。"""
+    try:
+        moment = datetime.fromisoformat(str(published))
+        cutoff = datetime.fromisoformat(str(as_of))
+    except (TypeError, ValueError):
+        return False
+    if moment.tzinfo is None or cutoff.tzinfo is None:
+        return False
+    return moment <= cutoff
+
+
+def build_effective_packet(initial_packet: dict, resolutions: list) -> dict:
+    """由已核对澄清生成作者/审稿共用的当前有效视图；原包不变。
+
+    仅应用可核对的有限更新：resolved_existing 恢复包内已有条件原句（text必须与
+    已核证据逐字一致，source_ref必须能在包内解析且与证据匹配）；resolved_added
+    只登记按原截止补充的证据（须带不晚于原as_of的公开时点）与gap状态更新。
+    来源无法核对、证据对不上或缺公开时点证明时不应用，原issue保持未决并按
+    阻塞处理（调用方读取 effective_packet.unapplied）。不覆盖judgment、参考价、
+    时间、股名、选股排名和观察目标；不清空其他真实缺口。
+    """
+    packet = copy.deepcopy(initial_packet)
+    applied: list[dict] = []
+    unapplied: list[dict] = []
+    as_of = (packet.get('identity') or {}).get('as_of')
+    for item in resolutions or []:
+        if not isinstance(item, dict):
+            continue
+        issue_id = str(item.get('issue_id') or '')
+        if item.get('type') not in EFFECTIVE_RESOLUTION_TYPES \
+                or item.get('blocking') or item.get('changes_original_judgment') is not False:
+            continue  # 非有效视图更新（阻塞/未决/改判断）由调用方按原样处理
+        updates = item.get('effective_updates')
+        if not isinstance(updates, dict) or not updates:
+            unapplied.append({'issue_id': issue_id,
+                              'reason': '缺少effective_updates，不构成可应用的有效视图更新'})
+            continue
+        note = {'issue_id': issue_id, 'applied': []}
+        conditions = updates.get('conditions')
+        if isinstance(conditions, dict) and str(conditions.get('text') or '').strip():
+            text = str(conditions['text']).strip()
+            source = str(conditions.get('source') or item.get('source_ref') or '').strip()
+            found, value = _source_ref_value(packet, source)
+            if item.get('type') == 'resolved_existing':
+                # 只恢复包内已有原句：必须找到来源、证据与源值一致，且text与证据逐字一致
+                ok = (found and _evidence_matches_source(value, item.get('evidence_text'))
+                      and text == str(item.get('evidence_text') or '').strip())
+                if not ok:
+                    unapplied.append({'issue_id': issue_id,
+                                      'reason': f'条件恢复未通过核对（source_ref可解析={found}；'
+                                                f'证据与源值一致={found and _evidence_matches_source(value, item.get("evidence_text"))}；'
+                                                '恢复文字与已核证据逐字一致='
+                                                f'{text == str(item.get("evidence_text") or "").strip()}）'})
+                else:
+                    existing = packet.get('conditions') if isinstance(packet.get('conditions'), dict) else {}
+                    restored = {k: v for k, v in (existing or {}).items()
+                                if k in ('tradability', 'sources', 'supplementary')}
+                    restored.update({'text': text, 'source': source, 'restored_from': issue_id})
+                    packet['conditions'] = restored
+                    note['applied'].append('conditions')
+            else:
+                # resolved_added：新文字只能来自按原截止补充的证据，须证明原as_of前已公开
+                published = _published_before_as_of(item.get('published_at'), as_of)
+                if not str(item.get('evidence_text') or '').strip() or not source or not published:
+                    unapplied.append({'issue_id': issue_id,
+                                      'reason': '补充事实缺少证据原文、来源或不晚于原as_of的公开时点证明，不应用'})
+                else:
+                    packet.setdefault('clarified_evidence', []).append({
+                        'issue_id': issue_id, 'evidence_text': str(item['evidence_text']),
+                        'source': source, 'published_at': str(item.get('published_at'))})
+                    note['applied'].append('clarified_evidence')
+        for key in (updates.get('resolved_gap_keys') or []):
+            key = str(key).strip()
+            if not key:
+                continue
+            remaining, removed = [], []
+            for gap in packet.get('gaps') or []:
+                # 只处理字符串条目；dict条目（context缺口）不匹配不移除
+                text = gap if isinstance(gap, str) else None
+                if text is not None and (text == key or text.startswith(f'{key}：') or text.startswith(f'{key}:')):
+                    removed.append(text)
+                else:
+                    remaining.append(gap)
+            if removed:
+                packet['gaps'] = remaining
+                history = packet.setdefault('resolved_gaps_history', [])
+                history.extend({'gap': gap, 'issue_id': issue_id,
+                                'resolution_type': item.get('type')} for gap in removed)
+                note['applied'].append(f'gap:{key}')
+        if note['applied']:
+            applied.append(note)
+        elif not any(u['issue_id'] == issue_id for u in unapplied):
+            unapplied.append({'issue_id': issue_id, 'reason': 'effective_updates无可应用项'})
+    packet['effective_packet'] = {'applied': applied, 'unapplied': unapplied}
+    return packet
+
+
 # ---------------------------------------------------------------- 作者与审稿输入
 
 
@@ -602,10 +762,14 @@ def author_prompt(root: Path, *, packet: dict, materials: dict,
     return body + '\n\n本次输入：\n' + json.dumps(value, ensure_ascii=False, separators=(',', ':'))
 
 
-def review_prompt(root: Path, *, article: str, packet: dict, materials: dict) -> str:
+def review_prompt(root: Path, *, article: str, packet: dict, materials: dict,
+                  issue_resolutions: list | None = None,
+                  pending_issue_checks: list | None = None) -> str:
     if not isinstance(article, str) or not article.strip():
         raise ValueError('审稿必须收到完整文章')
-    value = {'article': article, 'packet': packet, 'writing_material': _author_material(materials)}
+    value = {'article': article, 'packet': packet, 'writing_material': _author_material(materials),
+             'issue_resolutions': issue_resolutions or [],
+             'pending_issue_checks': pending_issue_checks or []}
     body = (root / 'ops/recommendation-review-prompt.md').read_text(encoding='utf-8')
     return body + '\n\n本次输入：\n' + json.dumps(value, ensure_ascii=False, separators=(',', ':'))
 
@@ -641,10 +805,28 @@ def parse_review_output(text: str) -> dict:
             if not isinstance(item, dict) or not all(str(item.get(k) or '').strip() for k in keys):
                 raise ValueError(f'{field}条目不完整')
         result[field] = items
-    for item in result['readability_issues']:
-        item['blocking'] = bool(item.get('blocking', True))
-    for item in result['fidelity_issues']:
-        item['blocking'] = True  # 与同版研究不一致的问题一律阻塞，不接受审稿降级
+    checks = value.get('issue_checks')
+    if checks is not None:
+        if not isinstance(checks, list):
+            raise ValueError('issue_checks必须是数组')
+        for item in checks:
+            if not isinstance(item, dict) or not str(item.get('issue_id') or '').strip() \
+                    or item.get('status') not in ('fixed', 'not_an_error', 'unresolved') \
+                    or not str(item.get('quote') or '').strip():
+                raise ValueError('issue_checks条目必须含issue_id、fixed/not_an_error/unresolved与当前正文原句')
+        result['issue_checks'] = checks
+    # issue_kind为语义类别时，无论放在哪个分栏、无论blocking标记，一律阻塞（V1.2 A2）。
+    for field in ('readability_issues', 'fidelity_issues'):
+        for item in result[field]:
+            kind = item.get('issue_kind')
+            if kind is not None and kind not in ISSUE_KINDS:
+                raise ValueError(f'issue_kind非法：{kind}')
+            if field == 'readability_issues':
+                item['blocking'] = bool(item.get('blocking', True))
+            else:
+                item['blocking'] = True  # 与同版研究不一致的问题一律阻塞，不接受审稿降级
+            if kind in SEMANTIC_ISSUE_KINDS:
+                item['blocking'] = True
     result['ready'] = bool(value.get('ready'))
     result['ready_contradicted_by_issues'] = False
     blocking = (result['research_issues']
@@ -673,9 +855,10 @@ def session_identity(host, provider: str, config: dict, *, text_only: bool = Tru
 
 
 def stage_execution_verified(host, provider: str, fallback: bool, entry: dict | None) -> bool:
-    """一次阶段调用的执行核验：实际route符合策略，且当次证据与该route期望一致。
+    """一次阶段调用的执行核验：实际route符合策略，且当次证据与该route期望严格一致。
 
-    源自缓存的复用同样走本检查；证据缺失/未核验/型号不符都返回False。
+    源自缓存的复用同样走本检查；证据缺失/未核验/缺会话或型号/型号不符都返回False。
+    型号匹配必须严格为True，不以“不是False”代表确认（V1.2 A3）。
     """
     if not isinstance(entry, dict):
         return False
@@ -685,9 +868,13 @@ def stage_execution_verified(host, provider: str, fallback: bool, entry: dict | 
     if not fallback and route != provider:
         return False
     evidence = entry.get('evidence') or {}
-    if not evidence.get('verified'):
+    if not isinstance(evidence, dict) or evidence.get('verified') is not True:
         return False
-    return host.route_evidence_matches(route, evidence) is not False
+    if not str(evidence.get('session_id') or '').strip():
+        return False
+    if not str(evidence.get('model') or evidence.get('request_model') or '').strip():
+        return False
+    return host.route_evidence_matches(route, evidence) is True
 
 
 def stage_entry_evidence(state: dict, stage: str) -> dict | None:
@@ -695,6 +882,33 @@ def stage_entry_evidence(state: dict, stage: str) -> dict | None:
     for entry in reversed(state.get('recommendation_stages') or []):
         if entry.get('stage') == stage:
             return {'provider': entry.get('provider'), 'evidence': entry.get('evidence') or {}}
+    return None
+
+
+def stage_input_identity(host, state: dict, stage: str, prompt: str, provider: str, config: dict,
+                         *, fallback: bool, contract: str, run_scope: str, text_only: bool = True) -> dict:
+    """阶段缓存身份：同输入才允许复用同版结果（V1.2 A3：缓存复用不计新次数）。"""
+    return {'stage': stage, 'contract': contract, 'prompt': prompt,
+            'session': session_identity(host, provider, config, text_only=text_only),
+            'policy': {'provider': provider, 'fallback': fallback,
+                       'provider_order': list(state.get('provider_order') or [])},
+            'run_scope': run_scope}
+
+
+def reusable_stage_result(host, directory: Path, stage: str, identity: dict, provider: str,
+                          *, fallback: bool, validate) -> str | None:
+    """同输入身份且执行核验通过的已存结果；否则None（调用方重建，保留旧文件）。"""
+    path = directory / f'{stage}-result.json'
+    if not path.exists():
+        return None
+    try:
+        saved = read_json(path)
+        if (saved.get('input_identity') == identity and saved.get('execution_verified') is True
+                and stage_execution_verified(host, provider, fallback, saved.get('stage_execution'))):
+            validate(saved['raw'])
+            return saved['raw']
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
     return None
 
 
@@ -708,20 +922,14 @@ def article_stage(host, state: dict, state_path: Path, directory: Path, stage: s
     旧缓存缺新身份或核验不过→保留旧文件并重建；恢复只把核验过的结果再用于同一输入。
     """
     path = directory / f'{stage}-result.json'
-    identity = {'stage': stage, 'contract': contract, 'prompt': prompt,
-                'session': session_identity(host, provider, config, text_only=text_only),
-                'policy': {'provider': provider, 'fallback': fallback,
-                           'provider_order': list(state.get('provider_order') or [])},
-                'run_scope': run_scope}
+    identity = stage_input_identity(host, state, stage, prompt, provider, config,
+                                    fallback=fallback, contract=contract, run_scope=run_scope,
+                                    text_only=text_only)
+    reusable = reusable_stage_result(host, directory, stage, identity, provider,
+                                     fallback=fallback, validate=validate)
+    if reusable is not None:
+        return reusable
     if path.exists():
-        saved = read_json(path)
-        if (saved.get('input_identity') == identity and saved.get('execution_verified') is True
-                and stage_execution_verified(host, provider, fallback, saved.get('stage_execution'))):
-            try:
-                validate(saved['raw'])
-                return saved['raw']
-            except (ValueError, KeyError, TypeError):
-                pass
         retain_previous(path)
     raw, route = run_stage(host, state, state_path, directory, stage, prompt, provider, config,
                            text_only=text_only, fallback=fallback)
@@ -734,7 +942,6 @@ def article_stage(host, state: dict, state_path: Path, directory: Path, stage: s
     return raw
 
 
-CLARIFICATION_CONTRACT_VERSION = 'research-clarification-v1'
 RESOLUTION_TYPES = ('resolved_existing', 'resolved_added', 'retained_unknown',
                     'requires_research_change', 'unresolved_blocking')
 BLOCKING_TYPES = ('requires_research_change', 'unresolved_blocking')
@@ -760,10 +967,27 @@ def parse_clarification_output(text: str) -> dict:
             raise ValueError('澄清处理条目缺少issue_id或类型非法')
         if item['type'] == 'retained_unknown' and len(str(item.get('author_instruction') or '')) < 12:
             raise ValueError('retained_unknown 必须说明不作何种推断及当前意见为何仍成立')
+        updates = item.get('effective_updates')
+        if updates is not None:
+            if not isinstance(updates, dict):
+                raise ValueError('effective_updates必须是对象')
+            conditions = updates.get('conditions')
+            if conditions is not None and (
+                    not isinstance(conditions, dict)
+                    or not str(conditions.get('text') or '').strip()
+                    or not str(conditions.get('source') or '').strip()):
+                raise ValueError('effective_updates.conditions必须含非空text与source')
+            keys = updates.get('resolved_gap_keys')
+            if keys is not None and (not isinstance(keys, list)
+                                     or not all(str(k).strip() for k in keys)):
+                raise ValueError('resolved_gap_keys必须为非空字符串数组')
         seen.add(item['issue_id'])
     for item in unresolved:
         if not isinstance(item, dict) or not str(item.get('issue_id') or '').strip():
             raise ValueError('unresolved条目缺少issue_id')
+        if item['issue_id'] in seen:
+            # 未决优先于伪已解决：矛盾输出在缓存写入前即拒绝（V1.2 A1）。
+            raise ValueError(f"同一问题同时给出已解决与未决：{item['issue_id']}")
         seen.add(item['issue_id'])
     return {'resolutions': resolutions, 'unresolved': unresolved, 'covered': sorted(seen)}
 
@@ -771,37 +995,52 @@ def parse_clarification_output(text: str) -> dict:
 def resolve_article_issues(host, *, issues: list, packet: dict, materials: dict, directory: Path,
                            state: dict, state_path: Path, config: dict, provider: str,
                            fallback: bool, allow_research_changes: bool,
-                           clarification_limit: int = 2) -> dict:
+                           clarification_limit: int = 2, run_scope: str = 'managed') -> dict:
     """生产与试写共用的疑点处理入口：核对→必要补资料/澄清→分类处理。
 
     返回 {'resolutions': [...], 'blocking': [...]}；每个原issue_id都有对应记录。
     真实研究变更在生产交回研究负责人（blocking 保留给 complete 组织返研）；
-    固定研究试写直接阻塞为 needs_research。
+    固定研究试写直接阻塞为 needs_research。澄清预算按 scope+code 稳定子项持久化；
+    同输入缓存复用不计新次数、不受预算阻断（恢复只补缺失，V1.2 A3）。
     """
     if not issues:
         return {'resolutions': [], 'blocking': []}
     code = packet['identity']['ts_code']
+    scope = run_scope_key(run_scope, code)
     counts = state.setdefault('article_cycle_counts', {}).setdefault(
-        f'{run_scope_key(packet, code)}', {'expression': 0, 'clarification': 0})
+        scope, {'expression': 0, 'clarification': 0})
     issues = _assign_issue_ids(copy.deepcopy(issues), 'A')
-    if counts['clarification'] >= clarification_limit:
-        blocking = [{'issue_id': i.get('issue_id'), 'type': 'unresolved_blocking',
-                     'changes_original_judgment': None,
-                     'author_instruction': '澄清轮次已达上限，保留待处理。',
-                     'blocking': True, 'note': 'original issue'} for i in issues]
-        return {'resolutions': blocking, 'blocking': list(blocking)}
-    counts['clarification'] += 1
     stage = 'research-clarification'
     payload = {'identity': packet['identity'], 'issues': issues,
                'packet_excerpt': {k: packet.get(k) for k in
-                                  ('judgment', 'reasoning', 'counterevidence', 'conditions', 'unknowns')},
+                                  ('judgment', 'reasoning', 'counterevidence', 'conditions', 'unknowns',
+                                   'clarified_evidence', 'effective_packet')},
                'allow_research_changes': allow_research_changes}
     body = (host.PROJECT_ROOT / 'ops/research-clarification-prompt.md').read_text(encoding='utf-8')
     prompt = body + '\n\n本次输入：\n' + json.dumps(payload, ensure_ascii=False, separators=(',', ':'))
-    raw = article_stage(host, state, state_path, directory, stage, prompt, provider, config,
-                        fallback=fallback, contract=CLARIFICATION_CONTRACT_VERSION,
-                        validate=parse_clarification_output, run_scope='clarification',
-                        text_only=False)
+    identity = stage_input_identity(host, state, stage, prompt, provider, config,
+                                    fallback=fallback, contract=CLARIFICATION_CONTRACT_VERSION,
+                                    run_scope='clarification', text_only=False)
+    raw = reusable_stage_result(host, directory, stage, identity, provider,
+                                fallback=fallback, validate=parse_clarification_output)
+    reused = raw is not None
+    if raw is None:
+        if counts['clarification'] >= clarification_limit:
+            blocking = [{'issue_id': i.get('issue_id'), 'type': 'unresolved_blocking',
+                         'changes_original_judgment': None,
+                         'author_instruction': '澄清轮次已达上限，保留待处理。',
+                         'blocking': True, 'note': 'original issue'} for i in issues]
+            return {'resolutions': blocking, 'blocking': list(blocking),
+                    'clarification_executed': False}
+        counts['clarification'] += 1  # 实际新调用前计数并持久化
+        progress = state.setdefault('article_cycle_progress', {}).setdefault(scope, {})
+        progress.update({'next_stage': stage, 'counts': dict(counts),
+                         'updated_at': _progress_timestamp(host)})
+        host.save_state(state_path, state)
+        raw = article_stage(host, state, state_path, directory, stage, prompt, provider, config,
+                            fallback=fallback, contract=CLARIFICATION_CONTRACT_VERSION,
+                            validate=parse_clarification_output, run_scope='clarification',
+                            text_only=False)
     parsed = parse_clarification_output(raw)
     (directory / f'{stage}-resolution.json').write_text(
         json.dumps({'issues': issues, **parsed}, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
@@ -829,12 +1068,43 @@ def resolve_article_issues(host, *, issues: list, packet: dict, materials: dict,
                 if item['type'] == 'resolved_existing':
                     item['type'] = 'requires_research_change'
     blocking = [item for item in resolutions if item.get('blocking')]
-    return {'resolutions': resolutions, 'blocking': blocking}
+    return {'resolutions': resolutions, 'blocking': blocking, 'clarification_executed': True}
 
 
-def run_scope_key(packet: dict, code: str) -> str:
-    scope = packet.get('_cycle_scope') or 'managed'
-    return f'{scope}:{code}'
+def _progress_timestamp(host) -> str:
+    """进度记录时间戳；宿主无时钟钩子时用本地带时区时间，不影响真实任务。"""
+    now = getattr(host, 'now_shanghai', None)
+    if now is not None:
+        return now().isoformat()
+    return datetime.now().astimezone().isoformat()
+
+
+def run_scope_key(scope: str, code: str) -> str:
+    """稳定预算子项：scope+股票代码，不以新issue_id重置（V1.2 A3）。"""
+    return f'{scope or "managed"}:{code}'
+
+
+def _carry_stable_ids(current: list, prior_issues: list) -> None:
+    """与前轮quote+problem相同的审稿问题沿用原issue_id；轮次编号变化不重置成新问题。"""
+    known = {}
+    for item in prior_issues:
+        if item.get('issue_id'):
+            known.setdefault((str(item.get('quote')), str(item.get('problem'))), item['issue_id'])
+    for item in current:
+        key = (str(item.get('quote')), str(item.get('problem')))
+        if key in known and not item.get('issue_id'):
+            item['issue_id'] = known[key]
+
+
+def _stage_execution_entry(directory: Path, stage_name: str) -> dict | None:
+    """读取已保存阶段结果的执行核验记录；被本轮实际消费的阶段都要进入核验。"""
+    path = directory / f'{stage_name}-result.json'
+    if not path.exists():
+        return None
+    saved = read_json(path)
+    return {'stage': stage_name, 'execution_verified': bool(saved.get('execution_verified')),
+            'route': saved.get('route'),
+            'evidence': (saved.get('stage_execution') or {}).get('evidence') or {}}
 
 
 def run_article_cycle(host, *, packet: dict, materials: dict, directory: Path, state: dict,
@@ -847,19 +1117,38 @@ def run_article_cycle(host, *, packet: dict, materials: dict, directory: Path, s
     作者/审稿提出的疑点先经 issue_resolver（生产与试写同一实现，默认
     resolve_article_issues）核实处理：误读纠正与补资料回到作者；合理未知保留；
     真实研究变更在固定研究试写返回 needs_research，生产由调用方组织返研后重建。
+    澄清返回非阻塞处理时，packet 替换为 build_effective_packet 生成的当前有效视图，
+    其后作者与审稿使用同一份有效材料与同一版已核实处理（V1.2 A1）。
+    上轮未核销问题以 pending_issue_checks 交给下轮审稿，按 issue_checks 逐项核销，
+    缺失/未核销/引句不存在即阻塞，不以本轮列表为空或ready=true放行（V1.2 A2）。
     run_scope 隔离同一运行内的独立重复：repeat-2 即使输入与 repeat-1 完全相同，
     也不得命中其阶段缓存。模型调用失败向上抛出，由调用方决定保存与续跑。
     """
     directory.mkdir(parents=True, exist_ok=True)
     code = packet['identity']['ts_code']
     tag = code.replace('.', '-')
+    scope = run_scope_key(run_scope, code)
+    save_json(directory / 'packet-initial.json', packet)
     if issue_resolver is None:
         def issue_resolver(**kwargs):
-            return resolve_article_issues(host, allow_research_changes=allow_research_changes, **kwargs)
+            return resolve_article_issues(host, allow_research_changes=allow_research_changes,
+                                          run_scope=run_scope, **kwargs)
+    counts = state.setdefault('article_cycle_counts', {}).setdefault(
+        scope, {'expression': 0, 'clarification': 0})
+
+    def record_progress(next_stage):
+        progress = state.setdefault('article_cycle_progress', {}).setdefault(scope, {})
+        progress.update({'next_stage': next_stage, 'counts': dict(counts),
+                         'updated_at': _progress_timestamp(host)})
+        host.save_state(state_path, state)
+
     stages = []
     executions = []
     issue_resolutions: list[dict] = list(prior_resolutions or [])
     research_issues: list[dict] = []
+    prior_review_issues: list[dict] = []
+    pending_checks: list[dict] = []
+    effective_packet = packet
     prior = None
     revision_issues = None
     article = None
@@ -867,11 +1156,9 @@ def run_article_cycle(host, *, packet: dict, materials: dict, directory: Path, s
     review = None
 
     def stage_execution(stage_name):
-        saved = read_json(directory / f'{stage_name}-result.json')
-        executions.append({'stage': stage_name,
-                           'execution_verified': bool(saved.get('execution_verified')),
-                           'route': saved.get('route'),
-                           'evidence': (saved.get('stage_execution') or {}).get('evidence') or {}})
+        entry = _stage_execution_entry(directory, stage_name)
+        if entry is not None:
+            executions.append(entry)
 
     def result(status):
         return {'status': status, 'ts_code': code, 'article': article,
@@ -882,15 +1169,27 @@ def run_article_cycle(host, *, packet: dict, materials: dict, directory: Path, s
                 'stages_execution': executions,
                 'research_issues': research_issues,
                 'issue_resolutions': issue_resolutions,
+                'effective_packet_applied': (effective_packet.get('effective_packet') or {}),
                 'review': review, 'research_source': packet['source_refs'],
                 'provider': provider, 'fallback': fallback}
 
     for round_index in range(1 + expression_limit):
         author_stage = f'author-{tag}' if prior is None else f'author-rev{round_index}-{tag}'
-        stages.append(author_stage)
-        prompt = author_prompt(host.PROJECT_ROOT, packet=packet, materials=materials,
+        prompt = author_prompt(host.PROJECT_ROOT, packet=effective_packet, materials=materials,
                                prior_article=prior, revision_issues=revision_issues,
                                issue_resolutions=issue_resolutions or None)
+        if round_index >= 1:
+            # 表达修订轮：仅实际新调用计一次；缓存复用不扣新次数，恢复不清零。
+            identity = stage_input_identity(host, state, author_stage, prompt, provider, config,
+                                            fallback=fallback, contract=AUTHOR_CONTRACT_VERSION,
+                                            run_scope=run_scope)
+            if reusable_stage_result(host, directory, author_stage, identity, provider,
+                                     fallback=fallback, validate=parse_author_output) is None:
+                if counts['expression'] >= expression_limit:
+                    break
+                counts['expression'] += 1
+        stages.append(author_stage)
+        record_progress(author_stage)
         parsed = parse_author_output(article_stage(
             host, state, state_path, directory, author_stage, prompt, provider, config,
             fallback=fallback, contract=AUTHOR_CONTRACT_VERSION, validate=parse_author_output,
@@ -905,32 +1204,68 @@ def run_article_cycle(host, *, packet: dict, materials: dict, directory: Path, s
                 research_issues.append(issue)
         review_stage = f'review-{tag}' if prior is None else f'review-rev{round_index}-{tag}'
         stages.append(review_stage)
+        record_progress(review_stage)
         review_raw = article_stage(
             host, state, state_path, directory, review_stage,
-            review_prompt(host.PROJECT_ROOT, article=article, packet=packet, materials=materials),
+            review_prompt(host.PROJECT_ROOT, article=article, packet=effective_packet,
+                          materials=materials, issue_resolutions=issue_resolutions or None,
+                          pending_issue_checks=pending_checks or None),
             provider, config, fallback=fallback, contract=REVIEW_CONTRACT_VERSION,
             validate=parse_review_output, run_scope=run_scope)
         stage_execution(review_stage)
         review = parse_review_output(review_raw)
+        for group in ('readability_issues', 'fidelity_issues', 'research_issues'):
+            _carry_stable_ids(review[group], prior_review_issues)
         _assign_issue_ids(review['readability_issues'], f'R{round_index:02d}B')
         _assign_issue_ids(review['fidelity_issues'], f'R{round_index:02d}F')
         _assign_issue_ids(review['research_issues'], f'R{round_index:02d}S')
         (directory / f'{review_stage}-review.json').write_text(
             json.dumps(review, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+        blocking = [i for i in review['readability_issues'] + review['fidelity_issues']
+                    if i.get('blocking')]
+        # 上轮未核销问题逐项核对：以pending为驱动，缺失条目=未核销=阻塞（V1.2 A2/R2）。
+        checks = {str(c.get('issue_id')): c for c in (review.get('issue_checks') or [])}
+        still_open = []
+        for pending in pending_checks:
+            pid = str(pending['issue_id'])
+            entry = checks.get(pid)
+            verdict = entry.get('status') if isinstance(entry, dict) else None
+            quote = str((entry or {}).get('quote') or '').strip()
+            if verdict in ('fixed', 'not_an_error') and quote and quote in article:
+                continue
+            review['ready'] = False
+            still_open.append({'issue_id': pid, 'quote': quote or '（未提供原句）',
+                               'problem': f"上轮问题未核销（verdict={verdict or 'missing'}）",
+                               'instruction': '修复该问题并在issue_checks中给出现正文的对应原句与依据。',
+                               'blocking': True})
+        blocking.extend(still_open)
         research_pool = list(author_issues)
         for issue in review['research_issues']:
             research_pool.append(issue)
             if issue not in research_issues:
                 research_issues.append(issue)
-        blocking = [i for i in review['readability_issues'] + review['fidelity_issues']
-                    if i.get('blocking')]
+        author_actions = []
         if research_pool:
-            resolved = issue_resolver(issues=research_pool, packet=packet, materials=materials,
-                                      directory=directory, state=state, state_path=state_path,
-                                      config=config, provider=provider, fallback=fallback)
+            resolved = issue_resolver(issues=research_pool, packet=effective_packet,
+                                      materials=materials, directory=directory, state=state,
+                                      state_path=state_path, config=config, provider=provider,
+                                      fallback=fallback)
             issue_resolutions.extend(resolved['resolutions'])
             (directory / f'{review_stage}-resolutions.json').write_text(
                 json.dumps(resolved, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+            if resolved.get('clarification_executed'):
+                stage_execution('research-clarification')  # 澄清也纳入执行核验（V1.2 A3）
+            # 同一有效材料更新：只有通过核对的有限更新进入作者/审稿共享视图。
+            effective_packet = build_effective_packet(
+                effective_packet, [r for r in resolved['resolutions'] if not r.get('blocking')])
+            save_json(directory / 'packet-effective.json', effective_packet)
+            save_json(directory / 'issue-resolutions.json', issue_resolutions)
+            for miss in (effective_packet.get('effective_packet') or {}).get('unapplied') or []:
+                review['ready'] = False
+                blocking.append({'issue_id': miss['issue_id'], 'quote': '（有效材料更新未应用）',
+                                 'problem': miss['reason'],
+                                 'instruction': '核对来源与证据后重新澄清；不得凭空应用或改写研究。',
+                                 'blocking': True})
             if resolved['blocking']:
                 if not allow_research_changes:
                     return result('needs_research')
@@ -942,21 +1277,45 @@ def run_article_cycle(host, *, packet: dict, materials: dict, directory: Path, s
                     return result('needs_research')
                 blocking = blocking + [r for r in resolved['blocking']
                                        if r not in research_blocking]
-        author_actions = [r for r in issue_resolutions
-                          if r.get('type') in ('resolved_existing', 'resolved_added')
-                          and str(r.get('author_instruction') or '').strip()
-                          and not r.get('delivered_to_author')]
+            author_actions = [r for r in resolved['resolutions']
+                              if r.get('type') in ('resolved_existing', 'resolved_added')
+                              and str(r.get('author_instruction') or '').strip()
+                              and not r.get('delivered_to_author')
+                              and not any(m.get('issue_id') == r.get('issue_id')
+                                          for m in (effective_packet.get('effective_packet')
+                                                    or {}).get('unapplied') or [])]
+            issue_resolutions.extend(
+                {'issue_id': r.get('issue_id'), 'type': r.get('type'),
+                 'author_instruction': r.get('author_instruction'), 'blocking': True}
+                for r in resolved['blocking'])
         if not blocking and not author_actions and review['ready']:
+            save_json(directory / 'issues-open.json', still_open or [])
             return result('ready')
         if round_index >= expression_limit:
+            save_json(directory / 'issues-open.json', blocking + [
+                {'issue_id': r.get('issue_id'), 'problem': r.get('author_instruction'),
+                 'quote': '（研究澄清处理）'} for r in author_actions if r.get('issue_id')])
             break
         for r in author_actions:
             r['delivered_to_author'] = True
+        prior_review_issues = (review['readability_issues'] + review['fidelity_issues']
+                               + review['research_issues'])
         prior = article
         revision_issues = blocking + [
             {'quote': '（研究澄清处理）', 'problem': r.get('author_instruction'),
              'instruction': r.get('author_instruction'), 'blocking': True}
             for r in author_actions]
+        # 下一轮审稿必须逐项核销上一轮审稿提出的阻塞问题（研究问题的处理已经
+        # issue_resolutions 随同一有效包交付审稿核对，不重复计入issue_checks）。
+        merged = {}
+        for item in blocking:
+            if item.get('issue_id') and item in (review['readability_issues']
+                                                 + review['fidelity_issues'] + still_open):
+                merged[str(item['issue_id'])] = {'issue_id': item['issue_id'],
+                                                 'problem': item.get('problem'),
+                                                 'quote': item.get('quote') or ''}
+        pending_checks = list(merged.values())
+    save_json(directory / 'issues-open.json', pending_checks or [])
     return result('needs_revision')
 
 
@@ -1180,8 +1539,14 @@ def replace_recommendation(report: str, section: str) -> str:
 
 def _author_articles(host, state, state_path, directory, config, provider, root,
                      trace, expected, *, fallback, repair_limit):
-    """逐股作者循环；研究问题触发定向返研后回到作者，不跳过成稿。"""
-    repair_count = 0
+    """逐股作者循环；研究问题触发定向返研后回到作者，不跳过成稿。
+
+    生产冻结硬门槛（V1.2 A3/S4.2）：实质返研与全部被采用文章的执行核验必须
+    严格通过；返修预算按 state 稳定子项持久化，恢复不清零、不重复消耗。
+    """
+    repair_scope = f'research-repair:{expected[0]}'
+    repair_counts = state.setdefault('article_cycle_counts', {}).setdefault(
+        repair_scope, {'research_repair': 0})
     while True:
         trace = read_json(directory / 'context-trace.json')
         if identity(trace) != expected:
@@ -1209,6 +1574,10 @@ def _author_articles(host, state, state_path, directory, config, provider, root,
                 config=config, provider=provider, fallback=fallback,
                 allow_research_changes=True,
                 prior_resolutions=repair_context.get('prior_resolutions'))
+        unverified = {c: s for c, s in statuses.items()
+                      if s.get('status') == 'ready' and s.get('execution_verified') is not True}
+        if unverified:
+            raise ValueError(f'作者循环执行核验未通过：{sorted(unverified)}；保留草稿不冻结')
         unresolved = {c: s for c, s in statuses.items() if s['status'] != 'ready'}
         if not unresolved:
             return assemble_stock_section([(s, statuses[s['ts_code']]['article']) for s in stocks]), trace
@@ -1216,8 +1585,9 @@ def _author_articles(host, state, state_path, directory, config, provider, root,
         if failed:
             raise RuntimeError(f'作者阶段失败：{sorted(failed)}；保留产物等待续跑')
         needs_research = {c: s for c, s in unresolved.items() if s['status'] == 'needs_research'}
-        if needs_research and repair_count < repair_limit:
-            repair_count += 1
+        if needs_research and repair_counts['research_repair'] < repair_limit:
+            repair_counts['research_repair'] += 1  # 实际新返研前计数并持久化
+            host.save_state(state_path, state)
             issues = [i for s in needs_research.values() for i in s['research_issues']]
             pending = root / 'local_archive/forward_selection' / f'pending-trace-{expected[0]}.json'
             research_reply = directory / 'research-reply.md'
@@ -1235,6 +1605,9 @@ def _author_articles(host, state, state_path, directory, config, provider, root,
                 + json.dumps({'identity': expected, 'issues': issues}, ensure_ascii=False))
             raw, _repair_route = run_stage(host, state, state_path, directory, 'research-repair', prompt,
                                            provider, config, text_only=False, fallback=fallback)
+            if not stage_execution_verified(host, provider, fallback,
+                                            stage_entry_evidence(state, 'research-repair')):
+                raise ValueError('研究返修阶段执行核验未通过，保留产物不冻结')
             resolved = json_object(raw)
             if not isinstance(resolved.get('resolutions'), list) or not isinstance(resolved.get('unresolved'), list):
                 raise ValueError('研究负责人返回缺少resolutions/unresolved数组，原始输出已保留')
@@ -1323,21 +1696,67 @@ def complete(host, state: dict, state_path: Path, directory: Path, config: dict,
             raise ValueError('pending研究与本轮身份不一致')
         validate_pending(root, trace, state.get('prepare', {}))
         save_json(directory / 'context-trace.json', trace)
+        shared_trace = trace  # 共享准备基线；两路期间研究改变按硬失败处理
         result = selected_result(trace)
-        if result['selected_stocks']:
-            section, trace = _author_articles(host, state, state_path, directory, config,
-                                              provider, root, trace, expected,
-                                              fallback=fallback, repair_limit=1)
-        else:
+        section = None
+        if not result['selected_stocks']:
             section = '今天没有明确推荐的股票。' + result['empty_reason']
             save_json(directory / 'context-trace.json', trace)
-        # 独立复盘会话：已有同版正式产物直接复用，缺失时由单独会话按原合同执行。
+
+        def research_identity_intact() -> bool:
+            return pending.exists() and identity(read_json(pending)) == expected
+
+        # 独立复盘先行：不等待新推荐全文；已有同版正式产物直接复用（V1.2 A3）。
+        monitor_error = None
         monitor_dir = directory / 'monitor'
-        ledger_ok, report_ok = host.monitor_artifacts_status(expected[0])
-        if not (ledger_ok and report_ok):
-            monitor_prompt = host.write_monitor_prompt(state, monitor_dir)
-            run_stage(host, state, state_path, monitor_dir, 'monitor', monitor_prompt.read_text(encoding='utf-8'),
-                      provider, config, text_only=False, fallback=fallback)
+        try:
+            ledger_ok, report_ok = host.monitor_artifacts_status(expected[0])
+            if not (ledger_ok and report_ok):
+                monitor_prompt = host.write_monitor_prompt(state, monitor_dir)
+                run_stage(host, state, state_path, monitor_dir, 'monitor',
+                          monitor_prompt.read_text(encoding='utf-8'),
+                          provider, config, text_only=False, fallback=fallback)
+        except (OSError, ValueError, RuntimeError) as error:
+            if not research_identity_intact():
+                raise  # 复盘期间共享研究被改变/消失，不是普通失败
+            monitor_error = f'复盘：{type(error).__name__}: {error}'
+        # 选股研究 + 推荐作者/审稿：普通失败不再拖住上面已完成的复盘，反之亦然。
+        authoring_error = None
+        checkpoint_path = directory / 'accepted-draft-checkpoint.json'
+        if result['selected_stocks']:
+            if checkpoint_path.exists():
+                # 恢复：上次运行已保存的候选采用草稿按原身份采用，不重新请求模型。
+                try:
+                    draft = read_json(checkpoint_path)
+                    draft_trace = draft.get('trace') or {}
+                    if identity(draft_trace) == expected and str(draft.get('section') or '').strip() \
+                            and not host._recommendation_section_issues(
+                                draft['section'], expected[0],
+                                stocks=selected_result(draft_trace)['selected_stocks']):
+                        section = draft['section'].strip()
+                        trace = draft_trace
+                except (OSError, ValueError, KeyError, TypeError):
+                    retain_previous(checkpoint_path)
+            if section is None:
+                try:
+                    section, trace = _author_articles(host, state, state_path, directory, config,
+                                                      provider, root, trace, expected,
+                                                      fallback=fallback, repair_limit=1)
+                except (OSError, ValueError, RuntimeError) as error:
+                    if not research_identity_intact():
+                        raise  # 作者循环期间共享研究身份改变，不是普通失败
+                    authoring_error = f'推荐：{type(error).__name__}: {error}'
+        # 汇合：两路都完整有效才冻结；某一路普通失败则保留成功一路并明确部分完成。
+        if monitor_error or authoring_error:
+            if read_json(pending) != shared_trace:
+                raise ValueError('写审与复盘期间研究改变，不能冻结旧结果')
+            if section is not None and not authoring_error:
+                save_json(checkpoint_path, {'trace': trace, 'section': section.strip(),
+                                            'research_issues': [],
+                                            'status': 'accepted-draft-pending-review',
+                                            'monitor_error': monitor_error})
+            detail = '；'.join(e for e in (monitor_error, authoring_error) if e)
+            raise RuntimeError('本轮部分完成，保留成功一路产物，沿原身份恢复补缺失：' + detail)
         # 汇合核对：作者与复盘期间研究不得改变；复盘产物必须通过原装配合同。
         if read_json(pending) != trace:
             raise ValueError('写审与复盘期间研究改变，不能冻结旧结果')
@@ -1346,6 +1765,8 @@ def complete(host, state: dict, state_path: Path, directory: Path, config: dict,
         accepted = {'trace': trace, 'section': section.strip(), 'research_issues': []}
         validate_accepted(host, accepted, expected)
         save_json(accepted_path, accepted)  # Must precede the CSV write and trace move.
+        if checkpoint_path.exists():
+            retain_previous(checkpoint_path)
     from nightly_report import market_section_text, report_parts, source_sections
     source_sections(root, expected[0], as_of=expected[2])
     freeze(host, root, accepted, pending, config)

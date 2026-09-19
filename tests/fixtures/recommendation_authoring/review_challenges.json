@@ -20,7 +20,7 @@
         },
         "unknowns": "行业多数上涨能否持续未知。"
       },
-      "article": "甲公司主营结论在此重复三次以占位：主营、选择理由、改变看法均已包含。改变看法：如果甲公司收盘价跌破8.00元或行业走弱，我就会降低判断。\n**公司主要做什么**\n甲公司做业务。\n**为什么会选它**\n依据充分。\n**什么情况会让我改变看法**\n如上文所述。",
+      "article": "甲公司主营结论在此重复三次以占位：主营、选择理由、改变看法均已包含。中间段落先提到改变看法：如果甲公司收盘价跌破8.00元或行业走弱，我就会降低判断。\n**公司主要做什么**\n甲公司做业务。\n**为什么会选它**\n依据充分。\n**什么情况会让我改变看法**\n如果甲公司收盘价连续3个交易日低于8.00元且行业多数成员下跌，会降低判断。",
       "expect": {
         "ready": false,
         "min_blocking": 1,
@@ -79,12 +79,23 @@
     },
     {
       "id": "C4_material_misreport",
-      "kind": "clarify",
+      "kind": "full_chain",
       "packet": {
         "identity": {
           "ts_code": "000004.SZ",
           "name": "丁公司",
-          "as_of": "2026-09-17T18:30:00+08:00"
+          "as_of": "2026-09-17T18:30:00+08:00",
+          "reference_price": 8.6
+        },
+        "evidence": [
+          {
+            "id": "cash",
+            "fact": "丁公司2026上半年经营现金净额+102.0（丁公司2026半年报现金流量表）",
+            "source_ref": "cash_flow"
+          }
+        ],
+        "conditions": {
+          "text": "如果丁公司收盘价连续3个交易日低于7.50元且材料行业多数成员下跌，会降低判断。"
         },
         "comparisons": {
           "text": "与戊公司比较现金质量。",
@@ -95,7 +106,7 @@
               "facts": {
                 "cash_flow": [
                   {
-                    "n_cashflow_act": 102.0
+                    "n_cashflow_act": -71.9
                   }
                 ]
               }
@@ -106,7 +117,7 @@
               "facts": {
                 "cash_flow": [
                   {
-                    "n_cashflow_act": -71.9
+                    "n_cashflow_act": 31.4
                   }
                 ]
               }
@@ -114,17 +125,23 @@
           ]
         }
       },
+      "article": "**公司主要做什么**\n丁公司做材料。\n**为什么会选它**\n丁公司2026上半年经营现金净额-71.9，明显弱于戊公司的102.0，但丁的现金质量改善仍支持参与。\n**什么情况会让我改变看法**\n如果丁公司收盘价连续3个交易日低于7.50元且材料行业多数成员下跌，会降低判断。",
       "issue": {
         "ts_code": "000004.SZ",
-        "quote": "丁与戊的现金流数据疑似标反",
+        "quote": "丁公司2026上半年经营现金净额-71.9，明显弱于戊公司的102.0",
         "problem": "名称与数据归属疑似颠倒",
         "evidence": "作者整理时产生怀疑",
         "needed": "核对归属"
       },
       "expect": {
+        "draft_ready": false,
+        "draft_min_blocking": 1,
         "resolution_type": "resolved_existing",
-        "blocking": false,
-        "evidence_min_chars": 10
+        "resolution_blocking": false,
+        "final_ready": true,
+        "final_max_blocking": 0,
+        "must_pair": [["丁公司", "102.0"]],
+        "must_not_pair": [["丁公司", "-71.9"]]
       }
     },
     {

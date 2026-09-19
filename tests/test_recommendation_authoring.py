@@ -401,8 +401,9 @@ def test_research_repair_returns_to_author(case, monkeypatch):
     monkeypatch.setattr(nightly_report, 'source_sections', lambda *a, **kw: ('正式复盘', '正式统计'))
     final, _ = pipeline.complete(stock_ai, case.state, case.state_path, case.directory, {}, 'glm', '研究')
     stage_names = [c['stage'] for c in runner.calls]
-    assert stage_names == ['author-000001-SZ', 'review-000001-SZ', 'research-clarification',
-                           'research-repair', 'author-000001-SZ', 'review-000001-SZ', 'monitor']
+    # V1.2：独立复盘先行，推荐返研后回到作者成稿，两路都完整才汇合冻结。
+    assert stage_names == ['monitor', 'author-000001-SZ', 'review-000001-SZ', 'research-clarification',
+                           'research-repair', 'author-000001-SZ', 'review-000001-SZ']
     assert 'review-after-research' not in stage_names
     assert frozen and revised_article in frozen[0]['section']
     assert frozen[0]['trace']['candidate_ledger'][0]['primary_reason'].startswith('总控')
@@ -877,3 +878,140 @@ def test_review_severity_minor_suggestions_do_not_force_rewrite(case, monkeypatc
     result, _ = run_cycle(case, runner)
     assert result['status'] == 'ready'
     assert result['review']['readability_issues'][0]['blocking'] is False
+
+
+# ---- V1.2 A1/A2/A3：有效材料一致、语义错误必核销、预算与核验 ----
+
+
+def test_semantic_issue_kind_blocks_regardless_of_container_or_flag():
+    # metric_basis 被塞进readability且blocking=false：语义类别强制阻塞，不能放行。
+    data = {'reader_summary': 'x',
+            'readability_issues': [{'quote': '此前20日均额', 'problem': '口径与源不一致',
+                                    'instruction': '改回源定义', 'issue_kind': 'metric_basis',
+                                    'blocking': False}],
+            'fidelity_issues': [], 'research_issues': [], 'ready': True}
+    parsed = pipeline.parse_review_output(json.dumps(data, ensure_ascii=False))
+    assert parsed['ready'] is False
+    assert parsed['readability_issues'][0]['blocking'] is True
+    # 真实无误的近似数字（约数）属纯expression：不机械卡死，可与ready并存。
+    ok = pipeline.parse_review_output(json.dumps(
+        {'reader_summary': 'x', 'readability_issues': [
+            {'quote': '近5日', 'problem': '约数可保留', 'instruction': '可改可不改',
+             'issue_kind': 'expression', 'blocking': False}],
+         'fidelity_issues': [], 'research_issues': [], 'ready': True}, ensure_ascii=False))
+    assert ok['ready'] is True
+    with pytest.raises(ValueError, match='issue_kind'):
+        pipeline.parse_review_output(json.dumps(
+            {'reader_summary': 'x', 'readability_issues': [
+                {'quote': 'q', 'problem': 'p', 'instruction': 'i', 'issue_kind': '风格'}],
+             'fidelity_issues': [], 'research_issues': [], 'ready': False}, ensure_ascii=False))
+
+
+def test_unresolved_prior_semantic_issue_blocks_ready_even_when_list_empty(case, monkeypatch):
+    metric = [{'quote': '此前20日均额', 'problem': '口径与源不一致', 'instruction': '改回源定义',
+               'issue_kind': 'metric_basis', 'blocking': True}]
+    runner = stage_recorder({
+        'author-': lambda s, p: author_output(),
+        'review-': lambda s, p: json.dumps(
+            {'reader_summary': 'x', 'readability_issues': metric, 'fidelity_issues': [],
+             'research_issues': [], 'ready': True}, ensure_ascii=False)
+        if len([c for c in runner.calls if c['stage'].startswith('review')]) == 1
+        else json.dumps({'reader_summary': 'x', 'readability_issues': [], 'fidelity_issues': [],
+                         'research_issues': [], 'issue_checks': [], 'ready': True},
+                        ensure_ascii=False),
+        'monitor': lambda s, p: '复盘完成'})
+    monkeypatch.setattr(pipeline, 'run_stage', runner)
+    result, _ = run_cycle(case, runner)
+    # 上轮语义问题未核销而新ready=true：不得采用。
+    assert result['status'] == 'needs_revision'
+    assert result['review']['ready'] is False
+
+
+def test_fixed_prior_issue_with_existing_quote_passes(case, monkeypatch):
+    metric = [{'quote': '此前20日均额', 'problem': '口径与源不一致', 'instruction': '改回源定义',
+               'issue_kind': 'metric_basis', 'blocking': True}]
+    runner = stage_recorder({
+        'author-': lambda s, p: author_output(),
+        'review-': lambda s, p: json.dumps(
+            {'reader_summary': 'x', 'readability_issues': metric, 'fidelity_issues': [],
+             'research_issues': [], 'ready': False}, ensure_ascii=False)
+        if len([c for c in runner.calls if c['stage'].startswith('review')]) == 1
+        else json.dumps({'reader_summary': 'x', 'readability_issues': [], 'fidelity_issues': [],
+                         'research_issues': [],
+                         'issue_checks': [{'issue_id': 'R00B01', 'status': 'fixed',
+                                           'quote': '相对增量继续产生', 'basis': '源定义已恢复'}],
+                         'ready': True}, ensure_ascii=False),
+        'monitor': lambda s, p: '复盘完成'})
+    monkeypatch.setattr(pipeline, 'run_stage', runner)
+    result, _ = run_cycle(case, runner)
+    assert result['status'] == 'ready'
+
+
+def test_effective_packet_shared_with_review(case, monkeypatch):
+    cond = '如果连续收盘走弱且行业多数上涨收缩，会降低判断。'
+    packet = {'identity': {'ts_code': CODE, 'name': NAME, 'formation_date': '2026-01-05',
+                           'action_date': '2026-01-06', 'as_of': '2026-01-05T18:30:00+08:00',
+                           'reference_price': 10.5},
+              'judgment': {'selection_reason': '沿用原研究，不发明判断。'},
+              'reasoning': {'remaining_path': {'text': cond, 'formed': True}},
+              'conditions': None, 'counterevidence': {'text': '可能走弱'}, 'unknowns': [],
+              'source_refs': {'trace_identity': ['2026-01-05', '2026-01-06',
+                                                 '2026-01-05T18:30:00+08:00']},
+              'gaps': ['conditions_missing：未提取到条件']}
+    original = copy.deepcopy(packet)
+    payloads = []
+
+    def stage(host, state, state_path, directory, stage_name, prompt, provider, config, *,
+              text_only, fallback):
+        payloads.append(json.loads(prompt.split('本次输入：\n', 1)[1]))
+        if stage_name == 'research-clarification':
+            return clarification_output([{
+                'issue_id': 'A01', 'type': 'resolved_existing', 'evidence_text': cond,
+                'source_ref': 'reasoning.remaining_path.text', 'changes_original_judgment': False,
+                'author_instruction': '按该源句恢复条件，不改变判断。', 'blocking': False,
+                'effective_updates': {'conditions': {'text': cond,
+                                                     'source': 'reasoning.remaining_path.text'},
+                                      'resolved_gap_keys': ['conditions_missing']}}]), 'glm'
+        if stage_name.startswith('author-'):
+            issue = {'ts_code': CODE, 'quote': 'conditions=null', 'problem': '字段称条件缺失',
+                     'evidence': '原研究原句已存在', 'needed': '核对已有源句'}
+            return author_output(issues=[issue] if 'rev' not in stage_name else []), 'glm'
+        if stage_name.startswith('review-'):
+            return review_output(), 'glm'
+        raise AssertionError(stage_name)
+
+    monkeypatch.setattr(pipeline, 'run_stage', stage)
+    result, _ = run_cycle(case, stage, packet=packet)
+    assert result['status'] == 'ready'
+    authors = [p for p in payloads if 'article' not in p]
+    reviews = [p for p in payloads if 'article' in p]
+    assert len(authors) >= 2 and len(reviews) >= 2
+    assert authors[-1]['packet'] == reviews[-1]['packet']
+    assert reviews[-1]['packet']['conditions']['text'] == cond
+    assert not any(str(g).startswith('conditions_missing') for g in reviews[-1]['packet']['gaps'])
+    assert any(r['issue_id'] == 'A01' for r in reviews[-1]['issue_resolutions'])
+    assert packet == original
+    directory = case.directory / 'articles' / CODE
+    assert (directory / 'packet-initial.json').exists()
+    assert (directory / 'packet-effective.json').exists()
+    assert (directory / 'issue-resolutions.json').exists()
+
+
+def test_expression_counts_persist_and_cache_reuse_does_not_consume(case, monkeypatch):
+    blocking_review = {'reader_summary': 'x', 'readability_issues': [
+        {'quote': '原句', 'problem': '关键句需读者翻译', 'instruction': '直述', 'blocking': True}],
+        'fidelity_issues': [], 'research_issues': [], 'ready': False}
+    runner = stage_recorder({'author-': lambda s, p: author_output(),
+                             'review-': lambda s, p: json.dumps(blocking_review, ensure_ascii=False),
+                             'monitor': lambda s, p: '复盘完成'})
+    monkeypatch.setattr(pipeline, 'run_stage', runner)
+    result, _ = run_cycle(case, runner)
+    assert result['status'] == 'needs_revision'
+    counts = case.state['article_cycle_counts']['managed:000001.SZ']
+    assert counts['expression'] == 2
+    progress = case.state['article_cycle_progress']['managed:000001.SZ']
+    assert progress['counts']['expression'] == 2
+    # 同输入恢复：阶段全部来自缓存复用，计数不再增加（缓存复用不扣新次数）。
+    result2, _ = run_cycle(case, runner)
+    assert case.state['article_cycle_counts']['managed:000001.SZ']['expression'] == 2
+    assert result2['status'] == 'needs_revision'

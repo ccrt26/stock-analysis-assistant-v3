@@ -38,6 +38,7 @@ def prepared(tmp_path, monkeypatch):
     code_root = tmp_path / 'code'
     ops = code_root / 'ops'
     ops.mkdir(parents=True, exist_ok=True)
+    (ops / 'recommendation-authoring-prompt.md').write_text('作者合同', encoding='utf-8')
     (ops / 'recommendation-review-prompt.md').write_text('审稿合同', encoding='utf-8')
     (ops / 'research-clarification-prompt.md').write_text('澄清合同', encoding='utf-8')
     input_dir = tmp_path / 'trial' / 'input'
@@ -428,6 +429,25 @@ def test_check_review_runs_shared_functions_and_compares_in_wrapper(prepared, mo
                                                 'changes_original_judgment': False,
                                                 'author_instruction': '按包内事实继续。',
                                                 'blocking': False}], 'unresolved': []}), provider
+        if stage.endswith('-draft'):
+            # C4全链初稿审稿：稿件误报必须被发现。
+            review = {'reader_summary': 'x', 'readability_issues': [], 'fidelity_issues': [],
+                      'research_issues': [], 'ready': True}
+            review.update(fidelity_issues=[{'quote': 'q', 'problem': '归属颠倒', 'evidence': 'e',
+                                            'instruction': 'i', 'issue_kind': 'fact',
+                                            'blocking': True}], ready=False)
+            return json.dumps(review, ensure_ascii=False), provider
+        if stage.startswith('author-'):
+            # C4全链作者修改：按包内已核实归属改正数字配对。
+            article = ('**公司主要做什么**\n丁公司做材料。\n**为什么会选它**\n'
+                       '丁公司2026上半年经营现金净额102.0，强于戊公司的-71.9，现金质量支持参与。\n'
+                       '**什么情况会让我改变看法**\n'
+                       '如果丁公司收盘价连续3个交易日低于7.50元且材料行业多数成员下跌，会降低判断。')
+            return json.dumps({'article': article, 'research_issues': []}, ensure_ascii=False), provider
+        if stage.endswith('-final'):
+            # C4全链复审：修改后的正文按已核实材料通过。
+            return json.dumps({'reader_summary': 'x', 'readability_issues': [], 'fidelity_issues': [],
+                               'research_issues': [], 'ready': True}, ensure_ascii=False), provider
         review = {'reader_summary': 'x', 'readability_issues': [], 'fidelity_issues': [],
                   'research_issues': [], 'ready': True}
         cid = stage.replace('review-challenge-', '')
@@ -507,14 +527,14 @@ def test_export_collects_articles_full_opinions_and_fails_on_truncation(prepared
     code = trial.export(selection=selection, trial_dirs=[prepared.tmp_path / 'trial'],
                         output_dir=out, code_root=prepared.code_root)
     assert code == 0
-    for name in ('01_文章_原三股与新样本.md', '02_运行与代码核验.md',
+    for name in ('01_六个样本正文与状态.md', '02_逐项验收结果.md',
                  '03_完整问题与处理记录.md'):
         assert (out / name).exists() and (out / name).stat().st_size > 0
-    evidence = out / '04_最小复核证据'
+    evidence = out / 'evidence'
     assert (evidence / 'suite-selection.json').exists()
-    assert list((evidence / 'packets').glob(f'trial-{CODE}.json'))
-    assert list((evidence / 'stages').glob('trial-repeat-1-*'))
-    article = (out / '01_文章_原三股与新样本.md').read_text()
+    assert list((evidence / 'samples').glob(f'trial-{CODE}-initial-packet.json'))
+    assert list((evidence / 'samples').glob('trial-repeat-1-*'))
+    article = (out / '01_六个样本正文与状态.md').read_text()
     assert article.count(ARTICLE) == 2  # 两次重复都是完整正文，不挑最好
     # 反截断机械核对：审稿意见若被截断，导出必须失败
     stage_dir = next((runs_dir / 'repeat-1').glob('*/'))
@@ -529,3 +549,19 @@ def test_export_collects_articles_full_opinions_and_fails_on_truncation(prepared
     code = trial.export(selection=selection, trial_dirs=[prepared.tmp_path / 'trial'],
                         output_dir=out2, code_root=prepared.code_root)
     assert code == 0
+
+
+def test_trial_resume_rejects_changed_inputs(prepared, monkeypatch):
+    """--resume 输入身份改变时明确拒绝，不静默混版。"""
+    store = []
+    monkeypatch.setattr(pipeline, 'run_stage', trial_handlers(store))
+    runs_dir = prepared.tmp_path / 'trial' / 'runs-reject'
+    args = dict(manifest_path=prepared.input_dir / 'manifest.json', provider='glm',
+                fallback=False, repeats=1, output_dir=runs_dir, source_root=prepared.source)
+    assert trial.run(**args) == 0
+    manifest_path = prepared.input_dir / 'manifest.json'
+    data = json.loads(manifest_path.read_text(encoding='utf-8'))
+    data['identity']['as_of'] = '2026-01-06T18:30:00+08:00'
+    manifest_path.write_text(json.dumps(data, ensure_ascii=False), encoding='utf-8')
+    code = trial.run(**args, resume=True)
+    assert code == 2
