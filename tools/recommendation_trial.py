@@ -621,42 +621,46 @@ def export(*, selection: Path, trial_dirs: list, output_dir: Path,
                 else:
                     article_lines.append(f"（无完整正文：{summary.get('error') or status}）")
                 article_lines.append("")
-                # 完整意见与处理：逐字导出
+                # 完整意见与处理：逐字导出（写入后做回读结构相等核对）
                 stage_dir = Path(summary["_dir"])
                 issue_lines.append(f"## {name}（{code}）{Path(summary['_trial_dir']).name}/repeat-{repeat}")
                 issue_lines.append("")
+                roundtrip = []  # (source_data, exported_block_text)
                 for review_file in sorted(stage_dir.glob("review*-review.json")):
                     data = json.loads(review_file.read_text(encoding="utf-8"))
                     issue_lines.append(f"### {review_file.name}（审稿全文）")
                     issue_lines.append("```json")
-                    issue_lines.append(json.dumps(data, ensure_ascii=False, indent=1))
+                    block = json.dumps(data, ensure_ascii=False, indent=1)
+                    issue_lines.append(block)
                     issue_lines.append("```")
                     issue_lines.append("")
+                    roundtrip.append((data, block))
                 for resolution_file in sorted(stage_dir.glob("*-resolutions.json")) + \
                         sorted(stage_dir.glob("research-repair-resolution.json")):
                     data = json.loads(resolution_file.read_text(encoding="utf-8"))
                     issue_lines.append(f"### {resolution_file.name}（处理记录全文）")
                     issue_lines.append("```json")
-                    issue_lines.append(json.dumps(data, ensure_ascii=False, indent=1))
+                    block = json.dumps(data, ensure_ascii=False, indent=1)
+                    issue_lines.append(block)
                     issue_lines.append("```")
                     issue_lines.append("")
+                    roundtrip.append((data, block))
                 summary_issues = summary.get("research_issues") or []
                 if summary_issues:
                     issue_lines.append("### summary.research_issues（逐字）")
                     issue_lines.append("```json")
-                    issue_lines.append(json.dumps(summary_issues, ensure_ascii=False, indent=1))
+                    block = json.dumps(summary_issues, ensure_ascii=False, indent=1)
+                    issue_lines.append(block)
                     issue_lines.append("```")
                     issue_lines.append("")
-                # 反截断机械核对：所有意见字段在导出中必须逐字出现
-                exported_blob = "\n".join(issue_lines)
-                for review_file in sorted(stage_dir.glob("review*-review.json")):
-                    data = json.loads(review_file.read_text(encoding="utf-8"))
-                    for field in ("readability_issues", "fidelity_issues", "research_issues"):
-                        for item in data.get(field, []):
-                            for key in ("quote", "problem", "instruction", "evidence", "needed"):
-                                value = str(item.get(key) or "")
-                                if value and value not in exported_blob:
-                                    truncation_hits.append(f"{code}/{review_file.name}/{field}/{key}")
+                    roundtrip.append((summary_issues, block))
+                # 反截断机械核对：写出→回读，结构必须与源逐字相等
+                for source_data, block in roundtrip:
+                    try:
+                        if json.loads(block) != source_data:
+                            truncation_hits.append(f"{code}: 回读不等于源数据")
+                    except json.JSONDecodeError:
+                        truncation_hits.append(f"{code}: 导出块损坏")
         if not found_any:
             article_lines.append(f"（未执行/缺资料：本轮没有该公司的运行记录）")
             article_lines.append("")
@@ -772,17 +776,17 @@ def main(argv: list[str] | None = None) -> int:
                     handoff_path=args.handoff, original_report_path=args.original_report)
             print(f"manifest={args.output_dir / 'manifest.json'}")
             return EXIT_OK
-        # 发出任何请求前拒绝非GLM或允许备用的参数；不依赖调用者记得关闭。
-        policy_error = validate_run_policy(args.provider, not args.no_fallback)
-        if policy_error:
-            print(f"错误：{policy_error}", file=sys.stderr)
-            return EXIT_INPUT
         if args.command == "export":
             code = export(selection=args.selection, trial_dirs=args.trial_dirs,
                           output_dir=args.output_dir, code_root=args.code_root,
                           tests_dir=args.tests_dir, notes_path=args.notes)
             print(f"exit={code}; export={args.output_dir}")
             return code
+        # 发出任何请求前拒绝非GLM或允许备用的参数；不依赖调用者记得关闭。
+        policy_error = validate_run_policy(args.provider, not args.no_fallback)
+        if policy_error:
+            print(f"错误：{policy_error}", file=sys.stderr)
+            return EXIT_INPUT
         if args.command == "check-review":
             policy_error = validate_run_policy(args.provider, not args.no_fallback)
             if policy_error:
