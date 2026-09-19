@@ -1,0 +1,786 @@
+{
+  "version": "v13-reader-quality-1",
+  "description": "八个合成审稿反例/正常例。expect仅供外部核对，不发送给作者或审稿模型。",
+  "materials": {},
+  "cases": [
+    {
+      "id": "W01_window",
+      "kind": "review",
+      "packet": {
+        "identity": {
+          "ts_code": "TEST001",
+          "name": "合成甲材料",
+          "formation_date": "2026-09-10",
+          "action_date": "2026-09-11",
+          "as_of": "2026-09-10T18:30:00+08:00",
+          "reference_price": 50,
+          "observation_contract": "未来约20个交易日，相对50元上涨20%（60元）是观察目标，不是收益承诺。"
+        },
+        "judgment": {
+          "selection_reason": "按50元考虑参与。虽近5日已涨10%、行业最新一天转弱，但本股连续四个交易日收高、行业转弱时仍上涨，因此愿意承担51—53元区域再次受阻的风险，先于突破考虑参与；不是因为目标为60元就判断空间充足。"
+        },
+        "reasoning": {
+          "opinion": {
+            "formed": true,
+            "text": "按50元考虑参与；行业转弱时仍连续收高，是愿意先承担51—53元再次受阻风险的原因。",
+            "source": "judgment.selection_reason"
+          },
+          "why_now": {
+            "formed": false,
+            "text": null
+          }
+        },
+        "evidence": [
+          {
+            "id": "business",
+            "content": "生产电子材料，半年主营收入同比增长10%，经营现金流为正且同比增加10%，经营结果已经发生，没有新事件。",
+            "source": "synthetic.business"
+          },
+          {
+            "id": "market",
+            "content": "行业最近5日多数上涨，最新一天多数下跌；本股该日仍上涨，并连续四个交易日收高。",
+            "source": "synthetic.market"
+          }
+        ],
+        "counterevidence": {
+          "text": "近5日已涨10%，行业最新一天转弱，51—53元是此前两次上涨受阻的区域。"
+        },
+        "conditions": {
+          "text": "若连续两个交易日收盘低于48元，且行业过半成分股下跌，改为等待；若明显高开且随后回吐站不稳，先不追。",
+          "source": "synthetic.conditions"
+        },
+        "unknowns": "细分产品分别贡献多少未拆分；本次依据实际总收入和现金流，不依赖未拆分贡献。能否突破51—53元仍未知。",
+        "facts": {
+          "business": {
+            "revenue_growth": 0.1,
+            "operating_cash_flow_positive": true,
+            "operating_cash_flow_growth": 0.1
+          },
+          "price": {
+            "return_5d": 0.1,
+            "first_return_session": "2026-09-04",
+            "last_return_session": "2026-09-10",
+            "base_close_date": "2026-09-03",
+            "close_on_2026_09_08": 48.0,
+            "close_on_2026_09_10": 50.0,
+            "return_between_those_closes": 0.0416666666667,
+            "amount_ratio_last_20d": 1.8,
+            "amount_ratio_definition": "当日成交额/含当日在内最近20个交易日平均成交额，不是成交量倍数。",
+            "target_atr_distance": 4.0,
+            "atr_definition": "相对目标的价格距离/历史日线ATR，是波动尺度，不给出未来推进方向、天数或概率。",
+            "up_days_5d": 4,
+            "ordinary_day_rise_ex_largest": 0.06,
+            "mean_close_position_5d": 0.84
+          },
+          "peer": {
+            "name": "合成乙材料",
+            "mean_close_position_5d": 0.72,
+            "definition": "最近五个交易日收盘价在当天最低到最高之间的相对位置的算术平均，0为最低、1为最高。"
+          }
+        },
+        "comparisons": {
+          "text": "甲平均收盘位置84%，乙72%；仅表明甲的平均收盘位置相对更高。"
+        },
+        "gaps": [
+          "risk_acceptance_missing：未单独填写字段，实际取舍解释以judgment.selection_reason为准。"
+        ],
+        "source_refs": {
+          "source": "全部为本次验收自造数据，不对应真实公司，不用于交易。"
+        }
+      },
+      "article": "**公司主要做什么**\n合成甲材料生产电子材料。上半年主营收入增长10%，经营现金流为正且也增长10%，提供已经发生的经营支持；细分贡献未拆开，不影响这次按总量作判断。\n\n**为什么会选它**\n以50元为参照，我考虑参与。近5日已经上涨10%，前面还有51—53元两次受阻的区域，当前价格前面并非没有障碍。但行业最新一天多数下跌时，它仍上涨，连续四日收高也未中断；这些表现支持它再次尝试向上，是我愿意先承担受阻风险、而不是等突破再考虑的原因。\n\n9月8日收于48元，到9月10日50元，这一段累计上涨10%。\n\n未来约20个交易日的20%观察目标对应60元，要先通过上述受阻区域。目标不会使眼前阻力消失，能否通过仍须看后续表现。\n\n**什么情况会让我改变看法**\n若连续两个交易日收盘低于48元，且行业过半成分股下跌，改为等待；若明显高开且随后回吐站不稳，先不追。",
+      "expect": {
+        "ready": false,
+        "min_blocking": 1,
+        "blocking_semantic_kinds_any": [
+          "metric_basis",
+          "fact"
+        ],
+        "quote_anchors": [
+          "9月8日收于48元，到9月10日50元，这一段累计上涨10%"
+        ],
+        "forbid_research_issues": true
+      }
+    },
+    {
+      "id": "W02_relative_absolute",
+      "kind": "review",
+      "packet": {
+        "identity": {
+          "ts_code": "TEST001",
+          "name": "合成甲材料",
+          "formation_date": "2026-09-10",
+          "action_date": "2026-09-11",
+          "as_of": "2026-09-10T18:30:00+08:00",
+          "reference_price": 50,
+          "observation_contract": "未来约20个交易日，相对50元上涨20%（60元）是观察目标，不是收益承诺。"
+        },
+        "judgment": {
+          "selection_reason": "按50元考虑参与。虽近5日已涨10%、行业最新一天转弱，但本股连续四个交易日收高、行业转弱时仍上涨，因此愿意承担51—53元区域再次受阻的风险，先于突破考虑参与；不是因为目标为60元就判断空间充足。"
+        },
+        "reasoning": {
+          "opinion": {
+            "formed": true,
+            "text": "按50元考虑参与；行业转弱时仍连续收高，是愿意先承担51—53元再次受阻风险的原因。",
+            "source": "judgment.selection_reason"
+          },
+          "why_now": {
+            "formed": false,
+            "text": null
+          }
+        },
+        "evidence": [
+          {
+            "id": "business",
+            "content": "生产电子材料，半年主营收入同比增长10%，经营现金流为正且同比增加10%，经营结果已经发生，没有新事件。",
+            "source": "synthetic.business"
+          },
+          {
+            "id": "market",
+            "content": "行业最近5日多数上涨，最新一天多数下跌；本股该日仍上涨，并连续四个交易日收高。",
+            "source": "synthetic.market"
+          }
+        ],
+        "counterevidence": {
+          "text": "近5日已涨10%，行业最新一天转弱，51—53元是此前两次上涨受阻的区域。"
+        },
+        "conditions": {
+          "text": "若连续两个交易日收盘低于48元，且行业过半成分股下跌，改为等待；若明显高开且随后回吐站不稳，先不追。",
+          "source": "synthetic.conditions"
+        },
+        "unknowns": "细分产品分别贡献多少未拆分；本次依据实际总收入和现金流，不依赖未拆分贡献。能否突破51—53元仍未知。",
+        "facts": {
+          "business": {
+            "revenue_growth": 0.1,
+            "operating_cash_flow_positive": true,
+            "operating_cash_flow_growth": 0.1
+          },
+          "price": {
+            "return_5d": 0.1,
+            "first_return_session": "2026-09-04",
+            "last_return_session": "2026-09-10",
+            "base_close_date": "2026-09-03",
+            "close_on_2026_09_08": 48.0,
+            "close_on_2026_09_10": 50.0,
+            "return_between_those_closes": 0.0416666666667,
+            "amount_ratio_last_20d": 1.8,
+            "amount_ratio_definition": "当日成交额/含当日在内最近20个交易日平均成交额，不是成交量倍数。",
+            "target_atr_distance": 4.0,
+            "atr_definition": "相对目标的价格距离/历史日线ATR，是波动尺度，不给出未来推进方向、天数或概率。",
+            "up_days_5d": 4,
+            "ordinary_day_rise_ex_largest": 0.06,
+            "mean_close_position_5d": 0.84
+          },
+          "peer": {
+            "name": "合成乙材料",
+            "mean_close_position_5d": 0.72,
+            "definition": "最近五个交易日收盘价在当天最低到最高之间的相对位置的算术平均，0为最低、1为最高。"
+          }
+        },
+        "comparisons": {
+          "text": "甲平均收盘位置84%，乙72%；仅表明甲的平均收盘位置相对更高。"
+        },
+        "gaps": [
+          "risk_acceptance_missing：未单独填写字段，实际取舍解释以judgment.selection_reason为准。"
+        ],
+        "source_refs": {
+          "source": "全部为本次验收自造数据，不对应真实公司，不用于交易。"
+        }
+      },
+      "article": "**公司主要做什么**\n合成甲材料生产电子材料。上半年主营收入增长10%，经营现金流为正且也增长10%，提供已经发生的经营支持；细分贡献未拆开，不影响这次按总量作判断。\n\n**为什么会选它**\n以50元为参照，我考虑参与。近5日已经上涨10%，前面还有51—53元两次受阻的区域，当前价格前面并非没有障碍。但行业最新一天多数下跌时，它仍上涨，连续四日收高也未中断；这些表现支持它再次尝试向上，是我愿意先承担受阻风险、而不是等突破再考虑的原因。\n\n甲近五日平均收盘位置84%，乙为72%；因此乙大多数交易日收在当日区间下半部。\n\n未来约20个交易日的20%观察目标对应60元，要先通过上述受阻区域。目标不会使眼前阻力消失，能否通过仍须看后续表现。\n\n**什么情况会让我改变看法**\n若连续两个交易日收盘低于48元，且行业过半成分股下跌，改为等待；若明显高开且随后回吐站不稳，先不追。",
+      "expect": {
+        "ready": false,
+        "min_blocking": 1,
+        "blocking_semantic_kinds_any": [
+          "inference",
+          "fact"
+        ],
+        "quote_anchors": [
+          "因此乙大多数交易日收在当日区间下半部"
+        ],
+        "forbid_research_issues": true
+      }
+    },
+    {
+      "id": "W03_amount_volume",
+      "kind": "review",
+      "packet": {
+        "identity": {
+          "ts_code": "TEST001",
+          "name": "合成甲材料",
+          "formation_date": "2026-09-10",
+          "action_date": "2026-09-11",
+          "as_of": "2026-09-10T18:30:00+08:00",
+          "reference_price": 50,
+          "observation_contract": "未来约20个交易日，相对50元上涨20%（60元）是观察目标，不是收益承诺。"
+        },
+        "judgment": {
+          "selection_reason": "按50元考虑参与。虽近5日已涨10%、行业最新一天转弱，但本股连续四个交易日收高、行业转弱时仍上涨，因此愿意承担51—53元区域再次受阻的风险，先于突破考虑参与；不是因为目标为60元就判断空间充足。"
+        },
+        "reasoning": {
+          "opinion": {
+            "formed": true,
+            "text": "按50元考虑参与；行业转弱时仍连续收高，是愿意先承担51—53元再次受阻风险的原因。",
+            "source": "judgment.selection_reason"
+          },
+          "why_now": {
+            "formed": false,
+            "text": null
+          }
+        },
+        "evidence": [
+          {
+            "id": "business",
+            "content": "生产电子材料，半年主营收入同比增长10%，经营现金流为正且同比增加10%，经营结果已经发生，没有新事件。",
+            "source": "synthetic.business"
+          },
+          {
+            "id": "market",
+            "content": "行业最近5日多数上涨，最新一天多数下跌；本股该日仍上涨，并连续四个交易日收高。",
+            "source": "synthetic.market"
+          }
+        ],
+        "counterevidence": {
+          "text": "近5日已涨10%，行业最新一天转弱，51—53元是此前两次上涨受阻的区域。"
+        },
+        "conditions": {
+          "text": "若连续两个交易日收盘低于48元，且行业过半成分股下跌，改为等待；若明显高开且随后回吐站不稳，先不追。",
+          "source": "synthetic.conditions"
+        },
+        "unknowns": "细分产品分别贡献多少未拆分；本次依据实际总收入和现金流，不依赖未拆分贡献。能否突破51—53元仍未知。",
+        "facts": {
+          "business": {
+            "revenue_growth": 0.1,
+            "operating_cash_flow_positive": true,
+            "operating_cash_flow_growth": 0.1
+          },
+          "price": {
+            "return_5d": 0.1,
+            "first_return_session": "2026-09-04",
+            "last_return_session": "2026-09-10",
+            "base_close_date": "2026-09-03",
+            "close_on_2026_09_08": 48.0,
+            "close_on_2026_09_10": 50.0,
+            "return_between_those_closes": 0.0416666666667,
+            "amount_ratio_last_20d": 1.8,
+            "amount_ratio_definition": "当日成交额/含当日在内最近20个交易日平均成交额，不是成交量倍数。",
+            "target_atr_distance": 4.0,
+            "atr_definition": "相对目标的价格距离/历史日线ATR，是波动尺度，不给出未来推进方向、天数或概率。",
+            "up_days_5d": 4,
+            "ordinary_day_rise_ex_largest": 0.06,
+            "mean_close_position_5d": 0.84
+          },
+          "peer": {
+            "name": "合成乙材料",
+            "mean_close_position_5d": 0.72,
+            "definition": "最近五个交易日收盘价在当天最低到最高之间的相对位置的算术平均，0为最低、1为最高。"
+          }
+        },
+        "comparisons": {
+          "text": "甲平均收盘位置84%，乙72%；仅表明甲的平均收盘位置相对更高。"
+        },
+        "gaps": [
+          "risk_acceptance_missing：未单独填写字段，实际取舍解释以judgment.selection_reason为准。"
+        ],
+        "source_refs": {
+          "source": "全部为本次验收自造数据，不对应真实公司，不用于交易。"
+        }
+      },
+      "article": "**公司主要做什么**\n合成甲材料生产电子材料。上半年主营收入增长10%，经营现金流为正且也增长10%，提供已经发生的经营支持；细分贡献未拆开，不影响这次按总量作判断。\n\n**为什么会选它**\n以50元为参照，我考虑参与。近5日已经上涨10%，前面还有51—53元两次受阻的区域，当前价格前面并非没有障碍。但行业最新一天多数下跌时，它仍上涨，连续四日收高也未中断；这些表现支持它再次尝试向上，是我愿意先承担受阻风险、而不是等突破再考虑的原因。\n\n当日成交量为含当日在内近20日平均成交量的1.80倍。\n\n未来约20个交易日的20%观察目标对应60元，要先通过上述受阻区域。目标不会使眼前阻力消失，能否通过仍须看后续表现。\n\n**什么情况会让我改变看法**\n若连续两个交易日收盘低于48元，且行业过半成分股下跌，改为等待；若明显高开且随后回吐站不稳，先不追。",
+      "expect": {
+        "ready": false,
+        "min_blocking": 1,
+        "blocking_semantic_kinds_any": [
+          "metric_basis",
+          "fact"
+        ],
+        "quote_anchors": [
+          "当日成交量为含当日在内近20日平均成交量的1.80倍"
+        ],
+        "forbid_research_issues": true
+      }
+    },
+    {
+      "id": "W04_atr_duration",
+      "kind": "review",
+      "packet": {
+        "identity": {
+          "ts_code": "TEST001",
+          "name": "合成甲材料",
+          "formation_date": "2026-09-10",
+          "action_date": "2026-09-11",
+          "as_of": "2026-09-10T18:30:00+08:00",
+          "reference_price": 50,
+          "observation_contract": "未来约20个交易日，相对50元上涨20%（60元）是观察目标，不是收益承诺。"
+        },
+        "judgment": {
+          "selection_reason": "按50元考虑参与。虽近5日已涨10%、行业最新一天转弱，但本股连续四个交易日收高、行业转弱时仍上涨，因此愿意承担51—53元区域再次受阻的风险，先于突破考虑参与；不是因为目标为60元就判断空间充足。"
+        },
+        "reasoning": {
+          "opinion": {
+            "formed": true,
+            "text": "按50元考虑参与；行业转弱时仍连续收高，是愿意先承担51—53元再次受阻风险的原因。",
+            "source": "judgment.selection_reason"
+          },
+          "why_now": {
+            "formed": false,
+            "text": null
+          }
+        },
+        "evidence": [
+          {
+            "id": "business",
+            "content": "生产电子材料，半年主营收入同比增长10%，经营现金流为正且同比增加10%，经营结果已经发生，没有新事件。",
+            "source": "synthetic.business"
+          },
+          {
+            "id": "market",
+            "content": "行业最近5日多数上涨，最新一天多数下跌；本股该日仍上涨，并连续四个交易日收高。",
+            "source": "synthetic.market"
+          }
+        ],
+        "counterevidence": {
+          "text": "近5日已涨10%，行业最新一天转弱，51—53元是此前两次上涨受阻的区域。"
+        },
+        "conditions": {
+          "text": "若连续两个交易日收盘低于48元，且行业过半成分股下跌，改为等待；若明显高开且随后回吐站不稳，先不追。",
+          "source": "synthetic.conditions"
+        },
+        "unknowns": "细分产品分别贡献多少未拆分；本次依据实际总收入和现金流，不依赖未拆分贡献。能否突破51—53元仍未知。",
+        "facts": {
+          "business": {
+            "revenue_growth": 0.1,
+            "operating_cash_flow_positive": true,
+            "operating_cash_flow_growth": 0.1
+          },
+          "price": {
+            "return_5d": 0.1,
+            "first_return_session": "2026-09-04",
+            "last_return_session": "2026-09-10",
+            "base_close_date": "2026-09-03",
+            "close_on_2026_09_08": 48.0,
+            "close_on_2026_09_10": 50.0,
+            "return_between_those_closes": 0.0416666666667,
+            "amount_ratio_last_20d": 1.8,
+            "amount_ratio_definition": "当日成交额/含当日在内最近20个交易日平均成交额，不是成交量倍数。",
+            "target_atr_distance": 4.0,
+            "atr_definition": "相对目标的价格距离/历史日线ATR，是波动尺度，不给出未来推进方向、天数或概率。",
+            "up_days_5d": 4,
+            "ordinary_day_rise_ex_largest": 0.06,
+            "mean_close_position_5d": 0.84
+          },
+          "peer": {
+            "name": "合成乙材料",
+            "mean_close_position_5d": 0.72,
+            "definition": "最近五个交易日收盘价在当天最低到最高之间的相对位置的算术平均，0为最低、1为最高。"
+          }
+        },
+        "comparisons": {
+          "text": "甲平均收盘位置84%，乙72%；仅表明甲的平均收盘位置相对更高。"
+        },
+        "gaps": [
+          "risk_acceptance_missing：未单独填写字段，实际取舍解释以judgment.selection_reason为准。"
+        ],
+        "source_refs": {
+          "source": "全部为本次验收自造数据，不对应真实公司，不用于交易。"
+        }
+      },
+      "article": "**公司主要做什么**\n合成甲材料生产电子材料。上半年主营收入增长10%，经营现金流为正且也增长10%，提供已经发生的经营支持；细分贡献未拆开，不影响这次按总量作判断。\n\n**为什么会选它**\n以50元为参照，我考虑参与。近5日已经上涨10%，前面还有51—53元两次受阻的区域，当前价格前面并非没有障碍。但行业最新一天多数下跌时，它仍上涨，连续四日收高也未中断；这些表现支持它再次尝试向上，是我愿意先承担受阻风险、而不是等突破再考虑的原因。\n\n到目标的距离相当于4个历史日均真实波幅，意思是必须靠多天上涨才能走到；这不是天数预测。\n\n未来约20个交易日的20%观察目标对应60元，要先通过上述受阻区域。目标不会使眼前阻力消失，能否通过仍须看后续表现。\n\n**什么情况会让我改变看法**\n若连续两个交易日收盘低于48元，且行业过半成分股下跌，改为等待；若明显高开且随后回吐站不稳，先不追。",
+      "expect": {
+        "ready": false,
+        "min_blocking": 1,
+        "blocking_semantic_kinds_any": [
+          "inference"
+        ],
+        "quote_anchors": [
+          "意思是必须靠多天上涨才能走到"
+        ],
+        "forbid_research_issues": true
+      }
+    },
+    {
+      "id": "W05_redundant_meaning",
+      "kind": "review",
+      "packet": {
+        "identity": {
+          "ts_code": "TEST001",
+          "name": "合成甲材料",
+          "formation_date": "2026-09-10",
+          "action_date": "2026-09-11",
+          "as_of": "2026-09-10T18:30:00+08:00",
+          "reference_price": 50,
+          "observation_contract": "未来约20个交易日，相对50元上涨20%（60元）是观察目标，不是收益承诺。"
+        },
+        "judgment": {
+          "selection_reason": "按50元考虑参与。虽近5日已涨10%、行业最新一天转弱，但本股连续四个交易日收高、行业转弱时仍上涨，因此愿意承担51—53元区域再次受阻的风险，先于突破考虑参与；不是因为目标为60元就判断空间充足。"
+        },
+        "reasoning": {
+          "opinion": {
+            "formed": true,
+            "text": "按50元考虑参与；行业转弱时仍连续收高，是愿意先承担51—53元再次受阻风险的原因。",
+            "source": "judgment.selection_reason"
+          },
+          "why_now": {
+            "formed": false,
+            "text": null
+          }
+        },
+        "evidence": [
+          {
+            "id": "business",
+            "content": "生产电子材料，半年主营收入同比增长10%，经营现金流为正且同比增加10%，经营结果已经发生，没有新事件。",
+            "source": "synthetic.business"
+          },
+          {
+            "id": "market",
+            "content": "行业最近5日多数上涨，最新一天多数下跌；本股该日仍上涨，并连续四个交易日收高。",
+            "source": "synthetic.market"
+          }
+        ],
+        "counterevidence": {
+          "text": "近5日已涨10%，行业最新一天转弱，51—53元是此前两次上涨受阻的区域。"
+        },
+        "conditions": {
+          "text": "若连续两个交易日收盘低于48元，且行业过半成分股下跌，改为等待；若明显高开且随后回吐站不稳，先不追。",
+          "source": "synthetic.conditions"
+        },
+        "unknowns": "细分产品分别贡献多少未拆分；本次依据实际总收入和现金流，不依赖未拆分贡献。能否突破51—53元仍未知。",
+        "facts": {
+          "business": {
+            "revenue_growth": 0.1,
+            "operating_cash_flow_positive": true,
+            "operating_cash_flow_growth": 0.1
+          },
+          "price": {
+            "return_5d": 0.1,
+            "first_return_session": "2026-09-04",
+            "last_return_session": "2026-09-10",
+            "base_close_date": "2026-09-03",
+            "close_on_2026_09_08": 48.0,
+            "close_on_2026_09_10": 50.0,
+            "return_between_those_closes": 0.0416666666667,
+            "amount_ratio_last_20d": 1.8,
+            "amount_ratio_definition": "当日成交额/含当日在内最近20个交易日平均成交额，不是成交量倍数。",
+            "target_atr_distance": 4.0,
+            "atr_definition": "相对目标的价格距离/历史日线ATR，是波动尺度，不给出未来推进方向、天数或概率。",
+            "up_days_5d": 4,
+            "ordinary_day_rise_ex_largest": 0.06,
+            "mean_close_position_5d": 0.84
+          },
+          "peer": {
+            "name": "合成乙材料",
+            "mean_close_position_5d": 0.72,
+            "definition": "最近五个交易日收盘价在当天最低到最高之间的相对位置的算术平均，0为最低、1为最高。"
+          }
+        },
+        "comparisons": {
+          "text": "甲平均收盘位置84%，乙72%；仅表明甲的平均收盘位置相对更高。"
+        },
+        "gaps": [
+          "risk_acceptance_missing：未单独填写字段，实际取舍解释以judgment.selection_reason为准。"
+        ],
+        "source_refs": {
+          "source": "全部为本次验收自造数据，不对应真实公司，不用于交易。"
+        }
+      },
+      "article": "**公司主要做什么**\n合成甲材料生产电子材料。上半年主营收入增长10%，经营现金流为正且也增长10%，提供已经发生的经营支持；细分贡献未拆开，不影响这次按总量作判断。\n\n**为什么会选它**\n以50元为参照，我考虑参与。近5日已经上涨10%，前面还有51—53元两次受阻的区域，当前价格前面并非没有障碍。但行业最新一天多数下跌时，它仍上涨，连续四日收高也未中断；这些表现支持它再次尝试向上，是我愿意先承担受阻风险、而不是等突破再考虑的原因。\n\n\n它近五日有四日上涨，说明上涨不只发生在一天。这再次说明它不是靠某一天上涨。\n\n剔除最大上涨日后，其余交易日仍上涨6%，说明上涨分布在其他交易日。这也说明它不是靠某一天上涨。\n\n股价连续四日收高，说明上涨有多日确认。因此还可以再次说明，它不是靠某一天上涨。\n\n未来约20个交易日的20%观察目标对应60元，要先通过上述受阻区域。目标不会使眼前阻力消失，能否通过仍须看后续表现。\n\n**什么情况会让我改变看法**\n若连续两个交易日收盘低于48元，且行业过半成分股下跌，改为等待；若明显高开且随后回吐站不稳，先不追。",
+      "expect": {
+        "ready": false,
+        "min_blocking": 1,
+        "blocking_semantic_kinds_any": [
+          "expression"
+        ],
+        "quote_anchors": [
+          "它近五日有四日上涨，说明上涨不只发生在一天",
+          "剔除最大上涨日后，其余交易日仍上涨6%",
+          "股价连续四日收高，说明上涨有多日确认"
+        ],
+        "forbid_research_issues": true
+      }
+    },
+    {
+      "id": "W06_tradeoff_omitted",
+      "kind": "review",
+      "packet": {
+        "identity": {
+          "ts_code": "TEST001",
+          "name": "合成甲材料",
+          "formation_date": "2026-09-10",
+          "action_date": "2026-09-11",
+          "as_of": "2026-09-10T18:30:00+08:00",
+          "reference_price": 50,
+          "observation_contract": "未来约20个交易日，相对50元上涨20%（60元）是观察目标，不是收益承诺。"
+        },
+        "judgment": {
+          "selection_reason": "按50元考虑参与。虽近5日已涨10%、行业最新一天转弱，但本股连续四个交易日收高、行业转弱时仍上涨，因此愿意承担51—53元区域再次受阻的风险，先于突破考虑参与；不是因为目标为60元就判断空间充足。"
+        },
+        "reasoning": {
+          "opinion": {
+            "formed": true,
+            "text": "按50元考虑参与；行业转弱时仍连续收高，是愿意先承担51—53元再次受阻风险的原因。",
+            "source": "judgment.selection_reason"
+          },
+          "why_now": {
+            "formed": false,
+            "text": null
+          }
+        },
+        "evidence": [
+          {
+            "id": "business",
+            "content": "生产电子材料，半年主营收入同比增长10%，经营现金流为正且同比增加10%，经营结果已经发生，没有新事件。",
+            "source": "synthetic.business"
+          },
+          {
+            "id": "market",
+            "content": "行业最近5日多数上涨，最新一天多数下跌；本股该日仍上涨，并连续四个交易日收高。",
+            "source": "synthetic.market"
+          }
+        ],
+        "counterevidence": {
+          "text": "近5日已涨10%，行业最新一天转弱，51—53元是此前两次上涨受阻的区域。"
+        },
+        "conditions": {
+          "text": "若连续两个交易日收盘低于48元，且行业过半成分股下跌，改为等待；若明显高开且随后回吐站不稳，先不追。",
+          "source": "synthetic.conditions"
+        },
+        "unknowns": "细分产品分别贡献多少未拆分；本次依据实际总收入和现金流，不依赖未拆分贡献。能否突破51—53元仍未知。",
+        "facts": {
+          "business": {
+            "revenue_growth": 0.1,
+            "operating_cash_flow_positive": true,
+            "operating_cash_flow_growth": 0.1
+          },
+          "price": {
+            "return_5d": 0.1,
+            "first_return_session": "2026-09-04",
+            "last_return_session": "2026-09-10",
+            "base_close_date": "2026-09-03",
+            "close_on_2026_09_08": 48.0,
+            "close_on_2026_09_10": 50.0,
+            "return_between_those_closes": 0.0416666666667,
+            "amount_ratio_last_20d": 1.8,
+            "amount_ratio_definition": "当日成交额/含当日在内最近20个交易日平均成交额，不是成交量倍数。",
+            "target_atr_distance": 4.0,
+            "atr_definition": "相对目标的价格距离/历史日线ATR，是波动尺度，不给出未来推进方向、天数或概率。",
+            "up_days_5d": 4,
+            "ordinary_day_rise_ex_largest": 0.06,
+            "mean_close_position_5d": 0.84
+          },
+          "peer": {
+            "name": "合成乙材料",
+            "mean_close_position_5d": 0.72,
+            "definition": "最近五个交易日收盘价在当天最低到最高之间的相对位置的算术平均，0为最低、1为最高。"
+          }
+        },
+        "comparisons": {
+          "text": "甲平均收盘位置84%，乙72%；仅表明甲的平均收盘位置相对更高。"
+        },
+        "gaps": [
+          "risk_acceptance_missing：未单独填写字段，实际取舍解释以judgment.selection_reason为准。"
+        ],
+        "source_refs": {
+          "source": "全部为本次验收自造数据，不对应真实公司，不用于交易。"
+        }
+      },
+      "article": "**公司主要做什么**\n合成甲材料生产电子材料。上半年主营收入增长10%，经营现金流为正且也增长10%，提供已经发生的经营支持；细分贡献未拆开，不影响这次按总量作判断。\n\n**为什么会选它**\n以50元为参照，我考虑参与。近5日已经上涨10%，前面还有51—53元两次受阻的区域，行业最新一天多数下跌。公司经营改善。股票连续四日收高。我仍愿意参与，需要注意风险。\n\n未来约20个交易日的20%观察目标对应60元，要先通过上述受阻区域。目标不会使眼前阻力消失，能否通过仍须看后续表现。\n\n**什么情况会让我改变看法**\n若连续两个交易日收盘低于48元，且行业过半成分股下跌，改为等待；若明显高开且随后回吐站不稳，先不追。",
+      "expect": {
+        "ready": false,
+        "min_blocking": 1,
+        "blocking_semantic_kinds_any": [
+          "reasoning_gap"
+        ],
+        "quote_anchors": [
+          "我仍愿意参与，需要注意风险",
+          "以50元为参照，我考虑参与"
+        ],
+        "forbid_research_issues": true
+      }
+    },
+    {
+      "id": "W07_necessary_repeat_and_unknown",
+      "kind": "review",
+      "packet": {
+        "identity": {
+          "ts_code": "TEST001",
+          "name": "合成甲材料",
+          "formation_date": "2026-09-10",
+          "action_date": "2026-09-11",
+          "as_of": "2026-09-10T18:30:00+08:00",
+          "reference_price": 50,
+          "observation_contract": "未来约20个交易日，相对50元上涨20%（60元）是观察目标，不是收益承诺。"
+        },
+        "judgment": {
+          "selection_reason": "按50元考虑参与。虽近5日已涨10%、行业最新一天转弱，但本股连续四个交易日收高、行业转弱时仍上涨，因此愿意承担51—53元区域再次受阻的风险，先于突破考虑参与；不是因为目标为60元就判断空间充足。"
+        },
+        "reasoning": {
+          "opinion": {
+            "formed": true,
+            "text": "按50元考虑参与；行业转弱时仍连续收高，是愿意先承担51—53元再次受阻风险的原因。",
+            "source": "judgment.selection_reason"
+          },
+          "why_now": {
+            "formed": false,
+            "text": null
+          }
+        },
+        "evidence": [
+          {
+            "id": "business",
+            "content": "生产电子材料，半年主营收入同比增长10%，经营现金流为正且同比增加10%，经营结果已经发生，没有新事件。",
+            "source": "synthetic.business"
+          },
+          {
+            "id": "market",
+            "content": "行业最近5日多数上涨，最新一天多数下跌；本股该日仍上涨，并连续四个交易日收高。",
+            "source": "synthetic.market"
+          }
+        ],
+        "counterevidence": {
+          "text": "近5日已涨10%，行业最新一天转弱，51—53元是此前两次上涨受阻的区域。"
+        },
+        "conditions": {
+          "text": "若连续两个交易日收盘低于48元，且行业过半成分股下跌，改为等待；若明显高开且随后回吐站不稳，先不追。",
+          "source": "synthetic.conditions"
+        },
+        "unknowns": "细分产品分别贡献多少未拆分；本次依据实际总收入和现金流，不依赖未拆分贡献。能否突破51—53元仍未知。",
+        "facts": {
+          "business": {
+            "revenue_growth": 0.1,
+            "operating_cash_flow_positive": true,
+            "operating_cash_flow_growth": 0.1
+          },
+          "price": {
+            "return_5d": 0.1,
+            "first_return_session": "2026-09-04",
+            "last_return_session": "2026-09-10",
+            "base_close_date": "2026-09-03",
+            "close_on_2026_09_08": 48.0,
+            "close_on_2026_09_10": 50.0,
+            "return_between_those_closes": 0.0416666666667,
+            "amount_ratio_last_20d": 1.8,
+            "amount_ratio_definition": "当日成交额/含当日在内最近20个交易日平均成交额，不是成交量倍数。",
+            "target_atr_distance": 4.0,
+            "atr_definition": "相对目标的价格距离/历史日线ATR，是波动尺度，不给出未来推进方向、天数或概率。",
+            "up_days_5d": 4,
+            "ordinary_day_rise_ex_largest": 0.06,
+            "mean_close_position_5d": 0.84
+          },
+          "peer": {
+            "name": "合成乙材料",
+            "mean_close_position_5d": 0.72,
+            "definition": "最近五个交易日收盘价在当天最低到最高之间的相对位置的算术平均，0为最低、1为最高。"
+          }
+        },
+        "comparisons": {
+          "text": "甲平均收盘位置84%，乙72%；仅表明甲的平均收盘位置相对更高。"
+        },
+        "gaps": [
+          "risk_acceptance_missing：未单独填写字段，实际取舍解释以judgment.selection_reason为准。"
+        ],
+        "source_refs": {
+          "source": "全部为本次验收自造数据，不对应真实公司，不用于交易。"
+        }
+      },
+      "article": "**公司主要做什么**\n合成甲材料生产电子材料。上半年主营收入增长10%，经营现金流为正且也增长10%，提供已经发生的经营支持；细分贡献未拆开，不影响这次按总量作判断。\n\n**为什么会选它**\n以50元为参照，我考虑参与。近5日已经上涨10%，前面还有51—53元两次受阻的区域，当前价格前面并非没有障碍。但行业最新一天多数下跌时，它仍上涨，连续四日收高也未中断；这些表现支持它再次尝试向上，是我愿意先承担受阻风险、而不是等突破再考虑的原因。\n\n未来约20个交易日的20%观察目标对应60元，要先通过上述受阻区域。目标不会使眼前阻力消失，能否通过仍须看后续表现。\n\n**什么情况会让我改变看法**\n若连续两个交易日收盘低于48元，且行业过半成分股下跌，改为等待；若明显高开且随后回吐站不稳，先不追。",
+      "expect": {
+        "ready": true,
+        "max_blocking": 0,
+        "forbid_research_issues": true
+      }
+    },
+    {
+      "id": "W08_true_research_gap",
+      "kind": "review",
+      "packet": {
+        "identity": {
+          "ts_code": "TEST001",
+          "name": "合成甲材料",
+          "formation_date": "2026-09-10",
+          "action_date": "2026-09-11",
+          "as_of": "2026-09-10T18:30:00+08:00",
+          "reference_price": 50,
+          "observation_contract": "未来约20个交易日，相对50元上涨20%（60元）是观察目标，不是收益承诺。"
+        },
+        "judgment": {
+          "selection_reason": "按50元考虑参与，但原研究尚未形成为何愿意在51—53元两次受阻且行业转弱时提前买入的解释。该取舍属于待解决的核心研究问题，不能由作者补造。"
+        },
+        "reasoning": {
+          "opinion": {
+            "formed": true,
+            "text": "按50元考虑参与，但原研究尚未形成为何愿意在51—53元两次受阻且行业转弱时提前买入的解释。该取舍属于待解决的核心研究问题，不能由作者补造。",
+            "source": "judgment.selection_reason"
+          },
+          "why_now": {
+            "formed": false,
+            "text": null
+          }
+        },
+        "evidence": [
+          {
+            "id": "business",
+            "content": "生产电子材料，半年主营收入同比增长10%，经营现金流为正且同比增加10%，经营结果已经发生，没有新事件。",
+            "source": "synthetic.business"
+          },
+          {
+            "id": "market",
+            "content": "行业最近5日多数上涨，最新一天多数下跌；本股该日仍上涨，并连续四个交易日收高。",
+            "source": "synthetic.market"
+          }
+        ],
+        "counterevidence": {
+          "text": "近5日已涨10%，行业最新一天转弱，51—53元是此前两次上涨受阻的区域。"
+        },
+        "conditions": {
+          "text": "若连续两个交易日收盘低于48元，且行业过半成分股下跌，改为等待；若明显高开且随后回吐站不稳，先不追。",
+          "source": "synthetic.conditions"
+        },
+        "unknowns": "细分产品分别贡献多少未拆分；本次依据实际总收入和现金流，不依赖未拆分贡献。能否突破51—53元仍未知。",
+        "facts": {
+          "business": {
+            "revenue_growth": 0.1,
+            "operating_cash_flow_positive": true,
+            "operating_cash_flow_growth": 0.1
+          },
+          "price": {
+            "return_5d": 0.1,
+            "first_return_session": "2026-09-04",
+            "last_return_session": "2026-09-10",
+            "base_close_date": "2026-09-03",
+            "close_on_2026_09_08": 48.0,
+            "close_on_2026_09_10": 50.0,
+            "return_between_those_closes": 0.0416666666667,
+            "amount_ratio_last_20d": 1.8,
+            "amount_ratio_definition": "当日成交额/含当日在内最近20个交易日平均成交额，不是成交量倍数。",
+            "target_atr_distance": 4.0,
+            "atr_definition": "相对目标的价格距离/历史日线ATR，是波动尺度，不给出未来推进方向、天数或概率。",
+            "up_days_5d": 4,
+            "ordinary_day_rise_ex_largest": 0.06,
+            "mean_close_position_5d": 0.84
+          },
+          "peer": {
+            "name": "合成乙材料",
+            "mean_close_position_5d": 0.72,
+            "definition": "最近五个交易日收盘价在当天最低到最高之间的相对位置的算术平均，0为最低、1为最高。"
+          }
+        },
+        "comparisons": {
+          "text": "甲平均收盘位置84%，乙72%；仅表明甲的平均收盘位置相对更高。"
+        },
+        "gaps": [
+          "requires_research_change：当前参与意见与主要反证之间的取舍尚未形成。"
+        ],
+        "source_refs": {
+          "source": "全部为本次验收自造数据，不对应真实公司，不用于交易。"
+        }
+      },
+      "article": "**公司主要做什么**\n合成甲材料生产电子材料。上半年主营收入增长10%，经营现金流为正且也增长10%，提供已经发生的经营支持；细分贡献未拆开，不影响这次按总量作判断。\n\n**为什么会选它**\n以50元为参照，我考虑参与。近5日已经上涨10%，前面还有51—53元两次受阻的区域，行业最新一天多数下跌。公司经营改善。股票连续四日收高。我仍愿意参与，需要注意风险。\n\n未来约20个交易日的20%观察目标对应60元，要先通过上述受阻区域。目标不会使眼前阻力消失，能否通过仍须看后续表现。\n\n**什么情况会让我改变看法**\n若连续两个交易日收盘低于48元，且行业过半成分股下跌，改为等待；若明显高开且随后回吐站不稳，先不追。",
+      "expect": {
+        "ready": false,
+        "min_blocking": 1,
+        "issue_kind": "research",
+        "require_research_issues": true
+      }
+    }
+  ]
+}
