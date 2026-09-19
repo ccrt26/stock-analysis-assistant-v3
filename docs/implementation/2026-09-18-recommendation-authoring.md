@@ -58,3 +58,30 @@
 ## 待采用状态
 
 - 停在「待文章评估」：文章与运行证据交用户/ChatGPT 评估；质量采用后另行按合同快进合并 main、再清理临时工作树/分支。本轮未自动合并、未切换生产、未删除远端分支。
+
+---
+
+# 2026-09-19 第二轮（V1.1 持续质量修补）实施摘要
+
+承接上文；同分支 `fix/recommendation-authoring-20260918`，基线 3d475ab。
+
+## 修补内容（全部位于生产夜间任务共用的同一组函数）
+
+- 配置与证据：`stock_ai.load_local_config(path)` 支持传入路径；试写显式装载源配置并强制 glm 型号为 bigmodel/glm-5.3-flash（差异记录，损坏如实标记）；`rollout_model_evidence` 按本机 CLI 0.16.5 实测结构重写（querySource=main_turn、body.model、output_config.effort、response.modelId/usage，白名单不含headers），当次调用即存入阶段文件。
+- 缓存：`article_stage` 输入身份=stage+合同版本+Prompt全文+会话身份+路线策略(provider/fallback/provider_order)+run_scope；复用另需通过 `stage_execution_verified`（实际route符合策略+当次证据核验）。fallback污染与repeat隔离有行为测试。
+- 材料重组：`build_article_packet` 按研究引用组织（引用字段过滤定义、未引用财表剔除、industry_breadth删除、比较成组、证据瘦身、来源逐条标注）；飞凯包实测 129,023→61,427 紧凑字符。`selection-handoff.json` 升级 v2（trace_sha256 绑定，同日修订可区分）；`extract_conditions_from_report` 提取原稿条件原句。
+- 疑点处理：`resolve_article_issues`（生产/试写共用）五类处理（resolved_existing/resolved_added/retained_unknown/requires_research_change/unresolved_blocking）；处理结论进入作者输入并改变缓存身份；澄清预算（2轮）持久化于state；生产 `research-repair` 的 resolutions/unresolved 解析保存并回传作者。
+- Prompt：作者（开头交代意见与最大矛盾、五条通用写作纪律、resolutions处理）、审稿（blocking/minor分级、fidelity与研究缺口的分类边界）、新增 `research-clarification-prompt.md`。
+- 试写CLI：run 需要 --source-root、--resume 门、非GLM/允许fallback在请求前拒绝；article_status 与 execution_verified 分离，二者全满足才 exit 0；新增 `check-review`（真实GLM合成挑战）与 `export`（复核包汇总+反截断回读核对）。
+
+## 验证
+
+- 测试：清单十文件 609 passed；全量离线套件 1598 passed/1 skipped/2 failed（2个失败为worktree缺 local_warehouse 的环境性失败，原工作区通过）。
+- 真实GLM：pilot(飞凯)=ready+verified；回归三股×2=6/6 ready+verified；未调优两家=中材科技 r1 ready+verified / r2 needs_research+verified（真实研究缺口如实阻塞），海星股份 r1 needs_revision+verified / r2 failed（澄清响应尾部损坏，两次resume重试同型损坏，保留失败）。
+- 合成挑战6/6通过（真实GLM，经共用审稿/澄清函数；期望标签只在包装层比对）。
+- 退出码实测：0（pilot、回归）、3（中材，needs_research）、2（海星，解析失败）。
+- 正式文件：三份源trace sha256 与 P0.3 冻结值一致；CSV/复盘账本/报告/页面未动（formal-files-check.json）。
+
+## 状态
+
+停在「待ChatGPT复核」：未合并 main、未切换生产、未删除分支。不宣称长期零错误；收益准确率另走既有方法研究。
