@@ -1387,6 +1387,13 @@ def run_article_cycle(host, *, packet: dict, materials: dict, directory: Path, s
             'problem': '缺少同身份有出处的研究交接；这不表示原研究缺结论',
             'evidence': note_error, 'needed': '请原研究步骤生成绑定原资料的 authoring_note'})
         return result('needs_research')
+    if files_mode and prior_resolutions:
+        # Validate original binding first, then give both roles the same resolved view.
+        effective_packet = build_effective_packet(packet, prior_resolutions)
+        save_json(directory / 'packet-effective.json', effective_packet)
+        stage_execution('research-clarification')
+        if (effective_packet.get('effective_packet') or {}).get('unapplied'):
+            return result('needs_research')
 
     for round_index in range(1 + expression_limit):
         author_stage = f'author-{tag}' if round_index == 0 else f'author-rev{round_index}-{tag}'

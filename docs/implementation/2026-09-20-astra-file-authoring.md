@@ -21,3 +21,8 @@ CLI 接口依据：[非交互执行](https://developers.openai.com/codex/noninte
 离线记录：相关回归 299 通过；一次全量 1693 通过、4 失败、1 跳过。两个额外纯标题断言分别在 `test_pipeline_repair_acceptance` 与 `test_statement_display`，按执行单必要表外依赖条款先说明后同步，未修改其数据、身份或来源保护。其余两项是 `test_prism_a2_preview` 的 `test_assemble_series_builds_theme_comparisons` 和 `test_series_theme_conflict_against_snapshot_industry_raises`，均在读取候选工作树空交易日历时抛错；不修改事实仓或 Prism。测试修订后仅定向复测，不把初次全量报告改成全绿。
 
 两处旧格式断言同步后的定向回归：39 通过。程序代码在上述一次全量后没有变化。
+
+
+固定生成版本的唯一真实回放：交接由 Astra xhigh 完成，实际会话型号、强度和文件读取证据可见。交接明确维持原判断，却将一项非决定性比较核验缺口记录在 research_issues；原入口错误地把数组非空等同于决定性阻断，返回 needs_research，作者和审稿未启动，没有文章。这是接入缺陷，不是模型不可用或研究自动改判。
+
+生成后的离线修正：交接提出的问题进入已有 resolve_article_issues，沿用本轮一次澄清总预算，由现有 resolutions/unresolved 语义决定是否继续。程序不按“非阻断”等关键词放行，也不由开发者作研究判断；澄清后的同版视图同时提供作者和审稿。此修正仅做合成边界验证，本轮不再次发起真实调用、不改旧 summary、不把旧交接标为新源码生成。生成版本与后续候选修正版本分别记录，后者尚未经过真实回放。

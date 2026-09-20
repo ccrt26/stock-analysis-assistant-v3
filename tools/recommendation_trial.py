@@ -994,13 +994,23 @@ def replay_files(*, source_root: Path, packet_path: Path, source_manifest: Path,
         bound_packet, issues = pipeline.generate_file_handoff(stock_ai, packet=packet,
             materials=material, source_binding=manifest['binding'], directory=output_dir / 'handoff',
             state=state, state_path=state_path, config=config)
+        resolved = {'resolutions': [], 'blocking': []}
         if issues:
-            summary.update(status='needs_research', research_issues=issues)
+            # A research issue is not itself a decision that research must change.
+            # Use the existing resolver; never infer severity from prose keywords.
+            resolved = pipeline.resolve_article_issues(stock_ai, issues=issues, packet=bound_packet,
+                materials=material, directory=output_dir / 'article', state=state, state_path=state_path,
+                config=config, provider='astra', fallback=False, allow_research_changes=False,
+                clarification_limit=1, run_scope='replay-files')
+            pipeline.save_json(output_dir / 'handoff-issue-resolutions.json', resolved)
+        if resolved['blocking']:
+            summary.update(status='needs_research', research_issues=issues,
+                           issue_resolutions=resolved['resolutions'])
         else:
             summary.update(pipeline.run_article_cycle(stock_ai, packet=bound_packet, materials=material,
                 directory=output_dir / 'article', state=state, state_path=state_path, config=config,
                 provider='astra', fallback=False, allow_research_changes=False, expression_limit=1,
-                clarification_limit=1, run_scope='replay-files'))
+                clarification_limit=1, run_scope='replay-files', prior_resolutions=resolved['resolutions']))
             # Adoption refers to this candidate flow only, never formal/user acceptance.
             summary['flow_ready'] = summary.pop('adopted', False)
             summary['adopted'] = False

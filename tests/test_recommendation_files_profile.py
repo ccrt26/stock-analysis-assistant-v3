@@ -464,3 +464,31 @@ def test_formal_identity_order_duplicates_and_missing_still_checked():
 def test_unknown_profile_cannot_silently_use_legacy():
     with pytest.raises(ValueError, match='未知'):
         fio.enabled({'recommendation_authoring_profile':'astra-files-typo'})
+
+
+@pytest.mark.parametrize('blocking', [False, True])
+def test_handoff_issue_uses_existing_resolver_not_nonempty_or_keywords(harness, blocking):
+    def handoff_issue(role, directory):
+        value={'identity':IDENTITY, 'authoring_note':'保持原判断；比较细节尚未核实。',
+            'source_refs':[{'file':'input/packet.json','pointer':'/judgment/selection_reason',
+                            'quote':'原研究已解释接受风险的理由'}],
+            'research_issues':[{**QUESTION,'problem':'非阻断的附带比较缺口；不能据关键词决定状态'}]}
+        (directory/'output/handoff.json').write_text(fio.dumps(value))
+    def resolution(role, directory):
+        assert role == 'clarification'
+        issue=json.loads((directory/'input/issues.json').read_text())[0]
+        value={'resolutions':[], 'unresolved':[{'issue_id':issue['issue_id'],'problem':'实际仍有决定性问题'}]} if blocking else {
+            'resolutions':[{'issue_id':issue['issue_id'],'type':'retained_unknown',
+                'author_instruction':'保留原判断和既有风险接受理由；不采用无法核实的附带细节。',
+                'changes_original_judgment':False}], 'unresolved':[]}
+        (directory/'output/resolution.json').write_text(fio.dumps(value))
+    harness.responses[:]=[handoff_issue,resolution]
+    args=prepare_replay_inputs(harness)
+    code=trial.replay_files(**args)
+    assert code == (trial.EXIT_NEEDS_RESEARCH if blocking else 0)
+    expected=['handoff','clarification'] if blocking else ['handoff','clarification','author','review']
+    assert [x[0] for x in harness.calls] == expected
+    state=json.loads((args['output_dir']/'state.json').read_text())
+    assert list(state['article_cycle_counts'].values())[0]['clarification'] == 1
+    if not blocking:
+        assert (harness.calls[2][1]/'input/packet.json').read_text() == (harness.calls[3][1]/'input/packet.json').read_text()
