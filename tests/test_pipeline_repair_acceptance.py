@@ -31,8 +31,11 @@ def test_already_valid_article_and_research_issues_unchanged():
 def test_missing_heading_not_invented():
     result=p.parse_author_output(json.dumps({'article':'没有标题的原文。','research_issues':[]},ensure_ascii=False))
     assert result['article']=='没有标题的原文。'
+    assembled=p.assemble_stock_section([({'name':'测试','ts_code':'000001.SZ'},result['article'])])
+    assert '没有标题的原文。' in assembled
+    assert not any('**'+heading+'**' in assembled for heading in p.ARTICLE_SUBHEADINGS)
     with pytest.raises(ValueError):
-        p.assemble_stock_section([({'name':'测试','ts_code':'000001.SZ'},result['article'])])
+        p.assemble_stock_section([({'name':'测试','ts_code':'000001.SZ'},'### 测试（000001.SZ）')])
 
 def test_contract_separates_new_formatting_from_old_cache():
     assert p.AUTHOR_CONTRACT_VERSION=='article-author-v4.1'

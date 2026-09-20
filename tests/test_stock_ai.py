@@ -1832,9 +1832,9 @@ def test_merged_report_recommendation_section_contract(tmp_path, monkeypatch, fa
     # 重复标题 → 失败
     dup = reco + "### 山东玻纤（605006.SH）\n\n重复正文\n"
     assert any("重复的股票标题" in i for i in reco_issues(dup))
-    # 缺加粗小标题 → 失败
-    missing_sub = reco.replace("**为什么会选它**\n\n选择说明。\n\n", "")
-    assert any("缺少小标题" in i for i in reco_issues(missing_sub))
+    # 正文仍在时不强制三个固定小标题；其他身份、正文断言保留。
+    missing_sub = reco.replace("**为什么会选它**\n\n", "")
+    assert not any("缺少小标题" in i for i in reco_issues(missing_sub))
     # 正文标题降级为四级 → 不符合推荐节合同
     demoted = reco.replace("### 山东玻纤（605006.SH）", "#### 山东玻纤（605006.SH）")
     assert any("没有逐只股票正文" in i for i in reco_issues(demoted))

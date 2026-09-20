@@ -1143,7 +1143,7 @@ def codex_command(config: dict) -> list[str]:
     return [str(Path(binary).resolve())]
 
 
-def codex_session_evidence(events: Path, diagnostic: str, prompt: str, cwd: Path) -> dict:
+def codex_session_evidence(events: Path, diagnostic: str, prompt: str, cwd: Path, *, files_profile=False) -> dict:
     """Use Codex's actual turn input/output protocol, never the saved prompt alone."""
     stream = [json.loads(line) for line in events.read_text().splitlines() if line.strip()]
     sid = next((e.get("thread_id") for e in stream if e.get("type") == "thread.started"), None)
@@ -1157,8 +1157,31 @@ def codex_session_evidence(events: Path, diagnostic: str, prompt: str, cwd: Path
         evidence["note"] = "本会话原始协议记录缺失或不唯一"
         return evidence
     raw = paths[0].read_text()
-    events.with_suffix(".rollout.jsonl").write_text(raw)
     protocol = [json.loads(line) for line in raw.splitlines() if line.strip()]
+    if files_profile:
+        # Export only visible user/tool/final activity and execution metadata, never reasoning,
+        # encrypted blobs, system/developer instructions, or auth transport headers.
+        public = []
+        for event in protocol:
+            kind, payload = event.get('type'), event.get('payload', {})
+            clean = None
+            if kind == 'turn_context':
+                clean = {k: payload[k] for k in ('model', 'effort', 'cwd', 'approval_policy', 'sandbox_policy') if k in payload}
+            elif kind == 'session_meta':
+                clean = {k: payload[k] for k in ('id', 'cwd', 'model_provider', 'forked_from_id', 'cli_version', 'originator') if k in payload}
+            elif kind == 'response_item':
+                item_type = payload.get('type', '')
+                if item_type.endswith(('_call', '_call_output')):
+                    clean = {k: v for k, v in payload.items() if k not in ('encrypted_content', 'summary')}
+                elif item_type == 'message' and payload.get('role') == 'user':
+                    clean = {k: payload[k] for k in ('type', 'role', 'content') if k in payload}
+                elif item_type == 'message' and payload.get('role') == 'assistant' and payload.get('phase') == 'final_answer':
+                    clean = {k: payload[k] for k in ('type', 'role', 'content', 'phase') if k in payload}
+            if clean is not None:
+                public.append({'timestamp': event.get('timestamp'), 'type': kind, 'payload': clean})
+        events.with_suffix('.rollout.jsonl').write_text(''.join(json.dumps(e, ensure_ascii=False) + '\n' for e in public))
+    else:
+        events.with_suffix('.rollout.jsonl').write_text(raw)
     contexts = [e["payload"] for e in protocol if e.get("type") == "turn_context"]
     models = {(c.get("model"), c.get("effort")) for c in contexts}
     metadata = next((e["payload"] for e in protocol if e.get("type") == "session_meta"), {})
@@ -1204,28 +1227,51 @@ def run_codex(prompt_path: Path, final_path: Path, jsonl_path: Path,
     # Scoped transport logging identifies the real endpoint; no auth request headers.
     env["RUST_LOG"] = "codex_api=info,codex_core::client=info"
     env["NO_COLOR"] = "1"
-    isolation = tempfile.TemporaryDirectory(prefix="stock-text-") if config.get("_text_only") else None
+    files_profile = config.get("_file_stage") is True
+    isolation = tempfile.TemporaryDirectory(prefix="stock-text-") if config.get("_text_only") and not files_profile else None
     workdir = Path(isolation.name if isolation else config.get("_cwd") or PROJECT_ROOT).resolve()
     prompt = prompt_path.read_text(encoding="utf-8")
     args = codex_command(config) + ["exec", "--ignore-user-config", "--skip-git-repo-check",
         "-C", str(workdir), "-m", "gpt-6-astra", "--sandbox", "workspace-write", "--json",
         "--output-last-message", str(final_path.resolve())]
+    resume_sid = config.get('_resume_session_id') if files_profile else None
+    if resume_sid:
+        args = codex_command(config) + ['exec', 'resume', '--ignore-user-config', '--skip-git-repo-check',
+            '-m', 'gpt-6-astra', '--json', '--output-last-message', str(final_path.resolve())]
     overrides = ['forced_login_method="chatgpt"', 'model_reasoning_effort="high"',
         'approval_policy="never"', 'sandbox_workspace_write.network_access=true',
         'features.memories=false', 'features.apps=false', 'features.remote_plugin=false',
         'features.hooks=false', 'features.multi_agent=false', 'features.shell_snapshot=false']
-    if isolation:
-        overrides += ['web_search="disabled"', 'project_doc_max_bytes=0', 'features.shell_tool=false']
+    if files_profile or config.get("_astra_recommendation_profile"):
+        overrides = [v for v in overrides if not v.startswith(('model_reasoning_effort=', 'sandbox_workspace_write.network_access='))]
+        overrides += ['model_reasoning_effort="xhigh"', 'sandbox_workspace_write.network_access=false']
+    if isolation or files_profile:
+        overrides += ['web_search="disabled"', 'project_doc_max_bytes=0',
+                      'features.shell_tool=true' if files_profile else 'features.shell_tool=false']
         home = Path(env.get("CODEX_HOME", str(Path.home() / ".codex")))
         skills = list((home / "skills").glob("**/SKILL.md"))
         skills += list((Path.home() / ".agents/skills").glob("**/SKILL.md"))
+        if files_profile:
+            for ancestor in (workdir, *workdir.parents):
+                skills += list((ancestor / '.agents/skills').glob('**/SKILL.md'))
+                skills += list((ancestor / '.codex/skills').glob('**/SKILL.md'))
+            skills = sorted(set(skills))
         overrides.append("skills.config=[" + ",".join(
             '{path=' + json.dumps(str(path)) + ',enabled=false}' for p in skills for path in (p, p.parent)) + "]")
     else:
         overrides += ['web_search="live"']
     for value in overrides:
         args += ["-c", value]
+    if resume_sid:
+        args += ['-c', 'sandbox_mode="workspace-write"', str(resume_sid)]
     args += ["-"]
+    if files_profile:
+        jsonl_path.with_suffix('.request.json').write_text(json.dumps({
+            'profile': 'astra-files-v1', 'cwd': str(workdir), 'argv': args,
+            'stdin_path': str(prompt_path.resolve()), 'stdin_bytes': len(prompt.encode('utf-8')),
+            'expected_model': 'gpt-6-astra', 'expected_effort': 'xhigh',
+            'fallback': False, 'network_access': False, 'web_search': 'disabled',
+            'resumed_session_id': resume_sid}, ensure_ascii=False, indent=2))
     stderr_path = jsonl_path.with_suffix(".stderr.log")
     code, note = EXIT_FAIL, ""
     try:
@@ -1243,9 +1289,13 @@ def run_codex(prompt_path: Path, final_path: Path, jsonl_path: Path,
                 raise
         diagnostic = redact_codex_diagnostic(stderr_path.read_text(encoding="utf-8", errors="replace"))
         stderr_path.write_text(diagnostic, encoding="utf-8")
-        evidence = codex_session_evidence(jsonl_path, diagnostic, prompt, workdir)
+        evidence = (codex_session_evidence(jsonl_path, diagnostic, prompt, workdir, files_profile=True)
+                    if files_profile else codex_session_evidence(jsonl_path, diagnostic, prompt, workdir))
         EvidenceBox.record("astra", evidence)
         stream = [json.loads(line) for line in jsonl_path.read_text().splitlines() if line.strip()]
+        if files_profile:
+            public_stream = [e for e in stream if e.get('item', {}).get('type') != 'reasoning']
+            jsonl_path.write_text(''.join(json.dumps(e, ensure_ascii=False) + '\n' for e in public_stream))
         # Only terminal model events; command outputs and assistant quotes are excluded.
         terminal = [e.get("error", {}).get("message", "") for e in stream if e.get("type") == "turn.failed"]
         if code and not terminal:
@@ -1649,9 +1699,6 @@ def _recommendation_section_issues(section: str, formation: str, *, root: Path |
         body = section[body_start:body_end]
         code = m.group(2)
         label = next((n for c, n, _p in expected if c == code), m.group(1))
-        for sub in RECO_BOLD_SUBHEADINGS:
-            if f"**{sub}**" not in body:
-                issues.append(f"推荐正文缺少小标题“{sub}”：{label}（{code}）")
         # 小标题后同行说明、整段加粗都是真实正文，不能按行首 ** 丢弃。
         prose = []
         for line in body.splitlines():
@@ -2500,7 +2547,7 @@ def run_nightly(args: argparse.Namespace, config: dict, lock: TaskLock,
     )
 
 
-def route_evidence_matches(provider: str, evidence: dict) -> bool | None:
+def route_evidence_matches(provider: str, evidence: dict, *, profile: str | None = None) -> bool | None:
     """路线证据是否与预期三元组一致：True 一致 / False 明确不一致 / None 未核验。
 
     完整值相等比较（provider、model、request_model），并要求主请求集合一致；
@@ -2519,7 +2566,8 @@ def route_evidence_matches(provider: str, evidence: dict) -> bool | None:
         str(evidence.get("request_model", "")),
     )
     return actual == expected and (provider != "astra" or (
-        evidence.get("effort") == "high" and evidence.get("auth_method") == "chatgpt"))
+        evidence.get("effort") == ("xhigh" if profile == "astra-files-v1" else "high")
+        and evidence.get("auth_method") == "chatgpt"))
 
 
 def state_model_provider(state: dict) -> str:

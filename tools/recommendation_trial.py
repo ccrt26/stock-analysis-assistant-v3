@@ -22,6 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 import nightly_report
 import recommendation_pipeline as pipeline
 import stock_ai
+import recommendation_file_io as file_io
 
 EXIT_OK = 0
 EXIT_INPUT = 2
@@ -920,6 +921,117 @@ def export(*, selection: Path, trial_dirs: list, output_dir: Path,
     return EXIT_OK
 
 
+def replay_files(*, source_root: Path, packet_path: Path, source_manifest: Path, guide: Path,
+                 examples: list[Path], output_dir: Path, provider: str, fallback: bool,
+                 repeats: int, resume: bool = False) -> int:
+    """Frozen historical input -> real handoff-only -> shared article lifecycle."""
+    if provider != 'astra' or fallback or repeats != 1:
+        raise ValueError('replay-files 只允许 astra、--no-fallback、--repeats 1')
+    code_root = Path(__file__).resolve().parents[1]
+    if guide.read_bytes() != (code_root / file_io.GUIDE).read_bytes():
+        raise ValueError('传入指南与候选唯一简明指南不一致')
+    packet = pipeline.read_json(packet_path)
+    source = pipeline.read_json(source_manifest)
+    ident = packet['identity']
+    if any(ident.get(k) != v for k, v in source['identity'].items()):
+        raise ValueError('原研究包与来源 manifest 日期身份不一致')
+    if source.get('stocks') != [{'name': ident['name'], 'ts_code': ident['ts_code']}]:
+        raise ValueError('只接受来源 manifest 指定的唯一股票')
+    if packet.get('authoring_note'):
+        raise ValueError('历史回放输入不得含旧 authoring_note')
+    packet_digest = _sha256(packet_path)
+    original_digest = (source.get('v14_baseline_binding') or {}).get('copied_packet_sha256')
+    if original_digest and original_digest != packet_digest:
+        raise ValueError('实际原研究包字节与来源 manifest 指纹不符')
+    material = pipeline.writing_material(source_root, ident['as_of'], [ident['ts_code']],
+        teaching_root=code_root, profile=file_io.PROFILE, example_paths=examples)
+    if len(material['examples']) != len(examples) or material['gaps']:
+        raise ValueError('回放范文不满足已认可、原截止、排除本股及最多两篇条件')
+    config_path = source_root / '.stock-ai.local.json'
+    config = pipeline.read_json(config_path) if config_path.exists() else {}
+    config['recommendation_authoring_profile'] = file_io.PROFILE
+    config['_resume_files'] = resume
+    inputs = [{'path': str(p.resolve()), 'sha256': _sha256(p), 'bytes': p.stat().st_size}
+              for p in [packet_path, source_manifest, guide, *examples]]
+    policy = {'provider': 'astra', 'model': file_io.MODEL, 'effort': file_io.EFFORT,
+              'fallback': False, 'profile': file_io.PROFILE, 'repeats': 1,
+              'expression_limit': 1, 'clarification_limit': 1}
+    manifest = {'identity': ident, 'inputs': inputs, 'policy': policy,
+                'generation_commit': _code_commit(code_root), 'contracts': file_io.CONTRACTS,
+                'config_source': str(config_path.resolve()),
+                'binding': {'kind': 'original_packet', 'packet_sha256': packet_digest,
+                            'packet_content_sha256': file_io.digest(file_io.dumps(packet)),
+                            'identity': ident, 'source': str(packet_path.resolve())},
+                'trace_binding': '未读取核验完整 trace；仅绑定实际 packet，原 manifest trace 字段是历史元数据'}
+    output_dir = output_dir.resolve()
+    state_path = output_dir / 'state.json'
+    manifest_path = output_dir / 'manifest.json'
+    if output_dir.exists():
+        if not resume:
+            raise ValueError('输出目录已存在；禁止覆盖或隐式新抽样')
+        if not manifest_path.exists() or pipeline.read_json(manifest_path) != manifest:
+            raise ValueError('恢复输入、来源、源码版本或执行配置改变')
+        state = pipeline.read_json(state_path)
+        if state.get('terminal_status'):
+            raise ValueError('此运行已终态；不能使用 --resume 重采样')
+    else:
+        if resume:
+            raise ValueError('恢复目录不存在，不能新建一次冒充恢复')
+        output_dir.mkdir(parents=True)
+        pipeline.save_json(manifest_path, manifest)
+        state = {'provider_order': ['astra'], 'unavailable_providers': {}, 'attempts': [],
+                 'policy': policy, 'generation_commit': manifest['generation_commit']}
+        stock_ai.save_state(state_path, state)
+        snap = output_dir / 'input'
+        snap.mkdir()
+        for index, path in enumerate([packet_path, source_manifest, guide, *examples]):
+            (snap / f'{index:02d}-{path.name}').write_bytes(path.read_bytes())
+        pipeline.save_json(output_dir / 'writing-material.json', material)
+    summary = {'status': 'running', 'adopted': False, 'policy': policy,
+               'generation_commit': manifest['generation_commit'], 'article': None,
+               'quality': '待用户与 ChatGPT 复核；程序 ready 不代表文章已认可'}
+    try:
+        bound_packet, issues = pipeline.generate_file_handoff(stock_ai, packet=packet,
+            materials=material, source_binding=manifest['binding'], directory=output_dir / 'handoff',
+            state=state, state_path=state_path, config=config)
+        if issues:
+            summary.update(status='needs_research', research_issues=issues)
+        else:
+            summary.update(pipeline.run_article_cycle(stock_ai, packet=bound_packet, materials=material,
+                directory=output_dir / 'article', state=state, state_path=state_path, config=config,
+                provider='astra', fallback=False, allow_research_changes=False, expression_limit=1,
+                clarification_limit=1, run_scope='replay-files'))
+            # Adoption refers to this candidate flow only, never formal/user acceptance.
+            summary['flow_ready'] = summary.pop('adopted', False)
+            summary['adopted'] = False
+    except Exception as exc:
+        summary.update(status='failed', error=f'{type(exc).__name__}: {exc}')
+        stages = list(output_dir.glob('**/*-result.json'))
+        if any(pipeline.read_json(p).get('terminal_status') == 'execution_unverified' for p in stages):
+            summary['status'] = 'execution_unverified'
+    except BaseException:
+        pipeline.save_json(output_dir / 'summary.json', {**summary, 'status': 'interrupted'})
+        raise
+    if not summary.get('article'):
+        drafts = list((output_dir / 'article').glob('author-*-files-*/output/article.md'))
+        partials = list((output_dir / 'article').glob('author-*-files-*/output/partial.md'))
+        candidates = [p for p in drafts + partials if p.is_file() and p.stat().st_size]
+        if candidates:
+            latest = max(candidates, key=lambda p: p.stat().st_mtime_ns)
+            summary.update(article=latest.read_text(encoding='utf-8'), article_path=str(latest),
+                           draft_source='最后可见原始输出，未采用')
+        else:
+            summary['draft_source'] = '未找到可见作者草稿；不补造'
+    if summary.get('article'):
+        name = '01_唯一流程稿.md' if summary['status'] == 'ready' else '最后草稿_未通过.md'
+        (output_dir / name).write_text(summary['article'], encoding='utf-8')
+    summary['actual_stages'] = state.get('recommendation_stages', [])
+    state['terminal_status'] = summary['status']
+    stock_ai.save_state(state_path, state)
+    pipeline.save_json(output_dir / 'summary.json', summary)
+    return EXIT_OK if summary['status'] == 'ready' else (EXIT_NEEDS_RESEARCH if summary['status'] == 'needs_research' else EXIT_NEEDS_REVISION)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -971,8 +1083,22 @@ def main(argv: list[str] | None = None) -> int:
     p_run.add_argument("--resume", action="store_true",
                        help="仅恢复同一次未完成运行；不得隐式套用到全新实验")
 
+    p_files = sub.add_parser('replay-files', help='Astra 文件流程：原研究交接与共享单篇作者循环')
+    for flag in ('source-root', 'packet', 'source-manifest', 'guide', 'output-dir'):
+        p_files.add_argument('--' + flag, type=Path, required=True)
+    p_files.add_argument('--examples', type=Path, nargs='+', required=True)
+    p_files.add_argument('--provider', required=True)
+    p_files.add_argument('--no-fallback', action='store_true')
+    p_files.add_argument('--repeats', type=int, default=1)
+    p_files.add_argument('--resume', action='store_true')
+
     args = parser.parse_args(argv)
     try:
+        if args.command == 'replay-files':
+            return replay_files(source_root=args.source_root, packet_path=args.packet,
+                source_manifest=args.source_manifest, guide=args.guide, examples=args.examples,
+                output_dir=args.output_dir, provider=args.provider, fallback=not args.no_fallback,
+                repeats=args.repeats, resume=args.resume)
         if args.command == "prepare":
             prepare(source_root=args.source_root, trace_path=args.trace, names=args.names,
                     output_dir=args.output_dir, code_root=args.code_root,

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+import recommendation_file_io as file_io
 import csv
 import json
 import os
@@ -159,13 +160,17 @@ def recommendation_draft(host, reply: Path, trace: dict) -> str:
 
 
 def writing_material(root: Path, cutoff: str, excluded_codes: list[str], *,
-                     teaching_root: Path | None = None, preferred_examples: list[str] | None = None) -> dict:
+                     teaching_root: Path | None = None, preferred_examples: list[str] | None = None,
+                     profile: str | None = None, example_paths: list[Path] | None = None) -> dict:
     """写作材料：仓库教学、已确认要点正文、阅读指南正文与适用认可范文全文。
 
     teaching_root 缺省与 root 相同；知识库指针始终读 root 下的本地事实仓。
     examples 按 approved 与资料截止过滤，排除本股答案；preferred_examples
     只调整同批内的优先顺序，不放宽过滤条件。
     """
+    if profile == file_io.PROFILE:
+        return file_io.materials(root, cutoff, excluded_codes, teaching_root=teaching_root,
+                                 example_paths=example_paths, preferred_examples=preferred_examples)
     teaching_root = teaching_root or root
     teaching_path = teaching_root / '.agents/skills/orchestrating-stock-research/references/selection-writing-calibration.md'
     result = {'teaching': teaching_path.read_text(encoding='utf-8'), 'examples': [], 'gaps': []}
@@ -571,6 +576,14 @@ def build_article_packet(*, trace: dict, context: dict, ts_code: str, research_h
         'gaps': gaps + [g for g in (context.get('gaps') or [])
                         if isinstance(g, dict) and g.get('ts_code') in (None, ts_code)],
     }
+    note = handoff_stock.get('authoring_note')
+    if note and research_handoff.get('binding') == 'trace_sha256':
+        packet['authoring_note'] = {'text': note.get('text', '') if isinstance(note, dict) else str(note),
+            'source_refs': note.get('source_refs', []) if isinstance(note, dict) else (handoff_stock.get('source_refs') or
+                [{'source': 'selection-handoff.json', 'field': f'stocks[{ts_code}].authoring_note',
+                  'trace_sha256': trace_input_sha256(trace)}]),
+            'identity': packet['identity'], 'binding': {'trace_sha256': trace_input_sha256(trace)},
+            'origin': 'selection-handoff-v2'}
     packet['composition'] = packet_composition(packet)
     return packet
 
@@ -904,6 +917,11 @@ def stage_execution_verified(host, provider: str, fallback: bool, entry: dict | 
         return False
     if not str(evidence.get('model') or evidence.get('request_model') or '').strip():
         return False
+    if entry.get('profile') == file_io.PROFILE:
+        scope = evidence.get('context_evidence') or {}
+        route_ok = route == 'astra' and host.route_evidence_matches(route, evidence, profile=file_io.PROFILE) is True
+        return route_ok and (entry.get('file_stage') is False or (scope.get('isolated') is True
+                and scope.get('verified') is True and scope.get('input_present') is True))
     return host.route_evidence_matches(route, evidence) is True
 
 
@@ -911,7 +929,9 @@ def stage_entry_evidence(state: dict, stage: str) -> dict | None:
     """取state中该阶段最近一次运行的路线与证据条目（retry同名属同一阶段）。"""
     for entry in reversed(state.get('recommendation_stages') or []):
         if entry.get('stage') == stage:
-            return {'provider': entry.get('provider'), 'evidence': entry.get('evidence') or {}}
+            return {'provider': entry.get('provider'), 'evidence': entry.get('evidence') or {},
+                    'profile': entry.get('profile'), 'file_stage': entry.get('file_stage'),
+                    'exit_code': entry.get('exit_code'), 'status': entry.get('status')}
     return None
 
 
@@ -944,13 +964,16 @@ def reusable_stage_result(host, directory: Path, stage: str, identity: dict, pro
 
 def article_stage(host, state: dict, state_path: Path, directory: Path, stage: str, prompt: str,
                   provider: str, config: dict, *, fallback: bool, contract: str, validate,
-                  run_scope: str = 'managed', text_only: bool = True):
+                  run_scope: str = 'managed', text_only: bool = True, file_spec: dict | None = None):
     """未冻结作者/审稿阶段的输入身份复用。
 
     复用须同时满足：输入身份一致、已保存实际route符合本次路线策略
     （禁用备用时必须就是本次指定route）、当次模型证据通过核验。
     旧缓存缺新身份或核验不过→保留旧文件并重建；恢复只把核验过的结果再用于同一输入。
     """
+    if file_spec is not None:
+        return file_article_stage(host, state, state_path, directory, stage, config,
+                                  file_spec, validate=validate, run_scope=run_scope)
     path = directory / f'{stage}-result.json'
     identity = stage_input_identity(host, state, stage, prompt, provider, config,
                                     fallback=fallback, contract=contract, run_scope=run_scope,
@@ -970,6 +993,141 @@ def article_stage(host, state: dict, state_path: Path, directory: Path, stage: s
                      'contract': contract, 'stage_execution': stage_execution,
                      'execution_verified': verified})
     return raw
+
+
+def file_stage_identity(stage, spec, run_scope):
+    return {'stage': stage, 'file_spec': spec, 'policy': {'provider': 'astra', 'fallback': False},
+            'run_scope': run_scope}
+
+
+def file_cached_result(host, directory, stage, spec, run_scope, validate, *, resume=False):
+    path = directory / f'{stage}-result.json'
+    if not path.exists():
+        return None
+    saved = read_json(path)
+    if saved.get('input_identity') != file_stage_identity(stage, spec, run_scope):
+        return None
+    if saved.get('terminal_status') == 'interrupted' and resume:
+        file_resume_session(saved)
+        return None
+    if saved.get('terminal_status') != 'completed':
+        raise RuntimeError(f'{stage}已有终态或未确认中断记录，禁止再次抽样：{saved.get("terminal_status")}')
+    file_io.verify_inputs(Path(saved['stage_directory']), saved['input_index'])
+    for name, digest in saved.get('output_hashes', {}).items():
+        if file_io.digest((Path(saved['stage_directory']) / name).read_bytes()) != digest:
+            raise ValueError('已完成阶段输出被修改，不能复用')
+    if not stage_execution_verified(host, 'astra', False, saved.get('stage_execution')):
+        raise RuntimeError('已有阶段实际执行证据未核实，禁止重新调用')
+    validate(saved['raw'])
+    return saved['raw']
+
+
+def file_resume_session(saved):
+    """Only an explicitly interrupted, nonterminal existing CLI session can resume."""
+    if saved.get('terminal_status') != 'interrupted':
+        raise RuntimeError('只允许明确中断的阶段恢复')
+    event_path = saved.get('interrupted_events')
+    if not event_path or not Path(event_path).is_file():
+        raise RuntimeError('中断阶段缺会话事件，不能证明可恢复')
+    events = [json.loads(line) for line in Path(event_path).read_text().splitlines() if line.strip()]
+    if any(e.get('type') in ('turn.completed', 'turn.failed') for e in events):
+        raise RuntimeError('阶段已有终态事件，禁止模型续写或重采样')
+    sid = next((e.get('thread_id') for e in events if e.get('type') == 'thread.started'), None)
+    if not sid:
+        raise RuntimeError('中断阶段没有可识别的原会话')
+    file_io.verify_inputs(Path(saved['stage_directory']), saved['input_index'])
+    return sid
+
+
+def file_article_stage(host, state, state_path, directory, stage, config, spec, *, validate, run_scope):
+    directory.mkdir(parents=True, exist_ok=True)
+    resume = config.get('_resume_files') is True
+    cached = file_cached_result(host, directory, stage, spec, run_scope, validate, resume=resume)
+    if cached is not None:
+        return cached
+    path = directory / f'{stage}-result.json'
+    previous = read_json(path) if path.exists() else None
+    interrupted = (previous and previous.get('input_identity') == file_stage_identity(stage, spec, run_scope)
+                   and previous.get('terminal_status') == 'interrupted' and resume)
+    resume_sid = file_resume_session(previous) if interrupted else None
+    if interrupted:
+        stage_dir = Path(previous['stage_directory'])
+        manifest = previous['input_index']
+        # Preserve partial files before continuing the same session in the same directory.
+        for output in (stage_dir / 'output').glob('*'):
+            if output.is_file():
+                backup = stage_dir / 'interrupted-output' / output.name
+                backup.parent.mkdir(exist_ok=True)
+                if backup.exists():
+                    retain_previous(backup)
+                backup.write_bytes(output.read_bytes())
+        saved = {**previous, 'terminal_status': 'running', 'resumed_session_id': resume_sid}
+    else:
+        if path.exists():
+            retain_previous(path)
+        index = 1
+        stage_dir = directory / f'{stage}-files-{index}'
+        while stage_dir.exists():
+            index += 1
+            stage_dir = directory / f'{stage}-files-{index}'
+        stage_dir = stage_dir.resolve()
+        manifest = file_io.write_stage(stage_dir, spec)
+        saved = {'input_identity': file_stage_identity(stage, spec, run_scope),
+                 'contract': spec['contract'], 'stage_directory': str(stage_dir),
+                 'input_index': manifest, 'terminal_status': 'running', 'execution_verified': False}
+    save_json(path, saved)
+    stage_config = {**config, 'recommendation_authoring_profile': file_io.PROFILE,
+                    '_file_stage': True, '_cwd': str(stage_dir), '_resume_session_id': resume_sid}
+    try:
+        _, route = run_stage(host, state, state_path, directory, stage, spec['request'],
+                             'astra', stage_config, text_only=False, fallback=False)
+        file_io.verify_inputs(stage_dir, manifest)
+        saved['stage_execution'] = stage_entry_evidence(state, stage)
+        saved['execution_verified'] = stage_execution_verified(host, 'astra', False, saved['stage_execution'])
+        if not saved['execution_verified']:
+            saved['terminal_status'] = 'execution_unverified'
+            raise RuntimeError('文件会话实际执行证据未核实')
+        raw = file_io.read_output(stage_dir, spec, parse_review_output, parse_clarification_output)
+        validate(raw)
+        saved.update(raw=raw, route=route, terminal_status='completed')
+        saved['output_hashes'] = {str(p.relative_to(stage_dir)): file_io.digest(p.read_bytes())
+                                  for p in sorted((stage_dir / 'output').glob('*')) if p.is_file()}
+        canonical = stage_dir / 'article-for-review.md'
+        if canonical.exists():
+            saved['output_hashes']['article-for-review.md'] = file_io.digest(canonical.read_bytes())
+        save_json(path, saved)
+        return raw
+    except BaseException as exc:
+        saved['stage_execution'] = stage_entry_evidence(state, stage)
+        if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+            saved['terminal_status'] = 'interrupted'
+            entry = next((e for e in reversed(state.get('recommendation_stages', [])) if e.get('stage') == stage), {})
+            saved['interrupted_events'] = entry.get('events')
+        if saved['terminal_status'] == 'running':
+            if ((saved.get('stage_execution') or {}).get('evidence') or (saved.get('stage_execution') or {}).get('exit_code') == 0) and not stage_execution_verified(host, 'astra', False, saved['stage_execution']):
+                saved['terminal_status'] = 'execution_unverified'
+            else:
+                saved['terminal_status'] = 'interrupted' if isinstance(exc, (KeyboardInterrupt, SystemExit)) else 'failed'
+        saved['error'] = f'{type(exc).__name__}: {exc}'
+        save_json(path, saved)
+        raise
+
+
+def generate_file_handoff(host, *, packet, materials, source_binding, directory, state,
+                           state_path, config, run_scope='replay-files'):
+    """Historical handoff-only research step; never constructs the note in Python."""
+    spec = file_io.stage_spec(host.PROJECT_ROOT, 'handoff', packet, materials,
+                              source_binding=source_binding)
+    raw = article_stage(host, state, state_path, directory, 'research-handoff', '', 'astra', config,
+                        fallback=False, contract=file_io.CONTRACTS['handoff'], validate=json.loads,
+                        run_scope=run_scope, text_only=False, file_spec=spec)
+    delivery = json.loads(raw)
+    result = copy.deepcopy(packet)
+    result['authoring_note'] = {'text': delivery['authoring_note'], 'source_refs': delivery['source_refs'],
+                               'binding': source_binding, 'identity': packet['identity'],
+                               'origin': 'research-handoff-files-v1'}
+    save_json(directory / 'packet-with-handoff.json', result)
+    return result, delivery.get('research_issues', [])
 
 
 RESOLUTION_TYPES = ('resolved_existing', 'resolved_added', 'retained_unknown',
@@ -1048,29 +1206,41 @@ def resolve_article_issues(host, *, issues: list, packet: dict, materials: dict,
                'allow_research_changes': allow_research_changes}
     body = (host.PROJECT_ROOT / 'ops/research-clarification-prompt.md').read_text(encoding='utf-8')
     prompt = body + '\n\n本次输入：\n' + json.dumps(payload, ensure_ascii=False, separators=(',', ':'))
-    identity = stage_input_identity(host, state, stage, prompt, provider, config,
-                                    fallback=fallback, contract=CLARIFICATION_CONTRACT_VERSION,
-                                    run_scope='clarification', text_only=False)
-    raw = reusable_stage_result(host, directory, stage, identity, provider,
-                                fallback=fallback, validate=parse_clarification_output)
+    file_spec = None
+    if file_io.enabled(config):
+        provider, fallback = 'astra', False
+        file_spec = file_io.stage_spec(host.PROJECT_ROOT, 'clarification', packet, materials,
+                                       issues=issues, allow_research_changes=allow_research_changes)
+        raw = file_cached_result(host, directory, stage, file_spec, run_scope, parse_clarification_output,
+                                 resume=config.get('_resume_files') is True)
+    else:
+        identity = stage_input_identity(host, state, stage, prompt, provider, config,
+                                        fallback=fallback, contract=CLARIFICATION_CONTRACT_VERSION,
+                                        run_scope='clarification', text_only=False)
+        raw = reusable_stage_result(host, directory, stage, identity, provider,
+                                    fallback=fallback, validate=parse_clarification_output)
     reused = raw is not None
     if raw is None:
-        if counts['clarification'] >= clarification_limit:
+        pending = directory / f'{stage}-result.json'
+        continuing = bool(file_spec and config.get('_resume_files') and pending.exists()
+                          and read_json(pending).get('terminal_status') == 'interrupted')
+        if not continuing and counts['clarification'] >= clarification_limit:
             blocking = [{'issue_id': i.get('issue_id'), 'type': 'unresolved_blocking',
                          'changes_original_judgment': None,
                          'author_instruction': '澄清轮次已达上限，保留待处理。',
                          'blocking': True, 'note': 'original issue'} for i in issues]
             return {'resolutions': blocking, 'blocking': list(blocking),
                     'clarification_executed': False}
-        counts['clarification'] += 1  # 实际新调用前计数并持久化
+        if not continuing:
+            counts['clarification'] += 1  # 实际新阶段前计数；同会话中断恢复不清零
         progress = state.setdefault('article_cycle_progress', {}).setdefault(scope, {})
         progress.update({'next_stage': stage, 'counts': dict(counts),
                          'updated_at': _progress_timestamp(host)})
         host.save_state(state_path, state)
         raw = article_stage(host, state, state_path, directory, stage, prompt, provider, config,
                             fallback=fallback, contract=CLARIFICATION_CONTRACT_VERSION,
-                            validate=parse_clarification_output, run_scope='clarification',
-                            text_only=False)
+                            validate=parse_clarification_output, run_scope=run_scope if file_spec else 'clarification',
+                            text_only=False, file_spec=file_spec)
     parsed = parse_clarification_output(raw)
     (directory / f'{stage}-resolution.json').write_text(
         json.dumps({'issues': issues, **parsed}, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
@@ -1141,7 +1311,7 @@ def run_article_cycle(host, *, packet: dict, materials: dict, directory: Path, s
                       state_path: Path, config: dict, provider: str, fallback: bool,
                       allow_research_changes: bool, expression_limit: int = 2,
                       run_scope: str = 'managed', issue_resolver=None,
-                      prior_resolutions: list | None = None) -> dict:
+                      prior_resolutions: list | None = None, clarification_limit: int = 2) -> dict:
     """生产与试写共用的作者循环：作者 → 疑点核实 → 审稿 → 有限表达修订。
 
     作者/审稿提出的疑点先经 issue_resolver（生产与试写同一实现，默认
@@ -1155,6 +1325,9 @@ def run_article_cycle(host, *, packet: dict, materials: dict, directory: Path, s
     也不得命中其阶段缓存。模型调用失败向上抛出，由调用方决定保存与续跑。
     """
     directory.mkdir(parents=True, exist_ok=True)
+    files_mode = file_io.enabled(config)
+    if files_mode:
+        provider, fallback = 'astra', False
     code = packet['identity']['ts_code']
     tag = code.replace('.', '-')
     scope = run_scope_key(run_scope, code)
@@ -1162,7 +1335,7 @@ def run_article_cycle(host, *, packet: dict, materials: dict, directory: Path, s
     if issue_resolver is None:
         def issue_resolver(**kwargs):
             return resolve_article_issues(host, allow_research_changes=allow_research_changes,
-                                          run_scope=run_scope, **kwargs)
+                                          run_scope=run_scope, clarification_limit=clarification_limit, **kwargs)
     counts = state.setdefault('article_cycle_counts', {}).setdefault(
         scope, {'expression': 0, 'clarification': 0})
 
@@ -1203,45 +1376,96 @@ def run_article_cycle(host, *, packet: dict, materials: dict, directory: Path, s
                 'review': review, 'research_source': packet['source_refs'],
                 'provider': provider, 'fallback': fallback}
 
+    note_error = None
+    if files_mode:
+        try:
+            file_io.validate_note(packet)
+        except ValueError as exc:
+            note_error = str(exc)
+    if files_mode and note_error:
+        research_issues.append({'ts_code': code, 'quote': 'authoring_note',
+            'problem': '缺少同身份有出处的研究交接；这不表示原研究缺结论',
+            'evidence': note_error, 'needed': '请原研究步骤生成绑定原资料的 authoring_note'})
+        return result('needs_research')
+
     for round_index in range(1 + expression_limit):
-        author_stage = f'author-{tag}' if prior is None else f'author-rev{round_index}-{tag}'
-        prompt = author_prompt(host.PROJECT_ROOT, packet=effective_packet, materials=materials,
-                               prior_article=prior, revision_issues=revision_issues,
-                               issue_resolutions=issue_resolutions or None)
+        author_stage = f'author-{tag}' if round_index == 0 else f'author-rev{round_index}-{tag}'
+        file_spec = None
+        validator = file_io.parse_author if files_mode else parse_author_output
+        if files_mode:
+            file_spec = file_io.stage_spec(host.PROJECT_ROOT, 'author', effective_packet, materials,
+                prior_article=prior, revision_issues=revision_issues,
+                issue_resolutions=issue_resolutions or None)
+            prompt = file_spec['request']
+        else:
+            prompt = author_prompt(host.PROJECT_ROOT, packet=effective_packet, materials=materials,
+                                   prior_article=prior, revision_issues=revision_issues,
+                                   issue_resolutions=issue_resolutions or None)
         if round_index >= 1:
-            # 表达修订轮：仅实际新调用计一次；缓存复用不扣新次数，恢复不清零。
-            identity = stage_input_identity(host, state, author_stage, prompt, provider, config,
-                                            fallback=fallback, contract=AUTHOR_CONTRACT_VERSION,
-                                            run_scope=run_scope)
-            if reusable_stage_result(host, directory, author_stage, identity, provider,
-                                     fallback=fallback, validate=parse_author_output) is None:
+            if files_mode:
+                reusable = file_cached_result(host, directory, author_stage, file_spec, run_scope, validator,
+                                              resume=config.get('_resume_files') is True)
+            else:
+                identity = stage_input_identity(host, state, author_stage, prompt, provider, config,
+                                                fallback=fallback, contract=AUTHOR_CONTRACT_VERSION,
+                                                run_scope=run_scope)
+                reusable = reusable_stage_result(host, directory, author_stage, identity, provider,
+                                                 fallback=fallback, validate=validator)
+            pending = directory / f'{author_stage}-result.json'
+            continuing = bool(files_mode and config.get('_resume_files') and pending.exists()
+                              and read_json(pending).get('terminal_status') == 'interrupted')
+            if reusable is None and not continuing:
                 if counts['expression'] >= expression_limit:
                     break
                 counts['expression'] += 1
         stages.append(author_stage)
         record_progress(author_stage)
-        parsed = parse_author_output(article_stage(
+        parsed = validator(article_stage(
             host, state, state_path, directory, author_stage, prompt, provider, config,
-            fallback=fallback, contract=AUTHOR_CONTRACT_VERSION, validate=parse_author_output,
-            run_scope=run_scope))
+            fallback=fallback, contract=AUTHOR_CONTRACT_VERSION, validate=validator,
+            run_scope=run_scope, file_spec=file_spec))
         stage_execution(author_stage)
         article = parsed['article']
-        article_path = directory / f'{author_stage}-article.md'
-        article_path.write_text(article + '\n', encoding='utf-8')
+        if article:
+            article_path = directory / f'{author_stage}-article.md'
+            article_path.write_text(article if files_mode else article + '\n', encoding='utf-8')
         author_issues = _assign_issue_ids(copy.deepcopy(parsed['research_issues']), 'A')
         for issue in author_issues:
             if issue not in research_issues:
                 research_issues.append(issue)
-        review_stage = f'review-{tag}' if prior is None else f'review-rev{round_index}-{tag}'
+        # A questions-only delivery is research work, not an empty article for review.
+        if files_mode and author_issues:
+            resolved = issue_resolver(issues=author_issues, packet=effective_packet,
+                materials=materials, directory=directory, state=state, state_path=state_path,
+                config=config, provider=provider, fallback=fallback)
+            issue_resolutions.extend(resolved['resolutions'])
+            save_json(directory / f'{author_stage}-resolutions.json', resolved)
+            if resolved.get('clarification_executed'):
+                stage_execution('research-clarification')
+            effective_packet = build_effective_packet(effective_packet,
+                [r for r in resolved['resolutions'] if not r.get('blocking')])
+            save_json(directory / 'packet-effective.json', effective_packet)
+            save_json(directory / 'issue-resolutions.json', issue_resolutions)
+            if resolved['blocking'] or (effective_packet.get('effective_packet') or {}).get('unapplied'):
+                return result('needs_research')
+            if round_index >= expression_limit:
+                return result('needs_revision')
+            prior = article
+            revision_issues = resolved['resolutions']
+            continue
+        review_stage = f'review-{tag}' if round_index == 0 else f'review-rev{round_index}-{tag}'
         stages.append(review_stage)
         record_progress(review_stage)
+        review_spec = (file_io.stage_spec(host.PROJECT_ROOT, 'review', effective_packet, materials,
+            article=article, issue_resolutions=issue_resolutions or None,
+            pending_issue_checks=pending_checks or None) if files_mode else None)
         review_raw = article_stage(
             host, state, state_path, directory, review_stage,
-            review_prompt(host.PROJECT_ROOT, article=article, packet=effective_packet,
-                          materials=materials, issue_resolutions=issue_resolutions or None,
-                          pending_issue_checks=pending_checks or None),
+            review_spec['request'] if files_mode else review_prompt(host.PROJECT_ROOT,
+                article=article, packet=effective_packet, materials=materials,
+                issue_resolutions=issue_resolutions or None, pending_issue_checks=pending_checks or None),
             provider, config, fallback=fallback, contract=REVIEW_CONTRACT_VERSION,
-            validate=parse_review_output, run_scope=run_scope)
+            validate=parse_review_output, run_scope=run_scope, file_spec=review_spec)
         stage_execution(review_stage)
         review = parse_review_output(review_raw)
         for group in ('readability_issues', 'fidelity_issues', 'research_issues'):
@@ -1319,6 +1543,8 @@ def run_article_cycle(host, *, packet: dict, materials: dict, directory: Path, s
                  'author_instruction': r.get('author_instruction'), 'blocking': True}
                 for r in resolved['blocking'])
         if not blocking and not author_actions and review['ready']:
+            if files_mode and (not executions or not all(e['execution_verified'] for e in executions)):
+                return result('execution_unverified')
             save_json(directory / 'issues-open.json', still_open or [])
             return result('ready')
         if round_index >= expression_limit:
@@ -1355,10 +1581,9 @@ def assemble_stock_section(entries: list) -> str:
     for stock, article in entries:
         name, code = stock.get('name'), stock.get('ts_code')
         body = (article or '').strip()
-        for sub in ARTICLE_SUBHEADINGS:
-            if f'**{sub}**' not in body:
-                raise ValueError(f'{name}（{code}）文章缺少小标题：{sub}')
-        parts.append(f'### {name}（{code}）\n\n{body}')
+        normalized = file_io.normalize_article(body, {'name': name, 'ts_code': code})
+        # Files-profile drafts are already normalized before review; no post-review edit.
+        parts.append(normalized.rstrip('\n'))
     if not parts:
         raise ValueError('没有可装配的采用文章')
     return '\n\n'.join(parts) + '\n'
@@ -1383,13 +1608,20 @@ def run_stage(host, state: dict, state_path: Path, directory: Path, stage: str,
         stem = f'{stage}-retry-{attempt}'
     prompt_path = directory / f'{stem}-input.md'
     prompt_path.write_text(prompt)
-    order = host.available_routes(state, provider, fallback=fallback)
+    files_mode = config.get('_file_stage') is True
+    profile_stage = files_mode or (file_io.enabled(config) and stage in ('research', 'research-repair'))
+    if profile_stage:
+        provider, fallback = 'astra', False
+        config = {**config, '_astra_recommendation_profile': True}
+    order = ['astra'] if profile_stage else host.available_routes(state, provider, fallback=fallback)
     for route in order:
         output = directory / f'{stem}-{route}.md'
         events = directory / f'{stem}-{route}.jsonl'
         entry = {'stage': stage, 'provider': route, 'configured_model': host.model_ref(route, config),
                  'started_at': host.now_shanghai().isoformat(), 'input': str(prompt_path),
                  'output': str(output), 'events': str(events), 'status': 'running'}
+        if profile_stage:
+            entry.update(profile=file_io.PROFILE, file_stage=files_mode, configured_model=file_io.MODEL, configured_effort=file_io.EFFORT)
         state.setdefault('recommendation_stages', []).append(entry)
         host.EvidenceBox.store.pop(route, None)
         host.save_state(state_path, state)
@@ -1410,6 +1642,9 @@ def run_stage(host, state: dict, state_path: Path, directory: Path, stage: str,
                     '如已有中间研究，先按原身份核验，只补缺失，不重新从零扫描；'
                     '未冻结研究改变须同步 pending 与交接文件。')
                 prompt_path = directory / f'{stem}-{route}-input.md'
+                if file_io.enabled(config):
+                    handoff += '\n' + (host.PROJECT_ROOT / file_io.TASKS['handoff']).read_text(encoding='utf-8')
+                    handoff += '\n本次配置 astra-files-v1：每股 authoring_note 写在上述已绑定 trace 的 stocks[ts_code] 内；不生成文章。'
                 prompt_path.write_text(prompt + handoff)
                 entry['input'] = str(prompt_path)
             key, _ = host.authentication_available(route, config)
@@ -1428,7 +1663,8 @@ def run_stage(host, state: dict, state_path: Path, directory: Path, stage: str,
             if stage == 'research':
                 state.update(model_provider=route, model_evidence=evidence,
                              last_model=evidence.get('model') or host.model_label(route, config))
-            route_matches = host.route_evidence_matches(route, evidence)
+            route_matches = (host.route_evidence_matches(route, evidence, profile=file_io.PROFILE)
+                             if profile_stage else host.route_evidence_matches(route, evidence))
             if route_matches is False or (route == 'astra' and code == 0 and route_matches is not True):
                 entry['status'] = 'model_mismatch'
                 raise ValueError(f'{stage}实际模型与配置不一致，保留本阶段证据')
@@ -1589,7 +1825,9 @@ def _author_articles(host, state, state_path, directory, config, provider, root,
             raise ValueError('作者循环开始前pending与本轮身份不一致')
         context = build_context(root, trace, cited_text=handoff_from_trace(trace)['market'])
         save_json(directory / 'recommendation-context.json', context)
-        material = writing_material(root, expected[2], list(context['facts']))
+        material = (writing_material(root, expected[2], list(context['facts']),
+                    teaching_root=host.PROJECT_ROOT, profile=file_io.PROFILE) if file_io.enabled(config)
+                    else writing_material(root, expected[2], list(context['facts'])))
         save_json(directory / 'writing-material.json', material)
         handoff = selection_handoff(directory, trace)
         stocks = _sorted_stocks(selected_result(trace)['selected_stocks'])

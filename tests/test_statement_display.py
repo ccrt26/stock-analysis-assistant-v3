@@ -95,12 +95,19 @@ def test_conflicting_replies_rejected_identical_duplicate_allowed(source):
     REPLY+'\n### 测试公司（600176.SH）\n重复',
     REPLY+'\n#### 非正式公司（600999.SH）\n混入',
     REPLY+'\n## 今天明确推荐的股票\n重复分区',
-    REPLY.replace('**为什么会选它**', '无必需标题'),
     REPLY+'\n| 1 | 别的公司（600176.SH） | 理由 |',
 ])
 def test_invalid_recommendation_section_never_used(source, text):
     selection, _, reply = source;reply.write_text(text)
     assert display.fallback_report(selection, FORMATION, ACTION)[2] == 'recommendation_invalid'
+
+
+def test_optional_subheading_does_not_invalidate_real_body(source):
+    selection, _, reply = source
+    reply.write_text(REPLY.replace('**为什么会选它**', ''))
+    text, status, problem = display.fallback_report(selection, FORMATION, ACTION)
+    assert status == 'verified_recommendation' and not problem
+    assert '推荐原文。' in text
 
 
 def test_existing_canonical_problem_is_not_hidden_by_fallback(source):
