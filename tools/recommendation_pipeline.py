@@ -519,8 +519,9 @@ def build_article_packet(*, trace: dict, context: dict, ts_code: str, research_h
             comparison_codes.append(code)
     comparison_fields = ('price_observations', 'comparison_windows', 'cash_flow',
                          'financial_indicator')
-    comparison_names = {c['ts_code']: c for c in (research_handoff.get('stocks') or {}).values()
-                        if isinstance(c, dict) and c.get('name')}
+    # stocks is keyed by ts_code; entries need not repeat that field.
+    comparison_names = {code: item for code, item in (research_handoff.get('stocks') or {}).items()
+                        if isinstance(item, dict) and item.get('name')}
     comparison_items = []
     comparison_facts = {}
     for code in comparison_codes:

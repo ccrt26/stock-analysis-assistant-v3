@@ -281,7 +281,7 @@ def _two_stock_owner_input(h):
     trace['decision_trace'] += other['decision_trace']
     second = p.selected_result(other)['selected_stocks'][0];second['priority'] = 2
     trace['research_result']['selected_stocks'].append(second)
-    handoff['stocks'] = {s['ts_code']: {'authoring_note': s['selection_reason'],
+    handoff['stocks'] = {s['ts_code']: {'name': s['name'], 'authoring_note': s['selection_reason'],
         'source_refs': [{'pointer': f'/candidate_ledger/{i}', 'quote': s['selection_reason']}],
         'research_issues': []} for i, s in enumerate(p.selected_result(trace)['selected_stocks'])}
     handoff['trace_sha256'] = p.trace_input_sha256(trace)
@@ -349,6 +349,42 @@ def _two_stock_owner_input(h):
                    provider_order=['astra'], prepare={**trace['runtime_capabilities'], 'sector_research_available':True})
     section = '\n\n'.join(f"### {s['name']}（{s['ts_code']}）\n\n当前可有条件参与，普通时段确认后才参与。" for s in p.selected_result(trace)['selected_stocks'])
     return root, directory, trace, handoff, section, draft
+
+
+@pytest.mark.parametrize('with_names', [True, False], ids=['named', 'no-name'])
+def test_packet_uses_handoff_dictionary_keys(harness, with_names):
+    """A valid keyed handoff must work without an inner ts_code, with or without name."""
+    root, directory, trace, handoff, _section, _draft = _two_stock_owner_input(harness)
+    own, peer = trace['research_result']['selected_stocks']
+    own_code, peer_code = own['ts_code'], peer['ts_code']
+    own['nearest_comparison'] = f"本次与{peer_code}比较，采用原研究判断。"
+    for code, item in handoff['stocks'].items():
+        item.pop('ts_code', None)
+        if with_names:
+            item['name'] = f'交接名称-{code}'
+        else:
+            item.pop('name', None)
+    handoff['trace_sha256'] = p.trace_input_sha256(trace)
+    handoff_path = directory / 'selection-handoff.json'
+    p.save_json(handoff_path, handoff)
+    original_file = handoff_path.read_bytes()
+    bound = p.selection_handoff(directory, trace, strict=True)
+    assert all('ts_code' not in item for item in bound['stocks'].values())
+    context = {'facts': {
+        own_code: {'price_observations': [{'ts_code': own_code, 'close': 10.2}]},
+        peer_code: {'price_observations': [{'ts_code': peer_code, 'close': 20.2}]},
+    }, 'market_facts': [], 'gaps': []}
+    original_inputs = copy.deepcopy((trace, context, bound))
+    packet = p.build_article_packet(trace=trace, context=context, ts_code=own_code,
+                                    research_handoff=bound)
+    assert packet['identity']['ts_code'] == own_code
+    assert packet['comparisons']['codes'] == [peer_code]
+    other = packet['comparisons']['items'][0]
+    assert other['ts_code'] == peer_code
+    assert other['name'] == (f'交接名称-{peer_code}' if with_names else peer['name'])
+    assert other['facts']['price_observations'][0]['close'] == 20.2
+    assert (trace, context, bound) == original_inputs
+    assert handoff_path.read_bytes() == original_file
 
 
 def _withdraw_synthetic_stock(root, directory, trace):
@@ -430,6 +466,12 @@ def test_resolved_handoff_reaches_save_and_resume(harness, monkeypatch):
     from test_normal_recommendation_files import daily_author
     root,directory,trace,handoff,section,draft=_two_stock_owner_input(harness)
     monkeypatch.setattr(stock_ai,'PROJECT_ROOT',root)
+    real_run_stage = p.run_stage
+    def continue_unfinished_stage(*args, **kwargs):
+        stage = kwargs.get('stage', args[4] if len(args) > 4 else None)
+        assert stage not in ('research', 'monitor'), 'Completed research/monitor must be reused'
+        return real_run_stage(*args, **kwargs)
+    monkeypatch.setattr(p, 'run_stage', continue_unfinished_stage)
     file_model=stock_ai.run_agent;calls=[]
     def model(route,prompt,output,events,timeout,config):
         calls.append(prompt.name)
