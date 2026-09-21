@@ -137,7 +137,7 @@ def stage_spec(root, role, packet, material, **extra):
 
 
 def validate_shared_material(author_spec, review_spec):
-    for key in ('packet.json', 'research-handoff.md', 'issue-resolutions.json'):
+    for key in ('packet.json', 'research-handoff.md', 'issue-resolutions.json', 'current-opinion-resolution.json'):
         if author_spec['files'].get(key) != review_spec['files'].get(key):
             raise ValueError('作者与审稿材料或答复版本不一致：' + key)
 

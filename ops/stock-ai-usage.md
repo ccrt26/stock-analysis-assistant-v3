@@ -112,3 +112,19 @@
 ## 本次推荐文件方式（候选）
 
 仅授权运行时使用 run nightly --provider astra --no-fallback --recommendation-authoring-profile astra-files-v1。profile 与禁备用只作用本次，不修改长期配置；恢复沿用 state 保存策略，显式冲突拒绝。新推荐研究及写审为 Astra xhigh，正式复盘保持 Astra high。preopen 不接受这两个参数。正式启用须另行批准，细节见 docs/architecture/normal-recommendation-files.md。
+
+## 待复核候选：首次手动运行与供应商恢复
+
+本节是候选操作说明，**仅复核通过并另行批准后才能执行**。用户主动暂停的定时任务保持暂停；手动运行不等于恢复 launchd。
+
+首次已获批准的手动夜间任务显式使用：
+
+```sh
+./.venv/bin/python tools/stock_ai.py run nightly --provider astra --no-fallback --recommendation-authoring-profile astra-files-v1
+```
+
+日期由实际 prepare 决定，不把隔离验收的历史 rerun-date 当作今天。该策略仅绑定本任务，不要求修改长期供应商顺序或生产本地配置。研究/交接/作者/审稿/同股核对 xhigh，独立正式复盘及公司介绍 high；需核对实际会话证据，配置值不能证明已执行。新 profile 在同股当前意见核对完成前保留复盘待核对稿，未决不装配完整日报。
+
+真实额度不足时保留原阶段、失败和预算。用户明确确认 Astra 已恢复后，按**原任务同一身份、同一 profile、同一策略**在上面的已有 run 命令加 `--retry-unavailable-provider astra`；原任务使用 rerun-date 时保留其原值，不能另造业务日期。参数只解除已核实的本任务供应商故障 marker，先备份并追加审计，不清空 state、不重选、不删除有效文章。完成/取消、日期或策略不符、数据/合同/业务阻断均不能由它解除。再次供应商失败仍停止；不自动检测额度是否重置。
+
+旧 `--scheduled` 命令不带 `--no-fallback` 时不等价于本次首轮策略。以后是否恢复调度及其策略需单独授权；本节不提供自动恢复动作。

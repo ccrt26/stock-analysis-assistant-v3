@@ -1,5 +1,8 @@
 # 晚间正式研究运行提示
 
+仅外层明确标记 `astra-files-v1` 与 `same-day-current-opinion-v1` 时：选股交付pending trace及同版selection-handoff；独立复盘交付pending-daily-formal-reviews与pending-report及原snapshot，先不record。作者/审稿后由总控核对同股当前目的、参考价、条件与实际正文；必要问题分别回原研究/复盘负责人，只修本日待核对稿，不互相改稿。核对同版通过后，程序调用原record、freeze和装配。未决保留双方成果，不发布完整日报。旧profile和已正式冻结历史沿原恢复合同。
+
+
 ## 启动器分工与手动执行
 
 `tools/stock_ai.py` 的 managed 新研究模式以外层说明为准（article-v1 分工）：选股研究会话只做选股研究，交付完整 pending trace、市场说明正文（含独立标题行 `## 今天的市场情况`）和 `selection-handoff.json`（市场正文与逐股研究取舍、证据引用、比较对象、改变条件及来源），暂不执行选股 record/record-trace、公司介绍或网页同步。正式复盘由外层另起的独立复盘会话按 `ops/forward-monitor-prompt.md` 执行，选股会话不做复盘；逐股最终推荐文章由作者会话按单股研究包与写作材料生成，选股会话不写四分区整篇日报、不写推荐正文。总控在少量候选验证时即可按代码/截止/类别调用 `recommendation_context`。作者或审稿发现需要改变研究的问题返回研究负责人，同步 pending 与交接后重建对应单股材料并回到作者。正文与研究一致后由外层保存采用稿并执行既有 record-trace，再原样装配正文、同步本地页面、补缺失公司介绍。阶段日志和采用稿留在本轮 ai_tasks 目录。

@@ -147,22 +147,56 @@ function finalReviewBody(r){
  return `<section class="final-review"><h4>20个交易日固定结案</h4><p>${esc(f.final_twenty_day_review.overall_review)}</p><p>${esc(facts)}</p><p class="source-hint">原结论保存：${esc(f.analysis_date)} · 截止 ${esc(f.as_of)}</p></section>`;
 }
 const paragraphs=value=>String(value||'').split(/\n\s*\n/).filter(Boolean).map(p=>`<p class="original-copy">${esc(p)}</p>`).join('');
-function statementInline(value){
+let statementSequence=0;
+function statementInline(value,footnotes=null){
  const text=String(value||'');let out='',last=0;
- const tokens=/\[([^\]\n]+)\]\((?:<([^>\n]+)>|([^\)\n]+))\)|\*\*([^*]+)\*\*/g;
+ const tokens=/(`+)([\s\S]*?)\1(?!`)|\[\^([^\]\n]+)\]|\[([^\]\n]+)\]\((?:<([^>\n]+)>|([^\)\n]+))\)|\*\*([^*]+)\*\*/g;
  for(const m of text.matchAll(tokens)){
   out+=esc(text.slice(last,m.index));
-  if(m[4])out+=`<strong>${esc(m[4])}</strong>`;
-  else{const href=safeHref(m[2]||m[3]);out+=href?`<a href="${esc(href)}" target="_blank" rel="noopener noreferrer">${esc(m[1])}</a>`:esc(m[1])}
+  if(m[1])out+=`<code>${esc(m[2])}</code>`;
+  else if(m[3]){
+   const note=footnotes?.definitions.get(m[3]);
+   if(note){const ref=`${footnotes.prefix}-ref-${++footnotes.references}`;note.refs.push(ref);out+=`<sup id="${ref}"><a class="statement-footnote-ref" href="#${note.id}" aria-label="来源 ${esc(m[3])}">${note.number}</a></sup>`}
+   else out+=`<span class="reading-note">[来源缺失：${esc(m[3])}]</span>`;
+  }
+  else if(m[7])out+=`<strong>${esc(m[7])}</strong>`;
+  else{const href=safeHref(m[5]||m[6]);out+=href?`<a href="${esc(href)}" target="_blank" rel="noopener noreferrer">${esc(m[4])}</a>`:esc(m[4])}
   last=m.index+m[0].length;
  }
  return out+esc(text.slice(last));
 }
-const statementParagraphs=value=>String(value||'').split(/\n\s*\n/).filter(Boolean).map(p=>{
- const lines=p.split('\n');
- if(lines.every(l=>/^\s*[-*] /.test(l)))return `<ul class="original-copy">${lines.map(l=>`<li>${statementInline(l.replace(/^\s*[-*] /,''))}</li>`).join('')}</ul>`;
- return `<p class="original-copy">${statementInline(p).replace(/\n/g,'<br>')}</p>`;
-}).join('');
+function statementParagraphs(value){
+ const lines=String(value||'').replace(/\r\n/g,'\n').split('\n');
+ const context={prefix:`statement-${++statementSequence}`,definitions:new Map(),references:0};
+ const body=[],warnings=[];let fence=null;
+ for(let i=0;i<lines.length;i++){
+  const line=lines[i],marker=line.match(/^\s{0,3}(`{3,}|~{3,})/);
+  if(marker){if(!fence)fence=marker[1];else if(marker[1][0]===fence[0]&&marker[1].length>=fence.length)fence=null;body.push(line);continue}
+  const definition=!fence&&line.match(/^\[\^([^\]]+)\]:\s*(.*)$/);
+  if(!definition){body.push(line);continue}
+  const label=definition[1],content=[definition[2]];
+  while(i+1<lines.length){
+   if(/^(?: {4}|\t)/.test(lines[i+1])){content.push(lines[++i].replace(/^(?: {4}|\t)/,''));continue}
+   if(lines[i+1]===''&&i+2<lines.length&&/^(?: {4}|\t)/.test(lines[i+2])){content.push('');i++;continue}
+   break;
+  }
+  const text=content.join('\n');const old=context.definitions.get(label);
+  if(old){if(old.text!==text)warnings.push(`来源定义冲突：${label}\n${text}`)}
+  else{const number=context.definitions.size+1;context.definitions.set(label,{text,number,id:`${context.prefix}-source-${number}`,refs:[]})}
+ }
+ let html='',paragraph=[],code=[],codeFence=null;
+ const flush=()=>{if(!paragraph.length)return;const p=paragraph.join('\n');html+=paragraph.every(l=>/^\s*[-*] /.test(l))?`<ul class="original-copy">${paragraph.map(l=>`<li>${statementInline(l.replace(/^\s*[-*] /,''),context)}</li>`).join('')}</ul>`:`<p class="original-copy">${statementInline(p,context).replace(/\n/g,'<br>')}</p>`;paragraph=[]};
+ for(const line of body){
+  const marker=line.match(/^\s{0,3}(`{3,}|~{3,})/);
+  if(codeFence){if(marker&&marker[1][0]===codeFence[0]&&marker[1].length>=codeFence.length){html+=`<pre class="original-copy"><code>${esc(code.join('\n'))}</code></pre>`;code=[];codeFence=null}else code.push(line);continue}
+  if(marker){flush();codeFence=marker[1];continue}
+  if(!line.trim())flush();else paragraph.push(line);
+ }
+ flush();if(codeFence)html+=`<pre class="original-copy"><code>${esc(code.join('\n'))}</code></pre>`;
+ if(context.definitions.size)html+=`<section class="statement-sources"><h4>来源</h4><ol>${[...context.definitions.values()].map(n=>`<li id="${n.id}">${statementInline(n.text).replace(/\n/g,'<br>')}${n.refs.map((ref,i)=>` <a href="#${ref}" aria-label="返回引用 ${i+1}">↩${i+1}</a>`).join('')}</li>`).join('')}</ol></section>`;
+ html+=warnings.map(w=>`<p class="reading-note">${esc(w).replace(/\n/g,'<br>')}</p>`).join('');
+ return html;
+}
 function trackingNotice(s,day){
  const exit=s.trackingExitDate;
  if(!exit){return day===D.end&&s.trackingStatus==='evaluation_only'?'<section class="tracking-notice reading-note"><h3>已停止主动跟踪</h3><p>原记录缺少停止日期，停止原因需核对后展示。</p></section>':''}

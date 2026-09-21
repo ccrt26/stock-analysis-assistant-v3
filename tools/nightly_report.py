@@ -103,6 +103,9 @@ def assemble_from_sources(root: Path, formation: str, action: str, as_of: str, *
     bodies = [market_text.strip(), review_text, counts, accepted_section.strip()]
     if accepted_path is not None:
         accepted = json.loads(accepted_path.read_text(encoding="utf-8"))
+        if accepted.get('current_opinion_contract'):
+            from recommendation_pipeline import validate_adopted_current_opinions
+            validate_adopted_current_opinions(root, accepted, recorded=True)
         trace = json.loads((root / "local_archive/forward_selection" / f"research-trace-{formation}.json").read_text())
         if accepted.get("trace") != trace or accepted.get("research_issues") != []:
             raise ValueError("采用正文与正式研究不一致或仍有未决问题")
@@ -127,6 +130,9 @@ def assemble_reply(draft: str, formation: str, action: str, as_of: str, *, root:
     bodies[1], bodies[2] = source_sections(root, formation)
     if accepted_path is not None:
         accepted = json.loads(accepted_path.read_text())
+        if accepted.get('current_opinion_contract'):
+            from recommendation_pipeline import validate_adopted_current_opinions
+            validate_adopted_current_opinions(root, accepted, recorded=True)
         trace = json.loads((root / "local_archive/forward_selection" / f"research-trace-{formation}.json").read_text())
         if accepted.get("trace") != trace or accepted.get("research_issues") != []:
             raise ValueError("采用正文与正式研究不一致或仍有未决问题")

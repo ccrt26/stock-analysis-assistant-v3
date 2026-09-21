@@ -2077,8 +2077,15 @@ def write_monitor_prompt(state: dict, attempt_dir: Path) -> Path:
             "这是对原计划任务的补跑：复盘仍使用原计划交易日前一自然日18:30的固定截止；"
             "当前价格不能替代当时的事实。\n"
         )
+    pending_note = ""
+    if state.get('current_opinion_contract') == 'same-day-current-opinion-v1':
+        pending_note = (
+            "本次astra-files-v1先交待核对稿：保存pending-daily-formal-reviews-" + formation + ".json、"
+            "pending-report-" + formation + ".json及原snapshot。只分析，不执行record-daily-formal-reviews/monitor record。"
+            "本日复盘与新推荐的当前意见核对通过后，外层程序才执行原record；本段覆盖下文提前保存步骤。"
+            "不改研究判断，收到同股合并问题时只修本日待核对对象和唯一正文，保留无关记录与D20。\n")
     preamble = (
-        "【外层启动说明（启动器生成，非研究内容）】\n"
+        "【外层启动说明（启动器生成，非研究内容）】\n" + pending_note +
         "本次为独立复盘会话（article-v1 分工）：只负责已有正式推荐的当日复盘分析、统一分类、"
         "逐篇正文与原合同保存（record-daily-formal-reviews 与 monitor record，全部应复盘记录覆盖，"
         "节点/详评/简评互斥与上限不变，D20固定结案不改）。"
@@ -2263,6 +2270,50 @@ def nightly_run_policy(args, config, state, today):
     return effective, policy
 
 
+
+def authorize_provider_retry(args, state, path, policy):
+    """Explicit one-sequence retry under the caller's existing TaskLock.
+
+    Validate everything before any state write. The old state and marker are
+    append-only evidence; no stages, attempts, budgets or business blocks reset.
+    """
+    provider = getattr(args, 'retry_unavailable_provider', None)
+    if provider is None:
+        return
+    if provider != 'astra' or getattr(args, 'scheduled', False) or not path.is_file():
+        raise ValueError('重试授权只用于已有人工Astra任务')
+    original = json.loads(path.read_text())
+    if original.get('task') != 'nightly' or original.get('status') in ('completed', 'cancelled'):
+        raise ValueError('不能重试完成、取消或其他任务')
+    if original.get('run_policy') != policy or policy.get('provider') != 'astra':
+        raise ValueError('重试策略与原任务不同')
+    if any(original.get(k) != state.get(k) or not state.get(k) for k in ('formation_date', 'action_date', 'selection_as_of')):
+        raise ValueError('重试任务身份缺失或不同')
+    marker = original.get('unavailable_providers', {}).get(provider)
+    if not isinstance(marker, dict):
+        raise ValueError('没有已记录的Astra不可用标记')
+    failures = [e for e in original.get('recommendation_stages', []) if e.get('status') == 'failed']
+    attempts = [e for e in original.get('attempts', []) if e.get('outcome') == 'failed']
+    # Only an actual terminal provider failure authorizes clearing this marker.
+    evidence = failures[-1] if failures else attempts[-1] if attempts else None
+    reason = str((evidence or {}).get('error') or (evidence or {}).get('reason') or '')
+    start = reason.find('[model-request-error] ')
+    if not evidence or evidence.get('provider') != provider or start < 0 or not classify_failure(
+            int(evidence.get('exit_code') or 1), reason[start:])[1]:
+        raise ValueError('当前阻断不是可人工重试的供应商故障')
+    if (original.get('current_opinion') or {}).get('business_unresolved'):
+        raise ValueError('不能解除业务分歧阻断')
+    stamp = now_shanghai().strftime('%Y%m%dT%H%M%S%f')
+    backup = path.with_name(path.stem + '.before-provider-retry-' + stamp + '.json')
+    if backup.exists():
+        raise ValueError('重试备份已存在')
+    backup.write_bytes(path.read_bytes())
+    state.setdefault('provider_retry_events', []).append({'provider': provider, 'authorized_at': now_shanghai().isoformat(),
+        'prior_marker': marker, 'prior_state': backup.name, 'scope': 'existing-task-one-resume-sequence'})
+    del state['unavailable_providers'][provider]
+    save_state(path, state)
+
+
 def run_nightly(args: argparse.Namespace, config: dict, lock: TaskLock,
                 now: dt.datetime | None = None) -> int:
     now = now or now_shanghai()
@@ -2281,6 +2332,7 @@ def run_nightly(args: argparse.Namespace, config: dict, lock: TaskLock,
         "attempts": [],
     }
     config, policy = nightly_run_policy(args, config, state, today)
+    authorize_provider_retry(args, state, path, policy)
     save_state(path, state)
     if state.get("status") == "completed":
         result = state.get("result", {})
@@ -2462,6 +2514,8 @@ def run_nightly(args: argparse.Namespace, config: dict, lock: TaskLock,
                 raise ValueError('同身份来源运行策略不同，不复用为本 profile 验收')
             archive_dir.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(existing_reply, reply_target)
+            if source_state.get('current_opinion_contract'):
+                state['current_opinion_contract'] = source_state['current_opinion_contract']
             if source_state.get("recommendation_pipeline") in ("prefreeze-v1", "article-v1"):
                 state["recommendation_pipeline"] = source_state.get("recommendation_pipeline", "article-v1")
                 original = existing_reply.parent / "recommendation/accepted-recommendation.json"
@@ -2684,6 +2738,10 @@ def assemble_saved_reply(state: dict, reply_target: Path, formation: str, action
             adopted = reply_target.parent / "recommendation/accepted-recommendation.json"
             if not adopted.exists():
                 raise ValueError("managed 任务缺少与正式研究对应的采用正文，不能从其他草稿重新构造")
+        if state.get('current_opinion_contract') == 'same-day-current-opinion-v1':
+            from recommendation_pipeline import validate_adopted_current_opinions
+            adopted = reply_target.parent / 'recommendation/accepted-recommendation.json'
+            validate_adopted_current_opinions(PROJECT_ROOT, json.loads(adopted.read_text()), recorded=True)
         assembled = assemble_file(reply_target, formation, action, as_of, root=PROJECT_ROOT)
         state["reply_assembly"] = {"status": "assembled" if assembled else "unchanged",
                                    "source": f"monitor-report-{formation}.md"}
@@ -3360,6 +3418,8 @@ def build_parser() -> argparse.ArgumentParser:
                      help="仅本次 nightly 的推荐成稿方式；恢复沿用原运行配置")
     run.add_argument("--no-fallback", action="store_true", default=None,
                      help="本次禁用备用模型，须显式指定 --provider")
+    run.add_argument("--retry-unavailable-provider", choices=["astra"], default=None,
+                     help="仅用户确认恢复后，授权同身份未完成任务重试Astra一次；保留失败及阶段")
     run.add_argument("--rerun-date", default=None, metavar="YYYY-MM-DD",
                      help="原计划推荐日期（行动日）；与 forward_selection prepare 同义")
     run.add_argument("--scheduled", action="store_true",
@@ -3408,7 +3468,7 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_verify(args)
     config = load_local_config()
     if command == "run":
-        if args.task != "nightly" and (args.recommendation_authoring_profile or args.no_fallback):
+        if args.task != "nightly" and (args.recommendation_authoring_profile or args.no_fallback or args.retry_unavailable_provider):
             print("profile 与 --no-fallback 仅用于 nightly")
             return EXIT_USAGE
         if args.no_fallback and not args.provider:

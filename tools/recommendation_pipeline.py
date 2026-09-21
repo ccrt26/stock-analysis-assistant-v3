@@ -908,6 +908,9 @@ def session_identity(host, provider: str, config: dict, *, text_only: bool = Tru
     executor_defaults 是执行器硬编码且不可经配置改变的实测行为（CLI 0.16.5 主请求
     output_config.effort=max、thinking enabled），记录为实际默认，不提供虚假旋钮。
     """
+    if provider == 'astra':
+        return {'provider': provider, 'model_ref': 'gpt-6-astra', 'auth': 'chatgpt',
+                'text_only': text_only, 'effort': 'xhigh' if file_io.enabled(config) else 'high'}
     return {'provider': provider, 'model_ref': host.model_ref(provider, config),
             'base_url': host.provider_base_url(provider, config), 'text_only': text_only,
             'executor_defaults': {'effort': 'max', 'thinking': 'enabled'}}
@@ -1369,8 +1372,10 @@ def run_article_cycle(host, *, packet: dict, materials: dict, directory: Path, s
     prior_review_issues: list[dict] = []
     pending_checks: list[dict] = []
     effective_packet = packet
-    prior = None
-    revision_issues = None
+    amendment_path = directory / 'current-opinion-amendment.json'
+    amendment = read_json(amendment_path) if files_mode and amendment_path.exists() else {}
+    prior = amendment.get('prior_article')
+    revision_issues = amendment.get('revision_issues')
     article = None
     article_path = None
     review = None
@@ -1440,7 +1445,8 @@ def run_article_cycle(host, *, packet: dict, materials: dict, directory: Path, s
         if files_mode:
             file_spec = file_io.stage_spec(host.PROJECT_ROOT, 'author', effective_packet, materials,
                 prior_article=prior, revision_issues=revision_issues,
-                issue_resolutions=issue_resolutions or None)
+                issue_resolutions=issue_resolutions or None,
+                current_opinion_resolution=amendment.get('owner_answers'))
             prompt = file_spec['request']
         else:
             prompt = author_prompt(host.PROJECT_ROOT, packet=effective_packet, materials=materials,
@@ -1503,7 +1509,8 @@ def run_article_cycle(host, *, packet: dict, materials: dict, directory: Path, s
         record_progress(review_stage)
         review_spec = (file_io.stage_spec(host.PROJECT_ROOT, 'review', effective_packet, materials,
             article=article, issue_resolutions=issue_resolutions or None,
-            pending_issue_checks=pending_checks or None) if files_mode else None)
+            pending_issue_checks=pending_checks or None,
+            current_opinion_resolution=amendment.get('owner_answers')) if files_mode else None)
         if files_mode:
             file_io.validate_shared_material(file_spec, review_spec)
             saved_author = read_json(directory / f'{author_stage}-result.json')
@@ -1658,12 +1665,12 @@ def run_stage(host, state: dict, state_path: Path, directory: Path, stage: str,
     prompt_path = directory / f'{stem}-input.md'
     prompt_path.write_text(prompt)
     files_mode = config.get('_file_stage') is True
-    profile_stage = files_mode or (file_io.enabled(config) and stage in ('research', 'research-repair', 'research-contract-repair'))
+    profile_stage = files_mode or (file_io.enabled(config) and stage in ('research', 'research-repair', 'research-contract-repair', 'current-opinion-check', 'current-opinion-recheck', 'current-opinion-owner-selection'))
     if profile_stage:
         provider, fallback = 'astra', False
         config = {**config, '_astra_recommendation_profile': True}
     fallback = fallback and not config.get('_no_fallback', False)
-    order = ['astra'] if profile_stage else host.available_routes(state, provider, fallback=fallback)
+    order = host.available_routes(state, 'astra' if profile_stage else provider, fallback=False if profile_stage else fallback)
     for route in order:
         output = directory / f'{stem}-{route}.md'
         events = directory / f'{stem}-{route}.jsonl'
@@ -1917,6 +1924,7 @@ def _author_articles(host, state, state_path, directory, config, provider, root,
                               if file_io.enabled(config) else None)
             cache_path = articles_dir / code / 'cycle-ready.json'
             cycle_input = {'packet': packet, 'materials': material, 'handoff_issues': current_issues,
+                           'tasks': {role: (host.PROJECT_ROOT / file_io.TASKS[role]).read_text() for role in ('author', 'review')} if file_io.enabled(config) else None,
                            'prior_resolutions': repair_context.get('stocks', {}).get(code, {}).get('prior_resolutions')}
             if file_io.enabled(config) and cache_path.exists():
                 old = read_json(cache_path)
@@ -1944,6 +1952,7 @@ def _author_articles(host, state, state_path, directory, config, provider, root,
                 directory=articles_dir / code, state=state, state_path=state_path,
                 config=config, provider=provider, fallback=fallback,
                 allow_research_changes=True,
+                expression_limit=0 if (articles_dir / code / 'current-opinion-amendment.json').exists() else 1,
                 prior_resolutions=(repair_context.get('stocks', {}).get(code, {}).get('prior_resolutions')
                     if file_io.enabled(config) else repair_context.get('prior_resolutions')),
                 handoff_issues=(handoff.get('stocks', {}).get(code, {}).get('research_issues', [])
@@ -2032,6 +2041,332 @@ def _author_articles(host, state, state_path, directory, config, provider, root,
         raise ValueError(f'作者循环仍有未决问题，保留草稿不冻结：{json.dumps(details, ensure_ascii=False)[:2000]}')
 
 
+# Current-opinion checks are task receipts, not financial records or selection rules.
+CURRENT_OPINION_CONTRACT = 'same-day-current-opinion-v1'
+
+
+def monitor_draft(root, formation, *, saved=False):
+    directory = root / 'local_archive/forward_monitor'
+    names = {'snapshot': f'snapshot-{formation}.json',
+             'ledger': f'{"daily-formal-reviews" if saved else "pending-daily-formal-reviews"}-{formation}.json',
+             'report': f'{"monitor-report" if saved else "pending-report"}-{formation}.json'}
+    from stock_analyzer.ops.forward_monitor import DailyFormalReviewLedgerV1, DailyForwardMonitorReportV2
+    draft = {key: read_json(directory / name) for key, name in names.items()}
+    draft['ledger'] = DailyFormalReviewLedgerV1.model_validate(draft['ledger']).model_dump(mode='json')
+    draft['report'] = DailyForwardMonitorReportV2.model_validate(draft['report']).model_dump(mode='json')
+    return draft
+
+
+def validate_monitor_draft(draft, expected):
+    """Run both original record validators in disposable storage before adoption.
+
+    Their existing record functions are also the validators. No production/history
+    path is passed, no validation rules are copied and no financial schema changes.
+    """
+    import tempfile
+    from stock_analyzer.ops.forward_monitor import record_daily_formal_reviews, record_forward_monitor
+    if any(str(draft[k].get('analysis_date')) != expected[0] or
+           str(draft[k].get('as_of')) != expected[2] for k in ('snapshot', 'ledger', 'report')):
+        raise ValueError('复盘草稿与本轮日期/截止不一致')
+    with tempfile.TemporaryDirectory(prefix='monitor-draft-validation-') as temporary:
+        root = Path(temporary)
+        snapshot, ledger, report = (root / n for n in ('snapshot.json', 'ledger.json', 'report.json'))
+        for path, key in ((snapshot, 'snapshot'), (ledger, 'ledger'), (report, 'report')):
+            save_json(path, draft[key])
+        record_daily_formal_reviews(snapshot_file=snapshot, review_file=ledger, project_root=root)
+        record_forward_monitor(snapshot_file=snapshot, report_file=report, project_root=root)
+
+
+def current_opinion_input(trace, handoff, section, draft):
+    """Pair by stock AND episode; labels and horizons never decide compatibility."""
+    episodes = {e['episode_id']: e for e in draft['snapshot'].get('episodes', [])}
+    details = {r['episode_id']: r for a in draft['report'].get('alerts', [])
+               for r in a.get('episode_reviews', [])}
+    stocks = {s['ts_code']: s for s in selected_result(trace)['selected_stocks']}
+    pairs = []
+    for review in draft['ledger'].get('reviews', []):
+        episode = episodes[review['episode_id']]
+        code = episode['ts_code']
+        if code not in stocks or review.get('current_opportunity') is None:
+            continue
+        body = (review if review.get('review_kind') == 'brief' else details.get(review['episode_id'], {})).get('current_review')
+        if not body:
+            raise ValueError('同股核对缺少唯一复盘正文：' + review['episode_id'])
+        # Keep original historical conclusions/D20 out of current-action adjudication.
+        import stock_ai
+        article = stock_ai._stock_segment(section, code)
+        if not article:
+            raise ValueError('同股核对缺少新推荐正文：' + code)
+        pairs.append({'ts_code': code, 'episode_id': review['episode_id'],
+            'recommendation': {'judgment': stocks[code], 'handoff': handoff.get('stocks', {}).get(code),
+                               'article': article, 'purpose': '本次新参与', 'horizon': '原新推荐观察目标'},
+            'review': {'current_opportunity': review['current_opportunity'], 'body': body,
+                       'as_of': draft['ledger']['as_of'], 'purpose': '当前参与意见（独立于旧推荐历史评价）',
+                       'horizon': '5—10个交易日'},
+            'facts': {'review_context': episode.get('review_context'),
+                      'price': episode.get('current_price'),
+                      'source': f'snapshot:{review["episode_id"]}'}})
+    pairs.sort(key=lambda p: (p['ts_code'], p['episode_id']))
+    return {'contract': CURRENT_OPINION_CONTRACT, 'identity': list(identity(trace)), 'pairs': copy.deepcopy(pairs),
+            'expected_pairs': [[p['ts_code'], p['episode_id']] for p in pairs],
+            'binding': {'trace': trace_input_sha256(trace), 'handoff': trace_input_sha256(handoff),
+                        'section': file_io.digest(section), 'monitor': trace_input_sha256(draft)}}
+
+
+def validate_current_opinion_receipt(receipt, packet, *, require_ready=False):
+    if not isinstance(receipt, dict) or type(receipt.get('ready')) is not bool or not isinstance(receipt.get('checks'), list):
+        raise ValueError('当前意见核对回执缺失/损坏')
+    expected = {(p['ts_code'], p['episode_id']): p for p in packet['pairs']}
+    seen = set()
+    for check in receipt['checks']:
+        key = (check.get('ts_code'), check.get('episode_id'))
+        if key not in expected or key in seen:
+            raise ValueError('当前意见回执重复、额外或股票/episode不符')
+        seen.add(key)
+        pair = expected[key]
+        for name, text in [('recommendation_quote', pair['recommendation']['article']),
+                           ('review_quote', pair['review']['body'] + '\n' + '\n'.join(
+                               str(v) for v in pair['review']['current_opportunity'].values()))]:
+            quote = check.get(name)
+            if not isinstance(quote, str) or not quote.strip() or quote not in text:
+                raise ValueError('当前意见回执引句不是本版原文：' + name)
+        if check.get('result') not in ('compatible', 'explained_difference', 'unresolved'):
+            raise ValueError('未知当前意见核对结果')
+        owners = check.get('needs_owner')
+        if not isinstance(owners, list) or len(owners) != len(set(owners)) or set(owners) - {'selection', 'monitor'}:
+            raise ValueError('当前意见核对owner非法')
+        if not isinstance(check.get('basis'), str) or not check['basis'].strip():
+            raise ValueError('当前意见核对缺少依据')
+        if check['result'] == 'unresolved' and not owners:
+            raise ValueError('未决当前意见必须指明负责人')
+        if check['result'] != 'unresolved' and owners:
+            raise ValueError('已通过结果仍有待处理负责人')
+    if seen != set(expected):
+        raise ValueError('当前意见核对遗漏episode')
+    ready = all(c['result'] != 'unresolved' and not c['needs_owner'] for c in receipt['checks'])
+    if receipt['ready'] != ready or (require_ready and not ready):
+        raise ValueError('当前意见仍未决，不能采用/保存/装配')
+    return receipt
+
+
+def check_current_opinions(host, state, state_path, directory, config, trace, section, draft):
+    handoff = selection_handoff(directory, trace, strict=True)
+    packet = current_opinion_input(trace, handoff, section, draft)
+    previous = directory / 'current-opinion-check.json'
+    if previous.exists():
+        saved = read_json(previous)
+        if saved.get('input') == packet:
+            validate_current_opinion_receipt(saved['receipt'], packet)
+            if not packet['pairs'] or stage_execution_verified(host, 'astra', False, saved.get('execution')):
+                return saved
+        retain_previous(previous)
+    if not packet['pairs']:
+        receipt = {'checks': [], 'ready': True}
+        execution = None  # A real empty intersection needs no model.
+    else:
+        budget = state.setdefault('current_opinion', {})
+        round_no = budget.get('checks', 0)
+        stage = 'current-opinion-check' if round_no == 0 else 'current-opinion-recheck'
+        # A process failure may resume the same stage; successful semantic rounds are finite.
+        if round_no >= 2:
+            raise ValueError('当前意见核对预算已用完，保留本版待处理稿')
+        prompt = (host.PROJECT_ROOT / 'ops/recommendation-current-opinion-check.md').read_text()
+        prior_issues = read_json(directory / 'current-opinion-questions.json') if (directory / 'current-opinion-questions.json').exists() else None
+        answers = {p.stem: read_json(p) for p in directory.glob('current-opinion-owner-*-answer.json')}
+        prompt += '\n实际输入（只核对下列对象）：\n' + json.dumps(
+            {'input': packet, 'previous_questions': prior_issues, 'owner_answers': answers}, ensure_ascii=False)
+        validator = lambda raw: validate_current_opinion_receipt(json_object(raw), packet)
+        raw = article_stage(host, state, state_path, directory, stage, prompt, 'astra', config,
+                            fallback=False, contract=CURRENT_OPINION_CONTRACT, validate=validator)
+        receipt = validator(raw)
+        execution = read_json(directory / f'{stage}-result.json')['stage_execution']
+        if not stage_execution_verified(host, 'astra', False, execution):
+            raise ValueError('当前意见核对实际模型证据未通过')
+        budget['checks'] = round_no + 1
+        host.save_state(state_path, state)
+    saved = {'input': packet, 'receipt': receipt, 'execution': execution}
+    save_json(previous, saved)
+    return saved
+
+
+def validate_owner_answer(raw, issues):
+    answer = json_object(raw)
+    if not isinstance(answer.get('resolutions'), list) or not isinstance(answer.get('unresolved'), list):
+        raise ValueError('负责人缺少resolutions/unresolved')
+    ids = [r.get('issue_id') for r in answer['resolutions'] + answer['unresolved']]
+    if sorted(ids) != sorted(i['issue_id'] for i in issues) or len(ids) != len(set(ids)):
+        raise ValueError('负责人未逐项回应合并问题单')
+    for r in answer['resolutions']:
+        if not all(isinstance(r.get(k), str) and r[k].strip() for k in ('decision', 'evidence', 'author_instruction')):
+            raise ValueError('负责人答复缺少处理/证据/作者指引')
+    return answer
+
+
+def resolve_current_opinion_owners(host, state, state_path, directory, config, trace, section, draft, check):
+    """One consolidated ticket per original owner; never edit investment text here."""
+    questions_path = directory / 'current-opinion-questions.json'
+    if questions_path.exists():
+        questions = read_json(questions_path)
+    else:
+        questions = {'selection': [], 'monitor': []}
+        for i, c in enumerate(check['receipt']['checks']):
+            for owner in c['needs_owner']:
+                questions[owner].append({**c, 'issue_id': f'CO-{i + 1}'})
+        # Explicit pending questions from this task's source material, not stock-specific defaults.
+        extra = directory / 'current-opinion-source-questions.json'
+        if extra.exists():
+            for owner, values in read_json(extra).items():
+                if owner not in questions:
+                    raise ValueError('未知来源问题负责人')
+                questions[owner].extend(values)
+        save_json(questions_path, questions)
+        save_json(directory / 'current-opinion-before-owners.json',
+                  {'trace': trace, 'section': section, 'draft': draft,
+                   'handoff': read_json(directory / 'selection-handoff.json')})
+    before = read_json(directory / 'current-opinion-before-owners.json')
+    pending = host.PROJECT_ROOT / 'local_archive/forward_selection' / f'pending-trace-{identity(trace)[0]}.json'
+    monitor = host.PROJECT_ROOT / 'local_archive/forward_monitor'
+    answers = {}
+    for owner, issues in questions.items():
+        if not issues:
+            continue
+        answer_path = directory / f'current-opinion-owner-{owner}-answer.json'
+        if answer_path.exists():
+            answers[owner] = read_json(answer_path)
+            validate_owner_answer(json.dumps(answers[owner]), issues)
+            continue
+        stage = f'current-opinion-owner-{owner}'
+        started = state.setdefault('current_opinion', {}).setdefault('owners_started', [])
+        if owner in started:
+            entry = stage_entry_evidence(state, stage)
+            retries = state.get('provider_retry_events', [])
+            if not entry or entry.get('status') != 'failed' or not retries or retries[-1].get('owner_resumed') == owner:
+                raise ValueError('负责人本轮调用已开始但无有效交付，保留现场待受控恢复：' + owner)
+            retries[-1]['owner_resumed'] = owner
+        else:
+            started.append(owner)
+        host.save_state(state_path, state)
+        prompt = ('你是本次原' + ('选股研究' if owner == 'selection' else '正式复盘') + '负责人。'
+            '只对本任务合并问题单核对原截止已存事实，不重新扫描、不增加股票、不使用后续行情、不写新推荐文章。'
+            '不默认另一方、更谨慎或更高档位正确。可以保留有事实解释的不同目的，但实际当前正文/交接要让读者理解。'
+            '不运行prepare/record/freeze/装配/网页/公司介绍，不改代码或历史。不得启动其他模型。'
+            '本任务允许对未正式保存的本日结果作必要修正，保留所有原始事实与日期。'
+            + (f'只修改{pending}与{directory / "selection-handoff.json"}；同步名单、全部判断/条件及逐股authoring_note/source_refs/research_issues和实际trace_sha256。若不再推荐可移除但不补股，不改无关候选。'
+               f'请先读{host.PROJECT_ROOT / "ops/recommendation-handoff-prompt.md"}。'
+               if owner == 'selection' else
+               f'只修改{monitor / ("pending-daily-formal-reviews-" + identity(trace)[0] + ".json")}与'
+               f'{monitor / ("pending-report-" + identity(trace)[0] + ".json")}中的受影响本日current_opportunity和唯一正文，以及同步必要的当前解释字段；'
+               '不改历史评价、分类、覆盖、原始推荐、D20结案和其他股票。先读复盘Skill及ops/forward-monitor-prompt.md，外层待核对分工优先。')
+            + f'\n同股全部实际材料与原问题保存在{directory / "current-opinion-check.json"}和{questions_path}。'
+            f'原始快照与修正前全文在{directory / "current-opinion-before-owners.json"}。'
+            '最终只返回JSON：resolutions每项issue_id、ts_code、decision、evidence、author_instruction、changes_original_judgment；未解决的放unresolved每项issue_id/problem。'
+            '指出是恢复已有解释、据原事实补充论证还是实质改变判断。逐项回应，不给开发者补写结论。\n'
+            + json.dumps({'identity': identity(trace), 'owner': owner, 'issues': issues}, ensure_ascii=False))
+        raw, _ = run_stage(host, state, state_path, directory, stage, prompt, 'astra', config,
+                           text_only=False, fallback=False)
+        if not stage_execution_verified(host, 'astra', False, stage_entry_evidence(state, stage)):
+            raise ValueError('负责人实际模型证据未通过：' + owner)
+        answer = validate_owner_answer(raw, issues)
+        save_json(answer_path, answer)
+        answers[owner] = answer
+    if any(a['unresolved'] for a in answers.values()):
+        state.setdefault('current_opinion', {})['business_unresolved'] = True
+        host.save_state(state_path, state)
+        raise ValueError('负责人仍有未决问题，保留双方草稿')
+    revised = read_json(pending)
+    if identity(revised) != identity(before['trace']):
+        raise ValueError('负责人改变研究时间身份')
+    validate_pending(host.PROJECT_ROOT, revised, state.get('prepare', {}))
+    selection_handoff(directory, revised, strict=True)
+    revised_draft = monitor_draft(host.PROJECT_ROOT, identity(trace)[0])
+    validate_monitor_draft(revised_draft, identity(trace))
+    allowed_codes = {i['ts_code'] for values in questions.values() for i in values}
+    if set(s['ts_code'] for s in selected_result(revised)['selected_stocks']) - set(
+            s['ts_code'] for s in selected_result(before['trace'])['selected_stocks']):
+        raise ValueError('定向核对不能新增替代股票')
+    if revised_draft['snapshot'] != before['draft']['snapshot']:
+        raise ValueError('负责人改变事实快照')
+    ids = {e['episode_id']: e['ts_code'] for e in before['draft']['snapshot']['episodes']}
+    if len(before['draft']['ledger']['reviews']) != len(revised_draft['ledger']['reviews']) or len(before['draft']['report']['alerts']) != len(revised_draft['report']['alerts']):
+        raise ValueError('负责人改变复盘覆盖')
+    for old, new in zip(before['draft']['ledger']['reviews'], revised_draft['ledger']['reviews']):
+        allowed = {'current_opportunity', 'current_review', 'outlook_reason_plain_language', 'view_change_reason'} if ids[old['episode_id']] in allowed_codes else set()
+        if {k:v for k,v in old.items() if k not in allowed} != {k:v for k,v in new.items() if k not in allowed}:
+            raise ValueError('负责人改变无关日评/历史评价/D20：' + old['episode_id'])
+    for old, new in zip(before['draft']['report']['alerts'], revised_draft['report']['alerts']):
+        if old['ts_code'] not in allowed_codes and old != new:
+            raise ValueError('负责人改变无关详评：' + old['ts_code'])
+        if old['ts_code'] in allowed_codes:
+            if len(old['episode_reviews']) != len(new['episode_reviews']):
+                raise ValueError('负责人改变详评episode覆盖')
+            for a,b in zip(old['episode_reviews'], new['episode_reviews']):
+                if {k:v for k,v in a.items() if k != 'current_review'} != {k:v for k,v in b.items() if k != 'current_review'}:
+                    raise ValueError('负责人改变原推荐评价/D20')
+    save_json(directory / 'context-trace.json', revised)
+    # Existing author loop receives the same source draft plus owners' answers; no developer rewrite.
+    stocks = {s['ts_code'] for s in selected_result(revised)['selected_stocks']}
+    for code in allowed_codes & stocks:
+        path = directory / 'articles' / code / 'current-opinion-amendment.json'
+        import stock_ai
+        save_json(path, {'prior_article': stock_ai._stock_segment(before['section'], code),
+                        'revision_issues': [i for values in questions.values() for i in values if i['ts_code'] == code],
+                        'owner_answers': answers})
+    return revised, revised_draft
+
+
+def validate_adopted_current_opinions(root, accepted, *, directory=None, recorded=False):
+    saved = accepted.get('current_opinion_check')
+    if not saved:
+        raise ValueError('新任务缺少同版当前意见核对，不能保存/装配')
+    draft = accepted['monitor_draft']
+    handoff = accepted['selection_handoff']
+    packet = current_opinion_input(accepted['trace'], handoff, accepted['section'], draft)
+    if packet != saved.get('input'):
+        raise ValueError('当前意见核对后正文/判断/条件/来源改变')
+    validate_current_opinion_receipt(saved['receipt'], packet, require_ready=True)
+    import stock_ai
+    if packet['pairs'] and not stage_execution_verified(stock_ai, 'astra', False, saved.get('execution')):
+        raise ValueError('当前意见核对缺实际模型证据')
+    validate_monitor_draft(draft, identity(accepted['trace']))
+    if directory is not None:
+        if selection_handoff(directory, accepted['trace'], strict=True) != handoff:
+            raise ValueError('采用后研究交接改变')
+        pending = root / 'local_archive/forward_selection' / f'pending-trace-{identity(accepted["trace"])[0]}.json'
+        if pending.exists() and read_json(pending) != accepted['trace']:
+            raise ValueError('采用后pending研究改变')
+    if recorded and monitor_draft(root, identity(accepted['trace'])[0], saved=True) != draft:
+        raise ValueError('正式复盘与已核对采用版本不同')
+
+
+def record_adopted_monitor(root, accepted, directory):
+    from stock_analyzer.ops.forward_monitor import record_daily_formal_reviews, record_forward_monitor
+    validate_adopted_current_opinions(root, accepted, directory=directory)
+    formation = identity(accepted['trace'])[0]
+    mon = root / 'local_archive/forward_monitor'
+    draft = accepted['monitor_draft']
+    # Check every destination before the first write; preserve same-version checkpoints.
+    for key, name in [('snapshot', f'snapshot-{formation}.json'), ('ledger', f'daily-formal-reviews-{formation}.json'),
+                      ('report', f'monitor-report-{formation}.json')]:
+        path = mon / name
+        if path.exists() and read_json(path) != draft[key]:
+            raise ValueError('同日正式文件不同，拒绝覆盖：' + name)
+    for key, name in [('ledger', f'pending-daily-formal-reviews-{formation}.json'), ('report', f'pending-report-{formation}.json')]:
+        path = mon / name
+        if path.exists() and read_json(path) != draft[key]:
+            raise ValueError('采用后复盘草稿改变：' + name)
+    progress = directory / 'same-version-save.json'
+    for key, filename, record, arg in [('ledger', f'pending-daily-formal-reviews-{formation}.json', record_daily_formal_reviews, 'review_file'),
+                                      ('report', f'pending-report-{formation}.json', record_forward_monitor, 'report_file')]:
+        path = mon / filename
+        save_json(path, draft[key])
+        summary = record(snapshot_file=mon / f'snapshot-{formation}.json', project_root=root, **{arg: path})
+        if summary.status not in ('recorded', 'already_recorded'):
+            raise ValueError('原复盘record拒绝：' + summary.status)
+        save_json(progress, {'contract': CURRENT_OPINION_CONTRACT, 'identity': list(identity(accepted['trace'])),
+                            'last_recorded': key, 'status': summary.status})
+    validate_adopted_current_opinions(root, accepted, directory=directory, recorded=True)
+
+
 def complete(host, state: dict, state_path: Path, directory: Path, config: dict,
              provider: str, research_prompt: str, *, fallback=True) -> tuple[Path, str]:
     root = host.PROJECT_ROOT
@@ -2040,12 +2375,17 @@ def complete(host, state: dict, state_path: Path, directory: Path, config: dict,
     frozen = pending.with_name(f'research-trace-{expected[0]}.json')
     accepted_path = directory / 'accepted-recommendation.json'
     research_reply = directory / 'research-reply.md'
+    if file_io.enabled(config) and not frozen.exists() and not csv_has_formation(root, expected[0]):
+        state.setdefault('current_opinion_contract', CURRENT_OPINION_CONTRACT)
+    current_required = state.get('current_opinion_contract') == CURRENT_OPINION_CONTRACT
     state['recommendation_pipeline'] = 'article-v1'
     host.save_state(state_path, state)
     directory.mkdir(parents=True, exist_ok=True)
     if accepted_path.exists():
         accepted = read_json(accepted_path)
         validate_accepted(host, accepted, expected)
+        if current_required:
+            validate_adopted_current_opinions(root, accepted, directory=directory)
         if not research_reply.exists():
             raise ValueError('已有采用正文，但缺少原研究市场/复盘交接；不重新选股')
     else:
@@ -2109,11 +2449,25 @@ def complete(host, state: dict, state_path: Path, directory: Path, config: dict,
         monitor_dir = directory / 'monitor'
         try:
             ledger_ok, report_ok = host.monitor_artifacts_status(expected[0])
-            if not (ledger_ok and report_ok):
+            if current_required:
+                try:
+                    draft_monitor = monitor_draft(root, expected[0])
+                    validate_monitor_draft(draft_monitor, expected)
+                    analyzed = True
+                except FileNotFoundError:
+                    analyzed = False
+            else:
+                analyzed = ledger_ok and report_ok
+            if not analyzed:
                 monitor_prompt = host.write_monitor_prompt(state, monitor_dir)
                 run_stage(host, state, state_path, monitor_dir, 'monitor',
                           monitor_prompt.read_text(encoding='utf-8'),
                           provider, config, text_only=False, fallback=fallback)
+            if current_required:
+                draft_monitor = monitor_draft(root, expected[0])
+                validate_monitor_draft(draft_monitor, expected)
+                state['monitor_analysis'] = {'status': 'pending_current_opinion', 'recorded': False}
+                host.save_state(state_path, state)
         except (OSError, ValueError, RuntimeError) as error:
             if not research_identity_intact():
                 raise  # 复盘期间共享研究被改变/消失，不是普通失败
@@ -2122,7 +2476,7 @@ def complete(host, state: dict, state_path: Path, directory: Path, config: dict,
         authoring_error = None
         checkpoint_path = directory / 'accepted-draft-checkpoint.json'
         if result['selected_stocks']:
-            if checkpoint_path.exists():
+            if checkpoint_path.exists() and not current_required:
                 # 恢复：上次运行已保存的候选采用草稿按原身份采用，不重新请求模型。
                 try:
                     draft = read_json(checkpoint_path)
@@ -2159,18 +2513,42 @@ def complete(host, state: dict, state_path: Path, directory: Path, config: dict,
         if read_json(pending) != trace:
             raise ValueError('写审与复盘期间研究改变，不能冻结旧结果')
         from nightly_report import source_sections
-        source_sections(root, expected[0], as_of=expected[2])
+        if current_required:
+            check = check_current_opinions(host, state, state_path, directory, config, trace, section.strip(), draft_monitor)
+            if not check['receipt']['ready']:
+                trace, draft_monitor = resolve_current_opinion_owners(host, state, state_path, directory, config,
+                                                                     trace, section.strip(), draft_monitor, check)
+                section, trace = _author_articles(host, state, state_path, directory, config, provider,
+                                                  root, trace, expected, fallback=False, repair_limit=0)
+                check = check_current_opinions(host, state, state_path, directory, config, trace, section.strip(), draft_monitor)
+            if not check['receipt']['ready']:
+                state.setdefault('current_opinion', {})['business_unresolved'] = True
+                host.save_state(state_path, state)
+            validate_current_opinion_receipt(check['receipt'], check['input'], require_ready=True)
+        else:
+            source_sections(root, expected[0], as_of=expected[2])
         accepted = {'trace': trace, 'section': section.strip(), 'research_issues': []}
+        if current_required:
+            validate_pending(root, trace, state.get('prepare', {}))
+            accepted.update(current_opinion_contract=CURRENT_OPINION_CONTRACT, current_opinion_check=check,
+                            monitor_draft=draft_monitor, selection_handoff=selection_handoff(directory, trace, strict=True))
+            validate_adopted_current_opinions(root, accepted, directory=directory)
         validate_accepted(host, accepted, expected)
         save_json(accepted_path, accepted)  # Must precede the CSV write and trace move.
         if checkpoint_path.exists():
             retain_previous(checkpoint_path)
     from nightly_report import market_section_text, report_parts, source_sections
+    if current_required:
+        record_adopted_monitor(root, accepted, directory)
+        state['monitor_analysis'] = {'status': 'recorded', 'recorded': True}
+        host.save_state(state_path, state)
     source_sections(root, expected[0], as_of=expected[2])
     freeze(host, root, accepted, pending, config)
     final = directory / 'reviewed-reply.md'
     reply_text = research_reply.read_text()
     try:
+        if current_required:
+            raise ValueError('同版核对后的新流程必须从正式来源装配')
         report_parts(reply_text)  # 旧流程四分区研究回复：按原衔接方式恢复，不另装配。
         final.write_text(replace_recommendation(reply_text, accepted['section']))
     except ValueError:
