@@ -202,3 +202,26 @@ def test_complete_unresolved_preserves_both_drafts_and_never_records(harness, mo
     assert (directory/'articles'/code/'cycle-ready.json').exists()
     assert harness.state['current_opinion']['business_unresolved'] is True
     assert any('current-opinion-check' in x for x in seen)
+
+
+def test_separate_exact_excerpts_are_valid_but_not_invented_text(tmp_path):
+    *_, packet = inputs(tmp_path)
+    r=receipt(packet)
+    r['checks'][0]['recommendation_quote']='当前可有条件参与\n普通时段确认后才参与。'
+    p.validate_current_opinion_receipt(r,packet)
+    r['checks'][0]['recommendation_quote']+='\n不存在的句子'
+    with pytest.raises(ValueError,match='引句'):p.validate_current_opinion_receipt(r,packet)
+
+
+def test_completed_check_delivery_recovers_parser_failure_without_new_call(tmp_path,monkeypatch):
+    config={'recommendation_authoring_profile':'astra-files-v1'}
+    prompt='exact same bounded input';input_path=tmp_path/'input.md';input_path.write_text(prompt)
+    output=tmp_path/'output.md';output.write_text('{"checks":[],"ready":true}')
+    entry=dict(stage='current-opinion-check',provider='astra',profile='astra-files-v1',file_stage=False,
+        status='completed',evidence=evidence(),input=str(input_path),output=str(output),fallback=False)
+    state={'recommendation_stages':[entry]}
+    monkeypatch.setattr(stock_ai,'run_agent',lambda *a,**k:pytest.fail('valid original delivery must not be resampled'))
+    raw=p.article_stage(stock_ai,state,tmp_path/'state.json',tmp_path,'current-opinion-check',prompt,'astra',config,
+        fallback=False,contract=p.CURRENT_OPINION_CONTRACT,validate=json.loads)
+    assert raw==output.read_text()
+    assert p.read_json(tmp_path/'current-opinion-check-result.json')['recovery_source']==str(output)

@@ -1001,6 +1001,26 @@ def article_stage(host, state: dict, state_path: Path, directory: Path, stage: s
                                      fallback=fallback, validate=validate)
     if reusable is not None:
         return reusable
+    # A completed check can survive a deterministic receipt-parser error. Reuse
+    # the actual delivery only when its literal input and execution evidence match.
+    # This never repairs a verdict or requests another semantic sample.
+    if text_only and stage in ('current-opinion-check', 'current-opinion-recheck'):
+        delivered = next((e for e in reversed(state.get('recommendation_stages', []))
+                          if e.get('stage') == stage), None)
+        if delivered and delivered.get('status') == 'completed':
+            original_input = Path(delivered['input'])
+            output = Path(delivered['output'])
+            if (output.parent.resolve() == directory.resolve() and output.is_file()
+                    and original_input.is_file() and original_input.read_text() == prompt
+                    and delivered.get('fallback') == fallback
+                    and stage_execution_verified(host, provider, fallback, delivered)):
+                raw = output.read_text()
+                validate(raw)
+                execution = stage_entry_evidence(state, stage)
+                save_json(path, {'input_identity': identity, 'raw': raw, 'route': delivered['provider'],
+                    'contract': contract, 'stage_execution': execution, 'execution_verified': True,
+                    'recovery_source': str(output), 'recovery_basis': 'same literal input and verified completed delivery'})
+                return raw
     if path.exists():
         retain_previous(path)
     raw, route = run_stage(host, state, state_path, directory, stage, prompt, provider, config,
@@ -2128,7 +2148,8 @@ def validate_current_opinion_receipt(receipt, packet, *, require_ready=False):
                            ('review_quote', pair['review']['body'] + '\n' + '\n'.join(
                                str(v) for v in pair['review']['current_opportunity'].values()))]:
             quote = check.get(name)
-            if not isinstance(quote, str) or not quote.strip() or quote not in text:
+            if (not isinstance(quote, str) or not quote.strip() or
+                    any(part not in text for part in quote.splitlines() if part.strip())):
                 raise ValueError('当前意见回执引句不是本版原文：' + name)
         if check.get('result') not in ('compatible', 'explained_difference', 'unresolved'):
             raise ValueError('未知当前意见核对结果')
