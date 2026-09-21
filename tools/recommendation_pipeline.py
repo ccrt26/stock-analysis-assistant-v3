@@ -2218,7 +2218,11 @@ def validate_owner_answer(raw, issues):
     if sorted(ids) != sorted(i['issue_id'] for i in issues) or len(ids) != len(set(ids)):
         raise ValueError('负责人未逐项回应合并问题单')
     for r in answer['resolutions']:
-        if not all(isinstance(r.get(k), str) and r[k].strip() for k in ('decision', 'evidence', 'author_instruction')):
+        evidence = r.get('evidence')
+        evidence_ok = (isinstance(evidence, str) and bool(evidence.strip())) or (
+            isinstance(evidence, list) and bool(evidence) and
+            all(isinstance(item, str) and item.strip() for item in evidence))
+        if not evidence_ok or not all(isinstance(r.get(k), str) and r[k].strip() for k in ('decision', 'author_instruction')):
             raise ValueError('负责人答复缺少处理/证据/作者指引')
     return answer
 
@@ -2258,12 +2262,16 @@ def resolve_current_opinion_owners(host, state, state_path, directory, config, t
             continue
         stage = f'current-opinion-owner-{owner}'
         started = state.setdefault('current_opinion', {}).setdefault('owners_started', [])
+        delivered = None
         if owner in started:
             entry = stage_entry_evidence(state, stage)
+            if entry and entry.get('status') == 'completed':
+                delivered = next(e for e in reversed(state['recommendation_stages']) if e.get('stage') == stage)
             retries = state.get('provider_retry_events', [])
-            if not entry or entry.get('status') != 'failed' or not retries or retries[-1].get('owner_resumed') == owner:
-                raise ValueError('负责人本轮调用已开始但无有效交付，保留现场待受控恢复：' + owner)
-            retries[-1]['owner_resumed'] = owner
+            if delivered is None:
+                if not entry or entry.get('status') != 'failed' or not retries or retries[-1].get('owner_resumed') == owner:
+                    raise ValueError('负责人本轮调用已开始但无有效交付，保留现场待受控恢复：' + owner)
+                retries[-1]['owner_resumed'] = owner
         else:
             started.append(owner)
         host.save_state(state_path, state)
@@ -2283,8 +2291,17 @@ def resolve_current_opinion_owners(host, state, state_path, directory, config, t
             '最终只返回JSON：resolutions每项issue_id、ts_code、decision、evidence、author_instruction、changes_original_judgment；未解决的放unresolved每项issue_id/problem。'
             '指出是恢复已有解释、据原事实补充论证还是实质改变判断。逐项回应，不给开发者补写结论。\n'
             + json.dumps({'identity': identity(trace), 'owner': owner, 'issues': issues}, ensure_ascii=False))
-        raw, _ = run_stage(host, state, state_path, directory, stage, prompt, 'astra', config,
-                           text_only=False, fallback=False)
+        if delivered is not None:
+            original_input, output = Path(delivered['input']), Path(delivered['output'])
+            if (output.parent.resolve() != directory.resolve() or not output.is_file()
+                    or not original_input.is_file() or original_input.read_text() != prompt
+                    or delivered.get('fallback') is not False
+                    or not stage_execution_verified(host, 'astra', False, delivered)):
+                raise ValueError('负责人原交付与同版输入/实际证据不符：' + owner)
+            raw = output.read_text()
+        else:
+            raw, _ = run_stage(host, state, state_path, directory, stage, prompt, 'astra', config,
+                               text_only=False, fallback=False)
         if not stage_execution_verified(host, 'astra', False, stage_entry_evidence(state, stage)):
             raise ValueError('负责人实际模型证据未通过：' + owner)
         answer = validate_owner_answer(raw, issues)

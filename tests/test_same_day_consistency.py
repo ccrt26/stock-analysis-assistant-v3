@@ -225,3 +225,43 @@ def test_completed_check_delivery_recovers_parser_failure_without_new_call(tmp_p
         fallback=False,contract=p.CURRENT_OPINION_CONTRACT,validate=json.loads)
     assert raw==output.read_text()
     assert p.read_json(tmp_path/'current-opinion-check-result.json')['recovery_source']==str(output)
+
+
+@pytest.mark.parametrize('evidence_value', ['原始证据', ['原始证据一', '原始证据二']])
+def test_owner_evidence_accepts_literal_text_or_nonempty_list(evidence_value):
+    answer={'resolutions':[dict(issue_id='CO-1',decision='已处理',evidence=evidence_value,author_instruction='保持原结论')], 'unresolved':[]}
+    assert p.validate_owner_answer(json.dumps(answer,ensure_ascii=False),[{'issue_id':'CO-1'}]) == answer
+
+
+@pytest.mark.parametrize('evidence_value', ['', [], [''], [None], {'invented':'value'}])
+def test_owner_empty_or_invalid_evidence_is_rejected(evidence_value):
+    answer={'resolutions':[dict(issue_id='CO-1',decision='已处理',evidence=evidence_value,author_instruction='保持原结论')], 'unresolved':[]}
+    with pytest.raises(ValueError,match='证据'):
+        p.validate_owner_answer(json.dumps(answer,ensure_ascii=False),[{'issue_id':'CO-1'}])
+
+
+def test_owner_completed_delivery_recovers_parser_error_without_new_call(tmp_path, monkeypatch):
+    trace, handoff, section, draft, packet = inputs(tmp_path)
+    p.save_json(tmp_path/'selection-handoff.json', handoff)
+    check={'receipt':receipt(packet,'unresolved')}
+    for row in check['receipt']['checks']:row['needs_owner']=['selection']
+    state={};calls=[]
+    monkeypatch.setattr(stock_ai,'PROJECT_ROOT',tmp_path)
+    def run(host,state,state_path,directory,stage,prompt,provider,config,**kwargs):
+        calls.append(stage)
+        i=directory/'owner-input.md';i.write_text(prompt)
+        o=directory/'owner-output.md';o.write_text(json.dumps({'resolutions':[], 'unresolved':[{'issue_id':'CO-1','problem':'模型仍有未决'}]}))
+        state.setdefault('recommendation_stages',[]).append(dict(stage=stage,provider='astra',profile='astra-files-v1',file_stage=False,status='completed',evidence=evidence(),input=str(i),output=str(o),fallback=False))
+        return o.read_text(),'astra'
+    monkeypatch.setattr(p,'run_stage',run)
+    original=p.validate_owner_answer
+    def broken(*a):raise ValueError('synthetic parser failure')
+    monkeypatch.setattr(p,'validate_owner_answer',broken)
+    with pytest.raises(ValueError,match='parser failure'):
+        p.resolve_current_opinion_owners(stock_ai,state,tmp_path/'state.json',tmp_path,{},trace,section,draft,check)
+    monkeypatch.setattr(p,'validate_owner_answer',original)
+    with pytest.raises(ValueError,match='未决'):
+        p.resolve_current_opinion_owners(stock_ai,state,tmp_path/'state.json',tmp_path,{},trace,section,draft,check)
+    assert calls==['current-opinion-owner-selection']
+    assert state['current_opinion']['business_unresolved'] is True
+    assert p.read_json(tmp_path/'current-opinion-owner-selection-answer.json')['unresolved']
