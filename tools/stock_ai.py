@@ -2789,7 +2789,8 @@ def finish_nightly_success(
             EXIT_FAIL, stage="展示", extra={"provider": provider},
         )
     evidence = state.get("model_evidence", {}) or {}
-    matches = route_evidence_matches(provider, evidence)
+    # Use the same saved profile and per-stage evidence as terminal/recovery checks.
+    matches = state_route_evidence_matches(state)
     if provider == "astra" and matches is None:
         matches = False
     if matches is True:
