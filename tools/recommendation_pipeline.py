@@ -2252,14 +2252,61 @@ def resolve_current_opinion_owners(host, state, state_path, directory, config, t
     pending = host.PROJECT_ROOT / 'local_archive/forward_selection' / f'pending-trace-{identity(trace)[0]}.json'
     monitor = host.PROJECT_ROOT / 'local_archive/forward_monitor'
     answers = {}
-    for owner, issues in questions.items():
+    for owner in ('selection', 'monitor'):
+        issues = questions.get(owner, [])
         if not issues:
             continue
         answer_path = directory / f'current-opinion-owner-{owner}-answer.json'
-        if answer_path.exists():
-            answers[owner] = read_json(answer_path)
-            validate_owner_answer(json.dumps(answers[owner]), issues)
-            continue
+        cached_answer = read_json(answer_path) if answer_path.exists() else None
+        if cached_answer is not None:
+            validate_owner_answer(json.dumps(cached_answer), issues)
+            if owner == 'selection':
+                answers[owner] = cached_answer
+                continue
+        owner_input = {'identity': identity(trace), 'owner': owner, 'issues': issues}
+        if owner == 'monitor':
+            latest = read_json(pending)
+            if identity(latest) != identity(before['trace']) or identity(latest) != identity(trace):
+                raise ValueError('研究负责人处理后的时间身份不一致')
+            # Read the real handoff before the strict merge; missing/broken files
+            # must not silently fall back to the pre-owner trace summary.
+            read_json(directory / 'selection-handoff.json')
+            latest_handoff = selection_handoff(directory, latest, strict=True)
+            codes = {item['ts_code'] for item in issues}
+            selected = {item['ts_code']: item for item in selected_result(latest)['selected_stocks']}
+            previous_codes = [item['ts_code'] for item in selected_result(before['trace'])['selected_stocks']]
+            latest_summary = handoff_from_trace(latest)
+            related_ids = {item['issue_id'] for item in questions.get('selection', []) if item['ts_code'] in codes}
+            selection_answer = answers.get('selection', {})
+            current = {
+                'label': '研究负责人处理后的当前结果', 'identity': identity(latest),
+                'trace_sha256': trace_input_sha256(latest),
+                'summary': {'market': latest_handoff['market'],
+                            'stocks': {code: value for code, value in latest_summary['stocks'].items() if code in codes}},
+                'selection_answer': {kind: [item for item in selection_answer.get(kind, [])
+                                           if item.get('ts_code') in codes or item.get('issue_id') in related_ids]
+                                     for kind in ('resolutions', 'unresolved')},
+                'selected_codes_before': previous_codes,
+                'selected_codes_after': list(selected),
+                'removed_codes': [code for code in previous_codes if code not in selected],
+                'stocks': {},
+            }
+            for code in sorted(codes):
+                if code in selected:
+                    stock_handoff = latest_handoff['stocks'][code]
+                    current['stocks'][code] = {
+                        'status': 'selected', 'judgment': selected[code], 'handoff': stock_handoff,
+                        'conditions': {'handoff': stock_handoff.get('conditions'),
+                            'tradability': stock_handoff.get('conditions_tradability'),
+                            'decisions': [item for item in latest.get('decision_trace', [])
+                                          if item.get('ts_code') == code and item.get('decision_role') == 'action_condition']},
+                    }
+                elif code in previous_codes:
+                    current['stocks'][code] = {'status': 'withdrawn',
+                        'meaning': '本日新推荐已撤回，旧研究建议仅是过程记录。'}
+                else:
+                    current['stocks'][code] = {'status': 'not_selected', 'meaning': '本日新推荐名单中没有此股。'}
+            owner_input['current_selection'] = current
         stage = f'current-opinion-owner-{owner}'
         started = state.setdefault('current_opinion', {}).setdefault('owners_started', [])
         delivered = None
@@ -2269,10 +2316,14 @@ def resolve_current_opinion_owners(host, state, state_path, directory, config, t
                 delivered = next(e for e in reversed(state['recommendation_stages']) if e.get('stage') == stage)
             retries = state.get('provider_retry_events', [])
             if delivered is None:
+                if cached_answer is not None:
+                    raise ValueError('负责人已存答复缺少原始输入和实际交付证据：' + owner)
                 if not entry or entry.get('status') != 'failed' or not retries or retries[-1].get('owner_resumed') == owner:
                     raise ValueError('负责人本轮调用已开始但无有效交付，保留现场待受控恢复：' + owner)
                 retries[-1]['owner_resumed'] = owner
         else:
+            if cached_answer is not None:
+                raise ValueError('负责人已存答复缺少原始输入和实际交付证据：' + owner)
             started.append(owner)
         host.save_state(state_path, state)
         prompt = ('你是本次原' + ('选股研究' if owner == 'selection' else '正式复盘') + '负责人。'
@@ -2285,12 +2336,17 @@ def resolve_current_opinion_owners(host, state, state_path, directory, config, t
                if owner == 'selection' else
                f'只修改{monitor / ("pending-daily-formal-reviews-" + identity(trace)[0] + ".json")}与'
                f'{monitor / ("pending-report-" + identity(trace)[0] + ".json")}中的受影响本日current_opportunity和唯一正文，以及同步必要的当前解释字段；'
-               '不改历史评价、分类、覆盖、原始推荐、D20结案和其他股票。先读复盘Skill及ops/forward-monitor-prompt.md，外层待核对分工优先。')
+               '不改历史评价、分类、覆盖、原始推荐、D20结案和其他股票。先读复盘Skill及ops/forward-monitor-prompt.md，外层待核对分工优先。'
+               '原核对包及问题引句描述的是修改前状态，只作问题来历，不能当作最终建议；下方current_selection才是研究负责人处理后的当前结果。'
+               '先按研究负责人处理后的当前结果判断原分歧是否仍存在，再修改自己负责的本日当前意见和正文。'
+               '若本日新推荐已撤回，去掉本日正文中已经过时的“另一方仍建议参与”对照；保留自己的当前判断及其依据。'
+               '撤回稿里的后续观察约定若不再作为有效建议对外提供，不需要与当前复盘的门槛机械统一。'
+               '仍有真正有效的同目标相反建议时如实保留未决，不能为了通过而改成同一标签。')
             + f'\n同股全部实际材料与原问题保存在{directory / "current-opinion-check.json"}和{questions_path}。'
             f'原始快照与修正前全文在{directory / "current-opinion-before-owners.json"}。'
             '最终只返回JSON：resolutions每项issue_id、ts_code、decision、evidence、author_instruction、changes_original_judgment；未解决的放unresolved每项issue_id/problem。'
             '指出是恢复已有解释、据原事实补充论证还是实质改变判断。逐项回应，不给开发者补写结论。\n'
-            + json.dumps({'identity': identity(trace), 'owner': owner, 'issues': issues}, ensure_ascii=False))
+            + json.dumps(owner_input, ensure_ascii=False))
         if delivered is not None:
             original_input, output = Path(delivered['input']), Path(delivered['output'])
             if (output.parent.resolve() != directory.resolve() or not output.is_file()
@@ -2305,6 +2361,8 @@ def resolve_current_opinion_owners(host, state, state_path, directory, config, t
         if not stage_execution_verified(host, 'astra', False, stage_entry_evidence(state, stage)):
             raise ValueError('负责人实际模型证据未通过：' + owner)
         answer = validate_owner_answer(raw, issues)
+        if cached_answer is not None and answer != cached_answer:
+            raise ValueError('负责人已存答复与原始交付不符：' + owner)
         save_json(answer_path, answer)
         answers[owner] = answer
     if any(a['unresolved'] for a in answers.values()):
