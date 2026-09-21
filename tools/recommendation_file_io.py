@@ -125,14 +125,21 @@ def stage_spec(root, role, packet, material, **extra):
                 '不委派、不启动任何模型，不改 input。需要完整读取时分段读取，不把被截断的输出当作读完。'
                 '在本阶段 output 下交付，最终简短报告实际读取及输出路径。\n')
     if role == 'handoff':
+        request += '本次明确为固定历史交接回放：只依据原包交清原判断、反证和条件，不重新选股、不改变研究，不提供认可旧稿。\n'
         request += ('写 output/handoff.json：identity 与输入 identity 完全相同；authoring_note 为可读便笺字符串；'
                     'source_refs 是非空数组，每项 file="input/packet.json"、pointer（实际 JSON Pointer）、quote（该字段实际原句）；'
                     'research_issues 为既有问题数组（ts_code/quote/problem/evidence/needed）。不要生成读者正文。\n')
     if role == 'clarification':
         request += ('本轮交付接口：把上述既有 resolutions/unresolved JSON 写入 output/resolution.json。'
-                    'input/issues.json 是问题，完整 packet 是证据；本次固定历史不允许改研究判断、不补新事件。\n')
+                    'input/issues.json 是问题，完整 packet 是证据；不替作者改正文。需要改变研究判断时具体报告并交原研究负责人；固定历史不允许自行重判或补新事件。\n')
     return {'profile': PROFILE, 'role': role, 'contract': CONTRACTS[role], 'model': MODEL,
             'effort': EFFORT, 'files': files, 'sources': sources, 'request': request}
+
+
+def validate_shared_material(author_spec, review_spec):
+    for key in ('packet.json', 'research-handoff.md', 'issue-resolutions.json'):
+        if author_spec['files'].get(key) != review_spec['files'].get(key):
+            raise ValueError('作者与审稿材料或答复版本不一致：' + key)
 
 
 def write_stage(directory, spec):

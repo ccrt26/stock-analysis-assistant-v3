@@ -108,3 +108,7 @@
 少量候选验证可先调用 `python -m stock_analyzer.ops.recommendation_context --code 代码 --formation-date 日期 --as-of 带时区截止 --category financial --output 临时文件`；类别支持 financial/company/price/industry，`--period` 保留特定期间，`--sector-date` 按原截止读取行业跨日序列。期间摘要只说明本地可得，不等于公司是否披露。正文引用近邻及其他期间时保留对应事实，不能只留下价格。
 
 同份已知公告用 `python -m stock_analyzer.ops.official_evidence --announcement 元数据.json --as-of 带时区截止 --output-dir 临时目录`，可提供 `--existing-receipt` 或已核验同公告的 `--alternative-url`。优先复用同版原件，下载只在取证函数内使用明确直连。旧公司介绍 `fetch-evidence` 与 receipt 回读合同仍兼容。失败记录 HTTP 状态和诊断，不把错误页当 PDF，也不把取证失败变成模型接替理由。
+
+## 本次推荐文件方式（候选）
+
+仅授权运行时使用 run nightly --provider astra --no-fallback --recommendation-authoring-profile astra-files-v1。profile 与禁备用只作用本次，不修改长期配置；恢复沿用 state 保存策略，显式冲突拒绝。新推荐研究及写审为 Astra xhigh，正式复盘保持 Astra high。preopen 不接受这两个参数。正式启用须另行批准，细节见 docs/architecture/normal-recommendation-files.md。

@@ -1243,8 +1243,11 @@ def run_codex(prompt_path: Path, final_path: Path, jsonl_path: Path,
         'features.memories=false', 'features.apps=false', 'features.remote_plugin=false',
         'features.hooks=false', 'features.multi_agent=false', 'features.shell_snapshot=false']
     if files_profile or config.get("_astra_recommendation_profile"):
-        overrides = [v for v in overrides if not v.startswith(('model_reasoning_effort=', 'sandbox_workspace_write.network_access='))]
-        overrides += ['model_reasoning_effort="xhigh"', 'sandbox_workspace_write.network_access=false']
+        overrides = [v for v in overrides if not v.startswith('model_reasoning_effort=')]
+        overrides += ['model_reasoning_effort="xhigh"']
+    if files_profile:
+        overrides = [v for v in overrides if not v.startswith('sandbox_workspace_write.network_access=')]
+        overrides += ['sandbox_workspace_write.network_access=false']
     if isolation or files_profile:
         overrides += ['web_search="disabled"', 'project_doc_max_bytes=0',
                       'features.shell_tool=true' if files_profile else 'features.shell_tool=false']
@@ -1265,12 +1268,14 @@ def run_codex(prompt_path: Path, final_path: Path, jsonl_path: Path,
     if resume_sid:
         args += ['-c', 'sandbox_mode="workspace-write"', str(resume_sid)]
     args += ["-"]
-    if files_profile:
+    if files_profile or config.get('recommendation_authoring_profile') == 'astra-files-v1':
         jsonl_path.with_suffix('.request.json').write_text(json.dumps({
             'profile': 'astra-files-v1', 'cwd': str(workdir), 'argv': args,
             'stdin_path': str(prompt_path.resolve()), 'stdin_bytes': len(prompt.encode('utf-8')),
-            'expected_model': 'gpt-6-astra', 'expected_effort': 'xhigh',
-            'fallback': False, 'network_access': False, 'web_search': 'disabled',
+            'expected_model': 'gpt-6-astra',
+            'expected_effort': 'xhigh' if files_profile or config.get('_astra_recommendation_profile') else 'high',
+            'fallback': False if files_profile else not config.get('_no_fallback', False),
+            'network_access': not files_profile, 'web_search': 'disabled' if files_profile else 'live',
             'resumed_session_id': resume_sid}, ensure_ascii=False, indent=2))
     stderr_path = jsonl_path.with_suffix(".stderr.log")
     code, note = EXIT_FAIL, ""
@@ -1290,10 +1295,10 @@ def run_codex(prompt_path: Path, final_path: Path, jsonl_path: Path,
         diagnostic = redact_codex_diagnostic(stderr_path.read_text(encoding="utf-8", errors="replace"))
         stderr_path.write_text(diagnostic, encoding="utf-8")
         evidence = (codex_session_evidence(jsonl_path, diagnostic, prompt, workdir, files_profile=True)
-                    if files_profile else codex_session_evidence(jsonl_path, diagnostic, prompt, workdir))
+                    if files_profile or config.get('recommendation_authoring_profile') == 'astra-files-v1' else codex_session_evidence(jsonl_path, diagnostic, prompt, workdir))
         EvidenceBox.record("astra", evidence)
         stream = [json.loads(line) for line in jsonl_path.read_text().splitlines() if line.strip()]
-        if files_profile:
+        if files_profile or config.get('recommendation_authoring_profile') == 'astra-files-v1':
             public_stream = [e for e in stream if e.get('item', {}).get('type') != 'reasoning']
             jsonl_path.write_text(''.join(json.dumps(e, ensure_ascii=False) + '\n' for e in public_stream))
         # Only terminal model events; command outputs and assistant quotes are excluded.
@@ -2221,6 +2226,43 @@ def prepare_arguments_ok(args_used: list[str], summary: dict, rerun_date: dt.dat
     return True
 
 
+def nightly_run_policy(args, config, state, today):
+    """Bind run-only options before any completed/reuse branch; omissions retain saved policy."""
+    saved = state.get('run_policy')
+    profile_arg = getattr(args, 'recommendation_authoring_profile', None)
+    no_fallback_arg = getattr(args, 'no_fallback', None)
+    explicit_provider = getattr(args, 'provider', None)
+    if saved:
+        if profile_arg is not None and profile_arg != saved.get('recommendation_authoring_profile'):
+            raise ValueError('恢复 profile 与原任务不同；不得静默更换生成方式')
+        if explicit_provider is not None and explicit_provider != saved.get('provider'):
+            raise ValueError('恢复 provider 与原任务不同')
+        if no_fallback_arg is True and not saved.get('no_fallback'):
+            raise ValueError('恢复备用策略与原任务不同')
+        policy = dict(saved)
+    else:
+        profile = profile_arg if profile_arg is not None else config.get('recommendation_authoring_profile')
+        if profile not in (None, '', 'astra-files-v1'):
+            raise ValueError('未知 recommendation_authoring_profile')
+        if no_fallback_arg and not explicit_provider:
+            raise ValueError('--no-fallback 必须同时显式指定 --provider')
+        if profile == 'astra-files-v1' and (state.get('final_reply') or state.get('recommendation_pipeline')):
+            raise ValueError('旧任务缺少本 profile 的运行策略，不把旧成品认作新方式验收')
+        order, _ = resolve_provider_order('nightly', explicit_provider, config, today)
+        if profile == 'astra-files-v1' and order[0] != 'astra':
+            raise ValueError('astra-files-v1 要求 Astra；不能静默更换指定路线')
+        policy = {'recommendation_authoring_profile': profile or None,
+                  'provider': order[0], 'no_fallback': bool(no_fallback_arg)}
+        state['run_policy'] = policy
+    effective = dict(config)
+    effective['recommendation_authoring_profile'] = policy['recommendation_authoring_profile']
+    effective['_no_fallback'] = policy['no_fallback']
+    effective['_resume_files'] = bool(saved)
+    if policy['no_fallback']:
+        state['provider_order'] = [policy['provider']]
+    return effective, policy
+
+
 def run_nightly(args: argparse.Namespace, config: dict, lock: TaskLock,
                 now: dt.datetime | None = None) -> int:
     now = now or now_shanghai()
@@ -2238,6 +2280,8 @@ def run_nightly(args: argparse.Namespace, config: dict, lock: TaskLock,
         "status": "running",
         "attempts": [],
     }
+    config, policy = nightly_run_policy(args, config, state, today)
+    save_state(path, state)
     if state.get("status") == "completed":
         result = state.get("result", {})
         if result.get("status") == "正常无需运行":
@@ -2414,6 +2458,8 @@ def run_nightly(args: argparse.Namespace, config: dict, lock: TaskLock,
         existing = find_existing_reply(formation, action, as_of)
         if existing is not None:
             existing_reply, source_state = existing
+            if (policy.get('recommendation_authoring_profile') or policy.get('no_fallback')) and source_state.get('run_policy') != policy:
+                raise ValueError('同身份来源运行策略不同，不复用为本 profile 验收')
             archive_dir.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(existing_reply, reply_target)
             if source_state.get("recommendation_pipeline") in ("prefreeze-v1", "article-v1"):
@@ -2427,6 +2473,7 @@ def run_nightly(args: argparse.Namespace, config: dict, lock: TaskLock,
             state["model_provider"] = state_model_provider(source_state)
             state["last_model"] = source_state.get("last_model", "")
             state["model_evidence"] = source_state.get("model_evidence", {})
+            state["model_expectation"] = source_state.get("model_expectation", {})
             state["source_model_mismatch"] = state_route_evidence_matches(source_state) is False
             state["final_reply"] = str(reply_target.relative_to(PROJECT_ROOT))
             state["archive"] = str(archive_dir.relative_to(PROJECT_ROOT))
@@ -2452,7 +2499,9 @@ def run_nightly(args: argparse.Namespace, config: dict, lock: TaskLock,
     if state.get("recommendation_pipeline") in ("prefreeze-v1", "article-v1") or not art["trace_ok"]:
         state["recommendation_pipeline"] = "article-v1"
         save_state(path, state)
-        order, _ = resolve_provider_order("nightly", args.provider, config, today)
+        order, _ = resolve_provider_order("nightly", policy["provider"], config, today)
+        if policy["no_fallback"]:
+            order = order[:1]
         state.setdefault("provider_order", order)
         stage_dir = archive_dir / "recommendation"
         prompt_path = write_nightly_prompt(state, stage_dir, force_already_selected=False, art=art)
@@ -2462,7 +2511,8 @@ def run_nightly(args: argparse.Namespace, config: dict, lock: TaskLock,
             except ImportError:
                 from recommendation_pipeline import complete
             final_path, provider = complete(
-                sys.modules[__name__], state, path, stage_dir, config, order[0], prompt_path.read_text())
+                sys.modules[__name__], state, path, stage_dir, config, order[0], prompt_path.read_text(),
+                **({"fallback": False} if policy["no_fallback"] else {}))
         except (OSError, ValueError, RuntimeError) as exc:
             save_state(path, state)
             return finish_task("nightly", path.name, state, "失败",
@@ -2478,15 +2528,17 @@ def run_nightly(args: argparse.Namespace, config: dict, lock: TaskLock,
 
     # ---- 顺序尝试各模型路线（每家一次；无时限；仅额度/不可用才接替）----
     order, order_source = resolve_provider_order(
-        "nightly", args.provider, config, today
+        "nightly", policy["provider"], config, today
     )
+    if policy["no_fallback"]:
+        order = order[:1]
     print(f"模型顺序（{order_source}）：{' → '.join(order)}")
     attempt_dir = LOG_DIR / f"nightly-{slot_date.isoformat()}"
     attempt_dir.mkdir(parents=True, exist_ok=True)
     last_fail = "没有已配置的模型路线"
 
     state.setdefault("provider_order", order)
-    for index, provider in enumerate(available_routes(state, order[0])):
+    for index, provider in enumerate(available_routes(state, order[0], fallback=not policy["no_fallback"])):
         # 每次接替前重新核对产物，并把当前中间状态写进该路 Prompt。
         art = assess_artifacts(
             formation, action, as_of,
@@ -2585,7 +2637,25 @@ def state_model_provider(state: dict) -> str:
 
 
 def state_route_evidence_matches(state: dict) -> bool | None:
-    matches = route_evidence_matches(state_model_provider(state), state.get("model_evidence", {}))
+    expected = state.get("model_expectation") or {}
+    matches = route_evidence_matches(state_model_provider(state), state.get("model_evidence", {}),
+                                     profile=expected.get("profile"))
+    for entry in state.get('recommendation_stages', []):
+        if entry.get('status') not in ('completed', 'artifacts_recovered'):
+            continue
+        if entry.get('provider') != 'astra':
+            continue
+        actual = entry.get('evidence') or {}
+        profile = entry.get('profile')
+        stage_match = route_evidence_matches(entry.get('provider'), actual, profile=profile)
+        if stage_match is False:
+            return False
+        if entry.get('configured_effort') and actual.get('effort') != entry['configured_effort']:
+            return False
+        if entry.get('configured_model') and actual.get('model') != entry['configured_model']:
+            return False
+        if stage_match is None:
+            matches = None
     if state.get("source_model_mismatch"):
         return False
     if matches is None and (state.get("result") or {}).get("status") == "完成但模型身份待核对":
@@ -3286,6 +3356,10 @@ def build_parser() -> argparse.ArgumentParser:
     run = sub.add_parser("run", help="执行晚间研究或次晨提醒")
     run.add_argument("task", choices=["nightly", "preopen"])
     run.add_argument("--provider", choices=ALL_PROVIDERS, default=None)
+    run.add_argument("--recommendation-authoring-profile", choices=["astra-files-v1"], default=None,
+                     help="仅本次 nightly 的推荐成稿方式；恢复沿用原运行配置")
+    run.add_argument("--no-fallback", action="store_true", default=None,
+                     help="本次禁用备用模型，须显式指定 --provider")
     run.add_argument("--rerun-date", default=None, metavar="YYYY-MM-DD",
                      help="原计划推荐日期（行动日）；与 forward_selection prepare 同义")
     run.add_argument("--scheduled", action="store_true",
@@ -3333,6 +3407,16 @@ def main(argv: list[str] | None = None) -> int:
     if command == "verify":
         return cmd_verify(args)
     config = load_local_config()
+    if command == "run":
+        if args.task != "nightly" and (args.recommendation_authoring_profile or args.no_fallback):
+            print("profile 与 --no-fallback 仅用于 nightly")
+            return EXIT_USAGE
+        if args.no_fallback and not args.provider:
+            print("--no-fallback 必须同时显式指定 --provider")
+            return EXIT_USAGE
+        if args.recommendation_authoring_profile and args.provider not in (None, "astra"):
+            print("astra-files-v1 必须使用 Astra")
+            return EXIT_USAGE
     if getattr(args, "dry_run", False):
         # dry-run 不取锁、不写状态、不运行 prepare/模型。
         if args.task == "nightly":

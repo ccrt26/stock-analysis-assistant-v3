@@ -503,3 +503,5 @@ AI 检查的是事实与推论是否相称、是否回答选择问题；程序�
 
 
 仅当运行配置明确为 `recommendation_authoring_profile=astra-files-v1` 时：选股研究仍由原研究步骤完成；本步骤须按 `ops/recommendation-handoff-prompt.md` 将每股可读 `authoring_note`、原句引用与未决 `research_issues` 写入 `selection-handoff.json` 的 `stocks[ts_code]`，绑定本次 formation_date/action_date/as_of 及实际完整 trace_sha256。便笺交清既有研究意思，不改变选股判据；缺交接返回研究步骤，不能视为空字段证明原研究缺结论。正式复盘职责和流程不变。
+
+新文件 profile 的作者与审稿只读取程序提供的一份简明阅读指南和适用范文，成稿任务不接收本运行全文；本研究步骤交付事实、判断和出处，不能代写或补写 ready。

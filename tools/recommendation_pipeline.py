@@ -260,7 +260,7 @@ def trace_input_sha256(trace: dict) -> str:
         json.dumps(trace, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
 
 
-def selection_handoff(directory: Path, trace: dict) -> dict:
+def selection_handoff(directory: Path, trace: dict, *, strict: bool = False) -> dict:
     """selection-handoff.json 是选股负责人的暂存交接。
 
     v2 交接必须携带 trace_sha256（规范化研究输入指纹）：同日修订内容不同即指纹
@@ -276,9 +276,21 @@ def selection_handoff(directory: Path, trace: dict) -> dict:
         base['gaps'] = ['selection-handoff.json 读取失败，已忽略']
         return base
     if (data.get('formation_date'), data.get('action_date'), data.get('as_of')) != identity(trace):
+        if strict:
+            raise ValueError('研究交接时间身份与本版 pending 不一致')
         base['gaps'] = ['selection-handoff.json 身份与本版pending不一致，已忽略']
         return base
     digest = data.get('trace_sha256')
+    if strict:
+        if digest != trace_input_sha256(trace):
+            raise ValueError('研究交接缺少本版 trace 绑定或来自其他版本')
+        stocks = data.get('stocks')
+        if not isinstance(stocks, dict) or set(stocks) - set(base['stocks']):
+            raise ValueError('研究交接包含本次名单之外的股票')
+        for code, extra in stocks.items():
+            if not isinstance(extra, dict):
+                raise ValueError('逐股交接必须是对象')
+            validate_handoff_issues(extra.get('research_issues', []), code, digest)
     if digest and digest != trace_input_sha256(trace):
         base['gaps'] = [f'selection-handoff.json 的 trace_sha256 与本版pending不匹配（{str(digest)[:12]}…），判定为其他版本，已忽略']
         return base
@@ -289,12 +301,18 @@ def selection_handoff(directory: Path, trace: dict) -> dict:
         if code in base['stocks'] and isinstance(extra, dict):
             base['stocks'][code].update(extra)
     return base
-    base['market'] = str(data.get('market') or base['market'])
-    base['handoff_source'] = 'selection-handoff.json'
-    for code, extra in (data.get('stocks') or {}).items():
-        if code in base['stocks'] and isinstance(extra, dict):
-            base['stocks'][code].update(extra)
-    return base
+
+
+def validate_handoff_issues(issues, code, trace_sha256=None):
+    if not isinstance(issues, list):
+        raise ValueError('research_issues 必须是数组')
+    for item in issues:
+        if not isinstance(item, dict) or item.get('ts_code') != code:
+            raise ValueError('交接问题股票与当前材料不一致')
+        if any(not str(item.get(k) or '').strip() for k in ('quote', 'problem', 'evidence', 'needed')):
+            raise ValueError('交接问题缺少既有必填字段')
+        if item.get('trace_sha256') and item['trace_sha256'] != trace_sha256:
+            raise ValueError('交接问题来自其他 trace 版本')
 
 
 def _compact_own_facts(facts: dict, decisions: list) -> dict:
@@ -579,9 +597,7 @@ def build_article_packet(*, trace: dict, context: dict, ts_code: str, research_h
     note = handoff_stock.get('authoring_note')
     if note and research_handoff.get('binding') == 'trace_sha256':
         packet['authoring_note'] = {'text': note.get('text', '') if isinstance(note, dict) else str(note),
-            'source_refs': note.get('source_refs', []) if isinstance(note, dict) else (handoff_stock.get('source_refs') or
-                [{'source': 'selection-handoff.json', 'field': f'stocks[{ts_code}].authoring_note',
-                  'trace_sha256': trace_input_sha256(trace)}]),
+            'source_refs': note.get('source_refs', []) if isinstance(note, dict) else handoff_stock.get('source_refs', []),
             'identity': packet['identity'], 'binding': {'trace_sha256': trace_input_sha256(trace)},
             'origin': 'selection-handoff-v2'}
     packet['composition'] = packet_composition(packet)
@@ -1311,7 +1327,8 @@ def run_article_cycle(host, *, packet: dict, materials: dict, directory: Path, s
                       state_path: Path, config: dict, provider: str, fallback: bool,
                       allow_research_changes: bool, expression_limit: int = 2,
                       run_scope: str = 'managed', issue_resolver=None,
-                      prior_resolutions: list | None = None, clarification_limit: int = 2) -> dict:
+                      prior_resolutions: list | None = None, clarification_limit: int = 2,
+                      handoff_issues: list | None = None) -> dict:
     """生产与试写共用的作者循环：作者 → 疑点核实 → 审稿 → 有限表达修订。
 
     作者/审稿提出的疑点先经 issue_resolver（生产与试写同一实现，默认
@@ -1387,9 +1404,30 @@ def run_article_cycle(host, *, packet: dict, materials: dict, directory: Path, s
             'problem': '缺少同身份有出处的研究交接；这不表示原研究缺结论',
             'evidence': note_error, 'needed': '请原研究步骤生成绑定原资料的 authoring_note'})
         return result('needs_research')
+    validate_handoff_issues(handoff_issues or [], code, packet.get('source_refs', {}).get('trace_sha256'))
+    if handoff_issues:
+        research_issues = _assign_issue_ids(copy.deepcopy(handoff_issues), f'H-{code}')
+        record_progress('research-clarification')
+        resolved = issue_resolver(issues=research_issues, packet=packet,
+            materials=materials, directory=directory, state=state, state_path=state_path,
+            config=config, provider=provider, fallback=fallback)
+        issue_resolutions.extend(resolved['resolutions'])
+        save_json(directory / 'handoff-issue-resolutions.json', resolved)
+        if resolved.get('clarification_executed'):
+            stage_execution('research-clarification')
+        if resolved['blocking']:
+            return result('needs_research')
+        # Answers are separate input; only explicit validated updates edit the effective view.
+        updates = [r for r in resolved['resolutions'] if r.get('effective_updates')]
+        if updates:
+            effective_packet = build_effective_packet(packet, updates)
+            if (effective_packet.get('effective_packet') or {}).get('unapplied'):
+                return result('needs_research')
+        save_json(directory / 'packet-effective.json', effective_packet)
+        save_json(directory / 'issue-resolutions.json', issue_resolutions)
     if files_mode and prior_resolutions:
         # Validate original binding first, then give both roles the same resolved view.
-        effective_packet = build_effective_packet(packet, prior_resolutions)
+        effective_packet = build_effective_packet(effective_packet, prior_resolutions)
         save_json(directory / 'packet-effective.json', effective_packet)
         stage_execution('research-clarification')
         if (effective_packet.get('effective_packet') or {}).get('unapplied'):
@@ -1466,6 +1504,10 @@ def run_article_cycle(host, *, packet: dict, materials: dict, directory: Path, s
         review_spec = (file_io.stage_spec(host.PROJECT_ROOT, 'review', effective_packet, materials,
             article=article, issue_resolutions=issue_resolutions or None,
             pending_issue_checks=pending_checks or None) if files_mode else None)
+        if files_mode:
+            file_io.validate_shared_material(file_spec, review_spec)
+            saved_author = read_json(directory / f'{author_stage}-result.json')
+            file_io.verify_inputs(Path(saved_author['stage_directory']), saved_author['input_index'])
         review_raw = article_stage(
             host, state, state_path, directory, review_stage,
             review_spec['request'] if files_mode else review_prompt(host.PROJECT_ROOT,
@@ -1616,10 +1658,11 @@ def run_stage(host, state: dict, state_path: Path, directory: Path, stage: str,
     prompt_path = directory / f'{stem}-input.md'
     prompt_path.write_text(prompt)
     files_mode = config.get('_file_stage') is True
-    profile_stage = files_mode or (file_io.enabled(config) and stage in ('research', 'research-repair'))
+    profile_stage = files_mode or (file_io.enabled(config) and stage in ('research', 'research-repair', 'research-contract-repair'))
     if profile_stage:
         provider, fallback = 'astra', False
         config = {**config, '_astra_recommendation_profile': True}
+    fallback = fallback and not config.get('_no_fallback', False)
     order = ['astra'] if profile_stage else host.available_routes(state, provider, fallback=fallback)
     for route in order:
         output = directory / f'{stem}-{route}.md'
@@ -1627,6 +1670,9 @@ def run_stage(host, state: dict, state_path: Path, directory: Path, stage: str,
         entry = {'stage': stage, 'provider': route, 'configured_model': host.model_ref(route, config),
                  'started_at': host.now_shanghai().isoformat(), 'input': str(prompt_path),
                  'output': str(output), 'events': str(events), 'status': 'running'}
+        if route == 'astra':
+            entry['configured_effort'] = 'xhigh' if profile_stage else 'high'
+        entry['fallback'] = fallback
         if profile_stage:
             entry.update(profile=file_io.PROFILE, file_stage=files_mode, configured_model=file_io.MODEL, configured_effort=file_io.EFFORT)
         state.setdefault('recommendation_stages', []).append(entry)
@@ -1651,7 +1697,7 @@ def run_stage(host, state: dict, state_path: Path, directory: Path, stage: str,
                 prompt_path = directory / f'{stem}-{route}-input.md'
                 if file_io.enabled(config):
                     handoff += '\n' + (host.PROJECT_ROOT / file_io.TASKS['handoff']).read_text(encoding='utf-8')
-                    handoff += '\n本次配置 astra-files-v1：每股 authoring_note 写在上述已绑定 trace 的 stocks[ts_code] 内；不生成文章。'
+                    handoff += '\n本次是正常日常研究，不是固定历史回放：依原五 Skill 与截止形成取舍，在同一次研究把每股 authoring_note（字符串）、source_refs（实际字段或文件与原句）、research_issues（数组，允许空）写入已绑定 trace 的 stocks[ts_code]；不生成推荐文章。'
                 prompt_path.write_text(prompt + handoff)
                 entry['input'] = str(prompt_path)
             key, _ = host.authentication_available(route, config)
@@ -1668,7 +1714,7 @@ def run_stage(host, state: dict, state_path: Path, directory: Path, stage: str,
             evidence = host.EvidenceBox.get(route).copy()
             entry.update(exit_code=code, evidence=evidence, status='completed' if code == 0 else 'failed')
             if stage == 'research':
-                state.update(model_provider=route, model_evidence=evidence,
+                state.update(model_provider=route, model_evidence=evidence, model_expectation={k: entry.get(k) for k in ('provider', 'configured_model', 'configured_effort', 'profile')},
                              last_model=evidence.get('model') or host.model_label(route, config))
             route_matches = (host.route_evidence_matches(route, evidence, profile=file_io.PROFILE)
                              if profile_stage else host.route_evidence_matches(route, evidence))
@@ -1816,6 +1862,18 @@ def replace_recommendation(report: str, section: str) -> str:
 # ---------------------------------------------------------------- 生产主流程
 
 
+
+def same_stock_material(left, right):
+    """Only the full-trace fingerprint may differ; every stock input must match."""
+    def content(value):
+        if isinstance(value, dict):
+            return {k: content(v) for k, v in value.items() if k != 'trace_sha256'}
+        if isinstance(value, list):
+            return [content(v) for v in value]
+        return value
+    return content(left) == content(right)
+
+
 def _author_articles(host, state, state_path, directory, config, provider, root,
                      trace, expected, *, fallback, repair_limit):
     """逐股作者循环；研究问题触发定向返研后回到作者，不跳过成稿。
@@ -1836,7 +1894,13 @@ def _author_articles(host, state, state_path, directory, config, provider, root,
                     teaching_root=host.PROJECT_ROOT, profile=file_io.PROFILE) if file_io.enabled(config)
                     else writing_material(root, expected[2], list(context['facts'])))
         save_json(directory / 'writing-material.json', material)
-        handoff = selection_handoff(directory, trace)
+        handoff = selection_handoff(directory, trace, strict=file_io.enabled(config))
+        if file_io.enabled(config) and (directory / 'selection-handoff.json').exists():
+            snapshot = directory / ('selection-handoff-version-' + trace_input_sha256(trace)[:16] + '.json')
+            current = (directory / 'selection-handoff.json').read_bytes()
+            if snapshot.exists() and snapshot.read_bytes() != current:
+                retain_previous(snapshot)
+            snapshot.write_bytes(current)
         stocks = _sorted_stocks(selected_result(trace)['selected_stocks'])
         statuses = {}
         articles_dir = directory / 'articles'
@@ -1849,12 +1913,45 @@ def _author_articles(host, state, state_path, directory, config, provider, root,
             packet = build_article_packet(trace=trace, context=context, ts_code=code,
                                           research_handoff=handoff)
             save_json(articles_dir / f'{code}-packet.json', packet)
+            current_issues = (handoff.get('stocks', {}).get(code, {}).get('research_issues', [])
+                              if file_io.enabled(config) else None)
+            cache_path = articles_dir / code / 'cycle-ready.json'
+            cycle_input = {'packet': packet, 'materials': material, 'handoff_issues': current_issues,
+                           'prior_resolutions': repair_context.get('stocks', {}).get(code, {}).get('prior_resolutions')}
+            if file_io.enabled(config) and cache_path.exists():
+                old = read_json(cache_path)
+                before = (old.get('input') or {}).get('packet', {}).get('source_refs', {}).get('trace_sha256')
+                after = packet.get('source_refs', {}).get('trace_sha256')
+                if before != after and same_stock_material(old.get('input'), cycle_input):
+                    file_io.validate_note(packet)
+                    for result_file in (articles_dir / code).glob('*-result.json'):
+                        saved_stage = read_json(result_file)
+                        if saved_stage.get('terminal_status') == 'completed':
+                            file_io.verify_inputs(Path(saved_stage['stage_directory']), saved_stage['input_index'])
+                            if not stage_execution_verified(host, 'astra', False, saved_stage.get('stage_execution')):
+                                raise ValueError('Unverified saved execution for unchanged stock')
+                            for name, digest in saved_stage.get('output_hashes', {}).items():
+                                if file_io.digest((Path(saved_stage['stage_directory']) / name).read_bytes()) != digest:
+                                    raise ValueError('Saved stage output changed')
+                    statuses[code] = old['result']
+                    save_json(articles_dir / code / f'trace-rebind-{after[:16]}.json',
+                              {'previous_trace': before, 'current_trace': after,
+                               'basis': 'All stock inputs match except trace_sha256',
+                               'input': cycle_input, 'reviewed_trace': before})
+                    continue
             statuses[code] = run_article_cycle(
                 host, packet=packet, materials=material,
                 directory=articles_dir / code, state=state, state_path=state_path,
                 config=config, provider=provider, fallback=fallback,
                 allow_research_changes=True,
-                prior_resolutions=repair_context.get('prior_resolutions'))
+                prior_resolutions=(repair_context.get('stocks', {}).get(code, {}).get('prior_resolutions')
+                    if file_io.enabled(config) else repair_context.get('prior_resolutions')),
+                handoff_issues=(handoff.get('stocks', {}).get(code, {}).get('research_issues', [])
+                    if file_io.enabled(config) else None))
+            if file_io.enabled(config) and statuses[code]['status'] == 'ready':
+                if cache_path.exists():
+                    retain_previous(cache_path)
+                save_json(cache_path, {'input': cycle_input, 'result': statuses[code]})
         unverified = {c: s for c, s in statuses.items()
                       if s.get('status') == 'ready' and s.get('execution_verified') is not True}
         if unverified:
@@ -1869,7 +1966,8 @@ def _author_articles(host, state, state_path, directory, config, provider, root,
         if needs_research and repair_counts['research_repair'] < repair_limit:
             repair_counts['research_repair'] += 1  # 实际新返研前计数并持久化
             host.save_state(state_path, state)
-            issues = [i for s in needs_research.values() for i in s['research_issues']]
+            issues = [i for c, s in needs_research.items()
+                      for i in _assign_issue_ids(s['research_issues'], f'RR-{c}')]
             pending = root / 'local_archive/forward_selection' / f'pending-trace-{expected[0]}.json'
             research_reply = directory / 'research-reply.md'
             prompt = ('你是本轮选股研究负责人，处理作者/审稿发现的下列具体研究问题。'
@@ -1884,6 +1982,17 @@ def _author_articles(host, state, state_path, directory, config, provider, root,
                 '完成文件更新后再返回JSON。\n'
                 f'pending={pending}；完整报告={research_reply}；交接={directory / "selection-handoff.json"}\n'
                 + json.dumps({'identity': expected, 'issues': issues}, ensure_ascii=False))
+            note_only = bool(issues) and all(i.get('quote') == 'authoring_note' for i in issues)
+            if file_io.enabled(config):
+                prompt += '\n' + (host.PROJECT_ROOT / file_io.TASKS['handoff']).read_text(encoding='utf-8')
+                if note_only:
+                    prompt += ('\n本次仅缺交接交付：只为列明股票补 authoring_note、source_refs 和 research_issues，'
+                               '绑定实际完整 trace；不得改 pending、市场说明、名单或研究判断。')
+                old_handoff = directory / 'selection-handoff.json'
+                if old_handoff.exists():
+                    snapshot = directory / f'selection-handoff-before-repair-{repair_counts["research_repair"]}.json'
+                    if not snapshot.exists():
+                        snapshot.write_bytes(old_handoff.read_bytes())
             raw, _repair_route = run_stage(host, state, state_path, directory, 'research-repair', prompt,
                                            provider, config, text_only=False, fallback=fallback)
             if not stage_execution_verified(host, provider, fallback,
@@ -1901,6 +2010,8 @@ def _author_articles(host, state, state_path, directory, config, provider, root,
             revised = read_json(pending)
             if identity(revised) != expected:
                 raise ValueError('研究修复改变时间身份')
+            if file_io.enabled(config) and note_only and revised != trace:
+                raise ValueError('仅补交接的研究步骤改动了原研究')
             validate_pending(root, revised, state.get('prepare', {}))
             save_json(directory / 'context-trace.json', revised)
             # 处理结论回传作者：下一轮作者输入包含resolutions，缓存身份随之变化。
@@ -1908,6 +2019,12 @@ def _author_articles(host, state, state_path, directory, config, provider, root,
                 {**r, 'issue_id': r.get('issue_id') or f'RR{n:02d}', 'source': 'research-repair'}
                 for n, r in enumerate(resolved['resolutions'], 1)]
             repair_context = {'prior_resolutions': prior_resolutions}
+            if file_io.enabled(config):
+                repair_context = {'trace_sha256': trace_input_sha256(revised), 'stocks': {
+                    c: {'prior_resolutions': [r for r in prior_resolutions
+                        if r.get('ts_code') == c or r.get('issue_id') in
+                        {i.get('issue_id') for i in needs_research[c]['research_issues']}]}
+                    for c in needs_research}}
             save_json(directory / 'research-repair-handoff.json', repair_context)
             continue
         details = {c: (s['research_issues'] or (s.get('review') or {}).get('readability_issues', []))
@@ -1963,7 +2080,7 @@ def complete(host, state: dict, state_path: Path, directory: Path, config: dict,
                 [{'quote': 'pending研究合同', 'problem': str(error), 'evidence': str(error)}]})
             prompt = ('本轮pending未通过原有研究合同，按错误定向修正，不能删减必填证据、改时间或降回旧版。'
                       '不运行prepare/record、不重新扫描股票、不生成网页、不写推荐文章。'
-                      '修正研究时同步pending；市场说明因此改变时同步research-reply.md对应段落。'
+                      '修正研究时同步pending及同版selection-handoff.json（actual trace_sha256、逐股便笺、source_refs、research_issues）；市场说明因此改变时同步research-reply.md对应段落。'
                       f'pending={pending}；完整报告={research_reply}；'
                       f'prepare={json.dumps(state["prepare"],ensure_ascii=False)}；错误={error}')
             run_stage(host, state, state_path, directory, 'research-contract-repair', prompt,

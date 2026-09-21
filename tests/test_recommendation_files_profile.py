@@ -372,7 +372,8 @@ def test_production_author_entry_uses_same_files_cycle_without_freezing(harness)
     stock = pipeline.selected_result(trace)['selected_stocks'][0]
     handoff = {'formation_date':trace['formation_date'],'action_date':trace['action_date'],
         'as_of':trace['as_of'],'trace_sha256':pipeline.trace_input_sha256(trace),
-        'stocks':{stock['ts_code']:{'authoring_note':'原研究交接便笺；原句：'+stock['selection_reason']}}}
+        'stocks':{stock['ts_code']:{'authoring_note':'原研究交接便笺；原句：'+stock['selection_reason'],
+            'source_refs':[{'pointer':'/final_selection/selected_stocks/0/selection_reason','quote':stock['selection_reason']}]}}}
     pipeline.save_json(directory/'selection-handoff.json', handoff)
     # Empty synthetic warehouse is read only and produces explicit evidence gaps.
     from stock_analyzer.storage.research_warehouse import ResearchWarehouse
