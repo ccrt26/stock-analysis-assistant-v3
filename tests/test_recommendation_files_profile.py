@@ -501,3 +501,40 @@ def test_handoff_issue_uses_existing_resolver_not_nonempty_or_keywords(harness, 
     assert list(state['article_cycle_counts'].values())[0]['clarification'] == 1
     if not blocking:
         assert (harness.calls[2][1]/'input/packet.json').read_text() == (harness.calls[4][1]/'input/packet.json').read_text()
+
+@pytest.mark.parametrize('item_type,protocol_call,expected_calls', [
+    ('error', False, 0),
+    ('error', True, 1),
+    ('command_execution', False, 1),
+    ('unknown_capability', False, 1),
+])
+def test_codex_warning_item_is_not_a_tool_but_actual_and_unknown_activity_fail_closed(
+        tmp_path, monkeypatch, item_type, protocol_call, expected_calls):
+    home = tmp_path / 'codex-home'
+    monkeypatch.setenv('CODEX_HOME', str(home))
+    cwd = tmp_path / 'reader'; cwd.mkdir()
+    sid = 'reader-warning-case'
+    events = tmp_path / 'events.jsonl'
+    stream = [
+        {'type': 'thread.started', 'thread_id': sid},
+        {'type': 'item.completed', 'item': {'type': item_type, 'message':
+            'Code Mode is unavailable because code-mode host is disabled. Code mode will fail closed.'}},
+        {'type': 'turn.completed', 'usage': {}},
+    ]
+    events.write_text('\n'.join(json.dumps(e) for e in stream) + '\n')
+    protocol = [
+        {'type': 'session_meta', 'payload': {'id': sid, 'cwd': str(cwd), 'model_provider': 'openai'}},
+        {'type': 'turn_context', 'payload': {'cwd': str(cwd), 'model': 'gpt-6-astra', 'effort': 'xhigh'}},
+        {'type': 'response_item', 'payload': {'type': 'message', 'role': 'user',
+            'content': [{'type': 'input_text', 'text': 'article and reading guide only'}]}},
+    ]
+    if protocol_call:
+        protocol.append({'type': 'response_item', 'payload': {'type': 'function_call', 'name': 'exec_command'}})
+    path = home / 'sessions/2026/09/22' / f'rollout-test-{sid}.jsonl'
+    path.parent.mkdir(parents=True)
+    path.write_text('\n'.join(json.dumps(e) for e in protocol) + '\n')
+    result = stock_ai.codex_session_evidence(events,
+        'wss://chatgpt.com/backend-api/codex/responses model=gpt-6-astra',
+        'article and reading guide only', cwd, files_profile=True)
+    assert result['context_evidence']['tool_calls'] == expected_calls
+    assert result['context_evidence']['input_present'] is True

@@ -1192,8 +1192,10 @@ def codex_session_evidence(events: Path, diagnostic: str, prompt: str, cwd: Path
                 for c in i.get("content", [])]
     calls = [i for i in items if i.get("type", "").endswith("_call")]
     completed = any(e.get("type") == "turn.completed" for e in stream)
+    # CLI capability warnings are error items, not tool activity. Actual calls
+    # remain checked in the protocol; unknown item kinds still fail closed.
     tool_events = [e for e in stream if e.get("type") in {"item.started", "item.completed"}
-                   and e.get("item", {}).get("type") not in {"agent_message", "reasoning"}]
+                   and e.get("item", {}).get("type") not in {"agent_message", "reasoning", "error"}]
     # Request transport + turn context together establish actual model/effort/auth.
     auth = "chatgpt" if re.search(r"(?:wss|https)://chatgpt\.com/backend-api/codex/", diagnostic) else ""
     actual_request = "model=gpt-6-astra" in diagnostic
