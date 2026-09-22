@@ -65,7 +65,7 @@ def test_labels_horizon_and_multiple_episodes_never_skip_pairs(tmp_path, partici
     review['current_opportunity']['participation'] = participation
     second = copy.deepcopy(review); second['episode_id'] += ':second'
     draft['ledger']['reviews'].append(second)
-    ep = copy.deepcopy(draft['snapshot']['episodes'][0]);ep['episode_id'] = second['episode_id'];draft['snapshot']['episodes'].append(ep)
+    ep = copy.deepcopy(draft['snapshot']['episodes'][0]);ep['episode_id'] = second['episode_id'];draft['snapshot']['episodes'].append(ep);draft['snapshot']['daily_review_episode_ids'].append(ep['episode_id'])
     detail = copy.deepcopy(draft['report']['alerts'][0]['episode_reviews'][0]);detail['episode_id'] = second['episode_id'];draft['report']['alerts'][0]['episode_reviews'].append(detail)
     packet = p.current_opinion_input(trace, handoff, section, draft)
     assert len(packet['expected_pairs']) == 2
@@ -75,7 +75,7 @@ def test_labels_horizon_and_multiple_episodes_never_skip_pairs(tmp_path, partici
 
 def test_empty_intersection_needs_no_model(tmp_path, monkeypatch):
     trace, handoff, section, draft, packet = inputs(tmp_path)
-    draft['ledger']['reviews'][0]['current_opportunity'] = None
+    draft['snapshot']['episodes'][0]['ts_code'] = '600000.SH'
     monkeypatch.setattr(stock_ai, 'run_agent', lambda *a, **k: pytest.fail('empty pairs must not call model'))
     check = p.check_current_opinions(stock_ai, {}, tmp_path/'state.json', tmp_path, {}, trace, section, draft)
     assert check['input']['expected_pairs'] == [] and check['receipt'] == {'checks': [], 'ready': True}
@@ -145,7 +145,7 @@ def test_complete_cannot_adopt_old_accepted_before_new_check(tmp_path, monkeypat
     (directory/'research-reply.md').write_text('## 今天的市场情况\n\n原市场。')
     state=dict(zip(('formation_date','action_date','selection_as_of'),p.identity(trace)))
     monkeypatch.setattr(stock_ai,'PROJECT_ROOT',tmp_path)
-    with pytest.raises(ValueError,match='同版当前意见'):
+    with pytest.raises(ValueError,match='reader-first'):
         p.complete(stock_ai,state,tmp_path/'state.json',directory,{'recommendation_authoring_profile':'astra-files-v1'},'astra','')
     assert not (tmp_path/'local_archive/forward_monitor').exists()
 
@@ -156,7 +156,7 @@ def test_complete_unresolved_preserves_both_drafts_and_never_records(harness, mo
     import shutil
     root,directory,trace,handoff,code=daily_input(harness)
     _,_,_,draft,_=inputs(root)
-    for role in ('author','review','handoff'):
+    for role in ('author','reader','review','handoff'):
         source=Path(__file__).resolve().parents[1]/p.file_io.TASKS[role]
         target=root/p.file_io.TASKS[role];target.parent.mkdir(exist_ok=True);shutil.copyfile(source,target)
     check_src=Path(__file__).resolve().parents[1]/'ops/recommendation-current-opinion-check.md'
@@ -174,17 +174,17 @@ def test_complete_unresolved_preserves_both_drafts_and_never_records(harness, mo
     file_model=stock_ai.run_agent
     seen=[]
     def model(route,prompt,final,events,timeout,config):
-        if config.get('_file_stage'):
+        if config.get('_file_stage') or config.get('_reader_only'):
             return file_model(route,prompt,final,events,timeout,config)
         name=prompt.name;seen.append(name)
-        if 'current-opinion-check' in name:
+        if 'current-research-check' in name:
             packet=json.loads(prompt.read_text().split('实际输入（只核对下列对象）：\n')[1])['input']
             result=receipt(packet,'unresolved')
-            for row,pair in zip(result['checks'],packet['pairs']):row['recommendation_quote']=pair['recommendation']['article']
+            for row,pair in zip(result['checks'],packet['pairs']):row['recommendation_quote']=pair['recommendation'].get('article') or pair['recommendation']['judgment']['selection_reason']
             ev=evidence();ev['context_evidence']['tool_calls']=0
-        elif 'current-opinion-owner-' in name:
+        elif 'current-research-owner-' in name:
             owner='selection' if 'selection' in name else 'monitor'
-            issues=p.read_json(directory/'current-opinion-questions.json')[owner]
+            issues=p.read_json(directory/'current-research-questions.json')[owner]
             result={'resolutions':[],'unresolved':[{'issue_id':x['issue_id'],'problem':'合成的未解释相反动作'} for x in issues]}
             ev=evidence('xhigh' if owner=='selection' else 'high')
         else:raise AssertionError(name)
@@ -199,9 +199,10 @@ def test_complete_unresolved_preserves_both_drafts_and_never_records(harness, mo
     assert pending.exists() and (mon/f'pending-report-{formation}.json').exists()
     assert not (mon/f'daily-formal-reviews-{formation}.json').exists()
     assert not (directory/'accepted-recommendation.json').exists()
-    assert (directory/'articles'/code/'cycle-ready.json').exists()
+    assert not harness.calls
+    assert not (directory/'articles'/code/'cycle-ready.json').exists()
     assert harness.state['current_opinion']['business_unresolved'] is True
-    assert any('current-opinion-check' in x for x in seen)
+    assert any('current-research-check' in x for x in seen)
 
 
 def test_separate_exact_excerpts_are_valid_but_not_invented_text(tmp_path):
@@ -281,7 +282,7 @@ def _two_stock_owner_input(h):
     trace['decision_trace'] += other['decision_trace']
     second = p.selected_result(other)['selected_stocks'][0];second['priority'] = 2
     trace['research_result']['selected_stocks'].append(second)
-    handoff['stocks'] = {s['ts_code']: {'name': s['name'], 'authoring_note': s['selection_reason'],
+    handoff['stocks'] = {s['ts_code']: {'name': s['name'], 'authoring_note_contract': 'current-research-v1', 'authoring_note': s['selection_reason'],
         'source_refs': [{'pointer': f'/candidate_ledger/{i}', 'quote': s['selection_reason']}],
         'research_issues': []} for i, s in enumerate(p.selected_result(trace)['selected_stocks'])}
     handoff['trace_sha256'] = p.trace_input_sha256(trace)
@@ -337,7 +338,7 @@ def _two_stock_owner_input(h):
     p.save_json(root/'local_archive/forward_selection'/f'pending-trace-{formation}.json', trace)
     _write_csv(root/'local_archive/forward_selection/forward-selection-log.csv', [])
     p.save_json(directory/'context-trace.json', trace);p.save_json(directory/'selection-handoff.json', handoff)
-    for role in ('author', 'review', 'handoff'):
+    for role in ('author', 'reader', 'review', 'handoff'):
         src = Path(__file__).resolve().parents[1]/p.file_io.TASKS[role]
         dst = root/p.file_io.TASKS[role];dst.parent.mkdir(exist_ok=True);shutil.copyfile(src, dst)
     shutil.copyfile(Path(__file__).resolve().parents[1]/'ops/recommendation-current-opinion-check.md', root/'ops/recommendation-current-opinion-check.md')
@@ -415,6 +416,7 @@ def test_owner_handoff_passes_latest_selection_to_monitor(harness, monkeypatch):
     # Deliberately save monitor first, including a JSON round trip.
     p.save_json(directory/'current-opinion-questions.json', json.loads(json.dumps({'monitor':issues, 'selection':issues})))
     p.save_json(directory/'current-opinion-before-owners.json', dict(trace=trace, section=section, draft=draft, handoff=handoff))
+    p.save_json(directory/'current-opinion-questions-input.json', check)
     calls=[];monitor_inputs=[];selection_checkpoint={}
     def model(route, prompt, output, events, timeout, config):
         owner='selection' if 'owner-selection' in prompt.name else 'monitor';calls.append(owner)
@@ -437,7 +439,7 @@ def test_owner_handoff_passes_latest_selection_to_monitor(harness, monkeypatch):
             # A synthetic checkpoint representing completed selection, before monitor.
             selection_checkpoint.update(copy.deepcopy(harness.state))
             selection_checkpoint['recommendation_stages']=selection_checkpoint['recommendation_stages'][:-1]
-            selection_checkpoint['current_opinion']['owners_started']=['selection']
+            selection_checkpoint['current_opinion']['current-opinion_owners_started']=['selection']
         output.write_text(json.dumps(_owner_resolution(issues),ensure_ascii=False));events.write_text('')
         stock_ai.EvidenceBox.record('astra',evidence('xhigh' if owner=='selection' else 'high'))
         return 0,''
@@ -475,18 +477,18 @@ def test_resolved_handoff_reaches_save_and_resume(harness, monkeypatch):
     file_model=stock_ai.run_agent;calls=[]
     def model(route,prompt,output,events,timeout,config):
         calls.append(prompt.name)
-        if config.get('_file_stage'):
+        if config.get('_file_stage') or config.get('_reader_only'):
             if 'author-' in prompt.name:harness.responses.append(daily_author)
             return file_model(route,prompt,output,events,timeout,config)
         text=prompt.read_text()
-        if 'current-opinion-check' in prompt.name or 'current-opinion-recheck' in prompt.name:
+        if any(x in prompt.name for x in ('current-opinion-check', 'current-opinion-recheck', 'current-research-check', 'current-research-recheck')):
             packet=json.loads(text.split('实际输入（只核对下列对象）：\n')[1])['input']
-            result=receipt(packet,'compatible' if 'recheck' in prompt.name else 'unresolved')
-            for row,pair in zip(result['checks'],packet['pairs']):row['recommendation_quote']=pair['recommendation']['article']
+            result=receipt(packet,'unresolved' if 'current-research-check' in prompt.name else 'compatible')
+            for row,pair in zip(result['checks'],packet['pairs']):row['recommendation_quote']=pair['recommendation'].get('article') or pair['recommendation']['judgment']['selection_reason']
             ev=evidence();ev['context_evidence']['tool_calls']=0
         else:
             owner='selection' if 'owner-selection' in prompt.name else 'monitor'
-            issues=p.read_json(directory/'current-opinion-questions.json')[owner]
+            issues=p.read_json(directory/'current-research-questions.json')[owner]
             if owner=='selection':_withdraw_synthetic_stock(root,directory,trace)
             else:
                 latest=json.loads(text.rsplit('\n',1)[-1])['current_selection']

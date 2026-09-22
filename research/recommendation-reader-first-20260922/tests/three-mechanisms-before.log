@@ -1,0 +1,183 @@
+FFFFFFFFFFFF                                                             [100%]
+=================================== FAILURES ===================================
+__________ test_T01_research_input_does_not_require_unwritten_article __________
+
+tmp_path = PosixPath('$TEST_TMP')
+
+    def test_T01_research_input_does_not_require_unwritten_article(tmp_path):
+        trace, handoff, section, draft, _ = inputs(tmp_path)
+>       packet = pipeline.current_research_input(trace, handoff, draft)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'recommendation_pipeline' has no attribute 'current_research_input'
+
+tests/test_recommendation_reader_first.py:14: AttributeError
+___ test_T26_missing_related_review_never_becomes_empty_intersection[ledger] ___
+
+tmp_path = PosixPath('$TEST_TMP')
+damage = 'ledger'
+
+    @pytest.mark.parametrize('damage', ['ledger', 'opportunity', 'time', 'body'])
+    def test_T26_missing_related_review_never_becomes_empty_intersection(tmp_path, damage):
+        trace, handoff, section, draft, _ = inputs(tmp_path)
+        if damage == 'ledger': draft['ledger']['reviews'] = []
+        elif damage == 'opportunity': draft['ledger']['reviews'][0]['current_opportunity'] = None
+        elif damage == 'time': draft['ledger']['as_of'] = '2026-01-01T18:30:00+08:00'
+        else: draft['report']['alerts'][0]['episode_reviews'][0]['current_review'] = ''
+>       with pytest.raises(ValueError): pipeline.current_research_input(trace, handoff, draft)
+                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'recommendation_pipeline' has no attribute 'current_research_input'
+
+tests/test_recommendation_reader_first.py:28: AttributeError
+_ test_T26_missing_related_review_never_becomes_empty_intersection[opportunity] _
+
+tmp_path = PosixPath('$TEST_TMP')
+damage = 'opportunity'
+
+    @pytest.mark.parametrize('damage', ['ledger', 'opportunity', 'time', 'body'])
+    def test_T26_missing_related_review_never_becomes_empty_intersection(tmp_path, damage):
+        trace, handoff, section, draft, _ = inputs(tmp_path)
+        if damage == 'ledger': draft['ledger']['reviews'] = []
+        elif damage == 'opportunity': draft['ledger']['reviews'][0]['current_opportunity'] = None
+        elif damage == 'time': draft['ledger']['as_of'] = '2026-01-01T18:30:00+08:00'
+        else: draft['report']['alerts'][0]['episode_reviews'][0]['current_review'] = ''
+>       with pytest.raises(ValueError): pipeline.current_research_input(trace, handoff, draft)
+                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'recommendation_pipeline' has no attribute 'current_research_input'
+
+tests/test_recommendation_reader_first.py:28: AttributeError
+____ test_T26_missing_related_review_never_becomes_empty_intersection[time] ____
+
+tmp_path = PosixPath('$TEST_TMP')
+damage = 'time'
+
+    @pytest.mark.parametrize('damage', ['ledger', 'opportunity', 'time', 'body'])
+    def test_T26_missing_related_review_never_becomes_empty_intersection(tmp_path, damage):
+        trace, handoff, section, draft, _ = inputs(tmp_path)
+        if damage == 'ledger': draft['ledger']['reviews'] = []
+        elif damage == 'opportunity': draft['ledger']['reviews'][0]['current_opportunity'] = None
+        elif damage == 'time': draft['ledger']['as_of'] = '2026-01-01T18:30:00+08:00'
+        else: draft['report']['alerts'][0]['episode_reviews'][0]['current_review'] = ''
+>       with pytest.raises(ValueError): pipeline.current_research_input(trace, handoff, draft)
+                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'recommendation_pipeline' has no attribute 'current_research_input'
+
+tests/test_recommendation_reader_first.py:28: AttributeError
+____ test_T26_missing_related_review_never_becomes_empty_intersection[body] ____
+
+tmp_path = PosixPath('$TEST_TMP')
+damage = 'body'
+
+    @pytest.mark.parametrize('damage', ['ledger', 'opportunity', 'time', 'body'])
+    def test_T26_missing_related_review_never_becomes_empty_intersection(tmp_path, damage):
+        trace, handoff, section, draft, _ = inputs(tmp_path)
+        if damage == 'ledger': draft['ledger']['reviews'] = []
+        elif damage == 'opportunity': draft['ledger']['reviews'][0]['current_opportunity'] = None
+        elif damage == 'time': draft['ledger']['as_of'] = '2026-01-01T18:30:00+08:00'
+        else: draft['report']['alerts'][0]['episode_reviews'][0]['current_review'] = ''
+>       with pytest.raises(ValueError): pipeline.current_research_input(trace, handoff, draft)
+                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'recommendation_pipeline' has no attribute 'current_research_input'
+
+tests/test_recommendation_reader_first.py:28: AttributeError
+____ test_T07_author_projection_removes_process_channels_but_keeps_meaning _____
+
+    def test_T07_author_projection_removes_process_channels_but_keeps_meaning():
+        packet = bound_packet()
+        packet['reasoning']['obsolete'] = '旧上限42元，等待负责人争论'
+        packet['resolved_gaps_history'] = ['旧上限42元']
+        packet['authoring_note']['text'] = '当前上限40元；仅两项同时满足才暂停新买，收盘确认；新增订单未知。'
+        packet['authoring_note']['source_refs'] = [{'pointer':'/reasoning/obsolete','quote':'旧上限42元'}]
+        spec = fio.stage_spec(CODE_ROOT, 'author', packet, material(),
+            issue_resolutions=[{'internal':'旧上限42元'}], current_opinion_resolution={'old':'旧上限42元'})
+        actual = fio.dumps(spec)
+>       assert '旧上限42元' not in actual
+E       assert '旧上限42元' not in '{\n  "contr... }\n  }\n}\n'
+E         
+E         '旧上限42元' is contained here:
+E           "old\": \"旧上限42元\"\n}\n",
+E         ?           ++++++
+E               "examples/01.md": "---\nstatus: approved\n---\n完整正文\n完整批注",
+E               "identity.json": "{\n  \"action_date\": \"2026-09-18\",\n  \"as_of\": \"2026-09-17T18:30:00+08:00\",\n  \"formation_date\": \"2026-09-17\",\n  \"name\": \"合成公司\",\n  \"reference_price\": 10,\n  \"ts_code\": \"000001.SZ\"\n}\n",
+E               "issue-resolutions.json": "[\n  {\n    \"internal\": \"旧上限42元\"\n  }\n]\n",...
+E         
+E         ...Full output truncated (52 lines hidden), use '-vv' to show
+
+tests/test_recommendation_reader_first.py:40: AssertionError
+______________ test_T09_fidelity_has_authority_beyond_projection _______________
+
+    def test_T09_fidelity_has_authority_beyond_projection():
+        packet=bound_packet()
+        spec=fio.stage_spec(CODE_ROOT,'review',packet,material(),article='完整正文')
+>       assert json.loads(spec['files']['authoritative-research.json']) == packet
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: 'authoritative-research.json'
+
+tests/test_recommendation_reader_first.py:49: KeyError
+______________ test_T10_reader_receives_only_article_and_standard ______________
+
+    def test_T10_reader_receives_only_article_and_standard():
+>       spec=fio.reader_stage_spec(CODE_ROOT,identity={**bound_packet()['identity'],'private':'研究答案'},
+             ^^^^^^^^^^^^^^^^^^^^^
+            article='测试完整文章。',reading_guide='只读正文，不补底稿。')
+E       AttributeError: module 'recommendation_file_io' has no attribute 'reader_stage_spec'
+
+tests/test_recommendation_reader_first.py:53: AttributeError
+____ test_T12_T13_T14_neither_review_can_override_other[reader0-fidelity0] _____
+
+reader = {'reader_summary': '原选择、事实及改变条件。', 'readability_issues': [{'quote': '真实原句', 'problem': '重复', 'instruction': '合并', 'blocking': True, ...}], 'fidelity_issues': [], 'research_issues': [], ...}
+fidelity = {'reader_summary': '原选择、事实及改变条件。', 'readability_issues': [], 'fidelity_issues': [], 'research_issues': [], ...}
+
+    @pytest.mark.parametrize('reader,fidelity', [(review(False,readability=[dict(quote='真实原句',problem='重复',instruction='合并',blocking=True,issue_kind='expression')]), review()),(review(), review(False,fidelity=[dict(quote='任一',problem='AND误写OR',instruction='恢复AND',evidence='两项同时',blocking=True,issue_kind='condition')])),(review(),None)])
+    def test_T12_T13_T14_neither_review_can_override_other(reader,fidelity):
+>       assert pipeline.merge_article_reviews(reader,fidelity)['ready'] is False
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'recommendation_pipeline' has no attribute 'merge_article_reviews'
+
+tests/test_recommendation_reader_first.py:63: AttributeError
+____ test_T12_T13_T14_neither_review_can_override_other[reader1-fidelity1] _____
+
+reader = {'reader_summary': '原选择、事实及改变条件。', 'readability_issues': [], 'fidelity_issues': [], 'research_issues': [], ...}
+fidelity = {'reader_summary': '原选择、事实及改变条件。', 'readability_issues': [], 'fidelity_issues': [{'quote': '任一', 'problem': 'AND误写OR', 'instruction': '恢复AND', 'evidence': '两项同时', ...}], 'research_issues': [], ...}
+
+    @pytest.mark.parametrize('reader,fidelity', [(review(False,readability=[dict(quote='真实原句',problem='重复',instruction='合并',blocking=True,issue_kind='expression')]), review()),(review(), review(False,fidelity=[dict(quote='任一',problem='AND误写OR',instruction='恢复AND',evidence='两项同时',blocking=True,issue_kind='condition')])),(review(),None)])
+    def test_T12_T13_T14_neither_review_can_override_other(reader,fidelity):
+>       assert pipeline.merge_article_reviews(reader,fidelity)['ready'] is False
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'recommendation_pipeline' has no attribute 'merge_article_reviews'
+
+tests/test_recommendation_reader_first.py:63: AttributeError
+_______ test_T12_T13_T14_neither_review_can_override_other[reader2-None] _______
+
+reader = {'reader_summary': '原选择、事实及改变条件。', 'readability_issues': [], 'fidelity_issues': [], 'research_issues': [], ...}
+fidelity = None
+
+    @pytest.mark.parametrize('reader,fidelity', [(review(False,readability=[dict(quote='真实原句',problem='重复',instruction='合并',blocking=True,issue_kind='expression')]), review()),(review(), review(False,fidelity=[dict(quote='任一',problem='AND误写OR',instruction='恢复AND',evidence='两项同时',blocking=True,issue_kind='condition')])),(review(),None)])
+    def test_T12_T13_T14_neither_review_can_override_other(reader,fidelity):
+>       assert pipeline.merge_article_reviews(reader,fidelity)['ready'] is False
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'recommendation_pipeline' has no attribute 'merge_article_reviews'
+
+tests/test_recommendation_reader_first.py:63: AttributeError
+__________________ test_T14_ready_cannot_hide_blocking_error ___________________
+
+    def test_T14_ready_cannot_hide_blocking_error():
+        item=dict(quote='任一',problem='AND误写OR',instruction='恢复AND',evidence='两项同时',blocking=True,issue_kind='condition')
+>       result=pipeline.merge_article_reviews(review(),review(True,fidelity=[item]))
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'recommendation_pipeline' has no attribute 'merge_article_reviews'
+
+tests/test_recommendation_reader_first.py:68: AttributeError
+=========================== short test summary info ============================
+FAILED tests/test_recommendation_reader_first.py::test_T01_research_input_does_not_require_unwritten_article
+FAILED tests/test_recommendation_reader_first.py::test_T26_missing_related_review_never_becomes_empty_intersection[ledger]
+FAILED tests/test_recommendation_reader_first.py::test_T26_missing_related_review_never_becomes_empty_intersection[opportunity]
+FAILED tests/test_recommendation_reader_first.py::test_T26_missing_related_review_never_becomes_empty_intersection[time]
+FAILED tests/test_recommendation_reader_first.py::test_T26_missing_related_review_never_becomes_empty_intersection[body]
+FAILED tests/test_recommendation_reader_first.py::test_T07_author_projection_removes_process_channels_but_keeps_meaning
+FAILED tests/test_recommendation_reader_first.py::test_T09_fidelity_has_authority_beyond_projection
+FAILED tests/test_recommendation_reader_first.py::test_T10_reader_receives_only_article_and_standard
+FAILED tests/test_recommendation_reader_first.py::test_T12_T13_T14_neither_review_can_override_other[reader0-fidelity0]
+FAILED tests/test_recommendation_reader_first.py::test_T12_T13_T14_neither_review_can_override_other[reader1-fidelity1]
+FAILED tests/test_recommendation_reader_first.py::test_T12_T13_T14_neither_review_can_override_other[reader2-None]
+FAILED tests/test_recommendation_reader_first.py::test_T14_ready_cannot_hide_blocking_error
+12 failed in 0.62s

@@ -25,7 +25,7 @@ def daily_input(h):
     pipeline.save_json(directory / 'context-trace.json', trace)
     stock = pipeline.selected_result(trace)['selected_stocks'][0]
     code = stock['ts_code']
-    item = {'authoring_note': stock['selection_reason'],
+    item = {'authoring_note_contract': 'current-research-v1', 'authoring_note': stock['selection_reason'],
             'source_refs': [{'pointer': '/candidate_ledger/0', 'quote': stock['selection_reason']}],
             'research_issues': []}
     handoff = dict(zip(('formation_date', 'action_date', 'as_of'), pipeline.identity(trace)))
@@ -89,9 +89,9 @@ def test_daily_real_handoff_to_common_cycle_and_resume(harness, kind):
         return
     section, saved = pipeline._author_articles(*args, fallback=False, repair_limit=0)
     assert saved == trace
-    expected = ['author', 'review'] if kind == 'none' else ['clarification', 'author', 'review']
+    expected = ['author', 'reader', 'review'] if kind == 'none' else ['clarification', 'author', 'reader', 'review']
     assert [r[0] for r in harness.calls] == expected
-    author, reviewer = harness.calls[-2][1], harness.calls[-1][1]
+    author, reviewer = harness.calls[-3][1], harness.calls[-1][1]
     assert (reviewer / 'input/article.md').read_text() == section
     for filename in ['packet.json', 'research-handoff.md', 'issue-resolutions.json']:
         a, b = author / 'input' / filename, reviewer / 'input' / filename
@@ -124,9 +124,12 @@ def test_daily_cross_identity_is_rejected_before_model(harness, wrong):
     assert not harness.calls
 
 
-def test_answers_version_mismatch_is_rejected():
+def test_current_material_version_mismatch_is_rejected():
     a = fio.stage_spec(CODE_ROOT, 'author', bound_packet(), material(), issue_resolutions=[{'version': 1}])
-    b = fio.stage_spec(CODE_ROOT, 'review', bound_packet(), material(), issue_resolutions=[{'version': 2}])
+    packet = bound_packet()
+    packet['authoring_note']['text'] += '当前说明变化'
+    b = fio.stage_spec(CODE_ROOT, 'review', packet, material(), issue_resolutions=[{'version': 2}])
+    assert 'issue-resolutions.json' not in a['files'] and 'issue-resolutions.json' not in b['files']
     with pytest.raises(ValueError, match='版本'):
         fio.validate_shared_material(a, b)
 
@@ -249,7 +252,7 @@ def test_missing_note_returns_to_existing_targeted_owner(harness, monkeypatch):
     original = stock_ai.run_agent
     repairs = []
     def model(route, prompt, final, events, timeout, config):
-        if config.get('_file_stage'):
+        if config.get('_file_stage') or config.get('_reader_only'):
             return original(route, prompt, final, events, timeout, config)
         repairs.append(prompt.read_text())
         assert '只为列明股票补 authoring_note' in repairs[-1]
@@ -267,5 +270,5 @@ def test_missing_note_returns_to_existing_targeted_owner(harness, monkeypatch):
         pipeline.identity(trace), fallback=False, repair_limit=1)
     assert unchanged == trace and pipeline.read_json(pending) == trace
     assert len(repairs) == 1
-    assert [r[0] for r in harness.calls] == ['author', 'review']
+    assert [r[0] for r in harness.calls] == ['author', 'reader', 'review']
     assert list(harness.state['article_cycle_counts'].values())[0]['research_repair'] == 1

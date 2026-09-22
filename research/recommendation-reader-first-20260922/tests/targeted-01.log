@@ -1,0 +1,445 @@
+.................................................................FF..... [ 43%]
+F.............F......................................................... [ 87%]
+.....F.............FF                                                    [100%]
+=================================== FAILURES ===================================
+___________ test_daily_real_handoff_to_common_cycle_and_resume[none] ___________
+
+harness = namespace(calls=[('author', PosixPath('$TEST_TMP'))
+kind = 'none'
+
+    @pytest.mark.parametrize('kind', ['none', 'retained', 'blocking'])
+    def test_daily_real_handoff_to_common_cycle_and_resume(harness, kind):
+        root, directory, trace, handoff, code = daily_input(harness)
+        if kind != 'none':
+            handoff['stocks'][code]['research_issues'] = [{**QUESTION, 'ts_code': code,
+                'trace_sha256': pipeline.trace_input_sha256(trace),
+                'problem': '附带单日比较没有 OHLC；是否影响意见须由研究处理'}]
+            harness.responses.append(resolver(kind == 'blocking'))
+        harness.responses.append(daily_author)
+        pipeline.save_json(directory / 'selection-handoff.json', handoff)
+        args = (stock_ai, harness.state, harness.state_path, directory,
+                {'recommendation_authoring_profile': PROFILE}, 'astra', root, trace, pipeline.identity(trace))
+        if kind == 'blocking':
+            with pytest.raises(ValueError, match='未决'):
+                pipeline._author_articles(*args, fallback=False, repair_limit=0)
+            assert [r[0] for r in harness.calls] == ['clarification']
+            return
+        section, saved = pipeline._author_articles(*args, fallback=False, repair_limit=0)
+        assert saved == trace
+        expected = ['author', 'review'] if kind == 'none' else ['clarification', 'author', 'review']
+>       assert [r[0] for r in harness.calls] == expected
+E       AssertionError: assert ['author', 'reader', 'review'] == ['author', 'review']
+E         
+E         At index 1 diff: 'reader' != 'review'
+E         Left contains one more item: 'review'
+E         Use -v to get more diff
+
+tests/test_normal_recommendation_files.py:93: AssertionError
+_________ test_daily_real_handoff_to_common_cycle_and_resume[retained] _________
+
+harness = namespace(calls=[('clarification', PosixPath('$TEST_TMP'))
+kind = 'retained'
+
+    @pytest.mark.parametrize('kind', ['none', 'retained', 'blocking'])
+    def test_daily_real_handoff_to_common_cycle_and_resume(harness, kind):
+        root, directory, trace, handoff, code = daily_input(harness)
+        if kind != 'none':
+            handoff['stocks'][code]['research_issues'] = [{**QUESTION, 'ts_code': code,
+                'trace_sha256': pipeline.trace_input_sha256(trace),
+                'problem': '附带单日比较没有 OHLC；是否影响意见须由研究处理'}]
+            harness.responses.append(resolver(kind == 'blocking'))
+        harness.responses.append(daily_author)
+        pipeline.save_json(directory / 'selection-handoff.json', handoff)
+        args = (stock_ai, harness.state, harness.state_path, directory,
+                {'recommendation_authoring_profile': PROFILE}, 'astra', root, trace, pipeline.identity(trace))
+        if kind == 'blocking':
+            with pytest.raises(ValueError, match='未决'):
+                pipeline._author_articles(*args, fallback=False, repair_limit=0)
+            assert [r[0] for r in harness.calls] == ['clarification']
+            return
+        section, saved = pipeline._author_articles(*args, fallback=False, repair_limit=0)
+        assert saved == trace
+        expected = ['author', 'review'] if kind == 'none' else ['clarification', 'author', 'review']
+>       assert [r[0] for r in harness.calls] == expected
+E       AssertionError: assert ['clarificati...er', 'review'] == ['clarificati...or', 'review']
+E         
+E         At index 2 diff: 'reader' != 'review'
+E         Left contains one more item: 'review'
+E         Use -v to get more diff
+
+tests/test_normal_recommendation_files.py:93: AssertionError
+__________________ test_answers_version_mismatch_is_rejected ___________________
+
+    def test_answers_version_mismatch_is_rejected():
+        a = fio.stage_spec(CODE_ROOT, 'author', bound_packet(), material(), issue_resolutions=[{'version': 1}])
+        b = fio.stage_spec(CODE_ROOT, 'review', bound_packet(), material(), issue_resolutions=[{'version': 2}])
+>       with pytest.raises(ValueError, match='版本'):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE ValueError
+
+tests/test_normal_recommendation_files.py:130: Failed
+_____________ test_missing_note_returns_to_existing_targeted_owner _____________
+
+harness = namespace(calls=[('author', PosixPath('$TEST_TMP'))
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10f1c6600>
+
+    def test_missing_note_returns_to_existing_targeted_owner(harness, monkeypatch):
+        import duckdb
+        root, directory, trace, handoff, code = daily_input(harness)
+        handoff['stocks'][code].pop('authoring_note')
+        pipeline.save_json(directory / 'selection-handoff.json', handoff)
+        pending = root / 'local_archive/forward_selection' / f"pending-trace-{trace['formation_date']}.json"
+        pipeline.save_json(pending, trace)
+        harness.state['prepare'] = {**trace['runtime_capabilities'], 'sector_research_available': True}
+        catalog = root / 'local_warehouse/facts/security_master/catalog_version=synthetic'
+        catalog.mkdir(parents=True)
+        stock = pipeline.selected_result(trace)['selected_stocks'][0]
+        with duckdb.connect() as db:
+            db.execute("create table securities(ts_code varchar, name varchar, market varchar, exchange varchar, list_status varchar, valid_from date, valid_to date)")
+            db.execute("insert into securities values (?, ?, '主板', 'SZSE', 'L', '2020-01-01', null)", [code, stock['name']])
+            db.execute("copy securities to ? (format parquet)", [str(catalog / 'data.parquet')])
+        original = stock_ai.run_agent
+        repairs = []
+        def model(route, prompt, final, events, timeout, config):
+            if config.get('_file_stage'):
+                return original(route, prompt, final, events, timeout, config)
+            repairs.append(prompt.read_text())
+            assert '只为列明股票补 authoring_note' in repairs[-1]
+            fixed = copy.deepcopy(handoff)
+            fixed['stocks'][code]['authoring_note'] = stock['selection_reason']
+            pipeline.save_json(directory / 'selection-handoff.json', fixed)
+            final.write_text('{"resolutions": [], "unresolved": []}')
+            events.write_text('')
+            stock_ai.EvidenceBox.record(route, evidence())
+            return 0, ''
+        monkeypatch.setattr(stock_ai, 'run_agent', model)
+        harness.responses[:] = [daily_author]
+>       section, unchanged = pipeline._author_articles(stock_ai, harness.state, harness.state_path, directory,
+            {'recommendation_authoring_profile': PROFILE}, 'astra', root, trace,
+            pipeline.identity(trace), fallback=False, repair_limit=1)
+
+tests/test_normal_recommendation_files.py:265: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tools/recommendation_pipeline.py:2090: in _author_articles
+    statuses[code] = run_article_cycle(
+tools/recommendation_pipeline.py:1598: in run_article_cycle
+    reader = parse_review_output(article_stage(host, state, state_path, directory,
+tools/recommendation_pipeline.py:1033: in article_stage
+    return file_article_stage(host, state, state_path, directory, stage, config,
+tools/recommendation_pipeline.py:1162: in file_article_stage
+    delivery, route = run_stage(host, state, state_path, directory, stage, spec['request'],
+tools/recommendation_pipeline.py:1824: in run_stage
+    code, diag = host.run_agent(route, prompt_path, output, events, None, {**config, '_text_only': text_only, '_handoff_only': False})
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+route = 'astra'
+prompt = PosixPath('$TEST_TMP')
+final = PosixPath('$TEST_TMP')
+events = PosixPath('$TEST_TMP')
+timeout = None
+config = {'recommendation_authoring_profile': 'astra-files-v1', '_file_stage': False, '_reader_only': True, '_cwd': '/private/v...n/T/pytest-of-ccrt/pytest-1493/test_missing_note_returns_to_e0/daily/articles/000001.SZ/reader-000001-SZ-files-1', ...}
+
+    def model(route, prompt, final, events, timeout, config):
+        if config.get('_file_stage'):
+            return original(route, prompt, final, events, timeout, config)
+        repairs.append(prompt.read_text())
+>       assert '只为列明股票补 authoring_note' in repairs[-1]
+E       assert '只为列明股票补 authoring_note' in '# 独立阅读审查\n\n你只检查这篇待发表文章对普通读者是否清楚、顺畅，不重新研究股票，不补充底稿中可能存在的理由。完整阅读一次，再指出影响理解的具体位置。你收到的全部材料是正文、股名代码、阅读标准，以及适用时上轮仅凭正文提出的问题；...没有违规。\\n\\n范文看它怎样把事实、选择和应对连起来，不复制它的价位、结论或段落安排。国际复材展示为什么仍考虑参与；中国巨石展示公司不错但为什么现在等。采用稿及批注原样保留，是否适用于本次时点由原有读取规则处理。\\n"\n}\n'
+
+tests/test_normal_recommendation_files.py:255: AssertionError
+___________ test_complete_cannot_adopt_old_accepted_before_new_check ___________
+
+tmp_path = PosixPath('$TEST_TMP')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10f319850>
+
+    def test_complete_cannot_adopt_old_accepted_before_new_check(tmp_path, monkeypatch):
+        trace, handoff, section, draft, packet = inputs(tmp_path)
+        directory=tmp_path/'task';directory.mkdir()
+        p.save_json(directory/'accepted-recommendation.json',dict(trace=trace,section=section,research_issues=[]))
+        (directory/'research-reply.md').write_text('## 今天的市场情况\n\n原市场。')
+        state=dict(zip(('formation_date','action_date','selection_as_of'),p.identity(trace)))
+        monkeypatch.setattr(stock_ai,'PROJECT_ROOT',tmp_path)
+>       with pytest.raises(ValueError,match='同版当前意见'):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AssertionError: Regex pattern did not match.
+E         Expected regex: '同版当前意见'
+E         Actual message: '旧采用稿缺少reader-first两阶段审查合同，不自动跨合同恢复'
+
+tests/test_same_day_consistency.py:148: AssertionError
+____________ test_owner_handoff_passes_latest_selection_to_monitor _____________
+
+harness = namespace(calls=[], responses=[], root=PosixPath('$TEST_TMP'))
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10f31a5d0>
+
+    def test_owner_handoff_passes_latest_selection_to_monitor(harness, monkeypatch):
+        root, directory, trace, handoff, section, draft = _two_stock_owner_input(harness)
+        monkeypatch.setattr(stock_ai, 'PROJECT_ROOT', root)
+        packet = p.current_opinion_input(trace, p.selection_handoff(directory, trace, strict=True), section, draft)
+        check = {'receipt':receipt(packet, 'unresolved')}
+        issues = [{**row, 'issue_id':f'CO-{i+1}'} for i, row in enumerate(check['receipt']['checks'])]
+        # Deliberately save monitor first, including a JSON round trip.
+        p.save_json(directory/'current-opinion-questions.json', json.loads(json.dumps({'monitor':issues, 'selection':issues})))
+        p.save_json(directory/'current-opinion-before-owners.json', dict(trace=trace, section=section, draft=draft, handoff=handoff))
+        calls=[];monitor_inputs=[];selection_checkpoint={}
+        def model(route, prompt, output, events, timeout, config):
+            owner='selection' if 'owner-selection' in prompt.name else 'monitor';calls.append(owner)
+            if owner=='selection':
+                _withdraw_synthetic_stock(root, directory, trace)
+            else:
+                text=prompt.read_text();latest=json.loads(text.rsplit('\n',1)[-1])['current_selection']
+                assert latest['label']=='研究负责人处理后的当前结果'
+                assert latest['selected_codes_before']==['000991.SZ','000992.SZ']
+                assert latest['selected_codes_after']==['000991.SZ'] and latest['removed_codes']==['000992.SZ']
+                assert latest['summary']['market']=='合成研究最新摘要：只保留甲。'
+                assert latest['trace_sha256']==p.trace_input_sha256(p.read_json(root/'local_archive/forward_selection/pending-trace-2026-08-25.json'))
+                assert latest['selection_answer']==_owner_resolution(issues)
+                assert latest['stocks']['000992.SZ']['status']=='withdrawn'
+                assert '本日新推荐已撤回' in latest['stocks']['000992.SZ']['meaning']
+                assert latest['stocks']['000991.SZ']['handoff']['authoring_note']
+                assert 'thesis' in latest['stocks']['000991.SZ']['handoff']
+                assert '修改前状态' in text and '不需要与当前复盘的门槛机械统一' in text
+                monitor_inputs.append(text)
+                # A synthetic checkpoint representing completed selection, before monitor.
+                selection_checkpoint.update(copy.deepcopy(harness.state))
+                selection_checkpoint['recommendation_stages']=selection_checkpoint['recommendation_stages'][:-1]
+                selection_checkpoint['current_opinion']['owners_started']=['selection']
+            output.write_text(json.dumps(_owner_resolution(issues),ensure_ascii=False));events.write_text('')
+            stock_ai.EvidenceBox.record('astra',evidence('xhigh' if owner=='selection' else 'high'))
+            return 0,''
+        monkeypatch.setattr(stock_ai, 'run_agent', model)
+        args=(stock_ai,harness.state,harness.state_path,directory,{'recommendation_authoring_profile':'astra-files-v1'},trace,section,draft,check)
+        p.resolve_current_opinion_owners(*args)
+        assert calls==['selection','monitor']
+        # Restore that checkpoint in tmp_path only; the completed selection answer stays.
+        (directory/'current-opinion-owner-monitor-answer.json').rename(directory/'synthetic-later-monitor-answer.json')
+        harness.state.clear();harness.state.update(selection_checkpoint)
+>       p.resolve_current_opinion_owners(*args)
+
+tests/test_same_day_consistency.py:452: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+host = <module 'stock_ai' from '$CANDIDATE_ROOT/tools/stock_ai.py'>
+state = {'provider_order': ['astra'], 'formation_date': '2026-08-25', 'action_date': '2026-08-26', 'selection_as_of': '2026-08-25T18:30:00+08:00', ...}
+state_path = PosixPath('$TEST_TMP')
+directory = PosixPath('$TEST_TMP')
+config = {'recommendation_authoring_profile': 'astra-files-v1'}
+trace = {'trace_version': 'daily-research-trace-v4', 'formation_date': '2026-08-25', 'action_date': '2026-08-26', 'as_of': '2026-08-25T18:30:00+08:00', ...}
+section = '### 合成甲（000991.SZ）\n\n当前可有条件参与，普通时段确认后才参与。\n\n### 合成乙（000992.SZ）\n\n当前可有条件参与，普通时段确认后才参与。'
+draft = {'snapshot': {'snapshot_version': 'forward-monitor-snapshot-v1', 'analysis_date': '2026-08-25', 'as_of': '2026-08-25T1...otation', 'market_risk_overlays': [], 'what_changed': '市场变化不大', 'implication_for_monitored_stocks': '只看触发变化的股票'}, ...}}
+check = {'receipt': {'checks': [{'ts_code': '000991.SZ', 'episode_id': 'formal:2026-07-31:000991.SZ:selected', 'result': 'unre...mal:2026-07-31:000992.SZ:selected', 'result': 'unresolved', 'recommendation_quote': '当前可有条件参与', ...}], 'ready': False}}
+
+    def resolve_current_opinion_owners(host, state, state_path, directory, config, trace, section, draft, check):
+        """One consolidated ticket per original owner; never edit investment text here."""
+        prefix = 'current-research' if section is None else 'current-opinion'
+        claim_research_processing(host, state, state_path, prefix)
+        questions_path = directory / f'{prefix}-questions.json'
+        if questions_path.exists():
+            questions = read_json(questions_path)
+        else:
+            questions = {'selection': [], 'monitor': []}
+            for i, c in enumerate(check['receipt']['checks']):
+                for owner in c['needs_owner']:
+                    questions[owner].append({**c, 'issue_id': f'CO-{i + 1}'})
+            # Explicit pending questions from this task's source material, not stock-specific defaults.
+            extra = directory / 'current-opinion-source-questions.json'
+            if extra.exists():
+                for owner, values in read_json(extra).items():
+                    if owner not in questions:
+                        raise ValueError('未知来源问题负责人')
+                    questions[owner].extend(values)
+            save_json(questions_path, questions)
+            save_json(directory / f'{prefix}-before-owners.json',
+                      {'trace': trace, 'section': section, 'draft': draft,
+                       'handoff': read_json(directory / 'selection-handoff.json')})
+        before = read_json(directory / f'{prefix}-before-owners.json')
+        pending = host.PROJECT_ROOT / 'local_archive/forward_selection' / f'pending-trace-{identity(trace)[0]}.json'
+        monitor = host.PROJECT_ROOT / 'local_archive/forward_monitor'
+        answers = {}
+        for owner in ('selection', 'monitor'):
+            issues = questions.get(owner, [])
+            if not issues:
+                continue
+            answer_path = directory / f'{prefix}-owner-{owner}-answer.json'
+            cached_answer = read_json(answer_path) if answer_path.exists() else None
+            if cached_answer is not None:
+                validate_owner_answer(json.dumps(cached_answer), issues)
+                if owner == 'selection':
+                    answers[owner] = cached_answer
+                    continue
+            owner_input = {'identity': identity(trace), 'owner': owner, 'issues': issues}
+            if owner == 'monitor':
+                latest = read_json(pending)
+                if identity(latest) != identity(before['trace']) or identity(latest) != identity(trace):
+                    raise ValueError('研究负责人处理后的时间身份不一致')
+                # Read the real handoff before the strict merge; missing/broken files
+                # must not silently fall back to the pre-owner trace summary.
+                read_json(directory / 'selection-handoff.json')
+                latest_handoff = selection_handoff(directory, latest, strict=True)
+                codes = {item['ts_code'] for item in issues}
+                selected = {item['ts_code']: item for item in selected_result(latest)['selected_stocks']}
+                previous_codes = [item['ts_code'] for item in selected_result(before['trace'])['selected_stocks']]
+                latest_summary = handoff_from_trace(latest)
+                related_ids = {item['issue_id'] for item in questions.get('selection', []) if item['ts_code'] in codes}
+                selection_answer = answers.get('selection', {})
+                current = {
+                    'label': '研究负责人处理后的当前结果', 'identity': identity(latest),
+                    'trace_sha256': trace_input_sha256(latest),
+                    'summary': {'market': latest_handoff['market'],
+                                'stocks': {code: value for code, value in latest_summary['stocks'].items() if code in codes}},
+                    'selection_answer': {kind: [item for item in selection_answer.get(kind, [])
+                                               if item.get('ts_code') in codes or item.get('issue_id') in related_ids]
+                                         for kind in ('resolutions', 'unresolved')},
+                    'selected_codes_before': previous_codes,
+                    'selected_codes_after': list(selected),
+                    'removed_codes': [code for code in previous_codes if code not in selected],
+                    'stocks': {},
+                }
+                for code in sorted(codes):
+                    if code in selected:
+                        stock_handoff = latest_handoff['stocks'][code]
+                        current['stocks'][code] = {
+                            'status': 'selected', 'judgment': selected[code], 'handoff': stock_handoff,
+                            'conditions': {'handoff': stock_handoff.get('conditions'),
+                                'tradability': stock_handoff.get('conditions_tradability'),
+                                'decisions': [item for item in latest.get('decision_trace', [])
+                                              if item.get('ts_code') == code and item.get('decision_role') == 'action_condition']},
+                        }
+                    elif code in previous_codes:
+                        current['stocks'][code] = {'status': 'withdrawn',
+                            'meaning': '本日新推荐已撤回，旧研究建议仅是过程记录。'}
+                    else:
+                        current['stocks'][code] = {'status': 'not_selected', 'meaning': '本日新推荐名单中没有此股。'}
+                owner_input['current_selection'] = current
+            stage = f'{prefix}-owner-{owner}'
+            started = state.setdefault('current_opinion', {}).setdefault(prefix + '_owners_started', [])
+            delivered = None
+            if owner in started:
+                entry = stage_entry_evidence(state, stage)
+                if entry and entry.get('status') == 'completed':
+                    delivered = next(e for e in reversed(state['recommendation_stages']) if e.get('stage') == stage)
+                retries = state.get('provider_retry_events', [])
+                if delivered is None:
+                    if cached_answer is not None:
+                        raise ValueError('负责人已存答复缺少原始输入和实际交付证据：' + owner)
+                    if not entry or entry.get('status') != 'failed' or not retries or retries[-1].get('owner_resumed') == owner:
+>                       raise ValueError('负责人本轮调用已开始但无有效交付，保留现场待受控恢复：' + owner)
+E                       ValueError: 负责人本轮调用已开始但无有效交付，保留现场待受控恢复：monitor
+
+tools/recommendation_pipeline.py:2466: ValueError
+________________ test_resolved_handoff_reaches_save_and_resume _________________
+
+harness = namespace(calls=[], responses=[], root=PosixPath('$TEST_TMP'))
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10f34fc20>
+
+    def test_resolved_handoff_reaches_save_and_resume(harness, monkeypatch):
+        import datetime as dt
+        from dataclasses import asdict
+        from test_normal_recommendation_files import daily_author
+        root,directory,trace,handoff,section,draft=_two_stock_owner_input(harness)
+        monkeypatch.setattr(stock_ai,'PROJECT_ROOT',root)
+        real_run_stage = p.run_stage
+        def continue_unfinished_stage(*args, **kwargs):
+            stage = kwargs.get('stage', args[4] if len(args) > 4 else None)
+            assert stage not in ('research', 'monitor'), 'Completed research/monitor must be reused'
+            return real_run_stage(*args, **kwargs)
+        monkeypatch.setattr(p, 'run_stage', continue_unfinished_stage)
+        file_model=stock_ai.run_agent;calls=[]
+        def model(route,prompt,output,events,timeout,config):
+            calls.append(prompt.name)
+            if config.get('_file_stage'):
+                if 'author-' in prompt.name:harness.responses.append(daily_author)
+                return file_model(route,prompt,output,events,timeout,config)
+            text=prompt.read_text()
+            if 'current-opinion-check' in prompt.name or 'current-opinion-recheck' in prompt.name:
+                packet=json.loads(text.split('实际输入（只核对下列对象）：\n')[1])['input']
+                result=receipt(packet,'compatible' if 'recheck' in prompt.name else 'unresolved')
+                for row,pair in zip(result['checks'],packet['pairs']):row['recommendation_quote']=pair['recommendation']['judgment']['selection_reason']
+                ev=evidence();ev['context_evidence']['tool_calls']=0
+            else:
+                owner='selection' if 'owner-selection' in prompt.name else 'monitor'
+                issues=p.read_json(directory/'current-research-questions.json')[owner]
+                if owner=='selection':_withdraw_synthetic_stock(root,directory,trace)
+                else:
+                    latest=json.loads(text.rsplit('\n',1)[-1])['current_selection']
+                    assert latest['removed_codes']==['000992.SZ']
+                    path=root/'local_archive/forward_monitor/pending-report-2026-08-25.json';report=p.read_json(path)
+                    for alert in report['alerts']:
+                        if alert['ts_code']=='000992.SZ':alert['episode_reviews'][0]['current_review']='合成乙当前仍等待，保留自己的事实与依据。'
+                    p.save_json(path,report)
+                result=_owner_resolution(issues);ev=evidence('xhigh' if owner=='selection' else 'high')
+            output.write_text(json.dumps(result,ensure_ascii=False));events.write_text('');stock_ai.EvidenceBox.record('astra',ev);return 0,''
+        monkeypatch.setattr(stock_ai,'run_agent',model)
+        def process(cmd,timeout,**kwargs):
+            from stock_analyzer.ops.forward_selection import LocalForwardData, record_daily_trace
+            assert cmd[1:4]==['-m','stock_analyzer.ops.forward_selection','record-trace']
+            # Substitute only process setup; run the actual record function with tmp_path data.
+            pending=Path(cmd[cmd.index('--trace-file')+1])
+            formation,action,cutoff=p.identity(p.read_json(pending))
+            archive=root/'local_archive/forward_selection'
+            result=record_daily_trace(p.read_json(pending), pending_path=pending,
+                archive_dir=archive, csv_path=archive/'forward-selection-log.csv',
+                data=LocalForwardData(root/'local_warehouse',root/'local_archive'),
+                clock=lambda:dt.datetime.fromisoformat(cutoff)+dt.timedelta(minutes=1),
+                sleep=lambda _:pytest.fail('Synthetic data readiness must not wait'),
+                formation_date=dt.date.fromisoformat(formation), action_date=dt.date.fromisoformat(action),
+                selection_as_of=dt.datetime.fromisoformat(cutoff))
+            return 0,json.dumps(asdict(result),ensure_ascii=False,default=str),''
+        monkeypatch.setattr(stock_ai,'run_bounded',process)
+        args=(stock_ai,harness.state,harness.state_path,directory,{'recommendation_authoring_profile':'astra-files-v1','_no_fallback':True},'astra','')
+>       final,_=p.complete(*args,fallback=False)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_same_day_consistency.py:519: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tools/recommendation_pipeline.py:2731: in complete
+    trace, draft_monitor = prepare_current_research(host, state, state_path, directory,
+tools/recommendation_pipeline.py:2611: in prepare_current_research
+    check = check_current_opinions(host, state, state_path, directory, config, trace, None, draft)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tools/recommendation_pipeline.py:2342: in check_current_opinions
+    raw = article_stage(host, state, state_path, directory, stage, prompt, 'astra', config,
+tools/recommendation_pipeline.py:1065: in article_stage
+    raw, route = run_stage(host, state, state_path, directory, stage, prompt, provider, config,
+tests/test_same_day_consistency.py:474: in continue_unfinished_stage
+    return real_run_stage(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tools/recommendation_pipeline.py:1824: in run_stage
+    code, diag = host.run_agent(route, prompt_path, output, events, None, {**config, '_text_only': text_only, '_handoff_only': False})
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_same_day_consistency.py:490: in model
+    issues=p.read_json(directory/'current-research-questions.json')[owner]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tools/recommendation_pipeline.py:28: in read_json
+    return json.loads(path.read_text(encoding='utf-8'))
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+$PYTHON_RUNTIME/lib/python3.12/pathlib.py:1027: in read_text
+    with self.open(mode='r', encoding=encoding, errors=errors) as f:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = PosixPath('$TEST_TMP')
+mode = 'r', buffering = -1, encoding = 'utf-8', errors = None, newline = None
+
+    def open(self, mode='r', buffering=-1, encoding=None,
+             errors=None, newline=None):
+        """
+        Open the file pointed to by this path and return a file object, as
+        the built-in open() function does.
+        """
+        if "b" not in mode:
+            encoding = io.text_encoding(encoding)
+>       return io.open(self, mode, buffering, encoding, errors, newline)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       FileNotFoundError: [Errno 2] No such file or directory: '$TEST_TMP'
+
+$PYTHON_RUNTIME/lib/python3.12/pathlib.py:1013: FileNotFoundError
+=========================== short test summary info ============================
+FAILED tests/test_normal_recommendation_files.py::test_daily_real_handoff_to_common_cycle_and_resume[none]
+FAILED tests/test_normal_recommendation_files.py::test_daily_real_handoff_to_common_cycle_and_resume[retained]
+FAILED tests/test_normal_recommendation_files.py::test_answers_version_mismatch_is_rejected
+FAILED tests/test_normal_recommendation_files.py::test_missing_note_returns_to_existing_targeted_owner
+FAILED tests/test_same_day_consistency.py::test_complete_cannot_adopt_old_accepted_before_new_check
+FAILED tests/test_same_day_consistency.py::test_owner_handoff_passes_latest_selection_to_monitor
+FAILED tests/test_same_day_consistency.py::test_resolved_handoff_reaches_save_and_resume
+7 failed, 158 passed in 10.71s

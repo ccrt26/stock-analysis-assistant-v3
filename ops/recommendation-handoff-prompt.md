@@ -14,3 +14,5 @@
 # 文件交付约定（接口，不是文章写法）
 
 正常日常交接使用 selection-handoff-v2：formation_date/action_date/as_of 与实际 pending 相同，trace_sha256 为完整 pending 规范化指纹；stocks[ts_code] 含 authoring_note 字符串、source_refs（数组；每项 file 为实际 pending 文件，pointer 为该 trace 内 JSON Pointer，quote 为对应字段原句）、research_issues 数组（允许为空）。不得引用未读资料。独立文件角色的输入范围、权限及输出路径以调用方接口为准。
+
+当前有效供料合同 current-research-v1：每股在同一研究步骤交付唯一authoring_note，并写authoring_note_contract="current-research-v1"。先完成需要的同股研究分歧处理，再整理此说明。说明只含当前采用意见、必要证据及来源、风险如何影响取舍、重要未知和完整条件；旧解释、负责人争论及问题归属过程另留内部记录，不累加到说明。不以清理名义改变意见力度、时间、参考价/端点、观察目标、AND/OR、收盘确认或参与/撤回对象。实质矛盾交回研究；不能清掉必要内容。已有同版有效说明直接复用，不为每只股票另开润色步骤。

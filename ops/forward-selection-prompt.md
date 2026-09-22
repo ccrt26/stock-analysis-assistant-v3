@@ -1,6 +1,6 @@
 # 晚间正式研究运行提示
 
-仅外层明确标记 `astra-files-v1` 与 `same-day-current-opinion-v1` 时：选股交付pending trace及同版selection-handoff；独立复盘交付pending-daily-formal-reviews与pending-report及原snapshot，先不record。作者/审稿后由总控核对同股当前目的、参考价、条件与实际正文；必要问题分别回原研究/复盘负责人，只修本日待核对稿，不互相改稿。核对同版通过后，程序调用原record、freeze和装配。未决保留双方成果，不发布完整日报。旧profile和已正式冻结历史沿原恢复合同。
+仅外层明确标记 `astra-files-v1` 与 `same-day-current-opinion-v1` 时：选股交付pending trace及同版selection-handoff；独立复盘交付pending-daily-formal-reviews与pending-report及原snapshot，先不record。推荐成稿前由总控先核对双方研究的同股当前目的、参考价和完整条件；分歧处理后原负责人交付current-research-v1当前有效说明。推荐作者完成后，先由无研究输入的独立阅读审查检查正文，再由事实阶段核对同版研究，至多一次集中修订；最后仍核对真实推荐与复盘当前正文；必要问题分别回原研究/复盘负责人，只修本日待核对稿，不互相改稿。核对同版通过后，程序调用原record、freeze和装配。未决保留双方成果，不发布完整日报。旧profile和已正式冻结历史沿原恢复合同。
 
 
 ## 启动器分工与手动执行

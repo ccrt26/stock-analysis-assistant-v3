@@ -600,7 +600,8 @@ def build_article_packet(*, trace: dict, context: dict, ts_code: str, research_h
         packet['authoring_note'] = {'text': note.get('text', '') if isinstance(note, dict) else str(note),
             'source_refs': note.get('source_refs', []) if isinstance(note, dict) else handoff_stock.get('source_refs', []),
             'identity': packet['identity'], 'binding': {'trace_sha256': trace_input_sha256(trace)},
-            'origin': 'selection-handoff-v2'}
+            'origin': 'selection-handoff-v2',
+            'meaning_contract': handoff_stock.get('authoring_note_contract')}
     packet['composition'] = packet_composition(packet)
     return packet
 
@@ -903,6 +904,44 @@ def parse_review_output(text: str) -> dict:
 # ---------------------------------------------------------------- 作者循环与阶段复用
 
 
+READER_FIRST_CONTRACT = 'recommendation-reader-first-v1'
+
+
+def merge_article_reviews(reader, fidelity):
+    result = {'reader_summary': (reader or {}).get('reader_summary', ''),
+              'readability_issues': [], 'fidelity_issues': [], 'research_issues': [],
+              'issue_checks': [], 'ready': False, 'reader': reader, 'fidelity': fidelity}
+    valid = []
+    for origin, value in (('reader', reader), ('fidelity', fidelity)):
+        try:
+            if not isinstance(value, dict) or type(value.get('ready')) is not bool:
+                raise ValueError('missing review')
+            parsed = parse_review_output(json.dumps(value, ensure_ascii=False))
+        except (ValueError, TypeError):
+            valid.append(False)
+            continue
+        valid.append(parsed['ready'])
+        for key in ('readability_issues', 'fidelity_issues', 'research_issues', 'issue_checks'):
+            items = copy.deepcopy(parsed.get(key, []))
+            if key != 'issue_checks':
+                for item in items: item['review_origin'] = origin
+            result[key].extend(items)
+    result['ready'] = all(valid) and len(valid) == 2
+    return result
+
+
+def claim_research_processing(host, state, state_path, operation, input_value=None):
+    """One original-owner handling pass per task, shared before/after writing."""
+    budget = state.setdefault('research_processing', {'operations': [], 'limit': 1})
+    claim = {'operation': operation, 'input_sha256': file_io.digest(file_io.dumps(input_value))}
+    if claim in budget['operations']:
+        return
+    if len(budget['operations']) >= budget['limit']:
+        raise ValueError('本任务研究处理预算已用完；保留更正事实与待处理稿，不继续生成')
+    budget['operations'].append(claim)
+    host.save_state(state_path, state)
+
+
 def session_identity(host, provider: str, config: dict, *, text_only: bool = True) -> dict:
     """影响模型会话行为的显式配置；进入阶段缓存身份。
 
@@ -940,6 +979,8 @@ def stage_execution_verified(host, provider: str, fallback: bool, entry: dict | 
     if entry.get('profile') == file_io.PROFILE:
         scope = evidence.get('context_evidence') or {}
         route_ok = route == 'astra' and host.route_evidence_matches(route, evidence, profile=file_io.PROFILE) is True
+        if entry.get('reader_only'):
+            return route_ok and scope.get('isolated') is True and scope.get('verified') is True and scope.get('input_present') is True and scope.get('tool_calls') == 0 and scope.get('reader_capabilities_disabled') is True
         return route_ok and (entry.get('file_stage') is False or (scope.get('isolated') is True
                 and scope.get('verified') is True and scope.get('input_present') is True))
     return host.route_evidence_matches(route, evidence) is True
@@ -951,6 +992,7 @@ def stage_entry_evidence(state: dict, stage: str) -> dict | None:
         if entry.get('stage') == stage:
             return {'provider': entry.get('provider'), 'evidence': entry.get('evidence') or {},
                     'profile': entry.get('profile'), 'file_stage': entry.get('file_stage'),
+                    'reader_only': entry.get('reader_only'),
                     'exit_code': entry.get('exit_code'), 'status': entry.get('status')}
     return None
 
@@ -1116,11 +1158,20 @@ def file_article_stage(host, state, state_path, directory, stage, config, spec, 
                  'contract': spec['contract'], 'stage_directory': str(stage_dir),
                  'input_index': manifest, 'terminal_status': 'running', 'execution_verified': False}
     save_json(path, saved)
+    reader_only = spec.get('execution_mode') == 'reader-text-only'
     stage_config = {**config, 'recommendation_authoring_profile': file_io.PROFILE,
-                    '_file_stage': True, '_cwd': str(stage_dir), '_resume_session_id': resume_sid}
+                    '_file_stage': not reader_only, '_reader_only': reader_only,
+                    '_cwd': str(stage_dir), '_resume_session_id': resume_sid}
     try:
-        _, route = run_stage(host, state, state_path, directory, stage, spec['request'],
-                             'astra', stage_config, text_only=False, fallback=False)
+        delivery, route = run_stage(host, state, state_path, directory, stage, spec['request'],
+                             'astra', stage_config, text_only=reader_only, fallback=False)
+        if reader_only:
+            value = json_object(delivery)
+            parse_review_output(delivery)
+            if not str(value.get('review_text') or '').strip():
+                raise ValueError('阅读阶段缺少完整review_text')
+            (stage_dir / 'output/review.md').write_text(value['review_text'], encoding='utf-8')
+            (stage_dir / 'output/review-result.json').write_text(file_io.dumps(value), encoding='utf-8')
         file_io.verify_inputs(stage_dir, manifest)
         saved['stage_execution'] = stage_entry_evidence(state, stage)
         saved['execution_verified'] = stage_execution_verified(host, 'astra', False, saved['stage_execution'])
@@ -1165,7 +1216,7 @@ def generate_file_handoff(host, *, packet, materials, source_binding, directory,
     result = copy.deepcopy(packet)
     result['authoring_note'] = {'text': delivery['authoring_note'], 'source_refs': delivery['source_refs'],
                                'binding': source_binding, 'identity': packet['identity'],
-                               'origin': 'research-handoff-files-v1'}
+                               'origin': file_io.CONTRACTS['handoff'], 'meaning_contract': file_io.CURRENT_MEANING}
     save_json(directory / 'packet-with-handoff.json', result)
     return result, delivery.get('research_issues', [])
 
@@ -1344,7 +1395,8 @@ def _stage_execution_entry(directory: Path, stage_name: str) -> dict | None:
     saved = read_json(path)
     return {'stage': stage_name, 'execution_verified': bool(saved.get('execution_verified')),
             'route': saved.get('route'),
-            'evidence': (saved.get('stage_execution') or {}).get('evidence') or {}}
+            'evidence': (saved.get('stage_execution') or {}).get('evidence') or {},
+            'stage_execution': saved.get('stage_execution')}
 
 
 def run_article_cycle(host, *, packet: dict, materials: dict, directory: Path, state: dict,
@@ -1352,7 +1404,7 @@ def run_article_cycle(host, *, packet: dict, materials: dict, directory: Path, s
                       allow_research_changes: bool, expression_limit: int = 2,
                       run_scope: str = 'managed', issue_resolver=None,
                       prior_resolutions: list | None = None, clarification_limit: int = 2,
-                      handoff_issues: list | None = None) -> dict:
+                      handoff_issues: list | None = None, initial_author_spec: dict | None = None) -> dict:
     """生产与试写共用的作者循环：作者 → 疑点核实 → 审稿 → 有限表达修订。
 
     作者/审稿提出的疑点先经 issue_resolver（生产与试写同一实现，默认
@@ -1369,6 +1421,7 @@ def run_article_cycle(host, *, packet: dict, materials: dict, directory: Path, s
     files_mode = file_io.enabled(config)
     if files_mode:
         provider, fallback = 'astra', False
+        expression_limit = min(expression_limit, 1)
     code = packet['identity']['ts_code']
     tag = code.replace('.', '-')
     scope = run_scope_key(run_scope, code)
@@ -1416,13 +1469,18 @@ def run_article_cycle(host, *, packet: dict, materials: dict, directory: Path, s
                 'research_issues': research_issues,
                 'issue_resolutions': issue_resolutions,
                 'effective_packet_applied': (effective_packet.get('effective_packet') or {}),
-                'review': review, 'research_source': packet['source_refs'],
-                'provider': provider, 'fallback': fallback}
+                'review': review, 'reviewed_article_sha256': file_io.digest(article or ''),
+                'research_source': packet['source_refs'],
+                'provider': provider, 'fallback': fallback,
+                'reader_first_contract': READER_FIRST_CONTRACT if files_mode else None,
+                'contracts': copy.deepcopy(file_io.CONTRACTS) if files_mode else None}
 
     note_error = None
     if files_mode:
         try:
             file_io.validate_note(packet)
+            if packet['authoring_note'].get('meaning_contract') != file_io.CURRENT_MEANING:
+                raise ValueError('原研究交接尚未标明唯一当前含义合同current-research-v1')
         except ValueError as exc:
             note_error = str(exc)
     if files_mode and note_error:
@@ -1466,8 +1524,13 @@ def run_article_cycle(host, *, packet: dict, materials: dict, directory: Path, s
         if files_mode:
             file_spec = file_io.stage_spec(host.PROJECT_ROOT, 'author', effective_packet, materials,
                 prior_article=prior, revision_issues=revision_issues,
-                issue_resolutions=issue_resolutions or None,
-                current_opinion_resolution=amendment.get('owner_answers'))
+                issue_resolutions=None, current_opinion_resolution=None)
+            if round_index == 0 and initial_author_spec is not None:
+                file_spec = copy.deepcopy(initial_author_spec)
+                if (file_spec.get('role') != 'author' or file_spec.get('model') != file_io.MODEL
+                        or file_spec.get('effort') != file_io.EFFORT
+                        or json.loads(file_spec['files']['identity.json']) != packet['identity']):
+                    raise ValueError('固定回放作者输入身份或模型不符')
             prompt = file_spec['request']
         else:
             prompt = author_prompt(host.PROJECT_ROOT, packet=effective_packet, materials=materials,
@@ -1490,6 +1553,17 @@ def run_article_cycle(host, *, packet: dict, materials: dict, directory: Path, s
                 if counts['expression'] >= expression_limit:
                     break
                 counts['expression'] += 1
+        if files_mode:
+            cached = file_cached_result(host, directory, author_stage, file_spec, run_scope, validator,
+                                       resume=config.get('_resume_files') is True)
+            pending_file = directory / f'{author_stage}-result.json'
+            continuing = bool(config.get('_resume_files') and pending_file.exists()
+                and read_json(pending_file).get('terminal_status') == 'interrupted')
+            if cached is None and not continuing:
+                if counts.get('author_requests', 0) >= 2:
+                    return result('needs_revision')
+                counts['author_requests'] = counts.get('author_requests', 0) + 1
+                host.save_state(state_path, state)
         stages.append(author_stage)
         record_progress(author_stage)
         parsed = validator(article_stage(
@@ -1525,14 +1599,35 @@ def run_article_cycle(host, *, packet: dict, materials: dict, directory: Path, s
             prior = article
             revision_issues = resolved['resolutions']
             continue
+        reader = None
+        if files_mode:
+            reader_stage = f'reader-{tag}' if round_index == 0 else f'reader-rev{round_index}-{tag}'
+            reader_spec = file_io.reader_stage_spec(host.PROJECT_ROOT,
+                identity=packet['identity'], article=article, reading_guide=materials['reading_guide'],
+                pending_readability=[i for i in pending_checks if i.get('review_origin') == 'reader'])
+            stages.append(reader_stage)
+            record_progress(reader_stage)
+            reader = parse_review_output(article_stage(host, state, state_path, directory,
+                reader_stage, reader_spec['request'], 'astra', config, fallback=False,
+                contract=file_io.CONTRACTS['reader'], validate=parse_review_output,
+                run_scope=run_scope, file_spec=reader_spec))
+            stage_execution(reader_stage)
         review_stage = f'review-{tag}' if round_index == 0 else f'review-rev{round_index}-{tag}'
         stages.append(review_stage)
         record_progress(review_stage)
         review_spec = (file_io.stage_spec(host.PROJECT_ROOT, 'review', effective_packet, materials,
             article=article, issue_resolutions=issue_resolutions or None,
-            pending_issue_checks=pending_checks or None,
-            current_opinion_resolution=amendment.get('owner_answers')) if files_mode else None)
+            pending_issue_checks=[i for i in pending_checks if i.get('review_origin') != 'reader'] or None,
+            current_opinion_resolution=None) if files_mode else None)
         if files_mode:
+            # Fact checking sees the exact materials actually used by this author,
+            # including a frozen historical supply in controlled replay.
+            for name in ('packet.json', 'research-handoff.md', 'issue-resolutions.json', 'current-opinion-resolution.json'):
+                if name in file_spec['files']:
+                    review_spec['files'][name] = file_spec['files'][name]
+                    review_spec['sources'][name] = file_spec['sources'].get(name, 'actual author input')
+                else:
+                    review_spec['files'].pop(name, None)
             file_io.validate_shared_material(file_spec, review_spec)
             saved_author = read_json(directory / f'{author_stage}-result.json')
             file_io.verify_inputs(Path(saved_author['stage_directory']), saved_author['input_index'])
@@ -1544,7 +1639,8 @@ def run_article_cycle(host, *, packet: dict, materials: dict, directory: Path, s
             provider, config, fallback=fallback, contract=REVIEW_CONTRACT_VERSION,
             validate=parse_review_output, run_scope=run_scope, file_spec=review_spec)
         stage_execution(review_stage)
-        review = parse_review_output(review_raw)
+        fidelity = parse_review_output(review_raw)
+        review = merge_article_reviews(reader, fidelity) if files_mode else fidelity
         for group in ('readability_issues', 'fidelity_issues', 'research_issues'):
             _carry_stable_ids(review[group], prior_review_issues)
         _assign_issue_ids(review['readability_issues'], f'R{round_index:02d}B')
@@ -1646,7 +1742,8 @@ def run_article_cycle(host, *, packet: dict, materials: dict, directory: Path, s
                                                  + review['fidelity_issues'] + still_open):
                 merged[str(item['issue_id'])] = {'issue_id': item['issue_id'],
                                                  'problem': item.get('problem'),
-                                                 'quote': item.get('quote') or ''}
+                                                 'quote': item.get('quote') or '',
+                                                 'review_origin': item.get('review_origin', 'fidelity')}
         pending_checks = list(merged.values())
     save_json(directory / 'issues-open.json', pending_checks or [])
     return result('needs_revision')
@@ -1686,7 +1783,8 @@ def run_stage(host, state: dict, state_path: Path, directory: Path, stage: str,
     prompt_path = directory / f'{stem}-input.md'
     prompt_path.write_text(prompt)
     files_mode = config.get('_file_stage') is True
-    profile_stage = files_mode or (file_io.enabled(config) and stage in ('research', 'research-repair', 'research-contract-repair', 'current-opinion-check', 'current-opinion-recheck', 'current-opinion-owner-selection'))
+    reader_only = config.get('_reader_only') is True
+    profile_stage = files_mode or reader_only or (file_io.enabled(config) and stage in ('research', 'research-repair', 'research-contract-repair', 'current-opinion-check', 'current-opinion-recheck', 'current-opinion-owner-selection', 'current-research-check', 'current-research-recheck', 'current-research-owner-selection'))
     if profile_stage:
         provider, fallback = 'astra', False
         config = {**config, '_astra_recommendation_profile': True}
@@ -1702,7 +1800,7 @@ def run_stage(host, state: dict, state_path: Path, directory: Path, stage: str,
             entry['configured_effort'] = 'xhigh' if profile_stage else 'high'
         entry['fallback'] = fallback
         if profile_stage:
-            entry.update(profile=file_io.PROFILE, file_stage=files_mode, configured_model=file_io.MODEL, configured_effort=file_io.EFFORT)
+            entry.update(profile=file_io.PROFILE, file_stage=files_mode, reader_only=reader_only, configured_model=file_io.MODEL, configured_effort=file_io.EFFORT)
         state.setdefault('recommendation_stages', []).append(entry)
         host.EvidenceBox.store.pop(route, None)
         host.save_state(state_path, state)
@@ -1753,6 +1851,8 @@ def run_stage(host, state: dict, state_path: Path, directory: Path, stage: str,
                 if text_only:
                     scope = evidence.get('context_evidence', {})
                     tools_ok = (scope.get('isolated') is True if route == 'astra' else not scope.get('offered_tools'))
+                    if reader_only:
+                        tools_ok = tools_ok and scope.get('reader_capabilities_disabled') is True
                     if not scope.get('verified') or not tools_ok or scope.get('tool_calls') != 0 or not scope.get('input_present'):
                         raise ValueError(
                             f'{stage}纯文本会话隔离核验失败（要求无工具；短上下文不按字数判定）：'
@@ -1842,9 +1942,41 @@ def validate_pending(root: Path, trace: dict, prepare: dict) -> None:
         announcement_exchanges=tuple(capabilities['announcement_exchanges']))
 
 
+def validate_reader_first_accepted(host, accepted):
+    if accepted.get('reader_first_contract') != READER_FIRST_CONTRACT:
+        raise ValueError('旧采用稿缺少reader-first两阶段审查合同，不自动跨合同恢复')
+    if accepted.get('reader_first_trace_sha256') != trace_input_sha256(accepted['trace']):
+        raise ValueError('采用后研究条件变化，两阶段审查失效')
+    stocks = selected_result(accepted['trace'])['selected_stocks']
+    proofs = accepted.get('article_reviews') or {}
+    if set(proofs) != {s['ts_code'] for s in stocks}:
+        raise ValueError('采用稿缺逐股两阶段审查')
+    import stock_ai
+    for stock in stocks:
+        proof = proofs[stock['ts_code']]
+        article = stock_ai._stock_segment(accepted['section'], stock['ts_code'])
+        if (proof.get('reader_first_contract') != READER_FIRST_CONTRACT
+                or proof.get('contracts') != file_io.CONTRACTS
+                or not article or article.strip() != str(stock_ai._stock_segment(proof.get('article') or '', stock['ts_code']) or '').strip()
+                or proof.get('status') != 'ready'
+                or proof.get('reviewed_article_sha256') != file_io.digest(proof.get('article') or '')):
+            raise ValueError('采用正文或合同改变，旧审查失效')
+        review = proof.get('review') or {}
+        if not merge_article_reviews(review.get('reader'), review.get('fidelity'))['ready']:
+            raise ValueError('缺有效阅读/事实审查，不能采用')
+        entries = proof.get('stages_execution') or []
+        if not entries or not all(e.get('execution_verified') and stage_execution_verified(host, 'astra', False, e.get('stage_execution')) for e in entries):
+            raise ValueError('采用稿缺实际阶段执行证据')
+        reader_entries = [e for e in entries if str(e.get('stage', '')).startswith('reader-')]
+        if not reader_entries or not all(e['stage_execution'].get('reader_only') for e in reader_entries):
+            raise ValueError('采用稿缺独立reader阶段')
+
+
 def validate_accepted(host, accepted: dict, expected: tuple[str, str, str]) -> None:
     if identity(accepted['trace']) != expected:
         raise ValueError('采用正文与本轮时间身份不一致')
+    if accepted.get('reader_first_contract'):
+        validate_reader_first_accepted(host, accepted)
     if accepted.get('research_issues') != []:
         raise ValueError('尚有未解决的研究问题，不能冻结')
     issues = host._recommendation_section_issues(accepted['section'], expected[0], stocks=selected_result(accepted['trace'])['selected_stocks'])
@@ -1916,6 +2048,9 @@ def _author_articles(host, state, state_path, directory, config, provider, root,
         trace = read_json(directory / 'context-trace.json')
         if identity(trace) != expected:
             raise ValueError('作者循环开始前pending与本轮身份不一致')
+        if state.get('reader_first_contract') == READER_FIRST_CONTRACT:
+            trace, _ = prepare_current_research(host, state, state_path, directory, config, trace,
+                monitor_draft(root, expected[0]))
         context = build_context(root, trace, cited_text=handoff_from_trace(trace)['market'])
         save_json(directory / 'recommendation-context.json', context)
         material = (writing_material(root, expected[2], list(context['facts']),
@@ -1945,13 +2080,13 @@ def _author_articles(host, state, state_path, directory, config, provider, root,
                               if file_io.enabled(config) else None)
             cache_path = articles_dir / code / 'cycle-ready.json'
             cycle_input = {'packet': packet, 'materials': material, 'handoff_issues': current_issues,
-                           'tasks': {role: (host.PROJECT_ROOT / file_io.TASKS[role]).read_text() for role in ('author', 'review')} if file_io.enabled(config) else None,
+                           'tasks': {role: (host.PROJECT_ROOT / file_io.TASKS[role]).read_text() for role in ('author', 'reader', 'review')} if file_io.enabled(config) else None,
                            'prior_resolutions': repair_context.get('stocks', {}).get(code, {}).get('prior_resolutions')}
             if file_io.enabled(config) and cache_path.exists():
                 old = read_json(cache_path)
                 before = (old.get('input') or {}).get('packet', {}).get('source_refs', {}).get('trace_sha256')
                 after = packet.get('source_refs', {}).get('trace_sha256')
-                if before != after and same_stock_material(old.get('input'), cycle_input):
+                if old.get('result', {}).get('reader_first_contract') == READER_FIRST_CONTRACT and before != after and same_stock_material(old.get('input'), cycle_input):
                     file_io.validate_note(packet)
                     for result_file in (articles_dir / code).glob('*-result.json'):
                         saved_stage = read_json(result_file)
@@ -1973,7 +2108,7 @@ def _author_articles(host, state, state_path, directory, config, provider, root,
                 directory=articles_dir / code, state=state, state_path=state_path,
                 config=config, provider=provider, fallback=fallback,
                 allow_research_changes=True,
-                expression_limit=0 if (articles_dir / code / 'current-opinion-amendment.json').exists() else 1,
+                expression_limit=1,
                 prior_resolutions=(repair_context.get('stocks', {}).get(code, {}).get('prior_resolutions')
                     if file_io.enabled(config) else repair_context.get('prior_resolutions')),
                 handoff_issues=(handoff.get('stocks', {}).get(code, {}).get('research_issues', [])
@@ -1994,6 +2129,8 @@ def _author_articles(host, state, state_path, directory, config, provider, root,
             raise RuntimeError(f'作者阶段失败：{sorted(failed)}；保留产物等待续跑')
         needs_research = {c: s for c, s in unresolved.items() if s['status'] == 'needs_research'}
         if needs_research and repair_counts['research_repair'] < repair_limit:
+            if file_io.enabled(config):
+                claim_research_processing(host, state, state_path, 'article-research-repair')
             repair_counts['research_repair'] += 1  # 实际新返研前计数并持久化
             host.save_state(state_path, state)
             issues = [i for c, s in needs_research.items()
@@ -2064,6 +2201,7 @@ def _author_articles(host, state, state_path, directory, config, provider, root,
 
 # Current-opinion checks are task receipts, not financial records or selection rules.
 CURRENT_OPINION_CONTRACT = 'same-day-current-opinion-v1'
+CURRENT_RESEARCH_CONTRACT = 'same-day-current-research-v1'
 
 
 def monitor_draft(root, formation, *, saved=False):
@@ -2100,7 +2238,14 @@ def validate_monitor_draft(draft, expected):
 
 def current_opinion_input(trace, handoff, section, draft):
     """Pair by stock AND episode; labels and horizons never decide compatibility."""
+    expected_identity = identity(trace)
+    if any((draft[k].get('analysis_date'), draft[k].get('as_of')) != (expected_identity[0], expected_identity[2]) for k in ('snapshot', 'ledger', 'report')):
+        raise ValueError('同股研究/文字核对时间身份未确认')
     episodes = {e['episode_id']: e for e in draft['snapshot'].get('episodes', [])}
+    ledger_ids = [r['episode_id'] for r in draft['ledger'].get('reviews', [])]
+    expected_ids = draft['snapshot'].get('daily_review_episode_ids')
+    if expected_ids is None or set(ledger_ids) != set(expected_ids) or len(ledger_ids) != len(expected_ids):
+        raise ValueError('相关复盘覆盖未核实，不能当作无同股组合')
     details = {r['episode_id']: r for a in draft['report'].get('alerts', [])
                for r in a.get('episode_reviews', [])}
     stocks = {s['ts_code']: s for s in selected_result(trace)['selected_stocks']}
@@ -2108,15 +2253,17 @@ def current_opinion_input(trace, handoff, section, draft):
     for review in draft['ledger'].get('reviews', []):
         episode = episodes[review['episode_id']]
         code = episode['ts_code']
-        if code not in stocks or review.get('current_opportunity') is None:
+        if code not in stocks:
             continue
+        if review.get('current_opportunity') is None:
+            raise ValueError('相关同股缺少当前机会，不能当作无组合：' + review['episode_id'])
         body = (review if review.get('review_kind') == 'brief' else details.get(review['episode_id'], {})).get('current_review')
         if not body:
             raise ValueError('同股核对缺少唯一复盘正文：' + review['episode_id'])
         # Keep original historical conclusions/D20 out of current-action adjudication.
         import stock_ai
-        article = stock_ai._stock_segment(section, code)
-        if not article:
+        article = stock_ai._stock_segment(section, code) if section is not None else None
+        if section is not None and not article:
             raise ValueError('同股核对缺少新推荐正文：' + code)
         pairs.append({'ts_code': code, 'episode_id': review['episode_id'],
             'recommendation': {'judgment': stocks[code], 'handoff': handoff.get('stocks', {}).get(code),
@@ -2127,11 +2274,18 @@ def current_opinion_input(trace, handoff, section, draft):
             'facts': {'review_context': episode.get('review_context'),
                       'price': episode.get('current_price'),
                       'source': f'snapshot:{review["episode_id"]}'}})
+    if section is None:
+        for pair in pairs:
+            pair['recommendation'].pop('article')
     pairs.sort(key=lambda p: (p['ts_code'], p['episode_id']))
-    return {'contract': CURRENT_OPINION_CONTRACT, 'identity': list(identity(trace)), 'pairs': copy.deepcopy(pairs),
+    return {'contract': CURRENT_RESEARCH_CONTRACT if section is None else CURRENT_OPINION_CONTRACT, 'identity': list(identity(trace)), 'pairs': copy.deepcopy(pairs),
             'expected_pairs': [[p['ts_code'], p['episode_id']] for p in pairs],
             'binding': {'trace': trace_input_sha256(trace), 'handoff': trace_input_sha256(handoff),
-                        'section': file_io.digest(section), 'monitor': trace_input_sha256(draft)}}
+                        'section': file_io.digest(section) if section is not None else None, 'monitor': trace_input_sha256(draft)}}
+
+
+def current_research_input(trace, handoff, draft):
+    return current_opinion_input(trace, handoff, None, draft)
 
 
 def validate_current_opinion_receipt(receipt, packet, *, require_ready=False):
@@ -2145,7 +2299,7 @@ def validate_current_opinion_receipt(receipt, packet, *, require_ready=False):
             raise ValueError('当前意见回执重复、额外或股票/episode不符')
         seen.add(key)
         pair = expected[key]
-        for name, text in [('recommendation_quote', pair['recommendation']['article']),
+        for name, text in [('recommendation_quote', pair['recommendation'].get('article') or '\n'.join(str(v) for v in _iter_leaves(pair['recommendation']))),
                            ('review_quote', pair['review']['body'] + '\n' + '\n'.join(
                                str(v) for v in pair['review']['current_opportunity'].values()))]:
             quote = check.get(name)
@@ -2174,7 +2328,8 @@ def validate_current_opinion_receipt(receipt, packet, *, require_ready=False):
 def check_current_opinions(host, state, state_path, directory, config, trace, section, draft):
     handoff = selection_handoff(directory, trace, strict=True)
     packet = current_opinion_input(trace, handoff, section, draft)
-    previous = directory / 'current-opinion-check.json'
+    prefix = 'current-research' if section is None else 'current-opinion'
+    previous = directory / f'{prefix}-check.json'
     if previous.exists():
         saved = read_json(previous)
         if saved.get('input') == packet:
@@ -2187,24 +2342,26 @@ def check_current_opinions(host, state, state_path, directory, config, trace, se
         execution = None  # A real empty intersection needs no model.
     else:
         budget = state.setdefault('current_opinion', {})
-        round_no = budget.get('checks', 0)
-        stage = 'current-opinion-check' if round_no == 0 else 'current-opinion-recheck'
+        count_key = 'research_checks' if section is None else 'checks'
+        round_no = budget.get(count_key, 0)
+        stage = f'{prefix}-check' if round_no == 0 else f'{prefix}-recheck'
         # A process failure may resume the same stage; successful semantic rounds are finite.
         if round_no >= 2:
             raise ValueError('当前意见核对预算已用完，保留本版待处理稿')
         prompt = (host.PROJECT_ROOT / 'ops/recommendation-current-opinion-check.md').read_text()
-        prior_issues = read_json(directory / 'current-opinion-questions.json') if (directory / 'current-opinion-questions.json').exists() else None
-        answers = {p.stem: read_json(p) for p in directory.glob('current-opinion-owner-*-answer.json')}
+        prompt += ('\n本阶段是成稿前研究级核对：新推荐正文尚不存在，recommendation_quote必须引用真实judgment或handoff原句；不得要求作者先写稿。差异须已在实际当前研究说明说明。' if section is None else '\n本阶段是成稿后文字核对：必须引用真实推荐文章；成稿前核对通过不能替代本次核对。')
+        prior_issues = read_json(directory / f'{prefix}-questions.json') if (directory / f'{prefix}-questions.json').exists() else None
+        answers = {p.stem: read_json(p) for p in directory.glob(f'{prefix}-owner-*-answer.json')}
         prompt += '\n实际输入（只核对下列对象）：\n' + json.dumps(
             {'input': packet, 'previous_questions': prior_issues, 'owner_answers': answers}, ensure_ascii=False)
         validator = lambda raw: validate_current_opinion_receipt(json_object(raw), packet)
         raw = article_stage(host, state, state_path, directory, stage, prompt, 'astra', config,
-                            fallback=False, contract=CURRENT_OPINION_CONTRACT, validate=validator)
+                            fallback=False, contract=packet['contract'], validate=validator)
         receipt = validator(raw)
         execution = read_json(directory / f'{stage}-result.json')['stage_execution']
         if not stage_execution_verified(host, 'astra', False, execution):
             raise ValueError('当前意见核对实际模型证据未通过')
-        budget['checks'] = round_no + 1
+        budget[count_key] = round_no + 1
         host.save_state(state_path, state)
     saved = {'input': packet, 'receipt': receipt, 'execution': execution}
     save_json(previous, saved)
@@ -2230,8 +2387,13 @@ def validate_owner_answer(raw, issues):
 
 def resolve_current_opinion_owners(host, state, state_path, directory, config, trace, section, draft, check):
     """One consolidated ticket per original owner; never edit investment text here."""
-    questions_path = directory / 'current-opinion-questions.json'
+    prefix = 'current-research' if section is None else 'current-opinion'
+    claim_research_processing(host, state, state_path, prefix, check)
+    questions_path = directory / f'{prefix}-questions.json'
+    binding_path = directory / f'{prefix}-questions-input.json'
     if questions_path.exists():
+        if not binding_path.exists() or read_json(binding_path) != check:
+            raise ValueError('旧负责人问题单与本次阶段输入不符')
         questions = read_json(questions_path)
     else:
         questions = {'selection': [], 'monitor': []}
@@ -2246,10 +2408,11 @@ def resolve_current_opinion_owners(host, state, state_path, directory, config, t
                     raise ValueError('未知来源问题负责人')
                 questions[owner].extend(values)
         save_json(questions_path, questions)
-        save_json(directory / 'current-opinion-before-owners.json',
+        save_json(binding_path, check)
+        save_json(directory / f'{prefix}-before-owners.json',
                   {'trace': trace, 'section': section, 'draft': draft,
                    'handoff': read_json(directory / 'selection-handoff.json')})
-    before = read_json(directory / 'current-opinion-before-owners.json')
+    before = read_json(directory / f'{prefix}-before-owners.json')
     pending = host.PROJECT_ROOT / 'local_archive/forward_selection' / f'pending-trace-{identity(trace)[0]}.json'
     monitor = host.PROJECT_ROOT / 'local_archive/forward_monitor'
     answers = {}
@@ -2257,13 +2420,10 @@ def resolve_current_opinion_owners(host, state, state_path, directory, config, t
         issues = questions.get(owner, [])
         if not issues:
             continue
-        answer_path = directory / f'current-opinion-owner-{owner}-answer.json'
+        answer_path = directory / f'{prefix}-owner-{owner}-answer.json'
         cached_answer = read_json(answer_path) if answer_path.exists() else None
         if cached_answer is not None:
             validate_owner_answer(json.dumps(cached_answer), issues)
-            if owner == 'selection':
-                answers[owner] = cached_answer
-                continue
         owner_input = {'identity': identity(trace), 'owner': owner, 'issues': issues}
         if owner == 'monitor':
             latest = read_json(pending)
@@ -2308,8 +2468,8 @@ def resolve_current_opinion_owners(host, state, state_path, directory, config, t
                 else:
                     current['stocks'][code] = {'status': 'not_selected', 'meaning': '本日新推荐名单中没有此股。'}
             owner_input['current_selection'] = current
-        stage = f'current-opinion-owner-{owner}'
-        started = state.setdefault('current_opinion', {}).setdefault('owners_started', [])
+        stage = f'{prefix}-owner-{owner}'
+        started = state.setdefault('current_opinion', {}).setdefault(prefix + '_owners_started', [])
         delivered = None
         if owner in started:
             entry = stage_entry_evidence(state, stage)
@@ -2343,8 +2503,8 @@ def resolve_current_opinion_owners(host, state, state_path, directory, config, t
                '若本日新推荐已撤回，去掉本日正文中已经过时的“另一方仍建议参与”对照；保留自己的当前判断及其依据。'
                '撤回稿里的后续观察约定若不再作为有效建议对外提供，不需要与当前复盘的门槛机械统一。'
                '仍有真正有效的同目标相反建议时如实保留未决，不能为了通过而改成同一标签。')
-            + f'\n同股全部实际材料与原问题保存在{directory / "current-opinion-check.json"}和{questions_path}。'
-            f'原始快照与修正前全文在{directory / "current-opinion-before-owners.json"}。'
+            + f'\n同股全部实际材料与原问题保存在{directory / (prefix + '-check.json')}和{questions_path}。'
+            f'原始快照与修正前全文在{directory / (prefix + '-before-owners.json')}。'
             '最终只返回JSON：resolutions每项issue_id、ts_code、decision、evidence、author_instruction、changes_original_judgment；未解决的放unresolved每项issue_id/problem。'
             '指出是恢复已有解释、据原事实补充论证还是实质改变判断。逐项回应，不给开发者补写结论。\n'
             + json.dumps(owner_input, ensure_ascii=False))
@@ -2402,11 +2562,12 @@ def resolve_current_opinion_owners(host, state, state_path, directory, config, t
     save_json(directory / 'context-trace.json', revised)
     # Existing author loop receives the same source draft plus owners' answers; no developer rewrite.
     stocks = {s['ts_code'] for s in selected_result(revised)['selected_stocks']}
-    for code in allowed_codes & stocks:
+    for code in allowed_codes & stocks if section is not None else []:
         path = directory / 'articles' / code / 'current-opinion-amendment.json'
         import stock_ai
         save_json(path, {'prior_article': stock_ai._stock_segment(before['section'], code),
-                        'revision_issues': [i for values in questions.values() for i in values if i['ts_code'] == code],
+                        'revision_issues': [{'issue_id': r['issue_id'], 'instruction': r['author_instruction']}
+                            for value in answers.values() for r in value['resolutions'] if r.get('ts_code') == code],
                         'owner_answers': answers})
     return revised, revised_draft
 
@@ -2464,6 +2625,35 @@ def record_adopted_monitor(root, accepted, directory):
     validate_adopted_current_opinions(root, accepted, directory=directory, recorded=True)
 
 
+def prepare_text_amendments(directory, section, check):
+    """Only an explicit recommendation misstatement goes back to its existing author."""
+    import stock_ai
+    by_code = {}
+    for row in check['receipt']['checks']:
+        if row['result'] != 'unresolved':
+            continue
+        if row.get('issue_kind') != 'expression' or row['needs_owner'] != ['selection']:
+            raise ValueError('不是仅推荐正文误写，须由原研究职责处理')
+        by_code.setdefault(row['ts_code'], []).append({'quote': row['recommendation_quote'],
+            'instruction': row['basis'], 'blocking': True, 'issue_kind': 'expression'})
+    for code, issues in by_code.items():
+        folder = directory / 'articles' / code
+        save_json(folder / 'current-opinion-amendment.json',
+                  {'prior_article': stock_ai._stock_segment(section, code), 'revision_issues': issues})
+        ready = folder / 'cycle-ready.json'
+        if ready.exists(): retain_previous(ready)
+
+
+def prepare_current_research(host, state, state_path, directory, config, trace, draft):
+    check = check_current_opinions(host, state, state_path, directory, config, trace, None, draft)
+    if not check['receipt']['ready']:
+        trace, draft = resolve_current_opinion_owners(host, state, state_path, directory, config,
+                                                    trace, None, draft, check)
+        check = check_current_opinions(host, state, state_path, directory, config, trace, None, draft)
+    validate_current_opinion_receipt(check['receipt'], check['input'], require_ready=True)
+    return trace, draft
+
+
 def complete(host, state: dict, state_path: Path, directory: Path, config: dict,
              provider: str, research_prompt: str, *, fallback=True) -> tuple[Path, str]:
     root = host.PROJECT_ROOT
@@ -2474,12 +2664,17 @@ def complete(host, state: dict, state_path: Path, directory: Path, config: dict,
     research_reply = directory / 'research-reply.md'
     if file_io.enabled(config) and not frozen.exists() and not csv_has_formation(root, expected[0]):
         state.setdefault('current_opinion_contract', CURRENT_OPINION_CONTRACT)
+        if state.get('recommendation_stages') and state.get('reader_first_contract') != READER_FIRST_CONTRACT:
+            raise ValueError('旧任务运行/中断中，不自动跨reader-first合同恢复；保留旧版本等待处理')
+        state.setdefault('reader_first_contract', READER_FIRST_CONTRACT)
     current_required = state.get('current_opinion_contract') == CURRENT_OPINION_CONTRACT
     state['recommendation_pipeline'] = 'article-v1'
     host.save_state(state_path, state)
     directory.mkdir(parents=True, exist_ok=True)
     if accepted_path.exists():
         accepted = read_json(accepted_path)
+        if state.get('reader_first_contract'):
+            validate_reader_first_accepted(host, accepted)
         validate_accepted(host, accepted, expected)
         if current_required:
             validate_adopted_current_opinions(root, accepted, directory=directory)
@@ -2569,6 +2764,16 @@ def complete(host, state: dict, state_path: Path, directory: Path, config: dict,
             if not research_identity_intact():
                 raise  # 复盘期间共享研究被改变/消失，不是普通失败
             monitor_error = f'复盘：{type(error).__name__}: {error}'
+        if current_required:
+            if monitor_error:
+                raise RuntimeError('相关复盘尚未核实，保留研究，不进入推荐作者：' + monitor_error)
+            trace, draft_monitor = prepare_current_research(host, state, state_path, directory,
+                                                           config, trace, draft_monitor)
+            save_json(directory / 'context-trace.json', trace)
+            shared_trace = trace
+            result = selected_result(trace)
+            if not result['selected_stocks']:
+                section = '今天没有明确推荐的股票。' + result['empty_reason']
         # 选股研究 + 推荐作者/审稿：普通失败不再拖住上面已完成的复盘，反之亦然。
         authoring_error = None
         checkpoint_path = directory / 'accepted-draft-checkpoint.json'
@@ -2613,8 +2818,11 @@ def complete(host, state: dict, state_path: Path, directory: Path, config: dict,
         if current_required:
             check = check_current_opinions(host, state, state_path, directory, config, trace, section.strip(), draft_monitor)
             if not check['receipt']['ready']:
-                trace, draft_monitor = resolve_current_opinion_owners(host, state, state_path, directory, config,
-                                                                     trace, section.strip(), draft_monitor, check)
+                if all(c.get('issue_kind') == 'expression' for c in check['receipt']['checks'] if c['result'] == 'unresolved'):
+                    prepare_text_amendments(directory, section, check)
+                else:
+                    trace, draft_monitor = resolve_current_opinion_owners(host, state, state_path, directory, config,
+                                                                         trace, section.strip(), draft_monitor, check)
                 section, trace = _author_articles(host, state, state_path, directory, config, provider,
                                                   root, trace, expected, fallback=False, repair_limit=0)
                 check = check_current_opinions(host, state, state_path, directory, config, trace, section.strip(), draft_monitor)
@@ -2625,6 +2833,11 @@ def complete(host, state: dict, state_path: Path, directory: Path, config: dict,
         else:
             source_sections(root, expected[0], as_of=expected[2])
         accepted = {'trace': trace, 'section': section.strip(), 'research_issues': []}
+        if state.get('reader_first_contract'):
+            accepted.update(reader_first_contract=READER_FIRST_CONTRACT,
+                reader_first_trace_sha256=trace_input_sha256(trace),
+                article_reviews={stock['ts_code']: read_json(directory / 'articles' / stock['ts_code'] / 'cycle-ready.json')['result']
+                    for stock in selected_result(trace)['selected_stocks']})
         if current_required:
             validate_pending(root, trace, state.get('prepare', {}))
             accepted.update(current_opinion_contract=CURRENT_OPINION_CONTRACT, current_opinion_check=check,

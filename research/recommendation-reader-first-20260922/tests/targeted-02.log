@@ -1,0 +1,103 @@
+........................................................................ [ 43%]
+........................................................................ [ 87%]
+....................F                                                    [100%]
+=================================== FAILURES ===================================
+________________ test_resolved_handoff_reaches_save_and_resume _________________
+
+harness = namespace(calls=[('author', PosixPath('$TEST_TMP'))
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x108a73e30>
+
+    def test_resolved_handoff_reaches_save_and_resume(harness, monkeypatch):
+        import datetime as dt
+        from dataclasses import asdict
+        from test_normal_recommendation_files import daily_author
+        root,directory,trace,handoff,section,draft=_two_stock_owner_input(harness)
+        monkeypatch.setattr(stock_ai,'PROJECT_ROOT',root)
+        real_run_stage = p.run_stage
+        def continue_unfinished_stage(*args, **kwargs):
+            stage = kwargs.get('stage', args[4] if len(args) > 4 else None)
+            assert stage not in ('research', 'monitor'), 'Completed research/monitor must be reused'
+            return real_run_stage(*args, **kwargs)
+        monkeypatch.setattr(p, 'run_stage', continue_unfinished_stage)
+        file_model=stock_ai.run_agent;calls=[]
+        def model(route,prompt,output,events,timeout,config):
+            calls.append(prompt.name)
+            if config.get('_file_stage') or config.get('_reader_only'):
+                if 'author-' in prompt.name:harness.responses.append(daily_author)
+                return file_model(route,prompt,output,events,timeout,config)
+            text=prompt.read_text()
+            if any(x in prompt.name for x in ('current-opinion-check', 'current-opinion-recheck', 'current-research-check', 'current-research-recheck')):
+                packet=json.loads(text.split('实际输入（只核对下列对象）：\n')[1])['input']
+                result=receipt(packet,'unresolved' if 'current-research-check' in prompt.name else 'compatible')
+                for row,pair in zip(result['checks'],packet['pairs']):row['recommendation_quote']=pair['recommendation'].get('article') or pair['recommendation']['judgment']['selection_reason']
+                ev=evidence();ev['context_evidence']['tool_calls']=0
+            else:
+                owner='selection' if 'owner-selection' in prompt.name else 'monitor'
+                issues=p.read_json(directory/'current-research-questions.json')[owner]
+                if owner=='selection':_withdraw_synthetic_stock(root,directory,trace)
+                else:
+                    latest=json.loads(text.rsplit('\n',1)[-1])['current_selection']
+                    assert latest['removed_codes']==['000992.SZ']
+                    path=root/'local_archive/forward_monitor/pending-report-2026-08-25.json';report=p.read_json(path)
+                    for alert in report['alerts']:
+                        if alert['ts_code']=='000992.SZ':alert['episode_reviews'][0]['current_review']='合成乙当前仍等待，保留自己的事实与依据。'
+                    p.save_json(path,report)
+                result=_owner_resolution(issues);ev=evidence('xhigh' if owner=='selection' else 'high')
+            output.write_text(json.dumps(result,ensure_ascii=False));events.write_text('');stock_ai.EvidenceBox.record('astra',ev);return 0,''
+        monkeypatch.setattr(stock_ai,'run_agent',model)
+        def process(cmd,timeout,**kwargs):
+            from stock_analyzer.ops.forward_selection import LocalForwardData, record_daily_trace
+            assert cmd[1:4]==['-m','stock_analyzer.ops.forward_selection','record-trace']
+            # Substitute only process setup; run the actual record function with tmp_path data.
+            pending=Path(cmd[cmd.index('--trace-file')+1])
+            formation,action,cutoff=p.identity(p.read_json(pending))
+            archive=root/'local_archive/forward_selection'
+            result=record_daily_trace(p.read_json(pending), pending_path=pending,
+                archive_dir=archive, csv_path=archive/'forward-selection-log.csv',
+                data=LocalForwardData(root/'local_warehouse',root/'local_archive'),
+                clock=lambda:dt.datetime.fromisoformat(cutoff)+dt.timedelta(minutes=1),
+                sleep=lambda _:pytest.fail('Synthetic data readiness must not wait'),
+                formation_date=dt.date.fromisoformat(formation), action_date=dt.date.fromisoformat(action),
+                selection_as_of=dt.datetime.fromisoformat(cutoff))
+            return 0,json.dumps(asdict(result),ensure_ascii=False,default=str),''
+        monkeypatch.setattr(stock_ai,'run_bounded',process)
+        args=(stock_ai,harness.state,harness.state_path,directory,{'recommendation_authoring_profile':'astra-files-v1','_no_fallback':True},'astra','')
+>       final,_=p.complete(*args,fallback=False)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_same_day_consistency.py:520: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tools/recommendation_pipeline.py:2832: in complete
+    validate_accepted(host, accepted, expected)
+tools/recommendation_pipeline.py:1965: in validate_accepted
+    validate_reader_first_accepted(host, accepted)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+host = <module 'stock_ai' from '$CANDIDATE_ROOT/tools/stock_ai.py'>
+accepted = {'trace': {'trace_version': 'daily-research-trace-v4', 'formation_date': '2026-08-25', 'action_date': '2026-08-26', 'a...1.SZ）\n\n业务支持原意见，保留重要反证和原参与条件。', 'research_issues': [], 'reader_first_contract': 'recommendation-reader-first-v1', ...}
+
+    def validate_reader_first_accepted(host, accepted):
+        if accepted.get('reader_first_contract') != READER_FIRST_CONTRACT:
+            raise ValueError('旧采用稿缺少reader-first两阶段审查合同，不自动跨合同恢复')
+        if accepted.get('reader_first_trace_sha256') != trace_input_sha256(accepted['trace']):
+            raise ValueError('采用后研究条件变化，两阶段审查失效')
+        stocks = selected_result(accepted['trace'])['selected_stocks']
+        proofs = accepted.get('article_reviews') or {}
+        if set(proofs) != {s['ts_code'] for s in stocks}:
+            raise ValueError('采用稿缺逐股两阶段审查')
+        import stock_ai
+        for stock in stocks:
+            proof = proofs[stock['ts_code']]
+            article = stock_ai._stock_segment(accepted['section'], stock['ts_code'])
+            if (proof.get('reader_first_contract') != READER_FIRST_CONTRACT
+                    or proof.get('contracts') != file_io.CONTRACTS
+                    or not article or article.strip() != str(proof.get('article') or '').strip()
+                    or proof.get('status') != 'ready'
+                    or proof.get('reviewed_article_sha256') != file_io.digest(proof.get('article') or '')):
+>               raise ValueError('采用正文或合同改变，旧审查失效')
+E               ValueError: 采用正文或合同改变，旧审查失效
+
+tools/recommendation_pipeline.py:1949: ValueError
+=========================== short test summary info ============================
+FAILED tests/test_same_day_consistency.py::test_resolved_handoff_reaches_save_and_resume
+1 failed, 164 passed in 9.99s

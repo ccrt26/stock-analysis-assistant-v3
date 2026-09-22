@@ -1,0 +1,1 @@
+实际CLI为0.155.0。使用本机HTTP假端点捕获请求后立即返回400，不向任何模型供应商转发；业务模型请求0次。捕获的tools为空数组。关闭列表与stock_ai.READER_DISABLED_FEATURES一致，strict-config、ignore-user-config、project_doc_max_bytes=0及禁用Skill同时生效。检查实际developer输入没有skills、memory、app-context、user_instructions标记；不公开系统提示原文。CLI预期exit=1（假端点拒绝），这不是一次成功模型运行。正式reader还必须取得每次实际Astra xhigh及上下文证据。

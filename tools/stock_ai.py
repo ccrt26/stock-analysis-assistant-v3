@@ -1221,6 +1221,15 @@ def redact_codex_diagnostic(text: str) -> str:
     return re.sub(r", headers:.*$", ", headers: [REDACTED]", text, flags=re.MULTILINE)
 
 
+# These CLI capability switches were checked against an offline Responses request.
+# Reader calls never enable a file-stage shell, even though their inputs are archived as files.
+READER_DISABLED_FEATURES = (
+    'shell_tool', 'view_image', 'apps', 'plugins', 'remote_plugin', 'hooks',
+    'multi_agent', 'memories', 'browser_use', 'browser_use_external', 'computer_use',
+    'image_generation', 'artifact', 'code_mode', 'code_mode_host', 'in_app_browser',
+)
+
+
 def run_codex(prompt_path: Path, final_path: Path, jsonl_path: Path,
               timeout_seconds: int | None, config: dict) -> tuple[int, str]:
     env = child_env("astra", config)
@@ -1228,13 +1237,16 @@ def run_codex(prompt_path: Path, final_path: Path, jsonl_path: Path,
     env["RUST_LOG"] = "codex_api=info,codex_core::client=info"
     env["NO_COLOR"] = "1"
     files_profile = config.get("_file_stage") is True
-    isolation = tempfile.TemporaryDirectory(prefix="stock-text-") if config.get("_text_only") and not files_profile else None
+    reader_only = config.get("_reader_only") is True
+    if reader_only and files_profile:
+        raise ValueError("reader不可同时开启文件工具阶段")
+    isolation = tempfile.TemporaryDirectory(prefix="stock-text-") if config.get("_text_only") and not files_profile and not reader_only else None
     workdir = Path(isolation.name if isolation else config.get("_cwd") or PROJECT_ROOT).resolve()
     prompt = prompt_path.read_text(encoding="utf-8")
     args = codex_command(config) + ["exec", "--ignore-user-config", "--skip-git-repo-check",
         "-C", str(workdir), "-m", "gpt-6-astra", "--sandbox", "workspace-write", "--json",
         "--output-last-message", str(final_path.resolve())]
-    resume_sid = config.get('_resume_session_id') if files_profile else None
+    resume_sid = config.get('_resume_session_id') if files_profile or reader_only else None
     if resume_sid:
         args = codex_command(config) + ['exec', 'resume', '--ignore-user-config', '--skip-git-repo-check',
             '-m', 'gpt-6-astra', '--json', '--output-last-message', str(final_path.resolve())]
@@ -1248,13 +1260,13 @@ def run_codex(prompt_path: Path, final_path: Path, jsonl_path: Path,
     if files_profile:
         overrides = [v for v in overrides if not v.startswith('sandbox_workspace_write.network_access=')]
         overrides += ['sandbox_workspace_write.network_access=false']
-    if isolation or files_profile:
+    if isolation or files_profile or reader_only:
         overrides += ['web_search="disabled"', 'project_doc_max_bytes=0',
                       'features.shell_tool=true' if files_profile else 'features.shell_tool=false']
         home = Path(env.get("CODEX_HOME", str(Path.home() / ".codex")))
         skills = list((home / "skills").glob("**/SKILL.md"))
         skills += list((Path.home() / ".agents/skills").glob("**/SKILL.md"))
-        if files_profile:
+        if files_profile or reader_only:
             for ancestor in (workdir, *workdir.parents):
                 skills += list((ancestor / '.agents/skills').glob('**/SKILL.md'))
                 skills += list((ancestor / '.codex/skills').glob('**/SKILL.md'))
@@ -1263,6 +1275,12 @@ def run_codex(prompt_path: Path, final_path: Path, jsonl_path: Path,
             '{path=' + json.dumps(str(path)) + ',enabled=false}' for p in skills for path in (p, p.parent)) + "]")
     else:
         overrides += ['web_search="live"']
+    if reader_only:
+        overrides = [v for v in overrides if not any(v.startswith('features.' + f + '=') for f in READER_DISABLED_FEATURES)
+                     and not v.startswith('sandbox_workspace_write.network_access=')]
+        overrides += ['features.' + f + '=false' for f in READER_DISABLED_FEATURES]
+        overrides += ['sandbox_workspace_write.network_access=false']
+        args += ['--strict-config']
     for value in overrides:
         args += ["-c", value]
     if resume_sid:
@@ -1275,7 +1293,8 @@ def run_codex(prompt_path: Path, final_path: Path, jsonl_path: Path,
             'expected_model': 'gpt-6-astra',
             'expected_effort': 'xhigh' if files_profile or config.get('_astra_recommendation_profile') else 'high',
             'fallback': False if files_profile else not config.get('_no_fallback', False),
-            'network_access': not files_profile, 'web_search': 'disabled' if files_profile else 'live',
+            'network_access': not (files_profile or reader_only), 'web_search': 'disabled' if files_profile or reader_only else 'live',
+            'reader_only': reader_only, 'disabled_features': list(READER_DISABLED_FEATURES) if reader_only else None,
             'resumed_session_id': resume_sid}, ensure_ascii=False, indent=2))
     stderr_path = jsonl_path.with_suffix(".stderr.log")
     code, note = EXIT_FAIL, ""
@@ -1296,6 +1315,15 @@ def run_codex(prompt_path: Path, final_path: Path, jsonl_path: Path,
         stderr_path.write_text(diagnostic, encoding="utf-8")
         evidence = (codex_session_evidence(jsonl_path, diagnostic, prompt, workdir, files_profile=True)
                     if files_profile or config.get('recommendation_authoring_profile') == 'astra-files-v1' else codex_session_evidence(jsonl_path, diagnostic, prompt, workdir))
+        if reader_only:
+            scope = evidence.get('context_evidence') or {}
+            scope['reader_capabilities_disabled'] = bool(
+                '--strict-config' in args and all('features.' + f + '=false' in overrides for f in READER_DISABLED_FEATURES)
+                and 'web_search="disabled"' in overrides and 'project_doc_max_bytes=0' in overrides
+                and scope.get('isolated') is True and scope.get('tool_calls') == 0)
+            scope['reader_capability_configuration'] = {'disabled_features': list(READER_DISABLED_FEATURES),
+                'web_search': 'disabled', 'project_doc_max_bytes': 0, 'strict_config': True,
+                'basis': 'actual CLI argv plus isolated turn protocol; offline tool declarations captured in acceptance'}
         EvidenceBox.record("astra", evidence)
         stream = [json.loads(line) for line in jsonl_path.read_text().splitlines() if line.strip()]
         if files_profile or config.get('recommendation_authoring_profile') == 'astra-files-v1':
@@ -2738,6 +2766,10 @@ def assemble_saved_reply(state: dict, reply_target: Path, formation: str, action
             adopted = reply_target.parent / "recommendation/accepted-recommendation.json"
             if not adopted.exists():
                 raise ValueError("managed 任务缺少与正式研究对应的采用正文，不能从其他草稿重新构造")
+        if state.get('reader_first_contract'):
+            from recommendation_pipeline import validate_reader_first_accepted
+            adopted = reply_target.parent / 'recommendation/accepted-recommendation.json'
+            validate_reader_first_accepted(sys.modules[__name__], json.loads(adopted.read_text()))
         if state.get('current_opinion_contract') == 'same-day-current-opinion-v1':
             from recommendation_pipeline import validate_adopted_current_opinions
             adopted = reply_target.parent / 'recommendation/accepted-recommendation.json'

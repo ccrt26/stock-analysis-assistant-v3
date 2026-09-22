@@ -47,7 +47,7 @@ def original_packet():
 
 def bound_packet():
     packet = original_packet()
-    packet['authoring_note'] = {'text': '原选择、反证和条件，不补新理由。', 'identity': packet['identity'],
+    packet['authoring_note'] = {'meaning_contract': fio.CURRENT_MEANING, 'text': '原选择、反证和条件，不补新理由。', 'identity': packet['identity'],
         'source_refs': [{'pointer': '/judgment/selection_reason', 'quote': '原研究已解释接受风险的理由'}],
         'binding': {'kind': 'original_packet', 'packet_sha256': 'a' * 64,
                     'packet_content_sha256': fio.digest(fio.dumps(packet)), 'identity': packet['identity']}}
@@ -75,9 +75,11 @@ def harness(tmp_path, monkeypatch):
         index = json.loads((directory / 'input/input-index.json').read_text())
         role = index['role']
         calls.append((role, directory, config))
-        assert route == 'astra' and config['_file_stage'] and not config['_text_only']
+        assert route == 'astra'
+        assert config['_file_stage'] is (role != 'reader')
+        assert config['_text_only'] is (role == 'reader')
         assert directory.is_absolute() and directory == directory.resolve()
-        handler = responses.pop(0) if responses else None
+        handler = responses.pop(0) if responses and role != 'reader' else None
         output = directory / 'output'
         if handler:
             handler(role, directory)
@@ -86,6 +88,8 @@ def harness(tmp_path, monkeypatch):
         elif role == 'review':
             (output / 'review.md').write_text('实际整篇审稿意见。')
             (output / 'review-result.json').write_text(fio.dumps(review()))
+        elif role == 'reader':
+            pass
         elif role == 'handoff':
             (output / 'handoff.json').write_text(fio.dumps({'identity': IDENTITY,
                 'authoring_note': '原有理由、反证及条件的研究交接。',
@@ -93,9 +97,13 @@ def harness(tmp_path, monkeypatch):
                                  'quote': '原研究已解释接受风险的理由'}], 'research_issues': []}))
         else:
             raise AssertionError(role)
-        final.write_text('已读 input，交付 output。')
+        final.write_text(fio.dumps({**review(), 'review_text':'正文自身清楚。'}) if role == 'reader' else '已读 input，交付 output。')
         events.write_text('')
-        stock_ai.EvidenceBox.record('astra', evidence())
+        ev = evidence()
+        ev['session_id'] = f'synthetic-session-{len(calls)}'
+        if role == 'reader':
+            ev['context_evidence'].update(tool_calls=0, reader_capabilities_disabled=True)
+        stock_ai.EvidenceBox.record('astra', ev)
         return 0, ''
     monkeypatch.setattr(stock_ai, 'run_agent', model)
     return SimpleNamespace(calls=calls, responses=responses, root=tmp_path,
@@ -112,12 +120,12 @@ def cycle(h, **kwargs):
 def test_complete_shared_files_cycle_keeps_reviewed_bytes_and_cache(harness):
     result = cycle(harness)
     assert result['status'] == 'ready' and result['execution_verified']
-    assert [x[0] for x in harness.calls] == ['author', 'review']
+    assert [x[0] for x in harness.calls] == ['author', 'reader', 'review']
     reviewer = harness.calls[-1][1]
     assert (reviewer/'input/article.md').read_text() == result['article']
     assert pipeline.assemble_stock_section([(IDENTITY, result['article'])]) == result['article']
     assert cycle(harness)['article'] == result['article']
-    assert len(harness.calls) == 2
+    assert len(harness.calls) == 3
     assert 'risk_acceptance_missing' in original_packet()['gaps']
 
 @pytest.mark.parametrize('changed', ['note', 'guide', 'source', 'model', 'profile'])
@@ -180,11 +188,11 @@ def test_questions_before_review_and_one_clarification_one_revision(harness, dua
         if not dual: assert result['article'] is None
     else:
         assert result['status'] == 'ready'
-        assert [x[0] for x in harness.calls] == ['author', 'clarification', 'author', 'review']
+        assert [x[0] for x in harness.calls] == ['author', 'clarification', 'author', 'reader', 'review']
         assert 'rev1' in harness.calls[2][1].name
-        assert list(harness.state['article_cycle_counts'].values())[0] == {'expression': 1, 'clarification': 1}
+        assert list(harness.state['article_cycle_counts'].values())[0] == {'expression': 1, 'clarification': 1, 'author_requests':2}
         cycle(harness)
-        assert len(harness.calls) == 4
+        assert len(harness.calls) == 5
 
 @pytest.mark.parametrize('payload', ['', '{broken', '{"ready": "true"}'])
 def test_bad_review_never_passes_and_preserves_md(harness, payload):
@@ -197,7 +205,7 @@ def test_bad_review_never_passes_and_preserves_md(harness, payload):
     assert (harness.calls[-1][1]/'output/review.md').read_text() == '保留的真实意见'
     with pytest.raises(RuntimeError, match='终态'):
         cycle(harness)
-    assert len(harness.calls) == 2
+    assert len(harness.calls) == 3
 
 @pytest.mark.parametrize('effort,verified', [('high', True), ('xhigh', False)])
 def test_wrong_actual_execution_is_not_accepted_or_fallback(harness, monkeypatch, effort, verified):
@@ -234,8 +242,8 @@ def test_pending_issue_requires_actual_revised_quote(harness):
     harness.responses[:] = [None, first_review]
     result = cycle(harness)
     assert result['status'] == 'needs_revision'  # rereview omits mandatory issue_checks
-    assert [c[0] for c in harness.calls] == ['author','review','author','review']
-    assert (harness.calls[3][1]/'input/article.md').read_text() == result['article']
+    assert [c[0] for c in harness.calls] == ['author','reader','review','author','reader','review']
+    assert (harness.calls[5][1]/'input/article.md').read_text() == result['article']
 
 @pytest.mark.parametrize('bad', ['# 合成公司（000001.SZ）\n', '# 其他公司（000001.SZ）\n正文', '# 合成公司（000002.SZ）\n正文', 'output/article.md'])
 def test_invalid_article_identity_or_empty_body_rejected(bad):
@@ -258,7 +266,7 @@ def test_handoff_is_model_formed_and_packet_bound(harness):
         source_binding=binding, directory=harness.root/'handoff', state=harness.state,
         state_path=harness.state_path, config={'recommendation_authoring_profile': PROFILE})
     assert [c[0] for c in harness.calls] == ['handoff']
-    assert formed['authoring_note']['origin'] == 'research-handoff-files-v1'
+    assert formed['authoring_note']['origin'] == fio.CONTRACTS['handoff']
     assert 'trace_sha256' not in formed['authoring_note']['binding']
     fio.validate_note(formed)
     assert {k:v for k,v in formed.items() if k != 'authoring_note'} == packet
@@ -357,7 +365,7 @@ def test_replay_actual_shared_cycle_and_failure_draft(harness, monkeypatch):
 def test_replay_success_keeps_one_article_and_real_handoff(harness):
     args = prepare_replay_inputs(harness)
     assert trial.replay_files(**args) == 0
-    assert [x[0] for x in harness.calls] == ['handoff','author','review']
+    assert [x[0] for x in harness.calls] == ['handoff','author','reader','review']
     summary = json.loads((args['output_dir']/'summary.json').read_text())
     assert summary['status'] == 'ready' and not summary['adopted'] and summary['flow_ready']
     assert (args['output_dir']/'01_唯一流程稿.md').read_text() == (harness.calls[-1][1]/'input/article.md').read_text()
@@ -372,7 +380,7 @@ def test_production_author_entry_uses_same_files_cycle_without_freezing(harness)
     stock = pipeline.selected_result(trace)['selected_stocks'][0]
     handoff = {'formation_date':trace['formation_date'],'action_date':trace['action_date'],
         'as_of':trace['as_of'],'trace_sha256':pipeline.trace_input_sha256(trace),
-        'stocks':{stock['ts_code']:{'authoring_note':'原研究交接便笺；原句：'+stock['selection_reason'],
+        'stocks':{stock['ts_code']:{'authoring_note_contract':fio.CURRENT_MEANING, 'authoring_note':'原研究交接便笺；原句：'+stock['selection_reason'],
             'source_refs':[{'pointer':'/final_selection/selected_stocks/0/selection_reason','quote':stock['selection_reason']}]}}}
     pipeline.save_json(directory/'selection-handoff.json', handoff)
     # Empty synthetic warehouse is read only and produces explicit evidence gaps.
@@ -399,7 +407,7 @@ def test_production_author_entry_uses_same_files_cycle_without_freezing(harness)
     section, unchanged = pipeline._author_articles(stock_ai, harness.state, harness.state_path,
         directory, {'recommendation_authoring_profile': PROFILE}, 'glm', root, trace,
         pipeline.identity(trace), fallback=True, repair_limit=0)
-    assert [x[0] for x in harness.calls] == ['author','review']
+    assert [x[0] for x in harness.calls] == ['author','reader','review']
     assert section == (harness.calls[-1][1]/'input/article.md').read_text()
     assert unchanged == trace
     assert not list(root.glob('**/research-trace-*.json'))
@@ -428,9 +436,9 @@ def test_resume_only_existing_interrupted_session(harness, monkeypatch, terminal
         assert not harness.calls
     else:
         assert cycle(harness,config=config)['status'] == 'ready'
-        assert len(harness.calls) == 2
+        assert len(harness.calls) == 3
         assert (harness.calls[0][1]/'interrupted-output/partial.md').read_text() == '中断时的部分草稿'
-        assert list(harness.state['article_cycle_counts'].values())[0] == {'expression':0,'clarification':0}
+        assert list(harness.state['article_cycle_counts'].values())[0] == {'expression':0,'clarification':0,'author_requests':1}
 
 @pytest.mark.parametrize('name,content', [('article.md',''),('questions.json','[]')])
 def test_empty_author_delivery_not_consumed(tmp_path,name,content):
@@ -487,9 +495,9 @@ def test_handoff_issue_uses_existing_resolver_not_nonempty_or_keywords(harness, 
     args=prepare_replay_inputs(harness)
     code=trial.replay_files(**args)
     assert code == (trial.EXIT_NEEDS_RESEARCH if blocking else 0)
-    expected=['handoff','clarification'] if blocking else ['handoff','clarification','author','review']
+    expected=['handoff','clarification'] if blocking else ['handoff','clarification','author','reader','review']
     assert [x[0] for x in harness.calls] == expected
     state=json.loads((args['output_dir']/'state.json').read_text())
     assert list(state['article_cycle_counts'].values())[0]['clarification'] == 1
     if not blocking:
-        assert (harness.calls[2][1]/'input/packet.json').read_text() == (harness.calls[3][1]/'input/packet.json').read_text()
+        assert (harness.calls[2][1]/'input/packet.json').read_text() == (harness.calls[4][1]/'input/packet.json').read_text()

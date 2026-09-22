@@ -1,0 +1,80 @@
+..............F......................................................... [ 41%]
+........................................................................ [ 83%]
+.............................                                            [100%]
+=================================== FAILURES ===================================
+____________ test_T11_T15_T16_two_reviews_one_consolidated_revision ____________
+
+harness = namespace(calls=[('author', PosixPath('$TEST_TMP'))
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10d076510>
+
+    def test_T11_T15_T16_two_reviews_one_consolidated_revision(harness, monkeypatch):
+        original=stock_ai.run_agent
+        counts={'reader':0,'review':0,'author':0}
+        ids={}
+        def model(route,prompt,final,events,timeout,config):
+            folder=Path(config['_cwd']);role=json.loads((folder/'input/input-index.json').read_text())['role']
+            counts[role]+=1
+            result=original(route,prompt,final,events,timeout,config)
+            issue=dict(quote='业务事实支持原选择，也保留反证。', problem='合成待改问题',instruction='合并且保留条件',blocking=True,issue_kind='expression')
+            if role=='reader':
+                if counts[role]==1:
+                    data=review(False,readability=[issue])
+                else:
+                    pending=json.loads((folder/'input/pending-readability.json').read_text())
+                    assert len(pending)==1 and '研究条件写错' not in fio.dumps(pending)
+                    data=review(checks=[dict(issue_id=pending[0]['issue_id'],status='fixed',quote='业务事实支持原选择，也保留反证。',basis='重复已删除，现文保留含义')])
+                final.write_text(fio.dumps({**data,'review_text':'合成阅读意见'}))
+            if role=='review':
+                if counts[role]==1:
+                    data=review(False,fidelity=[{**issue,'problem':'研究条件写错','issue_kind':'condition'}])
+                else:
+                    pending=json.loads((folder/'input/pending-issue-checks.json').read_text())
+                    assert len(pending)==1
+                    data=review(checks=[dict(issue_id=pending[0]['issue_id'],status='fixed',quote='连续走弱且行业收缩才降低判断。',basis='条件恢复')])
+                (folder/'output/review-result.json').write_text(fio.dumps(data))
+            if role=='author' and counts[role]==2:
+                assert len(json.loads((folder/'input/revision-issues.json').read_text()))==2
+            return result
+        monkeypatch.setattr(stock_ai,'run_agent',model)
+>       result=cycle(harness)
+               ^^^^^^^^^^^^^^
+
+tests/test_recommendation_reader_first.py:124: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_recommendation_files_profile.py:118: in cycle
+    return pipeline.run_article_cycle(stock_ai, **args)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tools/recommendation_pipeline.py:1620: in run_article_cycle
+    review_raw = article_stage(
+tools/recommendation_pipeline.py:1037: in article_stage
+    return file_article_stage(host, state, state_path, directory, stage, config,
+tools/recommendation_pipeline.py:1181: in file_article_stage
+    raw = file_io.read_output(stage_dir, spec, parse_review_output, parse_clarification_output)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tools/recommendation_file_io.py:307: in read_output
+    review_validator(raw)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+text = '{\n  "fidelity_issues": [\n    {\n      "blocking": true,\n      "instruction": "合并且保留条件",\n      "issue_kind": "cond...[],\n  "readability_issues": [],\n  "reader_summary": "原选择、事实及改变条件。",\n  "ready": false,\n  "research_issues": []\n}\n'
+
+    def parse_review_output(text: str) -> dict:
+        value = json_object(text)
+        if not isinstance(value.get('reader_summary'), str) or not value['reader_summary'].strip():
+            raise ValueError('审稿必须先复述文章实际传达的判断')
+        result = {'reader_summary': value['reader_summary']}
+        fields = {'readability_issues': ('quote', 'problem', 'instruction'),
+                  'fidelity_issues': ('quote', 'problem', 'evidence', 'instruction'),
+                  'research_issues': ('ts_code', 'quote', 'problem', 'evidence', 'needed')}
+        for field, keys in fields.items():
+            items = value.get(field)
+            if not isinstance(items, list):
+                raise ValueError(f'审稿结果缺少{field}数组')
+            for item in items:
+                if not isinstance(item, dict) or not all(str(item.get(k) or '').strip() for k in keys):
+>                   raise ValueError(f'{field}条目不完整')
+E                   ValueError: fidelity_issues条目不完整
+
+tools/recommendation_pipeline.py:867: ValueError
+=========================== short test summary info ============================
+FAILED tests/test_recommendation_reader_first.py::test_T11_T15_T16_two_reviews_one_consolidated_revision
+1 failed, 172 passed in 10.13s
