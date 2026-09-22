@@ -1082,12 +1082,15 @@ def file_stage_identity(stage, spec, run_scope):
             'run_scope': run_scope}
 
 
-def file_cached_result(host, directory, stage, spec, run_scope, validate, *, resume=False):
+def file_cached_result(host, directory, stage, spec, run_scope, validate, *, resume=False, resume_quota=False):
     path = directory / f'{stage}-result.json'
     if not path.exists():
         return None
     saved = read_json(path)
     if saved.get('input_identity') != file_stage_identity(stage, spec, run_scope):
+        return None
+    if resume_quota and saved.get('quota_resume_events'):
+        file_resume_session(saved, quota=True)
         return None
     if saved.get('terminal_status') == 'interrupted' and resume:
         file_resume_session(saved)
@@ -1104,8 +1107,10 @@ def file_cached_result(host, directory, stage, spec, run_scope, validate, *, res
     return saved['raw']
 
 
-def file_resume_session(saved):
+def file_resume_session(saved, *, quota=False):
     """Only an explicitly interrupted, nonterminal existing CLI session can resume."""
+    if quota:
+        return quota_resume_session(saved)
     if saved.get('terminal_status') != 'interrupted':
         raise RuntimeError('只允许明确中断的阶段恢复')
     event_path = saved.get('interrupted_events')
@@ -1121,18 +1126,50 @@ def file_resume_session(saved):
     return sid
 
 
+def quota_resume_session(saved):
+    """Explicit recovery of an unfinished quota failure, never a delivered judgment."""
+    if saved.get('terminal_status') not in ('failed', 'execution_unverified'):
+        raise RuntimeError('额度恢复只接受原失败记录')
+    event_path = Path(saved.get('quota_resume_events') or '')
+    if not event_path.is_file():
+        raise RuntimeError('额度恢复缺少原始事件')
+    events = [json.loads(line) for line in event_path.read_text().splitlines() if line.strip()]
+    failures = [e for e in events if e.get('type') == 'turn.failed']
+    if (not failures or any('hit your usage limit' not in str(e.get('error', {})).lower() for e in failures)
+            or any(e.get('type') == 'turn.completed' for e in events)):
+        raise RuntimeError('额度恢复必须是未完成且仅额度失败的原会话')
+    sid = next((e.get('thread_id') for e in events if e.get('type') == 'thread.started'), None)
+    original = (saved.get('stage_execution') or {}).get('evidence') or {}
+    if not sid or sid != original.get('session_id') or original.get('context_evidence', {}).get('completed'):
+        raise RuntimeError('额度恢复原会话身份不一致或已完成')
+    directory = Path(saved['stage_directory'])
+    final = event_path.with_suffix('.md')
+    if ((final.is_file() and final.stat().st_size)
+            or any(p.is_file() and p.stat().st_size for p in (directory / 'output').rglob('*'))
+            or saved.get('raw')):
+        raise RuntimeError('已有可见交付，禁止通过额度恢复重采样')
+    file_io.verify_inputs(directory, saved['input_index'])
+    return sid
+
+
 def file_article_stage(host, state, state_path, directory, stage, config, spec, *, validate, run_scope):
     directory.mkdir(parents=True, exist_ok=True)
     resume = config.get('_resume_files') is True
-    cached = file_cached_result(host, directory, stage, spec, run_scope, validate, resume=resume)
+    resume_quota = config.get('_resume_quota_files') is True
+    cached = file_cached_result(host, directory, stage, spec, run_scope, validate, resume=resume, resume_quota=resume_quota)
     if cached is not None:
         return cached
     path = directory / f'{stage}-result.json'
     previous = read_json(path) if path.exists() else None
     interrupted = (previous and previous.get('input_identity') == file_stage_identity(stage, spec, run_scope)
                    and previous.get('terminal_status') == 'interrupted' and resume)
-    resume_sid = file_resume_session(previous) if interrupted else None
-    if interrupted:
+    quota_interrupted = (previous and previous.get('input_identity') == file_stage_identity(stage, spec, run_scope)
+                         and previous.get('quota_resume_events') and resume_quota)
+    resume_sid = (file_resume_session(previous, quota=True) if quota_interrupted
+                  else file_resume_session(previous) if interrupted else None)
+    if interrupted or quota_interrupted:
+        if quota_interrupted:
+            retain_previous(path)
         stage_dir = Path(previous['stage_directory'])
         manifest = previous['input_index']
         # Preserve partial files before continuing the same session in the same directory.
@@ -1180,6 +1217,7 @@ def file_article_stage(host, state, state_path, directory, stage, config, spec, 
             raise RuntimeError('文件会话实际执行证据未核实')
         raw = file_io.read_output(stage_dir, spec, parse_review_output, parse_clarification_output)
         validate(raw)
+        saved.pop('quota_resume_events', None)
         saved.update(raw=raw, route=route, terminal_status='completed')
         saved['output_hashes'] = {str(p.relative_to(stage_dir)): file_io.digest(p.read_bytes())
                                   for p in sorted((stage_dir / 'output').glob('*')) if p.is_file()}

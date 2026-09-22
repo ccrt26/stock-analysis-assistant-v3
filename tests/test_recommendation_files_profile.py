@@ -538,3 +538,37 @@ def test_codex_warning_item_is_not_a_tool_but_actual_and_unknown_activity_fail_c
         'article and reading guide only', cwd, files_profile=True)
     assert result['context_evidence']['tool_calls'] == expected_calls
     assert result['context_evidence']['input_present'] is True
+
+@pytest.mark.parametrize('block', ['none','no_opt_in','completed','non_quota','output','final','wrong_session','changed_input'])
+def test_quota_recovery_preserves_session_and_never_resamples_judgment(harness, monkeypatch, block):
+    spec=fio.stage_spec(CODE_ROOT,'review',bound_packet(),material(),article=BODY)
+    stage='review-quota'; d=harness.root/'review-files-1'; manifest=fio.write_stage(d,spec)
+    events=harness.root/'review-quota-astra.jsonl'
+    stream=[{'type':'thread.started','thread_id':'quota-session'},
+        {'type':'turn.failed','error':{'message':'You have hit your usage limit'}}]
+    if block=='completed':stream.append({'type':'turn.completed'})
+    if block=='non_quota':stream[-1]['error']['message']='invalid schema'
+    events.write_text(''.join(json.dumps(v)+'\n' for v in stream))
+    saved={'input_identity':pipeline.file_stage_identity(stage,spec,'quota-test'),
+        'stage_directory':str(d),'input_index':manifest,'terminal_status':'execution_unverified',
+        'quota_resume_events':str(events),'stage_execution':{'evidence':{'session_id':'quota-session','context_evidence':{'completed':False}}}}
+    if block=='wrong_session':saved['stage_execution']['evidence']['session_id']='other'
+    if block=='output':(d/'output/review-result.json').write_text(fio.dumps(review(False)))
+    if block=='final':events.with_suffix('.md').write_text('已经交付的原判断')
+    if block=='changed_input':(d/'input/article.md').write_text('偷换正文')
+    path=harness.root/f'{stage}-result.json';pipeline.save_json(path,saved)
+    actual=stock_ai.run_agent
+    def resume(*args):
+        assert args[-1]['_resume_session_id']=='quota-session'
+        return actual(*args)
+    monkeypatch.setattr(stock_ai,'run_agent',resume)
+    config={'_resume_quota_files':block!='no_opt_in'}
+    def run():return pipeline.file_article_stage(stock_ai,harness.state,harness.state_path,harness.root,stage,config,spec,validate=pipeline.parse_review_output,run_scope='quota-test')
+    if block=='none':
+        assert pipeline.parse_review_output(run())['ready'] is True
+        assert run() and len(harness.calls)==1
+        assert pipeline.read_json(harness.root/'review-quota-result-previous-1.json') == saved
+        assert 'quota_resume_events' not in pipeline.read_json(path)
+    else:
+        with pytest.raises((RuntimeError,ValueError)):run()
+        assert not harness.calls

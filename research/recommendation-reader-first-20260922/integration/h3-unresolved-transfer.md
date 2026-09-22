@@ -1,0 +1,7 @@
+# H3原交接中的研究未决项
+
+N-H3原交付指出：原说明说缺少同口径上年一季度，但packet存在2025Q1/H1归母净利润字段，且未说明不可比原因。整理阶段没有擅自造新结论；其真实research_issues导致准备试验失败，保留失败记录，不重新生成说明。
+
+已有日常 `_author_articles` 会把selection_handoff的research_issues交给现有research-clarification再决定能否成稿。`prepare_unresolved_daily_handoff.py`只把原交付及未决项原样接入隔离H3入口，无模型调用、无删问题、无修改原研究文字。H3仅执行一次正常有界处理；任何原研究trace变化使固定历史回放失效，由`check_daily_meaning.py`保留差异并标失败。若因此无法采用、装配或渲染，记录未完成，不手工制造成功页面。
+
+原准备失败和后续日常结果分别记录。不存在真实同股组合的H3不伪造同股分歧；该分支由真实D2历史问题及自动测试补证。

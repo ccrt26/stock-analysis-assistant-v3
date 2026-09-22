@@ -12,7 +12,7 @@ if a.daily:os.environ['STOCK_AI_PROJECT_ROOT']=str(CODE)
 import stock_ai as host
 import recommendation_pipeline as p
 import recommendation_file_io as fio
-CFG={'recommendation_authoring_profile':fio.PROFILE,'_no_fallback':True,'_resume_files':True}
+CFG={'recommendation_authoring_profile':fio.PROFILE,'_no_fallback':True,'_resume_files':True,'_resume_quota_files':True}
 PLAN=p.read_json(W/'experiment-plan.json');TESTED=PLAN['tested_code_sha'];ACTIVE=''
 
 def now():return datetime.datetime.now().astimezone().isoformat()
