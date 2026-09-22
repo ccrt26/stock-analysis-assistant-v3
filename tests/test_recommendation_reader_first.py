@@ -212,3 +212,48 @@ def test_T23_fixed_supply_replay_uses_same_cycle(harness):
     assert [c[0] for c in harness.calls]==['author','reader','review']
     assert (harness.calls[0][1]/'input/packet.json').read_bytes()==(harness.calls[2][1]/'input/packet.json').read_bytes()
     assert not (harness.calls[1][1]/'input/packet.json').exists()
+
+
+def test_T06_final_actual_prose_is_checked_after_research_pass(tmp_path,monkeypatch):
+    from test_same_day_consistency import receipt
+    trace,handoff,section,draft,_=inputs(tmp_path)
+    seen=[]
+    def model(route,prompt,final,events,timeout,config):
+        value=json.loads(prompt.read_text().split('实际输入（只核对下列对象）：\n')[1])['input']
+        before='article' not in value['pairs'][0]['recommendation']
+        seen.append('research' if before else 'prose')
+        result=receipt(value,'compatible' if before else 'unresolved')
+        for row,pair in zip(result['checks'],value['pairs']):
+            row['recommendation_quote']=pair['recommendation']['judgment']['selection_reason'] if before else pair['recommendation']['article']
+            if not before:row.update(issue_kind='expression',needs_owner=['selection'],basis='原研究是同时满足，作者误写任一；仅恢复原条件。')
+        final.write_text(fio.dumps(result));events.write_text('')
+        ev=evidence();ev['context_evidence']['tool_calls']=0;stock_ai.EvidenceBox.record('astra',ev)
+        return 0,''
+    monkeypatch.setattr(stock_ai,'run_agent',model)
+    state={};cfg={'recommendation_authoring_profile':fio.PROFILE}
+    first=pipeline.check_current_opinions(stock_ai,state,tmp_path/'state.json',tmp_path,cfg,trace,None,draft)
+    assert first['receipt']['ready']
+    last=pipeline.check_current_opinions(stock_ai,state,tmp_path/'state.json',tmp_path,cfg,trace,section+'\n任一条件满足即撤回。',draft)
+    assert not last['receipt']['ready'] and seen==['research','prose']
+    pipeline.prepare_text_amendments(tmp_path,section,last)
+    assert 'research_processing' not in state  # A prose error does not consume an owner pass.
+    code=last['input']['pairs'][0]['ts_code']
+    amendment=pipeline.read_json(tmp_path/'articles'/code/'current-opinion-amendment.json')
+    assert amendment['prior_article'] and len(amendment['revision_issues'])==1
+
+
+
+def test_T09_historical_cleanup_retains_note_only_authority(harness):
+    original=bound_packet()
+    original['authoring_note']['text']='只有原便笺明确：未证实新增订单；盘中触及不能当收盘确认。'
+    base=copy.deepcopy(original);base.pop('authoring_note')
+    formed,_=pipeline.generate_file_handoff(stock_ai,packet=original,materials=material(),
+        source_binding=dict(kind='original_packet',identity=original['identity'],packet_sha256=fio.digest(fio.dumps(original)),packet_content_sha256=fio.digest(fio.dumps(base))),
+        directory=harness.root/'handoff',state=harness.state,state_path=harness.state_path,
+        config={'recommendation_authoring_profile':fio.PROFILE})
+    fio.validate_note(formed)
+    author=fio.stage_spec(CODE_ROOT,'author',formed,material())
+    fidelity=fio.stage_spec(CODE_ROOT,'review',formed,material(),article=BODY)
+    assert original['authoring_note']['text'] not in fio.dumps(author)
+    authority=json.loads(fidelity['files']['authoritative-research.json'])
+    assert authority['authoring_note']['pre_cleanup_note']==original['authoring_note']

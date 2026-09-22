@@ -5,7 +5,7 @@ actual run_agent boundary, across this runner and its isolated daily subprocess.
 """
 import argparse,copy,datetime,fcntl,importlib.util,json,os,subprocess,sys,time,traceback
 from pathlib import Path
-args=argparse.ArgumentParser();args.add_argument('--work',type=Path,required=True);args.add_argument('--code',type=Path,required=True);args.add_argument('--daily',action='store_true');a=args.parse_args()
+args=argparse.ArgumentParser();args.add_argument('--work',type=Path,required=True);args.add_argument('--code',type=Path,required=True);args.add_argument('--daily',action='store_true');args.add_argument('--continue-interrupted',action='store_true');a=args.parse_args()
 W=a.work.resolve();CODE=a.code.resolve();S=W/'sources';W.mkdir(exist_ok=True,parents=True)
 sys.path[:0]=[str(CODE/'tools'),str(CODE/'src')]
 if a.daily:os.environ['STOCK_AI_PROJECT_ROOT']=str(CODE)
@@ -28,9 +28,11 @@ def ledger_update(row=None):
             data.append(row)
         else:data[row['number']-1]=row
         p.save_json(path,data);return copy.deepcopy(row)
+NO_NEW_MODEL=False
 actual_run=host.run_agent
 
 def counted(route,prompt,final,events,timeout,config):
+    if NO_NEW_MODEL:raise RuntimeError('Completed handoff cache may not resample')
     assert route=='astra' and config.get('_astra_recommendation_profile') is True, 'Every actual business stage must be Astra xhigh'
     row=ledger_update();row.update(request=str(prompt),output=str(final),events=str(events));ledger_update(row)
     t=time.monotonic();print(f"REQUEST {row['number']} {ACTIVE} {prompt.name}",flush=True)
@@ -54,9 +56,21 @@ def directory(trial):
     d=W/'sessions'/f's{index:03d}';d.mkdir(parents=True,exist_ok=True);return d
 
 def perform(trial,fn):
-    global ACTIVE
+    global ACTIVE,NO_NEW_MODEL
     ACTIVE=trial;out=W/'results'/f'{trial}.json'
-    if out.exists():raise RuntimeError('A terminal trial is never sampled again: '+trial)
+    if out.exists():
+        previous=p.read_json(out)
+        if previous['status']=='completed' and trial.startswith('N-'):
+            NO_NEW_MODEL=True
+            try:fn()  # Same persisted model delivery; only attach the original authority.
+            finally:NO_NEW_MODEL=False
+            previous['cache_reconstruction_sha']=TESTED
+            p.save_json(out,previous)
+            return previous
+        if previous['status']!='interrupted' or not a.continue_interrupted:
+            return previous  # Never resample a terminal trial.
+        history=W/'results/history'/f"{trial}-{previous['started_at'].replace(':','_')}.json"
+        history.parent.mkdir(parents=True,exist_ok=True);out.rename(history)
     started=now();t=time.monotonic();count=len(p.read_json(W/'requests.json')) if (W/'requests.json').exists() else 0
     run={'id':trial,'started_at':started,'tested_code_sha':TESTED,'status':'planned'}
     if (W/'provider-unavailable.json').exists():run.update(status='not_run',reason='Provider unavailable; no fallback or repeated sampling')
@@ -77,7 +91,7 @@ def handoff(case):
     original=packet(case);raw=fio.dumps(original);base=copy.deepcopy(original);base.pop('authoring_note',None)
     # Existing source-bound replay interface, no developer-written research explanation.
     binding=dict(kind='original_packet',identity=base['identity'],packet_sha256=fio.digest(raw),packet_content_sha256=fio.digest(fio.dumps(base)))
-    d=directory('N-'+case);state={}
+    d=directory('N-'+case);state=p.read_json(d/'state.json') if (d/'state.json').exists() else {}
     formed,issues=p.generate_file_handoff(host,packet=original,materials=material(case),source_binding=binding,directory=d,state=state,state_path=d/'state.json',config=CFG,run_scope=ACTIVE)
     if issues:raise ValueError('Historical meaning needs research resolution; no trial interpretation is invented: '+fio.dumps(issues))
     fio.validate_note(formed);p.save_json(W/'effective'/f'{case}.json',formed)

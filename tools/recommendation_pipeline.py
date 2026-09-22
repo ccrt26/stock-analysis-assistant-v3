@@ -1216,7 +1216,8 @@ def generate_file_handoff(host, *, packet, materials, source_binding, directory,
     result = copy.deepcopy(packet)
     result['authoring_note'] = {'text': delivery['authoring_note'], 'source_refs': delivery['source_refs'],
                                'binding': source_binding, 'identity': packet['identity'],
-                               'origin': file_io.CONTRACTS['handoff'], 'meaning_contract': file_io.CURRENT_MEANING}
+                               'origin': file_io.CONTRACTS['handoff'], 'meaning_contract': file_io.CURRENT_MEANING,
+                               'pre_cleanup_note': copy.deepcopy(packet.get('authoring_note'))}
     save_json(directory / 'packet-with-handoff.json', result)
     return result, delivery.get('research_issues', [])
 
