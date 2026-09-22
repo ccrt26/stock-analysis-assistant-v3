@@ -1,6 +1,6 @@
 """「当初为什么选它」日报原文提取的最小充分测试。
 
-锁定三件事：小节提取口径（标题行不含、至下一任意级标题止、同名小节必须唯一）、
+锁定三件事：小节提取口径（标题行不含、保留稿内子标题、至下一同级或更高层级标题止、同名小节必须唯一）、
 payload 的 statementFull 注入与 statement_missing 缺口标注、无日报时的回落语义。
 """
 
@@ -66,6 +66,14 @@ class TestExtractDailyStatement:
         )
         assert miss == ""
         assert statement == "**公司主要做什么**\n公司修船。\n\n**综合判断**\n仍选择它。"
+
+    def test_preserves_article_subheadings_and_sources(self, tmp_path: Path) -> None:
+        body = "开头。\n\n#### 为什么保留\n原理由。\n\n#### 改变条件\n原条件。[^1]\n\n[^1]: 原来源。"
+        _write_report(tmp_path, "2026-09-18",
+            "## 今天明确推荐的股票\n### 德冠新材（001378.SZ）\n" + body
+            + "\n### 另一公司（000001.SZ）\n不属于本股。\n")
+        statement, miss = extract_daily_statement(tmp_path, "2026-09-18", "德冠新材", "001378.SZ")
+        assert (statement, miss) == (body, "")
 
     def test_matches_code_with_exchange_suffix(self, tmp_path: Path) -> None:
         _write_report(

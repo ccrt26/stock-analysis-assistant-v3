@@ -1175,14 +1175,10 @@ def sw_industry_code_map(
 def load_d0_entries(
     selection_dir: Path, monitor_dir: Path, analysis_date: date
 ) -> tuple[list[dict[str, Any]], str]:
-    """当晚定稿的最新报告才追加 D0：读取配对选股轨迹的 selected 候选。
+    """读取本报告形成日已经冻结的新推荐，包括合法补存的历史报告。
 
-    返回 (D0 条目列表, 轨迹 action_date)。历史日期（非最新候选报告）永不追加
-    D0，保持历史页面语义不变；轨迹缺失 / 格式不符时返回空。
+    返回 (D0 条目列表, 轨迹 action_date)，不借用其他形成日的新推荐。
     """
-    archived = archived_dates(monitor_dir)
-    if not archived or max(archived) != analysis_date:
-        return [], ""
     trace_path = selection_dir / f"research-trace-{analysis_date.isoformat()}.json"
     if not trace_path.is_file():
         return [], ""
@@ -1241,7 +1237,7 @@ def extract_daily_statement(
     "no_report" 表示形成日无日报存档；"not_found" / "ambiguous" 表示
     小节未找到或不唯一（同日同名小节多于一个时宁缺毋滥，不猜第一个）。
     合并报告限定在新推荐分区；独立旧日报兼容原口径。
-    正文不含小节标题行，取标题行之后到下一个任意级 markdown 标题为止。
+    正文不含股票标题行；保留稿内更深层的小标题，至下一同级或更高层级标题止。
     """
     formed_on = str(formed_on or "").strip()
     name = str(name or "").strip()
@@ -1295,9 +1291,11 @@ def extract_statement_text(text: str, name: str, ts_code: str) -> tuple[str, str
     if len(hits) > 1:
         return "", "ambiguous"
     start = hits[0] + 1
+    stock_level = len(re.match(r"^(#{2,6})\s+", lines[hits[0]]).group(1))
     end = len(lines)
     for index in range(start, len(lines)):
-        if lines[index].lstrip().startswith("#"):
+        heading = re.match(r"^(#{1,6})[ \t]+", lines[index])
+        if heading and len(heading.group(1)) <= stock_level:
             end = index
             break
     body = "\n".join(lines[start:end]).strip()
@@ -1370,6 +1368,38 @@ def _statement_missing_issue(
     }
 
 
+def include_backfilled_formal_episodes(selection_dir, analysis_date, as_of, episodes):
+    """只读汇入在较新快照之后补存的正式身份，不生成后续复盘判断。"""
+    from stock_analyzer.ops.forward_monitor import _trace_episodes
+    from stock_analyzer.ops.forward_selection import DailyResearchTraceV4
+
+    cutoff = _parse_as_of(as_of)
+    for path in sorted(selection_dir.glob("research-trace-*.json")):
+        try:
+            formed = date.fromisoformat(path.stem.removeprefix("research-trace-"))
+        except ValueError:
+            continue
+        if formed >= analysis_date:
+            continue
+        trace = json.loads(path.read_text(encoding="utf-8"))
+        if trace.get("trace_version") != "daily-research-trace-v4":
+            continue
+        validated = DailyResearchTraceV4.model_validate(trace)
+        if (validated.formation_date != formed or validated.action_date > analysis_date
+                or cutoff is None or validated.as_of > cutoff):
+            continue
+        if not (validated.research_result.research_completed
+                and validated.research_result.point_in_time_evidence_verified):
+            continue
+        for episode in _trace_episodes(trace, label="formal", source_type="formal"):
+            if (episode["role"] != "selected"
+                    or episode["selection_output_class"] != "confirmed_active"
+                    or episode["episode_id"] in episodes):
+                continue
+            episode["display_backfilled"] = True
+            episodes[episode["episode_id"]] = episode
+
+
 def build_payload(
     root: Path,
     monitor_dir: Path,
@@ -1388,6 +1418,7 @@ def build_payload(
         for item in snapshot.get("episodes", [])
         if isinstance(item, dict)
     }
+    include_backfilled_formal_episodes(selection_dir, analysis_date, as_of, episodes)
     # 事件等待型条件记录（conditional_event）按复盘合同不进日报与台账、永不复盘，
     # 网页与日报同口径只展示正式推荐（含次日待首日）；记录本身仍留在 snapshot/trace。
     selected = [
@@ -1518,6 +1549,11 @@ def build_payload(
             (i for i, day in enumerate(sessions) if day.isoformat() == action_iso), None
         )
         data_issues: list[dict[str, Any]] = []
+        if episode.get("display_backfilled"):
+            data_issues.append({"code": "backfilled_recommendation", "recordKey": f"{ts_code}:{action_iso}",
+                                "reviewDate": analysis_date.isoformat(),
+                                "message": f"这次推荐已正式归档；尚无{analysis_date.isoformat()}的正式复盘或当前参与意见。",
+                                "origin": "formal_selection_archive"})
         if rec_index is None:
             data_issues.append(
                 {

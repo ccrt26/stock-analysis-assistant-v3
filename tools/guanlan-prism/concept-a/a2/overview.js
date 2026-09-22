@@ -190,6 +190,8 @@ function statementParagraphs(value){
   const marker=line.match(/^\s{0,3}(`{3,}|~{3,})/);
   if(codeFence){if(marker&&marker[1][0]===codeFence[0]&&marker[1].length>=codeFence.length){html+=`<pre class="original-copy"><code>${esc(code.join('\n'))}</code></pre>`;code=[];codeFence=null}else code.push(line);continue}
   if(marker){flush();codeFence=marker[1];continue}
+  const heading=line.match(/^(#{1,6})[ \t]+(.+)$/);
+  if(heading){flush();const level=Math.max(3,heading[1].length);html+=`<h${level}>${statementInline(heading[2],context)}</h${level}>`;continue}
   if(!line.trim())flush();else paragraph.push(line);
  }
  flush();if(codeFence)html+=`<pre class="original-copy"><code>${esc(code.join('\n'))}</code></pre>`;

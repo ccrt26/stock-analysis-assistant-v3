@@ -350,8 +350,8 @@ def test_conditional_event_leads_never_displayed(tmp_path: Path) -> None:
     assert payload["stocks"] == []
 
 
-def test_d0_entries_from_latest_trace_only(tmp_path: Path) -> None:
-    """D0：最新报告页面把次日生效的新推荐以"待定价"列出；历史页面永不追加。"""
+def test_d0_entries_from_same_formation_trace(tmp_path: Path) -> None:
+    """D0：本形成日冻结推荐在最新页及历史页都显示，不借用其他形成日。"""
     selection_dir = tmp_path / "local_archive" / "forward_selection"
     selection_dir.mkdir(parents=True)
     old_selection_dir = renderer.SELECTION_DIR
@@ -388,7 +388,7 @@ def test_d0_entries_from_latest_trace_only(tmp_path: Path) -> None:
         (selection_dir / "research-trace-2026-09-02.json").write_text(
             json.dumps(trace, ensure_ascii=False), encoding="utf-8"
         )
-        # 非最新的 09-01 也有配对轨迹：历史页面不得追加 D0
+        # 非最新的 09-01 有自己的配对轨迹：仍应显示本日新推荐。
         old_trace = dict(trace, formation_date="2026-09-01", action_date="2026-09-02")
         (selection_dir / "research-trace-2026-09-01.json").write_text(
             json.dumps(old_trace, ensure_ascii=False), encoding="utf-8"
@@ -426,7 +426,7 @@ def test_d0_entries_from_latest_trace_only(tmp_path: Path) -> None:
         assert d0["reasonRisk"] == "涨幅集中在最近三日。"
         assert d0["recIndex"] == len(payload["dates"]) - 1
         assert any(event[2] == "正式推荐" for event in d0["events"])
-        # 历史日期不追加 D0
+        # 历史日期保留本日轨迹中的推荐及原行动日。
         old_payload = build_payload(
             tmp_path,
             tmp_path,
@@ -434,8 +434,9 @@ def test_d0_entries_from_latest_trace_only(tmp_path: Path) -> None:
             _report([]),
             _snapshot([_episode("e-old", "600009.SH", "旧股")]),
         )
-        assert all(not s.get("d0") for s in old_payload["stocks"])
-        assert "600003.SH" not in [s["code"] for s in old_payload["stocks"]]
+        old_d0 = next(s for s in old_payload["stocks"] if s["code"] == "600003.SH")
+        assert old_d0["d0"] is True
+        assert old_d0["recDate"] == "2026-09-02" and old_d0["formedOn"] == "2026-09-01"
     finally:
         renderer.SELECTION_DIR = old_selection_dir
 
