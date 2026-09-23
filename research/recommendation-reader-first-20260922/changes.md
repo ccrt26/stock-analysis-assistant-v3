@@ -15,7 +15,7 @@
 | T01 | same_day_consistency::test_complete_unresolved_preserves_both_drafts_and_never_records；reader_first::test_T01… |
 | T02–T03 | same_day_consistency中的空交集、解释差异、多episode核对测试 |
 | T04–T05 | same_day_consistency负责人撤回/不改历史与D20、实际保存及恢复测试；current_opportunity_review、d20_web_readiness |
-| T06 | same_day_consistency实际文章引句与未决验证；最终文字阶段仍独立执行 |
+| T06 | reader_first::test_T06_final_actual_prose_is_checked_after_research_pass；实际正文条件写反走文字纠正，不滥用负责人预算 |
 | T07–T10 | reader_first相应编号；files_profile实际CLI配置测试；离线能力捕获 |
 | T11–T16 | reader_first集中双审修订、两种失败合并、ready冲突、合法删句核销 |
 | T17–T18 | reader_first稳定预算及事实中断仅恢复缺失阶段 |
@@ -27,4 +27,32 @@
 | T25 | files_profile规范化与装配保留；真实H3日常渲染另验 |
 | T26–T27 | reader_first缺日评/条件/时点/正文拒绝；旧任务合同、same_day旧accepted拒绝 |
 
-测试用假模型只证明机制，不证明真人稿质量。原始命令与所有失败日志在tests/。全量一次1791 passed、3 failed、1 skipped，三个失败在未改动baseline复现。相关最终174 passed。不修改无关WEB/公司介绍测试凑全绿。
+测试用假模型只证明机制，不证明真人稿质量。原始命令与所有失败日志在tests/。最终066129e代码全量1805 passed、3 failed、1 skipped，三个失败已在未改动baseline复现。最终规定相关188 passed。不修改无关WEB/公司介绍测试凑全绿。
+
+## 实测发现的确定性接线修正
+
+原便笺只存在于note中的含义通过`pre_cleanup_note`保留给事实核对，作者仍只读当前note。第一次真实reader还发现CLI禁用能力提示被误计为工具；最终解析器忽略error消息本身，保留实际调用及未知事件的拦截。两次修正均未改写作Prompt/研究结论，原失败和中断见integration，两次恢复计入同一64次上限。原阅读ready=false未被改成通过。
+
+额度恢复是显式关闭默认的执行机制，不改模型评价条件；完整失败与同会话恢复见[integration/quota-recovery.md](integration/quota-recovery.md)。仅符合严格条件且未交付判断的原事实核对恢复，已完成稿和审稿不重抽。
+
+## 改动文件归属
+
+| 实际文件 | 归属及用途 |
+|---|---|
+| [tools/recommendation_pipeline.py](../../tools/recommendation_pipeline.py) | 一/二/三：前后两种核对、当前材料、双审顺序、合并与有限修订、真实采用核验；另有显式额度恢复 |
+| [tools/recommendation_file_io.py](../../tools/recommendation_file_io.py) | 二/三：作者投影、权威研究核对材料、reader独立输入合同 |
+| [tools/stock_ai.py](../../tools/stock_ai.py) | 三/衔接：reader能力禁用、实际执行证据、旧采用稿不能绕过新合同 |
+| [ops/forward-selection-prompt.md](../../ops/forward-selection-prompt.md) | 一：明确先独立研究与复盘、处理分歧再成稿的次序 |
+| [ops/forward-monitor-prompt.md](../../ops/forward-monitor-prompt.md) | 一：说明当前研究核对在成稿前，历史评价及D20不变 |
+| [ops/recommendation-current-opinion-check.md](../../ops/recommendation-current-opinion-check.md) | 一：区分原研究含义与实际成稿检查 |
+| [ops/recommendation-handoff-prompt.md](../../ops/recommendation-handoff-prompt.md) | 二：要求唯一当前完整含义、保留必要反证/未知/条件及来源 |
+| [ops/recommendation-author-files-prompt.md](../../ops/recommendation-author-files-prompt.md) | 二：当前说明与有限集中修订的供料职责 |
+| [ops/recommendation-reader-check-prompt.md](../../ops/recommendation-reader-check-prompt.md) | 三：仅依据文章和阅读标准形成独立意见 |
+| [ops/recommendation-review-files-prompt.md](../../ops/recommendation-review-files-prompt.md) | 三：后续事实与含义核对，不替代先行阅读判断 |
+| [tests/test_recommendation_reader_first.py](../../tests/test_recommendation_reader_first.py) | 三机制及衔接主要新增测试，见T01—T27映射 |
+| [tests/test_recommendation_files_profile.py](../../tests/test_recommendation_files_profile.py) | 文件阶段、CLI隔离、供料绑定与不重抽恢复验证 |
+| [tests/test_normal_recommendation_files.py](../../tests/test_normal_recommendation_files.py) | 真实日常作者入口接线与缓存验证 |
+| [tests/test_same_day_consistency.py](../../tests/test_same_day_consistency.py) | 一：前置分歧、负责人处理与最终正文检查验证 |
+| [scripts/](scripts/)及本复核目录 | 衔接验证、固定试验编排、脱敏公开副本；不复制业务写作/审稿逻辑 |
+
+没有修改五个选股Skill、正式复盘方法、第二十日结案、采集时间、供应商默认偏好或WEB布局。实验代码内指定Astra xhigh只是本执行单要求，不切换生产默认路由。

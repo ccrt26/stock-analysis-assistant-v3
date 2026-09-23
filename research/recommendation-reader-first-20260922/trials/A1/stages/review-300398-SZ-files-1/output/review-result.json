@@ -1,0 +1,34 @@
+{
+  "reader_summary": "飞凯材料（300398.SZ）仍为2026年9月21日第一顺位、偏积极的条件性参与选择，报价限定36.97—38.35元且含两端。行业广度、个股相对优势及多日收高支持选择，经营数据仅作业务基础；急修复中断、39.20—39.23元附近受阻及三季度订单和毛利未知限制判断。20个交易日上涨20%、对应46.02元只是观察目标。现文主要事实、窗口、信号时点和参与后逻辑与权威研究一致，但把取消参与条件中的“新的重大不利变化”收窄为“新的重大不利公告”，须由同一作者修订后再核对。",
+  "readability_issues": [],
+  "fidelity_issues": [
+    {
+      "quote": "若出现停牌、无可靠报价、单边封板等无法正常成交的情形，或新的重大不利公告，则直接取消当次参与，重新研究。",
+      "problem": "input/article.md第29行只明确新的重大不利公告触发取消，遗漏同版研究规定的新的重大不利变化这一更广条件。第5行又把新参与限定为下文所列撤回情形未出现，不能补足这一遗漏。已经出现重大不利变化但尚未以公告形式呈现的情形，未被现文明确纳入取消当次参与、重新研究的范围。正文虽与conditions/text的公告措辞一致，仍须同时保留conditions/tradability及权威交接明确转交的补充范围。",
+      "instruction": "交同一作者集中修订取消参与条款，完整保留新的重大不利变化，不将范围限于正式公告；保持该条件与停牌、无可靠报价、无法正常成交等情形之间的OR关系，不添加价格跌破或行业转弱的AND门槛。不能通过删除必要取消规则核销。无需改变原选股顺位、报价阈值或其他研究判断。",
+      "evidence": [
+        {
+          "source": "input/packet.json#/conditions/tradability",
+          "quote": "停牌、无可靠报价、单边封板或新的重大不利变化均取消当次参与。"
+        },
+        {
+          "source": "input/authoritative-research.json#/conditions/tradability",
+          "quote": "停牌、无可靠报价、单边封板或新的重大不利变化均取消当次参与。"
+        },
+        {
+          "source": "input/authoritative-research.json#/authoring_note/text",
+          "quote": "可交易性同样保留：停牌、无可靠报价、单边封板、无法正常成交或新的重大不利变化均取消当次参与；参考价不保证成交。"
+        },
+        {
+          "source": "input/authoritative-research.json#/authoring_note/source_refs/18/quote",
+          "quote": "停牌、无可靠报价、单边封板或新的重大不利变化均取消当次参与。"
+        }
+      ],
+      "issue_kind": "condition",
+      "blocking": true
+    }
+  ],
+  "research_issues": [],
+  "issue_checks": [],
+  "ready": false
+}

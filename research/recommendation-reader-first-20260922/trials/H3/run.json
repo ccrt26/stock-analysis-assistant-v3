@@ -1,0 +1,10 @@
+{
+  "id": "H3",
+  "started_at": "2026-09-23T08:34:14.869646+08:00",
+  "tested_code_sha": "066129e1641c4d1fc55fbb3568527a6f88e35525",
+  "status": "failed",
+  "error": "Traceback (most recent call last):\n  File \"$CANDIDATE_ROOT/research/recommendation-reader-first-20260922/scripts/run_trials.py\", line 79, in perform\n    result=fn();run.update(status='completed',result=result)\n           ^^^^\n  File \"$CANDIDATE_ROOT/research/recommendation-reader-first-20260922/scripts/run_trials.py\", line 144, in daily\n    final,provider=p.complete(host,state,state_path,d,CFG,'astra','Historical upstream must already exist; no rescan permitted.',fallback=False)\n                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"$EXPERIMENT_ROOT/daily-root/tools/recommendation_pipeline.py\", line 2852, in complete\n    raise RuntimeError('本轮部分完成，保留成功一路产物，沿原身份恢复补缺失：' + detail)\nRuntimeError: 本轮部分完成，保留成功一路产物，沿原身份恢复补缺失：推荐：ValueError: 同一问题同时给出已解决与未决：H-300658.SZ01\n",
+  "finished_at": "2026-09-23T08:37:53.071778+08:00",
+  "seconds": 218.2,
+  "requests": 1
+}

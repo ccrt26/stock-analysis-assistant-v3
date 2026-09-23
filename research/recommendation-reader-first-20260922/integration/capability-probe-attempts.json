@@ -1,0 +1,22 @@
+[
+  {
+    "timestamp": "2026-09-22T11:10:27.666Z",
+    "reported_lines": [
+      "exit 1 stderr Reading additional input from stdin...",
+      "captured 1",
+      "tool names []",
+      "input markers []"
+    ],
+    "scope": "Public stdout from offline localhost capability probes; no model forwarding"
+  },
+  {
+    "timestamp": "2026-09-22T12:53:24.590Z",
+    "reported_lines": [
+      "exit 1 stderr Reading additional input from stdin...",
+      "captured 1",
+      "tool names []",
+      "input markers []"
+    ],
+    "scope": "Public stdout from offline localhost capability probes; no model forwarding"
+  }
+]

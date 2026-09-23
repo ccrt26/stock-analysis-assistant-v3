@@ -1,0 +1,30 @@
+{
+  "authorized_by": "User follow-up: continue the task and reconnect quota interruption",
+  "prepared_at": "2026-09-23T06:53:24.218331+08:00",
+  "usage_check": "ordinaryUsageAllowed=true; no reset credit consumed",
+  "original_request": 24,
+  "same_session_id": "01a0c952-061c-7f92-a39e-738ddb5c8969",
+  "next_request": 25,
+  "reopened_trials": [
+    "B2",
+    "B3",
+    "B4",
+    "C1",
+    "C2",
+    "C3",
+    "C4",
+    "H1",
+    "H2",
+    "H3"
+  ],
+  "retained_completed_stages": [
+    "B2 author",
+    "B2 reader"
+  ],
+  "original_stage_status": "execution_unverified",
+  "original_failure_preserved": true,
+  "output_directory_was_empty": true,
+  "ledger_reset": false,
+  "prompt_sample_research_changes": false,
+  "budget": 64
+}

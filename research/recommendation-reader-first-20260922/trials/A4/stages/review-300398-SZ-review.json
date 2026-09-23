@@ -1,0 +1,46 @@
+{
+  "reader_summary": "文章对飞凯材料持有条件的积极意见，将其列为本次第一顺位。9月21日仅在正常成交、可靠报价处于36.97—38.35元且其他条件满足时考虑参与，不追高，也不自动延用到之后交易日。主要支持是行业普涨、飞凯持续跑赢同行，以及最大上涨日后仍继续收高；盈利和经营现金流提供经营背景。作者接受近期急涨后在39.20—39.23元附近受阻回吐的风险，但不认为突破已经确定。后续根据价格、相对表现、行业支持和量价变化调整判断；46.02元只是20个交易日的观察参照。",
+  "readability_issues": [],
+  "fidelity_issues": [
+    {
+      "quote": "停牌、无可靠报价、单边封板等无法正常成交的情况，或新的重大不利公告，直接取消当次参与，重新研究。",
+      "problem": "必要撤回条件的对象被缩窄。正文只列“新的重大不利公告”，但作者实际使用的完整packet与同版权威研究还明确规定“新的重大不利变化”均取消当次参与。重大不利公告属于其中情形，不能替代更广的变化条件；现文会漏掉公告以外的重大不利变化。虽然/conditions/text使用“公告”，也必须合并核对/conditions/tradability所保留的完整限制。",
+      "instruction": "交同一作者集中修订第30行的取消条件，使其涵盖原研究规定的“新的重大不利变化”，可保留重大不利公告作为其中情形。保留其作为独立OR条件直接取消当次参与并重新研究的作用，不附加跌破价位、相对行业转弱或等待收盘的要求；无需改变选股判断或新增阈值。",
+      "evidence": "input/packet.json#/conditions/tradability与input/authoritative-research.json#/conditions/tradability逐字相同：“停牌、无可靠报价、单边封板或新的重大不利变化均取消当次参与。”原包#/authoring_note/source_refs/17/quote也保留此句。权威研究#/authoring_note/text的可交易性段再次明确：“停牌、无可靠报价、单边封板、无法正常成交或新的重大不利变化均取消当次参与”。input/article.md:30仅写“新的重大不利公告”，全文无其他覆盖“重大不利变化”的取消条款。",
+      "issue_kind": "condition",
+      "blocking": true,
+      "review_origin": "fidelity",
+      "issue_id": "R00F01"
+    }
+  ],
+  "research_issues": [],
+  "issue_checks": [],
+  "ready": false,
+  "reader": {
+    "reader_summary": "文章对飞凯材料持有条件的积极意见，将其列为本次第一顺位。9月21日仅在正常成交、可靠报价处于36.97—38.35元且其他条件满足时考虑参与，不追高，也不自动延用到之后交易日。主要支持是行业普涨、飞凯持续跑赢同行，以及最大上涨日后仍继续收高；盈利和经营现金流提供经营背景。作者接受近期急涨后在39.20—39.23元附近受阻回吐的风险，但不认为突破已经确定。后续根据价格、相对表现、行业支持和量价变化调整判断；46.02元只是20个交易日的观察参照。",
+    "readability_issues": [],
+    "fidelity_issues": [],
+    "research_issues": [],
+    "issue_checks": [],
+    "ready": true,
+    "ready_contradicted_by_issues": false
+  },
+  "fidelity": {
+    "reader_summary": "飞凯材料仍是9月21日第一顺位、偏积极的条件性参与选择，依据行业广度、自身相对优势和连续普通日收高；仅在36.97—38.35元含两端的原范围考虑。正文保留了主要反证、重要未知、参与后价格与行业条件、收盘信号可用时点及观察目标非承诺的限制，但将“新的重大不利变化”取消条件缩窄为“新的重大不利公告”。本阶段不通过，交同一作者修订该必要条件。",
+    "readability_issues": [],
+    "fidelity_issues": [
+      {
+        "quote": "停牌、无可靠报价、单边封板等无法正常成交的情况，或新的重大不利公告，直接取消当次参与，重新研究。",
+        "problem": "必要撤回条件的对象被缩窄。正文只列“新的重大不利公告”，但作者实际使用的完整packet与同版权威研究还明确规定“新的重大不利变化”均取消当次参与。重大不利公告属于其中情形，不能替代更广的变化条件；现文会漏掉公告以外的重大不利变化。虽然/conditions/text使用“公告”，也必须合并核对/conditions/tradability所保留的完整限制。",
+        "instruction": "交同一作者集中修订第30行的取消条件，使其涵盖原研究规定的“新的重大不利变化”，可保留重大不利公告作为其中情形。保留其作为独立OR条件直接取消当次参与并重新研究的作用，不附加跌破价位、相对行业转弱或等待收盘的要求；无需改变选股判断或新增阈值。",
+        "evidence": "input/packet.json#/conditions/tradability与input/authoritative-research.json#/conditions/tradability逐字相同：“停牌、无可靠报价、单边封板或新的重大不利变化均取消当次参与。”原包#/authoring_note/source_refs/17/quote也保留此句。权威研究#/authoring_note/text的可交易性段再次明确：“停牌、无可靠报价、单边封板、无法正常成交或新的重大不利变化均取消当次参与”。input/article.md:30仅写“新的重大不利公告”，全文无其他覆盖“重大不利变化”的取消条款。",
+        "issue_kind": "condition",
+        "blocking": true
+      }
+    ],
+    "research_issues": [],
+    "issue_checks": [],
+    "ready": false,
+    "ready_contradicted_by_issues": false
+  }
+}

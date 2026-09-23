@@ -1,0 +1,202 @@
+{
+  "files": [
+    {
+      "bytes": 317,
+      "path": "input/identity.json",
+      "sha256": "e5c63d77896671c38aad484c591d6e9b988fe6d88dc3b8982091a6ea12797b95",
+      "source": "packet.identity"
+    },
+    {
+      "bytes": 186463,
+      "path": "input/packet.json",
+      "sha256": "c5780baf64b65b9dba60c72a01df3a781c8e47ab97097cb4a989f74519503cdb",
+      "source": {
+        "decision_ids": [
+          "300398.SZ:market",
+          "300398.SZ:sector",
+          "300398.SZ:company",
+          "300398.SZ:price",
+          "300398.SZ:conditions"
+        ],
+        "handoff_source": "selection-handoff.json",
+        "source_skills": [
+          "researching-sectors-industries",
+          "analyzing-price-trading"
+        ],
+        "trace_identity": [
+          "2026-09-18",
+          "2026-09-21",
+          "2026-09-20T18:30:00+08:00"
+        ],
+        "trace_sha256": "080f06be178945b0f518eb1bfd2e67ef3b1f05a67372e3ab51cba7cdc050a56b"
+      }
+    },
+    {
+      "bytes": 9067,
+      "path": "input/research-handoff.md",
+      "sha256": "52a9503e946640d56534f84f4091bfba64308983ac93332607467459db8aa6f2",
+      "source": {
+        "binding": {
+          "trace_sha256": "080f06be178945b0f518eb1bfd2e67ef3b1f05a67372e3ab51cba7cdc050a56b"
+        },
+        "identity": {
+          "action_date": "2026-09-21",
+          "as_of": "2026-09-20T18:30:00+08:00",
+          "formation_date": "2026-09-18",
+          "name": "飞凯材料",
+          "observation_contract": "原推荐观察期为20个交易日，相对参考价+20%是原观察目标，不是收益承诺。",
+          "reference_price": 38.35,
+          "ts_code": "300398.SZ"
+        },
+        "origin": "selection-handoff-v2",
+        "source_refs": [
+          {
+            "file": "$PRODUCTION_ROOT/local_archive/forward_selection/pending-trace-2026-09-18.json",
+            "pointer": "/decision_trace/4/formation_values/current_opinion",
+            "quote": "保留为本次第一顺位的条件性参与选择，明确偏积极；2026年9月21日仅在正常双向成交、可靠报价处于36.97—38.35元且原改变条件未触发时可考虑。高于38.35元或低于36.97元均不新参与，完整条件见conditions；此意见不自动延用于之后交易日。"
+          },
+          {
+            "file": "$PRODUCTION_ROOT/local_archive/forward_selection/pending-trace-2026-09-18.json",
+            "pointer": "/research_result/selected_stocks/0/selection_reason",
+            "quote": "电子化学品的增量参与已有同口径广度支持，飞凯材料又在行业普涨之外获得自己的相对增量：近3日、5日分别跑赢同行3.23、6.68个百分点，5个普通交易日都上涨并跑赢沪深300，成交额逐日提高。半导体材料是实际收入来源，半年报利润与现金流增长为业务联系提供了支撑。选择的是行业扩散中的持续强成员，不把半年报重读当作9月的新催化。38.35元下仍愿保留，是因为9月17、18日已连续收回前15个交易日的36.97元高点，最大上涨日后四天还累计上涨10.55%，出现了可辨认的价格接受过程；但前期回落尚未全部修复、一周已涨16.92%，故只接受原参考附近的参与，并明确跌回修复区时重判。 本次共同问题核对进一步明确：9月21日仅接受36.97—38.35元的原范围，任何略高于上限的报价也不参与。8月17日39.20元收盘及39.23元盘中高点距38.35元仅约2.22%—2.29%，是仍需检验的近处障碍；多日普通交易收高与行业相对优势支持保留本次选择，但不证明该障碍必然越过，也不因此扩大报价范围。"
+          },
+          {
+            "file": "$PRODUCTION_ROOT/local_archive/forward_selection/pending-trace-2026-09-18.json",
+            "pointer": "/decision_trace/4/formation_values/why_this_stock",
+            "quote": "同属电子化学品扩散，上海新阳也有实际业务与利润增长，但其近5日仅超同行1.54个百分点，飞凯为6.68个百分点；上海新阳5天中有3天明显上影，飞凯没有达到同一上影定义的交易日。飞凯的增量需求连续性较好。西陇科学涨得更多，却有两次涨停贡献约84%的正收益、45.25%的形成日换手及负经营现金流，不能用最高涨幅替代更可靠的传播路径。"
+          },
+          {
+            "file": "$PRODUCTION_ROOT/local_archive/forward_selection/pending-trace-2026-09-18.json",
+            "pointer": "/decision_trace/4/formation_values/why_now",
+            "quote": "这不是低位判断。用复权收益实际计算，8月24日至9月11日前15个交易日跌8.05%，最近一周才涨16.92%；9月17、18日收盘37.12、38.35元连续高于该前15日盘中高点36.97元。现在相较此前回落阶段，多了真实的收复与普通日延续；若机械等更高报价而没有新的业务信息，入口会更贵。但38.35元已支付这段修复，不能靠距60日旧高较远证明未来还有20%空间。"
+          },
+          {
+            "file": "$PRODUCTION_ROOT/local_archive/forward_selection/pending-trace-2026-09-18.json",
+            "pointer": "/research_result/selected_stocks/0/strongest_counterevidence",
+            "quote": "最强反证是上涨仍可能只是前期下跌后的急修复：前15个交易日跌8.05%，20日路径效率仅0.165，当前一周已涨16.92%、高于20日均价约8.74%。公司显示材料收入占比47.87%，半导体材料约20.76%，不能把整家公司当作纯半导体需求受益者。 本次核实的近处障碍还包括8月17日39.20元收盘和39.23元盘中高点，距38.35元仅约2.22%—2.29%；刚收复36.97元不等于已通过8月高位，新增参与可能很快遇到回吐，进一步支持保留原报价上限。"
+          },
+          {
+            "file": "$PRODUCTION_ROOT/local_archive/forward_selection/pending-trace-2026-09-18.json",
+            "pointer": "/decision_trace/4/formation_values/risk_acceptance",
+            "quote": "仍保留，是因为修复已经越过近处前15日高点，并连续两天在其上收盘；最大上涨日之后四天的复利涨幅10.55%及相对沪深3009.94个百分点，连同同业相对增量，说明现有支持不只是一根反弹阳线。半年报扣非利润增长47.19%、经营现金流为正且增长，尚未出现与业务联系相冲突的经营证据。接受的是有条件的修复延续风险，因而保留明确价格上限与失效区，不把旧高当成目标。\n\n本次据原事实补充：8月17日39.20元收盘与39.23元盘中高点仍在38.35元上方约2.22%—2.29%，收复36.97元只越过最近15日窗口障碍，并未证明已越过8月高位；附近受阻回吐是眼前实际代价。仍保留是因五个普通交易日收高、最大日后四日仍涨10.55%、3/5日相对行业收益为正及行业多数参与共同支持修复继续，足以接受在原范围内检验旧高的失败风险，但不足以把任意更高价格纳入。38.35元是本次愿意接受的报价上限，不是测算的内在价值。36.97元失守并同时丢失相对行业优势才触发原参与后等待条件，意在区分局部回撤与价格、相对优势共同转弱；连续两日低于9月15日35.22元则退回最大上涨日后第一个普通日收盘之下，按原约定判定这项修复延续选择失效。这些是对原风险取舍的新增说明，不是历史原文已经写明的理由；不将这些价位宣称为经过统计验证的通用规则。"
+          },
+          {
+            "file": "$PRODUCTION_ROOT/local_archive/forward_selection/pending-trace-2026-09-18.json",
+            "pointer": "/decision_trace/4/formation_values/conditions",
+            "quote": "2026年9月21日仅在正常双向成交、可参与报价处于36.97—38.35元且未持续向下跌破36.97元时考虑；36.97元是前15个交易日盘中高点，38.35元为形成日收盘参考。高于38.35元的跳空或快速上冲不按本次原价格判断追入，低于36.97元也不因便宜直接参与。参与后若收盘跌回36.97元以下，同时近3日相对电子化学品收益转为非正，改为等待重判；若连续两个正常交易日收盘低于35.22元（9月15日收盘），修复延续选择失效。若电子化学品近3日、5日广度均降至不超过一半且相对沪深300收益均不再为正，即使个股尚未跌破上述价位也需撤回行业扩散理由。停牌、无法正常成交或新的重大不利公告直接取消当次参与，重新研究。\n\n适用范围与信号时点（本次明确已有条件含义）：本次范围是9月21日的新参与，依据截至9月18日已经形成的收盘及行业事实；不要求先等9月21日收盘再用该收盘反向决定当天参与。36.97—38.35元含两端，是完整报价边界；任何高于38.35元的报价，即使仅略高、没有明显跳高或尚未到39.20—39.23元，都不在本次可考虑范围。低于36.97元同样不新参与；35.22元和复核所述36元均不是放宽这一新参与下限的理由。若使用某日收盘、当日成交额或截至该日的3/5日收益与广度作改变判断的依据，只能在该数据形成后判断，最早用于下一可交易时段；本次9月21日的报价范围不自动成为之后交易日的持续参与许可。"
+          },
+          {
+            "file": "$PRODUCTION_ROOT/local_archive/forward_selection/pending-trace-2026-09-18.json",
+            "pointer": "/candidate_ledger/0/research_thesis/critical_unknown",
+            "quote": "未来几个交易日行业扩散是否继续、半导体与显示业务三季度实际订单和毛利变化均未知；当前材料不能识别买入账户或解释全部价格驱动。未取得能把近期每一天上涨归因于某项新订单的证据。这些未知限制论证力度，不能由作者补写催化。"
+          },
+          {
+            "file": "$PRODUCTION_ROOT/local_archive/forward_selection/pending-trace-2026-09-18.json",
+            "pointer": "/candidate_ledger/0/research_thesis/fundamental_anchor",
+            "quote": "已核对2026年半年报：收入17.2243亿元、归母净利润2.6713亿元，分别同比增长17.79%、23.20%；扣非同比47.19%，经营现金流4.7819亿元、同比101.81%。半导体材料收入3.5763亿元、显示材料8.2447亿元，分别占总收入20.76%、47.87%。实际执行H1减Q1得到Q2收入8.4971亿元、归母净利润1.3593亿元；不能把H1增长说成逐季全面加速。"
+          },
+          {
+            "file": "$PRODUCTION_ROOT/local_archive/forward_selection/pending-trace-2026-09-18.json",
+            "pointer": "/decision_trace/4/formation_values/authoring_evidence_notes",
+            "quote": "经营联系来自半年报分部收入，行业分类只是发现入口；不能写成全部业务均受半导体景气带动。前15日跌幅和36.97元恢复位置是本次执行计算后形成的新研究论证，已经写入本次pending，不属于任何更早推荐的原话。行业前三贡献仅指9月18日；成交占比变化是9月18日减9月11日的当日占比。 CO-1、CO-2本次核对明确保留原选择与数值条件；39.20/39.23元出处及规则关系属于据原存事实补充论证，具体见price_level_verification、current_opinion_scenario_actions、current_opinion_reconciliation。复核方尚未澄清的事项保留在同版handoff.research_issues，不能写成双方已经一致。"
+          },
+          {
+            "file": "$PRODUCTION_ROOT/local_archive/forward_selection/pending-trace-2026-09-18.json",
+            "pointer": "/decision_trace/4/formation_values/calculation_source",
+            "quote": "local_archive/ai_tasks/nightly/rerun-2026-09-21/recommendation/research-materials/calculations.json#/300398.SZ;local_archive/ai_tasks/nightly/rerun-2026-09-21/recommendation/research-materials/path-calculations.json#/300398.SZ"
+          },
+          {
+            "file": "$PRODUCTION_ROOT/local_archive/forward_selection/pending-trace-2026-09-18.json",
+            "pointer": "/decision_trace/2/formation_values/source_file",
+            "quote": "local_archive/ai_tasks/nightly/rerun-2026-09-21/recommendation/research-materials/candidate-context.json#/facts/300398.SZ/financial_availability"
+          },
+          {
+            "file": "$PRODUCTION_ROOT/local_archive/forward_selection/pending-trace-2026-09-18.json",
+            "pointer": "/decision_trace/2/formation_values/official_original",
+            "quote": "local_archive/ai_tasks/nightly/rerun-2026-09-21/recommendation/research-materials/feikai-h1/original.pdf"
+          },
+          {
+            "file": "$PRODUCTION_ROOT/local_archive/forward_selection/pending-trace-2026-09-18.json",
+            "pointer": "/decision_trace/4/formation_values/price_level_verification",
+            "quote": "CO-1、CO-2定向核对，仅使用本次已存candidate-price-with-adjustment.parquet中的300398.SZ日线，未读取9月18日之后行情。来源：local_archive/ai_tasks/nightly/rerun-2026-09-21/recommendation/research-materials/candidate-price-with-adjustment.parquet；Tushare daily，quality_status=passed。价格归一公式为历史OHLC×历史adj_factor÷2026-09-18 adj_factor。2026-08-17原收盘39.20元、原盘中高点39.23元，历史及9月18日adj_factor均为5.696，归一结果仍为39.20、39.23元；该日available_at=2026-08-17T15:01:00+08:00。实际核对8月3—31日21个交易日，它们分别为该8月窗口的最高收盘及最高盘中价，不是60日高点。2026-08-24至2026-09-11的15个交易日盘中最高价为8月28日36.97元，同口径因子为5.696；8月17日不在这个15日窗口中。2026-09-15收盘35.22元、9月17日收盘37.12元、9月18日收盘38.35元也按同一因子归一，数值不变；各行available_at分别为当日15:01:00+08:00，均早于原截止。实际计算：39.20/38.35-1=0.022164276401564537，39.23/38.35-1=0.022946544980443286，约2.22%、2.29%；38.35×1.20=46.02元，仅复核原文章的20日20%观察参照。原快照/draft/snapshot/episodes/98与/101保留了39.23与39.20元的历史论述；本次通过已存日线补齐日期、窗口和收盘/盘中口径。“36元观察区”的选取日期、窗口、取整依据及盘中还是收盘口径，不能由这些数值相近的日线反推；仍需monitor说明其原取值理由。"
+          },
+          {
+            "file": "$PRODUCTION_ROOT/local_archive/forward_selection/pending-trace-2026-09-18.json",
+            "pointer": "/decision_trace/4/formation_values/current_opinion_scenario_actions",
+            "quote": "共同情形的selection动作：报价高于38.35元，无论是否明显高开，均不按本次研究新参与；到39.20—39.23元附近后稳定与否，均不能豁免上限。报价处于36.97—38.35元、正常双向成交且没有原条件所列撤回事实时，可按9月18日已完成的确认有条件考虑；不叠加一个尚未取得的9月21日更高收盘。跌至36.97元以下，包括36元附近或以下时，当前新参与一律等待；这与已经参与后的20日研究命题是否失效分开。参与后仅一次收盘低于36.97元、但近3日相对行业收益仍为正且其他撤回条件未触发，原规则未直接判定20日命题失效；收盘低于36.97元且近3日相对行业收益非正时，改为等待重判。连续两个正常交易日收盘低于35.22元则修复延续选择失效，这项失效条件不要求再同时满足相对行业转弱，也不表示此前必须维持当前可参与意见。若单日成交增加却收盘不再提高，而收盘仍在36.97元或以上、近3日相对行业收益仍为正且行业撤回条件未触发，selection将其视为削弱推进依据的新反证，不把一次停顿自动等同整个20日修复命题失效；需据届时已形成事实重新判断下一时段的参与意见，不能仅凭未触及35.22元继续沿用本次积极意见。理由是9月14—18日已有五个普通交易日收高，最大上涨日之后四日仍涨10.55%，行业广度与自身相对增量同时存在；单次停顿会削弱这条依据，但原事实没有证明任意一次停顿就等于全部确认消失。该解释是本次据原事实补充的论证，不冒称原文已逐项解释。复核如据一次停顿即撤回5—10日当前积极意见，应自行说明收回的是即时方向/参与判断还是20日命题，并说明实际信号时点；两者期限不同本身不能证明共同新参与条件已一致。"
+          },
+          {
+            "file": "$PRODUCTION_ROOT/local_archive/forward_selection/pending-trace-2026-09-18.json",
+            "pointer": "/decision_trace/4/formation_values/current_opinion_reconciliation",
+            "quote": "CO-1（formal:2026-09-16:300398.SZ:selected）与CO-2（formal:2026-09-17:300398.SZ:selected）共用本次9月18日形成、9月21日行动的selection判断。保持selected、第一顺位、sector_broad_diffusion/active/confirmed及全部原数值条件；旧记录的36.62元、37.53元仅用于各自历史评价，不替代本次38.35元参照。恢复已有解释：明确原区间的完整上下限，以及参与后重判/失效线不等于新参与报价下限。据原事实补充论证：核实8月17日39.20/39.23元的双重口径和近处压力，解释收盘信号可用时点、单日停顿与整段修复失效的区别。未实质改变原选股判断或参与条件。20日+20%的46.02元仅为观察参照；未来5—10日偏上也不是任何报价都值得新参与的理由。两项共同问题均未整体关闭：monitor仍须明确略高于38.35元是否允许新参与、收盘接续是否要求新增确认、36元观察区的出处与触发口径，以及放量不收高撤回规则的对象和理由，并同步其current_opportunity与唯一正文。selection不能替monitor追认这些含义，也不能声称未经修改的实际正文已经一致。"
+          },
+          {
+            "file": "$PRODUCTION_ROOT/local_archive/forward_selection/pending-trace-2026-09-18.json",
+            "pointer": "/decision_trace/4/formation_values/remaining_path",
+            "quote": "现价38.35元的剩余路径依据是最近修复已转为高于36.97元近处旧高的连续接受、同行增量优势仍存在、随后普通日仍抬高收盘，尚未被单日集中兑现替代。未来20日若要再形成明显上涨，必须由这种需求延续完成，不能从旧高差额推导。20%对应历史平均真实波幅约4.34倍，只说明目标有难度，不给目标价或成功概率。 本次核对补充：先要面对8月17日39.20元最高收盘、39.23元盘中高点，两者均在原已存8月窗口内；它们距38.35元仅约2.22%、2.29%，远早于46.02元观察参照。仍保留的是由行业扩散和普通日推进继续检验并越过该区的可能性，不声称障碍已消失或20%路径已被证明。9月21日只在36.97—38.35元考虑，报价越过上限不能借远处观察参照补足参与理由。"
+          },
+          {
+            "file": "$PRODUCTION_ROOT/local_archive/forward_selection/pending-trace-2026-09-18.json",
+            "pointer": "/decision_trace/4/formation_values/conditions_tradability",
+            "quote": "条件仅表达2026年9月21日的可考虑范围，不保证能以参考价成交；停牌、无可靠报价、单边封板或新的重大不利变化均取消当次参与。没有当前实盘报价，不自动下单、不决定仓位。 收盘与日成交、行业统计只在形成后用于下一可交易时段，不以当日尚未发生的收盘作当日参与前提；本次没有观察或假设9月21日实际报价。"
+          }
+        ],
+        "text": "本次为原选股负责人对CO-1、CO-2的定向核对，不重新发现股票，不改任何历史推荐。形成日2026-09-18、行动日2026-09-21、截止2026-09-20T18:30:00+08:00均保留。飞凯材料仍selected、第一顺位，原行业扩散发动机active/confirmed不变。原始事实、原快照和修正前全文继续保留。\n\n恢复已有解释：修正前pending /decision_trace/4/formation_values/conditions首句已经限定“可参与报价处于36.97—38.35元”。这原本就是完整上下限，不是只排除明显高开；本次将这一含义同步至当前意见与选择理由。35.22元为参与后失效观察，不能当作新参与下限。当前本版pending的完整意见原句是：\n“保留为本次第一顺位的条件性参与选择，明确偏积极；2026年9月21日仅在正常双向成交、可靠报价处于36.97—38.35元且原改变条件未触发时可考虑。高于38.35元或低于36.97元均不新参与，完整条件见conditions；此意见不自动延用于之后交易日。”\n\n原研究取舍仍然成立：电子化学品的广度提供行业支持，飞凯3/5日超同行3.23/6.68个百分点、五个普通日收高和最大日后四日仍涨10.55%解释为何仍选本股；上海新阳有真实增长但相对行业增量较弱，西陇科学更依赖涨停且有现金流反证。经营只作真实业务与盈利基础，不将8月半年报重读说成9月新催化。前15日跌8.05%、20日效率0.165、一周已涨16.92%依然是急修复可能中断的反证；半导体材料占收入20.76%、显示47.87%，不把整家公司当纯半导体。\n\n据原事实补充论证（不是恢复历史原文）：已存日线核实8月17日最高收盘39.20元和盘中高点39.23元，按9月18日因子归一后不变；8月24日至9月11日的36.97元高点是另一较近窗口。前者只在38.35元之上约2.22%—2.29%，所以必须说明仍有近处障碍，不能仅写已经收复36.97元。本次接受原范围内检验旧高的失败风险，是因为多日推进、相对行业优势及行业多数参与仍在；没有把更高目标或更长观察期当作扩宽报价边界的理由。20日20%对应46.02元仍仅为观察参照，不证明跨过旧高或达标；与复核5—10日方向意见的目的不同，不能据此推定二者当前新参与条件相容。数值输入、执行公式、实际结果与来源已写入pending的price_level_verification。\n\n当前本版pending完整参与及改变条件原句：\n“2026年9月21日仅在正常双向成交、可参与报价处于36.97—38.35元且未持续向下跌破36.97元时考虑；36.97元是前15个交易日盘中高点，38.35元为形成日收盘参考。高于38.35元的跳空或快速上冲不按本次原价格判断追入，低于36.97元也不因便宜直接参与。参与后若收盘跌回36.97元以下，同时近3日相对电子化学品收益转为非正，改为等待重判；若连续两个正常交易日收盘低于35.22元（9月15日收盘），修复延续选择失效。若电子化学品近3日、5日广度均降至不超过一半且相对沪深300收益均不再为正，即使个股尚未跌破上述价位也需撤回行业扩散理由。停牌、无法正常成交或新的重大不利公告直接取消当次参与，重新研究。\n\n适用范围与信号时点（本次明确已有条件含义）：本次范围是9月21日的新参与，依据截至9月18日已经形成的收盘及行业事实；不要求先等9月21日收盘再用该收盘反向决定当天参与。36.97—38.35元含两端，是完整报价边界；任何高于38.35元的报价，即使仅略高、没有明显跳高或尚未到39.20—39.23元，都不在本次可考虑范围。低于36.97元同样不新参与；35.22元和复核所述36元均不是放宽这一新参与下限的理由。若使用某日收盘、当日成交额或截至该日的3/5日收益与广度作改变判断的依据，只能在该数据形成后判断，最早用于下一可交易时段；本次9月21日的报价范围不自动成为之后交易日的持续参与许可。”\n\n本次对共同情形的实际研究判断（补充规则作用解释，不改变原阈值）：\n共同情形的selection动作：报价高于38.35元，无论是否明显高开，均不按本次研究新参与；到39.20—39.23元附近后稳定与否，均不能豁免上限。报价处于36.97—38.35元、正常双向成交且没有原条件所列撤回事实时，可按9月18日已完成的确认有条件考虑；不叠加一个尚未取得的9月21日更高收盘。跌至36.97元以下，包括36元附近或以下时，当前新参与一律等待；这与已经参与后的20日研究命题是否失效分开。参与后仅一次收盘低于36.97元、但近3日相对行业收益仍为正且其他撤回条件未触发，原规则未直接判定20日命题失效；收盘低于36.97元且近3日相对行业收益非正时，改为等待重判。连续两个正常交易日收盘低于35.22元则修复延续选择失效，这项失效条件不要求再同时满足相对行业转弱，也不表示此前必须维持当前可参与意见。若单日成交增加却收盘不再提高，而收盘仍在36.97元或以上、近3日相对行业收益仍为正且行业撤回条件未触发，selection将其视为削弱推进依据的新反证，不把一次停顿自动等同整个20日修复命题失效；需据届时已形成事实重新判断下一时段的参与意见，不能仅凭未触及35.22元继续沿用本次积极意见。理由是9月14—18日已有五个普通交易日收高，最大上涨日之后四日仍涨10.55%，行业广度与自身相对增量同时存在；单次停顿会削弱这条依据，但原事实没有证明任意一次停顿就等于全部确认消失。该解释是本次据原事实补充的论证，不冒称原文已逐项解释。复核如据一次停顿即撤回5—10日当前积极意见，应自行说明收回的是即时方向/参与判断还是20日命题，并说明实际信号时点；两者期限不同本身不能证明共同新参与条件已一致。\n\nCO-1对应9月16日旧推荐，36.62元只用于其历史评价；CO-2对应9月17日旧推荐，37.53元也只用于其历史评价。两项都用本次38.35元当前参照、同一原截止；不能借用旧参考价或不同episode掩盖当前参与差异。本次确认39.20/39.23元真实存在，并不代表monitor已经采用这个来源更新正文。“36元观察区”尚无可确认取值理由，不能拿接近36元的任意日线替其补造来源。\n\n问题归属修正（仅交付格式修复）：CO-1、CO-2的selection研究处理已完成，本人的这两项研究判断没有待补结论。依据是上次实际答复current-opinion-owner-selection-astra.md的两项resolutions均明确“选股侧核对完成”，并已交代原36.97—38.35元完整报价边界、既有收盘确认时点、参与后规则及39.20/39.23元的核实结果；该答复unresolved及原research_issues所列剩余事项均明确要求monitor回应。故本次清除research_issues中误归给selection的两项monitor待办，使其为空，不改变研究判断、已核实价位或条件，也不表示共同问题已解决。\n\nmonitor独立待办仍完整保存在同目录current-opinion-questions.json#/monitor/0（CO-1，9月16日旧推荐）及#/monitor/1（CO-2，9月17日旧推荐），该问题单未改。monitor仍须明确略高于38.35元但未明显跳高时能否新参与、收盘接续是否要求新增确认及信号可用时点、36元观察区的日期/窗口/价格口径/取整理由与触发口径，以及单次放量不收高撤回哪项判断及其依据，并同步其current_opportunity与唯一正文；39.20/39.23元来源虽已由selection核实，仍不能宣称monitor实际正文已采用。推荐作者据已完成的selection研究写明条件关系，不替monitor补判，也不因这些monitor待办再次请求selection研究。最终共同ready由后续独立一致性核对决定，本次不作共同通过结论。\n\n来源引用说明：source_refs中pending /decision_trace/4/formation_values/authoring_evidence_notes关于“复核方尚未澄清的事项保留在同版handoff.research_issues”的文字仍按原字段逐字保留；其交接位置说明由本段更正为上述monitor问题单与本交接说明，不据该旧位置说明重新归入selection研究未决。pending及已绑定的trace_sha256保持不变。\n\n作者操作说明：引用当前pending原句与source_refs；标明原范围的恢复解释以及本次据原事实补充的论证，不把新增论证冒充修正前原话。实际推荐正文需让读者读懂报价边界、信号形成时间、新参与与参与后观察的区别；不要把本便笺复制成文章或让开发者补写研究结论。本任务未写或修改正式推荐文章、复核正文，不能宣称全文已一致。三季度订单、毛利及行业扩散能否继续仍未知，不补写新订单催化。"
+      }
+    },
+    {
+      "bytes": 2053,
+      "path": "input/reading-guide.md",
+      "sha256": "61c2971f3b16b5f3633c6a4fd0ce0c6b7f2b511050bf7395b44047a9d91e3535",
+      "source": "$PRODUCTION_ROOT/.agents/skills/orchestrating-stock-research/references/recommendation-reading-guide.md"
+    },
+    {
+      "bytes": 6597,
+      "path": "input/examples/01.md",
+      "sha256": "792deb1d42cf25aef65f017bebfe7d6f7b0c7418a163a2ce13fef178387f4ba9",
+      "source": {
+        "metadata": {
+          "action_date": "2026-09-14",
+          "approval_scope": "论证与表达范文",
+          "as_of": "2026-09-13T18:30:00+08:00",
+          "confirmation_ref": "用户2026-09-15明确确认本轮修改版定稿，并与国际复材一同采用",
+          "content_origin": "point_in_time_supplement",
+          "formation_date": "2026-09-11",
+          "note_type": "writing_example",
+          "status": "approved",
+          "ts_code": "600176.SH",
+          "updated": "2026-09-15"
+        },
+        "source": "$USER_HOME/知识库/LLW/股票分析/10_方法与范文/推荐说明范文/中国巨石_2026-09-14_推荐说明_采用范文.md"
+      }
+    },
+    {
+      "bytes": 6721,
+      "path": "input/examples/02.md",
+      "sha256": "d99f60fcfcccd921b4971039739a90283ae289b4eeabff188440d8f8886f9157",
+      "source": {
+        "metadata": {
+          "action_date": "2026-09-16",
+          "approval_scope": "论证与表达范文",
+          "as_of": "2026-09-15T18:30:00+08:00",
+          "confirmation_ref": "用户2026-09-15授权按风险判断与应对意见修改后，与中国巨石一同采用",
+          "content_origin": "依据本轮讨论及原截止资料修订的采用稿",
+          "formation_date": "2026-09-15",
+          "note_type": "writing_example",
+          "status": "approved",
+          "ts_code": "301526.SZ",
+          "updated": "2026-09-15"
+        },
+        "source": "$USER_HOME/知识库/LLW/股票分析/10_方法与范文/推荐说明范文/国际复材_2026-09-16_推荐说明_采用范文.md"
+      }
+    },
+    {
+      "bytes": 6435,
+      "path": "input/article.md",
+      "sha256": "a34c2b437f37d32ca13b0d0751470bc5189ed57f28d2442bfe2722c0af56e40e",
+      "source": "current-cycle:article"
+    }
+  ],
+  "profile": "astra-files-v1",
+  "role": "review"
+}

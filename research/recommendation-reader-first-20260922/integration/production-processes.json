@@ -1,0 +1,5 @@
+{
+  "observed_at": "2026-09-23T08:44:01.883943+08:00",
+  "matching_processes": [],
+  "scope": "ps argv tokens matching stock_ai.py run nightly; launchd state independently queried; not a general inventory of private processes"
+}

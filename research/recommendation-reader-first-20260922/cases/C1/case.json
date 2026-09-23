@@ -1,0 +1,13 @@
+{
+  "identity": {
+    "action_date": "2026-09-21",
+    "as_of": "2026-09-20T18:30:00+08:00",
+    "formation_date": "2026-09-18",
+    "name": "飞凯材料",
+    "observation_contract": "原推荐观察期为20个交易日，相对参考价+20%是原观察目标，不是收益承诺。",
+    "reference_price": 38.35,
+    "ts_code": "300398.SZ"
+  },
+  "source": ".worktrees/recommendation-authoring-20260918/local_archive/ai_tasks/normal-authoring-20260921-074913/normal-root/local_archive/ai_tasks/nightly/rerun-2026-09-21/recommendation",
+  "reference_label": "user_approved"
+}

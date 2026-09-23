@@ -1,0 +1,189 @@
+{
+  "trial": {
+    "id": "C2",
+    "case": "C2",
+    "purpose": "Old combined review then fresh reader then fidelity",
+    "requests": 3,
+    "automatic_revision": false,
+    "status": "planned"
+  },
+  "requests": [
+    {
+      "number": 35,
+      "trial_id": "C2",
+      "status": "completed",
+      "started_at": "2026-09-23T07:26:22.193706+08:00",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "tested_code_sha": "066129e1641c4d1fc55fbb3568527a6f88e35525",
+      "request": "$EXPERIMENT_ROOT/sessions/s014/combined-review-input.md",
+      "output": "$EXPERIMENT_ROOT/sessions/s014/combined-review-astra.md",
+      "events": "$EXPERIMENT_ROOT/sessions/s014/combined-review-astra.jsonl",
+      "exit_code": 0,
+      "diagnostic": "",
+      "evidence": {
+        "verified": true,
+        "session_id": "01a0cb71-1a18-7800-99ac-4e7bd3c7253c",
+        "executor": "codex",
+        "context_evidence": {
+          "verified": true,
+          "input_present": true,
+          "input_source": "codex rollout response_item(role=user)",
+          "session_id": "01a0cb71-1a18-7800-99ac-4e7bd3c7253c",
+          "tool_calls": 44,
+          "isolated": true,
+          "offered_tools": null,
+          "offered_tools_note": "CLI 可声明内置工具；以完整实际工具活动验收",
+          "request_chars": 2664,
+          "completed": true
+        },
+        "provider": "openai",
+        "model": "gpt-6-astra",
+        "request_model": "gpt-6-astra",
+        "response_model": "",
+        "effort": "xhigh",
+        "consistent": true,
+        "auth_method": "chatgpt",
+        "usage": {
+          "input_tokens": 813636,
+          "cached_input_tokens": 717056,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 9091,
+          "reasoning_output_tokens": 2742
+        },
+        "note": "Codex 会话 turn_context、实际请求传输与 response_item 协议",
+        "protocol_path": "$EXPERIMENT_ROOT/sessions/s014/combined-review-astra.rollout.jsonl"
+      },
+      "finished_at": "2026-09-23T07:31:40.737689+08:00",
+      "seconds": 318.54
+    },
+    {
+      "number": 36,
+      "trial_id": "C2",
+      "status": "completed",
+      "started_at": "2026-09-23T07:31:40.748136+08:00",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "tested_code_sha": "066129e1641c4d1fc55fbb3568527a6f88e35525",
+      "request": "$EXPERIMENT_ROOT/sessions/s014/reader-input.md",
+      "output": "$EXPERIMENT_ROOT/sessions/s014/reader-astra.md",
+      "events": "$EXPERIMENT_ROOT/sessions/s014/reader-astra.jsonl",
+      "exit_code": 0,
+      "diagnostic": "",
+      "evidence": {
+        "verified": true,
+        "session_id": "01a0cb75-f671-7d73-bc74-974d7ffd7926",
+        "executor": "codex",
+        "context_evidence": {
+          "verified": true,
+          "input_present": true,
+          "input_source": "codex rollout response_item(role=user)",
+          "session_id": "01a0cb75-f671-7d73-bc74-974d7ffd7926",
+          "tool_calls": 0,
+          "isolated": true,
+          "offered_tools": null,
+          "offered_tools_note": "CLI 可声明内置工具；以完整实际工具活动验收",
+          "request_chars": 5243,
+          "completed": true,
+          "reader_capabilities_disabled": true,
+          "reader_capability_configuration": {
+            "disabled_features": [
+              "shell_tool",
+              "view_image",
+              "apps",
+              "plugins",
+              "remote_plugin",
+              "hooks",
+              "multi_agent",
+              "memories",
+              "browser_use",
+              "browser_use_external",
+              "computer_use",
+              "image_generation",
+              "artifact",
+              "code_mode",
+              "code_mode_host",
+              "in_app_browser"
+            ],
+            "web_search": "disabled",
+            "project_doc_max_bytes": 0,
+            "strict_config": true,
+            "basis": "actual CLI argv plus isolated turn protocol; offline tool declarations captured in acceptance"
+          }
+        },
+        "provider": "openai",
+        "model": "gpt-6-astra",
+        "request_model": "gpt-6-astra",
+        "response_model": "",
+        "effort": "xhigh",
+        "consistent": true,
+        "auth_method": "chatgpt",
+        "usage": {
+          "input_tokens": 11673,
+          "cached_input_tokens": 0,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 1733,
+          "reasoning_output_tokens": 1313
+        },
+        "note": "Codex 会话 turn_context、实际请求传输与 response_item 协议",
+        "protocol_path": "$EXPERIMENT_ROOT/sessions/s014/reader-astra.rollout.jsonl"
+      },
+      "finished_at": "2026-09-23T07:32:42.501234+08:00",
+      "seconds": 61.749
+    },
+    {
+      "number": 37,
+      "trial_id": "C2",
+      "status": "completed",
+      "started_at": "2026-09-23T07:32:42.524207+08:00",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "tested_code_sha": "066129e1641c4d1fc55fbb3568527a6f88e35525",
+      "request": "$EXPERIMENT_ROOT/sessions/s014/fidelity-input.md",
+      "output": "$EXPERIMENT_ROOT/sessions/s014/fidelity-astra.md",
+      "events": "$EXPERIMENT_ROOT/sessions/s014/fidelity-astra.jsonl",
+      "exit_code": 0,
+      "diagnostic": "",
+      "evidence": {
+        "verified": true,
+        "session_id": "01a0cb76-e7c4-76d0-a396-6e31770f9e20",
+        "executor": "codex",
+        "context_evidence": {
+          "verified": true,
+          "input_present": true,
+          "input_source": "codex rollout response_item(role=user)",
+          "session_id": "01a0cb76-e7c4-76d0-a396-6e31770f9e20",
+          "tool_calls": 40,
+          "isolated": true,
+          "offered_tools": null,
+          "offered_tools_note": "CLI 可声明内置工具；以完整实际工具活动验收",
+          "request_chars": 2279,
+          "completed": true
+        },
+        "provider": "openai",
+        "model": "gpt-6-astra",
+        "request_model": "gpt-6-astra",
+        "response_model": "",
+        "effort": "xhigh",
+        "consistent": true,
+        "auth_method": "chatgpt",
+        "usage": {
+          "input_tokens": 884444,
+          "cached_input_tokens": 790528,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 9735,
+          "reasoning_output_tokens": 2138
+        },
+        "note": "Codex 会话 turn_context、实际请求传输与 response_item 协议",
+        "protocol_path": "$EXPERIMENT_ROOT/sessions/s014/fidelity-astra.rollout.jsonl"
+      },
+      "finished_at": "2026-09-23T07:38:28.024888+08:00",
+      "seconds": 345.496
+    }
+  ],
+  "interrupted_attempt_records": [
+    "trials/C2/history/C2-quota-stop.json"
+  ],
+  "revision_count": "not_run",
+  "money_cost": "not_provided"
+}

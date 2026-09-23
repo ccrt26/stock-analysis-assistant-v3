@@ -1,0 +1,54 @@
+{
+  "recommendation_stages": [
+    {
+      "stage": "research-handoff",
+      "provider": "astra",
+      "configured_model": "gpt-6-astra",
+      "started_at": "2026-09-22T19:50:10.950803+08:00",
+      "input": "$EXPERIMENT_ROOT/sessions/s001/research-handoff-input.md",
+      "output": "$EXPERIMENT_ROOT/sessions/s001/research-handoff-astra.md",
+      "events": "$EXPERIMENT_ROOT/sessions/s001/research-handoff-astra.jsonl",
+      "status": "completed",
+      "configured_effort": "xhigh",
+      "fallback": false,
+      "profile": "astra-files-v1",
+      "file_stage": true,
+      "reader_only": false,
+      "exit_code": 0,
+      "evidence": {
+        "verified": true,
+        "session_id": "01a0c8f3-b946-7343-bd7d-9a3c5f681d8f",
+        "executor": "codex",
+        "context_evidence": {
+          "verified": true,
+          "input_present": true,
+          "input_source": "codex rollout response_item(role=user)",
+          "session_id": "01a0c8f3-b946-7343-bd7d-9a3c5f681d8f",
+          "tool_calls": 30,
+          "isolated": true,
+          "offered_tools": null,
+          "offered_tools_note": "CLI 可声明内置工具；以完整实际工具活动验收",
+          "request_chars": 2965,
+          "completed": true
+        },
+        "provider": "openai",
+        "model": "gpt-6-astra",
+        "request_model": "gpt-6-astra",
+        "response_model": "",
+        "effort": "xhigh",
+        "consistent": true,
+        "auth_method": "chatgpt",
+        "usage": {
+          "input_tokens": 733135,
+          "cached_input_tokens": 638848,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 15048,
+          "reasoning_output_tokens": 5707
+        },
+        "note": "Codex 会话 turn_context、实际请求传输与 response_item 协议",
+        "protocol_path": "$EXPERIMENT_ROOT/sessions/s001/research-handoff-astra.rollout.jsonl"
+      },
+      "ended_at": "2026-09-22T19:58:44.107955+08:00"
+    }
+  ]
+}

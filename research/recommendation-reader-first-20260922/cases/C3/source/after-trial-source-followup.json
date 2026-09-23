@@ -1,0 +1,44 @@
+{
+  "status": "supplemental_source_found_after_fixed_trial",
+  "located_at": "2026-09-23T07:54:40.046674+08:00",
+  "source": "local_archive/forward_selection/research-trace-2026-09-17.json",
+  "identity": {
+    "formation_date": "2026-09-17",
+    "action_date": "2026-09-18",
+    "as_of": "2026-09-17T18:30:00+08:00"
+  },
+  "source_pointer": "/decision_trace/36/formation_values",
+  "referencing_pointer": "/decision_trace/18/formation_values",
+  "referencing_values": {
+    "reason": "与独立价格候选新莱应材相比，中天最大单日收益集中度更低、最大日之后已有4日路径，半年收入和扣非利润增长，而新莱扣非下降10.20%、经营现金流下降35.44%。中天现金绝对规模仍弱，故放在第三，不能以大市值或业务知名度加分。",
+    "risk_acceptance": "从独立价格路径发现：中天科技在弱市中近5日涨9.28%，强于自身行业约7.39个百分点，最大正收益日仅占5日正收益之和约33%，该日之后4日累计仍涨5.51%。9月15—17日连续提高收盘，今日接近日内高点且成交增加，多日需求已有实际价格进展。半年收入、扣非利润增长提供基础；现金流虽弱但已由负转正。选择的是连续相对走强，不把业务标签或旧报告称为新催化。",
+    "strongest_counterevidence": "近5日已有9.28%涨幅、20日10.81%；半年归母利润23.87亿元而经营现金流仅1.48亿元，现金与利润不匹配。近5日有3天较明显上影，前期长跌后修复可能再遇卖压，员工持股解锁公告也需保留供给风险。",
+    "critical_unknown": "是否能有效收过8月36.80元附近并继续提高收盘、现金回款能否改善；均无保证。",
+    "financial_comparison_basis": "新莱2026H1扣非−10.20%、经营现金−35.44%已由半年报第8页原文及同期原值核实，见300260.SZ:company内嵌摘录；中天与新莱均用2026年上半年及2025年同期合并口径。中天现金绝对规模偏弱仍为反证，补齐出处不改变两者取舍。"
+  },
+  "excerpted_fields": {
+    "financial_anchor": "官方H1收入15.4584亿元+9.69%，归母9996万元-7.52%，扣非9539万元-10.20%，经营现金8417万元-35.44%，不能把结构化缺失视为未披露。",
+    "official_receipt": "local_archive/ai_tasks/nightly/2026-09-17/recommendation/evidence/300260/receipt.json",
+    "official_document_title": "昆山新莱洁净应用材料股份有限公司2026年半年度报告全文",
+    "official_document_id": "cninfo:1225526443",
+    "official_document_url": "https://static.cninfo.com.cn/finalpage/2026-08-29/1225526443.PDF",
+    "official_document_available_at": "2026-08-29T00:00:00+08:00",
+    "official_document_availability_basis": "原as_of内公告清单同时列有2026-08-29巨潮1225526443及深交所同名半年报；本地176页PDF标题与身份一致。原公开日早于研究截止，不以下载时刻推定公开时间。",
+    "official_document_retrieved_at": "2026-09-17T10:53:18+00:00",
+    "official_document_http_status": 200,
+    "official_document_page": 8,
+    "official_document_excerpt": "四、主要会计数据和财务指标；公司是否需追溯调整或重述以前年度会计数据：否。表头：本报告期｜上年同期｜本报告期比上年同期增减。归属于上市公司股东的扣除非经常性损益的净利润（元）：95,385,820.03｜106,220,746.87｜-10.20%。经营活动产生的现金流量净额（元）：84,166,663.85｜130,369,484.47｜-35.44%。",
+    "official_document_comparison_basis": "人民币元；2026年1月1日至6月30日对2025年1月1日至6月30日（第6页释义）。扣非为归属于上市公司股东的扣除非经常性损益的净利润，合并归属口径；经营现金为合并现金流量净额，第57页合并现金流量表同列核对。同比按(本期/同期−1)×100%，分别约−10.20%、−35.44%；不是单季度环比或母公司单体口径。",
+    "official_deducted_net_profit_h1_2026": 95385820.03,
+    "official_deducted_net_profit_h1_2025": 106220746.87,
+    "official_deducted_net_profit_yoy_pct": -10.2,
+    "official_operating_cash_flow_h1_2026": 84166663.85,
+    "official_operating_cash_flow_h1_2025": 130369484.47,
+    "official_operating_cash_flow_yoy_pct": -35.44,
+    "official_evidence_limitation": "本地结构化财务截至2026年一季报，原comparable_financials与financial_availability如实保留。半年报数字来自上述官方PDF，现已将原文和口径直接补入本decision，不能把结构化缺项当作未披露。回执下载时间为9月17日18:53:18上海时间，晚于as_of；采用的是8月29日已公开的同份报告内容，非截止后新事实；旧报告只作经营比较，不作当日新催化。"
+  },
+  "included_in_C3_model_input": false,
+  "new_model_requests": 0,
+  "original_trial_results_changed": false,
+  "limitation": "This is a bounded excerpt from the currently saved full historical trace found after the fixed C3 run. Same identity does not retroactively prove the omitted excerpt was supplied to the reviewer. No new report download or research was performed; no full PDF is republished."
+}

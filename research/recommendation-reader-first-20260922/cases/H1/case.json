@@ -1,0 +1,14 @@
+{
+  "identity": {
+    "ts_code": "301589.SZ",
+    "name": "诺瓦星云",
+    "formation_date": "2026-09-18",
+    "action_date": "2026-09-21",
+    "as_of": "2026-09-20T18:30:00+08:00",
+    "reference_price": 159.7,
+    "observation_contract": "原推荐观察期为20个交易日，相对参考价+20%是原观察目标，不是收益承诺。"
+  },
+  "source": "local_archive/ai_tasks/nightly/rerun-2026-09-21/recommendation/articles/301589.SZ-packet.json",
+  "used_for_tuning": false,
+  "article_read_for_tuning": false
+}

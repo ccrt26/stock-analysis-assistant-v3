@@ -1,0 +1,346 @@
+{
+  "version": "reader-first-experiment-v1.2-parser-only",
+  "frozen_at": "2026-09-22T20:33:38.522033+08:00",
+  "baseline_sha": "61f0ebbd719845e44aae3fb5449f0b74b15bf1ad",
+  "tested_code_sha": "dd33e77bb2e9dae28a62c49d133d5554240669e3",
+  "model": "gpt-6-astra",
+  "effort": "xhigh",
+  "fallback": false,
+  "business_request_cap": 64,
+  "planned_minimum": 49,
+  "planned_maximum_including_revisions": 58,
+  "reserve_max": 6,
+  "samples": {
+    "D1": {
+      "identity": {
+        "ts_code": "300398.SZ",
+        "name": "飞凯材料",
+        "formation_date": "2026-09-18",
+        "action_date": "2026-09-21",
+        "as_of": "2026-09-20T18:30:00+08:00",
+        "reference_price": 38.35,
+        "observation_contract": "原推荐观察期为20个交易日，相对参考价+20%是原观察目标，不是收益承诺。"
+      },
+      "source": "local_archive/ai_tasks/nightly/rerun-2026-09-21/recommendation/articles/300398.SZ-packet.json",
+      "used_for_tuning": true,
+      "article_read_for_tuning": false
+    },
+    "H1": {
+      "identity": {
+        "ts_code": "301589.SZ",
+        "name": "诺瓦星云",
+        "formation_date": "2026-09-18",
+        "action_date": "2026-09-21",
+        "as_of": "2026-09-20T18:30:00+08:00",
+        "reference_price": 159.7,
+        "observation_contract": "原推荐观察期为20个交易日，相对参考价+20%是原观察目标，不是收益承诺。"
+      },
+      "source": "local_archive/ai_tasks/nightly/rerun-2026-09-21/recommendation/articles/301589.SZ-packet.json",
+      "used_for_tuning": false,
+      "article_read_for_tuning": false
+    },
+    "H2": {
+      "identity": {
+        "ts_code": "001378.SZ",
+        "name": "德冠新材",
+        "formation_date": "2026-09-18",
+        "action_date": "2026-09-21",
+        "as_of": "2026-09-20T18:30:00+08:00",
+        "reference_price": 23.57,
+        "observation_contract": "原推荐观察期为20个交易日，相对参考价+20%是原观察目标，不是收益承诺。"
+      },
+      "source": "local_archive/ai_tasks/nightly/rerun-2026-09-21/recommendation/articles/001378.SZ-packet.json",
+      "used_for_tuning": false,
+      "article_read_for_tuning": false
+    },
+    "H3": {
+      "identity": {
+        "ts_code": "300658.SZ",
+        "name": "延江股份",
+        "formation_date": "2026-09-21",
+        "action_date": "2026-09-22",
+        "as_of": "2026-09-21T18:30:00+08:00",
+        "reference_price": 10.89,
+        "observation_contract": "原推荐观察期为20个交易日，相对参考价+20%是原观察目标，不是收益承诺。"
+      },
+      "source": "local_archive/ai_tasks/nightly/rerun-2026-09-22/recommendation/articles/300658.SZ-packet.json",
+      "used_for_tuning": false,
+      "article_read_for_tuning": false
+    },
+    "D2": {
+      "identity": {
+        "ts_code": "300398.SZ",
+        "name": "飞凯材料",
+        "formation_date": "2026-09-18",
+        "action_date": "2026-09-21",
+        "as_of": "2026-09-20T18:30:00+08:00",
+        "reference_price": 38.35,
+        "observation_contract": "原推荐观察期为20个交易日，相对参考价+20%是原观察目标，不是收益承诺。"
+      },
+      "source": "local_archive/ai_tasks/nightly/rerun-2026-09-21/recommendation/articles/300398.SZ/author-300398-SZ-files-2/input",
+      "used_for_tuning": true,
+      "article_read_for_tuning": false,
+      "substitution_reason": "捷捷微电实际最终撤回；固定使用飞凯同一真实修订，不能制造有效捷捷推荐。D1/D2重合是限制。"
+    },
+    "C1": {
+      "identity": {
+        "action_date": "2026-09-21",
+        "as_of": "2026-09-20T18:30:00+08:00",
+        "formation_date": "2026-09-18",
+        "name": "飞凯材料",
+        "observation_contract": "原推荐观察期为20个交易日，相对参考价+20%是原观察目标，不是收益承诺。",
+        "reference_price": 38.35,
+        "ts_code": "300398.SZ"
+      },
+      "source": ".worktrees/recommendation-authoring-20260918/local_archive/ai_tasks/normal-authoring-20260921-074913/normal-root/local_archive/ai_tasks/nightly/rerun-2026-09-21/recommendation",
+      "reference_label": "user_approved"
+    },
+    "C2": {
+      "identity": {
+        "ts_code": "300398.SZ",
+        "name": "飞凯材料",
+        "formation_date": "2026-09-18",
+        "action_date": "2026-09-21",
+        "as_of": "2026-09-20T18:30:00+08:00",
+        "reference_price": 38.35,
+        "observation_contract": "原推荐观察期为20个交易日，相对参考价+20%是原观察目标，不是收益承诺。"
+      },
+      "source": "local_archive/ai_tasks/nightly/rerun-2026-09-21/recommendation",
+      "reference_label": "user_difficult"
+    },
+    "C3": {
+      "identity": {
+        "ts_code": "600522.SH",
+        "name": "中天科技",
+        "formation_date": "2026-09-17",
+        "action_date": "2026-09-18",
+        "as_of": "2026-09-17T18:30:00+08:00",
+        "reference_price": 36.39,
+        "observation_contract": "原推荐观察期为20个交易日，相对参考价+20%是原观察目标，不是收益承诺。"
+      },
+      "source": "local_archive/ai_tasks/writing-trials/20260918-181714",
+      "reference_label": "reference_label_unconfirmed"
+    },
+    "C4": {
+      "identity": {
+        "ts_code": "300398.SZ",
+        "name": "飞凯材料",
+        "formation_date": "2026-09-18",
+        "action_date": "2026-09-21",
+        "as_of": "2026-09-20T18:30:00+08:00",
+        "reference_price": 38.35,
+        "observation_contract": "原推荐观察期为20个交易日，相对参考价+20%是原观察目标，不是收益承诺。"
+      },
+      "source": "local_archive/ai_tasks/nightly/rerun-2026-09-21/recommendation",
+      "reference_label": "synthetic_challenge_AND_to_OR",
+      "only_change": {
+        "before": "若收盘跌回36.97元以下，同时近3日相对电子化学品的收益转为非正",
+        "after": "若收盘跌回36.97元以下，或近3日相对电子化学品的收益转为非正"
+      }
+    }
+  },
+  "trials": [
+    {
+      "id": "N-D1",
+      "case": "D1",
+      "purpose": "Existing research handoff cleanup, fixed meaning",
+      "requests": 1,
+      "status": "planned"
+    },
+    {
+      "id": "N-H1",
+      "case": "H1",
+      "purpose": "Existing research handoff cleanup, fixed meaning",
+      "requests": 1,
+      "status": "planned"
+    },
+    {
+      "id": "N-H2",
+      "case": "H2",
+      "purpose": "Existing research handoff cleanup, fixed meaning",
+      "requests": 1,
+      "status": "planned"
+    },
+    {
+      "id": "N-H3",
+      "case": "H3",
+      "purpose": "Existing research handoff cleanup, fixed meaning",
+      "requests": 1,
+      "status": "planned"
+    },
+    {
+      "id": "A1",
+      "case": "D1",
+      "arm": "old",
+      "purpose": "Initial draft",
+      "requests": 3,
+      "automatic_revision": false,
+      "status": "planned"
+    },
+    {
+      "id": "A2",
+      "case": "D1",
+      "arm": "current",
+      "purpose": "Initial draft",
+      "requests": 3,
+      "automatic_revision": false,
+      "status": "planned"
+    },
+    {
+      "id": "A3",
+      "case": "D1",
+      "arm": "current",
+      "purpose": "Initial draft",
+      "requests": 3,
+      "automatic_revision": false,
+      "status": "planned"
+    },
+    {
+      "id": "A4",
+      "case": "D1",
+      "arm": "old",
+      "purpose": "Initial draft",
+      "requests": 3,
+      "automatic_revision": false,
+      "status": "planned"
+    },
+    {
+      "id": "B1",
+      "case": "D2",
+      "arm": "old",
+      "purpose": "One revision of identical real draft",
+      "requests": 3,
+      "automatic_revision": false,
+      "status": "planned"
+    },
+    {
+      "id": "B2",
+      "case": "D2",
+      "arm": "current",
+      "purpose": "One revision of identical real draft",
+      "requests": 3,
+      "automatic_revision": false,
+      "status": "planned"
+    },
+    {
+      "id": "B3",
+      "case": "D2",
+      "arm": "current",
+      "purpose": "One revision of identical real draft",
+      "requests": 3,
+      "automatic_revision": false,
+      "status": "planned"
+    },
+    {
+      "id": "B4",
+      "case": "D2",
+      "arm": "old",
+      "purpose": "One revision of identical real draft",
+      "requests": 3,
+      "automatic_revision": false,
+      "status": "planned"
+    },
+    {
+      "id": "C1",
+      "case": "C1",
+      "purpose": "Old combined review then fresh reader then fidelity",
+      "requests": 3,
+      "automatic_revision": false,
+      "status": "planned"
+    },
+    {
+      "id": "C2",
+      "case": "C2",
+      "purpose": "Old combined review then fresh reader then fidelity",
+      "requests": 3,
+      "automatic_revision": false,
+      "status": "planned"
+    },
+    {
+      "id": "C3",
+      "case": "C3",
+      "purpose": "Old combined review then fresh reader then fidelity",
+      "requests": 3,
+      "automatic_revision": false,
+      "status": "planned"
+    },
+    {
+      "id": "C4",
+      "case": "C4",
+      "purpose": "Old combined review then fresh reader then fidelity",
+      "requests": 3,
+      "automatic_revision": false,
+      "status": "planned"
+    },
+    {
+      "id": "H1",
+      "case": "H1",
+      "purpose": "Holdout with at most one revision",
+      "requests": 6,
+      "status": "planned"
+    },
+    {
+      "id": "H2",
+      "case": "H2",
+      "purpose": "Holdout with at most one revision",
+      "requests": 6,
+      "status": "planned"
+    },
+    {
+      "id": "H3",
+      "case": "H3",
+      "purpose": "Holdout with at most one revision; real daily entry",
+      "requests": 6,
+      "status": "planned"
+    }
+  ],
+  "unchanged_factors": [
+    "original stock decision",
+    "time identity",
+    "full material conditions and unknowns",
+    "reading guide",
+    "approved examples",
+    "model and effort",
+    "candidate reader/fidelity prompts"
+  ],
+  "A_only_change": "original actual author research supply versus one current note and evidence projection",
+  "B_only_change": "actual original revision package versus same original draft plus current note and consolidated verified owner instructions",
+  "old_combined_review_source": "61f0ebbd719845e44aae3fb5449f0b74b15bf1ad:tools/recommendation_file_io.py + ops/recommendation-review-files-prompt.md",
+  "holdout_rule": "No holdout prose used to tune. H3 has genuine empty same-stock intersection; do not invent disagreement.",
+  "criteria": "具体阅读改善且两次无明显反向退化、无必要含义损失，才能称小样本改善迹象；C2识别真实阅读障碍、C4事实拦截；H全部有限交付且无实质未决。外部内容复核仍待用户与ChatGPT。",
+  "failure_policy": "Preserve every terminal failure; no bad-output retry, no provider fallback. Missing upstream dependent trial fails without invented input. A transmission interruption may only continue its same recorded session and consumes another ledger entry.",
+  "status_policy": [
+    "planned",
+    "completed",
+    "failed",
+    "interrupted",
+    "not_run"
+  ],
+  "cost": "Actual usage if available; money cost not provided",
+  "outer_work_excluded": "Coding session and exactly one independent plan review are outside business-stage count.",
+  "upstream_scope": "H3 begins from stored research/monitor delivery, not a new five-Skill daily scan",
+  "previous_tested_code_sha": "0ffeae19d8829505e685fbb4da63161142b122dd",
+  "wiring_amendment": {
+    "reason": "Preserve original note-only meaning in fidelity authority; no research/prompt/sample change",
+    "completed_request_reused": [
+      1
+    ],
+    "interrupted_request": [
+      2
+    ],
+    "resume_rule": "Only original N-H1 session, same exact stage input; another actual request counted",
+    "affected_author_or_review_trials": [],
+    "planned_maximum_including_one_resume": 59,
+    "preparation_delivery_policy": "N-D1 same actual delivery reconstructed through validated cache with no model request; pre-cleanup note attached mechanically from original packet"
+  },
+  "parser_amendment": {
+    "reason": "CLI capability warning item was miscounted as a tool; actual protocol has zero calls",
+    "original_request_reparsed_without_model": 7,
+    "review_ready_preserved": false,
+    "interrupted_request": 8,
+    "resume_rule": "Only original A2 author session; no completed author or reader is resampled",
+    "planned_maximum_including_two_resumes": 60,
+    "same_cap": 64,
+    "prompt_sample_research_changes": false
+  }
+}

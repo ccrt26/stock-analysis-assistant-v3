@@ -1,0 +1,64 @@
+{
+  "monitor": {
+    "resolutions": [
+      {
+        "author_instruction": "实际正文已明确：略高于38.35元也不新参与；单日成交额较前一正常交易日增加而收盘不提高，撤回当前积极参与意见并重判方向，不直接判定20日命题失效。本日新推荐的参与后36.97元叠加相对行业条件、连续两日35.22元失效条件，不构成当前持续参与许可。原历史评价、分类、跟踪及观察期不变；无需开发者补写结论，外层仍须核对推荐实际成稿。",
+        "changes_original_judgment": true,
+        "decision": "已修正9月16日原推荐对应的本日当前意见与唯一正文。研究负责人仍保留本日新推荐，原分歧需要处理。保留偏上、条件性考虑的判断，但将新参与范围明确收紧为36.97—38.35元，并以单日收盘低于36.97元替换缺少依据的36元撤回条件；这是实质修正，不冒称只是恢复原意。",
+        "evidence": [
+          "原核对包input.pairs[0].facts.review_context确认：当前参照38.35元，行情截至9月18日；36.62元仅为本条历史评价入口。",
+          "已存candidate-price-with-adjustment.parquet定向核实：8月17日收盘39.20元、盘中高点39.23元，分别为8月3—31日窗口最高值；按9月18日因子归一后不变，距38.35元约2.22%、2.29%。",
+          "同份日线确认36.97元为8月24日至9月11日15个交易日的盘中高点，出现在8月28日；9月17、18日收盘37.12、38.35元已连续收复。原快照、原条件及上轮正文未找到36元观察区的取值依据。",
+          "恢复已有解释：收盘信号形成后才能用于下一可交易时段。据原事实补充论证：9月21日使用9月18日已有确认，不等待尚未形成的9月21日收盘；多日推进支持保留参与，近处旧高和一周已涨16.92%限制加价。",
+          "已修改pending-daily-formal-reviews-2026-09-18.json#/reviews/6/current_opportunity及pending-report-2026-09-18.json#/alerts/6/episode_reviews/0/current_review，并同步该股票必要解释与条件字段。"
+        ],
+        "issue_id": "CO-1",
+        "ts_code": "300398.SZ"
+      },
+      {
+        "author_instruction": "实际正文已说明新参与与参与后20日观察的区别：9月21日仅在36.97—38.35元及所述成交条件下考虑；当前参与许可可以先撤回，不代表原20日推荐失效。单次放量停步后，双方均须重新判断，不能凭较低失效线未触发而继续沿用积极意见。未发现研究负责人最新结果中仍然有效的同目标相反建议；不以期限不同或标签相同代替条件核对，也不宣称外层共同审核已通过。",
+        "changes_original_judgment": true,
+        "decision": "已修正9月17日原推荐对应的本日当前意见与唯一正文，与CO-1保持同股同日当前意见一致。保留首日历史评价及偏上、条件性考虑标签；明确报价范围和替换36元门槛属于实质修正，信号时点及规则对象属于解释补充。",
+        "evidence": [
+          "原核对包input.pairs[1].facts.review_context确认：本条9月18日开盘37.53元、收盘38.35元；推荐后仅验证一天，近期五日推进不能写成推荐后五日持续性。",
+          "已存原截止日线独立核实39.20／39.23元的日期、窗口和价格口径，以及36.97元近期高点和连续收复事实；未取得36元观察区的日期、取整理由或触发口径，未用邻近价位补造来源。",
+          "本日当前参与依据截至9月18日已经形成的收盘与行业事实；不额外要求9月21日新增收盘确认。之后的完整日成交及收盘信号，最早用于下一可交易时段。",
+          "已修改pending-daily-formal-reviews-2026-09-18.json#/reviews/7/current_opportunity及pending-report-2026-09-18.json#/alerts/6/episode_reviews/1/current_review。核对确认两条current_opportunity完全一致，详评正文仍仅存报告，其他股票、历史评价、日期及D20字段未改。"
+        ],
+        "issue_id": "CO-2",
+        "ts_code": "300398.SZ"
+      }
+    ],
+    "unresolved": []
+  },
+  "selection": {
+    "resolutions": [
+      {
+        "author_instruction": "沿用现有研究交接，不因monitor待办再次请求selection研究。monitor仍须明确略高于38.35元是否允许新参与、收盘接续是否另需确认及信号时点、36元观察区来源与触发口径、放量不收高撤回的判断对象和依据，并同步其结构化意见与唯一正文。不得宣称monitor已解决；最终共同ready由后续独立一致性核对决定。",
+        "changes_original_judgment": false,
+        "decision": "本人的选股研究处理已完成；上次重复列入unresolved的是monitor待办。本次已从research_issues移除误归属事项，并在authoring_note保留依据和交接说明。沿用上次恢复的已有解释及据原事实补充的论证，不改变原判断、价位或条件。monitor尚待回应，共同问题未整体解决。",
+        "evidence": [
+          "current-opinion-owner-selection-astra.md#/resolutions/0明确选股侧核对完成，已说明36.97—38.35元完整参与范围、参与后规则及已核实旧高；其#/unresolved/0全部为monitor待办。",
+          "原selection-handoff.json#/stocks/300398.SZ/research_issues/0明确selection已完成处理，并要求由monitor继续核对，是本次更正归属的依据。",
+          "current-opinion-questions.json#/monitor/0完整保留，文件未改。"
+        ],
+        "issue_id": "CO-1",
+        "ts_code": "300398.SZ"
+      },
+      {
+        "author_instruction": "按现有交接保留截至9月18日已有确认及收盘信号形成后才能使用的解释。monitor仍须回应报价上限、新增收盘确认要求、36元来源及撤回规则的适用对象，并同步实际正文；39.20/39.23元虽已由selection核实，不能宣称monitor正文已采用。source_refs保留pending原句，其中过时的research_issues位置说明已在authoring_note更正。最终共同ready由后续独立一致性核对决定。",
+        "changes_original_judgment": false,
+        "decision": "本人的选股研究处理已完成；上次重复列入unresolved的是monitor待办。本次仅更正交付格式与归属，保留38.35元当前参照、原参与范围、信号时点及全部原条件，不借用37.53元历史参考扩大范围。monitor尚待回应，不能以观察期不同认定当前意见已经一致。",
+        "evidence": [
+          "current-opinion-owner-selection-astra.md#/resolutions/1明确选股侧核对完成；其#/unresolved/1要求monitor澄清正文及字段，并未留下selection待补判断。",
+          "原selection-handoff.json#/stocks/300398.SZ/research_issues/1明确剩余处理由monitor承担；36元取值依据仍未确认，没有补写为已核实支撑位。",
+          "current-opinion-questions.json#/monitor/1完整保留。修改后核对仅300398.SZ的research_issues和authoring_note发生变化；source_refs、其他股票、其他交接字段及pending保持原样，已绑定trace_sha256未变。"
+        ],
+        "issue_id": "CO-2",
+        "ts_code": "300398.SZ"
+      }
+    ],
+    "trace_sha256": "080f06be178945b0f518eb1bfd2e67ef3b1f05a67372e3ab51cba7cdc050a56b",
+    "unresolved": []
+  }
+}

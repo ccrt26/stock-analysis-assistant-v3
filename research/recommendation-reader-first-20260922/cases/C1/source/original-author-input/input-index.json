@@ -1,0 +1,160 @@
+{
+  "files": [
+    {
+      "bytes": 317,
+      "path": "input/identity.json",
+      "sha256": "e5c63d77896671c38aad484c591d6e9b988fe6d88dc3b8982091a6ea12797b95",
+      "source": "packet.identity"
+    },
+    {
+      "bytes": 100177,
+      "path": "input/packet.json",
+      "sha256": "5be95503233cc5b3345f2321d6971bd582bec70a89f63563470036b238ae01e2",
+      "source": {
+        "decision_ids": [
+          "300398-company",
+          "300398-sector",
+          "300398-price",
+          "300398-conditions",
+          "300398-market"
+        ],
+        "handoff_source": "selection-handoff.json",
+        "source_skills": [
+          "researching-sectors-industries",
+          "analyzing-price-trading"
+        ],
+        "trace_identity": [
+          "2026-09-18",
+          "2026-09-21",
+          "2026-09-20T18:30:00+08:00"
+        ],
+        "trace_sha256": "a24af4d918fb45c6ff4a1716fa46f470c8d13e31208f401ea958e92cc3a5efeb"
+      }
+    },
+    {
+      "bytes": 1926,
+      "path": "input/research-handoff.md",
+      "sha256": "a5f28c6c0282df97700621b2d23ec4c545f78cbca18e40c9b450165392497c4b",
+      "source": {
+        "binding": {
+          "trace_sha256": "a24af4d918fb45c6ff4a1716fa46f470c8d13e31208f401ea958e92cc3a5efeb"
+        },
+        "identity": {
+          "action_date": "2026-09-21",
+          "as_of": "2026-09-20T18:30:00+08:00",
+          "formation_date": "2026-09-18",
+          "name": "飞凯材料",
+          "observation_contract": "原推荐观察期为20个交易日，相对参考价+20%是原观察目标，不是收益承诺。",
+          "reference_price": 38.35,
+          "ts_code": "300398.SZ"
+        },
+        "origin": "selection-handoff-v2",
+        "source_refs": [
+          {
+            "file": "$PRODUCTION_ROOT/.worktrees/recommendation-authoring-20260918/local_archive/ai_tasks/normal-authoring-20260921-074913/normal-root/local_archive/forward_selection/pending-trace-2026-09-18.json",
+            "id": "R1",
+            "pointer": "/research_result/selected_stocks/0/selection_reason",
+            "quote": "明确推荐，偏积极，但只在原参考位置附近仍能正常成交时考虑参与。未来约20个交易日的主要依据是电子化学品共同走强与本股多日需求持续相互印证：36个有效行业成员近五日全部上涨，行业成交份额增加；本股五日上涨16.92%，超过行业等权6.68个百分点，五个普通交易日收盘逐日抬高，成交从10.95亿元逐步增加至21.45亿元。最大上涨日在9月14日，之后四日仍上涨10.55%，说明需求没有止于一次脉冲。公司显示材料和半导体材料已有实际收入，半年收入、归母利润与经营现金流同时增加，使这次材料方向的识别有真实经营基础，但半年报是旧信息，不能当本周新催化。相比上海新阳，本股行业超额、成交后的收盘推进及现金流支持更强，因此接受多付出的五日涨幅。最不利的是反弹已涨16.92%且二十日路径仍曲折，49.60倍滚动市盈率也不便宜；仍选择，是因为普通日继续收高和全组参与尚未被放量不涨取代，而非因距旧高较远。"
+          },
+          {
+            "file": "$PRODUCTION_ROOT/.worktrees/recommendation-authoring-20260918/local_archive/ai_tasks/normal-authoring-20260921-074913/normal-root/local_archive/forward_selection/pending-trace-2026-09-18.json",
+            "id": "R2",
+            "pointer": "/research_result/selected_stocks/0/nearest_comparison",
+            "quote": "同一电子化学品扩散组比较上海新阳：后者五日涨11.79%、超行业1.54个百分点、当日成交为二十日均额1.28倍，五日有三日较明显上影；飞凯超行业6.68个百分点、成交2.00倍且五日收盘均逐步提高。上海新阳主营半导体联系更集中、半年收入增速也更快，不能说其基本面更差；本次优先的是飞凯更持续的个股需求及较强现金流，而非业务纯度。"
+          },
+          {
+            "file": "$PRODUCTION_ROOT/.worktrees/recommendation-authoring-20260918/local_archive/ai_tasks/normal-authoring-20260921-074913/normal-root/local_archive/forward_selection/pending-trace-2026-09-18.json",
+            "id": "R3",
+            "pointer": "/research_result/selected_stocks/0/strongest_counterevidence",
+            "quote": "五日已上涨16.92%，从38.35元再参与已明显高于一周前；二十日路径效率仅0.165、六十日旧高尚未收复，较低区间位置仍可能只是大幅回撤后的反弹。滚动市盈率49.60倍，若行业共同需求回落，缺乏低估值保护。"
+          },
+          {
+            "file": "$PRODUCTION_ROOT/.worktrees/recommendation-authoring-20260918/local_archive/ai_tasks/normal-authoring-20260921-074913/normal-root/local_archive/forward_selection/pending-trace-2026-09-18.json",
+            "id": "R4",
+            "pointer": "/candidate_ledger/0/research_thesis/remaining_path",
+            "quote": "当前38.35元参考价，最近五日已涨16.92%、二十日涨7.51%。9月16日36.40元收盘和9月18日同价低点是已观察到的推进位置；目前仍距前六十日高点约41.19%，这仅说明旧高未恢复，不等于无阻力或有20%空间。保留延续假设的依据是全组参与与最大日之后四个普通日收高，20%约4.34个历史ATR只是波动尺度，不是概率；需要未来新收盘继续推进才可能走完目标路径。"
+          },
+          {
+            "file": "$PRODUCTION_ROOT/.worktrees/recommendation-authoring-20260918/local_archive/ai_tasks/normal-authoring-20260921-074913/normal-root/local_archive/forward_selection/pending-trace-2026-09-18.json",
+            "id": "R5",
+            "pointer": "/candidate_ledger/0/research_thesis/critical_unknown",
+            "quote": "无法确认电子化学品这轮交易需求背后是否有可持续的新增产业信息；没有新增订单金额或产品涨价的已读证据。此选择只依赖已观察到的板块传播与个股增量，不冒充信息型早确认。"
+          },
+          {
+            "file": "$PRODUCTION_ROOT/.worktrees/recommendation-authoring-20260918/local_archive/ai_tasks/normal-authoring-20260921-074913/normal-root/local_archive/forward_selection/pending-trace-2026-09-18.json",
+            "id": "R6",
+            "pointer": "/decision_trace/3/formation_values/condition",
+            "quote": "以9月18日38.35元收盘作为研究参照，不给出新买价。9月21日停牌、一字涨停或没有正常双向成交时不参与；若开盘高于9月18日最高价38.89元，先等回落检验，未回到38.35—38.89元原观察区并恢复双向成交前不追入。后续若单次收盘跌破36.40元，同时当日成交额不低于9月18日21.45亿元，则撤回本次积极判断；该组合以收盘确认，盘中触及本身不算。若电子化学品同口径五日上涨面降至一半或以下，同时本股五日相对该行业收益不再为正，也撤回推荐。出现足以否定业务或正常交易的新正式公告时重新研究。"
+          },
+          {
+            "file": "$PRODUCTION_ROOT/.worktrees/recommendation-authoring-20260918/local_archive/ai_tasks/normal-authoring-20260921-074913/normal-root/local_archive/forward_selection/pending-trace-2026-09-18.json",
+            "id": "R7",
+            "pointer": "/decision_trace/0/formation_values/fundamental_anchor",
+            "quote": "2026年半年收入17.2243亿元、归母净利润2.6713亿元、经营现金流4.7819亿元，对比2025年同期14.6235亿元、2.1682亿元、2.3695亿元；收入同比17.7855%为本次执行计算，利润同比23.2047%。显示材料收入8.2447亿元、半导体材料3.5763亿元，主营联系真实但不能把全部收入算作半导体。"
+          },
+          {
+            "file": "$PRODUCTION_ROOT/.worktrees/recommendation-authoring-20260918/local_archive/ai_tasks/normal-authoring-20260921-074913/normal-root/local_archive/forward_selection/pending-trace-2026-09-18.json",
+            "id": "R8",
+            "pointer": "/candidate_ledger/0/research_thesis/company_risk",
+            "quote": "经营改善是已公开背景；显示材料与半导体材料并非同一业务。未核实本周新增订单或产品涨价，不能把行业上涨转述为公司订单增长。当前估值与短期涨幅使回落代价不可忽略。"
+          },
+          {
+            "file": "$PRODUCTION_ROOT/.worktrees/recommendation-authoring-20260918/local_archive/ai_tasks/normal-authoring-20260921-074913/normal-root/local_archive/forward_selection/pending-trace-2026-09-18.json",
+            "id": "CALC-revenue_yoy_formula",
+            "pointer": "/decision_trace/0/formation_values/revenue_yoy_formula",
+            "quote": "2026H1 revenue / 2025H1 revenue - 1"
+          }
+        ],
+        "text": "本次原研究是“明确推荐，偏积极”，以38.35元原收盘为参照，主要依据电子化学品共同上涨与飞凯自己的多日需求。R1保存完整取舍；R2的同组比较说明为何宁可接受比上海新阳更高的五日涨幅。不要将R1在primary_reason、short_term_engine等字段的重复出现计作多条独立依据。这里“公司联系真实”来自半年主营收入和三表，而“为什么现在”来自9月14—18日的行业传播、相对强势及成交后收盘推进，不是半年报刚刚发布。\n\n价格最大的上涨日为9月14日；去掉该日和该日之后，均指9月15—18日同样四天，10.55%的两种表述只有一份事实。五日正收益中最大日的36.17%不是对累计复利收益的占比。行业36只、35只三日上涨、36只五日上涨采用同一申万二级有效全组，不能称为“本轮可买36只”，也不能由嵌套三／五日窗口断言扩散逐日加速。原研究没有认为半导体是全部主营，显示材料与半导体材料收入须分开。\n\nR3和R4交清了真正的代价：五日16.92%的涨幅、曲折的二十日路径和不便宜的估值。接受它的含义见R1末句：普通日继续收高、全组参与仍在，尚未变成放量不涨；不是旧高较远保证空间。本次另行执行的直接计算为1722434398.46 / 1462348737.67 - 1 = 0.17785474428240788，即收入同比17.7855%；输入与结果保留在R7所在公司证据的formation_values中，公式原句见CALC-revenue_yoy_formula。这是对已知财务数值的计算，不是新增投资理由。R5中的新增产业原因和订单仍未知，不能补造。R6是本轮实际确定的完整参与和改变条件，包括高于38.89元开盘后的等待、36.40元收盘与成交同时满足的撤回条件，以及行业上涨面与本股行业相对收益的组合条件；不能改成盘中单次触及即失效。"
+      }
+    },
+    {
+      "bytes": 2053,
+      "path": "input/reading-guide.md",
+      "sha256": "61c2971f3b16b5f3633c6a4fd0ce0c6b7f2b511050bf7395b44047a9d91e3535",
+      "source": "$PRODUCTION_ROOT/.worktrees/recommendation-authoring-20260918/local_archive/ai_tasks/normal-authoring-20260921-074913/normal-root/.agents/skills/orchestrating-stock-research/references/recommendation-reading-guide.md"
+    },
+    {
+      "bytes": 6597,
+      "path": "input/examples/01.md",
+      "sha256": "792deb1d42cf25aef65f017bebfe7d6f7b0c7418a163a2ce13fef178387f4ba9",
+      "source": {
+        "metadata": {
+          "action_date": "2026-09-14",
+          "approval_scope": "论证与表达范文",
+          "as_of": "2026-09-13T18:30:00+08:00",
+          "confirmation_ref": "用户2026-09-15明确确认本轮修改版定稿，并与国际复材一同采用",
+          "content_origin": "point_in_time_supplement",
+          "formation_date": "2026-09-11",
+          "note_type": "writing_example",
+          "status": "approved",
+          "ts_code": "600176.SH",
+          "updated": "2026-09-15"
+        },
+        "source": "$PRODUCTION_ROOT/.worktrees/recommendation-authoring-20260918/local_archive/ai_tasks/normal-authoring-20260921-074913/normal-root/temporary-vault/10_方法与范文/推荐说明范文/中国巨石_2026-09-14_推荐说明_采用范文.md"
+      }
+    },
+    {
+      "bytes": 6721,
+      "path": "input/examples/02.md",
+      "sha256": "d99f60fcfcccd921b4971039739a90283ae289b4eeabff188440d8f8886f9157",
+      "source": {
+        "metadata": {
+          "action_date": "2026-09-16",
+          "approval_scope": "论证与表达范文",
+          "as_of": "2026-09-15T18:30:00+08:00",
+          "confirmation_ref": "用户2026-09-15授权按风险判断与应对意见修改后，与中国巨石一同采用",
+          "content_origin": "依据本轮讨论及原截止资料修订的采用稿",
+          "formation_date": "2026-09-15",
+          "note_type": "writing_example",
+          "status": "approved",
+          "ts_code": "301526.SZ",
+          "updated": "2026-09-15"
+        },
+        "source": "$PRODUCTION_ROOT/.worktrees/recommendation-authoring-20260918/local_archive/ai_tasks/normal-authoring-20260921-074913/normal-root/temporary-vault/10_方法与范文/推荐说明范文/国际复材_2026-09-16_推荐说明_采用范文.md"
+      }
+    }
+  ],
+  "profile": "astra-files-v1",
+  "role": "author"
+}

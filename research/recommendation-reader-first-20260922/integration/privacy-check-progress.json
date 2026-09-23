@@ -1,0 +1,9 @@
+{
+  "status": "passed",
+  "scope": "Export checkpoint through C4/H1; final refresh still required",
+  "checked_at": "2026-09-23T08:25:58.955757+08:00",
+  "text_files": 1031,
+  "protocol_events": 2402,
+  "findings": [],
+  "method": "Credential/account/path pattern scan and protocol role/type checks; no financial content rewritten"
+}

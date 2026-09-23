@@ -1,0 +1,24 @@
+{
+  "files": [
+    {
+      "bytes": 55,
+      "path": "input/identity.json",
+      "sha256": "0161aa2dd207df105691000183bc48b54c349ec8a803d801f77cba521724ffdb",
+      "source": "current article/readability material"
+    },
+    {
+      "bytes": 6911,
+      "path": "input/article.md",
+      "sha256": "7a96e86a659cdf2386a08d1c6d535a670636aad52dee8590fed90e14c59d6bb8",
+      "source": "current article/readability material"
+    },
+    {
+      "bytes": 2053,
+      "path": "input/reading-guide.md",
+      "sha256": "61c2971f3b16b5f3633c6a4fd0ce0c6b7f2b511050bf7395b44047a9d91e3535",
+      "source": "current article/readability material"
+    }
+  ],
+  "profile": "astra-files-v1",
+  "role": "reader"
+}

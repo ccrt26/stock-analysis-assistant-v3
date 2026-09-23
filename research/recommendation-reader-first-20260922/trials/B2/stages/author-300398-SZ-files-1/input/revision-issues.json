@@ -1,0 +1,10 @@
+[
+  {
+    "instruction": "沿用现有研究交接，不因monitor待办再次请求selection研究。monitor仍须明确略高于38.35元是否允许新参与、收盘接续是否另需确认及信号时点、36元观察区来源与触发口径、放量不收高撤回的判断对象和依据，并同步其结构化意见与唯一正文。不得宣称monitor已解决；最终共同ready由后续独立一致性核对决定。",
+    "issue_id": "CO-1"
+  },
+  {
+    "instruction": "按现有交接保留截至9月18日已有确认及收盘信号形成后才能使用的解释。monitor仍须回应报价上限、新增收盘确认要求、36元来源及撤回规则的适用对象，并同步实际正文；39.20/39.23元虽已由selection核实，不能宣称monitor正文已采用。source_refs保留pending原句，其中过时的research_issues位置说明已在authoring_note更正。最终共同ready由后续独立一致性核对决定。",
+    "issue_id": "CO-2"
+  }
+]

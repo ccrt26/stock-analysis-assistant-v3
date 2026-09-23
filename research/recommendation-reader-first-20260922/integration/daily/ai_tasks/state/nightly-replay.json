@@ -1,0 +1,163 @@
+{
+  "formation_date": "2026-09-21",
+  "action_date": "2026-09-22",
+  "selection_as_of": "2026-09-21T18:30:00+08:00",
+  "prepare": {
+    "action_date": "2026-09-22",
+    "announcement_exchanges": [
+      "SSE",
+      "SZSE"
+    ],
+    "announcement_status": "cninfo_complete",
+    "data_ready": true,
+    "error": "",
+    "formation_date": "2026-09-21",
+    "industry_research_available": true,
+    "limitations": [],
+    "market_research_available": true,
+    "new_forward_rows": 0,
+    "preopen_event_refresh_complete": true,
+    "price_research_available": true,
+    "research_mode": "full",
+    "run_mode": "rerun",
+    "sector_research_available": true,
+    "selected_count": 0,
+    "selection_as_of": "2026-09-21T18:30:00+08:00",
+    "settled_rows": 10,
+    "started_at": "2026-09-21T21:53:11+08:00",
+    "status": "ready_for_research",
+    "stock_context_available": true,
+    "theme_research_available": true
+  },
+  "model_evidence": {
+    "verified": true,
+    "session_id": "01a0c43d-fc94-7953-a389-73cb623aafbd",
+    "executor": "codex",
+    "context_evidence": {
+      "verified": true,
+      "input_present": true,
+      "input_source": "codex rollout response_item(role=user)",
+      "session_id": "01a0c43d-fc94-7953-a389-73cb623aafbd",
+      "tool_calls": 184,
+      "isolated": false,
+      "offered_tools": null,
+      "offered_tools_note": "CLI 可声明内置工具；以完整实际工具活动验收",
+      "request_chars": 7896,
+      "completed": true
+    },
+    "provider": "openai",
+    "model": "gpt-6-astra",
+    "request_model": "gpt-6-astra",
+    "response_model": "",
+    "effort": "xhigh",
+    "consistent": true,
+    "auth_method": "chatgpt",
+    "usage": {
+      "input_tokens": 6600579,
+      "cached_input_tokens": 6313088,
+      "cache_write_input_tokens": 0,
+      "output_tokens": 48350,
+      "reasoning_output_tokens": 9510
+    },
+    "note": "Codex 会话 turn_context、实际请求传输与 response_item 协议",
+    "protocol_path": "$PRODUCTION_ROOT/local_archive/ai_tasks/nightly/rerun-2026-09-22/recommendation/research-astra.rollout.jsonl"
+  },
+  "model_expectation": {
+    "provider": "astra",
+    "configured_model": "gpt-6-astra",
+    "configured_effort": "xhigh",
+    "profile": "astra-files-v1"
+  },
+  "last_model": "gpt-6-astra",
+  "task": "nightly",
+  "status": "running",
+  "attempts": [],
+  "provider_order": [
+    "astra"
+  ],
+  "model_provider": "astra",
+  "reader_first_contract": "recommendation-reader-first-v1",
+  "current_opinion_contract": "same-day-current-opinion-v1",
+  "run_policy": {
+    "provider": "astra",
+    "no_fallback": true,
+    "recommendation_authoring_profile": "astra-files-v1"
+  },
+  "upstream_provenance": "Reused historical research and monitor, not a new market scan",
+  "recommendation_pipeline": "article-v1",
+  "monitor_analysis": {
+    "status": "pending_current_opinion",
+    "recorded": false
+  },
+  "article_cycle_counts": {
+    "research-repair:2026-09-21": {
+      "research_repair": 0
+    },
+    "managed:300658.SZ": {
+      "expression": 0,
+      "clarification": 1
+    }
+  },
+  "article_cycle_progress": {
+    "managed:300658.SZ": {
+      "next_stage": "research-clarification",
+      "counts": {
+        "expression": 0,
+        "clarification": 1
+      },
+      "updated_at": "2026-09-23T08:34:15.955583+08:00"
+    }
+  },
+  "recommendation_stages": [
+    {
+      "stage": "research-clarification",
+      "provider": "astra",
+      "configured_model": "gpt-6-astra",
+      "started_at": "2026-09-23T08:34:15.957551+08:00",
+      "input": "$EXPERIMENT_ROOT/daily-root/local_archive/ai_tasks/nightly/replay/recommendation/articles/300658.SZ/research-clarification-input.md",
+      "output": "$EXPERIMENT_ROOT/daily-root/local_archive/ai_tasks/nightly/replay/recommendation/articles/300658.SZ/research-clarification-astra.md",
+      "events": "$EXPERIMENT_ROOT/daily-root/local_archive/ai_tasks/nightly/replay/recommendation/articles/300658.SZ/research-clarification-astra.jsonl",
+      "status": "completed",
+      "configured_effort": "xhigh",
+      "fallback": false,
+      "profile": "astra-files-v1",
+      "file_stage": true,
+      "reader_only": false,
+      "exit_code": 0,
+      "evidence": {
+        "verified": true,
+        "session_id": "01a0cbaf-4347-7092-ad01-ee30ef66ed29",
+        "executor": "codex",
+        "context_evidence": {
+          "verified": true,
+          "input_present": true,
+          "input_source": "codex rollout response_item(role=user)",
+          "session_id": "01a0cbaf-4347-7092-ad01-ee30ef66ed29",
+          "tool_calls": 26,
+          "isolated": true,
+          "offered_tools": null,
+          "offered_tools_note": "CLI 可声明内置工具；以完整实际工具活动验收",
+          "request_chars": 3209,
+          "completed": true
+        },
+        "provider": "openai",
+        "model": "gpt-6-astra",
+        "request_model": "gpt-6-astra",
+        "response_model": "",
+        "effort": "xhigh",
+        "consistent": true,
+        "auth_method": "chatgpt",
+        "usage": {
+          "input_tokens": 304522,
+          "cached_input_tokens": 251776,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 5824,
+          "reasoning_output_tokens": 1762
+        },
+        "note": "Codex 会话 turn_context、实际请求传输与 response_item 协议",
+        "protocol_path": "$EXPERIMENT_ROOT/daily-root/local_archive/ai_tasks/nightly/replay/recommendation/articles/300658.SZ/research-clarification-astra.rollout.jsonl"
+      },
+      "ended_at": "2026-09-23T08:37:53.055091+08:00"
+    }
+  ]
+}

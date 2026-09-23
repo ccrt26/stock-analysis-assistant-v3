@@ -1,0 +1,237 @@
+{
+  "observed_at": "2026-09-23T08:39:50.806199+08:00",
+  "nightly": {
+    "loaded": false,
+    "disabled": false
+  },
+  "files": [
+    {
+      "path": "$USER_HOME/Library/LaunchAgents/com.ccrt.stock-analysis-assistant.ai-nightly.plist",
+      "size": 1219,
+      "mtime_ns": 1789998771980487172,
+      "sha256": "790f5ac4fd8f1819a5ef35cc70190969db89689bac294318e96a0e9d52bd3e8d"
+    },
+    {
+      "path": "$PRODUCTION_ROOT/.stock-ai.local.json",
+      "size": 1349,
+      "mtime_ns": 1789638471575837050,
+      "sha256": "5e3b5c05bffbcff2d3132a12be3144bd531752c1e6f0074b0ef81d657bf37a19"
+    },
+    {
+      "path": "$PRODUCTION_ROOT/local_archive/forward_monitor/daily-formal-reviews-2026-09-18.json",
+      "size": 60990,
+      "mtime_ns": 1790061767858156294,
+      "sha256": "b69528104a450d7d593f00f382c235744c5c4099498021edc0ef285ed8bf3350"
+    },
+    {
+      "path": "$PRODUCTION_ROOT/local_archive/forward_monitor/daily-formal-reviews-2026-09-18.json.pre-outlook-unify-backup",
+      "size": 48086,
+      "mtime_ns": 1790010620839236607,
+      "sha256": "c5df8f91b111422a1c96a1624ee61be5c6968bd53a20c5b2902b2ef0371d2cd0"
+    },
+    {
+      "path": "$PRODUCTION_ROOT/local_archive/forward_monitor/daily-formal-reviews-2026-09-18.json.pre-priority-fix-backup",
+      "size": 48118,
+      "mtime_ns": 1790010740176393486,
+      "sha256": "fc40e0fea0956ad2cb493dff6be2c387207c4234c26120e5bc944c609f3f0df8"
+    },
+    {
+      "path": "$PRODUCTION_ROOT/local_archive/forward_monitor/daily-formal-reviews-2026-09-21.json",
+      "size": 67530,
+      "mtime_ns": 1790057913375033153,
+      "sha256": "582237563c04c8d55af24bafbaec32c181b837e33c60ed6aeb8057287de16621"
+    },
+    {
+      "path": "$PRODUCTION_ROOT/local_archive/forward_monitor/monitor-report-2026-09-18.json",
+      "size": 72601,
+      "mtime_ns": 1790061767869872862,
+      "sha256": "c049687add6518a3cf3b1330a275fda90d95b16fc6aac7d5d5a8e276dbe17f0d"
+    },
+    {
+      "path": "$PRODUCTION_ROOT/local_archive/forward_monitor/monitor-report-2026-09-18.md",
+      "size": 70985,
+      "mtime_ns": 1790061767870334614,
+      "sha256": "94c775e76b73281a6bd84afcb30bcb5a4f4708d2f1f6051e90e684e15fb9b314"
+    },
+    {
+      "path": "$PRODUCTION_ROOT/local_archive/forward_monitor/monitor-report-2026-09-21.json",
+      "size": 114205,
+      "mtime_ns": 1790057913386549313,
+      "sha256": "177c4b4d20804728baad65e96762c24c17c8e691988ffdf59411e23301b26350"
+    },
+    {
+      "path": "$PRODUCTION_ROOT/local_archive/forward_monitor/monitor-report-2026-09-21.md",
+      "size": 72063,
+      "mtime_ns": 1790057913387089650,
+      "sha256": "c7c3eb86002eeacf57e78bf7e1e5cecf7b6be729e0dec96763b2c328a936bf0a"
+    },
+    {
+      "path": "$PRODUCTION_ROOT/local_archive/forward_monitor/prism-a2-report-2026-09-18.html",
+      "size": 2767847,
+      "mtime_ns": 1790066619643410686,
+      "sha256": "338f24de9d9d91f8e08bec027ebd9575090e0bfb1b0e284af6c70845b875cc7a"
+    },
+    {
+      "path": "$PRODUCTION_ROOT/local_archive/forward_monitor/prism-a2-report-2026-09-21.html",
+      "size": 2927111,
+      "mtime_ns": 1790066631402712048,
+      "sha256": "0d7ca7ce2565f527e6d9e3408e7dded9be2fc7627bd0525eaf837eaa75586742"
+    },
+    {
+      "path": "$PRODUCTION_ROOT/local_archive/forward_monitor/snapshot-2026-09-18.json",
+      "size": 2092742,
+      "mtime_ns": 1790035220256234012,
+      "sha256": "e5f3bcded98de18f80044564279171c742e57d2351f2d4603ed1482d85f3f5e1"
+    },
+    {
+      "path": "$PRODUCTION_ROOT/local_archive/forward_monitor/snapshot-2026-09-21.json",
+      "size": 2119363,
+      "mtime_ns": 1790000733297834296,
+      "sha256": "26ff7040acd7c6ea7d5aa38c1c1c85d0665be014988e00d0936ae79ffd3c79b2"
+    },
+    {
+      "path": "$PRODUCTION_ROOT/local_archive/forward_monitor/style-preview/prism-a2.html",
+      "size": 2927905,
+      "mtime_ns": 1790066631633988588,
+      "sha256": "b8820d521cf031796975e7061d96963dd926f6990816fa521d95ef94ae7209e6"
+    },
+    {
+      "path": "$PRODUCTION_ROOT/local_archive/forward_selection/forward-selection-log.csv",
+      "size": 117750,
+      "mtime_ns": 1790061768580542166,
+      "sha256": "9d105f70c3689fd10bba101a965c28f8752fa0d0032d3d7f5743b23019d94799"
+    },
+    {
+      "path": "$PRODUCTION_ROOT/local_archive/forward_selection/research-trace-2026-09-01.json",
+      "size": 28071,
+      "mtime_ns": 1788888866805400200,
+      "sha256": "95596483b5e7e4cedaac723e4499d78e59f60747404b6743e1383a022bbb780d"
+    },
+    {
+      "path": "$PRODUCTION_ROOT/local_archive/forward_selection/research-trace-2026-09-01.json.pre-thesis-restore-2026-09-09.json",
+      "size": 29624,
+      "mtime_ns": 1788888857985275375,
+      "sha256": "85638431027d61cadd57561dd52e5a063121c20859e5c4a9dfed7598d66cc002"
+    },
+    {
+      "path": "$PRODUCTION_ROOT/local_archive/forward_selection/research-trace-2026-09-01.pre-description-upgrade-2026-09-05.json",
+      "size": 23342,
+      "mtime_ns": 1788314647063033639,
+      "sha256": "25051af4f2c70538b51f304a0e39572358879e3888ff9adb3330c50b53e43f79"
+    },
+    {
+      "path": "$PRODUCTION_ROOT/local_archive/forward_selection/research-trace-2026-09-02.json",
+      "size": 41502,
+      "mtime_ns": 1788888876357518448,
+      "sha256": "72ff61571bc54871ebbe7a9b860bca3ce6bd87ef51f75c5adbe2a792e1292642"
+    },
+    {
+      "path": "$PRODUCTION_ROOT/local_archive/forward_selection/research-trace-2026-09-02.json.pre-thesis-restore-2026-09-09.json",
+      "size": 41742,
+      "mtime_ns": 1788888869794577235,
+      "sha256": "4e77990a46a46465edfb1e7ee8871f88ac0313371ffa8991669525b01652ff62"
+    },
+    {
+      "path": "$PRODUCTION_ROOT/local_archive/forward_selection/research-trace-2026-09-02.pre-description-upgrade-2026-09-05.json",
+      "size": 38841,
+      "mtime_ns": 1788400413905973491,
+      "sha256": "875472f2ead1e25765f7db1aa762279077d3d1d516f1657d96e69cb2cc55a9b8"
+    },
+    {
+      "path": "$PRODUCTION_ROOT/local_archive/forward_selection/research-trace-2026-09-03.json",
+      "size": 80523,
+      "mtime_ns": 1788544437666469366,
+      "sha256": "8f7a898bbf8e2b5d34365109db3a5f2c891113efb99262a8eacb8a6f5e0d197b"
+    },
+    {
+      "path": "$PRODUCTION_ROOT/local_archive/forward_selection/research-trace-2026-09-03.pre-description-upgrade-2026-09-05.json",
+      "size": 80523,
+      "mtime_ns": 1788487099944142110,
+      "sha256": "8f7a898bbf8e2b5d34365109db3a5f2c891113efb99262a8eacb8a6f5e0d197b"
+    },
+    {
+      "path": "$PRODUCTION_ROOT/local_archive/forward_selection/research-trace-2026-09-04.json",
+      "size": 15945,
+      "mtime_ns": 1789467930698673259,
+      "sha256": "ba3651e86cd2b30e7e4b015399454827377be6449d718caa0147b5f00ed7214a"
+    },
+    {
+      "path": "$PRODUCTION_ROOT/local_archive/forward_selection/research-trace-2026-09-04.json.pre-cashflow-fix-2026-09-15.json",
+      "size": 15944,
+      "mtime_ns": 1789467911383032897,
+      "sha256": "2c870df8a6a21029dbdcc2fbbb0ccafb97878d8f2e4527d4bf76c3c9653302af"
+    },
+    {
+      "path": "$PRODUCTION_ROOT/local_archive/forward_selection/research-trace-2026-09-07.json",
+      "size": 98635,
+      "mtime_ns": 1788787860340131865,
+      "sha256": "ee77b3f01fa16a620ee95b915925023e0c0f50dae8d6080d3ed694aa7f582899"
+    },
+    {
+      "path": "$PRODUCTION_ROOT/local_archive/forward_selection/research-trace-2026-09-08.json",
+      "size": 125072,
+      "mtime_ns": 1788866856227050158,
+      "sha256": "0bf638fa6dcd4da72eb9940032deac48333b6bc6992180769213e72e4b4ef1cf"
+    },
+    {
+      "path": "$PRODUCTION_ROOT/local_archive/forward_selection/research-trace-2026-09-09.json",
+      "size": 113023,
+      "mtime_ns": 1788952913374181510,
+      "sha256": "6fc49298d565c8bb775938684f1f5479e52cbba5aafbad52f0b86828c0528df9"
+    },
+    {
+      "path": "$PRODUCTION_ROOT/local_archive/forward_selection/research-trace-2026-09-10.json",
+      "size": 118583,
+      "mtime_ns": 1789040625883425474,
+      "sha256": "b17ecb3d050837b0bdbedc40fc5052be6d48365a9a94819f9edd42788b97386a"
+    },
+    {
+      "path": "$PRODUCTION_ROOT/local_archive/forward_selection/research-trace-2026-09-11.json",
+      "size": 43748,
+      "mtime_ns": 1789300657668509216,
+      "sha256": "c58fa0079c98166a61274b72821541469f3cbcb6afe041ff5791903f4febb823"
+    },
+    {
+      "path": "$PRODUCTION_ROOT/local_archive/forward_selection/research-trace-2026-09-14.json",
+      "size": 30356,
+      "mtime_ns": 1789386450853610811,
+      "sha256": "959e0d50cf07948279e9d6861fa9167dfb77036e08c2dbb8ff7ee607d1ae6e22"
+    },
+    {
+      "path": "$PRODUCTION_ROOT/local_archive/forward_selection/research-trace-2026-09-15.json",
+      "size": 50041,
+      "mtime_ns": 1789473300354279709,
+      "sha256": "1df388b1a66b41533f6bfb886d7bc070f535f4e74d80e3322ed2af3fbf7a160b"
+    },
+    {
+      "path": "$PRODUCTION_ROOT/local_archive/forward_selection/research-trace-2026-09-16.json",
+      "size": 452414,
+      "mtime_ns": 1789649940602615795,
+      "sha256": "c3a15fbfaa7363676426a82e5c74e2bf280808b81b3dd59273701abc295f8be4"
+    },
+    {
+      "path": "$PRODUCTION_ROOT/local_archive/forward_selection/research-trace-2026-09-17.json",
+      "size": 269358,
+      "mtime_ns": 1789647521333397201,
+      "sha256": "111b3b48b4652fa50b1f3bd689b0bdcfc92beca9e2793b48737fdb74ecfcbcde"
+    },
+    {
+      "path": "$PRODUCTION_ROOT/local_archive/forward_selection/research-trace-2026-09-18.json",
+      "size": 221605,
+      "mtime_ns": 1790061767958420289,
+      "sha256": "2195643fdd40472baf0cb1a10c5dd81acb9d290d8fe0a96d90989167178493e8"
+    },
+    {
+      "path": "$PRODUCTION_ROOT/local_archive/forward_selection/research-trace-2026-09-21.json",
+      "size": 177484,
+      "mtime_ns": 1790004366511556699,
+      "sha256": "02247cd00b5b863f7c1270a668a36a5cca71229740fd60d0e0b29affeef0d4a4"
+    }
+  ],
+  "changes": [],
+  "production_branch": "main",
+  "production_head": "61f0ebbd719845e44aae3fb5449f0b74b15bf1ad",
+  "production_status": "M docs/architecture/current-v3-architecture.md\n M src/stock_analyzer/data/fundamental_backfill.py\n M src/stock_analyzer/data/research_contracts.py\n M src/stock_analyzer/ops/research_health.py\n M tests/test_fundamental_backfill.py\n M tests/test_research_contracts.py\n M tests/test_research_health.py\n M tools/guanlan-prism/concept-a/a2/overview.js\n M tools/guanlan-prism/concept-a/a2/preview.css\n M tools/guanlan-prism/concept-a/overview-a2-shell.html\n?? docs/data-warehouse-maintenance.md\n?? pelican-bicycle.html\n?? tests/test_repair_statement_conflicts.py\n?? tools/guanlan-prism/concept-a/a2/overview.js.backup-before-first-select-dedupe.js\n?? tools/guanlan-prism/concept-a/a2/overview.js.backup-before-former-stocks-toggle.js\n?? tools/guanlan-prism/concept-a/a2/overview.js.backup-before-period-trim.js\n?? tools/guanlan-prism/concept-a/a2/overview.js.backup-before-reader-text-trim.js\n?? tools/guanlan-prism/concept-a/a2/preview.css.backup-before-former-stocks-toggle.css\n?? tools/guanlan-prism/demo-map-date-nav.html\n?? tools/repair_statement_conflicts.py",
+  "inventory_unchanged": true,
+  "scope": "Same 37-path targeted inventory as before; not a hash of the entire warehouse"
+}

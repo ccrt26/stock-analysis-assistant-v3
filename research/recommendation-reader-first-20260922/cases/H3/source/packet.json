@@ -1,0 +1,1914 @@
+{
+  "identity": {
+    "ts_code": "300658.SZ",
+    "name": "延江股份",
+    "formation_date": "2026-09-21",
+    "action_date": "2026-09-22",
+    "as_of": "2026-09-21T18:30:00+08:00",
+    "reference_price": 10.89,
+    "observation_contract": "原推荐观察期为20个交易日，相对参考价+20%是原观察目标，不是收益承诺。"
+  },
+  "judgment": {
+    "selection_reason": "明确推荐延江股份，力度适中，依据是个护用品近期从局部修复转为多数成员共同上涨，而延江已有五个连续较高收盘、强于市场和同业的实际推进。它提供卫生巾、纸尿裤面层材料，是真实业务成员；半年报扣非利润和经营现金流同向改善，使其相对同业的选择有经营依据，但8月公开的半年报不是今天的新催化。同组洁雅五日已涨19.47%、二十日涨28.06%，延江为10.90%、4.91%；选择延江不是因为涨得少，而是它在较少累计涨幅下已经有连续收高、同业前列和当日成交增加后的有效收盘。最不利的是此前路径反复、长期趋势未强，第二季度利润也低于第一季度；因此只按10.44元以上至10.89元的行动日条件参与，不把旧高当成保证空间，且不继续补入代价更高的候选。",
+    "opportunity_type": "sector_diffusion",
+    "priority": 1,
+    "engine_type": "sector_broad_diffusion",
+    "engine_status": "active"
+  },
+  "reasoning": {
+    "opinion": {
+      "text": "明确推荐延江股份，力度适中，依据是个护用品近期从局部修复转为多数成员共同上涨，而延江已有五个连续较高收盘、强于市场和同业的实际推进。它提供卫生巾、纸尿裤面层材料，是真实业务成员；半年报扣非利润和经营现金流同向改善，使其相对同业的选择有经营依据，但8月公开的半年报不是今天的新催化。同组洁雅五日已涨19.47%、二十日涨28.06%，延江为10.90%、4.91%；选择延江不是因为涨得少，而是它在较少累计涨幅下已经有连续收高、同业前列和当日成交增加后的有效收盘。最不利的是此前路径反复、长期趋势未强，第二季度利润也低于第一季度；因此只按10.44元以上至10.89元的行动日条件参与，不把旧高当成保证空间，且不继续补入代价更高的候选。",
+      "formed": true,
+      "source": "research_result.selected_stocks[].selection_reason"
+    },
+    "main_basis": {
+      "text": "个护用品共同需求的价格传播已经成立；延江处于有效12成员中的五日第二位，五日每天上涨，四个非最大涨幅日合计仍涨6.31%，9月21日成交增加后收在日内区间较高位置，构成具体核心成员的确认。未确认新的产业政策或公司订单催化，不补造上涨原因。",
+      "formed": true,
+      "source": "candidate_ledger.research_thesis.short_term_engine"
+    },
+    "why_this": {
+      "text": "个护用品共同需求的价格传播已经成立；延江处于有效12成员中的五日第二位，五日每天上涨，四个非最大涨幅日合计仍涨6.31%，9月21日成交增加后收在日内区间较高位置，构成具体核心成员的确认。未确认新的产业政策或公司订单催化，不补造上涨原因。 这些反证限制的是趋势持续性与参与价格，没有抹去五个较高收盘、去最大日仍上涨、相对同行靠前和多成员共同推进的当前事实。半年扣非及现金流同时改善也比同组主要依赖非经常损益的利润增长更有支撑。确认与较低的已付涨幅合在一起，暂时超过追价风险；因此保留适中力度，并用明确区间与破坏条件约束，不将其表述为经营或中期趋势已全面恢复。",
+      "formed": true,
+      "source": "candidate_ledger.research_thesis.market_recognition.basis"
+    },
+    "remaining_path": {
+      "text": "确认来自连续五日、相对同业和二十日新高收盘的组合，而不是低涨幅本身。二十日仅涨4.91%包含9月8日10.60元回落至9月11日9.74元的反复，目前10.89元才越过这段收盘区间；二十日路径效率0.140、六十日仍跌4.64%，说明中期上升尚未建立。形成日可见六十日最高收盘12.03元距10.89元只有10.47%，约20%观察路径还需要跨过更早供给区，旧高不能证明余量。现有更广泛个护上涨与自身连续收高使继续扩展路径值得观察；优势依赖10.89元以内入口，不为更高价格沿用此结论。",
+      "formed": true,
+      "source": "candidate_ledger.research_thesis.remaining_path"
+    },
+    "why_now": {
+      "formed": true,
+      "text": "当前时点的变化是个护同一12名成员五日上涨家数从9月17日的4名扩至9月21日的11名，同时延江五个交易日收盘连续提高至10.89元，刚越过此前二十日收盘区间；因此已经有共同参与和本股推进可供判断。当前价格的取舍是：同组洁雅为更强确认已付出五日19.47%、二十日28.06%的涨幅，延江五日10.90%、二十日4.91%仍有行业前列、去最大日仍涨6.31%的确认，并有半年扣非和现金流改善作背景。延江的二十日反复、六十日仍跌及二季度利润低于一季度限制了信心，因此只保留10.44元以上至10.89元的入口，超过10.89元不沿用当前选择。它不是等待新事件的押注，也不靠旧高或20%观察目标证明余量。",
+      "related_field": {
+        "name": "catalyst",
+        "text": "无核实的实质新增公司催化；经营与板块价格变化分别使用。",
+        "meaning": "研究记录的事件状态，不等于为何当前时点的论证"
+      }
+    },
+    "risk_context": {
+      "text": "最强反证是短期连涨仍处于此前反复的价格路径，尚无长期连续趋势；经营也不能简单写成持续加速。用半年归母45373264.40元减一季度31416835.81元，第二季度为13956428.59元，较一季度低55.58%，不据此推单季同比或季节性。报告财务费用因汇兑损失增加，客户集中、海外经营和原料波动仍有影响。9月17日公告控股股东质押1300万股，占总股本3.91%、控股股东及一致行动人持股7.48%，用途为股东债权类投资；不是公司经营融资，也未据此认定存在平仓。",
+      "source": "candidate_ledger.research_thesis.company_risk",
+      "meaning": "研究记录的风险描述，不是接受理由"
+    },
+    "risk_acceptance": {
+      "formed": true,
+      "text": "这些反证限制的是趋势持续性与参与价格，没有抹去五个较高收盘、去最大日仍上涨、相对同行靠前和多成员共同推进的当前事实。半年扣非及现金流同时改善也比同组主要依赖非经常损益的利润增长更有支撑。确认与较低的已付涨幅合在一起，暂时超过追价风险；因此保留适中力度，并用明确区间与破坏条件约束，不将其表述为经营或中期趋势已全面恢复。",
+      "source": "selection-handoff.json"
+    }
+  },
+  "evidence": [
+    {
+      "id": "company_report",
+      "content": "本命题不以财报新增性为发动机；已读半年经营作为背景，不把较完整报告或首次读到旧消息冒称新增。",
+      "source": "https://www.cninfo.com.cn/finalpage/2026-08-26/1225503375.PDF",
+      "available_at": "2026-09-21T18:30:00+08:00"
+    },
+    {
+      "id": "company_basis",
+      "content": "2026年半年报8月26日已公开：收入8.918亿元，同比增长5.76%；归母4537.33万元、扣非3943.33万元，同比增长75.60%和148.18%；经营现金流1.101亿元、同比增13.89%。正式业务为3D打孔无纺布、PE打孔膜等一次性卫生用品面层；产品结构和成本管理是半年经营解释，属于背景，不能证明9月的新订单或短期股价必涨。 最强反证是短期连涨仍处于此前反复的价格路径，尚无长期连续趋势；经营也不能简单写成持续加速。用半年归母45373264.40元减一季度31416835.81元，第二季度为13956428.59元，较一季度低55.58%，不据此推单季同比或季节性。报告财务费用因汇兑损失增加，客户集中、海外经营和原料波动仍有影响。9月17日公告控股股东质押1300万股，占总股本3.91%、控股股东及一致行动人持股7.48%，用途为股东债权类投资；不是公司经营融资，也未据此认定存在平仓。",
+      "source": "candidate_ledger.research_thesis.company_information.basis"
+    },
+    {
+      "id": "300658.SZ-market",
+      "content": {
+        "source_locator": "local_warehouse/derived/market_context/analysis_date=2026-09-21/formula_version=market-context-v3/data.parquet",
+        "observation_date": "2026-09-21",
+        "available_at": "2026-09-21T18:30:00+08:00",
+        "breadth_3d": 0.8409813721,
+        "breadth_5d": 0.7368779823,
+        "turnover_ratio_20d": 1.0538469627,
+        "return_dispersion_ratio_20d": 1.0123369778,
+        "interpretation": "普涨为共同基线，不证明个股独立需求；本股仍须依赖自己的公司、同业和价格事实。市场不投票、不独立否决。"
+      },
+      "source": "decision_trace:300658.SZ-market",
+      "source_skill": "interpreting-market-macro"
+    },
+    {
+      "id": "300658.SZ-company",
+      "content": {
+        "source_locator": "local_archive/ai_tasks/nightly/rerun-2026-09-22/recommendation/closest-peer-facts.json#/facts/300658.SZ",
+        "available_at": "2026-09-21T18:30:00+08:00",
+        "fact_cutoff_semantics": "此为查询截止，原逐条available_at保留在事实包/原件receipt，不能作为文档原公开时刻",
+        "company_business": "一次性卫生用品面层材料的研发、 生产和销售。",
+        "unknown": "尚无可核实的9月新订单或产业新增信息；二季度单季同比、三季度利润及汇率影响是否逆转未确认。长期高点不是可保证到达的价格。9月22日能否在指定区间正常成交尚不可知，禁止补读行动日行情。",
+        "h1_2026_revenue": 891824859.57,
+        "h1_2026_net_income": 45373264.4,
+        "h1_2026_deducted_net_income": 39433282.8,
+        "h1_2026_operating_cashflow": 110131390.13,
+        "document_id": "1225503374",
+        "document_url": "https://static.cninfo.com.cn/finalpage/2026-08-26/1225503374.PDF",
+        "document_available_at": "2026-08-26T00:00:00+08:00",
+        "document_retrieved_at": "2026-09-21T14:04:01+00:00",
+        "document_title": "2026年半年度报告摘要",
+        "document_local_text": "local_archive/ai_tasks/nightly/rerun-2026-09-22/recommendation/official/1225503374/text.txt",
+        "document_source_read": true,
+        "financial_availability_limitation": "本地结构化三表最新为2026-03-31，但2026-06-30正式摘要已公开并实际读取，不以漏查写未披露。",
+        "full_report_id": "1225503375",
+        "full_report_url": "https://static.cninfo.com.cn/finalpage/2026-08-26/1225503375.PDF",
+        "full_report_available_at": "2026-08-26T00:00:00+08:00",
+        "full_report_retrieved_at": "2026-09-21T14:05:23+00:00",
+        "full_report_title": "2026年半年度报告",
+        "full_report_local_text": "local_archive/ai_tasks/nightly/rerun-2026-09-22/recommendation/official/1225503375/text.txt",
+        "full_report_source_read": true,
+        "distribution_id": "1225567859",
+        "distribution_url": "https://static.cninfo.com.cn/finalpage/2026-09-16/1225567859.PDF",
+        "distribution_available_at": "2026-09-16T17:32:11+08:00",
+        "distribution_retrieved_at": "2026-09-21T14:08:17+00:00",
+        "distribution_title": "2026年半年度权益分派实施公告",
+        "distribution_local_text": "local_archive/ai_tasks/nightly/rerun-2026-09-22/recommendation/official/1225567859/text.txt",
+        "distribution_source_read": true,
+        "pledge_id": "1225569402",
+        "pledge_url": "https://static.cninfo.com.cn/finalpage/2026-09-17/1225569402.PDF",
+        "pledge_available_at": "2026-09-17T16:46:27+08:00",
+        "pledge_retrieved_at": "2026-09-21T14:08:17+00:00",
+        "pledge_title": "关于控股股东部分股份质押的公告",
+        "pledge_local_text": "local_archive/ai_tasks/nightly/rerun-2026-09-22/recommendation/official/1225569402/text.txt",
+        "pledge_source_read": true,
+        "full_report_pages_read": "P10—13业务、经营变化、财务表；摘要P2主要数据；权益分派P1—4；质押P1—3",
+        "q1_2026_net_income": 31416835.81,
+        "q2_net_income_formula": "45373264.40 - 31416835.81",
+        "q2_2026_net_income": 13956428.59,
+        "q2_vs_q1_formula": "13956428.59 / 31416835.81 - 1",
+        "q2_vs_q1_result": -0.5557659379065265,
+        "record_date": "2026-09-22",
+        "ex_dividend_date": "2026-09-23",
+        "ex_dividend_reference_adjustment": 0.0443565,
+        "cash_dividend_per_10_shares": 0.45,
+        "pledged_shares": 13000000,
+        "pledge_total_equity_ratio": 0.0391,
+        "pledge_controller_group_holdings_ratio": 0.0748,
+        "new_catalyst_status": "半年经营与分红、质押均为已公开背景或已知安排，无确认的9月经营新增催化；不把分红当免费收益。"
+      },
+      "source": "decision_trace:300658.SZ-company",
+      "source_skill": "researching-company-events"
+    },
+    {
+      "id": "300658.SZ-sector",
+      "content": {
+        "available_at": "2026-09-21T18:30:00+08:00",
+        "level": "L2",
+        "effective_member_count": 12,
+        "observed_member_count": 12,
+        "member_identity_source": "ResearchQuery industry_member available_at<=as_of且形成日有效",
+        "top3_contribution_window": "仅2026-09-21当日正收益成员前三收益和占比，不是五日涨幅贡献",
+        "candidate_industry_percentile_5d": 0.9090909091,
+        "breadth_3d_advancing_members": 12,
+        "breadth_5d_advancing_members": 11,
+        "same_group_nearest": "301108.SZ",
+        "comparison_series_source": "local_archive/ai_tasks/nightly/rerun-2026-09-22/recommendation/sector-comparison-series.json",
+        "comparison_series_used_dates": "2026-09-17与2026-09-21各自18:30；9月18日现有快照截止是9月20日，未作为9月18日18:30冻结事实引用",
+        "september17_breadth_5d": 0.3333333333333333,
+        "september21_breadth_5d": 0.9166666666666666,
+        "note": "12名成员分母是原完整行业范围，不用证券合格筛选后的其他人数重算；延江五日第二位。"
+      },
+      "source": "decision_trace:300658.SZ-sector",
+      "source_skill": "researching-sectors-industries"
+    },
+    {
+      "id": "300658.SZ-price",
+      "content": {
+        "observation_date": "2026-09-21",
+        "close": 10.89,
+        "amount": 111540221.30000001,
+        "price_input_available_at": "2026-09-21T15:01:00+08:00",
+        "return_1d": 0.0431034483,
+        "return_3d": 0.0803571429,
+        "return_5d": 0.1089613035,
+        "return_20d": 0.049132948,
+        "return_60d": -0.0464098074,
+        "relative_market_3d": 0.0671219757,
+        "relative_market_5d": 0.0956840245,
+        "relative_industry_return_3d": 0.016993459,
+        "relative_industry_return_5d": 0.0430956965,
+        "amount_ratio_last_20d": 1.3792670844,
+        "largest_positive_day_contribution_5d": 0.4101282009,
+        "return_ex_largest_positive_day_5d": 0.0631364562,
+        "mean_close_position_5d": 0.7026951872,
+        "upper_shadow_frequency_5d": 0.4,
+        "volume_amplification_days_5d": 2.0,
+        "limit_up_return_contribution_5d": 0.0,
+        "efficiency_ratio_20d": 0.1397260274,
+        "breakout_vs_prior60": -0.1329617834,
+        "target_atr_distance_20pct": 5.3057247259
+      },
+      "source": "decision_trace:300658.SZ-price",
+      "source_skill": "analyzing-price-trading"
+    }
+  ],
+  "comparisons": {
+    "text": "同一申万二级个护动力先比较洁雅与延江：洁雅相对确认更强且突破较长区间，但五日19.47%/二十日28.06%的代价、最大正日贡献58%和半年扣非下降31.87%一起降低当前入口吸引力。延江不是未确认的落后成员：五日行业百分位90.91%、五日连续上升、扣掉最大日仍涨6.31%，所以较少累计涨幅具有实际比较意义。再跨发动机比较：朝阳、南矿等独立价量线索缺乏相同经营支持并承受较多既有涨幅；彩讯信息更强但首日放量高开回落及多年订单不确定性使当前取舍未解决。不把不同发动机互称同业近邻。",
+    "codes": [],
+    "items": []
+  },
+  "counterevidence": {
+    "text": "最强反证是短期连涨仍处于此前反复的价格路径，尚无长期连续趋势；经营也不能简单写成持续加速。用半年归母45373264.40元减一季度31416835.81元，第二季度为13956428.59元，较一季度低55.58%，不据此推单季同比或季节性。报告财务费用因汇兑损失增加，客户集中、海外经营和原料波动仍有影响。9月17日公告控股股东质押1300万股，占总股本3.91%、控股股东及一致行动人持股7.48%，用途为股东债权类投资；不是公司经营融资，也未据此认定存在平仓。 确认来自连续五日、相对同业和二十日新高收盘的组合，而不是低涨幅本身。二十日仅涨4.91%包含9月8日10.60元回落至9月11日9.74元的反复，目前10.89元才越过这段收盘区间；二十日路径效率0.140、六十日仍跌4.64%，说明中期上升尚未建立。形成日可见六十日最高收盘12.03元距10.89元只有10.47%，约20%观察路径还需要跨过更早供给区，旧高不能证明余量。现有更广泛个护上涨与自身连续收高使继续扩展路径值得观察；优势依赖10.89元以内入口，不为更高价格沿用此结论。",
+    "related_sector": "共同广度为价格事实，没有单独证明新增行业订单；多数上涨近期才出现，若同业转弱不能用行业标签维持。"
+  },
+  "conditions": {
+    "text": "2026年9月22日只在有正常双向成交、可成交价高于10.44元且不高于10.89元时考虑参与；高于10.89元不追价，低于或等于10.44元不参与。若停牌、无可靠报价或无法正常成交，放弃本次参与。其后单次收盘低于10.44元先减弱看法；连续两个交易日收盘低于10.44元，或任一交易日收盘低于10.12元，撤销本次继续走强判断。若个护行业三日多数成员下跌且延江三日不再跑赢同业，也撤销依赖板块扩散的看法。重大新公告若证实核心客户订单减少或经营出现实质恶化，应重判。所有后续收盘比较使用与9月21日相同的复权尺度；已知9月23日除息，每股除息参考调整0.0443565元，不把机械除息当作跌破。",
+    "tradability": "以原截止可见正常日线、成交额及涨跌停价核对；未见生效S停牌记录。行动日须有正常双向成交和可靠报价，成交价在(10.44,10.89]元。9月22日为已公告股权登记日，9月23日除息；后续结构比较保持9月21日复权尺度。未来实际可成交性未知。",
+    "source": "selection-handoff.json",
+    "sources": [
+      "selection-handoff.json"
+    ],
+    "supplementary": []
+  },
+  "unknowns": "尚无可核实的9月新订单或产业新增信息；二季度单季同比、三季度利润及汇率影响是否逆转未确认。长期高点不是可保证到达的价格。9月22日能否在指定区间正常成交尚不可知，禁止补读行动日行情。",
+  "facts": {
+    "definitions": {
+      "dates": "所有日期统一为YYYY-MM-DD。窗口列出收益归属交易日；首日收益以之前交易日收盘为基准。",
+      "units": "行情价格元，amount成交额元（已经转换，不能再乘1000）；return/ratio/breadth为小数，乘100才是百分比。财务金额、市值total_mv/circ_mv均为元；pe/pe_ttm/pb/ps_ttm为倍数，turnover_rate为百分数；财务同比和利润率原列为百分数。",
+      "price_basis": "日线为原始OHLC，仅说明各日价格/高低位置；跨日收益用既有复权派生，不从原始价格另算替代。",
+      "amount_ratio_last_20d": "形成日当日成交额/含形成日的近20个交易日平均成交额；1.26表示当日高于20日均额约26%，不是最近20日相对此前20日增长26%。",
+      "volume_amplification_days_5d": "最近5个交易日中，当日成交额大于其此前20个交易日平均成交额的天数；虽然字段名有volume，实际比较的是成交额，不是成交股数。",
+      "upper_shadow_frequency_5d": "近5日上影长度(high-max(open,close))占当日振幅(high-low)至少25%的交易日比例；0.6表示5天中3天有较明显上影，不是有任何上影的天数比例。",
+      "price_location_60d": "当前复权收盘价在含当日的近60个收盘价最大值与最小值间的位置：(close-min)/(max-min)；不是盘中高低点区间，不等于估值或未来上涨空间。",
+      "atr_ratio_20d": "近20日真实波幅均值/当前复权收盘价；真实波幅取当日高低差、最高价与前收差绝对值、最低价与前收差绝对值的最大值。表示历史波动尺度，不是未来涨幅。",
+      "target_atr_distance_20pct": "0.20/atr_ratio_20d，即20%观察目标约相当于多少个历史平均真实波幅；不是所需天数、上涨概率或承诺。",
+      "top3_positive_contribution_1d": "当日行业收益为正的成员中，前三个最大正收益之和/全部正收益之和；单日集中度，不是5日贡献，也不是行业总收益中前三名的占比。",
+      "fade_frequency_5d": "近5日(high>open且(close-low)/(high-low)<0.5)的比例；不是盘中从最高价下跌的频率，也不代表没有冲高回落。",
+      "largest_positive_day_contribution_5d": "最大正收益日涨幅/5日正收益之和，不是累计复利涨幅的占比。",
+      "return_ex_largest_positive_day_5d": "5日中去掉最大正收益日，其余收益复利；最大日并列时取靠后的一天。",
+      "return_after_largest_positive_day_5d": "只取最大正收益日之后的收益复利；可能与去掉最大日完全同一窗口，不能重复算独立证据。",
+      "industry": "名称、SW2021分类层级、有效成员总数、观察数及各期限覆盖随同行事实提供；所有行业统计来自原全市场历史成员计算，范围可能含不在本轮可选范围的市场成员；不能把另一次筛选得到的人数与此处广度拼接。",
+      "absence": "缺资料/读取失败/不可回放与真实没有记录不同；空的事实集合不能推出公司未披露。AI原判断不是已核实事实。"
+    },
+    "own": {
+      "financial_availability": {
+        "income_statement": {
+          "status": "available",
+          "available_periods": [
+            "2021-12-31",
+            "2022-12-31",
+            "2023-09-30",
+            "2023-12-31",
+            "2024-03-31",
+            "2024-06-30",
+            "2024-09-30",
+            "2024-12-31",
+            "2025-03-31",
+            "2025-06-30",
+            "2025-09-30",
+            "2025-12-31",
+            "2026-03-31"
+          ],
+          "latest_period": "2026-03-31",
+          "meaning": "本地原截止可得期间，不代表公司全部公开披露期间"
+        },
+        "balance_sheet": {
+          "status": "available",
+          "available_periods": [
+            "2021-12-31",
+            "2022-12-31",
+            "2023-09-30",
+            "2023-12-31",
+            "2024-03-31",
+            "2024-06-30",
+            "2024-09-30",
+            "2024-12-31",
+            "2025-03-31",
+            "2025-06-30",
+            "2025-09-30",
+            "2025-12-31",
+            "2026-03-31"
+          ],
+          "latest_period": "2026-03-31",
+          "meaning": "本地原截止可得期间，不代表公司全部公开披露期间"
+        },
+        "cash_flow": {
+          "status": "available",
+          "available_periods": [
+            "2021-12-31",
+            "2022-12-31",
+            "2023-09-30",
+            "2023-12-31",
+            "2024-03-31",
+            "2024-06-30",
+            "2024-09-30",
+            "2024-12-31",
+            "2025-03-31",
+            "2025-06-30",
+            "2025-09-30",
+            "2025-12-31",
+            "2026-03-31"
+          ],
+          "latest_period": "2026-03-31",
+          "meaning": "本地原截止可得期间，不代表公司全部公开披露期间"
+        },
+        "financial_indicator": {
+          "status": "available",
+          "available_periods": [
+            "2021-12-31",
+            "2022-12-31",
+            "2023-09-30",
+            "2023-12-31",
+            "2024-03-31",
+            "2024-06-30",
+            "2024-09-30",
+            "2024-12-31",
+            "2025-03-31",
+            "2025-06-30",
+            "2025-09-30",
+            "2025-12-31",
+            "2026-03-31"
+          ],
+          "latest_period": "2026-03-31",
+          "meaning": "本地原截止可得期间，不代表公司全部公开披露期间"
+        }
+      },
+      "equity_daily": [
+        {
+          "trade_date": "2026-06-29",
+          "open": 11.45,
+          "high": 11.59,
+          "low": 11.12,
+          "close": 11.42,
+          "pre_close": 11.56,
+          "amount": 138544192.0,
+          "available_at": "2026-06-29T15:01:00+08:00"
+        },
+        {
+          "trade_date": "2026-06-30",
+          "open": 11.47,
+          "high": 11.54,
+          "low": 11.15,
+          "close": 11.43,
+          "pre_close": 11.42,
+          "amount": 106301497.60000001,
+          "available_at": "2026-06-30T15:01:00+08:00"
+        },
+        {
+          "trade_date": "2026-07-01",
+          "open": 11.46,
+          "high": 12.04,
+          "low": 11.25,
+          "close": 11.73,
+          "pre_close": 11.43,
+          "amount": 115403628.2,
+          "available_at": "2026-07-01T15:01:00+08:00"
+        },
+        {
+          "trade_date": "2026-07-02",
+          "open": 11.51,
+          "high": 12.56,
+          "low": 11.5,
+          "close": 12.03,
+          "pre_close": 11.73,
+          "amount": 159984338.04,
+          "available_at": "2026-07-02T15:01:00+08:00"
+        },
+        {
+          "trade_date": "2026-07-03",
+          "open": 12.05,
+          "high": 12.24,
+          "low": 11.82,
+          "close": 12.0,
+          "pre_close": 12.03,
+          "amount": 124720362.7,
+          "available_at": "2026-07-03T15:01:00+08:00"
+        },
+        {
+          "trade_date": "2026-07-06",
+          "open": 12.09,
+          "high": 12.19,
+          "low": 11.33,
+          "close": 11.38,
+          "pre_close": 12.0,
+          "amount": 118165206.39999999,
+          "available_at": "2026-07-06T15:01:00+08:00"
+        },
+        {
+          "trade_date": "2026-07-07",
+          "open": 11.24,
+          "high": 11.58,
+          "low": 10.84,
+          "close": 10.92,
+          "pre_close": 11.38,
+          "amount": 108866561.0,
+          "available_at": "2026-07-07T15:01:00+08:00"
+        },
+        {
+          "trade_date": "2026-07-08",
+          "open": 10.89,
+          "high": 11.13,
+          "low": 10.74,
+          "close": 10.83,
+          "pre_close": 10.92,
+          "amount": 94303812.0,
+          "available_at": "2026-07-08T15:01:00+08:00"
+        },
+        {
+          "trade_date": "2026-07-09",
+          "open": 10.79,
+          "high": 10.94,
+          "low": 10.42,
+          "close": 10.81,
+          "pre_close": 10.83,
+          "amount": 82596179.72,
+          "available_at": "2026-07-09T15:01:00+08:00"
+        },
+        {
+          "trade_date": "2026-07-10",
+          "open": 11.16,
+          "high": 11.54,
+          "low": 10.75,
+          "close": 11.14,
+          "pre_close": 10.81,
+          "amount": 144360447.22,
+          "available_at": "2026-07-10T15:01:00+08:00"
+        },
+        {
+          "trade_date": "2026-07-13",
+          "open": 11.12,
+          "high": 11.3,
+          "low": 10.35,
+          "close": 10.39,
+          "pre_close": 11.14,
+          "amount": 111097604.92,
+          "available_at": "2026-07-13T15:01:00+08:00"
+        },
+        {
+          "trade_date": "2026-07-14",
+          "open": 10.4,
+          "high": 10.58,
+          "low": 10.16,
+          "close": 10.58,
+          "pre_close": 10.39,
+          "amount": 97216416.35,
+          "available_at": "2026-07-14T15:01:00+08:00"
+        },
+        {
+          "trade_date": "2026-07-15",
+          "open": 10.55,
+          "high": 10.82,
+          "low": 10.36,
+          "close": 10.49,
+          "pre_close": 10.58,
+          "amount": 78178785.57,
+          "available_at": "2026-07-15T15:01:00+08:00"
+        },
+        {
+          "trade_date": "2026-07-16",
+          "open": 10.3,
+          "high": 10.7,
+          "low": 10.25,
+          "close": 10.42,
+          "pre_close": 10.49,
+          "amount": 90129309.12,
+          "available_at": "2026-07-16T15:01:00+08:00"
+        },
+        {
+          "trade_date": "2026-07-17",
+          "open": 10.39,
+          "high": 10.59,
+          "low": 9.62,
+          "close": 9.71,
+          "pre_close": 10.42,
+          "amount": 185333678.26,
+          "available_at": "2026-07-17T15:01:00+08:00"
+        },
+        {
+          "trade_date": "2026-07-20",
+          "open": 9.76,
+          "high": 10.05,
+          "low": 9.14,
+          "close": 9.29,
+          "pre_close": 9.71,
+          "amount": 153909461.0,
+          "available_at": "2026-07-20T15:01:00+08:00"
+        },
+        {
+          "trade_date": "2026-07-21",
+          "open": 9.38,
+          "high": 9.49,
+          "low": 8.41,
+          "close": 9.42,
+          "pre_close": 9.29,
+          "amount": 175440576.96,
+          "available_at": "2026-07-21T15:01:00+08:00"
+        },
+        {
+          "trade_date": "2026-07-22",
+          "open": 9.32,
+          "high": 9.6,
+          "low": 9.13,
+          "close": 9.42,
+          "pre_close": 9.42,
+          "amount": 92715635.75,
+          "available_at": "2026-07-22T15:01:00+08:00"
+        },
+        {
+          "trade_date": "2026-07-23",
+          "open": 9.31,
+          "high": 9.7,
+          "low": 9.31,
+          "close": 9.61,
+          "pre_close": 9.42,
+          "amount": 91266731.0,
+          "available_at": "2026-07-23T15:01:00+08:00"
+        },
+        {
+          "trade_date": "2026-07-24",
+          "open": 9.42,
+          "high": 9.59,
+          "low": 9.29,
+          "close": 9.36,
+          "pre_close": 9.61,
+          "amount": 63962930.800000004,
+          "available_at": "2026-07-24T15:01:00+08:00"
+        },
+        {
+          "trade_date": "2026-07-27",
+          "open": 9.41,
+          "high": 9.98,
+          "low": 9.28,
+          "close": 9.95,
+          "pre_close": 9.36,
+          "amount": 131863399.0,
+          "available_at": "2026-07-27T15:01:00+08:00"
+        },
+        {
+          "trade_date": "2026-07-28",
+          "open": 9.84,
+          "high": 10.08,
+          "low": 9.65,
+          "close": 9.82,
+          "pre_close": 9.95,
+          "amount": 74482238.80000001,
+          "available_at": "2026-07-28T15:01:00+08:00"
+        },
+        {
+          "trade_date": "2026-07-29",
+          "open": 9.78,
+          "high": 10.03,
+          "low": 9.65,
+          "close": 9.8,
+          "pre_close": 9.82,
+          "amount": 85296009.56,
+          "available_at": "2026-07-29T15:01:00+08:00"
+        },
+        {
+          "trade_date": "2026-07-30",
+          "open": 9.81,
+          "high": 9.96,
+          "low": 9.33,
+          "close": 9.5,
+          "pre_close": 9.8,
+          "amount": 95455903.8,
+          "available_at": "2026-07-30T15:01:00+08:00"
+        },
+        {
+          "trade_date": "2026-07-31",
+          "open": 9.68,
+          "high": 9.92,
+          "low": 9.45,
+          "close": 9.82,
+          "pre_close": 9.5,
+          "amount": 92451213.2,
+          "available_at": "2026-07-31T15:01:00+08:00"
+        },
+        {
+          "trade_date": "2026-08-03",
+          "open": 9.94,
+          "high": 10.22,
+          "low": 9.74,
+          "close": 10.19,
+          "pre_close": 9.82,
+          "amount": 103055609.0,
+          "available_at": "2026-08-03T15:01:00+08:00"
+        },
+        {
+          "trade_date": "2026-08-04",
+          "open": 10.2,
+          "high": 10.34,
+          "low": 10.04,
+          "close": 10.29,
+          "pre_close": 10.19,
+          "amount": 92492745.38,
+          "available_at": "2026-08-04T15:01:00+08:00"
+        },
+        {
+          "trade_date": "2026-08-05",
+          "open": 10.31,
+          "high": 10.5,
+          "low": 10.16,
+          "close": 10.44,
+          "pre_close": 10.29,
+          "amount": 76000737.61,
+          "available_at": "2026-08-05T15:01:00+08:00"
+        },
+        {
+          "trade_date": "2026-08-06",
+          "open": 10.49,
+          "high": 10.7,
+          "low": 10.36,
+          "close": 10.61,
+          "pre_close": 10.44,
+          "amount": 82458179.55,
+          "available_at": "2026-08-06T15:01:00+08:00"
+        },
+        {
+          "trade_date": "2026-08-07",
+          "open": 10.73,
+          "high": 10.73,
+          "low": 10.32,
+          "close": 10.7,
+          "pre_close": 10.61,
+          "amount": 85134436.78,
+          "available_at": "2026-08-07T15:01:00+08:00"
+        },
+        {
+          "trade_date": "2026-08-10",
+          "open": 10.81,
+          "high": 11.13,
+          "low": 10.57,
+          "close": 11.07,
+          "pre_close": 10.7,
+          "amount": 109741403.60000001,
+          "available_at": "2026-08-10T15:01:00+08:00"
+        },
+        {
+          "trade_date": "2026-08-11",
+          "open": 11.07,
+          "high": 11.18,
+          "low": 10.77,
+          "close": 10.96,
+          "pre_close": 11.07,
+          "amount": 76599188.52,
+          "available_at": "2026-08-11T15:01:00+08:00"
+        },
+        {
+          "trade_date": "2026-08-12",
+          "open": 11.05,
+          "high": 11.17,
+          "low": 10.89,
+          "close": 11.14,
+          "pre_close": 10.96,
+          "amount": 52149268.1,
+          "available_at": "2026-08-12T15:01:00+08:00"
+        },
+        {
+          "trade_date": "2026-08-13",
+          "open": 11.22,
+          "high": 11.22,
+          "low": 10.79,
+          "close": 10.79,
+          "pre_close": 11.14,
+          "amount": 71025304.0,
+          "available_at": "2026-08-13T15:01:00+08:00"
+        },
+        {
+          "trade_date": "2026-08-14",
+          "open": 10.86,
+          "high": 10.95,
+          "low": 10.7,
+          "close": 10.82,
+          "pre_close": 10.79,
+          "amount": 73168142.39999999,
+          "available_at": "2026-08-14T15:01:00+08:00"
+        },
+        {
+          "trade_date": "2026-08-17",
+          "open": 10.93,
+          "high": 11.18,
+          "low": 10.74,
+          "close": 11.16,
+          "pre_close": 10.82,
+          "amount": 93227353.48,
+          "available_at": "2026-08-17T15:01:00+08:00"
+        },
+        {
+          "trade_date": "2026-08-18",
+          "open": 11.2,
+          "high": 11.24,
+          "low": 10.82,
+          "close": 11.03,
+          "pre_close": 11.16,
+          "amount": 66694399.39999999,
+          "available_at": "2026-08-18T15:01:00+08:00"
+        },
+        {
+          "trade_date": "2026-08-19",
+          "open": 11.0,
+          "high": 11.01,
+          "low": 10.44,
+          "close": 10.44,
+          "pre_close": 11.03,
+          "amount": 85080981.0,
+          "available_at": "2026-08-19T15:01:00+08:00"
+        },
+        {
+          "trade_date": "2026-08-20",
+          "open": 10.74,
+          "high": 10.83,
+          "low": 10.5,
+          "close": 10.59,
+          "pre_close": 10.44,
+          "amount": 63817994.0,
+          "available_at": "2026-08-20T15:01:00+08:00"
+        },
+        {
+          "trade_date": "2026-08-21",
+          "open": 10.66,
+          "high": 10.66,
+          "low": 10.3,
+          "close": 10.58,
+          "pre_close": 10.59,
+          "amount": 56957272.42,
+          "available_at": "2026-08-21T15:01:00+08:00"
+        },
+        {
+          "trade_date": "2026-08-24",
+          "open": 10.68,
+          "high": 10.77,
+          "low": 10.25,
+          "close": 10.38,
+          "pre_close": 10.58,
+          "amount": 61973522.8,
+          "available_at": "2026-08-24T15:01:00+08:00"
+        },
+        {
+          "trade_date": "2026-08-25",
+          "open": 10.39,
+          "high": 10.71,
+          "low": 10.21,
+          "close": 10.65,
+          "pre_close": 10.38,
+          "amount": 75786443.0,
+          "available_at": "2026-08-25T15:01:00+08:00"
+        },
+        {
+          "trade_date": "2026-08-26",
+          "open": 10.66,
+          "high": 10.67,
+          "low": 10.12,
+          "close": 10.18,
+          "pre_close": 10.65,
+          "amount": 113782050.8,
+          "available_at": "2026-08-26T15:01:00+08:00"
+        },
+        {
+          "trade_date": "2026-08-27",
+          "open": 10.09,
+          "high": 10.43,
+          "low": 10.06,
+          "close": 10.37,
+          "pre_close": 10.18,
+          "amount": 89464128.80000001,
+          "available_at": "2026-08-27T15:01:00+08:00"
+        },
+        {
+          "trade_date": "2026-08-28",
+          "open": 10.51,
+          "high": 10.55,
+          "low": 10.21,
+          "close": 10.51,
+          "pre_close": 10.37,
+          "amount": 66144022.0,
+          "available_at": "2026-08-28T15:01:00+08:00"
+        },
+        {
+          "trade_date": "2026-08-31",
+          "open": 10.56,
+          "high": 10.56,
+          "low": 10.24,
+          "close": 10.52,
+          "pre_close": 10.51,
+          "amount": 105795144.6,
+          "available_at": "2026-08-31T15:01:00+08:00"
+        },
+        {
+          "trade_date": "2026-09-01",
+          "open": 10.57,
+          "high": 10.65,
+          "low": 10.32,
+          "close": 10.47,
+          "pre_close": 10.52,
+          "amount": 72652481.0,
+          "available_at": "2026-09-01T15:01:00+08:00"
+        },
+        {
+          "trade_date": "2026-09-02",
+          "open": 10.37,
+          "high": 10.43,
+          "low": 10.11,
+          "close": 10.35,
+          "pre_close": 10.47,
+          "amount": 70879626.60000001,
+          "available_at": "2026-09-02T15:01:00+08:00"
+        },
+        {
+          "trade_date": "2026-09-03",
+          "open": 10.44,
+          "high": 10.58,
+          "low": 10.27,
+          "close": 10.28,
+          "pre_close": 10.35,
+          "amount": 67231219.24000001,
+          "available_at": "2026-09-03T15:01:00+08:00"
+        },
+        {
+          "trade_date": "2026-09-04",
+          "open": 10.38,
+          "high": 10.58,
+          "low": 10.28,
+          "close": 10.36,
+          "pre_close": 10.28,
+          "amount": 68648971.2,
+          "available_at": "2026-09-04T15:01:00+08:00"
+        },
+        {
+          "trade_date": "2026-09-07",
+          "open": 10.41,
+          "high": 10.7,
+          "low": 10.32,
+          "close": 10.55,
+          "pre_close": 10.36,
+          "amount": 91379379.67,
+          "available_at": "2026-09-07T15:01:00+08:00"
+        },
+        {
+          "trade_date": "2026-09-08",
+          "open": 10.56,
+          "high": 10.6,
+          "low": 10.37,
+          "close": 10.6,
+          "pre_close": 10.55,
+          "amount": 63826696.8,
+          "available_at": "2026-09-08T15:01:00+08:00"
+        },
+        {
+          "trade_date": "2026-09-09",
+          "open": 10.75,
+          "high": 10.75,
+          "low": 10.43,
+          "close": 10.44,
+          "pre_close": 10.6,
+          "amount": 61520499.0,
+          "available_at": "2026-09-09T15:01:00+08:00"
+        },
+        {
+          "trade_date": "2026-09-10",
+          "open": 10.68,
+          "high": 10.68,
+          "low": 10.0,
+          "close": 10.03,
+          "pre_close": 10.44,
+          "amount": 118327832.71000001,
+          "available_at": "2026-09-10T15:01:00+08:00"
+        },
+        {
+          "trade_date": "2026-09-11",
+          "open": 10.2,
+          "high": 10.2,
+          "low": 9.56,
+          "close": 9.74,
+          "pre_close": 10.03,
+          "amount": 80120243.24,
+          "available_at": "2026-09-11T15:01:00+08:00"
+        },
+        {
+          "trade_date": "2026-09-14",
+          "open": 9.53,
+          "high": 9.93,
+          "low": 9.53,
+          "close": 9.82,
+          "pre_close": 9.74,
+          "amount": 73176118.72,
+          "available_at": "2026-09-14T15:01:00+08:00"
+        },
+        {
+          "trade_date": "2026-09-15",
+          "open": 9.91,
+          "high": 10.02,
+          "low": 9.72,
+          "close": 9.85,
+          "pre_close": 9.82,
+          "amount": 75789971.2,
+          "available_at": "2026-09-15T15:01:00+08:00"
+        },
+        {
+          "trade_date": "2026-09-16",
+          "open": 9.83,
+          "high": 10.13,
+          "low": 9.62,
+          "close": 10.08,
+          "pre_close": 9.85,
+          "amount": 65913652.10000001,
+          "available_at": "2026-09-16T15:01:00+08:00"
+        },
+        {
+          "trade_date": "2026-09-17",
+          "open": 10.14,
+          "high": 10.21,
+          "low": 9.91,
+          "close": 10.12,
+          "pre_close": 10.08,
+          "amount": 67305382.19999999,
+          "available_at": "2026-09-17T15:01:00+08:00"
+        },
+        {
+          "trade_date": "2026-09-18",
+          "open": 10.2,
+          "high": 10.65,
+          "low": 10.1,
+          "close": 10.44,
+          "pre_close": 10.12,
+          "amount": 78099852.0,
+          "available_at": "2026-09-18T15:01:00+08:00"
+        },
+        {
+          "trade_date": "2026-09-21",
+          "open": 10.47,
+          "high": 10.96,
+          "low": 10.46,
+          "close": 10.89,
+          "pre_close": 10.44,
+          "amount": 111540221.30000001,
+          "available_at": "2026-09-21T15:01:00+08:00"
+        }
+      ],
+      "industry_member": [
+        {
+          "industry_system": "SW2021",
+          "level": "L1",
+          "industry_code": "801980.SI",
+          "industry_name": "美容护理",
+          "valid_from": "2021-07-30",
+          "valid_to": null,
+          "available_at": "2021-07-30T15:01:00+08:00",
+          "source_name": "tushare",
+          "source_endpoint": "index_member_all",
+          "quality_status": "passed"
+        },
+        {
+          "industry_system": "SW2021",
+          "level": "L2",
+          "industry_code": "801981.SI",
+          "industry_name": "个护用品",
+          "valid_from": "2021-07-30",
+          "valid_to": null,
+          "available_at": "2021-07-30T15:01:00+08:00",
+          "source_name": "tushare",
+          "source_endpoint": "index_member_all",
+          "quality_status": "passed"
+        },
+        {
+          "industry_system": "SW2021",
+          "level": "L3",
+          "industry_code": "859811.SI",
+          "industry_name": "生活用纸",
+          "valid_from": "2021-07-30",
+          "valid_to": null,
+          "available_at": "2021-07-30T15:01:00+08:00",
+          "source_name": "tushare",
+          "source_endpoint": "index_member_all",
+          "quality_status": "passed"
+        }
+      ],
+      "company_profile": [
+        {
+          "com_name": "厦门延江新材料股份有限公司",
+          "main_business": "一次性卫生用品面层材料的研发、 生产和销售。",
+          "business_scope": "新材料技术推广服务；塑料制品制造；塑料制品销售；产业用纺织制成品制造；产业用纺织制成品销售；货物进出口；技术进出口；物业管理；非居住房地产租赁；机械设备租赁；设备制造；设备销售；纸制品制造；纸制品销售。（除依法须经批准的项目外，凭营业执照依法自主开展经营活动）。",
+          "valid_from": "2026-07-13",
+          "profile_snapshot_date": "2026-07-13",
+          "available_at": "2026-07-14T01:15:56.005404+08:00",
+          "source_name": "tushare",
+          "source_endpoint": "stock_company",
+          "quality_status": "passed"
+        }
+      ],
+      "income_statement": [
+        {
+          "report_period": "2025-03-31",
+          "ann_date": "2025-04-25",
+          "f_ann_date": "2025-04-25",
+          "report_type": "1",
+          "comparable_selection_rule": "as_of_then_end_type_match_then_consolidated_report_then_available_at_then_statement_type",
+          "total_revenue": 436300465.76,
+          "revenue": 436300465.76,
+          "n_income_attr_p": 11105273.05,
+          "available_at": "2025-04-26T00:00:00+08:00",
+          "source_name": "tushare",
+          "source_endpoint": "income",
+          "quality_status": "passed"
+        },
+        {
+          "report_period": "2025-06-30",
+          "ann_date": "2025-08-27",
+          "f_ann_date": "2025-08-27",
+          "report_type": "1",
+          "comparable_selection_rule": "as_of_then_end_type_match_then_consolidated_report_then_available_at_then_statement_type",
+          "total_revenue": 843220236.53,
+          "revenue": 843220236.53,
+          "n_income_attr_p": 25839190.76,
+          "available_at": "2025-08-28T00:00:00+08:00",
+          "source_name": "tushare",
+          "source_endpoint": "income",
+          "quality_status": "passed"
+        },
+        {
+          "report_period": "2025-09-30",
+          "ann_date": "2025-10-23",
+          "f_ann_date": "2025-10-23",
+          "report_type": "1",
+          "comparable_selection_rule": "as_of_then_end_type_match_then_consolidated_report_then_available_at_then_statement_type",
+          "total_revenue": 1295107617.96,
+          "revenue": 1295107617.96,
+          "n_income_attr_p": 42501824.73,
+          "available_at": "2025-10-24T00:00:00+08:00",
+          "source_name": "tushare",
+          "source_endpoint": "income",
+          "quality_status": "passed"
+        },
+        {
+          "report_period": "2025-12-31",
+          "ann_date": "2026-04-23",
+          "f_ann_date": "2026-04-23",
+          "report_type": "1",
+          "comparable_selection_rule": "as_of_then_end_type_match_then_consolidated_report_then_available_at_then_statement_type",
+          "total_revenue": 1742655695.89,
+          "revenue": 1742655695.89,
+          "n_income_attr_p": 40518589.42,
+          "available_at": "2026-04-24T00:00:00+08:00",
+          "source_name": "tushare",
+          "source_endpoint": "income",
+          "quality_status": "passed"
+        },
+        {
+          "report_period": "2026-03-31",
+          "ann_date": "2026-04-28",
+          "f_ann_date": "2026-04-28",
+          "report_type": "1",
+          "comparable_selection_rule": "as_of_then_end_type_match_then_consolidated_report_then_available_at_then_statement_type",
+          "total_revenue": 475852361.24,
+          "revenue": 475852361.24,
+          "n_income_attr_p": 31416835.81,
+          "available_at": "2026-04-29T00:00:00+08:00",
+          "source_name": "tushare",
+          "source_endpoint": "income",
+          "quality_status": "passed"
+        }
+      ],
+      "cash_flow": [
+        {
+          "report_period": "2025-03-31",
+          "ann_date": "2025-04-25",
+          "f_ann_date": "2025-04-25",
+          "comparable_selection_rule": "as_of_then_end_type_match_then_consolidated_report_then_available_at_then_statement_type",
+          "n_cashflow_act": 2049052.54,
+          "available_at": "2025-04-26T00:00:00+08:00",
+          "source_name": "tushare",
+          "source_endpoint": "cashflow",
+          "quality_status": "passed"
+        },
+        {
+          "report_period": "2025-06-30",
+          "ann_date": "2025-08-27",
+          "f_ann_date": "2025-08-27",
+          "comparable_selection_rule": "as_of_then_end_type_match_then_consolidated_report_then_available_at_then_statement_type",
+          "n_cashflow_act": 96698858.46,
+          "available_at": "2025-08-28T00:00:00+08:00",
+          "source_name": "tushare",
+          "source_endpoint": "cashflow",
+          "quality_status": "passed"
+        },
+        {
+          "report_period": "2025-09-30",
+          "ann_date": "2025-10-23",
+          "f_ann_date": "2025-10-23",
+          "comparable_selection_rule": "as_of_then_end_type_match_then_consolidated_report_then_available_at_then_statement_type",
+          "n_cashflow_act": 184515435.71,
+          "available_at": "2025-10-24T00:00:00+08:00",
+          "source_name": "tushare",
+          "source_endpoint": "cashflow",
+          "quality_status": "passed"
+        },
+        {
+          "report_period": "2025-12-31",
+          "ann_date": "2026-04-23",
+          "f_ann_date": "2026-04-23",
+          "comparable_selection_rule": "as_of_then_end_type_match_then_consolidated_report_then_available_at_then_statement_type",
+          "n_cashflow_act": 269052558.77,
+          "available_at": "2026-04-24T00:00:00+08:00",
+          "source_name": "tushare",
+          "source_endpoint": "cashflow",
+          "quality_status": "passed"
+        },
+        {
+          "report_period": "2026-03-31",
+          "ann_date": "2026-04-28",
+          "f_ann_date": "2026-04-28",
+          "comparable_selection_rule": "as_of_then_end_type_match_then_consolidated_report_then_available_at_then_statement_type",
+          "n_cashflow_act": 62094793.57,
+          "available_at": "2026-04-29T00:00:00+08:00",
+          "source_name": "tushare",
+          "source_endpoint": "cashflow",
+          "quality_status": "passed"
+        }
+      ],
+      "financial_indicator": [
+        {
+          "report_period": "2025-03-31",
+          "ann_date": "2025-04-25",
+          "netprofit_yoy": 20.6764,
+          "dt_netprofit_yoy": 5.89,
+          "ocf_yoy": -93.9262,
+          "grossprofit_margin": 14.2469,
+          "available_at": "2025-04-26T00:00:00+08:00",
+          "source_name": "tushare",
+          "source_endpoint": "fina_indicator",
+          "quality_status": "passed"
+        },
+        {
+          "report_period": "2025-06-30",
+          "ann_date": "2025-08-27",
+          "netprofit_yoy": -7.1425,
+          "dt_netprofit_yoy": -24.91,
+          "ocf_yoy": 32.5202,
+          "grossprofit_margin": 15.3476,
+          "available_at": "2025-08-28T00:00:00+08:00",
+          "source_name": "tushare",
+          "source_endpoint": "fina_indicator",
+          "quality_status": "passed"
+        },
+        {
+          "report_period": "2025-09-30",
+          "ann_date": "2025-10-23",
+          "netprofit_yoy": 27.9503,
+          "dt_netprofit_yoy": 6.95,
+          "ocf_yoy": 896.2294,
+          "grossprofit_margin": 16.5074,
+          "available_at": "2025-10-24T00:00:00+08:00",
+          "source_name": "tushare",
+          "source_endpoint": "fina_indicator",
+          "quality_status": "passed"
+        },
+        {
+          "report_period": "2025-12-31",
+          "ann_date": "2026-04-23",
+          "netprofit_yoy": 48.5049,
+          "dt_netprofit_yoy": 8.24,
+          "ocf_yoy": 107.7366,
+          "grossprofit_margin": 16.9772,
+          "available_at": "2026-04-24T00:00:00+08:00",
+          "source_name": "tushare",
+          "source_endpoint": "fina_indicator",
+          "quality_status": "passed"
+        },
+        {
+          "report_period": "2026-03-31",
+          "ann_date": "2026-04-28",
+          "netprofit_yoy": 182.9002,
+          "dt_netprofit_yoy": 294.15,
+          "ocf_yoy": 2930.4149,
+          "grossprofit_margin": 19.5478,
+          "available_at": "2026-04-29T00:00:00+08:00",
+          "source_name": "tushare",
+          "source_endpoint": "fina_indicator",
+          "quality_status": "passed"
+        }
+      ],
+      "main_business": [
+        {
+          "report_period": "2025-12-31",
+          "classification": "industry",
+          "item_name": "一次性卫生用品",
+          "bz_item": "一次性卫生用品",
+          "bz_sales": 1742655695.89,
+          "bz_profit": 295853952.45,
+          "curr_type": "CNY",
+          "availability_limitation": null,
+          "available_at": "2026-04-24T00:00:00+08:00",
+          "source_name": "tushare",
+          "source_endpoint": "fina_mainbz",
+          "quality_status": "passed"
+        },
+        {
+          "report_period": "2025-12-31",
+          "classification": "product",
+          "item_name": "PE打孔膜",
+          "bz_item": "PE打孔膜",
+          "bz_sales": 362475238.62,
+          "bz_profit": 24007130.68,
+          "curr_type": "CNY",
+          "availability_limitation": null,
+          "available_at": "2026-04-24T00:00:00+08:00",
+          "source_name": "tushare",
+          "source_endpoint": "fina_mainbz",
+          "quality_status": "passed"
+        },
+        {
+          "report_period": "2025-12-31",
+          "classification": "product",
+          "item_name": "其他业务",
+          "bz_item": "其他业务",
+          "bz_sales": 13916370.68,
+          "bz_profit": 5508303.25,
+          "curr_type": "CNY",
+          "availability_limitation": null,
+          "available_at": "2026-04-24T00:00:00+08:00",
+          "source_name": "tushare",
+          "source_endpoint": "fina_mainbz",
+          "quality_status": "passed"
+        },
+        {
+          "report_period": "2025-12-31",
+          "classification": "product",
+          "item_name": "其他主营业务",
+          "bz_item": "其他主营业务",
+          "bz_sales": 112941379.23,
+          "bz_profit": -18604970.51,
+          "curr_type": "CNY",
+          "availability_limitation": null,
+          "available_at": "2026-04-24T00:00:00+08:00",
+          "source_name": "tushare",
+          "source_endpoint": "fina_mainbz",
+          "quality_status": "passed"
+        },
+        {
+          "report_period": "2025-12-31",
+          "classification": "product",
+          "item_name": "打孔无纺布",
+          "bz_item": "打孔无纺布",
+          "bz_sales": 553034032.19,
+          "bz_profit": 173956062.11,
+          "curr_type": "CNY",
+          "availability_limitation": null,
+          "available_at": "2026-04-24T00:00:00+08:00",
+          "source_name": "tushare",
+          "source_endpoint": "fina_mainbz",
+          "quality_status": "passed"
+        },
+        {
+          "report_period": "2025-12-31",
+          "classification": "product",
+          "item_name": "无纺布腰贴",
+          "bz_item": "无纺布腰贴",
+          "bz_sales": 39631757.05,
+          "bz_profit": 10673548.38,
+          "curr_type": "CNY",
+          "availability_limitation": null,
+          "available_at": "2026-04-24T00:00:00+08:00",
+          "source_name": "tushare",
+          "source_endpoint": "fina_mainbz",
+          "quality_status": "passed"
+        },
+        {
+          "report_period": "2025-12-31",
+          "classification": "product",
+          "item_name": "热风无纺布",
+          "bz_item": "热风无纺布",
+          "bz_sales": 660656918.12,
+          "bz_profit": 100313878.54,
+          "curr_type": "CNY",
+          "availability_limitation": null,
+          "available_at": "2026-04-24T00:00:00+08:00",
+          "source_name": "tushare",
+          "source_endpoint": "fina_mainbz",
+          "quality_status": "passed"
+        },
+        {
+          "report_period": "2025-12-31",
+          "classification": "region",
+          "item_name": "中国大陆",
+          "bz_item": "中国大陆",
+          "bz_sales": 708087644.96,
+          "bz_profit": 131426500.35,
+          "curr_type": "CNY",
+          "availability_limitation": null,
+          "available_at": "2026-04-24T00:00:00+08:00",
+          "source_name": "tushare",
+          "source_endpoint": "fina_mainbz",
+          "quality_status": "passed"
+        },
+        {
+          "report_period": "2025-12-31",
+          "classification": "region",
+          "item_name": "国外",
+          "bz_item": "国外",
+          "bz_sales": 1034568050.93,
+          "bz_profit": 164427452.1,
+          "curr_type": "CNY",
+          "availability_limitation": null,
+          "available_at": "2026-04-24T00:00:00+08:00",
+          "source_name": "tushare",
+          "source_endpoint": "fina_mainbz",
+          "quality_status": "passed"
+        }
+      ],
+      "announcement": [
+        {
+          "announcement_time": "2025-08-27T00:00:00+08:00",
+          "title": "2025年半年度报告",
+          "url": "https://www.cninfo.com.cn/finalpage/2025-08-27/1224577072.PDF",
+          "available_at": "2025-08-27T00:00:00+08:00",
+          "source_name": "cninfo",
+          "source_endpoint": "cninfo.new/hisAnnouncement/query",
+          "quality_status": "passed"
+        },
+        {
+          "announcement_time": "2025-10-23T00:00:00+08:00",
+          "title": "2025年三季度报告",
+          "url": "https://www.cninfo.com.cn/finalpage/2025-10-23/1224725278.PDF",
+          "available_at": "2025-10-23T00:00:00+08:00",
+          "source_name": "cninfo",
+          "source_endpoint": "cninfo.new/hisAnnouncement/query",
+          "quality_status": "passed"
+        },
+        {
+          "announcement_time": "2026-04-23T00:00:00+08:00",
+          "title": "2025年年度报告披露提示性公告",
+          "url": "https://www.cninfo.com.cn/finalpage/2026-04-23/1225150053.pdf",
+          "available_at": "2026-04-23T00:00:00+08:00",
+          "source_name": "cninfo",
+          "source_endpoint": "cninfo.new/hisAnnouncement/query",
+          "quality_status": "passed"
+        },
+        {
+          "announcement_time": "2026-04-23T00:00:00+08:00",
+          "title": "2025年年度报告摘要",
+          "url": "https://www.cninfo.com.cn/finalpage/2026-04-23/1225150020.PDF",
+          "available_at": "2026-04-23T00:00:00+08:00",
+          "source_name": "cninfo",
+          "source_endpoint": "cninfo.new/hisAnnouncement/query",
+          "quality_status": "passed"
+        },
+        {
+          "announcement_time": "2026-04-23T00:00:00+08:00",
+          "title": "2025年年度报告",
+          "url": "https://www.cninfo.com.cn/finalpage/2026-04-23/1225150021.PDF",
+          "available_at": "2026-04-23T00:00:00+08:00",
+          "source_name": "cninfo",
+          "source_endpoint": "cninfo.new/hisAnnouncement/query",
+          "quality_status": "passed"
+        },
+        {
+          "announcement_time": "2026-04-23T00:00:00+08:00",
+          "title": "关于预计2026年度日常采购关联交易的公告",
+          "url": "https://www.cninfo.com.cn/finalpage/2026-04-23/1225150036.PDF",
+          "available_at": "2026-04-23T00:00:00+08:00",
+          "source_name": "cninfo",
+          "source_endpoint": "cninfo.new/hisAnnouncement/query",
+          "quality_status": "passed"
+        },
+        {
+          "announcement_time": "2026-04-28T00:00:00+08:00",
+          "title": "2026年一季度报告",
+          "url": "https://www.cninfo.com.cn/finalpage/2026-04-28/1225202798.PDF",
+          "available_at": "2026-04-28T00:00:00+08:00",
+          "source_name": "cninfo",
+          "source_endpoint": "cninfo.new/hisAnnouncement/query",
+          "quality_status": "passed"
+        },
+        {
+          "announcement_time": "2026-04-28T00:00:00+08:00",
+          "title": "第四届董事会第十四次会议决议的公告",
+          "url": "https://www.cninfo.com.cn/finalpage/2026-04-28/1225202800.PDF",
+          "available_at": "2026-04-28T00:00:00+08:00",
+          "source_name": "cninfo",
+          "source_endpoint": "cninfo.new/hisAnnouncement/query",
+          "quality_status": "passed"
+        },
+        {
+          "announcement_time": "2026-05-06T16:16:29+08:00",
+          "title": "关于参加厦门辖区上市公司2025年年报业绩说明会暨投资者网上集体接待日活动的公告",
+          "url": "https://www.cninfo.com.cn/finalpage/2026-05-06/1225278468.PDF",
+          "available_at": "2026-05-06T16:16:29+08:00",
+          "source_name": "cninfo",
+          "source_endpoint": "cninfo.new/hisAnnouncement/query",
+          "quality_status": "passed"
+        },
+        {
+          "announcement_time": "2026-05-15T19:30:11+08:00",
+          "title": "2025年年度股东会决议的公告",
+          "url": "https://www.cninfo.com.cn/finalpage/2026-05-15/1225310685.PDF",
+          "available_at": "2026-05-15T19:30:11+08:00",
+          "source_name": "cninfo",
+          "source_endpoint": "cninfo.new/hisAnnouncement/query",
+          "quality_status": "passed"
+        },
+        {
+          "announcement_time": "2026-05-15T19:30:30+08:00",
+          "title": "关于厦门延江新材料股份有限公司2025年年度股东会的法律意见书",
+          "url": "https://www.cninfo.com.cn/finalpage/2026-05-15/1225310686.PDF",
+          "available_at": "2026-05-15T19:30:30+08:00",
+          "source_name": "cninfo",
+          "source_endpoint": "cninfo.new/hisAnnouncement/query",
+          "quality_status": "passed"
+        },
+        {
+          "announcement_time": "2026-05-18T18:04:30+08:00",
+          "title": "关于终止发行股份及支付现金购买资产并募集配套资金暨关联交易事项的公告",
+          "url": "https://www.cninfo.com.cn/finalpage/2026-05-18/1225313218.PDF",
+          "available_at": "2026-05-18T18:04:30+08:00",
+          "source_name": "cninfo",
+          "source_endpoint": "cninfo.new/hisAnnouncement/query",
+          "quality_status": "passed"
+        },
+        {
+          "announcement_time": "2026-05-18T18:04:30+08:00",
+          "title": "第四届董事会第十五次会议决议的公告",
+          "url": "https://www.cninfo.com.cn/finalpage/2026-05-18/1225313219.PDF",
+          "available_at": "2026-05-18T18:04:30+08:00",
+          "source_name": "cninfo",
+          "source_endpoint": "cninfo.new/hisAnnouncement/query",
+          "quality_status": "passed"
+        },
+        {
+          "announcement_time": "2026-05-20T18:26:11+08:00",
+          "title": "关于股票交易严重异常波动的公告",
+          "url": "https://www.cninfo.com.cn/finalpage/2026-05-20/1225320140.PDF",
+          "available_at": "2026-05-20T18:26:11+08:00",
+          "source_name": "cninfo",
+          "source_endpoint": "cninfo.new/hisAnnouncement/query",
+          "quality_status": "passed"
+        },
+        {
+          "announcement_time": "2026-05-21T17:42:09+08:00",
+          "title": "关于股票交易异常波动的公告",
+          "url": "https://www.cninfo.com.cn/finalpage/2026-05-21/1225322717.PDF",
+          "available_at": "2026-05-21T17:42:09+08:00",
+          "source_name": "cninfo",
+          "source_endpoint": "cninfo.new/hisAnnouncement/query",
+          "quality_status": "passed"
+        },
+        {
+          "announcement_time": "2026-06-10T17:08:27+08:00",
+          "title": "2025年年度权益分派实施公告",
+          "url": "https://www.cninfo.com.cn/finalpage/2026-06-10/1225362281.PDF",
+          "available_at": "2026-06-10T17:08:27+08:00",
+          "source_name": "cninfo",
+          "source_endpoint": "cninfo.new/hisAnnouncement/query",
+          "quality_status": "passed"
+        },
+        {
+          "announcement_time": "2026-06-30T18:22:29+08:00",
+          "title": "关于原控股股东、实际控制人之一所持公司股份完成非交易过户的公告",
+          "url": "https://www.cninfo.com.cn/finalpage/2026-06-30/1225400489.PDF",
+          "available_at": "2026-06-30T18:22:29+08:00",
+          "source_name": "cninfo",
+          "source_endpoint": "cninfo.new/hisAnnouncement/query",
+          "quality_status": "passed"
+        },
+        {
+          "announcement_time": "2026-08-26T00:00:00+08:00",
+          "title": "2026年半年度报告摘要",
+          "url": "https://www.cninfo.com.cn/finalpage/2026-08-26/1225503374.PDF",
+          "available_at": "2026-08-26T00:00:00+08:00",
+          "source_name": "cninfo",
+          "source_endpoint": "cninfo.new/hisAnnouncement/query",
+          "quality_status": "passed"
+        },
+        {
+          "announcement_time": "2026-08-26T00:00:00+08:00",
+          "title": "关于2026年中期利润分配方案的公告",
+          "url": "https://www.cninfo.com.cn/finalpage/2026-08-26/1225503373.PDF",
+          "available_at": "2026-08-26T00:00:00+08:00",
+          "source_name": "cninfo",
+          "source_endpoint": "cninfo.new/hisAnnouncement/query",
+          "quality_status": "passed"
+        },
+        {
+          "announcement_time": "2026-08-26T00:00:00+08:00",
+          "title": "2026年半年度非经营性资金占用及其他关联资金往来情况汇总表",
+          "url": "https://www.cninfo.com.cn/finalpage/2026-08-26/1225503376.PDF",
+          "available_at": "2026-08-26T00:00:00+08:00",
+          "source_name": "cninfo",
+          "source_endpoint": "cninfo.new/hisAnnouncement/query",
+          "quality_status": "passed"
+        },
+        {
+          "announcement_time": "2026-08-26T00:00:00+08:00",
+          "title": "2026年半年度募集资金存放、管理与使用情况的专项报告",
+          "url": "https://www.cninfo.com.cn/finalpage/2026-08-26/1225503377.PDF",
+          "available_at": "2026-08-26T00:00:00+08:00",
+          "source_name": "cninfo",
+          "source_endpoint": "cninfo.new/hisAnnouncement/query",
+          "quality_status": "passed"
+        },
+        {
+          "announcement_time": "2026-08-26T00:00:00+08:00",
+          "title": "第四届董事会第十六次会议决议的公告",
+          "url": "https://www.cninfo.com.cn/finalpage/2026-08-26/1225503378.PDF",
+          "available_at": "2026-08-26T00:00:00+08:00",
+          "source_name": "cninfo",
+          "source_endpoint": "cninfo.new/hisAnnouncement/query",
+          "quality_status": "passed"
+        },
+        {
+          "announcement_time": "2026-08-26T00:00:00+08:00",
+          "title": "2026年半年度报告",
+          "url": "https://www.cninfo.com.cn/finalpage/2026-08-26/1225503375.PDF",
+          "available_at": "2026-08-26T00:00:00+08:00",
+          "source_name": "cninfo",
+          "source_endpoint": "cninfo.new/hisAnnouncement/query",
+          "quality_status": "passed"
+        },
+        {
+          "announcement_time": "2026-09-16T17:32:11+08:00",
+          "title": "2026年半年度权益分派实施公告",
+          "url": "https://www.cninfo.com.cn/finalpage/2026-09-16/1225567859.PDF",
+          "available_at": "2026-09-16T17:32:11+08:00",
+          "source_name": "cninfo",
+          "source_endpoint": "new/hisAnnouncement/query",
+          "quality_status": "passed"
+        },
+        {
+          "announcement_time": "2026-09-17T16:46:27+08:00",
+          "title": "关于控股股东部分股份质押的公告",
+          "url": "https://www.cninfo.com.cn/finalpage/2026-09-17/1225569402.PDF",
+          "available_at": "2026-09-17T16:46:27+08:00",
+          "source_name": "cninfo",
+          "source_endpoint": "new/hisAnnouncement/query",
+          "quality_status": "passed"
+        }
+      ],
+      "price_observations": [
+        {
+          "analysis_date": "2026-09-21",
+          "ts_code": "300658.SZ",
+          "return_1d": 0.0431034483,
+          "relative_market_1d": 0.0359656631,
+          "return_3d": 0.0803571429,
+          "relative_market_3d": 0.0671219757,
+          "return_5d": 0.1089613035,
+          "relative_market_5d": 0.0956840245,
+          "return_10d": 0.0322274882,
+          "relative_market_10d": 0.0399780696,
+          "return_20d": 0.049132948,
+          "relative_market_20d": 0.0542963375,
+          "return_60d": -0.0464098074,
+          "relative_market_60d": 0.03221041,
+          "relative_continuity_5d": 1.0,
+          "up_days_5d": 5.0,
+          "mean_close_position_5d": 0.7026951872,
+          "upper_shadow_frequency_5d": 0.4,
+          "fade_frequency_5d": 0.2,
+          "volume_amplification_days_5d": 2.0,
+          "volume_price_efficiency_5d": 1.0,
+          "limit_up_return_contribution_5d": 0.0,
+          "largest_positive_day_contribution_5d": 0.4101282009,
+          "sessions_since_largest_positive_day_5d": 0.0,
+          "return_ex_largest_positive_day_5d": 0.0631364562,
+          "return_after_largest_positive_day_5d": null,
+          "relative_market_after_largest_positive_day_5d": null,
+          "breakout_vs_prior60": -0.1329617834,
+          "price_location_60d": 0.5839416058,
+          "price_location_82d": 0.4693043232,
+          "realized_volatility_20d_annualized": 0.3593548205,
+          "atr_ratio_20d": 0.0376951331,
+          "liquidity_log10_amount": 8.0474315018,
+          "amount_ratio_last_20d": 1.3792670844,
+          "price_basis": "ohlc_times_adj_factor",
+          "available_price_sessions": 241,
+          "efficiency_ratio_20d": 0.1397260274,
+          "distance_to_prior_250d_high": null,
+          "breakout_prior_250d_high": null,
+          "indicator_coverage_status": "limited",
+          "indicator_limitation_notes": "short history: 241/251 adjusted price sessions available; unavailable fields: distance_to_prior_250d_high, breakout_prior_250d_high",
+          "coverage_status": "limited",
+          "limitation_notes": "short history: 241/251 adjusted price sessions available; unavailable fields: distance_to_prior_250d_high, breakout_prior_250d_high; scenario inputs unavailable: breakout_prior_250d_high",
+          "primary_industry_code": "801981.SI",
+          "primary_industry_name": "个护用品",
+          "primary_industry_level": "L2",
+          "industry_comparison_status": "complete",
+          "industry_equal_weight_return_1d": 0.0292386866,
+          "industry_equal_weight_return_3d": 0.0633636839,
+          "industry_equal_weight_return_5d": 0.065865607,
+          "industry_equal_weight_return_20d": 0.1100328934,
+          "relative_industry_return_1d": 0.0138647617,
+          "relative_industry_return_3d": 0.016993459,
+          "relative_industry_return_5d": 0.0430956965,
+          "relative_industry_return_20d": -0.0608999454,
+          "industry_return_rank_percentile_5d": 0.9090909091,
+          "target_atr_distance_20pct": 5.3057247259
+        }
+      ],
+      "comparison_windows": {
+        "1d": {
+          "first_return_session": "2026-09-21",
+          "last_return_session": "2026-09-21",
+          "base_close_date": "2026-09-18",
+          "session_count": 1
+        },
+        "3d": {
+          "first_return_session": "2026-09-17",
+          "last_return_session": "2026-09-21",
+          "base_close_date": "2026-09-16",
+          "session_count": 3
+        },
+        "5d": {
+          "first_return_session": "2026-09-15",
+          "last_return_session": "2026-09-21",
+          "base_close_date": "2026-09-14",
+          "session_count": 5
+        },
+        "20d": {
+          "first_return_session": "2026-08-25",
+          "last_return_session": "2026-09-21",
+          "base_close_date": "2026-08-24",
+          "session_count": 20
+        },
+        "60d": {
+          "first_return_session": "2026-06-30",
+          "last_return_session": "2026-09-21",
+          "base_close_date": "2026-06-29",
+          "session_count": 60
+        },
+        "largest_positive_day_5d": "2026-09-21",
+        "ex_largest_positive_day_5d": [
+          "2026-09-15",
+          "2026-09-16",
+          "2026-09-17",
+          "2026-09-18"
+        ],
+        "after_largest_positive_day_5d": []
+      },
+      "industry_observations": [
+        {
+          "group_type": "industry",
+          "group_code": "801981.SI",
+          "group_name": "个护用品",
+          "level": "L2",
+          "member_count": 12,
+          "observed_member_count": 12,
+          "member_coverage_ratio": 1.0,
+          "top3_positive_contribution_1d": 0.4010000177,
+          "equal_weight_return_1d": 0.0292386866,
+          "median_return_1d": 0.0324369316,
+          "breadth_1d": 0.9166666667,
+          "relative_return_1d": 0.0221009015,
+          "horizon_observed_member_count_1d": 12,
+          "horizon_member_coverage_ratio_1d": 1.0,
+          "equal_weight_return_3d": 0.0633636839,
+          "median_return_3d": 0.0643867275,
+          "breadth_3d": 1.0,
+          "relative_return_3d": 0.0501285167,
+          "horizon_observed_member_count_3d": 12,
+          "horizon_member_coverage_ratio_3d": 1.0,
+          "equal_weight_return_5d": 0.065865607,
+          "median_return_5d": 0.0524067214,
+          "breadth_5d": 0.9166666667,
+          "relative_return_5d": 0.052588328,
+          "horizon_observed_member_count_5d": 12,
+          "horizon_member_coverage_ratio_5d": 1.0,
+          "equal_weight_return_20d": 0.1100328934,
+          "median_return_20d": 0.0528685204,
+          "breadth_20d": 1.0,
+          "relative_return_20d": 0.1151962829,
+          "horizon_observed_member_count_20d": 12,
+          "horizon_member_coverage_ratio_20d": 1.0,
+          "turnover_share_change_3d": 4.03607e-05,
+          "turnover_share_change_5d": 0.0001769816
+        }
+      ],
+      "equity_daily_source": {
+        "source_name": "tushare",
+        "source_endpoint": "daily",
+        "quality_status": "passed"
+      }
+    },
+    "market": [
+      {
+        "analysis_date": "2026-09-21",
+        "formula_version": "market-context-v3",
+        "observed_current_rows": 4407,
+        "expected_current_rows": 4415,
+        "coverage_ratio": 0.9981879955,
+        "adjustment_observed_current_rows": 4407,
+        "adjustment_coverage_ratio": 0.9981879955,
+        "equity_return_price_basis": "close_times_adj_factor",
+        "interpretation_limit": "observable market facts only",
+        "equal_weight_return_1d": 0.0194250209,
+        "median_return_1d": 0.0158415842,
+        "breadth_1d": 0.8276958002,
+        "equal_weight_return_3d": 0.0352014578,
+        "median_return_3d": 0.0268693179,
+        "breadth_3d": 0.8409813721,
+        "equal_weight_return_5d": 0.0332656415,
+        "median_return_5d": 0.0208514335,
+        "breadth_5d": 0.7368779823,
+        "equal_weight_return_20d": 0.0488591021,
+        "median_return_20d": 0.0278695528,
+        "breadth_20d": 0.6723510687,
+        "broad_index_current_count": 8,
+        "broad_index_current_coverage_ratio": 1.0,
+        "required_index_current_count": 6,
+        "required_index_current_coverage_ratio": 1.0,
+        "auxiliary_index_current_count": 2,
+        "auxiliary_index_current_coverage_ratio": 1.0,
+        "index_000001_sh_return_1d": 0.0097230701,
+        "index_000001_sh_return_3d": 0.0149826016,
+        "index_000001_sh_return_5d": 0.0166199405,
+        "index_000001_sh_return_20d": 0.0174906651,
+        "index_399001_sz_return_1d": 0.006535315,
+        "index_399001_sz_return_3d": 0.0204594687,
+        "index_399001_sz_return_5d": 0.0258097155,
+        "index_399001_sz_return_20d": -0.0046590587,
+        "index_399006_sz_return_1d": 0.0079798942,
+        "index_399006_sz_return_3d": 0.0266092063,
+        "index_399006_sz_return_5d": 0.0346991701,
+        "index_399006_sz_return_20d": -0.0094103384,
+        "index_000300_sh_return_1d": 0.0071377852,
+        "index_000300_sh_return_3d": 0.0132351672,
+        "index_000300_sh_return_5d": 0.013277279,
+        "index_000300_sh_return_20d": -0.0051633895,
+        "index_000905_sh_return_1d": 0.0065217467,
+        "index_000905_sh_return_3d": 0.0217362462,
+        "index_000905_sh_return_5d": 0.0368871239,
+        "index_000905_sh_return_20d": 0.0172856588,
+        "index_000852_sh_return_1d": 0.0102425804,
+        "index_000852_sh_return_3d": 0.0235795221,
+        "index_000852_sh_return_5d": 0.0399068264,
+        "index_000852_sh_return_20d": 0.0366876154,
+        "index_000688_sh_return_1d": 0.0029368927,
+        "index_000688_sh_return_3d": 0.025553377,
+        "index_000688_sh_return_5d": 0.0845523564,
+        "index_000688_sh_return_20d": 0.0344170443,
+        "index_899050_bj_return_1d": 0.0132484695,
+        "index_899050_bj_return_3d": 0.0171937815,
+        "index_899050_bj_return_5d": 0.035494954,
+        "index_899050_bj_return_20d": 0.0043210918,
+        "required_index_return_observed_count": 24,
+        "required_index_return_coverage_ratio": 1.0,
+        "scope_anchor_return_1d": 0.0080794264,
+        "breadth_index_return_gap_1d": 0.0113455945,
+        "scope_anchor_return_3d": 0.0206837589,
+        "breadth_index_return_gap_3d": 0.014517699,
+        "scope_anchor_return_5d": 0.0257096087,
+        "breadth_index_return_gap_5d": 0.0075560328,
+        "scope_anchor_return_20d": 0.0011404227,
+        "breadth_index_return_gap_20d": 0.0477186794,
+        "market_turnover_amount": 1713442773658.75,
+        "turnover_ratio_5d": 1.0833723644,
+        "turnover_ratio_20d": 1.0538469627,
+        "above_ma_20d_share": 0.5431113139,
+        "new_high_20d_share": 0.1521441606,
+        "new_low_20d_share": 0.0157390511,
+        "above_ma_60d_share": 0.6354407014,
+        "new_high_60d_share": 0.0694508537,
+        "new_low_60d_share": 0.0036917397,
+        "return_dispersion_1d": 0.0262618995,
+        "return_dispersion_20d_average": 0.0259418554,
+        "return_dispersion_ratio_20d": 1.0123369778,
+        "realized_volatility_20d_annualized": 0.1693660218,
+        "realized_volatility_60d_annualized": 0.2515525293,
+        "realized_volatility_ratio_20d_to_60d": 0.6732829214,
+        "positive_return_count_1d": 3646,
+        "top20_positive_return_contribution_1d": 0.0298567484,
+        "limit_observed_count": 4407,
+        "limit_price_coverage_ratio": 0.9981879955,
+        "limit_up_count": 98,
+        "limit_up_share": 0.0221970555,
+        "near_limit_up_count": 11,
+        "near_limit_up_share": 0.0024915062,
+        "limit_down_count": 2,
+        "limit_down_share": 0.0004530011,
+        "near_limit_down_count": 0,
+        "near_limit_down_share": 0.0,
+        "coverage_status": "complete",
+        "limitation_notes": ""
+      }
+    ]
+  },
+  "source_refs": {
+    "trace_identity": [
+      "2026-09-21",
+      "2026-09-22",
+      "2026-09-21T18:30:00+08:00"
+    ],
+    "trace_sha256": "051f0b8b59a4e7798bc878178bed7b5f497f7710fc0dd51cf5920e95f59d829c",
+    "decision_ids": [
+      "300658.SZ-market",
+      "300658.SZ-company",
+      "300658.SZ-sector",
+      "300658.SZ-price",
+      "300658.SZ-price-risk-condition"
+    ],
+    "source_skills": [
+      "researching-sectors-industries"
+    ],
+    "handoff_source": "selection-handoff.json"
+  },
+  "gaps": [],
+  "authoring_note": {
+    "text": "这是本次正常日常研究的交接便笺。以下“原句”均指本会话已写入同版 pending 的研究判断；“转述”只解释已有取舍。新增的当前时点解释已同步写入本版 /decision_trace/4/formation_values/why_now，不冒称先前记录已有。完整事实包及直接计算输入继续保留，本便笺不替代它们。\n\n当前意见原句（/decision_trace/4/formation_values/current_opinion）：“明确推荐；力度适中；只在原参考价格范围正常参与，不追价”。转述：本次只选择延江一只。选股的主要依据是同业参与扩大和本股已经发生的持续推进。卫生用品面层材料业务、半年报扣非与现金流改善提供经营背景；没有核实9月新增订单，也没有把8月的半年报写成今天的催化。\n\n当前变化的原句见 /candidate_ledger/0/research_thesis/propagation：“9月17日同组五日上涨仅4/12，当前11/12，说明广泛参与近期才形成，不称长期连续强行业。”这是一组相同12名成员、两个各自18:30截止的五日窗口比较。前三名贡献40.10%仅指9月21日当天正收益之和，不是五日贡献。延江五日行业第二位、五个连续较高收盘；最大正日就是形成日，剔除该日其余四日复合收益仍为6.31%，形成日以后没有可用交易日，不能说最大日之后已经验证。\n\n为何是本股和当前价格：同组洁雅确认更强，却已付出五日19.47%、二十日28.06%的涨幅，且半年扣非利润下降31.87%；延江五日10.90%、二十日4.91%，具有自己的连续确认，半年扣非和经营现金流同时改善。这个比较使较小累计涨幅有意义，不能单独改写成“低位补涨”。朝阳、南矿属于另一种价格机会，作为跨组取舍，不能冒充同业。更完整的当前时点解释见 /decision_trace/4/formation_values/why_now，属于本轮研究已明确形成的论证。\n\n最重要的不利事实是近期上涨尚未消除中期反复。二十日4.91%包含9月8日收盘10.60元到9月11日9.74元的回落，当前10.89元才越过最近二十日收盘区间；六十日仍跌4.64%，二十日路径效率约0.140。形成日可见六十日最高收盘12.03元距参考价10.89元约10.47%，只是需要面对的旧价格区域，不能用它或20%观察目标证明上涨空间。\n\n经营反证也已影响力度：半年归母45,373,264.40元减一季度31,416,835.81元，实际计算第二季度13,956,428.59元；再除以一季度并减1，结果为-55.5766%。这只说明二季度较一季度回落，缺同口径上年一季度，不补造单季同比、季节性或三季度恢复。财务费用因汇兑损失增加；已公开的控股股东质押1300万股，占总股本3.91%、股东及一致行动人持股7.48%，用途为股东债权类投资，不是公司经营融资，也不能推断已经平仓。计算原输入、公式与结果保留在 company 决策字段及 decision-calculations.json，原报告与质押公告位置保留在该 company 决策字段。\n\n为何这些反证尚未推翻选择，原句（/decision_trace/4/formation_values/why_counter_not_overturn）：“这些反证限制的是趋势持续性与参与价格，没有抹去五个较高收盘、去最大日仍上涨、相对同行靠前和多成员共同推进的当前事实。半年扣非及现金流同时改善也比同组主要依赖非经常损益的利润增长更有支撑。确认与较低的已付涨幅合在一起，暂时超过追价风险；因此保留适中力度，并用明确区间与破坏条件约束，不将其表述为经营或中期趋势已全面恢复。” 转述：研究接受的是目前已有的短期共同参与及个股确认，并由参与区间与撤销条件限制适用范围；未形成“利润持续加速”或“中期趋势全面恢复”的结论。\n\n完整参与与改变条件原句（/decision_trace/4/formation_values/participation_and_change_conditions）：“2026年9月22日只在有正常双向成交、可成交价高于10.44元且不高于10.89元时考虑参与；高于10.89元不追价，低于或等于10.44元不参与。若停牌、无可靠报价或无法正常成交，放弃本次参与。其后单次收盘低于10.44元先减弱看法；连续两个交易日收盘低于10.44元，或任一交易日收盘低于10.12元，撤销本次继续走强判断。若个护行业三日多数成员下跌且延江三日不再跑赢同业，也撤销依赖板块扩散的看法。重大新公告若证实核心客户订单减少或经营出现实质恶化，应重判。所有后续收盘比较使用与9月21日相同的复权尺度；已知9月23日除息，每股除息参考调整0.0443565元，不把机械除息当作跌破。” 10.89元取形成日收盘，10.44元取上一交易日收盘，10.12元取9月17日收盘。以10.89元为分母，两处下方观察价分别低4.1322%和7.0707%；这些是已执行计算的结构距离，不是仓位或卖出指令。\n\n必要未知原句（/candidate_ledger/0/research_thesis/critical_unknown）：“尚无可核实的9月新订单或产业新增信息；二季度单季同比、三季度利润及汇率影响是否逆转未确认。长期高点不是可保证到达的价格。9月22日能否在指定区间正常成交尚不可知，禁止补读行动日行情。”这些未知已经纳入本次适中力度的取舍；本轮没有遗留需要作者补造的决定性解释，research_issues 为空不表示经营未知不存在。\n\n对作者的操作提醒：按已有意见及完整条件写作。将经营背景、近期价格变化和未知分清；按本次同口径统计解释比较。保持原截止，不用未来开盘价格或除息后原始价格重写9月21日判断。正式短期观察目标不是公司估值目标；便笺未形成估值或盈利预测，不需补造。",
+    "source_refs": [
+      {
+        "file": "$PRODUCTION_ROOT/local_archive/forward_selection/pending-trace-2026-09-21.json",
+        "pointer": "/research_result/selected_stocks/0/selection_reason",
+        "quote": "明确推荐延江股份，力度适中，依据是个护用品近期从局部修复转为多数成员共同上涨，而延江已有五个连续较高收盘、强于市场和同业的实际推进。它提供卫生巾、纸尿裤面层材料，是真实业务成员；半年报扣非利润和经营现金流同向改善，使其相对同业的选择有经营依据，但8月公开的半年报不是今天的新催化。同组洁雅五日已涨19.47%、二十日涨28.06%，延江为10.90%、4.91%；选择延江不是因为涨得少，而是它在较少累计涨幅下已经有连续收高、同业前列和当日成交增加后的有效收盘。最不利的是此前路径反复、长期趋势未强，第二季度利润也低于第一季度；因此只按10.44元以上至10.89元的行动日条件参与，不把旧高当成保证空间，且不继续补入代价更高的候选。"
+      },
+      {
+        "file": "$PRODUCTION_ROOT/local_archive/forward_selection/pending-trace-2026-09-21.json",
+        "pointer": "/research_result/selected_stocks/0/nearest_comparison",
+        "quote": "同一申万二级个护动力先比较洁雅与延江：洁雅相对确认更强且突破较长区间，但五日19.47%/二十日28.06%的代价、最大正日贡献58%和半年扣非下降31.87%一起降低当前入口吸引力。延江不是未确认的落后成员：五日行业百分位90.91%、五日连续上升、扣掉最大日仍涨6.31%，所以较少累计涨幅具有实际比较意义。再跨发动机比较：朝阳、南矿等独立价量线索缺乏相同经营支持并承受较多既有涨幅；彩讯信息更强但首日放量高开回落及多年订单不确定性使当前取舍未解决。不把不同发动机互称同业近邻。"
+      },
+      {
+        "file": "$PRODUCTION_ROOT/local_archive/forward_selection/pending-trace-2026-09-21.json",
+        "pointer": "/candidate_ledger/0/research_thesis/propagation",
+        "quote": "申万二级个护用品12名有效成员全覆盖，三日12名、五日11名上涨，成员三日/五日中位数6.44%/5.24%，三日/五日相对沪深300为5.01/5.26个百分点，五日平均成交份额高于二十日均份额。前三名占当日正收益贡献40.10%，不是只有本股上涨。9月17日同组五日上涨仅4/12，当前11/12，说明广泛参与近期才形成，不称长期连续强行业。"
+      },
+      {
+        "file": "$PRODUCTION_ROOT/local_archive/forward_selection/pending-trace-2026-09-21.json",
+        "pointer": "/candidate_ledger/0/research_thesis/price_confirmation",
+        "quote": "五日收益10.90%，三日8.04%；相对沪深300三日/五日6.71/9.57个百分点，相对个护同业等权三日/五日1.70/4.31个百分点。9月15日至21日五个收盘从9.85、10.08、10.12、10.44到10.89元连续提高，当天成交1.12亿元、为含当日二十日均额1.38倍。最大正日占五日正收益和41.01%，去掉今天仍有6.31%上涨；今天尚无后续交易日，不冒称最大日之后已经验证。"
+      },
+      {
+        "file": "$PRODUCTION_ROOT/local_archive/forward_selection/pending-trace-2026-09-21.json",
+        "pointer": "/candidate_ledger/0/research_thesis/remaining_path",
+        "quote": "确认来自连续五日、相对同业和二十日新高收盘的组合，而不是低涨幅本身。二十日仅涨4.91%包含9月8日10.60元回落至9月11日9.74元的反复，目前10.89元才越过这段收盘区间；二十日路径效率0.140、六十日仍跌4.64%，说明中期上升尚未建立。形成日可见六十日最高收盘12.03元距10.89元只有10.47%，约20%观察路径还需要跨过更早供给区，旧高不能证明余量。现有更广泛个护上涨与自身连续收高使继续扩展路径值得观察；优势依赖10.89元以内入口，不为更高价格沿用此结论。"
+      },
+      {
+        "file": "$PRODUCTION_ROOT/local_archive/forward_selection/pending-trace-2026-09-21.json",
+        "pointer": "/candidate_ledger/0/research_thesis/critical_unknown",
+        "quote": "尚无可核实的9月新订单或产业新增信息；二季度单季同比、三季度利润及汇率影响是否逆转未确认。长期高点不是可保证到达的价格。9月22日能否在指定区间正常成交尚不可知，禁止补读行动日行情。"
+      },
+      {
+        "file": "$PRODUCTION_ROOT/local_archive/forward_selection/pending-trace-2026-09-21.json",
+        "pointer": "/decision_trace/1/formation_values/fundamental_anchor",
+        "quote": "2026年半年报8月26日已公开：收入8.918亿元，同比增长5.76%；归母4537.33万元、扣非3943.33万元，同比增长75.60%和148.18%；经营现金流1.101亿元、同比增13.89%。正式业务为3D打孔无纺布、PE打孔膜等一次性卫生用品面层；产品结构和成本管理是半年经营解释，属于背景，不能证明9月的新订单或短期股价必涨。"
+      },
+      {
+        "file": "$PRODUCTION_ROOT/local_archive/forward_selection/pending-trace-2026-09-21.json",
+        "pointer": "/decision_trace/1/formation_values/company_risk",
+        "quote": "最强反证是短期连涨仍处于此前反复的价格路径，尚无长期连续趋势；经营也不能简单写成持续加速。用半年归母45373264.40元减一季度31416835.81元，第二季度为13956428.59元，较一季度低55.58%，不据此推单季同比或季节性。报告财务费用因汇兑损失增加，客户集中、海外经营和原料波动仍有影响。9月17日公告控股股东质押1300万股，占总股本3.91%、控股股东及一致行动人持股7.48%，用途为股东债权类投资；不是公司经营融资，也未据此认定存在平仓。"
+      },
+      {
+        "file": "$PRODUCTION_ROOT/local_archive/forward_selection/pending-trace-2026-09-21.json",
+        "pointer": "/decision_trace/4/formation_values/current_opinion",
+        "quote": "明确推荐；力度适中；只在原参考价格范围正常参与，不追价"
+      },
+      {
+        "file": "$PRODUCTION_ROOT/local_archive/forward_selection/pending-trace-2026-09-21.json",
+        "pointer": "/decision_trace/4/formation_values/why_this_stock",
+        "quote": "同组比较保留延江：实际业务是卫生用品面层材料，属于个护业务链；在已有五日连续较高收盘、行业五日第二位、剔除最大正日仍上涨的确认下，相对洁雅付出的累计涨幅更小，半年扣非和经营现金流又同时改善。业务背景本身不发起短期机会，当前选择由共同参与、本股推进和当前代价合并形成。"
+      },
+      {
+        "file": "$PRODUCTION_ROOT/local_archive/forward_selection/pending-trace-2026-09-21.json",
+        "pointer": "/decision_trace/4/formation_values/why_now",
+        "quote": "当前时点的变化是个护同一12名成员五日上涨家数从9月17日的4名扩至9月21日的11名，同时延江五个交易日收盘连续提高至10.89元，刚越过此前二十日收盘区间；因此已经有共同参与和本股推进可供判断。当前价格的取舍是：同组洁雅为更强确认已付出五日19.47%、二十日28.06%的涨幅，延江五日10.90%、二十日4.91%仍有行业前列、去最大日仍涨6.31%的确认，并有半年扣非和现金流改善作背景。延江的二十日反复、六十日仍跌及二季度利润低于一季度限制了信心，因此只保留10.44元以上至10.89元的入口，超过10.89元不沿用当前选择。它不是等待新事件的押注，也不靠旧高或20%观察目标证明余量。"
+      },
+      {
+        "file": "$PRODUCTION_ROOT/local_archive/forward_selection/pending-trace-2026-09-21.json",
+        "pointer": "/decision_trace/4/formation_values/why_counter_not_overturn",
+        "quote": "这些反证限制的是趋势持续性与参与价格，没有抹去五个较高收盘、去最大日仍上涨、相对同行靠前和多成员共同推进的当前事实。半年扣非及现金流同时改善也比同组主要依赖非经常损益的利润增长更有支撑。确认与较低的已付涨幅合在一起，暂时超过追价风险；因此保留适中力度，并用明确区间与破坏条件约束，不将其表述为经营或中期趋势已全面恢复。"
+      },
+      {
+        "file": "$PRODUCTION_ROOT/local_archive/forward_selection/pending-trace-2026-09-21.json",
+        "pointer": "/decision_trace/4/formation_values/participation_and_change_conditions",
+        "quote": "2026年9月22日只在有正常双向成交、可成交价高于10.44元且不高于10.89元时考虑参与；高于10.89元不追价，低于或等于10.44元不参与。若停牌、无可靠报价或无法正常成交，放弃本次参与。其后单次收盘低于10.44元先减弱看法；连续两个交易日收盘低于10.44元，或任一交易日收盘低于10.12元，撤销本次继续走强判断。若个护行业三日多数成员下跌且延江三日不再跑赢同业，也撤销依赖板块扩散的看法。重大新公告若证实核心客户订单减少或经营出现实质恶化，应重判。所有后续收盘比较使用与9月21日相同的复权尺度；已知9月23日除息，每股除息参考调整0.0443565元，不把机械除息当作跌破。"
+      },
+      {
+        "file": "$PRODUCTION_ROOT/local_archive/forward_selection/pending-trace-2026-09-21.json",
+        "pointer": "/decision_trace/4/formation_values/condition_origin",
+        "quote": "上界为形成日收盘，10.44为前一交易日较高收盘，10.12为9月17日收盘；是本股本次结构观察，不是通用百分比阈值"
+      },
+      {
+        "file": "$PRODUCTION_ROOT/local_archive/forward_selection/pending-trace-2026-09-21.json",
+        "pointer": "/decision_trace/1/formation_values/q2_net_income_formula",
+        "quote": "45373264.40 - 31416835.81"
+      },
+      {
+        "file": "$PRODUCTION_ROOT/local_archive/forward_selection/pending-trace-2026-09-21.json",
+        "pointer": "/decision_trace/1/formation_values/q2_vs_q1_formula",
+        "quote": "13956428.59 / 31416835.81 - 1"
+      },
+      {
+        "file": "$PRODUCTION_ROOT/local_archive/forward_selection/pending-trace-2026-09-21.json",
+        "pointer": "/decision_trace/4/formation_values/calculation_source",
+        "quote": "local_archive/ai_tasks/nightly/rerun-2026-09-22/recommendation/decision-calculations.json"
+      }
+    ],
+    "identity": {
+      "ts_code": "300658.SZ",
+      "name": "延江股份",
+      "formation_date": "2026-09-21",
+      "action_date": "2026-09-22",
+      "as_of": "2026-09-21T18:30:00+08:00",
+      "reference_price": 10.89,
+      "observation_contract": "原推荐观察期为20个交易日，相对参考价+20%是原观察目标，不是收益承诺。"
+    },
+    "binding": {
+      "trace_sha256": "051f0b8b59a4e7798bc878178bed7b5f497f7710fc0dd51cf5920e95f59d829c"
+    },
+    "origin": "selection-handoff-v2"
+  },
+  "composition": {
+    "identity": 217,
+    "judgment": 455,
+    "reasoning": 2394,
+    "evidence": 6010,
+    "comparisons": 274,
+    "counterevidence": 557,
+    "conditions": 535,
+    "unknowns": 93,
+    "facts": 37516,
+    "source_refs": 375,
+    "gaps": 2,
+    "authoring_note": 8504,
+    "total": 57092
+  }
+}

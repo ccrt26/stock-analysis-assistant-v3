@@ -1,0 +1,4 @@
+{
+  "policy": "Only path/credential redaction and hidden/system protocol exclusion; visible research and article wording unchanged",
+  "filtered_protocol": []
+}

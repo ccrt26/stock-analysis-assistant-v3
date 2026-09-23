@@ -1,0 +1,13 @@
+{
+  "identity": {
+    "ts_code": "600522.SH",
+    "name": "中天科技",
+    "formation_date": "2026-09-17",
+    "action_date": "2026-09-18",
+    "as_of": "2026-09-17T18:30:00+08:00",
+    "reference_price": 36.39,
+    "observation_contract": "原推荐观察期为20个交易日，相对参考价+20%是原观察目标，不是收益承诺。"
+  },
+  "source": "local_archive/ai_tasks/writing-trials/20260918-181714",
+  "reference_label": "reference_label_unconfirmed"
+}

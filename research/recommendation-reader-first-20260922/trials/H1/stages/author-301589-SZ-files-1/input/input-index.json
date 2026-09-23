@@ -1,0 +1,85 @@
+{
+  "files": [
+    {
+      "bytes": 317,
+      "path": "input/identity.json",
+      "sha256": "5d92d4587d2281699d27f911a2979aa1439db64ff14b156717855be517d8f90f",
+      "source": "packet.identity"
+    },
+    {
+      "bytes": 104464,
+      "path": "input/packet.json",
+      "sha256": "3d9b83c275516db83f183a5b19319b0749b11100172b24c70ad8cac58cc3fa39",
+      "source": "current research projection"
+    },
+    {
+      "bytes": 7866,
+      "path": "input/research-handoff.md",
+      "sha256": "e14d7a8b379f6ee508de9ffbb29be88f6f74dafa217ba7ccd73f220f81af4e2f",
+      "source": {
+        "binding": {
+          "identity": {
+            "action_date": "2026-09-21",
+            "as_of": "2026-09-20T18:30:00+08:00",
+            "formation_date": "2026-09-18",
+            "name": "诺瓦星云",
+            "observation_contract": "原推荐观察期为20个交易日，相对参考价+20%是原观察目标，不是收益承诺。",
+            "reference_price": 159.7,
+            "ts_code": "301589.SZ"
+          },
+          "kind": "original_packet",
+          "packet_content_sha256": "6fda094307ef6a056a299691b4854d244f777c40bf0d396680427f119c0641f6",
+          "packet_sha256": "4b7623edd51e366c0bf6b35fe0e2e37adbb3d3c553c4e282a8b5ca3eac1321a2"
+        }
+      }
+    },
+    {
+      "bytes": 2053,
+      "path": "input/reading-guide.md",
+      "sha256": "61c2971f3b16b5f3633c6a4fd0ce0c6b7f2b511050bf7395b44047a9d91e3535",
+      "source": "$PRODUCTION_ROOT/.agents/skills/orchestrating-stock-research/references/recommendation-reading-guide.md"
+    },
+    {
+      "bytes": 6597,
+      "path": "input/examples/01.md",
+      "sha256": "792deb1d42cf25aef65f017bebfe7d6f7b0c7418a163a2ce13fef178387f4ba9",
+      "source": {
+        "metadata": {
+          "action_date": "2026-09-14",
+          "approval_scope": "论证与表达范文",
+          "as_of": "2026-09-13T18:30:00+08:00",
+          "confirmation_ref": "用户2026-09-15明确确认本轮修改版定稿，并与国际复材一同采用",
+          "content_origin": "point_in_time_supplement",
+          "formation_date": "2026-09-11",
+          "note_type": "writing_example",
+          "status": "approved",
+          "ts_code": "600176.SH",
+          "updated": "2026-09-15"
+        },
+        "source": "$USER_HOME/知识库/LLW/股票分析/10_方法与范文/推荐说明范文/中国巨石_2026-09-14_推荐说明_采用范文.md"
+      }
+    },
+    {
+      "bytes": 6721,
+      "path": "input/examples/02.md",
+      "sha256": "d99f60fcfcccd921b4971039739a90283ae289b4eeabff188440d8f8886f9157",
+      "source": {
+        "metadata": {
+          "action_date": "2026-09-16",
+          "approval_scope": "论证与表达范文",
+          "as_of": "2026-09-15T18:30:00+08:00",
+          "confirmation_ref": "用户2026-09-15授权按风险判断与应对意见修改后，与中国巨石一同采用",
+          "content_origin": "依据本轮讨论及原截止资料修订的采用稿",
+          "formation_date": "2026-09-15",
+          "note_type": "writing_example",
+          "status": "approved",
+          "ts_code": "301526.SZ",
+          "updated": "2026-09-15"
+        },
+        "source": "$USER_HOME/知识库/LLW/股票分析/10_方法与范文/推荐说明范文/国际复材_2026-09-16_推荐说明_采用范文.md"
+      }
+    }
+  ],
+  "profile": "astra-files-v1",
+  "role": "author"
+}

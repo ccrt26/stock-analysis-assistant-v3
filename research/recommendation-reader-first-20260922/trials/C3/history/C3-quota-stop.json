@@ -1,0 +1,10 @@
+{
+  "id": "C3",
+  "started_at": "2026-09-22T21:36:37.222725+08:00",
+  "tested_code_sha": "dd33e77bb2e9dae28a62c49d133d5554240669e3",
+  "status": "not_run",
+  "reason": "Provider unavailable; no fallback or repeated sampling",
+  "finished_at": "2026-09-22T21:36:37.222901+08:00",
+  "seconds": 0.0,
+  "requests": 0
+}

@@ -1,0 +1,88 @@
+{
+  "identity": {
+    "action_date": "2026-09-21",
+    "as_of": "2026-09-20T18:30:00+08:00",
+    "formation_date": "2026-09-18",
+    "name": "德冠新材",
+    "observation_contract": "原推荐观察期为20个交易日，相对参考价+20%是原观察目标，不是收益承诺。",
+    "reference_price": 23.57,
+    "ts_code": "001378.SZ"
+  },
+  "purpose": "固定历史交接中的算术复核，不重做研究判断。",
+  "execution": "Python 3 decimal.Decimal，精度40位；本文件由执行公式的同一程序写入。",
+  "packet_sha256": "bc9f60ea33dd5d2ddce0d455189475db21607205934f754717aa05d66530b07a",
+  "checks": [
+    {
+      "id": "preceding_15_sessions_return",
+      "meaning": "复核原记录前15日-5.87%；20日窗口前15日为2026-08-24至2026-09-11，基准收盘日2026-08-21。",
+      "original_judgment_pointer": "/reasoning/why_now/text",
+      "window_pointers": [
+        "/facts/own/comparison_windows/20d",
+        "/facts/own/comparison_windows/5d"
+      ],
+      "inputs": {
+        "return_20d": {
+          "file": "input/packet.json",
+          "pointer": "/evidence/5/content/return_20d",
+          "value": "0.17205370462456493"
+        },
+        "return_5d": {
+          "file": "input/packet.json",
+          "pointer": "/evidence/5/content/return_5d",
+          "value": "0.24511357633386166"
+        }
+      },
+      "formula": "(1 + return_20d) / (1 + return_5d) - 1",
+      "result_decimal": "-0.0586772749875683931731332571155621737259",
+      "result_percent": "-5.867727498756839317313325711556217372590",
+      "rounded_percent": "-5.87%",
+      "interpretation": "仅复核原研究已采用的历史变化；用既有复权收益拆分，不从原始OHLC重新计算跨日收益。"
+    },
+    {
+      "id": "q2_revenue",
+      "meaning": "Q2收入，同一2026年合并累计口径H1减Q1。",
+      "original_judgment_pointer": "/evidence/1/content",
+      "inputs": {
+        "H1": {
+          "file": "input/packet.json",
+          "pointer": "/facts/own/income_statement/7/total_revenue",
+          "value": "885008688.0"
+        },
+        "Q1": {
+          "file": "input/packet.json",
+          "pointer": "/facts/own/income_statement/6/total_revenue",
+          "value": "415365275.96"
+        }
+      },
+      "unit": "CNY",
+      "formula": "H1 - Q1",
+      "result": "469643412.04",
+      "packet_existing_result": "469643412.04",
+      "matches_existing_result": true,
+      "interpretation": "仅复核原研究已采用的季度变化，不新增经营解释。"
+    },
+    {
+      "id": "q2_profit",
+      "meaning": "Q2归母净利润，同一2026年合并累计口径H1减Q1。",
+      "original_judgment_pointer": "/evidence/1/content",
+      "inputs": {
+        "H1": {
+          "file": "input/packet.json",
+          "pointer": "/facts/own/income_statement/7/n_income_attr_p",
+          "value": "60937134.83"
+        },
+        "Q1": {
+          "file": "input/packet.json",
+          "pointer": "/facts/own/income_statement/6/n_income_attr_p",
+          "value": "28180928.38"
+        }
+      },
+      "unit": "CNY",
+      "formula": "H1 - Q1",
+      "result": "32756206.45",
+      "packet_existing_result": "32756206.45",
+      "matches_existing_result": true,
+      "interpretation": "仅复核原研究已采用的季度变化，不新增经营解释。"
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "tested_code_sha": "066129e1641c4d1fc55fbb3568527a6f88e35525",
+  "scope": "Tracked src/tools/ops/.agents source files; direct byte comparison, no fact-store inventory",
+  "compared_files": 158,
+  "differences": [],
+  "status": "passed"
+}

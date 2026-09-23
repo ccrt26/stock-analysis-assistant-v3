@@ -1,0 +1,97 @@
+{
+  "files": [
+    {
+      "bytes": 317,
+      "path": "input/identity.json",
+      "sha256": "e5c63d77896671c38aad484c591d6e9b988fe6d88dc3b8982091a6ea12797b95",
+      "source": "packet.identity"
+    },
+    {
+      "bytes": 148247,
+      "path": "input/packet.json",
+      "sha256": "b7556a0d4fe2f0f18c99c993ced52546e291df87b5000e15384f56daf380a9cb",
+      "source": "current research projection"
+    },
+    {
+      "bytes": 213882,
+      "path": "input/authoritative-research.json",
+      "sha256": "7daafa0fd5145ef1e3258791f0509e7c642974704563d25ac6710dc9c0478354",
+      "source": "same-version authority; check omissions in writer projection"
+    },
+    {
+      "bytes": 9115,
+      "path": "input/research-handoff.md",
+      "sha256": "4bcd71d0abd2292a4b7a0493f95fcc466b9bbabcd7618e5b46bec4d333af5def",
+      "source": {
+        "binding": {
+          "identity": {
+            "action_date": "2026-09-21",
+            "as_of": "2026-09-20T18:30:00+08:00",
+            "formation_date": "2026-09-18",
+            "name": "飞凯材料",
+            "observation_contract": "原推荐观察期为20个交易日，相对参考价+20%是原观察目标，不是收益承诺。",
+            "reference_price": 38.35,
+            "ts_code": "300398.SZ"
+          },
+          "kind": "original_packet",
+          "packet_content_sha256": "8c2822ab6e469c96d0a4483e5a4a512e151a4c3abc9c3794ddbe5cef2be3df9e",
+          "packet_sha256": "c5780baf64b65b9dba60c72a01df3a781c8e47ab97097cb4a989f74519503cdb"
+        }
+      }
+    },
+    {
+      "bytes": 2053,
+      "path": "input/reading-guide.md",
+      "sha256": "61c2971f3b16b5f3633c6a4fd0ce0c6b7f2b511050bf7395b44047a9d91e3535",
+      "source": "$PRODUCTION_ROOT/.agents/skills/orchestrating-stock-research/references/recommendation-reading-guide.md"
+    },
+    {
+      "bytes": 6597,
+      "path": "input/examples/01.md",
+      "sha256": "792deb1d42cf25aef65f017bebfe7d6f7b0c7418a163a2ce13fef178387f4ba9",
+      "source": {
+        "metadata": {
+          "action_date": "2026-09-14",
+          "approval_scope": "论证与表达范文",
+          "as_of": "2026-09-13T18:30:00+08:00",
+          "confirmation_ref": "用户2026-09-15明确确认本轮修改版定稿，并与国际复材一同采用",
+          "content_origin": "point_in_time_supplement",
+          "formation_date": "2026-09-11",
+          "note_type": "writing_example",
+          "status": "approved",
+          "ts_code": "600176.SH",
+          "updated": "2026-09-15"
+        },
+        "source": "$USER_HOME/知识库/LLW/股票分析/10_方法与范文/推荐说明范文/中国巨石_2026-09-14_推荐说明_采用范文.md"
+      }
+    },
+    {
+      "bytes": 6721,
+      "path": "input/examples/02.md",
+      "sha256": "d99f60fcfcccd921b4971039739a90283ae289b4eeabff188440d8f8886f9157",
+      "source": {
+        "metadata": {
+          "action_date": "2026-09-16",
+          "approval_scope": "论证与表达范文",
+          "as_of": "2026-09-15T18:30:00+08:00",
+          "confirmation_ref": "用户2026-09-15授权按风险判断与应对意见修改后，与中国巨石一同采用",
+          "content_origin": "依据本轮讨论及原截止资料修订的采用稿",
+          "formation_date": "2026-09-15",
+          "note_type": "writing_example",
+          "status": "approved",
+          "ts_code": "301526.SZ",
+          "updated": "2026-09-15"
+        },
+        "source": "$USER_HOME/知识库/LLW/股票分析/10_方法与范文/推荐说明范文/国际复材_2026-09-16_推荐说明_采用范文.md"
+      }
+    },
+    {
+      "bytes": 6903,
+      "path": "input/article.md",
+      "sha256": "955b8bb0107bfcad808d125ab8e141ce2328d3d14efa29f776cd3e199dcb2b63",
+      "source": "current-cycle:article"
+    }
+  ],
+  "profile": "astra-files-v1",
+  "role": "review"
+}

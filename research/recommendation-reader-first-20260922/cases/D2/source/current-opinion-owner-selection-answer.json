@@ -1,0 +1,30 @@
+{
+  "resolutions": [
+    {
+      "issue_id": "CO-1",
+      "ts_code": "300398.SZ",
+      "decision": "本人的选股研究处理已完成；上次重复列入unresolved的是monitor待办。本次已从research_issues移除误归属事项，并在authoring_note保留依据和交接说明。沿用上次恢复的已有解释及据原事实补充的论证，不改变原判断、价位或条件。monitor尚待回应，共同问题未整体解决。",
+      "evidence": [
+        "current-opinion-owner-selection-astra.md#/resolutions/0明确选股侧核对完成，已说明36.97—38.35元完整参与范围、参与后规则及已核实旧高；其#/unresolved/0全部为monitor待办。",
+        "原selection-handoff.json#/stocks/300398.SZ/research_issues/0明确selection已完成处理，并要求由monitor继续核对，是本次更正归属的依据。",
+        "current-opinion-questions.json#/monitor/0完整保留，文件未改。"
+      ],
+      "author_instruction": "沿用现有研究交接，不因monitor待办再次请求selection研究。monitor仍须明确略高于38.35元是否允许新参与、收盘接续是否另需确认及信号时点、36元观察区来源与触发口径、放量不收高撤回的判断对象和依据，并同步其结构化意见与唯一正文。不得宣称monitor已解决；最终共同ready由后续独立一致性核对决定。",
+      "changes_original_judgment": false
+    },
+    {
+      "issue_id": "CO-2",
+      "ts_code": "300398.SZ",
+      "decision": "本人的选股研究处理已完成；上次重复列入unresolved的是monitor待办。本次仅更正交付格式与归属，保留38.35元当前参照、原参与范围、信号时点及全部原条件，不借用37.53元历史参考扩大范围。monitor尚待回应，不能以观察期不同认定当前意见已经一致。",
+      "evidence": [
+        "current-opinion-owner-selection-astra.md#/resolutions/1明确选股侧核对完成；其#/unresolved/1要求monitor澄清正文及字段，并未留下selection待补判断。",
+        "原selection-handoff.json#/stocks/300398.SZ/research_issues/1明确剩余处理由monitor承担；36元取值依据仍未确认，没有补写为已核实支撑位。",
+        "current-opinion-questions.json#/monitor/1完整保留。修改后核对仅300398.SZ的research_issues和authoring_note发生变化；source_refs、其他股票、其他交接字段及pending保持原样，已绑定trace_sha256未变。"
+      ],
+      "author_instruction": "按现有交接保留截至9月18日已有确认及收盘信号形成后才能使用的解释。monitor仍须回应报价上限、新增收盘确认要求、36元来源及撤回规则的适用对象，并同步实际正文；39.20/39.23元虽已由selection核实，不能宣称monitor正文已采用。source_refs保留pending原句，其中过时的research_issues位置说明已在authoring_note更正。最终共同ready由后续独立一致性核对决定。",
+      "changes_original_judgment": false
+    }
+  ],
+  "unresolved": [],
+  "trace_sha256": "080f06be178945b0f518eb1bfd2e67ef3b1f05a67372e3ab51cba7cdc050a56b"
+}

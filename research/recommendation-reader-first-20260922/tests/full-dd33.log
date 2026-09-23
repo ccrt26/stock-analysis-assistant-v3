@@ -1,0 +1,250 @@
+........................................................................ [  3%]
+........................................................................ [  7%]
+........................................................................ [ 11%]
+................F....................................................... [ 15%]
+........................................................................ [ 19%]
+........................................................................ [ 23%]
+........................................................................ [ 27%]
+........................................................................ [ 31%]
+........................................................................ [ 35%]
+........................................................................ [ 39%]
+........................................................................ [ 43%]
+........................................................................ [ 47%]
+........................................................................ [ 51%]
+......................................................FF................ [ 55%]
+........................................................................ [ 59%]
+........................................................................ [ 63%]
+........................................................................ [ 67%]
+........................................................................ [ 71%]
+..............s......................................................... [ 75%]
+........................................................................ [ 79%]
+........................................................................ [ 83%]
+........................................................................ [ 87%]
+........................................................................ [ 91%]
+........................................................................ [ 95%]
+........................................................................ [ 99%]
+.                                                                        [100%]
+=================================== FAILURES ===================================
+__________ test_same_stock_two_recommendations_keep_own_introductions __________
+
+project = {'root': PosixPath('$TEST_TMP'), ...}
+
+    def test_same_stock_two_recommendations_keep_own_introductions(project):
+        from tools.render_monitor_web import build_payload
+    
+        ep_new = _episode(CODE, "海油工程", action=ACTION, formation=FORMATION,
+                          episode_id=f"formal:{FORMATION}:{CODE}:selected")
+        ep_old = _episode(CODE, "海油工程", action="2026-08-10", formation="2026-08-07",
+                          episode_id="formal:2026-08-07:600583.SH:selected")
+        _display_archive(project, episodes=[ep_old, ep_new],
+                         daily_ids=[ep_new["episode_id"]])
+        # 第二条身份来自更早的原 trace
+        old_trace = {
+            "trace_version": "daily-research-trace-v4", "formation_date": "2026-08-07",
+            "action_date": "2026-08-10", "as_of": "2026-08-09T18:30:00+08:00",
+            "candidate_ledger": [{
+                "ts_code": CODE, "name": "海油工程", "final_fate": "selected",
+                "research_thesis": {"engine_type": "sector_leader_cluster",
+                                    "engine_status": "active",
+                                    "market_recognition": {"status": "confirmed"}},
+            }],
+            "decision_trace": [],
+            "research_result": {"research_completed": True,
+                                "point_in_time_evidence_verified": True,
+                                "failure_reason": "", "skills_used": [], "selected_stocks": [],
+                                "nearest_nonselections": [], "empty_reason": ""},
+        }
+        (project["selection_dir"] / "research-trace-2026-08-07.json").write_text(
+            json.dumps(old_trace, ensure_ascii=False), encoding="utf-8")
+        _write_introduction_file(project["intro_root"], ACTION, CODE, "本次推荐篇")
+        _write_introduction_file(project["intro_root"], "2026-08-10", CODE, "上次推荐篇",
+                                 as_of="2026-08-09T18:30:00+08:00", formation="2026-08-07")
+        report = json.loads(
+            (project["monitor_dir"] / "monitor-report-2026-08-21.json").read_text(encoding="utf-8")
+        )
+        snapshot = json.loads(
+            (project["monitor_dir"] / "snapshot-2026-08-21.json").read_text(encoding="utf-8")
+        )
+>       payload = build_payload(project["root"], project["monitor_dir"],
+                                date(2026, 8, 21), report, snapshot,
+                                selection_dir=project["selection_dir"],
+                                intro_root=project["intro_root"])
+
+tests/test_company_introduction.py:923: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tools/render_monitor_web.py:1421: in build_payload
+    include_backfilled_formal_episodes(selection_dir, analysis_date, as_of, episodes)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+selection_dir = PosixPath('$TEST_TMP')
+analysis_date = datetime.date(2026, 8, 21), as_of = '2026-08-23T09:05:02+08:00'
+episodes = {'formal:2026-08-07:600583.SH:selected': {'episode_id': 'formal:2026-08-07:600583.SH:selected', 'ts_code': '600583.SH'...'episode_id': 'formal:2026-08-21:600583.SH:selected', 'ts_code': '600583.SH', 'name': '海油工程', 'role': 'selected', ...}}
+
+    def include_backfilled_formal_episodes(selection_dir, analysis_date, as_of, episodes):
+        """只读汇入在较新快照之后补存的正式身份，不生成后续复盘判断。"""
+        from stock_analyzer.ops.forward_monitor import _trace_episodes
+        from stock_analyzer.ops.forward_selection import DailyResearchTraceV4
+    
+        cutoff = _parse_as_of(as_of)
+        for path in sorted(selection_dir.glob("research-trace-*.json")):
+            try:
+                formed = date.fromisoformat(path.stem.removeprefix("research-trace-"))
+            except ValueError:
+                continue
+            if formed >= analysis_date:
+                continue
+            trace = json.loads(path.read_text(encoding="utf-8"))
+            if trace.get("trace_version") != "daily-research-trace-v4":
+                continue
+>           validated = DailyResearchTraceV4.model_validate(trace)
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           pydantic_core._pydantic_core.ValidationError: 18 validation errors for DailyResearchTraceV4
+E           market_search_context
+E             Field required [type=missing, input_value={'trace_version': 'daily-...[], 'empty_reason': ''}}, input_type=dict]
+E               For further information visit https://errors.pydantic.dev/2.13/v/missing
+E           market_propagation_mode
+E             Field required [type=missing, input_value={'trace_version': 'daily-...[], 'empty_reason': ''}}, input_type=dict]
+E               For further information visit https://errors.pydantic.dev/2.13/v/missing
+E           market_risk_overlays
+E             Field required [type=missing, input_value={'trace_version': 'daily-...[], 'empty_reason': ''}}, input_type=dict]
+E               For further information visit https://errors.pydantic.dev/2.13/v/missing
+E           candidate_ledger.0.opportunity_type
+E             Field required [type=missing, input_value={'ts_code': '600583.SH', ...'status': 'confirmed'}}}, input_type=dict]
+E               For further information visit https://errors.pydantic.dev/2.13/v/missing
+E           candidate_ledger.0.source_skills
+E             Field required [type=missing, input_value={'ts_code': '600583.SH', ...'status': 'confirmed'}}}, input_type=dict]
+E               For further information visit https://errors.pydantic.dev/2.13/v/missing
+E           candidate_ledger.0.primary_reason
+E             Field required [type=missing, input_value={'ts_code': '600583.SH', ...'status': 'confirmed'}}}, input_type=dict]
+E               For further information visit https://errors.pydantic.dev/2.13/v/missing
+E           candidate_ledger.0.research_thesis.market_recognition.basis
+E             Field required [type=missing, input_value={'status': 'confirmed'}, input_type=dict]
+E               For further information visit https://errors.pydantic.dev/2.13/v/missing
+E           candidate_ledger.0.research_thesis.company_information
+E             Field required [type=missing, input_value={'engine_type': 'sector_l...{'status': 'confirmed'}}, input_type=dict]
+E               For further information visit https://errors.pydantic.dev/2.13/v/missing
+E           candidate_ledger.0.research_thesis.catalyst
+E             Field required [type=missing, input_value={'engine_type': 'sector_l...{'status': 'confirmed'}}, input_type=dict]
+E               For further information visit https://errors.pydantic.dev/2.13/v/missing
+E           candidate_ledger.0.research_thesis.short_term_engine
+E             Field required [type=missing, input_value={'engine_type': 'sector_l...{'status': 'confirmed'}}, input_type=dict]
+E               For further information visit https://errors.pydantic.dev/2.13/v/missing
+E           candidate_ledger.0.research_thesis.propagation
+E             Field required [type=missing, input_value={'engine_type': 'sector_l...{'status': 'confirmed'}}, input_type=dict]
+E               For further information visit https://errors.pydantic.dev/2.13/v/missing
+E           candidate_ledger.0.research_thesis.price_confirmation
+E             Field required [type=missing, input_value={'engine_type': 'sector_l...{'status': 'confirmed'}}, input_type=dict]
+E               For further information visit https://errors.pydantic.dev/2.13/v/missing
+E           candidate_ledger.0.research_thesis.remaining_path
+E             Field required [type=missing, input_value={'engine_type': 'sector_l...{'status': 'confirmed'}}, input_type=dict]
+E               For further information visit https://errors.pydantic.dev/2.13/v/missing
+E           candidate_ledger.0.research_thesis.fundamental_anchor
+E             Field required [type=missing, input_value={'engine_type': 'sector_l...{'status': 'confirmed'}}, input_type=dict]
+E               For further information visit https://errors.pydantic.dev/2.13/v/missing
+E           candidate_ledger.0.research_thesis.company_risk
+E             Field required [type=missing, input_value={'engine_type': 'sector_l...{'status': 'confirmed'}}, input_type=dict]
+E               For further information visit https://errors.pydantic.dev/2.13/v/missing
+E           candidate_ledger.0.research_thesis.critical_unknown
+E             Field required [type=missing, input_value={'engine_type': 'sector_l...{'status': 'confirmed'}}, input_type=dict]
+E               For further information visit https://errors.pydantic.dev/2.13/v/missing
+E           candidate_ledger.0.research_thesis.decision_ids
+E             Field required [type=missing, input_value={'engine_type': 'sector_l...{'status': 'confirmed'}}, input_type=dict]
+E               For further information visit https://errors.pydantic.dev/2.13/v/missing
+E           research_result.skills_used
+E             List should have at least 5 items after validation, not 0 [type=too_short, input_value=[], input_type=list]
+E               For further information visit https://errors.pydantic.dev/2.13/v/too_short
+
+tools/render_monitor_web.py:1387: ValidationError
+________________ test_assemble_series_builds_theme_comparisons _________________
+
+    def test_assemble_series_builds_theme_comparisons() -> None:
+        """携带 industryCode（非申万目录代码）的记录生成主题对照侧表；
+        申万代码不进 comparisons；close 来自真实 theme_daily 且与 80 日窗对齐。"""
+        from tools import render_monitor_web as rmw
+    
+        sessions = ["2026-09-07", "2026-09-08", "2026-09-09", "2026-09-10", "2026-09-11"]
+        snap = {"analysis_date": "2026-09-11", "as_of": "2026-09-13T18:30:00+08:00",
+                "sessionDates": sessions, "dates": [d[5:] for d in sessions],
+                "market": [3000.] * len(sessions),
+                "stocks": [
+                    {"code": "TEST1.SZ", "name": "主题对照样例", "recDate": "2026-09-10",
+                     "industryCode": "399971.SZ", "industry": [None] * len(sessions),
+                     "candles": [None] * len(sessions), "reviews": []},
+                    {"code": "TEST2.SH", "name": "申万对照样例", "recDate": "2026-09-10",
+                     "industryCode": "801760.SI", "industry": [None] * len(sessions),
+                     "candles": [None] * len(sessions), "reviews": []}],
+                "presentation": {"marketCodes": ["000001.SH"]}}
+>       series = build_preview_a2.assemble_series(ROOT, rmw, snap)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_prism_a2_preview.py:194: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tools/guanlan-prism/tools/build_preview_a2.py:74: in assemble_series
+    sessions = rmw.list_sessions(root, analysis - timedelta(days=200), analysis)[-SERIES_SESSIONS:]
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+root = PosixPath('$CANDIDATE_ROOT')
+start = datetime.date(2026, 2, 23), end = datetime.date(2026, 9, 11)
+
+    def list_sessions(root: Path, start: date, end: date) -> list[date]:
+        """用本地 SSE trade_calendar 推导 [start, end] 的交易日序列。
+    
+        不再以行情分区文件是否存在决定开市日；有交易日但缺行情时由调用方保留
+        空位（null），保证观察天数不被数据缺口缩短。日历覆盖不足时明确失败。
+        """
+        calendar = read_trade_calendar(root)
+        if not calendar:
+>           raise ValueError(
+                f"本地交易日历为空（{root / 'local_warehouse' / 'facts' / 'trade_calendar'}），"
+                f"无法推导 {start.isoformat()}—{end.isoformat()} 的交易日；请先补齐 trade_calendar，"
+                "不得用行情目录或周历代替"
+            )
+E           ValueError: 本地交易日历为空（$CANDIDATE_ROOT/local_warehouse/facts/trade_calendar），无法推导 2026-02-23—2026-09-11 的交易日；请先补齐 trade_calendar，不得用行情目录或周历代替
+
+tools/render_monitor_web.py:142: ValueError
+_________ test_series_theme_conflict_against_snapshot_industry_raises __________
+
+    def test_series_theme_conflict_against_snapshot_industry_raises() -> None:
+        from tools import render_monitor_web as rmw
+    
+        snap = {"analysis_date": "2026-09-11", "as_of": "2026-09-13T18:30:00+08:00",
+                "sessionDates": [], "dates": [], "market": [],
+                "stocks": [{"code": "TEST1.SZ", "name": "主题对照样例", "recDate": "2026-09-10",
+                            "industryCode": "399971.SZ", "industry": [],
+                            "candles": [], "reviews": []}],
+                "presentation": {"marketCodes": []}}
+>       series = build_preview_a2.assemble_series(ROOT, rmw, snap)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_prism_a2_preview.py:215: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tools/guanlan-prism/tools/build_preview_a2.py:74: in assemble_series
+    sessions = rmw.list_sessions(root, analysis - timedelta(days=200), analysis)[-SERIES_SESSIONS:]
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+root = PosixPath('$CANDIDATE_ROOT')
+start = datetime.date(2026, 2, 23), end = datetime.date(2026, 9, 11)
+
+    def list_sessions(root: Path, start: date, end: date) -> list[date]:
+        """用本地 SSE trade_calendar 推导 [start, end] 的交易日序列。
+    
+        不再以行情分区文件是否存在决定开市日；有交易日但缺行情时由调用方保留
+        空位（null），保证观察天数不被数据缺口缩短。日历覆盖不足时明确失败。
+        """
+        calendar = read_trade_calendar(root)
+        if not calendar:
+>           raise ValueError(
+                f"本地交易日历为空（{root / 'local_warehouse' / 'facts' / 'trade_calendar'}），"
+                f"无法推导 {start.isoformat()}—{end.isoformat()} 的交易日；请先补齐 trade_calendar，"
+                "不得用行情目录或周历代替"
+            )
+E           ValueError: 本地交易日历为空（$CANDIDATE_ROOT/local_warehouse/facts/trade_calendar），无法推导 2026-02-23—2026-09-11 的交易日；请先补齐 trade_calendar，不得用行情目录或周历代替
+
+tools/render_monitor_web.py:142: ValueError
+=========================== short test summary info ============================
+FAILED tests/test_company_introduction.py::test_same_stock_two_recommendations_keep_own_introductions
+FAILED tests/test_prism_a2_preview.py::test_assemble_series_builds_theme_comparisons
+FAILED tests/test_prism_a2_preview.py::test_series_theme_conflict_against_snapshot_industry_raises
+3 failed, 1797 passed, 1 skipped in 286.34s (0:04:46)

@@ -1,0 +1,694 @@
+{
+  "report_version": "daily-forward-monitor-report-v2",
+  "analysis_date": "2026-09-21",
+  "as_of": "2026-09-21T18:30:00+08:00",
+  "market_overview": {
+    "market_propagation_mode": "broad_sustained_participation",
+    "market_risk_overlays": [],
+    "what_changed": "9月21日沪深300上涨0.71%，可比股票约83%上涨，等权上涨1.94%；近3日、5日分别约84%、74%的股票上涨，回升已不只发生一天。成交约1.71万亿元，为近20日均值的1.05倍；分化程度接近近期常态",
+    "implication_for_monitored_stocks": "市场共同回暖改善了观察环境，但个股跟涨不能自动证明独立优势。重点仍是同行恢复时能否跟上、上涨后能否保留收盘，以及当前价格是否值得承担回吐；缺少这些支持的股票不因普涨就改为参与。"
+  },
+  "pool_summary": {
+    "open_episode_count": 112,
+    "distinct_stock_count": 99,
+    "selected_count": 41,
+    "comparator_count": 60,
+    "primary_count": 101,
+    "passive_tail_count": 11,
+    "attention_stock_count": 83,
+    "routine_stock_count": 16
+  },
+  "alerts": [
+    {
+      "ts_code": "600583.SH",
+      "name": "海油工程",
+      "episode_ids": [
+        "formal:2026-08-21:600583.SH:selected"
+      ],
+      "roles": [
+        "selected"
+      ],
+      "day_numbers": [
+        21
+      ],
+      "original_engine_types": [
+        "sector_leader_cluster"
+      ],
+      "alert_type": "checkpoint",
+      "monitor_state": "passive_tail",
+      "market_change": "复用同日pending-trace已形成的共同市场判断并对照snapshot.market_context：上涨面1/3/5日=0.8276958002/0.8409813721/0.7368779823，等权1/3/5日=0.0194250209/0.0352014578/0.0332656415；成交1713442773658.75元、20日比1.0538469627、分化比1.0123369778。覆盖4407/4415，必需6指数完整；沪深300当日0.0071377852。市场多日多数参与支持继续核对相对机会，不证明个股必涨，普涨降低单日绝对上涨的独立信息量。若上涨面与多个窗口收益再度收缩，则收缩观察。知识：src_cn_market_breadth_alignment；本次用途：防止将普涨当个股独立支持；不能推出：未来显著上涨概率。",
+      "sector_change": "来源snapshot本episode，relative_industry对应review_context.basis.primary_industry，breadth对应原group，两者不得混用。{\"original_group_code\": \"801962.SI\", \"sector_breadth_3d\": 0.7142857142857143, \"sector_breadth_5d\": 0.5, \"sector_median_return_3d\": 0.008916214682936796, \"sector_median_return_5d\": 0.0008912655971479166, \"sector_relative_return_3d\": 0.0030057672787306734, \"sector_relative_return_5d\": -0.010191537536104007, \"sector_top_contribution\": 0.39142849579929945, \"sector_turnover_share_change_5d\": -0.0007858154695356318, \"relative_industry_3d\": 0.05425086881142119, \"relative_industry_5d\": 0.08163186650608965}。行业/主题多数上涨只说明同业环境，自身是否跟上见本篇价格与当前意见。 原20日结案只另引snapshot-2026-09-17.json同episode：油服工程sector_breadth_5d=0.0；北矿relative_industry_20d=-0.0535392460、relative_market_20d=-0.0241907899。原结案不引用当前第21日行业和成对比较。",
+      "stock_change": "来源snapshot本episode.review_context与同episode确定性字段，市场为沪深300、价格按分析日因子归一、入口为行动日开盘；近日3/5日窗口不冒充推荐后。{\"return_1d\": 0.07755775577557755, \"return_3d\": 0.07049180327868854, \"return_5d\": 0.08471760797342198, \"relative_market_3d\": 0.05725663609015186, \"relative_market_5d\": 0.07144032896998564, \"amount_ratio_last_20d\": 2.6981680318944976, \"largest_positive_day_contribution_5d\": 0.8541062847098859, \"return_ex_largest_positive_day_5d\": 0.006644518272425293, \"return_after_largest_positive_day_5d\": null, \"current_close_return_since_entry\": 0.08833333333333315, \"data_limitations\": [], \"price_levels\": {\"atr20\": 0.19299999999999987, \"current_close\": 6.53, \"entry_reference_price\": 6.0, \"prior60_close_high\": 6.28, \"prior60_close_high_date\": \"2026-09-01\", \"prior60_high\": 6.4, \"prior60_high_date\": \"2026-09-02\", \"remaining_atr_to_target\": 3.4715025906735724, \"remaining_return_to_target\": 0.10260336906584988, \"target_price\": 7.199999999999999}}；含日内位置及成交的原始路径见recent_sessions/post_entry_sessions。",
+      "company_change": "原推荐公司锚及风险只依snapshot本episode原理由与原引用资料；本次new_announcements=[]。未取得足以改变本篇主要解释的公司增量，不把未出现新增条目写成已排除全部经营风险，也不把股价变化等同经营改变。",
+      "outlook_1_3d": "continuation_possible",
+      "confirmation_condition": "普通交易日继续提高收盘并保留6.28—6.40元突破区域、油服工程参与保持，会进一步支持震荡偏上。",
+      "invalidation_condition": "收盘跌回6.28—6.40元区域下方且同行恢复中断，会使当前偏上判断需要改变。",
+      "why_reported": "pending_final_review：原20日结案到期/待补，当前意见与原期结案分开；今天突破6.40元旧高且同行近3日多数上涨，原先偏弱的当前方向改善；不改前20日评价。",
+      "outlook_reason_plain_language": "6.53元突破近期高点且强于市场与油服同行，未来5—10日倾向偏上；主要涨幅集中于今天，延续未验证。",
+      "episode_reviews": [
+        {
+          "episode_id": "formal:2026-08-21:600583.SH:selected",
+          "original_reason_plain_language": "当时主要看中油服工程多只领先股票共同上涨，海油工程自身强于市场与同行，经营稳定提供基础。",
+          "original_key_risk_plain_language": "主要担心已接近近期高点、半年利润没有增长，行业轮动结束后上涨难以接续。",
+          "current_assessment": "weakening",
+          "best_supported_explanation": "mixed",
+          "current_weak_or_failed_link": "industry_follow_through",
+          "current_review": "海油工程｜原20日未形成持续上涨，今天突破只改善当前机会\n\n今天6.53元收盘越过此前6.40元盘中高点，成交达到近20日均值的2.70倍；当日比沪深300多涨7.04个百分点、比油服工程多涨4.47个百分点。当前方向因此由偏弱转为未来5—10日偏上，但参与仍先等待，不能把这一日突破当成已经稳定的入口。\n\n上轮要求的两部分已有改善：股价继续高于6.03元，油服工程近3日约71%的成员上涨。不过行业近5日仅一半成员上涨，仍落后市场；今天又贡献了本股近5日正收益的大部分。它说明个股显著转强、同行也有恢复，尚不能证明原来期待的持续行业带动重新建立。本次取得的公告增量没有新增记录，当前上涨也没有已核实的新公司消息可解释。\n\n从6.53元出发，马上参与要承受突破后回到6.28—6.40元旧高区域检验的代价。我更愿意等普通交易日仍能保留这一带、收盘继续提高，再按届时价格判断；若迅速跌回该区下方，就降低这次转强的判断。等待可能错过继续拉升，但当前单日集中程度使这个代价可以接受。\n\n今天是原20个交易日结束后的表现，只改善当前窗口；前20日结案见下方，不纳入今天涨幅。本条原观察完成，当前看法不另开日常跟踪周期。",
+          "comparison_interpretation": "snapshot.episodes[formal:2026-08-21:600583.SH:selected].pair_context：同窗第21日推荐与原比较对象累计收益差=-0.1232582030052134；仅支持结果比较，不凭收益差认定当时理由或具体选股必然正确。该比较含20日后行情，不用于原20日结案归因。",
+          "final_twenty_day_review": {
+            "weak_or_failed_link": "industry_follow_through",
+            "decision_review": "short_term_reason_wrong",
+            "overall_review": "原来期待油服工程多只领先股的共同上涨延续，公司经营稳定只提供基础；最担心的是推荐前已接近近期高点，而利润没有同步增长，板块转弱后难以继续推高。\n\n原观察期为8月24日至9月18日。按行动日开盘6.00元作统一价格参照，20日内没有以收盘达到20%目标，第20日收6.06元、期末上涨1.00%，距原7.20元观察价仍需上涨18.81%。期间最高收盘为9月1日的6.28元、较入口上涨4.67%；盘中最高为9月2日的6.40元、上涨6.67%。最低盘中价5.89元较入口下跌1.83%；从此前收盘高点计算的最大收盘回撤为4.62%，期末较最高收盘回撤3.50%。这些是原20日路径的不同口径，不是实际交易收益。\n\n9月1日收高后又回到6元附近，持续推进没有形成。9月17日已保存的油服工程近5日上涨面为零，削弱了行业共同带动的期待；但股票仍比同期市场和行业抗跌，不能把未达目标等同于公司或每项价格判断都错。原先半年收入增长、利润基本持平、经营现金流为正的事实没有被这段股价表现否定，也不能用经营稳定证明短期必然上涨。主要失误更像高估了行业上涨的接续，现有证据不能进一步拆清高位参与时机与候选取舍各自的影响，不能认定换一只股票就能解决。\n\n可供批量检查的问题是：同类行业领先股机会在形成日前已接近高点、利润缺少增量时，后续行业参与收缩是否经常使阶段上涨难以延续。单例不产生新筛选规则。原第20日对应任务的资料截止已核对为9月20日18:30；本结案的价格止于9月18日，仅使用原推荐资料、原20日路径及9月17日已保存的比较事实，不借后续价格或消息改写原观察期。"
+          }
+        }
+      ]
+    },
+    {
+      "ts_code": "600980.SH",
+      "name": "北矿科技",
+      "episode_ids": [
+        "formal:2026-08-21:600980.SH:selected"
+      ],
+      "roles": [
+        "selected"
+      ],
+      "day_numbers": [
+        21
+      ],
+      "original_engine_types": [
+        "independent_demand_acceleration"
+      ],
+      "alert_type": "checkpoint",
+      "monitor_state": "passive_tail",
+      "market_change": "复用同日pending-trace已形成的共同市场判断并对照snapshot.market_context：上涨面1/3/5日=0.8276958002/0.8409813721/0.7368779823，等权1/3/5日=0.0194250209/0.0352014578/0.0332656415；成交1713442773658.75元、20日比1.0538469627、分化比1.0123369778。覆盖4407/4415，必需6指数完整；沪深300当日0.0071377852。市场多日多数参与支持继续核对相对机会，不证明个股必涨，普涨降低单日绝对上涨的独立信息量。若上涨面与多个窗口收益再度收缩，则收缩观察。知识：src_cn_market_breadth_alignment；本次用途：防止将普涨当个股独立支持；不能推出：未来显著上涨概率。",
+      "sector_change": "来源snapshot本episode，relative_industry对应review_context.basis.primary_industry，breadth对应原group，两者不得混用。{\"original_group_code\": \"801074.SI\", \"sector_breadth_3d\": 0.8823529411764706, \"sector_breadth_5d\": 0.7990196078431373, \"sector_median_return_3d\": 0.0278586211356876, \"sector_median_return_5d\": 0.025865928039841113, \"sector_relative_return_3d\": 0.02249627731319004, \"sector_relative_return_5d\": 0.022305607051859702, \"sector_top_contribution\": 0.09808015560800236, \"sector_turnover_share_change_5d\": null, \"relative_industry_3d\": -0.0032500813494371616, \"relative_industry_5d\": -0.0003452992960861906}。行业/主题多数上涨只说明同业环境，自身是否跟上见本篇价格与当前意见。 原20日结案只另引snapshot-2026-09-17.json同episode：油服工程sector_breadth_5d=0.0；北矿relative_industry_20d=-0.0535392460、relative_market_20d=-0.0241907899。原结案不引用当前第21日行业和成对比较。",
+      "stock_change": "来源snapshot本episode.review_context与同episode确定性字段，市场为沪深300、价格按分析日因子归一、入口为行动日开盘；近日3/5日窗口不冒充推荐后。{\"return_1d\": 0.028101802757158012, \"return_3d\": 0.032481363152289555, \"return_5d\": 0.03523758675920985, \"relative_market_3d\": 0.019246195963752877, \"relative_market_5d\": 0.02196030775577351, \"amount_ratio_last_20d\": 1.1488267563234478, \"largest_positive_day_contribution_5d\": 0.46875596664914215, \"return_ex_largest_positive_day_5d\": 0.0069407367859049, \"return_after_largest_positive_day_5d\": null, \"current_close_return_since_entry\": -0.03484320557491283, \"data_limitations\": [], \"price_levels\": {\"atr20\": 0.4854999999999997, \"current_close\": 19.39, \"entry_reference_price\": 20.09, \"prior60_close_high\": 20.33, \"prior60_close_high_date\": \"2026-08-27\", \"prior60_high\": 20.47, \"prior60_high_date\": \"2026-08-28\", \"remaining_atr_to_target\": 9.717816683831108, \"remaining_return_to_target\": 0.24332129963898907, \"target_price\": 24.108}}；含日内位置及成交的原始路径见recent_sessions/post_entry_sessions。",
+      "company_change": "原推荐公司锚及风险只依snapshot本episode原理由与原引用资料；本次new_announcements=[]。未取得足以改变本篇主要解释的公司增量，不把未出现新增条目写成已排除全部经营风险，也不把股价变化等同经营改变。",
+      "outlook_1_3d": "continuation_possible",
+      "confirmation_condition": "收盘继续提高并有专用设备多数成员回升，会进一步支持短期震荡偏上。",
+      "invalidation_condition": "反弹再度跌回18.56—18.86元区域，会改变短期修复判断。",
+      "why_reported": "pending_final_review：补交原20日结案，当前短期修复与原推荐已被否定分开评价。",
+      "outlook_reason_plain_language": "18.86元、19.39元连续收高，同行多数回升，未来1—3日更可能震荡偏上；较长窗口仍缺少独立领先。",
+      "episode_reviews": [
+        {
+          "episode_id": "formal:2026-08-21:600980.SH:selected",
+          "original_reason_plain_language": "当时主要看中弱市中温和放量、持续领先市场和同行，半年收入利润增长且现金为正。",
+          "original_key_risk_plain_language": "主要担心20日已有较大涨幅，正式半年报只是快报确认，缺少新增催化。",
+          "current_assessment": "contradicted",
+          "best_supported_explanation": "industry_common_move",
+          "current_weak_or_failed_link": "price_and_volume_confirmation",
+          "current_review": "北矿科技｜原持续强势未兑现，期后反弹仍以跟随修复看待\n\n前20日已经结束，原先持续领先市场和同行的期待未兑现；今天19.39元的回升不撤销此前停止普通跟踪的判断。当前短期更可能震荡偏上，未来5—10日先看整理，参与意见是等待。\n\n最近两个收盘从18.56元升到18.86元、19.39元，今天成交回到20日均值的1.15倍，止跌后的恢复比零星反弹更清楚。专用设备近3日约88%、近5日约80%的成员上涨，本股近5日与该行业表现接近，因而这轮回升更适合先按同业带动理解，尚无足够证据认定新的独立走强。公告增量未见新条目，原经营基础不能直接当作今天上涨的新原因。\n\n19.39元仍要面对原来20.09—20.33元区域。等待的理由是，这一区域收复之前，反弹能否摆脱原来逐级回落还不清楚；较长方向不因两次收高就直接转为上涨。后续连续收回该区并开始稳定领先专用设备，再按收盘后信息重评；跌回18.56—18.86元则说明修复再度受阻。原20日结果单独结案，不借今天反弹延长旧目标。",
+          "comparison_interpretation": "snapshot.episodes[formal:2026-08-21:600980.SH:selected].pair_context：同窗第21日推荐与原比较对象累计收益差=0.16417980104342944；仅支持结果比较，不凭收益差认定当时理由或具体选股必然正确。该比较含20日后行情，不用于原20日结案归因。",
+          "final_twenty_day_review": {
+            "weak_or_failed_link": "price_and_volume_confirmation",
+            "decision_review": "short_term_reason_wrong",
+            "overall_review": "原来期待弱市中温和放量、持续强于市场和同行的走势延续，半年收入利润增长及正现金流提供经营基础；原先也明确担心20日已涨18.88%、半年报只是此前快报的确认，缺少新增催化。因此不能事后把这次推荐改说成误把重复财报当成新消息。\n\n8月24日至9月18日的原20日观察期内，收盘没有触达20%目标。以20.09元开盘参照计算，第20日18.86元，期末下跌6.12%，距原24.108元观察价仍需上涨27.83%。期间最高收盘为8月27日的20.33元、较入口上涨1.19%；盘中最高为8月28日的20.47元、上涨1.89%。最低盘中价18.24元较入口下跌9.21%；从此前收盘高点计算的最大收盘回撤为9.05%，期末较最高收盘回撤7.23%。价格路径完整，不能把结果写成资料不足，也不能把这些路径指标混成实际交易收益。\n\n8月27日短暂收高后总体下移。9月17日已保存的近20交易日比较中，本股落后沪深300约2.42个百分点、落后专用设备约5.35个百分点；这是截至当日的滚动窗口，不是从8月24日开盘计算的推荐收益。它与原20日的回落路径共同说明，最重要的持续相对强势没有延续，支持原来停止普通跟踪的价格理由。期末已有反弹，仍没有收回入口，更没有回到原最高收盘。经营增长不等于短期股价必涨，现有证据也没有否定原半年经营事实。主要问题在短期价格接续判断；参与时机与候选取舍可能也有影响，但不能可靠拆开，不能仅因未达20%把全部价格分析判错。\n\n值得批量核对的是：已有较大20日涨幅、正式财报又未带来新增信息的机会，温和量价确认是否容易高估后续延续。单例不构成机械排除标准。原第20日对应任务的资料截止已核对为9月20日18:30；本结案的价格止于9月18日，仅使用原推荐资料、原20日路径及9月17日已保存的比较事实，不借后续价格或消息改写原观察期。"
+          }
+        }
+      ]
+    },
+    {
+      "ts_code": "000690.SZ",
+      "name": "宝新能源",
+      "episode_ids": [
+        "formal:2026-08-24:000690.SZ:selected"
+      ],
+      "roles": [
+        "selected"
+      ],
+      "day_numbers": [
+        20
+      ],
+      "original_engine_types": [
+        "independent_demand_acceleration"
+      ],
+      "alert_type": "checkpoint",
+      "monitor_state": "passive_tail",
+      "market_change": "复用同日pending-trace已形成的共同市场判断并对照snapshot.market_context：上涨面1/3/5日=0.8276958002/0.8409813721/0.7368779823，等权1/3/5日=0.0194250209/0.0352014578/0.0332656415；成交1713442773658.75元、20日比1.0538469627、分化比1.0123369778。覆盖4407/4415，必需6指数完整；沪深300当日0.0071377852。市场多日多数参与支持继续核对相对机会，不证明个股必涨，普涨降低单日绝对上涨的独立信息量。若上涨面与多个窗口收益再度收缩，则收缩观察。知识：src_cn_market_breadth_alignment；本次用途：防止将普涨当个股独立支持；不能推出：未来显著上涨概率。",
+      "sector_change": "来源snapshot本episode，relative_industry对应review_context.basis.primary_industry，breadth对应原group，两者不得混用。{\"original_group_code\": \"801161.SI\", \"sector_breadth_3d\": 0.30275229357798167, \"sector_breadth_5d\": 0.21100917431192662, \"sector_median_return_3d\": -0.008350730688935215, \"sector_median_return_5d\": -0.01501501501501512, \"sector_relative_return_3d\": -0.01567700774891225, \"sector_relative_return_5d\": -0.020160675181334464, \"sector_top_contribution\": 0.23701235792238315, \"sector_turnover_share_change_5d\": null, \"relative_industry_3d\": -0.0013676832491482465, \"relative_industry_5d\": -0.0007067366494261087}。行业/主题多数上涨只说明同业环境，自身是否跟上见本篇价格与当前意见。",
+      "stock_change": "来源snapshot本episode.review_context与同episode确定性字段，市场为沪深300、价格按分析日因子归一、入口为行动日开盘；近日3/5日窗口不冒充推荐后。{\"return_1d\": -0.015065913370998052, \"return_3d\": -0.003809523809523818, \"return_5d\": -0.007590132827324236, \"relative_market_3d\": -0.017044690998060497, \"relative_market_5d\": -0.020867411830760574, \"amount_ratio_last_20d\": 0.7253039408572846, \"largest_positive_day_contribution_5d\": 1.0, \"return_ex_largest_positive_day_5d\": -0.03188641959426375, \"return_after_largest_positive_day_5d\": -0.015065913370998052, \"current_close_return_since_entry\": 0.05870445344129549, \"data_limitations\": [], \"price_levels\": {\"atr20\": 0.1280000000000001, \"current_close\": 5.23, \"entry_reference_price\": 4.94, \"prior60_close_high\": 5.409999999999999, \"prior60_close_high_date\": \"2026-09-09\", \"prior60_high\": 5.45, \"prior60_high_date\": \"2026-09-09\", \"remaining_atr_to_target\": 5.453124999999991, \"remaining_return_to_target\": 0.13346080305927321, \"target_price\": 5.928}}；含日内位置及成交的原始路径见recent_sessions/post_entry_sessions。",
+      "company_change": "原推荐公司锚及风险只依snapshot本episode原理由与原引用资料；本次new_announcements=[]。未取得足以改变本篇主要解释的公司增量，不把未出现新增条目写成已排除全部经营风险，也不把股价变化等同经营改变。",
+      "outlook_1_3d": "range_or_wait",
+      "confirmation_condition": "收盘继续在5.12—5.30元附近反复而未形成连续推进，会支持横盘判断。",
+      "invalidation_condition": "连续越过5.30元且同行恢复，或收盘跌破5.12元，会改变当前整理判断。",
+      "why_reported": "pending_final_review：原20日结案到期/待补，当前意见与原期结案分开；5.31元只维持一天便退回5.23元，原先越过5.30元并保留的条件未完成；5.12元也未收破。",
+      "outlook_reason_plain_language": "5.23元仍在5.12—5.30元观察区间，电力近5日仅约21%上涨，未来5—10日偏向整理。",
+      "episode_reviews": [
+        {
+          "episode_id": "formal:2026-08-24:000690.SZ:selected",
+          "original_reason_plain_language": "当时主要看中弱市中连续领先市场和电力、成交增加带来价格推进，前期累计涨幅尚低。",
+          "original_key_risk_plain_language": "主要担心形成日大涨放量只是短促脉冲，一季度增长不足以单独支持上涨。",
+          "current_assessment": "weakening",
+          "best_supported_explanation": "industry_common_move",
+          "current_weak_or_failed_link": "industry_follow_through",
+          "current_review": "宝新能源｜原20日留下小幅上涨，后段接续不足，当前仍等\n\n原20日结束时保有上涨，但没有完成显著上涨目标。今天5.23元先按未来5—10日整理看待，当前继续等待。前一交易日收5.31元，看似刚越过原观察的5.30元，今天却退了回来，要求“越过并在随后交易日保留”的条件没有完成。\n\n本次最影响当前机会的，是电力行业恢复仍弱：近5日只有约21%的成员上涨，宝新能源自身也没有连续领先。当市场普涨而它下跌1.51%时，难以说后段上涨已经重新接上。今天成交减少，只能说明交易降温，不能自动视为下跌已经结束。没有新增公告条目足以给这次变化提供新的经营解释。\n\n5.23元仍处5.12—5.30元观察区间内，原来的阶段涨幅尚未全部失去，因此不把短期回落定为整个推荐失败。但当前参与首先要承受继续区间反复的时间成本，旧20%目标也不成为现在买入的合理目标。后续收盘越过5.30元并保留、恢复同行领先再重评；收盘跌破5.12元则改为回避。原20日结案如下，不延长期限。",
+          "comparison_interpretation": "snapshot.episodes[formal:2026-08-24:000690.SZ:selected].pair_context：同窗第20日推荐与原比较对象累计收益差=0.026940117718109446；仅支持结果比较，不凭收益差认定当时理由或具体选股必然正确。",
+          "final_twenty_day_review": {
+            "weak_or_failed_link": "price_and_volume_confirmation",
+            "decision_review": "unknown",
+            "overall_review": "原推荐看中弱市中连续领先市场和电力、成交增加能够推动价格，同时20日累计涨幅尚低；最担心形成日的大涨放量只是短促脉冲，经营增长也不强。\n\n8月25日至9月21日20个交易日内，收盘没有达到20%观察目标。以4.94元行动日开盘参照，第20日5.23元、期末上涨5.87%；最高收盘上涨9.51%，最高盘中上涨10.32%，最深盘中跌幅2.23%，最大收盘回撤4.25%。这些是原20日分别计算的收盘和盘中结果。\n\n前半程先在4.9元附近反复，9月8—9日明显上行，此后又回落，原来的上行方向得到部分支持，快速且持续扩展涨幅没有实现。临近期末，5.31元只保持一天就退回5.23元，电力近5日仅约21%成员上涨；个股原先的相对强度并未转化为后段加速。它没有发生完整价格失败，也没有证据将经营基础判错。\n\n差异首先体现在推进断续、后段缺少接力，但尚不足以从一例判定当时选错股票或纯粹买早，取舍归因保留未知。批量可检验的问题是：低20日涨幅与放量相对强势同时出现时，后续是否经常先长时间横盘再短暂上涨，从而难以在原20日期间达到显著幅度。不因此延长本次目标。"
+          }
+        }
+      ]
+    },
+    {
+      "ts_code": "601998.SH",
+      "name": "中信银行",
+      "episode_ids": [
+        "formal:2026-08-24:601998.SH:selected"
+      ],
+      "roles": [
+        "selected"
+      ],
+      "day_numbers": [
+        20
+      ],
+      "original_engine_types": [
+        "sector_broad_diffusion"
+      ],
+      "alert_type": "checkpoint",
+      "monitor_state": "passive_tail",
+      "market_change": "复用同日pending-trace已形成的共同市场判断并对照snapshot.market_context：上涨面1/3/5日=0.8276958002/0.8409813721/0.7368779823，等权1/3/5日=0.0194250209/0.0352014578/0.0332656415；成交1713442773658.75元、20日比1.0538469627、分化比1.0123369778。覆盖4407/4415，必需6指数完整；沪深300当日0.0071377852。市场多日多数参与支持继续核对相对机会，不证明个股必涨，普涨降低单日绝对上涨的独立信息量。若上涨面与多个窗口收益再度收缩，则收缩观察。知识：src_cn_market_breadth_alignment；本次用途：防止将普涨当个股独立支持；不能推出：未来显著上涨概率。",
+      "sector_change": "来源snapshot本episode，relative_industry对应review_context.basis.primary_industry，breadth对应原group，两者不得混用。{\"original_group_code\": \"801783.SI\", \"sector_breadth_3d\": 0.3333333333333333, \"sector_breadth_5d\": 0.0, \"sector_median_return_3d\": -0.006825938566553114, \"sector_median_return_5d\": -0.020408163265306145, \"sector_relative_return_3d\": -0.019149419042331473, \"sector_relative_return_5d\": -0.032562199129536326, \"sector_top_contribution\": 0.8622407840867715, \"sector_turnover_share_change_5d\": -0.0018908791886234014, \"relative_industry_3d\": 0.012678626149172367, \"relative_industry_5d\": 0.018166351893437665}。行业/主题多数上涨只说明同业环境，自身是否跟上见本篇价格与当前意见。",
+      "stock_change": "来源snapshot本episode.review_context与同episode确定性字段，市场为沪深300、价格按分析日因子归一、入口为行动日开盘；近日3/5日窗口不冒充推荐后。{\"return_1d\": -0.0033482142857144126, \"return_3d\": 0.006764374295377573, \"return_5d\": -0.0011185682326623203, \"relative_market_3d\": -0.006470792893159105, \"relative_market_5d\": -0.014395847236098658, \"amount_ratio_last_20d\": 0.7815358429427604, \"largest_positive_day_contribution_5d\": 0.5404145077720166, \"return_ex_largest_positive_day_5d\": -0.008939787497059815, \"return_after_largest_positive_day_5d\": -0.0011185682326623203, \"current_close_return_since_entry\": 0.04079254079254069, \"data_limitations\": [], \"price_levels\": {\"atr20\": 0.20549999999999988, \"current_close\": 8.93, \"entry_reference_price\": 8.58, \"prior60_close_high\": 8.98, \"prior60_close_high_date\": \"2026-09-15\", \"prior60_high\": 9.07, \"prior60_high_date\": \"2026-09-15\", \"remaining_atr_to_target\": 6.647201946472022, \"remaining_return_to_target\": 0.15296752519596857, \"target_price\": 10.296}}；含日内位置及成交的原始路径见recent_sessions/post_entry_sessions。",
+      "company_change": "原推荐公司锚及风险只依snapshot本episode原理由与原引用资料；本次new_announcements=[]。未取得足以改变本篇主要解释的公司增量，不把未出现新增条目写成已排除全部经营风险，也不把股价变化等同经营改变。",
+      "outlook_1_3d": "range_or_wait",
+      "confirmation_condition": "收盘在8.87—8.98元附近反复且银行同行缺少方向，会支持横盘判断。",
+      "invalidation_condition": "连续突破8.98元且银行同行恢复，或跌破8.87元后不能收回，会改变当前整理判断。",
+      "why_reported": "pending_final_review：原20日结案到期/待补，当前意见与原期结案分开；8.94、8.96元后退至8.93元，未形成连续向上突破；股份制银行近5日上涨面仍为零。",
+      "outlook_reason_plain_language": "股价仍贴近近期收盘高位，但银行共同带动未恢复，8.93元起未来5—10日更像整理。",
+      "episode_reviews": [
+        {
+          "episode_id": "formal:2026-08-24:601998.SH:selected",
+          "original_reason_plain_language": "当时主要看中股份制银行多数成员连续上涨，中信银行在其中领先且成交增加。",
+          "original_key_risk_plain_language": "主要担心短期已有明显涨幅、价格处高点，银行轮动结束会失去支持。",
+          "current_assessment": "partly_supported",
+          "best_supported_explanation": "industry_common_move",
+          "current_weak_or_failed_link": "industry_follow_through",
+          "current_review": "中信银行｜原20日慢涨未达目标，当前缺少银行共同带动\n\n原20日期间股价缓慢抬高，但幅度没有达到原目标。当前8.93元仍更像高位附近的反复整理，未来5—10日先等待，不把较小回撤直接当作新的参与理由。\n\n上轮观察的是连续站稳8.93元并有同行恢复。此后8.94元、8.96元没有继续变成更高收盘，今天又回到8.93元；股份制银行近5日上涨面仍为零，近3日也仅三分之一上涨。价格没有明显失守，但原来行业多数共同上涨的推动并未回来。这解释了为何原推荐可以保有一定相对强度，当前却仍缺少积极参与依据。\n\n当前离8.98元近期收盘高点很近，向上首先需要重新越过并保留，而不是直接期待旧20%观察线。公司公告增量没有新条目，不能据此声称公司所有风险均已排除。后续若更高收盘与银行同行恢复一起出现，就在收盘后重新评估；跌回8.87元且无法收复则降低意见。原期限评价已完成，当前整理判断不把旧观察期重新开始。",
+          "comparison_interpretation": "snapshot.episodes[formal:2026-08-24:601998.SH:selected].pair_context：同窗第20日推荐与原比较对象累计收益差=0.10338144548670858；仅支持结果比较，不凭收益差认定当时理由或具体选股必然正确。",
+          "final_twenty_day_review": {
+            "weak_or_failed_link": "industry_follow_through",
+            "decision_review": "unknown",
+            "overall_review": "原来期待股份制银行多数成员共同上涨继续扩展，中信银行保持组内领先；风险是推荐前五日已涨约11%、处于近期高点，银行轮动一旦结束就可能失去推动。\n\n8月25日至9月21日的20日内，收盘没有触达20%目标。以8.58元开盘参照，第20日8.93元、期末上涨4.08%；最高收盘上涨4.66%，最高盘中上涨5.71%，最深盘中跌幅1.63%，最大收盘回撤1.69%。其间波动相对有限，但小回撤本身不证明存在足够上涨空间。\n\n股价从8.5元附近缓慢抬高到8.9元附近，多次新高后又回落，原来的相对强势得到部分支持，行业普遍带动却没有持续：期末股份制银行近5日上涨面为零，成交份额也下降。公司价值没有因目标未达到而被否定；问题是短期共同上涨不足以支持原期待的幅度。\n\n本次不能单凭未达到20%就断言股票选错，也不能把较稳的路径改称目标兑现。主要薄弱处是行业接续，幅度预期、时机和股票选择的作用仍无法可靠分开。批量可检验的问题是：推荐前已明显上涨的银行扩散机会，后续是否更常表现为低波动慢涨，而难在20日内进一步达到显著幅度。本次按原期限结案，不将当前等待意见变成延期目标。"
+          }
+        }
+      ]
+    },
+    {
+      "ts_code": "002602.SZ",
+      "name": "世纪华通",
+      "episode_ids": [
+        "formal:2026-09-07:002602.SZ:selected"
+      ],
+      "roles": [
+        "selected"
+      ],
+      "day_numbers": [
+        10
+      ],
+      "original_engine_types": [
+        "sector_broad_diffusion"
+      ],
+      "alert_type": "checkpoint",
+      "monitor_state": "actionable_watch",
+      "market_change": "复用同日pending-trace已形成的共同市场判断并对照snapshot.market_context：上涨面1/3/5日=0.8276958002/0.8409813721/0.7368779823，等权1/3/5日=0.0194250209/0.0352014578/0.0332656415；成交1713442773658.75元、20日比1.0538469627、分化比1.0123369778。覆盖4407/4415，必需6指数完整；沪深300当日0.0071377852。市场多日多数参与支持继续核对相对机会，不证明个股必涨，普涨降低单日绝对上涨的独立信息量。若上涨面与多个窗口收益再度收缩，则收缩观察。知识：src_cn_market_breadth_alignment；本次用途：防止将普涨当个股独立支持；不能推出：未来显著上涨概率。",
+      "sector_change": "来源snapshot本episode，relative_industry对应review_context.basis.primary_industry，breadth对应原group，两者不得混用。{\"original_group_code\": \"399971.SZ\", \"sector_breadth_3d\": 0.82, \"sector_breadth_5d\": 0.78, \"sector_median_return_3d\": 0.021395948746141036, \"sector_median_return_5d\": 0.016740297838674256, \"sector_relative_return_3d\": 0.01158588972890659, \"sector_relative_return_5d\": 0.005043079251334227, \"sector_top_contribution\": 0.2060939005724929, \"sector_turnover_share_change_5d\": 0.0005438253341932004, \"relative_industry_3d\": null, \"relative_industry_5d\": null}。行业/主题多数上涨只说明同业环境，自身是否跟上见本篇价格与当前意见。",
+      "stock_change": "来源snapshot本episode.review_context与同episode确定性字段，市场为沪深300、价格按分析日因子归一、入口为行动日开盘；近日3/5日窗口不冒充推荐后。{\"return_1d\": -0.00544588155207637, \"return_3d\": -0.0013670539986331276, \"return_5d\": -0.029880478087649487, \"relative_market_3d\": -0.014602221187169806, \"relative_market_5d\": -0.043157757091085824, \"amount_ratio_last_20d\": 0.7197174815427146, \"largest_positive_day_contribution_5d\": 1.0, \"return_ex_largest_positive_day_5d\": -0.0397863956020712, \"return_after_largest_positive_day_5d\": -0.00544588155207637, \"current_close_return_since_entry\": -0.09535603715170282, \"data_limitations\": [\"price_context_incomplete\"], \"price_levels\": {\"atr20\": 0.5189999999999996, \"current_close\": 14.61, \"entry_reference_price\": 16.15, \"prior60_close_high\": 16.16, \"prior60_close_high_date\": \"2026-09-07\", \"prior60_high\": 16.58, \"prior60_high_date\": \"2026-09-07\", \"remaining_atr_to_target\": 9.190751445086711, \"remaining_return_to_target\": 0.3264887063655031, \"target_price\": 19.38}}；含日内位置及成交的原始路径见recent_sessions/post_entry_sessions。",
+      "company_change": "本次同截止同2026H1 income_statement.n_income_attr_p=4502724309.47（available_at=2026-08-29T21:42:06.996157+08:00），cash_flow.n_cashflow_act=4497316996.57（2026-08-29T00:00+08:00）；盈利现金基础成立，价格仍不跟随。未从员工持股解锁推定实际卖出。",
+      "outlook_1_3d": "weakening",
+      "confirmation_condition": "反弹后继续收低、仍落后沪深300，会进一步支持偏弱判断。",
+      "invalidation_condition": "连续收回14.93—15.06元并重新领先市场，会改变偏弱判断。",
+      "why_reported": "按本episode阶段及当前机会完成节点六项；传媒主题近3日已有82%成员上涨，世纪华通却反弹一天后再收低；不能继续主要归于同行不振，个股价格障碍加重。",
+      "outlook_reason_plain_language": "14.61元附近的反弹未接续，近5日落后沪深3004.32个百分点，主题多数恢复也未带动，未来5—10日仍偏弱。",
+      "episode_reviews": [
+        {
+          "episode_id": "formal:2026-09-07:002602.SZ:selected",
+          "original_reason_plain_language": "当时主要看中传媒主题多数上涨、游戏业务直接相关，自身多日走强并有半年经营增长支持。",
+          "original_key_risk_plain_language": "主要担心已在高位、较大涨幅集中于一天，后续成交增加却收低会削弱早期确认。",
+          "current_assessment": "weakening",
+          "best_supported_explanation": "stock_specific_move",
+          "current_weak_or_failed_link": "price_and_volume_confirmation",
+          "current_review": "世纪华通｜前半程持续回落，主题恢复也未带动，当前回避\n\n第10个交易日，14.61元处仍判断未来5—10日偏弱，当前暂不参与。前半程最明确的结果，是原来期待的行业带动与自身连续上涨没有延续：从首日16.13元逐步下移到14元多，上周五反弹至14.69元，今天又收低。两天恢复没有连续起来。\n\n此前主要担心同行偏弱，今天这一解释已不够。原推荐对应的传媒主题近3日82%、近5日78%的成员上涨，而本股近5日仍下跌2.99%、落后沪深3004.32个百分点。当前障碍更多落在股票没有跟上恢复，而不能继续把下跌都归于板块。相对申万二级游戏行业的收益字段缺失，因此不能进一步量化对游戏同行的落后；这不抹掉传媒主题上涨面的事实。\n\n公司半年归母利润45.03亿元、经营现金净流入44.97亿元，本次按同一报告期重新核对，经营基础并未因股价下跌而变成虚假。但已有盈利增长尚未换来推荐后的持续上涨；没有已取得的新事实足以说明这轮回落是某类股东交易造成的。利润与价格两件事需要分开评价。\n\n从14.61元参与，首先需要扭转连续收低并收回14.93—15.06元近期区域。原20%观察线还需再涨约32.65%，已明显困难，但不能单凭余程大就认定公司经营失效。先等连续收高、重新领先市场并保留主题多数参与，再按届时价格判断；若再收破14.54元，当前偏弱判断进一步得到支持。",
+          "comparison_interpretation": "snapshot.episodes[formal:2026-09-07:002602.SZ:selected].pair_context：同窗第10日推荐与原比较对象累计收益差=0.0376154689541317；仅支持结果比较，不凭收益差认定当时理由或具体选股必然正确。",
+          "final_twenty_day_review": null
+        }
+      ]
+    },
+    {
+      "ts_code": "300196.SZ",
+      "name": "长海股份",
+      "episode_ids": [
+        "formal:2026-09-14:300196.SZ:selected"
+      ],
+      "roles": [
+        "selected"
+      ],
+      "day_numbers": [
+        5
+      ],
+      "original_engine_types": [
+        "sector_leader_cluster"
+      ],
+      "alert_type": "checkpoint",
+      "monitor_state": "actionable_watch",
+      "market_change": "复用同日pending-trace已形成的共同市场判断并对照snapshot.market_context：上涨面1/3/5日=0.8276958002/0.8409813721/0.7368779823，等权1/3/5日=0.0194250209/0.0352014578/0.0332656415；成交1713442773658.75元、20日比1.0538469627、分化比1.0123369778。覆盖4407/4415，必需6指数完整；沪深300当日0.0071377852。市场多日多数参与支持继续核对相对机会，不证明个股必涨，普涨降低单日绝对上涨的独立信息量。若上涨面与多个窗口收益再度收缩，则收缩观察。知识：src_cn_market_breadth_alignment；本次用途：防止将普涨当个股独立支持；不能推出：未来显著上涨概率。",
+      "sector_change": "来源snapshot本episode，relative_industry对应review_context.basis.primary_industry，breadth对应原group，两者不得混用。{\"original_group_code\": \"801712.SI\", \"sector_breadth_3d\": 0.6875, \"sector_breadth_5d\": 0.625, \"sector_median_return_3d\": 0.020920422347305623, \"sector_median_return_5d\": 0.011616449652005478, \"sector_relative_return_3d\": 0.019057740100267756, \"sector_relative_return_5d\": 0.010703377853849734, \"sector_top_contribution\": 0.5596014196464458, \"sector_turnover_share_change_5d\": -0.0007316529790215923, \"relative_industry_3d\": -0.020516153576566692, \"relative_industry_5d\": -0.04333549556696332}。行业/主题多数上涨只说明同业环境，自身是否跟上见本篇价格与当前意见。",
+      "stock_change": "来源snapshot本episode.review_context与同episode确定性字段，市场为沪深300、价格按分析日因子归一、入口为行动日开盘；近日3/5日窗口不冒充推荐后。{\"return_1d\": -0.03656752803510477, \"return_3d\": 0.011776753712237742, \"return_5d\": -0.019354838709677247, \"relative_market_3d\": -0.0014584134762989365, \"relative_market_5d\": -0.032632117713113584, \"amount_ratio_last_20d\": 1.4164111304218483, \"largest_positive_day_contribution_5d\": 1.0, \"return_ex_largest_positive_day_5d\": -0.07522935779816498, \"return_after_largest_positive_day_5d\": -0.04587155963302747, \"current_close_return_since_entry\": 0.018556701030928213, \"data_limitations\": [], \"price_levels\": {\"atr20\": 1.0087699816801885, \"current_close\": 19.76, \"entry_reference_price\": 19.4, \"prior60_close_high\": 29.22020570531274, \"prior60_close_high_date\": \"2026-06-30\", \"prior60_high\": 32.55034074849515, \"prior60_high_date\": \"2026-06-29\", \"remaining_atr_to_target\": 3.4893980430872356, \"remaining_return_to_target\": 0.17813765182186203, \"target_price\": 23.279999999999998}}；含日内位置及成交的原始路径见recent_sessions/post_entry_sessions。",
+      "company_change": "已读取并核对同份2026半年报https://static.cninfo.com.cn/finalpage/2026-08-22/1225491673.PDF，原已保存available_at=2026-08-22T00:00+08:00。原文第13—14页：普通纱价格承压、未涉及电子级玻纤纱和电子布；第7页收入1611293635.49(+10.70%)、归母156425649.02(-9.94%)；第17页经营现金增加主要因短期存款到期收回，不视为等额经营回款改善。旧信息含义核对，不冒充新事件。",
+      "outlook_1_3d": "weakening",
+      "confirmation_condition": "收盘继续降低并持续落后玻璃玻纤，会进一步支持偏弱判断。",
+      "invalidation_condition": "连续收回20.15元、恢复同行领先并出现自身产品经营改善证据，会改变偏弱判断。",
+      "why_reported": "按本episode阶段及当前机会完成节点六项；首周涨幅回吐、收盘跌回20.15元下方；半年报核实普通纱价格回落且不涉及电子纱布，不能把同行高景气直接映射公司，当前转回避。",
+      "outlook_reason_plain_language": "20.71元后连续降至19.76元，近5日落后行业4.33个百分点；自身产品未分享电子级玻纤高景气，未来5—10日偏弱。",
+      "episode_reviews": [
+        {
+          "episode_id": "formal:2026-09-14:300196.SZ:selected",
+          "original_reason_plain_language": "当时主要看中玻纤强势成员继续上涨，长海股份此前多个普通交易日接续，期待行业景气传到自身。",
+          "original_key_risk_plain_language": "主要担心短期涨幅已大、行业上涨集中，以及自身半年利润受益幅度尚未核实。",
+          "current_assessment": "weakening",
+          "best_supported_explanation": "mixed",
+          "current_weak_or_failed_link": "company_risk",
+          "current_review": "长海股份｜首周上涨回吐，自身未分享电子纱布景气，当前转回避\n\n首周收盘从19.83元、19.53元升到20.71元，随后连续退至20.51元、19.76元。刚收回的20.15元没有保留，未来5—10日由偏上改为偏弱，当前从等待转为回避。19.40元原观察价尚未被收盘跌破，此次下调另有价格和公司证据，不能写成那个条件已触发。\n\n原推荐看中玻纤领先成员继续走强，也期待行业景气能传到自身经营。今天玻璃玻纤近5日仍有62.5%的成员上涨，本股却在首周下跌，近5日落后行业4.33个百分点；第三日的明显反弹没有转为稳定接续，首周只保留相对开盘的小幅上涨。\n\n更需要修正的是公司受益的解释。[已公开半年报第13—14页](https://static.cninfo.com.cn/finalpage/2026-08-22/1225491673.PDF)明确，公司主要生产普通玻纤纱和无纺制品，不涉及电子级玻纤纱、电子布；普通纱价格承压，收入增长主要来自销量，利润反而下降9.94%。因此，不能用其他公司电子布的高景气证明它已经获得同等利润弹性。这是对既有资料含义的核对，不是今天新发生的经营恶化，也不能从中推断未来普通纱一定不会改善。\n\n19.76元虽比第三日低，但上方刚失去的20.15元需要重新收复，自身产品价格改善又缺少证据，当前不值得为了较低价格抢先参与。后续需看到连续收回20.15元并恢复同行领先，同时出现普通纱价格或自身利润改善的明确资料，才重新评估；跌破19.40元会进一步削弱。原推荐尚未到结案日，当前回避与继续记录原观察期分别处理。",
+          "comparison_interpretation": "同窗成对路径不可完整核对，不能判断替代股票是否更优。",
+          "final_twenty_day_review": null
+        }
+      ]
+    },
+    {
+      "ts_code": "002080.SZ",
+      "name": "中材科技",
+      "episode_ids": [
+        "formal:2026-09-16:002080.SZ:selected"
+      ],
+      "roles": [
+        "selected"
+      ],
+      "day_numbers": [
+        3
+      ],
+      "original_engine_types": [
+        "independent_demand_acceleration"
+      ],
+      "alert_type": "checkpoint",
+      "monitor_state": "overheated",
+      "market_change": "复用同日pending-trace已形成的共同市场判断并对照snapshot.market_context：上涨面1/3/5日=0.8276958002/0.8409813721/0.7368779823，等权1/3/5日=0.0194250209/0.0352014578/0.0332656415；成交1713442773658.75元、20日比1.0538469627、分化比1.0123369778。覆盖4407/4415，必需6指数完整；沪深300当日0.0071377852。市场多日多数参与支持继续核对相对机会，不证明个股必涨，普涨降低单日绝对上涨的独立信息量。若上涨面与多个窗口收益再度收缩，则收缩观察。知识：src_cn_market_breadth_alignment；本次用途：防止将普涨当个股独立支持；不能推出：未来显著上涨概率。",
+      "sector_change": "来源snapshot本episode，relative_industry对应review_context.basis.primary_industry，breadth对应原group，两者不得混用。{\"original_group_code\": \"801712.SI\", \"sector_breadth_3d\": 0.6875, \"sector_breadth_5d\": 0.625, \"sector_median_return_3d\": 0.020920422347305623, \"sector_median_return_5d\": 0.011616449652005478, \"sector_relative_return_3d\": 0.019057740100267756, \"sector_relative_return_5d\": 0.010703377853849734, \"sector_top_contribution\": 0.5596014196464458, \"sector_turnover_share_change_5d\": -0.0007316529790215923, \"relative_industry_3d\": 0.15310437259666418, \"relative_industry_5d\": 0.23080244600310412}。行业/主题多数上涨只说明同业环境，自身是否跟上见本篇价格与当前意见。",
+      "stock_change": "来源snapshot本episode.review_context与同episode确定性字段，市场为沪深300、价格按分析日因子归一、入口为行动日开盘；近日3/5日窗口不冒充推荐后。{\"return_1d\": 0.09996678844237783, \"return_3d\": 0.1853972798854686, \"return_5d\": 0.2547831028603902, \"relative_market_3d\": 0.17216211269693193, \"relative_market_5d\": 0.24150582385695385, \"amount_ratio_last_20d\": 2.841380896605987, \"largest_positive_day_contribution_5d\": 0.426975617297491, \"return_ex_largest_positive_day_5d\": 0.14074635347603737, \"return_after_largest_positive_day_5d\": null, \"current_close_return_since_entry\": 0.08732764281024274, \"data_limitations\": [], \"price_levels\": {\"atr20\": 3.508999999999998, \"current_close\": 66.24, \"entry_reference_price\": 60.92, \"prior60_close_high\": 90.5, \"prior60_close_high_date\": \"2026-06-29\", \"prior60_high\": 99.58, \"prior60_high_date\": \"2026-06-29\", \"remaining_atr_to_target\": 1.956112852664579, \"remaining_return_to_target\": 0.1036231884057972, \"target_price\": 73.104}}；含日内位置及成交的原始路径见recent_sessions/post_entry_sessions。",
+      "company_change": "已读募集说明书1225569348，available_at=2026-09-18T00:00+08:00，https://static.cninfo.com.cn/finalpage/2026-09-18/1225569348.PDF，第6—8页：已获注册，拟募集448114.92万元；包括低介电纤维布项目及资金用途，尚不能证明发行完成或项目收益兑现。当前同2026H1 cash_flow.n_cashflow_act=-200005165.65，financial_indicator.dt_netprofit_yoy=35.54，available_at=2026-08-19T00:00+08:00。未作该融资相对全部旧披露的新增性推断。",
+      "outlook_1_3d": "overheated",
+      "confirmation_condition": "成交增加却不再提高收盘、冲高回吐变大，会支持短期高位震荡偏下。",
+      "invalidation_condition": "多个更高收盘继续保持且回吐减轻，会改变短期高位震荡偏下判断。",
+      "why_reported": "按本episode阶段及当前机会完成节点六项；首日高开回吐之后收盘连续提高至66.24元，已越过59.93元；但成交未降温，不能宣称上轮全部参与条件完成。",
+      "outlook_reason_plain_language": "五日涨25.48%、今日涨约10%且成交继续增加，短期更可能高位震荡偏下；多日相对强势仍支持较长偏上。",
+      "episode_reviews": [
+        {
+          "episode_id": "formal:2026-09-16:002080.SZ:selected",
+          "original_reason_plain_language": "当时主要看中连续五个普通交易日收盘和成交提高、持续强于市场及同行，经营改善提供基础。",
+          "original_key_risk_plain_language": "主要担心经营现金净流出、负债和上方旧价格区域反复，行动日明显高开不宜追入。",
+          "current_assessment": "supported",
+          "best_supported_explanation": "stock_specific_move",
+          "current_weak_or_failed_link": "remaining_room",
+          "current_review": "中材科技｜第三日延续上涨，但加速和融资风险使当前仍等\n\n首日高开回吐之后，收盘从58.69元继续提高到60.22元、66.24元，原来的上涨判断得到更多支持，未来5—10日转为偏上。不过今天再涨约10%、近5日已涨25.48%，当前仍等待加速后的整理，短期更可能高位震荡偏下。原来要求开盘不要直接跳到59.93元附近或以上，首日60.92元仍不符合；后来上涨不会把那个入口重新变成可执行。\n\n这三日的上涨明显强于市场和玻璃玻纤，并非只有行业普涨可以解释。收盘已经越过59.93元，但成交连续增加而非降温；所以上轮“成交降温、连续收稳并重新收回”的条件只完成价格的一部分。取得更多上涨确认，也意味着现在已付出更高价格。\n\n经营支持与限制同时存在：本次核实半年扣非利润增长35.54%，经营现金仍净流出2.00亿元。[9月18日募集说明书第6—8页](https://static.cninfo.com.cn/finalpage/2026-09-18/1225569348.PDF)说明发行已获注册，拟募资不超过44.81亿元，用于低介电纤维布等项目及资金用途；这不等于已完成发行、项目已投产或未来数日利润兑现。现金占用、融资摊薄与项目效益的不确定性，不能由一天强势收盘抵消。\n\n66.24元已经离59.93元原观察区域较远。当前追进，要接受可能回到60.22—64.56元近期区域的检验；原目标73.10元只是原推荐的评价线，不是新买入目标。先看新高后的回落能否保留这一带、交易降温而收盘仍稳定，再在收盘后重评；若跌回59.93元下方或出现放量连续收低，就降低当前看法。",
+          "comparison_interpretation": "同窗成对路径不可完整核对，不能判断替代股票是否更优。",
+          "final_twenty_day_review": null
+        }
+      ]
+    },
+    {
+      "ts_code": "300398.SZ",
+      "name": "飞凯材料",
+      "episode_ids": [
+        "formal:2026-09-16:300398.SZ:selected",
+        "formal:2026-09-17:300398.SZ:selected"
+      ],
+      "roles": [
+        "selected"
+      ],
+      "day_numbers": [
+        2,
+        3
+      ],
+      "original_engine_types": [
+        "sector_broad_diffusion"
+      ],
+      "alert_type": "checkpoint",
+      "monitor_state": "actionable_watch",
+      "market_change": "复用同日pending-trace已形成的共同市场判断并对照snapshot.market_context：上涨面1/3/5日=0.8276958002/0.8409813721/0.7368779823，等权1/3/5日=0.0194250209/0.0352014578/0.0332656415；成交1713442773658.75元、20日比1.0538469627、分化比1.0123369778。覆盖4407/4415，必需6指数完整；沪深300当日0.0071377852。市场多日多数参与支持继续核对相对机会，不证明个股必涨，普涨降低单日绝对上涨的独立信息量。若上涨面与多个窗口收益再度收缩，则收缩观察。知识：src_cn_market_breadth_alignment；本次用途：防止将普涨当个股独立支持；不能推出：未来显著上涨概率。",
+      "sector_change": "来源snapshot本episode，relative_industry对应review_context.basis.primary_industry，breadth对应原group，两者不得混用。{\"original_group_code\": \"801086.SI\", \"sector_breadth_3d\": 0.6666666666666666, \"sector_breadth_5d\": 0.9722222222222222, \"sector_median_return_3d\": 0.02123685005898568, \"sector_median_return_5d\": 0.07419133935539812, \"sector_relative_return_3d\": 0.004641158208944028, \"sector_relative_return_5d\": 0.06945627850471833, \"sector_top_contribution\": 0.5356747854840542, \"sector_turnover_share_change_5d\": 0.00022849621087922198, \"relative_industry_3d\": 0.0356951031739479, \"relative_industry_5d\": 0.02277235197584651}。行业/主题多数上涨只说明同业环境，自身是否跟上见本篇价格与当前意见。",
+      "stock_change": "来源snapshot本episode.review_context与同episode确定性字段，市场为沪深300、价格按分析日因子归一、入口为行动日开盘；近日3/5日窗口不冒充推荐后。{\"return_1d\": 0.0, \"return_3d\": 0.0535714285714286, \"return_5d\": 0.10550590948400118, \"relative_market_3d\": 0.040336261382891925, \"relative_market_5d\": 0.09222863048056484, \"amount_ratio_last_20d\": 1.2976868346313506, \"largest_positive_day_contribution_5d\": 0.3294434069524352, \"return_ex_largest_positive_day_5d\": 0.06966808055017903, \"return_after_largest_positive_day_5d\": 0.0535714285714286, \"current_close_return_since_entry\": 0.047241944292736315, \"data_limitations\": [], \"price_levels\": {\"atr20\": 1.7409999999999994, \"current_close\": 38.35, \"entry_reference_price\": 36.62, \"prior60_close_high\": 64.16410639044945, \"prior60_close_high_date\": \"2026-06-29\", \"prior60_high\": 65.21253950140449, \"prior60_high_date\": \"2026-06-29\", \"remaining_atr_to_target\": 3.2130959218839723, \"remaining_return_to_target\": 0.14586701434159055, \"target_price\": 43.943999999999996}}；含日内位置及成交的原始路径见recent_sessions/post_entry_sessions。",
+      "company_change": "本次同截止核对2026H1归母267133083.22、经营现金478188892.97、扣非同比47.19%，available_at=2026-08-28T00:00+08:00。原报告https://static.cninfo.com.cn/finalpage/2026-08-27/1225513137.PDF；无本次新增公告条目，不把旧业绩当今日催化。两条推荐经营事实共用，原评价分别记录。",
+      "outlook_1_3d": "range_or_wait",
+      "confirmation_condition": "39.20—39.30元附近反复受阻而收盘仍能保持，会支持短期整理判断。",
+      "invalidation_condition": "连续收盘越过39.20—39.30元并保持，或失守37.12元且持续收低，会改变短期整理判断。",
+      "why_reported": "按本episode阶段及当前机会完成节点六项；早期上涨仍有支持，但今天试39.30元后回到38.35元，行业3日上涨面收窄；当前由有条件考虑转等待。",
+      "outlook_reason_plain_language": "今天收盘与前日持平、39.30元冲高未守住且成交减少，短期更可能整理，较长窗口仍有多日上涨基础。",
+      "episode_reviews": [
+        {
+          "episode_id": "formal:2026-09-16:300398.SZ:selected",
+          "original_reason_plain_language": "当时主要看中电子化学品多数成员上涨、自身收盘成交接续，盈利及现金回流改善。",
+          "original_key_risk_plain_language": "主要担心最大上涨日贡献较大、后续确认有限，37元多及39.23元旧价格区域可能反复。",
+          "current_assessment": "partly_supported",
+          "best_supported_explanation": "mixed",
+          "current_weak_or_failed_link": "remaining_room",
+          "current_review": "飞凯材料｜前三日保住上涨，碰到旧高后停顿，当前改为等待\n\n9月17日开始的这次观察，前三个收盘从37.12元升到38.35元，今天仍为38.35元，早期上涨保住了，但暂时停止推进。未来5—10日仍偏上，当前从有条件考虑改为等待，短期先看整理。今天最高39.30元，最终回到开盘39.09元下方，原先担心的39.20元附近反复已实际出现。\n\n原推荐依靠电子化学品多数成员上涨、自身连续提高收盘和经营改善。首日36.62元开盘未碰到原先需避开的39.23元附近，存在可核对的报价和成交，但不据此假定实际买入。推荐后的第二日继续提高收盘，第三日持平；这是三日早期检验，不等于后续趋势已经确定。\n\n行业近5日35/36只上涨仍有帮助，但近3日只剩24/36只，短窗口已不如原来普遍。本股近3日仍领先该行业3.57个百分点，说明自身支持未完全消失；今天成交较前日减少约33%，价格未收低也不等于阻力已经消化。本次重核半年扣非利润增长47.19%、经营现金净流入4.78亿元，提供经营基础，不能当成今天新增订单。\n\n38.35元距39.20—39.30元区域很近，当前参与可能先经历突破失败后的回落，因此先等收盘越过并在后续交易日保留，同时行业多数参与持续。信号收盘后才知道，下一可交易时段要按新价格重新判断；连续跌回37.12元下方或放量收低则降低意见。两次推荐各自的原入口与撤回条件保留，不能因共用当前看法就合并原收益。",
+          "comparison_interpretation": "同窗成对路径不可完整核对，不能判断替代股票是否更优。",
+          "final_twenty_day_review": null
+        },
+        {
+          "episode_id": "formal:2026-09-17:300398.SZ:selected",
+          "original_reason_plain_language": "当时主要看中行业多数参与、自身连续四日收高，最大上涨日之后仍有推进且经营现金支持盈利。",
+          "original_key_risk_plain_language": "主要担心已有连续上涨、行业正收益集中，以及39.20元附近旧高可能遇阻回吐。",
+          "current_assessment": "partly_supported",
+          "best_supported_explanation": "mixed",
+          "current_weak_or_failed_link": "remaining_room",
+          "current_review": "飞凯材料｜后一次推荐两日保有涨幅，当前同样等待旧高检验\n\n9月18日这次推荐以37.53元开盘作观察参照，第一日收38.35元，第二日仍收38.35元，原来的上涨期待获得部分支持，但只有两日，尚无更长推荐后路径可对。当前与前一次记录共用同一38.35元参考：未来5—10日偏上，短期整理，参与先等待。\n\n当时看中行业多数参与、自身多日接续和盈利现金同步改善，也明确担心接近39.20元旧高后的回吐。首日开盘未发生明显跳离前一收盘的情形，第二日却在39.09元开盘、试39.30元后退回38.35元；报价成交真实存在，不代表第二日高开就适合追入。最近5日领先同行等指标包含推荐前日期，只能作为背景，不能记作这次推荐已经走出的五日表现。\n\n当前支持仍是行业近5日35/36只上涨和公司已披露的盈利现金基础；反证是近3日上涨成员降至24/36只、自身今日不再提高收盘。以38.35元参与要先承受39.20—39.30元附近再度受阻的代价，不能直接把原20%观察线当成新目标。\n\n后续收盘越过该区域并保留、行业多数参与继续，才在下一可用时段按新价重评；连续失守37.12元或放量收低则降低当前意见。原推荐更早约定的35.22元等条件仍按自己的记录保留。",
+          "comparison_interpretation": "snapshot.episodes[formal:2026-09-17:300398.SZ:selected].pair_context：同窗第2日推荐与原比较对象累计收益差=0.022453173626456824；仅支持结果比较，不凭收益差认定当时理由或具体选股必然正确。",
+          "final_twenty_day_review": null
+        }
+      ]
+    },
+    {
+      "ts_code": "603115.SH",
+      "name": "海星股份",
+      "episode_ids": [
+        "formal:2026-09-15:603115.SH:selected"
+      ],
+      "roles": [
+        "selected"
+      ],
+      "day_numbers": [
+        4
+      ],
+      "original_engine_types": [
+        "independent_demand_acceleration"
+      ],
+      "alert_type": "actionable_watch",
+      "monitor_state": "actionable_watch",
+      "market_change": "复用同日pending-trace已形成的共同市场判断并对照snapshot.market_context：上涨面1/3/5日=0.8276958002/0.8409813721/0.7368779823，等权1/3/5日=0.0194250209/0.0352014578/0.0332656415；成交1713442773658.75元、20日比1.0538469627、分化比1.0123369778。覆盖4407/4415，必需6指数完整；沪深300当日0.0071377852。市场多日多数参与支持继续核对相对机会，不证明个股必涨，普涨降低单日绝对上涨的独立信息量。若上涨面与多个窗口收益再度收缩，则收缩观察。知识：src_cn_market_breadth_alignment；本次用途：防止将普涨当个股独立支持；不能推出：未来显著上涨概率。",
+      "sector_change": "来源snapshot本episode，relative_industry对应review_context.basis.primary_industry，breadth对应原group，两者不得混用。{\"original_group_code\": \"801086.SI\", \"sector_breadth_3d\": 0.6666666666666666, \"sector_breadth_5d\": 0.9722222222222222, \"sector_median_return_3d\": 0.02123685005898568, \"sector_median_return_5d\": 0.07419133935539812, \"sector_relative_return_3d\": 0.004641158208944028, \"sector_relative_return_5d\": 0.06945627850471833, \"sector_top_contribution\": 0.5356747854840542, \"sector_turnover_share_change_5d\": 0.00022849621087922198, \"relative_industry_3d\": -0.04056888485635043, \"relative_industry_5d\": -0.06234399149835876}。行业/主题多数上涨只说明同业环境，自身是否跟上见本篇价格与当前意见。",
+      "stock_change": "来源snapshot本episode.review_context与同episode确定性字段，市场为沪深300、价格按分析日因子归一、入口为行动日开盘；近日3/5日窗口不冒充推荐后。{\"return_1d\": -0.0437660119555936, \"return_3d\": -0.02269255945886972, \"return_5d\": 0.020389566009795912, \"relative_market_3d\": -0.0359277266474064, \"relative_market_5d\": 0.0071122870063595744, \"amount_ratio_last_20d\": 0.9851597386510127, \"largest_positive_day_contribution_5d\": 0.587243577599711, \"return_ex_largest_positive_day_5d\": -0.03573735199138872, \"return_after_largest_positive_day_5d\": -0.03573735199138872, \"current_close_return_since_entry\": -0.04182265482939351, \"data_limitations\": [], \"price_levels\": {\"atr20\": 6.780499999999998, \"current_close\": 89.58, \"entry_reference_price\": 93.49, \"prior60_close_high\": 121.86623478662764, \"prior60_close_high_date\": \"2026-06-30\", \"prior60_high\": 129.16009859805885, \"prior60_high_date\": \"2026-06-30\", \"remaining_atr_to_target\": 3.3342673844111785, \"remaining_return_to_target\": 0.2523777628935029, \"target_price\": 112.18799999999999}}；含日内位置及成交的原始路径见recent_sessions/post_entry_sessions。",
+      "company_change": "原推荐公司锚及风险只依snapshot本episode原理由与原引用资料；本次new_announcements=[]。未取得足以改变本篇主要解释的公司增量，不把未出现新增条目写成已排除全部经营风险，也不把股价变化等同经营改变。",
+      "outlook_1_3d": "weakening",
+      "confirmation_condition": "收盘继续低于93.49元并落后电子化学品，会进一步支持偏弱判断。",
+      "invalidation_condition": "重新收回93.49元并连续保留、相对同行转强且回吐减少，会改变偏弱判断。",
+      "why_reported": "因本次重要判断变化进入普通详评；连续回落后收在89.58元，已重新失守93.49元，前轮明确的转回避条件发生，方向由未明转偏弱。",
+      "outlook_reason_plain_language": "95.41元后两次收低，今天在市场普涨时下跌4.38%，未来5—10日更可能偏弱。",
+      "episode_reviews": [
+        {
+          "episode_id": "formal:2026-09-15:603115.SH:selected",
+          "original_reason_plain_language": "当时主要看中多日持续领先市场与电子化学品，最大上涨日之外仍有收盘推进。",
+          "original_key_risk_plain_language": "主要担心历史波动很大、融资摊薄及经营验证不足，反弹可能被较大回落打断。",
+          "current_assessment": "weakening",
+          "best_supported_explanation": "stock_specific_move",
+          "current_weak_or_failed_link": "price_and_volume_confirmation",
+          "current_review": "海星股份｜反弹被连续回吐，失守观察价位后改为回避\n\n这次需要下调当前意见：收盘从95.41元连续降到93.68元、89.58元，重新失守上次明确观察的93.49元。未来5—10个交易日由方向未明转为偏弱，当前暂不参与。这里出现的是收盘条件，不能再按“盘中波动较大、但最终收回来”处理。\n\n今天市场多数股票上涨，海星反而下跌4.38%；近3日落后电子化学品约4.06个百分点。此前担心的高波动已经表现为反弹后的实际回吐，单靠市场恢复并没有保住更高收盘。成交比前日减少，能说明交易降温，却不能说明下跌已接近结束，也不足以认定哪一类账户在卖。\n\n原推荐依靠多日独立走强，并非已经核实了新的盈利催化。如今这条价格依据受到削弱；没有新的正式经营证据能抵消它。89.58元比两天前便宜，但重新面对93.49元附近的恢复检验，现在参与仍可能先经历进一步下移，因而不因价格降低就转积极。\n\n下一步先看收盘能否重新收回并连续保留93.49元，以及对同行的领先和盘中保持能否一起恢复。一次反弹不够，相关表现收盘后确认，再按下一可交易时段的实际价格重新判断。",
+          "comparison_interpretation": "snapshot.episodes[formal:2026-09-15:603115.SH:selected].pair_context：同窗第4日推荐与原比较对象累计收益差=-0.018218478705925523；仅支持结果比较，不凭收益差认定当时理由或具体选股必然正确。",
+          "final_twenty_day_review": null
+        }
+      ]
+    },
+    {
+      "ts_code": "301086.SZ",
+      "name": "鸿富瀚",
+      "episode_ids": [
+        "formal:2026-09-04:301086.SZ:selected"
+      ],
+      "roles": [
+        "selected"
+      ],
+      "day_numbers": [
+        11
+      ],
+      "original_engine_types": [
+        "independent_demand_acceleration"
+      ],
+      "alert_type": "strengthening",
+      "monitor_state": "strengthening",
+      "market_change": "复用同日pending-trace已形成的共同市场判断并对照snapshot.market_context：上涨面1/3/5日=0.8276958002/0.8409813721/0.7368779823，等权1/3/5日=0.0194250209/0.0352014578/0.0332656415；成交1713442773658.75元、20日比1.0538469627、分化比1.0123369778。覆盖4407/4415，必需6指数完整；沪深300当日0.0071377852。市场多日多数参与支持继续核对相对机会，不证明个股必涨，普涨降低单日绝对上涨的独立信息量。若上涨面与多个窗口收益再度收缩，则收缩观察。知识：src_cn_market_breadth_alignment；本次用途：防止将普涨当个股独立支持；不能推出：未来显著上涨概率。",
+      "sector_change": "来源snapshot本episode，relative_industry对应review_context.basis.primary_industry，breadth对应原group，两者不得混用。{\"original_group_code\": \"801085.SI\", \"sector_breadth_3d\": 0.88, \"sector_breadth_5d\": 0.89, \"sector_median_return_3d\": 0.030379808970010358, \"sector_median_return_5d\": 0.040537055552318346, \"sector_relative_return_3d\": 0.02800676941051449, \"sector_relative_return_5d\": 0.04217826453998851, \"sector_top_contribution\": 0.14954182842164504, \"sector_turnover_share_change_5d\": null, \"relative_industry_3d\": 0.08328684750420112, \"relative_industry_5d\": 0.10526463056460111}。行业/主题多数上涨只说明同业环境，自身是否跟上见本篇价格与当前意见。",
+      "stock_change": "来源snapshot本episode.review_context与同episode确定性字段，市场为沪深300、价格按分析日因子归一、入口为行动日开盘；近日3/5日窗口不冒充推荐后。{\"return_1d\": 0.06158393147958252, \"return_3d\": 0.1245287841032523, \"return_5d\": 0.16072017410802597, \"relative_market_3d\": 0.11129361691471562, \"relative_market_5d\": 0.14744289510458963, \"amount_ratio_last_20d\": 1.0985259365693818, \"largest_positive_day_contribution_5d\": 0.3445223568567412, \"return_ex_largest_positive_day_5d\": 0.08885653288953033, \"return_after_largest_positive_day_5d\": 0.1245287841032523, \"current_close_return_since_entry\": 0.1383481016751824, \"data_limitations\": [], \"price_levels\": {\"atr20\": 11.881500000000006, \"current_close\": 176.0, \"entry_reference_price\": 154.61, \"prior60_close_high\": 209.28, \"prior60_close_high_date\": \"2026-06-30\", \"prior60_high\": 213.05, \"prior60_high_date\": \"2026-07-01\", \"remaining_atr_to_target\": 0.8022556074569714, \"remaining_return_to_target\": 0.05415909090909099, \"target_price\": 185.532}}；含日内位置及成交的原始路径见recent_sessions/post_entry_sessions。",
+      "company_change": "本次recommendation_context按2026-09-21T18:30+08:00读取同合并口径2026H1：income_statement.n_income_attr_p=73103568.07，cash_flow.n_cashflow_act=-712265504.81，均available_at=2026-08-26T00:00+08:00。原稿现金描述不能沿用；无新资料解除现金占用风险。源报告https://static.cninfo.com.cn/finalpage/2026-08-25/1225496426.PDF；不把股价恢复写成现金改善。",
+      "outlook_1_3d": "continuation_possible",
+      "confirmation_condition": "普通交易日继续提高收盘并领先消费电子，会进一步支持价格偏上判断。",
+      "invalidation_condition": "连续收低跌回157.12元下方或明显放量不进，会改变价格偏上判断。",
+      "why_reported": "因本次重要判断变化进入普通详评；165.79、176元连续提高且恢复同行领先，价格判断实质增强；现金流净流出已核实，当前仍回避，未把原组合条件说成全部满足。",
+      "outlook_reason_plain_language": "近5日上涨16.07%、最大上涨日之后仍涨12.45%，并领先消费电子10.53个百分点，未来5—10日方向转为偏上；现金质量仍构成参与障碍。",
+      "episode_reviews": [
+        {
+          "episode_id": "formal:2026-09-04:301086.SZ:selected",
+          "original_reason_plain_language": "当时主要看中弱市中持续放量领先市场和消费电子、距旧高尚远，原稿还把半年经营改善视为支持。",
+          "original_key_risk_plain_language": "主要担心涨幅集中、前期已涨较多及负债；原稿现金支持的错误已在既有复盘更正，不作为本日正面依据。",
+          "current_assessment": "partly_supported",
+          "best_supported_explanation": "stock_specific_move",
+          "current_weak_or_failed_link": "company_risk",
+          "current_review": "鸿富瀚｜价格恢复已明确，现金风险仍使当前回避\n\n165.79元、176元连续两个更高收盘，使价格方向需要上调：未来5—10日由偏弱转为偏上。但当前参与仍回避。上轮等待的是站稳157.12元和现金回流获得可核实改善，价格部分已有进展，现金部分没有，不能把两项一起写成已完成。\n\n近5日上涨16.07%、领先消费电子10.53个百分点，最大上涨日之后仍上涨12.45%，这段强势不能简化为单日冲高。它支持股票自身正在恢复，也说明继续一概判断偏弱已不符合当前价格事实。今天成交略少于上个交易日，但收盘继续提高，尚未出现放量却持续收低的反证。\n\n现金问题则需要另外回答。本次重新读取同一半年期财务：归母利润约0.73亿元，而经营现金净流出约7.12亿元。原早期理由曾把现金支持写得过强，上轮已更正，本轮沿用已核实口径。盈利增长不能代替现金回流，价格上涨也不能证明现金问题已解除。\n\n176元参与还需承担近几日快速反弹后的往返；目前缺少足够经营依据让我接受这种代价。因此，看涨方向与回避参与并存。只有正式资料能解释或改善经营现金回流，并且新高后的回落仍能保留更高收盘，才重新考虑；单靠再涨一天不够。",
+          "comparison_interpretation": "snapshot.episodes[formal:2026-09-04:301086.SZ:selected].pair_context：同窗第11日推荐与原比较对象累计收益差=-0.1463609131593553；仅支持结果比较，不凭收益差认定当时理由或具体选股必然正确。",
+          "final_twenty_day_review": null
+        }
+      ]
+    },
+    {
+      "ts_code": "600150.SH",
+      "name": "中国船舶",
+      "episode_ids": [
+        "formal:2026-09-08:600150.SH:selected"
+      ],
+      "roles": [
+        "selected"
+      ],
+      "day_numbers": [
+        9
+      ],
+      "original_engine_types": [
+        "independent_demand_acceleration"
+      ],
+      "alert_type": "strengthening",
+      "monitor_state": "strengthening",
+      "market_change": "复用同日pending-trace已形成的共同市场判断并对照snapshot.market_context：上涨面1/3/5日=0.8276958002/0.8409813721/0.7368779823，等权1/3/5日=0.0194250209/0.0352014578/0.0332656415；成交1713442773658.75元、20日比1.0538469627、分化比1.0123369778。覆盖4407/4415，必需6指数完整；沪深300当日0.0071377852。市场多日多数参与支持继续核对相对机会，不证明个股必涨，普涨降低单日绝对上涨的独立信息量。若上涨面与多个窗口收益再度收缩，则收缩观察。知识：src_cn_market_breadth_alignment；本次用途：防止将普涨当个股独立支持；不能推出：未来显著上涨概率。",
+      "sector_change": "来源snapshot本episode，relative_industry对应review_context.basis.primary_industry，breadth对应原group，两者不得混用。{\"original_group_code\": \"801744.SI\", \"sector_breadth_3d\": 1.0, \"sector_breadth_5d\": 1.0, \"sector_median_return_3d\": 0.03826835899136938, \"sector_median_return_5d\": 0.029586932571173064, \"sector_relative_return_3d\": 0.05124992718764479, \"sector_relative_return_5d\": 0.029303428874068185, \"sector_top_contribution\": 0.47471487629484194, \"sector_turnover_share_change_5d\": null, \"relative_industry_3d\": 0.020987252805612727, \"relative_industry_5d\": 0.00975382265097162}。行业/主题多数上涨只说明同业环境，自身是否跟上见本篇价格与当前意见。",
+      "stock_change": "来源snapshot本episode.review_context与同episode确定性字段，市场为沪深300、价格按分析日因子归一、入口为行动日开盘；近日3/5日窗口不冒充推荐后。{\"return_1d\": 0.03927033189764373, \"return_3d\": 0.0854723471817942, \"return_5d\": 0.05233453052847614, \"relative_market_3d\": 0.07223717999325752, \"relative_market_5d\": 0.039057251525039804, \"amount_ratio_last_20d\": 1.1333965192789706, \"largest_positive_day_contribution_5d\": 0.4713123086150767, \"return_ex_largest_positive_day_5d\": 0.01257054899948673, \"return_after_largest_positive_day_5d\": null, \"current_close_return_since_entry\": 0.056127703398558104, \"data_limitations\": [], \"price_levels\": {\"atr20\": 1.359, \"current_close\": 41.02, \"entry_reference_price\": 38.84, \"prior60_close_high\": 40.82, \"prior60_close_high_date\": \"2026-09-10\", \"prior60_high\": 41.18, \"prior60_high_date\": \"2026-09-10\", \"remaining_atr_to_target\": 4.111846946284033, \"remaining_return_to_target\": 0.13622623110677723, \"target_price\": 46.608000000000004}}；含日内位置及成交的原始路径见recent_sessions/post_entry_sessions。",
+      "company_change": "已读同份公告1225558999，available_at=2026-09-11T00:00+08:00，官方原件https://static.cninfo.com.cn/finalpage/2026-09-11/1225558999.PDF，第1页确认北海造船检修事故但未量化交付损益。9月19日业绩说明会预告不替代事故进展。当前2026H1经营现金净流入10918336717.41，不能抵消事故未知。",
+      "outlook_1_3d": "continuation_possible",
+      "confirmation_condition": "收盘保留39.53—39.75元以上并继续领先航海装备，会支持震荡偏上。",
+      "invalidation_condition": "重新跌回39.53—39.75元下方或事故出现重大不利披露，会改变当前方向。",
+      "why_reported": "因本次重要判断变化进入普通详评；连续三次收高并越过39.53—39.75元，当前由回避改为等待、方向转偏上；事故影响仍未明确，完整组合条件未满足。",
+      "outlook_reason_plain_language": "37.79元后连续回升至41.02元，近3日领先航海装备2.10个百分点，支持未来5—10日偏上；事故经营影响限制判断。",
+      "episode_reviews": [
+        {
+          "episode_id": "formal:2026-09-08:600150.SH:selected",
+          "original_reason_plain_language": "当时主要看中多日收高、最大上涨日之后仍继续上涨，以及按可比口径改善的半年经营与现金回流。",
+          "original_key_risk_plain_language": "主要担心涨幅集中和冲高回吐，长周期订单并不显著影响当期利润，履约和汇率仍有不确定性。",
+          "current_assessment": "partly_supported",
+          "best_supported_explanation": "mixed",
+          "current_weak_or_failed_link": "company_risk",
+          "current_review": "中国船舶｜连续修复改善方向，事故影响未明，参与先转等待\n\n37.79元之后连续三个收盘提高，今天41.02元已经越过原来观察的39.53—39.75元区域。价格明显好于上轮，因此把未来5—10日方向调为偏上，当前由回避转为等待。原先还要求事故影响有明确披露，这部分并未完成，不能把突破直接当成全部风险解除。\n\n航海装备近3日、5日成员全部上涨，本股近3日还领先同行约2.10个百分点，行业恢复与自身走强都有作用。此前连续上涨中断的问题有所改善；不过41.02元刚超过此前40.82元收盘高点，靠近41.18元盘中高点，当前参与仍要面对能否保住这次突破的检验。\n\n本轮重读[北海造船厂火灾公告](https://static.cninfo.com.cn/finalpage/2026-09-11/1225558999.PDF)，确认事故事实，原件并未量化生产、交付及损益影响。后续取得的是业绩说明会预告，不能把预告标题当成事故损失已明确。公司半年经营现金净流入和盈利基础有据，但同样不能代替这项新增经营风险的核实。\n\n当前等待有两个明确问题：突破后是否连续保留，以及事故影响何时有足够正式资料说明。只解决价格一项不足以转为积极参与；若又跌回39.53—39.75元区域下方，也要降低方向判断。新的收盘事实确认之后，仍按下一可用时段价格重评。",
+          "comparison_interpretation": "同窗成对路径不可完整核对，不能判断替代股票是否更优。",
+          "final_twenty_day_review": null
+        }
+      ]
+    },
+    {
+      "ts_code": "603583.SH",
+      "name": "捷昌驱动",
+      "episode_ids": [
+        "formal:2026-09-03:603583.SH:selected"
+      ],
+      "roles": [
+        "selected"
+      ],
+      "day_numbers": [
+        12
+      ],
+      "original_engine_types": [
+        "independent_demand_acceleration"
+      ],
+      "alert_type": "strengthening",
+      "monitor_state": "strengthening",
+      "market_change": "复用同日pending-trace已形成的共同市场判断并对照snapshot.market_context：上涨面1/3/5日=0.8276958002/0.8409813721/0.7368779823，等权1/3/5日=0.0194250209/0.0352014578/0.0332656415；成交1713442773658.75元、20日比1.0538469627、分化比1.0123369778。覆盖4407/4415，必需6指数完整；沪深300当日0.0071377852。市场多日多数参与支持继续核对相对机会，不证明个股必涨，普涨降低单日绝对上涨的独立信息量。若上涨面与多个窗口收益再度收缩，则收缩观察。知识：src_cn_market_breadth_alignment；本次用途：防止将普涨当个股独立支持；不能推出：未来显著上涨概率。",
+      "sector_change": "来源snapshot本episode，relative_industry对应review_context.basis.primary_industry，breadth对应原group，两者不得混用。{\"original_group_code\": \"801078.SI\", \"sector_breadth_3d\": 0.8172043010752689, \"sector_breadth_5d\": 0.8494623655913979, \"sector_median_return_3d\": 0.019127516778523423, \"sector_median_return_5d\": 0.0390595373530529, \"sector_relative_return_3d\": 0.017991463628059753, \"sector_relative_return_5d\": 0.03293470138779844, \"sector_top_contribution\": 0.19436775509072313, \"sector_turnover_share_change_5d\": null, \"relative_industry_3d\": 0.05401164891993987, \"relative_industry_5d\": 0.026968096237117795}。行业/主题多数上涨只说明同业环境，自身是否跟上见本篇价格与当前意见。",
+      "stock_change": "来源snapshot本episode.review_context与同episode确定性字段，市场为沪深300、价格按分析日因子归一、入口为行动日开盘；近日3/5日窗口不冒充推荐后。{\"return_1d\": 0.04553938036580818, \"return_3d\": 0.0852382797365363, \"return_5d\": 0.07318007662835257, \"relative_market_3d\": 0.07200311254799963, \"relative_market_5d\": 0.05990279762491624, \"amount_ratio_last_20d\": 1.4968039478003694, \"largest_positive_day_contribution_5d\": 0.4579527288784478, \"return_ex_largest_positive_day_5d\": 0.02643678160919527, \"return_after_largest_positive_day_5d\": null, \"current_close_return_since_entry\": 0.03281710914454283, \"data_limitations\": [], \"price_levels\": {\"atr20\": 0.9374999999999999, \"current_close\": 28.01, \"entry_reference_price\": 27.12, \"prior60_close_high\": 27.12, \"prior60_close_high_date\": \"2026-09-03\", \"prior60_high\": 27.89, \"prior60_high_date\": \"2026-09-08\", \"remaining_atr_to_target\": 4.8362666666666625, \"remaining_return_to_target\": 0.16187076044269877, \"target_price\": 32.544}}；含日内位置及成交的原始路径见recent_sessions/post_entry_sessions。",
+      "company_change": "原推荐公司锚及风险只依snapshot本episode原理由与原引用资料；本次new_announcements=[]。未取得足以改变本篇主要解释的公司增量，不把未出现新增条目写成已排除全部经营风险，也不把股价变化等同经营改变。",
+      "outlook_1_3d": "continuation_possible",
+      "confirmation_condition": "收盘保留27.12—27.89元并继续领先自动化设备，会进一步支持震荡偏上。",
+      "invalidation_condition": "收盘跌回26.80元下方且相对同行再度转弱，会改变偏上判断。",
+      "why_reported": "因本次重要判断变化进入普通详评；连续回升终于越过26.80元及27.12元，近3日领先同行5.40个百分点；当前方向调为偏上，但新突破尚未连续保留。",
+      "outlook_reason_plain_language": "28.01元突破前期反复区，多个收盘提高且今天成交增加，支持未来5—10日偏上；经营反证及首次突破限制追价。",
+      "episode_reviews": [
+        {
+          "episode_id": "formal:2026-09-03:603583.SH:selected",
+          "original_reason_plain_language": "当时主要看中连续五日收高、最大上涨日之外仍有推进，在弱市中持续领先。",
+          "original_key_risk_plain_language": "主要担心半年利润与经营现金流下降，最大上涨日之后只有一天，近期高点可能站不稳。",
+          "current_assessment": "partly_supported",
+          "best_supported_explanation": "stock_specific_move",
+          "current_weak_or_failed_link": "price_and_volume_confirmation",
+          "current_review": "捷昌驱动｜连续回升终于越过原参考区，方向转偏上，仍等站稳\n\n前半程未能收回27.12元的问题，今天有了明确进展：收盘28.01元，连续回升并越过26.80元、27.12元，今天成交也随上涨增加。未来5—10日由整理调为偏上，但参与仍先等待；“收回”已经发生，“连续站稳”还没有完成。\n\n这段恢复并非只随大盘上扬。25.40元后多个收盘持续抬高，近3日领先自动化设备约5.40个百分点，说明此前缺少的自身推进正在恢复。原推荐所期待的多日强势获得部分支持。不过本次越过前方区域只有一天，不能把今天的突破预写为随后不会跌回。\n\n原研究已指出半年利润与经营现金流同比下降，这些经营反证不会因为股价恢复就自动消失；本轮公告增量没有新条目可改变该层判断。以28.01元参与，先要接受回到27.12—27.89元附近检验的可能。因此当前选择等待已越过区域能否保留，而不是机械沿用原20%目标说明空间。\n\n下一步关键在于后续普通交易日仍能保留更高收盘、继续领先同行。若重新跌到26.80元下方，今天好不容易取得的恢复会受到明显反证；确认发生在收盘后，参与价值要按下一可交易时段的价格重评。",
+          "comparison_interpretation": "snapshot.episodes[formal:2026-09-03:603583.SH:selected].pair_context：同窗第12日推荐与原比较对象累计收益差=-0.0029627073692184425；仅支持结果比较，不凭收益差认定当时理由或具体选股必然正确。",
+          "final_twenty_day_review": null
+        }
+      ]
+    },
+    {
+      "ts_code": "300473.SZ",
+      "name": "德尔股份",
+      "episode_ids": [
+        "formal:2026-08-25:300473.SZ:selected"
+      ],
+      "roles": [
+        "selected"
+      ],
+      "day_numbers": [
+        19
+      ],
+      "original_engine_types": [
+        "independent_demand_acceleration"
+      ],
+      "alert_type": "overheated",
+      "monitor_state": "overheated",
+      "market_change": "复用同日pending-trace已形成的共同市场判断并对照snapshot.market_context：上涨面1/3/5日=0.8276958002/0.8409813721/0.7368779823，等权1/3/5日=0.0194250209/0.0352014578/0.0332656415；成交1713442773658.75元、20日比1.0538469627、分化比1.0123369778。覆盖4407/4415，必需6指数完整；沪深300当日0.0071377852。市场多日多数参与支持继续核对相对机会，不证明个股必涨，普涨降低单日绝对上涨的独立信息量。若上涨面与多个窗口收益再度收缩，则收缩观察。知识：src_cn_market_breadth_alignment；本次用途：防止将普涨当个股独立支持；不能推出：未来显著上涨概率。",
+      "sector_change": "来源snapshot本episode，relative_industry对应review_context.basis.primary_industry，breadth对应原group，两者不得混用。{\"original_group_code\": \"801093.SI\", \"sector_breadth_3d\": 0.9306569343065694, \"sector_breadth_5d\": 0.7838827838827839, \"sector_median_return_3d\": 0.03188351611831186, \"sector_median_return_5d\": 0.02099236641221358, \"sector_relative_return_3d\": 0.029400420010096913, \"sector_relative_return_5d\": 0.017451684474922978, \"sector_top_contribution\": 0.0705960669784725, \"sector_turnover_share_change_5d\": null, \"relative_industry_3d\": 0.09834801935874349, \"relative_industry_5d\": 0.18266015786055276}。行业/主题多数上涨只说明同业环境，自身是否跟上见本篇价格与当前意见。",
+      "stock_change": "来源snapshot本episode.review_context与同episode确定性字段，市场为沪深300、价格按分析日因子归一、入口为行动日开盘；近日3/5日窗口不冒充推荐后。{\"return_1d\": 0.1428571428571428, \"return_3d\": 0.14098360655737707, \"return_5d\": 0.21338912133891208, \"relative_market_3d\": 0.1277484393688404, \"relative_market_5d\": 0.20011184233547574, \"amount_ratio_last_20d\": 2.8848254243703964, \"largest_positive_day_contribution_5d\": 0.6014191834035377, \"return_ex_largest_positive_day_5d\": 0.061715481171548126, \"return_after_largest_positive_day_5d\": null, \"current_close_return_since_entry\": 0.40833670578713055, \"data_limitations\": [], \"price_levels\": {\"atr20\": 1.5460000000000003, \"current_close\": 34.8, \"entry_reference_price\": 24.71, \"prior60_close_high\": 31.240000000000002, \"prior60_close_high_date\": \"2026-07-03\", \"prior60_high\": 32.39, \"prior60_high_date\": \"2026-07-06\", \"remaining_atr_to_target\": -3.3298835705045247, \"remaining_return_to_target\": -0.14793103448275857, \"target_price\": 29.652}}；含日内位置及成交的原始路径见recent_sessions/post_entry_sessions。",
+      "company_change": "原推荐公司锚及风险只依snapshot本episode原理由与原引用资料；本次new_announcements=[]。未取得足以改变本篇主要解释的公司增量，不把未出现新增条目写成已排除全部经营风险，也不把股价变化等同经营改变。",
+      "outlook_1_3d": "overheated",
+      "confirmation_condition": "新高后不再提高收盘、冲高回落增加，会支持短期高位震荡偏下。",
+      "invalidation_condition": "多个普通交易日继续提高收盘且回吐减轻，会改变短期高位震荡偏下的判断。",
+      "why_reported": "因本次重要判断变化进入普通详评；普通日整理后又以更大成交突破前高，原上涨判断增强；单日涨14.29%使当前追价代价更高。",
+      "outlook_reason_plain_language": "今日上涨14.29%、成交达20日均值2.88倍，最近5日涨21.34%，短期更可能高位震荡偏下；这不等同较长上行结构已破坏。",
+      "episode_reviews": [
+        {
+          "episode_id": "formal:2026-08-25:300473.SZ:selected",
+          "original_reason_plain_language": "当时主要看中股票多日明显领先市场、成交增加、尚距长期前高较远，季度经营改善提供基础。",
+          "original_key_risk_plain_language": "主要担心上涨集中于近几天，汽车零部件同行不跟随会使独立强势迅速减弱。",
+          "current_assessment": "supported",
+          "best_supported_explanation": "stock_specific_move",
+          "current_weak_or_failed_link": "remaining_room",
+          "current_review": "德尔股份｜整理后再度加速，原判断增强，当前追价代价也更高\n\n今天34.80元收盘，单日上涨14.29%，成交从前日约1.55亿元增至7.01亿元，越过此前32.39元的近期盘中高点。需要单独提醒的是：原来等待普通交易日接续，已有整理后的再次上涨支持，但价格一下跳高，当前仍不追，先等新高后的整理。\n\n前次大涨后30.24元、30.45元两个收盘没有明显失去涨幅，今天又继续提高；近5日领先汽车零部件18.27个百分点，剔除最大上涨日后其余日子仍上涨6.17%，不能把全部表现只归于今天普涨。另一方面，今日又成为最大上涨日，尚没有它之后的交易日可对，不能据此认定这一轮加速也能稳定延续。\n\n未来5—10日仍倾向偏上，短期则更可能高位震荡偏下。这两个窗口并不矛盾：多日相对强势仍在，而当前34.80元已比此前整理区高出很多，马上参与需承担回到31.24—32.39元旧高区域检验的代价。原推荐已达到20%不产生新的20%目标，也不意味着现在买入仍有同样空间。\n\n后续最有价值的观察，是新高后的回落能否保留旧高区域，以及普通交易日能否再留下更高收盘。没有新增公司公告条目解释今天的跳升，价格接续必须由后续实际表现回答。",
+          "comparison_interpretation": "snapshot.episodes[formal:2026-08-25:300473.SZ:selected].pair_context：同窗第19日推荐与原比较对象累计收益差=0.3534562667436183；仅支持结果比较，不凭收益差认定当时理由或具体选股必然正确。",
+          "final_twenty_day_review": null
+        }
+      ]
+    },
+    {
+      "ts_code": "301085.SZ",
+      "name": "亚康股份",
+      "episode_ids": [
+        "formal:2026-09-10:301085.SZ:selected"
+      ],
+      "roles": [
+        "selected"
+      ],
+      "day_numbers": [
+        7
+      ],
+      "original_engine_types": [
+        "event_repricing_confirmed"
+      ],
+      "alert_type": "strengthening",
+      "monitor_state": "strengthening",
+      "market_change": "复用同日pending-trace已形成的共同市场判断并对照snapshot.market_context：上涨面1/3/5日=0.8276958002/0.8409813721/0.7368779823，等权1/3/5日=0.0194250209/0.0352014578/0.0332656415；成交1713442773658.75元、20日比1.0538469627、分化比1.0123369778。覆盖4407/4415，必需6指数完整；沪深300当日0.0071377852。市场多日多数参与支持继续核对相对机会，不证明个股必涨，普涨降低单日绝对上涨的独立信息量。若上涨面与多个窗口收益再度收缩，则收缩观察。知识：src_cn_market_breadth_alignment；本次用途：防止将普涨当个股独立支持；不能推出：未来显著上涨概率。",
+      "sector_change": "来源snapshot本episode，relative_industry对应review_context.basis.primary_industry，breadth对应原group，两者不得混用。{\"original_group_code\": \"801103.SI\", \"sector_breadth_3d\": 0.8880597014925373, \"sector_breadth_5d\": 0.7686567164179104, \"sector_median_return_3d\": 0.024512264967159303, \"sector_median_return_5d\": 0.019677981237076203, \"sector_relative_return_3d\": 0.01528232178619901, \"sector_relative_return_5d\": 0.012226966606604286, \"sector_top_contribution\": 0.10713877716999988, \"sector_turnover_share_change_5d\": null, \"relative_industry_3d\": -0.022355170894232196, \"relative_industry_5d\": 0.05962018877909957}。行业/主题多数上涨只说明同业环境，自身是否跟上见本篇价格与当前意见。",
+      "stock_change": "来源snapshot本episode.review_context与同episode确定性字段，市场为沪深300、价格按分析日因子归一、入口为行动日开盘；近日3/5日窗口不冒充推荐后。{\"return_1d\": 0.0018276762402089641, \"return_3d\": 0.006162318080503493, \"return_5d\": 0.08512443438914019, \"relative_market_3d\": -0.007072849108033186, \"relative_market_5d\": 0.07184715538570385, \"amount_ratio_last_20d\": 0.6726774643011516, \"largest_positive_day_contribution_5d\": 0.7606392683234335, \"return_ex_largest_positive_day_5d\": 0.0030322882448456934, \"return_after_largest_positive_day_5d\": 0.006162318080503493, \"current_close_return_since_entry\": 0.04408163265306131, \"data_limitations\": [], \"price_levels\": {\"atr20\": 3.8024999999999984, \"current_close\": 76.74, \"entry_reference_price\": 73.5, \"prior60_close_high\": 76.6, \"prior60_close_high_date\": \"2026-09-18\", \"prior60_high\": 77.78, \"prior60_high_date\": \"2026-09-18\", \"remaining_atr_to_target\": 3.013806706114402, \"remaining_return_to_target\": 0.14933541829554353, \"target_price\": 88.2}}；含日内位置及成交的原始路径见recent_sessions/post_entry_sessions。",
+      "company_change": "原推荐公司锚及风险只依snapshot本episode原理由与原引用资料；本次new_announcements=[]。未取得足以改变本篇主要解释的公司增量，不把未出现新增条目写成已排除全部经营风险，也不把股价变化等同经营改变。",
+      "outlook_1_3d": "continuation_possible",
+      "confirmation_condition": "收盘保留76.27元上方并恢复IT服务同行领先，会进一步支持震荡偏上。",
+      "invalidation_condition": "收盘失守73.50元或反弹再度持续落后同行，会改变偏上判断。",
+      "why_reported": "因本次重要判断变化进入普通详评；76.60、76.74元连续越过76.27元，价格条件有进一步完成，方向改为偏上；普通日推进幅度与成交仍弱，继续等待。",
+      "outlook_reason_plain_language": "两日保留76.27元上方使修复延续，未来5—10日偏上；近3日仍落后IT服务、主要涨幅来自更早一天，确信有限。",
+      "episode_reviews": [
+        {
+          "episode_id": "formal:2026-09-10:301085.SZ:selected",
+          "original_reason_plain_language": "当时主要看中已签算力销售合同之后多个收盘提高，半年经营和现金回流改善提供基础。",
+          "original_key_risk_plain_language": "主要担心五年合同不等于当期利润，采购预付、客户信息与履约义务，以及公告前已上涨。",
+          "current_assessment": "partly_supported",
+          "best_supported_explanation": "mixed",
+          "current_weak_or_failed_link": "price_and_volume_confirmation",
+          "current_review": "亚康股份｜连续收回反弹高点，方向改善，普通日力度仍待确认\n\n76.60元、76.74元连续保留在76.27元上方，且仍高于73.50元原观察价，前次留下的价格条件有了进一步兑现。未来5—10日从整理调为偏上，当前仍等待更清楚的接续，不能因为价格条件改善就忽略参与代价。\n\n主要反证是回升速度已经放缓：今天只小幅收高，成交较前日减少约29%，仅为20日均值的0.67倍；近3日还落后IT服务约2.24个百分点。近5日较大的上涨，仍主要来自9月16日那次反弹，其余日子的净推进有限。当前比单日冲高更好，但距离稳定领先还有差距。\n\n原推荐围绕已签算力销售合同，合同期限较长、采购预付和客户履约的不确定性仍要保留。公告增量没有新条目说明这些问题已经改善，不能把今天收回高点视为未来各期收入和回款得到确认。\n\n76.74元靠近77.78元近期盘中高点，当前先等，是为观察缩量之后能否重新出现相对同行的推进。后续保留76.27元并恢复普通交易日领先，再按收盘后信息评估；跌回73.50元下方，则这次修复需要降级。原20%目标只用于原推荐评价。",
+          "comparison_interpretation": "同窗成对路径不可完整核对，不能判断替代股票是否更优。",
+          "final_twenty_day_review": null
+        }
+      ]
+    },
+    {
+      "ts_code": "300910.SZ",
+      "name": "瑞丰新材",
+      "episode_ids": [
+        "formal:2026-08-28:300910.SZ:selected"
+      ],
+      "roles": [
+        "selected"
+      ],
+      "day_numbers": [
+        16
+      ],
+      "original_engine_types": [
+        "sector_broad_diffusion"
+      ],
+      "alert_type": "strengthening",
+      "monitor_state": "actionable_watch",
+      "market_change": "复用同日pending-trace已形成的共同市场判断并对照snapshot.market_context：上涨面1/3/5日=0.8276958002/0.8409813721/0.7368779823，等权1/3/5日=0.0194250209/0.0352014578/0.0332656415；成交1713442773658.75元、20日比1.0538469627、分化比1.0123369778。覆盖4407/4415，必需6指数完整；沪深300当日0.0071377852。市场多日多数参与支持继续核对相对机会，不证明个股必涨，普涨降低单日绝对上涨的独立信息量。若上涨面与多个窗口收益再度收缩，则收缩观察。知识：src_cn_market_breadth_alignment；本次用途：防止将普涨当个股独立支持；不能推出：未来显著上涨概率。",
+      "sector_change": "来源snapshot本episode，relative_industry对应review_context.basis.primary_industry，breadth对应原group，两者不得混用。{\"original_group_code\": \"801034.SI\", \"sector_breadth_3d\": 0.8829787234042553, \"sector_breadth_5d\": 0.8351063829787234, \"sector_median_return_3d\": 0.028183109874049594, \"sector_median_return_5d\": 0.03137956053067992, \"sector_relative_return_3d\": 0.025006815107802546, \"sector_relative_return_5d\": 0.033492556891632844, \"sector_top_contribution\": 0.09479017768853742, \"sector_turnover_share_change_5d\": 0.0012347847840851502, \"relative_industry_3d\": -0.009680883236324753, \"relative_industry_5d\": -0.022282979575299636}。行业/主题多数上涨只说明同业环境，自身是否跟上见本篇价格与当前意见。",
+      "stock_change": "来源snapshot本episode.review_context与同episode确定性字段，市场为沪深300、价格按分析日因子归一、入口为行动日开盘；近日3/5日窗口不冒充推荐后。{\"return_1d\": 0.02485590778097957, \"return_3d\": 0.028561099060014472, \"return_5d\": 0.024486856319769545, \"relative_market_3d\": 0.015325931871477794, \"relative_market_5d\": 0.011209577316333208, \"amount_ratio_last_20d\": 0.755758743189299, \"largest_positive_day_contribution_5d\": 0.49255401684457517, \"return_ex_largest_positive_day_5d\": -0.00036010082823156875, \"return_after_largest_positive_day_5d\": null, \"current_close_return_since_entry\": -0.013864818024263537, \"data_limitations\": [], \"price_levels\": {\"atr20\": 1.0115000000000005, \"current_close\": 28.45, \"entry_reference_price\": 28.85, \"prior60_close_high\": 30.309999999999995, \"prior60_close_high_date\": \"2026-07-30\", \"prior60_high\": 31.5, \"prior60_high_date\": \"2026-07-03\", \"remaining_atr_to_target\": 6.099851705388033, \"remaining_return_to_target\": 0.21687170474516693, \"target_price\": 34.62}}；含日内位置及成交的原始路径见recent_sessions/post_entry_sessions。",
+      "company_change": "原推荐公司锚及风险只依snapshot本episode原理由与原引用资料；本次new_announcements=[]。未取得足以改变本篇主要解释的公司增量，不把未出现新增条目写成已排除全部经营风险，也不把股价变化等同经营改变。",
+      "outlook_1_3d": "range_or_wait",
+      "confirmation_condition": "28.85—29.18元前后反复且仍未恢复同行领先，会支持修复整理判断。",
+      "invalidation_condition": "连续收回该区并领先同行，或重新收破27.29元，会改变整理判断。",
+      "why_reported": "因本次重要判断变化进入普通详评；27.29元后连续收高至28.45元，回升有成交配合，当前由回避转等待；28.85—29.18元仍未收回。",
+      "outlook_reason_plain_language": "两次收高改善了下行路径，但近5日仍落后化学制品2.23个百分点，5—10日先看修复整理。",
+      "episode_reviews": [
+        {
+          "episode_id": "formal:2026-08-28:300910.SZ:selected",
+          "original_reason_plain_language": "当时主要看中化学制品多数成员上涨，瑞丰新材处同行前列且持续强于市场。",
+          "original_key_risk_plain_language": "主要担心近期已经上涨较多，一季度利润下降，经营未同步支持这次上涨。",
+          "current_assessment": "weakening",
+          "best_supported_explanation": "industry_common_move",
+          "current_weak_or_failed_link": "price_and_volume_confirmation",
+          "current_review": "瑞丰新材｜两次收高改善修复，先由回避改为等待\n\n27.29元后接连收在27.76元、28.45元，成交也逐日增加，前次反弹很快中断的情况有所改善。当前由回避改为等待，未来5—10日先看修复中的整理；这次上调不等于原28.85—29.18元恢复条件已经满足。\n\n值得等待，是因为上涨已经不只发生一天，且近3日强于市场。但化学制品同行同期更强，本股近3日仍落后约0.97个百分点、近5日落后约2.23个百分点。它更像跟随同行的恢复，不能直接恢复为原来行业前列成员的积极判断。原推荐关于利润下滑与已有较多涨幅的担心，也未被新的经营资料解除。\n\n28.45元距原观察区已近，抢先参与很可能先遇到能否收复的检验。当前愿意等，是因为价格与成交恢复有实际内容；仍不直接参与，是因为恢复还未转为相对领先。接下来重点看收回该区后能否保留，并在普通交易日继续领先同行；若又回到27.29元下方，本次修复的依据就会减弱。收盘确认之后，下一时段仍要重新核对价格。",
+          "comparison_interpretation": "snapshot.episodes[formal:2026-08-28:300910.SZ:selected].pair_context：同窗第16日推荐与原比较对象累计收益差=-0.17829434822560586；仅支持结果比较，不凭收益差认定当时理由或具体选股必然正确。",
+          "final_twenty_day_review": null
+        }
+      ]
+    },
+    {
+      "ts_code": "600176.SH",
+      "name": "中国巨石",
+      "episode_ids": [
+        "formal:2026-09-11:600176.SH:selected"
+      ],
+      "roles": [
+        "selected"
+      ],
+      "day_numbers": [
+        6
+      ],
+      "original_engine_types": [
+        "sector_broad_diffusion"
+      ],
+      "alert_type": "new_event",
+      "monitor_state": "actionable_watch",
+      "market_change": "复用同日pending-trace已形成的共同市场判断并对照snapshot.market_context：上涨面1/3/5日=0.8276958002/0.8409813721/0.7368779823，等权1/3/5日=0.0194250209/0.0352014578/0.0332656415；成交1713442773658.75元、20日比1.0538469627、分化比1.0123369778。覆盖4407/4415，必需6指数完整；沪深300当日0.0071377852。市场多日多数参与支持继续核对相对机会，不证明个股必涨，普涨降低单日绝对上涨的独立信息量。若上涨面与多个窗口收益再度收缩，则收缩观察。知识：src_cn_market_breadth_alignment；本次用途：防止将普涨当个股独立支持；不能推出：未来显著上涨概率。",
+      "sector_change": "来源snapshot本episode，relative_industry对应review_context.basis.primary_industry，breadth对应原group，两者不得混用。{\"original_group_code\": \"801712.SI\", \"sector_breadth_3d\": 0.6875, \"sector_breadth_5d\": 0.625, \"sector_median_return_3d\": 0.020920422347305623, \"sector_median_return_5d\": 0.011616449652005478, \"sector_relative_return_3d\": 0.019057740100267756, \"sector_relative_return_5d\": 0.010703377853849734, \"sector_top_contribution\": 0.5596014196464458, \"sector_turnover_share_change_5d\": -0.0007316529790215923, \"relative_industry_3d\": -0.06436718456249094, \"relative_industry_5d\": -0.011174297837635079}。行业/主题多数上涨只说明同业环境，自身是否跟上见本篇价格与当前意见。",
+      "stock_change": "来源snapshot本episode.review_context与同episode确定性字段，市场为沪深300、价格按分析日因子归一、入口为行动日开盘；近日3/5日窗口不冒充推荐后。{\"return_1d\": 0.01888049755664123, \"return_3d\": -0.0320742772736865, \"return_5d\": 0.012806359019650992, \"relative_market_3d\": -0.04530944446222318, \"relative_market_5d\": -0.00047091998378534505, \"amount_ratio_last_20d\": 1.1725992792802051, \"largest_positive_day_contribution_5d\": 0.6114898262670212, \"return_ex_largest_positive_day_5d\": -0.025907836058611577, \"return_after_largest_positive_day_5d\": -0.025907836058611577, \"current_close_return_since_entry\": 0.05085910652920966, \"data_limitations\": [], \"price_levels\": {\"atr20\": 2.772999999999999, \"current_close\": 45.87, \"entry_reference_price\": 43.65, \"prior60_close_high\": 72.88, \"prior60_close_high_date\": \"2026-06-30\", \"prior60_high\": 76.99, \"prior60_high_date\": \"2026-06-30\", \"remaining_atr_to_target\": 2.347637937252074, \"remaining_return_to_target\": 0.1419228253760627, \"target_price\": 52.379999999999995}}；含日内位置及成交的原始路径见recent_sessions/post_entry_sessions。",
+      "company_change": "已读公告1225570091，available_at=2026-09-18T00:00+08:00，https://static.cninfo.com.cn/finalpage/2026-09-18/1225570091.PDF，第1—3页：振石9/15—9/17集中竞价减持2832.6366万股，合计比例18.4997%降至17.7921%；不推断全部跌幅由此造成。2026H1经营现金2423769653.65、归母2933304204.75，分别available_at=8/22 00:00及21:35:10.684372+08:00。",
+      "outlook_1_3d": "range_or_wait",
+      "confirmation_condition": "43.46—47.39元之间反复且没有持续收高，会支持整理判断。",
+      "invalidation_condition": "连续收回47.39元并恢复同行领先，或连续失守43.46元，会改变整理判断。",
+      "why_reported": "因本次重要判断变化进入普通详评；放量冲高后又回落至45.02元，今日45.87元未收复47.39元；新增公告确认股东减持，进一步降低当前上行把握。",
+      "outlook_reason_plain_language": "冲高后的回吐尚未修复，近3日落后玻璃玻纤6.44个百分点；今日缩量反弹先支持整理，5—10日仍偏震荡。",
+      "episode_reviews": [
+        {
+          "episode_id": "formal:2026-09-11:600176.SH:selected",
+          "original_reason_plain_language": "当时主要看中玻纤行业多数走强、公司经营改善和多个普通交易日连续推进。",
+          "original_key_risk_plain_language": "主要担心个股并非行业最强，景气集中于特定产品或复价中断会削弱带动。",
+          "current_assessment": "weakening",
+          "best_supported_explanation": "mixed",
+          "current_weak_or_failed_link": "price_and_volume_confirmation",
+          "current_review": "中国巨石｜放量回吐后又有减持披露，反弹仍不足以转积极\n\n前次47.15元的放量冲高之后，收盘又退至45.02元；今天反弹到45.87元，尚未收回47.39元。原推荐的价格支持进一步减弱，未来5—10日仍按整理、当前继续等待。今天成交下降并伴随回升，只能说明回吐暂时缓和，不能证明前面的阻力已经消失。\n\n近3日落后玻璃玻纤约6.44个百分点，行业多数成员上涨也没有带来同步恢复。同时，[股东权益变动公告](https://static.cninfo.com.cn/finalpage/2026-09-18/1225570091.PDF)确认振石集团在9月15—17日通过集中竞价减持2832.64万股。这是已披露的供给事实，值得提高对价格保持的要求；公告没有证明全部下跌由它造成，也不能从日线反推其他账户行为。\n\n半年盈利及经营现金净流入提供的经营基础仍在，股东减持不等同公司订单或产品盈利恶化。当前45.87元尚未连续失守43.46元，因此不把一次反弹不足写成原推荐已被全部否定；但47.39元重新收复之前，参与仍可能先经历继续整理或下移。\n\n接下来要看反弹能否转为连续收高，以及后续股东披露是否加重供给压力。收回47.39元并保留后重评；连续失守43.46元则改为回避。等待可能错过恢复的初段，但现在已有价格回吐和披露事实，足以支持继续等待。",
+          "comparison_interpretation": "同窗成对路径不可完整核对，不能判断替代股票是否更优。",
+          "final_twenty_day_review": null
+        }
+      ]
+    }
+  ],
+  "unreported_attention_count": 67,
+  "routine_summary": "全部32条当日正式记录覆盖：8只节点股票共9条记录、8只普通详评、15只简评。非节点重要变化超过8只，普通详评优先展开明确参与变化、显著加速、公司风险和阶段修复，其余变化在唯一简评如实披露；不补位，不新增推荐。"
+}

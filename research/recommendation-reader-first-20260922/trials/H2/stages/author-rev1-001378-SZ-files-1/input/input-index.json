@@ -1,0 +1,97 @@
+{
+  "files": [
+    {
+      "bytes": 317,
+      "path": "input/identity.json",
+      "sha256": "2327f7bf1e5d821388050f2e8065554673c508be55553d94cccf33a08d4fdaa1",
+      "source": "packet.identity"
+    },
+    {
+      "bytes": 99887,
+      "path": "input/packet.json",
+      "sha256": "19b9b0ccd3ce333474b0a70649a93a655527443305529f1188bff98a16095961",
+      "source": "current research projection"
+    },
+    {
+      "bytes": 6944,
+      "path": "input/research-handoff.md",
+      "sha256": "82116ed7827e8b7eb6b615f327c891d74f7b836a30ddcf7cff2f682de99f8be4",
+      "source": {
+        "binding": {
+          "identity": {
+            "action_date": "2026-09-21",
+            "as_of": "2026-09-20T18:30:00+08:00",
+            "formation_date": "2026-09-18",
+            "name": "德冠新材",
+            "observation_contract": "原推荐观察期为20个交易日，相对参考价+20%是原观察目标，不是收益承诺。",
+            "reference_price": 23.57,
+            "ts_code": "001378.SZ"
+          },
+          "kind": "original_packet",
+          "packet_content_sha256": "7bd9d2311722646f54270e6bd14d41d1e0550d77522970912591615a83b35b8d",
+          "packet_sha256": "bc9f60ea33dd5d2ddce0d455189475db21607205934f754717aa05d66530b07a"
+        }
+      }
+    },
+    {
+      "bytes": 2053,
+      "path": "input/reading-guide.md",
+      "sha256": "61c2971f3b16b5f3633c6a4fd0ce0c6b7f2b511050bf7395b44047a9d91e3535",
+      "source": "$PRODUCTION_ROOT/.agents/skills/orchestrating-stock-research/references/recommendation-reading-guide.md"
+    },
+    {
+      "bytes": 6597,
+      "path": "input/examples/01.md",
+      "sha256": "792deb1d42cf25aef65f017bebfe7d6f7b0c7418a163a2ce13fef178387f4ba9",
+      "source": {
+        "metadata": {
+          "action_date": "2026-09-14",
+          "approval_scope": "论证与表达范文",
+          "as_of": "2026-09-13T18:30:00+08:00",
+          "confirmation_ref": "用户2026-09-15明确确认本轮修改版定稿，并与国际复材一同采用",
+          "content_origin": "point_in_time_supplement",
+          "formation_date": "2026-09-11",
+          "note_type": "writing_example",
+          "status": "approved",
+          "ts_code": "600176.SH",
+          "updated": "2026-09-15"
+        },
+        "source": "$USER_HOME/知识库/LLW/股票分析/10_方法与范文/推荐说明范文/中国巨石_2026-09-14_推荐说明_采用范文.md"
+      }
+    },
+    {
+      "bytes": 6721,
+      "path": "input/examples/02.md",
+      "sha256": "d99f60fcfcccd921b4971039739a90283ae289b4eeabff188440d8f8886f9157",
+      "source": {
+        "metadata": {
+          "action_date": "2026-09-16",
+          "approval_scope": "论证与表达范文",
+          "as_of": "2026-09-15T18:30:00+08:00",
+          "confirmation_ref": "用户2026-09-15授权按风险判断与应对意见修改后，与中国巨石一同采用",
+          "content_origin": "依据本轮讨论及原截止资料修订的采用稿",
+          "formation_date": "2026-09-15",
+          "note_type": "writing_example",
+          "status": "approved",
+          "ts_code": "301526.SZ",
+          "updated": "2026-09-15"
+        },
+        "source": "$USER_HOME/知识库/LLW/股票分析/10_方法与范文/推荐说明范文/国际复材_2026-09-16_推荐说明_采用范文.md"
+      }
+    },
+    {
+      "bytes": 5142,
+      "path": "input/prior-article.md",
+      "sha256": "fc34ef0b5a5ae9d882245d8a96393b40d13cabe2600e66fa198b6303fe825278",
+      "source": "current-cycle:prior_article"
+    },
+    {
+      "bytes": 3012,
+      "path": "input/revision-issues.json",
+      "sha256": "2b51b9ba936cd05320e6a93dfdf6e1c00096ec64bf59402602eb4690a4e5e7a3",
+      "source": "current-cycle:revision_issues"
+    }
+  ],
+  "profile": "astra-files-v1",
+  "role": "author"
+}

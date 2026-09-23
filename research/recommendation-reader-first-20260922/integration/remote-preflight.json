@@ -1,0 +1,13 @@
+{
+  "checked_at": "2026-09-23T07:58:55.166418+08:00",
+  "repository": "ccrt26/stock-analysis-assistant-v3",
+  "visibility": "public",
+  "default_branch": "main",
+  "remote_main": "61f0ebbd719845e44aae3fb5449f0b74b15bf1ad",
+  "work_branch_exists_before_push": false,
+  "commands": [
+    "git ls-remote origin refs/heads/main refs/heads/fix/recommendation-reader-first-20260922",
+    "gh api repos/ccrt26/stock-analysis-assistant-v3 --jq {full_name,visibility,default_branch}"
+  ],
+  "this_is_not_push_confirmation": true
+}

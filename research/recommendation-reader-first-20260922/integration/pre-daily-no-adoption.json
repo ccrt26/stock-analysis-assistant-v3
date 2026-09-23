@@ -1,0 +1,10 @@
+{
+  "observed_at": "2026-09-23T08:28:46.446705+08:00",
+  "scope": "Before first H3 business request; bounded read-only checks in isolated root",
+  "h3_requests_seen": 0,
+  "exists": {
+    "local_archive/ai_tasks/nightly/replay/recommendation/accepted-recommendation.json": false,
+    "local_archive/forward_monitor/style-preview/prism-a2.html": false
+  },
+  "note": "Historical accepted source remains under cases/H3/source/upstream, separate from a new actual adoption."
+}

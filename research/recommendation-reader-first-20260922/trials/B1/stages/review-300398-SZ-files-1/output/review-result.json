@@ -1,0 +1,22 @@
+{
+  "reader_summary": "飞凯材料仍为第一顺位、偏积极的条件性参与选择，限2026年9月21日在36.97—38.35元（含两端）及既定条件下考虑。文章保留了行业扩散与个股延续的依据、急修复及近处旧高的反证、重要经营未知、收盘信号时点和20日观察目标的非承诺性质；但将取消当次参与的“新的重大不利变化”缩窄为“新的重大不利公告”，须由同一作者修订，本次不通过。",
+  "readability_issues": [],
+  "fidelity_issues": [
+    {
+      "quote": "停牌、无可靠报价、单边封板等导致无法正常成交，或出现新的重大不利公告，均直接取消当次参与，重新研究。",
+      "problem": "article.md第23行将直接取消当次参与并重新研究的重大不利触发限于“公告”。同版研究的conditions.tradability及原始来源引句明确包括“新的重大不利变化”，范围不限于公告。若已有可靠依据确认新的重大不利变化，但尚无相应公告，现文遗漏了原研究要求的取消动作。前文“下述改变条件未触发”也未补足这一范围。",
+      "instruction": "交同一作者集中修订：恢复“新的重大不利变化”这一完整取消条件，重大不利公告可作为其中一种情形；保留任何此类触发即可直接取消当次参与、重新研究的关系，不附加价格失守、相对行业转弱或无法成交等前提。研究已有该条件，无须另行改变判断或补造阈值。",
+      "evidence": [
+        "input/authoritative-research.json#/conditions/tradability：“停牌、无可靠报价、单边封板或新的重大不利变化均取消当次参与。”",
+        "input/packet.json#/conditions/tradability与同版权威研究该字段完全一致；input/packet.json#/authoring_note/source_refs/17/quote也逐字保留上述“新的重大不利变化”条件。该来源引句指向原研究conditions_tradability，属于作者实际收到的供料。",
+        "input/authoritative-research.json#/authoring_note/text的可交易性段再次明确：“停牌、无可靠报价、单边封板、无法正常成交或新的重大不利变化均取消当次参与”。",
+        "input/packet.json#/conditions/text及input/research-handoff.md所引主体条件虽写“新的重大不利公告”，没有撤销conditions.tradability的较完整约束。完整核对须同时保留两处条件。"
+      ],
+      "issue_kind": "condition",
+      "blocking": true
+    }
+  ],
+  "research_issues": [],
+  "issue_checks": [],
+  "ready": false
+}

@@ -1,0 +1,65 @@
+{
+  "trial": {
+    "id": "H3",
+    "case": "H3",
+    "purpose": "Holdout with at most one revision; real daily entry",
+    "requests": 6,
+    "status": "planned"
+  },
+  "requests": [
+    {
+      "number": 53,
+      "trial_id": "H3",
+      "status": "completed",
+      "started_at": "2026-09-23T08:34:15.958212+08:00",
+      "model": "gpt-6-astra",
+      "effort": "xhigh",
+      "tested_code_sha": "066129e1641c4d1fc55fbb3568527a6f88e35525",
+      "request": "$EXPERIMENT_ROOT/daily-root/local_archive/ai_tasks/nightly/replay/recommendation/articles/300658.SZ/research-clarification-input.md",
+      "output": "$EXPERIMENT_ROOT/daily-root/local_archive/ai_tasks/nightly/replay/recommendation/articles/300658.SZ/research-clarification-astra.md",
+      "events": "$EXPERIMENT_ROOT/daily-root/local_archive/ai_tasks/nightly/replay/recommendation/articles/300658.SZ/research-clarification-astra.jsonl",
+      "exit_code": 0,
+      "diagnostic": "",
+      "evidence": {
+        "verified": true,
+        "session_id": "01a0cbaf-4347-7092-ad01-ee30ef66ed29",
+        "executor": "codex",
+        "context_evidence": {
+          "verified": true,
+          "input_present": true,
+          "input_source": "codex rollout response_item(role=user)",
+          "session_id": "01a0cbaf-4347-7092-ad01-ee30ef66ed29",
+          "tool_calls": 26,
+          "isolated": true,
+          "offered_tools": null,
+          "offered_tools_note": "CLI 可声明内置工具；以完整实际工具活动验收",
+          "request_chars": 3209,
+          "completed": true
+        },
+        "provider": "openai",
+        "model": "gpt-6-astra",
+        "request_model": "gpt-6-astra",
+        "response_model": "",
+        "effort": "xhigh",
+        "consistent": true,
+        "auth_method": "chatgpt",
+        "usage": {
+          "input_tokens": 304522,
+          "cached_input_tokens": 251776,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 5824,
+          "reasoning_output_tokens": 1762
+        },
+        "note": "Codex 会话 turn_context、实际请求传输与 response_item 协议",
+        "protocol_path": "$EXPERIMENT_ROOT/daily-root/local_archive/ai_tasks/nightly/replay/recommendation/articles/300658.SZ/research-clarification-astra.rollout.jsonl"
+      },
+      "finished_at": "2026-09-23T08:37:53.050583+08:00",
+      "seconds": 217.087
+    }
+  ],
+  "interrupted_attempt_records": [
+    "trials/H3/history/H3-quota-stop.json"
+  ],
+  "revision_count": "not_run",
+  "money_cost": "not_provided"
+}

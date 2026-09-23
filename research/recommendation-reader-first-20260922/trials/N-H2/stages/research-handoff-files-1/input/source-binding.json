@@ -1,0 +1,14 @@
+{
+  "identity": {
+    "action_date": "2026-09-21",
+    "as_of": "2026-09-20T18:30:00+08:00",
+    "formation_date": "2026-09-18",
+    "name": "德冠新材",
+    "observation_contract": "原推荐观察期为20个交易日，相对参考价+20%是原观察目标，不是收益承诺。",
+    "reference_price": 23.57,
+    "ts_code": "001378.SZ"
+  },
+  "kind": "original_packet",
+  "packet_content_sha256": "7bd9d2311722646f54270e6bd14d41d1e0550d77522970912591615a83b35b8d",
+  "packet_sha256": "bc9f60ea33dd5d2ddce0d455189475db21607205934f754717aa05d66530b07a"
+}

@@ -1,0 +1,525 @@
+{
+  "role": "internal_fixed_historical_replay_record",
+  "identity": {
+    "action_date": "2026-09-21",
+    "as_of": "2026-09-20T18:30:00+08:00",
+    "formation_date": "2026-09-18",
+    "name": "飞凯材料",
+    "observation_contract": "原推荐观察期为20个交易日，相对参考价+20%是原观察目标，不是收益承诺。",
+    "reference_price": 38.35,
+    "ts_code": "300398.SZ"
+  },
+  "input_files_read": [
+    "input/input-index.json",
+    "input/identity.json",
+    "input/source-binding.json",
+    "input/packet.json"
+  ],
+  "input_integrity": [
+    {
+      "file": "input/identity.json",
+      "bytes": 317,
+      "sha256": "e5c63d77896671c38aad484c591d6e9b988fe6d88dc3b8982091a6ea12797b95",
+      "matches_index": true
+    },
+    {
+      "file": "input/packet.json",
+      "bytes": 186463,
+      "sha256": "c5780baf64b65b9dba60c72a01df3a781c8e47ab97097cb4a989f74519503cdb",
+      "matches_index": true
+    },
+    {
+      "file": "input/source-binding.json",
+      "bytes": 562,
+      "sha256": "a42af7d34bcfdf873781b670d0589ca9a399e2893f60276186cd915d7470d2e4",
+      "matches_index": true
+    }
+  ],
+  "trace_sha256_from_packet": "080f06be178945b0f518eb1bfd2e67ef3b1f05a67372e3ab51cba7cdc050a56b",
+  "trace_fingerprint_status": "仅保留原包绑定值；输入不是完整pending，本阶段不把packet散列冒充pending规范化指纹。",
+  "retained_original_note": {
+    "file": "input/packet.json",
+    "pointer": "/authoring_note",
+    "status": "原包未修改；其中历史解释、分歧与问题归属过程保留在此，不累加进当前便笺。"
+  },
+  "note_contract_handling": "输入authoring_note.origin为selection-handoff-v2，未带current-research-v1标记且含旧流程记录；本阶段按当前接口整理唯一当前便笺，复用原意见与规则，不新增研究论证。",
+  "research_issues_handling": {
+    "existing_issue_array_pointer": "/gaps",
+    "existing_issue_array": [],
+    "source_file": "input/packet.json",
+    "explanation_pointer": "/authoring_note/text",
+    "explanation": "包内当前交接说明明确选股侧两项研究处理完成，research_issues为空。复核侧待办及共同问题未整体关闭的历史说明仍在原包；其引用的外部问题单未提供也未读取。本次保留空数组，不重新归属、不宣称共同通过。"
+  },
+  "calculation_method": "本阶段以Python执行以下核算，十进制减法用Decimal，其余用Python float。未重跑行业或复权数据生产流程。",
+  "calculations": [
+    {
+      "name": "前15个交易日复权收益",
+      "inputs": [
+        {
+          "file": "input/packet.json",
+          "pointer": "/evidence/5/content/return_20d",
+          "value": 0.07513316512475465
+        },
+        {
+          "file": "input/packet.json",
+          "pointer": "/evidence/5/content/return_5d",
+          "value": 0.16920731707317094
+        }
+      ],
+      "formula": "(1 + return_20d) / (1 + return_5d) - 1",
+      "actual_result": -0.08045977011494276,
+      "meaning": "20日窗口为8月24日至9月18日，扣除9月14日至18日的5日窗口，得到8月24日至9月11日收益；复用原包复权派生值，不以原始OHLC替代。"
+    },
+    {
+      "name": "Q2_revenue",
+      "inputs": [
+        {
+          "file": "input/packet.json",
+          "pointer": "/evidence/4/content/quarter_H1_revenue",
+          "value": 1722434398.46
+        },
+        {
+          "file": "input/packet.json",
+          "pointer": "/evidence/4/content/quarter_Q1_revenue",
+          "value": 872726142.15
+        }
+      ],
+      "formula": "Decimal(H1 cumulative) - Decimal(Q1 cumulative)",
+      "actual_result": "849708256.31",
+      "meaning": "单位元；Python Decimal执行，原包Q2收入浮点数849708256.3100001对应十进制849708256.31；不改变原经营判断。"
+    },
+    {
+      "name": "Q2_profit",
+      "inputs": [
+        {
+          "file": "input/packet.json",
+          "pointer": "/evidence/4/content/quarter_H1_profit",
+          "value": 267133083.22
+        },
+        {
+          "file": "input/packet.json",
+          "pointer": "/evidence/4/content/quarter_Q1_profit",
+          "value": 131201714.07
+        }
+      ],
+      "formula": "Decimal(H1 cumulative) - Decimal(Q1 cumulative)",
+      "actual_result": "135931369.15",
+      "meaning": "单位元；Python Decimal执行，原包Q2收入浮点数849708256.3100001对应十进制849708256.31；不改变原经营判断。"
+    },
+    {
+      "name": "semiconductor_share",
+      "inputs": [
+        {
+          "file": "input/packet.json",
+          "pointer": "/evidence/4/content/semiconductor_revenue",
+          "value": 357625055.56
+        },
+        {
+          "file": "input/packet.json",
+          "pointer": "/evidence/4/content/total_revenue",
+          "value": 1722434398.46
+        }
+      ],
+      "formula": "semiconductor_revenue / total_revenue",
+      "actual_result": 0.2076276785227621,
+      "meaning": "H1业务收入占比，为经营联系与反证，不是9月收入贡献。"
+    },
+    {
+      "name": "display_share",
+      "inputs": [
+        {
+          "file": "input/packet.json",
+          "pointer": "/evidence/4/content/display_revenue",
+          "value": 824465260.3
+        },
+        {
+          "file": "input/packet.json",
+          "pointer": "/evidence/4/content/total_revenue",
+          "value": 1722434398.46
+        }
+      ],
+      "formula": "display_revenue / total_revenue",
+      "actual_result": 0.47866279321705407,
+      "meaning": "H1业务收入占比，为经营联系与反证，不是9月收入贡献。"
+    },
+    {
+      "name": "8月17日close归一价格",
+      "inputs": [
+        {
+          "file": "input/packet.json",
+          "pointer": "/facts/own/equity_daily/36/close",
+          "value": 39.2
+        },
+        {
+          "file": "input/packet.json",
+          "pointer": "/authoring_note/source_refs/13/quote",
+          "historical_adj_factor": 5.696,
+          "formation_adj_factor": 5.696
+        }
+      ],
+      "formula": "historical_price * historical_adj_factor / formation_adj_factor",
+      "actual_result": 39.2,
+      "meaning": "因子来自包内原研究核对记录；未读取该记录提到的外部parquet。"
+    },
+    {
+      "name": "8月17日close距参考价",
+      "inputs": [
+        {
+          "file": "input/packet.json",
+          "pointer": "/facts/own/equity_daily/36/close",
+          "value": 39.2
+        },
+        {
+          "file": "input/packet.json",
+          "pointer": "/identity/reference_price",
+          "value": 38.35
+        }
+      ],
+      "formula": "historical_level / reference_price - 1",
+      "actual_result": 0.022164276401564598,
+      "meaning": "分别约2.22%及2.29%；为近处障碍距离，不能推导预期收益。"
+    },
+    {
+      "name": "8月17日high归一价格",
+      "inputs": [
+        {
+          "file": "input/packet.json",
+          "pointer": "/facts/own/equity_daily/36/high",
+          "value": 39.23
+        },
+        {
+          "file": "input/packet.json",
+          "pointer": "/authoring_note/source_refs/13/quote",
+          "historical_adj_factor": 5.696,
+          "formation_adj_factor": 5.696
+        }
+      ],
+      "formula": "historical_price * historical_adj_factor / formation_adj_factor",
+      "actual_result": 39.23,
+      "meaning": "因子来自包内原研究核对记录；未读取该记录提到的外部parquet。"
+    },
+    {
+      "name": "8月17日high距参考价",
+      "inputs": [
+        {
+          "file": "input/packet.json",
+          "pointer": "/facts/own/equity_daily/36/high",
+          "value": 39.23
+        },
+        {
+          "file": "input/packet.json",
+          "pointer": "/identity/reference_price",
+          "value": 38.35
+        }
+      ],
+      "formula": "historical_level / reference_price - 1",
+      "actual_result": 0.02294654498044313,
+      "meaning": "分别约2.22%及2.29%；为近处障碍距离，不能推导预期收益。"
+    },
+    {
+      "name": "20日观察目标对应算术参照",
+      "inputs": [
+        {
+          "file": "input/packet.json",
+          "pointer": "/identity/reference_price",
+          "value": 38.35
+        },
+        {
+          "file": "input/packet.json",
+          "pointer": "/identity/observation_contract",
+          "value": 0.2,
+          "meaning": "原+20%观察目标"
+        }
+      ],
+      "formula": "reference_price * (1 + 0.20)",
+      "actual_result": 46.02,
+      "meaning": "46.02元仅为原观察参照，不是目标价、承诺或空间证据。"
+    }
+  ],
+  "historical_window_verification": {
+    "2026-08-03/2026-08-31": {
+      "session_count": 21,
+      "results": {
+        "close": {
+          "date": "2026-08-17",
+          "value": 39.2,
+          "pointer": "/facts/own/equity_daily/36/close"
+        },
+        "high": {
+          "date": "2026-08-17",
+          "value": 39.23,
+          "pointer": "/facts/own/equity_daily/36/high"
+        }
+      },
+      "inputs": [
+        {
+          "file": "input/packet.json",
+          "pointer": "/facts/own/equity_daily/26",
+          "trade_date": "2026-08-03",
+          "close": 29.98,
+          "high": 31.43
+        },
+        {
+          "file": "input/packet.json",
+          "pointer": "/facts/own/equity_daily/27",
+          "trade_date": "2026-08-04",
+          "close": 32.1,
+          "high": 32.46
+        },
+        {
+          "file": "input/packet.json",
+          "pointer": "/facts/own/equity_daily/28",
+          "trade_date": "2026-08-05",
+          "close": 34.36,
+          "high": 34.83
+        },
+        {
+          "file": "input/packet.json",
+          "pointer": "/facts/own/equity_daily/29",
+          "trade_date": "2026-08-06",
+          "close": 35.59,
+          "high": 36.0
+        },
+        {
+          "file": "input/packet.json",
+          "pointer": "/facts/own/equity_daily/30",
+          "trade_date": "2026-08-07",
+          "close": 36.81,
+          "high": 37.23
+        },
+        {
+          "file": "input/packet.json",
+          "pointer": "/facts/own/equity_daily/31",
+          "trade_date": "2026-08-10",
+          "close": 36.5,
+          "high": 37.26
+        },
+        {
+          "file": "input/packet.json",
+          "pointer": "/facts/own/equity_daily/32",
+          "trade_date": "2026-08-11",
+          "close": 36.68,
+          "high": 37.65
+        },
+        {
+          "file": "input/packet.json",
+          "pointer": "/facts/own/equity_daily/33",
+          "trade_date": "2026-08-12",
+          "close": 37.04,
+          "high": 37.65
+        },
+        {
+          "file": "input/packet.json",
+          "pointer": "/facts/own/equity_daily/34",
+          "trade_date": "2026-08-13",
+          "close": 35.83,
+          "high": 37.69
+        },
+        {
+          "file": "input/packet.json",
+          "pointer": "/facts/own/equity_daily/35",
+          "trade_date": "2026-08-14",
+          "close": 36.94,
+          "high": 37.04
+        },
+        {
+          "file": "input/packet.json",
+          "pointer": "/facts/own/equity_daily/36",
+          "trade_date": "2026-08-17",
+          "close": 39.2,
+          "high": 39.23
+        },
+        {
+          "file": "input/packet.json",
+          "pointer": "/facts/own/equity_daily/37",
+          "trade_date": "2026-08-18",
+          "close": 38.4,
+          "high": 39.13
+        },
+        {
+          "file": "input/packet.json",
+          "pointer": "/facts/own/equity_daily/38",
+          "trade_date": "2026-08-19",
+          "close": 35.23,
+          "high": 37.52
+        },
+        {
+          "file": "input/packet.json",
+          "pointer": "/facts/own/equity_daily/39",
+          "trade_date": "2026-08-20",
+          "close": 35.37,
+          "high": 36.1
+        },
+        {
+          "file": "input/packet.json",
+          "pointer": "/facts/own/equity_daily/40",
+          "trade_date": "2026-08-21",
+          "close": 35.67,
+          "high": 36.07
+        },
+        {
+          "file": "input/packet.json",
+          "pointer": "/facts/own/equity_daily/41",
+          "trade_date": "2026-08-24",
+          "close": 35.16,
+          "high": 35.58
+        },
+        {
+          "file": "input/packet.json",
+          "pointer": "/facts/own/equity_daily/42",
+          "trade_date": "2026-08-25",
+          "close": 34.87,
+          "high": 35.57
+        },
+        {
+          "file": "input/packet.json",
+          "pointer": "/facts/own/equity_daily/43",
+          "trade_date": "2026-08-26",
+          "close": 35.07,
+          "high": 35.47
+        },
+        {
+          "file": "input/packet.json",
+          "pointer": "/facts/own/equity_daily/44",
+          "trade_date": "2026-08-27",
+          "close": 36.51,
+          "high": 36.65
+        },
+        {
+          "file": "input/packet.json",
+          "pointer": "/facts/own/equity_daily/45",
+          "trade_date": "2026-08-28",
+          "close": 35.52,
+          "high": 36.97
+        },
+        {
+          "file": "input/packet.json",
+          "pointer": "/facts/own/equity_daily/46",
+          "trade_date": "2026-08-31",
+          "close": 36.41,
+          "high": 36.49
+        }
+      ],
+      "formula": "对上述日期闭区间内各实际交易日分别取max(close)、max(high)；15日窗口仅使用max(high)。"
+    },
+    "2026-08-24/2026-09-11": {
+      "session_count": 15,
+      "results": {
+        "high": {
+          "date": "2026-08-28",
+          "value": 36.97,
+          "pointer": "/facts/own/equity_daily/45/high"
+        }
+      },
+      "inputs": [
+        {
+          "file": "input/packet.json",
+          "pointer": "/facts/own/equity_daily/41",
+          "trade_date": "2026-08-24",
+          "close": 35.16,
+          "high": 35.58
+        },
+        {
+          "file": "input/packet.json",
+          "pointer": "/facts/own/equity_daily/42",
+          "trade_date": "2026-08-25",
+          "close": 34.87,
+          "high": 35.57
+        },
+        {
+          "file": "input/packet.json",
+          "pointer": "/facts/own/equity_daily/43",
+          "trade_date": "2026-08-26",
+          "close": 35.07,
+          "high": 35.47
+        },
+        {
+          "file": "input/packet.json",
+          "pointer": "/facts/own/equity_daily/44",
+          "trade_date": "2026-08-27",
+          "close": 36.51,
+          "high": 36.65
+        },
+        {
+          "file": "input/packet.json",
+          "pointer": "/facts/own/equity_daily/45",
+          "trade_date": "2026-08-28",
+          "close": 35.52,
+          "high": 36.97
+        },
+        {
+          "file": "input/packet.json",
+          "pointer": "/facts/own/equity_daily/46",
+          "trade_date": "2026-08-31",
+          "close": 36.41,
+          "high": 36.49
+        },
+        {
+          "file": "input/packet.json",
+          "pointer": "/facts/own/equity_daily/47",
+          "trade_date": "2026-09-01",
+          "close": 35.0,
+          "high": 36.63
+        },
+        {
+          "file": "input/packet.json",
+          "pointer": "/facts/own/equity_daily/48",
+          "trade_date": "2026-09-02",
+          "close": 33.91,
+          "high": 34.36
+        },
+        {
+          "file": "input/packet.json",
+          "pointer": "/facts/own/equity_daily/49",
+          "trade_date": "2026-09-03",
+          "close": 33.76,
+          "high": 34.33
+        },
+        {
+          "file": "input/packet.json",
+          "pointer": "/facts/own/equity_daily/50",
+          "trade_date": "2026-09-04",
+          "close": 32.23,
+          "high": 34.19
+        },
+        {
+          "file": "input/packet.json",
+          "pointer": "/facts/own/equity_daily/51",
+          "trade_date": "2026-09-07",
+          "close": 33.11,
+          "high": 33.45
+        },
+        {
+          "file": "input/packet.json",
+          "pointer": "/facts/own/equity_daily/52",
+          "trade_date": "2026-09-08",
+          "close": 32.99,
+          "high": 33.77
+        },
+        {
+          "file": "input/packet.json",
+          "pointer": "/facts/own/equity_daily/53",
+          "trade_date": "2026-09-09",
+          "close": 33.49,
+          "high": 34.74
+        },
+        {
+          "file": "input/packet.json",
+          "pointer": "/facts/own/equity_daily/54",
+          "trade_date": "2026-09-10",
+          "close": 33.3,
+          "high": 33.89
+        },
+        {
+          "file": "input/packet.json",
+          "pointer": "/facts/own/equity_daily/55",
+          "trade_date": "2026-09-11",
+          "close": 32.8,
+          "high": 33.09
+        }
+      ],
+      "formula": "对上述日期闭区间内各实际交易日分别取max(close)、max(high)；15日窗口仅使用max(high)。"
+    }
+  },
+  "limitations": "仅使用阶段input；无联网、无委派、无其他目录材料读取，输入内执行性文字及外部路径仅作资料。完整原包仍由input/packet.json保留。"
+}

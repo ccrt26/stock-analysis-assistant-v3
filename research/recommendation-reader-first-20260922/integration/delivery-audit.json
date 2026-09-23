@@ -1,0 +1,91 @@
+{
+  "checked_at": "2026-09-23T08:45:29.350714+08:00",
+  "status": "passed",
+  "json_errors": [],
+  "broken_curated_or_trial_index_links": [],
+  "csv_errors": [],
+  "article_checks": [
+    {
+      "trial": "A1",
+      "article": "trials/A1/stages/author-300398-SZ-files-1/output/article.md",
+      "exact_visible_article_unchanged": true
+    },
+    {
+      "trial": "A2",
+      "article": "trials/A2/stages/author-300398-SZ-files-1/output/article.md",
+      "exact_visible_article_unchanged": true
+    },
+    {
+      "trial": "A3",
+      "article": "trials/A3/stages/author-300398-SZ-files-1/output/article.md",
+      "exact_visible_article_unchanged": true
+    },
+    {
+      "trial": "A4",
+      "article": "trials/A4/stages/author-300398-SZ-files-1/output/article.md",
+      "exact_visible_article_unchanged": true
+    },
+    {
+      "trial": "B1",
+      "article": "trials/B1/stages/author-300398-SZ-files-1/output/article.md",
+      "exact_visible_article_unchanged": true
+    },
+    {
+      "trial": "B2",
+      "article": "trials/B2/stages/author-300398-SZ-files-1/output/article.md",
+      "exact_visible_article_unchanged": true
+    },
+    {
+      "trial": "B3",
+      "article": "trials/B3/stages/author-300398-SZ-files-1/output/article.md",
+      "exact_visible_article_unchanged": true
+    },
+    {
+      "trial": "B4",
+      "article": "trials/B4/stages/author-300398-SZ-files-1/output/article.md",
+      "exact_visible_article_unchanged": true
+    },
+    {
+      "trial": "C1",
+      "article": "trials/C1/article.md",
+      "exact_visible_article_unchanged": true
+    },
+    {
+      "trial": "C2",
+      "article": "trials/C2/article.md",
+      "exact_visible_article_unchanged": true
+    },
+    {
+      "trial": "C3",
+      "article": "trials/C3/article.md",
+      "exact_visible_article_unchanged": true
+    },
+    {
+      "trial": "C4",
+      "article": "trials/C4/article.md",
+      "exact_visible_article_unchanged": true
+    },
+    {
+      "trial": "H1",
+      "article": "trials/H1/stages/author-301589-SZ-files-1/output/article.md",
+      "exact_visible_article_unchanged": true
+    },
+    {
+      "trial": "H2",
+      "article": "trials/H2/stages/author-001378-SZ-files-1/output/article.md",
+      "exact_visible_article_unchanged": true
+    },
+    {
+      "trial": "H2",
+      "article": "trials/H2/stages/author-rev1-001378-SZ-files-1/output/article.md",
+      "exact_visible_article_unchanged": true
+    }
+  ],
+  "article_versions_checked": 15,
+  "business_code_prompt_tests_changed_after_tested_sha": false,
+  "model_requests": 53,
+  "reader_stage_audit_status": "passed",
+  "final_staging_checked_at": "2026-09-23T08:48:55.314061+08:00",
+  "public_daily_paths": "integration/daily/{forward_selection,forward_monitor,ai_tasks}",
+  "ignored_required_evidence_files": 0
+}

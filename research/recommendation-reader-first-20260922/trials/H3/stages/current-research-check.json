@@ -1,0 +1,23 @@
+{
+  "input": {
+    "contract": "same-day-current-research-v1",
+    "identity": [
+      "2026-09-21",
+      "2026-09-22",
+      "2026-09-21T18:30:00+08:00"
+    ],
+    "pairs": [],
+    "expected_pairs": [],
+    "binding": {
+      "trace": "051f0b8b59a4e7798bc878178bed7b5f497f7710fc0dd51cf5920e95f59d829c",
+      "handoff": "65090e9e10c1d534dca69aeff1d43fb796154c5a1af256e99fc66d3813bac95c",
+      "section": null,
+      "monitor": "713b5cd43a0934e08e1dca6f9892bb3f1a3b16e4eff27a9004caa2d4bccb4afe"
+    }
+  },
+  "receipt": {
+    "checks": [],
+    "ready": true
+  },
+  "execution": null
+}

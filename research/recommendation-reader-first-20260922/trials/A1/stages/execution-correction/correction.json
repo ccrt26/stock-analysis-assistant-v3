@@ -1,0 +1,70 @@
+{
+  "kind": "deterministic_parser_recovery",
+  "code_commit": "dd33e77bb2e9dae28a62c49d133d5554240669e3",
+  "original_request_number": 7,
+  "original_session_id": "01a0c911-ce97-7712-891e-b262bf80a3e6",
+  "original_review_ready": false,
+  "judgment_changed": false,
+  "new_model_requests": 0,
+  "original_tool_count": 1,
+  "corrected_tool_count": 0,
+  "warning": "Code Mode is unavailable because code-mode host is disabled. Code mode will fail closed; enable `features.code_mode_host` and install `codex-code-mode-host`.",
+  "corrected_evidence": {
+    "verified": true,
+    "session_id": "01a0c911-ce97-7712-891e-b262bf80a3e6",
+    "executor": "codex",
+    "context_evidence": {
+      "verified": true,
+      "input_present": true,
+      "input_source": "codex rollout response_item(role=user)",
+      "session_id": "01a0c911-ce97-7712-891e-b262bf80a3e6",
+      "tool_calls": 0,
+      "isolated": true,
+      "offered_tools": null,
+      "offered_tools_note": "CLI 可声明内置工具；以完整实际工具活动验收",
+      "request_chars": 5238,
+      "completed": true,
+      "reader_capabilities_disabled": true,
+      "reader_capability_configuration": {
+        "disabled_features": [
+          "shell_tool",
+          "view_image",
+          "apps",
+          "plugins",
+          "remote_plugin",
+          "hooks",
+          "multi_agent",
+          "memories",
+          "browser_use",
+          "browser_use_external",
+          "computer_use",
+          "image_generation",
+          "artifact",
+          "code_mode",
+          "code_mode_host",
+          "in_app_browser"
+        ],
+        "web_search": "disabled",
+        "project_doc_max_bytes": 0,
+        "strict_config": true,
+        "basis": "actual CLI argv plus isolated turn protocol; offline tool declarations captured in acceptance"
+      }
+    },
+    "provider": "openai",
+    "model": "gpt-6-astra",
+    "request_model": "gpt-6-astra",
+    "response_model": "",
+    "effort": "xhigh",
+    "consistent": true,
+    "auth_method": "chatgpt",
+    "usage": {
+      "input_tokens": 11692,
+      "cached_input_tokens": 0,
+      "cache_write_input_tokens": 0,
+      "output_tokens": 3119,
+      "reasoning_output_tokens": 2411
+    },
+    "note": "Codex 会话 turn_context、实际请求传输与 response_item 协议",
+    "protocol_path": "$EXPERIMENT_ROOT/sessions/s005/reader-300398-SZ-astra.rollout.jsonl"
+  }
+}

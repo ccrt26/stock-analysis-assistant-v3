@@ -1,0 +1,42 @@
+{
+  "files": [
+    {
+      "bytes": 317,
+      "path": "input/identity.json",
+      "sha256": "07fada9a96ffb16acc50632b7186e7fc6fad22e09e3fe4189ba70b0f2314226b",
+      "source": "packet.identity"
+    },
+    {
+      "bytes": 95955,
+      "path": "input/packet.json",
+      "sha256": "4d93e2134557491aca078e3f4856efa008735208b0d84a21f8f301762e8ac8ad",
+      "source": {
+        "decision_ids": [
+          "300658.SZ-market",
+          "300658.SZ-company",
+          "300658.SZ-sector",
+          "300658.SZ-price",
+          "300658.SZ-price-risk-condition"
+        ],
+        "handoff_source": "selection-handoff.json",
+        "source_skills": [
+          "researching-sectors-industries"
+        ],
+        "trace_identity": [
+          "2026-09-21",
+          "2026-09-22",
+          "2026-09-21T18:30:00+08:00"
+        ],
+        "trace_sha256": "051f0b8b59a4e7798bc878178bed7b5f497f7710fc0dd51cf5920e95f59d829c"
+      }
+    },
+    {
+      "bytes": 562,
+      "path": "input/source-binding.json",
+      "sha256": "3bdf8468e3654240b45200a606d1c692b23a8f0bea9c130a9840dac515c86943",
+      "source": "current-cycle:source_binding"
+    }
+  ],
+  "profile": "astra-files-v1",
+  "role": "handoff"
+}

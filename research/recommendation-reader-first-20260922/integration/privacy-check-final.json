@@ -1,0 +1,12 @@
+{
+  "status": "passed",
+  "scope": "Final export after all 53 requests and 19 trials reached terminal states",
+  "checked_at": "2026-09-23T08:45:29.327935+08:00",
+  "text_files": 1170,
+  "protocol_events": 2722,
+  "findings": [],
+  "method": "Credential/account/path patterns and protocol role/type checks; visible investment prose unchanged",
+  "final_staging_checked_at": "2026-09-23T08:48:55.313848+08:00",
+  "final_staging_files": 1181,
+  "final_staging_findings": []
+}

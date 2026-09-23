@@ -1,0 +1,14 @@
+{
+  "identity": {
+    "action_date": "2026-09-22",
+    "as_of": "2026-09-21T18:30:00+08:00",
+    "formation_date": "2026-09-21",
+    "name": "延江股份",
+    "observation_contract": "原推荐观察期为20个交易日，相对参考价+20%是原观察目标，不是收益承诺。",
+    "reference_price": 10.89,
+    "ts_code": "300658.SZ"
+  },
+  "kind": "original_packet",
+  "packet_content_sha256": "3a6fdca2a36cfdcc93fbffbd3def8501d0062e1d538dfd7c6032a3b7d3d42740",
+  "packet_sha256": "4d93e2134557491aca078e3f4856efa008735208b0d84a21f8f301762e8ac8ad"
+}

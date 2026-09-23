@@ -1,0 +1,184 @@
+REQUEST 1 N-D1 research-handoff-input.md
+TRIAL N-D1 completed 1
+REQUEST 2 N-H1 research-handoff-input.md
+Traceback (most recent call last):
+  File "$CANDIDATE_ROOT/research/recommendation-reader-first-20260922/scripts/run_trials.py", line 139, in <module>
+    for case in ('D1','H1','H2','H3'):perform('N-'+case,lambda c=case:handoff(c))
+                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "$CANDIDATE_ROOT/research/recommendation-reader-first-20260922/scripts/run_trials.py", line 65, in perform
+    result=fn();run.update(status='completed',result=result)
+           ^^^^
+  File "$CANDIDATE_ROOT/research/recommendation-reader-first-20260922/scripts/run_trials.py", line 139, in <lambda>
+    for case in ('D1','H1','H2','H3'):perform('N-'+case,lambda c=case:handoff(c))
+                                                                      ^^^^^^^^^^
+  File "$CANDIDATE_ROOT/research/recommendation-reader-first-20260922/scripts/run_trials.py", line 81, in handoff
+    formed,issues=p.generate_file_handoff(host,packet=original,materials=material(case),source_binding=binding,directory=d,state=state,state_path=d/'state.json',config=CFG,run_scope=ACTIVE)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "$CANDIDATE_ROOT/tools/recommendation_pipeline.py", line 1212, in generate_file_handoff
+    raw = article_stage(host, state, state_path, directory, 'research-handoff', '', 'astra', config,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "$CANDIDATE_ROOT/tools/recommendation_pipeline.py", line 1037, in article_stage
+    return file_article_stage(host, state, state_path, directory, stage, config,
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "$CANDIDATE_ROOT/tools/recommendation_pipeline.py", line 1166, in file_article_stage
+    delivery, route = run_stage(host, state, state_path, directory, stage, spec['request'],
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "$CANDIDATE_ROOT/tools/recommendation_pipeline.py", line 1839, in run_stage
+    code, diag = host.run_agent(route, prompt_path, output, events, None, {**config, '_text_only': text_only, '_handoff_only': False})
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "$CANDIDATE_ROOT/research/recommendation-reader-first-20260922/scripts/run_trials.py", line 38, in counted
+    result=actual_run(route,prompt,final,events,timeout,config)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "$CANDIDATE_ROOT/tools/stock_ai.py", line 1364, in run_agent
+    return run_codex(prompt_path, final_path, jsonl_path, timeout_seconds, config)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "$CANDIDATE_ROOT/tools/stock_ai.py", line 1306, in run_codex
+    proc.communicate(prompt.encode("utf-8"), timeout=timeout_seconds)
+  File "$USER_HOME/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/subprocess.py", line 1201, in communicate
+    self.wait()
+  File "$USER_HOME/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/subprocess.py", line 1264, in wait
+    return self._wait(timeout=timeout)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "$USER_HOME/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/subprocess.py", line 2053, in _wait
+    (pid, sts) = self._try_wait(0)
+                 ^^^^^^^^^^^^^^^^^
+  File "$USER_HOME/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/subprocess.py", line 2011, in _try_wait
+    (pid, sts) = os.waitpid(self.pid, wait_flags)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+KeyboardInterrupt
+REQUEST 3 N-H1 research-handoff-retry-2-input.md
+TRIAL N-H1 completed 1
+REQUEST 4 N-H2 research-handoff-input.md
+TRIAL N-H2 completed 1
+REQUEST 5 N-H3 research-handoff-input.md
+TRIAL N-H3 failed 1
+REQUEST 6 A1 author-300398-SZ-input.md
+REQUEST 7 A1 reader-300398-SZ-input.md
+TRIAL A1 failed 2
+REQUEST 8 A2 author-300398-SZ-input.md
+Traceback (most recent call last):
+  File "$CANDIDATE_ROOT/research/recommendation-reader-first-20260922/scripts/run_trials.py", line 155, in <module>
+    for i,arm in enumerate(('old','current','current','old'),1):perform(f'{group}{i}',lambda g=group,b=arm,i=i:author_trial(f'{g}{i}',g,b))
+                                                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "$CANDIDATE_ROOT/research/recommendation-reader-first-20260922/scripts/run_trials.py", line 79, in perform
+    result=fn();run.update(status='completed',result=result)
+           ^^^^
+  File "$CANDIDATE_ROOT/research/recommendation-reader-first-20260922/scripts/run_trials.py", line 155, in <lambda>
+    for i,arm in enumerate(('old','current','current','old'),1):perform(f'{group}{i}',lambda g=group,b=arm,i=i:author_trial(f'{g}{i}',g,b))
+                                                                                                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "$CANDIDATE_ROOT/research/recommendation-reader-first-20260922/scripts/run_trials.py", line 115, in author_trial
+    return p.run_article_cycle(host,packet=effective,materials=m,directory=d,state=state,state_path=d/'state.json',config=CFG,provider='astra',fallback=False,allow_research_changes=False,expression_limit=0,clarification_limit=0,run_scope=trial,initial_author_spec=spec)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "$CANDIDATE_ROOT/tools/recommendation_pipeline.py", line 1570, in run_article_cycle
+    parsed = validator(article_stage(
+                       ^^^^^^^^^^^^^^
+  File "$CANDIDATE_ROOT/tools/recommendation_pipeline.py", line 1037, in article_stage
+    return file_article_stage(host, state, state_path, directory, stage, config,
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "$CANDIDATE_ROOT/tools/recommendation_pipeline.py", line 1166, in file_article_stage
+    delivery, route = run_stage(host, state, state_path, directory, stage, spec['request'],
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "$CANDIDATE_ROOT/tools/recommendation_pipeline.py", line 1840, in run_stage
+    code, diag = host.run_agent(route, prompt_path, output, events, None, {**config, '_text_only': text_only, '_handoff_only': False})
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "$CANDIDATE_ROOT/research/recommendation-reader-first-20260922/scripts/run_trials.py", line 40, in counted
+    result=actual_run(route,prompt,final,events,timeout,config)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "$CANDIDATE_ROOT/tools/stock_ai.py", line 1364, in run_agent
+    return run_codex(prompt_path, final_path, jsonl_path, timeout_seconds, config)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "$CANDIDATE_ROOT/tools/stock_ai.py", line 1306, in run_codex
+    proc.communicate(prompt.encode("utf-8"), timeout=timeout_seconds)
+  File "$USER_HOME/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/subprocess.py", line 1201, in communicate
+    self.wait()
+  File "$USER_HOME/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/subprocess.py", line 1264, in wait
+    return self._wait(timeout=timeout)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "$USER_HOME/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/subprocess.py", line 2053, in _wait
+    (pid, sts) = self._try_wait(0)
+                 ^^^^^^^^^^^^^^^^^
+  File "$USER_HOME/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/subprocess.py", line 2011, in _try_wait
+    (pid, sts) = os.waitpid(self.pid, wait_flags)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+KeyboardInterrupt
+REQUEST 9 A1 review-300398-SZ-input.md
+TRIAL A1 failed 1
+REQUEST 10 A2 author-300398-SZ-retry-2-input.md
+REQUEST 11 A2 reader-300398-SZ-input.md
+REQUEST 12 A2 review-300398-SZ-input.md
+TRIAL A2 failed 3
+REQUEST 13 A3 author-300398-SZ-input.md
+REQUEST 14 A3 reader-300398-SZ-input.md
+REQUEST 15 A3 review-300398-SZ-input.md
+TRIAL A3 failed 3
+REQUEST 16 A4 author-300398-SZ-input.md
+REQUEST 17 A4 reader-300398-SZ-input.md
+REQUEST 18 A4 review-300398-SZ-input.md
+TRIAL A4 failed 3
+REQUEST 19 B1 author-300398-SZ-input.md
+REQUEST 20 B1 reader-300398-SZ-input.md
+REQUEST 21 B1 review-300398-SZ-input.md
+TRIAL B1 failed 3
+REQUEST 22 B2 author-300398-SZ-input.md
+REQUEST 23 B2 reader-300398-SZ-input.md
+REQUEST 24 B2 review-300398-SZ-input.md
+TRIAL B2 failed 3
+TRIAL B3 not_run 0
+TRIAL B4 not_run 0
+TRIAL C1 not_run 0
+TRIAL C2 not_run 0
+TRIAL C3 not_run 0
+TRIAL C4 not_run 0
+TRIAL H1 not_run 0
+TRIAL H2 not_run 0
+TRIAL H3 not_run 0
+REQUEST 25 B2 review-300398-SZ-retry-2-input.md
+TRIAL B2 failed 1
+REQUEST 26 B3 author-300398-SZ-input.md
+REQUEST 27 B3 reader-300398-SZ-input.md
+REQUEST 28 B3 review-300398-SZ-input.md
+TRIAL B3 failed 3
+REQUEST 29 B4 author-300398-SZ-input.md
+REQUEST 30 B4 reader-300398-SZ-input.md
+REQUEST 31 B4 review-300398-SZ-input.md
+TRIAL B4 failed 3
+REQUEST 32 C1 combined-review-input.md
+REQUEST 33 C1 reader-input.md
+REQUEST 34 C1 fidelity-input.md
+TRIAL C1 completed 3
+REQUEST 35 C2 combined-review-input.md
+REQUEST 36 C2 reader-input.md
+REQUEST 37 C2 fidelity-input.md
+TRIAL C2 completed 3
+REQUEST 38 C3 combined-review-input.md
+REQUEST 39 C3 reader-input.md
+REQUEST 40 C3 fidelity-input.md
+TRIAL C3 completed 3
+REQUEST 41 C4 combined-review-input.md
+REQUEST 42 C4 reader-input.md
+REQUEST 43 C4 fidelity-input.md
+TRIAL C4 completed 3
+REQUEST 44 H1 author-301589-SZ-input.md
+REQUEST 45 H1 reader-301589-SZ-input.md
+REQUEST 46 H1 review-301589-SZ-input.md
+TRIAL H1 completed 3
+REQUEST 47 H2 author-001378-SZ-input.md
+REQUEST 48 H2 reader-001378-SZ-input.md
+REQUEST 49 H2 review-001378-SZ-input.md
+REQUEST 50 H2 author-rev1-001378-SZ-input.md
+REQUEST 51 H2 reader-rev1-001378-SZ-input.md
+REQUEST 52 H2 review-rev1-001378-SZ-input.md
+TRIAL H2 completed 6
+ many times, which has poor performance.  Consider joining all columns at once using pd.concat(axis=1) instead. To get a de-fragmented frame, use `newframe = frame.copy()`
+  candidates["__revision_rank"] = pd.to_numeric(
+$EXPERIMENT_ROOT/daily-root/src/stock_analyzer/storage/research_query.py:406: PerformanceWarning: DataFrame is highly fragmented.  This is usually the result of calling `frame.insert` many times, which has poor performance.  Consider joining all columns at once using pd.concat(axis=1) instead. To get a de-fragmented frame, use `newframe = frame.copy()`
+  candidates["__candidate_order"] = range(len(candidates))
+$EXPERIMENT_ROOT/daily-root/src/stock_analyzer/storage/research_query.py:395: PerformanceWarning: DataFrame is highly fragmented.  This is usually the result of calling `frame.insert` many times, which has poor performance.  Consider joining all columns at once using pd.concat(axis=1) instead. To get a de-fragmented frame, use `newframe = frame.copy()`
+  candidates["__available_rank"] = _parse_available_at(
+$EXPERIMENT_ROOT/daily-root/src/stock_analyzer/storage/research_query.py:403: PerformanceWarning: DataFrame is highly fragmented.  This is usually the result of calling `frame.insert` many times, which has poor performance.  Consider joining all columns at once using pd.concat(axis=1) instead. To get a de-fragmented frame, use `newframe = frame.copy()`
+  candidates["__revision_rank"] = pd.to_numeric(
+$EXPERIMENT_ROOT/daily-root/src/stock_analyzer/storage/research_query.py:406: PerformanceWarning: DataFrame is highly fragmented.  This is usually the result of calling `frame.insert` many times, which has poor performance.  Consider joining all columns at once using pd.concat(axis=1) instead. To get a de-fragmented frame, use `newframe = frame.copy()`
+  candidates["__candidate_order"] = range(len(candidates))
+REQUEST 53 H3 research-clarification-input.md
+TRIAL H3 failed 1
+
