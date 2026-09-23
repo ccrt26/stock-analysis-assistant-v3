@@ -1,0 +1,51 @@
+{
+  "sample": "2026-09-21/2026-09-22",
+  "profile": "astra-files-v1",
+  "stages": [
+    {
+      "stage": "author-300658-SZ",
+      "status": "failed",
+      "started_at": "2026-09-23T15:53:17.060356+08:00",
+      "ended_at": "2026-09-23T15:53:17.138668+08:00",
+      "configured_model": "gpt-6-astra",
+      "configured_effort": "xhigh",
+      "exit_code": 1,
+      "actual_model": null,
+      "actual_effort": null,
+      "session_id": null,
+      "execution_verified": false,
+      "auth_method": null,
+      "error": "RuntimeError: 本地/数据/上下文错误: WARNING: proceeding, even though we could not create PATH aliases: Operation not permitted (os error 1)\nError: failed to initialize in-process app-server client: Operation not permitted (os error 1)\n"
+    },
+    {
+      "stage": "author-300658-SZ",
+      "status": "completed",
+      "started_at": "2026-09-23T15:55:12.159737+08:00",
+      "ended_at": "2026-09-23T16:00:34.770132+08:00",
+      "configured_model": "gpt-6-astra",
+      "configured_effort": "xhigh",
+      "exit_code": 0,
+      "actual_model": "gpt-6-astra",
+      "actual_effort": "xhigh",
+      "session_id": "01a0cd42-f3f3-7791-8d38-91c81cdc9e5d",
+      "execution_verified": true,
+      "auth_method": "chatgpt",
+      "error": null
+    },
+    {
+      "stage": "review-300658-SZ",
+      "status": "completed",
+      "started_at": "2026-09-23T16:04:14.316310+08:00",
+      "ended_at": "2026-09-23T16:09:01.205823+08:00",
+      "configured_model": "gpt-6-astra",
+      "configured_effort": "xhigh",
+      "exit_code": 0,
+      "actual_model": "gpt-6-astra",
+      "actual_effort": "xhigh",
+      "session_id": "01a0cd4b-39d8-73f1-99ec-66b2845392c1",
+      "execution_verified": true,
+      "auth_method": "chatgpt",
+      "error": null
+    }
+  ]
+}
