@@ -330,7 +330,12 @@ def test_context_routes_financials_through_comparable_query_and_never_writes_war
             if dataset=='industry_member':return pd.DataFrame({'ts_code':[code],'industry_code':['ABC'],'industry_name':['真实二级行业'],'level':['L2'],'valid_from':['2020-01-01'],'valid_to':[None]})
             return pd.DataFrame()
         def comparable_financials_as_of(self,dataset,asof):
-            calls.append(('comparable:'+dataset,asof));return pd.DataFrame({'ts_code':[code],'report_period':['2026-06-30'],'ann_date':['20260820']})
+            calls.append(('comparable:'+dataset,asof))
+            row={'ts_code':code,'report_period':'2026-06-30','ann_date':'20260820'}
+            if dataset=='cash_flow':
+                row.update(c_inf_fr_operate_a=150.0,st_cash_out_act=220.0,
+                           n_cashflow_act=-70.0)
+            return pd.DataFrame([row])
     monkeypatch.setattr(context,'ResearchWarehouse',Warehouse);monkeypatch.setattr(context,'ResearchQuery',Query)
     def derived(w,feature,day,asof):
         assert day==formation and asof==cutoff
@@ -341,6 +346,13 @@ def test_context_routes_financials_through_comparable_query_and_never_writes_war
     result=context.build_context(tmp_path,trace)
     assert result['facts'][code]['industry_observations']==[{'group_code':'ABC','member_count':69,'observed_member_count':67}]
     assert result['facts'][code]['equity_daily'][0]['amount']==1000.0
+    cash=result['facts'][code]['cash_flow'][0]
+    assert (cash['c_inf_fr_operate_a'],cash['st_cash_out_act'],cash['n_cashflow_act'])==(150.0,220.0,-70.0)
+    packet=pipeline.build_article_packet(trace=trace,context=result,ts_code=code,
+                                         research_handoff=pipeline.handoff_from_trace(trace))
+    assert packet['facts']['own']['cash_flow'][0]['n_cashflow_act']==-70.0
+    assert all(field in packet['facts']['definitions'] for field in
+               ('c_inf_fr_operate_a','st_cash_out_act','n_cashflow_act'))
     assert all(t==cutoff for _,t in calls)
     assert {d for d,t in calls if d.startswith('comparable:')}=={'comparable:income_statement','comparable:balance_sheet','comparable:cash_flow','comparable:financial_indicator'}
     assert not (tmp_path/'local_warehouse').exists()

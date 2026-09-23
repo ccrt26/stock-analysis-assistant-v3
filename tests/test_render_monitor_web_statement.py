@@ -201,6 +201,31 @@ def test_payload_carries_statement_full(tmp_path: Path) -> None:
     assert all(issue["code"] != "statement_missing" for issue in stock["dataIssues"])
 
 
+def test_statement_only_override_cannot_replace_original_article(tmp_path: Path) -> None:
+    selection_dir = tmp_path / "local_archive" / "forward_selection"
+    _write_report(selection_dir, "2026-08-31", "### 示例股份（600000.SH）\n原推荐正文。\n")
+    (tmp_path / "statement-overrides.json").write_text(
+        json.dumps({"600000.SH:2026-09-02": {"statement": "未经采用的替换正文。"}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    stock = _build(tmp_path, [_episode("示例股份", "600000.SH", "2026-08-31")])["stocks"][0]
+    assert stock["statementFull"] == "原推荐正文。"
+    assert stock["statementSource"] != "adopted_rewrite"
+
+
+def test_sourced_dated_override_remains_displayed(tmp_path: Path) -> None:
+    selection_dir = tmp_path / "local_archive" / "forward_selection"
+    _write_report(selection_dir, "2026-08-31", "### 示例股份（600000.SH）\n原推荐正文。\n")
+    (tmp_path / "statement-overrides.json").write_text(
+        json.dumps({"600000.SH:2026-09-02": {
+            "statement": "已采用的修订正文。", "source": "批准记录", "applied": "2026-09-03"
+        }}, ensure_ascii=False), encoding="utf-8",
+    )
+    stock = _build(tmp_path, [_episode("示例股份", "600000.SH", "2026-08-31")])["stocks"][0]
+    assert stock["statementFull"] == "已采用的修订正文。"
+    assert stock["statementSource"] == "adopted_rewrite"
+
+
 def test_payload_silent_fallback_when_no_report_archived(tmp_path: Path) -> None:
     """形成日本无日报存档属正常历史事实：静默回落存档摘要，不虚构缺口标注（T32/T33）。"""
     payload = _build(tmp_path, [_episode("示例股份", "600000.SH", "2026-08-31")])

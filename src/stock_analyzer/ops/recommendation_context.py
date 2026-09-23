@@ -36,6 +36,9 @@ DEFINITIONS = {
     "return_after_largest_positive_day_5d": "只取最大正收益日之后的收益复利；可能与去掉最大日完全同一窗口，不能重复算独立证据。",
     "industry": "名称、SW2021分类层级、有效成员总数、观察数及各期限覆盖随同行事实提供；所有行业统计来自原全市场历史成员计算，范围可能含不在本轮可选范围的市场成员；不能把另一次筛选得到的人数与此处广度拼接。",
     "absence": "缺资料/读取失败/不可回放与真实没有记录不同；空的事实集合不能推出公司未披露。AI原判断不是已核实事实。",
+    "c_inf_fr_operate_a": "同一report_period经营活动现金流入小计，单位元；正的流入小计不代表经营现金净流入。",
+    "st_cash_out_act": "同一report_period经营活动现金流出小计，单位元；与流入小计配对核对，不把它当净额。",
+    "n_cashflow_act": "同一report_period经营活动产生的现金流量净额，单位元，保留正负符号；它不同于流入或流出小计。",
 }
 
 
@@ -225,7 +228,7 @@ def _context(root: Path, trace: dict, result: dict, codes: list[str], *,
         'company_profile': ['com_name','main_business','business_scope','valid_from','profile_snapshot_date'],
         'income_statement': ['report_period','ann_date','f_ann_date','report_type','comparable_selection_rule','total_revenue','revenue','n_income_attr_p'],
         'balance_sheet': ['report_period','ann_date','f_ann_date','comparable_selection_rule','total_assets','total_liab','total_hldr_eqy_exc_min_int','money_cap'],
-        'cash_flow': ['report_period','ann_date','f_ann_date','comparable_selection_rule','n_cashflow_act'],
+        'cash_flow': ['report_period','ann_date','f_ann_date','comparable_selection_rule','c_inf_fr_operate_a','st_cash_out_act','n_cashflow_act'],
         'financial_indicator': ['report_period','ann_date','netprofit_yoy','dt_netprofit_yoy','ocf_yoy','grossprofit_margin'],
         'main_business': ['report_period','classification','item_name','bz_item','bz_sales','bz_profit','curr_type','availability_limitation'],
         'announcement': ['announcement_time','title','url','announcement_title','announcement_url'],

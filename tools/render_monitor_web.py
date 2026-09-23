@@ -1340,12 +1340,18 @@ def load_statement_overrides(monitor_dir: Path) -> dict[str, dict[str, Any]]:
 def apply_statement_override(
     overrides: dict[str, dict[str, Any]], ts_code: str, rec_iso: str, statement: str
 ) -> tuple[str, str | None]:
-    """命中替换表时返回（范本正文, "adopted_rewrite"），否则原样返回。"""
+    """只有带采用日期和来源的替换正文才作为已采用稿展示。"""
     entry = overrides.get(f"{ts_code}:{rec_iso}")
     if not isinstance(entry, dict):
         return statement, None
     text = str(entry.get("statement") or "").strip()
-    if not text:
+    source = str(entry.get("source") or "").strip()
+    applied = str(entry.get("applied") or "").strip()
+    if not text or not source:
+        return statement, None
+    try:
+        date.fromisoformat(applied)
+    except ValueError:
         return statement, None
     return text, "adopted_rewrite"
 
