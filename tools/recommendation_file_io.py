@@ -14,8 +14,8 @@ from pathlib import Path
 PROFILE = 'astra-files-v1'
 MODEL = 'gpt-6-astra'
 EFFORT = 'xhigh'
-CONTRACTS = {'handoff': 'research-handoff-files-v1', 'author': 'article-author-files-v1',
-             'review': 'article-review-files-v1', 'clarification': 'research-clarification-files-v1'}
+CONTRACTS = {'handoff': 'research-handoff-files-v1', 'author': 'article-author-files-v2',
+             'review': 'article-review-files-v2', 'clarification': 'research-clarification-files-v1'}
 GUIDE = '.agents/skills/orchestrating-stock-research/references/recommendation-reading-guide.md'
 TASKS = {'handoff': 'ops/recommendation-handoff-prompt.md',
          'author': 'ops/recommendation-author-files-prompt.md',
@@ -100,15 +100,31 @@ def validate_note(packet):
         raise ValueError('研究便笺没有原包或完整 trace 绑定')
 
 
+def validate_research_packet(packet):
+    """Require an attributable original decision, without requiring an extra note."""
+    identity = packet.get('identity') or {}
+    refs = packet.get('source_refs') or {}
+    if not all(identity.get(k) for k in ('ts_code', 'formation_date', 'action_date', 'as_of')):
+        raise ValueError('原研究身份不完整')
+    if not refs.get('trace_sha256') or tuple(refs.get('trace_identity') or ()) != tuple(
+            identity.get(k) for k in ('formation_date', 'action_date', 'as_of')):
+        raise ValueError('原研究缺少同版 trace 身份与来源')
+    if not str((packet.get('judgment') or {}).get('selection_reason') or '').strip():
+        raise ValueError('原研究没有本股最终选择意见')
+    counter = packet.get('counterevidence')
+    if isinstance(counter, dict):
+        counter = counter.get('text')
+    conditions = packet.get('conditions') or {}
+    if not counter or not any(conditions.get(k) for k in ('text', 'action_conditions', 'supplementary')):
+        raise ValueError('原研究缺少反证或现行条件')
+    if packet.get('authoring_note'):
+        validate_note(packet)
+
+
 def stage_spec(root, role, packet, material, **extra):
     files = {'identity.json': dumps(packet['identity']), 'packet.json': dumps(packet)}
     sources = {'identity.json': 'packet.identity', 'packet.json': packet.get('source_refs', {})}
-    if role != 'handoff':
-        files['research-handoff.md'] = note_text(packet)
-        sources['research-handoff.md'] = packet.get('authoring_note', {})
-    if role in ('author', 'review'):
-        files['reading-guide.md'] = material['reading_guide']
-        sources['reading-guide.md'] = material.get('guide_source')
+    if role == 'author':
         for i, example in enumerate(material['examples'], 1):
             name = f'examples/{i:02d}.md'
             files[name] = example['text']
@@ -137,7 +153,7 @@ def stage_spec(root, role, packet, material, **extra):
 
 
 def validate_shared_material(author_spec, review_spec):
-    for key in ('packet.json', 'research-handoff.md', 'issue-resolutions.json', 'current-opinion-resolution.json'):
+    for key in ('packet.json', 'issue-resolutions.json', 'current-opinion-resolution.json'):
         if author_spec['files'].get(key) != review_spec['files'].get(key):
             raise ValueError('作者与审稿材料或答复版本不一致：' + key)
 
@@ -194,11 +210,14 @@ def normalize_article(text, identity):
             if found:
                 if found.group(1).strip() != name or found.group(2) != code:
                     raise ValueError('文章股票身份不符，禁止自动纠正')
-                if label != f'{name}（{code}）' and label != f'{name}({code})':
-                    raise ValueError('股票标题含额外文字，需作者处理')
+                suffix = label[found.end():].strip()
+                if suffix and not suffix.startswith(('：', ':', '—', '–', '-')):
+                    raise ValueError('股票标题含无法识别的额外文字，需作者处理')
                 if title_seen or any(x.strip() for x in lines):
                     raise ValueError('股票标题位置或数量异常')
                 title_seen = True
+                if suffix:
+                    lines.append('#### ' + suffix.lstrip('：:—–-').strip())
                 continue
             if len(heading.group(1)) <= 3:
                 line = '#### ' + heading.group(2)
@@ -232,6 +251,8 @@ def read_output(directory, spec, review_validator=None, clarification_validator=
     if role == 'author':
         question = output_text(directory, 'questions.json')
         issues = json.loads(question) if question.strip() else []
+        if isinstance(issues, dict) and set(issues) == {'research_issues'}:
+            issues = issues['research_issues']
         raw_article = output_text(directory, 'article.md')
         parse_author(dumps({'article': raw_article or None, 'research_issues': issues}))
         article = (raw_article if issues else normalize_article(raw_article, json.loads(spec['files']['identity.json']))) if raw_article.strip() else None

@@ -505,6 +505,6 @@ AI 检查的是事实与推论是否相称、是否回答选择问题；程序�
 按 V4 合同第10节与五 Skill 执行可选 early_confirmation；只有真正新增信息且首个完整交易日响应已发生才可用。不得为满足字段猜来源、成员、时间或收益。推荐理由用普通话回答“发生什么新变化、已得到什么响应、为何不继续等、当前剩余路径和最强反证”。既有 formation_values 时间线缺失填 null，method_revision 指向实际使用版本。20日批量检验仍读 ops/selection-method-review-prompt.md；当前改变已获本次用户授权，未来改规则另需批准。
 
 
-仅当运行配置明确为 `recommendation_authoring_profile=astra-files-v1` 时：选股研究仍由原研究步骤完成；本步骤须按 `ops/recommendation-handoff-prompt.md` 将每股可读 `authoring_note`、原句引用与未决 `research_issues` 写入 `selection-handoff.json` 的 `stocks[ts_code]`，绑定本次 formation_date/action_date/as_of 及实际完整 trace_sha256。便笺交清既有研究意思，不改变选股判据；缺交接返回研究步骤，不能视为空字段证明原研究缺结论。正式复盘职责和流程不变。
+仅当运行配置明确为 `recommendation_authoring_profile=astra-files-v1` 时：选股研究仍由原研究步骤完成；本步骤按 `ops/recommendation-handoff-prompt.md` 将每股最终判断、证据来源、风险、未知、完整条件与确有的 `research_issues` 写入同版 `selection-handoff.json` 的 `stocks[ts_code]`，绑定本次 formation_date/action_date/as_of 及实际完整 trace_sha256。已有便笺可以保留；完整原研究不以额外便笺为成稿前提。正式复盘职责和流程不变。
 
-新文件 profile 的作者与审稿只读取程序提供的一份简明阅读指南和适用范文，成稿任务不接收本运行全文；本研究步骤交付事实、判断和出处，不能代写或补写 ready。
+新文件 profile 的作者只读取程序提供的同版研究包与适用的认可范文；事实核对者只读取同版研究包与实际文章，成稿任务不接收本运行全文；本研究步骤交付事实、判断和出处，不能代写或补写 ready。

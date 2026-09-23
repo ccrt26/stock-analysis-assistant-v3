@@ -16,8 +16,8 @@ from stock_analyzer.ops.recommendation_context import DEFINITIONS, build_context
 # 作者/审稿阶段输出合同版本；进入阶段缓存身份，合同变化即不复用旧结果。
 # v2（2026-09-19）：作者输入含有效包与全部已核实处理；审稿输入含issue_resolutions、
 # pending_issue_checks，输出含issue_kind与issue_checks。
-AUTHOR_CONTRACT_VERSION = 'article-author-v4.1'
-REVIEW_CONTRACT_VERSION = 'article-review-v4'
+AUTHOR_CONTRACT_VERSION = 'article-author-v5'
+REVIEW_CONTRACT_VERSION = 'article-review-v5'
 CLARIFICATION_CONTRACT_VERSION = 'research-clarification-v2'
 # 正式推荐正文固定小标题；作者正文必须自带，程序只补逐股标题行。
 ARTICLE_SUBHEADINGS = ('公司主要做什么', '为什么会选它', '什么情况会让我改变看法')
@@ -481,20 +481,22 @@ def build_article_packet(*, trace: dict, context: dict, ts_code: str, research_h
                       'tradability': handoff_stock.get('conditions_tradability'),
                       'source': 'selection-handoff.json'}
         condition_sources.append('selection-handoff.json')
-    if conditions is None:
-        conditions_decision = next((d for d in decisions if d.get('decision_role') == 'action_condition'), None)
-        if conditions_decision is not None and str(conditions_decision['formation_values'].get('condition') or '').strip():
-            conditions = {'text': conditions_decision['formation_values']['condition'],
-                          'tradability': conditions_decision['formation_values'].get('known_tradability'),
-                          'source': conditions_decision['decision_id']}
-            condition_sources.append(str(conditions_decision['decision_id']))
+    action_conditions = [
+        {'formation_values': d['formation_values'], 'source': d.get('decision_id')}
+        for d in decisions if d.get('decision_role') == 'action_condition']
+    if conditions is None and action_conditions:
+        values = action_conditions[0]['formation_values']
+        text = values.get('condition') or values.get('participation_and_change_conditions')
+        conditions = {'text': text, 'tradability': values.get('known_tradability'),
+                      'source': action_conditions[0]['source']}
+        condition_sources.append(str(action_conditions[0]['source']))
     original_report = handoff_stock.get('original_report_conditions') or []
     supplementary = []
     for item in original_report:
         text = str(item.get('text') or '').strip()
         if text and (not conditions or text not in conditions['text']):
             supplementary.append({'text': text, 'source_ref': item.get('source_ref')})
-    if conditions is None:
+    if conditions is None and not supplementary:
         gaps.append('conditions_missing：本股没有已确定的改变条件，按原样表达未知，不得套用模板')
 
     counterevidence = {'text': stock.get('strongest_counterevidence')}
@@ -539,13 +541,13 @@ def build_article_packet(*, trace: dict, context: dict, ts_code: str, research_h
                             and research_handoff['trace_sha256'] == trace_input_sha256(trace)))
     formed = lambda text: bool(str(text or '').strip()) and owner_binding_ok
     reasoning = {
-        'opinion': {'text': stock.get('selection_reason'), 'formed': True,
+        'opinion': {'text': stock.get('selection_reason'), 'formed': bool(str(stock.get('selection_reason') or '').strip()),
                     'source': 'research_result.selected_stocks[].selection_reason'},
-        'main_basis': {'text': thesis.get('short_term_engine'), 'formed': True,
+        'main_basis': {'text': thesis.get('short_term_engine'), 'formed': bool(str(thesis.get('short_term_engine') or '').strip()),
                        'source': 'candidate_ledger.research_thesis.short_term_engine'},
-        'why_this': {'text': (thesis.get('market_recognition') or {}).get('basis'), 'formed': True,
+        'why_this': {'text': (thesis.get('market_recognition') or {}).get('basis'), 'formed': bool(str((thesis.get('market_recognition') or {}).get('basis') or '').strip()),
                      'source': 'candidate_ledger.research_thesis.market_recognition.basis'},
-        'remaining_path': {'text': thesis.get('remaining_path'), 'formed': True,
+        'remaining_path': {'text': thesis.get('remaining_path'), 'formed': bool(str(thesis.get('remaining_path') or '').strip()),
                            'source': 'candidate_ledger.research_thesis.remaining_path'},
         'why_now': {'formed': formed(handoff_stock.get('why_now')),
                     'text': handoff_stock.get('why_now'),
@@ -581,8 +583,9 @@ def build_article_packet(*, trace: dict, context: dict, ts_code: str, research_h
         'comparisons': {'text': stock.get('nearest_comparison'), 'codes': comparison_codes,
                         'items': comparison_items},
         'counterevidence': counterevidence,
-        'conditions': (dict(conditions, sources=condition_sources, supplementary=supplementary)
-                       if conditions else ({"supplementary": supplementary} if supplementary else None)),
+        'conditions': (dict(conditions or {}, sources=condition_sources,
+                            action_conditions=action_conditions, supplementary=supplementary)
+                       if conditions or action_conditions or supplementary else None),
         'unknowns': thesis.get('critical_unknown'),
         'facts': {'definitions': _referenced_definitions(own_facts, comparison_facts),
                   'own': own_facts,
@@ -1050,6 +1053,27 @@ def file_cached_result(host, directory, stage, spec, run_scope, validate, *, res
     if saved.get('terminal_status') == 'interrupted' and resume:
         file_resume_session(saved)
         return None
+    if saved.get('terminal_status') == 'failed' and saved.get('failed_output_hashes'):
+        # The model finished, but an output adapter rejected its files. After a
+        # parser correction, recover those exact files instead of asking it to write again.
+        stage_dir = Path(saved['stage_directory'])
+        file_io.verify_inputs(stage_dir, saved['input_index'])
+        if not stage_execution_verified(host, 'astra', False, saved.get('stage_execution')):
+            raise RuntimeError('失败阶段缺少已核实的实际模型执行证据')
+        for name, digest in saved['failed_output_hashes'].items():
+            if file_io.digest((stage_dir / name).read_bytes()) != digest:
+                raise ValueError('失败阶段原始输出已变化，不能按原稿恢复')
+        raw = file_io.read_output(stage_dir, spec, parse_review_output, parse_clarification_output)
+        validate(raw)
+        retain_previous(path)
+        saved.update(raw=raw, terminal_status='completed',
+                     output_hashes={str(p.relative_to(stage_dir)): file_io.digest(p.read_bytes())
+                                    for p in sorted((stage_dir / 'output').glob('*')) if p.is_file()})
+        canonical = stage_dir / 'article-for-review.md'
+        if canonical.exists():
+            saved['output_hashes']['article-for-review.md'] = file_io.digest(canonical.read_bytes())
+        save_json(path, saved)
+        return raw
     if saved.get('terminal_status') != 'completed':
         raise RuntimeError(f'{stage}已有终态或未确认中断记录，禁止再次抽样：{saved.get("terminal_status")}')
     file_io.verify_inputs(Path(saved['stage_directory']), saved['input_index'])
@@ -1149,6 +1173,10 @@ def file_article_stage(host, state, state_path, directory, stage, config, spec, 
             else:
                 saved['terminal_status'] = 'interrupted' if isinstance(exc, (KeyboardInterrupt, SystemExit)) else 'failed'
         saved['error'] = f'{type(exc).__name__}: {exc}'
+        if saved.get('execution_verified') and saved['terminal_status'] == 'failed':
+            saved['failed_output_hashes'] = {
+                str(p.relative_to(stage_dir)): file_io.digest(p.read_bytes())
+                for p in sorted((stage_dir / 'output').glob('*')) if p.is_file()}
         save_json(path, saved)
         raise
 
@@ -1422,13 +1450,13 @@ def run_article_cycle(host, *, packet: dict, materials: dict, directory: Path, s
     note_error = None
     if files_mode:
         try:
-            file_io.validate_note(packet)
+            file_io.validate_research_packet(packet)
         except ValueError as exc:
             note_error = str(exc)
     if files_mode and note_error:
-        research_issues.append({'ts_code': code, 'quote': 'authoring_note',
-            'problem': '缺少同身份有出处的研究交接；这不表示原研究缺结论',
-            'evidence': note_error, 'needed': '请原研究步骤生成绑定原资料的 authoring_note'})
+        research_issues.append({'ts_code': code, 'quote': '原研究',
+            'problem': '同版原研究身份、判断或必要含义不完整',
+            'evidence': note_error, 'needed': '请原研究负责人核实原记录和来源'})
         return result('needs_research')
     validate_handoff_issues(handoff_issues or [], code, packet.get('source_refs', {}).get('trace_sha256'))
     if handoff_issues:
@@ -1725,7 +1753,7 @@ def run_stage(host, state: dict, state_path: Path, directory: Path, stage: str,
                 prompt_path = directory / f'{stem}-{route}-input.md'
                 if file_io.enabled(config):
                     handoff += '\n' + (host.PROJECT_ROOT / file_io.TASKS['handoff']).read_text(encoding='utf-8')
-                    handoff += '\n本次是正常日常研究，不是固定历史回放：依原五 Skill 与截止形成取舍，在同一次研究把每股 authoring_note（字符串）、source_refs（实际字段或文件与原句）、research_issues（数组，允许空）写入已绑定 trace 的 stocks[ts_code]；不生成推荐文章。'
+                    handoff += '\n本次是正常日常研究，不是固定历史回放：依原五 Skill 与截止形成取舍，在同一次研究把每股完整判断、风险、未知、全部条件、可定位来源及确有的 research_issues 写入已绑定 trace 的 stocks[ts_code]；不要求额外写 authoring_note，不生成推荐文章。'
                 prompt_path.write_text(prompt + handoff)
                 entry['input'] = str(prompt_path)
             key, _ = host.authentication_available(route, config)
@@ -1852,6 +1880,12 @@ def validate_accepted(host, accepted: dict, expected: tuple[str, str, str]) -> N
         raise ValueError('；'.join(issues))
 
 
+def current_author_contract(accepted: dict) -> bool:
+    return accepted.get('author_contract') == AUTHOR_CONTRACT_VERSION and \
+        accepted.get('review_contract') == REVIEW_CONTRACT_VERSION and \
+        accepted.get('file_contracts') == {k: file_io.CONTRACTS[k] for k in ('author', 'review')}
+
+
 def freeze(host, root: Path, accepted: dict, pending: Path, config: dict) -> None:
     """Recover CSV-before-trace only from the exact retained, reviewed payload."""
     expected = identity(accepted['trace'])
@@ -1945,6 +1979,8 @@ def _author_articles(host, state, state_path, directory, config, provider, root,
                               if file_io.enabled(config) else None)
             cache_path = articles_dir / code / 'cycle-ready.json'
             cycle_input = {'packet': packet, 'materials': material, 'handoff_issues': current_issues,
+                           'author_contract': AUTHOR_CONTRACT_VERSION, 'review_contract': REVIEW_CONTRACT_VERSION,
+                           'file_contracts': {k: file_io.CONTRACTS[k] for k in ('author', 'review')},
                            'tasks': {role: (host.PROJECT_ROOT / file_io.TASKS[role]).read_text() for role in ('author', 'review')} if file_io.enabled(config) else None,
                            'prior_resolutions': repair_context.get('stocks', {}).get(code, {}).get('prior_resolutions')}
             if file_io.enabled(config) and cache_path.exists():
@@ -1952,7 +1988,7 @@ def _author_articles(host, state, state_path, directory, config, provider, root,
                 before = (old.get('input') or {}).get('packet', {}).get('source_refs', {}).get('trace_sha256')
                 after = packet.get('source_refs', {}).get('trace_sha256')
                 if before != after and same_stock_material(old.get('input'), cycle_input):
-                    file_io.validate_note(packet)
+                    file_io.validate_research_packet(packet)
                     for result_file in (articles_dir / code).glob('*-result.json'):
                         saved_stage = read_json(result_file)
                         if saved_stage.get('terminal_status') == 'completed':
@@ -1973,7 +2009,7 @@ def _author_articles(host, state, state_path, directory, config, provider, root,
                 directory=articles_dir / code, state=state, state_path=state_path,
                 config=config, provider=provider, fallback=fallback,
                 allow_research_changes=True,
-                expression_limit=0 if (articles_dir / code / 'current-opinion-amendment.json').exists() else 1,
+                expression_limit=1,
                 prior_resolutions=(repair_context.get('stocks', {}).get(code, {}).get('prior_resolutions')
                     if file_io.enabled(config) else repair_context.get('prior_resolutions')),
                 handoff_issues=(handoff.get('stocks', {}).get(code, {}).get('research_issues', [])
@@ -2012,12 +2048,8 @@ def _author_articles(host, state, state_path, directory, config, provider, root,
                 '完成文件更新后再返回JSON。\n'
                 f'pending={pending}；完整报告={research_reply}；交接={directory / "selection-handoff.json"}\n'
                 + json.dumps({'identity': expected, 'issues': issues}, ensure_ascii=False))
-            note_only = bool(issues) and all(i.get('quote') == 'authoring_note' for i in issues)
             if file_io.enabled(config):
                 prompt += '\n' + (host.PROJECT_ROOT / file_io.TASKS['handoff']).read_text(encoding='utf-8')
-                if note_only:
-                    prompt += ('\n本次仅缺交接交付：只为列明股票补 authoring_note、source_refs 和 research_issues，'
-                               '绑定实际完整 trace；不得改 pending、市场说明、名单或研究判断。')
                 old_handoff = directory / 'selection-handoff.json'
                 if old_handoff.exists():
                     snapshot = directory / f'selection-handoff-before-repair-{repair_counts["research_repair"]}.json'
@@ -2040,8 +2072,6 @@ def _author_articles(host, state, state_path, directory, config, provider, root,
             revised = read_json(pending)
             if identity(revised) != expected:
                 raise ValueError('研究修复改变时间身份')
-            if file_io.enabled(config) and note_only and revised != trace:
-                raise ValueError('仅补交接的研究步骤改动了原研究')
             validate_pending(root, revised, state.get('prepare', {}))
             save_json(directory / 'context-trace.json', revised)
             # 处理结论回传作者：下一轮作者输入包含resolutions，缓存身份随之变化。
@@ -2332,7 +2362,7 @@ def resolve_current_opinion_owners(host, state, state_path, directory, config, t
             '不默认另一方、更谨慎或更高档位正确。可以保留有事实解释的不同目的，但实际当前正文/交接要让读者理解。'
             '不运行prepare/record/freeze/装配/网页/公司介绍，不改代码或历史。不得启动其他模型。'
             '本任务允许对未正式保存的本日结果作必要修正，保留所有原始事实与日期。'
-            + (f'只修改{pending}与{directory / "selection-handoff.json"}；同步名单、全部判断/条件及逐股authoring_note/source_refs/research_issues和实际trace_sha256。若不再推荐可移除但不补股，不改无关候选。'
+            + (f'只修改{pending}与{directory / "selection-handoff.json"}；同步名单、全部判断/条件及逐股source_refs/research_issues和实际trace_sha256。若不再推荐可移除但不补股，不改无关候选。'
                f'请先读{host.PROJECT_ROOT / "ops/recommendation-handoff-prompt.md"}。'
                if owner == 'selection' else
                f'只修改{monitor / ("pending-daily-formal-reviews-" + identity(trace)[0] + ".json")}与'
@@ -2480,6 +2510,8 @@ def complete(host, state: dict, state_path: Path, directory: Path, config: dict,
     directory.mkdir(parents=True, exist_ok=True)
     if accepted_path.exists():
         accepted = read_json(accepted_path)
+        if file_io.enabled(config) and not frozen.exists() and not current_author_contract(accepted):
+            raise ValueError('旧成稿合同采用稿不能作为本次新日常采用；保留原件待核对')
         validate_accepted(host, accepted, expected)
         if current_required:
             validate_adopted_current_opinions(root, accepted, directory=directory)
@@ -2517,7 +2549,7 @@ def complete(host, state: dict, state_path: Path, directory: Path, config: dict,
                 [{'quote': 'pending研究合同', 'problem': str(error), 'evidence': str(error)}]})
             prompt = ('本轮pending未通过原有研究合同，按错误定向修正，不能删减必填证据、改时间或降回旧版。'
                       '不运行prepare/record、不重新扫描股票、不生成网页、不写推荐文章。'
-                      '修正研究时同步pending及同版selection-handoff.json（actual trace_sha256、逐股便笺、source_refs、research_issues）；市场说明因此改变时同步research-reply.md对应段落。'
+                      '修正研究时同步pending及同版selection-handoff.json（actual trace_sha256、逐股判断、全部条件、source_refs、research_issues）；市场说明因此改变时同步research-reply.md对应段落。'
                       f'pending={pending}；完整报告={research_reply}；'
                       f'prepare={json.dumps(state["prepare"],ensure_ascii=False)}；错误={error}')
             run_stage(host, state, state_path, directory, 'research-contract-repair', prompt,
@@ -2578,7 +2610,9 @@ def complete(host, state: dict, state_path: Path, directory: Path, config: dict,
                 try:
                     draft = read_json(checkpoint_path)
                     draft_trace = draft.get('trace') or {}
-                    if identity(draft_trace) == expected and str(draft.get('section') or '').strip() \
+                    if identity(draft_trace) == expected and \
+                            (not file_io.enabled(config) or current_author_contract(draft)) and \
+                            str(draft.get('section') or '').strip() \
                             and not host._recommendation_section_issues(
                                 draft['section'], expected[0],
                                 stocks=selected_result(draft_trace)['selected_stocks']):
@@ -2601,6 +2635,9 @@ def complete(host, state: dict, state_path: Path, directory: Path, config: dict,
                 raise ValueError('写审与复盘期间研究改变，不能冻结旧结果')
             if section is not None and not authoring_error:
                 save_json(checkpoint_path, {'trace': trace, 'section': section.strip(),
+                                            'author_contract': AUTHOR_CONTRACT_VERSION,
+                                            'review_contract': REVIEW_CONTRACT_VERSION,
+                                            'file_contracts': {k: file_io.CONTRACTS[k] for k in ('author', 'review')},
                                             'research_issues': [],
                                             'status': 'accepted-draft-pending-review',
                                             'monitor_error': monitor_error})
@@ -2625,6 +2662,10 @@ def complete(host, state: dict, state_path: Path, directory: Path, config: dict,
         else:
             source_sections(root, expected[0], as_of=expected[2])
         accepted = {'trace': trace, 'section': section.strip(), 'research_issues': []}
+        if file_io.enabled(config):
+            accepted.update(author_contract=AUTHOR_CONTRACT_VERSION,
+                            review_contract=REVIEW_CONTRACT_VERSION,
+                            file_contracts={k: file_io.CONTRACTS[k] for k in ('author', 'review')})
         if current_required:
             validate_pending(root, trace, state.get('prepare', {}))
             accepted.update(current_opinion_contract=CURRENT_OPINION_CONTRACT, current_opinion_check=check,

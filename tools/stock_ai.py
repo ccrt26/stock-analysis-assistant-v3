@@ -2466,6 +2466,12 @@ def run_nightly(args: argparse.Namespace, config: dict, lock: TaskLock,
 
     # ---- 接替前产物核对 ----
     art = assess_artifacts(formation, action, as_of, str(reply_target) if reply_target.exists() else None)
+    if policy.get('recommendation_authoring_profile') == 'astra-files-v1' and art['trace_ok']:
+        adopted = archive_dir / 'recommendation/accepted-recommendation.json'
+        if adopted.exists():
+            from recommendation_pipeline import current_author_contract
+            if not current_author_contract(json.loads(adopted.read_text(encoding='utf-8'))):
+                raise ValueError('已有正式历史采用稿属于旧成稿合同；保留历史，不作为本次新合同验收')
     if art["trace_ok"] and not art["csv_ok"]:
         return finish_task(
             "nightly", path.name, state, "失败",
@@ -2512,6 +2518,11 @@ def run_nightly(args: argparse.Namespace, config: dict, lock: TaskLock,
             existing_reply, source_state = existing
             if (policy.get('recommendation_authoring_profile') or policy.get('no_fallback')) and source_state.get('run_policy') != policy:
                 raise ValueError('同身份来源运行策略不同，不复用为本 profile 验收')
+            if policy.get('recommendation_authoring_profile') == 'astra-files-v1':
+                original = existing_reply.parent / 'recommendation/accepted-recommendation.json'
+                from recommendation_pipeline import current_author_contract
+                if not original.exists() or not current_author_contract(json.loads(original.read_text(encoding='utf-8'))):
+                    raise ValueError('同身份旧采用稿缺少当前作者与核对合同；保留来源历史，不复用')
             archive_dir.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(existing_reply, reply_target)
             if source_state.get('current_opinion_contract'):

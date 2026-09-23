@@ -43,7 +43,9 @@ def original_packet():
     return {'identity': copy.deepcopy(IDENTITY), 'judgment': {'selection_reason': '原研究已解释接受风险的理由'},
             'reasoning': {'risk_acceptance': {'formed': False, 'text': None}},
             'facts': {}, 'conditions': {'text': '连续走弱且行业收缩'}, 'counterevidence': ['反证原句'],
-            'source_refs': {}, 'gaps': ['risk_acceptance_missing'], 'unknowns': ['未知保留']}
+            'source_refs': {'trace_sha256': 'a'*64,
+                            'trace_identity': [IDENTITY[k] for k in ('formation_date', 'action_date', 'as_of')]},
+            'gaps': ['risk_acceptance_missing'], 'unknowns': ['未知保留']}
 
 def bound_packet():
     packet = original_packet()
@@ -127,9 +129,9 @@ def test_cache_identity_includes_inputs_sources_and_execution(harness, changed):
     args = (stock_ai, harness.state, harness.state_path, harness.root, stage, '', 'astra', {})
     pipeline.article_stage(*args, fallback=False, contract=spec['contract'], validate=fio.parse_author, file_spec=spec)
     next_spec = copy.deepcopy(spec)
-    if changed == 'note': next_spec['files']['research-handoff.md'] += '补充引用'
-    elif changed == 'guide': next_spec['files']['reading-guide.md'] += 'v2'
-    elif changed == 'source': next_spec['sources']['reading-guide.md'] = '/different/指南.md'
+    if changed == 'note': next_spec['files']['packet.json'] += ' '
+    elif changed == 'guide': next_spec['files']['examples/01.md'] += 'v2'
+    elif changed == 'source': next_spec['sources']['examples/01.md'] = '/different/范文.md'
     else: next_spec[changed] += '-different'
     assert pipeline.file_cached_result(stock_ai, harness.root, stage, next_spec, 'managed', fio.parse_author) is None
 
@@ -140,7 +142,7 @@ def test_material_files_are_complete_and_immutable(tmp_path):
     index = fio.write_stage(directory, spec)
     assert (directory/'input/examples/01.md').read_text().endswith('完整批注')
     assert 'teaching' not in spec['files'] and '认可正文' not in fio.dumps(spec)
-    assert len(list(directory.glob('input/*guide*'))) == 1
+    assert not list(directory.glob('input/*guide*'))
     fio.verify_inputs(directory, index)
     (directory/'input/packet.json').write_text('changed')
     with pytest.raises(ValueError, match='输入被修改'):
@@ -372,7 +374,7 @@ def test_production_author_entry_uses_same_files_cycle_without_freezing(harness)
     stock = pipeline.selected_result(trace)['selected_stocks'][0]
     handoff = {'formation_date':trace['formation_date'],'action_date':trace['action_date'],
         'as_of':trace['as_of'],'trace_sha256':pipeline.trace_input_sha256(trace),
-        'stocks':{stock['ts_code']:{'authoring_note':'原研究交接便笺；原句：'+stock['selection_reason'],
+        'stocks':{stock['ts_code']:{'conditions':'连续收盘走弱且行业转弱时撤回本次判断。',
             'source_refs':[{'pointer':'/final_selection/selected_stocks/0/selection_reason','quote':stock['selection_reason']}]}}}
     pipeline.save_json(directory/'selection-handoff.json', handoff)
     # Empty synthetic warehouse is read only and produces explicit evidence gaps.
