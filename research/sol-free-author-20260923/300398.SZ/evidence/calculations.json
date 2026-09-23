@@ -1,0 +1,31 @@
+{
+  "preceding_15_sessions_return": {
+    "input_return_20d": 0.0751331651,
+    "input_return_5d": 0.1692073171,
+    "formula": "(1 + return_20d) / (1 + return_5d) - 1",
+    "result": -0.08045977015721495
+  },
+  "prior60_high_normalized": {
+    "close": 38.35,
+    "breakout_vs_prior60": -0.4119229171,
+    "formula": "close / (1 + breakout_vs_prior60)",
+    "result": 65.21253950397734
+  },
+  "quarter_subtraction": {
+    "formula": "2026 H1 cumulative minus 2026 Q1 cumulative",
+    "H1_revenue": 1722434398.46,
+    "Q1_revenue": 872726142.15,
+    "Q2_revenue": 849708256.3100001,
+    "H1_profit": 267133083.22,
+    "Q1_profit": 131201714.07,
+    "Q2_profit": 135931369.15
+  },
+  "business_share": {
+    "formula": "segment revenue / H1 total revenue",
+    "total": 1722434398.46,
+    "semiconductor": 357625055.56,
+    "display": 824465260.3,
+    "semiconductor_share": 0.2076276785227621,
+    "display_share": 0.47866279321705407
+  }
+}
