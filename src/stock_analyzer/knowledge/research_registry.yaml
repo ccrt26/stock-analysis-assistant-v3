@@ -2377,3 +2377,38 @@ entries:
     local_validation:
       status: insufficient_for_direction
       reason: A股研究支持这些交易边界和继续观察方法，但不支持把单一成交或价格现象直接变成未来方向判断。
+
+  - knowledge_id: src_cn_held_price_progress_candidate_v3
+    title: 已有可靠推进后的成果保持与当前入口代价（V3候选方法）
+    primary_source_id: paper-gao-han-xiong-max-2021
+    supporting_source_ids: [paper-zhang-zhu-t1-2024, paper-zhang-zhang-turnover-2022]
+    source_grade: A
+    version_status: current
+    effect: method_only
+    modules: [price_trading, orchestration, sector_theme]
+    opportunity_types: [general, industry_trend, company_event]
+    topics: [price_confirmation, held_progress, current_entry_cost]
+    claim_summary: 本地已见案例显示“最大上涨日后必须再收高”可能造成无价值等待；V3在先有独立正向推进时，把有事前参照且完成正常交易的成果保持纳入连续性解释，并在最终取舍中比较当前入口代价。现有文献仅提醒单日集中、反转及成交解释边界，不直接证明此改法提高收益。
+    allowed_uses:
+      - 先核对剔除最大上涨日后的实际正向进展，再解释推进后的继续上涨或成果保持。
+      - 保持须有观察开始前的相关参照、逐日收盘、相对表现、成交与失速反证。
+      - 总控在确认充分后比较新增观察解决的问题、当前参考价代价和近邻。
+    forbidden_uses:
+      - 把单日急涨后横盘、没有下跌、低位置或旧背景直接变成价格支持。
+      - 用事后最低点挑支撑，或把最大日后负收益改写为正值。
+      - 放宽普通板块资格或无新增信息时使用信息型早确认。
+      - 宣称文献或本次已见小样本证明未来选股收益改善。
+    prerequisites:
+      - 使用形成日截止前可得的普通交易日、复权收益、相对市场和行业及成交事实。
+      - 保留原20交易日约20%观察目标、原价格支持字段和正式可参与边界。
+    counter_evidence:
+      - 剔除最大上涨日后没有独立正向进展，或已获成果及相对优势实质丢失。
+      - 参照只能靠事后低点构造，或反复放量回吐扩大。
+      - 更高当前入口使同等确认相对近邻不再值得。
+    data_requirements:
+      - {kind: fact, name: equity_daily, required_fields: [trade_date, ts_code, close, amount, available_at]}
+      - {kind: fact, name: adj_factor, required_fields: [trade_date, ts_code, adj_factor, available_at]}
+      - {kind: derived, name: price_analysis_context, required_fields: [analysis_date, ts_code]}
+    local_validation:
+      status: insufficient_for_direction
+      reason: V3是单一候选改法；本轮B组与已见真实观察只检查行为和有限历史代价，不能证明新样本方向、全市场表现或未来收益。

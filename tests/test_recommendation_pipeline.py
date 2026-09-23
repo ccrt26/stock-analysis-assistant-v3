@@ -335,7 +335,9 @@ def test_context_routes_financials_through_comparable_query_and_never_writes_war
             if dataset=='cash_flow':
                 row.update(c_inf_fr_operate_a=150.0,st_cash_out_act=220.0,
                            n_cashflow_act=-70.0)
-            return pd.DataFrame([row])
+            # Historical vendor revisions can mix Timestamp and text periods.
+            earlier={**row,'report_period':pd.Timestamp('2026-03-31')}
+            return pd.DataFrame([earlier,row])
     monkeypatch.setattr(context,'ResearchWarehouse',Warehouse);monkeypatch.setattr(context,'ResearchQuery',Query)
     def derived(w,feature,day,asof):
         assert day==formation and asof==cutoff
@@ -348,6 +350,7 @@ def test_context_routes_financials_through_comparable_query_and_never_writes_war
     assert result['facts'][code]['equity_daily'][0]['amount']==1000.0
     cash=result['facts'][code]['cash_flow'][0]
     assert (cash['c_inf_fr_operate_a'],cash['st_cash_out_act'],cash['n_cashflow_act'])==(150.0,220.0,-70.0)
+    assert [item['report_period'] for item in result['facts'][code]['cash_flow']]==['2026-03-31','2026-06-30']
     packet=pipeline.build_article_packet(trace=trace,context=result,ts_code=code,
                                          research_handoff=pipeline.handoff_from_trace(trace))
     assert packet['facts']['own']['cash_flow'][0]['n_cashflow_act']==-70.0
