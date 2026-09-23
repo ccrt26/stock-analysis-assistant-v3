@@ -1,0 +1,7 @@
+collected_nodes=12
+executed_nodes=12
+PYTEST_ADDOPTS=unset
+............                                                             [100%]
+12 passed in 0.65s
+
+exit_code=0

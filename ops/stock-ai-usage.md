@@ -109,13 +109,13 @@
 
 同份已知公告用 `python -m stock_analyzer.ops.official_evidence --announcement 元数据.json --as-of 带时区截止 --output-dir 临时目录`，可提供 `--existing-receipt` 或已核验同公告的 `--alternative-url`。优先复用同版原件，下载只在取证函数内使用明确直连。旧公司介绍 `fetch-evidence` 与 receipt 回读合同仍兼容。失败记录 HTTP 状态和诊断，不把错误页当 PDF，也不把取证失败变成模型接替理由。
 
-## 本次推荐文件方式（候选）
+## 正式夜间推荐文件方式（已配置，任务仍禁用）
 
-仅授权运行时使用 run nightly --provider astra --no-fallback --recommendation-authoring-profile astra-files-v1。profile 与禁备用只作用本次，不修改长期配置；恢复沿用 state 保存策略，显式冲突拒绝。新推荐研究及写审为 Astra xhigh，正式复盘保持 Astra high。preopen 不接受这两个参数。正式启用须另行批准，细节见 docs/architecture/normal-recommendation-files.md。
+正式根已设置 `recommendation_authoring_profile=astra-files-v1`；夜间手动与定时命令均显式使用 `run nightly --provider astra --no-fallback --recommendation-authoring-profile astra-files-v1`。每次运行策略仍保存在 state，恢复时显式冲突拒绝。新推荐研究及写审为 Astra xhigh，正式复盘保持 Astra high；preopen 不接受这些参数。夜间 LaunchAgent 保持禁用、未加载，须由用户另行开启。合同细节见 docs/architecture/normal-recommendation-files.md。
 
-## 待复核候选：首次手动运行与供应商恢复
+## 手动夜间运行与供应商恢复
 
-本节是候选操作说明，**仅复核通过并另行批准后才能执行**。用户主动暂停的定时任务保持暂停；手动运行不等于恢复 launchd。
+手动运行只执行当前一轮，定时任务仍保持禁用；不要在同一晚同时手动运行和开启调度。
 
 首次已获批准的手动夜间任务显式使用：
 
@@ -123,8 +123,8 @@
 ./.venv/bin/python tools/stock_ai.py run nightly --provider astra --no-fallback --recommendation-authoring-profile astra-files-v1
 ```
 
-日期由实际 prepare 决定，不把隔离验收的历史 rerun-date 当作今天。该策略仅绑定本任务，不要求修改长期供应商顺序或生产本地配置。研究/交接/作者/审稿/同股核对 xhigh，独立正式复盘及公司介绍 high；需核对实际会话证据，配置值不能证明已执行。新 profile 在同股当前意见核对完成前保留复盘待核对稿，未决不装配完整日报。
+日期由实际 prepare 决定，不把隔离验收的历史 rerun-date 当作今天。该策略仅绑定本任务，不修改长期供应商顺序。研究/交接/作者/审稿/同股核对 xhigh，独立正式复盘及公司介绍 high；需核对实际会话证据，配置值不能证明已执行。新 profile 在同股当前意见核对完成前保留复盘待核对稿，未决不装配完整日报。
 
 真实额度不足时保留原阶段、失败和预算。用户明确确认 Astra 已恢复后，按**原任务同一身份、同一 profile、同一策略**在上面的已有 run 命令加 `--retry-unavailable-provider astra`；原任务使用 rerun-date 时保留其原值，不能另造业务日期。参数只解除已核实的本任务供应商故障 marker，先备份并追加审计，不清空 state、不重选、不删除有效文章。完成/取消、日期或策略不符、数据/合同/业务阻断均不能由它解除。再次供应商失败仍停止；不自动检测额度是否重置。
 
-旧 `--scheduled` 命令不带 `--no-fallback` 时不等价于本次首轮策略。以后是否恢复调度及其策略需单独授权；本节不提供自动恢复动作。
+已安装的 `--scheduled` 命令显式带同一 provider、禁备用与 profile；任务当前仍禁用、未加载。

@@ -1408,6 +1408,23 @@ def run_article_cycle(host, *, packet: dict, materials: dict, directory: Path, s
     counts = state.setdefault('article_cycle_counts', {}).setdefault(
         scope, {'expression': 0, 'clarification': 0})
 
+    def initial_author_already_started() -> bool:
+        """Recover older first-author state without sharing budgets across scopes."""
+        if counts.get('initial') or counts['expression']:
+            return True
+        progress = state.get('article_cycle_progress', {}).get(scope) or {}
+        if progress.get('next_stage') in (f'author-{tag}', f'review-{tag}'):
+            return True
+        for entry in state.get('recommendation_stages', []):
+            if entry.get('stage') != f'author-{tag}' or not entry.get('input'):
+                continue
+            saved_path = Path(entry['input']).parent / f'author-{tag}-result.json'
+            if saved_path.is_file():
+                identity = read_json(saved_path).get('input_identity') or {}
+                if identity.get('run_scope') == run_scope:
+                    return True
+        return False
+
     def record_progress(next_stage):
         progress = state.setdefault('article_cycle_progress', {}).setdefault(scope, {})
         progress.update({'next_stage': next_stage, 'counts': dict(counts),
@@ -1501,23 +1518,31 @@ def run_article_cycle(host, *, packet: dict, materials: dict, directory: Path, s
             prompt = author_prompt(host.PROJECT_ROOT, packet=effective_packet, materials=materials,
                                    prior_article=prior, revision_issues=revision_issues,
                                    issue_resolutions=issue_resolutions or None)
-        if round_index >= 1:
-            if files_mode:
-                reusable = file_cached_result(host, directory, author_stage, file_spec, run_scope, validator,
-                                              resume=config.get('_resume_files') is True)
-            else:
-                identity = stage_input_identity(host, state, author_stage, prompt, provider, config,
-                                                fallback=fallback, contract=AUTHOR_CONTRACT_VERSION,
-                                                run_scope=run_scope)
-                reusable = reusable_stage_result(host, directory, author_stage, identity, provider,
-                                                 fallback=fallback, validate=validator)
-            pending = directory / f'{author_stage}-result.json'
-            continuing = bool(files_mode and config.get('_resume_files') and pending.exists()
-                              and read_json(pending).get('terminal_status') == 'interrupted')
-            if reusable is None and not continuing:
-                if counts['expression'] >= expression_limit:
-                    break
-                counts['expression'] += 1
+        if files_mode:
+            reusable = file_cached_result(host, directory, author_stage, file_spec, run_scope, validator,
+                                          resume=config.get('_resume_files') is True)
+        else:
+            identity = stage_input_identity(host, state, author_stage, prompt, provider, config,
+                                            fallback=fallback, contract=AUTHOR_CONTRACT_VERSION,
+                                            run_scope=run_scope)
+            reusable = reusable_stage_result(host, directory, author_stage, identity, provider,
+                                             fallback=fallback, validate=validator)
+        pending = directory / f'{author_stage}-result.json'
+        pending_result = read_json(pending) if files_mode and pending.exists() else {}
+        continuing = bool(files_mode and config.get('_resume_files')
+                          and pending_result.get('input_identity') == file_stage_identity(
+                              author_stage, file_spec, run_scope)
+                          and pending_result.get('terminal_status') == 'interrupted')
+        if round_index == 0:
+            if reusable is None and not continuing and initial_author_already_started():
+                raise RuntimeError(f'{scope}已有初稿阶段；不能在第0轮再次调用作者，请保留原稿及核对记录')
+            counts['initial'] = 1  # Reserve before a new call; cache and same-session resume do not add calls.
+        elif reusable is None and not continuing:
+            if counts['expression'] >= expression_limit:
+                break
+            counts['expression'] += 1
+        else:
+            counts['expression'] = max(counts['expression'], round_index)
         stages.append(author_stage)
         record_progress(author_stage)
         parsed = validator(article_stage(

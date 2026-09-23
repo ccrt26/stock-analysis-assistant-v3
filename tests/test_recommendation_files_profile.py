@@ -184,7 +184,7 @@ def test_questions_before_review_and_one_clarification_one_revision(harness, dua
         assert result['status'] == 'ready'
         assert [x[0] for x in harness.calls] == ['author', 'clarification', 'author', 'review']
         assert 'rev1' in harness.calls[2][1].name
-        assert list(harness.state['article_cycle_counts'].values())[0] == {'expression': 1, 'clarification': 1}
+        assert list(harness.state['article_cycle_counts'].values())[0] == {'expression': 1, 'clarification': 1, 'initial': 1}
         cycle(harness)
         assert len(harness.calls) == 4
 
@@ -432,7 +432,7 @@ def test_resume_only_existing_interrupted_session(harness, monkeypatch, terminal
         assert cycle(harness,config=config)['status'] == 'ready'
         assert len(harness.calls) == 2
         assert (harness.calls[0][1]/'interrupted-output/partial.md').read_text() == '中断时的部分草稿'
-        assert list(harness.state['article_cycle_counts'].values())[0] == {'expression':0,'clarification':0}
+        assert list(harness.state['article_cycle_counts'].values())[0] == {'expression':0,'clarification':0,'initial':1}
 
 @pytest.mark.parametrize('name,content', [('article.md',''),('questions.json','[]')])
 def test_empty_author_delivery_not_consumed(tmp_path,name,content):

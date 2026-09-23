@@ -97,6 +97,7 @@ def test_one_revision_and_full_recheck(harness):
     assert result['status'] == 'ready'
     assert [r for r, *_ in harness.calls] == ['author', 'review', 'author', 'review']
     assert harness.state['article_cycle_counts']['synthetic:000001.SZ']['expression'] == 1
+    assert harness.state['article_cycle_counts']['synthetic:000001.SZ']['initial'] == 1
 
 
 def test_revision_budget_survives_new_directory(harness):
@@ -108,11 +109,79 @@ def test_revision_budget_survives_new_directory(harness):
     harness.responses[:] = [None, bad, None, bad]
     first = cycle(harness, packet=original_packet())
     assert first['status'] == 'needs_revision'
-    harness.responses[:] = [None, bad]
-    second = cycle(harness, packet=original_packet(), directory=harness.root/'new-directory')
-    assert second['status'] == 'needs_revision'
-    assert [r for r, *_ in harness.calls] == ['author', 'review', 'author', 'review', 'author', 'review']
+    with pytest.raises(RuntimeError, match='不能在第0轮再次调用作者'):
+        cycle(harness, packet=original_packet(), directory=harness.root/'new-directory')
+    assert [r for r, *_ in harness.calls] == ['author', 'review', 'author', 'review']
     assert harness.state['article_cycle_counts']['synthetic:000001.SZ']['expression'] == 1
+
+
+def test_initial_budget_survives_new_directory_and_legacy_state(harness):
+    assert cycle(harness, packet=original_packet())['status'] == 'ready'
+    counts = harness.state['article_cycle_counts']['synthetic:000001.SZ']
+    counts.pop('initial')  # An older saved task did not have the initial marker.
+    harness.state.pop('article_cycle_progress')  # Recover from bound stage evidence as well.
+    with pytest.raises(RuntimeError, match='不能在第0轮再次调用作者'):
+        cycle(harness, packet=original_packet(), directory=harness.root/'new-directory')
+    assert [r for r, *_ in harness.calls] == ['author', 'review']
+
+
+def test_changed_research_cannot_free_rewrite_initial(harness):
+    assert cycle(harness, packet=original_packet())['status'] == 'ready'
+    changed = original_packet()
+    changed['judgment']['selection_reason'] += '；同任务内新增研究结论'
+    with pytest.raises(RuntimeError, match='不能在第0轮再次调用作者'):
+        cycle(harness, packet=changed)
+    assert [r for r, *_ in harness.calls] == ['author', 'review']
+
+
+def test_missing_review_only_completes_review(harness, monkeypatch):
+    original = pipeline.article_stage
+    def stop_before_review(host, state, state_path, directory, stage, *args, **kwargs):
+        if stage == 'review-000001-SZ':
+            raise KeyboardInterrupt()
+        return original(host, state, state_path, directory, stage, *args, **kwargs)
+    monkeypatch.setattr(pipeline, 'article_stage', stop_before_review)
+    with pytest.raises(KeyboardInterrupt):
+        cycle(harness, packet=original_packet())
+    monkeypatch.setattr(pipeline, 'article_stage', original)
+    assert cycle(harness, packet=original_packet())['status'] == 'ready'
+    assert [r for r, *_ in harness.calls] == ['author', 'review']
+
+
+def test_missing_recheck_only_completes_recheck(harness, monkeypatch):
+    issue = dict(quote='连续走弱', problem='漏掉行业条件', instruction='补回条件',
+                 issue_kind='condition', evidence='packet.conditions.text', blocking=True)
+    def first(role, directory):
+        (directory/'output/review.md').write_text('需要补回行业条件。')
+        (directory/'output/review-result.json').write_text(fio.dumps(review(fidelity=[issue])))
+    def recheck(role, directory):
+        pending = json.loads((directory/'input/pending-issue-checks.json').read_text())[0]
+        (directory/'output/review.md').write_text('修订后已核对。')
+        (directory/'output/review-result.json').write_text(fio.dumps(review(checks=[
+            {'issue_id': pending['issue_id'], 'status': 'fixed',
+             'quote': '连续走弱且行业收缩才降低判断。', 'basis': 'packet.conditions.text'}])))
+    harness.responses[:] = [None, first, None, recheck]
+    original = pipeline.article_stage
+    def stop_before_recheck(host, state, state_path, directory, stage, *args, **kwargs):
+        if stage == 'review-rev1-000001-SZ':
+            raise KeyboardInterrupt()
+        return original(host, state, state_path, directory, stage, *args, **kwargs)
+    monkeypatch.setattr(pipeline, 'article_stage', stop_before_recheck)
+    with pytest.raises(KeyboardInterrupt):
+        cycle(harness, packet=original_packet())
+    monkeypatch.setattr(pipeline, 'article_stage', original)
+    assert cycle(harness, packet=original_packet())['status'] == 'ready'
+    assert [r for r, *_ in harness.calls] == ['author', 'review', 'author', 'review']
+    assert harness.state['article_cycle_counts']['synthetic:000001.SZ']['expression'] == 1
+
+
+def test_different_task_scope_has_own_initial_budget(harness):
+    assert cycle(harness, packet=original_packet())['status'] == 'ready'
+    assert cycle(harness, packet=original_packet(), run_scope='other-task',
+                 directory=harness.root/'other-task')['status'] == 'ready'
+    assert [r for r, *_ in harness.calls] == ['author', 'review', 'author', 'review']
+    assert harness.state['article_cycle_counts']['synthetic:000001.SZ']['initial'] == 1
+    assert harness.state['article_cycle_counts']['other-task:000001.SZ']['initial'] == 1
 
 
 def test_changed_contract_rejects_old_stage_cache(harness):

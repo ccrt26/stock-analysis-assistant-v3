@@ -16,7 +16,9 @@ cd "__PROJECT_ROOT__"
 set -a
 source .env.local >/dev/null 2>&1
 set +a
-exec .venv/bin/python tools/stock_ai.py run nightly --scheduled
+export STOCK_AI_PROJECT_ROOT="$PWD"
+export PYTHONPATH="$PWD/src:$PWD/tools"
+exec .venv/bin/python tools/stock_ai.py run nightly --scheduled --provider astra --no-fallback --recommendation-authoring-profile astra-files-v1
     ]]></string>
   </array>
   <key>StartCalendarInterval</key>
