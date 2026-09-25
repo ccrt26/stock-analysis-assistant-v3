@@ -1352,6 +1352,15 @@ def run_scope_key(scope: str, code: str) -> str:
     return f'{scope or "managed"}:{code}'
 
 
+def selection_owner_issues(amendment: dict) -> list[dict]:
+    """Only this stock's selection-owner answers can request article correction."""
+    answers = (amendment.get('owner_answers') or {}).get('selection') or {}
+    answered_ids = {item.get('issue_id') for kind in ('resolutions', 'unresolved')
+                    for item in answers.get(kind, [])}
+    return [issue for issue in amendment.get('revision_issues') or []
+            if issue.get('issue_id') in answered_ids]
+
+
 def _carry_stable_ids(current: list, prior_issues: list) -> None:
     """与前轮quote+problem相同的审稿问题沿用原issue_id；轮次编号变化不重置成新问题。"""
     known = {}
@@ -1405,7 +1414,9 @@ def run_article_cycle(host, *, packet: dict, materials: dict, directory: Path, s
         def issue_resolver(**kwargs):
             return resolve_article_issues(host, allow_research_changes=allow_research_changes,
                                           run_scope=run_scope, clarification_limit=clarification_limit, **kwargs)
-    counts = state.setdefault('article_cycle_counts', {}).setdefault(
+    cycle_counts = state.setdefault('article_cycle_counts', {})
+    scope_preexisting = scope in cycle_counts
+    counts = cycle_counts.setdefault(
         scope, {'expression': 0, 'clarification': 0})
 
     def initial_author_already_started() -> bool:
@@ -1413,16 +1424,21 @@ def run_article_cycle(host, *, packet: dict, materials: dict, directory: Path, s
         if counts.get('initial') or counts['expression']:
             return True
         progress = state.get('article_cycle_progress', {}).get(scope) or {}
-        if progress.get('next_stage') in (f'author-{tag}', f'review-{tag}'):
+        next_stage = str(progress.get('next_stage') or '')
+        if (next_stage.startswith(('author-', 'review-')) and next_stage.endswith(tag)):
             return True
         for entry in state.get('recommendation_stages', []):
-            if entry.get('stage') != f'author-{tag}' or not entry.get('input'):
+            stage = str(entry.get('stage') or '')
+            if not re.fullmatch(rf'author(?:-rev\d+)?-{re.escape(tag)}', stage) or not entry.get('input'):
                 continue
-            saved_path = Path(entry['input']).parent / f'author-{tag}-result.json'
+            saved_path = Path(entry['input']).parent / f'{stage}-result.json'
             if saved_path.is_file():
                 identity = read_json(saved_path).get('input_identity') or {}
                 if identity.get('run_scope') == run_scope:
                     return True
+            elif (Path(entry['input']).parent.resolve() == directory.resolve() or scope_preexisting):
+                # A started old author with a missing receipt is not a fresh task.
+                return True
         return False
 
     def record_progress(next_stage):
@@ -1440,8 +1456,8 @@ def run_article_cycle(host, *, packet: dict, materials: dict, directory: Path, s
     effective_packet = packet
     amendment_path = directory / 'current-opinion-amendment.json'
     amendment = read_json(amendment_path) if files_mode and amendment_path.exists() else {}
-    prior = amendment.get('prior_article')
-    revision_issues = amendment.get('revision_issues')
+    prior = None
+    revision_issues = None
     article = None
     article_path = None
     review = None
@@ -1504,7 +1520,100 @@ def run_article_cycle(host, *, packet: dict, materials: dict, directory: Path, s
         if (effective_packet.get('effective_packet') or {}).get('unapplied'):
             return result('needs_research')
 
-    for round_index in range(1 + expression_limit):
+    max_rounds = 1 + clarification_limit + expression_limit
+    round_index = 0
+    has_complete_draft = False
+    revisions_seen = 0
+    selection_issues = selection_owner_issues(amendment)
+    owner_issues = list(selection_issues)
+    owner_issues.extend(r for r in (prior_resolutions or [])
+                        if r.get('source') == 'research-repair'
+                        and str(r.get('author_instruction') or '').strip())
+    owner_confirmed = (files_mode and allow_research_changes and bool(owner_issues)
+                       and (bool(amendment.get('owner_answers'))
+                            or any(r.get('source') == 'research-repair' for r in owner_issues)))
+    author_owner_answers = amendment.get('owner_answers') if selection_issues else None
+    if owner_confirmed:
+        if not initial_author_already_started():
+            raise RuntimeError('负责人更正缺少同任务原作者阶段，不能作为新初稿生成')
+        correction_key = file_io.digest(file_io.dumps({
+            'packet': effective_packet, 'owner_issues': owner_issues,
+            'owner_answers': amendment.get('owner_answers'),
+            'issue_resolutions': issue_resolutions}))
+        progress = state.setdefault('article_cycle_progress', {}).setdefault(scope, {})
+        plan = progress.get('correction_plan') or {}
+        history = []
+        for path in directory.glob('*-result.json'):
+            stage = path.name.removesuffix('-result.json')
+            match = re.fullmatch(rf'author(?:-rev(\d+))?-{re.escape(tag)}', stage)
+            if not match:
+                continue
+            saved = read_json(path)
+            old_identity = saved.get('input_identity') or {}
+            if old_identity.get('run_scope') != run_scope:
+                continue
+            old_spec = old_identity.get('file_spec') or {}
+            if old_spec.get('contract') != file_io.CONTRACTS['author'] or old_spec.get('role') != 'author':
+                raise RuntimeError('原作者阶段合同不符，不能自动使用旧稿修订')
+            try:
+                old_stock = json.loads(old_spec['files']['identity.json'])
+            except (KeyError, TypeError, ValueError) as exc:
+                raise RuntimeError('原作者阶段身份不完整，不能自动修订') from exc
+            if old_stock != packet['identity']:
+                raise RuntimeError('原作者阶段股票或时点身份不同，不能自动修订')
+            if (plan.get('input_key') == correction_key
+                    and type(plan.get('base_round')) is int
+                    and int(match.group(1) or 0) > plan['base_round']
+                    and saved.get('terminal_status') == 'interrupted'):
+                # The same correction stage resumes in the loop below; it is not a new sample.
+                continue
+            raw = file_cached_result(host, directory, stage, old_spec, run_scope,
+                                     file_io.parse_author)
+            if raw is None:
+                raise RuntimeError('原作者阶段没有可核实的完成稿，不能自动修订')
+            history.append((int(match.group(1) or 0), stage, file_io.parse_author(raw), old_spec))
+        history.sort(key=lambda item: item[0])
+        if not history or history[0][0] != 0 or any(
+                later[0] != earlier[0] + 1 for earlier, later in zip(history, history[1:])):
+            raise RuntimeError('原作者阶段链不完整，不能自动新增作者会话')
+        for entry in state.get('recommendation_stages', []):
+            stage = str(entry.get('stage') or '')
+            if (re.fullmatch(rf'author(?:-rev\d+)?-{re.escape(tag)}', stage)
+                    and entry.get('input') and Path(entry['input']).parent.resolve() == directory.resolve()
+                    and not (directory / f'{stage}-result.json').exists()):
+                raise RuntimeError('旧作者已启动但缺阶段回执，不能自动重开')
+        if plan.get('input_key') == correction_key:
+            base_round = plan.get('base_round')
+            if type(base_round) is not int or base_round not in {item[0] for item in history}:
+                raise RuntimeError('负责人更正的原稿阶段证据缺失，不能自动重开')
+        else:
+            latest_spec = history[-1][3]
+            if ((amendment.get('owner_answers') and latest_spec['files'].get(
+                    'current-opinion-resolution.json') == file_io.dumps(amendment['owner_answers']))
+                    or (prior_resolutions and latest_spec['files'].get('packet.json') ==
+                        file_io.dumps(effective_packet) and latest_spec['files'].get(
+                            'issue-resolutions.json') == file_io.dumps(issue_resolutions))):
+                raise RuntimeError('已有本次负责人更正作者阶段但缺恢复计划，不能自动重开')
+            base_round = history[-1][0]
+            progress['correction_plan'] = {'input_key': correction_key, 'base_round': base_round}
+            host.save_state(state_path, state)
+        prior = next((item[2]['article'] for item in reversed(history)
+                      if item[0] <= base_round and item[2]['article']
+                      and not item[2]['research_issues']), None)
+        if amendment.get('prior_article') and (
+                not prior or amendment['prior_article'].strip() != prior.strip()):
+            raise RuntimeError('负责人更正所指原稿与已核实作者原稿不同')
+        completed_articles = [item for item in history if item[2]['article']
+                              and not item[2]['research_issues']]
+        counts['expression'] = max(0, len(completed_articles) - 1)
+        revisions_seen = max(0, sum(item[0] <= base_round for item in completed_articles) - 1)
+        has_complete_draft = prior is not None
+        revision_issues = owner_issues
+        round_index = base_round + 1
+        if round_index >= max_rounds:
+            raise RuntimeError(f'{scope}作者阶段次数已用完；保留原稿和负责人更正记录')
+
+    while round_index < max_rounds:
         author_stage = f'author-{tag}' if round_index == 0 else f'author-rev{round_index}-{tag}'
         file_spec = None
         validator = file_io.parse_author if files_mode else parse_author_output
@@ -1512,7 +1621,7 @@ def run_article_cycle(host, *, packet: dict, materials: dict, directory: Path, s
             file_spec = file_io.stage_spec(host.PROJECT_ROOT, 'author', effective_packet, materials,
                 prior_article=prior, revision_issues=revision_issues,
                 issue_resolutions=issue_resolutions or None,
-                current_opinion_resolution=amendment.get('owner_answers'))
+                current_opinion_resolution=author_owner_answers)
             prompt = file_spec['request']
         else:
             prompt = author_prompt(host.PROJECT_ROOT, packet=effective_packet, materials=materials,
@@ -1538,11 +1647,15 @@ def run_article_cycle(host, *, packet: dict, materials: dict, directory: Path, s
                 raise RuntimeError(f'{scope}已有初稿阶段；不能在第0轮再次调用作者，请保留原稿及核对记录')
             counts['initial'] = 1  # Reserve before a new call; cache and same-session resume do not add calls.
         elif reusable is None and not continuing:
-            if counts['expression'] >= expression_limit:
-                break
-            counts['expression'] += 1
-        else:
-            counts['expression'] = max(counts['expression'], round_index)
+            if has_complete_draft and counts['expression'] >= expression_limit:
+                raise RuntimeError(f'{scope}唯一文章修订机会已用完；保留已写原稿和核对记录')
+        if reusable is None and not continuing and pending_result:
+            raise RuntimeError(f'{author_stage}已有不同输入的作者阶段，不能覆盖或重新抽样')
+        if reusable is None and not continuing and any(
+                entry.get('stage') == author_stage and entry.get('input')
+                and Path(entry['input']).parent.resolve() == directory.resolve()
+                for entry in state.get('recommendation_stages', [])):
+            raise RuntimeError(f'{author_stage}已有启动记录但缺可用回执，不能重新抽样')
         stages.append(author_stage)
         record_progress(author_stage)
         parsed = validator(article_stage(
@@ -1573,18 +1686,27 @@ def run_article_cycle(host, *, packet: dict, materials: dict, directory: Path, s
             save_json(directory / 'issue-resolutions.json', issue_resolutions)
             if resolved['blocking'] or (effective_packet.get('effective_packet') or {}).get('unapplied'):
                 return result('needs_research')
-            if round_index >= expression_limit:
+            if round_index + 1 >= max_rounds:
                 return result('needs_revision')
-            prior = article
+            prior = article or prior
             revision_issues = resolved['resolutions']
+            round_index += 1
             continue
+        if article:
+            if has_complete_draft:
+                revisions_seen += 1
+                counts['expression'] = max(counts['expression'], revisions_seen)
+            elif round_index > 0:
+                # Older runs charged a question-only follow-up as an article revision.
+                counts['expression'] = 0
+            has_complete_draft = True
         review_stage = f'review-{tag}' if round_index == 0 else f'review-rev{round_index}-{tag}'
         stages.append(review_stage)
         record_progress(review_stage)
         review_spec = (file_io.stage_spec(host.PROJECT_ROOT, 'review', effective_packet, materials,
             article=article, issue_resolutions=issue_resolutions or None,
             pending_issue_checks=pending_checks or None,
-            current_opinion_resolution=amendment.get('owner_answers')) if files_mode else None)
+            current_opinion_resolution=author_owner_answers) if files_mode else None)
         if files_mode:
             file_io.validate_shared_material(file_spec, review_spec)
             saved_author = read_json(directory / f'{author_stage}-result.json')
@@ -1677,7 +1799,7 @@ def run_article_cycle(host, *, packet: dict, materials: dict, directory: Path, s
                 return result('execution_unverified')
             save_json(directory / 'issues-open.json', still_open or [])
             return result('ready')
-        if round_index >= expression_limit:
+        if round_index + 1 >= max_rounds:
             save_json(directory / 'issues-open.json', blocking + [
                 {'issue_id': r.get('issue_id'), 'problem': r.get('author_instruction'),
                  'quote': '（研究澄清处理）'} for r in author_actions if r.get('issue_id')])
@@ -1701,6 +1823,7 @@ def run_article_cycle(host, *, packet: dict, materials: dict, directory: Path, s
                                                  'problem': item.get('problem'),
                                                  'quote': item.get('quote') or ''}
         pending_checks = list(merged.values())
+        round_index += 1
     save_json(directory / 'issues-open.json', pending_checks or [])
     return result('needs_revision')
 
@@ -2012,7 +2135,13 @@ def _author_articles(host, state, state_path, directory, config, provider, root,
                 old = read_json(cache_path)
                 before = (old.get('input') or {}).get('packet', {}).get('source_refs', {}).get('trace_sha256')
                 after = packet.get('source_refs', {}).get('trace_sha256')
-                if before != after and same_stock_material(old.get('input'), cycle_input):
+                amendment_path = articles_dir / code / 'current-opinion-amendment.json'
+                amendment = read_json(amendment_path) if amendment_path.exists() else {}
+                same_input = old.get('input') == cycle_input
+                trace_only = before != after and same_stock_material(old.get('input'), cycle_input)
+                if not selection_owner_issues(amendment) and (same_input or trace_only):
+                    if (old.get('result') or {}).get('status') != 'ready':
+                        raise ValueError('Saved article cache is not ready')
                     file_io.validate_research_packet(packet)
                     for result_file in (articles_dir / code).glob('*-result.json'):
                         saved_stage = read_json(result_file)
@@ -2024,10 +2153,11 @@ def _author_articles(host, state, state_path, directory, config, provider, root,
                                 if file_io.digest((Path(saved_stage['stage_directory']) / name).read_bytes()) != digest:
                                     raise ValueError('Saved stage output changed')
                     statuses[code] = old['result']
-                    save_json(articles_dir / code / f'trace-rebind-{after[:16]}.json',
-                              {'previous_trace': before, 'current_trace': after,
-                               'basis': 'All stock inputs match except trace_sha256',
-                               'input': cycle_input, 'reviewed_trace': before})
+                    if trace_only:
+                        save_json(articles_dir / code / f'trace-rebind-{after[:16]}.json',
+                                  {'previous_trace': before, 'current_trace': after,
+                                   'basis': 'All stock inputs match except trace_sha256',
+                                   'input': cycle_input, 'reviewed_trace': before})
                     continue
             statuses[code] = run_article_cycle(
                 host, packet=packet, materials=material,

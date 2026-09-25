@@ -125,6 +125,28 @@ def test_initial_budget_survives_new_directory_and_legacy_state(harness):
     assert [r for r, *_ in harness.calls] == ['author', 'review']
 
 
+def test_old_started_author_without_receipt_does_not_reopen(harness):
+    assert cycle(harness, packet=original_packet())['status'] == 'ready'
+    harness.state['article_cycle_counts']['synthetic:000001.SZ'].pop('initial')
+    harness.state.pop('article_cycle_progress')
+    (harness.root / 'article/author-000001-SZ-result.json').unlink()
+    with pytest.raises(RuntimeError, match='不能在第0轮再次调用作者'):
+        cycle(harness, packet=original_packet(), directory=harness.root / 'changed-directory')
+    assert [r for r, *_ in harness.calls] == ['author', 'review']
+    assert cycle(harness, packet=original_packet(), run_scope='new-task',
+                 directory=harness.root / 'new-task')['status'] == 'ready'
+    assert [r for r, *_ in harness.calls] == ['author', 'review', 'author', 'review']
+    another_stock = original_packet()
+    another_stock['identity'].update(name='另一公司', ts_code='000002.SZ')
+    def another_author(role, directory):
+        (directory / 'output/article.md').write_text(
+            '# 另一公司（000002.SZ）\n\n研究判断、风险和改变条件。\n')
+    harness.responses[:] = [another_author]
+    assert cycle(harness, packet=another_stock,
+                 directory=harness.root / 'another-stock')['status'] == 'ready'
+    assert [r for r, *_ in harness.calls] == ['author', 'review'] * 3
+
+
 def test_changed_research_cannot_free_rewrite_initial(harness):
     assert cycle(harness, packet=original_packet())['status'] == 'ready'
     changed = original_packet()
@@ -132,6 +154,147 @@ def test_changed_research_cannot_free_rewrite_initial(harness):
     with pytest.raises(RuntimeError, match='不能在第0轮再次调用作者'):
         cycle(harness, packet=changed)
     assert [r for r, *_ in harness.calls] == ['author', 'review']
+
+
+def test_owner_confirmed_change_uses_one_revision_of_original(harness):
+    first = cycle(harness, packet=original_packet(), allow_research_changes=True)
+    assert first['status'] == 'ready'
+    changed = original_packet()
+    changed['judgment']['selection_reason'] += '；负责人确认补充条件解释'
+    article_dir = harness.root / 'article'
+    pipeline.save_json(article_dir / 'current-opinion-amendment.json', {
+        'prior_article': first['article'],
+        'revision_issues': [{'issue_id': 'owner-1', 'ts_code': IDENTITY['ts_code'],
+                             'problem': '原说明缺少负责人确认的条件解释'}],
+        'owner_answers': {'selection': {'resolutions': [
+            {'issue_id': 'owner-1', 'author_instruction': '补充已确认的条件解释'}], 'unresolved': []}}})
+    def revise(role, directory):
+        assert (directory / 'input/prior-article.md').read_text() == first['article']
+        assert '负责人确认补充条件解释' in (directory / 'input/packet.json').read_text()
+        assert 'owner-1' in (directory / 'input/revision-issues.json').read_text()
+        (directory / 'output/article.md').write_text(BODY + '\n补充负责人确认的条件解释。\n')
+    harness.responses[:] = [revise]
+    second = cycle(harness, packet=changed, allow_research_changes=True)
+    assert second['status'] == 'ready'
+    assert '补充负责人确认的条件解释。' in second['article']
+    assert [r for r, *_ in harness.calls] == ['author', 'review', 'author', 'review']
+    assert harness.state['article_cycle_counts']['synthetic:000001.SZ']['expression'] == 1
+    assert cycle(harness, packet=changed, allow_research_changes=True)['article'] == second['article']
+    assert len(harness.calls) == 4
+    changed_again = original_packet()
+    changed_again['judgment']['selection_reason'] += '；负责人又提出另一项更正'
+    pipeline.save_json(article_dir / 'current-opinion-amendment.json', {
+        'prior_article': second['article'],
+        'revision_issues': [{'issue_id': 'owner-2', 'ts_code': IDENTITY['ts_code'],
+                             'problem': '再次更正'}],
+        'owner_answers': {'selection': {'resolutions': [
+            {'issue_id': 'owner-2', 'author_instruction': '再次更正'}], 'unresolved': []}}})
+    with pytest.raises(RuntimeError, match='修订机会已用完'):
+        cycle(harness, packet=changed_again, allow_research_changes=True)
+    assert len(harness.calls) == 4
+
+
+def test_owner_revision_resumes_same_interrupted_session(harness, monkeypatch):
+    first = cycle(harness, packet=original_packet(), allow_research_changes=True)
+    changed = original_packet()
+    changed['judgment']['selection_reason'] += '；负责人已更正'
+    pipeline.save_json(harness.root / 'article/current-opinion-amendment.json', {
+        'prior_article': first['article'],
+        'revision_issues': [{'issue_id': 'owner-1', 'ts_code': IDENTITY['ts_code'],
+                             'problem': '需要按负责人结论修改正文'}],
+        'owner_answers': {'selection': {'resolutions': [
+            {'issue_id': 'owner-1', 'author_instruction': '按更正后的研究写'}], 'unresolved': []}}})
+    original = stock_ai.run_agent
+    def interrupt(route, prompt, final, events, timeout, config):
+        assert 'author-rev1-' in Path(config['_cwd']).name
+        events.write_text(json.dumps({'type': 'thread.started', 'thread_id': 'owner-revision-session'}) + '\n')
+        (Path(config['_cwd']) / 'output/partial.md').write_text('未完成修订')
+        raise KeyboardInterrupt()
+    monkeypatch.setattr(stock_ai, 'run_agent', interrupt)
+    with pytest.raises(KeyboardInterrupt):
+        cycle(harness, packet=changed, allow_research_changes=True)
+    def resumed(*args):
+        if 'author-rev1-' in Path(args[-1]['_cwd']).name:
+            assert args[-1]['_resume_session_id'] == 'owner-revision-session'
+        return original(*args)
+    monkeypatch.setattr(stock_ai, 'run_agent', resumed)
+    result = cycle(harness, packet=changed, allow_research_changes=True,
+                   config={'recommendation_authoring_profile': fio.PROFILE, '_resume_files': True})
+    assert result['status'] == 'ready'
+    assert [r for r, *_ in harness.calls] == ['author', 'review', 'author', 'review']
+    assert harness.state['article_cycle_counts']['synthetic:000001.SZ']['expression'] == 1
+
+
+def test_research_owner_repair_uses_original_as_one_revision(harness):
+    issue = dict(ts_code=IDENTITY['ts_code'], quote='原研究', problem='条件证据要由负责人复核',
+                 evidence='原研究条件', needed='负责人核对后给出明确修改')
+    def asks_owner(role, directory):
+        verdict = review(ready=False)
+        verdict['research_issues'] = [issue]
+        (directory / 'output/review.md').write_text('有研究问题交回负责人。')
+        (directory / 'output/review-result.json').write_text(fio.dumps(verdict))
+    def block_for_owner(**kwargs):
+        item = kwargs['issues'][0]
+        blocked = {'issue_id': item['issue_id'], 'type': 'requires_research_change',
+                   'changes_original_judgment': True, 'blocking': True,
+                   'author_instruction': '交原研究负责人核实'}
+        return {'resolutions': [blocked], 'blocking': [blocked], 'clarification_executed': False}
+    harness.responses[:] = [None, asks_owner]
+    first = cycle(harness, packet=original_packet(), allow_research_changes=True,
+                  issue_resolver=block_for_owner)
+    assert first['status'] == 'needs_research' and first['article']
+    changed = original_packet()
+    changed['judgment']['selection_reason'] += '；研究负责人已确认更正'
+    owner_result = [{'issue_id': first['research_issues'][0]['issue_id'],
+                     'source': 'research-repair', 'type': 'retained_unknown',
+                     'author_instruction': '按负责人核实后的条件解释改写原稿',
+                     'changes_original_judgment': False}]
+    def revise(role, directory):
+        assert (directory / 'input/prior-article.md').read_text() == first['article']
+        assert '研究负责人已确认更正' in (directory / 'input/packet.json').read_text()
+        assert '按负责人核实后' in (directory / 'input/revision-issues.json').read_text()
+        (directory / 'output/article.md').write_text(BODY + '\n按更正后的条件解释。\n')
+    harness.responses[:] = [revise]
+    second = cycle(harness, packet=changed, allow_research_changes=True,
+                   prior_resolutions=owner_result)
+    assert second['status'] == 'ready' and '按更正后的条件解释。' in second['article']
+    assert [r for r, *_ in harness.calls] == ['author', 'review', 'author', 'review']
+    assert harness.state['article_cycle_counts']['synthetic:000001.SZ']['expression'] == 1
+
+
+def test_questions_only_first_article_still_has_one_correction(harness):
+    question = dict(ts_code=IDENTITY['ts_code'], quote='原研究', problem='条件原义未清楚',
+                    evidence='原研究条件', needed='请澄清条件原义')
+    issue = dict(quote='条件', problem='正文漏了撤回动作', instruction='补回撤回动作',
+                 issue_kind='condition', evidence='packet.conditions.text', blocking=True)
+    def ask(role, directory):
+        (directory / 'output/questions.json').write_text(fio.dumps([question]))
+    def clarify(role, directory):
+        item = json.loads((directory / 'input/issues.json').read_text())[0]
+        (directory / 'output/resolution.json').write_text(fio.dumps({
+            'resolutions': [{'issue_id': item['issue_id'], 'type': 'retained_unknown',
+                             'author_instruction': '保留原条件，对未核实的细节不作新增推断。',
+                             'changes_original_judgment': False}], 'unresolved': []}))
+    def bad_review(role, directory):
+        (directory / 'output/review.md').write_text('遗漏撤回动作。')
+        (directory / 'output/review-result.json').write_text(fio.dumps(review(fidelity=[issue])))
+    def revise(role, directory):
+        assert '业务事实支持原选择' in (directory / 'input/prior-article.md').read_text()
+        (directory / 'output/article.md').write_text(BODY + '\n理由失效时撤回。\n')
+    def recheck(role, directory):
+        pending = json.loads((directory / 'input/pending-issue-checks.json').read_text())[0]
+        assert '理由失效时撤回。' in (directory / 'input/article.md').read_text()
+        (directory / 'output/review.md').write_text('修订已复核。')
+        (directory / 'output/review-result.json').write_text(fio.dumps(review(checks=[
+            {'issue_id': pending['issue_id'], 'status': 'fixed',
+             'quote': '理由失效时撤回。', 'basis': 'packet.conditions.text'}])))
+    harness.responses[:] = [ask, clarify, None, bad_review, revise, recheck]
+    result = cycle(harness, packet=original_packet())
+    assert result['status'] == 'ready'
+    assert '理由失效时撤回。' in result['article']
+    assert [r for r, *_ in harness.calls] == [
+        'author', 'clarification', 'author', 'review', 'author', 'review']
+    assert harness.state['article_cycle_counts']['synthetic:000001.SZ']['expression'] == 1
 
 
 def test_missing_review_only_completes_review(harness, monkeypatch):

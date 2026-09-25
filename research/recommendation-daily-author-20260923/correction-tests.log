@@ -1,0 +1,69 @@
+collected_nodes=12
+executed_nodes=12
+PYTEST_ADDOPTS=unset
+........F...                                                             [100%]
+=================================== FAILURES ===================================
+_________________ test_missing_recheck_only_completes_recheck __________________
+
+harness = namespace(calls=[('author', PosixPath('/private/var/folders/yn/_wdrwmr91fz6tmr69my24wz40000gn/T/pytest-of-ccrt/pytest-...ar/folders/yn/_wdrwmr91fz6tmr69my24wz40000gn/T/pytest-of-ccrt/pytest-1532/test_missing_recheck_only_comp0/state.json'))
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10f648dd0>
+
+    def test_missing_recheck_only_completes_recheck(harness, monkeypatch):
+        issue = dict(quote='连续走弱', problem='漏掉行业条件', instruction='补回条件',
+                     issue_kind='condition', evidence='packet.conditions.text', blocking=True)
+        def first(role, directory):
+            (directory/'output/review.md').write_text('需要补回行业条件。')
+            (directory/'output/review-result.json').write_text(fio.dumps(review(fidelity=[issue])))
+        def recheck(role, directory):
+            pending = json.loads((directory/'input/pending-issue-checks.json').read_text())[0]
+            (directory/'output/review.md').write_text('修订后已核对。')
+            (directory/'output/review-result.json').write_text(fio.dumps(review(checks=[
+                {'issue_id': pending['issue_id'], 'status': 'fixed',
+                 'quote': '连续走弱且行业收缩才降低判断。', 'basis': 'packet.conditions.text'}])))
+        harness.responses[:] = [None, first, None, recheck]
+        original = pipeline.article_stage
+        def stop_before_recheck(host, state, state_path, directory, stage, *args, **kwargs):
+            if stage == 'review-rev1-000001-SZ':
+                raise KeyboardInterrupt()
+            return original(host, state, state_path, directory, stage, *args, **kwargs)
+        monkeypatch.setattr(pipeline, 'article_stage', stop_before_recheck)
+        with pytest.raises(KeyboardInterrupt):
+            cycle(harness, packet=original_packet())
+        monkeypatch.setattr(pipeline, 'article_stage', original)
+>       assert cycle(harness, packet=original_packet())['status'] == 'ready'
+E       AssertionError: assert 'needs_revision' == 'ready'
+E
+E         - ready
+E         + needs_revision
+
+tests/test_daily_free_author.py:336: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_daily_free_author.py::test_missing_recheck_only_completes_recheck
+1 failed, 11 passed in 0.60s
+
+exit_code=1
+
+After fixing cached-revision recheck branch; same 12 nodes:
+............                                                             [100%]
+12 passed in 0.92s
+
+final_exit_code=0
+
+Final code after exhausted-stage reason; same 12 nodes:
+............                                                             [100%]
+12 passed in 0.79s
+
+final_code_exit=0
+
+Final selected nodes updated to include the normal production author entry and monitor-only cache case.
+collect-only: 12 tests collected in 0.30s
+............                                                             [100%]
+12 passed in 0.80s
+final_selected_exit=0
+syntax_and_diff_check_exit=0
+
+Final revision also covers missing cycle-ready cache with a monitor-only amendment.
+collect-only: 12 tests collected in 0.65s
+............                                                             [100%]
+12 passed in 0.98s
+final_selected_exit=0

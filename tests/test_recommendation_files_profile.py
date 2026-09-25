@@ -160,7 +160,7 @@ def test_note_binding_rejects_wrong_original(harness, change):
 
 @pytest.mark.parametrize('dual', [False, True])
 @pytest.mark.parametrize('unresolved', [False, True])
-def test_questions_before_review_and_one_clarification_one_revision(harness, dual, unresolved):
+def test_questions_before_review_and_one_clarification_first_draft(harness, dual, unresolved):
     def ask(role, directory):
         assert role == 'author'
         (directory/'output/questions.json').write_text(fio.dumps([QUESTION]))
@@ -184,7 +184,7 @@ def test_questions_before_review_and_one_clarification_one_revision(harness, dua
         assert result['status'] == 'ready'
         assert [x[0] for x in harness.calls] == ['author', 'clarification', 'author', 'review']
         assert 'rev1' in harness.calls[2][1].name
-        assert list(harness.state['article_cycle_counts'].values())[0] == {'expression': 1, 'clarification': 1, 'initial': 1}
+        assert list(harness.state['article_cycle_counts'].values())[0] == {'expression': 0, 'clarification': 1, 'initial': 1}
         cycle(harness)
         assert len(harness.calls) == 4
 
@@ -405,6 +405,23 @@ def test_production_author_entry_uses_same_files_cycle_without_freezing(harness)
     assert section == (harness.calls[-1][1]/'input/article.md').read_text()
     assert unchanged == trace
     assert not list(root.glob('**/research-trace-*.json'))
+    pipeline.save_json(directory/'articles'/stock['ts_code']/'current-opinion-amendment.json', {
+        'prior_article': section,
+        'revision_issues': [{'issue_id':'monitor-only', 'ts_code':stock['ts_code'],
+                             'problem':'复盘负责人更正了本日复盘意见'}],
+        'owner_answers': {'monitor': {'resolutions': [
+            {'issue_id':'monitor-only', 'author_instruction':'只修改复盘意见'}], 'unresolved': []}}})
+    repeated, same_trace = pipeline._author_articles(stock_ai, harness.state, harness.state_path,
+        directory, {'recommendation_authoring_profile': PROFILE}, 'glm', root, trace,
+        pipeline.identity(trace), fallback=True, repair_limit=0)
+    assert repeated == section and same_trace == trace
+    assert [x[0] for x in harness.calls] == ['author','review']
+    (directory/'articles'/stock['ts_code']/'cycle-ready.json').unlink()
+    resumed, same_trace = pipeline._author_articles(stock_ai, harness.state, harness.state_path,
+        directory, {'recommendation_authoring_profile': PROFILE}, 'glm', root, trace,
+        pipeline.identity(trace), fallback=True, repair_limit=0)
+    assert resumed == section and same_trace == trace
+    assert [x[0] for x in harness.calls] == ['author','review']
 
 @pytest.mark.parametrize('terminal', [False, True])
 def test_resume_only_existing_interrupted_session(harness, monkeypatch, terminal):
