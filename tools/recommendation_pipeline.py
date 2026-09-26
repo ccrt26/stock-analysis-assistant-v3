@@ -1862,7 +1862,7 @@ def run_stage(host, state: dict, state_path: Path, directory: Path, stage: str,
     prompt_path = directory / f'{stem}-input.md'
     prompt_path.write_text(prompt)
     files_mode = config.get('_file_stage') is True
-    profile_stage = files_mode or (file_io.enabled(config) and stage in ('research', 'research-repair', 'research-contract-repair', 'current-opinion-check', 'current-opinion-recheck', 'current-opinion-owner-selection'))
+    profile_stage = files_mode or config.get('_astra_recommendation_profile') is True or (file_io.enabled(config) and stage in ('research', 'research-repair', 'research-contract-repair', 'current-opinion-check', 'current-opinion-recheck', 'current-opinion-owner-selection'))
     if profile_stage:
         provider, fallback = 'astra', False
         config = {**config, '_astra_recommendation_profile': True}

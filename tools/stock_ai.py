@@ -2293,6 +2293,11 @@ def nightly_run_policy(args, config, state, today, *, new_task: bool = True):
     effective['recommendation_authoring_profile'] = policy['recommendation_authoring_profile']
     effective['_no_fallback'] = policy['no_fallback']
     effective['_resume_files'] = bool(saved)
+    effort = policy.get('astra_reasoning_effort')
+    if effort not in (None, 'xhigh') or (effort and policy['provider'] != 'astra'):
+        raise ValueError('未知或不匹配的本任务 Astra 档位')
+    if effort == 'xhigh':
+        effective['_astra_recommendation_profile'] = True
     if policy['no_fallback']:
         state['provider_order'] = [policy['provider']]
     return effective, policy

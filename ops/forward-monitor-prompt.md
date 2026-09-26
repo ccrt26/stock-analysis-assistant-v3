@@ -2,7 +2,7 @@
 
 本 Prompt 仅用于 `run_policy.monitor_review_policy=state-change-v1` 的新任务。旧已开始任务由启动器只读 `ops/forward-monitor-legacy-prompt.md`，不得在同一任务并行采用两套写法。本步骤属于现有18:45晚间任务及正常手动入口，不创建新任务。managed 模式由现有独立复盘会话承担，不重新选股、不调用其他模型、不生成公司介绍或网页；外层继续负责正式合并日报与展示。
 
-先读取 `.agents/skills/reviewing-stock-recommendations/SKILL.md`。其三态、结束原因、资料缺口、episode、节点和来源要求为本次活动业务合同。写法只读 prepare 输出 `input_file` 中所选的 `00_阅读指南.md`、`01_状态变化复盘_范文与注意事项.md`、`02_简单复盘_范文与注意事项.md` 全文，每任务各一次；文件内容内嵌于输入索引并带来源，不能只看到键名就声称已读。虚构教学数字不可成为实际规则。不读旧节点六项/普通详评四项范文。
+先读取 `.agents/skills/reviewing-stock-recommendations/SKILL.md`。其三态、结束原因、资料缺口、episode、节点和来源要求为本次活动业务合同。写法只读 prepare 输出 `input_file` 中所选的 `00_阅读指南.md`、`01_状态变化复盘_范文与注意事项.md`、`02_简单复盘_范文与注意事项.md` 全文，每任务各一次；文件内容内嵌于输入索引并带来源，不能只看到键名就声称已读。两篇分别为历史报告编辑和匿名虚构教学，均不是本股研究证据，示例数字不可成为实际规则。不读旧节点六项/普通详评四项范文。
 
 ## 1. 冻结输入与全覆盖
 
@@ -17,7 +17,7 @@ selection prepare 已确定 formation_date、action_date、带时区的 selectio
 
 读取返回的 `snapshot_file` 与 `input_file`，核对两者日期、as_of、策略一致。input-index 是紧凑供料，原 snapshot 是事实权威；当判断受重要公告影响时据索引读取正式原件或可靠摘录。市场资料只分析一次，行业和同股资料共用；每个 `daily_review_episode_ids` 均必须作出本日判断或明确无法可靠判断，不只看“提醒股”。完整旧条件和风险不得截断；价格路径用原确定性累计值与近期数据，不逐股读全部60日日线。需要时按原件索引定向查阅，不链接不可读位置。
 
-原已结束 episode 的普通日不进入 AI 日评；`required_final_review_episode_ids` 中仅欠 D20 的早停记录用 `internal_only` 填简短结论，不重新激活。一次任务同版 snapshot/已存账本/报告直接复用，未完成只补缺，不重扫已完成股票。若缺关键事实，不能把未知改成“今日确认继续”；上次三态及判断日期如实保留。
+原已结束 episode 的普通日不进入 AI 日评；`previous_tracking_stop` 仅证明同 episode 旧正式 live 已停止，不补造历史三态；`required_final_review_episode_ids` 中仅欠 D20 的早停记录用 `internal_only` 填简短结论，不重新激活。一次任务同版 snapshot/已存账本/报告直接复用，未完成只补缺，不重扫已完成股票。若缺关键事实，不能把未知改成“今日确认继续”；上次三态及判断日期如实保留。
 
 ## 2. 一份判断与正文
 
@@ -27,15 +27,15 @@ selection prepare 已确定 formation_date、action_date、带时区的 selectio
 
 - 状态未变、首次登记或今日资料不足：`review_kind=brief`。同股选最新仍跟踪 episode 的账本 `current_review` 写唯一短正文；其他 episode 的 `current_review=null`。重要新消息、风险或当前参与意见变化仍写清。缺资料时标上次判断日期，不能宣称今日已经确认不变。
 - 任一 episode 真实从 `follow↔wait` 或 `follow/wait→ended`：变化股相关行 `review_kind=regular_detail`，其他未变 episode 仍为 `brief`；该股所有账本 `current_review=null`，唯一变化说明写在报告 alert 的 `stock_review`。正文必须区分不同推荐日期；真实变化超过8只也全部入报告。
-- 已结束的 episode 只欠原 D20：`review_kind=internal_only`，`tracking_state=ended`，保留原结束原因，`current_review=null`、`current_opportunity=null`；`final_twenty_day_review` 和原价格结果留内部，不写公开文章。
+- 已结束的 episode 只欠原 D20：`review_kind=internal_only`，`tracking_state=ended`，保留原结束原因，`current_review=null`、`current_opportunity=null`；`final_twenty_day_review` 和原价格结果留内部，不写公开文章。存在 `previous_tracking_stop` 时，原 `reason` 原样保留为 `tracking_decision_reason`，日期和明确的结束原因沿原记录；不得通过 brief 绕过。
 
 初次没有有效三态不伪造变化。跟踪中出现数据缺口可设 `tracking_state=null`，但 `current_assessment=insufficient_evidence`，操作上继续检查，不把资料故障等同于稳定、等待或失败。`ended` 不能回到 `follow/wait`。正常 D20 默认 `ended + observation_complete + complete_observation`，简明说明结果；原目标提前达到不提前结束或抬目标，已明确批准的 D25/D30 延长沿用且 D20冻结。`thesis_invalidated` 要有原条件确认或足以否定原主要上涨依据的可信事实，不能单靠下跌/未达目标；`not_executable` 要有确认无法按原条件参与的证据。结束不等于卖出，也不宣称未来不会涨。
 
-节点 D1/D3/D5/D10/D20/D25/D30 的事实、路径指标及本日简短判断在原 snapshot/账本/报告归档互相引用；节点到来不自动转态或写长文。D20 固定结案必填，早停也不能漏；晚补只用原 D20 窗口及当时可得解释事实，缺失保持 unknown。避免在公开日报从 final 字段追加结案长文。
+节点 D1/D3/D5/D10/D20/D25/D30 的事实、路径指标及本日简短判断在原 snapshot/账本/报告归档互相引用；节点到来不自动转态或写长文。D20 固定结案必填，早停也不能漏；晚补只用原 D20 窗口及当时可得解释事实，缺失保持 unknown。若 `final_review_delivery_only=true`，只原样复用输入的 `frozen_twenty_day_review` 并补缺失保存/装配，不重新研究其结论；缺失报告不等于缺失结案对象。避免在公开日报从 final 字段追加结案长文。
 
 ## 3. 保存与同股核对
 
-完成全体判断和唯一正文后，同一执行者逐股核对时间、原风险与完整条件、关键数字来源、重要公告正文、前后态及结束原因；待核的事实只留下待核，不编买卖门槛、确认时长、价格或来源。然后保存：
+完成全体判断和唯一正文后，同一执行者按输入指南通读实际公开正文，检查事实对判断的意义和下一观察点是否说清，不用登记/标签代替解释，不强制字数或段数。同时逐股核对时间、原风险与完整条件、关键数字来源、重要公告正文、前后态及结束原因；待核的事实只留下待核，不编买卖门槛、确认时长、价格或来源。然后保存：
 
 ```bash
 ./.venv/bin/python -m stock_analyzer.ops.forward_monitor record-daily-formal-reviews \

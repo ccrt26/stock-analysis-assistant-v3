@@ -1,0 +1,13 @@
+Exact set: test-nodes.txt (12 nodes, no parametrized expansion).
+Commands: python -m pytest --collect-only -q <each node from test-nodes.txt>
+          python -m pytest -q --tb=short <the same 12 nodes>
+
+Collection 1: exit 4, tools import missing in new test fixture; no tests executed.
+Collection 2 after fixture import: 12 tests collected, exit 0.
+Baseline ecb0eb6: 11 failed, 1 passed, exit 1.
+Confirmed defects: T09 kept all 3 completed episodes pending; T04 rejected a real same-episode legacy live stop; T06 accepted brief bypass. Two baseline failures also exposed incomplete test data, corrected without weakening production contracts.
+After repair: 8 failed, 4 passed, exit 1; cutoff was read from wrong level (fixed to snapshot), and test material roots/metadata markers needed correction.
+Next: 5 failed, 7 passed, exit 1; old synthetic fixtures lacked episode analysis_date and mock freeze output. Corrected fixtures, no production validation relaxation.
+Final exact set: 12 passed in 1.29s, exit 0.
+
+Repair verification used 0 real business model sessions. All model/process boundaries in T10 are fake. No whole-repository tests, old 18-test set, model verify or nightly smoke run.

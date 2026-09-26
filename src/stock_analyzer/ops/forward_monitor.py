@@ -615,7 +615,7 @@ def prepare_forward_monitor(
         analysis_date,
     )
     previous_daily_reviews, previous_live_reviews, _ = (
-        _daily_review_history(monitor_dir, analysis_date)
+        _daily_review_history(monitor_dir, analysis_date, as_of=as_of)
     )
     last_detailed_reviews = _last_detailed_review_dates(
         monitor_dir,
@@ -794,6 +794,11 @@ def prepare_forward_monitor(
                 ),
                 previous_daily_formal_review=(
                     previous_daily_reviews.get(episode_id)
+                ),
+                previous_tracking_stop=(latest_live or {}).get("_tracking_stop"),
+                frozen_twenty_day_review_source=(
+                    {key: final_history[episode_id][key] for key in ("analysis_date", "as_of")}
+                    if episode_id in final_history else None
                 ),
                 last_detailed_review_date=(
                     last_detailed.isoformat() if last_detailed else None
@@ -1036,6 +1041,12 @@ def build_state_change_input(snapshot: dict[str, Any], project_root: Path) -> di
             "action_date": item.get("action_date"), "day_number": item.get("day_number"),
             "checkpoint": item.get("checkpoint"), "tracking_status": item.get("tracking_status"),
             "previous_tracking_state": _previous_tracking_state(item),
+            "previous_tracking_stop": _previous_tracking_stop(item, as_of=snapshot.get("as_of")),
+            "frozen_twenty_day_review": item.get("frozen_twenty_day_review"),
+            "frozen_twenty_day_review_source": item.get("frozen_twenty_day_review_source"),
+            "final_review_delivery_only": bool(
+                item.get("final_review_pending") and item.get("frozen_twenty_day_review") is not None
+            ),
             "previous_tracking_date": previous.get("_tracking_state_date") or previous.get("_analysis_date"),
             "previous_judgment": {key: previous.get(key) for key in (
                 "current_assessment", "tracking_decision", "tracking_decision_reason", "view_change_reason",
@@ -1705,6 +1716,30 @@ def _previous_tracking_state(episode: Mapping[str, Any]) -> str | None:
     return value if value in {"follow", "wait", "ended"} else None
 
 
+
+def _previous_tracking_stop(episode: Mapping[str, Any], *, as_of: Any) -> dict[str, Any] | None:
+    """Same-episode formal live lifecycle evidence, not an inferred historical tri-state."""
+    stop = episode.get("previous_tracking_stop")
+    if not isinstance(stop, dict) or (
+        stop.get("episode_id") != episode.get("episode_id")
+        or stop.get("review_origin") != "live"
+        or stop.get("tracking_decision") not in {"stop_active_tracking", "complete_observation"}
+        or not stop.get("reason")
+    ):
+        return None
+    try:
+        day = date.fromisoformat(str(stop.get("analysis_date")))
+        current_day = date.fromisoformat(str(episode.get("analysis_date")))
+        stamp = _as_datetime(stop.get("as_of"))
+        cutoff = _as_datetime(as_of)
+    except (TypeError, ValueError):
+        return None
+    if (day >= current_day or stamp is None or cutoff is None or stamp > cutoff
+            or stop.get("source") != f"daily-formal-reviews-{day.isoformat()}.json"):
+        return None
+    return stop
+
+
 def _validate_state_change_ledger(
     snapshot: dict[str, Any], ledger: DailyFormalReviewLedgerV1,
     episodes: dict[str, dict[str, Any]],
@@ -1714,7 +1749,9 @@ def _validate_state_change_ledger(
         episode = episodes[review.episode_id]
         previous = _previous_tracking_state(episode)
         current = review.tracking_state
-        if previous == "ended" and current != "ended":
+        stopped = _previous_tracking_stop(episode, as_of=snapshot.get("as_of"))
+        already_ended = previous == "ended" or stopped is not None
+        if already_ended and current != "ended":
             raise ValueError("ended episode cannot revive; a new recommendation needs a new episode")
         if current is None and review.current_assessment != "insufficient_evidence":
             raise ValueError("unknown tracking state requires insufficient evidence")
@@ -1727,11 +1764,21 @@ def _validate_state_change_ledger(
         if review.review_kind != expected_kind:
             raise ValueError("review kind must match the recorded state transition")
         if internal:
-            if (not episode.get("final_review_pending") or previous != "ended"
+            if (not episode.get("final_review_pending") or not already_ended
                     or review.final_twenty_day_review is None
                     or review.current_review is not None or review.current_opportunity is not None):
                 raise ValueError("internal-only review is for an ended episode's pending D20 final")
-        elif previous == "ended":
+            if stopped is not None:
+                if review.tracking_decision_reason != stopped["reason"]:
+                    raise ValueError("internal final must preserve the original stop reason")
+                end_reason = stopped.get("tracking_end_reason")
+                if end_reason is None and stopped.get("current_assessment") == "contradicted":
+                    end_reason = "thesis_invalidated"
+                if end_reason is None and stopped["tracking_decision"] == "complete_observation":
+                    end_reason = "observation_complete"
+                if end_reason is not None and review.tracking_end_reason != end_reason:
+                    raise ValueError("internal final must preserve the original stop category")
+        elif already_ended:
             raise ValueError("ended episode has no ordinary daily review")
         if current in {"follow", "wait", None} and review.tracking_decision != "keep_active_tracking":
             raise ValueError("follow, wait and missing evidence remain active for checking")
@@ -3869,6 +3916,8 @@ def _detail_report_bodies(
 def _daily_review_history(
     monitor_dir: Path,
     analysis_date: date,
+    *,
+    as_of: datetime | None = None,
 ) -> tuple[
     dict[str, dict[str, Any]],
     dict[str, dict[str, Any]],
@@ -3896,6 +3945,10 @@ def _daily_review_history(
             )
         except (OSError, ValueError):
             continue
+        if (ledger.analysis_date != ledger_date
+                or ledger.as_of.date() > analysis_date
+                or (as_of is not None and ledger.as_of > as_of)):
+            continue
         if any(review.current_review is None for review in ledger.reviews):
             report_bodies[ledger_date] = _detail_report_bodies(
                 monitor_dir,
@@ -3904,6 +3957,7 @@ def _daily_review_history(
             )
         for review in ledger.reviews:
             payload = review.model_dump(mode="json")
+            payload["_analysis_date"] = ledger_date.isoformat()
             if payload["current_review"] is None:
                 payload["current_review"] = report_bodies[ledger_date].get(
                     review.episode_id
@@ -3920,9 +3974,21 @@ def _daily_review_history(
                 payload["_tracking_state_date"] = state_date
                 exit_date = previous_live.get("_tracking_exit_date")
                 exit_reason = previous_live.get("_tracking_exit_reason")
-                if review.tracking_decision == "stop_active_tracking":
-                    exit_date = ledger_date.isoformat()
-                    exit_reason = review.tracking_decision_reason
+                stop = previous_live.get("_tracking_stop")
+                if stop is None and review.tracking_decision in {"stop_active_tracking", "complete_observation"}:
+                    stop = {
+                        "episode_id": review.episode_id,
+                        "analysis_date": ledger_date.isoformat(), "as_of": ledger.as_of.isoformat(),
+                        "source": path.name, "review_origin": "live",
+                        "tracking_decision": review.tracking_decision,
+                        "reason": review.tracking_decision_reason,
+                        "tracking_end_reason": review.tracking_end_reason,
+                        "current_assessment": review.current_assessment,
+                        "current_weak_or_failed_link": review.current_weak_or_failed_link,
+                    }
+                if exit_date is None and stop is not None:
+                    exit_date = stop["analysis_date"]
+                    exit_reason = stop["reason"]
                 latest_live[review.episode_id] = {
                     **payload,
                     "_analysis_date": ledger_date.isoformat(),
@@ -3930,6 +3996,7 @@ def _daily_review_history(
                     "_tracking_state_date": state_date,
                     "_tracking_exit_date": exit_date,
                     "_tracking_exit_reason": exit_reason,
+                    "_tracking_stop": stop,
                 }
             if review.final_twenty_day_review is not None:
                 frozen.setdefault(
@@ -4143,6 +4210,19 @@ def final_review_history(
             and (as_of is None or report_stamp <= as_of)
             and (ledger is None or report_stamp == ledger.as_of)
         )
+        state_change = (
+            (ledger is not None and ledger.monitor_review_policy == STATE_CHANGE_POLICY)
+            or (isinstance(report, dict) and report.get("monitor_review_policy") == STATE_CHANGE_POLICY)
+        )
+        if state_change:
+            try:
+                validated_report = DailyForwardMonitorReportV2.model_validate(report)
+            except ValueError:
+                valid_report = False
+            else:
+                valid_report = bool(valid_report and ledger is not None
+                    and ledger.monitor_review_policy == STATE_CHANGE_POLICY
+                    and validated_report.monitor_review_policy == STATE_CHANGE_POLICY)
         daily = {r.episode_id: r for r in ledger.reviews} if ledger else {}
         for review in daily.values():
             if review.final_twenty_day_review is not None:
@@ -4153,8 +4233,9 @@ def final_review_history(
                     "report_delivered": False,
                 })
         if valid_report and ledger is not None and ledger.monitor_review_policy == STATE_CHANGE_POLICY:
+            # New policy delivery includes a saved internal final, with or without public prose.
             for review in daily.values():
-                if review.review_kind == "internal_only" and review.final_twenty_day_review is not None:
+                if review.final_twenty_day_review is not None:
                     item = history.get(review.episode_id)
                     if item is not None and item["final_twenty_day_review"] == review.final_twenty_day_review.model_dump(mode="json"):
                         item["report_delivered"] = True
