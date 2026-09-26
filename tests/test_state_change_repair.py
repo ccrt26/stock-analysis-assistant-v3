@@ -387,6 +387,26 @@ def test_T10_resume_reuses_research_and_authors_and_task_xhigh_is_real(harness,m
         files.fio.read_output(stage_dir,identity['file_spec'],pipeline.parse_review_output)
     output.write_bytes(originals['output/review-result.json'])
 
+    # A completed reviewer may name its evidenced fix "resolved"; preserve its verdict.
+    article_input=(stage_dir/'input/article.md').read_text()
+    quote=next(line for line in article_input.splitlines() if line.strip())
+    original=files.review(True,checks=[dict(issue_id='R00S01',status='resolved',quote=quote,basis='逐项核对原始事实及当前正文')])
+    output.write_text(files.fio.dumps(original))
+    originals={str(p.relative_to(stage_dir)):p.read_bytes() for p in (stage_dir/'output').glob('*') if p.is_file()}
+    current=json.loads(cached_path.read_text());current.update(terminal_status='failed',failed_output_hashes={k:files.fio.digest(v) for k,v in originals.items()})
+    dump(cached_path,current)
+    raw=pipeline.file_cached_result(*cache_args)
+    expected=deepcopy(original);expected['issue_checks'][0]['status']='fixed'
+    assert json.loads(raw)==expected and expected['ready'] is True and quote in article_input
+    assert all((stage_dir/k).read_bytes()==v for k,v in originals.items())
+    assert pipeline.file_cached_result(*cache_args)==raw and len(harness.calls)==calls_before
+    for field,value in [('status','unknown_status'),('quote',''),('basis','')]:
+        invalid=deepcopy(original);invalid['issue_checks'][0][field]=value
+        output.write_text(files.fio.dumps(invalid))
+        with pytest.raises(ValueError,match='issue_checks|basis'):
+            files.fio.read_output(stage_dir,identity['file_spec'],pipeline.parse_review_output)
+    output.write_bytes(originals['output/review-result.json'])
+
     # Explicitly blocking dispositions may repeat in unresolved without becoming resolved.
     issues=[dict(files.QUESTION,issue_id='R00S01')];packet=files.bound_packet();material=files.material()
     scope='synthetic-blocking-resume';recovery_dir=directory/'blocked-clarification'

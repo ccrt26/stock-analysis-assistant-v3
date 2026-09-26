@@ -285,6 +285,9 @@ def read_output(directory, spec, review_validator=None, clarification_validator=
                 if issue.get('issue_kind') not in ('condition', 'metric_basis', 'fact', 'inference', 'reasoning_gap', 'expression') or type(issue.get('blocking')) is not bool:
                     raise ValueError('审稿问题缺 issue_kind 或布尔 blocking')
         for check in value['issue_checks']:
+            if check.get('status') == 'resolved':
+                check['status'] = 'fixed'
+                normalized = True
             if not str(check.get('basis') or '').strip():
                 raise ValueError('审稿问题核销缺依据 basis')
         if normalized:

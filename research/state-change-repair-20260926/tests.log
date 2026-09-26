@@ -20,3 +20,7 @@ Repair verification used 0 real business model sessions. All model/process bound
 第二项具体续跑阻断的定向补充：
 原T10验证requires_research_change且blocking=true的唯一同号处理/未决记录可原样恢复，经真实resolve_article_issues仍阻塞，原稿不变、无新调用或澄清计数；真正已解决冲突、例外重复ID与非true blocking仍拒绝。
 仅执行同一T10：1 passed in 1.03s，退出码0。唯一测试节点仍12，未重跑全集。真实模型验收0次。
+
+第三项具体续跑阻断的定向补充：
+原 T10 增加 resolved→fixed 的原稿恢复，ready=true/引句/依据保留、原文件不变、无新调用；未知状态、缺引句和缺依据仍拒绝。
+仅执行同一 T10：1 passed in 0.96s，退出码 0。唯一测试节点仍 12，未重跑全集。真实模型验收 0 次。
