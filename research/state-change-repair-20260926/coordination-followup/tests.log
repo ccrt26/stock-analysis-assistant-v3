@@ -1,0 +1,36 @@
+$ ./.venv/bin/python -m pytest --collect-only -q tests/test_owner_handoff_resume.py
+tests/test_owner_handoff_resume.py::test_T01_original_midway_answer_keeps_unresolved_and_rejects_bad_identity
+tests/test_owner_handoff_resume.py::test_T02_resume_original_selection_only_calls_missing_monitor
+tests/test_owner_handoff_resume.py::test_T03_real_reply_closes_current_work_keeps_original_unresolved
+tests/test_owner_handoff_resume.py::test_T04_self_unknown_wrong_scope_or_monitor_unresolved_cannot_close
+tests/test_owner_handoff_resume.py::test_T05_complete_resumes_owners_before_any_author_or_check
+tests/test_owner_handoff_resume.py::test_T06_finished_monitor_resumes_without_call_but_bad_input_rejected
+tests/test_owner_handoff_resume.py::test_T07_only_changed_article_revises_original_and_handoff_not_reresearched
+tests/test_owner_handoff_resume.py::test_T08_second_check_and_revision_budget_never_reset
+tests/test_owner_handoff_resume.py::test_T09_other_episode_and_history_not_editable
+tests/test_owner_handoff_resume.py::test_T10_latest_quotes_and_final_semantics_required_before_record
+tests/test_owner_handoff_resume.py::test_T11_complete_real_record_freeze_and_report_from_fake_boundaries
+tests/test_owner_handoff_resume.py::test_T12_owner_monitor_actual_config_xhigh_and_original_action_date
+
+12 tests collected in 0.50s
+exit_code=0
+
+$ ./.venv/bin/python -m pytest -q tests/test_owner_handoff_resume.py
+............                                                             [100%]
+12 passed in 4.82s
+exit_code=0
+
+Scope: same 12 fake-model nodes only; repair verification real business sessions=0.
+
+Runtime-format follow-up (same 12 nodes):
+$ ./.venv/bin/python -m pytest --collect-only -q tests/test_owner_handoff_resume.py
+12 tests collected in 1.52s
+exit_code=0
+$ ./.venv/bin/python -m pytest -q tests/test_owner_handoff_resume.py
+............ [100%]
+12 passed in 4.81s
+exit_code=0
+$ ./.venv/bin/python -m py_compile tools/recommendation_pipeline.py tests/test_owner_handoff_resume.py
+exit_code=0
+$ git diff --check
+exit_code=0

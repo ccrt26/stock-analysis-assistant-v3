@@ -49,5 +49,71 @@
     "resolution_kind": "参与范围及等待条件为实质改判；入选和力度不变；滚动三日三级行业撤回不变并补充论证；20日观察期恢复已有解释",
     "decision": "保留300725.SZ及原优先级；按原事实修正本日新参与报价条件，保留本次滚动三日三级行业撤回。",
     "trace_sha256": "5ccaea1a8260f57860bc039a9ff670ad41226b677581f00a669f2f06d88c8103"
+  },
+  "monitor_answer": {
+    "resolutions": [
+      {
+        "issue_id": "CO-1",
+        "ts_code": "300725.SZ",
+        "episode_id": "formal:2026-09-22:300725.SZ:selected",
+        "decision": "复盘侧已处理。研究负责人修订后，55.12元首个等待边界的分歧已消除。保留当前有条件考虑及5—10日向上展望。恢复已有解释：将5—10日展望写入唯一正文。补充论证：明确当前意见面向2026年9月24日，并解释报价边界和近期同行比较的用途。实质修正：明确53.50—55.12元含两端为当前报价范围；当前撤回比较由固定起点二级医疗服务改为滚动三日三级医疗研发外包。旧推荐仍按原条件、目标及期限评价，不改变历史判断或D20。",
+        "evidence": [
+          {
+            "source": "ledger",
+            "pointer": "/reviews/33/current_opportunity/participation_reason",
+            "quote": "9月22日最高55.12元、收53.50元，9月23日最高55.00元、收54.35元，最新收盘继续提高但未越过近期高点；低于53.50元时这一最新推进已回吐，高于55.12元则已超出原价附近对既有推进的判断，需要按新价格重评。"
+          },
+          {
+            "source": "ledger",
+            "pointer": "/reviews/33/current_opportunity/change_condition",
+            "quote": "50.32元为9月21日最大上涨日收盘，价格失守检验其后推进是否失去；三级同业滚动窗口检验当前业务对应板块的近期传播，避免以较早累计优势掩盖近期落后。"
+          }
+        ],
+        "author_instruction": "复盘唯一正文及当前解释已修改于账本/reviews/33；report没有药石条目，保持原样。推荐作者按研究负责人当前交接更新推荐文章：53.50—55.12元含两端为有条件参与范围，范围外先等待完整收盘和同行表现重判，盘中返回不自动恢复；50.32元完整收盘与滚动三日三级行业比较须同时失效才撤回。推荐20日观察期与复盘5—10日延续展望分别说明，不再使用修改前的57.23元首个等待边界。",
+        "changes_original_judgment": true
+      }
+    ],
+    "unresolved": [
+      {
+        "issue_id": "CO-1",
+        "ts_code": "300725.SZ",
+        "episode_id": "formal:2026-09-22:300725.SZ:selected",
+        "problem": "复盘侧当前意见和唯一正文已处理；推荐作者仍须按selection修订交接更新并核对实际推荐正文。本方未修改或验收推荐文章，不能宣布两份实际正文已全部一致。这是作者交付待办，不是将复盘自身研究未知交给对方关闭。"
+      }
+    ],
+    "handoff_replies": [
+      {
+        "from_owner": "selection",
+        "issue_id": "CO-1",
+        "ts_code": "300725.SZ",
+        "episode_id": "formal:2026-09-22:300725.SZ:selected",
+        "source_quote": "选股侧已修正，但尚不能认定双方当前正文一致。复盘负责人仍须确认当前意见适用行动日，回应53.50—55.12元报价范围，并决定当前新参与是否采用本次滚动三日三级行业条件；若保留固定起点二级行业条件，须给出具体目的和事实解释，在唯一正文写清5—10日观察期。推荐正文也尚待按修订交接更新。本任务未修改获准两个文件以外的文章或复盘材料。",
+        "scope": "monitor_confirmation",
+        "result": "handled",
+        "explanation": "已确认同版handoff中CO-1为selection_resolved_monitor_and_author_pending，绑定trace_sha256=5ccaea1a8260f57860bc039a9ff670ad41226b677581f00a669f2f06d88c8103，表示选股侧对此问题已作决定。本方依据原截止价格与行业事实完成行动日、报价范围、滚动窗口及期限解释，未机械取双方条件交集。旧固定起点二级行业条件保留用于原推荐评价；当前条件修改不构成原episode状态变化。作者待办保留在unresolved，原selection未决原文未改。",
+        "evidence": [
+          {
+            "source": "ledger",
+            "pointer": "/reviews/33/current_review",
+            "quote": "以下据9月23日18:30（上海时间）资料，面向9月24日，展望随后5—10个交易日能否继续推进。"
+          },
+          {
+            "source": "ledger",
+            "pointer": "/reviews/33/current_opportunity/participation_reason",
+            "quote": "面向2026年9月24日，以9月23日收盘54.35元为参照，将本日新参与报价范围明确为53.50—55.12元（含两端）。"
+          },
+          {
+            "source": "ledger",
+            "pointer": "/reviews/33/current_opportunity/change_condition",
+            "quote": "当前撤回条件改为：完整交易日收盘低于50.32元，同时截至该日滚动最近三个完整交易日的复权累计收益不再高于申万2021三级医疗研发外包851563.SI当时有效且同窗口可比成员的等权累计收益，撤回本日当前参与意见；两项须同时成立，盘中跌破不能替代完整日收盘。"
+          },
+          {
+            "source": "ledger",
+            "pointer": "/reviews/33/current_opportunity/change_condition",
+            "quote": "旧9月22日推荐仍按完整日收盘低于50.32元、且自9月21日收盘起不再强于二级医疗服务801156.SI的原同时条件评价，原条件、目标、期限及D20不变；它不再用作本日当前新参与的撤回比较。"
+          }
+        ]
+      }
+    ]
   }
 }

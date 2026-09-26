@@ -2439,8 +2439,11 @@ def validate_owner_answer(raw, issues, *, require_identity=False):
     for r in answer['resolutions']:
         evidence = r.get('evidence')
         evidence_ok = (isinstance(evidence, str) and bool(evidence.strip())) or (
-            isinstance(evidence, list) and bool(evidence) and
-            all(isinstance(item, str) and item.strip() for item in evidence))
+            isinstance(evidence, list) and bool(evidence) and (
+                all(isinstance(item, str) and item.strip() for item in evidence)
+                or all(isinstance(item, dict) and item.get('source') in ('ledger', 'report')
+                       and all(isinstance(item.get(k), str) and item[k].strip()
+                               for k in ('pointer', 'quote')) for item in evidence)))
         if not evidence_ok or not all(isinstance(r.get(k), str) and r[k].strip() for k in ('decision', 'author_instruction')):
             raise ValueError('负责人答复缺少处理/证据/作者指引')
     if not isinstance(answer.get('handoff_replies', []), list):
@@ -2486,10 +2489,42 @@ def _owner_original_delivery(host, directory, delivered, owner_input):
     return raw
 
 
+def _validate_owner_current_evidence(refs, draft, issue):
+    code = issue['ts_code']
+    for ref in refs:
+        try:
+            source_name, pointer, quote = ref['source'], ref['pointer'], ref['quote']
+            parts = pointer.strip('/').split('/')
+            value = draft[source_name]
+            for part in parts:
+                part = part.replace('~1', '/').replace('~0', '~')
+                value = value[int(part)] if isinstance(value, list) else value[part]
+            if source_name == 'ledger' and parts[0] == 'reviews':
+                row = draft['ledger']['reviews'][int(parts[1])]
+                owned = row['episode_id'] == issue['episode_id'] and parts[2] in ('current_review', 'current_opportunity', 'outlook_reason_plain_language', 'view_change_reason')
+            elif source_name == 'report' and parts[0] == 'alerts':
+                alert = draft['report']['alerts'][int(parts[1])]
+                owned = alert['ts_code'] == code and (parts[2:] == ['stock_review'] or (
+                    parts[2] == 'episode_reviews' and alert['episode_reviews'][int(parts[3])]['episode_id'] == issue['episode_id'] and parts[4:] == ['current_review']))
+            else:
+                owned = False
+            if not owned or not isinstance(value, str) or not isinstance(quote, str) or not quote.strip() or quote not in value:
+                raise ValueError('依据不是该episode当前正文/意见原句')
+        except (KeyError, IndexError, TypeError, ValueError) as exc:
+            raise ValueError('前方待办答复依据无法定位到本日实际内容') from exc
+
+
 def owner_handoff_status(answers, questions, handoff, draft, *, trace_sha256):
     """Derive outstanding coordination work; never rewrite owners' historical answers."""
     for owner, answer in answers.items():
         validate_owner_answer(json.dumps(answer), questions.get(owner, []))
+        issues = {i['issue_id']: i for i in questions.get(owner, [])}
+        for item in answer.get('resolutions', []):
+            refs = item.get('evidence')
+            if isinstance(refs, list) and refs and isinstance(refs[0], dict):
+                if owner != 'monitor':
+                    raise ValueError('只有复盘负责人可引用本日复盘字段作为处理依据')
+                _validate_owner_current_evidence(refs, draft, issues[item['issue_id']])
     selection = answers.get('selection', {})
     monitor = answers.get('monitor', {})
     source = {i['issue_id']: i for i in selection.get('unresolved', [])}
@@ -2527,27 +2562,7 @@ def owner_handoff_status(answers, questions, handoff, draft, *, trace_sha256):
         refs = reply.get('evidence')
         if not str(reply.get('explanation') or '').strip() or not isinstance(refs, list) or not refs:
             raise ValueError('前方待办答复缺少本日依据')
-        for ref in refs:
-            try:
-                source_name, pointer, quote = ref['source'], ref['pointer'], ref['quote']
-                parts = pointer.strip('/').split('/')
-                value = draft[source_name]
-                for part in parts:
-                    part = part.replace('~1', '/').replace('~0', '~')
-                    value = value[int(part)] if isinstance(value, list) else value[part]
-                if source_name == 'ledger' and parts[0] == 'reviews':
-                    row = draft['ledger']['reviews'][int(parts[1])]
-                    owned = row['episode_id'] == issue['episode_id'] and parts[2] in ('current_review', 'current_opportunity', 'outlook_reason_plain_language', 'view_change_reason')
-                elif source_name == 'report' and parts[0] == 'alerts':
-                    alert = draft['report']['alerts'][int(parts[1])]
-                    owned = alert['ts_code'] == code and (parts[2:] == ['stock_review'] or (
-                        parts[2] == 'episode_reviews' and alert['episode_reviews'][int(parts[3])]['episode_id'] == issue['episode_id'] and parts[4:] == ['current_review']))
-                else:
-                    owned = False
-                if not owned or not isinstance(value, str) or not isinstance(quote, str) or not quote.strip() or quote not in value:
-                    raise ValueError('依据不是该episode当前正文/意见原句')
-            except (KeyError, IndexError, TypeError, ValueError) as exc:
-                raise ValueError('前方待办答复依据无法定位到本日实际内容') from exc
+        _validate_owner_current_evidence(refs, draft, issue)
         handled.append({'issue_id': key, 'ts_code': code, 'episode_id': issue['episode_id'],
                         'source_unresolved': copy.deepcopy(source[key]), 'source_handoff_issue': copy.deepcopy(source_issues[0]),
                         'reply': copy.deepcopy(reply)})

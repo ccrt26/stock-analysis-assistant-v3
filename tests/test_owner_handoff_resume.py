@@ -165,6 +165,9 @@ def resolve(c):
 def test_T01_original_midway_answer_keeps_unresolved_and_rejects_bad_identity():
     q=[ORIGINAL['question']];raw=ORIGINAL['selection_answer']
     assert p.validate_owner_answer(json.dumps(raw),q)==raw and raw['unresolved']
+    monitor=ORIGINAL['monitor_answer']
+    assert p.validate_owner_answer(json.dumps(monitor),q,require_identity=True)==monitor
+    assert monitor['unresolved']  # A real current owner unresolved item is not historical success.
     for kind in ('resolutions','unresolved'):
         bad=copy.deepcopy(raw);bad[kind]*=2
         with pytest.raises(ValueError):p.validate_owner_answer(json.dumps(bad),q)
@@ -189,6 +192,12 @@ def test_T03_real_reply_closes_current_work_keeps_original_unresolved(coord):
     status=p.owner_handoff_status(answers,c.questions,p.selection_handoff(c.directory,trace,strict=True),draft,trace_sha256=p.trace_input_sha256(trace))
     assert not status['unresolved'] and status['handled'][0]['issue_id']=='CO-1'
     assert answers['selection']['unresolved']==c.answer['unresolved']
+    typed=copy.deepcopy(answers)
+    typed['monitor']['resolutions'][0]['evidence']=typed['monitor']['handoff_replies'][0]['evidence']
+    assert not p.owner_handoff_status(typed,c.questions,p.selection_handoff(c.directory,trace,strict=True),draft,trace_sha256=p.trace_input_sha256(trace))['unresolved']
+    typed['monitor']['resolutions'][0]['evidence'][0]['quote']='不存在的当前字段原句'
+    with pytest.raises(ValueError,match='依据'):
+        p.owner_handoff_status(typed,c.questions,p.selection_handoff(c.directory,trace,strict=True),draft,trace_sha256=p.trace_input_sha256(trace))
     assert c.h.state['current_opinion']['business_unresolved'] is False
     assert not (c.directory/'accepted-recommendation.json').exists()
 
