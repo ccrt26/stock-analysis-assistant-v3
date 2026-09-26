@@ -8,13 +8,15 @@ from pathlib import Path
 
 SECTIONS = ("今天的市场情况", "正式推荐股票的今日复盘", "目前仍开放的正式推荐股票数量", "今天明确推荐的股票")
 GROUPS = ("关键节点复盘", "今日深入复盘", "今日简评")
+STATE_CHANGE_GROUPS = ("状态变化复盘", "简单复盘")
 
 
-def review_blocks(text: str) -> list[str]:
+def review_blocks(text: str, policy: str | None = None) -> list[str]:
+    groups = STATE_CHANGE_GROUPS if policy == "state-change-v1" else GROUPS
     headings = list(re.finditer(r"^## ([^\n]+)$", text, re.M))
     blocks, names = [], []
     for i, heading in enumerate(headings):
-        name = next((g for g in GROUPS if heading.group(1).startswith(g)), None)
+        name = next((g for g in groups if heading.group(1).startswith(g)), None)
         if name is None:
             continue
         if name in names:
@@ -22,7 +24,7 @@ def review_blocks(text: str) -> list[str]:
         names.append(name)
         end = headings[i + 1].start() if i + 1 < len(headings) else len(text)
         blocks.append(text[heading.start():end].strip())
-    if names != sorted(names, key=GROUPS.index):
+    if names != sorted(names, key=groups.index):
         raise ValueError("复盘源稿分组顺序不正确")
     return blocks
 
@@ -47,8 +49,11 @@ def source_sections(root: Path, formation: str, *, as_of: str | None = None) -> 
         if report.as_of != cutoff or ledger.as_of != cutoff or datetime.fromisoformat(snapshot["as_of"]) != cutoff:
             raise ValueError("复盘报告、账本、快照与本轮截止不一致")
     expected = _render_markdown(report, snapshot, ledger)
-    blocks = review_blocks(saved)
-    if blocks != review_blocks(expected):
+    policy = report.monitor_review_policy
+    if policy != ledger.monitor_review_policy or policy != snapshot.get("monitor_review_policy"):
+        raise ValueError("复盘策略在报告、账本和快照之间不一致")
+    blocks = review_blocks(saved, policy)
+    if blocks != review_blocks(expected, policy):
         raise ValueError("复盘源 Markdown 与正式 JSON/日评账本不一致；保留源稿，先核对冲突")
     episodes = {str(e.get("episode_id")): e for e in snapshot.get("episodes", [])}
     counts = _render_tracking_counts(snapshot, episodes, ledger)

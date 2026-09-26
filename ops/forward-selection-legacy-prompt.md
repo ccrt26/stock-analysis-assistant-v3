@@ -5,7 +5,7 @@
 
 ## 启动器分工与手动执行
 
-`tools/stock_ai.py` 的 managed 新研究模式以外层说明为准（article-v1 分工）：选股研究会话只做选股研究，交付完整 pending trace、市场说明正文（含独立标题行 `## 今天的市场情况`）和 `selection-handoff.json`（市场正文与逐股研究取舍、证据引用、比较对象、改变条件及来源），暂不执行选股 record/record-trace、公司介绍或网页同步。正式复盘由外层另起的独立复盘会话按 `ops/forward-monitor-prompt.md` 执行，选股会话不做复盘；逐股最终推荐文章由作者会话按单股研究包与写作材料生成，选股会话不写四分区整篇日报、不写推荐正文。总控在少量候选验证时即可按代码/截止/类别调用 `recommendation_context`。作者或审稿发现需要改变研究的问题返回研究负责人，同步 pending 与交接后重建对应单股材料并回到作者。正文与研究一致后由外层保存采用稿并执行既有 record-trace，再原样装配正文、同步本地页面、补缺失公司介绍。阶段日志和采用稿留在本轮 ai_tasks 目录。
+`tools/stock_ai.py` 的 managed 新研究模式以外层说明为准（article-v1 分工）：选股研究会话只做选股研究，交付完整 pending trace、市场说明正文（含独立标题行 `## 今天的市场情况`）和 `selection-handoff.json`（市场正文与逐股研究取舍、证据引用、比较对象、改变条件及来源），暂不执行选股 record/record-trace、公司介绍或网页同步。正式复盘由外层另起的独立复盘会话按 `ops/forward-monitor-legacy-prompt.md` 执行，选股会话不做复盘；逐股最终推荐文章由作者会话按单股研究包与写作材料生成，选股会话不写四分区整篇日报、不写推荐正文。总控在少量候选验证时即可按代码/截止/类别调用 `recommendation_context`。作者或审稿发现需要改变研究的问题返回研究负责人，同步 pending 与交接后重建对应单股材料并回到作者。正文与研究一致后由外层保存采用稿并执行既有 record-trace，再原样装配正文、同步本地页面、补缺失公司介绍。阶段日志和采用稿留在本轮 ai_tasks 目录。
 
 少量候选的通用事实入口（不需要先写 trace）：
 
@@ -33,7 +33,7 @@
 
 ## 最终回复唯一来源
 
-本文件及其引用的 `ops/forward-monitor-prompt.md` 是每日股票报告的唯一格式来源。
+本文件及其引用的 `ops/forward-monitor-legacy-prompt.md` 是每日股票报告的唯一格式来源。
 
 正常完成时：
 - 最终回复必须是完整股票报告；
@@ -55,18 +55,18 @@
 
 正常研究在次日前一自然日18:45启动，固定使用当天18:30上海时间截止；核心数据最晚等到18:55。这里的次日就是 `action_date`，必须为交易日，不能自动跳过休息日提前推荐。若明天不是交易日（`non_trading_day`），正常说明无需生成报告并结束，不运行复盘或新选股；周末和长假统一在下个交易日前一自然日晚间运行。周日使用周五行情、周日18:30公告，为周一提供复盘和推荐。20:30只是交付目标，不新增守护服务。
 
-若返回 `ready_for_research`、`ready_for_research_limited` 或 `already_selected`，先读取本任务已绑定的 `run_policy.monitor_review_policy`。新任务的 `state-change-v1` 运行：
+若返回 `ready_for_research`、`ready_for_research_limited` 或 `already_selected`，用返回的可靠 `formation_date` 和原始 `selection_as_of` 运行：
 
 ```bash
 ./.venv/bin/python -m stock_analyzer.ops.forward_monitor prepare \
   --analysis-date <formation_date> \
   --as-of <selection_as_of> \
-  --review-policy state-change-v1
+  --review-policy legacy-v1
 ```
 
-然后只读 `ops/forward-monitor-prompt.md` 与其活动 Skill、input-index 中的同版指南和教学。市场 Skill 每天只分析一次，同时供已有推荐跟踪和新选股；先覆盖全部仍跟踪 episode，保存日评账本，再保存仅含真实状态变化股票的报告；节点结果和D20结案留原内部位置。同股只有一份公开正文，状态未变写简评，变化全部说明，不设详评数量上限。只有 selection 返回 `ready_for_research` 或 `ready_for_research_limited` 时才继续当天 V4 新选股。managed 模式本段由外层独立复盘会话执行，选股会话跳过。
+然后读取 `ops/forward-monitor-legacy-prompt.md`。市场 Skill 每天只分析一次，同一份市场结果同时用于已有股票跟踪和当天新选股。先为 monitor snapshot 的 `daily_review_episode_ids` 形成全部结构化判断草稿，再按 `checkpoint_review_episode_ids` 确定节点股、从非节点中选0—8只普通详评、其余归简评；各写唯一正文并核对一致性后，先调用 `record-daily-formal-reviews` 保存账本，再 `record` 全部节点详评和普通详评的 `monitor-report`。`checkpoint_review_stock_count` 是节点股数，`regular_detail_stock_limit` 是普通详评上限，不是必写篇数；账本只保存简评类正文。只有 selection 返回 `ready_for_research` 或 `ready_for_research_limited` 时才继续当天 V4 新选股。managed 模式下本段复盘步骤由外层的独立复盘会话执行，选股会话跳过本段；手动完整执行仍按本段顺序完成。
 
-旧已开始任务没有复盘策略字段时，显式用 `--review-policy legacy-v1` 并且只读 `ops/forward-monitor-legacy-prompt.md` 及其旧Skill，不把旧 snapshot/账本/报告当作新模式重判。同一任务不并行加载两套写法。
+进入任何复盘写作前（正常任务、`already_selected` 当日仅复盘、补跑路径均同），必须按 `ops/forward-monitor-legacy-prompt.md` 的分类知识库入口实际读取对应类型的指南与范文，并按其当前机会合同为每条需复盘记录形成 `current_opportunity` 当前意见；具体读取范围、选择方法与失败降级仅由复盘 Skill／Prompt 维护，不依赖此前对话的记忆，也不把范文名单或知识库路径复制到本 Prompt。
 
 若 selection 返回 `already_selected`，仍可生成跟踪报告，但不得重复执行新选股。若 snapshot 的 `daily_review_episode_ids` 为空，只跳过逐股写作，仍通过既有 `record-daily-formal-reviews`、`record` 保存 `reviews=[]` 的空账本和 `alerts=[]` 的空详评报告；报告汇总、未详评数量及市场内容使用真实 snapshot 和本次共同市场判断，不一律填零、不借用旧报告。正常继续新选股或共同收尾。若返回 `non_trading_day`、数据缺口或错误，说明真实状态，不补猜。
 
@@ -284,7 +284,7 @@ local_archive/forward_selection/research-run-context-<action_date>.json
 }
 ```
 
-方法文件集合固定为：五个选股 Skill 的 `SKILL.md`、`ops/forward-selection-prompt.md`、`docs/architecture/a-share-short-horizon-engine-contract-v4.md`，以及本次实际读取的 `src/stock_analyzer/knowledge/` 方法条目。在仓库根目录用 `git rev-parse HEAD`、`git log -1 --format=%H -- <实际路径列表>`、`git diff --name-only HEAD -- <同一列表>` 取得；路径列表由本次已读文件确定。方法文件有未提交修改时，只记录事实并把 `version_status` 标为 `uncommitted_method_changes`，不阻断正式选股，也不新增哈希或快照。`model_id` 只有运行环境明确提供时才记录，否则留空。该记录是辅助说明，不写入正式 trace，不改变推荐保存成功条件；保存失败时说明失败即可，不撤销已保存的正式推荐，不重跑研究。历史运行不补造此记录。
+方法文件集合固定为：五个选股 Skill 的 `SKILL.md`、`ops/forward-selection-legacy-prompt.md`、`docs/architecture/a-share-short-horizon-engine-contract-v4.md`，以及本次实际读取的 `src/stock_analyzer/knowledge/` 方法条目。在仓库根目录用 `git rev-parse HEAD`、`git log -1 --format=%H -- <实际路径列表>`、`git diff --name-only HEAD -- <同一列表>` 取得；路径列表由本次已读文件确定。方法文件有未提交修改时，只记录事实并把 `version_status` 标为 `uncommitted_method_changes`，不阻断正式选股，也不新增哈希或快照。`model_id` 只有运行环境明确提供时才记录，否则留空。该记录是辅助说明，不写入正式 trace，不改变推荐保存成功条件；保存失败时说明失败即可，不撤销已保存的正式推荐，不重跑研究。历史运行不补造此记录。
 
 ### 研究归档后的网页同步（共同收尾）
 
@@ -334,7 +334,7 @@ managed 模式本节及公司介绍由外层执行，研究模型不重复操作
 
 内部归档和最终给用户的回复必须分开：
 
-- snapshot、V4 trace、比较记录、最近替代和程序要求的本地 JSON/Markdown 继续完整生成，供内部研究、校验和以后评价使用，不得删减或改写合同。`daily-formal-reviews-<analysis_date>.json` 保存全部结构化判断、未变股的一份简评与内部结案，`DailyForwardMonitorReportV2` 只保存真实状态变化股的唯一正文；没有公开的事件候选仍完整保留在 snapshot、事实仓和 trace。
+- snapshot、V4 trace、比较记录、最近替代和程序要求的本地 JSON/Markdown 继续完整生成，供内部研究、校验和以后评价使用，不得删减或改写合同。`daily-formal-reviews-<analysis_date>.json` 保存全部结构化判断及仅简评类正文，`DailyForwardMonitorReportV2` 保存全部节点详评和最多8只普通详评的唯一正文；没有公开的事件候选仍完整保留在 snapshot、事实仓和 trace。
 - 最终回复的正式复盘只展示派生为 `confirmed_active` 的股票。比较股、最近替代股、未入选候选、未决股票和只在内部关注的股票都不展示、不点名，也不披露它们的表现或数量。
 - `fresh_event_pending + conditional + pending` 继续作为 `conditional_event` 保留在内部 V4 trace；原有的 `selected` 身份、优先级、事件公司证据和首个交易日观察条件保持不变。conditional 不进入正式推荐数量，不写入“今天明确推荐的股票”，也不得虚构收益或在用户报告中单列。
 - 同一股票同时有正式推荐和比较记录时，对外只讲正式推荐记录；内部仍保留完整比较。
@@ -396,11 +396,45 @@ managed 模式本节及公司介绍由外层执行，研究模型不重复操作
 
 ## 正式推荐股票的今日复盘
 
-程序从 `state-change-v1` 正式报告与日评账本装配，不重新生成或改写分析文字。只显示明确正式推荐过的股票，按“状态变化复盘”“简单复盘”两组；真实变化股全部展示，不设名额。状态不变的重要新消息、风险或参与意见调整仍在简评中讲清。已结束记录的内部节点和D20固定结案留档，不追加公开长文。合并步骤只核对已存唯一正文及分组、股票身份和状态一致，不重复逐股写作。
+复盘写作与逐篇复查按 `.agents/skills/reviewing-stock-recommendations/SKILL-legacy.md` 和复盘 Prompt 的已批准范文执行；本合并步骤由程序从正式结果原样装配，不重新改写分析或呈现。
 
-两个分组均按股票代码只显示一份当日说明；同股多次推荐在正文里区分推荐日期，顶部状态优先绑定最新仍跟踪的正式 episode。只有内部结案的股票不在公开分组中重复出现。资料缺失时保留上次判断日期或空状态，不把旧意见说成今天的新确认。
+程序装配与网页刷新后，逐只核对节点详评的阶段结论标题、普通详评的告知标题及各自分析正文与正式记录一致；不能因文件已存在而保留旧正文，也不能由合并步骤另拟标题或摘要。首篇检查过程留在本任务运行记录，最终回复仍只输出完整股票报告。
 
-本节负责原推荐状态的后续更新；下节“今天明确推荐的股票”负责本日首次完整论证，两部分不互套模板。
+直接采用本次已记录的正式复盘 Markdown，只展示明确正式推荐过的股票，并依次包含：
+
+以下复盘呈现规则描述程序装配后的成品，不要求模型在草稿中重复撰写已保存复盘。
+
+合并报告的四个总标题固定使用二级标题（`##`）。复盘内“关键节点复盘”“今日深入复盘”“今日简评”各自使用独立标题行，每组只出现一次；建议使用三级标题（`###`），也允许保留独立复盘 Markdown 原有的二级标题。验收仅在“正式推荐股票的今日复盘”至“目前仍开放的正式推荐股票数量”之间识别这些分组，接受二至六级及其混排；仍须逐股核对分组、原正文和简评行，不因标题层级兼容而省略实质检查。不改写已记录的逐股分析标题或正文。
+
+### 关键节点复盘、今日深入复盘 与 今日简评
+
+依次包含三个分区（空分区写“今日无……”）：关键节点复盘与今日深入复盘为两类详评，每股采用状态行＋三段；今日简评为六列简表：
+
+```markdown
+| 股票 | 当前观察日 | 当前涨跌 | 今日简评 | 未来1—3日 | 主动跟踪 |
+```
+
+简表每只简评股一行；正文读取当日台账中 `brief` 类的 `DailyFormalReviewV1.current_review`，结构化结论读取台账。
+
+### 关键节点复盘 与 今日深入复盘
+
+到达 D1/D3/D5/D10/D20 检查节点的股票全部进入“关键节点复盘”，每只说明本次深入复盘原因（到达第几个交易日检查节点或补20日结案）；剔除节点后按优先级选最多8只进入“今日深入复盘”，每只说明当日入选原因，正文按 `.agents/skills/reviewing-stock-recommendations/SKILL-legacy.md` 的当前机会版普通详评四项写作，运行与范文入口见 `ops/forward-monitor-legacy-prompt.md`；这里直接采用已保存原文，不另写一套旧目标余程摘要；没有需要时写“今日无深入复盘。”。两类详评每只先写一行当前状态，显示推荐日期、交易日序号、收盘相对推荐参考价、期间最高收盘和最深下跌，只使用已取得的事实。然后采用以下三段：
+
+**今天发生了什么**
+
+展示独立展开的详评正文 `ForwardEpisodeReviewV1.current_review`：说明今天发生了什么、当前看法及重点日的阶段展开。详评与当天账本的结构化结论一致，账本不另写详评股的简评正文；观点变化说明仍读取当天日评的 `view_change` 与 `view_change_reason`。
+
+**相比上次判断**
+
+直接采用当天日评的 `view_change` 与 `view_change_reason`，说明判断维持、增强、减弱或被事实否定及其原因。
+
+**接下来1—3个交易日**
+
+依次显示当前方向、方向理由、支持当前方向的表现、改变当前方向的表现；偏弱判断的支持条件是继续偏弱，恢复上涨属于改变条件。
+
+原推荐理由和风险作为内部历史锚点，普通日不重复公开；D1 可在当前状态后用一到两句话提示原推荐背景，D20 才允许独立完整结案，使用“20个交易日最终复盘”，不在当天正文重复。多个推荐记录只用推荐日期和交易日序号的简短前缀区分。
+
+本节负责观点更新；下节“今天明确推荐的股票”负责首次完整论证，两部分不共享小标题，不互套模板。
 
 ## 目前仍开放的正式推荐股票数量
 

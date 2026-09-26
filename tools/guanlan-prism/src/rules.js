@@ -14,6 +14,17 @@ function orderedReviews(s,date){return (s.reviews||[]).filter(r=>r.date<=date).s
 function latest(s,d){return orderedReviews(s,d.analysis_date).at(-1)||null;}
 function recommendations(d){return [...d.stocks].sort((a,b)=>b.recDate.localeCompare(a.recDate));}
 function deepReviews(d){
+ if(d.monitorReviewPolicy==='state-change-v1'){
+  const groups=[];
+  for(const s of d.stocks){
+   const r=latest(s,d);
+   if(r?.date!==d.analysis_date||r.review_kind!=='regular_detail')continue;
+   let group=groups.find(item=>item.code===s.code);
+   if(!group){group={code:s.code,records:[]};groups.push(group);}
+   if(!group.records.some(item=>key(item.s)===key(s)))group.records.push({s,r});
+  }
+  return {groups,totalStocks:groups.length,limit:groups.length,overflow:0,source:'当日状态变化'};
+ }
  const rawLimit=d.presentation?.deepLimit;
  const limit=valid(rawLimit)?Math.min(8,Math.max(0,Math.floor(rawLimit))):8;
  const supplied=d.dailyDeepReview;
@@ -70,6 +81,11 @@ function directionUpdates(d){
  });
 }
 function isInvalid(s,d){
+ if(d.monitorReviewPolicy==='state-change-v1'){
+  const reason=latest(s,d)?.trackingEndReason;
+  if(reason==='observation_complete')return false;
+  if(reason==='thesis_invalidated')return true;
+ }
  // Optional current lifecycle value must be copied from the research system.
  if(typeof s.invalidated==='boolean')return s.invalidated;
  const r=latest(s,d);

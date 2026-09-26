@@ -213,6 +213,17 @@ def render_html(snapshot: dict, series: dict | None = None) -> str:
                          allow_nan=False).replace("<", "\\u003c")
     series_payload = (json.dumps(series, ensure_ascii=False, separators=(",", ":"),
                                  allow_nan=False).replace("<", "\\u003c") if series is not None else "null")
+    overview_source = (A2_DIR / "overview.js").read_text(encoding="utf-8")
+    if snapshot.get("monitorReviewPolicy") == "state-change-v1":
+        # Keep user-edited A2 source intact; replace only the policy-dependent
+        # label while composing the next page from the saved report.
+        overview_source, count = re.subn(
+            r"(?m)^const kindLabel=r=>[^\n]*;$",
+            "const kindLabel=r=>r?.reviewKindText||(!r?'':r.review_kind==='brief'?'简单复盘':'状态变化复盘');",
+            overview_source,
+        )
+        if count != 1:
+            raise ValueError("A2 review-kind label adapter could not be applied")
     replacements = {
         "/*__DATA__*/": payload,
         "/*__SERIES__*/": series_payload,
@@ -220,7 +231,7 @@ def render_html(snapshot: dict, series: dict | None = None) -> str:
         "/*__MATH__*/": (A2_DIR / "display-math.js").read_text(encoding="utf-8"),
         "/*__DATAACCESS__*/": (A2_DIR / "data-access.js").read_text(encoding="utf-8"),
         "/*__CHARTS__*/": (A2_DIR / "charts.js").read_text(encoding="utf-8"),
-        "/*__OVERVIEW__*/": (A2_DIR / "overview.js").read_text(encoding="utf-8"),
+        "/*__OVERVIEW__*/": overview_source,
     }
     # 只扫描原始模板一次，正文中相同标记按原文保留。
     pattern = re.compile("(" + "|".join(re.escape(marker) for marker in MARKERS) + ")")

@@ -6,7 +6,7 @@
 - 程序管事实、时点、存储、确定性计算和质量；AI/Skill 管问题、解释、因果、比较、反证、未知及取舍。用户明确指令优先于 Skill；Skill 管研究方法，`ops/` Prompt 管运行与报告，代码核对实际合同；冲突须说明，不为通过校验倒退用户要求。
 - 选股先读 `.agents/skills/orchestrating-stock-research/SKILL.md`，按需调用市场、板块、公司、价格四个专业 Skill；仅这五个参与选股。正式复盘另读 `.agents/skills/reviewing-stock-recommendations/SKILL.md`，综合四专业 `phase: review` 事实，总控查一致性，不重新发现或选股。
 - 用户指定尚未买入的单股买入决策研究，读 `.agents/skills/analyzing-stock-buy-decision/SKILL.md` 并按 `ops/buy-decision-prompt.md` 运行；该流程不走正式推荐／复盘发布合同，不进入 Forward CSV 或冻结历史，原推荐目标价与观察期仅作背景，保留禁止自动交易、仓位与收益承诺的边界。
-- 正式每日研究与复盘开始前必须读 `ops/forward-selection-prompt.md` 和 `ops/forward-monitor-prompt.md`，遵守时间、三路互斥、节点六项／普通详评四项（当前机会版）、正文唯一存放、当前机会对象（current-opportunity-v1，存日评账本）及 D20 冻结合同；原推荐固定结案与当前参与意见分开回答。次晨提醒读 `ops/preopen-safety-prompt.md`。沿用现有报告模型和任务，不自行新增任务；五个选股 Skill 的选择规则修改必须另有用户批准（批量研究入口 `ops/selection-method-review-prompt.md`，默认 diagnose）。
+- 正式每日研究与复盘开始前读当次策略对应的 `ops/forward-selection-prompt.md` 与 `ops/forward-monitor-prompt.md`；无策略字段的旧任务使用各自 legacy Prompt。新任务 `state-change-v1` 按 episode 的继续关注／等待变化／结束跟踪判断，状态未变简评、真实改变解释原因，节点与 D20 结果留原内部位置；一股只存一份公开正文。原推荐固定结案与当前参与意见分开回答，当前机会对象（current-opportunity-v1）仍存日评账本。次晨提醒读 `ops/preopen-safety-prompt.md`。沿用现有报告模型和任务，不自行新增任务；五个选股 Skill 的选择规则修改必须另有用户批准（批量研究入口 `ops/selection-method-review-prompt.md`，默认 diagnose）。
 - 公司介绍是正式推荐的附属资料：运行顺序见 `ops/company-introduction-prompt.md`，方法见 `.agents/skills/writing-company-introductions/SKILL.md`，按原推荐身份与原 as_of 保存于 `local_archive/company_introductions/`；它不参与选股、不是第六个视角，不进入 Forward CSV、V4 trace 或复盘正文，不承诺收益、不给目标价。
 - 季度／半年产业研究先读 `docs/industry-research/00_逐步执行操作手册.md` 和 `docs/industry-research/01_全局执行规范.md`，与短周期选股分离。
 - Obsidian 股票知识子库只沉淀认识、不改写正式记录：整理入口是 `ops/stock-knowledge-prompt.md`（仅人工触发），分层与口径见 `docs/architecture/stock-knowledge-and-skill-review-v1.md`。
@@ -17,7 +17,7 @@
 - 正式形成日研究冻结 `formation_date`、`action_date` 和带时区的 `as_of`，只用 `available_at <= as_of` 的事实；未来行情仅在候选与理由冻结后用于独立评价。
 - 默认范围为沪深主板和创业板；排除科创板、北交所、场内基金、ST/*ST、退市整理、停牌、无可靠报价及行动日明确无法正常参与的股票。允许 0—5 只或空名单，不补位，不以总分、权重、Gate、行业配额、代码顺序或材料完整度代替比较。
 - 四个专业视角互补，不投票或一票否决；须说明公司真实联系、价格剩余路径、最强反证和关键未知。不从量价推断账户、机构或主力身份，不连接券商、不自动交易、不决定仓位、不承诺收益。
-- 区分数据不存在、覆盖不足、查询失败、快照不可回放与真实无记录；关键证据不足时明确未知、未决或空名单，不补猜。复盘正文由 AI 按文风基准逐篇撰写，禁止用程序模板拼接生成；补写按小批量逐批自检，不改写历史推荐或冻结结论。
+- 区分数据不存在、覆盖不足、查询失败、快照不可回放与真实无记录；关键证据不足时明确未知、未决或空名单，不补猜。复盘正文由现有独立复盘会话按当次策略及供料指南撰写，程序只作保存与确定性展示；不得用模板拼接投资结论。只补受影响的未完成结果，不改写历史推荐或冻结结论。
 - GitHub 不含本地事实仓、归档、日志或凭据，不据此声称已取得数据；不提交凭据、Token、本机绝对路径或个人产物。
 
 ## 执行与验证

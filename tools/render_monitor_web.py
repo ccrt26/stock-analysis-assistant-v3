@@ -574,7 +574,19 @@ def scan_history(
             for item in snapshot.get("episodes", [])
             if isinstance(item, dict)
         }
+        day_ledger_path = monitor_dir / f"daily-formal-reviews-{day.isoformat()}.json"
+        day_ledger = json.loads(day_ledger_path.read_text(encoding="utf-8")) if day_ledger_path.is_file() else {}
+        day_states = {str(row.get("episode_id")): row.get("tracking_state")
+                      for row in day_ledger.get("reviews", [])}
         for alert in report.get("alerts", []):
+            public_owner = None
+            if report.get("monitor_review_policy") == "state-change-v1":
+                candidates = [str(value) for value in alert.get("episode_ids", []) if str(value) in episodes]
+                active = [value for value in candidates if day_states.get(value) in {"follow", "wait", None}]
+                public_owner = max(active or candidates, key=lambda value: (
+                    str(episodes[value].get("formation_date") or ""),
+                    str(episodes[value].get("action_date") or ""), value,
+                )) if candidates else None
             alert_checkpoint = any(
                 str(episode_id) in set(snapshot.get("checkpoint_review_episode_ids") or [])
                 for episode_id in alert.get("episode_ids", [])
@@ -599,18 +611,24 @@ def scan_history(
                         f" → {MONITOR_STATE_TEXT.get(str(current_state), current_state)}"
                     )
                 outlook_raw = alert.get("outlook_1_3d")
+                public_body = (str(alert.get("stock_review") or "")
+                               if report.get("monitor_review_policy") == "state-change-v1" and episode_id == public_owner
+                               else "" if report.get("monitor_review_policy") == "state-change-v1"
+                               else str(review.get("current_review") or ""))
                 merged[(episode_id, day.isoformat())] = {
                     "date": day.isoformat(),
                     "as_of": str(snapshot.get("as_of") or ""),
                     "day": int(episode.get("day_number") or 0),
                     "checkpoint": episode.get("checkpoint"),
-                    "headline": _first_sentence(str(review.get("current_review") or "")),
-                    "copy": str(review.get("current_review") or ""),
-                    "summary_copy": str(review.get("current_review") or ""),
+                    "headline": _first_sentence(public_body) if public_body else "同股当日说明见最新跟踪记录",
+                    "copy": public_body,
+                    "summary_copy": public_body,
                     "review_kind": (
-                        "checkpoint_detail" if alert_checkpoint
-                        else "regular_detail"
+                        "regular_detail" if report.get("monitor_review_policy") == "state-change-v1"
+                        else "checkpoint_detail" if alert_checkpoint else "regular_detail"
                     ),
+                    "monitorReviewPolicy": report.get("monitor_review_policy"),
+                    "reviewKindText": "状态变化复盘" if report.get("monitor_review_policy") == "state-change-v1" else None,
                     "facts": _review_facts(episode),
                     "formalReturn": (episode.get("current_close_return_since_entry")
                                      if episode.get("entry_open") and _parse_as_of(report.get("as_of")) is not None
@@ -659,6 +677,9 @@ def scan_history(
         ledger_as_of = _parse_as_of(ledger.get("as_of"))
         for review in ledger.get("reviews", []):
             episode_id = str(review.get("episode_id"))
+            if ledger.get("monitor_review_policy") == "state-change-v1" and review.get("review_kind") == "internal_only":
+                merged.pop((episode_id, day.isoformat()), None)
+                continue
             episode = episodes.get(episode_id, {})
             same_snapshot_cutoff = (ledger_as_of is not None
                                     and ledger_as_of == _parse_as_of(snapshot.get("as_of"))) if snapshot_path.is_file() else False
@@ -687,9 +708,13 @@ def scan_history(
                 "viewReason": str(review.get("view_change_reason") or ""),
                 "viewChanged": view_changed,
                 "fromTo": from_to,
+                "monitorReviewPolicy": ledger.get("monitor_review_policy"),
+                "reviewKindText": ("状态变化复盘" if review.get("review_kind") == "regular_detail" else "简单复盘")
+                    if ledger.get("monitor_review_policy") == "state-change-v1" else None,
             }
             detail_body_missing = (
-                day_three_route and not review.get("current_review")
+                (day_three_route or ledger.get("monitor_review_policy") == "state-change-v1")
+                and not review.get("current_review")
             )
             if detail_body_missing:
                 existing = merged.get(key)
@@ -717,6 +742,13 @@ def scan_history(
                             existing["headline"] = title
                     continue
                 if existing is None:
+                    if ledger.get("monitor_review_policy") == "state-change-v1":
+                        merged[key] = {
+                            "date": day.isoformat(), "as_of": str(ledger.get("as_of") or ""),
+                            "headline": "同股当日说明见最新跟踪记录", "copy": "", "summary_copy": "",
+                            "confirm": "", "risk": "", **structured,
+                        }
+                        continue
                     item = {
                         "date": day.isoformat(),
                         "as_of": str(ledger.get("as_of") or ""),
@@ -753,6 +785,9 @@ def scan_history(
                 "risk": "",
                 "viewChanged": view_changed,
                 "fromTo": from_to,
+                "monitorReviewPolicy": ledger.get("monitor_review_policy"),
+                "reviewKindText": ("状态变化复盘" if review.get("review_kind") == "regular_detail" else "简单复盘")
+                    if ledger.get("monitor_review_policy") == "state-change-v1" else None,
             }
             existing = merged.get(key)
             if existing is None:
@@ -1652,6 +1687,25 @@ def build_payload(
         company_info = thesis.get("company_information") or {}
         review_items = history.get(episode_id, [])
         reviews = [item for item in review_items if not item.get("eventOnly")]
+        if snapshot.get("monitor_review_policy") == "state-change-v1":
+            latest_review = reviews[-1] if reviews else {}
+            previous_review = episode.get("previous_daily_formal_review") or {}
+            tracking_state = latest_review.get("trackingState") or previous_review.get("_effective_tracking_state")
+            end_reason = latest_review.get("trackingEndReason") or previous_review.get("tracking_end_reason")
+            state_labels = {"follow": ("继续关注", "strong"), "wait": ("等待变化", "sideways"),
+                            "ended": ("结束跟踪", "paused")}
+            if tracking_state in state_labels:
+                stage_label, stage_type = state_labels[tracking_state]
+                if tracking_state == "ended":
+                    reason_labels = {"observation_complete": "观察期结束", "thesis_invalidated": "原判断失效",
+                                     "not_executable": "原条件无法执行", "user_closed": "用户结束"}
+                    if end_reason in reason_labels:
+                        stage_label += "｜" + reason_labels[end_reason]
+                if latest_review and latest_review.get("trackingState") is None:
+                    prior_date = previous_review.get("_tracking_state_date") or previous_review.get("_analysis_date")
+                    stage_label += f"（上次{prior_date}）；今日资料待核实" if prior_date else "；今日资料待核实"
+            else:
+                stage_label, stage_type = "今日资料待核实", "paused"
         group_code = str(episode.get("original_group_code") or "")
         industry_kind = facts.get("industry_kind", {}).get(group_code, "none")
         # UI 身份仍是 code:recDate；同一身份出现两个不同真实 episode 时明确报错，
@@ -1714,6 +1768,9 @@ def build_payload(
                 "trackingStatus": (
                     str(episode.get("tracking_status") or "") or None
                 ),
+                "trackingState": (reviews[-1].get("trackingState") if reviews else None)
+                    or (episode.get("previous_daily_formal_review") or {}).get("_effective_tracking_state"),
+                "trackingEndReason": (reviews[-1].get("trackingEndReason") if reviews else None),
                 "trackingExitDate": (
                     str(episode["tracking_exit_date"])
                     if episode.get("tracking_exit_date")
@@ -1858,5 +1915,6 @@ def build_payload(
         "review_dates": review_dates,
         "sourceInfo": web_display_contract.source_info(),
         "observationPolicy": web_display_contract.observation_policy(),
+        "monitorReviewPolicy": snapshot.get("monitor_review_policy"),
         "stocks": stocks_payload,
     }

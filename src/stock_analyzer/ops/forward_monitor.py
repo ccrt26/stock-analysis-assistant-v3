@@ -27,6 +27,7 @@ REGISTER_VERSION = "registered-forward-monitor-episodes-v1"
 TRACE_VERSION = "daily-research-trace-v4"
 SNAPSHOT_VERSION = "forward-monitor-snapshot-v1"
 DAILY_FORMAL_REVIEWS_VERSION = "daily-formal-reviews-v1"
+STATE_CHANGE_POLICY = "state-change-v1"
 CHECKPOINTS = {1: "D1", 3: "D3", 5: "D5", 10: "D10", 20: "D20", 25: "D25", 30: "D30"}
 POSITIVE_SCENARIOS = {"initial_activation", "confirmed_breakout", "trend_continuation", "reversal_attempt"}
 NEGATIVE_SCENARIOS = {"failed_breakout", "single_day_impulse", "range_cross_noise"}
@@ -77,6 +78,7 @@ class PrepareSummary:
     daily_review_episode_count: int
     checkpoint_review_stock_count: int
     regular_detail_stock_limit: int
+    input_file: str | None = None
 
 
 class MarketOverviewV1(BaseModel):
@@ -249,7 +251,10 @@ class DailyFormalReviewV1(BaseModel):
         "stock_selection", "unknown",
     ]
     current_review: str | None = Field(default=None, min_length=1, max_length=600)
-    review_kind: Literal["brief", "regular_detail", "checkpoint_detail"] | None = None
+    review_kind: Literal["brief", "regular_detail", "checkpoint_detail", "internal_only"] | None = None
+    monitor_review_policy: Literal["state-change-v1"] | None = None
+    tracking_state: Literal["follow", "wait", "ended"] | None = None
+    tracking_end_reason: Literal["thesis_invalidated", "not_executable", "observation_complete", "user_closed"] | None = None
     view_change: Literal[
         "first_review", "unchanged", "strengthened", "weakened",
         "invalidated",
@@ -271,12 +276,28 @@ class DailyFormalReviewV1(BaseModel):
 
     @model_validator(mode="after")
     def validate_review_body(self) -> "DailyFormalReviewV1":
-        if self.review_kind in {None, "brief"}:
+        if self.monitor_review_policy == STATE_CHANGE_POLICY:
+            if self.review_kind == "checkpoint_detail":
+                raise ValueError("state-change reviews do not publish checkpoint detail")
+            if self.review_kind in {"regular_detail", "internal_only"} and self.current_review is not None:
+                raise ValueError("state-change detail has one stock body in report")
+            if self.review_kind == "internal_only" and self.current_opportunity is not None:
+                raise ValueError("internal final review has no current opportunity")
+        elif self.review_kind in {None, "brief"}:
             if not self.current_review:
                 raise ValueError("brief or legacy review requires current_review")
         elif self.current_review is not None:
             raise ValueError("detailed review must not carry a separate brief")
         return self
+
+
+def state_change_kind(
+    previous: str | None, current: str | None, *, internal_only: bool = False,
+) -> Literal["brief", "regular_detail", "internal_only"]:
+    """Use recorded episode states only; missing or first state is not a transition."""
+    if internal_only:
+        return "internal_only"
+    return "regular_detail" if previous in {"follow", "wait"} and current in {"follow", "wait", "ended"} and previous != current else "brief"
 
 
 def current_opportunity_changed(
@@ -307,6 +328,7 @@ class DailyFormalReviewLedgerV1(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     ledger_version: Literal["daily-formal-reviews-v1"]
+    monitor_review_policy: Literal["state-change-v1"] | None = None
     analysis_date: date
     as_of: datetime
     reviews: list[DailyFormalReviewV1]
@@ -320,6 +342,8 @@ class DailyFormalReviewLedgerV1(BaseModel):
         review_ids = [review.episode_id for review in self.reviews]
         if len(review_ids) != len(set(review_ids)):
             raise ValueError("each episode may be reviewed only once")
+        if any(review.monitor_review_policy != self.monitor_review_policy for review in self.reviews):
+            raise ValueError("daily review policy must match ledger")
         return self
 
 
@@ -358,12 +382,13 @@ class ForwardEpisodeReviewV1(BaseModel):
         "stock_selection",
         "unknown",
     ]
-    current_review: str = Field(min_length=1)
+    current_review: str | None = Field(default=None, min_length=1)
     comparison_interpretation: str = Field(min_length=1)
     final_twenty_day_review: FrozenTwentyDayReviewV1 | None = None
 
 
 class ForwardMonitorAlertV2(ForwardMonitorAlertV1):
+    stock_review: str | None = Field(default=None, min_length=1)
     outlook_reason_plain_language: str | None = Field(
         default=None,
         min_length=1,
@@ -386,6 +411,7 @@ class DailyForwardMonitorReportV2(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     report_version: Literal["daily-forward-monitor-report-v2"]
+    monitor_review_policy: Literal["state-change-v1"] | None = None
     analysis_date: date
     as_of: datetime
     market_overview: MarketOverviewV1
@@ -504,6 +530,7 @@ def prepare_forward_monitor(
     analysis_date: date,
     as_of: datetime,
     project_root: Path,
+    monitor_review_policy: str | None = None,
 ) -> PrepareSummary:
     if as_of.tzinfo is None or as_of.utcoffset() is None:
         raise ValueError("as_of must include a timezone")
@@ -512,8 +539,43 @@ def prepare_forward_monitor(
     if analysis_date == as_of.date() and as_of.hour < 15:
         raise ValueError("analysis_date has not closed at as_of")
 
+    if monitor_review_policy not in {None, STATE_CHANGE_POLICY}:
+        raise ValueError("unknown monitor review policy")
     root = Path(project_root)
     monitor_dir = root / "local_archive" / "forward_monitor"
+    snapshot_path = monitor_dir / f"snapshot-{analysis_date.isoformat()}.json"
+    input_path = monitor_dir / f"input-index-{analysis_date.isoformat()}.json"
+    if monitor_review_policy is None and snapshot_path.is_file():
+        existing_policy = json.loads(snapshot_path.read_text(encoding="utf-8")).get("monitor_review_policy")
+        if existing_policy == STATE_CHANGE_POLICY:
+            raise ValueError("same-date snapshot already belongs to state-change-v1")
+    if monitor_review_policy == STATE_CHANGE_POLICY and snapshot_path.is_file():
+        existing = json.loads(snapshot_path.read_text(encoding="utf-8"))
+        if (existing.get("monitor_review_policy") != monitor_review_policy
+                or _as_datetime(existing.get("as_of")) != as_of):
+            raise ValueError("same-date snapshot already belongs to a different policy or cutoff")
+        if input_path.is_file():
+            saved_input = json.loads(input_path.read_text(encoding="utf-8"))
+            knowledge = saved_input.get("knowledge") if isinstance(saved_input, dict) else None
+            if (not isinstance(saved_input, dict)
+                    or saved_input.get("monitor_review_policy") != STATE_CHANGE_POLICY
+                    or saved_input.get("analysis_date") != analysis_date.isoformat()
+                    or _as_datetime(saved_input.get("as_of")) != as_of
+                    or not isinstance(knowledge, dict) or len(knowledge) != 3
+                    or any(not isinstance(row, dict) or not str(row.get("text") or "").strip()
+                           for row in knowledge.values())):
+                raise ValueError("same-date compact review input is incomplete or mismatched")
+        else:
+            _atomic_write_json(input_path, build_state_change_input(existing, root))
+        required_summary = set(PrepareSummary.__dataclass_fields__) - {
+            "status", "analysis_date", "snapshot_file", "input_file",
+        }
+        saved_summary = existing.get("summary") or {}
+        if not required_summary.issubset(saved_summary):
+            raise ValueError("same-date snapshot summary is incomplete")
+        return PrepareSummary(status="already_prepared", analysis_date=analysis_date.isoformat(),
+                              snapshot_file=str(snapshot_path), input_file=str(input_path),
+                              **{key: saved_summary[key] for key in required_summary})
     sessions = _trading_sessions(root, as_of)
     if analysis_date not in sessions:
         raise ValueError("analysis_date is not an available open trading day")
@@ -714,6 +776,10 @@ def prepare_forward_monitor(
                 latest_live,
             )
             last_detailed = last_detailed_reviews.get(episode_id)
+            if (day_number > 20 and latest_live is not None
+                    and int(latest_live.get("day_number", 0)) >= 20
+                    and latest_live.get("tracking_decision") == "keep_active_tracking"):
+                observation["approved_extension"] = True
             observation.update(
                 tracking_status=tracking_status,
                 tracking_exit_date=(
@@ -871,15 +937,12 @@ def prepare_forward_monitor(
         ),
         "daily_review_episode_count": len(daily_review_episode_ids),
         "checkpoint_review_stock_count": len(node_codes),
-        "regular_detail_stock_limit": min(
-            8,
-            len(detailed_review_candidate_codes),
+        "regular_detail_stock_limit": (
+            0 if monitor_review_policy == STATE_CHANGE_POLICY
+            else min(8, len(detailed_review_candidate_codes))
         ),
     }
-    snapshot_path = monitor_dir / f"snapshot-{analysis_date.isoformat()}.json"
-    _atomic_write_json(
-        snapshot_path,
-        {
+    snapshot_payload = {
             "snapshot_version": SNAPSHOT_VERSION,
             "analysis_date": analysis_date.isoformat(),
             "as_of": as_of.isoformat(),
@@ -897,14 +960,104 @@ def prepare_forward_monitor(
                 detailed_review_candidate_codes
             ),
             "current_opportunity_required": True,
-        },
-    )
+    }
+    if monitor_review_policy == STATE_CHANGE_POLICY:
+        snapshot_payload["monitor_review_policy"] = STATE_CHANGE_POLICY
+    _atomic_write_json(snapshot_path, snapshot_payload)
+    if monitor_review_policy == STATE_CHANGE_POLICY:
+        _atomic_write_json(input_path, build_state_change_input(snapshot_payload, root))
     return PrepareSummary(
         status="prepared",
         analysis_date=analysis_date.isoformat(),
         snapshot_file=str(snapshot_path),
+        input_file=str(input_path) if monitor_review_policy == STATE_CHANGE_POLICY else None,
         **summary_payload,
     )
+
+
+def build_state_change_input(snapshot: dict[str, Any], project_root: Path) -> dict[str, Any]:
+    """One readable delivery index from the frozen snapshot; the snapshot remains authority."""
+    root = Path(project_root)
+    names = ("00_阅读指南.md", "01_状态变化复盘_范文与注意事项.md", "02_简单复盘_范文与注意事项.md")
+    pointer = root / "local_archive" / "knowledge-vault-path.txt"
+    vault = None
+    if pointer.is_file():
+        location = pointer.read_text(encoding="utf-8").strip()
+        if location:
+            vault = Path(location) / "10_方法与范文" / "复盘范文" / "状态跟踪"
+    repo = root / ".agents" / "skills" / "reviewing-stock-recommendations" / "references" / "state-change"
+    selected = vault if vault is not None and all((vault / name).is_file() for name in names) else repo
+    knowledge: dict[str, dict[str, str]] = {}
+    for name in names:
+        path = selected / name
+        content = path.read_text(encoding="utf-8")
+        if not content.strip() or (name != names[0] and "example_only: true" not in content):
+            raise ValueError("review knowledge is unreadable or missing teaching marker: " + name)
+        knowledge[name] = {"source": str(path), "text": content}
+    by_id = {str(item.get("episode_id")): item for item in snapshot.get("episodes", []) if isinstance(item, dict)}
+    ids = [str(value) for value in snapshot.get("daily_review_episode_ids", [])]
+    stocks: dict[str, dict[str, Any]] = {}
+    episodes: dict[str, dict[str, Any]] = {}
+    sectors: dict[str, dict[str, Any]] = {}
+    current_keys = (
+        "return_1d", "return_3d", "return_5d", "relative_market_1d", "relative_market_3d",
+        "relative_market_5d", "relative_industry_1d", "relative_industry_3d", "relative_industry_5d",
+        "amount_ratio_last_20d", "new_announcements", "data_limitations",
+    )
+    path_keys = (
+        "entry_open", "current_close_return_since_entry", "current_max_close_return_since_entry",
+        "current_max_high_return_since_entry", "current_mae_since_entry", "current_close_drawdown_from_peak",
+        "current_hit_20pct_close", "current_first_close_hit_20pct_date", "primary_days_remaining",
+        "d20_close_return_since_entry", "d20_max_close_return_since_entry", "d20_mae_since_entry",
+        "d20_hit_20pct_close_within_20d", "d20_end_date", "final_review_pending",
+    )
+    sector_keys = tuple(key for key in ("sector_breadth_3d", "sector_breadth_5d", "sector_median_return_3d",
+        "sector_median_return_5d", "sector_relative_return_3d", "sector_relative_return_5d",
+        "sector_dispersion", "sector_top_contribution", "sector_turnover_share_change_5d"))
+    for episode_id in ids:
+        item = by_id[episode_id]
+        code = str(item["ts_code"])
+        if code not in stocks:
+            context = item.get("review_context") or {}
+            stocks[code] = {
+                "name": item.get("name"), "episode_ids": [],
+                "current": {key: item.get(key) for key in current_keys},
+                "price_context": {key: context.get(key) for key in (
+                    "basis", "benchmark_return_since_entry", "benchmark_windows", "price_levels",
+                    "recent_sessions", "stock_excess_since_entry", "limitations")},
+            }
+        stocks[code]["episode_ids"].append(episode_id)
+        group = str(item.get("original_group_code") or "")
+        if group and group not in sectors:
+            sectors[group] = {key: item.get(key) for key in sector_keys}
+        previous = item.get("previous_daily_formal_review") or {}
+        episodes[episode_id] = {
+            "ts_code": code, "formation_date": item.get("formation_date"),
+            "action_date": item.get("action_date"), "day_number": item.get("day_number"),
+            "checkpoint": item.get("checkpoint"), "tracking_status": item.get("tracking_status"),
+            "previous_tracking_state": _previous_tracking_state(item),
+            "previous_tracking_date": previous.get("_tracking_state_date") or previous.get("_analysis_date"),
+            "previous_judgment": {key: previous.get(key) for key in (
+                "current_assessment", "tracking_decision", "tracking_decision_reason", "view_change_reason",
+                "current_review", "outlook_1_3d")},
+            "source_as_of": item.get("source_as_of"), "source_type": item.get("source_type"),
+            "cumulative_path": {key: item.get(key) for key in path_keys},
+            "data_limitations": item.get("data_limitations"),
+            "review_basis": (item.get("review_context") or {}).get("basis"),
+            "source_snapshot_episode_id": episode_id,
+        }
+        # Preserve full original conditions and risks at their existing fields; no prose truncation.
+        episodes[episode_id].update({key: value for key, value in item.items() if key.startswith("original_")})
+    return {
+        "input_version": "state-change-monitor-input-v1", "monitor_review_policy": STATE_CHANGE_POLICY,
+        "analysis_date": snapshot.get("analysis_date"), "as_of": snapshot.get("as_of"),
+        "source_snapshot": f"snapshot-{snapshot.get('analysis_date')}.json",
+        "market_context": snapshot.get("market_context"), "sectors": sectors,
+        "stocks": stocks, "episodes": episodes,
+        "daily_review_episode_ids": ids,
+        "required_final_review_episode_ids": snapshot.get("required_final_review_episode_ids", []),
+        "knowledge": knowledge,
+    }
 
 
 def record_daily_formal_reviews(
@@ -925,6 +1078,8 @@ def record_daily_formal_reviews(
     ledger = DailyFormalReviewLedgerV1.model_validate_json(
         pending_path.read_text(encoding="utf-8")
     )
+    if ledger.monitor_review_policy != snapshot.get("monitor_review_policy"):
+        raise ValueError("daily review policy does not match snapshot")
     if ledger.analysis_date.isoformat() != str(snapshot.get("analysis_date")):
         raise ValueError("daily reviews analysis_date does not match snapshot")
     snapshot_as_of = _as_datetime(snapshot.get("as_of"))
@@ -965,6 +1120,8 @@ def record_daily_formal_reviews(
             opportunity_required
             and review.review_origin == "live"
             and review.current_opportunity is None
+            and not (ledger.monitor_review_policy == STATE_CHANGE_POLICY
+                     and review.review_kind == "internal_only")
         ):
             raise ValueError(
                 "this snapshot requires a current opportunity object: "
@@ -1003,7 +1160,7 @@ def record_daily_formal_reviews(
             )
         if not historical and review.tracking_decision == "historical_not_applied":
             raise ValueError("live reviews cannot use historical_not_applied")
-        if review.tracking_decision == "stop_active_tracking" and not (
+        if ledger.monitor_review_policy != STATE_CHANGE_POLICY and review.tracking_decision == "stop_active_tracking" and not (
             review.current_assessment == "contradicted"
             or (
                 review.current_weak_or_failed_link == "execution"
@@ -1055,6 +1212,9 @@ def record_daily_formal_reviews(
                     f"final twenty day review is frozen: {review.episode_id}"
                 )
 
+    if ledger.monitor_review_policy == STATE_CHANGE_POLICY:
+        _validate_state_change_ledger(snapshot, ledger, episodes)
+
     if opportunity_required:
         same_stock: dict[str, list[DailyFormalReviewV1]] = {}
         for review in ledger.reviews:
@@ -1079,7 +1239,7 @@ def record_daily_formal_reviews(
                     f"one current opportunity object: {code}"
                 )
 
-    if "checkpoint_review_episode_ids" in snapshot:
+    if "checkpoint_review_episode_ids" in snapshot and ledger.monitor_review_policy != STATE_CHANGE_POLICY:
         _three_route_grouping(
             snapshot=snapshot,
             daily_reviews={
@@ -1139,6 +1299,8 @@ def record_forward_monitor(
         raise ValueError("snapshot must be forward-monitor-snapshot-v1")
     raw_report = json.loads(pending_path.read_text(encoding="utf-8"))
     report = DailyForwardMonitorReportV2.model_validate(raw_report)
+    if report.monitor_review_policy != snapshot.get("monitor_review_policy"):
+        raise ValueError("report policy does not match snapshot")
     if any(
         alert.outlook_reason_plain_language is None
         for alert in report.alerts
@@ -1190,7 +1352,7 @@ def record_forward_monitor(
         "daily_review_episode_ids" in snapshot
         and daily_ledger_path.is_file()
     )
-    three_route = "checkpoint_review_episode_ids" in snapshot
+    three_route = "checkpoint_review_episode_ids" in snapshot and report.monitor_review_policy != STATE_CHANGE_POLICY
     if three_route and not daily_ledger_path.is_file():
         raise ValueError(
             "three-route snapshot requires the daily formal review ledger"
@@ -1215,7 +1377,7 @@ def record_forward_monitor(
         }
         if set(daily_reviews) != expected_daily_ids:
             raise ValueError("daily formal review ledger does not match snapshot")
-        if not three_route:
+        if report.monitor_review_policy != STATE_CHANGE_POLICY and not three_route:
             expected_detail_count = int(
                 snapshot_summary.get("detailed_review_stock_count", 0)
             )
@@ -1304,6 +1466,10 @@ def record_forward_monitor(
                 raise ValueError(
                     "a final decision review is required at or after the twentieth trading day"
                 )
+            if report.monitor_review_policy != STATE_CHANGE_POLICY and review.current_review is None:
+                raise ValueError("legacy detail requires an episode body")
+            if report.monitor_review_policy == STATE_CHANGE_POLICY and review.current_review is not None:
+                raise ValueError("state-change report must use one stock body")
             frozen_raw = episode.get("frozen_twenty_day_review")
             if frozen_raw is not None:
                 frozen = FrozenTwentyDayReviewV1.model_validate(
@@ -1403,7 +1569,26 @@ def record_forward_monitor(
         )
     }
     reported_codes = {alert.ts_code for alert in report.alerts}
-    if three_route:
+    if report.monitor_review_policy == STATE_CHANGE_POLICY:
+        if daily_ledger is None:
+            raise ValueError("state-change report requires daily ledger")
+        changed_codes = {
+            str(episodes[episode_id]["ts_code"])
+            for episode_id, daily in daily_reviews.items()
+            if daily.review_kind == "regular_detail"
+        }
+        if reported_codes != changed_codes:
+            raise ValueError("state-change report must contain every and only changed stock")
+        for alert in report.alerts:
+            if not alert.stock_review or any(item.current_review is not None for item in alert.episode_reviews):
+                raise ValueError("changed stock requires one stock body only")
+        missing_final = required_final_review_episode_ids - {
+            episode_id for episode_id, daily in daily_reviews.items()
+            if daily.final_twenty_day_review is not None
+        }
+        if missing_final:
+            raise ValueError("state-change ledger misses D20 final: " + ",".join(sorted(missing_final)))
+    elif three_route:
         node_codes, regular_codes, expected_report_codes = (
             _three_route_grouping(
                 snapshot=snapshot,
@@ -1512,6 +1697,76 @@ def record_forward_monitor(
         alert_count=len(report.alerts),
         unreported_attention_count=report.unreported_attention_count,
     )
+
+
+def _previous_tracking_state(episode: Mapping[str, Any]) -> str | None:
+    previous = episode.get("previous_daily_formal_review") or {}
+    value = previous.get("_effective_tracking_state") or previous.get("tracking_state")
+    return value if value in {"follow", "wait", "ended"} else None
+
+
+def _validate_state_change_ledger(
+    snapshot: dict[str, Any], ledger: DailyFormalReviewLedgerV1,
+    episodes: dict[str, dict[str, Any]],
+) -> None:
+    by_code: dict[str, list[DailyFormalReviewV1]] = {}
+    for review in ledger.reviews:
+        episode = episodes[review.episode_id]
+        previous = _previous_tracking_state(episode)
+        current = review.tracking_state
+        if previous == "ended" and current != "ended":
+            raise ValueError("ended episode cannot revive; a new recommendation needs a new episode")
+        if current is None and review.current_assessment != "insufficient_evidence":
+            raise ValueError("unknown tracking state requires insufficient evidence")
+        if current == "ended" and review.tracking_end_reason is None:
+            raise ValueError("ended tracking state requires a specific end reason")
+        if current != "ended" and review.tracking_end_reason is not None:
+            raise ValueError("end reason requires ended tracking state")
+        internal = review.review_kind == "internal_only"
+        expected_kind = state_change_kind(previous, current, internal_only=internal)
+        if review.review_kind != expected_kind:
+            raise ValueError("review kind must match the recorded state transition")
+        if internal:
+            if (not episode.get("final_review_pending") or previous != "ended"
+                    or review.final_twenty_day_review is None
+                    or review.current_review is not None or review.current_opportunity is not None):
+                raise ValueError("internal-only review is for an ended episode's pending D20 final")
+        elif previous == "ended":
+            raise ValueError("ended episode has no ordinary daily review")
+        if current in {"follow", "wait", None} and review.tracking_decision != "keep_active_tracking":
+            raise ValueError("follow, wait and missing evidence remain active for checking")
+        if current == "ended" and not internal:
+            expected_decision = (
+                "complete_observation" if review.tracking_end_reason == "observation_complete"
+                else "stop_active_tracking"
+            )
+            if review.tracking_decision != expected_decision:
+                raise ValueError("ended reason and tracking decision disagree")
+            if review.tracking_end_reason == "observation_complete" and not (
+                review.day_number in {20, 25, 30} or episode.get("final_review_pending")
+            ):
+                raise ValueError("normal completion requires the original endpoint")
+        if review.day_number == 20 and current in {"follow", "wait"} and not episode.get("approved_extension"):
+            raise ValueError("D20 must complete unless an extension was already approved")
+        by_code.setdefault(str(episode["ts_code"]), []).append(review)
+    for code, reviews in by_code.items():
+        changed = any(review.review_kind == "regular_detail" for review in reviews)
+        bodies = [review for review in reviews if review.current_review]
+        if changed and bodies:
+            raise ValueError("changed stock body belongs only in report")
+        if not changed and any(review.review_kind != "internal_only" for review in reviews):
+            if len(bodies) != 1:
+                raise ValueError(f"simple stock needs exactly one public body: {code}")
+            owner = max(
+                (review for review in reviews if review.review_kind != "internal_only"),
+                key=lambda review: (
+                    str(episodes[review.episode_id].get("action_date", "")),
+                    str(episodes[review.episode_id].get("formation_date", "")),
+                    review.episode_id,
+                ),
+            )
+            if bodies[0].episode_id != owner.episode_id:
+                raise ValueError("simple stock body must use the latest active episode")
 
 
 def _validate_pair_context(
@@ -1804,11 +2059,74 @@ def _brief_table_text(review_text: str, stock_name: str) -> str:
     return joined
 
 
+def _state_change_status(review: DailyFormalReviewV1, episode: dict[str, Any]) -> str:
+    labels = {"follow": "继续关注", "wait": "等待变化", "ended": "结束跟踪"}
+    if review.tracking_state is None:
+        previous = _previous_tracking_state(episode)
+        prior = episode.get("previous_daily_formal_review") or {}
+        when = prior.get("_tracking_state_date") or prior.get("_analysis_date")
+        return (f"上次状态：{labels[previous]}（{when}）；今日资料待核实" if previous and when
+                else "今日资料不足，尚不能判断跟踪状态")
+    if review.tracking_state == "ended":
+        reasons = {"thesis_invalidated": "原判断失效", "not_executable": "原条件无法执行",
+                   "observation_complete": "观察期结束", "user_closed": "用户要求结束"}
+        return "结束跟踪｜" + reasons[review.tracking_end_reason]
+    return labels[review.tracking_state]
+
+
+def _render_state_change_markdown(
+    report: DailyForwardMonitorReportV2, snapshot: dict[str, Any],
+    ledger: DailyFormalReviewLedgerV1,
+) -> str:
+    episodes = {str(e.get("episode_id")): e for e in snapshot.get("episodes", []) if isinstance(e, dict)}
+    reviews = {review.episode_id: review for review in ledger.reviews}
+    by_code: dict[str, list[tuple[dict[str, Any], DailyFormalReviewV1]]] = {}
+    for episode_id, review in reviews.items():
+        episode = episodes[episode_id]
+        by_code.setdefault(str(episode["ts_code"]), []).append((episode, review))
+    changed = {alert.ts_code: alert for alert in report.alerts}
+    lines = [f"# {report.analysis_date.isoformat()} 正式推荐股票的今日复盘", "",
+             "## 今天的市场情况", "",
+             f"{report.market_overview.what_changed.rstrip('。！？!? ；; ')}。{report.market_overview.implication_for_monitored_stocks}", "",
+             f"## 状态变化复盘（{len(changed)}只）", ""]
+    if not changed:
+        lines.extend(["今日没有已确认的跟踪状态变化。", ""])
+    for code, alert in sorted(changed.items()):
+        items = by_code[code]
+        active = [pair for pair in items if pair[1].tracking_state in {"follow", "wait"}]
+        primary = max(active or items, key=lambda pair: (
+            str(pair[0].get("action_date", "")), str(pair[0].get("formation_date", "")),
+            str(pair[0].get("episode_id", ""))))
+        lines.extend([f"### {alert.name}（{code}）", "",
+                      f"状态：{_state_change_status(primary[1], primary[0])}。", "",
+                      _brief_table_text(alert.stock_review or "", alert.name), ""])
+    simple = [(code, items) for code, items in by_code.items() if code not in changed
+              and any(r.review_kind != "internal_only" for _, r in items)]
+    lines.extend([f"## 简单复盘（{len(simple)}只）", ""])
+    if not simple:
+        lines.extend(["今日没有需要公开的简单复盘。", ""])
+    for code, items in sorted(simple):
+        owner = next((pair for pair in items if pair[1].current_review), None)
+        if owner is None:
+            continue
+        episode, review = owner
+        lines.extend([f"### {episode['name']}（{code}）", "",
+                      f"状态：{_state_change_status(review, episode)}。", "",
+                      _brief_table_text(review.current_review or "", str(episode.get("name") or "")), ""])
+    lines.extend(["## 目前还在跟踪多少只", "",
+                  _render_tracking_counts(snapshot, episodes, ledger), ""])
+    return "\n".join(lines)
+
+
 def _render_markdown(
     report: DailyForwardMonitorReportV2,
     snapshot: dict[str, Any],
     daily_ledger: DailyFormalReviewLedgerV1 | None = None,
 ) -> str:
+    if report.monitor_review_policy == STATE_CHANGE_POLICY:
+        if daily_ledger is None or daily_ledger.monitor_review_policy != STATE_CHANGE_POLICY:
+            raise ValueError("state-change Markdown requires matching daily ledger")
+        return _render_state_change_markdown(report, snapshot, daily_ledger)
     overview = report.market_overview
     pool = report.pool_summary
     episodes = {
@@ -3593,6 +3911,13 @@ def _daily_review_history(
             latest[review.episode_id] = payload
             if review.review_origin == "live":
                 previous_live = latest_live.get(review.episode_id, {})
+                effective_state = review.tracking_state or previous_live.get("_effective_tracking_state")
+                state_date = (
+                    ledger_date.isoformat() if review.tracking_state is not None
+                    else previous_live.get("_tracking_state_date")
+                )
+                payload["_effective_tracking_state"] = effective_state
+                payload["_tracking_state_date"] = state_date
                 exit_date = previous_live.get("_tracking_exit_date")
                 exit_reason = previous_live.get("_tracking_exit_reason")
                 if review.tracking_decision == "stop_active_tracking":
@@ -3601,6 +3926,8 @@ def _daily_review_history(
                 latest_live[review.episode_id] = {
                     **payload,
                     "_analysis_date": ledger_date.isoformat(),
+                    "_effective_tracking_state": effective_state,
+                    "_tracking_state_date": state_date,
                     "_tracking_exit_date": exit_date,
                     "_tracking_exit_reason": exit_reason,
                 }
@@ -3825,6 +4152,12 @@ def final_review_history(
                     "as_of": ledger.as_of.isoformat(),
                     "report_delivered": False,
                 })
+        if valid_report and ledger is not None and ledger.monitor_review_policy == STATE_CHANGE_POLICY:
+            for review in daily.values():
+                if review.review_kind == "internal_only" and review.final_twenty_day_review is not None:
+                    item = history.get(review.episode_id)
+                    if item is not None and item["final_twenty_day_review"] == review.final_twenty_day_review.model_dump(mode="json"):
+                        item["report_delivered"] = True
         if not valid_report:
             continue
         for alert in report.get("alerts", []):
@@ -3852,7 +4185,8 @@ def final_review_history(
                     "as_of": report_stamp.isoformat(),
                     "report_delivered": False,
                 })
-                body = review.get("current_review")
+                body = (alert.get("stock_review") if report.get("monitor_review_policy") == STATE_CHANGE_POLICY
+                        else review.get("current_review"))
                 if (episode_id in alert.get("episode_ids", [])
                         and isinstance(body, str) and body.strip()
                         and item["final_twenty_day_review"] == final):
@@ -4287,6 +4621,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     prepare = commands.add_parser("prepare")
     prepare.add_argument("--analysis-date", required=True)
     prepare.add_argument("--as-of", required=True)
+    prepare.add_argument("--review-policy", choices=["legacy-v1", STATE_CHANGE_POLICY])
     record = commands.add_parser("record")
     record.add_argument("--snapshot-file", required=True)
     record.add_argument("--report-file", required=True)
@@ -4307,10 +4642,18 @@ def main(argv: list[str] | None = None) -> int:
                 project_root=project_root,
             )
         elif args.command == "prepare":
+            policy = args.review_policy
+            if policy is None:
+                config_path = project_root / ".stock-ai.local.json"
+                config = json.loads(config_path.read_text(encoding="utf-8")) if config_path.is_file() else {}
+                policy = config.get("monitor_review_policy", STATE_CHANGE_POLICY)
+            if policy not in {"legacy-v1", STATE_CHANGE_POLICY}:
+                raise ValueError("unknown monitor review policy")
             summary = prepare_forward_monitor(
                 analysis_date=date.fromisoformat(args.analysis_date),
                 as_of=datetime.fromisoformat(args.as_of),
                 project_root=project_root,
+                monitor_review_policy=(STATE_CHANGE_POLICY if policy == STATE_CHANGE_POLICY else None),
             )
         elif args.command == "record-daily-formal-reviews":
             summary = record_daily_formal_reviews(

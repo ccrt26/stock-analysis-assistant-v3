@@ -1,0 +1,25 @@
+Pre-collected exact node IDs: 18
+tests/test_state_change_review.py::test_T01_all_active_episodes_one_stock_facts_compact_input
+tests/test_state_change_review.py::test_T02_unchanged_follow_and_wait_use_brief_even_with_price_opinion_change
+tests/test_state_change_review.py::test_T03_both_directions_require_single_change_body
+tests/test_state_change_review.py::test_T04_ended_requires_real_reason_not_price_or_quota
+tests/test_state_change_review.py::test_T05_more_than_eight_true_changes_all_delivered
+tests/test_state_change_review.py::test_T06_checkpoint_without_transition_stays_short_and_keeps_facts
+tests/test_state_change_review.py::test_T07_d20_normal_completion_is_short_public_change_with_internal_final
+tests/test_state_change_review.py::test_T08_early_ended_d20_only_internal_no_opportunity_or_public_body
+tests/test_state_change_review.py::test_T09_target_hit_not_auto_ended_and_approved_tail_keeps_d20
+tests/test_state_change_review.py::test_T10_first_registration_is_not_mass_transition
+tests/test_state_change_review.py::test_T11_ended_cannot_revive_old_episode
+tests/test_state_change_review.py::test_T12_missing_facts_preserve_last_state_date_without_today_confirmation
+tests/test_state_change_review.py::test_T13_participation_change_does_not_force_state_transition
+tests/test_state_change_review.py::test_T14_final_history_does_not_use_later_as_of
+tests/test_state_change_review.py::test_T15_knowledge_text_is_really_in_input_once_and_marked_fictional
+tests/test_state_change_review.py::test_T16_new_policy_bound_old_saved_policy_preserved
+tests/test_state_change_review.py::test_T17_fake_saved_body_reaches_markdown_and_web_once
+tests/test_state_change_review.py::test_T18_normal_cli_policy_parses_without_model_or_profile_change
+
+18 tests collected in 0.40s
+
+Execution of the same 18 IDs:
+..................                                                       [100%]
+18 passed in 0.27s

@@ -2288,6 +2288,13 @@ def current_opinion_input(trace, handoff, section, draft):
     episodes = {e['episode_id']: e for e in draft['snapshot'].get('episodes', [])}
     details = {r['episode_id']: r for a in draft['report'].get('alerts', [])
                for r in a.get('episode_reviews', [])}
+    state_change = draft['report'].get('monitor_review_policy') == 'state-change-v1'
+    stock_bodies = {str(a['ts_code']): a.get('stock_review') for a in draft['report'].get('alerts', [])} if state_change else {}
+    if state_change:
+        for review in draft['ledger'].get('reviews', []):
+            code = episodes[review['episode_id']]['ts_code']
+            if review.get('current_review') and code not in stock_bodies:
+                stock_bodies[code] = review['current_review']
     stocks = {s['ts_code']: s for s in selected_result(trace)['selected_stocks']}
     pairs = []
     for review in draft['ledger'].get('reviews', []):
@@ -2295,7 +2302,8 @@ def current_opinion_input(trace, handoff, section, draft):
         code = episode['ts_code']
         if code not in stocks or review.get('current_opportunity') is None:
             continue
-        body = (review if review.get('review_kind') == 'brief' else details.get(review['episode_id'], {})).get('current_review')
+        body = (stock_bodies.get(code) if state_change else
+                (review if review.get('review_kind') == 'brief' else details.get(review['episode_id'], {})).get('current_review'))
         if not body:
             raise ValueError('同股核对缺少唯一复盘正文：' + review['episode_id'])
         # Keep original historical conclusions/D20 out of current-action adjudication.

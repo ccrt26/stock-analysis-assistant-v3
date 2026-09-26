@@ -132,11 +132,17 @@ def review_enums(review: Mapping[str, Any]) -> dict[str, str | None]:
     view_change = review.get("view_change")
     assessment = review.get("current_assessment")
     outlook = review.get("outlook_1_3d")
+    policy = review.get("monitor_review_policy")
+    state = review.get("tracking_state") if policy == "state-change-v1" else None
+    reason = review.get("tracking_end_reason") if state == "ended" else None
     return {
         "viewChange": str(view_change) if view_change else None,
         "assessmentCode": str(assessment) if assessment else None,
         "outlookCode": str(outlook) if outlook else None,
         "outlookDirection": outlook_direction(outlook),
+        "trackingState": str(state) if state else None,
+        "trackingEndReason": str(reason) if reason else None,
+        "monitorReviewPolicy": str(policy) if policy else None,
     }
 
 

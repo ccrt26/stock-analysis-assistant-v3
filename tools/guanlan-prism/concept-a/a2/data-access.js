@@ -8,6 +8,29 @@ const M=root.PrismMath,V=M.valid;
 function create(data,extra={},rules){
  if(!rules||!rules.key||!rules.direction||!rules.deepReviews)
   throw new Error('A.02 数据适配必须注入仓库显示规则（rules），不允许内置第二套业务引擎');
+ if(data.monitorReviewPolicy==='state-change-v1'){
+  // The report is the sole source of changed-stock prose. Do not apply the
+  // legacy eight-stock editorial cap or the old supplied detail list.
+  rules.deepReviews=d=>{
+   const groups=[];
+   for(const stock of d.stocks){
+    const review=rules.latest(stock);
+    if(review?.date!==d.analysis_date||review.review_kind!=='regular_detail')continue;
+    let group=groups.find(item=>item.code===stock.code);
+    if(!group){group={code:stock.code,records:[]};groups.push(group);}
+    if(!group.records.some(item=>rules.key(item.s)===rules.key(stock)))group.records.push({s:stock,r:review});
+   }
+   return {groups,totalStocks:groups.length,limit:groups.length,overflow:0,source:'当日状态变化'};
+  };
+  const legacyInvalid=rules.isInvalid;
+  rules.isInvalid=(stock,day)=>{
+   const review=rules.latest(stock,day||data.analysis_date);
+   if(review?.trackingEndReason==='observation_complete')return false;
+   if(review?.trackingEndReason==='thesis_invalidated')return true;
+   return legacyInvalid(stock,day);
+  };
+  root.isInvalid=rules.isInvalid;
+ }
  const end=data.analysis_date;
  const original=data.sessionDates||(data.dates||[]);
  if(!/^\d{4}-\d{2}-\d{2}$/.test(end)||!original.every(d=>/^\d{4}-\d{2}-\d{2}$/.test(d)))throw new Error('需要完整 ISO sessionDates，不能用 MM-DD 猜年份');

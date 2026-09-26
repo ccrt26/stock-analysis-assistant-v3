@@ -157,11 +157,19 @@ def load_completed_archives(renderer, monitor_dir, analysis_date, action_date, a
                 or monitor._episode_selection_output_class(episode) not in monitor.PUBLIC_FORMAL_OUTPUT_CLASSES
                 or review.day_number != episode.get("day_number")):
             raise ValueError(f"daily review episode identity mismatch: {episode_id}")
-    _, _, report_codes = monitor._three_route_grouping(
-        snapshot=snapshot, daily_reviews=daily, episodes=episodes,
-    )
+    if report.monitor_review_policy != ledger.monitor_review_policy or report.monitor_review_policy != snapshot.get("monitor_review_policy"):
+        raise ValueError("formal review policies do not match")
+    if report.monitor_review_policy == monitor.STATE_CHANGE_POLICY:
+        report_codes = {str(episodes[eid]["ts_code"]) for eid, review in daily.items()
+                        if review.review_kind == "regular_detail"}
+        if any(not alert.stock_review for alert in report.alerts):
+            raise ValueError("changed stock is missing its sole public body")
+    else:
+        _, _, report_codes = monitor._three_route_grouping(
+            snapshot=snapshot, daily_reviews=daily, episodes=episodes,
+        )
     if {alert.ts_code for alert in report.alerts} != report_codes:
-        raise ValueError("report must exactly cover checkpoint and regular detail stocks")
+        raise ValueError("report must exactly cover the policy's public detail stocks")
     for alert in report.alerts:
         ids = {episode_id for episode_id in daily if episodes[episode_id].get("ts_code") == alert.ts_code}
         if (set(alert.episode_ids) != ids or len(alert.episode_ids) != len(ids)
