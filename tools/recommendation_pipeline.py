@@ -1242,8 +1242,16 @@ def parse_clarification_output(text: str) -> dict:
         if not isinstance(item, dict) or not str(item.get('issue_id') or '').strip():
             raise ValueError('unresolved条目缺少issue_id')
         if item['issue_id'] in seen:
-            # 未决优先于伪已解决：矛盾输出在缓存写入前即拒绝（V1.2 A1）。
-            raise ValueError(f"同一问题同时给出已解决与未决：{item['issue_id']}")
+            matches = [r for r in resolutions if r['issue_id'] == item['issue_id']]
+            unresolved_count = sum(isinstance(u, dict) and u.get('issue_id') == item['issue_id']
+                                   for u in unresolved)
+            # A blocking disposition can also be explicitly listed as unresolved.
+            # Preserve both records; genuinely resolved/unresolved conflicts still fail.
+            same_block = (len(matches) == 1 and unresolved_count == 1
+                          and matches[0]['type'] in BLOCKING_TYPES
+                          and matches[0].get('blocking') is True)
+            if not same_block:
+                raise ValueError(f"同一问题同时给出已解决与未决：{item['issue_id']}")
         seen.add(item['issue_id'])
     return {'resolutions': resolutions, 'unresolved': unresolved, 'covered': sorted(seen)}
 

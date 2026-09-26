@@ -15,3 +15,5 @@
 ## 正式续跑发现的必要局部适配
 
 `tools/recommendation_file_io.py::read_output`：真实核对稿用`fidelity_issues.issue_kind=omission`表示原研究必要理由遗漏；提示未枚举类别，既有适配器拒收。只在内存将此精确别名规范为现有`reasoning_gap`，再运行原校验。原文件与哈希不变、blocking和ready不变、真实研究问题全部保留；其他非法类别和非布尔/缺失blocking仍拒绝。不改Prompt、输入身份、作者循环、预算或路由，利用现有failed_output_hashes恢复原审稿，不再次抽样。原独立审查者就这一具体新失败补审通过（以修订版为准）；无新角色。验证并入原T10。
+
+`tools/recommendation_pipeline.py::parse_clarification_output`：第二份真实回执在resolutions以requires_research_change/阻塞描述问题，并在unresolved重述同一未决事实。仅在对应ID两组各一条、类型为原BLOCKING_TYPES且blocking严格true时允许共存，两组内容原样保留；其他跨数组冲突仍拒绝，不新增一般重复治理。现有resolve_article_issues继续将其列入blocking，原输出恢复不新增澄清会话。原审查者对具体新故障补审通过；原T10包含真实处理函数和否定分支验证。不修改循环、预算、研究方法或路由。

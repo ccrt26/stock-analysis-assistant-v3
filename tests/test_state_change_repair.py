@@ -387,6 +387,41 @@ def test_T10_resume_reuses_research_and_authors_and_task_xhigh_is_real(harness,m
         files.fio.read_output(stage_dir,identity['file_spec'],pipeline.parse_review_output)
     output.write_bytes(originals['output/review-result.json'])
 
+    # Explicitly blocking dispositions may repeat in unresolved without becoming resolved.
+    issues=[dict(files.QUESTION,issue_id='R00S01')];packet=files.bound_packet();material=files.material()
+    scope='synthetic-blocking-resume';recovery_dir=directory/'blocked-clarification'
+    spec=files.fio.stage_spec(root,'clarification',packet,material,issues=issues,allow_research_changes=True)
+    stage_dir=recovery_dir/'original-stage';manifest=files.fio.write_stage(stage_dir,spec)
+    resolution=dict(issue_id='R00S01',type='requires_research_change',blocking=True,
+        changes_original_judgment=True,evidence_text='原材料无法核对同行估值',source_ref='input/packet.json',
+        author_instruction='交原研究负责人核实，不由作者补造理由')
+    original=dict(resolutions=[resolution],unresolved=[dict(issue_id='R00S01',problem='证据缺口仍未解决')])
+    raw=files.fio.dumps(original);output=stage_dir/'output/resolution.json';output.write_text(raw)
+    cache=recovery_dir/'research-clarification-result.json'
+    dump(cache,dict(input_identity=pipeline.file_stage_identity('research-clarification',spec,scope),
+        stage_directory=str(stage_dir),input_index=manifest,terminal_status='failed',execution_verified=True,
+        stage_execution=saved['stage_execution'],failed_output_hashes={'output/resolution.json':files.fio.digest(raw)}))
+    state={};calls_before=len(harness.calls)
+    kwargs=dict(issues=issues,packet=packet,materials=material,directory=recovery_dir,state=state,
+        state_path=root/'recovery-state.json',config=config,provider='astra',fallback=False,
+        allow_research_changes=True,run_scope=scope)
+    result=pipeline.resolve_article_issues(stock_ai,**kwargs)
+    assert result['blocking']==[resolution] and result['resolutions']==[resolution]
+    assert state['article_cycle_counts'][scope+':'+packet['identity']['ts_code']]['clarification']==0
+    assert output.read_text()==raw and len(harness.calls)==calls_before
+    recovered=json.loads(cache.read_text())
+    assert json.loads(recovered['raw'])==original
+    assert pipeline.resolve_article_issues(stock_ai,**kwargs)['blocking']==[resolution]
+    assert len(harness.calls)==calls_before
+    for kind,blocking in [('resolved_existing',True),('requires_research_change',False),('requires_research_change','true')]:
+        invalid=deepcopy(original);invalid['resolutions'][0].update(type=kind,blocking=blocking)
+        with pytest.raises(ValueError,match='同一问题'):
+            pipeline.parse_clarification_output(files.fio.dumps(invalid))
+    for group in ['resolutions','unresolved']:
+        invalid=deepcopy(original);invalid[group].append(deepcopy(invalid[group][0]))
+        with pytest.raises(ValueError,match='同一问题'):
+            pipeline.parse_clarification_output(files.fio.dumps(invalid))
+
 
 def test_T11_three_new_knowledge_texts_are_supplied_once_and_not_business_facts(tmp_path):
     s,_=sc.case();sc.install_knowledge(tmp_path)
