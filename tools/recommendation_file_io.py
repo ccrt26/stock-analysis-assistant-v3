@@ -274,13 +274,21 @@ def read_output(directory, spec, review_validator=None, clarification_validator=
         for key in ('reader_summary', 'readability_issues', 'fidelity_issues', 'research_issues', 'issue_checks'):
             if key not in value:
                 raise ValueError('审稿缺字段：' + key)
+        normalized = False
         for group in ('readability_issues', 'fidelity_issues'):
             for issue in value[group]:
+                # A missing original argument is an existing reasoning gap.
+                # Normalize only in memory; retain the model's original files.
+                if group == 'fidelity_issues' and issue.get('issue_kind') == 'omission':
+                    issue['issue_kind'] = 'reasoning_gap'
+                    normalized = True
                 if issue.get('issue_kind') not in ('condition', 'metric_basis', 'fact', 'inference', 'reasoning_gap', 'expression') or type(issue.get('blocking')) is not bool:
                     raise ValueError('审稿问题缺 issue_kind 或布尔 blocking')
         for check in value['issue_checks']:
             if not str(check.get('basis') or '').strip():
                 raise ValueError('审稿问题核销缺依据 basis')
+        if normalized:
+            raw = dumps(value)
         review_validator(raw)
         return raw
     if role == 'clarification':

@@ -356,6 +356,37 @@ def test_T10_resume_reuses_research_and_authors_and_task_xhigh_is_real(harness,m
     pipeline.run_stage(stock_ai,harness.state,harness.state_path,directory/'intro','company-introductions','补介绍','astra',effective,text_only=False,fallback=False)
     assert harness.state['recommendation_stages'][-1]['configured_effort']=='xhigh'
 
+    # A finished review with a category alias recovers its exact files, without a new call.
+    cached_path=next(directory.rglob('review-*-result.json'))
+    saved=json.loads(cached_path.read_text());stage_dir=Path(saved['stage_directory'])
+    output=stage_dir/'output/review-result.json'
+    issue=dict(quote='原研究引句',problem='必要理由遗漏',instruction='由研究负责人核对后补齐',
+               issue_kind='omission',evidence=['原资料定位'],blocking=True)
+    original=files.review(False,fidelity=[issue])
+    original['research_issues']=[dict(files.QUESTION,ts_code=code)]
+    output.write_text(files.fio.dumps(original))
+    originals={str(p.relative_to(stage_dir)):p.read_bytes() for p in (stage_dir/'output').glob('*') if p.is_file()}
+    saved.update(terminal_status='failed',failed_output_hashes={k:files.fio.digest(v) for k,v in originals.items()})
+    dump(cached_path,saved)
+    identity=saved['input_identity'];calls_before=len(harness.calls)
+    cache_args=(stock_ai,cached_path.parent,identity['stage'],identity['file_spec'],identity['run_scope'],pipeline.parse_review_output)
+    raw=pipeline.file_cached_result(*cache_args)
+    expected=deepcopy(original);expected['fidelity_issues'][0]['issue_kind']='reasoning_gap'
+    assert json.loads(raw)==expected and expected['ready'] is False
+    assert pipeline.parse_review_output(raw)['fidelity_issues'][0]['blocking'] is True
+    assert all((stage_dir/k).read_bytes()==v for k,v in originals.items())
+    assert pipeline.file_cached_result(*cache_args)==raw and len(harness.calls)==calls_before
+    for change in [{'issue_kind':'unrecognized'}, {'blocking':'true'}, {'blocking':None}]:
+        invalid=deepcopy(original);invalid['fidelity_issues'][0].update(change)
+        output.write_text(files.fio.dumps(invalid))
+        with pytest.raises(ValueError,match='issue_kind|blocking'):
+            files.fio.read_output(stage_dir,identity['file_spec'],pipeline.parse_review_output)
+    invalid=deepcopy(original);invalid['fidelity_issues'][0].pop('blocking')
+    output.write_text(files.fio.dumps(invalid))
+    with pytest.raises(ValueError,match='issue_kind|blocking'):
+        files.fio.read_output(stage_dir,identity['file_spec'],pipeline.parse_review_output)
+    output.write_bytes(originals['output/review-result.json'])
+
 
 def test_T11_three_new_knowledge_texts_are_supplied_once_and_not_business_facts(tmp_path):
     s,_=sc.case();sc.install_knowledge(tmp_path)

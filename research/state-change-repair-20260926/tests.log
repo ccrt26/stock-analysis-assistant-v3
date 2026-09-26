@@ -11,3 +11,8 @@ Next: 5 failed, 7 passed, exit 1; old synthetic fixtures lacked episode analysis
 Final exact set: 12 passed in 1.29s, exit 0.
 
 Repair verification used 0 real business model sessions. All model/process boundaries in T10 are fake. No whole-repository tests, old 18-test set, model verify or nightly smoke run.
+
+正式续跑出现具体回执适配失败后的定向补充：
+同一T10增加omission原稿恢复、文件不变、无新调用、阻塞不变及非法类别/缺失或非布尔blocking拒绝断言。
+仅执行 tests/test_state_change_repair.py::test_T10_resume_reuses_research_and_authors_and_task_xhigh_is_real
+1 passed in 1.04s；退出码0。唯一测试节点仍为原12项；未重复全套。真实模型验收0次。

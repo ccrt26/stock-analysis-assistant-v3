@@ -11,3 +11,7 @@
 | tests/test_state_change_repair.py | T01—T12：真实prepare/save/assemble、同股意见、文件作者缓存与假进程命令；不新建测试平台 |
 
 同股当前意见入口已有current_opportunity=None跳过逻辑，本次只验证不改动。D20价格计算、WEB布局、数据库与调度均未修改。
+
+## 正式续跑发现的必要局部适配
+
+`tools/recommendation_file_io.py::read_output`：真实核对稿用`fidelity_issues.issue_kind=omission`表示原研究必要理由遗漏；提示未枚举类别，既有适配器拒收。只在内存将此精确别名规范为现有`reasoning_gap`，再运行原校验。原文件与哈希不变、blocking和ready不变、真实研究问题全部保留；其他非法类别和非布尔/缺失blocking仍拒绝。不改Prompt、输入身份、作者循环、预算或路由，利用现有failed_output_hashes恢复原审稿，不再次抽样。原独立审查者就这一具体新失败补审通过（以修订版为准）；无新角色。验证并入原T10。
