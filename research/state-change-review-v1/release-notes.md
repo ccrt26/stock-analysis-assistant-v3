@@ -11,3 +11,5 @@ Obsidian 三份教学资料已经按本机知识库指针安装并被单快照�
 受测并合入的实现提交为 `fbbee9c`（完整 SHA 可用 `git rev-parse fbbee9c` 读取），从原 main `9dcc0e9` 快进合入。工作分支 `fix/state-change-review-v1` 已推送。生产代码目录已在 main 上；此文件所在的后续提交仅记录部署事实，不更改受测程序。
 
 实际 `.stock-ai.local.json` 已增加 `monitor_review_policy=state-change-v1`；设置前后 `recommendation_authoring_profile=astra-files-v1`，其余配置值逐项相同。夜间 LaunchAgent 安装命令仍为 `run nightly --scheduled --provider astra --no-fallback --recommendation-authoring-profile astra-files-v1`，未加载、未启动，原禁用状态未改变。用户原有未提交文件均保留，本次没有生成生产 HTML 或覆盖旧文章。下一次正常新任务会按本机配置绑定新策略；已开始旧任务保持旧策略。
+
+部署后复核当前 A2 页面源码时，发现同股列表原先固定采用最早记录。随后把新策略的列表代表改为最新仍跟踪的 episode；没有活跃记录时取最新已结束 episode，并按保存的结束原因展示。适配仅在下次生成 state-change-v1 页面时应用，未修改用户尚未提交的 A2 页面源码，也未在本轮生成生产 HTML。修订沿用相同 18 个精确离线节点，仍全部通过。

@@ -1,6 +1,7 @@
 """V2 state-change review: exact offline fake-output acceptance nodes T01-T18."""
 from __future__ import annotations
 
+import importlib.util
 import json
 from argparse import Namespace
 from copy import deepcopy
@@ -297,6 +298,18 @@ def test_T17_fake_saved_body_reaches_markdown_and_web_once(tmp_path):
     assert history[reviews[0]["episode_id"]][-1]["trackingState"] == "wait"
     assert history[newer_episode["episode_id"]][-1]["trackingState"] == "follow"
     assert "状态变化复盘" in nightly_report.source_sections(tmp_path, snapshot["analysis_date"])[0]
+    builder_path = SOURCE / "tools/guanlan-prism/tools/build_preview_a2.py"
+    spec = importlib.util.spec_from_file_location("state_change_a2_builder", builder_path)
+    assert spec is not None and spec.loader is not None
+    builder = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(builder)
+    sample = {"analysis_date": "2026-08-31", "sessionDates": ["2026-08-31"],
+              "dates": ["08-31"], "market": [None], "stocks": [],
+              "monitorReviewPolicy": POLICY}
+    rendered = builder.render_html(sample)
+    assert "const currentEpisode=s=>" in rendered
+    assert "s.stage||D.opinion(s)" in rendered
+    assert "简单复盘" in rendered and "状态变化复盘" in rendered
 
 
 def test_T18_normal_cli_policy_parses_without_model_or_profile_change():

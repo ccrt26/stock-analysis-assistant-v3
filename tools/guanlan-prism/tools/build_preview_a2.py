@@ -224,6 +224,24 @@ def render_html(snapshot: dict, series: dict | None = None) -> str:
         )
         if count != 1:
             raise ValueError("A2 review-kind label adapter could not be applied")
+        overview_source, count = re.subn(
+            r"(?m)^ const firstByCode=new Map\(\);\n for\(const s of raw.stocks\)\{const cur=firstByCode.get\(s.code\);\n  if\(!cur\|\|s.recDate<cur.recDate\)firstByCode.set\(s.code,s\);\}",
+            " const firstByCode=new Map();\n const currentEpisode=s=>s.trackingStatus==='active'&&s.trackingState!=='ended';\n const newer=(a,b)=>(a.formedOn||a.recDate)+'|'+a.recDate+'|'+(a.episodeId||'')>(b.formedOn||b.recDate)+'|'+b.recDate+'|'+(b.episodeId||'');\n for(const s of raw.stocks){const cur=firstByCode.get(s.code);\n  if(!cur||(currentEpisode(s)&&!currentEpisode(cur))||(currentEpisode(s)===currentEpisode(cur)&&newer(s,cur)))firstByCode.set(s.code,s);}",
+            overview_source,
+        )
+        if count != 1:
+            raise ValueError("A2 current-episode display adapter could not be applied")
+        overview_source, count = re.subn(
+            r"(?m)^const opTag=s=>[^\n]*;$",
+            "const opTag=s=>opTagText(s.stage||D.opinion(s),s.trackingEndReason==='thesis_invalidated');",
+            overview_source,
+        )
+        if count != 1:
+            raise ValueError("A2 tracking-state badge adapter could not be applied")
+        overview_source = overview_source.replace(
+            "const activeCode=new Set(raw.stocks.filter(s=>!isFormerRecord(s)).map(s=>s.code));",
+            "const activeCode=new Set(raw.stocks.filter(s=>currentEpisode(s)).map(s=>s.code));",
+        )
     replacements = {
         "/*__DATA__*/": payload,
         "/*__SERIES__*/": series_payload,

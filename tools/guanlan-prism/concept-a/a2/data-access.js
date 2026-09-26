@@ -30,6 +30,10 @@ function create(data,extra={},rules){
    return legacyInvalid(stock,day);
   };
   root.isInvalid=rules.isInvalid;
+  const legacyOpinion=rules.opinionLabel;
+  rules.opinionLabel=(stock,day)=>
+   (day||data.analysis_date)===data.analysis_date&&stock.stage?stock.stage:legacyOpinion(stock,day);
+  root.opinionLabel=rules.opinionLabel;
  }
  const end=data.analysis_date;
  const original=data.sessionDates||(data.dates||[]);

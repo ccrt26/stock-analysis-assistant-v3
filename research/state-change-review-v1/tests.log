@@ -18,8 +18,8 @@ tests/test_state_change_review.py::test_T16_new_policy_bound_old_saved_policy_pr
 tests/test_state_change_review.py::test_T17_fake_saved_body_reaches_markdown_and_web_once
 tests/test_state_change_review.py::test_T18_normal_cli_policy_parses_without_model_or_profile_change
 
-18 tests collected in 0.40s
+18 tests collected in 0.51s
 
 Execution of the same 18 IDs:
 ..................                                                       [100%]
-18 passed in 0.27s
+18 passed in 0.26s
