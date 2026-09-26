@@ -64,3 +64,14 @@
 追加局部修复：允许定位式证据，但逐项核对 source / pointer / quote 对应此 episode 的当前实际字段。
 模型原输入、原输出和执行协议不改；同项 monitor.unresolved 仍保留为当前未决，不能由该格式修复清除。
 同一组 12 项最终通过（4.81s），补充原真实回执夹具、真实字段与伪造引句反例。
+
+## 最终交付状态：未完成正式业务
+
+- 受测代码与生产恢复版本：def61182c08cf461647b3cbee6c89e4389016cbc；最初交接修复：ca7b66e6b62d28809e5ab68e220d50b6193adae9。
+- 后续仅本目录文档提交；最终HEAD和远端核对由交付回复列出。
+- 修复阶段0真实会话；正式续跑1个Astra xhigh monitor会话，约8分08秒。
+- 原selection及新monitor原件均可恢复；剩余是monitor新回执保留的同项作者待办，并非仅因selection历史文字仍在而停止。
+- 原第二次同股检查、药石修订预算均未消耗；未形成9月23日正式日报，未生成或发布新页面。
+- 原始必要摘录见 CO-1-evidence.md；真实阶段、预算及分层发布状态见 resume-summary.md；药石修改仅以明确标注的草稿证据提供。
+- 原入口：在已核实的生产目录运行 ./.venv/bin/python tools/stock_ai.py run nightly --rerun-date 2026-09-24 --provider astra --no-fallback --recommendation-authoring-profile astra-files-v1。
+- 当前相同入口会复用原回执并停在同一未决，不能靠重复启动解决；没有安排后续日期或自动任务。
