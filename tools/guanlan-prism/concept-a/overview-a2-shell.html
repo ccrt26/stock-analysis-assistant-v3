@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="dark">
-<meta name="description" content="观澜 A2 主用展示：量价活跃度、40日主图、50日指数K线弹窗。只呈现本地冻结快照与本地补充日线，主用收盘研究页面。">
+<meta name="description" content="观澜 A2 主用展示：量价活跃度、40日主图、50日指数K线弹窗。只呈现本地冻结快照与本地补充日线，主用收盘研究页面">
 <title>观澜 · A2 — 收盘研究工作台</title>
 <style>
 /* A 黑白仪表台 · 视觉令牌。黑白为基底，红/青仅表示涨跌方向，琥珀仅标注观察目标。 */
@@ -625,7 +625,7 @@ function atlasRecordLabel(s){const sameYear=s.recDate.slice(0,4)===DATA.analysis
 const state={page:'overview',mapMode:'stock',mapGroup:null,mapCurrent:null,mapPreview:null,mapDate:null};
 /* ---- 区块渲染 ---- */
 function overviewPage(){
-  return `<div class="page-title between"><div><div class="eyebrow">AFTERCLOSE / OBSERVATION DESK</div><h1>收盘之后，看清变化。</h1><p>先看市场，再看量价，最后回到每一次判断。</p></div><div class="report-meta" id="reportMeta"></div></div>
+  return `<div class="page-title between"><div><div class="eyebrow">AFTERCLOSE / OBSERVATION DESK</div><h1>收盘之后，看清变化</h1><p>先看市场，再看量价，最后回到每一次判断</p></div><div class="report-meta" id="reportMeta"></div></div>
   <div class="market-hint"><span>市场行情</span><span>点击指数，展开最近 50 个交易日的 K 线 ↗</span></div>
   <section class="market-strip" id="marketStrip" aria-label="市场行情，点击查看50个交易日K线"></section>
   <section id="focus"><div class="section-head"><h2><span class="dot"></span> <span class="ht">走势聚焦</span> <span class="muted" id="focusName"></span><span class="eyebrow">DAILY DEEP REVIEW</span></h2>
@@ -642,7 +642,7 @@ function overviewPage(){
   <div id="updatesRail" class="updates-rail" aria-label="观点更新横向清单"></div>
   <div class="rail-tools"><input id="updatesScroll" type="range" min="0" max="1000" value="0" aria-label="拖动观点更新"><span id="updatesPosition"></span>
   <button class="square" data-rail="updatesRail" data-step="-1" aria-label="向左查看观点更新">←</button><button class="square" data-rail="updatesRail" data-step="1" aria-label="向右查看观点更新">→</button></div>
-  <p class="scope-note">比较相邻两次已保存复盘的短期方向；不是涨跌排名，也不把观点增强等同于方向改变。</p></section>${foot()}`;
+  <p class="scope-note">比较相邻两次已保存复盘的短期方向；不是涨跌排名，也不把观点增强等同于方向改变</p></section>${foot()}`;
 }
 function opinionTagClass(s,date=DATA.analysis_date){
   if(isInvalid(s,date))return 'down';
@@ -650,12 +650,12 @@ function opinionTagClass(s,date=DATA.analysis_date){
 }
 /* ---- 观察星图页 ---- */
 function foot(){
-  return `<footer class="footer"><span><strong>观澜</strong> &nbsp; 记录判断，而不是制造确定性。</span><span>A2 主用展示</span></footer>`;
+  return `<footer class="footer"><span><strong>观澜</strong> &nbsp; 记录判断，而不是制造确定性</span><span>A2 主用展示</span></footer>`;
 }
 function atlasPage(){
   const stockView=state.mapMode==='stock',asOf=atlasAsOf();
   const mmdd=asOf.date.slice(5).replace('-','.'),wd='日一二三四五六'[new Date(asOf.date+'T00:00:00').getDay()];
-  return `<div class="page-title between"><div><div class="eyebrow">THE OBSERVATION ATLAS</div><h1>每一只股票，一条观察主线。</h1></div>
+  return `<div class="page-title between"><div><div class="eyebrow">THE OBSERVATION ATLAS</div><h1>每一只股票，一条观察主线</h1></div>
   <div class="dateNav${asOf.review?' review':''}" id="dateNav">
     <div class="dateNav-row">
       <button class="dn-arrow" data-map-date-step="-1" aria-label="上一个交易日"${asOf.iV<=0?' disabled':''}>◀</button>
@@ -692,7 +692,7 @@ function mapPanelContent(){
   return recordPanel(hit?hit.s:null);
 }
 function groupPanel(item){
-  if(!item)return `<div class="empty sel-empty"><h2>还没有选中的股票</h2><p>点击星图上的光点或“入选N次”徽标，这里展开这只股票的全部入选明细；悬停只作预览。</p></div>`;
+  if(!item)return `<div class="empty sel-empty"><h2>还没有选中的股票</h2><p>点击星图上的光点或“入选N次”徽标，这里展开这只股票的全部入选明细；悬停只作预览</p></div>`;
   const {group,badge,basis}=item,anchor=basis.anchor,{date,iV,review}=atlasAsOf();
   const episodes=group.records.map((s,i)=>{
     const p=atlasRecordPoint(s,group,iV),invalid=isInvalid(s,date);
@@ -706,12 +706,12 @@ function groupPanel(item){
   ${badge?`<span class="tag accent">${esc(badge.full)}</span>`:''}
   <div class="sel-return num ${tone(basis.ret)}">${pct(basis.ret)}</div>
   ${basis.plottable?`<dl class="sel-meta"><div><dt>最早记录原参考价</dt><dd>¥ ${number(anchor.ref)}</dd></div><div><dt>${review?'回看日收盘':'报告日收盘'}</dt><dd>¥ ${number(basis.close)}<small>${date}</small></dd></div><div><dt>距最早入选</dt><dd>第 ${basis.day} 个交易日</dd></div></dl>`
-  :`<p class="sel-missing">最早基准无法计算：${esc(basis.reason)}。不换用最新参考价，也不按 0% 绘制；明细中仍可阅读各次记录。</p>`}
-  ${latest&&latestPoint&&latestPoint.plottable?`<div class="sel-latest"><b>最新一次 ${latest.recDate.replaceAll('-','.')}</b>：自己的涨跌 <b class="num ${tone(latestPoint.ret)}">${pct(latestPoint.ret)}</b>（第 ${latestPoint.day} 个交易日，较该次参考价 ${number(latest.ref)}）。单列阅读，不替换主图基准。</div>`:''}
+  :`<p class="sel-missing">最早基准无法计算：${esc(basis.reason)}。不换用最新参考价，也不按 0% 绘制；明细中仍可阅读各次记录</p>`}
+  ${latest&&latestPoint&&latestPoint.plottable?`<div class="sel-latest"><b>最新一次 ${latest.recDate.replaceAll('-','.')}</b>：自己的涨跌 <b class="num ${tone(latestPoint.ret)}">${pct(latestPoint.ret)}</b>（第 ${latestPoint.day} 个交易日，较该次参考价 ${number(latest.ref)}）。单列阅读，不替换主图基准</div>`:''}
   <div class="sel-episodes-title">全部入选明细 · 按时间顺序</div>${episodes}</div>`;
 }
 function recordPanel(s){
-  if(!s)return `<div class="empty sel-empty"><h2>还没有选中记录</h2><p>点击星图上的光点查看这一次入选的详情；每个点使用自己那次的日期与参考价。</p></div>`;
+  if(!s)return `<div class="empty sel-empty"><h2>还没有选中记录</h2><p>点击星图上的光点查看这一次入选的详情；每个点使用自己那次的日期与参考价</p></div>`;
   const {date}=atlasAsOf();
   const i=indexOfDate(date),eq=s.candles[i],ret=returnOnDate(s,date),r=latest(s,date);
   return `<div class="sel-body"><span class="eyebrow">SELECTED OBSERVATION</span>
@@ -719,7 +719,7 @@ function recordPanel(s){
   <div class="sel-return num ${tone(ret)}">${pct(ret)}</div><span class="sel-hint">收盘较原参考价</span>
   <dl class="sel-meta"><div><dt>观察进度</dt><dd>${s.d0?'待首日观察':`第 ${daysAt(s,date)} 天 / ${OBS_DAYS}`}</dd></div><div><dt>${dateWord(s).w}日期</dt><dd>${dateWord(s).d}</dd></div><div><dt>本期成交额</dt><dd>${eq&&valid(eq[4])?number(eq[4])+' 亿':'—'}</dd></div></dl>
   ${isInvalid(s,date)?'<span class="tag invalid-pill">判断失效</span>':`<span class="tag ${opinionTagClass(s,date)}">${esc(opinionLabel(s,date))}</span>`}
-  <p class="sel-note">${esc(r?.viewReason||(s.reasonFull?s.reasonFull.slice(0,90)+'…':'原报告未填写复盘说明。'))}</p>
+  <p class="sel-note">${esc(r?.viewReason||(s.reasonFull?s.reasonFull.slice(0,90)+'…':'原报告未填写复盘说明'))}</p>
   <button class="text-button" data-open="${key(s)}">阅读完整复盘 →</button></div>`;
 }
 function updateMapPanel(){const el=$('mapSelection');if(el)el.innerHTML=mapPanelContent()}

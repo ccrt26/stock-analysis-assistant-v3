@@ -279,3 +279,16 @@ span.op-weakened{color:var(--down)}
 /* Method studies keep their own time boundary; all report text is escaped. */
 .method-page{max-width:1200px;margin:auto}.method-study{padding:24px;margin:0 0 20px;line-height:1.85;min-width:0}.method-study h2{font-size:19px;margin:0 0 12px}.method-study h3{font-size:15px;margin:20px 0 8px}.method-study p{margin:10px 0;color:var(--secondary)}.method-study ol{padding-left:22px}.method-status{font-weight:600;color:var(--text)!important}.method-counts{display:flex;gap:22px;flex-wrap:wrap;margin:18px 0}.method-counts b{font-family:var(--mono);font-size:23px;margin-left:8px}.method-study details{border-top:1px solid var(--line);padding:14px 0}.method-study summary{cursor:pointer;font-weight:600;list-style:disclosure-closed}.method-study details[open]>summary{list-style:disclosure-open}.method-prose p{white-space:pre-wrap;overflow-wrap:anywhere}.method-change{border-left:2px solid var(--accent);padding-left:16px;margin:15px 0}.method-table{overflow-x:auto;max-width:100%;margin-top:14px}.method-table table{border-collapse:collapse;font-size:12px;width:max-content;min-width:100%}.method-table th,.method-table td{padding:10px;border-bottom:1px solid var(--line);text-align:left;max-width:220px;white-space:normal;overflow-wrap:anywhere}.method-table th{white-space:nowrap}.method-source{font-size:11px;color:var(--muted)!important;overflow-wrap:anywhere}.method-study textarea{display:block;width:100%;min-height:125px;margin:14px 0;padding:12px;background:var(--raised);color:var(--text);border:1px solid var(--line);font:inherit;line-height:1.7}.method-copy{padding:8px 14px;border:1px solid var(--line);margin-right:12px;color:var(--text)}
 @media(max-width:680px){.method-study{padding:17px}.method-counts{gap:12px}.method-counts span{flex-basis:44%}.method-page h1{font-size:28px}.method-study textarea{min-height:210px}}
+
+/* 全部观察：超过观察期的曾入选股票默认隐藏，开关打开后在独立分区显示。 */
+.former-switch{display:inline-flex;align-items:center;gap:8px;font-size:11px;color:var(--secondary);cursor:pointer;user-select:none;margin-left:2px}
+.former-switch:hover{color:var(--text)}
+.former-switch input{position:absolute;opacity:0;pointer-events:none}
+.former-switch i{width:30px;height:16px;border-radius:8px;border:1px solid var(--line);background:var(--panel);position:relative;transition:background .15s,border-color .15s;flex:none}
+.former-switch i::after{content:'';position:absolute;top:2px;left:2px;width:10px;height:10px;border-radius:50%;background:var(--secondary);transition:transform .15s,background .15s}
+.former-switch input:checked+i{background:var(--raised);border-color:#ffffff35}
+.former-switch input:checked+i::after{transform:translateX(14px);background:var(--text)}
+.former-switch input:focus-visible+i{outline:1px solid var(--text);outline-offset:2px}
+.former-section{margin-top:6px}
+.former-section .section-head p{font-size:10px;color:var(--muted);font-weight:400;text-align:right;max-width:560px}
+@media(max-width:760px){.former-section .section-head p{text-align:left;max-width:none}}

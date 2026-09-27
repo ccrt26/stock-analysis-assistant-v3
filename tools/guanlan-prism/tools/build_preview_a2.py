@@ -238,10 +238,36 @@ def render_html(snapshot: dict, series: dict | None = None) -> str:
         )
         if count != 1:
             raise ValueError("A2 tracking-state badge adapter could not be applied")
-        overview_source = overview_source.replace(
-            "const activeCode=new Set(raw.stocks.filter(s=>!isFormerRecord(s)).map(s=>s.code));",
-            "const activeCode=new Set(raw.stocks.filter(s=>currentEpisode(s)).map(s=>s.code));",
+        # d0 records (recommended tonight, first observation day beyond the
+        # snapshot cutoff) carry no trackingStatus yet but stay under current
+        # observation; the v1 "former" bucket means tracking ended, which the
+        # legacy 20-trading-day wording no longer describes accurately.
+        overview_source, count = re.subn(
+            re.escape("const activeCode=new Set(raw.stocks.filter(s=>!isFormerRecord(s)).map(s=>s.code));"),
+            "const activeCode=new Set(raw.stocks.filter(s=>currentEpisode(s)||s.d0).map(s=>s.code));",
+            overview_source,
         )
+        if count != 1:
+            raise ValueError("A2 current-episode records adapter could not be applied")
+        for old, new, name in (
+            ("已隐藏 ${rows.formerTotal} 只超过${daysOf()}个观察交易日、不再复盘的曾入选股票",
+             "已隐藏 ${rows.formerTotal} 只已结束跟踪、不再逐日复盘的曾入选股票",
+             "hidden-count note"),
+            ("已超过 ${daysOf()} 个观察交易日，不再逐日复盘；历史记录保留",
+             "全部跟踪已结束，不再逐日复盘；历史记录保留",
+             "former section head"),
+            ("显示已超过${daysOf()}个观察交易日、不再复盘的股票",
+             "显示已结束跟踪、不再逐日复盘的股票",
+             "former toggle title"),
+            # v1 下走势聚焦区只收状态变化复盘（regular_detail），空状态
+            # 文案沿用旧「普通详评」口径会误导读者。
+            ("当天没有普通详评记录；不从其他股票补位",
+             "当天没有状态变化复盘；不从其他股票补位",
+             "focus empty state"),
+        ):
+            overview_source, count = re.subn(re.escape(old), new, overview_source)
+            if count != 1:
+                raise ValueError(f"A2 former-stock {name} adapter could not be applied")
     replacements = {
         "/*__DATA__*/": payload,
         "/*__SERIES__*/": series_payload,

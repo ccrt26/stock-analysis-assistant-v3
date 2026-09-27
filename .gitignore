@@ -34,3 +34,7 @@ tools/guanlan-prism/tools/*.backup-*.py
 tools/guanlan-prism/concept-a/a2/*.backup-before-armory.*
 tools/guanlan-prism/concept-a/a2/*.backup-before-modal.*
 tools/guanlan-prism/concept-a/a2/*.backup-before-dial.*
+tools/guanlan-prism/concept-a/a2/*.backup-before-first-select-dedupe.*
+tools/guanlan-prism/concept-a/a2/*.backup-before-former-stocks-toggle.*
+tools/guanlan-prism/concept-a/a2/*.backup-before-period-trim.*
+tools/guanlan-prism/concept-a/a2/*.backup-before-reader-text-trim.*
