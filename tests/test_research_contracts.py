@@ -197,3 +197,8 @@ def test_financial_indicator_contract_does_not_invent_cash_flow_update_flag():
         "report_type",
         "statement_type",
     )
+
+
+def test_statement_update_flag_is_not_a_required_financial_fact():
+    for dataset in (ResearchDatasetId.INCOME_STATEMENT, ResearchDatasetId.BALANCE_SHEET, ResearchDatasetId.CASH_FLOW):
+        assert "update_flag" not in research_contract_registry()[dataset].required_columns

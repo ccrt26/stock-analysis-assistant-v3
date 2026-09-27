@@ -172,7 +172,7 @@ def test_same_time_provider_variants_are_not_ranked_by_numeric_update_flag(tmp_p
                         "end_type": "1",
                         "total_revenue": 101.0,
                         "n_income_attr_p": 10.0,
-                        "update_flag": "1",
+                        "update_flag": "2",
                     },
                 ]
             )
@@ -1073,3 +1073,189 @@ def test_recent_listing_without_due_periodic_report_can_complete_empty(tmp_path)
     assert len(income_calls) == 1
     assert first.waiting_upstream == 0
     assert second.skipped == 1
+
+
+_STATEMENT_CASES = [
+    (ResearchDatasetId.INCOME_STATEMENT, "income", "total_revenue"),
+    (ResearchDatasetId.BALANCE_SHEET, "balancesheet", "total_assets"),
+    (ResearchDatasetId.CASH_FLOW, "cashflow", "n_cashflow_act"),
+]
+
+
+def _statement_fixture(tmp_path, dataset, endpoint, field, variants):
+    class Pro:
+        def __getattr__(self, name):
+            assert name == endpoint
+            return lambda **kwargs: pd.DataFrame(variants)
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    service = FundamentalBackfillService(TushareResearchClient(Pro(), pacer=lambda _: None), warehouse)
+    return warehouse, service
+
+
+def _statement_raw(field, value=100.0, flag="1", **extra):
+    return {"ts_code": "000001.SZ", "end_date": "20260331",
+            "ann_date": "20260425", "f_ann_date": "20260425",
+            "report_type": "1", "comp_type": "2", "end_type": "1",
+            field: value, "update_flag": flag, **extra}
+
+
+@pytest.mark.parametrize("dataset,endpoint,field", _STATEMENT_CASES)
+@pytest.mark.parametrize("reverse", [False, True])
+def test_statement_latest_content_is_order_independent_and_forward_only(tmp_path, dataset, endpoint, field, reverse):
+    rows = [_statement_raw(field, 10.0, "0"), _statement_raw(field, 20.0, "1"),
+            _statement_raw(field, 20.0, "0")]
+    if reverse:
+        rows.reverse()
+    warehouse, service = _statement_fixture(tmp_path, dataset, endpoint, field, rows)
+    before = datetime.now(timezone.utc)
+    service.backfill(start=date(2026, 3, 31), through=date(2026, 7, 13),
+                     codes=("000001.SZ",), datasets=(dataset,), resume=False)
+    facts = warehouse.read_current(dataset)
+    assert facts.iloc[0][field] == 20.0
+    assert pd.Timestamp(facts.iloc[0]["available_at"]) >= pd.Timestamp(before)
+    assert "update_flag" not in facts.columns
+    assert ResearchQuery(warehouse).dataset_as_of(dataset, before).empty
+    service.backfill(start=date(2026, 3, 31), through=date(2026, 7, 13),
+                     codes=("000001.SZ",), datasets=(dataset,), resume=False)
+    assert warehouse.revision_count(dataset) == 0
+
+
+@pytest.mark.parametrize("dataset,endpoint,field", _STATEMENT_CASES)
+@pytest.mark.parametrize("flags", [(None, None), ("1", "1")])
+def test_statement_ambiguous_content_remains_conflicted(tmp_path, dataset, endpoint, field, flags):
+    rows = [_statement_raw(field, float(i), flag) for i, flag in enumerate(flags)]
+    warehouse, service = _statement_fixture(tmp_path, dataset, endpoint, field, rows)
+    result = service.backfill_statement_business_keys(dataset=dataset,
+        business_keys=(("000001.SZ", "2026-03-31", "1", "comp=2;end=1"),), through=date(2026, 7, 13))
+    assert result.limited == 1
+    assert warehouse.read_current(dataset).empty
+
+
+@pytest.mark.parametrize("dataset,endpoint,field", _STATEMENT_CASES)
+def test_statement_same_content_flags_and_legacy_hash_do_not_make_revisions(tmp_path, dataset, endpoint, field):
+    raw = _statement_raw(field)
+    warehouse, service = _statement_fixture(tmp_path, dataset, endpoint, field,
+        [raw, raw | {"update_flag": "0"}])
+    row = service._normalize_financial_row(dataset, raw, date(2026, 7, 13))
+    row.pop("_provider_update_flag")
+    row["update_flag"] = "0"
+    warehouse.commit_batch(FactBatch(dataset_id=dataset, partition_value="2026-03-31",
+        source_name="tushare", source_endpoint=endpoint, ingestion_run_id="legacy",
+        ingested_at=datetime.now(timezone.utc), default_available_at=row["available_at"], records=[row]))
+    before = warehouse.read_current(dataset).iloc[0]["payload_hash"]
+    service.backfill_statement_business_keys(dataset=dataset,
+        business_keys=(("000001.SZ", "2026-03-31", "1", "comp=2;end=1"),), through=date(2026, 7, 13))
+    assert warehouse.read_current(dataset).iloc[0]["payload_hash"] == before
+    assert warehouse.revision_count(dataset) == 0
+
+
+@pytest.mark.parametrize("dataset,endpoint,field", _STATEMENT_CASES)
+def test_statement_retry_filters_full_key_and_resolves_only_after_commit(tmp_path, dataset, endpoint, field):
+    from stock_analyzer.storage.research_conflicts import ResearchConflictRegistry
+    rows = [_statement_raw(field, 10.0, "0"), _statement_raw(field, 20.0, "1"),
+            _statement_raw(field, 99.0, report_type="4"),
+            _statement_raw(field, 99.0, comp_type="1"),
+            _statement_raw(field, 99.0, end_date="20251231", end_type="4")]
+    warehouse, service = _statement_fixture(tmp_path, dataset, endpoint, field, rows)
+    key = ("000001.SZ", "2026-03-31", "1", "comp=2;end=1")
+    observed = datetime(2026, 8, 1, tzinfo=timezone.utc)
+    ResearchConflictRegistry(warehouse.duckdb_path).record_variants(dataset, "2026-03-31",
+        business_key=key, rows=[service._normalize_financial_row(dataset, raw, date(2026, 7, 13)) for raw in rows[:2]],
+        source_name="tushare", source_endpoint=endpoint, observed_at=observed)
+    before = datetime.now(timezone.utc)
+    service.backfill_statement_business_keys(dataset=dataset, business_keys=(key,), through=date(2026, 7, 13))
+    facts = warehouse.read_current(dataset)
+    assert len(facts) == 1 and facts.iloc[0][field] == 20.0
+    assert ResearchQuery(warehouse).dataset_as_of(dataset, before).empty
+    with connect_research_warehouse(warehouse.duckdb_path, read_only=True) as con:
+        rows = con.execute("select status,resolution_basis from research_fact_conflicts").fetchall()
+    import json
+    assert all(status == "resolved" and json.loads(basis)["payload_hash"] == facts.iloc[0]["payload_hash"] for status, basis in rows)
+
+
+def test_statement_retry_rejects_future_publication_and_does_not_write(tmp_path):
+    dataset, endpoint, field = _STATEMENT_CASES[0]
+    warehouse, service = _statement_fixture(tmp_path, dataset, endpoint, field,
+        [_statement_raw(field, f_ann_date="20991231")])
+    with pytest.raises(ValueError, match="future publication"):
+        service.backfill_statement_business_keys(dataset=dataset,
+            business_keys=(("000001.SZ", "2026-03-31", "1", "comp=2;end=1"),), through=date(2026, 7, 13))
+    assert warehouse.read_current(dataset).empty
+
+
+def test_statement_multiple_publication_dates_with_ambiguity_keep_only_observed_final(tmp_path):
+    dataset, endpoint, field = _STATEMENT_CASES[0]
+    rows = [_statement_raw(field, 10.0, "0"), _statement_raw(field, 20.0, "1"),
+            _statement_raw(field, 30.0, ann_date="20260501", f_ann_date="20260501")]
+    warehouse, service = _statement_fixture(tmp_path, dataset, endpoint, field, rows)
+    before = datetime.now(timezone.utc)
+    service.backfill(start=date(2026, 3, 31), through=date(2026, 7, 13),
+                     codes=("000001.SZ",), datasets=(dataset,), resume=False)
+    assert warehouse.read_current(dataset).iloc[0][field] == 30.0
+    assert ResearchQuery(warehouse).dataset_as_of(dataset, before).empty
+    assert warehouse.revision_count(dataset) == 0
+
+
+def test_statement_retry_missing_and_source_errors_do_not_resolve(tmp_path):
+    from stock_analyzer.data.tushare_research_client import ResearchSourceError
+    dataset, endpoint, field = _STATEMENT_CASES[0]
+    warehouse, service = _statement_fixture(tmp_path, dataset, endpoint, field, [])
+    key = ("000001.SZ", "2026-03-31", "1", "comp=2;end=1")
+    result = service.backfill_statement_business_keys(dataset=dataset, business_keys=(key,), through=date(2026, 7, 13))
+    assert result.waiting_upstream == 1 and result.committed == 0
+    def failed(*args, **kwargs):
+        raise ResearchSourceError("unavailable", category="network", endpoint=endpoint)
+    service.client.call = failed
+    result = service.backfill_statement_business_keys(dataset=dataset, business_keys=(key,), through=date(2026, 7, 13))
+    assert result.failed == 1 and result.committed == 0
+    assert warehouse.read_current(dataset).empty
+
+
+@pytest.mark.parametrize("failure", ["commit", "verify"])
+def test_statement_failure_before_resolution_keeps_conflict(tmp_path, monkeypatch, failure):
+    from stock_analyzer.storage.research_conflicts import ResearchConflictRegistry
+    dataset, endpoint, field = _STATEMENT_CASES[0]
+    variants = [_statement_raw(field, 10.0, "0"), _statement_raw(field, 20.0, "1")]
+    warehouse, service = _statement_fixture(tmp_path, dataset, endpoint, field, variants)
+    key = ("000001.SZ", "2026-03-31", "1", "comp=2;end=1")
+    ResearchConflictRegistry(warehouse.duckdb_path).record_variants(dataset, "2026-03-31", business_key=key,
+        rows=[service._normalize_financial_row(dataset, v, date(2026, 7, 13)) for v in variants],
+        source_name="tushare", source_endpoint=endpoint)
+    if failure == "commit":
+        def fail(*args, **kwargs):
+            raise RuntimeError("commit failed")
+        monkeypatch.setattr(warehouse, "commit_batch", fail)
+    else:
+        original = warehouse.read_current
+        calls = 0
+        def read(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            result = original(*args, **kwargs)
+            if calls > 1 and not result.empty:
+                result[field] = -999.0
+            return result
+        monkeypatch.setattr(warehouse, "read_current", read)
+    with pytest.raises((ValueError, RuntimeError), match="failed"):
+        service.backfill_statement_business_keys(dataset=dataset, business_keys=(key,), through=date(2026, 7, 13))
+    with connect_research_warehouse(warehouse.duckdb_path, read_only=True) as con:
+        assert con.execute("select distinct status from research_fact_conflicts").fetchall() == [("unresolved",)]
+
+
+def test_statement_retry_reverts_to_old_payload_as_new_revision(tmp_path):
+    dataset, endpoint, field = _STATEMENT_CASES[0]
+    warehouse, service = _statement_fixture(tmp_path, dataset, endpoint, field, [_statement_raw(field, 10.0)])
+    key = ("000001.SZ", "2026-03-31", "1", "comp=2;end=1")
+    for day, value in [(1, 10.0), (2, 20.0)]:
+        observed = datetime(2026, 8, day, tzinfo=timezone.utc)
+        row = service._normalize_financial_row(dataset, _statement_raw(field, value), date(2026, 7, 13))
+        row.pop("_provider_update_flag")
+        row["available_at"] = observed
+        warehouse.commit_batch(FactBatch(dataset_id=dataset, partition_value="2026-03-31", source_name="tushare",
+            source_endpoint=endpoint, ingestion_run_id=str(day), ingested_at=observed,
+            default_available_at=observed, records=[row]))
+    before = datetime.now(timezone.utc)
+    service.backfill_statement_business_keys(dataset=dataset, business_keys=(key,), through=date(2026, 7, 13))
+    assert warehouse.read_current(dataset).iloc[0][field] == 10.0
+    assert warehouse.revision_count(dataset) == 2
+    assert ResearchQuery(warehouse).dataset_as_of(dataset, before).iloc[0][field] == 20.0

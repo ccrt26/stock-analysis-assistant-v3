@@ -324,7 +324,7 @@ def research_contract_registry() -> dict[ResearchDatasetId, DatasetContract]:
             availability="announcement time, never report-period end",
             required_columns=(
                 "ts_code", "report_period", "report_type", "statement_type",
-                "comp_type", "end_type", "ann_date", "f_ann_date", "update_flag",
+                "comp_type", "end_type", "ann_date", "f_ann_date",
             ),
         ),
         _contract(

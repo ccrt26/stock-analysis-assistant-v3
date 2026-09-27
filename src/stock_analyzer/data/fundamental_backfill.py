@@ -226,6 +226,9 @@ class FundamentalBackfillService:
                     if frame.empty:
                         path.unlink(missing_ok=True)
                         continue
+                if dataset in _STATEMENTS and not frame.empty:
+                    _validate_statement_publications(frame, through)
+                    frame["_provider_observed_at"] = datetime.now(timezone.utc)
                 if dataset is ResearchDatasetId.INCOME_STATEMENT:
                     income_announcement_map = _announcement_map(frame)
                 if dataset is ResearchDatasetId.MAIN_BUSINESS:
@@ -310,6 +313,72 @@ class FundamentalBackfillService:
             },
             resume=False,
         )
+
+    def backfill_statement_business_keys(
+        self,
+        *,
+        dataset: ResearchDatasetId,
+        business_keys: tuple[tuple[str, str, str, str], ...],
+        through: date,
+    ) -> BackfillSummary:
+        """Fetch only the requested full statement identities, with fresh evidence."""
+        dataset = ResearchDatasetId(dataset)
+        if dataset not in _STATEMENTS:
+            raise ValueError("exact statement retry requires a statement dataset")
+        targets = frozenset(tuple(str(v) for v in key) for key in business_keys)
+        if not targets or any(len(key) != 4 or not all(key) for key in targets):
+            raise ValueError("statement retry requires complete business keys")
+        periods = {_date(key[1]) for key in targets}
+        if max(periods) > through:
+            raise ValueError("statement target period is after through date")
+        summary = BackfillSummary(
+            scope=dataset.value, start=min(periods), through=through,
+        )
+        endpoint = _ENDPOINTS[dataset]
+        fields = research_contract(dataset).business_key
+        for code in sorted({key[0] for key in targets}):
+            code_targets = frozenset(key for key in targets if key[0] == code)
+            try:
+                frame = self.client.call(
+                    endpoint, ts_code=code,
+                    start_date=_yyyymmdd(min(_date(key[1]) for key in code_targets)),
+                    end_date=_yyyymmdd(through),
+                )
+            except ResearchSourceError as exc:
+                summary.failed += 1
+                summary.retry_codes.append(code)
+                summary.issues.append(f"{endpoint}:{code}:{exc.category}")
+                continue
+            observed_at = datetime.now(timezone.utc)
+            records_by_period: dict[str, list[dict[str, Any]]] = defaultdict(list)
+            returned: set[tuple[str, ...]] = set()
+            for raw in frame.to_dict(orient="records"):
+                if str(raw.get("ts_code")) != code:
+                    continue
+                _validate_statement_publications(pd.DataFrame([raw]), through)
+                row = self._normalize_financial_row(
+                    dataset, {**raw, "_provider_observed_at": observed_at}, through,
+                )
+                key = tuple(str(row.get(field)) for field in fields)
+                if key not in code_targets:
+                    continue
+                returned.add(key)
+                records_by_period[key[1]].append(row)
+            missing = code_targets - returned
+            if missing:
+                summary.waiting_upstream += len(missing)
+                if code not in summary.retry_codes:
+                    summary.retry_codes.append(code)
+                summary.issues.extend(
+                    f"{dataset.value}:{'/'.join(key)}:官方当前响应未返回该目标业务键"
+                    for key in sorted(missing)
+                )
+            for period, records in sorted(records_by_period.items()):
+                self._commit_revision_levels(
+                    dataset, period, endpoint, records, through, summary,
+                    force_observed_keys=code_targets,
+                )
+        return summary
 
     def _backfill_company_profiles(
         self,
@@ -557,9 +626,12 @@ class FundamentalBackfillService:
         row = _clean_row(raw)
         provider_update_flag = None
         provider_observed_at = None
-        if dataset is ResearchDatasetId.FINANCIAL_INDICATOR:
+        if dataset in _CORE_FINANCIALS:
             provider_update_flag = row.pop("update_flag", None)
             provider_observed_at = row.pop("_provider_observed_at", None)
+            row["_provider_update_flag"] = provider_update_flag
+            if provider_observed_at is not None:
+                row["_provider_observed_at"] = provider_observed_at
         report_period = _date(row.pop("end_date"))
         row["report_period"] = report_period
         if dataset in _STATEMENTS:
@@ -646,19 +718,23 @@ class FundamentalBackfillService:
             tuple(str(row.get(field)) for field in contract.business_key)
             for row in initial_current.to_dict(orient="records")
         }
+        content_hash = _statement_content_hash if dataset in _STATEMENTS else _business_hash
         known_hashes: dict[tuple[str, ...], set[str]] = defaultdict(set)
         current_hashes: dict[tuple[str, ...], str] = {}
         for row in initial_current.to_dict(orient="records"):
             key = tuple(str(row.get(field)) for field in contract.business_key)
-            known_hashes[key].add(str(row["payload_hash"]))
-            current_hashes[key] = str(row["payload_hash"])
+            digest = content_hash(row) if dataset in _STATEMENTS else str(row["payload_hash"])
+            known_hashes[key].add(digest)
+            current_hashes[key] = digest
         for revision in self.warehouse.revision_rows(
             dataset,
             partition_values=(partition,),
         ):
             payload = revision["row_payload"]
             key = tuple(str(payload.get(field)) for field in contract.business_key)
-            known_hashes[key].add(str(revision["payload_hash"]))
+            known_hashes[key].add(
+                content_hash(payload) if dataset in _STATEMENTS else str(revision["payload_hash"])
+            )
 
         reconstruction_levels: dict[int, list[dict[str, Any]]] = defaultdict(list)
         observed_rows: list[dict[str, Any]] = []
@@ -671,7 +747,8 @@ class FundamentalBackfillService:
                     dataset,
                     partition,
                     business_key=key,
-                    rows=rows,
+                    rows=[_statement_conflict_evidence(row) for row in rows]
+                    if dataset in _STATEMENTS else rows,
                     source_name="tushare",
                     source_endpoint=endpoint,
                 )
@@ -685,27 +762,35 @@ class FundamentalBackfillService:
                     "同一公开时间存在多个无法排序的上游版本，未写入该业务键"
                 )
                 continue
-            if key in force_observed_keys:
+            statement_resolution = dataset in _STATEMENTS and any(
+                row.get("_provider_resolution_basis") for row in timeline
+            )
+            if key in force_observed_keys or statement_resolution:
                 observed = dict(timeline[-1])
+                if dataset in _STATEMENTS:
+                    observed["available_at"] = observed.get("_provider_observed_at")
+                    observed["availability_precision"] = AvailabilityPrecision.INGESTION_CUTOFF.value
+                    if statement_resolution:
+                        observed["_provider_resolution_basis"] = "official_update_flag_unique_revision"
                 if observed.get("_provider_observed_at") is None:
                     observed["available_at"] = None
                     observed["availability_precision"] = (
                         AvailabilityPrecision.INGESTION_CUTOFF.value
                     )
-                if current_hashes.get(key) != _business_hash(observed):
+                if current_hashes.get(key) != content_hash(observed):
                     observed_rows.append(observed)
                 basis = str(
                     observed.get("_provider_resolution_basis")
                     or "official_current_response_converged_to_one_payload"
                 )
                 converged_conflict_keys.append(
-                    (key, _business_hash(observed), basis)
+                    (key, content_hash(observed), basis)
                 )
                 continue
             if key in initial_keys:
                 unseen = [
                     row for row in timeline
-                    if _business_hash(row) not in known_hashes[key]
+                    if content_hash(row) not in known_hashes[key]
                 ]
                 if unseen:
                     # All unseen content was first observed in this run.  Only
@@ -739,8 +824,19 @@ class FundamentalBackfillService:
                 reconstruct_source_revisions=False,
                 summary=summary,
             )
+        persisted = {}
+        if converged_conflict_keys:
+            for row in self.warehouse.read_current(dataset, partition_value=partition).to_dict(orient="records"):
+                persisted[tuple(str(row.get(field)) for field in contract.business_key)] = row
         resolved_at = datetime.now(timezone.utc)
-        for key, payload_hash, basis in converged_conflict_keys:
+        for key, expected_hash, basis in converged_conflict_keys:
+            actual = persisted.get(key)
+            actual_content = (
+                content_hash(actual) if dataset in _STATEMENTS else str(actual["payload_hash"])
+            ) if actual is not None else None
+            if actual_content != expected_hash:
+                raise ValueError(f"committed financial content verification failed: {dataset.value}/{key}")
+            payload_hash = str(actual["payload_hash"])
             self.conflicts.resolve(
                 dataset,
                 business_key=key,
@@ -970,23 +1066,25 @@ def _canonical_provider_timeline(
 
     result: list[dict[str, Any]] = []
     for bucket in sorted(by_availability):
-        unique = {
-            _business_hash(row): row for row in by_availability[bucket]
-        }
-        candidates = list(unique.values())
-        if len(candidates) == 1:
-            result.append(candidates[0])
+        content_hash = _statement_content_hash if dataset in _STATEMENTS else _business_hash
+        grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for row in by_availability[bucket]:
+            grouped[content_hash(row)].append(row)
+        if len(grouped) == 1:
+            result.append(next(iter(grouped.values()))[0])
             continue
-        if dataset is ResearchDatasetId.FINANCIAL_INDICATOR:
-            current = [
-                row for row in candidates
-                if _is_update_flag_one(row.get("_provider_update_flag"))
-            ]
+        if dataset in _CORE_FINANCIALS:
+            current = []
+            for variants in grouped.values():
+                marked = [row for row in variants
+                          if _is_update_flag_one(row.get("_provider_update_flag"))]
+                if marked:
+                    current.append(marked[0])
             if len(current) == 1:
                 selected = dict(current[0])
-                selected["_provider_resolution_basis"] = (
-                    "official_update_flag_unique_revision"
-                )
+                if dataset in _STATEMENTS and selected.get("_provider_observed_at") is None:
+                    raise AmbiguousProviderVariantError("statement resolution requires a fresh response time")
+                selected["_provider_resolution_basis"] = "official_update_flag_unique_revision"
                 result.append(selected)
                 continue
         raise AmbiguousProviderVariantError(
@@ -994,6 +1092,40 @@ def _canonical_provider_timeline(
             f"key={key} available_at={bucket}"
         )
     return result
+
+
+def _statement_content_hash(row: dict[str, Any]) -> str:
+    """Compare legacy and new statements without migrating persisted hashes."""
+    normalized = {}
+    for key, value in row.items():
+        if key == "update_flag" or key in _GOVERNANCE_FIELDS | _PROVIDER_PRIVATE_FIELDS:
+            continue
+        if value is None or bool(pd.isna(value)):
+            continue
+        if key == "report_period":
+            value = _date(value).isoformat()
+        normalized[key] = value
+    return _business_hash(normalized)
+
+
+def _statement_conflict_evidence(row: dict[str, Any]) -> dict[str, Any]:
+    result = {key: value for key, value in row.items() if key not in _PROVIDER_PRIVATE_FIELDS}
+    result["update_flag"] = row.get("_provider_update_flag")
+    return result
+
+
+def _validate_statement_publications(frame: pd.DataFrame, through: date) -> None:
+    observed_day = datetime.now(ZoneInfo("Asia/Shanghai")).date()
+    for row in frame.to_dict(orient="records"):
+        if not row.get("ts_code") or not row.get("end_date"):
+            raise ValueError("statement response lacks stock identity or report period")
+        if _date(row["end_date"]) > min(through, observed_day):
+            raise ValueError("statement response has a future report period")
+        for field in ("ann_date", "f_ann_date"):
+            value = row.get(field)
+            if value is not None and not pd.isna(value) and str(value).strip():
+                if _date(value) > min(through, observed_day):
+                    raise ValueError("statement response has a future publication date")
 
 
 def _business_hash(row: dict[str, Any]) -> str:

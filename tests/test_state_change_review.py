@@ -1,8 +1,9 @@
-"""V2 state-change review: exact offline fake-output acceptance nodes T01-T18."""
+"""V2 state-change review: exact offline fake-output acceptance nodes T01-T19."""
 from __future__ import annotations
 
 import importlib.util
 import json
+import shutil
 from argparse import Namespace
 from copy import deepcopy
 from datetime import date, datetime
@@ -308,6 +309,7 @@ def test_T17_fake_saved_body_reaches_markdown_and_web_once(tmp_path):
               "monitorReviewPolicy": POLICY}
     rendered = builder.render_html(sample)
     assert "const currentEpisode=s=>" in rendered
+    assert "filter(s=>currentEpisode(s)||s.d0)" in rendered
     assert "s.stage||D.opinion(s)" in rendered
     assert "简单复盘" in rendered and "状态变化复盘" in rendered
 
@@ -318,3 +320,37 @@ def test_T18_normal_cli_policy_parses_without_model_or_profile_change():
     assert args.review_policy == POLICY
     assert "model" not in vars(args)
     assert "astra-files-v1" not in Path("tools/stock_ai.py").read_text().split("def write_monitor_prompt", 1)[1].split("def write_preopen_prompt", 1)[0]
+
+
+def test_T19_a2_adapter_keeps_d0_current_and_fails_closed_on_drift(tmp_path, monkeypatch):
+    # d0 当晚新推荐（首个观察日未到、尚无 trackingStatus）必须留在 v1 页
+    # 「全部观察」当前桶；「曾入选」文案不得再沿用超过 N 个观察日旧口径。
+    builder_path = SOURCE / "tools/guanlan-prism/tools/build_preview_a2.py"
+    spec = importlib.util.spec_from_file_location("state_change_a2_builder_d0", builder_path)
+    assert spec is not None and spec.loader is not None
+    builder = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(builder)
+    base = {"analysis_date": "2026-08-31", "sessionDates": ["2026-08-31"],
+            "dates": ["08-31"], "market": [None], "stocks": []}
+    v1 = builder.render_html({**base, "monitorReviewPolicy": POLICY})
+    assert "filter(s=>currentEpisode(s)||s.d0)" in v1
+    assert "只已结束跟踪、不再逐日复盘的曾入选股票" in v1
+    assert "全部跟踪已结束，不再逐日复盘" in v1
+    assert "显示已结束跟踪、不再逐日复盘的股票" in v1
+    assert "超过${daysOf()}个观察交易日" not in v1
+    assert "当天没有状态变化复盘；不从其他股票补位" in v1
+    assert "当天没有普通详评记录" not in v1
+    legacy_render = builder.render_html(dict(base))
+    assert "filter(s=>!isFormerRecord(s))" in legacy_render
+    assert "超过${daysOf()}个观察交易日" in legacy_render
+    assert "当天没有普通详评记录" in legacy_render
+    drifted = tmp_path / "a2"
+    shutil.copytree(builder.A2_DIR, drifted)
+    overview = drifted / "overview.js"
+    overview.write_text(overview.read_text(encoding="utf-8").replace(
+        "const activeCode=new Set(raw.stocks.filter(s=>!isFormerRecord(s)).map(s=>s.code));",
+        "const activeCode=new Set(raw.stocks.filter(s=>!isFormerRecord(s) ).map(s=>s.code));",
+    ), encoding="utf-8")
+    monkeypatch.setattr(builder, "A2_DIR", drifted)
+    with pytest.raises(ValueError, match="current-episode records adapter"):
+        builder.render_html({**base, "monitorReviewPolicy": POLICY})

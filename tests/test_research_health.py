@@ -1155,3 +1155,49 @@ def test_health_does_not_call_proxy_complete_while_an_active_gap_exists(tmp_path
 
     assert proxy.complete_units == 0
     assert proxy.status_counts == {"unclassified_missing": 1}
+
+
+@pytest.mark.parametrize("cutoff,expected,pending", [
+    ("2026-09-22T18:30:00+08:00", date(2026, 9, 21), (date(2026, 9, 22),)),
+    ("2026-09-23T07:59:59+08:00", date(2026, 9, 21), (date(2026, 9, 22),)),
+    ("2026-09-23T08:00:00+08:00", date(2026, 9, 22), ()),
+    ("2026-09-19T08:00:00+08:00", date(2026, 9, 18), (date(2026, 9, 21), date(2026, 9, 22))),
+])
+def test_margin_health_uses_natural_day_maturity(tmp_path, cutoff, expected, pending):
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    warehouse.commit_batch(_calendar_batch([date(2026, 9, 18), date(2026, 9, 21), date(2026, 9, 22)]))
+    report = build_research_health_report(warehouse, date(2026, 9, 22), evaluated_at=datetime.fromisoformat(cutoff))
+    margin = next(item for item in report.datasets if item.dataset_id == "margin_detail")
+    assert margin.expected_latest_date == expected
+    assert margin.awaiting_publication_dates == pending
+    assert margin.unclassified_missing_samples == (expected.isoformat(),)
+    assert margin.expected_units == 1
+    assert report.evaluated_at == datetime.fromisoformat(cutoff)
+    assert report.generated_at != report.evaluated_at
+
+
+def test_margin_health_rejects_naive_evaluation_time(tmp_path):
+    with pytest.raises(ValueError, match="timezone-aware"):
+        build_research_health_report(ResearchWarehouse(tmp_path), date(2026, 9, 22), evaluated_at=datetime(2026, 9, 22))
+
+
+def test_margin_full_history_keeps_due_gaps_and_audits_due_file(tmp_path):
+    warehouse = ResearchWarehouse(tmp_path / "warehouse")
+    days = [date(2026, 9, 18), date(2026, 9, 21), date(2026, 9, 22)]
+    warehouse.commit_batch(_calendar_batch(days))
+    for day in days[1:]:
+        warehouse.commit_batch(FactBatch(dataset_id=ResearchDatasetId.MARGIN_DETAIL,
+            partition_value=day.isoformat(), source_name="tushare", source_endpoint="margin_detail",
+            ingestion_run_id="margin-" + str(day), ingested_at=datetime.now(timezone.utc),
+            default_available_at=datetime.now(timezone.utc),
+            records=[{"trade_date": day, "ts_code": "000001.SZ", "exchange": "SZSE"}]))
+    cutoff = datetime.fromisoformat("2026-09-22T18:30:00+08:00")
+    report = build_research_health_report(warehouse, days[-1], full_history=True, evaluated_at=cutoff)
+    margin = next(item for item in report.datasets if item.dataset_id == "margin_detail")
+    assert margin.expected_units == 2 and margin.complete_units == 1
+    assert margin.unclassified_missing_samples == ("2026-09-18",)
+    assert margin.checked_partitions == 1
+    assert margin.data_date_partition_ready  # Physical specified-date meaning remains.
+    warehouse._partition_path(ResearchDatasetId.MARGIN_DETAIL, "2026-09-21").write_bytes(b"corrupt")
+    with pytest.raises(ValueError, match="Parquet"):
+        build_research_health_report(warehouse, days[-1], evaluated_at=cutoff)

@@ -3,9 +3,10 @@ from __future__ import annotations
 import hashlib
 import json
 from collections import Counter
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import duckdb
 import pyarrow.parquet as pq
@@ -66,6 +67,8 @@ class DatasetHealth(BaseModel):
     unclassified_missing_samples: tuple[str, ...] = ()
     source_contract_failure_partitions: int = 0
     source_contract_issues: tuple[str, ...] = ()
+    expected_latest_date: date | None = None
+    awaiting_publication_dates: tuple[date, ...] = ()
 
 
 class DerivedFeatureHealth(BaseModel):
@@ -110,6 +113,7 @@ class ResearchHealthReport(BaseModel):
     derived_ready_for_research: bool
     derived_has_declared_gaps: bool
     latest_stage_runs: tuple[StageRunHealth, ...]
+    evaluated_at: datetime | None = None
 
 
 def build_research_health_report(
@@ -117,7 +121,11 @@ def build_research_health_report(
     data_date: date,
     *,
     full_history: bool = False,
+    evaluated_at: datetime | None = None,
 ) -> ResearchHealthReport:
+    evaluation_time = evaluated_at or datetime.now(timezone.utc)
+    if evaluation_time.utcoffset() is None:
+        raise ValueError("health evaluation requires a timezone-aware datetime")
     datasets: list[DatasetHealth] = []
     core_complete = True
     revision_audit = _revision_interval_audit(warehouse)
@@ -134,6 +142,12 @@ def build_research_health_report(
             if not manifest.empty
             else []
         )
+        expected_units = _expected_date_units(
+            dataset_id, open_dates, data_date, full_history, evaluated_at=evaluation_time,
+        )
+        awaiting = tuple(
+            value for value in open_dates if _margin_due_at(value) > evaluation_time
+        ) if dataset_id is ResearchDatasetId.MARGIN_DETAIL else ()
         selected = manifest
         interval_scoped_dataset = dataset_id in {
             ResearchDatasetId.INDUSTRY_CATALOG,
@@ -148,12 +162,16 @@ def build_research_health_report(
                 manifest["partition_value"].astype(str) == data_date.isoformat()
             ]
             selected = same_day if not same_day.empty else manifest.tail(1)
+        if dataset_id is ResearchDatasetId.MARGIN_DETAIL:
+            # Audit the due window, without changing data_date_partition_ready.
+            selected = manifest[
+                manifest["partition_value"].astype(str).isin(
+                    value.isoformat() for value in expected_units
+                )
+            ] if not manifest.empty else manifest
         file_audit = _audit_partition_files(warehouse, selected, contract)
         source_failures, source_issues = _source_contract_failures(
             warehouse, dataset_id, selected
-        )
-        expected_units = _expected_date_units(
-            dataset_id, open_dates, data_date, full_history
         )
         manifest_values = set(values)
         complete_values = manifest_values - source_failures
@@ -229,6 +247,8 @@ def build_research_health_report(
         datasets.append(
             DatasetHealth(
                 dataset_id=dataset_id.value,
+                expected_latest_date=max(expected_units) if expected_units else None,
+                awaiting_publication_dates=awaiting,
                 partitions=partitions,
                 rows=rows,
                 first_partition=values[0] if values else None,
@@ -315,6 +335,7 @@ def build_research_health_report(
     return ResearchHealthReport(
         data_date=data_date,
         generated_at=datetime.now(timezone.utc),
+        evaluated_at=evaluation_time,
         datasets=tuple(datasets),
         gap_counts=dict(sorted(gap_counts.items())),
         complete_core_date=bool(core_complete),
@@ -363,12 +384,24 @@ def _open_trading_dates(
     return tuple(row[0] for row in rows)
 
 
+def _margin_due_at(value: date) -> datetime:
+    return datetime.combine(value + timedelta(days=1), time(8), ZoneInfo("Asia/Shanghai"))
+
+
 def _expected_date_units(
     dataset: ResearchDatasetId,
     open_dates: tuple[date, ...],
     through: date,
     full_history: bool,
+    *,
+    evaluated_at: datetime | None = None,
 ) -> tuple[date, ...]:
+    if dataset is ResearchDatasetId.MARGIN_DETAIL:
+        cutoff = evaluated_at or datetime.now(timezone.utc)
+        if cutoff.utcoffset() is None:
+            raise ValueError("health evaluation requires a timezone-aware datetime")
+        due = tuple(value for value in open_dates if value <= through and _margin_due_at(value) <= cutoff)
+        return due[-250:] if full_history else due[-1:]
     if dataset not in (
         _CORE_DAILY
         | _SESSION_250_DAILY
@@ -1082,6 +1115,14 @@ def write_health_report(
                 f"- {item.dataset_id} 有 {item.coverage_failure_partitions} 个分区"
                 f"未达到核心字段覆盖阈值：{coverage}。"
             )
+    if report.evaluated_at is not None:
+        lines.append(f"应到日期评估时点：{report.evaluated_at.isoformat()}；不代表历史采集状态回放。")
+    for item in report.datasets:
+        if item.dataset_id == "margin_detail":
+            lines.append(f"- 融资融券最新应到交易日：{item.expected_latest_date or '尚无'}。")
+            if item.awaiting_publication_dates:
+                pending = "、".join(str(value) for value in item.awaiting_publication_dates)
+                lines.append(f"- 融资融券 {pending} 尚未到 T+1 发布时点，等待发布，不计入到期缺口。")
     lines.extend(
         [
             "",
@@ -1132,7 +1173,7 @@ def write_health_report(
             )
         for limitation in item.limitations:
             lines.append(f"- {item.feature_set}：{limitation}")
-    lines.extend(["", "未完成或等待事项：", ""])
+    lines.extend(["", "全局未决账本与本次检查推断缺口（不等同于本次到期窗口）：", ""])
     if report.gap_counts:
         for status, count in sorted(report.gap_counts.items()):
             lines.append(f"- {status}: {count}")
