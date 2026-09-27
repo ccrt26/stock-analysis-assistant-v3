@@ -198,3 +198,37 @@ python -m pytest -q
 ```
 
 测试覆盖当前数据获取、事实仓、时点查询、派生观察、健康检查、三个数据阶段及四个定时入口、每日推荐和选出后的走势复盘边界。
+
+## M0/M1 新旧方法轻量试验（手工）
+
+本分支新增与正式流程隔离的轻量对照，**未自动启用、未生产采用**。本次真实配对验收停在首边：公司视角独立发现覆盖和单次额度未满足目标；私有配置已阻断继续研究，第二边未运行。合成程序测试通过不等于真实链路通过。M0 是 V3 修改前固定方法，M1 是已交付 V3 候选方法；共用同一时点事实和确定性计算，各用独立 `gpt-6-sol` / `xhigh` 研究上下文。每天只存短决定和关键证据，程序更新第5/10/20日结果，每10个预定参与日备一批；批次 AI 研究须用户手工启动。正式 nightly、复盘、公司介绍、任务开关和 WEB 不从试验目录读取。
+
+```mermaid
+flowchart TD
+    A[现有本地采集：事实仓] --> B[同一时点的确定性事实与计算]
+    B --> P[原正式研究与复盘]
+    P --> W[原正式归档与 WEB：本次不改]
+    B --> C[试验输入：同一基础版本]
+    C --> M0[M0 旧方法：Sol xhigh 独立上下文]
+    C --> M1[M1 候选方法：Sol xhigh 独立上下文]
+    M0 --> D[分别冻结短决定与证据]
+    M1 --> D
+    D --> E[程序逐日更新结果]
+    E --> F[每10个预定参与日备一批]
+    F --> G[用户启动 Codex 集中研究]
+    G --> H[用户与 ChatGPT 讨论是否改方法]
+```
+
+私有数据仍在实际 `LOCAL_WAREHOUSE_DIR` 与 `LOCAL_ARCHIVE_DIR`；试验归档位于 `LOCAL_ARCHIVE_DIR/selection_trials/confirmation-cost-v3/`，其中 `daily/` 是前瞻研究，`smoke/` 是回放验收，`outcomes/` 是程序结果，`batches/` 是十日材料，`maintenance/` 是只读盘点和精确清理建议。真实绝对路径只写本机私有 `experiment.json`。完整目录边界见 [数据地图](docs/data-map.md)，口径、配置和恢复见 [试验说明](docs/selection-parallel-lite.md)。
+
+从本分支工作树运行时，先设 `PYTHONPATH="$PWD/src:$PWD"`，并将 `CFG` 指向已建立的本机私有 `experiment.json`。可用命令：
+
+```bash
+python tools/selection_parallel.py status --config "$CFG"
+python tools/selection_parallel.py daily --config "$CFG" --date auto
+python tools/selection_parallel.py outcomes --config "$CFG" --through YYYY-MM-DD
+python tools/selection_parallel.py batch --config "$CFG" --number 1 --through YYYY-MM-DD
+python tools/selection_parallel.py review-batch --config "$CFG" --number 1 --through YYYY-MM-DD
+```
+
+本次私有配置处于阻断状态，`daily`、`prepare`、`select` 暂不运行；待输入和额度问题经用户与 ChatGPT 决定后再恢复。正常状态下，`daily` 人工调用才运行 M0/M1；同日已冻结的方法自动复用，中断后用原 `select --action-date ... --method M0|M1` 继续未完成的一边，不能换原截止或事实版本。`outcomes` 在没有新研究的日子仍可单独更新。批次 `comparison.csv` 生成后不代表 AI 已研究，只有 `report.md` 存在才表示手工批次研究已运行。旧 WEB 的五日“选股方法复盘”仍是另一套 `skill_optimization` 材料，本轮不更改。
