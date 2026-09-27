@@ -1,0 +1,231 @@
+{
+  "task": "nightly-rerun-2026-09-24",
+  "formation_date": "2026-09-23",
+  "action_date": "2026-09-24",
+  "as_of": "2026-09-23T18:30:00+08:00",
+  "status": "completed",
+  "repair_verification": {
+    "fake_model_tests_collected": 12,
+    "fake_model_tests_passed": 12,
+    "real_business_sessions": 0
+  },
+  "tested_and_business_deployed_commit": "139a1928f36664e48786c4183293efed9cf40bc7",
+  "baseline": "8db9dd3a37f5e2a602b1e2e360b24cae95b99240",
+  "implementation_evidence_commit": "This delivery-finish commit; subsequent commit changes evidence only, not tested code.",
+  "original_stage_records_retained": 21,
+  "new_business_sessions": 4,
+  "new_business_stage_seconds": 1390.403,
+  "new_business_stages": [
+    {
+      "stage": "author-rev1-300725-SZ",
+      "status": "completed",
+      "provider": "astra",
+      "configured_model": "gpt-6-astra",
+      "configured_effort": "xhigh",
+      "fallback": false,
+      "started_at": "2026-09-27T08:53:27.559947+08:00",
+      "ended_at": "2026-09-27T08:59:40.585689+08:00",
+      "seconds": 373.026,
+      "actual_model": "gpt-6-astra",
+      "effort": "xhigh",
+      "auth_method": "chatgpt",
+      "verified": true,
+      "consistent": true,
+      "usage": {
+        "input_tokens": 789854,
+        "cached_input_tokens": 676736,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 10773,
+        "reasoning_output_tokens": 4081
+      }
+    },
+    {
+      "stage": "review-rev1-300725-SZ",
+      "status": "completed",
+      "provider": "astra",
+      "configured_model": "gpt-6-astra",
+      "configured_effort": "xhigh",
+      "fallback": false,
+      "started_at": "2026-09-27T08:59:40.598284+08:00",
+      "ended_at": "2026-09-27T09:04:54.493657+08:00",
+      "seconds": 313.895,
+      "actual_model": "gpt-6-astra",
+      "effort": "xhigh",
+      "auth_method": "chatgpt",
+      "verified": true,
+      "consistent": true,
+      "usage": {
+        "input_tokens": 780181,
+        "cached_input_tokens": 699136,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 9077,
+        "reasoning_output_tokens": 2160
+      }
+    },
+    {
+      "stage": "current-opinion-recheck",
+      "status": "completed",
+      "provider": "astra",
+      "configured_model": "gpt-6-astra",
+      "configured_effort": "xhigh",
+      "fallback": false,
+      "started_at": "2026-09-27T09:04:54.607772+08:00",
+      "ended_at": "2026-09-27T09:06:20.324180+08:00",
+      "seconds": 85.716,
+      "actual_model": "gpt-6-astra",
+      "effort": "xhigh",
+      "auth_method": "chatgpt",
+      "verified": true,
+      "consistent": true,
+      "usage": {
+        "input_tokens": 41105,
+        "cached_input_tokens": 0,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 2520,
+        "reasoning_output_tokens": 1349
+      }
+    },
+    {
+      "stage": "company-introductions",
+      "status": "completed",
+      "provider": "astra",
+      "configured_model": "gpt-6-astra",
+      "configured_effort": "xhigh",
+      "fallback": false,
+      "started_at": "2026-09-27T09:07:13.783993+08:00",
+      "ended_at": "2026-09-27T09:17:31.549888+08:00",
+      "seconds": 617.766,
+      "actual_model": "gpt-6-astra",
+      "effort": "xhigh",
+      "auth_method": "chatgpt",
+      "verified": true,
+      "consistent": true,
+      "usage": {
+        "input_tokens": 2420311,
+        "cached_input_tokens": 2269568,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 17775,
+        "reasoning_output_tokens": 3270
+      }
+    }
+  ],
+  "new_business_usage": {
+    "input_tokens": 4031451,
+    "cached_input_tokens": 3645440,
+    "cache_write_input_tokens": 0,
+    "output_tokens": 40145,
+    "reasoning_output_tokens": 10860
+  },
+  "counts_before": {
+    "research-repair:2026-09-23": {
+      "research_repair": 1
+    },
+    "managed:300685.SZ": {
+      "expression": 1,
+      "clarification": 1,
+      "initial": 1
+    },
+    "managed:300725.SZ": {
+      "expression": 0,
+      "clarification": 0,
+      "initial": 1
+    },
+    "managed:301107.SZ": {
+      "expression": 1,
+      "clarification": 2,
+      "initial": 1
+    }
+  },
+  "counts_after": {
+    "research-repair:2026-09-23": {
+      "research_repair": 1
+    },
+    "managed:300685.SZ": {
+      "expression": 1,
+      "clarification": 1,
+      "initial": 1
+    },
+    "managed:300725.SZ": {
+      "expression": 1,
+      "clarification": 0,
+      "initial": 1
+    },
+    "managed:301107.SZ": {
+      "expression": 1,
+      "clarification": 2,
+      "initial": 1
+    }
+  },
+  "current_opinion_checks_before": 1,
+  "current_opinion_checks_after": 2,
+  "original_owners_reused": [
+    "selection",
+    "monitor"
+  ],
+  "other_articles_reused": [
+    "300685.SZ",
+    "301107.SZ"
+  ],
+  "research_and_monitor_reused": true,
+  "snapshot_and_input_index_preserved": true,
+  "formal_result": {
+    "selected": [
+      "300685.SZ",
+      "300725.SZ",
+      "301107.SZ"
+    ],
+    "episodes": 36,
+    "distinct_stocks": 34,
+    "brief_episode_rows": 28,
+    "public_simple_bodies": 26,
+    "state_change_bodies": 5,
+    "internal_only_episodes": 3,
+    "D20_results": 4,
+    "company_introductions": {
+      "recorded_count": 3,
+      "missing": []
+    },
+    "record_freeze_csv_final_report": true
+  },
+  "examples": {
+    "status": "pending_user_review",
+    "source_kind": "actual_20260923_review",
+    "source_formally_saved": true,
+    "vault_location": "knowledge-vault-path / 10_方法与范文/复盘范文/状态跟踪/待确认/",
+    "installed_and_readback": true,
+    "active_examples_changed": false,
+    "entered_business_author_input": false
+  },
+  "publication": {
+    "formal_saved": true,
+    "local_payload_date": "2026-09-23",
+    "local_recommendations": "3/3",
+    "local_introductions": "3/3",
+    "site_commit": "63896b07ca56878d7de586aceed4fb82e2f34a50",
+    "remote_main_confirmed": true,
+    "build": "Workers Builds: prism / completed / success",
+    "url": "https://prism.dafeirou1hao.top/",
+    "public_http_status": 200,
+    "public_date": "2026-09-23",
+    "public_payload_equals_published_local": true,
+    "browser_visual_inspection": false,
+    "note": "Web reader unavailable; one ordinary HTTP request succeeded, returned the full published snapshot; no settings changed."
+  },
+  "preservation": {
+    "user_dirty_files": 22,
+    "all_unchanged_this_turn": true,
+    "previous_day_page_and_reports_retained": true,
+    "previous_day_company_introductions_retained": 3,
+    "owners_original_inputs_outputs_retained": true,
+    "original_21_stage_records_retained": true,
+    "no_scheduling_changes": true,
+    "no_future_date_run": true
+  },
+  "remaining_in_scope": [],
+  "observations": [
+    "Existing DataFrame fragmentation performance warnings left unchanged.",
+    "Fact reviewer explicitly did not independently re-read official PDF originals absent from its supplied input; used supplied facts and calculations, with source boundary retained.",
+    "Page still reports 17 historical recommendation bodies missing, predating this task; current day recommendation bodies and introductions are complete.",
+    "Earlier protection manifest predates two valid local page-adapter changes and the newer September 22 page. Their modification times precede this turn; preserved the newer versions."
+  ]
+}
