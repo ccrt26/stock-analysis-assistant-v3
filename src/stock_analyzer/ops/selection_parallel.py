@@ -2,8 +2,12 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 import os
+import selectors
+import signal
+import time as clock_time
 import re
 import shlex
 import shutil
@@ -15,7 +19,7 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
-from stock_analyzer.ops.recommendation_context import candidate_context, derived_at, records
+from stock_analyzer.ops.recommendation_context import DEFINITIONS, candidate_context, derived_at, records
 from stock_analyzer.storage.research_query import ResearchQuery
 from stock_analyzer.storage.research_schema import connect_research_warehouse
 from stock_analyzer.storage.research_warehouse import ResearchWarehouse
@@ -32,7 +36,7 @@ EXPERIMENT = 'confirmation-cost-v3'
 ZONE = ZoneInfo('Asia/Shanghai')
 DERIVED = ('market_context', 'sector_hotspot', 'stock_trading_context', 'price_analysis_context')
 CATEGORIES = ('financial', 'company', 'price', 'industry')
-MODEL = 'gpt-6-sol'
+MODEL = 'gpt-6-astra'
 EFFORT = 'xhigh'
 
 
@@ -61,8 +65,6 @@ def _cfg(config_path: Path) -> dict:
         raise ValueError('experiment or common code baseline differs from pinned T1')
     if cfg.get('methods') != METHODS:
         raise ValueError('M0/M1 source differs from pinned T1')
-    if (cfg.get('model'), cfg.get('reasoning'), cfg.get('no_fallback')) != (MODEL, EFFORT, True):
-        raise ValueError('model, effort, or no-fallback setting differs')
     root = Path(cfg['archive_root']) / 'selection_trials' / EXPERIMENT
     if config_path.resolve() != (root / 'experiment.json').resolve():
         raise ValueError('config must be in the isolated selection_trials directory')
@@ -73,8 +75,28 @@ def _cfg(config_path: Path) -> dict:
     return cfg
 
 
+def _require_research(config_path: Path) -> dict:
+    """Single prelaunch check for every trial research subprocess."""
+    cfg = _cfg(config_path)
+    if cfg.get('research_enabled') is not True:
+        raise ValueError('research_enabled=false; research launch is disabled')
+    if (cfg.get('model'), cfg.get('reasoning'), cfg.get('no_fallback')) != (MODEL, EFFORT, True):
+        raise ValueError('Astra/xhigh/no_fallback research configuration required')
+    limits = cfg.get('limits')
+    required = {'max_tool_commands','max_wall_seconds','max_input_tokens','max_output_tokens'}
+    if not isinstance(limits, dict) or set(limits) != required or any(
+            not isinstance(limits[k], int) or isinstance(limits[k], bool) or limits[k] <= 0 for k in required):
+        raise ValueError('complete positive research limits required before launch')
+    return cfg
+
+
 def _trial(cfg: dict) -> Path:
     return Path(cfg['archive_root']) / 'selection_trials' / EXPERIMENT
+
+
+def _worktree_dirty(code_root: Path) -> bool:
+    return bool(subprocess.run(['git','status','--porcelain'],cwd=code_root,check=True,
+                               capture_output=True,text=True).stdout.strip())
 
 
 def _git_bytes(code_root: Path, ref: str, rel: str) -> bytes:
@@ -149,6 +171,27 @@ def _source_versions(warehouse: ResearchWarehouse) -> list[dict]:
     return [dict(dataset=x, partition=str(y), file_sha256=z) for x, y, z in rows]
 
 
+def _bound_source_versions(versions: list[dict], formation: str, cutoff: datetime,
+                           price_sessions: list[str]) -> list[dict]:
+    """Keep only sources the frozen trial can read at this cutoff."""
+    company = set(COMPANY_DATASETS) | {'security_master', 'industry_member', 'trade_calendar'}
+    latest_month = cutoff.date().isoformat()[:7]
+    bound = []
+    for row in versions:
+        dataset, partition = row['dataset'], row['partition']
+        if dataset in company:
+            if dataset == 'announcement' and re.match(r'^\d{4}-\d{2}$', partition) and partition > latest_month:
+                continue
+            if dataset in {'income_statement','balance_sheet','cash_flow','financial_indicator','main_business'} and re.match(r'^\d{4}-\d{2}-\d{2}$', partition) and partition > cutoff.date().isoformat():
+                continue
+            bound.append(row)
+        elif dataset == 'equity_daily' and partition in price_sessions:
+            bound.append(row)
+        elif dataset == 'daily_basic' and partition == formation:
+            bound.append(row)
+    return sorted(bound, key=lambda r: (r['dataset'], r['partition']))
+
+
 def _derived_snapshot(warehouse: ResearchWarehouse, feature: str, formation: str,
                       cutoff: datetime) -> tuple[pd.DataFrame, dict]:
     with connect_research_warehouse(warehouse.duckdb_path, read_only=True) as con:
@@ -184,12 +227,99 @@ def _universe(query: ResearchQuery, formation: str, cutoff: datetime) -> list[di
             for r in valid[['ts_code', 'name', 'market']].drop_duplicates('ts_code').itertuples(index=False)]
 
 
-def prepare_day(config_path: Path, *, as_of: str, mode: str) -> Path:
+COMPANY_DATASETS = ('announcement', 'income_statement', 'balance_sheet', 'cash_flow',
+                    'financial_indicator', 'company_profile', 'main_business')
+COMPANY_VALUES = {
+    'income_statement': ('total_revenue', 'revenue', 'n_income_attr_p'),
+    'balance_sheet': ('total_assets', 'total_liab', 'money_cap'),
+    'cash_flow': ('n_cashflow_act',),
+    'financial_indicator': ('netprofit_yoy', 'dt_netprofit_yoy', 'ocf_yoy', 'grossprofit_margin'),
+    'company_profile': ('main_business', 'business_scope'),
+    'main_business': ('classification', 'item_name', 'bz_sales', 'bz_profit', 'curr_type'),
+    'announcement': (),
+}
+
+
+def _company_discovery(query: ResearchQuery, eligible: set[str], cutoff: datetime) -> tuple[pd.DataFrame, dict]:
+    """Index raw point-in-time company facts across the full eligible universe."""
+    rows: list[dict] = []
+    coverage: dict[str, dict] = {}
+    for dataset in COMPANY_DATASETS:
+        try:
+            frame = (query.comparable_financials_as_of(dataset, cutoff) if dataset in
+                     ('income_statement', 'balance_sheet', 'cash_flow', 'financial_indicator') else
+                     query.dataset_as_of(dataset, cutoff))
+        except (ValueError, OSError, RuntimeError) as exc:
+            coverage[dataset] = {'status': 'query_failed', 'detail': str(exc),
+                                 'coverage_status': 'unknown', 'record_count': 0, 'security_count': 0}
+            continue
+        if not frame.empty:
+            frame = frame[frame['ts_code'].astype(str).isin(eligible)].copy()
+            visible = pd.to_datetime(frame['available_at'], utc=True, errors='coerce')
+            frame = frame[visible.notna() & (visible <= pd.Timestamp(cutoff).tz_convert('UTC'))].copy()
+            frame['__available_rank'] = visible.loc[frame.index]
+            if 'business_key_hash' in frame:
+                frame = frame.sort_values('__available_rank').drop_duplicates('business_key_hash', keep='last')
+            frame = frame.drop(columns='__available_rank')
+        coverage[dataset] = {'status': 'available' if not frame.empty else 'no_available_rows',
+                             'coverage_status': 'unknown', 'record_count': int(len(frame)),
+                             'security_count': int(frame['ts_code'].nunique()) if 'ts_code' in frame else 0,
+                             'earliest_available_at': visible.loc[frame.index].min().isoformat() if not frame.empty else None,
+                             'latest_available_at': visible.loc[frame.index].max().isoformat() if not frame.empty else None}
+        if not frame.empty:
+            frame['available_at'] = visible.loc[frame.index].map(lambda value: value.isoformat())
+        for rec in frame.to_dict('records'):
+            val = {k: rec.get(k) for k in COMPANY_VALUES[dataset] if pd.notna(rec.get(k))}
+            key = str(rec.get('business_key_hash') or rec.get('source_record_id') or
+                      rec.get('announcement_id') or f"{rec.get('ts_code')}:{rec.get('report_period')}:{dataset}")
+            period = str(rec.get('report_period') or '')[:10]
+            published = rec.get('announcement_time') or rec.get('f_ann_date') or rec.get('ann_date')
+            partition = (str(published)[:7] if dataset == 'announcement' else period if dataset in
+                         {'income_statement','balance_sheet','cash_flow','financial_indicator','main_business'} else '')
+            rows.append({'ts_code': str(rec['ts_code']), 'dataset': dataset, 'record_type': dataset,
+                         'source_partition': partition,
+                         'title': str(rec.get('title') or rec.get('announcement_title') or ''),
+                         'fact_values_json': json.dumps(val, ensure_ascii=False, default=str),
+                         'business_date': period or str(rec.get('valid_from') or '')[:10],
+                         'report_period': period, 'available_at': str(rec['available_at']),
+                         'published_at': str(published) if pd.notna(published) else '',
+                         'source_name': str(rec.get('source_name') or ''),
+                         'source_endpoint': str(rec.get('source_endpoint') or ''),
+                         'source_record_id': str(rec.get('source_record_id') or ''),
+                         'business_key_hash': key,
+                         'original_url': str(rec.get('url') or rec.get('announcement_url') or ''),
+                         'content_status': 'title_only' if dataset == 'announcement' else 'structured_fact'})
+    columns = ('ts_code','dataset','record_type','source_partition','title','fact_values_json','business_date',
+               'report_period','available_at','published_at','source_name','source_endpoint',
+               'source_record_id','business_key_hash','original_url','content_status')
+    result = pd.DataFrame(rows, columns=columns)
+    if not result.empty:
+        result = result.sort_values(['available_at','ts_code','dataset','business_key_hash'],
+                                    ascending=[False, True, True, True], kind='mergesort').reset_index(drop=True)
+    return result, coverage
+
+
+def discover_company(catalog_path: Path, *, limit: int = 50, offset: int = 0) -> dict:
+    if limit < 1 or offset < 0:
+        raise ValueError('limit must be positive and offset nonnegative')
+    catalog = _json(catalog_path)
+    path = catalog_path.parent / catalog['company_discovery']
+    frame = pd.read_parquet(path)
+    total = len(frame)
+    page = frame.iloc[offset:offset+limit]
+    return {'view': 'company', 'as_of': catalog.get('as_of'), 'total_records': total,
+            'returned': len(page), 'coverage': catalog.get('company_coverage', {}),
+            'next_offset': offset+len(page) if offset+len(page) < total else None,
+            'records': [{k: (None if pd.isna(v) else v) for k, v in row.items()}
+                        for row in page.to_dict('records')]}
+
+
+def prepare_day(config_path: Path, *, as_of: str, mode: str, replay_id: str | None = None) -> Path:
     if mode not in {'prospective', 'replay_smoke'}:
         raise ValueError('mode must be prospective or replay_smoke')
+    if replay_id is not None and (mode != 'replay_smoke' or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_-]{0,79}', replay_id)):
+        raise ValueError('replay-id must be a simple replay_smoke directory name')
     cfg = _cfg(config_path)
-    if str(cfg.get('status', '')).startswith('blocked_'):
-        raise ValueError('trial research is blocked pending the documented decision')
     cutoff = datetime.fromisoformat(as_of)
     if cutoff.tzinfo is None or cutoff.utcoffset() is None:
         raise ValueError('as_of must contain timezone')
@@ -209,15 +339,16 @@ def prepare_day(config_path: Path, *, as_of: str, mode: str) -> Path:
     if mode == 'prospective' and now >= datetime.combine(date.fromisoformat(action), time(9, 30), ZONE):
         raise ValueError('prospective run must freeze before action opening')
     root = _trial(cfg)
-    day_dir = root / ('daily' if mode == 'prospective' else 'smoke') / action
+    day_dir = root / ('daily' if mode == 'prospective' else 'smoke') / (replay_id or action)
     run_path = day_dir / 'run.json'
     if run_path.exists():
         previous = _json(run_path)
-        if (previous['as_of'], previous['mode']) != (cutoff.isoformat(), mode):
+        if (previous['as_of'], previous['mode'], previous.get('replay_id')) != (cutoff.isoformat(), mode, replay_id):
             raise ValueError('existing day has a different cutoff or mode')
         return day_dir
     warehouse = ResearchWarehouse(warehouse_root, read_only=True)
     query = ResearchQuery(warehouse)
+    starting_versions = _source_versions(warehouse)
     universe = _universe(query, formation, cutoff)
     if not universe:
         raise ValueError('eligible full-market universe is empty')
@@ -230,16 +361,52 @@ def prepare_day(config_path: Path, *, as_of: str, mode: str) -> Path:
         source['rows'] = len(frame)
         derived_sources[feature] = source
         frame.to_parquet(day_inputs / f'{feature}.parquet', index=False)
-    versions = _source_versions(warehouse)
+    company_index, company_coverage = _company_discovery(query, {r['ts_code'] for r in universe}, cutoff)
+    price_sessions = _calendar(warehouse_root, (date.fromisoformat(formation)-timedelta(days=120)).isoformat(), formation)[-61:]
+    versions = _bound_source_versions(_source_versions(warehouse), formation, cutoff, price_sessions)
+    if versions != _bound_source_versions(starting_versions, formation, cutoff, price_sessions):
+        raise ValueError('source partition version changed during trial preparation')
+    version_map = {(x['dataset'], x['partition']): x['file_sha256'] for x in versions}
+    single_partition = {dataset: part[0]['partition'] for dataset in COMPANY_DATASETS
+                        if len(part := [x for x in versions if x['dataset'] == dataset]) == 1}
+    if not company_index.empty:
+        company_index['source_partition'] = [part or single_partition.get(dataset, '')
+                                             for dataset, part in zip(company_index['dataset'], company_index['source_partition'], strict=True)]
+        company_index['source_file_sha256'] = [version_map.get((dataset, part), '')
+                                                for dataset, part in zip(company_index['dataset'], company_index['source_partition'], strict=True)]
+        for dataset, count in company_index[company_index['source_file_sha256'].eq('')].groupby('dataset').size().items():
+            company_coverage[dataset]['unresolved_source_rows'] = int(count)
+    company_index.to_parquet(day_inputs / 'company_discovery.parquet', index=False, compression='zstd')
     _write_json(day_inputs / 'sources.json', versions)
     catalog = dict(experiment_id=EXPERIMENT, as_of=cutoff.isoformat(), formation_date=formation,
                    action_date=action, warehouse_root=str(warehouse_root), source_root=cfg['source_root'],
+                   price_sessions=price_sessions, bound_sources=[f"{x['dataset']}:{x['partition']}" for x in versions],
                    day_dir=str(day_dir), derived=derived_sources, source_versions='sources.json',
-                   categories=list(CATEGORIES), neutral_files=[f'{x}.parquet' for x in DERIVED])
+                   categories=list(CATEGORIES), field_map='field-map.json',
+                   company_discovery='company_discovery.parquet',
+                   company_coverage=company_coverage,
+                   neutral_files=[f'{x}.parquet' for x in DERIVED] + ['company_discovery.parquet'])
     _write_json(day_inputs / 'catalog.json', catalog)
+    _write_json(day_inputs / 'field-map.json', {
+        'definitions': DEFINITIONS,
+        'company_discovery_command': f'python tools/selection_parallel.py discover --catalog {day_inputs / "catalog.json"} --view company --limit 50 --offset 0',
+        'company_discovery_fields': {'available_at':'本地时点可见时间，不等于实际公告公开时间',
+            'published_at':'原公开时间若可得', 'business_date':'对应报告期或业务生效日期',
+            'fact_values_json':'对应记录类别的原始关键值；无推断',
+            'source_partition':'事实分区', 'source_file_sha256':'事实分区当前绑定版本'},
+        'fact_categories': list(CATEGORIES),
+        'fact_paging': 'facts 的 --offset 按返回片段续读；next_offset 为空前不得认为取齐。'})
+    _check_source_catalog(day_inputs / 'catalog.json')
+    common_prompt = (Path(cfg['code_root']) / 'ops/selection-parallel-prompt.md').read_bytes()
+    program_ref = subprocess.run(['git','rev-parse','HEAD'], cwd=cfg['code_root'], check=True, capture_output=True, text=True).stdout.strip()
     _write_json(run_path, dict(experiment_id=EXPERIMENT, formation_date=formation,
                                action_date=action, as_of=cutoff.isoformat(), mode=mode,
-                               status={'M0': 'not_run', 'M1': 'not_run'},
+                               replay_id=replay_id, input_contract_version='selection-parallel-input-v2',
+                               program_ref=program_ref, program_dirty_at_prepare=_worktree_dirty(Path(cfg['code_root'])),
+                               common_prompt_sha256=hashlib.sha256(common_prompt).hexdigest(),
+                               methods=METHODS, model=cfg.get('model'), reasoning=cfg.get('reasoning'),
+                               no_fallback=cfg.get('no_fallback'), research_enabled=cfg.get('research_enabled', False),
+                               limits=cfg.get('limits'), status={'M0': 'not_run', 'M1': 'not_run'},
                                source_catalog='inputs/catalog.json'))
     if mode == 'prospective':
         if not cfg.get('start_action_date'):
@@ -264,8 +431,21 @@ def _check_source_catalog(catalog_path: Path) -> dict:
     warehouse = ResearchWarehouse(Path(catalog['warehouse_root']), read_only=True)
     original = _json(catalog_path.parent / catalog['source_versions'])
     current = _source_versions(warehouse)
-    if current != original:
+    if 'bound_sources' in catalog:
+        current = _bound_source_versions(current, catalog['formation_date'],
+                                         datetime.fromisoformat(catalog['as_of']),
+                                         catalog.get('price_sessions') or [x['partition'] for x in original if x['dataset']=='equity_daily'])
+    if sorted(current, key=lambda r:(r['dataset'],r['partition'])) != sorted(original, key=lambda r:(r['dataset'],r['partition'])):
         raise ValueError('source partition version changed after trial preparation; stop paired research')
+    if 'bound_sources' in catalog:
+        from collections import defaultdict
+        partitions = defaultdict(list)
+        for item in original:
+            partitions[item['dataset']].append(item['partition'])
+        verify = getattr(warehouse, 'validated_partition_manifest', None)
+        if callable(verify):
+            for dataset, values in partitions.items():
+                verify(dataset, values)
     for feature, source in catalog['derived'].items():
         from stock_analyzer.storage.research_parquet import sha256_file
         if sha256_file(warehouse.root / source['relative_path']) != source['file_sha256']:
@@ -273,27 +453,64 @@ def _check_source_catalog(catalog_path: Path) -> dict:
     return catalog
 
 
-def facts(catalog_path: Path, *, codes: list[str], categories: list[str] | None = None) -> dict:
+def facts(catalog_path: Path, *, codes: list[str], categories: list[str] | None = None,
+          offset: int = 0, max_chars: int = 40000) -> dict:
     catalog = _check_source_catalog(catalog_path)
-    categories = categories or list(CATEGORIES)
-    if not codes or set(categories) - set(CATEGORIES):
+    categories = list(dict.fromkeys(categories or CATEGORIES))
+    codes = list(dict.fromkeys(codes))
+    if not codes or set(categories) - set(CATEGORIES) or offset < 0:
         raise ValueError('facts requires codes and existing financial/company/price/industry categories')
     allowed = {x['ts_code'] for x in _json(catalog_path.parent / 'universe.json')}
     if any(code not in allowed for code in codes):
         raise ValueError('stock code outside frozen eligible universe')
-    out = []
-    for code in dict.fromkeys(codes):
-        for category in dict.fromkeys(categories):
-            result = candidate_context(Path(catalog['source_root']), [code],
-                                       formation_date=catalog['formation_date'], as_of=catalog['as_of'],
-                                       categories=[category])
-            result.pop('proposed_judgment', None)
-            out.append({'source_ref': f'facts:{code}:{category}', 'ts_code': code,
-                        'category': category, 'source_version': catalog['source_versions'],
-                        'result': result})
+    frozen = {name: pd.read_parquet(catalog_path.parent / f'{name}.parquet')
+              for name in ('market_context','sector_hotspot','price_analysis_context')
+              if (catalog_path.parent / f'{name}.parquet').exists()}
+    common = candidate_context(Path(catalog['source_root']), codes,
+                               formation_date=catalog['formation_date'], as_of=catalog['as_of'],
+                               categories=categories, warehouse_root=Path(catalog['warehouse_root']),
+                               derived_inputs=frozen)
+    category_fields = {
+        'financial': ('financial_availability','income_statement','balance_sheet','cash_flow','financial_indicator'),
+        'company': ('company_profile','main_business','announcement'),
+        'price': ('equity_daily','daily_basic','price_observations','comparison_windows'),
+        'industry': ('industry_member','industry_observations','industry_breadth','industry_series','comparison_windows'),
+    }
+    reads = []
+    for code in codes:
+        for category in categories:
+            fact = common['facts'][code]
+            selected = {k: fact[k] for k in category_fields[category] if k in fact}
+            base = {'source_ref': f'facts:{code}:{category}', 'ts_code': code,
+                    'category': category, 'source_version': catalog['source_versions'],
+                    'query_scope': {'as_of': catalog['as_of'], 'formation_date': catalog['formation_date'],
+                                    'datasets': list(category_fields[category])}}
+            result = {'facts': selected}
+            raw = json.dumps(result, ensure_ascii=False, default=str)
+            if max_chars and len(raw) > 25000:
+                parts = [raw[i:i+25000] for i in range(0, len(raw), 25000)]
+                reads.extend([{**base, 'result_json_fragment': part, 'part_index': i,
+                               'part_count': len(parts)} for i, part in enumerate(parts)])
+            else:
+                reads.append({**base, 'result': result})
+    header = {'identity': {k: catalog[k] for k in ('formation_date','action_date','as_of')},
+              'definitions': common.get('definitions', {}), 'gaps': common.get('gaps', []),
+              'market_facts': common.get('market_facts', []), 'total_read_parts': len(reads)}
+    if not max_chars:
+        return {**header, 'reads': reads, 'next_offset': None}
+    output = {**header, 'reads': [], 'next_offset': None}
+    for index in range(offset, len(reads)):
+        proposed = {**output, 'reads': output['reads'] + [reads[index]]}
+        if output['reads'] and len(json.dumps(proposed, ensure_ascii=False, default=str)) > max_chars:
+            output['next_offset'] = index
+            break
+        output['reads'].append(reads[index])
+    if output['reads'] and output['next_offset'] is None and offset+len(output['reads']) < len(reads):
+        output['next_offset'] = offset+len(output['reads'])
+    output['offset'] = offset
+    output['over_target'] = len(json.dumps(output, ensure_ascii=False, default=str)) > max_chars
     _check_source_catalog(catalog_path)
-    return {'identity': {k: catalog[k] for k in ('formation_date', 'action_date', 'as_of')},
-            'reads': out}
+    return output
 
 
 def _model_command(context: Path, last_message: Path) -> list[str]:
@@ -337,7 +554,90 @@ def _verified_cli_session(events_text: str) -> dict:
     return actual
 
 
-def _invoke_model(context: Path, prompt: str, attempt: Path) -> tuple[int, dict]:
+def _execute_research(cmd: list[str], cwd: Path, prompt: str, events_path: Path,
+                      stderr_path: Path, limits: dict) -> dict:
+    """Stream only this child process; enforce observable tool/time budgets."""
+    with events_path.open('wb') as events, stderr_path.open('wb') as errors:
+        proc = subprocess.Popen(cmd, cwd=cwd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, start_new_session=True, bufsize=0)
+        assert proc.stdin and proc.stdout and proc.stderr
+        proc.stdin.write(prompt.encode('utf-8'))
+        proc.stdin.close()
+        selector = selectors.DefaultSelector()
+        selector.register(proc.stdout, selectors.EVENT_READ, 'stdout')
+        selector.register(proc.stderr, selectors.EVENT_READ, 'stderr')
+        partial = b''
+        tools = 0
+        tokens = None
+        budget_exceeded = None
+        stop_at = None
+        termination_sent = False
+        kill_sent = False
+        token_live_observed = False
+        started = clock_time.monotonic()
+        def inspect(line: bytes) -> None:
+            nonlocal tools, tokens, budget_exceeded, token_live_observed
+            try:
+                event = json.loads(line)
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                return
+            item = event.get('item') or {}
+            if event.get('type') == 'item.completed' and item.get('type') == 'command_execution':
+                tools += 1
+                if tools >= limits['max_tool_commands']:
+                    budget_exceeded = 'max_tool_commands'
+            usage = event.get('usage')
+            if isinstance(usage, dict):
+                tokens = usage
+                token_live_observed = token_live_observed or event.get('type') != 'turn.completed'
+                if usage.get('input_tokens', 0) >= limits['max_input_tokens']:
+                    budget_exceeded = 'max_input_tokens'
+                if usage.get('output_tokens', 0) >= limits['max_output_tokens']:
+                    budget_exceeded = 'max_output_tokens'
+        try:
+            while selector.get_map() or proc.poll() is None:
+                if budget_exceeded and stop_at is None:
+                    stop_at = clock_time.monotonic()
+                if not budget_exceeded and clock_time.monotonic()-started >= limits['max_wall_seconds']:
+                    budget_exceeded = 'max_wall_seconds'
+                if budget_exceeded and not termination_sent:
+                    try:
+                        os.killpg(proc.pid, signal.SIGTERM)
+                    except ProcessLookupError:
+                        pass
+                    termination_sent = True
+                for key, _ in selector.select(timeout=0.1):
+                    block = os.read(key.fileobj.fileno(), 65536)
+                    if not block:
+                        selector.unregister(key.fileobj)
+                        continue
+                    if key.data == 'stderr':
+                        errors.write(block)
+                    else:
+                        events.write(block)
+                        partial += block
+                        while b'\n' in partial:
+                            line, partial = partial.split(b'\n', 1)
+                            inspect(line)
+                if budget_exceeded and not kill_sent and stop_at is not None and clock_time.monotonic()-stop_at > 2:
+                    try:
+                        os.killpg(proc.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    kill_sent = True
+            if partial:
+                inspect(partial)
+            exit_code = proc.wait(timeout=3)
+        finally:
+            selector.close()
+        return {'exit_code': exit_code if not budget_exceeded else 124,
+                'child_exit_code': exit_code, 'budget_exceeded': budget_exceeded,
+                'tool_commands': tools, 'tokens': tokens,
+                'token_limit_mode': 'observed_events' if token_live_observed else 'post_run_only'}
+
+
+def _invoke_model(context: Path, prompt: str, attempt: Path, *, config_path: Path) -> tuple[int, dict]:
+    _require_research(config_path)
     attempt.mkdir(parents=True, exist_ok=False)
     (attempt / 'prompt.md').write_text(prompt, encoding='utf-8')
     cmd = _model_command(context, attempt / 'raw-output.json')
@@ -345,17 +645,21 @@ def _invoke_model(context: Path, prompt: str, attempt: Path) -> tuple[int, dict]
                                            'requested_model': MODEL, 'requested_reasoning': EFFORT,
                                            'fallback': False})
     started = datetime.now(ZONE)
-    result = subprocess.run(cmd, input=prompt, capture_output=True, text=True, cwd=context)
+    cfg = _cfg(config_path)
+    execution = _execute_research(cmd, context, prompt, attempt / 'events.jsonl',
+                                  attempt / 'stderr.log', cfg['limits'])
     finished = datetime.now(ZONE)
-    (attempt / 'events.jsonl').write_text(result.stdout, encoding='utf-8')
-    (attempt / 'stderr.log').write_text(result.stderr, encoding='utf-8')
-    metadata = {'exit_code': result.returncode, 'requested_model': MODEL,
+    events_text = (attempt / 'events.jsonl').read_text(encoding='utf-8')
+    metadata = {'exit_code': execution['exit_code'], 'requested_model': MODEL,
                 'started_at': started.isoformat(), 'finished_at': finished.isoformat(),
                 'duration_seconds': round((finished-started).total_seconds(), 3),
                 'research_context_count': 1,
                 'requested_reasoning': EFFORT, 'actual_model': None,
-                'actual_reasoning': None, 'tokens': None}
-    for line in result.stdout.splitlines():
+                'actual_reasoning': None, 'tokens': execution['tokens'],
+                'budget_exceeded': execution['budget_exceeded'],
+                'tool_commands': execution['tool_commands'],
+                'token_limit_mode': execution['token_limit_mode']}
+    for line in events_text.splitlines():
         try:
             event = json.loads(line)
         except json.JSONDecodeError:
@@ -365,9 +669,22 @@ def _invoke_model(context: Path, prompt: str, attempt: Path) -> tuple[int, dict]
                               ('usage', 'tokens')):
                 if event.get(key) is not None:
                     metadata[dest] = event[key]
-    metadata.update(_verified_cli_session(result.stdout))
+    metadata.update(_verified_cli_session(events_text))
     _write_json(attempt / 'invocation.json', metadata)
-    return result.returncode, metadata
+    return execution['exit_code'], metadata
+
+
+def _prior_qualified_decision(root: Path, method: str, cutoff: str) -> Path | None:
+    prior = []
+    cutoff_time = datetime.fromisoformat(cutoff)
+    for file in (root/'daily').glob('*/run.json'):
+        day_dir = file.parent
+        day = _json(file)
+        prior_time = datetime.fromisoformat(day['as_of'])
+        if prior_time >= cutoff_time or not _qualification(day_dir, method)['qualified']:
+            continue
+        prior.append((prior_time, day_dir/method/'result.json'))
+    return max(prior, default=(None,None))[1]
 
 
 def _prompt(cfg: dict, day: dict, method: str, catalog_path: Path) -> str:
@@ -375,39 +692,39 @@ def _prompt(cfg: dict, day: dict, method: str, catalog_path: Path) -> str:
     python = Path(cfg.get('python') or sys.executable)
     own = Path(cfg['context_root']) / method
     import_path = f'{code / "src"}:{code}'
-    fact_command = (f'PYTHONPATH={shlex.quote(import_path)} {shlex.quote(str(python))} '
-                    f'{shlex.quote(str(code / "tools/selection_parallel.py"))} facts '
-                    f'--catalog {shlex.quote(str(catalog_path))} --code 000001.SZ --category price')
+    cli = (f'PYTHONPATH={shlex.quote(import_path)} {shlex.quote(str(python))} '
+           f'{shlex.quote(str(code / "tools/selection_parallel.py"))}')
     files = [f'.agents/skills/{name}/SKILL.md' for name in SKILLS]
     common = (code / 'ops/selection-parallel-prompt.md').read_text(encoding='utf-8')
-    return (common + f'\n你执行 {method} 独立短研究。先完整阅读本目录这五个 Skill：{", ".join(files)}，'
+    prior = _prior_qualified_decision(_trial(cfg), method, day['as_of'])
+    prior_note = f'本方法上一合格前瞻决定：{prior}。' if prior else '本方法此前无合格前瞻决定，独立判断。'
+    example = ('{"method_id":"'+method+'","formation_date":"'+day['formation_date']+'",'
+               '"action_date":"'+day['action_date']+'","as_of":"'+day['as_of']+'",'
+               '"market_summary":"简短背景",'
+               '"discovery_summary":{"sector":{"status":"searched_no_candidate","source_refs":["neutral:sector_hotspot"],"codes":[]},'
+               '"company":{"status":"searched_no_candidate","source_refs":["neutral:company_discovery"],"codes":[]},'
+               '"price":{"status":"searched_no_candidate","source_refs":["neutral:price_analysis_context"],"codes":[]}},'
+               '"candidates":[],"selected":[],"conditional_events":[],"unresolved":[],"no_selection_reason":"完成且零入选原因"}')
+    return (common + f'\n你执行 {method} 独立短研究。先读本目录五个冻结 Skill：{", ".join(files)}，'
             '以及 docs/architecture/a-share-short-horizon-engine-contract-v4.md。'
-            '方法规则按这些冻结文件，正式写稿与发布步骤止于短研究判断。'
-            '市场先发现搜索背景，再由板块、公司、价格分别发现候选，最后总控比较取舍。'
-            '不得只用价格排名、正式旧入选、另一方法结果或未来行情作为发现池。'
-            f'你的工作目录是 {own}。共同事实 catalog={catalog_path}；'
-            f'形成日={day["formation_date"]}，预定参与日={day["action_date"]}，'
-            f'时点={day["as_of"]}。'
-            f'完整中性范围在 {catalog_path.parent / "universe.json"}；'
+            f'只用自身方法，上下文目录 {own}。{prior_note}'
+            f'形成日={day["formation_date"]}，参与日={day["action_date"]}，截止={day["as_of"]}。'
+            f'共同 catalog={catalog_path}；字段地图={catalog_path.parent / "field-map.json"}；'
+            f'完整证券范围={catalog_path.parent / "universe.json"}。'
             + ' '.join(f'{name}={catalog_path.parent / (name+".parquet")}' for name in DERIVED)
-            + '。可用 Python/pandas 只读分析完整派生，不改写文件，不设新硬阈值。'
-            f'按需只读调用（可重复 --code/--category）：{fact_command}。'
-            '必须在最终 JSON 的 source_refs 引用实际看过的 neutral:<派生名> 或 '
-            'facts:<股票代码>:<类别>；关键数值写入理由并能对应来源。'
-            '关键官方公告若只有标题，没有正文，明确未知。'
-            '只输出一个有效 JSON 对象，不要 Markdown 围栏：'
-            '{"method_id":"'+method+'","formation_date":"'+day['formation_date']+'",'
-            '"action_date":"'+day['action_date']+'","as_of":"'+day['as_of']+'",'
-            '"market_summary":"简短市场背景","candidates":[{"ts_code":"000001.SZ",'
-            '"discovered_by":["sector"],"final_fate":"selected或原方法去留",'
-            '"short_reason":"一两句", "source_refs":["neutral:sector_hotspot"]}],'
-            '"selected":[{"ts_code":"000001.SZ","rank":1,"primary_reason":"原因及必要数值",'
-            '"strongest_counter_evidence":"最强反证", "nearest_comparison":"最近替代股及比较",'
-            '"participation_condition":"盘中/收盘条件明确区分", "change_condition":"撤回/重判条件",'
-            '"source_refs":["facts:000001.SZ:price"]}],'
-            '"conditional_events":[],"unresolved":[],"no_selection_reason":null}。'
-            '全部实际研究候选均须记录，0—5只入选，不凑数。零入选且完成时填写 no_selection_reason。'
-            '不输出收益、不写正式记录、不执行生产命令。')
+            + f'；公司索引={catalog_path.parent / "company_discovery.parquet"}。'
+            f'公司独立发现先运行：{cli} discover --catalog {shlex.quote(str(catalog_path))} --view company --limit 50 --offset 0；'
+            'next_offset 非空继续分页，或用 Python 只读查询完整索引。'
+            f'个股事实批量读取：{cli} facts --catalog {shlex.quote(str(catalog_path))} '
+            '--code <实际代码1> --code <实际代码2> --category company --category price --offset 0；'
+            '只读实际需要的类别，next_offset 非空继续，不因分页遗漏负面或缺口。'
+            '字段和单位只读一次，之后只引用实际返回的关键原值、窗口、来源。'
+            '最终 JSON 包含 discovery_summary 三路各自 status、source_refs、codes：'
+            'status 只能用 searched_with_candidates 或 searched_no_candidate；无索引、未查或资料不足不可说已查零候选。'
+            '各路可零候选，不强迫补位。候选账只记真实提出的股票及原去留。'
+            'M1 若用保持解释，selected 项可加 confirmation_reference：观察参照日、参照价或区域、'
+            '确定时间或本次事前重建、来源、之后已完成交易及反证；不用则不填。'
+            '只返回有效 JSON，不写正式记录和收益。形状示例：'+example)
 
 
 def _parse_model_output(path: Path) -> dict:
@@ -418,6 +735,54 @@ def _parse_model_output(path: Path) -> dict:
     if not isinstance(obj, dict):
         raise ValueError('model output must be one JSON object')
     return obj
+
+
+def _successful_tool_results(events_text: str) -> list[tuple[str, str, dict | list | None]]:
+    found = []
+    for line in events_text.splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        item = event.get('item') or {}
+        if (event.get('type') != 'item.completed' or item.get('type') != 'command_execution'
+                or item.get('exit_code') != 0):
+            continue
+        output = item.get('aggregated_output') or ''
+        try:
+            parsed = json.loads(output)
+        except json.JSONDecodeError:
+            parsed = None
+        found.append((item.get('command') or '', output, parsed))
+    return found
+
+
+def _check_discovery(obj: dict, tools: list[tuple[str, str, object]]) -> None:
+    summary = obj.get('discovery_summary')
+    if not isinstance(summary, dict):
+        raise ValueError('discovery_summary required for V2')
+    expected = {'sector':'sector_hotspot.parquet', 'company':'company_discovery',
+                'price':'price_analysis_context.parquet'}
+    candidates = obj.get('candidates') or []
+    for view, marker in expected.items():
+        item = summary.get(view)
+        if not isinstance(item, dict) or item.get('status') not in {'searched_with_candidates','searched_no_candidate'}:
+            raise ValueError(f'discovery {view} was not completed')
+        codes = item.get('codes')
+        if not isinstance(codes, list):
+            raise ValueError(f'discovery {view} codes required, including empty list')
+        actual = {c['ts_code'] for c in candidates if view in c.get('discovered_by', [])}
+        if set(codes) != actual or (bool(codes) != (item['status'] == 'searched_with_candidates')):
+            raise ValueError(f'discovery {view} candidates differ from ledger')
+        if f'neutral:{"company_discovery" if view=="company" else marker[:-8]}' not in item.get('source_refs', []):
+            raise ValueError(f'discovery {view} source ref required')
+        if view == 'company':
+            observed = any(isinstance(parsed, dict) and parsed.get('view') == 'company'
+                           and isinstance(parsed.get('records'), list) for _, _, parsed in tools)
+        else:
+            observed = any(marker in command and output.strip() for command, output, _ in tools)
+        if not observed:
+            raise ValueError(f'discovery {view} lacks successful tool result')
 
 
 def _validate_decision(obj: dict, day: dict, method: str, catalog_path: Path,
@@ -459,19 +824,34 @@ def _validate_decision(obj: dict, day: dict, method: str, catalog_path: Path,
         raise ValueError('completed zero selection needs explicit reason')
     if any(key.startswith('outcome_') for key in obj):
         raise ValueError('decision cannot include post-selection outcome')
+    tools = _successful_tool_results(events_text)
+    if day.get('input_contract_version') == 'selection-parallel-input-v2':
+        _check_discovery(obj, tools)
     fact_refs = []
     for ref in refs:
         if not isinstance(ref, str):
             raise ValueError('source ref must be text')
         if ref.startswith('neutral:'):
-            if ref[8:] not in DERIVED:
+            if ref[8:] not in DERIVED + ('company_discovery',):
                 raise ValueError(f'unknown neutral source {ref}')
         else:
             parts = ref.split(':')
             if len(parts) != 3 or parts[0] != 'facts' or parts[1] not in allowed or parts[2] not in CATEGORIES:
                 raise ValueError(f'unknown fact source {ref}')
-            if ref not in events_text:
-                raise ValueError(f'fact source was not returned in CLI event log: {ref}')
+            seen_parts = set()
+            part_count = None
+            for _, _, parsed in tools:
+                if not isinstance(parsed, dict):
+                    continue
+                for read in parsed.get('reads', []):
+                    if read.get('source_ref') != ref:
+                        continue
+                    if isinstance(read.get('result'), dict) and read['result'].get('facts'):
+                        seen_parts.add(0); part_count = 1
+                    elif 'result_json_fragment' in read:
+                        seen_parts.add(read.get('part_index')); part_count = read.get('part_count')
+            if part_count is None or seen_parts != set(range(part_count)):
+                raise ValueError(f'fact source was not returned by successful CLI tool: {ref}')
             fact_refs.append(ref)
     return sorted(set(fact_refs)), sorted(refs)
 
@@ -480,7 +860,7 @@ def _save_slices(catalog_path: Path, method: str, fact_refs: list[str]) -> None:
     day = catalog_path.parent.parent
     for ref in fact_refs:
         _, code, category = ref.split(':')
-        result = facts(catalog_path, codes=[code], categories=[category])
+        result = facts(catalog_path, codes=[code], categories=[category], max_chars=0)
         _write_json(day / 'inputs' / 'reads' / method / f'{code}-{category}.json', result)
 
 
@@ -504,29 +884,85 @@ def _render_summary(day_dir: Path) -> None:
     (day_dir / 'summary.md').write_text('\n'.join(lines) + '\n', encoding='utf-8')
 
 
+def _qualification(day_dir: Path, method: str) -> dict:
+    """Only explicit V2 acceptance can make a result reusable or countable."""
+    day = _json(day_dir / 'run.json')
+    path = day_dir / method / 'qualification.json'
+    stored = _json(path) if path.exists() else {}
+    reasons = list(stored.get('reasons') or [])
+    result_path = day_dir / method / 'result.json'
+    if stored.get('qualified') is not True or stored.get('paired_acceptance') != 'qualified':
+        reasons.append('qualification_not_explicitly_accepted')
+    if day.get('input_contract_version') != 'selection-parallel-input-v2':
+        reasons.append('legacy_input_contract')
+    if day.get('status', {}).get(method) not in {'complete','complete_zero'}:
+        reasons.append('run_not_complete')
+    if not result_path.exists():
+        reasons.append('result_missing')
+    else:
+        result = _json(result_path)
+        expected_id = f"{day['mode']}:{day.get('replay_id') or day['action_date']}:{method}"
+        if result.get('run_id') != expected_id or result.get('method_id') != method:
+            reasons.append('run_identity_mismatch')
+        metadata = result.get('model_run') or {}
+        if (metadata.get('actual_model'), metadata.get('actual_reasoning')) != (MODEL, EFFORT):
+            reasons.append('actual_model_unverified')
+        if metadata.get('budget_exceeded'):
+            reasons.append('budget_exceeded')
+        summary = result.get('discovery_summary') or {}
+        if not all(isinstance(summary.get(v), dict) and summary[v].get('status') in
+                   {'searched_with_candidates','searched_no_candidate'} for v in ('sector','company','price')):
+            reasons.append('discovery_not_complete')
+        if stored.get('run_id') != expected_id or stored.get('method_id') != method:
+            reasons.append('qualification_identity_mismatch')
+        if stored.get('input_contract_version') != day.get('input_contract_version'):
+            reasons.append('qualification_input_mismatch')
+    return {'qualified': not reasons, 'paired_acceptance': 'qualified' if not reasons else 'not_qualified',
+            'reasons': sorted(set(reasons))}
+
+
+def _check_run_contract(day: dict, cfg: dict) -> None:
+    code_root = Path(cfg['code_root'])
+    actual = {'input_contract_version':'selection-parallel-input-v2',
+              'program_ref':subprocess.run(['git','rev-parse','HEAD'],cwd=code_root,check=True,
+                                           capture_output=True,text=True).stdout.strip(),
+              'common_prompt_sha256':hashlib.sha256((code_root/'ops/selection-parallel-prompt.md').read_bytes()).hexdigest(),
+              'methods':METHODS, 'model':cfg.get('model'), 'reasoning':cfg.get('reasoning'),
+              'no_fallback':cfg.get('no_fallback'), 'limits':cfg.get('limits')}
+    different = [k for k,v in actual.items() if day.get(k) != v]
+    if day.get('program_dirty_at_prepare') is not False or _worktree_dirty(code_root):
+        different.append('program_dirty')
+    if different:
+        raise ValueError(f'frozen run contract changed: {different}; prepare a new replay identity')
+
+
 def run_arm(day_dir: Path, *, method: str) -> dict:
     if method not in METHODS:
         raise ValueError('method must be M0 or M1')
     day = _json(day_dir / 'run.json')
     cfg = _cfg(day_dir.parents[1] / 'experiment.json')
     catalog_path = day_dir / day['source_catalog']
+    _require_research(day_dir.parents[1] / 'experiment.json')
     _check_source_catalog(catalog_path)
     target = day_dir / method / 'result.json'
-    if str(cfg.get('status', '')).startswith('blocked_'):
-        raise ValueError('trial research is blocked pending the documented decision')
     if target.exists():
+        qual = _qualification(day_dir, method)
+        if not qual['qualified']:
+            raise RuntimeError(f'{method} existing result is not qualified: {qual["reasons"]}')
+        _check_run_contract(day, cfg)
         return _json(target)
+    _check_run_contract(day, cfg)
     init_experiment(day_dir.parents[1] / 'experiment.json')
-    attempts = _trial(cfg) / 'work' / day['action_date'] / method
+    attempts = _trial(cfg) / 'work' / day_dir.name / method
     attempt = attempts / f'attempt-{len(list(attempts.glob("attempt-*")))+1:03d}'
     context = Path(cfg['context_root']) / method
-    code, metadata = _invoke_model(context, _prompt(cfg, day, method, catalog_path), attempt)
+    code, metadata = _invoke_model(context, _prompt(cfg, day, method, catalog_path), attempt, config_path=day_dir.parents[1] / 'experiment.json')
     if code == 0 and (metadata.get('actual_model'), metadata.get('actual_reasoning')) != (MODEL, EFFORT):
         day['status'][method] = 'model_identity_mismatch'
         _write_json(day_dir / 'run.json', day)
         raise RuntimeError(f'{method} actual model/effort differs; evidence {attempt}')
     if code != 0:
-        day['status'][method] = 'failed'
+        day['status'][method] = 'budget_exceeded' if metadata.get('budget_exceeded') else 'failed'
         _write_json(day_dir / 'run.json', day)
         raise RuntimeError(f'{method} codex exec failed with exit {code}; evidence {attempt}')
     try:
@@ -534,12 +970,11 @@ def run_arm(day_dir: Path, *, method: str) -> dict:
         fact_refs, refs = _validate_decision(obj, day, method, catalog_path,
                                               (attempt / 'events.jsonl').read_text(encoding='utf-8'))
         _save_slices(catalog_path, method, fact_refs)
-        obj['run_id'] = f'{day["mode"]}:{day["action_date"]}:{method}'
+        obj['run_id'] = f'{day["mode"]}:{day.get("replay_id") or day["action_date"]}:{method}'
         code_root = Path(cfg['code_root'])
         obj['program_ref'] = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=code_root,
                                              check=True, capture_output=True, text=True).stdout.strip()
-        obj['program_dirty'] = bool(subprocess.run(['git', 'status', '--porcelain'], cwd=code_root,
-                                                   check=True, capture_output=True, text=True).stdout.strip())
+        obj['program_dirty'] = _worktree_dirty(code_root)
         obj['model_run'] = metadata
         obj['source_refs_used'] = refs
         obj['saved_at'] = datetime.now(ZONE).isoformat()
@@ -548,11 +983,22 @@ def run_arm(day_dir: Path, *, method: str) -> dict:
         _write_json(target, obj)
         day['status'][method] = 'complete_zero' if not obj['selected'] else 'complete'
         _write_json(day_dir / 'run.json', day)
+        assessment = {'qualified': True, 'paired_acceptance': 'qualified', 'reasons': [],
+                      'input_contract_version': day.get('input_contract_version'),
+                      'run_id': obj['run_id'], 'method_id': method, 'model': MODEL, 'reasoning': EFFORT}
+        _write_json(day_dir / method / 'qualification.json', assessment)
+        assessment = _qualification(day_dir, method)
+        if not assessment['qualified']:
+            day['status'][method] = 'not_qualified'
+            _write_json(day_dir / 'run.json', day)
+            _write_json(day_dir / method / 'qualification.json', assessment)
+            raise RuntimeError(f'{method} result not qualified: {assessment["reasons"]}')
         _render_summary(day_dir)
         return obj
     except Exception:
-        day['status'][method] = 'failed_validation'
-        _write_json(day_dir / 'run.json', day)
+        if day['status'][method] != 'not_qualified':
+            day['status'][method] = 'failed_validation'
+            _write_json(day_dir / 'run.json', day)
         raise
 
 
@@ -593,13 +1039,49 @@ def _selected_records(root: Path, *, include_smoke: bool = True) -> list[dict]:
             d = _json(day)
             for method in METHODS:
                 file = day.parent / method / 'result.json'
-                if not file.exists():
+                if not file.exists() or not _qualification(day.parent, method)['qualified']:
                     continue
                 obj = _json(file)
                 for row in obj['selected']:
                     selections.append({**{k: obj[k] for k in ('run_id','method_id','formation_date','action_date','as_of')},
                                        'mode': d['mode'], **row})
     return selections
+
+
+def _candidate_records(root: Path, *, include_smoke: bool = False) -> list[dict]:
+    diagnostic = []
+    parents = [root / 'daily'] + ([root / 'smoke'] if include_smoke else [])
+    for parent in parents:
+        for file in sorted(parent.glob('*/run.json')):
+            day_dir = file.parent
+            day = _json(file)
+            for method in METHODS:
+                if not _qualification(day_dir, method)['qualified']:
+                    continue
+                result = _json(day_dir / method / 'result.json')
+                selected = {x['ts_code'] for x in result['selected']}
+                for candidate in result['candidates']:
+                    if candidate['ts_code'] in selected or candidate.get('final_fate') not in {'rejected','unresolved'}:
+                        continue
+                    diagnostic.append({**{k: result[k] for k in ('run_id','method_id','formation_date','action_date','as_of')},
+                                       'mode':day['mode'], 'ts_code':candidate['ts_code'],
+                                       'role':candidate['final_fate'], 'rank':None,
+                                       'participation_condition':None,
+                                       'candidate_reason':candidate.get('short_reason'),
+                                       'source_refs':candidate.get('source_refs', [])})
+    return diagnostic
+
+
+def _day_state(day_dir: Path) -> dict:
+    day = _json(day_dir / 'run.json')
+    return {**day, 'qualification': {m: _qualification(day_dir, m)['qualified'] for m in METHODS}}
+
+
+def _outcome_source_versions(warehouse: ResearchWarehouse, first: str, through: str) -> list[dict]:
+    dates = set(_calendar(warehouse.root, first, through))
+    return [r for r in _source_versions(warehouse) if
+            (r['dataset'] in {'equity_daily','adj_factor','index_daily'} and r['partition'] in dates) or
+            r['dataset'] == 'trade_calendar']
 
 
 def update_outcomes(config_path: Path, *, through: str) -> Path:
@@ -609,12 +1091,16 @@ def update_outcomes(config_path: Path, *, through: str) -> Path:
     from stock_analyzer.analysis.selection_parallel_outcomes import calculate, auxiliary_views, summarize
     root = _trial(cfg)
     warehouse = Path(cfg['warehouse_root'])
-    before = _source_versions(ResearchWarehouse(warehouse, read_only=True))
-    rows, summary = calculate(warehouse, _selected_records(root), through)
-    after = _source_versions(ResearchWarehouse(warehouse, read_only=True))
+    selections = _selected_records(root)
+    candidates = _candidate_records(root)
+    first = min((r['action_date'] for r in selections+candidates), default=through)
+    before = _outcome_source_versions(ResearchWarehouse(warehouse, read_only=True), first, through)
+    rows, summary = calculate(warehouse, selections, through)
+    candidate_rows, _ = calculate(warehouse, candidates, through)
+    after = _outcome_source_versions(ResearchWarehouse(warehouse, read_only=True), first, through)
     if before != after:
         raise ValueError('outcome price source changed during computation')
-    days = [_json(file) for file in sorted((root/'daily').glob('*/run.json'))]
+    days = [_day_state(file.parent) for file in sorted((root/'daily').glob('*/run.json'))]
     stats = summarize(rows, days)
     calendar = _calendar(warehouse, min((r['action_date'] for r in rows), default=through), through)
     first_only, nonoverlap = auxiliary_views([r for r in rows if r.get('mode')=='prospective'], calendar)
@@ -625,9 +1111,9 @@ def update_outcomes(config_path: Path, *, through: str) -> Path:
         if not existing.exists() or existing.read_text(encoding='utf-8') == content:
             continue
         with existing.open(encoding='utf-8', newline='') as f:
-            old = {(r['method_id'], r['action_date'], r['ts_code']): r for r in csv.DictReader(f)}
+            old = {(r['run_id'], r['ts_code']): r for r in csv.DictReader(f)}
         with __import__('io').StringIO(content) as f:
-            new = {(r['method_id'], r['action_date'], r['ts_code']): r for r in csv.DictReader(f)}
+            new = {(r['run_id'], r['ts_code']): r for r in csv.DictReader(f)}
         for key, previous in old.items():
             present = new.get(key)
             if present is None:
@@ -646,7 +1132,8 @@ def update_outcomes(config_path: Path, *, through: str) -> Path:
                   'horizons': [5, 10, 20], 'close_hit_target': 0.20,
                   'missing_path': 'endpoint and full path are separate',
                   'summary': summary, 'source_versions': before}
-    extras = {'first-only.csv': _csv_text(first_only), 'nonoverlap.csv': _csv_text(nonoverlap),
+    extras = {'candidate-outcomes.csv': _csv_text(candidate_rows),
+              'first-only.csv': _csv_text(first_only), 'nonoverlap.csv': _csv_text(nonoverlap),
               'summary.json': json.dumps(stats, ensure_ascii=False, indent=2, default=str) + '\n',
               'definition.json': json.dumps(definition, ensure_ascii=False, indent=2, default=str) + '\n'}
     path = _revisions(parent, 'outcomes.csv', content, extras=extras)
@@ -671,30 +1158,45 @@ def prepare_batch(config_path: Path, *, batch_number: int, through: str) -> Path
         _write_json(scope_path, expected)
     outcomes = update_outcomes(config_path, through=through)
     with (outcomes / 'outcomes.csv').open(encoding='utf-8', newline='') as f:
-        outcome_rows = {(r['method_id'], r['action_date'], r['ts_code']): r for r in csv.DictReader(f) if r.get('mode') == 'prospective'}
+        outcome_rows = {(r['run_id'], r['ts_code']): r for r in csv.DictReader(f) if r.get('mode') == 'prospective'}
+    with (outcomes / 'candidate-outcomes.csv').open(encoding='utf-8', newline='') as f:
+        candidate_rows = {(r['run_id'], r['ts_code']): r for r in csv.DictReader(f) if r.get('mode') == 'prospective'}
     rows = []
     for action in scope:
         day = root / 'daily' / action
         run = _json(day / 'run.json') if (day / 'run.json').exists() else None
         for method in METHODS:
             result_path = day / method / 'result.json'
+            qualification = _qualification(day, method) if run else {'qualified':False,'reasons':['not_run']}
+            qualified = qualification['qualified']
             status = run['status'][method] if run else 'not_run'
-            if not result_path.exists():
+            if status.startswith('complete') and not qualified:
+                status = 'not_qualified'
+            if not result_path.exists() or not qualified:
                 rows.append({'action_date': action, 'method_id': method, 'status': status,
+                             'qualification_reasons': qualification['reasons'] if status != 'not_run' else [],
+                             'run_dir': str(day), 'result_path': '', 'catalog_path': str(day/'inputs/catalog.json') if run else '',
                              'ts_code': '', 'selected': '', 'candidate_reason': '', 'outcome_status': ''})
                 continue
             result = _json(result_path)
             if not result['selected']:
                 rows.append({'action_date': action, 'method_id': method, 'status': status,
+                             'qualification_reasons': [], 'run_dir': str(day),
+                             'result_path': str(result_path), 'catalog_path': str(day/'inputs/catalog.json'),
                              'ts_code': '', 'selected': 'false', 'candidate_reason': result.get('no_selection_reason',''),
                              'outcome_status': 'no_selection'})
             chosen = {s['ts_code'] for s in result['selected']}
             for candidate in result['candidates']:
                 code = candidate['ts_code']
-                outcome = outcome_rows.get((method, action, code), {})
+                outcome = (outcome_rows if code in chosen else candidate_rows).get((result['run_id'], code), {})
+                selected_detail = next((s for s in result['selected'] if s['ts_code']==code), {})
                 rows.append({'action_date': action, 'method_id': method, 'status': status,
+                             'qualification_reasons': [], 'run_dir': str(day),
+                             'primary_reason': selected_detail.get('primary_reason',''),
                              'ts_code': code, 'selected': str(code in chosen).lower(),
-                             'candidate_fate': candidate.get('final_fate'),
+                             'candidate_fate': candidate.get('final_fate'), 'run_id': result.get('run_id'),
+                             'result_path': str(result_path), 'catalog_path': str(day/'inputs/catalog.json'),
+                             'outcome_path': str(outcomes / ('outcomes.csv' if code in chosen else 'candidate-outcomes.csv')),
                              'candidate_reason': candidate.get('short_reason'),
                              'source_refs': candidate.get('source_refs'),
                              'd5_status': outcome.get('d5_status'), 'd5_return': outcome.get('d5_endpoint_return'),
@@ -714,17 +1216,18 @@ def prepare_batch(config_path: Path, *, batch_number: int, through: str) -> Path
                 value = row.get(f'd{n}_hit_20pct_close')
                 row[f'd{n}_hit_20pct_close'] = None if value in ('',None) else value == 'True'
             relevant.append(row)
-    day_states = [_json(root/'daily'/x/'run.json') if (root/'daily'/x/'run.json').exists() else
-                  {'mode':'prospective','action_date':x,'status':{'M0':'not_run','M1':'not_run'}} for x in scope]
-    flat_states = [{'mode':'prospective','action_date':d['action_date'],**d['status']} for d in day_states]
-    metrics = summarize(relevant, flat_states)
+    day_states = [_day_state(root/'daily'/x) if (root/'daily'/x/'run.json').exists() else
+                  {'mode':'prospective','action_date':x,'status':{'M0':'not_run','M1':'not_run'},
+                   'qualification':{'M0':False,'M1':False}} for x in scope]
+    metrics = summarize(relevant, day_states)
     readiness = {'batch': batch_number, 'through': through,
                  'research_status': 'materials_ready_ai_review_not_run',
                  'planned_days': 10,
-                 'M0_complete': sum((root/'daily'/x/'M0/result.json').exists() for x in scope),
-                 'M1_complete': sum((root/'daily'/x/'M1/result.json').exists() for x in scope),
-                 'paired_days': sum(all((root/'daily'/x/m/'result.json').exists() for m in METHODS) for x in scope),
-                 'outcomes_revision': str(outcomes.relative_to(root))}
+                 'M0_complete': metrics['methods']['M0']['completed_days'],
+                 'M1_complete': metrics['methods']['M1']['completed_days'],
+                 'paired_days': metrics['paired_days'],
+                 'outcomes_revision': str(outcomes.relative_to(root)),
+                 'candidate_outcomes': str((outcomes / 'candidate-outcomes.csv').relative_to(root))}
     extras = {'metrics.json': json.dumps(metrics, ensure_ascii=False, indent=2, default=str) + '\n',
               'readiness.json': json.dumps(readiness, ensure_ascii=False, indent=2, default=str) + '\n'}
     revision = _revisions(parent / through, 'comparison.csv', content, extras=extras)
@@ -734,20 +1237,39 @@ def prepare_batch(config_path: Path, *, batch_number: int, through: str) -> Path
 def review_batch(batch_dir: Path) -> Path:
     root = batch_dir.parents[3] if batch_dir.name.startswith('r') else batch_dir.parents[2]
     cfg = _cfg(root / 'experiment.json')
+    _require_research(root / 'experiment.json')
     report = batch_dir / 'report.md'
     if report.exists():
         return report
     review_context = Path(cfg['context_root']) / 'batch-review'
     review_context.mkdir(parents=True, exist_ok=True)
     (review_context / 'AGENTS.md').write_text('只读研究本批冻结对照和先前理由；只提出建议，不改方法或生产。\n', encoding='utf-8')
-    prompt = ('请读本批 scope.json、comparison.csv、readiness.json、相关 daily/*/summary.md '
-              '和 outcomes 文件。只研究已发生资料，分开未成熟与失败。选4—6个值得深入的案例，'
-              '覆盖有利、失利、错过、相同及资料问题（无类不凑数）。'
-              '一页结论后附案例，逐项说明原理由、数值、近邻、代价与能推翻建议的反例。'
-              f'批次目录：{batch_dir}。只输出报告 Markdown，不写文件。')
+    scope_path = batch_dir.parents[1] / 'scope.json'
+    scope = _json(scope_path)
+    readiness_path = batch_dir / 'readiness.json'
+    readiness = _json(readiness_path)
+    outcomes_dir = root / readiness['outcomes_revision']
+    original_paths = []
+    for action in scope['action_dates']:
+        day_dir = root / 'daily' / action
+        for method in METHODS:
+            result_path = day_dir / method / 'result.json'
+            if result_path.exists():
+                original_paths.append(str(result_path))
+        catalog = day_dir / 'inputs/catalog.json'
+        if catalog.exists():
+            original_paths.append(str(catalog))
+    prompt = ('只读研究本批固定十日和指定评价截止。请依次读取以下精确文件，不扫描其他批次或更晚结果：\n'
+              + '\n'.join([str(scope_path), str(batch_dir / 'comparison.csv'),
+                           str(batch_dir / 'metrics.json'), str(readiness_path),
+                           str(outcomes_dir / 'outcomes.csv'),
+                           str(outcomes_dir / 'candidate-outcomes.csv')] +
+                           original_paths) + '\n'
+              '只输出一份简短 Markdown 报告。分开未成熟与失败；选择 4—6 个重点问题，不足不凑数，'
+              '包括不利或无差异证据、原决定、近邻、价格代价和反证。不改方法或正式资料。')
     attempts = root / 'work' / 'batch-review' / batch_dir.parent.parent.name / batch_dir.parent.name
     attempt = attempts / f'attempt-{len(list(attempts.glob("attempt-*")))+1:03d}'
-    code, metadata = _invoke_model(review_context, prompt, attempt)
+    code, metadata = _invoke_model(review_context, prompt, attempt, config_path=root / 'experiment.json')
     if code != 0:
         raise RuntimeError(f'batch review codex exec failed with exit {code}; evidence {attempt}')
     if (metadata.get('actual_model'), metadata.get('actual_reasoning')) != (MODEL, EFFORT):
@@ -767,10 +1289,16 @@ def experiment_status(config_path: Path) -> dict:
     for parent in (root/'daily', root/'smoke'):
         for file in sorted(parent.glob('*/run.json')):
             day = _json(file)
-            rows.append({'mode': day['mode'], 'action_date': day['action_date'], **day['status']})
+            rows.append({'mode': day['mode'], 'action_date': day['action_date'],
+                         'replay_id': day.get('replay_id'), 'run_dir': str(file.parent),
+                         'qualification': {m:_qualification(file.parent,m) for m in METHODS},
+                         **day['status']})
     batches = [str(p.relative_to(root)) for p in root.glob('batches/batch-*/????-??-??/r???/comparison.csv')]
     reviews = [str(p.relative_to(root)) for p in root.glob('batches/batch-*/????-??-??/r???/report.md')]
-    return {'experiment': EXPERIMENT, 'status': cfg.get('status'), 'plan_start': cfg.get('start_action_date'),
+    return {'experiment': EXPERIMENT, 'status': cfg.get('status'),
+            'research_model': cfg.get('model'), 'research_reasoning': cfg.get('reasoning'),
+            'research_enabled': cfg.get('research_enabled', False),
+            'limits': cfg.get('limits'), 'plan_start': cfg.get('start_action_date'),
             'planned_action_days': len(cfg.get('action_dates') or []), 'days': rows,
             'batch_materials': batches, 'batch_ai_reports': reviews,
             'latest_outcomes': max((str(p.relative_to(root)) for p in root.glob('outcomes/*/r???/outcomes.csv')), default=None),

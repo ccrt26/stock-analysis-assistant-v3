@@ -17,6 +17,6 @@
 | `local_archive/publish/`、`logs/` | 展示回退、运行日志 | WEB 回退与故障定位 | 用途未核清前保留 |
 | `local_warehouse/.staging/`、`.backfill_staging/` | 可能的中断恢复暂存 | 仓库恢复路径 | 未核清引用与恢复依赖前保留 |
 
-试验 `daily/<参与日>/inputs/` 保存当时共同中性观察、完整证券范围、原分区版本和实际读取的关键小切片；`M0/`、`M1/` 各自保存原始短输出和采用结果；`outcomes/<评价截止>/rNNN/` 由程序计算并附分母及重复股辅助视图；`batches/batch-NNN/<评价截止>/rNNN/` 包含十日全量材料，人工运行后才有 `report.md`。`smoke/` 是回放链路验收，不计入前瞻十日批次。模型工作上下文在仓库之外，可由冻结方法包重建，不是第二份权威归档。
+试验 `smoke/<replay-id>/inputs/` 与 `daily/<参与日>/inputs/` 保存同版四类中性派生、`company_discovery.parquet` 全市场公司线索索引、`field-map.json`、完整合格证券范围、相关事实分区/派生版本与实际读取小切片。`smoke/2026-09-24/` 的旧 Sol M0 原始输出和不合格资格原样保留，不与新身份配对。`M0/`、`M1/` 各自保存短决定、原始输出与 `qualification.json`。`outcomes/<评价截止>/rNNN/` 有合格入选结果 `outcomes.csv` 和独立落选/未决候选 `candidate-outcomes.csv`；`batches/batch-NNN/<评价截止>/rNNN/` 是十日固定范围材料，人工批次研究后才有 `report.md`。回放不混入前瞻绩效；模型上下文在仓库外可重建，不是第二份权威归档。`maintenance/repair-handoff-v2.md` 和小证据包为本轮私有交接，不推 GitHub。试验研究当前关闭，未自动启用、未生产采用。
 
 私有 `maintenance/inventory.csv` 按实际文件列大小、类别和已知产消关系；`cleanup-proposal.csv` 只列重建和引用均核实的精确候选。本版未验证任何真实文件可安全清理，因此建议列表为空，**没有执行删除**。未知项、修复备份、正式记录和原证据继续保留。程序不提供删除参数。

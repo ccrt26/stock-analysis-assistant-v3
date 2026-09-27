@@ -1,37 +1,38 @@
-# M0/M1 轻量对照：手工试验说明
+# M0/M1 轻量对照：程序与手工研究边界
 
-**状态：**命令是本分支新增的手工试验接口；合成定向测试已通过，真实 M0/M1 配对验收在首边停止，第二边未运行。当前私有配置标为 `blocked_smoke_pending_method_input_decision`，研究命令拒绝继续。未启用定时试验，未采用为正式选股方法。正式 `tools/stock_ai.py`、正式归档与 WEB 不读取本试验结果。源码不携带本机事实、模型输出或路径。
+**当前状态：**程序修复与无模型输入预检阶段；`research_enabled=false`。旧 2026-09-24 Sol/xhigh M0 保留为不合格诊断，M1 未运行。本轮 `live_pair_verified=false`。未自动启用、未生产采用；正式 nightly、推荐、复盘、公司介绍和 WEB 不读本试验。
 
-## 身份与输入
+## 固定身份
 
-共用程序从 `d3985297ba17aa1f62496c259924f9aeb24c3814` 起开发；M0 冻结于 `a1fcef2f1c6e3a99b47d4a5186fec91179f8e64c`，M1 冻结于 `c84238a686cc0809172ecd2e28e8cbf7880fc398`。H 是正式历史，只读参考，不能充当同模型 M0。两个方法各有一个仓库外上下文和方法包；各用 `codex exec --model gpt-6-sol -c 'model_reasoning_effort="xhigh"' --sandbox read-only`，每边一次新会话，无替补。五个 Skill 在会话内履行不同研究职责。
+共用原程序基线 `d3985297ba17aa1f62496c259924f9aeb24c3814`；M0 方法 `a1fcef2f1c6e3a99b47d4a5186fec91179f8e64c`；M1 V3 候选方法 `c84238a686cc0809172ecd2e28e8cbf7880fc398`。两套冻结 Skill 与方法包保持原样。未来每边一个独立 Codex 研究上下文，运行时强制 `gpt-6-astra` / `xhigh`、不回退；本轮 Sol 只承担程序开发。模型是否实际按请求运行，未来须从该次 CLI rollout 的 turn_context 核实，配置与提示词不等于运行证据。
 
-`init` 验证并冻结方法文件；`prepare` 根据带时区的 `as_of` 找最后形成交易日和下一参与交易日，保存完整中性派生、可选范围、事实分区版本与派生来源。`facts` 只读同一 catalog；模型可以分别发现候选，实际读取小切片由宿主复核并存回本日 `inputs/reads/`。来源版本变化会停止配对。当前 `replay_smoke` 与前瞻 `daily/` 分开放；首次前瞻准备才冻结30个预定参与日，连续每10日一批。
+## 输入与短决定
 
-## 命令与恢复
+`prepare` 按带时区 `as_of` 找最后交易形成日和下一参与日，冻结四类原派生、完整合格证券范围、公司全市场时点索引、一次性字段图和相关来源分区版本。`company_discovery.parquet` 按当时可见的公告、四类财务及公司资料存原值；`discover --view company` 可分页查询，不用价格候选代码。标题不是正文；覆盖摘要是本地可检索情况，不声称全市场公告完整。`facts` 可一次传多个 `--code`、`--category`，默认精简输出并用 `next_offset` 续页。公司事实读完整截止，周末可配周五已冻结价格派生；相关分区覆盖或文件哈希改变则拒绝继续。
 
-以下均从本分支工作树运行，并让 `PYTHONPATH` 包含本工作树的 `src` 与根目录。`CFG` 是本机私有 `LOCAL_ARCHIVE_DIR/selection_trials/confirmation-cost-v3/experiment.json`，其中显式写实际源码、仓、归档、上下文和 Python 路径。公开仓不提供个人路径配置；文件须先按本机路径建立。`init` 会检查配置中固定提交、模型、推理强度及隔离目录。
+未来真实短决定需含 sector/company/price 的 `discovery_summary`，把已查有候选、已查无合适候选、未执行或资料不足区分。每只实际候选保留原去留和必要证据；若 M1 用保持解释，可加观察参照、来源和后续已完成交易的 `confirmation_reference`。合格资格写在各边 `qualification.json`；旧无 V2 资格或旧 Sol 身份不能因有 `result.json` 而升格。预算失败非零退出、保留日志、不转写为空名单。
+
+## 本轮可运行命令
+
+从本分支工作树运行，设置 `PYTHONPATH="$PWD/src:$PWD"`。`CFG` 是本机私有 `LOCAL_ARCHIVE_DIR/selection_trials/confirmation-cost-v3/experiment.json`；`CATALOG` 取准备命令返回目录中的 `inputs/catalog.json`。
 
 ```bash
-python tools/selection_parallel.py init --config "$CFG"
-python tools/selection_parallel.py prepare --config "$CFG" --as-of '2026-09-23T18:30:00+08:00' --mode replay_smoke
-python tools/selection_parallel.py facts --catalog "$CATALOG" --code 000001.SZ --category price
-python tools/selection_parallel.py select --config "$CFG" --action-date 2026-09-24 --method M0
-python tools/selection_parallel.py select --config "$CFG" --action-date 2026-09-24 --method M1
-python tools/selection_parallel.py outcomes --config "$CFG" --through 2026-09-24
 python tools/selection_parallel.py status --config "$CFG"
-python tools/selection_parallel.py daily --config "$CFG" --date auto
+python tools/selection_parallel.py prepare --config "$CFG" --as-of '2026-09-23T18:30:00+08:00' --mode replay_smoke --replay-id 2026-09-24-input-v2
+python tools/selection_parallel.py discover --catalog "$CATALOG" --view company --limit 50 --offset 0
+python tools/selection_parallel.py facts --catalog "$CATALOG" --code 000001.SZ --code 000002.SZ --category company --category price --offset 0
+python tools/selection_parallel.py outcomes --config "$CFG" --through YYYY-MM-DD
 python tools/selection_parallel.py batch --config "$CFG" --number 1 --through YYYY-MM-DD
-python tools/selection_parallel.py review-batch --config "$CFG" --number 1 --through YYYY-MM-DD
-python tools/selection_data_inventory.py --source-root "$SOURCE_ROOT" --output-dir "$MAINTENANCE_DIR"
 ```
 
-上面的历史日期只示范 `replay_smoke` 接口，不应每天重跑；当前阻断状态下 `prepare`、`select` 与 `daily` 会拒绝新研究，只有 `status`、独立结果计算和盘点等无需新研究的命令可用。日常人工命令是 `daily --date auto`；上海时间18:30前只报告尚未到截止，明日不开市只更新既有结果。若已冻结一边，重复 `select` 直接复用；中断后对未完成的方法调用相同 `select`，不得换截止或来源。真实来源版本已变时停下并按试验 `maintenance/questions-for-chatgpt.md` 交回。`outcomes` 可独立调用，不依赖当晚有新研究。`review-batch` 仅在用户明确调用时启动一次集中研究，不自动改方法。
+`prepare`、`discover`、`facts`、`outcomes`、`batch`、`status` 不调用模型。`batch` 需要预定十日范围与到达的评价截止，未冻结日历时会拒绝。`select`、`daily`、`review-batch` 是未来研究入口，在当前开关下启动前拒绝；不运行探针。新 replay-id 使用 `smoke/<replay-id>/` 单层目录，`run.json` 另记真实参与日。相同交易日多身份时 `select` 必须显式 `--replay-id`。共同输入、代码提交、Prompt、方法、模型或预算改变时新建配对身份；只在条件完全未变且用户已批准后续未完成一边。
 
-## 指标和状态
+## 限额与结果
 
-参与日开盘为标准参考入口，复权收盘到第5/10/20个原日历交易日的回报由原 `export_skill_optimization_dataset.py` 计算。第20日约20%收盘触达沿用原口径。端点值与全路径完整性分列；缺中间日不补零、不顺延。最低点相对入口的跌幅与最大收盘回撤分别列；沪深300用同入口开盘和对应收盘。参与条件是否真实可执行没有成交和盘中顺序时标未知；参考价格路径不等于实际成交或净收益。空名单、未跑、失败、条件事件、未成熟和缺路径各自保留。
+私有配置初始每边 `max_tool_commands=24`、`max_wall_seconds=900`、`max_input_tokens=750000`、`max_output_tokens=20000`。工具数与时长由本次独立子进程组的流式执行器观察和停止；安装版 CLI 在历史事件中仅 `turn.completed` 报 token，因此输入/输出 token 当前只能事后验收，缓存输入包含在总输入，推理输出包含在输出，不重复相加。这不是账户周额度或账单保证。达到可观察限额标 `budget_exceeded`，不自动补跑。批次研究未来同样受显式限额。
 
-批次范围按预定日历，不按入选股票数或好坏重排。`outcomes.csv` 配有 `summary.json`、同股首条和不重叠窗口辅助 CSV；`comparison.csv` 保留全部候选及零入选/失败日，`metrics.json` 分列完成、配对、空名单与第5/10/20日各自分母、中位数、相对基准及路径指标。辅助视图不声称统计独立。`report.md` 只有人工触发批次研究后才存在。第一版停止收新样本于第30个预定参与日，既有样本的20日结果仍可继续更新。旧正式 WEB 的五日方法复盘属于 `skill_optimization`，与这里的十日批次分开。
+入选结果沿原程序的行动日开盘×复权因子参考入口及第5/10/20日/20%收盘触达口径；落选与未决近邻单列 `candidate-outcomes.csv`，不计入推荐绩效分母。`summary.json` 只计显式合格前瞻决定，配对须双方同日合格；回放与诊断另列。端点与完整路径分开，未成熟不算失败，参考价格路径不等于成交或净收益。`comparison.csv`、`metrics.json`、`readiness.json` 按固定十日和指定评价截止版本化，原结果及 catalog 精确定位；`report.md` 只有未来人工批次研究成功后才会出现。
 
-详见 [数据地图](data-map.md) 和根 README 的正式/试验流程图。
+未来要真实配对，先由用户审查本轮回执并另行启动 Astra/xhigh 会话。按最终提交创建新 replay-id，核对同版输入和预算，才可有序运行 M0、M1；不能把旧 Sol M0 接到新 M1。一次配对仍不足以声称方法更准或生产采用。
+
+见[数据地图](data-map.md)和根 README 总体图。

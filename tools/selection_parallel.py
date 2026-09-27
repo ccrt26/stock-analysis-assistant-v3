@@ -20,9 +20,11 @@ def parser() -> argparse.ArgumentParser:
         if name == 'prepare':
             s.add_argument('--as-of', required=True)
             s.add_argument('--mode', choices=('prospective','replay_smoke'), required=True)
+            s.add_argument('--replay-id')
         if name == 'select':
             s.add_argument('--action-date', required=True)
             s.add_argument('--method', choices=('M0','M1'), required=True)
+            s.add_argument('--replay-id')
         if name in ('outcomes','batch','review-batch'):
             s.add_argument('--through', required=True)
         if name in ('batch','review-batch'):
@@ -33,30 +35,41 @@ def parser() -> argparse.ArgumentParser:
     f.add_argument('--catalog', type=Path, required=True)
     f.add_argument('--code', action='append', required=True)
     f.add_argument('--category', action='append', choices=trial.CATEGORIES)
+    f.add_argument('--offset', type=int, default=0)
+    d = sub.add_parser('discover', help='page frozen company discovery facts')
+    d.add_argument('--catalog', type=Path, required=True)
+    d.add_argument('--view', choices=('company',), required=True)
+    d.add_argument('--limit', type=int, default=50)
+    d.add_argument('--offset', type=int, default=0)
     return p
 
 
 def main(argv: list[str] | None = None) -> int:
     a = parser().parse_args(argv)
-    if a.command == 'facts':
-        output = trial.facts(a.catalog, codes=a.code, categories=a.category)
+    if a.command == 'discover':
+        output = trial.discover_company(a.catalog, limit=a.limit, offset=a.offset)
+    elif a.command == 'facts':
+        output = trial.facts(a.catalog, codes=a.code, categories=a.category, offset=a.offset)
     elif a.command == 'init':
         output = trial.init_experiment(a.config)
     elif a.command == 'prepare':
-        output = {'day_dir': str(trial.prepare_day(a.config, as_of=a.as_of, mode=a.mode))}
+        output = {'day_dir': str(trial.prepare_day(a.config, as_of=a.as_of, mode=a.mode, replay_id=a.replay_id))}
     elif a.command == 'select':
+        trial._require_research(a.config)
         cfg = trial._cfg(a.config)
         root = trial._trial(cfg)
-        candidates = [p for p in (root/'daily'/a.action_date, root/'smoke'/a.action_date)
-                      if (p/'run.json').exists()]
+        candidates = [p.parent for p in list((root/'daily').glob('*/run.json')) + list((root/'smoke').glob('*/run.json'))
+                      if trial._json(p)['action_date'] == a.action_date and
+                      (a.replay_id is None or p.parent.name == a.replay_id)]
         if len(candidates) != 1:
-            raise ValueError('expected exactly one prepared trial day for action date')
+            raise ValueError('expected exactly one prepared trial day; specify --replay-id for same-day replays')
         output = trial.run_arm(candidates[0], method=a.method)
     elif a.command == 'outcomes':
         output = {'outcome_dir': str(trial.update_outcomes(a.config, through=a.through))}
     elif a.command == 'batch':
         output = {'batch_dir': str(trial.prepare_batch(a.config, batch_number=a.number, through=a.through))}
     elif a.command == 'review-batch':
+        trial._require_research(a.config)
         batch = trial.prepare_batch(a.config, batch_number=a.number, through=a.through)
         output = {'report': str(trial.review_batch(batch))}
     elif a.command == 'status':
@@ -64,8 +77,7 @@ def main(argv: list[str] | None = None) -> int:
     else:
         if a.date != 'auto':
             raise ValueError('daily only accepts --date auto; explicit history uses prepare --mode replay_smoke')
-        if str(trial._cfg(a.config).get('status', '')).startswith('blocked_'):
-            raise ValueError('trial research is blocked pending the documented decision')
+        trial._require_research(a.config)
         now = datetime.now(ZoneInfo('Asia/Shanghai'))
         if now.time() < time(18, 30):
             output = {'status': 'before_18_30_cutoff', 'today': now.date().isoformat()}

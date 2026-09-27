@@ -83,7 +83,7 @@ def test_summary_has_horizon_denominators_and_same_stock_invariant():
             'd5_endpoint_return':0.1,'d5_path_complete':True,'d5_relative_market_return':0.03,
             'd5_hit_20pct_close':False,'d5_mae':-0.04,'d5_max_close_drawdown':-0.02}
     rows=[{**common,'method_id':'M0'},{**common,'method_id':'M1'}]
-    days=[{'mode':'prospective','M0':'complete','M1':'complete'}]
+    days=[{'mode':'prospective','action_date':'2026-09-01','status':{'M0':'complete','M1':'complete'},'qualification':{'M0':True,'M1':True}}]
     stats=outcomes.summarize(rows,days)
     assert stats['paired_days']==1
     assert stats['methods']['M0']['horizons']['d5']['endpoint_denominator']==1
@@ -100,3 +100,52 @@ def test_repeated_stock_auxiliary_views_are_descriptive():
     first,nonoverlap=outcomes.auxiliary_views(rows,dates)
     assert len(first)==1
     assert [r['action_date'] for r in nonoverlap]==['2026-09-01','2026-09-22']
+
+
+def test_completed_and_paired_counts_use_same_state_shape():
+    days=[{'mode':'prospective','action_date':'2026-09-01',
+           'status':{'M0':'complete_zero','M1':'complete'},'qualification':{'M0':True,'M1':True}},
+          {'mode':'prospective','action_date':'2026-09-02',
+           'status':{'M0':'complete','M1':'not_run'},'qualification':{'M0':False,'M1':False}},
+          {'mode':'prospective','action_date':'2026-09-03',
+           'status':{'M0':'budget_exceeded','M1':'not_run'},'qualification':{'M0':False,'M1':False}}]
+    stats=outcomes.summarize([],days)
+    assert stats['paired_days']==1
+    assert stats['methods']['M0']['completed_days']==1
+    assert stats['methods']['M0']['zero_selection_days']==1
+    assert stats['methods']['M0']['failed_days']==2
+    assert stats['methods']['M1']['not_run_days']==2
+
+
+def test_candidate_diagnostics_do_not_change_selection_denominator(tmp_path, monkeypatch):
+    from stock_analyzer.ops import selection_parallel as trial
+    root=tmp_path/'trial';day=root/'daily/2026-09-01';(day/'M0').mkdir(parents=True)
+    trial._write_json(day/'run.json',{'mode':'prospective','action_date':'2026-09-01',
+        'formation_date':'2026-08-31','as_of':'2026-08-31T18:30:00+08:00',
+        'status':{'M0':'complete','M1':'not_run'},'input_contract_version':'selection-parallel-input-v2'})
+    trial._write_json(day/'M0/result.json',{'run_id':'prospective:2026-09-01:M0','method_id':'M0',
+        'formation_date':'2026-08-31','action_date':'2026-09-01','as_of':'2026-08-31T18:30:00+08:00',
+        'candidates':[{'ts_code':'000001.SZ','final_fate':'selected','short_reason':'入选'},
+                      {'ts_code':'000002.SZ','final_fate':'rejected','short_reason':'近邻未选'}],
+        'selected':[{'ts_code':'000001.SZ','rank':1,'participation_condition':'观察'}],
+        'model_run':{'actual_model':'gpt-6-astra','actual_reasoning':'xhigh'},
+        'discovery_summary':{v:{'status':'searched_no_candidate','codes':[]} for v in ('sector','company','price')}})
+    trial._write_json(day/'M0/qualification.json',{'qualified':True,'paired_acceptance':'qualified','reasons':[],
+        'run_id':'prospective:2026-09-01:M0','method_id':'M0',
+        'input_contract_version':'selection-parallel-input-v2'})
+    candidates=trial._candidate_records(root)
+    assert len(candidates)==1 and candidates[0]['ts_code']=='000002.SZ'
+    assert candidates[0]['role']=='rejected' and candidates[0]['rank'] is None
+    selected=trial._selected_records(root,include_smoke=False)
+    assert len(selected)==1 and selected[0]['ts_code']=='000001.SZ'
+    monkeypatch.setattr(original,'load_trading_dates',lambda *a:['2026-09-01']*5)
+    monkeypatch.setattr(original,'load_benchmark_daily',lambda *a:{})
+    monkeypatch.setattr(original,'build_daily_price_volume_records',lambda root,subjects,*a:
+        [{**r,'event_key':subject['event_key']} for subject in subjects for r in _rows(5)])
+    monkeypatch.setattr(original,'enrich_selections_with_outcomes',lambda *a,**k:None)
+    selected_rows,_=outcomes.calculate(tmp_path,selected,'2026-09-05')
+    candidate_rows,_=outcomes.calculate(tmp_path,candidates,'2026-09-05')
+    assert len(candidate_rows)==1 and candidate_rows[0]['d5_endpoint_return']==selected_rows[0]['d5_endpoint_return']
+    stats=outcomes.summarize(selected_rows,[{**trial._json(day/'run.json'),
+                                             'qualification':{'M0':True,'M1':False}}])
+    assert stats['methods']['M0']['recommendation_events']==1

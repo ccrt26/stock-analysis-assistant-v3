@@ -120,7 +120,8 @@ def build_context(root: Path, trace: dict, *, extra_codes: list[str] = (), cited
 
 def candidate_context(root: Path, codes: list[str], *, formation_date: str, as_of: str,
                       categories=("financial", "company", "price", "industry"), periods=(),
-                      sector_dates=()) -> dict:
+                      sector_dates=(), warehouse_root: Path | None = None,
+                      derived_inputs: dict[str, pd.DataFrame] | None = None) -> dict:
     """On-demand facts before any selection judgment or draft exists."""
     unknown = set(categories) - set(FACT_CATEGORIES)
     if unknown or not codes:
@@ -128,7 +129,8 @@ def candidate_context(root: Path, codes: list[str], *, formation_date: str, as_o
     request = {'formation_date': formation_date, 'as_of': as_of,
                'market_search_context': {}, 'candidate_ledger': [], 'decision_trace': []}
     return _context(root, request, {'selected_stocks': []}, list(dict.fromkeys(codes)),
-                    categories=categories, periods=periods, sector_dates=sector_dates)
+                    categories=categories, periods=periods, sector_dates=sector_dates,
+                    warehouse_root=warehouse_root, derived_inputs=derived_inputs)
 
 
 def breadth_evidence(rows: list[dict], windows: dict) -> list[dict]:
@@ -150,7 +152,8 @@ def breadth_evidence(rows: list[dict], windows: dict) -> list[dict]:
 
 
 def _context(root: Path, trace: dict, result: dict, codes: list[str], *,
-             categories=("financial", "company", "price", "industry"), cited_text="", periods=(), sector_dates=()) -> dict:
+             categories=("financial", "company", "price", "industry"), cited_text="", periods=(), sector_dates=(),
+             warehouse_root: Path | None = None, derived_inputs: dict[str, pd.DataFrame] | None = None) -> dict:
     formation = date.fromisoformat(trace['formation_date']).isoformat()
     action = date.fromisoformat(trace['action_date']).isoformat() if trace.get('action_date') else None
     cutoff = datetime.fromisoformat(trace['as_of'])
@@ -173,7 +176,7 @@ def _context(root: Path, trace: dict, result: dict, codes: list[str], *,
                                                if d.get('decision_id') in decision_ids]
     if not codes:
         return output
-    warehouse = ResearchWarehouse(root / 'local_warehouse', read_only=True)
+    warehouse = ResearchWarehouse(warehouse_root if warehouse_root is not None else root / 'local_warehouse', read_only=True)
     query = ResearchQuery(warehouse)
 
     def read(dataset: str, *, partitions=None, financial=False) -> pd.DataFrame:
@@ -212,7 +215,8 @@ def _context(root: Path, trace: dict, result: dict, codes: list[str], *,
             derived[feature] = pd.DataFrame()
             continue
         try:
-            derived[feature] = derived_at(warehouse, feature, formation, cutoff)
+            derived[feature] = (derived_inputs[feature] if derived_inputs is not None and feature in derived_inputs
+                                else derived_at(warehouse, feature, formation, cutoff))
         except (ValueError, OSError, RuntimeError) as exc:
             gaps.append({'source': feature, 'status': 'unavailable_at_cutoff', 'detail': str(exc)})
             derived[feature] = pd.DataFrame()

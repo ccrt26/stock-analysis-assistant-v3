@@ -59,7 +59,7 @@ def calculate(warehouse_root: Path, selections: list[dict], through: str) -> tup
     benchmark = original.load_benchmark_daily(warehouse_root, dates)
     subjects = []
     for selection in selections:
-        subjects.append({'event_key': f"trial:{selection.get('mode', 'prospective')}:{selection['method_id']}:{selection['action_date']}:{selection['ts_code']}",
+        subjects.append({'event_key': f"trial:{selection['run_id']}:{selection['ts_code']}",
                          'formation_date': selection['formation_date'],
                          'action_date': selection['action_date'], 'selection_as_of': selection['as_of'],
                          'ts_code': selection['ts_code'], 'name': selection.get('name') or selection['ts_code']})
@@ -73,8 +73,9 @@ def calculate(warehouse_root: Path, selections: list[dict], through: str) -> tup
         rows = sorted(by_key.get(subject['event_key'], []), key=lambda r: int(r['trading_day_number']))
         result = dict(method_id=item['method_id'], run_id=item['run_id'], mode=item.get('mode', 'prospective'), formation_date=item['formation_date'],
                       action_date=item['action_date'], as_of=item['as_of'], ts_code=item['ts_code'],
-                      name=item.get('name') or item['ts_code'], rank=item['rank'],
-                      participation_condition=item['participation_condition'],
+                      name=item.get('name') or item['ts_code'], rank=item.get('rank'),
+                      role=item.get('role','selected'), candidate_reason=item.get('candidate_reason'),
+                      participation_condition=item.get('participation_condition'),
                       condition_event='unverified_without_intraday_order_or_trade',
                       price_path_is_trade=False, through=through,
                       fixed_d20_status=subject.get('fixed_d20_status'),
@@ -113,7 +114,15 @@ def summarize(rows: list[dict], day_states: list[dict] | None = None) -> dict:
     """Program counts and medians, explicitly scoped to prospective trial days."""
     from statistics import median
     day_states = [d for d in (day_states or []) if d.get('mode') == 'prospective']
-    forward = [r for r in rows if r.get('mode') == 'prospective']
+    normalized = []
+    for day in day_states:
+        status = day.get('status') if isinstance(day.get('status'), dict) else {m:day.get(m,'not_run') for m in ('M0','M1')}
+        qualification = day.get('qualification') or {}
+        normalized.append({'action_date':day.get('action_date'), 'status':status, 'qualification':qualification})
+    eligible = {(d['action_date'],m) for d in normalized for m in ('M0','M1')
+                if d['qualification'].get(m) is True and d['status'].get(m) in {'complete','complete_zero'}}
+    forward = [r for r in rows if r.get('mode') == 'prospective' and
+               (r.get('action_date'),r.get('method_id')) in eligible]
     for row in rows:
         key = (row['action_date'], row['ts_code'])
         peer = next((x for x in rows if x is not row and
@@ -123,15 +132,18 @@ def summarize(rows: list[dict], day_states: list[dict] | None = None) -> dict:
                 field = f'd{n}_endpoint_return'
                 if row.get(field) is not None and peer.get(field) is not None and abs(float(row[field])-float(peer[field])) > 1e-12:
                     raise ValueError(f'same stock/action has different reference return: {key}/{field}')
-    result = {'planned_days': len(day_states),
-              'paired_days': sum(d.get('M0','').startswith('complete') and d.get('M1','').startswith('complete') for d in day_states),
+    result = {'planned_days': len(normalized),
+              'paired_days': sum(all((d['action_date'],m) in eligible for m in ('M0','M1')) for d in normalized),
               'methods': {}}
     for method in ('M0','M1'):
         records = [r for r in forward if r['method_id']==method]
-        states = [d.get(method,'not_run') for d in day_states]
-        method_summary = {'completed_days': sum(x.startswith('complete') for x in states),
-                          'failed_days': sum(x.startswith('failed') or x.startswith('model_identity') for x in states),
-                          'zero_selection_days': states.count('complete_zero'),
+        states = [d['status'].get(method,'not_run') for d in normalized]
+        method_summary = {'completed_days': sum((d['action_date'],method) in eligible for d in normalized),
+                          'failed_days': sum(x != 'not_run' and (d['action_date'],method) not in eligible
+                                             for d,x in zip(normalized,states,strict=True)),
+                          'not_run_days': states.count('not_run'),
+                          'zero_selection_days': sum(x == 'complete_zero' and (d['action_date'],method) in eligible
+                                                     for d,x in zip(normalized,states,strict=True)),
                           'recommendation_events': len(records),
                           'distinct_stocks': len({r['ts_code'] for r in records}),
                           'repeat_events': len(records)-len({r['ts_code'] for r in records}),
