@@ -160,3 +160,19 @@ def test_replay_summary_keeps_five_completed_zero_days():
     assert result['methods']['M0']['zero_selection_days']==5
     assert result['methods']['M0']['horizons']['d20']['median_endpoint_return'] is None
     assert summarize([],days)['planned_days']==0
+
+
+def test_group_summary_denominators_zero_days_and_shared_date_means():
+    from stock_analyzer.analysis.selection_parallel_outcomes import describe_groups
+    rows=[{'method_id':'M0','ts_code':'A','action_date':'2026-01-02','d5_endpoint_return':.1},
+          {'method_id':'M0','ts_code':'B','action_date':'2026-01-02','d5_endpoint_return':.3},
+          {'method_id':'M0','ts_code':'A','action_date':'2026-01-05','d5_endpoint_return':.4},
+          {'method_id':'M1','ts_code':'C','action_date':'2026-01-02','d5_endpoint_return':None},
+          {'method_id':'M1','ts_code':'D','action_date':'2026-01-02','d5_endpoint_return':.2}]
+    result=describe_groups(rows,['2026-01-02','2026-01-05'],['2026-01-02','2026-01-05'])
+    a=result['groups']['M0']['views']['all_events']['metrics']['d5_endpoint_return']
+    assert a['denominator']==3 and a['date_denominator']==2
+    assert a['mean']==pytest.approx(.8/3) and a['date_equal_mean']==pytest.approx(.3)
+    assert result['groups']['M1']['zero_selection_days']==1
+    assert result['groups']['M0']['views']['nonoverlap']['records']==2
+    assert result['common_date_equal_AB']['d5_endpoint_return']['A']==pytest.approx(.2)

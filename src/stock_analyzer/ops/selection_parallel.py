@@ -1439,6 +1439,8 @@ def update_outcomes(config_path: Path, *, through: str) -> Path:
               'summary.json': json.dumps(stats, ensure_ascii=False, indent=2, default=str) + '\n',
               'definition.json': json.dumps(definition, ensure_ascii=False, indent=2, default=str) + '\n'}
     if cfg.get('full_universe_replay'):
+        from stock_analyzer.analysis.selection_parallel_outcomes import describe_groups
+        extras['group-summary.json'] = json.dumps(describe_groups(rows+reference_outcomes+universe_outcomes, calendar, cfg['action_dates']), ensure_ascii=False, indent=2) + '\n'
         extras.update({'simple-reference-outcomes.csv':_csv_text(reference_outcomes),
                        'universe-outcomes.csv':_csv_text(universe_outcomes),
                        'simple-reference-ranking.csv':_csv_text(ranking_rows)})

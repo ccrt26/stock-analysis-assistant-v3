@@ -181,3 +181,46 @@ def summarize(rows: list[dict], day_states: list[dict] | None = None, *, mode: s
             }
         result['methods'][method] = method_summary
     return result
+
+
+def describe_groups(rows: list[dict], trading_dates: list[str], action_dates: list[str]) -> dict:
+    """Describe the same calculated fields for A/B, their size-matched references and U."""
+    import pandas as pd
+    metrics = [f'd{n}_{field}' for n in HORIZONS for field in
+               ('endpoint_return','relative_market_return','hit_20pct_close','mae','max_close_drawdown')]
+    metrics += ['fixed_d20_mfe','fixed_d20_max_close_return','fixed_d20_mae','fixed_d20_max_close_drawdown']
+    result = {}
+    for method in ('M0','M1','S_A','S_B','U'):
+        records = [r for r in rows if r['method_id'] == method]
+        first, nonoverlap = auxiliary_views(records, trading_dates)
+        views = {}
+        for view, values in [('all_events',records),('first_per_stock',first),('nonoverlap',nonoverlap)]:
+            frame = pd.DataFrame(values)
+            summary = {'records':len(values), 'distinct_stocks':len({r['ts_code'] for r in values}),
+                       'complete_d20_paths':sum(r.get('fixed_d20_status')=='complete' for r in values),
+                       'metrics':{}}
+            for field in metrics:
+                numeric = pd.to_numeric(frame[field], errors='coerce').dropna() if field in frame else pd.Series(dtype=float)
+                by_date = frame.loc[numeric.index].assign(value=numeric).groupby('action_date')['value'].mean() if len(numeric) else pd.Series(dtype=float)
+                summary['metrics'][field] = {
+                    'denominator':len(numeric), 'mean':float(numeric.mean()) if len(numeric) else None,
+                    'median':float(numeric.median()) if len(numeric) else None,
+                    'q25':float(numeric.quantile(.25)) if len(numeric) else None,
+                    'q75':float(numeric.quantile(.75)) if len(numeric) else None,
+                    'date_denominator':len(by_date), 'date_equal_mean':float(by_date.mean()) if len(by_date) else None,
+                    'per_date_mean':{str(k):float(v) for k,v in by_date.items()}}
+            views[view] = summary
+        counts = {day:sum(r['action_date']==day for r in records) for day in action_dates}
+        result[method] = {'daily_counts':counts, 'zero_selection_days':sum(n==0 for n in counts.values()),
+                          'zero_selection_is_cash_return':False, 'views':views}
+    # Equal-date A/B comparison uses only dates where both have an observed mean.
+    common = {}
+    for metric in metrics:
+        a=result['M0']['views']['all_events']['metrics'][metric]['per_date_mean']
+        b=result['M1']['views']['all_events']['metrics'][metric]['per_date_mean']
+        days=sorted(set(a)&set(b))
+        common[metric]={'dates':days,'denominator':len(days),
+                        'A':sum(a[d] for d in days)/len(days) if days else None,
+                        'B':sum(b[d] for d in days)/len(days) if days else None}
+    return {'groups':result, 'common_date_equal_AB':common,
+            'interpretation':'Descriptive overlapping historical observations; no execution or long-run probability claim.'}
