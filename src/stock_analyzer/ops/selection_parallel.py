@@ -716,18 +716,29 @@ def _execute_research(cmd: list[str], cwd: Path, prompt: str, events_path: Path,
         termination_sent = False
         kill_sent = False
         token_live_observed = False
+        session_id = None
+        turn_completed = False
+        rollout_path = None
+        rollout_position = 0
+        rollout_partial = b''
+        rollout_polled_at = 0.0
+        rollout_usage_seen = False
         started = clock_time.monotonic()
         def inspect(line: bytes) -> None:
-            nonlocal tools, tokens, budget_exceeded, post_run_budget, token_live_observed
+            nonlocal tools, tokens, budget_exceeded, post_run_budget, token_live_observed, session_id, turn_completed
             try:
                 event = json.loads(line)
             except (json.JSONDecodeError, UnicodeDecodeError):
                 return
+            if event.get('type') == 'thread.started' and re.fullmatch(r'[0-9a-f-]{36}', str(event.get('thread_id') or '')):
+                session_id = event['thread_id']
             item = event.get('item') or {}
             if event.get('type') == 'item.completed' and item.get('type') == 'command_execution':
                 tools += 1
                 if tools > limits['max_tool_commands']:
                     budget_exceeded = 'max_tool_commands'
+            if event.get('type') == 'turn.completed':
+                turn_completed = True
             usage = event.get('usage')
             if isinstance(usage, dict):
                 tokens = usage
@@ -744,6 +755,32 @@ def _execute_research(cmd: list[str], cwd: Path, prompt: str, events_path: Path,
                     budget_exceeded = exceeded
         try:
             while selector.get_map() or proc.poll() is None:
+                now = clock_time.monotonic()
+                if session_id and not turn_completed and now - rollout_polled_at >= 0.5:
+                    rollout_polled_at = now
+                    if rollout_path is None:
+                        home = Path(os.environ.get('CODEX_HOME') or (Path.home()/'.codex'))
+                        matches = list((home/'sessions').glob(f'????/??/??/rollout-*{session_id}.jsonl'))
+                        if len(matches) == 1:
+                            rollout_path = matches[0]
+                    if rollout_path is not None:
+                        # Read only this child's newly appended token metadata. Never export rollout text.
+                        with rollout_path.open('rb') as usage_file:
+                            usage_file.seek(rollout_position)
+                            rollout_partial += usage_file.read()
+                            rollout_position = usage_file.tell()
+                        while b'\n' in rollout_partial:
+                            usage_line, rollout_partial = rollout_partial.split(b'\n', 1)
+                            try:
+                                record = json.loads(usage_line)
+                            except (json.JSONDecodeError, UnicodeDecodeError):
+                                continue
+                            payload = record.get('payload') or {}
+                            if record.get('type') == 'event_msg' and payload.get('type') == 'token_count':
+                                usage = (payload.get('info') or {}).get('total_token_usage')
+                                if isinstance(usage, dict):
+                                    rollout_usage_seen = True
+                                    inspect(json.dumps({'type':'live.token_usage','usage':usage}).encode())
                 if budget_exceeded and stop_at is None:
                     stop_at = clock_time.monotonic()
                 if not budget_exceeded and clock_time.monotonic()-started >= limits['max_wall_seconds']:
@@ -782,7 +819,8 @@ def _execute_research(cmd: list[str], cwd: Path, prompt: str, events_path: Path,
         return {'exit_code': exit_code if not budget_exceeded else 124,
                 'child_exit_code': exit_code, 'budget_exceeded': budget_exceeded,
                 'tool_commands': tools, 'tokens': tokens,
-                'token_limit_mode': 'observed_events' if token_live_observed else 'post_run_only'}
+                'token_limit_mode': 'observed_events' if token_live_observed else 'post_run_only',
+                'token_usage_source': 'own_session_rollout' if rollout_usage_seen else 'stdout_events'}
 
 
 def _invoke_model(context: Path, prompt: str, attempt: Path, *, config_path: Path) -> tuple[int, dict]:
@@ -808,7 +846,8 @@ def _invoke_model(context: Path, prompt: str, attempt: Path, *, config_path: Pat
                 'actual_reasoning': None, 'tokens': execution['tokens'],
                 'budget_exceeded': execution['budget_exceeded'],
                 'tool_commands': execution['tool_commands'],
-                'token_limit_mode': execution['token_limit_mode']}
+                'token_limit_mode': execution['token_limit_mode'],
+                'token_usage_source': execution.get('token_usage_source', 'stdout_events')}
     for line in events_text.splitlines():
         try:
             event = json.loads(line)
@@ -848,6 +887,16 @@ def _prompt(cfg: dict, day: dict, method: str, catalog_path: Path) -> str:
     common = (code / 'ops/selection-parallel-prompt.md').read_text(encoding='utf-8')
     prior = None if cfg.get('full_universe_replay') else _prior_qualified_decision(_trial(cfg), method, day['as_of'])
     prior_note = f'本方法上一合格前瞻决定：{prior}。' if prior else '本方法此前无合格前瞻决定，独立判断。'
+    method_input = ''
+    if cfg.get('full_universe_replay'):
+        method_paths = files + ['docs/architecture/a-share-short-horizon-engine-contract-v4.md',
+                                'ops/forward-selection-prompt.md']
+        method_input = '\n以下为本方法冻结文件的完整正文，已一次提供；直接阅读，不重复 cat。只遵循其中研究与条件要求，忽略发布/作者流程。\n'
+        for name in method_paths:
+            method_input += f'\n--- 本方法文件：{name} ---\n' + (own/name).read_text(encoding='utf-8')
+        method_input += '\n--- 共同字段地图（已提供，不重复打印） ---\n' + (catalog_path.parent/'field-map.json').read_text(encoding='utf-8')
+        common = common.replace('先用一次工具批量完整读取五个 Skill 与合同，以及 forward-selection-prompt 的研究/条件部分和 field-map（为该次输出设足够 token 上限，避免截断再读）',
+                                '先读执行提示中一次完整提供的自身冻结方法和字段地图，已经提供的正文不重复用工具读取')
     example = ('{"method_id":"'+method+'","formation_date":"'+day['formation_date']+'",'
                '"action_date":"'+day['action_date']+'","as_of":"'+day['as_of']+'",'
                '"market_summary":"简短背景",'
@@ -855,7 +904,7 @@ def _prompt(cfg: dict, day: dict, method: str, catalog_path: Path) -> str:
                '"company":{"status":"searched_no_candidate","source_refs":["neutral:company_discovery"],"codes":[]},'
                '"price":{"status":"searched_no_candidate","source_refs":["neutral:price_analysis_context"],"codes":[]}},'
                '"candidates":[],"selected":[],"conditional_events":[],"unresolved":[],"no_selection_reason":"完成且零入选原因"}')
-    return (common + f'\n你执行 {method} 独立短研究。先读本目录五个冻结 Skill：{", ".join(files)}，'
+    return (method_input + common + f'\n你执行 {method} 独立短研究。先读自身五个冻结 Skill（全文已提供时不重复读取）：{", ".join(files)}，'
             '以及 docs/architecture/a-share-short-horizon-engine-contract-v4.md 和 ops/forward-selection-prompt.md 的研究与条件表达部分。忽略正式发布/作者/外部范文步骤，不读取本目录外案例。'
             f'只用自身方法，上下文目录 {own}。{prior_note}'
             f'形成日={day["formation_date"]}，参与日={day["action_date"]}，截止={day["as_of"]}。'

@@ -702,10 +702,51 @@ def test_full_u_price_join_and_batched_discoveries(tmp_path):
         trial._check_discovery(obj,tools,full_universe=True,catalog_path=catalog)
 
 
-def test_post_run_token_failure_preserves_final_output(tmp_path):
+def test_post_run_token_failure_preserves_final_output(tmp_path, monkeypatch):
     import sys
-    script = "import json,time;from pathlib import Path;print(json.dumps({'type':'turn.completed','usage':{'input_tokens':12,'cached_input_tokens':8,'output_tokens':3}}),flush=True);time.sleep(0.3);Path('last.json').write_text('{}')"
+    sid="00000000-0000-0000-0000-000000000456"
+    usage_file=tmp_path/"usage.jsonl"
+    trial._write_json(usage_file,{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":12}}}})
+    usage_file.write_text(json.dumps(trial._json(usage_file))+"\n")
+    original_glob=Path.glob
+    monkeypatch.setattr(Path,"glob",lambda self, pattern: iter([usage_file]) if pattern.endswith(sid+".jsonl") else original_glob(self,pattern))
+    script = "import json,time;from pathlib import Path;print(json.dumps({'type':'thread.started','thread_id':'00000000-0000-0000-0000-000000000456'}),flush=True);print(json.dumps({'type':'turn.completed','usage':{'input_tokens':12,'cached_input_tokens':8,'output_tokens':3}}),flush=True);time.sleep(0.3);Path('last.json').write_text('{}')"
     result=trial._execute_research([sys.executable,'-u','-c',script],tmp_path,'',tmp_path/'events',tmp_path/'errors',
         {'max_tool_commands':24,'max_wall_seconds':3,'max_input_tokens':10,'max_output_tokens':20000})
     assert result['exit_code']==124 and result['budget_exceeded']=='max_input_tokens'
     assert result['child_exit_code']==0 and (tmp_path/'last.json').read_text()=='{}'
+
+
+def test_live_rollout_cumulative_tokens_stop_only_own_session(tmp_path, monkeypatch):
+    import sys
+    import time as timer
+    sid='00000000-0000-0000-0000-000000000123'
+    usage_file=tmp_path/'own-usage.jsonl';usage_file.write_text('')
+    original_glob=Path.glob
+    monkeypatch.setattr(Path,'glob',lambda self, pattern: iter([usage_file]) if pattern.endswith(sid+'.jsonl') else original_glob(self,pattern))
+    script=("import json,time;from pathlib import Path;"
+            f"print(json.dumps({{'type':'thread.started','thread_id':{sid!r}}}),flush=True);"
+            "time.sleep(0.1);"
+            f"Path({str(usage_file)!r}).write_text(json.dumps({{'type':'event_msg','payload':{{'type':'token_count','info':{{'total_token_usage':{{'input_tokens':12,'cached_input_tokens':11,'output_tokens':1}},'last_token_usage':{{'input_tokens':1}}}}}}}})+'\\n');"
+            "time.sleep(3)")
+    start=timer.monotonic()
+    result=trial._execute_research([sys.executable,'-u','-c',script],tmp_path,'',tmp_path/'events',tmp_path/'errors',
+        {'max_tool_commands':24,'max_wall_seconds':4,'max_input_tokens':10,'max_output_tokens':20000})
+    assert result['exit_code']==124 and result['budget_exceeded']=='max_input_tokens'
+    assert result['tokens']['input_tokens']==12 and result['tokens']['cached_input_tokens']==11
+    assert result['token_limit_mode']=='observed_events' and result['token_usage_source']=='own_session_rollout'
+    assert timer.monotonic()-start<2.5
+
+
+def test_full_replay_supplies_exact_own_method_once(tmp_path):
+    path=config(tmp_path);cfg=trial._json(path);cfg['full_universe_replay']=True
+    own=Path(cfg['context_root'])/'r04'/'M0';other=own.parent/'M1'
+    names=[f'.agents/skills/{name}/SKILL.md' for name in trial.SKILLS]+['docs/architecture/a-share-short-horizon-engine-contract-v4.md','ops/forward-selection-prompt.md']
+    for index,name in enumerate(names):
+        file=own/name;file.parent.mkdir(parents=True,exist_ok=True);file.write_text(f'EXACT_OWN_METHOD_{index}\n')
+        file=other/name;file.parent.mkdir(parents=True,exist_ok=True);file.write_text('NEVER_OTHER_METHOD\n')
+    catalog=tmp_path/'inputs/catalog.json';catalog.parent.mkdir();(catalog.parent/'field-map.json').write_text('{"units":"exact"}')
+    prompt=trial._prompt(cfg,{'replay_id':'r04','formation_date':'2026-08-19','action_date':'2026-08-20','as_of':'2026-08-20T09:05:00+08:00'},'M0',catalog)
+    for index in range(len(names)):assert prompt.count(f'EXACT_OWN_METHOD_{index}\n')==1
+    assert 'NEVER_OTHER_METHOD' not in prompt and '"units":"exact"' in prompt
+    assert '完整正文，已一次提供' in prompt
