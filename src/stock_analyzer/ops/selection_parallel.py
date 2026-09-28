@@ -960,10 +960,19 @@ def _successful_tool_results(events_text: str) -> list[tuple[str, str, dict | li
             # Arrow's sandbox CPU probe is emitted beside otherwise valid JSON.
             # Keep the raw log, and remove only the known native diagnostic line.
             clean = re.sub(r"(?m)^/[^\n]*arrow/cpp/src/arrow/util/cpu_info\.cc:\d+: IOError: sysctlbyname failed for 'hw\.[A-Za-z0-9_.]+'\. Detail: \[errno 1\] Operation not permitted\r?\n?", '', output)
-            parsed = json.loads(clean)
+            documents = []
+            remaining = clean.strip()
+            decoder = json.JSONDecoder()
+            while remaining:
+                parsed, end = decoder.raw_decode(remaining)
+                if not isinstance(parsed, (dict, list)):
+                    raise json.JSONDecodeError('tool evidence must be JSON objects or arrays', remaining, 0)
+                documents.append(parsed)
+                remaining = remaining[end:].strip()
         except json.JSONDecodeError:
-            parsed = None
-        found.append((item.get('command') or '', output, parsed))
+            # Never accept just a JSON-looking suffix or ignore an unknown diagnostic.
+            documents = []
+        found.extend((item.get('command') or '', output, parsed) for parsed in (documents or [None]))
     return found
 
 

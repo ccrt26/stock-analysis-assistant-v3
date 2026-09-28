@@ -750,3 +750,14 @@ def test_full_replay_supplies_exact_own_method_once(tmp_path):
     for index in range(len(names)):assert prompt.count(f'EXACT_OWN_METHOD_{index}\n')==1
     assert 'NEVER_OTHER_METHOD' not in prompt and '"units":"exact"' in prompt
     assert '完整正文，已一次提供' in prompt
+
+
+def test_successful_tool_json_stream_preserves_every_complete_document():
+    def event(output):
+        return json.dumps({'type':'item.completed','item':{'type':'command_execution','command':'batch query','exit_code':0,'aggregated_output':output}})
+    raw='{"knowledge":[]}\n{"view":"company","source_total":3,"records":[]}\n'
+    found=trial._successful_tool_results(event(raw))
+    assert len(found)==2 and found[0][2]=={'knowledge':[]} and found[1][2]['view']=='company'
+    assert all(x[1]==raw for x in found)
+    for malformed in [raw+'unknown trailer', 'unrecognized prefix\n'+raw, '12\n'+raw]:
+        assert trial._successful_tool_results(event(malformed))==[('batch query',malformed,None)]
