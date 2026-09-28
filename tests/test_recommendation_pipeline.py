@@ -630,3 +630,37 @@ def test_user_cancel_stops_all_remaining_paths(case, monkeypatch):
         pipeline.complete(stock_ai, case.state, case.state_path, case.directory, {}, 'glm', '')
     assert not (case.directory / 'accepted-draft-checkpoint.json').exists()
     assert not (case.directory / 'accepted-recommendation.json').exists()
+
+
+def test_window_sets_distinguish_identical_overlap_and_empty():
+    sessions=['2026-08-13','2026-08-14','2026-08-17','2026-08-18','2026-08-19']
+    identical=context.window_dates(sessions,{'sessions_since_largest_positive_day_5d':4})
+    overlap=context.window_dates(sessions,{'sessions_since_largest_positive_day_5d':2})
+    empty=context.window_dates(sessions,{'sessions_since_largest_positive_day_5d':0})
+    assert identical['ex_after_largest_relationship']['relation']=='identical'
+    assert overlap['ex_after_largest_relationship']['relation']=='overlap'
+    assert empty['ex_after_largest_relationship']['relation']=='empty'
+    assert context.window_dates([], {})['ex_after_largest_relationship']['relation']=='insufficient'
+
+
+def test_explicit_l3_and_original_morning_snapshot_through_normal_context(tmp_path,monkeypatch):
+    cutoff='2026-08-20T09:05:00+08:00';calls=[]
+    class Query:
+        def __init__(self,*a):pass
+        def dataset_partitions_as_of(self,d,parts,c):
+            if d=='trade_calendar':return pd.DataFrame({'cal_date':['2026-08-18','2026-08-19'],'is_open':[1,1]})
+            return pd.DataFrame()
+        def dataset_as_of(self,*a):return pd.DataFrame()
+    monkeypatch.setattr(context,'ResearchWarehouse',lambda *a,**k:object())
+    monkeypatch.setattr(context,'ResearchQuery',Query)
+    def derived(w,feature,day,stamp):
+        calls.append((feature,day,stamp.isoformat()))
+        return pd.DataFrame({'group_code':['L2','L3'],'level':['L2','L3'],'breadth_5d':[.5,.7],
+                             'horizon_observed_member_count_5d':[10,20]}) if feature=='sector_hotspot' else pd.DataFrame()
+    monkeypatch.setattr(context,'derived_at',derived)
+    args=dict(formation_date='2026-08-19',action_date='2026-08-20',as_of=cutoff,categories=['industry'],group_codes=['L3'],
+              sector_snapshots=[{'analysis_date':'2026-08-18','as_of':'2026-08-19T09:05:00+08:00'}])
+    result=context.candidate_context(tmp_path,['000001.SZ'],**args)['facts']['000001.SZ']
+    assert [r['group_code'] for r in result['industry_observations']]==['L3']
+    assert result['industry_series'][0]['as_of']=='2026-08-19T09:05:00+08:00'
+    assert next(r for r in result['industry_series'][0]['breadth'] if r['window']=='5d')['valid_denominator']==20

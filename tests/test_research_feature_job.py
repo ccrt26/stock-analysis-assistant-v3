@@ -711,3 +711,21 @@ def _counted(counts, label, function):
         counts[label] += 1
         return function(*args, **kwargs)
     return compute
+
+
+def test_optional_output_root_is_used_by_all_original_feature_commits(tmp_path,monkeypatch):
+    import stock_analyzer.ops.research_features as job
+    dates=[value.date() for value in pd.bdate_range(end=ANALYSIS_DATE,periods=300)]
+    source=FakeWarehouse(tmp_path/'source',dates)
+    isolated=FakeWarehouse(tmp_path/'isolated',dates)
+    _WAREHOUSES[isolated.root]=isolated
+    monkeypatch.setattr(job,'ResearchQuery',FakeQuery)
+    monkeypatch.setattr(job,'DerivedFeatureStore',FakeStore)
+    monkeypatch.setattr(job,'compute_market_context_features',_simple_market)
+    monkeypatch.setattr(job,'compute_hotspot_features',_simple_sector)
+    monkeypatch.setattr(job,'compute_stock_context_features',_simple_stock)
+    monkeypatch.setattr(job,'compute_price_analysis_features',_simple_price)
+    summary=job.run_research_features(source,ANALYSIS_DATE,output_root=isolated.root)
+    assert not source.commits
+    assert len(isolated.commits)==4
+    assert source.calls and not summary.failed_feature_sets

@@ -79,6 +79,8 @@ description: Use when point-in-time A-share candidate selection, validation, or 
 
 ### 2. 判断所处阶段
 
+对实际采用的行业代码显式传入 `recommendation_context --group-code`，跨日用 `--sector-snapshots` 提供原 `{analysis_date, as_of}`；明确 L3 不得用 L2 替代，晨间截止不得改成当天晚间。行业整体判断与具体成员选错分开；行业弱是反证，不自动淘汰独立价格机会。
+
 根据同层级、同窗口、同统计口径的连续日期事实判断阶段，并说明成员数、有效覆盖及其变化。单次快照中3日与5日的差异不能独立证明退潮；缺少可比跨日资料时，相应动态判断保留未知。根据这些事实解释为：
 
 - `broad_diffusion`：多窗口相对表现、成员中位数和上涨面共同增强，且不是少数成员独占贡献；

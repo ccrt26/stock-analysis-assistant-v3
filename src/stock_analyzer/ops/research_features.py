@@ -71,13 +71,14 @@ def run_research_features(
     warehouse: ResearchWarehouse,
     analysis_date: date | str,
     as_of: datetime | None = None,
+    *, output_root: Path | None = None,
 ) -> DerivedFeatureSummary:
     """Compute and independently commit the daily derived products."""
 
     analysis_day = _as_date(analysis_date)
     cutoff = _cutoff(analysis_day, as_of)
     query = ResearchQuery(warehouse)
-    store = DerivedFeatureStore(Path(warehouse.root))
+    store = DerivedFeatureStore(output_root if output_root is not None else Path(warehouse.root))
 
     calendar_partitions = _calendar_partitions(warehouse, analysis_day)
     calendar_snapshot = query.materialize_snapshot(

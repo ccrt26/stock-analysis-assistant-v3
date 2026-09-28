@@ -78,6 +78,14 @@ def window_dates(sessions: list[str], price: dict) -> dict:
             out['largest_positive_day_5d'] = day
             out['ex_largest_positive_day_5d'] = [d for d in sessions[-5:] if d != day]
             out['after_largest_positive_day_5d'] = [d for d in sessions[-5:] if d > day]
+    left = set(out.get('ex_largest_positive_day_5d', []))
+    right = set(out.get('after_largest_positive_day_5d', []))
+    relation = ('insufficient' if len(sessions) < 5 or 'largest_positive_day_5d' not in out
+                else 'empty' if not left or not right else 'identical' if left == right
+                else 'overlap' if left & right else 'disjoint')
+    out['ex_after_largest_relationship'] = {'relation': relation,
+        'shared_sessions': sorted(left & right), 'ex_only_sessions': sorted(left-right),
+        'after_only_sessions': sorted(right-left), 'independent_evidence': relation == 'disjoint'}
     return out
 
 
@@ -99,36 +107,45 @@ def derived_at(warehouse: ResearchWarehouse, feature: str, formation: str, cutof
 
 
 FINANCIAL_DATASETS = ("income_statement", "balance_sheet", "cash_flow", "financial_indicator")
+EVENT_DATASETS = ("earnings_forecast", "earnings_express", "holder_trade", "share_float", "repurchase", "pledge", "suspension")
 FACT_CATEGORIES = {
     "financial": set(FINANCIAL_DATASETS),
-    "company": {"company_profile", "main_business", "announcement"},
-    "price": {"equity_daily", "daily_basic"},
+    "company": {"company_profile", "main_business", "announcement", *EVENT_DATASETS},
+    "price": {"equity_daily", "daily_basic", "suspension", "announcement"},
     "industry": {"industry_member"},
 }
 
 
 def build_context(root: Path, trace: dict, *, extra_codes: list[str] = (), cited_text: str = "",
-                  periods: list[str] = ()) -> dict:
+                  periods: list[str] = (), sector_dates=(), group_codes=(), sector_snapshots=(),
+                  warehouse_root: Path | None = None, derived_inputs: dict | None = None,
+                  derived_root: Path | None = None) -> dict:
     result = selected_result(trace)
     comparisons = cited_text + ' ' + ' '.join(s.get('nearest_comparison', '') for s in result['selected_stocks'])
     candidates = result.get('nearest_nonselections', []) + trace.get('candidate_ledger', [])
     neighbors = [c['ts_code'] for c in candidates if c['ts_code'] in comparisons or
                  (c.get('name') and c['name'] in comparisons)]
     codes = list(dict.fromkeys([s['ts_code'] for s in result['selected_stocks']] + neighbors + list(extra_codes)))
-    return _context(root, trace, result, codes, cited_text=cited_text, periods=periods)
+    return _context(root, trace, result, codes, cited_text=cited_text, periods=periods, sector_dates=sector_dates,
+                    group_codes=group_codes, sector_snapshots=sector_snapshots,
+                    warehouse_root=warehouse_root, derived_inputs=derived_inputs, derived_root=derived_root)
 
 
 def candidate_context(root: Path, codes: list[str], *, formation_date: str, as_of: str,
                       categories=("financial", "company", "price", "industry"), periods=(),
-                      sector_dates=()) -> dict:
+                      sector_dates=(), group_codes=(), sector_snapshots=(), action_date: str | None = None,
+                      warehouse_root: Path | None = None, derived_inputs: dict | None = None,
+                  derived_root: Path | None = None) -> dict:
     """On-demand facts before any selection judgment or draft exists."""
     unknown = set(categories) - set(FACT_CATEGORIES)
     if unknown or not codes:
         raise ValueError(f'需要候选代码及有效类别；未知类别：{sorted(unknown)}')
-    request = {'formation_date': formation_date, 'as_of': as_of,
+    request = {'formation_date': formation_date, 'action_date': action_date, 'as_of': as_of,
                'market_search_context': {}, 'candidate_ledger': [], 'decision_trace': []}
     return _context(root, request, {'selected_stocks': []}, list(dict.fromkeys(codes)),
-                    categories=categories, periods=periods, sector_dates=sector_dates)
+                    categories=categories, periods=periods, sector_dates=sector_dates,
+                    group_codes=group_codes, sector_snapshots=sector_snapshots,
+                    warehouse_root=warehouse_root, derived_inputs=derived_inputs, derived_root=derived_root)
 
 
 def breadth_evidence(rows: list[dict], windows: dict) -> list[dict]:
@@ -150,7 +167,9 @@ def breadth_evidence(rows: list[dict], windows: dict) -> list[dict]:
 
 
 def _context(root: Path, trace: dict, result: dict, codes: list[str], *,
-             categories=("financial", "company", "price", "industry"), cited_text="", periods=(), sector_dates=()) -> dict:
+             categories=("financial", "company", "price", "industry"), cited_text="", periods=(), sector_dates=(),
+             group_codes=(), sector_snapshots=(), warehouse_root: Path | None = None,
+             derived_inputs: dict | None = None, derived_root: Path | None = None) -> dict:
     formation = date.fromisoformat(trace['formation_date']).isoformat()
     action = date.fromisoformat(trace['action_date']).isoformat() if trace.get('action_date') else None
     cutoff = datetime.fromisoformat(trace['as_of'])
@@ -173,8 +192,9 @@ def _context(root: Path, trace: dict, result: dict, codes: list[str], *,
                                                if d.get('decision_id') in decision_ids]
     if not codes:
         return output
-    warehouse = ResearchWarehouse(root / 'local_warehouse', read_only=True)
+    warehouse = ResearchWarehouse(warehouse_root or root / 'local_warehouse', read_only=True)
     query = ResearchQuery(warehouse)
+    derived_warehouse = ResearchWarehouse(derived_root, read_only=True) if derived_root else warehouse
 
     def read(dataset: str, *, partitions=None, financial=False) -> pd.DataFrame:
         if dataset != 'trade_calendar' and dataset not in wanted:
@@ -206,13 +226,16 @@ def _context(root: Path, trace: dict, result: dict, codes: list[str], *,
         frames[dataset] = read(dataset, financial=True)
     frames['main_business'] = read('main_business')
     frames['announcement'] = read('announcement')
+    for dataset in EVENT_DATASETS:
+        frames[dataset] = read(dataset)
     derived = {}
     for feature in ('market_context', 'sector_hotspot', 'price_analysis_context'):
         if not set(categories) & {'price', 'industry'}:
             derived[feature] = pd.DataFrame()
             continue
         try:
-            derived[feature] = derived_at(warehouse, feature, formation, cutoff)
+            derived[feature] = (derived_inputs[feature] if derived_inputs is not None and feature in derived_inputs
+                                else derived_at(derived_warehouse, feature, formation, cutoff))
         except (ValueError, OSError, RuntimeError) as exc:
             gaps.append({'source': feature, 'status': 'unavailable_at_cutoff', 'detail': str(exc)})
             derived[feature] = pd.DataFrame()
@@ -228,8 +251,10 @@ def _context(root: Path, trace: dict, result: dict, codes: list[str], *,
         'cash_flow': ['report_period','ann_date','f_ann_date','comparable_selection_rule','n_cashflow_act'],
         'financial_indicator': ['report_period','ann_date','netprofit_yoy','dt_netprofit_yoy','ocf_yoy','grossprofit_margin'],
         'main_business': ['report_period','classification','item_name','bz_item','bz_sales','bz_profit','curr_type','availability_limitation'],
-        'announcement': ['announcement_time','title','url','announcement_title','announcement_url'],
+        'announcement': ['announcement_id','announcement_time','title','url','announcement_title','announcement_url'],
     }
+    for dataset in EVENT_DATASETS:
+        fields[dataset] = [c for c in frames[dataset].columns if c not in {'ts_code', *metadata}]
     for code in codes:
         fact = {'financial_availability': {}}
         for dataset, frame in frames.items():
@@ -257,14 +282,16 @@ def _context(root: Path, trace: dict, result: dict, codes: list[str], *,
             if dataset == 'equity_daily' and not part.empty:
                 part = part.sort_values('trade_date')
             if dataset == 'announcement' and not part.empty:
-                ordered = part.sort_values('available_at')
+                ordered = part.sort_values('available_at', key=lambda x: pd.to_datetime(x, utc=True))
                 title_column = next((k for k in ('title','announcement_title') if k in ordered), None)
                 if title_column:
                     # A burst of issuance notices must not hide the latest report
                     # titles; metadata can establish disclosure, not its economics.
                     reports = ordered[ordered[title_column].fillna('').str.contains(
                         '半年度报告|年度报告|季度报告|业绩预告|业绩快报', regex=True)].tail(8)
-                    part = pd.concat([reports, ordered.tail(20)]).drop_duplicates().sort_values('available_at')
+                    restrictions = ordered[ordered[title_column].fillna('').str.contains('停牌|复牌|风险警示|退市', regex=True)]
+                    part = pd.concat([reports, restrictions, ordered.tail(20)]).drop_duplicates().sort_values(
+                        'available_at', key=lambda x: pd.to_datetime(x, utc=True))
                 else:
                     part = ordered.tail(20)
             fact[dataset] = records(part, fields[dataset] + metadata)
@@ -275,8 +302,8 @@ def _context(root: Path, trace: dict, result: dict, codes: list[str], *,
         fact['price_observations'] = records(prices[prices['ts_code'] == code]) if 'ts_code' in prices else []
         price = next(iter(fact['price_observations']), {})
         fact['comparison_windows'] = window_dates(sessions, price)
-        groups = {r['industry_code'] for r in fact.get('industry_member', []) if r.get('level') == 'L2'}
-        if price.get('primary_industry_code'):
+        groups = set(group_codes) if group_codes else {r['industry_code'] for r in fact.get('industry_member', []) if r.get('level') == 'L2'}
+        if not group_codes and price.get('primary_industry_code'):
             groups.add(price['primary_industry_code'])
         sectors = derived['sector_hotspot']
         cited = json.dumps({
@@ -284,26 +311,38 @@ def _context(root: Path, trace: dict, result: dict, codes: list[str], *,
             'result': [c for c in stocks if c['ts_code'] == code],
             'decisions': [d for d in trace['decision_trace'] if d.get('ts_code') == code],
         }, ensure_ascii=False) + cited_text
-        if 'group_name' in sectors and 'group_code' in sectors:
+        if not group_codes and 'group_name' in sectors and 'group_code' in sectors:
             groups.update(row['group_code'] for row in sectors.to_dict('records')
                           if row['group_code'] in cited or (row.get('group_type') == 'industry' and row.get('level') in {'L2','L3'} and isinstance(row['group_name'],str) and len(row['group_name']) >= 2 and row['group_name'] in cited))
         fact['industry_observations'] = records(sectors[sectors['group_code'].isin(groups)]) if 'group_code' in sectors else []
         fact['industry_breadth'] = breadth_evidence(fact['industry_observations'], fact['comparison_windows'])
-        if sector_dates:
+        snapshots = list(sector_snapshots) + [dict(analysis_date=d, as_of=d+'T18:30:00+08:00') for d in sorted(set(sector_dates))]
+        if snapshots:
             fact['industry_series'] = []
-            for day in sorted(set(sector_dates)):
-                # Each original daily snapshot retains its own cutoff; never use a later snapshot.
-                day_cutoff = datetime.fromisoformat(day + 'T18:30:00+08:00')
+            for snapshot in snapshots:
+                day = date.fromisoformat(snapshot['analysis_date']).isoformat()
+                day_cutoff = datetime.fromisoformat(snapshot['as_of'])
+                if day_cutoff.tzinfo is None:
+                    raise ValueError('行业快照截止必须有时区')
                 if day > formation or day_cutoff > cutoff:
                     raise ValueError('行业序列不能越过本轮截止')
                 try:
-                    prior = derived_at(warehouse, 'sector_hotspot', day, day_cutoff)
+                    prior = derived_at(derived_warehouse, 'sector_hotspot', day, day_cutoff)
                     observed = records(prior[prior['group_code'].isin(groups)]) if 'group_code' in prior else []
                     prior_windows = window_dates([d for d in sessions if d <= day], {})
                     fact['industry_series'].append({'analysis_date': day, 'as_of': day_cutoff.isoformat(),
                         'observations': observed, 'breadth': breadth_evidence(observed, prior_windows)})
                 except (ValueError, OSError, RuntimeError) as exc:
                     gaps.append({'source':'sector_hotspot', 'analysis_date':day, 'status':'unavailable_at_cutoff', 'detail':str(exc)})
+        if set(categories) & {'company', 'price'}:
+            suspensions = fact.get('suspension', [])
+            fact['action_trading_restrictions'] = {
+                'action_date': action, 'as_of': cutoff.isoformat(),
+                'records': [r for r in suspensions if action and
+                            date_text(r.get('trade_date') or r.get('suspend_date')) == action],
+                'notice_candidates': [r for r in fact.get('announcement', []) if
+                    re.search('停牌|复牌|风险警示|退市', str(r.get('title') or r.get('announcement_title') or ''))],
+                'meaning': '只列截止前记录；空记录不能证明可交易，公告须读正文核对行动日与生效条件'}
         output['facts'][code] = fact
     return output
 
@@ -314,21 +353,29 @@ def main() -> int:
     parser.add_argument('--code', action='append', default=[])
     parser.add_argument('--formation-date')
     parser.add_argument('--as-of')
+    parser.add_argument('--action-date')
+    parser.add_argument('--group-code', action='append', default=[])
+    parser.add_argument('--sector-snapshots', type=Path)
     parser.add_argument('--category', choices=FACT_CATEGORIES, action='append')
     parser.add_argument('--period', action='append', default=[])
     parser.add_argument('--sector-date', action='append', default=[])
     parser.add_argument('--root', type=Path, help='只读事实源项目')
+    parser.add_argument('--warehouse-root', type=Path)
+    parser.add_argument('--derived-root', type=Path)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--compare-code', action='append', default=[])
     args = parser.parse_args()
     root = args.root or Path(__file__).resolve().parents[3]
+    snapshots = json.loads(args.sector_snapshots.read_text()) if args.sector_snapshots else []
     if args.trace:
-        data = build_context(root, json.loads(args.trace.read_text()), extra_codes=args.compare_code, periods=args.period)
+        data = build_context(root, json.loads(args.trace.read_text()), extra_codes=args.compare_code, periods=args.period,
+            sector_dates=args.sector_date, group_codes=args.group_code, sector_snapshots=snapshots, warehouse_root=args.warehouse_root, derived_root=args.derived_root)
     else:
         if not args.formation_date or not args.as_of:
             parser.error('候选验证需要 --code / --formation-date / --as-of')
         data = candidate_context(root, args.code, formation_date=args.formation_date, as_of=args.as_of,
-            categories=args.category or tuple(FACT_CATEGORIES), periods=args.period, sector_dates=args.sector_date)
+            categories=args.category or tuple(FACT_CATEGORIES), periods=args.period, sector_dates=args.sector_date, action_date=args.action_date,
+            group_codes=args.group_code, sector_snapshots=snapshots, warehouse_root=args.warehouse_root, derived_root=args.derived_root)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(data, ensure_ascii=False, indent=2) + '\n')
     print(f'context={args.output}; gaps={len(data["gaps"])}')

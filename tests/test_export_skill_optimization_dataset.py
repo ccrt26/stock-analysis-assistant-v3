@@ -1326,3 +1326,15 @@ def test_repair_registered_replay_keeps_its_identity_and_ended_history(tmp_path:
     assert selected[0]["event_key"] == formal_id
     assert selected[0]["selection_output_class"] == "legacy_v1_not_rewritten"
     validate_package(output)
+
+
+def test_formal_consistency_falls_back_per_metric_within_same_episode():
+    selections=[{'event_key':'e1','fixed_d20_status':'complete','fixed_d20_terminal_return':.1,'fixed_d20_max_close_return':.2,'fixed_d20_mae':-.1}]
+    episodes=[{'episode_id':'e1','frozen_twenty_day_review':{'body':'frozen prose','d20_close_return_since_entry':.1},
+               'd20_close_return_since_entry':.9,'d20_max_close_return_since_entry':.2,'d20_mae_since_entry':-.1},
+              {'episode_id':'e2','d20_max_close_return_since_entry':8}]
+    _apply_formal_result_consistency(selections,episodes)
+    assert selections[0]['formal_result_consistency']=='match'
+    assert selections[0]['formal_result_sources']['max_close_return']=='episode_d20'
+    assert selections[0]['formal_result_sources']['terminal_return']=='frozen_twenty_day_review'
+    assert selections[0]['formal_result_source_conflicts']

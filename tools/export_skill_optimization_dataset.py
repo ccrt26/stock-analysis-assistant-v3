@@ -1762,35 +1762,23 @@ def _apply_formal_result_consistency(
         compared: list[str] = []
         if episode is not None and selection.get("fixed_d20_status") == "complete":
             frozen = episode.get("frozen_twenty_day_review")
-            pairs = [
-                (
-                    "terminal_return",
-                    selection.get("fixed_d20_terminal_return"),
-                    (
-                        frozen.get("d20_close_return_since_entry")
-                        if isinstance(frozen, Mapping)
-                        else episode.get("d20_close_return_since_entry")
-                    ),
-                ),
-                (
-                    "max_close_return",
-                    selection.get("fixed_d20_max_close_return"),
-                    (
-                        frozen.get("d20_max_close_return_since_entry")
-                        if isinstance(frozen, Mapping)
-                        else episode.get("d20_max_close_return_since_entry")
-                    ),
-                ),
-                (
-                    "mae",
-                    selection.get("fixed_d20_mae"),
-                    (
-                        frozen.get("d20_mae_since_entry")
-                        if isinstance(frozen, Mapping)
-                        else episode.get("d20_mae_since_entry")
-                    ),
-                ),
-            ]
+            pairs = []
+            sources = {}
+            conflicts = []
+            for name, derived_field, formal_field in (
+                ('terminal_return', 'fixed_d20_terminal_return', 'd20_close_return_since_entry'),
+                ('max_close_return', 'fixed_d20_max_close_return', 'd20_max_close_return_since_entry'),
+                ('mae', 'fixed_d20_mae', 'd20_mae_since_entry'),
+            ):
+                fixed = frozen.get(formal_field) if isinstance(frozen, Mapping) else None
+                original = episode.get(formal_field)
+                theirs = fixed if fixed is not None else original
+                sources[name] = 'frozen_twenty_day_review' if fixed is not None else 'episode_d20' if original is not None else 'unavailable'
+                if fixed is not None and original is not None and not math.isclose(float(fixed), float(original), rel_tol=1e-9, abs_tol=1e-9):
+                    conflicts.append(f'{name}:frozen={fixed!r},episode_d20={original!r}')
+                pairs.append((name, selection.get(derived_field), theirs))
+            selection['formal_result_sources'] = sources
+            selection['formal_result_source_conflicts'] = conflicts
             pairs = [(name, mine, theirs) for name, mine, theirs in pairs if theirs is not None]
             if pairs:
                 status = "match"
@@ -1947,6 +1935,8 @@ def export_dataset(
         "fixed_d20_market_missing_reason",
         "formal_result_consistency",
         "formal_result_diff_fields",
+        "formal_result_sources",
+        "formal_result_source_conflicts",
     ]
     counts["formal_selections"] = write_csv(
         data_dir / "formal_selections.csv", selections, selection_fields
