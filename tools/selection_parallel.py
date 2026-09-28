@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import warnings
+
+import pandas as pd
 from datetime import datetime, time, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -51,6 +54,9 @@ def parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     a = parser().parse_args(argv)
+    # Fragmentation diagnostics from the existing financial query are not data errors.
+    # Keep machine-readable fact responses usable when a tool combines stdout/stderr.
+    warnings.filterwarnings('ignore', category=pd.errors.PerformanceWarning)
     if a.command == 'discover':
         output = trial.discover_company(a.catalog, limit=a.limit, offset=a.offset)
     elif a.command == 'facts':

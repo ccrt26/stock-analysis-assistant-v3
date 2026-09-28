@@ -9,3 +9,7 @@
 最终 JSON 保留三路 `discovery_summary`：各自的 `status`、`source_refs`、实际提交的 `codes`。已检索且有候选用 `searched_with_candidates`；已检索但无合适候选用 `searched_no_candidate`。工具没有成功返回，不能自称已检索。候选账记录所有实际进入研究的代码和原去留，允许 0—5 只入选或完成且零入选，不按证据条数或价格排名补位。
 
 入选只留简短决定：必要事实、当前价格代价、最近替代股、最强反证、参与与重判条件。不写正式 trace、推荐、复盘、公司介绍或网页，不输出未来收益、仓位或交易执行。宿主程序保存短决定与实际证据切片。
+
+输出沿用既有字段名：`candidates` 每项含 `ts_code, discovered_by, final_fate, short_reason, source_refs`；`selected` 每项含 `ts_code, rank, primary_reason, strongest_counter_evidence, nearest_comparison, participation_condition, change_condition, source_refs`，rank 从1连续。正式入选的 candidate.final_fate 用 `selected` 或 `confirmed_active`，其余用实际 rejected/unresolved/conditional 去向；conditional_events 和 unresolved 用带 ts_code 的对象列表，与候选账一致。公司尚待首日确认的事件不能放进 selected。
+
+本轮若要求全范围检索元数据，每路实际查询的工具响应各输出一个 JSON 对象（不要在同一响应连印多个 JSON）：`view, source_total, scanned_all, query, matched_count, records`；最终 discovery_summary 同步 `source_total, query, matched_count, coverage_gap`。公司完整来源查询先于价格候选查询；SQL/投影可以遍历全来源后仅返回命中摘要，不必打印全表。读取 facts 的工具输出预算须容纳完整 JSON；出现输出截断应缩小单次股票/类别范围并续读，不能把截断当完整读取。
