@@ -178,3 +178,14 @@ def test_group_summary_denominators_zero_days_and_shared_date_means():
     assert result['groups']['M1']['zero_selection_days']==1
     assert result['groups']['M0']['views']['nonoverlap']['records']==2
     assert result['common_date_equal_AB']['d5_endpoint_return']['A']==pytest.approx(.2)
+
+
+def test_group_hit_rate_boolean_quantiles_preserve_missing_denominator():
+    rows=[{'method_id':'M0','ts_code':code,'action_date':'2026-08-20',
+           'd5_hit_20pct_close':value} for code,value in [('A',True),('B',False),('C',None)]]
+    result=outcomes.describe_groups(rows,['2026-08-20'],['2026-08-20'])
+    metric=result['groups']['M0']['views']['all_events']['metrics']['d5_hit_20pct_close']
+    assert metric['denominator']==2 and metric['mean']==.5
+    assert metric['q25']==.25 and metric['q75']==.75
+    only=outcomes.describe_groups(rows[:1],['2026-08-20'],['2026-08-20'])
+    assert only['groups']['M0']['views']['all_events']['metrics']['d5_hit_20pct_close']['q25']==1.

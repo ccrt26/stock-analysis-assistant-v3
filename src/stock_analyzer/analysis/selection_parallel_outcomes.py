@@ -200,7 +200,7 @@ def describe_groups(rows: list[dict], trading_dates: list[str], action_dates: li
                        'complete_d20_paths':sum(r.get('fixed_d20_status')=='complete' for r in values),
                        'metrics':{}}
             for field in metrics:
-                numeric = pd.to_numeric(frame[field], errors='coerce').dropna() if field in frame else pd.Series(dtype=float)
+                numeric = pd.to_numeric(frame[field], errors='coerce').dropna().astype(float) if field in frame else pd.Series(dtype=float)
                 by_date = frame.loc[numeric.index].assign(value=numeric).groupby('action_date')['value'].mean() if len(numeric) else pd.Series(dtype=float)
                 summary['metrics'][field] = {
                     'denominator':len(numeric), 'mean':float(numeric.mean()) if len(numeric) else None,
