@@ -252,6 +252,79 @@ def test_heading_normalization_preserves_words_and_code_fence():
     assert fio.normalize_article(result, IDENTITY) == result
 
 
+
+@pytest.mark.parametrize('title', [
+    '# 合成公司（000001.SZ）推荐说明',
+    '### 合成公司（000001.SZ）推荐说明',
+    '## 合成公司(000001.SZ) 推荐说明',
+    '# 合成公司（000001.SZ）：推荐说明',
+    '# 合成公司（000001.SZ）—推荐说明',
+])
+def test_recommendation_title_label_keeps_words_and_is_idempotent(title):
+    body = '业务事实支持原选择，也保留反证。\n\n连续走弱且行业收缩才降低判断。\n'
+    result = fio.normalize_article(title + '\n\n' + body, IDENTITY)
+    assert result == '### 合成公司（000001.SZ）\n\n#### 推荐说明\n\n' + body
+    assert fio.normalize_article(result, IDENTITY) == result
+
+
+@pytest.mark.parametrize('text', [
+    '# 其他公司（000001.SZ）推荐说明\n正文',
+    '# 合成公司（000002.SZ）推荐说明\n正文',
+    '# 合成公司（000001.SZ）其他说明\n正文',
+    '# 合成公司（000001.SZ）推荐说明及新条件\n正文',
+    '# 合成公司（000001.SZ）推荐说明\n正文\n# 合成公司（000001.SZ）推荐说明',
+    '前置正文\n# 合成公司（000001.SZ）推荐说明\n正文',
+    '# 合成公司（000001.SZ）推荐说明\n',
+])
+def test_recommendation_title_label_does_not_relax_other_checks(text):
+    with pytest.raises(ValueError):
+        fio.normalize_article(text, IDENTITY)
+
+
+@pytest.mark.parametrize('tampered', [False, True])
+def test_failed_title_recovers_same_author_output_without_resampling(harness, monkeypatch, tampered):
+    raw = BODY.replace('）\n', '）推荐说明\n', 1)
+    def author(role, directory):
+        assert role == 'author'
+        (directory / 'output/article.md').write_text(raw)
+        (directory / 'output/questions.json').write_text(fio.dumps({'research_issues': []}))
+    harness.responses[:] = [author]
+    normalize = fio.normalize_article
+    def previous_parser(text, identity):
+        if text.splitlines()[0].endswith('推荐说明'):
+            raise ValueError('股票标题含无法识别的额外文字，需作者处理')
+        return normalize(text, identity)
+    with monkeypatch.context() as old_parser:
+        old_parser.setattr(fio, 'normalize_article', previous_parser)
+        with pytest.raises(ValueError, match='股票标题含无法识别'):
+            cycle(harness)
+    receipt_path = harness.root / 'article/author-000001-SZ-result.json'
+    failed = json.loads(receipt_path.read_text())
+    article_path = Path(failed['stage_directory']) / 'output/article.md'
+    assert failed['terminal_status'] == 'failed' and failed['execution_verified']
+    assert failed['failed_output_hashes']['output/article.md'] == fio.digest(article_path.read_bytes())
+    counts = copy.deepcopy(harness.state['article_cycle_counts'])
+    config = {'recommendation_authoring_profile': PROFILE, '_resume_files': True}
+    if tampered:
+        article_path.write_text(raw + '\n擅改正文。\n')
+        with pytest.raises(ValueError, match='失败阶段原始输出已变化'):
+            cycle(harness, config=config)
+        assert [call[0] for call in harness.calls] == ['author']
+        assert harness.state['article_cycle_counts'] == counts
+        return
+    result = cycle(harness, config=config)
+    assert result['status'] == 'ready' and result['execution_verified']
+    assert [call[0] for call in harness.calls] == ['author', 'review']
+    assert harness.state['article_cycle_counts'] == counts
+    assert article_path.read_text() == raw
+    assert (harness.calls[-1][1] / 'input/article.md').read_text() == result['article']
+    recovered = json.loads(receipt_path.read_text())
+    assert recovered['terminal_status'] == 'completed'
+    assert recovered['stage_execution'] == failed['stage_execution']
+    assert cycle(harness, config=config)['article'] == result['article']
+    assert len(harness.calls) == 2
+
+
 def test_handoff_is_model_formed_and_packet_bound(harness):
     packet = original_packet()
     binding = dict(kind='original_packet', identity=packet['identity'], packet_sha256='a'*64,

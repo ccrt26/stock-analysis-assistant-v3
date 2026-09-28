@@ -211,7 +211,8 @@ def normalize_article(text, identity):
                 if found.group(1).strip() != name or found.group(2) != code:
                     raise ValueError('文章股票身份不符，禁止自动纠正')
                 suffix = label[found.end():].strip()
-                if suffix and not suffix.startswith(('：', ':', '—', '–', '-')):
+                # Preserve this literal article label just like a separated subtitle.
+                if suffix and suffix != '推荐说明' and not suffix.startswith(('：', ':', '—', '–', '-')):
                     raise ValueError('股票标题含无法识别的额外文字，需作者处理')
                 if title_seen or any(x.strip() for x in lines):
                     raise ValueError('股票标题位置或数量异常')
