@@ -922,3 +922,47 @@ def test_scan_history_does_not_merge_across_different_as_of(tmp_path: Path) -> N
     # 账本未合并：观点标签保留报告自算结果，而非账本的“观点减弱”。
     assert review["viewLabel"] == "观点调整"
     assert review["viewReason"] == ""
+
+
+@pytest.mark.parametrize('route', ['report', 'brief', 'detail'])
+@pytest.mark.parametrize('mismatch', [False, True])
+def test_review_return_and_source_date_share_episode_and_cutoff(tmp_path, route, mismatch):
+    episodes = [_episode('e1','600000.SH','同股'), _episode('e2','600000.SH','同股')]
+    episodes[0]['current_close_return_date'] = '2026-09-01'
+    episodes[1]['current_close_return_since_entry'] = -.2
+    snapshot = _snapshot(episodes)
+    (tmp_path/'snapshot-2026-09-02.json').write_text(json.dumps(snapshot))
+    cutoff = '2026-09-02T18:00:00+08:00' if mismatch else snapshot['as_of']
+    if route == 'report':
+        report = _report([_alert('e1'),_alert('e2')]);report['as_of'] = cutoff
+        (tmp_path/'monitor-report-2026-09-02.json').write_text(json.dumps(report))
+    else:
+        reviews = [{**_review(e),'review_kind':'regular_detail' if route == 'detail' else 'brief',
+                    'view_change':'unchanged'} for e in ('e1','e2')]
+        (tmp_path/'daily-formal-reviews-2026-09-02.json').write_text(json.dumps({'as_of':cutoff,'reviews':reviews}))
+    history = scan_history(tmp_path,date(2026,9,2))
+    first, second = history['e1'][0], history['e2'][0]
+    assert first['date'] == '2026-09-02'
+    assert first['formalReturn'] == (None if mismatch else .03)
+    assert first['formalReturnDate'] == (None if mismatch else '2026-09-01')
+    assert second['formalReturn'] == (None if mismatch else -.2)
+    assert second['formalReturnDate'] is None  # Legacy snapshot: never infer from report or other episode.
+
+
+def test_main_return_keeps_actual_source_date_and_no_entry_stays_empty(tmp_path, monkeypatch):
+    first = _episode('e1','600000.SH','有入口')
+    first['current_close_return_date'] = '2026-09-01'
+    second = _episode('e2','600001.SH','缺入口')
+    second['current_close_return_date'] = '2026-09-01'
+    original = renderer.collect_market_facts
+    def facts(*args,**kwargs):
+        result = original(*args,**kwargs)
+        result['candles']['600000.SH'] = [[10.,10.,10.,10.,100.] for _ in args[2]]
+        return result
+    monkeypatch.setattr(renderer,'collect_market_facts',facts)
+    payload = build_payload(tmp_path,tmp_path,date(2026,9,2),_report([]),_snapshot([first,second]))
+    rows = {s['code']:s for s in payload['stocks']}
+    assert rows['600000.SH']['formalReturn'] == .03
+    assert rows['600000.SH']['formalReturnDate'] == '2026-09-01'
+    assert rows['600001.SH']['formalReturn'] is None
+    assert rows['600001.SH']['formalReturnDate'] is None

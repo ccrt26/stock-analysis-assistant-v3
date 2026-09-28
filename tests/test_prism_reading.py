@@ -61,7 +61,7 @@ def test_stop_day_with_review_and_completed_d20():
 
 def test_formal_return_is_same_day_only_and_d0_missing_reference_remain_empty():
     stock = {'recDate':'2026-09-01','ref':10,'formalReturnDate':'2026-09-14','formalReturn':-.0653,
-             'reviews':[{'date':'2026-09-02','formalReturn':.02}]}
+             'reviews':[{'date':'2026-09-02','formalReturn':.02,'formalReturnDate':'2026-09-02'}]}
     s = json.dumps(stock)
     values = js(f'[formalReturnAt({s},"2026-09-14"),formalReturnAt({s},"2026-09-02"),formalReturnAt({s},"2026-09-03"),formalReturnAt({{...{s},d0:true}},"2026-09-14"),formalReturnAt({{...{s},ref:null}},"2026-09-14")]')
     assert values[:2] == pytest.approx([-6.53, 2])
@@ -85,3 +85,10 @@ def test_history_opinion_uses_review_not_current_stock_state():
     assert 'D.invalid(s)' not in timeline and 'D.opinion(s)' not in timeline
     assert "r.viewChange==='invalidated'" in timeline
     assert '复盘 ${r.date}' in timeline and '开始观察 ${s.recDate}' in timeline
+
+
+@pytest.mark.parametrize('source_date', [None, '2026-09-13'])
+def test_existing_review_without_same_day_source_cannot_fall_back_to_main(source_date):
+    stock = {'recDate':'2026-09-01','ref':10,'formalReturnDate':'2026-09-14','formalReturn':.25,
+             'reviews':[{'date':'2026-09-14','formalReturn':.1,'formalReturnDate':source_date}]}
+    assert js(f'formalReturnAt({json.dumps(stock)},"2026-09-14")') is None

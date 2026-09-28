@@ -615,6 +615,9 @@ def scan_history(
                                if report.get("monitor_review_policy") == "state-change-v1" and episode_id == public_owner
                                else "" if report.get("monitor_review_policy") == "state-change-v1"
                                else str(review.get("current_review") or ""))
+                formal_return = (episode.get("current_close_return_since_entry")
+                                 if episode.get("entry_open") and _parse_as_of(report.get("as_of")) is not None
+                                 and _parse_as_of(report.get("as_of")) == _parse_as_of(snapshot.get("as_of")) else None)
                 merged[(episode_id, day.isoformat())] = {
                     "date": day.isoformat(),
                     "as_of": str(snapshot.get("as_of") or ""),
@@ -630,9 +633,9 @@ def scan_history(
                     "monitorReviewPolicy": report.get("monitor_review_policy"),
                     "reviewKindText": "状态变化复盘" if report.get("monitor_review_policy") == "state-change-v1" else None,
                     "facts": _review_facts(episode),
-                    "formalReturn": (episode.get("current_close_return_since_entry")
-                                     if episode.get("entry_open") and _parse_as_of(report.get("as_of")) is not None
-                                     and _parse_as_of(report.get("as_of")) == _parse_as_of(snapshot.get("as_of")) else None),
+                    "formalReturn": formal_return,
+                    "formalReturnDate": (episode.get("current_close_return_date")
+                                         if formal_return is not None else None),
                     "base": OUTLOOK_TEXT.get(str(alert.get("outlook_1_3d")), ""),
                     "outlookReason": str(alert.get("outlook_reason_plain_language") or ""),
                     "assessmentText": ASSESSMENT_TEXT.get(
@@ -697,6 +700,8 @@ def scan_history(
                 "checkpoint": review.get("checkpoint"),
                 "facts": _review_facts(episode),
                 "formalReturn": formal_return,
+                "formalReturnDate": (episode.get("current_close_return_date")
+                                     if formal_return is not None else None),
                 "base": OUTLOOK_TEXT.get(str(review.get("outlook_1_3d")), ""),
                 "outlookReason": str(review.get("outlook_reason_plain_language") or ""),
                 "assessmentText": ASSESSMENT_TEXT.get(
@@ -772,6 +777,8 @@ def scan_history(
                 "review_kind": str(review.get("review_kind") or "brief"),
                 "facts": _review_facts(episode),
                 "formalReturn": formal_return,
+                "formalReturnDate": (episode.get("current_close_return_date")
+                                     if formal_return is not None else None),
                 "base": OUTLOOK_TEXT.get(str(review.get("outlook_1_3d")), ""),
                 "outlookReason": str(review.get("outlook_reason_plain_language") or ""),
                 "assessmentText": ASSESSMENT_TEXT.get(
@@ -1764,7 +1771,9 @@ def build_payload(
                 "statementStatus": statement_miss if not statement_full else None,
                 "statementNote": statement_display.MESSAGES.get(statement_miss) if not statement_full else None,
                 "formalReturn": episode.get("current_close_return_since_entry") if ref is not None else None,
-                "formalReturnDate": analysis_date.isoformat(),
+                "formalReturnDate": (episode.get("current_close_return_date")
+                                     if ref is not None and episode.get("current_close_return_since_entry") is not None
+                                     else None),
                 "trackingStatus": (
                     str(episode.get("tracking_status") or "") or None
                 ),

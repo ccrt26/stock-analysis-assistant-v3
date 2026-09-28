@@ -3657,6 +3657,8 @@ def _path_metrics(
         f"{prefix}_first_high_hit_20pct_date": None,
         hit_key: None,
     }
+    if prefix == "current":
+        empty["current_close_return_date"] = None
     if not path or entry is None or entry <= 0:
         return empty
     close_returns = [(item["close"] / entry) - 1.0 for item in path]
@@ -3681,6 +3683,8 @@ def _path_metrics(
             item["close"] / running_peak - 1.0,
         )
     return {
+        **({"current_close_return_date": path[-1]["date"].isoformat()}
+           if prefix == "current" else {}),
         f"{prefix}_close_return_since_entry": close_returns[-1],
         f"{prefix}_max_close_return_since_entry": max(close_returns),
         f"{prefix}_close_drawdown_from_peak": (

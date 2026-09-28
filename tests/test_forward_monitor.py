@@ -862,6 +862,7 @@ def test_prepare_calculates_adjusted_path_and_excludes_future_prices(tmp_path: P
         assert episode[f"{prefix}_first_high_hit_20pct_date"] == sessions[0].isoformat()
     assert episode["d20_hit_20pct_close_within_20d"] is True
     assert episode["current_hit_20pct_close"] is True
+    assert episode["current_close_return_date"] == sessions[1].isoformat()
 
 
 def test_public_markdown_hides_conditional_event_but_keeps_internal_json(
@@ -955,6 +956,8 @@ def test_conditional_event_never_requires_or_accepts_a_d20_final_review(
 
     assert episode["selection_output_class"] == "conditional_event"
     assert episode["entry_open"] is None
+    assert episode.get("current_close_return_date") is None
+    assert episode["current_close_return_since_entry"] is None
     assert episode["d20_close_return_since_entry"] is None
     assert "pending_final_review" not in episode["attention_reasons"]
     assert snapshot["required_final_review_episode_ids"] == []
@@ -6184,3 +6187,33 @@ def test_repair_brief_markdown_displays_current_opportunity_once() -> None:
     for key in ("participation_reason", "outlook_reason", "change_condition"):
         assert md.count(opportunity[key]) == 1
     assert md.count(daily["current_review"]) == 1
+
+
+def test_current_return_date_uses_same_adjusted_path_and_leaves_d20_contract_unchanged():
+    from stock_analyzer.ops.forward_monitor import _adjusted_path, _path_metrics
+    code = '600000.SH'
+    earlier, missing = date(2026, 9, 23), date(2026, 9, 24)
+    eq = pd.DataFrame([{'ts_code':code,'open':50.,'close':50.,'high':55.,'low':45.}])
+    factors = pd.DataFrame([{'ts_code':code,'adj_factor':2.}])
+    # A raw last-day quote exists but its factor is missing: it cannot date the adjusted return.
+    cache = {earlier:(eq,factors), missing:(eq,pd.DataFrame(columns=['ts_code','adj_factor']))}
+    path = _adjusted_path(cache,code,[earlier,missing])
+    current = _path_metrics(path,100.,prefix='current')
+    assert current['current_close_return_date'] == '2026-09-23'
+    assert current['current_close_return_since_entry'] == pytest.approx(0.)
+    for empty_path, entry in [([],100.),(path,None),(path,0.)]:
+        empty = _path_metrics(empty_path,entry,prefix='current')
+        assert empty['current_close_return_date'] is None
+        assert empty['current_close_return_since_entry'] is None
+    fixed = _path_metrics(path,100.,prefix='d20')
+    assert fixed == {
+        'd20_close_return_since_entry':pytest.approx(0.),
+        'd20_max_close_return_since_entry':pytest.approx(0.),
+        'd20_close_drawdown_from_peak':pytest.approx(0.),
+        'd20_max_close_drawdown':pytest.approx(0.),
+        'd20_max_high_return_since_entry':pytest.approx(.1),
+        'd20_mae_since_entry':pytest.approx(-.1),
+        'd20_first_close_hit_20pct_date':None,
+        'd20_first_high_hit_20pct_date':None,
+        'd20_hit_20pct_close_within_20d':False,
+    }

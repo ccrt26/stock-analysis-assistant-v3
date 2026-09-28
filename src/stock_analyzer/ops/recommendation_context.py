@@ -252,7 +252,8 @@ def _context(root: Path, trace: dict, result: dict, codes: list[str], *,
                 available = sorted(set(normalized))
                 retained = set(available[-1 if dataset == 'main_business' else -5:])
                 retained.update(p for p in available if p in periods or p[:4] in cited_years)
-                part = part[normalized.isin(retained)].sort_values('report_period')
+                part = part[normalized.isin(retained)].sort_values(
+                    'report_period', key=lambda values: values.map(date_text))
             if dataset == 'equity_daily' and not part.empty:
                 part = part.sort_values('trade_date')
             if dataset == 'announcement' and not part.empty:

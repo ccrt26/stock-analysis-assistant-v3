@@ -79,7 +79,7 @@ description: Use when point-in-time A-share candidate selection, validation, or 
 
 ### 2. 判断所处阶段
 
-根据连续事实解释为：
+根据同层级、同窗口、同统计口径的连续日期事实判断阶段，并说明成员数、有效覆盖及其变化。单次快照中3日与5日的差异不能独立证明退潮；缺少可比跨日资料时，相应动态判断保留未知。根据这些事实解释为：
 
 - `broad_diffusion`：多窗口相对表现、成员中位数和上涨面共同增强，且不是少数成员独占贡献；
 - `early_diffusion`：短窗口共同表现和参与面开始扩大，更长窗口尚未完整确认；

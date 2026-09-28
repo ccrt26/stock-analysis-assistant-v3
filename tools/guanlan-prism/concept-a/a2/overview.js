@@ -210,8 +210,8 @@ function trackingNotice(s,day){
 }
 function formalReturnAt(s,day){
  if(s.d0||!V(s.ref)||s.ref<=0||day<s.recDate)return null;
- const value=(s.reviews||[]).find(r=>r.date===day)?.formalReturn;
- if(V(value))return value*100;
+ const review=(s.reviews||[]).find(r=>r.date===day);
+ if(review)return review.formalReturnDate===day&&V(review.formalReturn)?review.formalReturn*100:null;
  return s.formalReturnDate===day&&V(s.formalReturn)?s.formalReturn*100:null;
 }
 function returnBasis(s,day){

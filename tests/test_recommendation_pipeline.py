@@ -313,7 +313,8 @@ def test_derived_context_keeps_original_universe_denominators_and_requires_cutof
     with pytest.raises(ValueError,match='元数据不一致'):context.derived_at(warehouse,'sector_hotspot','2026-09-16',cutoff)
 
 
-def test_context_routes_financials_through_comparable_query_and_never_writes_warehouse(tmp_path,monkeypatch):
+@pytest.mark.parametrize("mixed_periods", [False, True])
+def test_context_routes_financials_through_comparable_query_and_never_writes_warehouse(tmp_path,monkeypatch,mixed_periods):
     trace=_v4_trace();stock=context.selected_result(trace)['selected_stocks'][0];code=stock['ts_code']
     trace['research_result']['nearest_nonselections']=[]
     formation=trace['formation_date'];cutoff=dt.datetime.fromisoformat(trace['as_of']);calls=[]
@@ -330,7 +331,13 @@ def test_context_routes_financials_through_comparable_query_and_never_writes_war
             if dataset=='industry_member':return pd.DataFrame({'ts_code':[code],'industry_code':['ABC'],'industry_name':['真实二级行业'],'level':['L2'],'valid_from':['2020-01-01'],'valid_to':[None]})
             return pd.DataFrame()
         def comparable_financials_as_of(self,dataset,asof):
-            calls.append(('comparable:'+dataset,asof));return pd.DataFrame({'ts_code':[code],'report_period':['2026-06-30'],'ann_date':['20260820']})
+            calls.append(('comparable:'+dataset,asof))
+            periods = [pd.Timestamp('2017-06-30'), '2020-06-30', dt.date(2021,6,30),
+                       '2022-06-30', pd.Timestamp('2023-06-30'), '2024-06-30',
+                       dt.date(2025,6,30), '2026-06-30'] if mixed_periods else ['2026-06-30']
+            return pd.DataFrame({'ts_code':[code]*len(periods),
+                                 'report_period':pd.Series(periods,dtype=object),
+                                 'ann_date':['20260820']*len(periods)})
     monkeypatch.setattr(context,'ResearchWarehouse',Warehouse);monkeypatch.setattr(context,'ResearchQuery',Query)
     def derived(w,feature,day,asof):
         assert day==formation and asof==cutoff
@@ -338,7 +345,9 @@ def test_context_routes_financials_through_comparable_query_and_never_writes_war
         if feature=='price_analysis_context':return pd.DataFrame({'ts_code':[code],'primary_industry_code':['ABC']})
         return pd.DataFrame()
     monkeypatch.setattr(context,'derived_at',derived)
-    result=context.build_context(tmp_path,trace)
+    result=context.build_context(tmp_path,trace,periods=['2017-06-30'])
+    expected_periods = ['2017-06-30', '2022-06-30', '2023-06-30', '2024-06-30', '2025-06-30', '2026-06-30'] if mixed_periods else ['2026-06-30']
+    assert [row['report_period'] for row in result['facts'][code]['income_statement']] == expected_periods
     assert result['facts'][code]['industry_observations']==[{'group_code':'ABC','member_count':69,'observed_member_count':67}]
     assert result['facts'][code]['equity_daily'][0]['amount']==1000.0
     assert all(t==cutoff for _,t in calls)
