@@ -510,6 +510,10 @@ def prepare_day(config_path: Path, *, as_of: str, mode: str, replay_id: str | No
     _write_json(day_inputs / 'catalog.json', catalog)
     _write_json(day_inputs / 'field-map.json', {
         'definitions': DEFINITIONS,
+        'source_summary': {**{name: {'rows': source['rows']} for name, source in derived_sources.items()},
+                           'company_discovery': {'rows': len(company_index)},
+                           'universe': {'rows': len(universe), 'shape': 'list of security records'}},
+        'technical_read_notes': 'Do not print catalog bound_sources or sources.json. Parse mixed ISO timestamps with pd.to_datetime(series, format="ISO8601", utc=True).',
         'company_discovery_command': f'python tools/selection_parallel.py discover --catalog {day_inputs / "catalog.json"} --view company --limit 50 --offset 0',
         'company_discovery_fields': {'available_at':'本地时点可见时间，不等于实际公告公开时间',
             'published_at':'原公开时间若可得', 'business_date':'对应报告期或业务生效日期',
@@ -707,13 +711,14 @@ def _execute_research(cmd: list[str], cwd: Path, prompt: str, events_path: Path,
         tools = 0
         tokens = None
         budget_exceeded = None
+        post_run_budget = None
         stop_at = None
         termination_sent = False
         kill_sent = False
         token_live_observed = False
         started = clock_time.monotonic()
         def inspect(line: bytes) -> None:
-            nonlocal tools, tokens, budget_exceeded, token_live_observed
+            nonlocal tools, tokens, budget_exceeded, post_run_budget, token_live_observed
             try:
                 event = json.loads(line)
             except (json.JSONDecodeError, UnicodeDecodeError):
@@ -727,10 +732,16 @@ def _execute_research(cmd: list[str], cwd: Path, prompt: str, events_path: Path,
             if isinstance(usage, dict):
                 tokens = usage
                 token_live_observed = token_live_observed or event.get('type') != 'turn.completed'
+                exceeded = None
                 if usage.get('input_tokens', 0) >= limits['max_input_tokens']:
-                    budget_exceeded = 'max_input_tokens'
+                    exceeded = 'max_input_tokens'
                 if usage.get('output_tokens', 0) >= limits['max_output_tokens']:
-                    budget_exceeded = 'max_output_tokens'
+                    exceeded = 'max_output_tokens'
+                if event.get('type') == 'turn.completed':
+                    # Let the CLI flush its final public output before rejecting the run.
+                    post_run_budget = exceeded
+                elif exceeded:
+                    budget_exceeded = exceeded
         try:
             while selector.get_map() or proc.poll() is None:
                 if budget_exceeded and stop_at is None:
@@ -767,6 +778,7 @@ def _execute_research(cmd: list[str], cwd: Path, prompt: str, events_path: Path,
             exit_code = proc.wait(timeout=3)
         finally:
             selector.close()
+        budget_exceeded = budget_exceeded or post_run_budget
         return {'exit_code': exit_code if not budget_exceeded else 124,
                 'child_exit_code': exit_code, 'budget_exceeded': budget_exceeded,
                 'tool_commands': tools, 'tokens': tokens,
@@ -863,7 +875,10 @@ def _prompt(cfg: dict, day: dict, method: str, catalog_path: Path) -> str:
             '完整检索每路记录 source_total、query、matched_count、coverage_gap；实际查询输出 JSON 包含 view、source_total、scanned_all=true、query、matched_count、records。'
             '纯分页第一页不算完成全来源检索；可用 pandas/duckdb 全表过滤投影，不必全表输出。'
             f'每arm固定预算{cfg.get("limits")}；请批量投影、集中核实后及时返回，不放大预算。'
-            '官方原件按本目录 work/official/ 保存，用现有 stock_analyzer.ops.official_evidence 的 fetch_announcement/read_evidence；'
+            '所有中间文件仅写本上下文 work/，不用共享临时文件。官方原件按本目录 work/official/ 保存。'
+            '现有 Python 接口：stock_analyzer.ops.selection_parallel.facts(Path(catalog), codes=[...], categories=[...], max_chars=0, group_codes=[...], sector_snapshots=[...]) 返回完整 dict；'
+            'stock_analyzer.ops.official_evidence.fetch_announcement(announcement_dict, Path(本cwd/work/official/独立id), as_of=datetime.fromisoformat(as_of)) 返回 receipt.json 的 Path；'
+            'receipt=json.loads(path.read_text())，read_evidence(path, receipt["url"], datetime.fromisoformat(receipt["retrieved_at"])) 校验原件，正文在 path.parent/text.txt，必须实际读取。'
             'adopted_pages_and_clauses 是 [{"page":1,"quote":"原文短句"}]，原文短句须在正文中。'
             'official_evidence 数组逐项含 evidence_id、ts_code、announcement_id、title、available_at、availability_basis、url、retrieved_at、receipt（相对本cwd的receipt.json）、adopted_pages_and_clauses。引用 official:<evidence_id>。'
             '验证完可能改变去留的实际业务和事实再返回最终结果。不得使用未来信息。'
@@ -893,7 +908,10 @@ def _successful_tool_results(events_text: str) -> list[tuple[str, str, dict | li
             continue
         output = item.get('aggregated_output') or ''
         try:
-            parsed = json.loads(output)
+            # Arrow's sandbox CPU probe is emitted beside otherwise valid JSON.
+            # Keep the raw log, and remove only the known native diagnostic line.
+            clean = re.sub(r"(?m)^/[^\n]*arrow/cpp/src/arrow/util/cpu_info\.cc:\d+: IOError: sysctlbyname failed for 'hw\.[A-Za-z0-9_.]+'\. Detail: \[errno 1\] Operation not permitted\r?\n?", '', output)
+            parsed = json.loads(clean)
         except json.JSONDecodeError:
             parsed = None
         found.append((item.get('command') or '', output, parsed))
@@ -925,12 +943,17 @@ def _check_discovery(obj: dict, tools: list[tuple[str, str, object]], *, full_un
             source_file = catalog_path.parent / ('company_discovery.parquet' if view == 'company' else marker)
             import pyarrow.parquet as pq
             total = pq.read_metadata(source_file).num_rows
-            observed = any(isinstance(parsed, dict) and parsed.get('view') == view
-                and parsed.get('source_total') == total and parsed.get('scanned_all') is True
-                and isinstance(parsed.get('query'), str) and parsed['query'].strip()
-                and isinstance(parsed.get('matched_count'), int) and isinstance(parsed.get('records'), list)
-                and marker in command for command, _, parsed in tools)
-            if item['source_total'] != total:
+            allowed_totals = {total}
+            if view == 'price' and (catalog_path.parent/'universe.json').exists():
+                # A left join from every eligible security is also a full-U scan.
+                allowed_totals.add(len(_json(catalog_path.parent/'universe.json')))
+            observed = any(isinstance(result, dict) and result.get('view') == view
+                and result.get('source_total') == item['source_total'] and result.get('scanned_all') is True
+                and isinstance(result.get('query'), str) and result['query'].strip()
+                and isinstance(result.get('matched_count'), int) and isinstance(result.get('records'), list)
+                and marker in command for command, _, parsed in tools if isinstance(parsed, dict)
+                for result in (parsed.get('discoveries', []) if 'discoveries' in parsed else [parsed]))
+            if item['source_total'] not in allowed_totals:
                 raise ValueError(f'discovery {view} source coverage differs from frozen source')
         elif view == 'company':
             observed = any(isinstance(parsed, dict) and parsed.get('view') == 'company'

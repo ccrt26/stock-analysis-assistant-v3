@@ -668,3 +668,44 @@ def test_outcomes_cannot_read_market_before_ten_frozen_decisions(tmp_path,monkey
     monkeypatch.setattr(trial,'_outcome_source_versions',lambda *a:pytest.fail('future source read before freeze'))
     with pytest.raises(ValueError,match='all ten qualified'):
         trial.update_outcomes(path,through='2026-09-24')
+
+
+def test_successful_json_survives_only_known_arrow_cpu_warning():
+    warning = "/Users/runner/work/crossbow/crossbow/arrow/cpp/src/arrow/util/cpu_info.cc:242: IOError: sysctlbyname failed for 'hw.l1dcachesize'. Detail: [errno 1] Operation not permitted\n"
+    def event(output, code=0):
+        return json.dumps({'type':'item.completed','item':{'type':'command_execution', 'command':'query', 'exit_code':code,'aggregated_output':output}})
+    raw = warning + '{"reads":[]}'
+    result = trial._successful_tool_results(event(raw))
+    assert result == [('query', raw, {'reads':[]})]
+    assert trial._successful_tool_results(event('unknown warning\n{"reads":[]}'))[0][2] is None
+    assert trial._successful_tool_results(event(raw, 1)) == []
+
+
+def test_full_u_price_join_and_batched_discoveries(tmp_path):
+    catalog=tmp_path/'catalog.json';summary={};results=[]
+    trial._write_json(tmp_path/'universe.json',[{'ts_code':'A'},{'ts_code':'B'}])
+    names=['company_discovery','sector_hotspot','price_analysis_context']
+    for view,name in zip(['company','sector','price'],names):
+        pd.DataFrame({'value':[1,2,3]}).to_parquet(tmp_path/(name+'.parquet'))
+        count=2 if view=='price' else 3
+        summary[view]={'status':'searched_no_candidate','codes':[],'source_refs':['neutral:'+name],
+                      'source_total':count,'query':'all-U predicate','matched_count':0,'coverage_gap':'none'}
+        results.append({'view':view,'source_total':count,'scanned_all':True,'query':'all-U predicate','matched_count':0,'records':[]})
+    tools=[(' '.join(n+'.parquet' for n in names),'',{'discoveries':results})]
+    obj={'candidates':[],'discovery_summary':summary}
+    trial._check_discovery(obj,tools,full_universe=True,catalog_path=catalog)
+    results[-1]['source_total']=1
+    with pytest.raises(ValueError,match='lacks successful'):
+        trial._check_discovery(obj,tools,full_universe=True,catalog_path=catalog)
+    results[-1]['source_total']=2;results[-1]['scanned_all']=False
+    with pytest.raises(ValueError,match='lacks successful'):
+        trial._check_discovery(obj,tools,full_universe=True,catalog_path=catalog)
+
+
+def test_post_run_token_failure_preserves_final_output(tmp_path):
+    import sys
+    script = "import json,time;from pathlib import Path;print(json.dumps({'type':'turn.completed','usage':{'input_tokens':12,'cached_input_tokens':8,'output_tokens':3}}),flush=True);time.sleep(0.3);Path('last.json').write_text('{}')"
+    result=trial._execute_research([sys.executable,'-u','-c',script],tmp_path,'',tmp_path/'events',tmp_path/'errors',
+        {'max_tool_commands':24,'max_wall_seconds':3,'max_input_tokens':10,'max_output_tokens':20000})
+    assert result['exit_code']==124 and result['budget_exceeded']=='max_input_tokens'
+    assert result['child_exit_code']==0 and (tmp_path/'last.json').read_text()=='{}'
