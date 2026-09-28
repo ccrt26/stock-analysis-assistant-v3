@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 import pandas as pd
 
 from stock_analyzer.analysis import selection_parallel_outcomes as outcomes
