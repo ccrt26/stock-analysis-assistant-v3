@@ -2149,6 +2149,8 @@ def preflight(config_path: Path, *, output_dir: Path) -> dict:
                 shutil.copytree(source_dir, target_dir)
             receipt = _json(evidence_receipts[0])
             announcement = receipt.get('announcement') or {}
+            is_pdf = str(receipt.get('original', '')).endswith('.pdf')
+            read_locator = {'start_page': 1, 'end_page': 1} if is_pdf else {'start_line': 1, 'end_line': 40}
             try:
                 located = compact.evidence_request(catalog0, evidence_context, {'documents': [
                     {'evidence_id': source_dir.name, 'ts_code': announcement.get('ts_code'),
@@ -2156,8 +2158,7 @@ def preflight(config_path: Path, *, output_dir: Path) -> dict:
                      'query': '业绩 变动 原因 风险'}]})
                 read_back = compact.evidence_request(catalog0, evidence_context, {'documents': [
                     {'evidence_id': source_dir.name, 'action': 'read',
-                     'receipt_ref': located['documents'][0]['receipt_ref'],
-                     'start_line': 1, 'end_line': 40}]})
+                     'receipt_ref': located['documents'][0]['receipt_ref'], **read_locator}]})
                 first = located['documents'][0]
                 evidence_ok = (first.get('receipt_ref', '').endswith('receipt.json')
                                and not first.get('fetched_now')
@@ -2288,7 +2289,8 @@ def _preflight_fake_arm(cfg: dict, root: Path, out: Path, catalog0: Path, identi
     sim_trial = simulation_root / 'archive/selection_trials' / cfg['experiment_id']
     sim_cfg = dict(cfg)
     sim_cfg.update(archive_root=str(simulation_root / 'archive'),
-                   context_root=str(simulation_root / 'context'),
+                   context_root=str(Path(cfg['context_root']).parent
+                                    / f"{cfg['experiment_id']}-preflight-sim"),
                    research_enabled=True,
                    replay_cases=[dict(identity0, replay_id='sim-compact1')],
                    full_universe_replay=True, execution_profile='compact-v1')
@@ -2344,10 +2346,12 @@ def _preflight_fake_arm(cfg: dict, root: Path, out: Path, catalog0: Path, identi
         add_event(f'{cli} facts --catalog {sim_catalog} --code {fixture_code} --profile decision', page)
     evidence_fixture = None
     if evidence_context is not None and evidence_id:
+        kind_receipt = _json(evidence_context / 'work/official' / evidence_id / 'receipt.json')
+        pdf_read = str(kind_receipt.get('original', '')).endswith('.pdf')
+        read_locator = {'start_page': 1, 'end_page': 1} if pdf_read else {'start_line': 1, 'end_line': 30}
         located = compact.evidence_request(sim_catalog, evidence_context, {'documents': [
             {'evidence_id': evidence_id, 'action': 'read',
-             'receipt_ref': f'work/official/{evidence_id}/receipt.json',
-             'start_line': 1, 'end_line': 30}]})
+             'receipt_ref': f'work/official/{evidence_id}/receipt.json', **read_locator}]})
         add_event(f'{cli} evidence --catalog {sim_catalog} --context . --request request.json', located)
         receipt_dir = evidence_context / 'work/official' / evidence_id
         text_lines = (receipt_dir / 'text.txt').read_text(encoding='utf-8').splitlines()
