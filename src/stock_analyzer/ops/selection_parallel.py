@@ -3041,11 +3041,17 @@ def preflight(config_path: Path, *, output_dir: Path) -> dict:
             detail = {'replay_id': identity['replay_id']}
             if ok:
                 universe = _json(cat_path.parent / 'universe.json')
+                sources_file = cat_path.parent / 'sources.json'
+                if not sources_file.exists() and _json(cat_path).get('input_storage') == 'sealed-v1':
+                    sources_file = cat_path.parent / 'source-notes.json'
+                bound_count = (len(_json(sources_file).get('bound_partitions', []))
+                               if sources_file.name == 'source-notes.json'
+                               else len(_json(sources_file)))
                 detail.update({'formation_date': identity['formation_date'],
                                'action_date': identity['action_date'], 'as_of': identity['as_of'],
                                'universe_rows': len(universe),
                                'company_rows': pq.read_metadata(cat_path.parent / 'company_discovery.parquet').num_rows,
-                               'bound_source_partitions': len(_json(cat_path.parent / 'sources.json')),
+                               'bound_source_partitions': bound_count,
                                'execution_profile': (_json(cat_path.parent.parent / 'run.json')
                                                      .get('execution_profile'))})
                 day_catalogs.append((identity, cat_path))
