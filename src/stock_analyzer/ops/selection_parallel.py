@@ -2804,6 +2804,10 @@ def _preflight_fake_arm(cfg: dict, root: Path, out: Path, day_catalogs: list,
         else:
             clause_for_decision = {'lines': span.get('lines') or [1, 30], 'quote': quote}
         receipt = _json(arm_context / 'M0' / located_doc['receipt_ref'])
+        # zero-selection M1 on the shared day cites the same original: stage it
+        m1_official = arm_context / 'M1' / 'work' / 'official' / evidence_id
+        if not m1_official.exists():
+            shutil.copytree((arm_context / 'M0' / located_doc['receipt_ref']).parent, m1_official)
         evidence_fixture = {'receipt': located_doc['receipt_ref'],
                             'announcement': announcement_identity,
                             'receipt_payload': receipt, 'clause': clause_for_decision}
