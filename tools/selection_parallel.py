@@ -60,6 +60,7 @@ def parser() -> argparse.ArgumentParser:
     d.add_argument('--limit', type=int, default=50)
     d.add_argument('--offset', type=int, default=0)
     d.add_argument('--output-dir', type=Path, help='arm-local dir for persisted query results')
+    d.add_argument('--part', help='continuation id for oversized rows (reads the stored result)')
     d.add_argument('--usage-file', type=Path)
     k = sub.add_parser('knowledge', help='read frozen knowledge entries by id')
     k.add_argument('--context', type=Path, required=True)
@@ -100,7 +101,12 @@ def main(argv: list[str] | None = None) -> int:
     # Keep machine-readable fact responses usable when a tool combines stdout/stderr.
     warnings.filterwarnings('ignore', category=pd.errors.PerformanceWarning)
     if a.command == 'discover':
-        if a.request is not None:
+        if a.part is not None:
+            if a.output_dir is None:
+                raise ValueError('--part requires --output-dir (where the query result is stored)')
+            output = compact.discover_queries(a.catalog, {'queries': []}, output_dir=a.output_dir, part=a.part)
+            _print(output, catalog_path=a.catalog, usage_file=a.usage_file)
+        elif a.request is not None:
             if a.output_dir is None:
                 raise ValueError('--request requires --output-dir (arm-local query output)')
             request = json.loads(a.request.read_text(encoding='utf-8'))

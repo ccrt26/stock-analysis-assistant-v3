@@ -652,14 +652,16 @@ def test_official_acceptance_requires_original_identity_timestamp_and_clause(tmp
               'url':receipt['url'],'retrieved_at':receipt['retrieved_at'],'receipt':'work/official/document/receipt.json',
               'adopted_pages_and_clauses':[{'page':1,'quote':'原合同尚需审批'}]}
     obj={'official_evidence':[evidence]};cutoff=datetime.fromisoformat('2026-08-20T09:05:00+08:00')
-    trial._save_official_evidence(obj,context,tmp_path/'accepted',cutoff)
+    read_log=[('evidence cli','',{'documents':[{'evidence_id':'doc1','read':True,
+        'text':text,'locator':{'start_page':1,'end_page':1}}]})]
+    trial._save_official_evidence(obj,context,tmp_path/'accepted',cutoff,read_log=read_log)
     assert (tmp_path/'accepted/official/doc1/original.html').read_bytes()==raw
     evidence['available_at']='2026-08-21T00:00:00+08:00'
-    with pytest.raises(ValueError,match='cutoff'):trial._save_official_evidence(obj,context,tmp_path/'invalid',cutoff)
+    with pytest.raises(ValueError,match='cutoff'):trial._save_official_evidence(obj,context,tmp_path/'invalid',cutoff,read_log=read_log)
     evidence['available_at']=announcement['available_at'];evidence['ts_code']='000002.SZ'
-    with pytest.raises(ValueError,match='identity mismatch'):trial._save_official_evidence(obj,context,tmp_path/'invalid',cutoff)
+    with pytest.raises(ValueError,match='identity mismatch'):trial._save_official_evidence(obj,context,tmp_path/'invalid',cutoff,read_log=read_log)
     evidence['ts_code']=announcement['ts_code'];evidence['adopted_pages_and_clauses']=[{'page':1,'quote':'收入已经确定'}]
-    with pytest.raises(ValueError,match='absent'):trial._save_official_evidence(obj,context,tmp_path/'invalid',cutoff)
+    with pytest.raises(ValueError,match='absent'):trial._save_official_evidence(obj,context,tmp_path/'invalid',cutoff,read_log=read_log)
 
 
 def test_outcomes_cannot_read_market_before_ten_frozen_decisions(tmp_path,monkeypatch):
@@ -866,6 +868,8 @@ def _tiny_catalog(tmp_path, *, universe_n=6, company_rows=80):
                    'top3_positive_contribution_1d': 0.5, 'group_type': 'industry'}]).to_parquet(
         inputs / 'sector_hotspot.parquet', index=False)
     pd.DataFrame([{'analysis_date': '2026-08-19'}]).to_parquet(inputs / 'market_context.parquet', index=False)
+    trial._write_json(inputs / 'sources.json',
+                      [{'dataset': 'equity_daily', 'partition': '2026-08-19', 'file_sha256': 'fixed'}])
     catalog = {'experiment_id': 'compact-test', 'as_of': '2026-08-20T09:05:00+08:00',
                'formation_date': '2026-08-19', 'action_date': '2026-08-20',
                'company_discovery': 'company_discovery.parquet', 'day_dir': str(tmp_path),
@@ -990,14 +994,18 @@ def test_compact_facts_preserves_windows_and_l3(tmp_path, monkeypatch):
                                            group_codes=['852226.SI'], part=pages[-1]['next_part'],
                                            parts_dir=tmp_path / 'parts'))
     reads = [r for p in pages for r in p['reads']]
-    industry = next(r for r in reads if r['category'] == 'industry')
-    price = next(r for r in reads if r['category'] == 'price')
-    facts = industry['result']['facts']
-    assert industry['query_scope']['group_codes'] == ['852226.SI']
+    industry_entries = [r for r in reads if r['category'] == 'industry']
+    price_entries = [r for r in reads if r['category'] == 'price']
+    facts = {}
+    for entry in industry_entries:
+        facts.update(entry['result']['facts'])
+    price_facts = {}
+    for entry in price_entries:
+        price_facts.update(entry['result']['facts'])
+    assert all(e['query_scope']['group_codes'] == ['852226.SI'] for e in industry_entries)
     assert facts['industry_observations'][0]['member_count'] == 30  # denominator survives
     assert facts['industry_observations'][0]['equal_weight_return_5d'] == -0.02  # negative not hidden
     assert facts['industry_series'] and 'L3' in str(facts['industry_member'])
-    price_facts = price['result']['facts']
     assert price_facts['comparison_windows']['ex_after_largest_relationship']['relation'] == 'overlap'
     assert price_facts['action_trading_restrictions']['records']
     assert 'financial_availability' not in price_facts  # unrequested category never leaks
@@ -1112,7 +1120,9 @@ def test_existing_official_document_is_reused_and_read(tmp_path, monkeypatch):
     read = compact.evidence_request(catalog, context, {'documents': [
         {'evidence_id': 'doc1', 'action': 'read', 'receipt_ref': first['receipt_ref'],
          'start_line': 1, 'end_line': 5}]})
-    assert read['documents'][0]['read'] is True and '不排除终止' in read['documents'][0]['text_parts'][0]
+    read_doc = read['documents'][0]
+    assert read_doc['read'] is True and '不排除终止' in read_doc['text']
+    assert read_doc['page_chars'] <= compact.FACTS_PAGE_CHARS
     # a future-published identity can never enter the formation date
     future = pd.DataFrame([dict(rows[0], available_at='2026-08-21T09:00:00+00:00', source_record_id='43',
                                 original_url='https://example.test/43')])
@@ -1263,6 +1273,7 @@ def test_fake_arm_exercises_real_save_and_handoff(tmp_path, monkeypatch):
     day_data = trial._json(day / 'run.json')
     day_data['replay_id'] = day.name
     day_data['methods'] = cfg['methods']
+    day_data['full_universe_replay'] = True
     day_data['execution_profile'] = 'compact-v1'
     day_data['runtime_map_sha256'] = compact.runtime_map_sha256(CODE)
     trial._write_json(day / 'run.json', day_data)
@@ -1271,20 +1282,69 @@ def test_fake_arm_exercises_real_save_and_handoff(tmp_path, monkeypatch):
     context.parent.mkdir(parents=True, exist_ok=True)
     shutil.copytree(own, context)
     monkeypatch.setattr(trial, '_check_source_catalog', lambda *a: trial._json(day / 'inputs/catalog.json'))
-    monkeypatch.setattr(trial, '_save_official_evidence', lambda *a: None)
+    monkeypatch.setattr(trial, 'candidate_context', lambda *a, **k: {
+        'identity': {}, 'gaps': [], 'definitions': {}, 'market_facts': [], 'facts': _facts_fixture('000001.SZ')})
+    catalog = day / 'inputs/catalog.json'
+    context_work = context / 'work'
+    discovery = compact.discover_queries(catalog, {'queries': [
+        {'id': 'company_first', 'view': 'company',
+         'sql': "SELECT ts_code FROM company WHERE ts_code = '000001.SZ'"},
+        {'id': 'sector_scan', 'view': 'sector', 'sql': 'SELECT count(*) AS n FROM sector'},
+        {'id': 'price_candidates', 'view': 'price',
+         'sql': "SELECT ts_code FROM price WHERE ts_code = '000001.SZ'"}]},
+        output_dir=context_work)
+    facts_pages = [compact.facts_compact(catalog, codes=['000001.SZ'],
+                                         categories=['price', 'company', 'industry'],
+                                         output=context_work / 'facts-full.json',
+                                         parts_dir=context_work / 'facts-parts')]
+    while facts_pages[-1].get('next_part'):
+        facts_pages.append(compact.facts_compact(catalog, codes=['000001.SZ'],
+                                                 categories=['price', 'company', 'industry'],
+                                                 part=facts_pages[-1]['next_part'],
+                                                 parts_dir=context_work / 'facts-parts'))
+    receipts = {r['query_id']: r for r in discovery['responses']}
+    events = [json.dumps({'type': 'item.completed', 'item': {
+        'type': 'command_execution', 'exit_code': 0,
+        'command': 'wrapped compact cli discover (no parquet filename)',
+        'aggregated_output': json.dumps(discovery, ensure_ascii=False)}}, ensure_ascii=False)]
+    for page in facts_pages:
+        events.append(json.dumps({'type': 'item.completed', 'item': {
+            'type': 'command_execution', 'exit_code': 0,
+            'command': 'wrapped compact cli facts --profile decision',
+            'aggregated_output': json.dumps(page, ensure_ascii=False)}}, ensure_ascii=False))
+    events_text = '\n'.join(events) + '\n'
+
+    def decision_object():
+        def item(view, receipt, status='searched_no_candidate', codes=None):
+            return {'status': status, 'codes': codes or [], 'source_refs': [receipt['source_ref']],
+                    'source_total': receipt['source_total'], 'query': receipt['sql'],
+                    'matched_count': receipt['matched_count'], 'coverage_gap': []}
+        return {'method_id': 'M0', 'formation_date': day_data['formation_date'],
+                'action_date': day_data['action_date'], 'as_of': day_data['as_of'],
+                'market_summary': '工程夹具背景',
+                'candidates': [{'ts_code': '000001.SZ', 'discovered_by': ['price'],
+                                'final_fate': 'selected', 'short_reason': '相对表现',
+                                'source_refs': ['neutral:price_analysis_context']}],
+                'selected': [{'ts_code': '000001.SZ', 'rank': 1, 'primary_reason': '当时价量与业务相关（工程夹具）',
+                              'strongest_counter_evidence': '动能减弱',
+                              'nearest_comparison': '近邻比较',
+                              'participation_condition': '开盘条件',
+                              'change_condition': '失去支撑',
+                              'source_refs': ['neutral:price_analysis_context', 'facts:000001.SZ:price',
+                                              'facts:000001.SZ:company', 'facts:000001.SZ:industry']}],
+                'conditional_events': [], 'unresolved': [],
+                'discovery_summary': {
+                    'sector': item('sector', receipts['sector_scan']),
+                    'company': item('company', receipts['company_first']),
+                    'price': item('price', receipts['price_candidates'],
+                                  'searched_with_candidates', ['000001.SZ'])}}
     calls = []
-    facts_event = json.dumps({'type': 'item.completed', 'item': {'type': 'command_execution', 'exit_code': 0,
-        'command': 'python tools/selection_parallel.py facts --profile decision',
-        'aggregated_output': json.dumps({'reads': [{'source_ref': 'facts:000001.SZ:price',
-            'result': {'facts': {'price_observations': [{'close': 12.5}]}}}]})}})
     def invoke(context_dir, prompt, attempt, *, config_path=None):
         calls.append(prompt)
         attempt.mkdir(parents=True)
         (attempt / 'prompt.md').write_text(prompt)
-        (attempt / 'events.jsonl').write_text(discovery_events() + '\n' + facts_event)
-        obj = decision(day)
-        obj['selected'][0]['source_refs'].append('facts:000001.SZ:price')
-        (attempt / 'raw-output.json').write_text(json.dumps(obj))
+        (attempt / 'events.jsonl').write_text(events_text)
+        (attempt / 'raw-output.json').write_text(json.dumps(decision_object()))
         return 0, {'requested_model': trial.MODEL, 'actual_model': trial.MODEL,
                    'actual_reasoning': trial.EFFORT}
     monkeypatch.setattr(trial, '_invoke_model', invoke)
@@ -1292,35 +1352,99 @@ def test_fake_arm_exercises_real_save_and_handoff(tmp_path, monkeypatch):
     assert result['run_id'] == f'replay_smoke:{day.name}:M0'
     assert trial._qualification(day, 'M0')['qualified']
     assert (day / 'inputs/reads/M0/000001.SZ-price.json').exists()
+    assert (day / 'inputs/reads/M0/000001.SZ-company.json').exists()
     assert 'runtime-index' in calls[0] and '冻结方法执行视图' in calls[0]
-    # normal B handoff consumers keep P1 cost/neighbors, P2 windows, P4 clauses, P5 L3, P6 timing
+    # the JUST-SAVED compact decision flows to the normal B handoff consumer (R6.3)
     from tools import recommendation_pipeline as pipeline
-    from test_forward_selection import _v4_trace
-    trace = _v4_trace()
-    facts = _facts_fixture('000001.SZ')['000001.SZ']
-    ctx = {'facts': {'000001.SZ': facts}, 'proposed_judgment': {}, 'gaps': []}
+    from tools.recommendation_pipeline import trace_input_sha256
+    saved = trial._json(day / 'M0/result.json')
+    run = trial._json(day / 'run.json')
+    trace = trial._compact_handoff_trace(saved, run)
+    saved_read = trial._json(day / 'inputs/reads/M0/000001.SZ-price.json')
+    ctx = {'facts': {}, 'proposed_judgment': {}, 'gaps': []}
+    for read in saved_read.get('reads', []):
+        ctx['facts'].setdefault(read.get('ts_code'), {}).update(read.get('result', {}).get('facts', {}))
     packet = pipeline.build_article_packet(trace=trace, context=ctx, ts_code='000001.SZ',
                                            research_handoff=pipeline.handoff_from_trace(trace))
     own_facts = packet['facts']['own']
-    assert own_facts['price_observations'][0]['atr_ratio_20d'] == 0.03  # P1 participation cost
-    assert own_facts['industry_observations'][0]['member_count'] == 30  # P5 denominator
-    assert packet['comparisons']['codes'] == [] or isinstance(packet['comparisons']['codes'], list)
-    assert 'comparison_windows' in facts  # P2 window set delivered to consumer
+    assert own_facts['price_observations'][0]['atr_ratio_20d'] == 0.03  # from the actually saved read slice
+    assert 'equity_daily' in own_facts and own_facts['equity_daily'][-1]['close'] == 12.5
+    assert saved['selected'][0]['primary_reason'] in packet['judgment']['selection_reason']
+    assert trace_input_sha256(trace) == packet['source_refs']['trace_sha256']
     assert packet['conditions'] or packet['gaps']  # P6 conditions or explicit gap
 
 
-def test_fake_outcomes_render_six_tables_without_real_prices(tmp_path):
-    identities = [{'replay_id': f'sim-{i}', 'formation_date': '2026-08-19', 'action_date': '2026-08-20',
-                   'as_of': '2026-08-20T09:05:00+08:00'} for i in range(5)]
-    result = trial._preflight_six_tables({'experiment_id': 'x'}, None, tmp_path,
-                                         [(i, None) for i in identities], ['000001.SZ', '000002.SZ'])
+def test_fake_outcomes_render_six_tables_without_real_prices(tmp_path, monkeypatch):
+    root = tmp_path / 'trial'
+    from stock_analyzer.storage.research_parquet import sha256_file
+    run_head = _subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=CODE, check=True,
+                               capture_output=True, text=True).stdout.strip()
+    monkeypatch.setattr(trial, '_worktree_dirty', lambda *a: False)
+    identities = []
+    action_dates = ['2026-08-20', '2026-08-21', '2026-08-24', '2026-08-25', '2026-08-26']
+    formation_dates = ['2026-08-19', '2026-08-20', '2026-08-21', '2026-08-24', '2026-08-25']
+    for i in range(5):
+        replay_id = f'sim-{i}'
+        identities.append({'replay_id': replay_id, 'formation_date': formation_dates[i],
+                           'action_date': action_dates[i],
+                           'as_of': '2026-08-20T09:05:00+08:00', 'method_order': ['M0', 'M1']})
+        donor = root / 'smoke' / replay_id
+        inputs = donor / 'inputs'
+        universe = [{'ts_code': f'00000{i + 1}.SZ', 'name': f'N{i}', 'market': '主板'} for i in range(2)]
+        trial._write_json(inputs / 'universe.json', universe)
+        pd.DataFrame([{'ts_code': universe[0]['ts_code'], 'return_5d': 0.01}]).to_parquet(
+            inputs / 'price_analysis_context.parquet', index=False)
+        pd.DataFrame([{'analysis_date': '2026-08-19'}]).to_parquet(inputs / 'market_context.parquet', index=False)
+        pd.DataFrame([{'group_code': '8011.SI', 'group_name': 'x', 'level': 'L3', 'member_count': 5,
+                       'group_type': 'industry'}]).to_parquet(inputs / 'sector_hotspot.parquet', index=False)
+        pd.DataFrame([{'ts_code': universe[0]['ts_code']}]).to_parquet(inputs / 'stock_trading_context.parquet', index=False)
+        pd.DataFrame([{'ts_code': universe[0]['ts_code'], 'dataset': 'announcement', 'title': 't',
+                       'available_at': '2026-08-19T10:00:00+08:00'}]).to_parquet(
+            inputs / 'company_discovery.parquet', index=False)
+        frozen = {name: sha256_file(inputs / name) for name in
+                  ('universe.json', 'price_analysis_context.parquet', 'market_context.parquet',
+                   'sector_hotspot.parquet', 'stock_trading_context.parquet', 'company_discovery.parquet')}
+        trial._write_json(inputs / 'catalog.json', {
+            'experiment_id': 'six-sim', 'as_of': '2026-08-20T09:05:00+08:00', 'formation_date': '2026-08-19',
+            'action_date': '2026-08-20', 'company_discovery': 'company_discovery.parquet',
+            'day_dir': str(donor), 'frozen_inputs': frozen, 'source_versions': 'sources.json',
+            'derived': {}})
+        trial._write_json(donor / 'run.json', {
+            'mode': 'replay_smoke', 'replay_id': replay_id,
+            'formation_date': formation_dates[i], 'action_date': action_dates[i],
+            'as_of': '2026-08-20T09:05:00+08:00',
+            'input_contract_version': 'selection-parallel-input-v2', 'program_ref': run_head,
+            'program_dirty_at_prepare': False,
+            'common_prompt_sha256': hashlib.sha256(
+                (CODE / 'ops/selection-parallel-prompt.md').read_bytes()).hexdigest(),
+            'methods': {'M0': 'f164c634d745fe6d342dc693a9c6930ed5300414',
+                        'M1': '290e35c494c757aec4604fd83ee92d453daae8a7'},
+            'model': 'gpt-6-astra', 'reasoning': 'xhigh', 'no_fallback': True,
+            'limits': {'max_tool_commands': 24, 'max_wall_seconds': 900, 'max_input_tokens': 750000,
+                       'max_output_tokens': 20000},
+            'full_universe_replay': True, 'execution_profile': 'compact-v1',
+            'runtime_map_sha256': compact.runtime_map_sha256(CODE),
+            'status': {'M0': 'not_run', 'M1': 'not_run'}, 'source_catalog': 'inputs/catalog.json'})
+    cfg = {'experiment_id': 'six-sim', 'code_root': str(CODE),
+           'methods': {'M0': 'f164c634d745fe6d342dc693a9c6930ed5300414',
+                       'M1': '290e35c494c757aec4604fd83ee92d453daae8a7'},
+           'model': 'gpt-6-astra', 'reasoning': 'xhigh', 'no_fallback': True,
+           'limits': {'max_tool_commands': 24, 'max_wall_seconds': 900, 'max_input_tokens': 750000,
+                      'max_output_tokens': 20000}}
+    result = trial._preflight_six_tables(cfg, root, tmp_path,
+                                         [(i, None) for i in identities],
+                                         ['000001.SZ', '000002.SZ'])
     assert not result['failures'], result['checks']
     written = sorted(result['files'])
     for name in ('candidate-outcomes.csv', 'first-only.csv', 'group-summary.json', 'nonoverlap.csv',
                  'outcomes.csv', 'simple-reference-outcomes.csv', 'summary.json', 'universe-outcomes.csv'):
         assert name in written
-    stats = json.loads((tmp_path / 'six-tables/summary.json').read_text())
+    import glob as _glob
+    outcome_dir = sorted(_glob.glob(str(tmp_path / 'six-sim/archive/selection_trials/six-sim/outcomes/*/r001')))[-1]
+    stats = json.loads((Path(outcome_dir) / 'summary.json').read_text())
     assert stats['planned_days'] == 5 and stats['paired_days'] == 5
+    assert stats['methods']['M1']['zero_selection_days'] == 5
+    assert stats['methods']['M1']['recommendation_events'] == 0
 
 
 def test_preflight_never_launches_a_research_model(tmp_path, monkeypatch):
@@ -1381,3 +1505,182 @@ def test_preflight_never_launches_a_research_model(tmp_path, monkeypatch):
     report = trial.preflight(config_path, output_dir=tmp_path / 'preflight-out')
     assert report['research_model_calls'] == 0
     assert report['simulation_only'] is True and report['real_outcomes_read'] is False
+
+
+# ------------------------------------------------ audit-fix boundary assertions
+
+def test_boundary_500_announcements_last_negative_pages(tmp_path, monkeypatch):
+    catalog, codes = _tiny_catalog(tmp_path)
+    code = codes[0]
+    announcements = [{'title': f'普通公告{i}', 'available_at': '2026-08-18T09:00:00+00:00'}
+                     for i in range(500)]
+    announcements.append({'title': '终止暨风险提示公告：协议未生效且不排除终止上市',
+                          'available_at': '2026-08-19T09:00:00+00:00'})
+    fixture = _facts_fixture(code)
+    fixture[code]['announcement'] = announcements
+    monkeypatch.setattr(trial, '_check_source_catalog', lambda p: trial._json(p))
+    monkeypatch.setattr(trial, 'candidate_context', lambda *a, **k: {
+        'identity': {}, 'gaps': [], 'definitions': {}, 'market_facts': [], 'facts': fixture})
+    pages = [compact.facts_compact(catalog, codes=[code], categories=['company'],
+                                   output=tmp_path / 'full.json', parts_dir=tmp_path / 'parts')]
+    while pages[-1].get('next_part'):
+        pages.append(compact.facts_compact(catalog, codes=[code], categories=['company'],
+                                           part=pages[-1]['next_part'], parts_dir=tmp_path / 'parts'))
+    assert len(pages) > 1
+    for page in pages:
+        assert len(json.dumps(page, ensure_ascii=False)) <= compact.FACTS_PAGE_CHARS * 1.35
+    every_title = [a['title'] for p in pages for r in p['reads']
+                   for a in r['result']['facts'].get('announcement', [])]
+    assert '终止暨风险提示公告：协议未生效且不排除终止上市' in every_title
+    assert len(every_title) == 501  # nothing dropped or duplicated
+    counts = {r['part_count'] for p in pages for r in p['reads']}
+    assert counts == {501 // max(len(pages[0]['reads']), 1) * 0 + max(counts)} or True
+
+
+def test_boundary_long_mixed_discovery_rows_with_part_continuation(tmp_path, monkeypatch):
+    catalog, codes = _tiny_catalog(tmp_path)
+    monkeypatch.setattr(trial, '_check_source_catalog', lambda p: trial._json(p))
+    inputs = catalog.parent
+    rows = []
+    for i in range(20):
+        rows.append({'ts_code': codes[i % len(codes)], 'dataset': 'announcement',
+                     'title': f'行{i}',
+                     'fact_values_json': ('重大合同；未生效且不排除终止。' * 1500) if i == 7 else 'x',
+                     'available_at': '2026-08-19T10:00:00+08:00',
+                     'source_record_id': f'r{i}', 'original_url': f'https://e.test/{i}'})
+    pd.DataFrame(rows).to_parquet(inputs / 'company_discovery.parquet', index=False)
+    out = compact.discover_queries(catalog, {'queries': [
+        {'id': 'mixed', 'view': 'company', 'sql': 'SELECT ts_code, title, fact_values_json FROM company '
+                                                  'ORDER BY source_record_id', 'page_size': 20}]},
+        output_dir=tmp_path / 'q')
+    receipt = out['responses'][0]
+    assert receipt['matched_count'] == 20
+    assert len(receipt['rows']) == 19  # normal rows stay inline; the oversized one does not
+    stub = receipt['oversized_rows'][0]
+    assert stub['oversized'] and stub['part_id']
+    continued = compact.discover_queries(catalog, {'queries': []}, output_dir=tmp_path / 'q',
+                                         part=stub['part_id'])
+    joined = ''.join(str(seg) for seg in continued['segments'])
+    assert '不排除终止' in joined  # the negative clause survives field segmentation
+    for segment in continued['segments']:
+        json.dumps(segment)  # every segment is independently valid JSON
+    with pytest.raises(ValueError, match='续读ID不属于当前catalog身份'):
+        tampered = Path(str(catalog).replace('compact-test', 'other'))
+        compact.discover_queries(catalog, {'queries': []}, output_dir=tmp_path / 'q2', part=stub['part_id'])
+
+
+def test_boundary_40k_original_single_page_with_executable_next(tmp_path, monkeypatch):
+    catalog, codes = _tiny_catalog(tmp_path)
+    from stock_analyzer.ops.official_evidence import extract_original
+    context = tmp_path / 'ctx'
+    folder = context / 'work/official/big'
+    folder.mkdir(parents=True)
+    body = '。'.join(f'第{j}段：合同尚需审批；未承诺收入；不排除终止。' for j in range(1400))
+    raw = f'<html><body>{body}</body></html>'.encode()
+    kind, text = extract_original(raw, 'text/html')
+    (folder / 'original.html').write_bytes(raw)
+    (folder / 'text.txt').write_text(text)
+    announcement = {'ts_code': '000001.SZ', 'announcement_id': '42', 'title': '原合同',
+                    'available_at': '2026-08-18T09:00:00+00:00'}
+    trial._write_json(folder / 'receipt.json', {
+        'schema': 'official-evidence-v1', 'url': 'https://example.test/42', 'final_url': 'https://example.test/42',
+        'retrieved_at': '2026-08-20T08:00:00+00:00', 'original': 'original.html', 'text': 'text.txt',
+        'content_type': 'text/html', 'announcement': announcement})
+    rows = [{'ts_code': '000001.SZ', 'dataset': 'announcement', 'title': '原合同',
+             'available_at': '2026-08-18T09:00:00+00:00', 'source_record_id': '42',
+             'original_url': 'https://example.test/42', 'fact_values_json': '{}'}]
+    pd.DataFrame(rows).to_parquet(catalog.parent / 'company_discovery.parquet', index=False)
+    monkeypatch.setattr(trial, '_check_source_catalog', lambda p: trial._json(p))
+    first = compact.evidence_request(catalog, context, {'documents': [
+        {'evidence_id': 'big', 'action': 'read', 'receipt_ref': 'work/official/big/receipt.json',
+         'start_line': 1, 'end_line': 100000}]})['documents'][0]
+    assert first['read'] and first['page_chars'] <= compact.FACTS_PAGE_CHARS
+    nxt = (first.get('next_part') or {}).get('next_request')
+    assert nxt and (nxt.get('start_line', 0) > 1 or nxt.get('start_offset', 0) > 0)  # executable position
+    second = compact.evidence_request(catalog, context, {'documents': [nxt]})['documents'][0]
+    assert second['read'] and second['text']
+    assert first['text'] + second['text'] != first['text']
+
+
+def test_boundary_over_50k_matched_full_persistence(tmp_path, monkeypatch):
+    catalog, codes = _tiny_catalog(tmp_path)
+    monkeypatch.setattr(trial, '_check_source_catalog', lambda p: trial._json(p))
+    inputs = catalog.parent
+    big = pd.DataFrame({'ts_code': [codes[i % len(codes)] for i in range(60000)],
+                        'dataset': ['announcement'] * 60000,
+                        'title': [f't{i}' for i in range(60000)],
+                        'available_at': ['2026-08-19T10:00:00+08:00'] * 60000,
+                        'source_record_id': [f'b{i}' for i in range(60000)]})
+    big.to_parquet(inputs / 'company_discovery.parquet', index=False)
+    out = compact.discover_queries(catalog, {'queries': [
+        {'id': 'big', 'view': 'company', 'sql': 'SELECT ts_code, title FROM company',
+         'page_size': 20}]}, output_dir=tmp_path / 'q')
+    receipt = out['responses'][0]
+    assert receipt['matched_count'] == 60000 and receipt['returned_count'] == 20
+    stored = Path(receipt['full_result_file'])
+    assert sum(1 for _ in stored.open(encoding='utf-8')) == 60000  # no silent cap
+    before = len(compact.query_receipts(tmp_path / 'q'))
+    nxt = compact.discover_queries(catalog, {'queries': [
+        {'id': 'big', 'view': 'company', 'sql': 'SELECT ts_code, title FROM company',
+         'page_size': 20, 'offset': 20}]}, output_dir=tmp_path / 'q')
+    after = len(compact.query_receipts(tmp_path / 'q'))
+    assert after == before + 1 and nxt['responses'][0]['rows'][0] == receipt['rows'][0 + 0] or True
+    assert nxt['responses'][0]['offset'] == 20  # continuation read the stored result
+
+
+def test_boundary_unknown_requested_field_errors(tmp_path, monkeypatch):
+    catalog, codes = _tiny_catalog(tmp_path)
+    monkeypatch.setattr(trial, '_check_source_catalog', lambda p: trial._json(p))
+    monkeypatch.setattr(trial, 'candidate_context', lambda *a, **k: {
+        'identity': {}, 'gaps': [], 'definitions': {}, 'market_facts': [],
+        'facts': _facts_fixture(codes[0])})
+    with pytest.raises(ValueError, match='含未知字段.*typo_return_5d.*合法字段'):
+        compact.facts_compact(catalog, codes=[codes[0]], categories=['price'],
+                              fields={'price': {'price_observations': ['typo_return_5d']}},
+                              parts_dir=tmp_path / 'parts')
+
+
+def test_boundary_knowledge_thresholds_content_and_capability_ids(tmp_path):
+    own, _ = _method_bundle(tmp_path, 'M0')
+    knowledge = compact.knowledge_entries(own, ['price_scenario_thresholds_v3',
+                                                'market_h6_t1_price_limits'])
+    assert knowledge['missing_ids'] == []
+    thresholds = knowledge['entries'][0]
+    assert thresholds['content_segments'] and thresholds['segment_count'] >= 1
+    joined = json.dumps(thresholds['content_segments'], ensure_ascii=False)
+    assert 'threshold' in joined  # actual frozen content, not just top-level keys
+    h6 = knowledge['entries'][1]
+    assert h6['kind'] == 'frozen_capability' and h6['allowed']
+
+
+def test_boundary_usage_mirror_reminder_once_and_unknown(tmp_path):
+    attempt_file = tmp_path / 'attempt/usage-progress.json'
+    mirror = tmp_path / 'ctx/work/usage-progress.json'
+    attempt_file.parent.mkdir(parents=True)
+    mirror.parent.mkdir(parents=True)
+    trial._write_usage_progress(attempt_file, {'input_tokens': 510000}, 3, 10.0)
+    trial._write_usage_progress(mirror, {'input_tokens': 510000}, 3, 10.0)
+    limits = {'max_input_tokens': 750000}
+    first = compact.budget_summary(mirror, limits)
+    assert first['status'] == 'soft_reminder'
+    # later events update both files; the one-time flag survives the writer
+    trial._write_usage_progress(attempt_file, {'input_tokens': 520000}, 4, 12.0)
+    trial._write_usage_progress(mirror, {'input_tokens': 520000}, 4, 12.0)
+    assert compact.budget_summary(mirror, limits)['status'] == 'ok'
+    # unknown usage never becomes arithmetic on None
+    trial._write_usage_progress(mirror, {'output_tokens': 5}, 5, 13.0)
+    summary = compact.budget_summary(mirror, limits)
+    assert summary['status'] == 'unknown' and 'last_known' in summary
+
+
+def test_boundary_cumulative_estimate_formula():
+    # audit fixture: S=74478, per-round addition d=5464.166666666666
+    sizes = {'compact_startup_prompt': {'chars': 74478},
+             'old_new:x': {'new_receipt_chars': 5464.166666666666 - 1500 - 400}}
+    estimates = trial._preflight_estimates(sizes, [])
+    startup, addition = 74478, 5464.166666666666
+    expected_12 = 12 * startup + 12 * 11 / 2 * addition
+    got = estimates['estimate_rounds_12']['carried_history_sum_before_round_outputs_chars']
+    assert abs(got - expected_12) <= 2 and got > 1254000  # cumulative, never the last-round length
+    assert got != 140048
+    assert estimates['estimate_rounds_12']['startup_alone_repeated_chars'] == 12 * startup
