@@ -3208,8 +3208,10 @@ def _preflight_six_tables(cfg: dict, root: Path, out: Path, day_catalogs: list,
     sim_root = out / 'six-sim'
     sim_trial = sim_root / 'archive/selection_trials' / cfg['experiment_id']
     sim_cfg = dict(cfg)
+    sixsim_context = (Path(cfg['context_root']).parent / f"{cfg['experiment_id']}-sixsim-context"
+                      if cfg.get('context_root') else out / 'sixsim-context')
     sim_cfg.update(archive_root=str(sim_root / 'archive'),
-                   context_root=str(sim_root / 'context'),
+                   context_root=str(sixsim_context),
                    replay_cases=[dict(identity, replay_id=f'simday{i + 1}')
                                  for i, identity in enumerate(identities)],
                    research_enabled=True, execution_profile='compact-v1',
