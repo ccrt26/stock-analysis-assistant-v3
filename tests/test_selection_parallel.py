@@ -1876,7 +1876,9 @@ def test_audit2_facts_roundtrip_to_archive(tmp_path, monkeypatch):
                                 for value in read['result']['facts'].values()))
     holed = json.loads(json.dumps(pages[target_index]))
     holed_read = next(read for read in holed['reads']
-                      if read.get('source_ref') == f'facts:{code}:company')
+                      if read.get('source_ref') == f'facts:{code}:company'
+                      and any(isinstance(value, list) and len(value) > 2
+                              for value in read['result']['facts'].values()))
     for rows in holed_read['result']['facts'].values():
         if isinstance(rows, list) and len(rows) > 2:
             del rows[1]

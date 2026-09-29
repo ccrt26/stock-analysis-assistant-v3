@@ -948,7 +948,8 @@ def _field_segments(section: str, row_index: int, row: dict, budget: int) -> lis
             small, small_chars = {}, 0
 
     for key, value in row.items():
-        rendered = len(json.dumps({key: value}, ensure_ascii=False))
+        # rendered size at the field's final indent depth, never a compact estimate
+        rendered = len(_render_element({key: value}, 10)) + 4
         if rendered <= budget:
             if small and small_chars + rendered > budget:
                 flush_small()
@@ -974,7 +975,13 @@ def _field_segments(section: str, row_index: int, row: dict, budget: int) -> lis
     return segments
 
 
-def _split_entries(projected: dict, category: str, target_chars: int) -> list[dict]:
+def _render_row_cost(row: dict) -> int:
+    """Exact rendered cost of one facts row at its final indent depth."""
+    return len(_render_element(row, 8)) + 2
+
+
+def _split_entries(projected: dict, category: str, target_chars: int,
+                   *, measure=None) -> list[dict]:
     """Split a projection into entries measured row by row.
 
     Every list section keeps its ORIGINAL row coordinates: normal groups carry
@@ -982,9 +989,12 @@ def _split_entries(projected: dict, category: str, target_chars: int) -> list[di
     section_row_total; oversized rows become field segments carrying the same
     section_row_total. Reassembly validates coverage of [0, total) exactly.
     """
+    measure = measure or (lambda row: _row_chars(row) + 96)
     entries: list[dict] = []
     for section, rows in projected.items():
-        if section in IDENTITY_SECTIONS or not isinstance(rows, list) or not rows or not isinstance(rows[0], dict):
+        # every list of dict rows is positional — including identity sections
+        # like industry_series, whose whole-value form can exceed a page
+        if not isinstance(rows, list) or not rows or not isinstance(rows[0], dict):
             entries.append({section: rows})
             continue
         total = len(rows)
@@ -992,7 +1002,7 @@ def _split_entries(projected: dict, category: str, target_chars: int) -> list[di
         group_start = 0
         group_chars = 0
         for index, row in enumerate(rows):
-            rendered = _row_chars(row) + 96  # shell keys/escaping overhead per entry
+            rendered = measure(row)  # exact rendered size, never a compact-json estimate
             if rendered > target_chars:
                 if group:
                     entries.append({section: group, 'section_row_range': [group_start, index],
@@ -1092,46 +1102,77 @@ def facts_compact(catalog_path: Path, *, codes: list[str], categories: list[str]
         _write_local(Path(output), full)
     reads: list[dict] = []
     unknown_field_errors: list[str] = []
-    for read in full.get('reads', []):
-        category = read['category']
-        projected = _project_facts(read.get('result', {}).get('facts', {}), category, fields.get(category) or {})
-        requested = fields.get(category) or {}
-        available: dict[str, set[str]] = {}
-        for section, rows in read.get('result', {}).get('facts', {}).items():
-            if isinstance(rows, list) and rows and isinstance(rows[0], dict):
-                available[section] = set(rows[0])
-        for section, wanted in requested.items():
-            legal = available.get(section) or set(DEFAULT_FACT_FIELDS.get(category, {}).get(section, ()))
-            wrong = [k for k in wanted if k not in legal]
-            if wrong:
-                unknown_field_errors.append(
-                    f"fields[{category}][{section}] 含未知字段 {wrong}；该section合法字段：{sorted(legal)[:80]}")
-        entries = _split_entries(projected, category, FACTS_PAGE_CHARS - 5000)
-        for position, entry in enumerate(entries):
-            payload = {k: v for k, v in entry.items()
-                       if k not in ('section_row_range', 'section_row_total')}
-            reads.append({'source_ref': read['source_ref'], 'ts_code': read['ts_code'],
-                          'category': category, 'source_version': read.get('source_version'),
-                          'query_scope': {**read.get('query_scope', {}), 'profile': PROFILE,
-                                          'fields': fields.get(category) or 'default_projection',
-                                          'scope_id': scope_id},
-                          'part_index': position, 'part_count': len(entries),
-                          'result': {'facts': payload,
-                                     **({'section_row_range': entry['section_row_range']}
-                                        if 'section_row_range' in entry else {}),
-                                     **({'section_row_total': entry['section_row_total']}
-                                        if 'section_row_total' in entry else {})}})
-    if unknown_field_errors:
-        raise ValueError('；'.join(unknown_field_errors))
-    # pack pages by the FINAL rendered stdout, including the shell, notes,
-    # cursor fields and any budget block the CLI will print (audit R8)
-    def _page_render(reads_list):
-        page_obj = {'profile': PROFILE, 'scope_id': scope_id, 'part': 'preview',
-                    'page_index': 0, 'page_count': 1, 'reads': reads_list,
-                    'identity': full.get('identity'), 'gaps': full.get('gaps', []),
-                    'next_part': None, 'full_output': str(output) if output else None,
-                    'omitted_note': '未投影的原始列在 full_output 与冻结原件中可按字段回读'}
-        return len(render_stdout(page_obj, extra=stdout_extra))
+    # entry sizing starts from a rendered-size hint and is corrected by the
+    # EXACT whole-page probe below: any part that alone busts the final stdout
+    # budget is re-split with a smaller target until every part fits (audit R8)
+    per_read_targets: dict[tuple[str, str], int] = {}
+
+    def build_reads() -> list[dict]:
+        built: list[dict] = []
+        for read in full.get('reads', []):
+            category = read['category']
+            key = (read['ts_code'], category)
+            target = per_read_targets.get(key, FACTS_PAGE_CHARS - 5000)
+            projected = _project_facts(read.get('result', {}).get('facts', {}), category, fields.get(category) or {})
+            requested = fields.get(category) or {}
+            available: dict[str, set[str]] = {}
+            for section, rows in read.get('result', {}).get('facts', {}).items():
+                if isinstance(rows, list) and rows and isinstance(rows[0], dict):
+                    available[section] = set(rows[0])
+            for section, wanted in requested.items():
+                legal = available.get(section) or set(DEFAULT_FACT_FIELDS.get(category, {}).get(section, ()))
+                wrong = [k for k in wanted if k not in legal]
+                if wrong:
+                    unknown_field_errors.append(
+                        f"fields[{category}][{section}] 含未知字段 {wrong}；该section合法字段：{sorted(legal)[:80]}")
+            entries = _split_entries(projected, category, target, measure=_render_row_cost)
+            for position, entry in enumerate(entries):
+                payload = {k: v for k, v in entry.items()
+                           if k not in ('section_row_range', 'section_row_total')}
+                built.append({'source_ref': read['source_ref'], 'ts_code': read['ts_code'],
+                              'category': category, 'source_version': read.get('source_version'),
+                              'query_scope': {**read.get('query_scope', {}), 'profile': PROFILE,
+                                              'fields': fields.get(category) or 'default_projection',
+                                              'scope_id': scope_id},
+                              'part_index': position, 'part_count': len(entries),
+                              'result': {'facts': payload,
+                                         **({'section_row_range': entry['section_row_range']}
+                                            if 'section_row_range' in entry else {}),
+                                         **({'section_row_total': entry['section_row_total']}
+                                            if 'section_row_total' in entry else {})}})
+        if unknown_field_errors:
+            raise ValueError('；'.join(unknown_field_errors))
+        return built
+
+    # pack pages by the FINAL rendered stdout: the measurement uses the exact
+    # page object the CLI will print (shell, notes, cursors, budget extra);
+    # a part that alone busts the budget forces a smaller-entry re-split
+    def _page_obj(index: int, count: int, page_reads: list, next_part: str | None) -> dict:
+        return {'profile': PROFILE, 'scope_id': scope_id, 'part': f'facts-{scope_id}-p{index:03d}',
+                'page_index': index, 'page_count': count, 'reads': page_reads,
+                'identity': full.get('identity'), 'gaps': full.get('gaps', []),
+                'next_part': next_part, 'full_output': str(output) if output else None,
+                'omitted_note': ('未投影的原始列在 full_output 与冻结原件中可按字段回读；'
+                                 '本投影保留身份、窗口、分母、限制与缺口；'
+                                 '类别引用需其全部part已返回')}
+
+    def _page_render(page_reads: list) -> int:
+        probe = _page_obj(0, 999, page_reads, f'facts-{scope_id}-p001')
+        return len(render_stdout(probe, extra=stdout_extra))
+
+    for _attempt in range(8):
+        reads = build_reads()
+        offenders = {key for key in per_read_targets}
+        oversized = [read for read in reads if _page_render([read]) > FACTS_PAGE_CHARS]
+        if not oversized:
+            break
+        for read in oversized:
+            key = (read['ts_code'], read['category'])
+            current = per_read_targets.get(key, FACTS_PAGE_CHARS - 5000)
+            per_read_targets[key] = max(1500, int(current * 0.6))
+    else:
+        raise ValueError('事实条目在最小分片下仍超过整页stdout预算；拒绝继续缩小区间')
+
     pages, current = [], []
     for read in reads:
         candidate = current + [read]
@@ -1144,14 +1185,8 @@ def facts_compact(catalog_path: Path, *, codes: list[str], categories: list[str]
     page_objects = []
     for index, page in enumerate(pages):
         page_id = f'facts-{scope_id}-p{index:03d}'
-        page_obj = {'profile': PROFILE, 'scope_id': scope_id, 'part': page_id,
-                    'page_index': index, 'page_count': len(pages), 'reads': page,
-                    'identity': full.get('identity'), 'gaps': full.get('gaps', []),
-                    'next_part': f'facts-{scope_id}-p{index + 1:03d}' if index + 1 < len(pages) else None,
-                    'full_output': str(output) if output else None,
-                    'omitted_note': ('未投影的原始列在 full_output 与冻结原件中可按字段回读；'
-                                     '本投影保留身份、窗口、分母、限制与缺口；'
-                                     '类别引用需其全部part已返回')}
+        page_obj = _page_obj(index, len(pages), page,
+                             f'facts-{scope_id}-p{index + 1:03d}' if index + 1 < len(pages) else None)
         rendered = len(render_stdout(page_obj, extra=stdout_extra))
         if rendered > FACTS_PAGE_CHARS:
             raise ValueError(f'事实分页最终stdout超预算：{page_id}={rendered}>{FACTS_PAGE_CHARS}')
@@ -1196,15 +1231,7 @@ def reassemble_category(reads: list[dict]) -> dict:
                 if isinstance(row_total, int):
                     totals.setdefault(seg.get('section'), set()).add(row_total)
                 continue
-            if key in IDENTITY_SECTIONS:
-                # identity sections are atomic: first wins, equal duplicate is
-                # dropped, a conflicting one is an error
-                if key in merged:
-                    if merged[key] != value:
-                        raise ValueError(f'identity section {key} 冲突：{merged[key]!r} vs {value!r}')
-                else:
-                    merged[key] = value
-            elif isinstance(value, list) and value and isinstance(value[0], dict):
+            if isinstance(value, list) and value and isinstance(value[0], dict):
                 if range_info is None:
                     # legacy single-shot complete read (one part, no paging):
                     # acceptable only as the ONLY entry for this section
@@ -1219,11 +1246,14 @@ def reassemble_category(reads: list[dict]) -> dict:
                     totals.setdefault(key, set()).add(row_total)
             elif isinstance(value, list):
                 plain_lists.setdefault(key, []).append(value)
-            elif key in merged:
-                if merged[key] != value:
-                    raise ValueError(f'identity section {key} 冲突：{merged[key]!r} vs {value!r}')
             else:
-                merged[key] = value
+                # non-list identity sections (e.g. comparison_windows) are
+                # atomic: first wins, equal duplicate is dropped, a conflict errors
+                if key in merged:
+                    if merged[key] != value:
+                        raise ValueError(f'identity section {key} 冲突：{merged[key]!r} vs {value!r}')
+                else:
+                    merged[key] = value
     positional_sections = set(ranged) | {section for section, _ in segment_rows}
     for key in positional_sections:
         section_totals = totals.get(key) or set()
