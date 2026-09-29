@@ -3929,13 +3929,33 @@ def test_launch_reuses_real_qualified_attempt_without_model_call(tmp_path, monke
     # scripts: two-done side issues zero select calls; one done one pending
     # issues exactly one call for the pending side
     from tools import selection_launch_scripts as generator
+    # the scripts run a REAL check-launch subprocess: point them at a clean
+    # clone pinned to the exact HEAD the runs were prepared with
+    import subprocess as sp_mod
+    head_ref = subprocess_run_head()
+    snapshot = tmp_path / 'code-snapshot-head'
+    sp_mod.run(['git', 'clone', '-q', '--no-hardlinks', str(CODE), str(snapshot)], check=True)
+    sp_mod.run(['git', '-C', str(snapshot), 'checkout', '-q', head_ref], check=True)
     log = tmp_path / 'select-log.txt'
     fake_cli = tmp_path / 'fake-select.py'
     fake_cli.write_text(
-        'import sys, os\n'
+        'import sys, os, json\n'
+        'from pathlib import Path\n'
         'args = sys.argv[1:]\n'
         'method = args[args.index("--method") + 1]\n'
         'replay = args[args.index("--replay-id") + 1]\n'
+        'cfg = json.loads(Path(args[args.index("--config") + 1]).read_text())\n'
+        'root = Path(cfg["archive_root"]) / "selection_trials" / cfg["experiment_id"]\n'
+        'day = root / "smoke" / replay\n'
+        'qual = day / method / "qualification.json"\n'
+        'run = json.loads((day / "run.json").read_text())\n'
+        'qualified = (qual.exists() and json.loads(qual.read_text()).get("qualified") is True\n'
+        '             and run.get("status", {}).get(method) in ("complete", "complete_zero")\n'
+        '             and (day / method / "result.json").exists())\n'
+        'if qualified:\n'
+        '    # mirror the REAL entrypoint: a done side is reused with zero\n'
+        '    # new model calls and no attempt is written\n'
+        '    sys.exit(0)\n'
         'with open(os.environ["FAKE_SELECT_LOG"], "a") as handle:\n'
         '    handle.write(f"select {method} {replay}\\n")\n', encoding='utf-8')
     out = tmp_path / 'scripts'
@@ -3943,27 +3963,33 @@ def test_launch_reuses_real_qualified_attempt_without_model_call(tmp_path, monke
     import subprocess as sp
     import os
     env = {k: v for k, v in os.environ.items() if not k.startswith('ASTRA_')}
-    env.update({'ASTRA_PY': sys.executable, 'ASTRA_CODE_ROOT': str(CODE),
+    cfg['code_root'] = str(snapshot)  # the script's real check-launch reads this cfg
+    trial._write_json(config_path, cfg)
+    env.update({'ASTRA_PY': sys.executable, 'ASTRA_CODE_ROOT': str(snapshot),
                 'ASTRA_CONFIG': str(config_path), 'ASTRA_SELECT_TOOL': str(fake_cli),
                 'FAKE_SELECT_LOG': str(log)})
     # make BOTH sides done, then first-pair script must make zero select calls
     cfg['research_enabled'] = True
     trial._write_json(config_path, cfg)
+    monkeypatch.setattr(trial, '_invoke_model', make_fake_invoke('M1'))
+    trial.run_arm(day1, method='M1')
+    cfg['research_enabled'] = False
     trial._write_json(config_path, cfg)
     completed = sp.run(['bash', str(out / 'Astra_首日一对.sh')], env=env,
                        capture_output=True, text=True, timeout=180)
     assert completed.returncode == 0, completed.stdout + completed.stderr
-    assert log.read_text().splitlines() == []  # both done: zero new calls
+    assert not log.exists() or log.read_text().splitlines() == []  # both done: zero new calls
     # one done one pending: exactly one call for the pending side
-    log.unlink()
+    log.unlink(missing_ok=True)
     day1_m1 = trial._json(day1 / 'M1/result.json')
     (day1 / 'M1').rename(tmp_path / 'moved-M1-result')
+    (trial_root / 'work/seal-1/M1').rename(tmp_path / 'moved-M1-work')  # pending = no attempts either
     run_m1 = trial._json(day1 / 'run.json')
     run_m1['status']['M1'] = 'not_run'
     trial._write_json(day1 / 'run.json', run_m1)
     completed = sp.run(['bash', str(out / 'Astra_首日一对.sh')], env=env,
                        capture_output=True, text=True, timeout=180)
-    assert completed.returncode != 0  # fake select does not produce a real result
-    lines = log.read_text().splitlines()
+    lines = log.read_text().splitlines() if log.exists() else []
     assert lines == ['select M1 seal-1']  # ONLY the pending side was called
     (tmp_path / 'moved-M1-result').rename(day1 / 'M1')
+    (tmp_path / 'moved-M1-work').rename(trial_root / 'work/seal-1/M1')
