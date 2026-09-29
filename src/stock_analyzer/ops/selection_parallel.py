@@ -151,6 +151,8 @@ def init_experiment(config_path: Path) -> dict:
         if instruction.exists() and instruction.read_text() != _context_instructions():
             raise ValueError(f'context instructions changed for {method}')
         instruction.write_text(_context_instructions())
+        if (cfg.get('execution_profile') or 'full') == 'compact-v1':
+            _ensure_runtime_materials(cfg, context, method)
     cfg.setdefault('batch_days', 10)
     cfg.setdefault('plan_days', 30)
     cfg.setdefault('action_dates', [])
@@ -382,8 +384,65 @@ def discover_company(catalog_path: Path, *, limit: int = 50, offset: int = 0) ->
                         for row in page.to_dict('records')]}
 
 
+def _reuse_frozen_inputs(cfg: dict, day_dir: Path, donor_dir: Path, mode: str, replay_id: str) -> Path:
+    """Share immutable frozen inputs from a prior day after identity/hash checks."""
+    from stock_analyzer.storage.research_parquet import sha256_file
+    if not (donor_dir / 'run.json').exists():
+        raise ValueError(f'复用来源缺少 run.json: {donor_dir}')
+    donor = _json(donor_dir / 'run.json')
+    expected = next((d for d in cfg.get('replay_cases', []) if d.get('replay_id') == replay_id), None)
+    if expected is None:
+        raise ValueError('reuse requires a replay identity present in frozen replay_cases')
+    if (donor.get('formation_date'), donor.get('action_date'), donor.get('as_of'), donor.get('mode')) != \
+            (expected['formation_date'], expected['action_date'], expected['as_of'], mode):
+        raise ValueError('复用来源 F/A/C 身份与当前冻结范围不同；先定位具体不同项，不重跑全量派生')
+    donor_catalog = _json(donor_dir / 'inputs/catalog.json')
+    for name, digest in donor_catalog.get('frozen_inputs', {}).items():
+        if sha256_file(donor_dir / 'inputs' / name) != digest:
+            raise ValueError(f'复用来源冻结输入已变化: {name}')
+    day_inputs = day_dir / 'inputs'
+    day_inputs.mkdir(parents=True, exist_ok=True)
+    for source in sorted((donor_dir / 'inputs').iterdir()):
+        if not source.is_file():
+            continue
+        target = day_inputs / source.name
+        if target.exists():
+            continue
+        try:
+            os.link(source, target)
+        except OSError:
+            shutil.copyfile(source, target)
+    for name, digest in donor_catalog.get('frozen_inputs', {}).items():
+        if sha256_file(day_inputs / name) != digest:
+            raise ValueError(f'复用输入落地校验失败: {name}')
+    catalog = dict(donor_catalog)
+    catalog['day_dir'] = str(day_dir)
+    catalog['reused_from'] = str(donor_dir)
+    _write_json(day_inputs / 'catalog.json', catalog)
+    common_prompt = (Path(cfg['code_root']) / 'ops/selection-parallel-prompt.md').read_bytes()
+    program_ref = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=cfg['code_root'], check=True,
+                                 capture_output=True, text=True).stdout.strip()
+    run = dict(experiment_id=cfg['experiment_id'], formation_date=expected['formation_date'],
+               action_date=expected['action_date'], as_of=expected['as_of'], mode=mode,
+               full_universe_replay=cfg.get('full_universe_replay', False), replay_id=replay_id,
+               input_contract_version='selection-parallel-input-v2', program_ref=program_ref,
+               program_dirty_at_prepare=_worktree_dirty(Path(cfg['code_root'])),
+               common_prompt_sha256=hashlib.sha256(common_prompt).hexdigest(),
+               methods=cfg['methods'], model=cfg.get('model'), reasoning=cfg.get('reasoning'),
+               no_fallback=cfg.get('no_fallback'), research_enabled=cfg.get('research_enabled', False),
+               limits=cfg.get('limits'), status={'M0': 'not_run', 'M1': 'not_run'},
+               source_catalog='inputs/catalog.json', inputs_reused_from=str(donor_dir))
+    if cfg.get('execution_profile'):
+        from stock_analyzer.ops.selection_parallel_compact import runtime_map_sha256
+        run['execution_profile'] = cfg['execution_profile']
+        run['runtime_map_sha256'] = runtime_map_sha256(Path(cfg['code_root']))
+    _write_json(day_dir / 'run.json', run)
+    return day_dir
+
+
 def prepare_day(config_path: Path, *, as_of: str, mode: str, replay_id: str | None = None,
-                formation_date: str | None = None, action_date: str | None = None) -> Path:
+                formation_date: str | None = None, action_date: str | None = None,
+                reuse_inputs_from: Path | None = None) -> Path:
     if mode not in {'prospective', 'replay_smoke'}:
         raise ValueError('mode must be prospective or replay_smoke')
     if replay_id is not None and (mode != 'replay_smoke' or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_-]{0,79}', replay_id)):
@@ -435,6 +494,8 @@ def prepare_day(config_path: Path, *, as_of: str, mode: str, replay_id: str | No
             raise ValueError('existing day has a different formation/action identity')
         _check_run_contract(previous, cfg)
         return day_dir
+    if reuse_inputs_from is not None:
+        return _reuse_frozen_inputs(cfg, day_dir, Path(reuse_inputs_from), mode, replay_id)
     warehouse = ResearchWarehouse(warehouse_root, read_only=True)
     query = ResearchQuery(warehouse)
     starting_versions = _source_versions(warehouse)
@@ -523,6 +584,7 @@ def prepare_day(config_path: Path, *, as_of: str, mode: str, replay_id: str | No
         'fact_paging': 'facts 的 --offset 按返回片段续读；next_offset 为空前不得认为取齐。'})
     _check_source_catalog(day_inputs / 'catalog.json')
     common_prompt = (Path(cfg['code_root']) / 'ops/selection-parallel-prompt.md').read_bytes()
+    from stock_analyzer.ops.selection_parallel_compact import runtime_map_sha256
     program_ref = subprocess.run(['git','rev-parse','HEAD'], cwd=cfg['code_root'], check=True, capture_output=True, text=True).stdout.strip()
     _write_json(run_path, dict(experiment_id=cfg['experiment_id'], formation_date=formation,
                                action_date=action, as_of=cutoff.isoformat(), mode=mode,
@@ -533,7 +595,10 @@ def prepare_day(config_path: Path, *, as_of: str, mode: str, replay_id: str | No
                                methods=cfg['methods'], model=cfg.get('model'), reasoning=cfg.get('reasoning'),
                                no_fallback=cfg.get('no_fallback'), research_enabled=cfg.get('research_enabled', False),
                                limits=cfg.get('limits'), status={'M0': 'not_run', 'M1': 'not_run'},
-                               source_catalog='inputs/catalog.json'))
+                               source_catalog='inputs/catalog.json',
+                               **({'execution_profile': cfg['execution_profile'],
+                                   'runtime_map_sha256': runtime_map_sha256(code_root)}
+                                  if cfg.get('execution_profile') else {})))
     if mode == 'prospective':
         if not cfg.get('start_action_date'):
             cfg['start_action_date'] = action
@@ -695,6 +760,24 @@ def _verified_cli_session(events_text: str) -> dict:
     return actual
 
 
+def _write_usage_progress(path: Path, usage: dict, tools: int, started: float) -> None:
+    """Persist the latest cumulative usage; repeated cumulative events are never summed."""
+    current = usage.get('input_tokens')
+    prior = _json(path) if path.exists() else {}
+    snapshot = {'input_tokens': current,
+                'peak_input_tokens': max(prior.get('peak_input_tokens') or 0, current or 0),
+                'cached_input_tokens': usage.get('cached_input_tokens'),
+                'output_tokens': usage.get('output_tokens'),
+                'reasoning_output_tokens': usage.get('reasoning_output_tokens'),
+                'tool_commands': tools,
+                'elapsed_seconds': round(clock_time.monotonic() - started, 1),
+                'semantics': 'input_tokens 为最新累计值且包含缓存；缺失用量是未知，不是零'}
+    try:
+        _write_json(path, snapshot)
+    except OSError:
+        pass
+
+
 def _execute_research(cmd: list[str], cwd: Path, prompt: str, events_path: Path,
                       stderr_path: Path, limits: dict) -> dict:
     """Stream only this child process; enforce observable tool/time budgets."""
@@ -742,6 +825,7 @@ def _execute_research(cmd: list[str], cwd: Path, prompt: str, events_path: Path,
             usage = event.get('usage')
             if isinstance(usage, dict):
                 tokens = usage
+                _write_usage_progress(events_path.parent / 'usage-progress.json', usage, tools, started)
                 token_live_observed = token_live_observed or event.get('type') != 'turn.completed'
                 exceeded = None
                 if usage.get('input_tokens', 0) >= limits['max_input_tokens']:
@@ -876,6 +960,130 @@ def _prior_qualified_decision(root: Path, method: str, cutoff: str) -> Path | No
     return max(prior, default=(None,None))[1]
 
 
+def _ensure_runtime_materials(cfg: dict, context: Path, method: str) -> dict:
+    """Materialize the per-method execution view once; rebuilt when the map changes."""
+    from stock_analyzer.ops import selection_parallel_compact as compact
+    code_root = Path(cfg['code_root'])
+    map_sha = compact.runtime_map_sha256(code_root)
+    runtime_dir = context / 'work' / 'runtime'
+    marker = runtime_dir / 'runtime-method-map.json'
+    if marker.exists():
+        document = _json(marker)
+        if (document.get('method') == method and document.get('method_commit') == cfg['methods'][method]
+                and document.get('runtime_map_sha256') == map_sha):
+            _prepare_arm_workdirs(context)
+            return document
+    result = compact.build_runtime_method(context, runtime_dir, compact.load_runtime_map(code_root),
+                                          method=method, method_ref=cfg['methods'][method])
+    document = result['document']
+    document['runtime_map_sha256'] = map_sha
+    _write_json(marker, document)
+    _prepare_arm_workdirs(context)
+    return document
+
+
+def _prepare_arm_workdirs(context: Path) -> None:
+    for folder in ('work', 'work/official', 'work/queries', 'work/facts-parts'):
+        (context / folder).mkdir(parents=True, exist_ok=True)
+
+
+def _runtime_index(cfg: dict, day: dict, method: str, catalog_path: Path, own: Path,
+                   runtime_document: dict) -> dict:
+    """Facts the researcher must not re-derive with pwd/rg/schema probes."""
+    from stock_analyzer.ops import selection_parallel_compact as compact
+    inputs = catalog_path.parent
+    catalog = _json(catalog_path)
+    universe = _json(inputs / 'universe.json')
+    import pyarrow.parquet as pq
+    views = {}
+    for view, filename in (('market', 'market_context.parquet'), ('company', 'company_discovery.parquet'),
+                           ('sector', 'sector_hotspot.parquet'), ('stock_context', 'stock_trading_context.parquet'),
+                           ('price', 'price_analysis_context.parquet')):
+        path = inputs / filename
+        if not path.exists():
+            continue
+        schema = pq.read_schema(path)
+        views[view] = {'rows': pq.read_metadata(path).num_rows,
+                       'columns': schema.names[:60], 'column_count': len(schema.names)}
+    views['universe'] = {'rows': len(universe), 'columns': ['ts_code', 'name', 'market']}
+    views['price_view_note'] = ('查询视图 price = universe 左连接 price_analysis_context；'
+                                'source_total 按完整 U，与派生行数不同不是缺失')
+    from stock_analyzer.ops.recommendation_context import DEFINITIONS
+    return {'profile': compact.PROFILE, 'method': method, 'method_commit': cfg['methods'][method],
+            'runtime_method_commit': runtime_document.get('method_commit'),
+            'runtime_map': compact.RUNTIME_MAP_PATH,
+            'runtime_map_sha256': runtime_document.get('runtime_map_sha256'),
+            'identity': {k: day[k] for k in ('formation_date', 'action_date', 'as_of')},
+            'limits': cfg.get('limits'),
+            'paths': {'catalog': str(catalog_path), 'universe': str(inputs / 'universe.json'),
+                      'sector_snapshots': str(inputs / 'sector-snapshots.json'),
+                      'context_cwd': str(own), 'work': str(own / 'work'),
+                      'official': str(own / 'work/official'), 'queries': str(own / 'work/queries'),
+                      'runtime_method': str(own / 'work/runtime/runtime-method.md'),
+                      'runtime_method_map': str(own / 'work/runtime/runtime-method-map.json'),
+                      'usage_progress': str(own / 'work/usage-progress.json')},
+            'views': views, 'company_datasets': list(COMPANY_DATASETS),
+            'definitions': DEFINITIONS,
+            'usage_progress_note': '查询类命令可加 --usage-file <上述usage-progress路径> 附带剩余预算摘要'}
+
+
+def _prompt_compact(cfg: dict, day: dict, method: str, catalog_path: Path, own: Path, cli: str) -> str:
+    """compact-v1 startup material: execution view + index + interfaces only."""
+    import shlex as _shlex
+    from stock_analyzer.ops import selection_parallel_compact as compact
+    runtime_document = _ensure_runtime_materials(cfg, own, method)
+    index = _runtime_index(cfg, day, method, catalog_path, own, runtime_document)
+    _write_json(own / 'work' / 'runtime-index.json', index)
+    method_text = (own / 'work/runtime/runtime-method.md').read_text(encoding='utf-8')
+    knowledge = compact.knowledge_entries(own, compact.load_runtime_map(Path(cfg['code_root']))
+                                          .get('startup_knowledge_ids', []))
+    if knowledge['missing_ids']:
+        raise ValueError(f"startup knowledge ids missing from frozen knowledge: {knowledge['missing_ids']}")
+    common = (Path(cfg['code_root']) / 'ops/selection-parallel-prompt.md').read_text(encoding='utf-8')
+    request_example = {'queries': [{'id': 'company_first', 'view': 'company',
+        'sql': 'SELECT ts_code,dataset,title,published_at,available_at FROM company '
+               'WHERE dataset = ? ORDER BY available_at DESC, ts_code',
+        'params': ['announcement'], 'page_size': 20, 'offset': 0}]}
+    evidence_example = {'documents': [{'evidence_id': 'doc_1', 'ts_code': '<实际代码>',
+        'announcement_id': '<从company视图取得的真实ID>', 'action': 'locate',
+        'query': '业绩变动 原因 生效 风险'}]}
+    example = ('{"method_id":"' + method + '","formation_date":"' + day['formation_date'] + '",'
+               '"action_date":"' + day['action_date'] + '","as_of":"' + day['as_of'] + '",'
+               '"market_summary":"简短背景",'
+               '"discovery_summary":{"sector":{"status":"searched_no_candidate","source_refs":["neutral:sector_hotspot"],"codes":[]},'
+               '"company":{"status":"searched_no_candidate","source_refs":["neutral:company_discovery"],"codes":[]},'
+               '"price":{"status":"searched_no_candidate","source_refs":["neutral:price_analysis_context"],"codes":[]}},'
+               '"candidates":[],"selected":[],"conditional_events":[],"unresolved":[],"no_selection_reason":"完成且零入选原因"}')
+    parts = [method_text,
+             '\n--- 共同执行要求 ---\n' + common,
+             '\n--- runtime-index（真实路径、视图行数、字段、单位与预算；不要再 pwd/rg/读 schema） ---\n'
+             + json.dumps(index, ensure_ascii=False, indent=1),
+             '\n--- 启动知识条目（按ID一次供给；其余知识用 knowledge --id 定向读取） ---\n'
+             + json.dumps(knowledge['entries'], ensure_ascii=False, indent=1),
+             f'\n你执行 {method} 独立短研究（{compact.PROFILE}）。上下文目录 {own}，读写仅限其 work/。'
+             f'形成日={day["formation_date"]}，参与日={day["action_date"]}，截止={day["as_of"]}；'
+             '不得读取 available_at 晚于截止的事实或未来行情。'
+             f'接口用法（{cli} 为公共命令前缀）：'
+             f'\n1) 全范围查询：写请求 JSON 到 {own}/work/queries/request.json 后运行 '
+             f'{cli} discover --catalog {index["paths"]["catalog"]} --request {own}/work/queries/request.json '
+             f'--output-dir {own}/work；请求形状 {json.dumps(request_example, ensure_ascii=False)}；'
+             '先 company 后 price；查询在完整来源上执行后分页，回执由程序计算，不手填覆盖数。'
+             f'\n2) 个股事实：{cli} facts --catalog {index["paths"]["catalog"]} --code <代码> '
+             '--category price --category company --profile decision '
+             f'--group-code <实际group_code> --sector-snapshots {index["paths"]["sector_snapshots"]} '
+             f'--output {own}/work/facts-full.json --part <上一页next_part>；'
+             'compact 投影保留窗口、行业层级/分母、负面与限制；未返回部分不计已读，next_part 非空须续读。'
+             f'\n3) 知识：{cli} knowledge --context {own} --id <知识ID>。'
+             f'\n4) 官方原件：{cli} evidence --catalog {index["paths"]["catalog"]} --context {own} '
+             f'--request {own}/work/official/request.json；locate 形状 '
+             f'{json.dumps(evidence_example, ensure_ascii=False)}；'
+             '决定去留的条款必须真正 read；receipt 存在不等于已读。'
+             f'\n预算：{cfg.get("limits")}；可用 --usage-file {index["paths"]["usage_progress"]} 查看剩余。'
+             '中断后同任务恢复会复用已保存输出，不重复已失效查询。'
+             '最终输出合同与示例：' + example]
+    return '\n'.join(parts)
+
+
 def _prompt(cfg: dict, day: dict, method: str, catalog_path: Path) -> str:
     code = Path(cfg['code_root'])
     python = Path(cfg.get('python') or sys.executable)
@@ -883,6 +1091,8 @@ def _prompt(cfg: dict, day: dict, method: str, catalog_path: Path) -> str:
     import_path = f'{code / "src"}:{code}'
     cli = (f'PYTHONPATH={shlex.quote(import_path)} {shlex.quote(str(python))} '
            f'{shlex.quote(str(code / "tools/selection_parallel.py"))}')
+    if (cfg.get('execution_profile') or 'full') == 'compact-v1':
+        return _prompt_compact(cfg, day, method, catalog_path, own, cli)
     files = [f'.agents/skills/{name}/SKILL.md' for name in SKILLS]
     common = (code / 'ops/selection-parallel-prompt.md').read_text(encoding='utf-8')
     prior = None if cfg.get('full_universe_replay') else _prior_qualified_decision(_trial(cfg), method, day['as_of'])
@@ -1005,12 +1215,47 @@ def _check_discovery(obj: dict, tools: list[tuple[str, str, object]], *, full_un
             if view == 'price' and (catalog_path.parent/'universe.json').exists():
                 # A left join from every eligible security is also a full-U scan.
                 allowed_totals.add(len(_json(catalog_path.parent/'universe.json')))
+
+            def _legacy_result(result) -> bool:
+                return (isinstance(result.get('query'), str) and result['query'].strip()
+                        and result.get('scanned_all') is True
+                        and isinstance(result.get('records'), list))
+
+            def _compact_result(result) -> bool:
+                # Program-computed receipts: query_id, computed coverage and a
+                # persisted full-result file; command text is never consulted.
+                if not result.get('query_id'):
+                    return False
+                if (result.get('as_of'), result.get('formation_date')) != (
+                        _json(catalog_path).get('as_of'), _json(catalog_path).get('formation_date')):
+                    return False
+                searched = result.get('searched_total')
+                if not (result.get('scanned_all') is True
+                        or (isinstance(searched, int) and searched > 0)):
+                    return False
+                if not (isinstance(result.get('rows'), list)
+                        or isinstance(result.get('records'), list) or result.get('partial')):
+                    return False
+                full_file = result.get('full_result_file')
+                if not full_file or not Path(str(full_file)).is_file():
+                    return False
+                try:
+                    persisted = _json(Path(str(full_file)))
+                except (OSError, json.JSONDecodeError):
+                    return False
+                if (isinstance(persisted.get('rows'), list) and not result.get('full_result_truncated')
+                        and len(persisted['rows']) != result.get('matched_count')):
+                    return False  # hand-edited matched_count diverges from the persisted result
+                return True
+
             observed = any(isinstance(result, dict) and result.get('view') == view
-                and result.get('source_total') == item['source_total'] and result.get('scanned_all') is True
-                and isinstance(result.get('query'), str) and result['query'].strip()
-                and isinstance(result.get('matched_count'), int) and isinstance(result.get('records'), list)
-                and marker in command for command, _, parsed in tools if isinstance(parsed, dict)
-                for result in (parsed.get('discoveries', []) if 'discoveries' in parsed else [parsed]))
+                and result.get('source_total') == item['source_total']
+                and isinstance(result.get('matched_count'), int)
+                and result.get('matched_count') == item.get('matched_count')
+                and (_legacy_result(result) and marker in command or _compact_result(result))
+                for command, _, parsed in tools if isinstance(parsed, dict)
+                for result in (parsed.get('discoveries') if 'discoveries' in parsed else
+                               parsed.get('responses') if 'responses' in parsed else [parsed]))
             if item['source_total'] not in allowed_totals:
                 raise ValueError(f'discovery {view} source coverage differs from frozen source')
         elif view == 'company':
@@ -1244,6 +1489,10 @@ def _check_run_contract(day: dict, cfg: dict) -> None:
               'common_prompt_sha256':hashlib.sha256((code_root/'ops/selection-parallel-prompt.md').read_bytes()).hexdigest(),
               'methods':cfg['methods'], 'model':cfg.get('model'), 'reasoning':cfg.get('reasoning'),
               'no_fallback':cfg.get('no_fallback'), 'limits':cfg.get('limits')}
+    if day.get('execution_profile') or cfg.get('execution_profile'):
+        from stock_analyzer.ops.selection_parallel_compact import runtime_map_sha256
+        actual['execution_profile'] = cfg.get('execution_profile')
+        actual['runtime_map_sha256'] = runtime_map_sha256(code_root)
     different = [k for k,v in actual.items() if day.get(k) != v]
     if day.get('program_dirty_at_prepare') is not False or _worktree_dirty(code_root):
         different.append('program_dirty')
@@ -1483,7 +1732,17 @@ def update_outcomes(config_path: Path, *, through: str) -> Path:
     after = _outcome_source_versions(ResearchWarehouse(warehouse, read_only=True), first, through)
     if before != after:
         raise ValueError('outcome price source changed during computation')
-    days = [_day_state(file.parent) for file in sorted((root/('smoke' if mode == 'replay_smoke' else 'daily')).glob('*/run.json'))]
+    if cfg.get('full_universe_replay'):
+        # Day states come only from the frozen replay_cases identities; old smoke
+        # attempts on the same dates never enter the current denominator.
+        days = []
+        for identity in cfg['replay_cases']:
+            case_dir = root / 'smoke' / identity['replay_id']
+            if not (case_dir / 'run.json').exists():
+                raise ValueError(f"current replay case missing on disk: {identity['replay_id']}")
+            days.append(_day_state(case_dir))
+    else:
+        days = [_day_state(file.parent) for file in sorted((root/('smoke' if mode == 'replay_smoke' else 'daily')).glob('*/run.json'))]
     stats = summarize(rows, days, mode=mode)
     calendar = _calendar(warehouse, min((r['action_date'] for r in rows), default=through), through)
     first_only, nonoverlap = auxiliary_views([r for r in rows if r.get('mode')==mode], calendar)
@@ -1521,7 +1780,8 @@ def update_outcomes(config_path: Path, *, through: str) -> Path:
               'definition.json': json.dumps(definition, ensure_ascii=False, indent=2, default=str) + '\n'}
     if cfg.get('full_universe_replay'):
         from stock_analyzer.analysis.selection_parallel_outcomes import describe_groups
-        extras['group-summary.json'] = json.dumps(describe_groups(rows+reference_outcomes+universe_outcomes, calendar, cfg['action_dates']), ensure_ascii=False, indent=2) + '\n'
+        planned_dates = cfg.get('action_dates') or [d['action_date'] for d in cfg['replay_cases']]
+        extras['group-summary.json'] = json.dumps(describe_groups(rows+reference_outcomes+universe_outcomes, calendar, planned_dates), ensure_ascii=False, indent=2) + '\n'
         extras.update({'simple-reference-outcomes.csv':_csv_text(reference_outcomes),
                        'universe-outcomes.csv':_csv_text(universe_outcomes),
                        'simple-reference-ranking.csv':_csv_text(ranking_rows)})
@@ -1611,7 +1871,8 @@ def prepare_batch(config_path: Path, *, batch_number: int, through: str) -> Path
                 row[f'd{n}_hit_20pct_close'] = None if value in ('',None) else value == 'True'
             relevant.append(row)
     day_states = [_day_state(day_path(x)) if (day_path(x)/'run.json').exists() else
-                  {'mode':mode,'action_date':x,'status':{'M0':'not_run','M1':'not_run'},
+                  {'mode':mode,'action_date':x,'replay_id':replay_ids.get(x),
+                   'status':{'M0':'not_run','M1':'not_run'},
                    'qualification':{'M0':False,'M1':False}} for x in scope]
     metrics = summarize(relevant, day_states, mode=mode)
     readiness = {'batch': batch_number, 'through': through,
@@ -1697,3 +1958,630 @@ def experiment_status(config_path: Path) -> dict:
             'batch_materials': batches, 'batch_ai_reports': reviews,
             'latest_outcomes': max((str(p.relative_to(root)) for p in root.glob('outcomes/*/r???/outcomes.csv')), default=None),
             'production_adopted': False, 'automatic_trial_enabled': False}
+
+
+# ------------------------------------------------------------------ T7 preflight
+
+def _preflight_record(checks: list, failures: list, name: str, ok: bool, detail: dict | None = None) -> None:
+    entry = {'check': name, 'status': 'ok' if ok else 'failed'}
+    if detail:
+        entry['detail'] = detail
+    checks.append(entry)
+    if not ok:
+        failures.append(name)
+
+
+def _synthetic_warehouse(base: Path, codes: list[str], dates: list[str]) -> Path:
+    """Deterministic synthetic price calendar/warehouse; no real future quotes."""
+    import pandas as pd
+    calendar_dir = base / 'facts/trade_calendar/cal_year=2026'
+    calendar_dir.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame({'cal_date': dates, 'is_open': True}).to_parquet(
+        calendar_dir / 'data.parquet', index=False)
+    for index, day in enumerate(dates):
+        frame_dir = base / 'facts/equity_daily' / f'trade_date={day}'
+        frame_dir.mkdir(parents=True, exist_ok=True)
+        rows = []
+        for position, code in enumerate(codes):
+            drift = 0.01 + 0.002 * ((position + index) % 5)
+            close = round(10.0 * (1 + drift) ** index, 4)
+            rows.append({'ts_code': code, 'trade_date': day, 'open': round(close * 0.995, 4),
+                         'high': round(close * 1.02, 4), 'low': round(close * 0.97, 4),
+                         'close': close, 'pre_close': round(close / (1 + drift), 4),
+                         'vol': 10000.0 + index, 'amount': 1000000.0 + 1000.0 * index})
+        pd.DataFrame(rows).to_parquet(frame_dir / 'data.parquet', index=False)
+        for dataset, payload in (('adj_factor', [{'ts_code': code, 'trade_date': day, 'adj_factor': 1.0}
+                                                 for code in codes]),
+                                 ('index_daily', [{'index_code': '000300.SH', 'trade_date': day,
+                                                   'open': 4000.0 + index, 'close': 4010.0 + index,
+                                                   'high': 4020.0 + index, 'low': 3990.0 + index}])):
+            target = base / 'facts' / dataset / f'trade_date={day}'
+            target.mkdir(parents=True, exist_ok=True)
+            pd.DataFrame(payload).to_parquet(target / 'data.parquet', index=False)
+    return base
+
+
+def _csv_rows(rows: list[dict], fallback_columns: list[str]) -> str:
+    if not rows:
+        import io
+        buffer = io.StringIO()
+        writer = csv.DictWriter(buffer, fieldnames=fallback_columns, lineterminator='\n')
+        writer.writeheader()
+        return buffer.getvalue() + '# no_rows: 空组如实为空，无伪造0收益\n'
+    return _csv_text(rows)
+
+
+def preflight(config_path: Path, *, output_dir: Path) -> dict:
+    """Offline real-scale acceptance over frozen inputs; never launches research."""
+    from stock_analyzer.analysis import selection_parallel_outcomes as outcomes
+    from stock_analyzer.ops import selection_parallel_compact as compact
+    cfg = _cfg(config_path)
+    root = _trial(cfg)
+    out = Path(output_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    checks: list[dict] = []
+    failures: list[str] = []
+    timings: dict[str, float] = {}
+    sizes: dict[str, dict] = {}
+    original_invoke = _invoke_model
+    invoke_calls = {'real': 0, 'fake': 0}
+    try:
+        import pyarrow.parquet as pq
+        day_catalogs = []
+        for identity in cfg.get('replay_cases', []):
+            cat_path = root / 'smoke' / identity['replay_id'] / 'inputs/catalog.json'
+            ok = cat_path.exists() and (cat_path.parent / 'company_discovery.parquet').exists()
+            detail = {'replay_id': identity['replay_id']}
+            if ok:
+                universe = _json(cat_path.parent / 'universe.json')
+                detail.update({'formation_date': identity['formation_date'],
+                               'action_date': identity['action_date'], 'as_of': identity['as_of'],
+                               'universe_rows': len(universe),
+                               'company_rows': pq.read_metadata(cat_path.parent / 'company_discovery.parquet').num_rows})
+                day_catalogs.append((identity, cat_path))
+            _preflight_record(checks, failures, f'frozen_inputs:{identity["replay_id"]}', ok, detail)
+        if not day_catalogs:
+            return _preflight_report(out, cfg, checks, failures, timings, sizes, invoke_calls)
+        identity0, catalog0 = day_catalogs[0]
+        universe_codes = [r['ts_code'] for r in _json(catalog0.parent / 'universe.json')]
+        fixture_code = universe_codes[0]
+
+        # --- fixed technical queries over the real frozen company index ---
+        qdir = out / 'queries'
+        started = clock_time.monotonic()
+        count_out = compact.discover_queries(catalog0, {'queries': [
+            {'id': 'company_count', 'view': 'company', 'sql': 'SELECT count(*) AS matched FROM company'}]},
+            output_dir=qdir)
+        timings['query_company_count_seconds'] = round(clock_time.monotonic() - started, 3)
+        count_receipt = count_out['responses'][0]
+        company_rows = pq.read_metadata(catalog0.parent / 'company_discovery.parquet').num_rows
+        counted = count_receipt['rows'][0][0] if count_receipt.get('rows') else None
+        _preflight_record(checks, failures, 'query:company_unconditional_count',
+                          counted == company_rows and count_receipt['source_total'] == company_rows,
+                          {'count_value': counted, 'source_total': count_receipt['source_total']})
+        field_sql = ("SELECT ts_code, dataset, title, published_at, available_at FROM company "
+                     "WHERE dataset = 'announcement' AND title LIKE '%业绩%' "
+                     "ORDER BY available_at DESC, ts_code")
+        page1 = compact.discover_queries(catalog0, {'queries': [
+            {'id': 'company_field', 'view': 'company', 'sql': field_sql, 'page_size': 5, 'offset': 0}]},
+            output_dir=qdir)
+        page_late = compact.discover_queries(catalog0, {'queries': [
+            {'id': 'company_field', 'view': 'company', 'sql': field_sql, 'page_size': 5, 'offset': 60}]},
+            output_dir=qdir)
+        r1, rl = page1['responses'][0], page_late['responses'][0]
+        _preflight_record(checks, failures, 'query:company_field_full_scope_then_paging',
+                          r1['matched_count'] == rl['matched_count'] and rl['returned_count'] > 0
+                          and rl['offset'] == 60 and r1['source_total'] == company_rows,
+                          {'matched': r1['matched_count'], 'page1_rows': r1['returned_count'],
+                           'offset60_rows': rl['returned_count'], 'next_offset': rl['next_offset']})
+        sizes['company_field_page_chars'] = {'page1': len(json.dumps(r1, ensure_ascii=False)),
+                                             'offset60': len(json.dumps(rl, ensure_ascii=False))}
+        price_sql = ('SELECT count(*) AS scanned, sum(CASE WHEN return_5d IS NULL THEN 1 ELSE 0 END) '
+                     'AS missing_return_5d FROM price')
+        price_out = compact.discover_queries(catalog0, {'queries': [
+            {'id': 'price_full_u', 'view': 'price', 'sql': price_sql}]}, output_dir=qdir)
+        pr = price_out['responses'][0]
+        _preflight_record(checks, failures, 'query:price_full_universe_left_join',
+                          pr['searched_total'] == pr['source_total'] == len(universe_codes),
+                          {'source_total': pr['source_total'], 'searched_total': pr['searched_total'],
+                           'missing_return_5d': pr['rows'][0][1] if pr['rows'] else None})
+        l3_out = compact.discover_queries(catalog0, {'queries': [
+            {'id': 'sector_l3_sample', 'view': 'sector',
+             'sql': "SELECT group_code, group_name, level, member_count FROM sector "
+                    "WHERE level = 'L3' ORDER BY member_count DESC"}]}, output_dir=qdir)
+        l3_receipt = l3_out['responses'][0]
+        l3_rows = l3_receipt.get('rows') or []
+        l3_code = l3_rows[0][0] if l3_rows else None
+        _preflight_record(checks, failures, 'query:sector_l3_real_rows',
+                          bool(l3_rows) and l3_receipt['matched_count'] > 0,
+                          {'l3_sample': l3_rows[:3], 'matched': l3_receipt['matched_count']})
+
+        # --- compact facts over real sources with a real L3 group ---
+        sector_snapshots = _json(catalog0.parent / 'sector-snapshots.json') \
+            if (catalog0.parent / 'sector-snapshots.json').exists() else []
+        started = clock_time.monotonic()
+        facts_page = compact.facts_compact(catalog0, codes=[fixture_code], categories=['price', 'industry'],
+                                           group_codes=[l3_code] if l3_code else [],
+                                           sector_snapshots=sector_snapshots, output=out / 'facts-full.json',
+                                           parts_dir=out / 'facts-parts')
+        timings['facts_compact_seconds'] = round(clock_time.monotonic() - started, 3)
+        industry_read = next((r for r in facts_page.get('reads', []) if r['category'] == 'industry'), None)
+        price_read = next((r for r in facts_page.get('reads', []) if r['category'] == 'price'), None)
+        industry_ok = bool(industry_read and industry_read['query_scope'].get('group_codes') == [l3_code]
+                           and industry_read['result']['facts'].get('industry_observations'))
+        price_ok = bool(price_read and 'comparison_windows' in price_read['result']['facts']
+                        and price_read['result']['facts'].get('price_observations'))
+        continuation_ok = True
+        if facts_page.get('next_part'):
+            nxt = compact.facts_compact(catalog0, codes=[fixture_code], categories=['price', 'industry'],
+                                        group_codes=[l3_code] if l3_code else [],
+                                        sector_snapshots=sector_snapshots,
+                                        part=facts_page['next_part'], parts_dir=out / 'facts-parts')
+            continuation_ok = nxt.get('part') == facts_page['next_part'] and 'reads' in nxt
+        _preflight_record(checks, failures, 'facts:compact_preserves_l3_and_windows',
+                          industry_ok and price_ok and continuation_ok,
+                          {'fixture_code': fixture_code, 'group_code': l3_code,
+                           'reads': len(facts_page.get('reads', [])),
+                           'next_part': facts_page.get('next_part')})
+        sizes['facts_page_chars'] = {'chars': len(json.dumps(facts_page, ensure_ascii=False)),
+                                     'utf8_bytes': len(json.dumps(facts_page, ensure_ascii=False).encode('utf-8'))}
+
+        # --- knowledge by id over the frozen method context ---
+        knowledge_ok, knowledge_detail = False, {}
+        m0_context = Path(cfg['context_root']) / 'M0'
+        if not m0_context.is_dir() and (root / 'methods/M0').is_dir():
+            m0_context = root / 'methods/M0'
+        if m0_context.is_dir():
+            ids = compact.load_runtime_map(Path(cfg['code_root'])).get('startup_knowledge_ids', [])
+            knowledge = compact.knowledge_entries(m0_context, ids)
+            knowledge_ok = not knowledge['missing_ids'] and len(knowledge['entries']) == len(ids)
+            knowledge_detail = {'ids': ids, 'missing': knowledge['missing_ids']}
+        _preflight_record(checks, failures, 'knowledge:id_entries_readable', knowledge_ok, knowledge_detail)
+
+        # --- official evidence reuse (no new download inside preflight) ---
+        evidence_receipts = sorted(Path(cfg['context_root']).glob('*/M0/work/official/*/receipt.json'))
+        evidence_ok, evidence_detail = False, {}
+        evidence_context = out / 'evidence-context'
+        if evidence_receipts:
+            source_dir = evidence_receipts[0].parent
+            target_dir = evidence_context / 'work/official' / source_dir.name
+            if not target_dir.exists():
+                shutil.copytree(source_dir, target_dir)
+            receipt = _json(evidence_receipts[0])
+            announcement = receipt.get('announcement') or {}
+            try:
+                located = compact.evidence_request(catalog0, evidence_context, {'documents': [
+                    {'evidence_id': source_dir.name, 'ts_code': announcement.get('ts_code'),
+                     'announcement_id': announcement.get('announcement_id'), 'action': 'locate',
+                     'query': '业绩 变动 原因 风险'}]})
+                read_back = compact.evidence_request(catalog0, evidence_context, {'documents': [
+                    {'evidence_id': source_dir.name, 'action': 'read',
+                     'receipt_ref': located['documents'][0]['receipt_ref'],
+                     'start_line': 1, 'end_line': 40}]})
+                first = located['documents'][0]
+                evidence_ok = (first.get('receipt_ref', '').endswith('receipt.json')
+                               and not first.get('fetched_now')
+                               and read_back['documents'][0].get('read') is True
+                               and bool(read_back['documents'][0].get('text_parts')))
+                evidence_detail = {'announcement_id': announcement.get('announcement_id'),
+                                   'ts_code': announcement.get('ts_code'),
+                                   'locate_matches': first.get('match_count'),
+                                   'read_parts': len(read_back['documents'][0].get('text_parts', []))}
+            except (ValueError, OSError, KeyError) as error:
+                evidence_detail = {'error': str(error)[:300]}
+        _preflight_record(checks, failures, 'evidence:existing_original_reused_and_read', evidence_ok, evidence_detail)
+
+        # --- r04/r03/r04 replayable query comparison ---
+        sample_path = root / 'work/engineering-repair-20260929/old-queries-sample.json'
+        if sample_path.exists():
+            sample = _json(sample_path)
+            for entry in sample.get('comparisons', []):
+                try:
+                    started = clock_time.monotonic()
+                    result = compact.discover_queries(catalog0, {'queries': [entry['request']]},
+                                                      output_dir=qdir)
+                    elapsed = round(clock_time.monotonic() - started, 3)
+                    receipt = result['responses'][0]
+                    expected = entry.get('expectations') or {}
+                    if entry.get('equality_required', True):
+                        ok = (receipt['matched_count'] == expected.get('matched_count')
+                              and receipt['source_total'] == expected.get('source_total', receipt['source_total']))
+                    else:
+                        ok = True  # reconstructed request: same-source execution, difference recorded
+                    chars = len(json.dumps(receipt, ensure_ascii=False))
+                    timings[f"old_new:{entry['label']}"] = elapsed
+                    sizes[f"old_new:{entry['label']}"] = {
+                        'old_output_chars': entry.get('old_output_chars'),
+                        'new_receipt_chars': chars, 'new_full_result_file': receipt['full_result_file'],
+                        'equality_required': entry.get('equality_required', True)}
+                    _preflight_record(checks, failures, f"old_new:{entry['label']}", ok,
+                                      {'matched': receipt['matched_count'],
+                                       'old_matched': expected.get('matched_count',
+                                                                   expected.get('matched_count_hint'))})
+                except (ValueError, OSError) as error:
+                    _preflight_record(checks, failures, f"old_new:{entry['label']}", False, {'error': str(error)[:300]})
+        else:
+            _preflight_record(checks, failures, 'old_new:sample', False,
+                              {'error': f'missing engineering sample: {sample_path}'})
+
+        # --- fake arm through the real save/parse path, in a temporary trial ---
+        prompt_sizes: list[dict] = []
+        simulation = _preflight_fake_arm(cfg, root, out, catalog0, identity0, fixture_code, l3_code,
+                                         evidence_context if evidence_receipts else None,
+                                         evidence_receipts[0].parent.name if evidence_receipts else None,
+                                         invoke_calls, prompt_sizes)
+        checks.extend(simulation['checks'])
+        failures.extend(simulation['failures'])
+        if prompt_sizes:
+            sizes['compact_startup_prompt'] = prompt_sizes[0]
+        audit_path = root / 'work/engineering-repair-20260929/failure-audit/failure-audit.json'
+        if audit_path.exists():
+            runs = _json(audit_path).get('runs', [])
+            r04 = next((r for r in runs if r.get('case', '').endswith('r04')), None)
+            if r04:
+                sizes['legacy_r04_startup_prompt'] = {'chars': r04.get('prompt_characters'),
+                                                      'utf8_bytes': r04.get('prompt_utf8_bytes')}
+
+        # --- synthetic six tables through the real guarded calculations ---
+        six = _preflight_six_tables(cfg, root, out, day_catalogs, universe_codes)
+        checks.extend(six['checks'])
+        failures.extend(six['failures'])
+        sizes['six_table_files'] = six.get('files', {})
+
+        # --- visible-volume estimates for 8/12/24 rounds ---
+        estimates = _preflight_estimates(sizes, checks)
+        for name, value in estimates.items():
+            sizes[name] = value
+        return _preflight_report(out, cfg, checks, failures, timings, sizes, invoke_calls, estimates)
+    finally:
+        globals()['_invoke_model'] = original_invoke
+
+
+def _preflight_estimates(sizes: dict, checks: list) -> dict:
+    """Accumulated visible-text estimates; not server-side token billing."""
+    startup = (sizes.get('compact_startup_prompt') or {}).get('chars') or 0
+    responses = []
+    for key, value in sizes.items():
+        if isinstance(value, dict) and 'new_receipt_chars' in value:
+            responses.append(value['new_receipt_chars'])
+    facts_chars = (sizes.get('facts_page_chars') or {}).get('chars')
+    if facts_chars:
+        responses.append(facts_chars)
+    page_chars = (sizes.get('company_field_page_chars') or {}).get('page1')
+    if page_chars:
+        responses.append(page_chars)
+    average_response = sum(responses) / len(responses) if responses else 0
+    assistant_per_round = 1500
+    def total(rounds: int) -> int:
+        return int(startup + rounds * (average_response + assistant_per_round + 400))
+    tokenizer = None
+    try:
+        import tiktoken
+        tokenizer = {'name': 'tiktoken', 'note': '本地编码估计，不是Astra服务端完整上下文计费'}
+    except ImportError:
+        tokenizer = None
+    estimates = {'estimate_inputs': {
+        'startup_chars': startup, 'average_tool_response_chars': round(average_response),
+        'assumed_assistant_chars_per_round': assistant_per_round,
+        'assumed_command_chars_per_round': 400,
+        'tokenizer': tokenizer or '不可用：报告字符与UTF-8字节上界，不伪称精确token',
+        'limits': '12轮为预检设计场景；系统/工具定义/隐藏推理不在本地精确统计范围'}}
+    for rounds in (8, 12, 24):
+        estimates[f'estimate_rounds_{rounds}'] = {
+            'visible_chars': total(rounds),
+            'utf8_bytes_upper_bound': int(total(rounds) * 2.1)}
+    return estimates
+
+
+def _preflight_fake_arm(cfg: dict, root: Path, out: Path, catalog0: Path, identity0: dict,
+                        fixture_code: str, l3_code, evidence_context, evidence_id,
+                        invoke_calls: dict, prompt_sizes: list[dict]) -> dict:
+    """Drive run_arm's real save/parse path with a fake model in a temp trial."""
+    from stock_analyzer.ops import selection_parallel_compact as compact
+    checks: list[dict] = []
+    failures: list[str] = []
+
+    def record(name, ok, detail=None):
+        _preflight_record(checks, failures, f'simulation:{name}', ok, detail or {})
+
+    simulation_root = out / 'simulation'
+    sim_trial = simulation_root / 'archive/selection_trials' / cfg['experiment_id']
+    sim_cfg = dict(cfg)
+    sim_cfg.update(archive_root=str(simulation_root / 'archive'),
+                   context_root=str(simulation_root / 'context'),
+                   research_enabled=True,
+                   replay_cases=[dict(identity0, replay_id='sim-compact1')],
+                   full_universe_replay=True, execution_profile='compact-v1')
+    sim_cfg_path = sim_trial / 'experiment.json'
+    _write_json(sim_cfg_path, sim_cfg)
+    donor = root / 'smoke' / identity0['replay_id']
+    sim_day = _reuse_frozen_inputs(sim_cfg, sim_trial / 'smoke/sim-compact1', donor,
+                                   'replay_smoke', 'sim-compact1')
+    sim_catalog = sim_day / 'inputs/catalog.json'
+    code_root = Path(cfg['code_root'])
+    cli_python = Path(cfg.get('python') or sys.executable)
+    cli = f'PYTHONPATH={code_root / "src"}:{code_root} {cli_python} {code_root / "tools/selection_parallel.py"}'
+
+    arm_context = Path(sim_cfg['context_root']) / 'sim-compact1'
+    # Real interface outputs become the fake model's tool events.
+    sim_queries = arm_context / 'work'
+    request = {'queries': [
+        {'id': 'company_first', 'view': 'company',
+         'sql': "SELECT ts_code, dataset, title, published_at, available_at FROM company "
+                "WHERE dataset = 'announcement' AND ts_code = ? ORDER BY available_at DESC, ts_code",
+         'params': [fixture_code], 'page_size': 5, 'offset': 0},
+        {'id': 'sector_scan', 'view': 'sector',
+         'sql': "SELECT group_code, group_name, level, member_count FROM sector "
+                "WHERE level = 'L3' ORDER BY member_count DESC", 'page_size': 5, 'offset': 0},
+        {'id': 'price_candidates', 'view': 'price',
+         'sql': 'SELECT ts_code, name, return_5d, relative_market_5d, price_location_60d '
+                'FROM price WHERE ts_code = ?', 'params': [fixture_code]}]}
+    discovery = compact.discover_queries(sim_catalog, request, output_dir=sim_queries)
+    sector_snapshots = _json(sim_catalog.parent / 'sector-snapshots.json') \
+        if (sim_catalog.parent / 'sector-snapshots.json').exists() else []
+    facts_pages = [compact.facts_compact(sim_catalog, codes=[fixture_code],
+                                         categories=['price', 'company', 'industry'],
+                                         group_codes=[l3_code] if l3_code else [],
+                                         sector_snapshots=sector_snapshots,
+                                         output=arm_context / 'work/facts-full.json',
+                                         parts_dir=arm_context / 'work/facts-parts')]
+    while facts_pages[-1].get('next_part'):
+        facts_pages.append(compact.facts_compact(sim_catalog, codes=[fixture_code],
+                                                 categories=['price', 'company', 'industry'],
+                                                 group_codes=[l3_code] if l3_code else [],
+                                                 sector_snapshots=sector_snapshots,
+                                                 part=facts_pages[-1]['next_part'],
+                                                 parts_dir=arm_context / 'work/facts-parts'))
+    events: list[str] = []
+
+    def add_event(command: str, payload: dict) -> None:
+        events.append(json.dumps({'type': 'item.completed', 'item': {
+            'type': 'command_execution', 'exit_code': 0, 'command': command,
+            'aggregated_output': json.dumps(payload, ensure_ascii=False)}}, ensure_ascii=False))
+
+    add_event(f'{cli} discover --catalog {sim_catalog} --request request.json --output-dir work', discovery)
+    for page in facts_pages:
+        add_event(f'{cli} facts --catalog {sim_catalog} --code {fixture_code} --profile decision', page)
+    evidence_fixture = None
+    if evidence_context is not None and evidence_id:
+        located = compact.evidence_request(sim_catalog, evidence_context, {'documents': [
+            {'evidence_id': evidence_id, 'action': 'read',
+             'receipt_ref': f'work/official/{evidence_id}/receipt.json',
+             'start_line': 1, 'end_line': 30}]})
+        add_event(f'{cli} evidence --catalog {sim_catalog} --context . --request request.json', located)
+        receipt_dir = evidence_context / 'work/official' / evidence_id
+        text_lines = (receipt_dir / 'text.txt').read_text(encoding='utf-8').splitlines()
+        quote = next((line[:40] for line in text_lines if len(line.strip()) >= 20), text_lines[0][:40])
+        receipt = _json(receipt_dir / 'receipt.json')
+        announcement = receipt.get('announcement') or {}
+        evidence_fixture = {'official_evidence': [{
+            'evidence_id': evidence_id, 'ts_code': announcement.get('ts_code'),
+            'announcement_id': announcement.get('announcement_id'),
+            'title': announcement.get('title'), 'available_at': announcement.get('available_at'),
+            'availability_basis': 'frozen original announcement metadata',
+            'url': receipt.get('url'), 'retrieved_at': receipt.get('retrieved_at'),
+            'receipt': f'work/official/{evidence_id}/receipt.json',
+            'adopted_pages_and_clauses': [{'page': 1, 'quote': quote.strip()}]}]}
+    receipts = {r['query_id']: r for r in discovery['responses']}
+    day = _json(sim_day / 'run.json')
+
+    def decision_object(*, selected=True, extra_ref=None, method='M0'):
+        stock = {'ts_code': fixture_code, 'rank': 1, 'primary_reason': '当时价量与业务相关（工程夹具）',
+                 'strongest_counter_evidence': '动能减弱与行业扩散不足',
+                 'nearest_comparison': '比同组近邻更强的剩余路径',
+                 'participation_condition': '开盘价格条件满足才参与（工程夹具）',
+                 'change_condition': '收盘失去支撑即重判',
+                 'source_refs': ['neutral:price_analysis_context',
+                                 f'facts:{fixture_code}:price',
+                                 f'facts:{fixture_code}:company',
+                                 f'facts:{fixture_code}:industry']}
+        if evidence_fixture:
+            stock['source_refs'].append(f'official:{evidence_id}')
+        if extra_ref:
+            stock['source_refs'].append(extra_ref)
+        candidate_refs = [r for r in stock['source_refs'] if r.startswith(('neutral', 'official'))]
+        price_receipt = receipts['price_candidates']
+        summary = {
+            'sector': {'status': 'searched_no_candidate', 'source_refs': ['neutral:sector_hotspot'], 'codes': [],
+                       'source_total': receipts['sector_scan']['source_total'],
+                       'query': receipts['sector_scan']['sql'],
+                       'matched_count': receipts['sector_scan']['matched_count'], 'coverage_gap': []},
+            'company': {'status': 'searched_no_candidate', 'source_refs': ['neutral:company_discovery'], 'codes': [],
+                        'source_total': receipts['company_first']['source_total'],
+                        'query': receipts['company_first']['sql'],
+                        'matched_count': receipts['company_first']['matched_count'], 'coverage_gap': []},
+            'price': {'status': 'searched_with_candidates' if selected else 'searched_no_candidate',
+                      'source_refs': ['neutral:price_analysis_context'],
+                      'codes': [fixture_code] if selected else [],
+                      'source_total': price_receipt['source_total'], 'query': price_receipt['sql'],
+                      'matched_count': price_receipt['matched_count'], 'coverage_gap': []}}
+        return {'method_id': method, 'formation_date': day['formation_date'], 'action_date': day['action_date'],
+                'as_of': day['as_of'], 'market_summary': '工程夹具市场背景',
+                'candidates': ([{'ts_code': fixture_code, 'discovered_by': ['price'],
+                                 'final_fate': 'selected' if selected else 'rejected',
+                                 'short_reason': '相对表现（工程夹具）',
+                                 'source_refs': candidate_refs}] if selected else []),
+                'selected': [stock] if selected else [], 'conditional_events': [], 'unresolved': [],
+                'discovery_summary': summary,
+                'no_selection_reason': None if selected else '完成且零入选（工程夹具）',
+                **(evidence_fixture or {})}
+
+    original_invoke = _invoke_model
+
+    def make_invoke(decision_text: str, *, exit_code=0, budget_exceeded=None, raise_error=None):
+        def invoke(context, prompt, attempt, *, config_path=None):
+            invoke_calls['fake'] += 1
+            if raise_error is not None:
+                raise raise_error
+            attempt.mkdir(parents=True, exist_ok=False)
+            (attempt / 'prompt.md').write_text(prompt, encoding='utf-8')
+            prompt_sizes.append({'chars': len(prompt), 'utf8_bytes': len(prompt.encode('utf-8'))})
+            (attempt / 'events.jsonl').write_text('\n'.join(events) + '\n', encoding='utf-8')
+            (attempt / 'raw-output.json').write_text(decision_text, encoding='utf-8')
+            metadata = {'requested_model': MODEL, 'actual_model': MODEL, 'actual_reasoning': EFFORT,
+                        'exit_code': exit_code, 'budget_exceeded': budget_exceeded,
+                        'tokens': {'input_tokens': 120000, 'cached_input_tokens': 90000, 'output_tokens': 2000}}
+            _write_json(attempt / 'invocation.json', metadata)
+            _write_json(attempt / 'usage-progress.json',
+                        {'input_tokens': 120000, 'cached_input_tokens': 90000,
+                         'output_tokens': 2000, 'tool_commands': len(events),
+                         'elapsed_seconds': 12.0})
+            return exit_code, metadata
+        return invoke
+
+    def guarded_invoke(*args, **kwargs):
+        invoke_calls['real'] += 1
+        raise RuntimeError('preflight must never launch the real research model')
+
+    globals()['_invoke_model'] = guarded_invoke
+    try:
+        # 1) non-empty selection through the real save path
+        globals()['_invoke_model'] = make_invoke(json.dumps(decision_object(selected=True), ensure_ascii=False))
+        result = run_arm(sim_day, method='M0')
+        nonempty_ok = ((sim_day / 'M0/result.json').exists() and result['selected']
+                       and result['run_id'] == 'replay_smoke:sim-compact1:M0'
+                       and _qualification(sim_day, 'M0')['qualified'])
+        if evidence_fixture:
+            nonempty_ok = nonempty_ok and (sim_day / 'M0/official').exists()
+        record('arm_nonempty_saved', nonempty_ok,
+               {'run_id': result.get('run_id'), 'selected': len(result.get('selected', []))})
+        # 2) legal zero selection
+        globals()['_invoke_model'] = make_invoke(json.dumps(decision_object(selected=False, method='M1'),
+                                                            ensure_ascii=False))
+        zero = run_arm(sim_day, method='M1')
+        record('arm_zero_selection_saved', zero['selected'] == [] and bool(zero.get('no_selection_reason'))
+               and _qualification(sim_day, 'M1')['qualified'],
+               {'no_selection_reason': zero.get('no_selection_reason')})
+        # 3) wrong fact reference must fail validation
+        for suffix, maker, expected_marker in (
+                ('badref', lambda: json.dumps(decision_object(selected=True,
+                                                              extra_ref=f'facts:{fixture_code}:financial'),
+                                              ensure_ascii=False), 'not returned'),
+                ('json', lambda: '{"method_id": "M0", truncated', 'JSON'),
+                ('budget', lambda: json.dumps(decision_object(selected=True), ensure_ascii=False), 'exit 124'),
+                ('interrupted', lambda: '', 'simulated interruption')):
+            sim_id = f'sim-compact1-{suffix}'
+            sim_dir = sim_trial / 'smoke' / sim_id
+            variant_cfg = dict(sim_cfg)
+            variant_cfg['replay_cases'] = [dict(identity0, replay_id=sim_id)]
+            _write_json(sim_cfg_path, variant_cfg)
+            _reuse_frozen_inputs(variant_cfg, sim_dir, donor, 'replay_smoke', sim_id)
+            if suffix == 'budget':
+                globals()['_invoke_model'] = make_invoke(maker(), exit_code=124,
+                                                         budget_exceeded='max_input_tokens')
+            elif suffix == 'interrupted':
+                globals()['_invoke_model'] = make_invoke('', raise_error=RuntimeError('simulated interruption'))
+            else:
+                globals()['_invoke_model'] = make_invoke(maker())
+            try:
+                run_arm(sim_dir, method='M0')
+                record(f'arm_{suffix}_rejected', False, {'error': 'failure variant was accepted'})
+            except (ValueError, RuntimeError, json.JSONDecodeError) as error:
+                if suffix == 'interrupted':
+                    ok = 'simulated interruption' in str(error) and \
+                        _json(sim_dir / 'run.json')['status']['M0'] == 'not_run'
+                else:
+                    ok = ((expected_marker in str(error) or 'JSONDecodeError' in type(error).__name__)
+                          and not (sim_dir / 'M0/result.json').exists())
+                record(f'arm_{suffix}_rejected', ok, {'error': str(error)[:200],
+                                                      'type': type(error).__name__})
+        _write_json(sim_cfg_path, sim_cfg)
+    finally:
+        globals()['_invoke_model'] = original_invoke
+    record('arm_real_model_never_called', invoke_calls['real'] == 0,
+           {'fake_invocations': invoke_calls['fake']})
+    return {'checks': checks, 'failures': failures}
+
+
+def _preflight_six_tables(cfg: dict, root: Path, out: Path, day_catalogs: list,
+                          universe_codes: list[str]) -> dict:
+    """Assemble the six guarded outcome tables from synthetic prices, real math."""
+    from stock_analyzer.analysis import selection_parallel_outcomes as outcomes
+    checks: list[dict] = []
+    failures: list[str] = []
+
+    def record(name, ok, detail=None):
+        _preflight_record(checks, failures, f'six_tables:{name}', ok, detail or {})
+
+    dates = list(pd.bdate_range('2026-08-20', '2026-09-25').strftime('%Y-%m-%d'))
+    fixture_codes = list(dict.fromkeys(universe_codes[:10]))
+    warehouse = _synthetic_warehouse(out / 'synthetic-warehouse', fixture_codes, dates)
+    through = dates[-1]
+    inputs = []
+    for index, (identity, _) in enumerate(day_catalogs):
+        code = fixture_codes[index % len(fixture_codes)]
+        base = {'formation_date': identity['formation_date'], 'action_date': identity['action_date'],
+                'as_of': identity['as_of'], 'ts_code': code, 'name': f'合成夹具{index}',
+                'mode': 'replay_smoke', 'rank': 1}
+        for method in ('M0', 'M1'):
+            inputs.append({**base, 'method_id': method,
+                           'run_id': f"replay_smoke:{identity['replay_id']}:{method}", 'role': 'selected'})
+        inputs.append({**base, 'method_id': 'S_A', 'run_id': f"replay_smoke:{identity['replay_id']}:S_M0",
+                       'role': 'simple_reference'})
+        inputs.append({**base, 'method_id': 'S_B', 'run_id': f"replay_smoke:{identity['replay_id']}:S_M1",
+                       'role': 'simple_reference'})
+        inputs.append({**base, 'method_id': 'U', 'run_id': f"replay_smoke:{identity['replay_id']}:U",
+                       'role': 'universe'})
+        inputs.append({**base, 'method_id': 'M0', 'run_id': f"replay_smoke:{identity['replay_id']}:M0",
+                       'role': 'rejected', 'candidate_reason': '合成被拒候选'})
+    rows, meta = outcomes.calculate(warehouse, inputs, through,
+                                    daily_output=out / 'synthetic-warehouse/daily-paths.parquet')
+    record('calculate_synthetic_paths',
+           bool(rows) and any(r.get('d20_endpoint_return') is not None for r in rows),
+           {'rows': len(rows), 'planned_selections': meta.get('planned_selections')})
+    calendar = dates
+    selected_rows = [r for r in rows if r['role'] == 'selected']
+    candidate_rows = [r for r in rows if r['role'] == 'rejected']
+    reference_rows = [r for r in rows if r['role'] == 'simple_reference']
+    universe_rows = [r for r in rows if r['role'] == 'universe']
+    day_states = []
+    for identity, _ in day_catalogs:
+        day_states.append({'mode': 'replay_smoke', 'replay_id': identity['replay_id'],
+                           'action_date': identity['action_date'],
+                           'status': {'M0': 'complete', 'M1': 'complete_zero'},
+                           'qualification': {'M0': True, 'M1': True}})
+    stats = outcomes.summarize(selected_rows, day_states, mode='replay_smoke')
+    record('summarize_exact_identity_scope',
+           stats['planned_days'] == len(day_catalogs) == stats['paired_days']
+           and stats['methods']['M0']['completed_days'] == len(day_catalogs)
+           and stats['methods']['M1']['completed_days'] == len(day_catalogs),
+           {'planned_days': stats['planned_days'], 'paired_days': stats['paired_days']})
+    first_only, nonoverlap = outcomes.auxiliary_views(selected_rows, calendar)
+    groups = outcomes.describe_groups(selected_rows + reference_rows + universe_rows, calendar,
+                                      [identity['action_date'] for identity, _ in day_catalogs])
+    target = out / 'six-tables'
+    target.mkdir(parents=True, exist_ok=True)
+    files = {}
+    for name, content in (('outcomes.csv', _csv_text(selected_rows)),
+                          ('candidate-outcomes.csv', _csv_rows(candidate_rows,
+                                                              ['run_id', 'method_id', 'action_date', 'ts_code'])),
+                          ('first-only.csv', _csv_text(first_only)),
+                          ('nonoverlap.csv', _csv_text(nonoverlap)),
+                          ('simple-reference-outcomes.csv', _csv_text(reference_rows)),
+                          ('universe-outcomes.csv', _csv_text(universe_rows)),
+                          ('group-summary.json', json.dumps(groups, ensure_ascii=False, indent=2, default=str)),
+                          ('summary.json', json.dumps(stats, ensure_ascii=False, indent=2, default=str))):
+        path = target / name
+        path.write_text(content + '\n', encoding='utf-8')
+        files[name] = {'chars': len(content)}
+    record('six_files_written',
+           all((target / name).stat().st_size > 0 for name in files),
+           {'files': sorted(files)})
+    return {'checks': checks, 'failures': failures, 'files': files}
+
+
+def _preflight_report(out: Path, cfg: dict, checks: list, failures: list, timings: dict,
+                      sizes: dict, invoke_calls: dict, estimates: dict | None = None) -> dict:
+    report = {'schema': 'selection-parallel-preflight-v1',
+              'experiment': cfg['experiment_id'],
+              'research_model_calls': invoke_calls.get('real', 0),
+              'real_outcomes_read': False,
+              'simulation_only': True,
+              'checks': checks,
+              'failed_checks': failures,
+              'timings_seconds': timings,
+              'sizes': sizes,
+              'estimates': estimates or {},
+              'output_dir': str(out)}
+    _write_json(out / 'preflight-report.json', report)
+    return report

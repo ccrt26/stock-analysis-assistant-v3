@@ -122,19 +122,32 @@ def auxiliary_views(rows: list[dict], trading_dates: list[str]) -> tuple[list[di
     return first, nonoverlap
 
 
+def _day_identity(day: dict) -> tuple:
+    """Replay identity, falling back to the action date for legacy days."""
+    return (day.get('mode'), day.get('replay_id') or day.get('action_date'))
+
+
+def _row_identity(row: dict) -> tuple:
+    run_id = str(row.get('run_id') or '')
+    parts = run_id.split(':')
+    if len(parts) == 3 and parts[0] == str(row.get('mode')) and parts[1]:
+        return (row.get('mode'), parts[1], parts[2])
+    return (row.get('mode'), row.get('action_date'), row.get('method_id'))
+
+
 def summarize(rows: list[dict], day_states: list[dict] | None = None, *, mode: str = "prospective") -> dict:
-    """Program counts and medians, explicitly scoped to prospective trial days."""
+    """Program counts and medians scoped to exact replay identities, not bare dates."""
     from statistics import median
     day_states = [d for d in (day_states or []) if d.get('mode') == mode]
     normalized = []
     for day in day_states:
         status = day.get('status') if isinstance(day.get('status'), dict) else {m:day.get(m,'not_run') for m in ('M0','M1')}
         qualification = day.get('qualification') or {}
-        normalized.append({'action_date':day.get('action_date'), 'status':status, 'qualification':qualification})
-    eligible = {(d['action_date'],m) for d in normalized for m in ('M0','M1')
+        normalized.append({'identity':_day_identity(day), 'action_date':day.get('action_date'),
+                           'status':status, 'qualification':qualification})
+    eligible = {(*d['identity'], m) for d in normalized for m in ('M0','M1')
                 if d['qualification'].get(m) is True and d['status'].get(m) in {'complete','complete_zero'}}
-    forward = [r for r in rows if r.get('mode') == mode and
-               (r.get('action_date'),r.get('method_id')) in eligible]
+    forward = [r for r in rows if r.get('mode') == mode and _row_identity(r) in eligible]
     reference = {}
     for row in rows:
         if row.get('mode') != mode:
@@ -146,16 +159,16 @@ def summarize(rows: list[dict], day_states: list[dict] | None = None, *, mode: s
             if row.get(field) is not None and peer.get(field) is not None and abs(float(row[field])-float(peer[field])) > 1e-12:
                 raise ValueError(f'same stock/action has different reference return: {key}/{field}')
     result = {'planned_days': len(normalized),
-              'paired_days': sum(all((d['action_date'],m) in eligible for m in ('M0','M1')) for d in normalized),
+              'paired_days': sum(all((*d['identity'], m) in eligible for m in ('M0','M1')) for d in normalized),
               'methods': {}}
     for method in ('M0','M1'):
         records = [r for r in forward if r['method_id']==method]
         states = [d['status'].get(method,'not_run') for d in normalized]
-        method_summary = {'completed_days': sum((d['action_date'],method) in eligible for d in normalized),
-                          'failed_days': sum(x != 'not_run' and (d['action_date'],method) not in eligible
+        method_summary = {'completed_days': sum((*d['identity'],method) in eligible for d in normalized),
+                          'failed_days': sum(x != 'not_run' and (*d['identity'],method) not in eligible
                                              for d,x in zip(normalized,states,strict=True)),
                           'not_run_days': states.count('not_run'),
-                          'zero_selection_days': sum(x == 'complete_zero' and (d['action_date'],method) in eligible
+                          'zero_selection_days': sum(x == 'complete_zero' and (*d['identity'],method) in eligible
                                                      for d,x in zip(normalized,states,strict=True)),
                           'recommendation_events': len(records),
                           'distinct_stocks': len({r['ts_code'] for r in records}),

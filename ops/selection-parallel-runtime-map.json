@@ -1,0 +1,84 @@
+{
+  "schema": "selection-parallel-runtime-map-v1",
+  "purpose": "Generate the compact execution view (compact-v1) from the frozen method originals verbatim. Sections are only ever dropped whole or de-duplicated by exact text; no wording is rewritten, merged or summarized. Frozen originals stay readable at their context paths.",
+  "paragraph_split": "blank-line separated blocks inside a section body, code fences kept atomic",
+  "actions": {
+    "keep": "section body copied verbatim",
+    "exclude": "section omitted from the execution view (recorded with reason)",
+    "keep_drop_code_blocks": "prose kept verbatim, fenced code blocks (verbose formal trace format examples) dropped; the running short-decision contract replaces them",
+    "keep_paragraphs_matching": "only body blocks containing one of `markers` are kept verbatim; used for sections that mix non-executing shell steps with frozen research rules"
+  },
+  "dedup": "exact duplicate body blocks (whitespace-normalized) are dropped after their first occurrence and recorded",
+  "files": {
+    ".agents/skills/orchestrating-stock-research/SKILL.md": {
+      "default": "keep",
+      "sections": [
+        {"heading": "## 最终输出", "action": "keep_drop_code_blocks", "reason": "输出合同语义（发动机、证据角色、近邻）保留；正式 trace 的冗长 yaml 示例不执行，由当次短决定合同替代"},
+        {"heading": "## 名单冻结后的用户说明", "action": "exclude", "reason": "正式对用户写稿外壳，本轮不执行"},
+        {"heading": "## Review 阶段", "action": "exclude", "reason": "正式复盘任务外壳，本轮不执行"},
+        {"heading": "## 历史评价边界", "action": "exclude", "reason": "复盘历史账本读取规则，本轮不执行；研究侧未知/边界义务由保留段落承担"},
+        {"heading": "## 冻结前的写作交接", "action": "exclude", "reason": "作者写作交接外壳，本轮不执行；试验结果由宿主程序保存"}
+      ]
+    },
+    ".agents/skills/interpreting-market-macro/SKILL.md": {
+      "default": "keep",
+      "sections": [
+        {"heading": "## Review 阶段", "action": "exclude", "reason": "正式复盘任务外壳，本轮不执行"},
+        {"heading": "## 输出合同", "action": "keep_drop_code_blocks", "reason": "证据角色与字段语义保留；冗长格式示例不执行"}
+      ]
+    },
+    ".agents/skills/researching-sectors-industries/SKILL.md": {
+      "default": "keep",
+      "sections": [
+        {"heading": "## Review 阶段", "action": "exclude", "reason": "正式复盘任务外壳，本轮不执行"},
+        {"heading": "## 输出合同", "action": "keep_drop_code_blocks", "reason": "证据角色与字段语义保留；冗长格式示例不执行"}
+      ]
+    },
+    ".agents/skills/researching-company-events/SKILL.md": {
+      "default": "keep",
+      "sections": [
+        {"heading": "## 最终名单的公司介绍补充", "action": "exclude", "reason": "公司介绍附属资料流程，本轮不执行"},
+        {"heading": "## Review 阶段", "action": "exclude", "reason": "正式复盘任务外壳，本轮不执行"},
+        {"heading": "## 输出合同", "action": "keep_drop_code_blocks", "reason": "证据角色与字段语义保留；冗长格式示例不执行"}
+      ]
+    },
+    ".agents/skills/analyzing-price-trading/SKILL.md": {
+      "default": "keep",
+      "sections": [
+        {"heading": "## Review 阶段", "action": "exclude", "reason": "正式复盘任务外壳，本轮不执行"},
+        {"heading": "## 输出合同", "action": "keep_drop_code_blocks", "reason": "证据角色与字段语义保留；冗长格式示例不执行"}
+      ]
+    },
+    "docs/architecture/a-share-short-horizon-engine-contract-v4.md": {
+      "default": "keep",
+      "sections": []
+    },
+    "ops/forward-selection-prompt.md": {
+      "default": "keep",
+      "sections": [
+        {"heading": "## 启动器分工与手动执行", "action": "exclude", "reason": "生产启动器与定时任务外壳，本轮不执行"},
+        {"heading": "## 最终回复唯一来源", "action": "exclude", "reason": "正式日报格式外壳，本轮不执行；试验只返回短 JSON"},
+        {"heading": "## 1. 每日准备与共同市场判断", "action": "keep_paragraphs_matching", "markers": ["唯一时间边界", "available_at > selection_as_of"], "reason": "prepare/复盘启动命令不执行；仅保留冻结时点边界研究规则段"},
+        {"heading": "### 用户要求补跑晚间失败任务时", "action": "exclude", "reason": "生产补跑流程外壳，本轮不执行"},
+        {"heading": "## 6. 唯一输出与记录", "action": "exclude", "reason": "正式记录、版本登记、网页同步与公司介绍收尾外壳，本轮不执行"},
+        {"heading": "### 方法版本辅助记录（仅新增研究，失败不撤销推荐）", "action": "exclude", "reason": "正式版本登记外壳，本轮不执行"},
+        {"heading": "### 研究归档后的网页同步（共同收尾）", "action": "exclude", "reason": "网页同步外壳，本轮不执行"},
+        {"heading": "### 公司介绍补齐（同一共同收尾，介绍失败不撤销推荐）", "action": "exclude", "reason": "公司介绍外壳，本轮不执行"},
+        {"heading": "## 7. 对外文字必须是人话", "action": "keep_paragraphs_matching", "markers": ["参与条件"], "reason": "对外写作风格外壳不执行；仅保留冻结前参与条件研究规则段（B 方法新增条款在此节）"},
+        {"heading": "### 推荐理由必须是一个完整论证", "action": "keep", "reason": "入选理由完整论证属于研究责任，保留"},
+        {"heading": "### 唯一用户输出格式", "action": "exclude", "reason": "正式日报排版模板，本轮不执行"},
+        {"heading": "### 股票名称（代码）", "action": "keep_paragraphs_matching", "markers": ["参与条件"], "reason": "推荐说明写作模板不执行；该节尾部夹带 B 方法新增的冻结前参与条件研究规则段，按段落保留"},
+        {"heading": "### 推荐说明写作前的定向阅读", "action": "exclude", "reason": "作者写作准备外壳，本轮不执行"},
+        {"heading": "### 去掉机械和平台腔", "action": "exclude", "reason": "写作风格外壳，本轮不执行"},
+        {"heading": "### 信息型早确认运行补充", "action": "keep", "reason": "信息型早确认研究规则，保留"}
+      ]
+    }
+  },
+  "startup_knowledge_ids": [
+    "market_h1_breadth_index_alignment",
+    "market_h2_turnover_price_progress",
+    "market_h3_dispersion_future_volatility",
+    "market_h4_state_changes_trend_reliability",
+    "price_scenario_thresholds_v3"
+  ]
+}
