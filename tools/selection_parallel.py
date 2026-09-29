@@ -75,6 +75,17 @@ def parser() -> argparse.ArgumentParser:
     pre = sub.add_parser('preflight', help='offline real-scale acceptance; never launches research')
     pre.add_argument('--config', type=Path, required=True)
     pre.add_argument('--output-dir', type=Path, required=True)
+    cl = sub.add_parser('check-launch', help='read-only launch gate for the Astra scripts; '
+                                             'no model, no switch flip, no attempt, no outcomes')
+    cl.add_argument('--config', type=Path, required=True)
+    cl.add_argument('--phase', choices=('first-pair', 'remaining'), required=True)
+    rp = sub.add_parser('reparse', help='deterministic re-parse of one recorded exit-0 research '
+                                        'output; never calls the model; research_enabled may be false')
+    rp.add_argument('--config', type=Path, required=True)
+    rp.add_argument('--action-date', required=True)
+    rp.add_argument('--method', choices=('M0', 'M1'), required=True)
+    rp.add_argument('--replay-id', required=False)
+    rp.add_argument('--attempt-dir', type=Path, required=True)
     return p
 
 
@@ -91,9 +102,24 @@ def _budget(catalog_path: Path | None, usage_file: Path | None):
     return usage_file, _limits_from_catalog(catalog_path)
 
 
-def _print(output: object, *, catalog_path: Path | None = None, usage_file: Path | None = None) -> None:
-    limits = _limits_from_catalog(catalog_path) if usage_file is not None and catalog_path is not None else None
-    compact.emit_json(output, usage_file=usage_file, limits=limits)
+def _print(output: object, *, catalog_path: Path | None = None, usage_file: Path | None = None,
+            budget: dict | None = None) -> None:
+    # the budget snapshot is computed ONCE per command (here or by the caller)
+    # and reused for page assembly and printing alike (audit R8)
+    if budget is None and usage_file is not None and catalog_path is not None:
+        limits = _limits_from_catalog(catalog_path)
+        if limits is not None:
+            budget = compact.budget_summary(usage_file, limits)
+    compact.emit_json(output, budget=budget)
+
+
+def _stdout_extra(catalog_path: Path | None, usage_file: Path | None) -> dict | None:
+    if usage_file is None or catalog_path is None:
+        return None
+    limits = _limits_from_catalog(catalog_path)
+    if limits is None:
+        return None
+    return {'budget': compact.budget_summary(usage_file, limits)}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -111,8 +137,10 @@ def main(argv: list[str] | None = None) -> int:
             if a.output_dir is None:
                 raise ValueError('--request requires --output-dir (arm-local query output)')
             request = json.loads(a.request.read_text(encoding='utf-8'))
-            output = compact.discover_queries(a.catalog, request, output_dir=a.output_dir)
-            _print(output, catalog_path=a.catalog, usage_file=a.usage_file)
+            output = compact.discover_queries(a.catalog, request, output_dir=a.output_dir,
+                                              stdout_extra=_stdout_extra(a.catalog, a.usage_file))
+            _print(output, catalog_path=a.catalog, usage_file=a.usage_file,
+                   budget=(_stdout_extra(a.catalog, a.usage_file) or {}).get('budget'))
         else:
             if a.output_dir is not None:
                 raise ValueError('--output-dir only applies to --request/--part')
@@ -124,11 +152,13 @@ def main(argv: list[str] | None = None) -> int:
         if a.profile == 'decision':
             if a.offset:
                 raise ValueError('--offset is the legacy profile pager; decision profile uses --part')
+            extra = _stdout_extra(a.catalog, a.usage_file)
             output = compact.facts_compact(a.catalog, codes=a.code, categories=a.category or list(trial.CATEGORIES),
                                            group_codes=a.group_code, sector_snapshots=snapshots,
                                            sector_dates=a.sector_date, fields=fields, part=a.part,
-                                           output=a.output)
-            _print(output, catalog_path=a.catalog, usage_file=a.usage_file)
+                                           output=a.output, stdout_extra=extra)
+            _print(output, catalog_path=a.catalog, usage_file=a.usage_file,
+                   budget=(extra or {}).get('budget'))
         else:
             if a.part:
                 raise ValueError('--part only applies to --profile decision')
@@ -142,8 +172,10 @@ def main(argv: list[str] | None = None) -> int:
             return 2
     elif a.command == 'evidence':
         request = json.loads(a.request.read_text(encoding='utf-8'))
-        output = compact.evidence_request(a.catalog, a.context, request)
-        _print(output, catalog_path=a.catalog, usage_file=a.usage_file)
+        extra = _stdout_extra(a.catalog, a.usage_file)
+        output = compact.evidence_request(a.catalog, a.context, request, stdout_extra=extra)
+        _print(output, catalog_path=a.catalog, usage_file=a.usage_file,
+               budget=(extra or {}).get('budget'))
     elif a.command == 'init':
         output = trial.init_experiment(a.config)
         _print(output)
@@ -178,6 +210,14 @@ def main(argv: list[str] | None = None) -> int:
         output = trial.preflight(a.config, output_dir=a.output_dir)
         _print(output)
         return 1 if output.get('failed_checks') else 0
+    elif a.command == 'check-launch':
+        output = trial.check_launch(a.config, phase=a.phase)
+        _print(output)
+        return 0 if output.get('launch_allowed') else 1
+    elif a.command == 'reparse':
+        output = trial.reparse_decision(a.config, action_date=a.action_date, method=a.method,
+                                        replay_id=a.replay_id, attempt_dir=a.attempt_dir)
+        _print(output)
     elif a.command == 'status':
         output = trial.experiment_status(a.config)
         _print(output)

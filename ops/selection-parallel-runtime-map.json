@@ -212,5 +212,6 @@
     "market_h3_dispersion_future_volatility",
     "market_h4_state_changes_trend_reliability",
     "price_scenario_thresholds_v3"
-  ]
+  ],
+  "tool_interface_notes": "compact-v1 分页契约（audit R2/R3/R8）：discover 整条 stdout 共享预算，多查询未返回行的响应经 next_offset 续读；超长行固定分片（OVERSIZED_ROW_SEGMENT_CHARS），stub.first_segment 与 --part #0 同一计划，非法片段号拒绝；facts 每页按最终渲染 stdout 装页并携带 section_row_range/section_row_total 原行坐标；evidence 保留最初请求范围仅推进 start_offset，returned_spans 只含 source/response 字符偏移与页/行定位。"
 }

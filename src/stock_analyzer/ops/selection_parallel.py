@@ -656,8 +656,12 @@ def _check_source_catalog(catalog_path: Path) -> dict:
 
 
 def facts(catalog_path: Path, *, codes: list[str], categories: list[str] | None = None,
-          offset: int = 0, max_chars: int = 40000, group_codes=(), sector_snapshots=(), sector_dates=()) -> dict:
-    catalog = _check_source_catalog(catalog_path)
+          offset: int = 0, max_chars: int = 40000, group_codes=(), sector_snapshots=(), sector_dates=(),
+          verified_catalog: dict | None = None) -> dict:
+    # verified_catalog: the caller (compact layer) already ran the catalog-wide
+    # source check for this fresh compute; the legacy builder must not repeat it
+    # back-to-back on the same request (audit R8).
+    catalog = verified_catalog if verified_catalog is not None else _check_source_catalog(catalog_path)
     categories = list(dict.fromkeys(categories or CATEGORIES))
     codes = list(dict.fromkeys(codes))
     if not codes or set(categories) - set(CATEGORIES) or offset < 0:
@@ -794,23 +798,39 @@ def _write_usage_progress(path: Path, usage: dict, tools: int, started: float) -
 
 
 def _terminate_owned_process_group(proc: subprocess.Popen, *, term_grace: float = 2.0) -> None:
-    """Terminate and reap ONLY the process group this executor created."""
-    if proc.poll() is not None:
-        return
-    try:
-        os.killpg(proc.pid, signal.SIGTERM)
-    except (ProcessLookupError, PermissionError):
-        pass
-    deadline = clock_time.monotonic() + term_grace
-    while clock_time.monotonic() < deadline and proc.poll() is None:
-        clock_time.sleep(0.05)
-    if proc.poll() is None:
+    """Terminate and reap ONLY the process group this executor created.
+
+    Liveness is observed on the whole group, not just the leader: a leader
+    that exited while its children ignore TERM still gets KILLed after the
+    grace period. The direct child is waited; owned pipes are closed. No
+    other session, no name-based killing, no process-table sweeps.
+    """
+    pgid = proc.pid  # start_new_session made the child its own group leader
+
+    def group_alive() -> bool:
         try:
-            os.killpg(proc.pid, signal.SIGKILL)
+            os.killpg(pgid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True  # exists but is not ours to signal; keep observing
+        return True
+
+    if group_alive():
+        try:
+            os.killpg(pgid, signal.SIGTERM)
+        except (ProcessLookupError, PermissionError):
+            pass
+    deadline = clock_time.monotonic() + term_grace
+    while clock_time.monotonic() < deadline and group_alive():
+        clock_time.sleep(0.05)
+    if group_alive():
+        try:
+            os.killpg(pgid, signal.SIGKILL)
         except (ProcessLookupError, PermissionError):
             pass
     try:
-        proc.wait(timeout=3)
+        proc.wait(timeout=5)
     except subprocess.TimeoutExpired:
         pass
     for stream in (proc.stdout, proc.stderr, proc.stdin):
@@ -822,174 +842,198 @@ def _terminate_owned_process_group(proc: subprocess.Popen, *, term_grace: float 
 
 
 def _execute_research(cmd: list[str], cwd: Path, prompt: str, events_path: Path,
-                      stderr_path: Path, limits: dict, usage_mirror: Path | None = None) -> dict:
+                      stderr_path: Path, limits: dict, usage_mirror: Path | None = None,
+                      prompt_file: Path | None = None) -> dict:
     """Stream only this child process; enforce observable tool/time budgets.
 
-    Everything after a successful Popen lives inside one try/finally: on any
-    exit path (normal completion, budget stop, KeyboardInterrupt, SIGTERM,
-    I/O error) this executor's own process group is terminated and reaped.
-    A local SIGTERM handler turns external termination into the same cleanup;
-    the original handler is restored afterwards. No other session is touched.
+    The prompt is fed from a local read-only file (Popen stdin), so a child
+    that never reads stdin cannot block the parent's budget monitoring. The
+    wall clock starts BEFORE the child is launched; selector creation, signal
+    installation and every later step share one try/finally that terminates
+    and reaps this executor's own process group on any exit path. A local
+    SIGTERM handler turns external termination into the same cleanup; the
+    original handler is restored afterwards. Controlled cancellation is
+    RETURNED as a diagnosis (never re-raised before the caller can record
+    the invocation), keeping usage, events and stderr for the audit trail.
     """
+    started = clock_time.monotonic()
+    exit_code: int | None = None
+    cancelled = None
+    tools = 0
+    tokens = None
+    budget_exceeded = None
+    post_run_budget = None
+    token_live_observed = False
+    rollout_usage_seen = False
+    selector = None
+    proc = None
+    prompt_handle = None
+    previous_sigterm = None
     with events_path.open('wb') as events, stderr_path.open('wb') as errors:
-        proc = subprocess.Popen(cmd, cwd=cwd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE, start_new_session=True, bufsize=0)
-        selector = selectors.DefaultSelector()
-        previous_sigterm = None
-
-        class _Cancelled(BaseException):
-            pass
-
-        def _on_sigterm(signum, frame):
-            raise _Cancelled(f'SIGTERM received ({signum})')
-
-        if threading.current_thread() is threading.main_thread():
-            try:
-                previous_sigterm = signal.signal(signal.SIGTERM, _on_sigterm)
-            except ValueError:
-                previous_sigterm = None
-        exit_code: int | None = None
-        cancelled = None
         try:
-            assert proc.stdin and proc.stdout and proc.stderr
-            proc.stdin.write(prompt.encode('utf-8'))
-            proc.stdin.close()
-            selector.register(proc.stdout, selectors.EVENT_READ, 'stdout')
-            selector.register(proc.stderr, selectors.EVENT_READ, 'stderr')
-            partial = b''
-            tools = 0
-            tokens = None
-            budget_exceeded = None
-            post_run_budget = None
-            stop_at = None
-            termination_sent = False
-            kill_sent = False
-            token_live_observed = False
-            session_id = None
-            turn_completed = False
-            rollout_path = None
-            rollout_position = 0
-            rollout_partial = b''
-            rollout_polled_at = 0.0
-            rollout_usage_seen = False
-            started = clock_time.monotonic()
+            if prompt_file is not None:
+                prompt_handle = open(prompt_file, 'rb')
+                proc = subprocess.Popen(cmd, cwd=cwd, stdin=prompt_handle,
+                                        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                        start_new_session=True, bufsize=0)
+            else:
+                proc = subprocess.Popen(cmd, cwd=cwd, stdin=subprocess.PIPE,
+                                        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                        start_new_session=True, bufsize=0)
+            selector = selectors.DefaultSelector()
 
-            def inspect(line: bytes) -> None:
-                nonlocal tools, tokens, budget_exceeded, post_run_budget, token_live_observed, session_id, turn_completed
-                try:
-                    event = json.loads(line)
-                except (json.JSONDecodeError, UnicodeDecodeError):
-                    return
-                if event.get('type') == 'thread.started' and re.fullmatch(r'[0-9a-f-]{36}', str(event.get('thread_id') or '')):
-                    session_id = event['thread_id']
-                item = event.get('item') or {}
-                if event.get('type') == 'item.completed' and item.get('type') == 'command_execution':
-                    tools += 1
-                    if tools > limits['max_tool_commands']:
-                        budget_exceeded = 'max_tool_commands'
-                if event.get('type') == 'turn.completed':
-                    turn_completed = True
-                usage = event.get('usage')
-                if isinstance(usage, dict):
-                    tokens = usage
-                    _write_usage_progress(events_path.parent / 'usage-progress.json', usage, tools, started)
-                    if usage_mirror is not None:
-                        _write_usage_progress(usage_mirror, usage, tools, started)
-                    token_live_observed = token_live_observed or event.get('type') != 'turn.completed'
-                    exceeded = None
-                    if usage.get('input_tokens', 0) >= limits['max_input_tokens']:
-                        exceeded = 'max_input_tokens'
-                    if usage.get('output_tokens', 0) >= limits['max_output_tokens']:
-                        exceeded = 'max_output_tokens'
-                    if event.get('type') == 'turn.completed':
-                        # Let the CLI flush its final public output before rejecting the run.
-                        post_run_budget = exceeded
-                    elif exceeded:
-                        budget_exceeded = exceeded
+            class _Cancelled(BaseException):
+                pass
 
-            while selector.get_map() or proc.poll() is None:
-                now = clock_time.monotonic()
-                if session_id and not turn_completed and now - rollout_polled_at >= 0.5:
-                    rollout_polled_at = now
-                    if rollout_path is None:
-                        home = Path(os.environ.get('CODEX_HOME') or (Path.home() / '.codex'))
-                        matches = list((home / 'sessions').glob(f'????/??/??/rollout-*{session_id}.jsonl'))
-                        if len(matches) == 1:
-                            rollout_path = matches[0]
-                    if rollout_path is not None:
-                        # Read only this child's newly appended token metadata. Never export rollout text.
-                        with rollout_path.open('rb') as usage_file:
-                            usage_file.seek(rollout_position)
-                            rollout_partial += usage_file.read()
-                            rollout_position = usage_file.tell()
-                        while b'\n' in rollout_partial:
-                            usage_line, rollout_partial = rollout_partial.split(b'\n', 1)
-                            try:
-                                record = json.loads(usage_line)
-                            except (json.JSONDecodeError, UnicodeDecodeError):
-                                continue
-                            payload = record.get('payload') or {}
-                            if record.get('type') == 'event_msg' and payload.get('type') == 'token_count':
-                                usage = (payload.get('info') or {}).get('total_token_usage')
-                                if isinstance(usage, dict):
-                                    rollout_usage_seen = True
-                                    inspect(json.dumps({'type': 'live.token_usage', 'usage': usage}).encode())
-                if budget_exceeded and stop_at is None:
-                    stop_at = clock_time.monotonic()
-                if not budget_exceeded and clock_time.monotonic() - started >= limits['max_wall_seconds']:
-                    budget_exceeded = 'max_wall_seconds'
-                if budget_exceeded and not termination_sent:
-                    try:
-                        os.killpg(proc.pid, signal.SIGTERM)
-                    except ProcessLookupError:
-                        pass
-                    termination_sent = True
-                for key, _ in selector.select(timeout=0.1):
-                    block = os.read(key.fileobj.fileno(), 65536)
-                    if not block:
-                        selector.unregister(key.fileobj)
-                        continue
-                    if key.data == 'stderr':
-                        errors.write(block)
-                    else:
-                        events.write(block)
-                        partial += block
-                        while b'\n' in partial:
-                            line, partial = partial.split(b'\n', 1)
-                            inspect(line)
-                if budget_exceeded and not kill_sent and stop_at is not None and clock_time.monotonic() - stop_at > 2:
-                    try:
-                        os.killpg(proc.pid, signal.SIGKILL)
-                    except ProcessLookupError:
-                        pass
-                    kill_sent = True
-            if partial:
-                inspect(partial)
-            exit_code = proc.wait(timeout=3)
-        except (_Cancelled, KeyboardInterrupt) as error:
-            cancelled = str(error) or type(error).__name__
-            raise KeyboardInterrupt(f'research execution cancelled: {cancelled}') from None
-        finally:
-            _terminate_owned_process_group(proc)
-            selector.close()
-            if previous_sigterm is not None:
+            def _on_sigterm(signum, frame):
+                raise _Cancelled(f'SIGTERM received ({signum})')
+
+            if threading.current_thread() is threading.main_thread():
                 try:
-                    signal.signal(signal.SIGTERM, previous_sigterm)
+                    previous_sigterm = signal.signal(signal.SIGTERM, _on_sigterm)
                 except ValueError:
+                    previous_sigterm = None
+            try:
+                if prompt_file is None:
+                    assert proc.stdin and proc.stdout and proc.stderr
+                    proc.stdin.write(prompt.encode('utf-8'))
+                    proc.stdin.close()
+                selector.register(proc.stdout, selectors.EVENT_READ, 'stdout')
+                selector.register(proc.stderr, selectors.EVENT_READ, 'stderr')
+                partial = b''
+                stop_at = None
+                termination_sent = False
+                kill_sent = False
+                session_id = None
+                turn_completed = False
+                rollout_path = None
+                rollout_position = 0
+                rollout_partial = b''
+                rollout_polled_at = 0.0
+
+                def inspect(line: bytes) -> None:
+                    nonlocal tools, tokens, budget_exceeded, post_run_budget, token_live_observed, session_id, turn_completed
+                    try:
+                        event = json.loads(line)
+                    except (json.JSONDecodeError, UnicodeDecodeError):
+                        return
+                    if event.get('type') == 'thread.started' and re.fullmatch(r'[0-9a-f-]{36}', str(event.get('thread_id') or '')):
+                        session_id = event['thread_id']
+                    item = event.get('item') or {}
+                    if event.get('type') == 'item.completed' and item.get('type') == 'command_execution':
+                        tools += 1
+                        if tools > limits['max_tool_commands']:
+                            budget_exceeded = 'max_tool_commands'
+                    if event.get('type') == 'turn.completed':
+                        turn_completed = True
+                    usage = event.get('usage')
+                    if isinstance(usage, dict):
+                        tokens = usage
+                        _write_usage_progress(events_path.parent / 'usage-progress.json', usage, tools, started)
+                        if usage_mirror is not None:
+                            _write_usage_progress(usage_mirror, usage, tools, started)
+                        token_live_observed = token_live_observed or event.get('type') != 'turn.completed'
+                        exceeded = None
+                        if usage.get('input_tokens', 0) >= limits['max_input_tokens']:
+                            exceeded = 'max_input_tokens'
+                        if usage.get('output_tokens', 0) >= limits['max_output_tokens']:
+                            exceeded = 'max_output_tokens'
+                        if event.get('type') == 'turn.completed':
+                            # Let the CLI flush its final public output before rejecting the run.
+                            post_run_budget = exceeded
+                        elif exceeded:
+                            budget_exceeded = exceeded
+
+                while selector.get_map() or proc.poll() is None:
+                    now = clock_time.monotonic()
+                    if session_id and not turn_completed and now - rollout_polled_at >= 0.5:
+                        rollout_polled_at = now
+                        if rollout_path is None:
+                            home = Path(os.environ.get('CODEX_HOME') or (Path.home() / '.codex'))
+                            matches = list((home / 'sessions').glob(f'????/??/??/rollout-*{session_id}.jsonl'))
+                            if len(matches) == 1:
+                                rollout_path = matches[0]
+                        if rollout_path is not None:
+                            # Read only this child's newly appended token metadata. Never export rollout text.
+                            with rollout_path.open('rb') as usage_file:
+                                usage_file.seek(rollout_position)
+                                rollout_partial += usage_file.read()
+                                rollout_position = usage_file.tell()
+                            while b'\n' in rollout_partial:
+                                usage_line, rollout_partial = rollout_partial.split(b'\n', 1)
+                                try:
+                                    record = json.loads(usage_line)
+                                except (json.JSONDecodeError, UnicodeDecodeError):
+                                    continue
+                                payload = record.get('payload') or {}
+                                if record.get('type') == 'event_msg' and payload.get('type') == 'token_count':
+                                    usage = (payload.get('info') or {}).get('total_token_usage')
+                                    if isinstance(usage, dict):
+                                        rollout_usage_seen = True
+                                        inspect(json.dumps({'type': 'live.token_usage', 'usage': usage}).encode())
+                    if budget_exceeded and stop_at is None:
+                        stop_at = clock_time.monotonic()
+                    if not budget_exceeded and clock_time.monotonic() - started >= limits['max_wall_seconds']:
+                        budget_exceeded = 'max_wall_seconds'
+                    if budget_exceeded and not termination_sent:
+                        try:
+                            os.killpg(proc.pid, signal.SIGTERM)
+                        except ProcessLookupError:
+                            pass
+                        termination_sent = True
+                    for key, _ in selector.select(timeout=0.1):
+                        block = os.read(key.fileobj.fileno(), 65536)
+                        if not block:
+                            selector.unregister(key.fileobj)
+                            continue
+                        if key.data == 'stderr':
+                            errors.write(block)
+                        else:
+                            events.write(block)
+                            partial += block
+                            while b'\n' in partial:
+                                line, partial = partial.split(b'\n', 1)
+                                inspect(line)
+                    if budget_exceeded and not kill_sent and stop_at is not None and clock_time.monotonic() - stop_at > 2:
+                        try:
+                            os.killpg(proc.pid, signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
+                        kill_sent = True
+                if partial:
+                    inspect(partial)
+                exit_code = proc.wait(timeout=5)
+            except (_Cancelled, KeyboardInterrupt) as error:
+                cancelled = str(error) or type(error).__name__
+            finally:
+                _terminate_owned_process_group(proc)
+                if selector is not None:
+                    selector.close()
+                if previous_sigterm is not None:
+                    try:
+                        signal.signal(signal.SIGTERM, previous_sigterm)
+                    except ValueError:
+                        pass
+        finally:
+            if prompt_handle is not None:
+                try:
+                    prompt_handle.close()
+                except OSError:
                     pass
-        budget_exceeded = budget_exceeded or post_run_budget
-        return {'exit_code': exit_code if not (budget_exceeded or cancelled) else 124,
-                'child_exit_code': exit_code, 'budget_exceeded': budget_exceeded,
-                'cancelled': bool(cancelled), 'cancel_reason': cancelled,
-                'tool_commands': tools, 'tokens': tokens,
-                'token_limit_mode': 'observed_events' if token_live_observed else 'post_run_only',
-                'token_usage_source': 'own_session_rollout' if rollout_usage_seen else 'stdout_events'}
+    budget_exceeded = budget_exceeded or post_run_budget
+    return {'exit_code': exit_code if not (budget_exceeded or cancelled) else 124,
+            'child_exit_code': exit_code, 'budget_exceeded': budget_exceeded,
+            'cancelled': bool(cancelled), 'cancel_reason': cancelled,
+            'tool_commands': tools, 'tokens': tokens,
+            'token_limit_mode': 'observed_events' if token_live_observed else 'post_run_only',
+            'token_usage_source': 'own_session_rollout' if rollout_usage_seen else 'stdout_events'}
 
 
 def _invoke_model(context: Path, prompt: str, attempt: Path, *, config_path: Path) -> tuple[int, dict]:
     _require_research(config_path)
     attempt.mkdir(parents=True, exist_ok=False)
-    (attempt / 'prompt.md').write_text(prompt, encoding='utf-8')
+    prompt_path = attempt / 'prompt.md'
+    prompt_path.write_text(prompt, encoding='utf-8')
     cfg = _cfg(config_path)
     cmd = _model_command(context, attempt / 'raw-output.json', network_workspace=True) if cfg.get('full_universe_replay') else _model_command(context, attempt / 'raw-output.json')
     _write_json(attempt / 'command.json', {'argv': cmd, 'cwd': str(context),
@@ -999,10 +1043,25 @@ def _invoke_model(context: Path, prompt: str, attempt: Path, *, config_path: Pat
     cfg = _cfg(config_path)
     usage_mirror = context / 'work' / 'usage-progress.json'  # same file the runtime-index advertises
     (context / 'work').mkdir(parents=True, exist_ok=True)
-    execution = _execute_research(cmd, context, prompt, attempt / 'events.jsonl',
-                                  attempt / 'stderr.log', cfg['limits'], usage_mirror=usage_mirror)
+    execution = None
+    try:
+        # the child reads the prompt from this file; the parent never blocks
+        # writing a PIPE (audit R5)
+        execution = _execute_research(cmd, context, prompt, attempt / 'events.jsonl',
+                                      attempt / 'stderr.log', cfg['limits'],
+                                      usage_mirror=usage_mirror, prompt_file=prompt_path)
+    except OSError as error:
+        metadata = {'exit_code': None, 'failed_start': str(error),
+                    'requested_model': MODEL, 'requested_reasoning': EFFORT,
+                    'started_at': started.isoformat(), 'finished_at': datetime.now(ZONE).isoformat(),
+                    'actual_model': None, 'actual_reasoning': None, 'tokens': None,
+                    'budget_exceeded': None, 'cancelled': False,
+                    'note': '模型子进程启动失败：不留下伪运行成功；用量未知为 null'}
+        _write_json(attempt / 'invocation.json', metadata)
+        raise RuntimeError(f'model process failed to start: {error}') from error
     finished = datetime.now(ZONE)
-    events_text = (attempt / 'events.jsonl').read_text(encoding='utf-8')
+    events_text = (attempt / 'events.jsonl').read_text(encoding='utf-8') \
+        if (attempt / 'events.jsonl').exists() else ''
     metadata = {'exit_code': execution['exit_code'], 'requested_model': MODEL,
                 'started_at': started.isoformat(), 'finished_at': finished.isoformat(),
                 'duration_seconds': round((finished-started).total_seconds(), 3),
@@ -1010,6 +1069,8 @@ def _invoke_model(context: Path, prompt: str, attempt: Path, *, config_path: Pat
                 'requested_reasoning': EFFORT, 'actual_model': None,
                 'actual_reasoning': None, 'tokens': execution['tokens'],
                 'budget_exceeded': execution['budget_exceeded'],
+                'cancelled': execution['cancelled'],
+                'cancel_reason': execution.get('cancel_reason'),
                 'tool_commands': execution['tool_commands'],
                 'token_limit_mode': execution['token_limit_mode'],
                 'token_usage_source': execution.get('token_usage_source', 'stdout_events')}
@@ -1024,7 +1085,7 @@ def _invoke_model(context: Path, prompt: str, attempt: Path, *, config_path: Pat
                 if event.get(key) is not None:
                     metadata[dest] = event[key]
     metadata.update(_verified_cli_session(events_text))
-    _write_json(attempt / 'invocation.json', metadata)
+    _write_json(attempt / 'invocation.json', metadata)  # written on EVERY terminal path
     return execution['exit_code'], metadata
 
 
@@ -1460,7 +1521,18 @@ def _observed_fact_reads(tools: list, ref: str) -> list[dict]:
         for read in parsed.get('reads', []):
             if read.get('source_ref') == ref:
                 key = json.dumps(read.get('query_scope', {}), sort_keys=True)
-                queries.setdefault(key, {})[read.get('part_index', 0)] = read
+                bucket = queries.setdefault(key, {})
+                index = read.get('part_index', 0)
+                if index in bucket:
+                    # a repeated part_index must be the SAME part: content,
+                    # part_count, source_version or scope conflicts are errors,
+                    # never last-write-wins (audit R1)
+                    if json.dumps(bucket[index], sort_keys=True, default=str) != \
+                            json.dumps(read, sort_keys=True, default=str):
+                        raise ValueError(f'同一part_index内容冲突：{ref} part {index}'
+                                         '（内容/part_count/来源版本/scope须一致）')
+                else:
+                    bucket[index] = read
     complete = []
     for query, parts in queries.items():
         first = parts.get(0, {})
@@ -1476,10 +1548,7 @@ def _observed_fact_reads(tools: list, ref: str) -> list[dict]:
             # compact parts carry positional row ranges: reassemble in order,
             # never dict.update over section lists (audit E2)
             from stock_analyzer.ops.selection_parallel_compact import reassemble_category
-            try:
-                merged = reassemble_category([parts[i] for i in range(count)])
-            except ValueError:
-                raise
+            merged = reassemble_category([parts[i] for i in range(count)])
             result = {'facts': merged}
         if result.get('facts'):
             complete.append({'source_ref': ref, 'ts_code': first.get('ts_code'),
@@ -1499,12 +1568,16 @@ def _save_slices(catalog_path: Path, method: str, fact_refs: list[str], events_t
 
 def _save_official_evidence(obj: dict, context: Path, target: Path, cutoff: datetime,
                             read_log: list | None = None) -> None:
-    """Accept originals only from actually-read page/line ranges.
+    """Accept originals only from the SAME actually-read receipt and positions.
 
     `read_log` carries the successful CLI tool results of this run. An
-    adoption must cite a locator that a successful evidence read returned for
-    the same evidence_id, and the quote must appear inside that read's text;
-    a receipt without a real read never passes.
+    adoption's receipt must be the receipt a successful evidence read of this
+    run returned for the same evidence_id (read A / adopt B fails even with
+    identical evidence_id and shared sentences). The quote, page/lines and
+    any declared character range must sit inside ONE returned span of that
+    read; a missing character range is derived deterministically only when
+    the quote is unique in the returned spans, otherwise a position is
+    demanded. A receipt without a real read never passes.
     """
     from stock_analyzer.ops.official_evidence import read_evidence
     for evidence in obj.get('official_evidence', []):
@@ -1538,32 +1611,72 @@ def _save_official_evidence(obj: dict, context: Path, target: Path, cutoff: date
         if not successful_reads:
             raise ValueError('official evidence lacks a successful read in this run; '
                              'a stored receipt alone is not an adoption')
-        spans = [span for read_event in successful_reads
-                 for span in (read_event.get('returned_spans') or [])]
+        # R4: adoption binds to the receipt THIS run actually read
+        bound_reads = [r for r in successful_reads if r.get('receipt_ref') == evidence['receipt']]
+        if not bound_reads:
+            raise ValueError(f'采用receipt与本轮实际read回执不一致（read '
+                             f'{sorted({r.get("receipt_ref") for r in successful_reads})} vs '
+                             f'采用 {evidence["receipt"]}）：不能读A采用B')
+        original_text = receipt_path.parent.joinpath('text.txt').read_text(encoding='utf-8')
         for clause in clauses:
             if not isinstance(clause, dict) or not clause.get('quote'):
                 raise ValueError('each adopted clause needs an exact quote and its real locator')
             quote_condensed = re.sub(r'\s+', '', clause['quote'])
-            # quote AND its page/lines must belong to the SAME returned span (E3)
-            same_span = False
-            for span in spans:
-                span_text = re.sub(r'\s+', '', str(span.get('text') or ''))
-                if not (quote_condensed and quote_condensed in span_text):
-                    continue
-                if clause.get('page') is not None:
-                    if span.get('page') == int(clause['page']):
-                        same_span = True
-                        break
-                elif isinstance(clause.get('lines'), list) and len(clause['lines']) == 2:
-                    span_lines = span.get('lines') or [None, None]
-                    if (span_lines[0] is not None
-                            and int(span_lines[0]) <= int(clause['lines'][0])
-                            and int(clause['lines'][1]) <= int(span_lines[1])):
-                        same_span = True
-                        break
-            if not same_span:
+            if not quote_condensed:
+                raise ValueError('adopted quote is empty after normalization')
+            occurrences: list[tuple[dict, dict]] = []  # (read_event, span)
+            for read_event in bound_reads:
+                text = read_event.get('text') or ''
+                for span in read_event.get('returned_spans') or []:
+                    if clause.get('page') is not None and span.get('page') != int(clause['page']):
+                        continue
+                    if isinstance(clause.get('lines'), list) and len(clause['lines']) == 2:
+                        span_lines = span.get('lines') or [None, None]
+                        if not (span_lines[0] is not None
+                                and int(span_lines[0]) <= int(clause['lines'][0])
+                                and int(clause['lines'][1]) <= int(span_lines[1])):
+                            continue
+                    if clause.get('page') is None and not isinstance(clause.get('lines'), list):
+                        continue  # clause carries no locator at all
+                    response_text = text[span.get('response_char_start', 0):span.get('response_char_end', 0)]
+                    if quote_condensed in re.sub(r'\s+', '', response_text):
+                        occurrences.append((read_event, span))
+            if not occurrences:
                 raise ValueError('adopted quote 与 page/lines 不属于同一次实际返回的页段；'
                                  'quote在其他页出现不算已读该页')
+            declared = None
+            if clause.get('source_char_start') is not None or clause.get('source_char_end') is not None:
+                start_value, end_value = clause.get('source_char_start'), clause.get('source_char_end')
+                if (not isinstance(start_value, int) or not isinstance(end_value, int)
+                        or isinstance(start_value, bool) or isinstance(end_value, bool)
+                        or start_value < 0 or end_value <= start_value):
+                    raise ValueError('字符区间非法（零长度/负数/反向）：'
+                                     f'[{start_value}, {end_value})')
+                declared = (start_value, end_value)
+            if declared is not None:
+                inside = [span for _, span in occurrences
+                          if span['source_char_start'] <= declared[0]
+                          and declared[1] <= span['source_char_end']]
+                if not inside:
+                    raise ValueError('声明的字符区间未落在任何一个实际返回的原文片段内：'
+                                     f'[{declared[0]}, {declared[1]})')
+                window = original_text[declared[0]:declared[1]]
+                if quote_condensed not in re.sub(r'\s+', '', window):
+                    raise ValueError('声明的字符区间内容与quote不对应；页码正确但字符位置不对不能通过')
+            else:
+                # deterministic derivation only when the quote is unique
+                positions = sorted({position
+                                    for read_event, span in occurrences
+                                    for position in _quote_positions(
+                                        read_event.get('text') or '',
+                                        quote_condensed, span)})
+                if len(positions) > 1:
+                    raise ValueError('quote在本次实际返回中出现多处，无法唯一定位；'
+                                     '请给出字符位置，不取第一处')
+                if len(positions) == 0:
+                    raise ValueError('quote无法在返回片段内定位字符位置')
+                clause['source_char_start'], clause['source_char_end'] = positions[0]
+                clause['derived_position'] = True
         destination = target/'official'/ident
         if destination.exists():
             if (destination/'receipt.json').read_bytes() != receipt_path.read_bytes():
@@ -1571,6 +1684,36 @@ def _save_official_evidence(obj: dict, context: Path, target: Path, cutoff: date
         else:
             shutil.copytree(receipt_path.parent, destination)
         _write_json(destination/'adoption.json', evidence)
+
+
+def _quote_positions(response_text: str, quote_condensed: str, span: dict) -> list[tuple[int, int]]:
+    """Source-absolute (start, end) ranges of the quote inside ONE returned span.
+
+    Whitespace-tolerant: condensed matching over the span's response slice,
+    with each condensed character mapped back to its raw relative offset.
+    """
+    start, end = span.get('response_char_start', 0), span.get('response_char_end', 0)
+    raw = response_text[start:end]
+    condensed_chars: list[str] = []
+    mapping: list[int] = []
+    for offset, character in enumerate(raw):
+        if not character.isspace():
+            condensed_chars.append(character)
+            mapping.append(offset)
+    condensed = ''.join(condensed_chars)
+    if not quote_condensed:
+        return []
+    positions: list[tuple[int, int]] = []
+    search_from = 0
+    while True:
+        index = condensed.find(quote_condensed, search_from)
+        if index < 0:
+            break
+        source_start = span['source_char_start'] + mapping[index]
+        source_end = span['source_char_start'] + mapping[index + len(quote_condensed) - 1] + 1
+        positions.append((source_start, source_end))
+        search_from = index + len(quote_condensed)
+    return positions
 
 
 def _render_summary(day_dir: Path) -> None:
@@ -1649,13 +1792,63 @@ def _check_run_contract(day: dict, cfg: dict) -> None:
         raise ValueError(f'frozen run contract changed: {different}; prepare a new replay identity')
 
 
+def _finalize_decision(day_dir: Path, cfg: dict, day: dict, method: str, attempt: Path,
+                       context: Path, metadata: dict, *, reparse: bool = False) -> dict:
+    """The single validate+save+qualify segment shared by run_arm and reparse.
+
+    On reparse the ORIGINAL research program_ref and usage stay in the result;
+    the parsing program is recorded separately as parsed_by_program_ref."""
+    catalog_path = day_dir / day['source_catalog']
+    obj = _parse_model_output(attempt / 'raw-output.json')
+    fact_refs, refs = _validate_decision(obj, day, method, catalog_path,
+                                          (attempt / 'events.jsonl').read_text(encoding='utf-8'))
+    _save_slices(catalog_path, method, fact_refs, (attempt/'events.jsonl').read_text())
+    if cfg.get('full_universe_replay'):
+        _save_official_evidence(obj, context, day_dir/method, datetime.fromisoformat(day['as_of']),
+                                read_log=_successful_tool_results((attempt / 'events.jsonl').read_text(encoding='utf-8')))
+    # Final input binding before freezing a qualified result (audit E6):
+    # sources must be unchanged since prepare; on drift keep the public
+    # output, record not-qualified, and never auto-rerun.
+    _check_source_catalog(catalog_path)
+    obj['run_id'] = f'{day["mode"]}:{day.get("replay_id") or day["action_date"]}:{method}'
+    code_root = Path(cfg['code_root'])
+    current_head = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=code_root,
+                                  check=True, capture_output=True, text=True).stdout.strip()
+    if reparse:
+        obj['program_ref'] = day.get('program_ref')
+        obj['parsed_by_program_ref'] = current_head
+        obj['reparsed_at'] = datetime.now(ZONE).isoformat()
+    else:
+        obj['program_ref'] = current_head
+    obj['program_dirty'] = _worktree_dirty(code_root)
+    obj['model_run'] = metadata
+    obj['source_refs_used'] = refs
+    obj['saved_at'] = datetime.now(ZONE).isoformat()
+    (day_dir / method).mkdir(exist_ok=True)
+    shutil.copyfile(attempt / 'raw-output.json', day_dir / method / 'raw-output.json')
+    _write_json(day_dir / method / 'result.json', obj)
+    day['status'][method] = 'complete_zero' if not obj['selected'] else 'complete'
+    _write_json(day_dir / 'run.json', day)
+    assessment = {'qualified': True, 'paired_acceptance': 'qualified', 'reasons': [],
+                  'input_contract_version': day.get('input_contract_version'),
+                  'run_id': obj['run_id'], 'method_id': method, 'model': MODEL, 'reasoning': EFFORT}
+    _write_json(day_dir / method / 'qualification.json', assessment)
+    assessment = _qualification(day_dir, method)
+    if not assessment['qualified']:
+        day['status'][method] = 'not_qualified'
+        _write_json(day_dir / 'run.json', day)
+        _write_json(day_dir / method / 'qualification.json', assessment)
+        raise RuntimeError(f'{method} result not qualified: {assessment["reasons"]}')
+    _render_summary(day_dir)
+    return obj
+
+
 def run_arm(day_dir: Path, *, method: str) -> dict:
     if method not in METHODS:
         raise ValueError('method must be M0 or M1')
     day = _json(day_dir / 'run.json')
     cfg = _cfg(day_dir.parents[1] / 'experiment.json')
     catalog_path = day_dir / day['source_catalog']
-    _require_research(day_dir.parents[1] / 'experiment.json')
     _check_source_catalog(catalog_path)
     target = day_dir / method / 'result.json'
     if target.exists():
@@ -1685,57 +1878,174 @@ def run_arm(day_dir: Path, *, method: str) -> dict:
             f'{method} 已有 {len(previous_attempts)} 次未合格尝试（状态 {day["status"][method]}）；'
             f'不自动发起新模型调用。需用户另行明确批准后再处理；证据 {previous_attempts[-1]}')
     else:
+        # a FRESH launch requires the research switch here; returning an
+        # already-qualified result and deterministic reparse stay read-only
+        _require_research(day_dir.parents[1] / 'experiment.json')
         code, metadata = _invoke_model(context, _prompt(cfg, day, method, catalog_path), attempt, config_path=day_dir.parents[1] / 'experiment.json')
     if code == 0 and (metadata.get('actual_model'), metadata.get('actual_reasoning')) != (MODEL, EFFORT):
         day['status'][method] = 'model_identity_mismatch'
         _write_json(day_dir / 'run.json', day)
         raise RuntimeError(f'{method} actual model/effort differs; evidence {attempt}')
     if code != 0:
-        day['status'][method] = 'budget_exceeded' if metadata.get('budget_exceeded') else 'failed'
+        # the terminal state is recorded BEFORE raising, with the invocation
+        # already on disk: cancelled/budget/failed are distinct (audit R5)
+        if metadata.get('cancelled'):
+            day['status'][method] = 'cancelled'
+        elif metadata.get('budget_exceeded'):
+            day['status'][method] = 'budget_exceeded'
+        else:
+            day['status'][method] = 'failed'
         _write_json(day_dir / 'run.json', day)
-        raise RuntimeError(f'{method} codex exec failed with exit {code}; evidence {attempt}')
+        reason = metadata.get('cancel_reason') or metadata.get('budget_exceeded') or 'failed'
+        raise RuntimeError(f'{method} execution ended with exit {code} ({day["status"][method]}: '
+                           f'{reason}); evidence {attempt}')
     try:
-        obj = _parse_model_output(attempt / 'raw-output.json')
-        fact_refs, refs = _validate_decision(obj, day, method, catalog_path,
-                                              (attempt / 'events.jsonl').read_text(encoding='utf-8'))
-        _save_slices(catalog_path, method, fact_refs, (attempt/'events.jsonl').read_text())
-        if cfg.get('full_universe_replay'):
-            _save_official_evidence(obj, context, day_dir/method, datetime.fromisoformat(day['as_of']),
-                                    read_log=_successful_tool_results((attempt / 'events.jsonl').read_text(encoding='utf-8')))
-        # Final input binding before freezing a qualified result (audit E6):
-        # sources must be unchanged since prepare; on drift keep the public
-        # output, record not-qualified, and never auto-rerun.
-        _check_source_catalog(catalog_path)
-        obj['run_id'] = f'{day["mode"]}:{day.get("replay_id") or day["action_date"]}:{method}'
-        code_root = Path(cfg['code_root'])
-        obj['program_ref'] = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=code_root,
-                                             check=True, capture_output=True, text=True).stdout.strip()
-        obj['program_dirty'] = _worktree_dirty(code_root)
-        obj['model_run'] = metadata
-        obj['source_refs_used'] = refs
-        obj['saved_at'] = datetime.now(ZONE).isoformat()
-        (day_dir / method).mkdir(exist_ok=True)
-        shutil.copyfile(attempt / 'raw-output.json', day_dir / method / 'raw-output.json')
-        _write_json(target, obj)
-        day['status'][method] = 'complete_zero' if not obj['selected'] else 'complete'
-        _write_json(day_dir / 'run.json', day)
-        assessment = {'qualified': True, 'paired_acceptance': 'qualified', 'reasons': [],
-                      'input_contract_version': day.get('input_contract_version'),
-                      'run_id': obj['run_id'], 'method_id': method, 'model': MODEL, 'reasoning': EFFORT}
-        _write_json(day_dir / method / 'qualification.json', assessment)
-        assessment = _qualification(day_dir, method)
-        if not assessment['qualified']:
-            day['status'][method] = 'not_qualified'
-            _write_json(day_dir / 'run.json', day)
-            _write_json(day_dir / method / 'qualification.json', assessment)
-            raise RuntimeError(f'{method} result not qualified: {assessment["reasons"]}')
-        _render_summary(day_dir)
-        return obj
+        return _finalize_decision(day_dir, cfg, day, method, attempt, context, metadata)
     except Exception:
         if day['status'][method] != 'not_qualified':
             day['status'][method] = 'failed_validation'
             _write_json(day_dir / 'run.json', day)
         raise
+
+
+def _check_reparse_contract(day: dict, cfg: dict) -> None:
+    """Input-side contract for deterministic reparse: the frozen request
+    identity must still match the config; the code head legitimately moved."""
+    keys = ('methods', 'model', 'reasoning', 'no_fallback', 'limits', 'execution_profile')
+    different = [k for k in keys if day.get(k) != cfg.get(k)]
+    if day.get('input_contract_version') and \
+            day['input_contract_version'] != 'selection-parallel-input-v2':
+        different.append('input_contract_version')
+    if different:
+        raise ValueError(f'重解析前输入合同与当前配置不一致：{different}；原研究身份不可在此配置下重解析')
+
+
+def reparse_decision(config_path: Path, *, action_date: str, method: str, replay_id: str,
+                     attempt_dir: Path) -> dict:
+    """Deterministic re-parse of one recorded exit-0 research output.
+
+    This is original-output recovery, not a new research run: it never calls
+    the model, works with research_enabled=false, requires the attempt to
+    belong to this run/method, the invocation to prove the real model identity
+    with no cancellation or budget stop, the raw output and events to be
+    complete, and the frozen inputs to be unchanged. The original program_ref
+    and usage stay; the parsing program is recorded separately. Nothing else
+    (no other arm, no other day) continues automatically.
+    """
+    if method not in METHODS:
+        raise ValueError('method must be M0 or M1')
+    cfg = _cfg(config_path)
+    root = _trial(cfg)
+    candidates = [p.parent for p in list((root/'daily').glob('*/run.json')) + list((root/'smoke').glob('*/run.json'))
+                  if _json(p)['action_date'] == action_date
+                  and (replay_id is None or p.parent.name == replay_id
+                       or _json(p).get('replay_id') == replay_id)]
+    if len(candidates) != 1:
+        raise ValueError('expected exactly one trial day for the given action date/replay id')
+    day_dir = candidates[0]
+    day = _json(day_dir / 'run.json')
+    _check_reparse_contract(day, cfg)
+    attempt = Path(attempt_dir)
+    expected_parent = root / 'work' / day_dir.name / method
+    if not attempt.is_dir() or expected_parent not in attempt.parents:
+        raise ValueError(f'attempt 目录不属于该 run/method：{attempt}（期望位于 {expected_parent}）')
+    invocation_path = attempt / 'invocation.json'
+    if not invocation_path.exists():
+        raise ValueError(f'缺少 invocation.json：{invocation_path}')
+    metadata = _json(invocation_path)
+    if metadata.get('exit_code') != 0:
+        raise ValueError('仅允许重解析退出码为 0 的原始输出；失败尝试保留为诊断')
+    if (metadata.get('actual_model'), metadata.get('actual_reasoning')) != (MODEL, EFFORT):
+        raise ValueError('原始输出的实际模型身份未证明；不能当作可重解析研究输出')
+    if metadata.get('budget_exceeded') or metadata.get('cancelled'):
+        raise ValueError('原始输出存在预算超限或取消；不能重解析')
+    if not (attempt / 'raw-output.json').exists() or not (attempt / 'events.jsonl').exists():
+        raise ValueError('原始输出或事件日志不完整；不能重解析')
+    catalog_path = day_dir / day['source_catalog']
+    _check_source_catalog(catalog_path)  # frozen inputs unchanged since the research ran
+    context = (Path(cfg['context_root']) / day['replay_id'] / method
+               if cfg.get('full_universe_replay') else Path(cfg['context_root']) / method)
+    return _finalize_decision(day_dir, cfg, day, method, attempt, context, metadata, reparse=True)
+
+
+def check_launch(config_path: Path, *, phase: str) -> dict:
+    """Read-only launch gate for the Astra scripts (audit R6).
+
+    phase=first-pair: the first replay case must have a clean not_run state
+    (or an already qualified pair, which is reported as complete), with no
+    failed/running attempts. phase=remaining: the first pair must be REALLY
+    qualified (explicit qualification, complete run, verified model, matching
+    result identity) and every case that is not not_run must be qualified
+    both sides. Every case must still satisfy the real run contract against
+    the current code. Never launches a model, flips a switch, writes an
+    attempt or reads outcomes.
+    """
+    if phase not in ('first-pair', 'remaining'):
+        raise ValueError("phase must be 'first-pair' or 'remaining'")
+    cfg = _cfg(config_path)
+    root = _trial(cfg)
+    cases = cfg.get('replay_cases') or []
+    problems: list[str] = []
+    details: list[dict] = []
+    if not cases:
+        problems.append('配置缺少 replay_cases')
+    for index, case in enumerate(cases):
+        entry = {'replay_id': case.get('replay_id'), 'action_date': case.get('action_date'),
+                 'method_order': case.get('method_order'), 'role': 'first' if index == 0 else 'remaining'}
+        if not case.get('method_order') or len(case['method_order']) != 2:
+            problems.append(f"{case.get('replay_id')}: method_order 必须为两个方法")
+        day_dir = root / 'smoke' / str(case.get('replay_id'))
+        run_file = day_dir / 'run.json'
+        if not run_file.exists():
+            problems.append(f"{case.get('replay_id')}: run.json 缺失")
+            details.append(entry)
+            continue
+        day = _json(run_file)
+        try:
+            _check_run_contract(day, cfg)
+        except ValueError as error:
+            problems.append(f"{case.get('replay_id')}: 运行合同失效：{str(error)[:160]}")
+            entry['contract'] = 'failed'
+            details.append(entry)
+            continue
+        entry['contract'] = 'ok'
+        entry['status'] = dict(day.get('status', {}))
+        entry['qualification'] = {m: _qualification(day_dir, m)['qualified'] for m in METHODS}
+        if phase == 'first-pair' and index == 0:
+            attempts = {m: len(list((root / 'work' / day_dir.name / m).glob('attempt-*')))
+                        for m in METHODS}
+            entry['attempts'] = attempts
+            if any(attempts.values()):
+                problems.append(f"{case.get('replay_id')}: 已存在未合格 attempt {attempts}；不自动修正状态")
+            for m in METHODS:
+                status = day.get('status', {}).get(m)
+                if status not in ('not_run', 'complete', 'complete_zero'):
+                    problems.append(f"{case.get('replay_id')}/{m}: 状态 {status} 不可启动首日一对")
+                elif status in ('complete', 'complete_zero') and not entry['qualification'][m]:
+                    problems.append(f"{case.get('replay_id')}/{m}: 状态 {status} 但未通过真实资格核验")
+            if all(entry['qualification'].values()) and not any(attempts.values()):
+                entry['first_pair'] = 'already_complete'
+        if phase == 'remaining':
+            if index == 0:
+                unqualified = [m for m in METHODS if not entry['qualification'][m]]
+                if unqualified:
+                    problems.append(f"首日 {case.get('replay_id')} 未双方合格：{unqualified}；"
+                                    '剩余四日不得启动')
+                else:
+                    entry['first_pair'] = 'qualified'
+            else:
+                for m in METHODS:
+                    status = day.get('status', {}).get(m)
+                    if status == 'not_run':
+                        continue
+                    if status in ('complete', 'complete_zero') and entry['qualification'][m]:
+                        continue
+                    problems.append(f"{case.get('replay_id')}/{m}: 状态 {status} 未合格；"
+                                    '后续启动前须先处理')
+        details.append(entry)
+    return {'phase': phase, 'launch_allowed': not problems, 'problems': problems,
+            'cases': details,
+            'note': '只读检查：不启动模型、不改research_enabled、不写attempt、不读收益'}
 
 
 def _csv_text(rows: list[dict]) -> str:
@@ -1818,6 +2128,42 @@ def _outcome_source_versions(warehouse: ResearchWarehouse, first: str, through: 
     return [r for r in _source_versions(warehouse) if
             (r['dataset'] in {'equity_daily','adj_factor','index_daily'} and r['partition'] in dates) or
             r['dataset'] == 'trade_calendar']
+
+
+def _assert_same_stock_same_day_consistent(rows: list[dict]) -> None:
+    """A/B share one frozen price path: entry, endpoints and returns must match.
+
+    This REPLACES the old "(method, return) combination count" tautology
+    (audit R7): two rows for the same (ts_code, action_date) under M0 and M1
+    must agree on every computable outcome field; a null-vs-value pair is a
+    mismatch unless BOTH sides lack the endpoint (separate denominators stay
+    separate — the check only compares rows that actually exist).
+    """
+    shared: dict[tuple[str, str], dict[str, dict]] = {}
+    for row in rows:
+        if row.get('method_id') not in ('M0', 'M1') or row.get('role') not in (None, 'selected'):
+            continue
+        shared.setdefault((row.get('ts_code'), row.get('action_date')), {})[row['method_id']] = row
+    compared = ['d5_endpoint_return', 'd10_endpoint_return', 'd20_endpoint_return',
+                'fixed_d20_terminal_return', 'd5_status', 'd10_status', 'd20_status',
+                'fixed_d20_status', 'd5_path_complete', 'd10_path_complete', 'd20_path_complete',
+                'd5_mae', 'd10_mae', 'd20_mae']
+    for (code, action), sides in shared.items():
+        if set(sides) != {'M0', 'M1'}:
+            continue
+        a, b = sides['M0'], sides['M1']
+        for field in compared:
+            value_a, value_b = a.get(field), b.get(field)
+            if value_a is None and value_b is None:
+                continue
+            if isinstance(value_a, (int, float)) and isinstance(value_b, (int, float)) \
+                    and not isinstance(value_a, bool) and not isinstance(value_b, bool):
+                if abs(float(value_a) - float(value_b)) > 1e-9:
+                    raise ValueError(f'同股同日收益路径不一致：{code} {action} {field}: '
+                                     f'M0={value_a} M1={value_b}')
+            elif str(value_a) != str(value_b):
+                raise ValueError(f'同股同日收益路径不一致：{code} {action} {field}: '
+                                 f'M0={value_a!r} M1={value_b!r}')
 
 
 def update_outcomes(config_path: Path, *, through: str) -> Path:
@@ -2145,11 +2491,14 @@ def _csv_rows(rows: list[dict], fallback_columns: list[str]) -> str:
 
 
 def _synthetic_warehouse(base: Path, codes: list[str], dates: list[str],
-                         absent: set | None = None) -> Path:
+                         absent: set | None = None, *, fixed_price_at=None) -> Path:
     """Deterministic synthetic price calendar/warehouse; no real future quotes.
 
     `absent` holds (date, ts_code) pairs whose equity row is deliberately
     missing so the missing-entry scenario keeps its own denominator.
+    `fixed_price_at(index)` overrides the per-code drift with ONE shared,
+    hand-checkable price path over the trading-day index (used by the
+    normal-return acceptance so expected values are literal arithmetic).
     """
     import pandas as pd
     absent = absent or set()
@@ -2164,6 +2513,14 @@ def _synthetic_warehouse(base: Path, codes: list[str], dates: list[str],
         for position, code in enumerate(codes):
             if (day, code) in absent:
                 continue
+            if fixed_price_at is not None:
+                close = round(float(fixed_price_at(index)), 4)
+                previous = round(float(fixed_price_at(max(0, index - 1))), 4)
+                rows.append({'ts_code': code, 'trade_date': day, 'open': close,
+                             'high': round(close * 1.01, 4), 'low': round(close * 0.99, 4),
+                             'close': close, 'pre_close': previous,
+                             'vol': 10000.0 + index, 'amount': 1000000.0 + 1000.0 * index})
+                continue
             drift = 0.01 + 0.002 * ((position + index) % 5)
             close = round(10.0 * (1 + drift) ** index, 4)
             rows.append({'ts_code': code, 'trade_date': day, 'open': round(close * 0.995, 4),
@@ -2171,11 +2528,16 @@ def _synthetic_warehouse(base: Path, codes: list[str], dates: list[str],
                          'close': close, 'pre_close': round(close / (1 + drift), 4),
                          'vol': 10000.0 + index, 'amount': 1000000.0 + 1000.0 * index})
         pd.DataFrame(rows).to_parquet(frame_dir / 'data.parquet', index=False)
+        index_payload = ([{'index_code': '000300.SH', 'trade_date': day,
+                           'open': 4000.0, 'close': 4000.0 + 4.0 * index,
+                           'high': 4020.0 + index, 'low': 3990.0 + index}]
+                         if fixed_price_at is not None else
+                         [{'index_code': '000300.SH', 'trade_date': day,
+                           'open': 4000.0 + index, 'close': 4010.0 + index,
+                           'high': 4020.0 + index, 'low': 3990.0 + index}])
         for dataset, payload in (('adj_factor', [{'ts_code': code, 'trade_date': day, 'adj_factor': 1.0}
                                                  for code in codes]),
-                                 ('index_daily', [{'index_code': '000300.SH', 'trade_date': day,
-                                                   'open': 4000.0 + index, 'close': 4010.0 + index,
-                                                   'high': 4020.0 + index, 'low': 3990.0 + index}])):
+                                 ('index_daily', index_payload)):
             target = base / 'facts' / dataset / f'trade_date={day}'
             target.mkdir(parents=True, exist_ok=True)
             pd.DataFrame(payload).to_parquet(target / 'data.parquet', index=False)
@@ -2357,7 +2719,10 @@ def preflight(config_path: Path, *, output_dir: Path) -> dict:
                           {'matched': r1['matched_count'], 'page1_rows': r1['returned_count'],
                            'offset60_rows': rl['returned_count'], 'next_offset': rl['next_offset'],
                            'continuation_reused_stored_result': index_after == index_before})
-        sizes['company_field_page_chars'] = {'page1': len(json.dumps(r1, ensure_ascii=False))}
+        r1_text = __import__('stock_analyzer.ops.selection_parallel_compact',
+                             fromlist=['render_stdout']).render_stdout(r1)
+        sizes['company_field_page_chars'] = {'page1': len(r1_text),
+                                             'utf8_bytes': len(r1_text.encode('utf-8'))}
 
         # --- knowledge by id over the frozen method context ---
         knowledge_ok, knowledge_detail = False, {}
@@ -2454,11 +2819,15 @@ def preflight(config_path: Path, *, output_dir: Path) -> dict:
                               and (value_check or {}).get('fields_compared', 0) > 0)
                     else:
                         ok = True  # reconstructed request: same-source execution, difference recorded
-                    chars = len(json.dumps(receipt, ensure_ascii=False))
+                    receipt_text = __import__('stock_analyzer.ops.selection_parallel_compact',
+                                              fromlist=['render_stdout']).render_stdout(receipt)
+                    chars = len(receipt_text)
                     timings[f"old_new:{entry['label']}"] = elapsed
                     sizes[f"old_new:{entry['label']}"] = {
                         'old_output_chars': entry.get('old_output_chars'),
-                        'new_receipt_chars': chars, 'new_full_result_file': receipt['full_result_file'],
+                        'new_receipt_chars': chars,
+                        'new_receipt_utf8_bytes': len(receipt_text.encode('utf-8')),
+                        'new_full_result_file': receipt['full_result_file'],
                         'equality_required': entry.get('equality_required', True)}
                     _preflight_record(checks, failures, f"old_new:{entry['label']}", ok,
                                       {'matched': receipt['matched_count'],
@@ -2477,8 +2846,28 @@ def preflight(config_path: Path, *, output_dir: Path) -> dict:
                                          invoke_calls, prompt_sizes)
         checks.extend(simulation['checks'])
         failures.extend(simulation['failures'])
+        for entry in prompt_sizes:
+            key = f"compact_startup_prompt_{entry.get('method') or 'M0'}"
+            if key not in sizes:
+                sizes[key] = {k: v for k, v in entry.items() if k != 'method'}
         if prompt_sizes:
             sizes['compact_startup_prompt'] = prompt_sizes[0]
+        # the visible trace: every step is a real CLI/serializer output of this
+        # preflight, with chars and UTF-8 bytes measured separately (audit R8)
+        visible_trace = []
+        for key, value in sizes.items():
+            if isinstance(value, dict) and 'new_receipt_chars' in value:
+                visible_trace.append({'step': f'old_new:{key}', 'chars': value['new_receipt_chars'],
+                                      'utf8_bytes': value.get('new_receipt_utf8_bytes'),
+                                      'kind': 'discover', 'source': str(value.get('new_full_result_file'))})
+        for key, kind in (('facts_page_chars', 'facts'), ('evidence_read_page_chars', 'evidence'),
+                          ('company_field_page_chars', 'discover')):
+            entry = sizes.get(key) or {}
+            if entry.get('chars'):
+                visible_trace.append({'step': key, 'chars': entry['chars'],
+                                      'utf8_bytes': entry.get('utf8_bytes'), 'kind': kind,
+                                      'source': 'preflight real CLI call'})
+        sizes['visible_trace'] = visible_trace
         audit_path = root / 'work/engineering-repair-20260929/failure-audit/failure-audit.json'
         if audit_path.exists():
             runs = _json(audit_path).get('runs', [])
@@ -2503,84 +2892,113 @@ def preflight(config_path: Path, *, output_dir: Path) -> dict:
 
 
 def _preflight_estimates(sizes: dict, checks: list) -> dict:
-    """Per-round cumulative visible-text estimates; not server-side token billing."""
-    startup_entry = sizes.get('compact_startup_prompt') or {}
-    startup = startup_entry.get('chars') or 0
-    startup_bytes = startup_entry.get('utf8_bytes')
-    responses = []
-    for key, value in sizes.items():
-        if isinstance(value, dict) and 'new_receipt_chars' in value:
-            responses.append(value['new_receipt_chars'])
-    for key, default in (('facts_page_chars', None), ('evidence_read_page_chars', None)):
-        entry = sizes.get(key) or {}
-        if entry.get('chars'):
-            responses.append(entry['chars'])
-    page_chars = (sizes.get('company_field_page_chars') or {}).get('page1')
-    if page_chars:
-        responses.append(page_chars)
-    average_response = sum(responses) / len(responses) if responses else 0
-    sample_bytes = []
-    if startup_entry.get('utf8_bytes') and startup:
-        sample_bytes.append((startup_entry['utf8_bytes'], startup))
-    for key in ('facts_page_chars', 'evidence_read_page_chars'):
-        entry = sizes.get(key) or {}
-        if entry.get('utf8_bytes') and entry.get('chars'):
-            sample_bytes.append((entry['utf8_bytes'], entry['chars']))
-    bytes_per_char = (sum(b for b, _ in sample_bytes) / sum(c for _, c in sample_bytes)
-                      if sample_bytes else None)
+    """Per-round cumulative visible-text estimates from BOTH real sides.
+
+    The two startup texts are the actually rendered M0/M1 prompts (their files
+    must differ); every trace step is a real CLI/serializer output with chars
+    and UTF-8 bytes measured separately. 8/12/24-round entries are explicitly
+    hypothetical scenarios. Token counts, when a tokenizer exists, encode the
+    REAL texts (never an equal-length placeholder); they are still not
+    server-side billing.
+    """
+    startups = {}
+    for method in ('M0', 'M1'):
+        entry = sizes.get(f'compact_startup_prompt_{method}')
+        if entry:
+            startups[method] = entry
+    if not startups.get('M0'):
+        legacy = sizes.get('compact_startup_prompt') or {}
+        if legacy:
+            startups['M0'] = legacy
+    trace_steps = [step for step in (sizes.get('visible_trace') or [])
+                   if isinstance(step, dict) and isinstance(step.get('chars'), (int, float))]
+    response_chars = [step['chars'] for step in trace_steps]
+    average_response = sum(response_chars) / len(response_chars) if response_chars else 0
     assistant_per_round = 1500
     command_per_round = 400
     per_round_addition = average_response + assistant_per_round + command_per_round
-
-    def carried_before_outputs(n: int) -> int:
-        return int(n * startup + n * (n - 1) / 2 * per_round_addition)
-
-    def measured_bytes(chars: int) -> int:
-        return int(chars * bytes_per_char) if bytes_per_char else None
+    trace_calls = len(trace_steps)
 
     tokenizer = None
+    _tokens = None
     try:
         import tiktoken
         encoding = tiktoken.get_encoding('o200k_base')
+
         def _tokens(text):
             return len(encoding.encode(text))
         tokenizer = {'name': 'tiktoken', 'encoding': 'o200k_base',
                      'note': '本地实际encode计数；仍不是Astra服务端完整上下文计费'}
     except Exception:
-        _tokens = None
         tokenizer = None
-    sample_text = ''
-    if startup_entry.get('prompt_file') and Path(startup_entry['prompt_file']).is_file():
-        sample_text = Path(startup_entry['prompt_file']).read_text(encoding='utf-8')
+    token_encode_sources = {}
+    if tokenizer:
+        for method, entry in startups.items():
+            prompt_file = entry.get('prompt_file')
+            if prompt_file and Path(prompt_file).is_file():
+                text = Path(prompt_file).read_text(encoding='utf-8')
+                token_encode_sources[method] = {
+                    'chars': len(text),
+                    'tokens': _tokens(text),
+                    'sha256': hashlib.sha256(text.encode('utf-8')).hexdigest()}
+
+    def side_rounds(method: str) -> dict | None:
+        entry = startups.get(method)
+        if not entry:
+            return None
+        startup = entry.get('chars') or 0
+        utf8 = entry.get('utf8_bytes')
+        out = {}
+        for rounds in (8, 12, 24):
+            before = int(rounds * startup + rounds * (rounds - 1) / 2 * per_round_addition)
+            out[f'estimate_rounds_{rounds}'] = {
+                'carried_history_sum_before_round_outputs_chars': before,
+                'startup_alone_repeated_chars': int(rounds * startup),
+                'startup_utf8_bytes_measured': int(rounds * utf8) if utf8 else None}
+        return out
+
     estimates = {'estimate_inputs': {
-        'startup_chars': startup, 'startup_utf8_bytes_measured': startup_bytes,
+        'startup_prompts': {method: {'chars': entry.get('chars'),
+                                      'utf8_bytes': entry.get('utf8_bytes'),
+                                      'prompt_file': entry.get('prompt_file'),
+                                      'method_commit': entry.get('method_commit')}
+                            for method, entry in startups.items()},
+        'missing_side': [m for m in ('M0', 'M1') if m not in startups],
+        'trace_steps': trace_steps,
         'average_tool_response_chars': round(average_response, 2),
         'assumed_assistant_chars_per_round': assistant_per_round,
         'assumed_command_chars_per_round': command_per_round,
         'per_round_addition_chars': round(per_round_addition, 2),
-        'utf8_bytes_per_char_measured': round(bytes_per_char, 4) if bytes_per_char else None,
-        'formula': 'carried_before_outputs(n) = n*startup + n*(n-1)/2*per_round；'
-                   '上下文保留时逐轮携带历史，累计为各轮输入之和，不是末轮长度',
+        'trace_tool_calls_used': trace_calls,
+        'trace_exceeds_tool_budget_note': '轨迹调用/页数超过工具预算时如实展示，不裁剪完整范围',
+        'formula': 'n*startup_side + n*(n-1)/2*per_round；上下文保留时逐轮携带历史，'
+                   '累计为各轮输入之和；两侧分别列出',
         'tokenizer': tokenizer or '不可用：报告字符与按实测样本编码的UTF-8字节，不伪称精确token',
-        'limits': '12轮为预检设计场景；系统/工具定义/隐藏推理不在本地精确统计范围；'
+        'token_encode_sources': token_encode_sources,
+        'limits': '8/12/24轮为假设场景（非实测）；系统/工具定义/隐藏推理不在本地精确统计范围；'
                   '本估算是供给端可见文本，不承诺真实会话完成'}}
+    per_side = {method: side_rounds(method) for method in ('M0', 'M1')}
+    default_startup = startups.get('M0') or next(iter(startups.values()), {})
+    startup = default_startup.get('chars') or 0
+    startup_utf8 = default_startup.get('utf8_bytes')
     for rounds in (8, 12, 24):
-        before = carried_before_outputs(rounds)
-        entry = {
-            'carried_history_sum_before_round_outputs_chars': before,
-            'carried_history_sum_including_final_round_addition_chars': before + int(per_round_addition),
-            'utf8_bytes_from_measured_ratio': measured_bytes(before),
-            'startup_alone_repeated_chars': int(rounds * startup)}
-        if _tokens is not None and sample_text:
-            startup_tokens = _tokens(sample_text)
-            per_round_tokens = _tokens('x' * int(per_round_addition)) if per_round_addition else 0
-            approx_tokens = int(rounds * startup_tokens + rounds * (rounds - 1) / 2 * per_round_tokens)
-            entry['estimated_tokens_local_encode'] = approx_tokens
-            entry['token_note'] = '由本地tokenizer对实际启动文本与等长样本encode推算；比率近似，非服务端计费'
+        before = int(rounds * startup + rounds * (rounds - 1) / 2 * per_round_addition)
+        entry = {'scenario': '假设场景（非实测）',
+                 'carried_history_sum_before_round_outputs_chars': before,
+                 'carried_history_sum_including_final_round_addition_chars':
+                     before + int(per_round_addition),
+                 'startup_alone_repeated_chars': int(rounds * startup),
+                 'startup_utf8_bytes_repeated_measured':
+                     int(rounds * startup_utf8) if startup_utf8 else None,
+                 'per_side': {method: (side or {}).get(f'estimate_rounds_{rounds}')
+                              for method, side in per_side.items()}}
+        if tokenizer and token_encode_sources:
+            entry['per_side_startup_tokens_repeated'] = {
+                method: int(rounds * source['tokens'])
+                for method, source in token_encode_sources.items()}
+            entry['token_note'] = ('本地tokenizer对两侧真实启动文本encode后按轮数重复；'
+                                   '轨迹新增部分为实测字符的假设场景，非服务端计费')
         estimates[f'estimate_rounds_{rounds}'] = entry
-    estimates['estimate_inputs']['both_sides_note'] = (
-        'A/B两侧启动材料分别由runtime-method视图与共同索引构成，实测字符差约1–2%；'
-        '估算对两侧分别成立；必要读页（facts分页、原件页）已计入每轮新增的平均回复样本')
     return estimates
 
 
@@ -2869,14 +3287,16 @@ def _preflight_fake_arm(cfg: dict, root: Path, out: Path, day_catalogs: list,
 
     original_invoke = _invoke_model
 
-    def make_invoke(decision_text: str, extra_events=None, *, exit_code=0, budget_exceeded=None, raise_error=None):
+    def make_invoke(decision_text: str, extra_events=None, *, exit_code=0, budget_exceeded=None,
+                    raise_error=None, method_label='M0'):
         def invoke(context, prompt, attempt, *, config_path=None):
             invoke_calls['fake'] += 1
             if raise_error is not None:
                 raise raise_error
             attempt.mkdir(parents=True, exist_ok=False)
             (attempt / 'prompt.md').write_text(prompt, encoding='utf-8')
-            prompt_sizes.append({'chars': len(prompt), 'utf8_bytes': len(prompt.encode('utf-8')),
+            prompt_sizes.append({'method': method_label, 'chars': len(prompt),
+                                 'utf8_bytes': len(prompt.encode('utf-8')),
                                  'prompt_file': str(attempt / 'prompt.md')})
             body = '\n'.join(events + (extra_events or [])) + '\n'
             (attempt / 'events.jsonl').write_text(body, encoding='utf-8')
@@ -2909,14 +3329,16 @@ def _preflight_fake_arm(cfg: dict, root: Path, out: Path, day_catalogs: list,
                {'run_id': result.get('run_id'), 'selected': len(result.get('selected', [])),
                 'official_saved': bool(evidence_fixture)})
         globals()['_invoke_model'] = make_invoke(
-            json.dumps(decision_object(method='M1', stocks=[]), ensure_ascii=False))
+            json.dumps(decision_object(method='M1', stocks=[]), ensure_ascii=False),
+            method_label='M1')
         zero_obj = decision_object(method='M1', stocks=[])
         zero_obj['selected'] = []
         zero_obj['candidates'] = []
         zero_obj['no_selection_reason'] = '完成且零入选（工程夹具）'
         zero_obj['discovery_summary']['price']['status'] = 'searched_no_candidate'
         zero_obj['discovery_summary']['price']['codes'] = []
-        globals()['_invoke_model'] = make_invoke(json.dumps(zero_obj, ensure_ascii=False))
+        globals()['_invoke_model'] = make_invoke(json.dumps(zero_obj, ensure_ascii=False),
+                                                 method_label='M1')
         zero = run_arm(sim_day, method='M1')
         record('arm_zero_selection_saved', zero['selected'] == [] and bool(zero.get('no_selection_reason'))
                and _qualification(sim_day, 'M1')['qualified'],
@@ -3055,7 +3477,7 @@ def _preflight_fake_arm(cfg: dict, root: Path, out: Path, day_catalogs: list,
                     'receipt': evidence_fixture['receipt'],
                     'adopted_pages_and_clauses': [evidence_fixture['clause']]}]
             globals()['_invoke_model'] = make_invoke(json.dumps(m1_decision, ensure_ascii=False),
-                                                     extra_events=m1_events)
+                                                     extra_events=m1_events, method_label='M1')
             m1_result = run_arm(m1full_day, method='M1')
             saved = _json(m1full_day / 'M1/result.json')
             slice_count = len(list((m1full_day / 'inputs/reads/M1').glob('*.json')))
@@ -3207,12 +3629,19 @@ def _synthetic_research_db(warehouse_root: Path, dates: list[str]) -> None:
 def _preflight_six_tables(cfg: dict, root: Path, out: Path, day_catalogs: list,
                           universe_codes: list[str]) -> dict:
     """Five synthetic pairs through the REAL save/qualification path, then the
-    real update_outcomes, prepare_batch and format_tables (audit E5).
+    real update_outcomes, prepare_batch and format_tables (audits E5/R7).
 
     Equal-count S_A/S_B references come from update_outcomes' own constructor
     (rank <= selected count), never hand-built rows. Zero-selection methods
     have no selected rows AND no reference rows; missing-entry and conditional
-    cases keep their own denominators. All synthetic data stays in temp dirs.
+    cases keep their own denominators. The normal-path stock uses ONE shared
+    hand-checkable price path V(i)=100+1.05*i with adj_factor=1, so a real
+    complete 20-day path exists for BOTH methods on the same stock and day,
+    with literal expected endpoint returns; the same-stock-same-day rows are
+    compared field-by-field by the real consistency checker (the old
+    "(method, return) combination count" tautology is gone). All synthetic
+    data stays in temp dirs and every research-dependent table cell stays
+    待Astra/未研究 or SIMULATION-marked.
     """
     from stock_analyzer.analysis import selection_parallel_outcomes as outcomes
     from stock_analyzer.ops import selection_parallel_compact as compact
@@ -3224,7 +3653,6 @@ def _preflight_six_tables(cfg: dict, root: Path, out: Path, day_catalogs: list,
         _preflight_record(checks, failures, f'six_tables:{name}', ok, detail or {})
 
     identities = [identity for identity, _ in day_catalogs]
-    fixture_codes = list(dict.fromkeys(universe_codes[:4]))
     sim_root = out / 'six-sim'
     sim_trial = sim_root / 'archive/selection_trials' / cfg['experiment_id']
     sim_cfg = dict(cfg)
@@ -3238,19 +3666,48 @@ def _preflight_six_tables(cfg: dict, root: Path, out: Path, day_catalogs: list,
                    batch_days=len(identities), plan_days=len(identities),
                    action_dates=[i['action_date'] for i in identities])
     dates = list(pd.bdate_range('2026-08-20', '2026-09-24').strftime('%Y-%m-%d'))
+    value_at = lambda i: round(100 + 1.05 * i, 2)  # noqa: E731 - the frozen hand-check path
     warehouse_root = out / 'synthetic-warehouse'
-    last_donor_inputs = root / 'smoke' / identities[-1]['replay_id'] / 'inputs'
-    last_day_universe = [r['ts_code'] for r in _json(last_donor_inputs / 'universe.json')]
+
+    # scenario stocks come from the REAL frozen universes of each day; the
+    # normal-path stock and the missing-entry stock are different codes
+    day_universes = {}
+    for identity in identities:
+        universe_file = root / 'smoke' / identity['replay_id'] / 'inputs/universe.json'
+        day_universes[identity['replay_id']] = [r['ts_code'] for r in _json(universe_file)]
+    all_codes = list(dict.fromkeys(code for codes in day_universes.values() for code in codes[:3]))
+    norm_code = day_universes[identities[0]['replay_id']][0]
     missing_entry_date = identities[-1]['action_date']
-    missing_entry_code = last_day_universe[0]  # in the universe, absent from prices that day
-    _synthetic_warehouse(warehouse_root, fixture_codes, dates,
-                         absent={(missing_entry_date, missing_entry_code)})
+    last_universe = day_universes[identities[-1]['replay_id']]
+    missing_entry_code = next((code for code in last_universe
+                               if code != norm_code and len(last_universe) > 2
+                               and code == last_universe[2]), last_universe[-1])
+    _synthetic_warehouse(warehouse_root, all_codes, dates,
+                         absent={(missing_entry_date, missing_entry_code)},
+                         fixed_price_at=value_at)
     _synthetic_research_db(warehouse_root, dates)
     sim_cfg['warehouse_root'] = str(warehouse_root)
     _write_json(sim_trial / 'experiment.json', sim_cfg)
 
-    # scenario plan: day1 both nonempty; day2 M0 zero, M1 nonempty; day3 both zero;
-    # day4 M0 nonempty + conditional candidate; day5 M0 nonempty missing-entry stock
+    # hand-checkable fixture: entry and endpoints are pure arithmetic on V
+    day1_action = identities[0]['action_date']
+    action_index = dates.index(day1_action)
+    expected_fixture = {
+        'formula': 'V(i)=100+1.05*i（i 为 2026-08-20 起 bdate 序号；全部股票共用；adj_factor=1）',
+        'entry_rule': 'entry=open(action_date)*adj_factor(=1); endpoint dN=close(V[a+N-1])/entry-1',
+        'action_date': day1_action, 'trading_day_index': action_index,
+        'V_table_head': [value_at(i) for i in range(action_index, action_index + 21)],
+        'expected': {
+            'entry_price': value_at(action_index),
+            'd5_endpoint_return': value_at(action_index + 4) / value_at(action_index) - 1,
+            'd10_endpoint_return': value_at(action_index + 9) / value_at(action_index) - 1,
+            'd20_endpoint_return': value_at(action_index + 19) / value_at(action_index) - 1},
+        'tolerance': 'rel=1e-9（项目浮点容差；期望值为公式手算值，非待测函数输出）'}
+    fixture_path = sim_root / 'expected-fixture.json'
+    _write_json(fixture_path, expected_fixture)
+
+    # scenario plan: day1 both nonempty (SHARED stock); day2 M0 zero, M1 nonempty;
+    # day3 both zero; day4 M0 nonempty + conditional candidate; day5 M0 missing-entry
     plan = {1: {'M0': ['selected'], 'M1': ['selected']},
             2: {'M0': [], 'M1': ['selected']},
             3: {'M0': [], 'M1': []},
@@ -3268,7 +3725,7 @@ def _preflight_six_tables(cfg: dict, root: Path, out: Path, day_catalogs: list,
             (attempt / 'events.jsonl').write_text(events_text, encoding='utf-8')
             (attempt / 'raw-output.json').write_text(decision_text, encoding='utf-8')
             metadata = {'requested_model': MODEL, 'actual_model': MODEL, 'actual_reasoning': EFFORT,
-                        'exit_code': 0, 'budget_exceeded': None,
+                        'exit_code': 0, 'budget_exceeded': None, 'cancelled': False,
                         'tokens': {'input_tokens': 1000, 'cached_input_tokens': 800, 'output_tokens': 100}}
             _write_json(attempt / 'invocation.json', metadata)
             return 0, metadata
@@ -3294,13 +3751,17 @@ def _preflight_six_tables(cfg: dict, root: Path, out: Path, day_catalogs: list,
             discovery = compact.discover_queries(catalog, request, output_dir=context / 'work')
             sector_snapshots = _json(catalog.parent / 'sector-snapshots.json') \
                 if (catalog.parent / 'sector-snapshots.json').exists() else []
-            pages = [compact.facts_compact(catalog, codes=[code_a],
+            # read facts for every code the day's decisions will cite, including
+            # the missing-entry stock on the last day
+            read_codes = list(dict.fromkeys(
+                [code_a] + ([missing_entry_code] if day_number == len(identities) else [])))
+            pages = [compact.facts_compact(catalog, codes=read_codes,
                                            categories=['price', 'company'],
                                            sector_snapshots=sector_snapshots,
                                            output=context / 'work/facts-full.json',
                                            parts_dir=context / 'work/facts-parts')]
             while pages[-1].get('next_part'):
-                pages.append(compact.facts_compact(catalog, codes=[code_a],
+                pages.append(compact.facts_compact(catalog, codes=read_codes,
                                                    categories=['price', 'company'],
                                                    sector_snapshots=sector_snapshots,
                                                    part=pages[-1]['next_part'],
@@ -3378,7 +3839,7 @@ def _preflight_six_tables(cfg: dict, root: Path, out: Path, day_catalogs: list,
         outcome_dir = update_outcomes(sim_trial / 'experiment.json', through='2026-09-24')
         batch_dir = prepare_batch(sim_trial / 'experiment.json', batch_number=1, through='2026-09-24')
         formatted = result_tables.format_tables(sim_trial / 'experiment.json', Path(outcome_dir),
-                                                out / 'delivery-tables')
+                                                out / 'delivery-tables', data_label='SIMULATION')
         # per-day equal-count and zero-group assertions from the ACTUAL files
         import csv as _csv
         with (Path(outcome_dir) / 'outcomes.csv').open(encoding='utf-8') as handle:
@@ -3444,26 +3905,69 @@ def _preflight_six_tables(cfg: dict, root: Path, out: Path, day_catalogs: list,
                len(missing) == 1 and missing[0].get('d5_status') == 'no_reliable_entry',
                {'row': {k: missing[0].get(k) for k in ('ts_code', 'd5_status', 'd20_status')}
                 if missing else None})
-        day1_pair = [r for r in outcome_rows if r['action_date'] == identities[0]['action_date']
-                     and r['ts_code'] == _json(sim_trial / 'smoke/simday1/inputs/universe.json')[0]['ts_code']]
-        record('same_stock_same_day_shared_path',
-               len({(r['method_id'], r['d5_endpoint_return']) for r in day1_pair
-                    if r['method_id'] in ('M0', 'M1')}) <= 2
-               and len(day1_pair) >= 2,
-               {'rows': len(day1_pair),
-                'returns': sorted({r.get('d5_endpoint_return') for r in day1_pair})[:4]})
+        # R7: a REAL normal complete path exists for BOTH methods on one stock/day;
+        # expected values come from the hand-checkable fixture, not from the
+        # code under test; entry/endpoints/indicators are compared numerically
+        norm_rows = [r for r in outcome_rows if r['action_date'] == day1_action
+                     and r['ts_code'] == norm_code and r['method_id'] in ('M0', 'M1')]
+        normal_detail = {'rows': len(norm_rows), 'expected': expected_fixture['expected']}
+        normal_ok = False
+        if len(norm_rows) == 2 and {r['method_id'] for r in norm_rows} == {'M0', 'M1'}:
+            daily_path = sim_root / 'archive/selection_trials' / cfg['experiment_id'] / \
+                'outcomes/2026-09-24/full-universe-cache/daily-paths.parquet'
+            entry_values = []
+            if daily_path.exists():
+                daily = pd.read_parquet(daily_path)
+                day1_paths = daily[(daily['event_key'] == f'trial:{day1_action}:{norm_code}')
+                                   & (daily['trading_day_number'] == 1)]
+                entry_values = sorted(day1_paths['entry_open_adjusted'].tolist())
+            normal_detail['shared_entry_open_adjusted'] = entry_values
+            tolerance = 1e-9
+            normal_ok = all(
+                r.get(f'd{n}_status') == 'endpoint_available' and r.get(f'd{n}_path_complete') == 'True'
+                for r in norm_rows for n in (5, 10, 20))
+            for r in norm_rows:
+                for field in ('d5_endpoint_return', 'd10_endpoint_return', 'd20_endpoint_return'):
+                    value = r.get(field)
+                    expected = expected_fixture['expected'][field]
+                    normal_ok = normal_ok and value not in ('', None) and \
+                        abs(float(value) - float(expected)) <= tolerance
+                normal_ok = normal_ok and r.get('d5_mae') not in ('', None)
+            normal_ok = normal_ok and len(entry_values) >= 1 and \
+                abs(float(entry_values[0]) - float(expected_fixture['expected']['entry_price'])) \
+                <= tolerance
+        record('normal_path_hand_checked_returns', normal_ok, normal_detail)
+        # R7: the real shared-path consistency check over all outcome rows
+        try:
+            _assert_same_stock_same_day_consistent(outcome_rows)
+            consistent = True
+            consistency_error = None
+        except ValueError as error:
+            consistent = False
+            consistency_error = str(error)[:300]
+        record('same_stock_same_day_shared_path_consistency', consistent,
+               {'error': consistency_error,
+                'meaning': '同股同日的M0/M1入场价、端点日期、5/10/20收益及路径指标逐项相等'})
         files = {name: (Path(outcome_dir) / name).stat().st_size
                  for name in ('outcomes.csv', 'candidate-outcomes.csv', 'first-only.csv',
                               'nonoverlap.csv', 'simple-reference-outcomes.csv',
                               'universe-outcomes.csv', 'group-summary.json', 'summary.json')}
         files.update({f'batch/{name}': (Path(batch_dir) / name).stat().st_size
                       for name in ('comparison.csv', 'metrics.json', 'readiness.json')})
+        delivery_files = sorted(os.listdir(out / 'delivery-tables'))
         files.update({f'delivery/{name}': (out / 'delivery-tables' / name).stat().st_size
-                      for name in os.listdir(out / 'delivery-tables')})
+                      for name in delivery_files})
         record('real_pipeline_files', all(size > 0 for size in files.values()),
                {'outcome_revision': str(outcome_dir), 'batch_revision': str(batch_dir),
                 'formatter': formatted, 'files': sorted(files),
                 'readiness': _json(Path(batch_dir) / 'readiness.json')})
+        six_csv = [name for name in delivery_files if name.endswith('.csv')]
+        record('six_delivery_tables_present',
+               len(six_csv) >= 6 and all((out / 'delivery-tables' / name).stat().st_size > 0
+                                         for name in six_csv),
+               {'files': sorted(delivery_files),
+                'meaning': '六张业务表：01范围/02逐条结果/03组别/04差异/05条件事件/06七问题评价；'
+                           '未研究字段为待Astra/未研究，模拟数据标SIMULATION'})
         stats = _json(Path(outcome_dir) / 'summary.json')
         total = len(identities)
         expected_m0_zero = sum(1 for d in plan if d <= total and not plan[d]['M0'])
@@ -3476,7 +3980,8 @@ def _preflight_six_tables(cfg: dict, root: Path, out: Path, day_catalogs: list,
                 'M1_zero': stats['methods']['M1']['zero_selection_days'],
                 'expected': [expected_m0_zero, expected_m1_zero]})
         return {'checks': checks, 'failures': failures,
-                'files': {k: {'bytes': v} for k, v in files.items()}}
+                'files': {k: {'bytes': v} for k, v in files.items()},
+                'expected_fixture': str(fixture_path), 'outcome_rows': outcome_rows}
     finally:
         globals()['_invoke_model'] = original_invoke
 

@@ -25,8 +25,21 @@ def write_csv(path: Path, rows: list[dict]) -> None:
         writer.writerows(rows)
 
 
+SEVEN_QUESTIONS = [
+    ('Q1', 'B对过去强势的处理是否改变发现与去留'),
+    ('Q2', 'B对同窗重复证据的处理是否改变发现与去留'),
+    ('Q3', 'B对价格代价的处理是否改变发现与去留'),
+    ('Q4', 'B对公司反证的处理是否改变发现与去留'),
+    ('Q5', 'B对行业持续支持的处理是否改变发现与去留'),
+    ('Q6', 'B对参与条件的处理是否改变发现与去留'),
+    ('Q7', '取舍的收益、下跌与遗漏机会代价（D5/D10/D20、20%触达、MFE/MAE、'
+           '相对沪深300、S_A/S_B与全U对照）'),
+]
+
+
 def format_tables(config_path: Path, outcomes_dir: Path, output_dir: Path,
-                  *, condition_evaluation: Path | None = None) -> dict:
+                  *, condition_evaluation: Path | None = None,
+                  data_label: str | None = None) -> dict:
     cfg = _json(config_path)
     root = config_path.parent
     for case in cfg['replay_cases']:
@@ -34,6 +47,7 @@ def format_tables(config_path: Path, outcomes_dir: Path, output_dir: Path,
         _check_run_contract(_json(day / 'run.json'), cfg)
         if not all(_qualification(day, m)['qualified'] for m in case['method_order']):
             raise ValueError('ten qualified decisions required before formatting result tables')
+    label = data_label or 'real'
     allout = read_csv_rows(outcomes_dir / 'outcomes.csv')
     candidates = read_csv_rows(outcomes_dir / 'candidate-outcomes.csv')
     universe_lookup = {(r['action_date'], r['ts_code']): r
@@ -91,6 +105,23 @@ def format_tables(config_path: Path, outcomes_dir: Path, output_dir: Path,
                          **{k: reference.get(k) for k in
                             ('d5_endpoint_return', 'd10_endpoint_return', 'd20_endpoint_return',
                              'fixed_d20_hit_20pct_close', 'fixed_d20_mae', 'fixed_d20_status')}})
+    scope_rows = []
+    for case in cfg['replay_cases']:
+        day_dir = root / 'smoke' / case['replay_id']
+        run = _json(day_dir / 'run.json')
+        universe = _json(day_dir / 'inputs/universe.json')
+        scope_rows.append({'replay_id': case['replay_id'],
+                           'formation_date': case['formation_date'],
+                           'action_date': case['action_date'], 'as_of': case['as_of'],
+                           'mode': run.get('mode'), 'execution_profile': run.get('execution_profile'),
+                           'universe_rows': len(universe),
+                           'method_order': json.dumps(case['method_order'], ensure_ascii=False),
+                           'model': run.get('model'), 'reasoning': run.get('reasoning'),
+                           'limits': json.dumps(run.get('limits'), ensure_ascii=False),
+                           'program_ref': run.get('program_ref'),
+                           'data_label': label,
+                           'note': '范围=完整合格U；零选日与未研究评价保留待Astra/未研究状态'})
+    write_csv(output_dir / '01_范围表.csv', scope_rows)
     write_csv(output_dir / '02_A-B逐条结果.csv', rows)
     write_csv(output_dir / '04_发现与取舍差异表.csv', diff)
     group_rows = []
@@ -108,8 +139,31 @@ def format_tables(config_path: Path, outcomes_dir: Path, output_dir: Path,
                                    'per_date_mean': json.dumps(values.get('per_date_mean', {}), ensure_ascii=False),
                                    'zero_selection_is_cash_return': False})
     write_csv(output_dir / '03_组别总表.csv', group_rows)
+    condition_rows = []
+    for case in cfg['replay_cases']:
+        results = {m: _json(root / 'smoke' / case['replay_id'] / m / 'result.json')
+                   for m in case['method_order']}
+        for method, result in results.items():
+            candidates = {x['ts_code']: x for x in result['candidates']}
+            for event in result.get('conditional_events', []):
+                code = event.get('ts_code') if isinstance(event, dict) else event
+                condition_rows.append({
+                    'action_date': case['action_date'], 'method_id': method, 'ts_code': code,
+                    'candidate_reason': (candidates.get(code) or {}).get('short_reason'),
+                    'row_type': 'conditional_event_reference_only_not_selected',
+                    'formal_outcome': '不入选正式收益（条件事件仅保留在候选账）',
+                    'data_label': label})
+    write_csv(output_dir / '05_条件事件表.csv', condition_rows)
+    question_rows = [{'question_id': qid, 'question': question,
+                      'A_observation': None, 'B_observation': None,
+                      'difference_conclusion': None,
+                      'evidence_status': '待Astra/未研究', 'data_label': label,
+                      'note': '研究依赖字段未预填；技术通过不预证B更准'}
+                     for qid, question in SEVEN_QUESTIONS]
+    write_csv(output_dir / '06_七问题研究评价表.csv', question_rows)
     return {'rows': len(rows), 'diff_rows': len(diff), 'group_rows': len(group_rows),
-            'output_dir': str(output_dir)}
+            'scope_rows': len(scope_rows), 'condition_rows': len(condition_rows),
+            'question_rows': len(question_rows), 'output_dir': str(output_dir)}
 
 
 def main() -> int:
@@ -119,9 +173,11 @@ def main() -> int:
                         help='revision directory holding outcomes.csv and its extras')
     parser.add_argument('--output-dir', type=Path, required=True)
     parser.add_argument('--condition-evaluation', type=Path)
+    parser.add_argument('--data-label', help='mark synthetic deliveries, e.g. SIMULATION')
     args = parser.parse_args()
     result = format_tables(args.config, args.outcomes_dir, args.output_dir,
-                           condition_evaluation=args.condition_evaluation)
+                           condition_evaluation=args.condition_evaluation,
+                           data_label=args.data_label)
     print(json.dumps(result, ensure_ascii=False))
     return 0
 
