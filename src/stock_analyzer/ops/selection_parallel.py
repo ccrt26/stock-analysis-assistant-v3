@@ -2808,8 +2808,8 @@ def _preflight_fake_arm(cfg: dict, root: Path, out: Path, day_catalogs: list,
                               'facts_from_saved_reads': sorted(context['facts'])}
         except Exception as error:  # noqa: BLE001 - report, never fabricate the pass
             import traceback as _tb
-            handoff_detail = {'error': f'{type(error).__name__}: {str(error)[:250]}',
-                              'traceback': _tb.format_exc()[-700:]}
+            handoff_detail = {'error': f'{type(error).__name__}: {str(error)}',
+                              'traceback': _tb.format_exc()[-1600:]}
         record('handoff_from_just_saved_decision', handoff_ok, handoff_detail)
     finally:
         globals()['_invoke_model'] = original_invoke

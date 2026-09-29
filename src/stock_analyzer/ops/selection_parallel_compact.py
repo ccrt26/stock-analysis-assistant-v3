@@ -563,6 +563,7 @@ def discover_queries(catalog_path: Path, request: dict, *, output_dir: Path,
     queries_dir.mkdir(parents=True, exist_ok=True)
     index_path = queries_dir / 'index.jsonl'
     history = [json.loads(line) for line in index_path.read_text().splitlines()] if index_path.exists() else []
+    new_records: list[dict] = []
     if part is not None:
         return _discover_continuation(catalog_path, queries_dir, history, part)
     _check_catalog(catalog_path)  # fresh execution only; continuations reuse stored results
@@ -633,19 +634,21 @@ def discover_queries(catalog_path: Path, request: dict, *, output_dir: Path,
                    'scanned_all': True, 'partial': False}
         _write_local(queries_dir / f'{stem}-receipt.json', receipt)
         if not reused_stored_result:
-            history.append({'seq': len(history) + 1, 'query_id': query_id, 'stem': stem, 'view': view,
-                            'sql': sql, 'params': params, 'matched_count': int(matched),
-                            'source_total': source_total, 'searched_total': searched_total,
-                            'columns': columns,
-                            'full_result_file': str(rows_file),
-                            'receipt_file': str(queries_dir / f'{stem}-receipt.json'),
-                            'as_of': catalog['as_of'], 'formation_date': catalog['formation_date'],
-                            'catalog': str(catalog_path)})
+            record = {'seq': len(history) + 1, 'query_id': query_id, 'stem': stem, 'view': view,
+                      'sql': sql, 'params': params, 'matched_count': int(matched),
+                      'source_total': source_total, 'searched_total': searched_total,
+                      'columns': columns,
+                      'full_result_file': str(rows_file),
+                      'receipt_file': str(queries_dir / f'{stem}-receipt.json'),
+                      'as_of': catalog['as_of'], 'formation_date': catalog['formation_date'],
+                      'catalog': str(catalog_path)}
+            history.append(record)
+            new_records.append(record)
         if view == 'company':
             company_seen = True
         responses.append(_bound_page(receipt, rows, queries_dir, stem))
     with index_path.open('a', encoding='utf-8') as handle:
-        for record in history[len(history) - len(responses):]:
+        for record in new_records:
             handle.write(json.dumps(record, ensure_ascii=False) + '\n')
     return {'profile': PROFILE, 'catalog': str(catalog_path), 'as_of': catalog['as_of'],
             'formation_date': catalog['formation_date'], 'view_totals': totals,
