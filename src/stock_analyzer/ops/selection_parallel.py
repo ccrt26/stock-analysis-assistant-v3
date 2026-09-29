@@ -2346,7 +2346,8 @@ def _preflight_fake_arm(cfg: dict, root: Path, out: Path, catalog0: Path, identi
         add_event(f'{cli} facts --catalog {sim_catalog} --code {fixture_code} --profile decision', page)
     evidence_fixture = None
     if evidence_context is not None and evidence_id:
-        sim_official = arm_context / 'work/official' / evidence_id
+        sim_official = arm_context / 'M0/work/official' / evidence_id
+        sim_official.parent.mkdir(parents=True, exist_ok=True)
         if not sim_official.exists():
             shutil.copytree(evidence_context / 'work/official' / evidence_id, sim_official)
         kind_receipt = _json(evidence_context / 'work/official' / evidence_id / 'receipt.json')
