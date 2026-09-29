@@ -72,6 +72,11 @@ def parser() -> argparse.ArgumentParser:
     e.add_argument('--context', type=Path, required=True)
     e.add_argument('--request', type=Path, required=True)
     e.add_argument('--usage-file', type=Path)
+    pb = sub.add_parser('prepare-batch', help='refresh the five zero-research preparation days '
+                                              'under their ORIGINAL ids (sealed-v1 local inputs); '
+                                              'no model call, no renumbering')
+    pb.add_argument('--config', type=Path, required=True)
+    pb.add_argument('--refresh-unstarted', action='store_true')
     pre = sub.add_parser('preflight', help='offline real-scale acceptance; never launches research')
     pre.add_argument('--config', type=Path, required=True)
     pre.add_argument('--output-dir', type=Path, required=True)
@@ -210,6 +215,11 @@ def main(argv: list[str] | None = None) -> int:
         output = trial.preflight(a.config, output_dir=a.output_dir)
         _print(output)
         return 1 if output.get('failed_checks') else 0
+    elif a.command == 'prepare-batch':
+        if not a.refresh_unstarted:
+            raise ValueError('prepare-batch 需要 --refresh-unstarted（零研究原身份刷新）')
+        output = trial.prepare_unstarted_batch(a.config, refresh_unstarted=a.refresh_unstarted)
+        _print(output)
     elif a.command == 'check-launch':
         output = trial.check_launch(a.config, phase=a.phase)
         _print(output)

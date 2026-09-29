@@ -135,8 +135,15 @@ def candidate_context(root: Path, codes: list[str], *, formation_date: str, as_o
                       categories=("financial", "company", "price", "industry"), periods=(),
                       sector_dates=(), group_codes=(), sector_snapshots=(), action_date: str | None = None,
                       warehouse_root: Path | None = None, derived_inputs: dict | None = None,
-                  derived_root: Path | None = None) -> dict:
-    """On-demand facts before any selection judgment or draft exists."""
+                      derived_root: Path | None = None,
+                      fact_query=None, sector_reader=None) -> dict:
+    """On-demand facts before any selection judgment or draft exists.
+
+    fact_query/sector_reader are optional sealed-input readers: when given,
+    every fact table and every historical sector slot is read from the local
+    trial snapshot instead of the live warehouse. Production callers that
+    omit them keep the exact previous behavior.
+    """
     unknown = set(categories) - set(FACT_CATEGORIES)
     if unknown or not codes:
         raise ValueError(f'需要候选代码及有效类别；未知类别：{sorted(unknown)}')
@@ -145,7 +152,8 @@ def candidate_context(root: Path, codes: list[str], *, formation_date: str, as_o
     return _context(root, request, {'selected_stocks': []}, list(dict.fromkeys(codes)),
                     categories=categories, periods=periods, sector_dates=sector_dates,
                     group_codes=group_codes, sector_snapshots=sector_snapshots,
-                    warehouse_root=warehouse_root, derived_inputs=derived_inputs, derived_root=derived_root)
+                    warehouse_root=warehouse_root, derived_inputs=derived_inputs, derived_root=derived_root,
+                    fact_query=fact_query, sector_reader=sector_reader)
 
 
 def breadth_evidence(rows: list[dict], windows: dict) -> list[dict]:
@@ -169,7 +177,8 @@ def breadth_evidence(rows: list[dict], windows: dict) -> list[dict]:
 def _context(root: Path, trace: dict, result: dict, codes: list[str], *,
              categories=("financial", "company", "price", "industry"), cited_text="", periods=(), sector_dates=(),
              group_codes=(), sector_snapshots=(), warehouse_root: Path | None = None,
-             derived_inputs: dict | None = None, derived_root: Path | None = None) -> dict:
+             derived_inputs: dict | None = None, derived_root: Path | None = None,
+             fact_query=None, sector_reader=None) -> dict:
     formation = date.fromisoformat(trace['formation_date']).isoformat()
     action = date.fromisoformat(trace['action_date']).isoformat() if trace.get('action_date') else None
     cutoff = datetime.fromisoformat(trace['as_of'])
@@ -192,9 +201,15 @@ def _context(root: Path, trace: dict, result: dict, codes: list[str], *,
                                                if d.get('decision_id') in decision_ids]
     if not codes:
         return output
-    warehouse = ResearchWarehouse(warehouse_root or root / 'local_warehouse', read_only=True)
-    query = ResearchQuery(warehouse)
-    derived_warehouse = ResearchWarehouse(derived_root, read_only=True) if derived_root else warehouse
+    if fact_query is None:
+        warehouse = ResearchWarehouse(warehouse_root or root / 'local_warehouse', read_only=True)
+        query = ResearchQuery(warehouse)
+        derived_warehouse = ResearchWarehouse(derived_root, read_only=True) if derived_root else warehouse
+    else:
+        # sealed trial inputs: no live warehouse object may even be constructed
+        warehouse = None
+        query = fact_query
+        derived_warehouse = None
 
     def read(dataset: str, *, partitions=None, financial=False) -> pd.DataFrame:
         if dataset != 'trade_calendar' and dataset not in wanted:
@@ -234,8 +249,12 @@ def _context(root: Path, trace: dict, result: dict, codes: list[str], *,
             derived[feature] = pd.DataFrame()
             continue
         try:
-            derived[feature] = (derived_inputs[feature] if derived_inputs is not None and feature in derived_inputs
-                                else derived_at(derived_warehouse, feature, formation, cutoff))
+            if derived_inputs is not None and feature in derived_inputs:
+                derived[feature] = derived_inputs[feature]
+            elif fact_query is not None:
+                raise ValueError(f'封存输入缺少形成日派生文件：{feature}；sealed 路径不回活跃仓取派生')
+            else:
+                derived[feature] = derived_at(derived_warehouse, feature, formation, cutoff)
         except (ValueError, OSError, RuntimeError) as exc:
             gaps.append({'source': feature, 'status': 'unavailable_at_cutoff', 'detail': str(exc)})
             derived[feature] = pd.DataFrame()
@@ -327,7 +346,8 @@ def _context(root: Path, trace: dict, result: dict, codes: list[str], *,
                 if day > formation or day_cutoff > cutoff:
                     raise ValueError('行业序列不能越过本轮截止')
                 try:
-                    prior = derived_at(derived_warehouse, 'sector_hotspot', day, day_cutoff)
+                    prior = (sector_reader('sector_hotspot', day, day_cutoff) if sector_reader is not None
+                             else derived_at(derived_warehouse, 'sector_hotspot', day, day_cutoff))
                     observed = records(prior[prior['group_code'].isin(groups)]) if 'group_code' in prior else []
                     prior_windows = window_dates([d for d in sessions if d <= day], {})
                     fact['industry_series'].append({'analysis_date': day, 'as_of': day_cutoff.isoformat(),

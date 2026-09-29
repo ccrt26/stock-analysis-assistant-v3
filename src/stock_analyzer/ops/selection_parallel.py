@@ -403,12 +403,15 @@ def _reuse_frozen_inputs(cfg: dict, day_dir: Path, donor_dir: Path, mode: str, r
             raise ValueError(f'复用来源冻结输入已变化: {name}')
     day_inputs = day_dir / 'inputs'
     day_inputs.mkdir(parents=True, exist_ok=True)
-    for source in sorted((donor_dir / 'inputs').iterdir()):
+    for source in sorted((donor_dir / 'inputs').rglob('*')):
         if not source.is_file():
             continue
-        target = day_inputs / source.name
+        # sealed-v1 inputs keep subdirectories (facts/, sector-slots/); copy
+        # the whole tree so the reused day carries the identical local snapshot
+        target = day_inputs / source.relative_to(donor_dir / 'inputs')
         if target.exists():
             continue
+        target.parent.mkdir(parents=True, exist_ok=True)
         try:
             os.link(source, target)
         except OSError:
@@ -443,7 +446,8 @@ def _reuse_frozen_inputs(cfg: dict, day_dir: Path, donor_dir: Path, mode: str, r
 
 def prepare_day(config_path: Path, *, as_of: str, mode: str, replay_id: str | None = None,
                 formation_date: str | None = None, action_date: str | None = None,
-                reuse_inputs_from: Path | None = None) -> Path:
+                reuse_inputs_from: Path | None = None, refresh_unstarted: bool = False,
+                _sealed_context: dict | None = None) -> Path:
     if mode not in {'prospective', 'replay_smoke'}:
         raise ValueError('mode must be prospective or replay_smoke')
     if replay_id is not None and (mode != 'replay_smoke' or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_-]{0,79}', replay_id)):
@@ -487,6 +491,16 @@ def prepare_day(config_path: Path, *, as_of: str, mode: str, replay_id: str | No
     root = _trial(cfg)
     day_dir = root / ('daily' if mode == 'prospective' else 'smoke') / (replay_id or action)
     run_path = day_dir / 'run.json'
+    if refresh_unstarted:
+        # zero-research refresh under the ORIGINAL identity: handled before the
+        # old run-contract check so a moved HEAD can never block a legal
+        # refresh of unstarted inputs (organized by prepare_unstarted_batch)
+        if _sealed_context is None:
+            raise ValueError('refresh_unstarted 只能由 prepare_unstarted_batch 组织调用')
+        return _refresh_sealed_day(cfg, root,
+                                   {'replay_id': replay_id, 'formation_date': formation,
+                                    'action_date': action, 'as_of': cutoff.isoformat()},
+                                   day_dir, _sealed_context)
     if run_path.exists():
         previous = _json(run_path)
         if (previous['as_of'], previous['mode'], previous.get('replay_id')) != (cutoff.isoformat(), mode, replay_id):
@@ -613,7 +627,377 @@ def prepare_day(config_path: Path, *, as_of: str, mode: str, replay_id: str | No
     return day_dir
 
 
-def _check_source_catalog(catalog_path: Path) -> dict:
+def _read_isolated_derived(store_root: Path, feature: str, analysis_date: str,
+                           cutoff: datetime) -> tuple[pd.DataFrame, dict]:
+    """Read one frame back from an isolated run_research_features output."""
+    from stock_analyzer.storage.research_parquet import sha256_file
+    duckdb_path = Path(store_root) / 'research.duckdb'
+    with connect_research_warehouse(duckdb_path, read_only=True) as connection:
+        rows = connection.execute(
+            'select relative_path,input_manifest_json,file_sha256 from research_derived_partitions '
+            'where feature_set=? and analysis_date=? order by committed_at desc',
+            [feature, analysis_date]).fetchall()
+    if not rows:
+        raise ValueError(f'隔离派生输出缺少 {feature}/{analysis_date}')
+    for relative, manifest, digest in rows:
+        stamp = (json.loads(manifest).get('fact_snapshot') or {}).get('as_of')
+        if not stamp or datetime.fromisoformat(stamp) != cutoff:
+            continue
+        source = Path(store_root) / relative
+        if sha256_file(source) != digest:
+            raise ValueError(f'隔离派生文件与元数据不一致：{feature}/{analysis_date}')
+        return pd.read_parquet(source), json.loads(manifest)
+    raise ValueError(f'隔离派生输出没有与本轮截止一致的 {feature}/{analysis_date}')
+
+
+def _enumerate_derived_slots(derived_root: Path, formation: str,
+                             cutoff: datetime) -> list[tuple[str, datetime]]:
+    """Historical sector_hotspot slots the isolated derived root could serve.
+
+    Only (analysis_date <= formation, as_of <= cutoff) pairs that were
+    actually committed there; these are exactly the slots derived_at could
+    have read legally for this day.
+    """
+    duckdb_path = Path(derived_root) / 'research.duckdb'
+    if not duckdb_path.is_file():
+        return []
+    with connect_research_warehouse(duckdb_path, read_only=True) as connection:
+        rows = connection.execute(
+            'select analysis_date, input_manifest_json from research_derived_partitions '
+            "where feature_set='sector_hotspot'").fetchall()
+    slots: set[tuple[str, datetime]] = set()
+    for analysis_date, manifest in rows:
+        stamp = (json.loads(manifest).get('fact_snapshot') or {}).get('as_of')
+        if not stamp:
+            continue
+        moment = datetime.fromisoformat(stamp)
+        if str(analysis_date) <= formation and moment <= cutoff:
+            slots.add((str(analysis_date), moment))
+    return sorted(slots)
+
+
+def _isolated_slot_frame(context: dict, analysis_date: str, cutoff: datetime) -> pd.DataFrame:
+    """Compute (once per batch) one sector slot via the ORIGINAL entry point."""
+    from stock_analyzer.ops.research_features import run_research_features
+    key = (analysis_date, cutoff.isoformat())
+    if key in context['slot_cache']:
+        return context['slot_cache'][key]
+    store_root = context['slot_output_root'] / f"{analysis_date}__{cutoff.isoformat().replace(':', '').replace('+', '_')}"
+    run_research_features(context['warehouse'], analysis_date, cutoff, output_root=store_root)
+    frame, _ = _read_isolated_derived(store_root, 'sector_hotspot', analysis_date, cutoff)
+    context['slot_cache'][key] = frame
+    return frame
+
+
+def _sealed_day_reusable(cfg: dict, day_dir: Path) -> bool:
+    """A finished sealed refresh under the CURRENT head with zero attempts."""
+    run_file = day_dir / 'run.json'
+    if not run_file.exists():
+        return False
+    run = _json(run_file)
+    head = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=Path(cfg['code_root']), check=True,
+                          capture_output=True, text=True).stdout.strip()
+    if run.get('program_ref') != head or run.get('status') != {'M0': 'not_run', 'M1': 'not_run'}:
+        return False
+    catalog_path = day_dir / run.get('source_catalog', 'inputs/catalog.json')
+    if not catalog_path.exists() or _json(catalog_path).get('input_storage') != 'sealed-v1':
+        return False
+    for method in METHODS:
+        if list((_trial(cfg) / 'work' / day_dir.name / method).glob('attempt-*')):
+            return False
+        if (day_dir / method / 'result.json').exists():
+            return False
+    try:
+        _check_source_catalog(catalog_path, full=True)
+    except (ValueError, OSError):
+        return False
+    return True
+
+
+def _backup_original_day(root: Path, day_dir: Path, replay_id: str) -> Path:
+    """Archive the ORIGINAL run+inputs once; refreshes never overwrite it."""
+    history = root / 'input-history' / replay_id
+    if history.exists() and any(history.iterdir()):
+        return sorted(history.iterdir())[0]
+    stamp = datetime.now(ZONE).strftime('%Y%m%dT%H%M%S')
+    target = history / stamp
+    target.mkdir(parents=True, exist_ok=False)
+    shutil.copyfile(day_dir / 'run.json', target / 'run.json')
+    shutil.copytree(day_dir / 'inputs', target / 'inputs')
+    return target
+
+
+def _refresh_sealed_day(cfg: dict, root: Path, case: dict, day_dir: Path,
+                        context: dict) -> dict:
+    """Rebuild one day's inputs as sealed-v1 under the ORIGINAL identity.
+
+    Reads happen under the batch's shared warehouse lock; every fact table
+    is resolved at the ORIGINAL as_of via ResearchQuery and written locally;
+    the company index is built from the just-saved frozen tables (same
+    batch); the four formation derived and every historical sector slot are
+    recomputed by the original run_research_features entry into isolated
+    outputs; the original universe and coverage are carried over verbatim
+    from the hash-verified archived original. The staging directory is only
+    promoted after a full local verification passes.
+    """
+    from stock_analyzer.ops import selection_input_snapshot as snapshot
+    from stock_analyzer.storage.research_parquet import sha256_file
+    replay_id = case['replay_id']
+    formation, action = case['formation_date'], case['action_date']
+    cutoff = datetime.fromisoformat(case['as_of'])
+    backup = _backup_original_day(root, day_dir, replay_id)
+    original_dir = backup
+    original_inputs = original_dir / 'inputs'
+    original_catalog = _json(original_inputs / 'catalog.json')
+    for name in ('universe.json', 'universe-coverage.csv', 'sector-snapshots.json'):
+        digest = original_catalog.get('frozen_inputs', {}).get(name)
+        if digest and sha256_file(original_inputs / name) != digest:
+            raise ValueError(f'归档原输入哈希不符：{replay_id}/{name}')
+    original_universe = _json(original_inputs / 'universe.json')
+    original_snapshots = _json(original_inputs / 'sector-snapshots.json')
+    universe_codes = {row['ts_code'] for row in original_universe}
+    warehouse = context['warehouse']
+    query = context['query']
+    price_sessions = _calendar(Path(cfg['warehouse_root']),
+                               (date.fromisoformat(formation) - timedelta(days=120)).isoformat(),
+                               formation)[-61:]
+    staging = day_dir / '.sealed-staging'
+    if staging.exists():
+        shutil.rmtree(staging)
+    staging_inputs = staging / 'inputs'
+    staging_inputs.mkdir(parents=True)
+
+    # A1: as_of-resolved fact tables
+    provenance = {'kind': 'refreshed_point_in_time_inputs',
+                  'prepared_at': datetime.now(ZONE).isoformat(),
+                  'warehouse_root': str(Path(cfg['warehouse_root'])),
+                  'previous_preparation': {'program_ref': _json(original_dir / 'run.json').get('program_ref'),
+                                           'archived_at': original_dir.name,
+                                           'backup': str(original_dir)},
+                  'note': '零研究状态下按当前仓与原as_of重新解析的时点输入；不声称与旧物理文件逐字节相同'}
+    manifest = snapshot.save_facts_snapshot(query, staging_inputs, formation_date=formation,
+                                            action_date=action, as_of=cutoff,
+                                            price_sessions=price_sessions,
+                                            provenance=provenance)
+    frozen_query = snapshot.FrozenTrialQuery(staging_inputs, manifest)
+    company_index, company_coverage = _company_discovery(frozen_query, universe_codes, cutoff)
+    if not company_index.empty:
+        dataset_sha = {name: entry.get('sha256', '')
+                       for name, entry in manifest['datasets'].items()}
+        company_index['source_file_sha256'] = [dataset_sha.get(dataset, '')
+                                               for dataset in company_index['dataset']]
+    company_index.to_parquet(staging_inputs / 'company_discovery.parquet',
+                             index=False, compression='zstd')
+
+    # A2.4: the four formation derived via the ORIGINAL formula entry
+    from stock_analyzer.ops.research_features import run_research_features
+    formation_store = context['slot_output_root'] / f"formation__{formation}__{cutoff.isoformat().replace(':', '').replace('+', '_')}"
+    run_research_features(warehouse, formation, cutoff, output_root=formation_store)
+    derived_sources = {}
+    for feature in DERIVED:
+        frame, derived_manifest = _read_isolated_derived(formation_store, feature, formation, cutoff)
+        frame.to_parquet(staging_inputs / f'{feature}.parquet', index=False)
+        source = {'root': str(formation_store),
+                  'as_of': cutoff.isoformat(), 'rows': len(frame),
+                  'recomputed_by': 'run_research_features(原公式入口，隔离输出)',
+                  'input_manifest': f'{feature}-source-manifest.json'}
+        _write_json(staging_inputs / source['input_manifest'],
+                    derived_manifest.get('fact_snapshot', {}))
+        derived_sources[feature] = source
+
+    # A2.5: historical sector slots with their OWN (analysis_date, as_of)
+    slots = {(entry['analysis_date'], datetime.fromisoformat(entry['as_of']))
+             for entry in original_snapshots}
+    slots.update(_enumerate_derived_slots(Path(cfg['derived_root']), formation, cutoff))
+    sealed_slots = []
+    for slot_date, slot_cutoff in sorted(slots):
+        try:
+            frame = _isolated_slot_frame(context, slot_date, slot_cutoff)
+        except Exception as error:  # noqa: BLE001 - report the exact slot gap
+            if any(entry.get('analysis_date') == slot_date
+                   and entry.get('as_of') == slot_cutoff.isoformat()
+                   for entry in original_snapshots):
+                raise ValueError(f'原声明的行业槽位不可回放：sector_hotspot/{slot_date}@'
+                                 f'{slot_cutoff.isoformat()}：{error}') from error
+            continue  # 原隔离仓曾有但本次不可得：如实缺口，不替代
+        slot_entry = snapshot.register_sector_slot(
+            staging_inputs, manifest, slot_date, slot_cutoff, frame,
+            source={'kind': 'recomputed_point_in_time',
+                    'entry': 'run_research_features(隔离输出)', 'rows': len(frame)})
+        sealed_slots.append({'analysis_date': slot_date, 'as_of': slot_cutoff.isoformat(),
+                             'path': slot_entry['path'], 'row_count': slot_entry['row_count']})
+
+    # carry over the ORIGINAL identity files verbatim
+    for name in ('universe.json', 'universe-coverage.csv', 'sector-snapshots.json'):
+        shutil.copyfile(original_inputs / name, staging_inputs / name)
+
+    # one-time source description (provenance only; never re-checked against live)
+    versions = _bound_source_versions(_source_versions(warehouse), formation, cutoff, price_sessions)
+    _write_json(staging_inputs / 'source-notes.json', {
+        'kind': 'refreshed_point_in_time_inputs',
+        'prepared_at': provenance['prepared_at'],
+        'warehouse_root': str(Path(cfg['warehouse_root'])),
+        'note': '准备持锁期间一次取出的来源说明；研究期不回源复核；仅供追溯',
+        'bound_partitions': [f"{row['dataset']}:{row['partition']}" for row in versions]})
+
+    snapshot.finalize_manifest(staging_inputs, manifest)
+
+    frozen_inputs = {}
+    for path in sorted(staging_inputs.rglob('*')):
+        if path.is_file() and path.name != 'catalog.json':
+            frozen_inputs[path.relative_to(staging_inputs).as_posix()] = sha256_file(path)
+    catalog = dict(experiment_id=cfg['experiment_id'], as_of=cutoff.isoformat(),
+                   formation_date=formation, full_universe_replay=cfg.get('full_universe_replay', False),
+                   action_date=action, warehouse_root=str(Path(cfg['warehouse_root'])),
+                   source_root=cfg['source_root'], price_sessions=price_sessions,
+                   day_dir=str(staging), derived=derived_sources,
+                   source_versions='source-notes.json',
+                   frozen_inputs=frozen_inputs, sector_snapshots=original_snapshots,
+                   sector_sources=[{'kind': 'sealed_slot', 'slots': sealed_slots}],
+                   derived_root=str(Path(cfg.get('derived_root') or cfg['warehouse_root'])),
+                   derived_bound_sources=[],
+                   categories=list(CATEGORIES), field_map='field-map.json',
+                   company_discovery='company_discovery.parquet',
+                   company_coverage=company_coverage,
+                   neutral_files=[f'{x}.parquet' for x in DERIVED] + ['company_discovery.parquet'],
+                   input_storage='sealed-v1', facts_snapshot=snapshot.MANIFEST_NAME,
+                   input_provenance=provenance)
+    _write_json(staging_inputs / 'catalog.json', catalog)
+    _write_json(staging_inputs / 'field-map.json', {
+        'definitions': DEFINITIONS,
+        'source_summary': {**{name: {'rows': source['rows']} for name, source in derived_sources.items()},
+                           'company_discovery': {'rows': len(company_index)},
+                           'universe': {'rows': len(original_universe), 'shape': 'list of security records'},
+                           'facts_snapshot': {'datasets': len(manifest['datasets']),
+                                              'sector_slots': len(sealed_slots)}},
+        'technical_read_notes': 'Do not print catalog bound_sources or source-notes.json. '
+                                'Parse mixed ISO timestamps with pd.to_datetime(series, format="ISO8601", utc=True).',
+        'company_discovery_command': f'python tools/selection_parallel.py discover --catalog {staging_inputs / "catalog.json"} --view company --limit 50 --offset 0',
+        'company_discovery_fields': {'available_at': '本地时点可见时间，不等于实际公告公开时间',
+            'published_at': '原公开时间若可得', 'business_date': '对应报告期或业务生效日期',
+            'fact_values_json': '对应记录类别的原始关键值；无推断',
+            'source_partition': '事实分区', 'source_file_sha256': '封存整表文件版本（sealed-v1）'},
+        'fact_categories': list(CATEGORIES),
+        'fact_paging': 'facts 的 --offset 按返回片段续读；next_offset 为空前不得认为取齐。'})
+    # full local verification BEFORE any promotion
+    _check_source_catalog(staging_inputs / 'catalog.json', full=True)
+
+    # promote: the original is already archived
+    old_inputs = day_dir / 'inputs'
+    if old_inputs.exists():
+        shutil.rmtree(old_inputs)
+    (staging / 'inputs').rename(day_dir / 'inputs')
+    shutil.rmtree(staging)
+    # the catalog was verified against the staging path; rebind it to the
+    # final day directory and re-run the FULL local verification there
+    final_catalog_path = day_dir / 'inputs/catalog.json'
+    final_catalog = _json(final_catalog_path)
+    final_catalog['day_dir'] = str(day_dir)
+    _write_json(final_catalog_path, final_catalog)
+    _check_source_catalog(final_catalog_path, full=True)
+    common_prompt = (Path(cfg['code_root']) / 'ops/selection-parallel-prompt.md').read_bytes()
+    from stock_analyzer.ops.selection_parallel_compact import runtime_map_sha256
+    program_ref = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=cfg['code_root'], check=True,
+                                 capture_output=True, text=True).stdout.strip()
+    _write_json(day_dir / 'run.json', dict(
+        experiment_id=cfg['experiment_id'], formation_date=formation,
+        action_date=action, as_of=cutoff.isoformat(), mode='replay_smoke',
+        full_universe_replay=cfg.get('full_universe_replay', False), replay_id=replay_id,
+        input_contract_version='selection-parallel-input-v2', program_ref=program_ref,
+        program_dirty_at_prepare=_worktree_dirty(Path(cfg['code_root'])),
+        common_prompt_sha256=hashlib.sha256(common_prompt).hexdigest(),
+        methods=cfg['methods'], model=cfg.get('model'), reasoning=cfg.get('reasoning'),
+        no_fallback=cfg.get('no_fallback'), research_enabled=cfg.get('research_enabled', False),
+        limits=cfg['limits'], status={'M0': 'not_run', 'M1': 'not_run'},
+        source_catalog='inputs/catalog.json',
+        input_storage='sealed-v1',
+        input_history_backup=str(original_dir),
+        refreshed_point_in_time_inputs=True,
+        **({'execution_profile': cfg['execution_profile'],
+            'runtime_map_sha256': runtime_map_sha256(Path(cfg['code_root']))}
+           if cfg.get('execution_profile') else {})))
+    return {'replay_id': replay_id, 'status': 'refreshed',
+            'backup_of_original': str(original_dir),
+            'source_catalog': str(day_dir / 'inputs/catalog.json'),
+            'input_storage': 'sealed-v1',
+            'universe_rows': len(original_universe),
+            'sealed_sector_slots': len(sealed_slots)}
+
+
+def prepare_unstarted_batch(config_path: Path, *, refresh_unstarted: bool = False) -> dict:
+    """Refresh the five zero-research preparation days under their ORIGINAL ids.
+
+    Full precheck of every case happens BEFORE any directory moves: the
+    research switch must be off and every method must be genuinely unstarted
+    (not_run, no attempt directory, no result/qualification/raw output). A
+    real attempt — even with status still not_run — blocks the whole batch
+    without touching anything. Originals are archived byte-for-byte under
+    input-history/<replay_id>/<timestamp>/ once; interrupted batches resume
+    by reusing already-refreshed days and rebuilding the rest from the
+    archive. Never calls a model and never renumbers compact identities.
+    """
+    cfg = _cfg(config_path)
+    if not refresh_unstarted:
+        raise ValueError('prepare-batch 需要 --refresh-unstarted（零研究原身份刷新）')
+    if cfg.get('research_enabled') is not False:
+        raise ValueError('research_enabled 必须为 false 才允许工程刷新')
+    root = _trial(cfg)
+    cases = cfg.get('replay_cases') or []
+    if not cases:
+        raise ValueError('配置缺少 replay_cases')
+    violations = []
+    for case in cases:
+        day_dir = root / 'smoke' / str(case.get('replay_id'))
+        run_file = day_dir / 'run.json'
+        if not run_file.exists():
+            violations.append(f"{case.get('replay_id')}: run.json 缺失")
+            continue
+        run = _json(run_file)
+        for key in ('formation_date', 'action_date', 'as_of'):
+            if run.get(key) != case.get(key):
+                violations.append(f"{case.get('replay_id')}: 原 run {key} 与 replay_cases 不一致")
+        for method in METHODS:
+            if run.get('status', {}).get(method) != 'not_run':
+                violations.append(f"{case.get('replay_id')}/{method}: 状态 {run.get('status', {}).get(method)} 不是 not_run")
+            if list((root / 'work' / str(case.get('replay_id')) / method).glob('attempt-*')):
+                violations.append(f"{case.get('replay_id')}/{method}: 存在真实 attempt，不刷新、不清空、不换名")
+            for artifact in ('result.json', 'qualification.json', 'raw-output.json'):
+                if (day_dir / method / artifact).exists():
+                    violations.append(f"{case.get('replay_id')}/{method}: 已有 {artifact}")
+        if not (day_dir / 'inputs/universe.json').is_file():
+            violations.append(f"{case.get('replay_id')}: 缺少原 universe.json")
+    if violations:
+        raise ValueError('零研究预检未通过（未移动任何目录）：' + '；'.join(violations))
+    from stock_analyzer.ops.research_features import run_research_features  # noqa: F401 (re-exported use)
+    items = []
+    lock_started = clock_time.monotonic()
+    warehouse = ResearchWarehouse(Path(cfg['warehouse_root']))  # standard writable open; brief exclusive init lock
+    with warehouse._file_lock(exclusive=False):  # shared lock over the read/prepare phase only
+        query = ResearchQuery(warehouse)
+        context = {'warehouse': warehouse, 'query': query, 'slot_cache': {},
+                   'slot_output_root': root / 'work/final-simplification-20260929/derived-iso'}
+        context['slot_output_root'].mkdir(parents=True, exist_ok=True)
+        for case in cases:
+            day_dir = root / 'smoke' / str(case['replay_id'])
+            if _sealed_day_reusable(cfg, day_dir):
+                run = _json(day_dir / 'run.json')
+                items.append({'replay_id': case['replay_id'], 'status': 'reused',
+                              'source_catalog': str(day_dir / 'inputs/catalog.json'),
+                              'input_storage': 'sealed-v1',
+                              'program_ref': run.get('program_ref')})
+                continue
+            items.append(_refresh_sealed_day(cfg, root, case, day_dir, context))
+    lock_seconds = round(clock_time.monotonic() - lock_started, 1)
+    return {'experiment': cfg['experiment_id'],
+            'refresh': 'refreshed_point_in_time_inputs',
+            'research_model_calls': 0, 'research_enabled': False,
+            'lock_held_seconds': lock_seconds,
+            'items': items,
+            'note': '原五个ID原身份刷新；原始输入已按字节归档于 input-history/；'
+                    '真实attempt不受影响；不产生compact5'}
+
+
+def _check_source_catalog(catalog_path: Path, *, full: bool = False) -> dict:
     catalog = _json(catalog_path)
     if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_-]{0,79}', catalog.get('experiment_id', '')):
         raise ValueError('invalid trial fact catalog')
@@ -621,6 +1005,35 @@ def _check_source_catalog(catalog_path: Path) -> dict:
     if catalog_path.resolve() != (day_dir / 'inputs/catalog.json').resolve():
         raise ValueError('catalog is not the frozen day input')
     from stock_analyzer.storage.research_parquet import sha256_file
+    if catalog.get('input_storage') == 'sealed-v1':
+        # Sealed trials verify LOCAL inputs only: no ResearchWarehouse is
+        # constructed, no live _source_versions comparison, no live
+        # derived_root read. The light check covers catalog/manifest
+        # identity; full additionally verifies every sealed file's hash.
+        from stock_analyzer.ops.selection_input_snapshot import (MANIFEST_NAME,
+                                                                  SnapshotIntegrityError,
+                                                                  load_frozen_query)
+        manifest_path = catalog_path.parent / catalog.get('facts_snapshot', MANIFEST_NAME)
+        if not manifest_path.is_file():
+            raise SnapshotIntegrityError(f'缺少封存manifest：{manifest_path}')
+        frozen_query = load_frozen_query(catalog_path, catalog)
+        if catalog.get('frozen_inputs', {}).get(catalog.get('facts_snapshot', MANIFEST_NAME)) is None:
+            raise SnapshotIntegrityError('封存manifest未登记在frozen_inputs中')
+        if not full:
+            return catalog
+        inputs_root = catalog_path.parent.resolve()
+        for name, digest in catalog.get('frozen_inputs', {}).items():
+            target = (catalog_path.parent / name).resolve()
+            if not target.is_relative_to(inputs_root):
+                raise SnapshotIntegrityError(f'冻结输入不在本inputs目录内：{name}')
+            if sha256_file(target) != digest:
+                raise ValueError(f'frozen input changed after preparation: {name}')
+        sealed_paths = {entry['path'] for entry in frozen_query.manifest.get('datasets', {}).values()
+                        if 'path' in entry}
+        sealed_paths |= {slot['path'] for slot in frozen_query.manifest.get('sector_slots', [])}
+        for relative in sorted(sealed_paths):
+            frozen_query._verified_path(relative)
+        return catalog
     for name, digest in catalog.get('frozen_inputs', {}).items():
         if sha256_file(catalog_path.parent/name) != digest:
             raise ValueError(f'frozen input changed after preparation: {name}')
@@ -655,6 +1068,21 @@ def _check_source_catalog(catalog_path: Path) -> dict:
     return catalog
 
 
+def _check_inputs_for_run(catalog_path: Path) -> None:
+    """Input verification before a model launch / qualified save / reparse.
+
+    Sealed-v1 catalogs get the FULL local verification (every sealed file's
+    hash); legacy catalogs keep the original live-warehouse semantics. The
+    dispatch is sealed-only so legacy call sites and test doubles keep the
+    exact previous single-argument behavior.
+    """
+    catalog = _json(catalog_path)
+    if catalog.get('input_storage') == 'sealed-v1':
+        _check_source_catalog(catalog_path, full=True)
+    else:
+        _check_source_catalog(catalog_path)
+
+
 def facts(catalog_path: Path, *, codes: list[str], categories: list[str] | None = None,
           offset: int = 0, max_chars: int = 40000, group_codes=(), sector_snapshots=(), sector_dates=(),
           verified_catalog: dict | None = None) -> dict:
@@ -672,12 +1100,19 @@ def facts(catalog_path: Path, *, codes: list[str], categories: list[str] | None 
     frozen = {name: pd.read_parquet(catalog_path.parent / f'{name}.parquet')
               for name in ('market_context','sector_hotspot','price_analysis_context')
               if (catalog_path.parent / f'{name}.parquet').exists()}
+    query_options = {}
+    if catalog.get('input_storage') == 'sealed-v1':
+        from stock_analyzer.ops.selection_input_snapshot import load_frozen_query
+        frozen_query = load_frozen_query(catalog_path, catalog)
+        query_options = {'fact_query': frozen_query,
+                         'sector_reader': frozen_query.read_sector}
     common = candidate_context(Path(catalog['source_root']), codes,
                                formation_date=catalog['formation_date'], as_of=catalog['as_of'],
                                categories=categories, warehouse_root=Path(catalog['warehouse_root']),
                                derived_inputs=frozen, action_date=catalog['action_date'],
                                derived_root=Path(catalog['derived_root']) if catalog.get('derived_root') else None,
-                               group_codes=group_codes, sector_snapshots=sector_snapshots, sector_dates=sector_dates)
+                               group_codes=group_codes, sector_snapshots=sector_snapshots, sector_dates=sector_dates,
+                               **query_options)
     category_fields = {
         'financial': ('financial_availability','income_statement','balance_sheet','cash_flow','financial_indicator'),
         'company': ('company_profile','main_business','announcement', *EVENT_DATASETS, 'action_trading_restrictions'),
@@ -1789,7 +2224,9 @@ def _check_run_contract(day: dict, cfg: dict) -> None:
     if day.get('program_dirty_at_prepare') is not False or _worktree_dirty(code_root):
         different.append('program_dirty')
     if different:
-        raise ValueError(f'frozen run contract changed: {different}; prepare a new replay identity')
+        raise ValueError(f'frozen run contract changed: {different}; '
+                         '未研究的输入用 prepare-batch --refresh-unstarted 在原身份下重新准备；'
+                         '已研究结果保留原身份，不自动重跑')
 
 
 def _finalize_decision(day_dir: Path, cfg: dict, day: dict, method: str, attempt: Path,
@@ -1809,7 +2246,7 @@ def _finalize_decision(day_dir: Path, cfg: dict, day: dict, method: str, attempt
     # Final input binding before freezing a qualified result (audit E6):
     # sources must be unchanged since prepare; on drift keep the public
     # output, record not-qualified, and never auto-rerun.
-    _check_source_catalog(catalog_path)
+    _check_inputs_for_run(catalog_path)
     obj['run_id'] = f'{day["mode"]}:{day.get("replay_id") or day["action_date"]}:{method}'
     code_root = Path(cfg['code_root'])
     current_head = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=code_root,
@@ -1849,7 +2286,7 @@ def run_arm(day_dir: Path, *, method: str) -> dict:
     day = _json(day_dir / 'run.json')
     cfg = _cfg(day_dir.parents[1] / 'experiment.json')
     catalog_path = day_dir / day['source_catalog']
-    _check_source_catalog(catalog_path)
+    _check_inputs_for_run(catalog_path)
     target = day_dir / method / 'result.json'
     if target.exists():
         qual = _qualification(day_dir, method)
@@ -1962,23 +2399,27 @@ def reparse_decision(config_path: Path, *, action_date: str, method: str, replay
     if not (attempt / 'raw-output.json').exists() or not (attempt / 'events.jsonl').exists():
         raise ValueError('原始输出或事件日志不完整；不能重解析')
     catalog_path = day_dir / day['source_catalog']
-    _check_source_catalog(catalog_path)  # frozen inputs unchanged since the research ran
+    _check_inputs_for_run(catalog_path)  # frozen inputs unchanged since the research ran
     context = (Path(cfg['context_root']) / day['replay_id'] / method
                if cfg.get('full_universe_replay') else Path(cfg['context_root']) / method)
     return _finalize_decision(day_dir, cfg, day, method, attempt, context, metadata, reparse=True)
 
 
 def check_launch(config_path: Path, *, phase: str) -> dict:
-    """Read-only launch gate for the Astra scripts (audit R6).
+    """Read-only launch gate for the Astra scripts (audits R6/final-simplification).
 
-    phase=first-pair: the first replay case must have a clean not_run state
-    (or an already qualified pair, which is reported as complete), with no
-    failed/running attempts. phase=remaining: the first pair must be REALLY
-    qualified (explicit qualification, complete run, verified model, matching
-    result identity) and every case that is not not_run must be qualified
-    both sides. Every case must still satisfy the real run contract against
-    the current code. Never launches a model, flips a switch, writes an
-    attempt or reads outcomes.
+    Each method is classified into exactly three states using the REAL
+    qualification, attempt directories and run status:
+      done    -- qualified result exists (a normal attempt directory is
+                 expected and never a reason to refuse; later selects reuse
+                 the result with zero new model calls)
+      pending -- genuinely not started (not_run, no attempts, no result or
+                 qualification files)
+      blocked -- failed/running/corrupted or a fake not_run with attempts;
+                 never auto-retried
+    The real run contract and per-case identity checks still apply.
+    Never launches a model, flips a switch, writes an attempt or reads
+    outcomes.
     """
     if phase not in ('first-pair', 'remaining'):
         raise ValueError("phase must be 'first-pair' or 'remaining'")
@@ -1991,9 +2432,10 @@ def check_launch(config_path: Path, *, phase: str) -> dict:
         problems.append('配置缺少 replay_cases')
     for index, case in enumerate(cases):
         entry = {'replay_id': case.get('replay_id'), 'action_date': case.get('action_date'),
-                 'method_order': case.get('method_order'), 'role': 'first' if index == 0 else 'remaining'}
-        if not case.get('method_order') or len(case['method_order']) != 2:
-            problems.append(f"{case.get('replay_id')}: method_order 必须为两个方法")
+                 'method_order': case.get('method_order'),
+                 'role': 'first' if index == 0 else 'remaining'}
+        if sorted(case.get('method_order') or []) != ['M0', 'M1']:
+            problems.append(f"{case.get('replay_id')}: method_order 必须恰好包含 M0/M1 各一次")
         day_dir = root / 'smoke' / str(case.get('replay_id'))
         run_file = day_dir / 'run.json'
         if not run_file.exists():
@@ -2009,464 +2451,46 @@ def check_launch(config_path: Path, *, phase: str) -> dict:
             details.append(entry)
             continue
         entry['contract'] = 'ok'
-        entry['status'] = dict(day.get('status', {}))
-        entry['qualification'] = {m: _qualification(day_dir, m)['qualified'] for m in METHODS}
+        states = {}
+        for method in ('M0', 'M1'):
+            qualification = _qualification(day_dir, method)
+            attempts = list((root / 'work' / day_dir.name / method).glob('attempt-*'))
+            status = day.get('status', {}).get(method)
+            if qualification['qualified']:
+                state = 'done'  # normal attempts coexist; selects must reuse, not re-call
+            elif (status == 'not_run' and not attempts
+                  and not (day_dir / method / 'result.json').exists()
+                  and not (day_dir / method / 'qualification.json').exists()):
+                state = 'pending'
+            else:
+                state = 'blocked'  # failed / running / corrupted / fake not_run
+            states[method] = {'state': state, 'status': status,
+                              'attempts': len(attempts),
+                              'qualified': qualification['qualified'],
+                              'reasons': qualification['reasons'][:4]}
+        entry['states'] = states
         if phase == 'first-pair' and index == 0:
-            attempts = {m: len(list((root / 'work' / day_dir.name / m).glob('attempt-*')))
-                        for m in METHODS}
-            entry['attempts'] = attempts
-            if any(attempts.values()):
-                problems.append(f"{case.get('replay_id')}: 已存在未合格 attempt {attempts}；不自动修正状态")
-            for m in METHODS:
-                status = day.get('status', {}).get(m)
-                if status not in ('not_run', 'complete', 'complete_zero'):
-                    problems.append(f"{case.get('replay_id')}/{m}: 状态 {status} 不可启动首日一对")
-                elif status in ('complete', 'complete_zero') and not entry['qualification'][m]:
-                    problems.append(f"{case.get('replay_id')}/{m}: 状态 {status} 但未通过真实资格核验")
-            if all(entry['qualification'].values()) and not any(attempts.values()):
+            blocked = [m for m, info in states.items() if info['state'] == 'blocked']
+            if blocked:
+                problems.append(f"首日 {case.get('replay_id')} 存在 blocked 方法 {blocked}；不自动研究重试")
+            if all(info['state'] == 'done' for info in states.values()):
                 entry['first_pair'] = 'already_complete'
         if phase == 'remaining':
             if index == 0:
-                unqualified = [m for m in METHODS if not entry['qualification'][m]]
-                if unqualified:
-                    problems.append(f"首日 {case.get('replay_id')} 未双方合格：{unqualified}；"
-                                    '剩余四日不得启动')
+                not_done = [m for m, info in states.items() if info['state'] != 'done']
+                if not_done:
+                    problems.append(f"首日 {case.get('replay_id')} 未双方合格：{not_done}；剩余四日不得启动")
                 else:
                     entry['first_pair'] = 'qualified'
             else:
-                for m in METHODS:
-                    status = day.get('status', {}).get(m)
-                    if status == 'not_run':
-                        continue
-                    if status in ('complete', 'complete_zero') and entry['qualification'][m]:
-                        continue
-                    problems.append(f"{case.get('replay_id')}/{m}: 状态 {status} 未合格；"
-                                    '后续启动前须先处理')
+                blocked = [m for m, info in states.items() if info['state'] == 'blocked']
+                if blocked:
+                    problems.append(f"{case.get('replay_id')} 存在 blocked 方法 {blocked}；后续启动前须先处理")
         details.append(entry)
     return {'phase': phase, 'launch_allowed': not problems, 'problems': problems,
             'cases': details,
-            'note': '只读检查：不启动模型、不改research_enabled、不写attempt、不读收益'}
-
-
-def _csv_text(rows: list[dict]) -> str:
-    import io
-    buffer = io.StringIO()
-    fields = list(dict.fromkeys(key for row in rows for key in row))
-    writer = csv.DictWriter(buffer, fieldnames=fields, lineterminator='\n')
-    writer.writeheader()
-    for row in rows:
-        writer.writerow({key: json.dumps(value, ensure_ascii=False) if isinstance(value, (dict, list)) else value
-                         for key, value in row.items()})
-    return buffer.getvalue()
-
-
-def _revisions(parent: Path, name: str, content: str, *, extras: dict[str, str] | None = None) -> Path:
-    extras = extras or {}
-    revisions = sorted(parent.glob('r[0-9][0-9][0-9]'))
-    for path in revisions:
-        target = path / name
-        if (target.is_file() and target.read_text(encoding='utf-8') == content and
-                all((path / extra).is_file() and (path / extra).read_text(encoding='utf-8') == value
-                    for extra, value in extras.items())):
-            return path
-    path = parent / f'r{len(revisions)+1:03d}'
-    path.mkdir(parents=True, exist_ok=False)
-    (path / name).write_text(content, encoding='utf-8')
-    for extra, value in extras.items():
-        (path / extra).write_text(value, encoding='utf-8')
-    return path
-
-
-def _selected_records(root: Path, *, include_smoke: bool = True) -> list[dict]:
-    selections = []
-    parents = [root / 'daily'] + ([root / 'smoke'] if include_smoke else [])
-    for parent in parents:
-        for day in sorted(parent.glob('*/run.json')):
-            d = _json(day)
-            for method in METHODS:
-                file = day.parent / method / 'result.json'
-                if not file.exists() or not _qualification(day.parent, method)['qualified']:
-                    continue
-                obj = _json(file)
-                for row in obj['selected']:
-                    selections.append({**{k: obj[k] for k in ('run_id','method_id','formation_date','action_date','as_of')},
-                                       'mode': d['mode'], **row})
-    return selections
-
-
-def _candidate_records(root: Path, *, include_smoke: bool = False) -> list[dict]:
-    diagnostic = []
-    parents = [root / 'daily'] + ([root / 'smoke'] if include_smoke else [])
-    for parent in parents:
-        for file in sorted(parent.glob('*/run.json')):
-            day_dir = file.parent
-            day = _json(file)
-            for method in METHODS:
-                if not _qualification(day_dir, method)['qualified']:
-                    continue
-                result = _json(day_dir / method / 'result.json')
-                selected = {x['ts_code'] for x in result['selected']}
-                for candidate in result['candidates']:
-                    if candidate['ts_code'] in selected or candidate.get('final_fate') not in {'rejected','unresolved'}:
-                        continue
-                    diagnostic.append({**{k: result[k] for k in ('run_id','method_id','formation_date','action_date','as_of')},
-                                       'mode':day['mode'], 'ts_code':candidate['ts_code'],
-                                       'role':candidate['final_fate'], 'rank':None,
-                                       'participation_condition':None,
-                                       'candidate_reason':candidate.get('short_reason'),
-                                       'source_refs':candidate.get('source_refs', [])})
-    return diagnostic
-
-
-def _day_state(day_dir: Path) -> dict:
-    day = _json(day_dir / 'run.json')
-    return {**day, 'qualification': {m: _qualification(day_dir, m)['qualified'] for m in METHODS}}
-
-
-def _outcome_source_versions(warehouse: ResearchWarehouse, first: str, through: str) -> list[dict]:
-    dates = set(_calendar(warehouse.root, first, through))
-    return [r for r in _source_versions(warehouse) if
-            (r['dataset'] in {'equity_daily','adj_factor','index_daily'} and r['partition'] in dates) or
-            r['dataset'] == 'trade_calendar']
-
-
-def _assert_same_stock_same_day_consistent(rows: list[dict]) -> None:
-    """A/B share one frozen price path: entry, endpoints and returns must match.
-
-    This REPLACES the old "(method, return) combination count" tautology
-    (audit R7): two rows for the same (ts_code, action_date) under M0 and M1
-    must agree on every computable outcome field; a null-vs-value pair is a
-    mismatch unless BOTH sides lack the endpoint (separate denominators stay
-    separate — the check only compares rows that actually exist).
-    """
-    shared: dict[tuple[str, str], dict[str, dict]] = {}
-    for row in rows:
-        if row.get('method_id') not in ('M0', 'M1') or row.get('role') not in (None, 'selected'):
-            continue
-        shared.setdefault((row.get('ts_code'), row.get('action_date')), {})[row['method_id']] = row
-    compared = ['d5_endpoint_return', 'd10_endpoint_return', 'd20_endpoint_return',
-                'fixed_d20_terminal_return', 'd5_status', 'd10_status', 'd20_status',
-                'fixed_d20_status', 'd5_path_complete', 'd10_path_complete', 'd20_path_complete',
-                'd5_mae', 'd10_mae', 'd20_mae']
-    for (code, action), sides in shared.items():
-        if set(sides) != {'M0', 'M1'}:
-            continue
-        a, b = sides['M0'], sides['M1']
-        for field in compared:
-            value_a, value_b = a.get(field), b.get(field)
-            if value_a is None and value_b is None:
-                continue
-            if isinstance(value_a, (int, float)) and isinstance(value_b, (int, float)) \
-                    and not isinstance(value_a, bool) and not isinstance(value_b, bool):
-                if abs(float(value_a) - float(value_b)) > 1e-9:
-                    raise ValueError(f'同股同日收益路径不一致：{code} {action} {field}: '
-                                     f'M0={value_a} M1={value_b}')
-            elif str(value_a) != str(value_b):
-                raise ValueError(f'同股同日收益路径不一致：{code} {action} {field}: '
-                                 f'M0={value_a!r} M1={value_b!r}')
-
-
-def update_outcomes(config_path: Path, *, through: str) -> Path:
-    cfg = _cfg(config_path)
-    if date.fromisoformat(through) > datetime.now(ZONE).date():
-        raise ValueError('outcome through date cannot be future')
-    from stock_analyzer.analysis.selection_parallel_outcomes import calculate, auxiliary_views, summarize
-    root = _trial(cfg)
-    warehouse = Path(cfg['warehouse_root'])
-    mode = cfg.get('evaluation_mode', 'prospective')
-    selections = _selected_records(root)
-    candidates = _candidate_records(root, include_smoke=mode == 'replay_smoke')
-    full_rows, reference_rows, ranking_rows = [], [], []
-    if cfg.get('full_universe_replay'):
-        scope_ids = {f"{mode}:{d['replay_id']}:{m}" for d in cfg['replay_cases'] for m in cfg['methods']}
-        selections = [r for r in selections if r['run_id'] in scope_ids]
-        candidates = [r for r in candidates if r['run_id'] in scope_ids]
-        for identity in cfg['replay_cases']:
-            day_dir = root/'smoke'/identity['replay_id']
-            if not (day_dir/'run.json').exists() or not all(_qualification(day_dir, m)['qualified'] for m in cfg['methods']):
-                raise ValueError('all ten qualified decisions must be frozen before outcome access')
-            _check_run_contract(_json(day_dir/'run.json'), cfg)
-        if through != cfg['outcome_through']:
-            raise ValueError('outcome cutoff differs from frozen scope')
-        for identity in cfg['replay_cases']:
-            day_dir = root/'smoke'/identity['replay_id']
-            universe = pd.DataFrame(_json(day_dir/'inputs/universe.json'))
-            price = pd.read_parquet(day_dir/'inputs/price_analysis_context.parquet')
-            ranking = universe.merge(price[['ts_code','return_5d']], on='ts_code', how='left', validate='one_to_one')
-            ranking = ranking.sort_values(['return_5d','ts_code'], ascending=[False,True], na_position='last', kind='mergesort')
-            for rank, row in enumerate(ranking.to_dict('records'),1):
-                base = {k:identity[k] for k in ('formation_date','action_date','as_of')}
-                base.update(ts_code=row['ts_code'], name=row['name'], mode=mode, rank=rank)
-                ranking_rows.append({**base, 'return_5d': row['return_5d'] if pd.notna(row['return_5d']) else None})
-                full_rows.append({**base, 'method_id':'U', 'run_id':f"{mode}:{identity['replay_id']}:U", 'role':'universe'})
-                for method in cfg['methods']:
-                    count = len(_json(day_dir/method/'result.json')['selected'])
-                    if rank <= count:
-                        reference_rows.append({**base, 'method_id':'S_A' if method=='M0' else 'S_B',
-                            'run_id':f"{mode}:{identity['replay_id']}:S_{method}", 'role':'simple_reference',
-                            'ranking_status':'available' if pd.notna(row['return_5d']) else 'missing_not_replaced'})
-        frozen_ranking = root/'inputs'/'simple-reference-ranking.json'
-        ranking_obj = {'created_after_all_decisions':True, 'ranking':'formation return_5d descending; ts_code ascending; missing last without substitution',
-                       'rows':ranking_rows, 'references':reference_rows}
-        if frozen_ranking.exists() and _json(frozen_ranking) != ranking_obj:
-            raise ValueError('frozen simple reference ranking changed')
-        if not frozen_ranking.exists():
-            _write_json(frozen_ranking, ranking_obj)
-    first = min((r['action_date'] for r in selections+candidates+full_rows), default=through)
-    before = _outcome_source_versions(ResearchWarehouse(warehouse, read_only=True), first, through)
-    if cfg.get('full_universe_replay'):
-        cache = root/'outcomes'/through/'full-universe-cache'
-        cache.mkdir(parents=True, exist_ok=True)
-        all_inputs = selections+candidates+reference_rows+full_rows
-        definition = {'sources':before, 'inputs':all_inputs, 'common_code_ref':cfg['common_code_ref']}
-        if (cache/'binding.json').exists():
-            if _json(cache/'binding.json') != definition:
-                raise ValueError('full-universe outcome cache binding changed')
-            all_results = _json(cache/'results.json')
-            summary = _json(cache/'summary.json')
-        else:
-            all_results, summary = calculate(warehouse, all_inputs, through, daily_output=cache/'daily-paths.parquet')
-            _write_json(cache/'results.json', all_results)
-            _write_json(cache/'summary.json', summary)
-            _write_json(cache/'binding.json', definition)
-        rows = [r for r in all_results if r['role']=='selected']
-        candidate_rows = [r for r in all_results if r['role'] not in {'selected','simple_reference','universe'}]
-        reference_outcomes = [r for r in all_results if r['role']=='simple_reference']
-        universe_outcomes = [r for r in all_results if r['role']=='universe']
-    else:
-        rows, summary = calculate(warehouse, selections, through)
-        candidate_rows, _ = calculate(warehouse, candidates, through)
-    after = _outcome_source_versions(ResearchWarehouse(warehouse, read_only=True), first, through)
-    if before != after:
-        raise ValueError('outcome price source changed during computation')
-    if cfg.get('full_universe_replay'):
-        # Day states come only from the frozen replay_cases identities; old smoke
-        # attempts on the same dates never enter the current denominator.
-        days = []
-        for identity in cfg['replay_cases']:
-            case_dir = root / 'smoke' / identity['replay_id']
-            if not (case_dir / 'run.json').exists():
-                raise ValueError(f"current replay case missing on disk: {identity['replay_id']}")
-            days.append(_day_state(case_dir))
-    else:
-        days = [_day_state(file.parent) for file in sorted((root/('smoke' if mode == 'replay_smoke' else 'daily')).glob('*/run.json'))]
-    stats = summarize(rows, days, mode=mode)
-    calendar = _calendar(warehouse, min((r['action_date'] for r in rows), default=through), through)
-    first_only, nonoverlap = auxiliary_views([r for r in rows if r.get('mode')==mode], calendar)
-    content = _csv_text(rows)
-    parent = root / 'outcomes' / through
-    for rev in sorted(parent.glob('r[0-9][0-9][0-9]')):
-        existing = rev / 'outcomes.csv'
-        if not existing.exists() or existing.read_text(encoding='utf-8') == content:
-            continue
-        with existing.open(encoding='utf-8', newline='') as f:
-            old = {(r['run_id'], r['ts_code']): r for r in csv.DictReader(f)}
-        with __import__('io').StringIO(content) as f:
-            new = {(r['run_id'], r['ts_code']): r for r in csv.DictReader(f)}
-        for key, previous in old.items():
-            present = new.get(key)
-            if present is None:
-                raise ValueError(f'previous outcome disappeared: {key}')
-            stable_metrics = {'fixed_d20_terminal_return', 'fixed_d20_market_return',
-                              'fixed_d20_mae', 'fixed_d20_max_close_drawdown'}
-            stable_metrics.update(f'd{n}_{suffix}' for n in (5, 10, 20) for suffix in
-                                  ('endpoint_return', 'relative_market_return', 'mae', 'max_close_drawdown'))
-            for col in stable_metrics:
-                value = previous.get(col)
-                if value not in ('', None, 'None') and present.get(col) != value:
-                    raise ValueError(f'nonmissing outcome source conflict: {key}/{col}')
-    definition = {'through': through, 'common_code_ref': cfg['common_code_ref'],
-                  'definition_source': 'tools/export_skill_optimization_dataset.py',
-                  'entry': 'planned action-date open times adj_factor; reference only, no execution claim',
-                  'horizons': [5, 10, 20], 'close_hit_target': 0.20,
-                  'missing_path': 'endpoint and full path are separate',
-                  'summary': summary, 'source_versions': before}
-    extras = {'candidate-outcomes.csv': _csv_text(candidate_rows),
-              'first-only.csv': _csv_text(first_only), 'nonoverlap.csv': _csv_text(nonoverlap),
-              'summary.json': json.dumps(stats, ensure_ascii=False, indent=2, default=str) + '\n',
-              'definition.json': json.dumps(definition, ensure_ascii=False, indent=2, default=str) + '\n'}
-    if cfg.get('full_universe_replay'):
-        from stock_analyzer.analysis.selection_parallel_outcomes import describe_groups
-        planned_dates = cfg.get('action_dates') or [d['action_date'] for d in cfg['replay_cases']]
-        extras['group-summary.json'] = json.dumps(describe_groups(rows+reference_outcomes+universe_outcomes, calendar, planned_dates), ensure_ascii=False, indent=2) + '\n'
-        extras.update({'simple-reference-outcomes.csv':_csv_text(reference_outcomes),
-                       'universe-outcomes.csv':_csv_text(universe_outcomes),
-                       'simple-reference-ranking.csv':_csv_text(ranking_rows)})
-    path = _revisions(parent, 'outcomes.csv', content, extras=extras)
-    return path
-
-
-def prepare_batch(config_path: Path, *, batch_number: int, through: str) -> Path:
-    cfg = _cfg(config_path)
-    batch_days = cfg.get('batch_days', 10)
-    mode = cfg.get('evaluation_mode', 'prospective')
-    if batch_number < 1 or batch_number > (len(cfg.get('action_dates', [])) + batch_days - 1)//batch_days:
-        raise ValueError('only the frozen three 10-day batches are planned')
-    dates = cfg.get('action_dates') or []
-    scope = dates[(batch_number-1)*batch_days:batch_number*batch_days]
-    if len(scope) != batch_days or through < scope[-1]:
-        raise ValueError('batch requires its scheduled action days to arrive')
-    root = _trial(cfg)
-    parent = root / 'batches' / f'batch-{batch_number:03d}'
-    scope_path = parent / 'scope.json'
-    expected = {'batch_number': batch_number, 'action_dates': scope, 'start': scope[0], 'end': scope[-1]}
-    if scope_path.exists() and _json(scope_path) != expected:
-        raise ValueError('batch scheduled days changed')
-    if not scope_path.exists():
-        _write_json(scope_path, expected)
-    outcomes = update_outcomes(config_path, through=through)
-    with (outcomes / 'outcomes.csv').open(encoding='utf-8', newline='') as f:
-        outcome_rows = {(r['run_id'], r['ts_code']): r for r in csv.DictReader(f) if r.get('mode') == mode}
-    with (outcomes / 'candidate-outcomes.csv').open(encoding='utf-8', newline='') as f:
-        candidate_rows = {(r['run_id'], r['ts_code']): r for r in csv.DictReader(f) if r.get('mode') == mode}
-    replay_ids = {d['action_date']:d['replay_id'] for d in cfg.get('replay_cases', [])}
-    def day_path(action):
-        return root/'smoke'/replay_ids[action] if mode == 'replay_smoke' else root/'daily'/action
-    rows = []
-    for action in scope:
-        day = day_path(action)
-        run = _json(day / 'run.json') if (day / 'run.json').exists() else None
-        for method in METHODS:
-            result_path = day / method / 'result.json'
-            qualification = _qualification(day, method) if run else {'qualified':False,'reasons':['not_run']}
-            qualified = qualification['qualified']
-            status = run['status'][method] if run else 'not_run'
-            if status.startswith('complete') and not qualified:
-                status = 'not_qualified'
-            if not result_path.exists() or not qualified:
-                rows.append({'action_date': action, 'method_id': method, 'status': status,
-                             'qualification_reasons': qualification['reasons'] if status != 'not_run' else [],
-                             'run_dir': str(day), 'result_path': '', 'catalog_path': str(day/'inputs/catalog.json') if run else '',
-                             'ts_code': '', 'selected': '', 'candidate_reason': '', 'outcome_status': ''})
-                continue
-            result = _json(result_path)
-            if not result['selected']:
-                rows.append({'action_date': action, 'method_id': method, 'status': status,
-                             'qualification_reasons': [], 'run_dir': str(day),
-                             'result_path': str(result_path), 'catalog_path': str(day/'inputs/catalog.json'),
-                             'ts_code': '', 'selected': 'false', 'candidate_reason': result.get('no_selection_reason',''),
-                             'outcome_status': 'no_selection'})
-            chosen = {s['ts_code'] for s in result['selected']}
-            for candidate in result['candidates']:
-                code = candidate['ts_code']
-                outcome = (outcome_rows if code in chosen else candidate_rows).get((result['run_id'], code), {})
-                selected_detail = next((s for s in result['selected'] if s['ts_code']==code), {})
-                rows.append({'action_date': action, 'method_id': method, 'status': status,
-                             'qualification_reasons': [], 'run_dir': str(day),
-                             'primary_reason': selected_detail.get('primary_reason',''),
-                             'ts_code': code, 'selected': str(code in chosen).lower(),
-                             'candidate_fate': candidate.get('final_fate'), 'run_id': result.get('run_id'),
-                             'result_path': str(result_path), 'catalog_path': str(day/'inputs/catalog.json'),
-                             'outcome_path': str(outcomes / ('outcomes.csv' if code in chosen else 'candidate-outcomes.csv')),
-                             'candidate_reason': candidate.get('short_reason'),
-                             'source_refs': candidate.get('source_refs'),
-                             'd5_status': outcome.get('d5_status'), 'd5_return': outcome.get('d5_endpoint_return'),
-                             'd10_status': outcome.get('d10_status'), 'd10_return': outcome.get('d10_endpoint_return'),
-                             'd20_status': outcome.get('fixed_d20_status'),
-                             'd20_return': outcome.get('fixed_d20_terminal_return')})
-    content = _csv_text(rows)
-    from stock_analyzer.analysis.selection_parallel_outcomes import summarize
-    relevant = []
-    for outcome in outcome_rows.values():
-        if outcome.get('action_date') in scope:
-            row = dict(outcome)
-            for n in (5,10,20):
-                for field in (f'd{n}_endpoint_return',f'd{n}_relative_market_return',f'd{n}_mae',f'd{n}_max_close_drawdown'):
-                    row[field] = float(row[field]) if row.get(field) not in ('',None) else None
-                row[f'd{n}_path_complete'] = row.get(f'd{n}_path_complete') == 'True'
-                value = row.get(f'd{n}_hit_20pct_close')
-                row[f'd{n}_hit_20pct_close'] = None if value in ('',None) else value == 'True'
-            relevant.append(row)
-    day_states = [_day_state(day_path(x)) if (day_path(x)/'run.json').exists() else
-                  {'mode':mode,'action_date':x,'replay_id':replay_ids.get(x),
-                   'status':{'M0':'not_run','M1':'not_run'},
-                   'qualification':{'M0':False,'M1':False}} for x in scope]
-    metrics = summarize(relevant, day_states, mode=mode)
-    readiness = {'batch': batch_number, 'through': through,
-                 'research_status': 'materials_ready_ai_review_not_run',
-                 'planned_days': batch_days,
-                 'M0_complete': metrics['methods']['M0']['completed_days'],
-                 'M1_complete': metrics['methods']['M1']['completed_days'],
-                 'paired_days': metrics['paired_days'],
-                 'outcomes_revision': str(outcomes.relative_to(root)),
-                 'candidate_outcomes': str((outcomes / 'candidate-outcomes.csv').relative_to(root))}
-    extras = {'metrics.json': json.dumps(metrics, ensure_ascii=False, indent=2, default=str) + '\n',
-              'readiness.json': json.dumps(readiness, ensure_ascii=False, indent=2, default=str) + '\n'}
-    revision = _revisions(parent / through, 'comparison.csv', content, extras=extras)
-    return revision
-
-
-def review_batch(batch_dir: Path) -> Path:
-    root = batch_dir.parents[3] if batch_dir.name.startswith('r') else batch_dir.parents[2]
-    cfg = _cfg(root / 'experiment.json')
-    _require_research(root / 'experiment.json')
-    report = batch_dir / 'report.md'
-    if report.exists():
-        return report
-    review_context = Path(cfg['context_root']) / 'batch-review'
-    review_context.mkdir(parents=True, exist_ok=True)
-    (review_context / 'AGENTS.md').write_text('只读研究本批冻结对照和先前理由；只提出建议，不改方法或生产。\n', encoding='utf-8')
-    scope_path = batch_dir.parents[1] / 'scope.json'
-    scope = _json(scope_path)
-    readiness_path = batch_dir / 'readiness.json'
-    readiness = _json(readiness_path)
-    outcomes_dir = root / readiness['outcomes_revision']
-    original_paths = []
-    for action in scope['action_dates']:
-        day_dir = root / 'daily' / action
-        for method in METHODS:
-            result_path = day_dir / method / 'result.json'
-            if result_path.exists():
-                original_paths.append(str(result_path))
-        catalog = day_dir / 'inputs/catalog.json'
-        if catalog.exists():
-            original_paths.append(str(catalog))
-    prompt = ('只读研究本批固定十日和指定评价截止。请依次读取以下精确文件，不扫描其他批次或更晚结果：\n'
-              + '\n'.join([str(scope_path), str(batch_dir / 'comparison.csv'),
-                           str(batch_dir / 'metrics.json'), str(readiness_path),
-                           str(outcomes_dir / 'outcomes.csv'),
-                           str(outcomes_dir / 'candidate-outcomes.csv')] +
-                           original_paths) + '\n'
-              '只输出一份简短 Markdown 报告。分开未成熟与失败；选择 4—6 个重点问题，不足不凑数，'
-              '包括不利或无差异证据、原决定、近邻、价格代价和反证。不改方法或正式资料。')
-    attempts = root / 'work' / 'batch-review' / batch_dir.parent.parent.name / batch_dir.parent.name
-    attempt = attempts / f'attempt-{len(list(attempts.glob("attempt-*")))+1:03d}'
-    code, metadata = _invoke_model(review_context, prompt, attempt, config_path=root / 'experiment.json')
-    if code != 0:
-        raise RuntimeError(f'batch review codex exec failed with exit {code}; evidence {attempt}')
-    if (metadata.get('actual_model'), metadata.get('actual_reasoning')) != (MODEL, EFFORT):
-        raise RuntimeError(f'batch review actual model/effort cannot be verified; evidence {attempt}')
-    raw = (attempt / 'raw-output.json').read_text(encoding='utf-8')
-    if not raw.strip():
-        raise ValueError('batch review returned empty report')
-    report.write_text(raw, encoding='utf-8')
-    _write_json(batch_dir / 'review-invocation.json', metadata)
-    return report
-
-
-def experiment_status(config_path: Path) -> dict:
-    cfg = _cfg(config_path)
-    root = _trial(cfg)
-    rows = []
-    for parent in (root/'daily', root/'smoke'):
-        for file in sorted(parent.glob('*/run.json')):
-            day = _json(file)
-            rows.append({'mode': day['mode'], 'action_date': day['action_date'],
-                         'replay_id': day.get('replay_id'), 'run_dir': str(file.parent),
-                         'qualification': {m:_qualification(file.parent,m) for m in METHODS},
-                         **day['status']})
-    batches = [str(p.relative_to(root)) for p in root.glob('batches/batch-*/????-??-??/r???/comparison.csv')]
-    reviews = [str(p.relative_to(root)) for p in root.glob('batches/batch-*/????-??-??/r???/report.md')]
-    return {'experiment': cfg['experiment_id'], 'status': cfg.get('status'),
-            'research_model': cfg.get('model'), 'research_reasoning': cfg.get('reasoning'),
-            'research_enabled': cfg.get('research_enabled', False),
-            'limits': cfg.get('limits'), 'plan_start': cfg.get('start_action_date'),
-            'planned_action_days': len(cfg.get('action_dates') or []), 'days': rows,
-            'batch_materials': batches, 'batch_ai_reports': reviews,
-            'latest_outcomes': max((str(p.relative_to(root)) for p in root.glob('outcomes/*/r???/outcomes.csv')), default=None),
-            'production_adopted': False, 'automatic_trial_enabled': False}
-
-
+            'note': '只读检查：done=合格可零调用复用；pending=真正未开始；blocked=不自动重试。'
+                    '不启动模型、不改research_enabled、不写attempt、不读收益'}
 
 
 # ------------------------------------------------------------------ T7 preflight
@@ -2604,6 +2628,15 @@ def preflight(config_path: Path, *, output_dir: Path) -> dict:
                                'execution_profile': (_json(cat_path.parent.parent / 'run.json')
                                                      .get('execution_profile'))})
                 day_catalogs.append((identity, cat_path))
+                if ok and _json(cat_path).get('input_storage') == 'sealed-v1':
+                    # sealed five-day entry: FULL local verification (identity +
+                    # every sealed file's hash); the live warehouse is not consulted
+                    try:
+                        _check_source_catalog(cat_path, full=True)
+                        detail['sealed_full_check'] = 'ok'
+                    except (ValueError, OSError) as error:
+                        ok = False
+                        detail['sealed_full_check'] = str(error)[:200]
             _preflight_record(checks, failures, f'frozen_inputs:{identity["replay_id"]}', ok, detail)
         if not day_catalogs:
             return _preflight_report(out, cfg, checks, failures, timings, sizes, invoke_calls)

@@ -6,7 +6,7 @@
 
 字段、单位、表名与来源总数已在 field-map 或 runtime-index 一次给出，不再探查 schema 或打印目录结构。个股事实用 `facts --profile decision`（compact，按完整行分页、投影保留窗口/行业层级/分母/负面/限制/缺口，`--part` 按上一页 `next_part` 续读）或 legacy `facts --offset`。历史逐日 OHLC、无关财务列默认不重复打印，但按字段/日期可精确回读。负面、缺口、更正与实际公开时间不得省略；缺记录、覆盖不足、查询失败和真实无记录分开。共同仓的价格/板块派生使用冻结快照，公司事实使用完整研究截止。研究截止后的走势只用于独立结果计算，不进入短决定。
 
-知识按 ID 定向读取（`knowledge --context <本方法上下文> --id <ID>`），启动材料已含必要条目；不打印整个 registry 或验证面板。官方原件用 `evidence --catalog <catalog> --context <本方法上下文> --request <请求文件>`：先 locate 取真实页段定位，再 read 完整页段；决定去留的条款必须实际读到，不能把下载或 receipt 存在当已读。引用沿用 `official:<evidence_id>`。
+本试验事实已按原截止完整封存于各日 `inputs/`（sealed-v1：事实表、派生与历史行业槽位均为本地文件）；discover/facts/行业序列只读该目录，不访问活跃数据仓。知识按 ID 定向读取（`knowledge --context <本方法上下文> --id <ID>`），启动材料已含必要条目；不打印整个 registry 或验证面板。官方原件用 `evidence --catalog <catalog> --context <本方法上下文> --request <请求文件>`：先 locate 取真实页段定位，再 read 完整页段；决定去留的条款必须实际读到，不能把下载或 receipt 存在当已读。引用沿用 `official:<evidence_id>`。
 
 最终 JSON 保留三路 `discovery_summary`：各自的 `status`、`source_refs`、实际提交的 `codes`。已检索且有候选用 `searched_with_candidates`；已检索但无合适候选用 `searched_no_candidate`。工具没有成功返回，不能自称已检索。候选账记录所有实际进入研究的代码和原去留，允许 0—5 只入选或完成且零入选，不按证据条数或价格排名补位。
 

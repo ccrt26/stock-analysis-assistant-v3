@@ -776,6 +776,7 @@ import subprocess as _subprocess
 import subprocess as subprocess_module
 import sys
 from decimal import Decimal
+from unittest import mock
 from datetime import date as _date
 
 import numpy
@@ -3288,3 +3289,681 @@ def test_audit3_estimates_use_both_actual_traces(tmp_path, monkeypatch):
             assert entry['chars'] == len(text)
     else:
         assert '不伪称' in json.dumps(tokenizer, ensure_ascii=False)
+# ------------------------------------------------ final-simplification target nodes
+
+def _seed_registry(connection, root: Path, dataset: str, partition: str, frame) -> None:
+    from stock_analyzer.storage.research_parquet import sha256_file
+    from stock_analyzer.storage.research_warehouse import research_contract_registry
+    contract = research_contract_registry()[dataset]
+    folder = root / 'facts' / dataset / f'{contract.partition_field}={partition}'
+    folder.mkdir(parents=True, exist_ok=True)
+    if len(frame) and 'payload_hash' not in frame.columns:
+        frame = frame.copy()
+        frame['payload_hash'] = [f'{dataset}-{partition}-{index}' for index in range(len(frame))]
+        frame['revision_no'] = 1
+    frame.to_parquet(folder / 'data.parquet', index=False)
+    rel = f'facts/{dataset}/{contract.partition_field}={partition}/data.parquet'
+    stamp = '2026-01-01T00:00:00+00:00'
+    connection.execute(
+        'insert into research_fact_partitions(dataset_id, partition_value, relative_path, '
+        'row_count, content_hash, file_sha256, min_available_at, max_available_at, '
+        'source_names, committed_at, ingestion_run_id, quality_status) values (?,?,?,?,?,?,?,?,?,?,?,?)',
+        [dataset, partition, rel, int(len(frame)), 'seed-content', sha256_file(root / rel),
+         stamp, stamp, '[]', stamp, 'seed-run', 'ok'])
+
+
+def _build_source_warehouse(root: Path, *, formation: str = '2026-08-19',
+                            cutoff: str = '2026-08-20T09:05:00+08:00') -> dict:
+    """A small REAL ResearchWarehouse with pre/post-cutoff facts.
+
+    Contains: pre- and post-cutoff announcements, a future float_date whose
+    announcement was ALREADY public before the cutoff, 260 sessions of
+    equity/adj/index data, calendar across three years, industry membership,
+    security master and one financial statement period.
+    """
+    from stock_analyzer.storage.research_warehouse import ResearchWarehouse
+    from stock_analyzer.storage.research_schema import connect_research_warehouse
+    warehouse = ResearchWarehouse(root)
+    sessions = list(pd.bdate_range(end=pd.Timestamp(formation) - pd.Timedelta(days=1),
+                                   periods=260).strftime('%Y-%m-%d'))
+    sessions = [d for d in sessions if d < '2026-08-20']
+    sessions.append(formation)
+    codes = ['000001.SZ', '000002.SZ', '600001.SH', '600002.SH']
+    with connect_research_warehouse(warehouse.duckdb_path) as connection:
+        _seed_registry(connection, root, 'trade_calendar', '2025', pd.DataFrame(
+            {'exchange': ['SSE'], 'cal_date': ['2025-12-31'], 'is_open': [True],
+             'available_at': ['2025-01-01T00:00:00+00:00'], 'business_key_hash': ['cal-2025']}))
+        calendar_rows = [{'exchange': 'SSE', 'cal_date': day, 'is_open': True,
+                          'available_at': '2025-01-01T00:00:00+00:00',
+                          'business_key_hash': f'cal-{day}'} for day in sessions
+                         if day.startswith('2026')]
+        _seed_registry(connection, root, 'trade_calendar', '2026', pd.DataFrame(calendar_rows))
+        _seed_registry(connection, root, 'trade_calendar', '2027', pd.DataFrame(
+            {'exchange': ['SSE'], 'cal_date': ['2027-01-04'], 'is_open': [True],
+             'available_at': ['2026-01-01T00:00:00+00:00'], 'business_key_hash': ['cal-2027']}))
+        for index, day in enumerate(sessions):
+            equity = [{'ts_code': code, 'trade_date': day, 'open': 10.0 + index,
+                       'high': 10.5 + index, 'low': 9.5 + index, 'close': 10.2 + index,
+                       'pre_close': 10.1 + index, 'vol': 1000.0 + index, 'amount': 10000.0 + index,
+                       'available_at': f'{day}T08:00:00+00:00',
+                       'business_key_hash': f'eq-{day}-{code}'} for code in codes]
+            _seed_registry(connection, root, 'equity_daily', day, pd.DataFrame(equity))
+            adj = [{'ts_code': code, 'trade_date': day, 'adj_factor': 1.0,
+                    'available_at': f'{day}T08:00:00+00:00',
+                    'business_key_hash': f'adj-{day}-{code}'} for code in codes]
+            _seed_registry(connection, root, 'adj_factor', day, pd.DataFrame(adj))
+            _seed_registry(connection, root, 'index_daily', day, pd.DataFrame(
+                [{'index_code': '000300.SH', 'trade_date': day, 'open': 4000.0 + index,
+                  'high': 4020.0 + index, 'low': 3990.0 + index, 'close': 4010.0 + index,
+                  'available_at': f'{day}T08:00:00+00:00',
+                  'business_key_hash': f'idx-{day}'}]))
+        for day in sessions:
+            _seed_registry(connection, root, 'stock_limit', day, pd.DataFrame(
+                [{'ts_code': code, 'trade_date': day, 'up_limit': 11.0, 'down_limit': 9.0,
+                  'available_at': f'{day}T08:00:00+00:00',
+                  'business_key_hash': f'lim-{day}-{code}'} for code in codes]))
+        for day in sessions:
+            _seed_registry(connection, root, 'daily_basic', day, pd.DataFrame(
+                [{'ts_code': code, 'trade_date': day, 'close': 10.2, 'pe_ttm': 20.0,
+                  'pb': 2.0, 'total_mv': 1e6, 'circ_mv': 8e5, 'turnover_rate': 1.5,
+                  'available_at': f'{day}T08:00:00+00:00',
+                  'business_key_hash': f'db-{day}-{code}'} for code in codes]))
+        _seed_registry(connection, root, 'industry_catalog', 'v1', pd.DataFrame(
+            [{'industry_system': 'SW', 'level': level, 'industry_code': f'801{index}.SI',
+              'industry_name': f'测试行业{level}', 'is_published': True,
+              'valid_from': '2024-01-01', 'valid_to': None,
+              'available_at': '2024-01-02T00:00:00+00:00',
+              'business_key_hash': f'icat-{level}'}
+             for index, level in enumerate(('L1', 'L2', 'L3'), 1)]))
+        _seed_registry(connection, root, 'theme_catalog', 'v1', pd.DataFrame(
+            [{'publisher': 'test', 'theme_code': 'T1', 'theme_name': '测试主题',
+              'valid_from': '2024-01-01', 'valid_to': None,
+              'available_at': '2024-01-02T00:00:00+00:00',
+              'business_key_hash': 'tcat-T1'}]))
+        _seed_registry(connection, root, 'theme_member', 'v1', pd.DataFrame(
+            [{'theme_code': 'T1', 'ts_code': code, 'valid_from': '2024-01-01',
+              'valid_to': None, 'available_at': '2024-01-02T00:00:00+00:00',
+              'business_key_hash': f'tmem-{code}'} for code in codes]))
+        proxy_rows = [{'trade_date': day, 'industry_code': f'801{index}.SI',
+                       'proxy_return': 0.01, 'proxy_method': 'official',
+                       'coverage_status': 'complete', 'available_at': f'{day}T08:00:00+00:00',
+                       'business_key_hash': f'prox-{day}-{index}'}
+                      for day in sessions for index in (1, 2, 3)]
+        _seed_registry(connection, root, 'industry_daily_proxy', sessions[-1], pd.DataFrame(
+            [row for row in proxy_rows if row['trade_date'] == sessions[-1]]))
+        for day in sessions[:-1]:
+            _seed_registry(connection, root, 'industry_daily_proxy', day, pd.DataFrame(
+                [row for row in proxy_rows if row['trade_date'] == day]))
+        theme_daily_rows = [{'trade_date': day, 'theme_code': 'T1', 'close': 500.0,
+                             'available_at': f'{day}T08:00:00+00:00',
+                             'business_key_hash': f'tday-{day}'} for day in sessions]
+        _seed_registry(connection, root, 'theme_daily', sessions[-1],
+                       pd.DataFrame([row for row in theme_daily_rows
+                                     if row['trade_date'] == sessions[-1]]))
+        for day in sessions[:-1]:
+            _seed_registry(connection, root, 'theme_daily', day,
+                           pd.DataFrame([row for row in theme_daily_rows
+                                         if row['trade_date'] == day]))
+        _seed_registry(connection, root, 'security_master', 'v1', pd.DataFrame(
+            [{'ts_code': code, 'name': f'N{index}', 'market': '主板', 'exchange': 'SSE',
+              'list_date': '2020-01-01', 'valid_from': '2020-01-01', 'valid_to': None,
+              'available_at': '2020-01-02T00:00:00+00:00',
+              'business_key_hash': f'sm-{code}'} for index, code in enumerate(codes)]))
+        _seed_registry(connection, root, 'industry_member', 'v1', pd.DataFrame(
+            [{'ts_code': code, 'industry_system': 'SW', 'level': 'L3',
+              'industry_code': '8011.SI', 'industry_name': '测试行业', 'valid_from': '2024-01-01',
+              'valid_to': None, 'available_at': '2024-01-02T00:00:00+00:00',
+              'business_key_hash': f'im-{code}'} for code in codes]))
+        _seed_registry(connection, root, 'company_profile', 'v1', pd.DataFrame(
+            [{'ts_code': code, 'com_name': f'公司{index}', 'main_business': '主营',
+              'business_scope': '范围', 'profile_snapshot_date': '2026-06-30',
+              'valid_from': '2024-01-01', 'available_at': '2026-07-01T00:00:00+00:00',
+              'business_key_hash': f'cp-{code}'} for index, code in enumerate(codes)]))
+        _seed_registry(connection, root, 'income_statement', '2026-06-30', pd.DataFrame(
+            [{'ts_code': code, 'report_period': '2026-06-30', 'ann_date': '2026-07-01',
+              'f_ann_date': '2026-07-01', 'report_type': '1', 'statement_type': '1',
+              'total_revenue': 100.0, 'revenue': 90.0, 'n_income_attr_p': 10.0,
+              'available_at': '2026-07-02T00:00:00+00:00',
+              'business_key_hash': f'is-{code}-2026h1'} for code in codes]))
+        announcements = [
+            {'ts_code': '000001.SZ', 'announcement_id': 'pre-1', 'title': '截止前公告：重大合同',
+             'url': 'https://e.test/pre-1', 'announcement_time': '2026-08-10 08:00:00',
+             'available_at': '2026-08-10T08:00:00+00:00', 'source_record_id': 'pre-1',
+             'business_key_hash': 'ann-pre-1'},
+            {'ts_code': '000001.SZ', 'announcement_id': 'pre-2', 'title': '截止前反证：终止风险',
+             'url': 'https://e.test/pre-2', 'announcement_time': '2026-08-15 08:00:00',
+             'available_at': '2026-08-15T08:00:00+00:00', 'source_record_id': 'pre-2',
+             'business_key_hash': 'ann-pre-2'},
+            {'ts_code': '000001.SZ', 'announcement_id': 'post-1', 'title': '截止后公告不应出现',
+             'url': 'https://e.test/post-1', 'announcement_time': '2026-08-25 08:00:00',
+             'available_at': '2026-08-25T08:00:00+00:00', 'source_record_id': 'post-1',
+             'business_key_hash': 'ann-post-1'},
+            {'ts_code': '000002.SZ', 'announcement_id': 'pre-3', 'title': '另一截止前公告',
+             'url': 'https://e.test/pre-3', 'announcement_time': '2026-08-12 08:00:00',
+             'available_at': '2026-08-12T08:00:00+00:00', 'source_record_id': 'pre-3',
+             'business_key_hash': 'ann-pre-3'}]
+        _seed_registry(connection, root, 'announcement', '2026-08', pd.DataFrame(announcements))
+        _seed_registry(connection, root, 'announcement', '2026-09', pd.DataFrame(
+            [{'ts_code': '000001.SZ', 'announcement_id': 'post-2', 'title': '九月公告不应出现',
+              'url': 'https://e.test/post-2', 'announcement_time': '2026-09-01 08:00:00',
+              'available_at': '2026-09-01T08:00:00+00:00', 'source_record_id': 'post-2',
+              'business_key_hash': 'ann-post-2'}]))
+        # future float_date, published BEFORE the cutoff: must be kept
+        _seed_registry(connection, root, 'share_float', '2026-12', pd.DataFrame(
+            [{'ts_code': '000001.SZ', 'float_date': '2026-12-15', 'float_share': 1e6,
+              'float_ratio': 5.0, 'holder_name': '股东', 'share_type': '限售',
+              'ann_date': '2026-08-01', 'available_at': '2026-08-01T08:00:00+00:00',
+              'variant_group_id': 'sf-future-1', 'business_key_hash': 'sf-future-1'}]))
+    return {'warehouse': warehouse, 'sessions': sessions, 'codes': codes,
+            'formation': formation, 'cutoff': cutoff}
+
+
+def _fabricate_legacy_day(root: Path, replay_id: str, formation: str, action: str,
+                          cutoff: str, universe: list[dict], snapshots: list[dict] | None = None,
+                          program_ref: str | None = None) -> Path:
+    """A minimal legacy (unsealed) prepared day used as the refresh source."""
+    day_dir = root / 'smoke' / replay_id
+    inputs = day_dir / 'inputs'
+    inputs.mkdir(parents=True, exist_ok=True)
+    import hashlib as _hl
+    from stock_analyzer.storage.research_parquet import sha256_file
+    trial._write_json(inputs / 'universe.json', universe)
+    trial._write_json(inputs / 'sector-snapshots.json', snapshots or [])
+    (inputs / 'universe-coverage.csv').write_text('ts_code\n', encoding='utf-8')
+    for name in ('market_context', 'sector_hotspot', 'stock_trading_context',
+                 'price_analysis_context', 'company_discovery'):
+        pd.DataFrame({'ts_code': [u['ts_code'] for u in universe]}).to_parquet(
+            inputs / f'{name}.parquet', index=False)
+    frozen = {name: sha256_file(inputs / name)
+              for name in ('universe.json', 'universe-coverage.csv', 'sector-snapshots.json',
+                           'market_context.parquet', 'sector_hotspot.parquet',
+                           'stock_trading_context.parquet', 'price_analysis_context.parquet',
+                           'company_discovery.parquet')}
+    trial._write_json(inputs / 'sources.json', [])
+    trial._write_json(inputs / 'catalog.json', {
+        'experiment_id': 'sealed-test', 'as_of': cutoff, 'formation_date': formation,
+        'action_date': action, 'company_discovery': 'company_discovery.parquet',
+        'day_dir': str(day_dir), 'frozen_inputs': frozen, 'source_versions': 'sources.json',
+        'derived': {}, 'source_root': '/tmp', 'warehouse_root': '/tmp/wh',
+        'sector_snapshots': snapshots or []})
+    run_head = program_ref or subprocess_run_head()
+    trial._write_json(day_dir / 'run.json', {
+        'mode': 'replay_smoke', 'replay_id': replay_id, 'formation_date': formation,
+        'action_date': action, 'as_of': cutoff,
+        'input_contract_version': 'selection-parallel-input-v2', 'program_ref': run_head,
+        'program_dirty_at_prepare': False,
+        'common_prompt_sha256': _hl.sha256(
+            (CODE / 'ops/selection-parallel-prompt.md').read_bytes()).hexdigest(),
+        'methods': {'M0': 'f164c634d745fe6d342dc693a9c6930ed5300414',
+                    'M1': '290e35c494c757aec4604fd83ee92d453daae8a7'},
+        'model': 'gpt-6-astra', 'reasoning': 'xhigh', 'no_fallback': True,
+        'research_enabled': False,
+        'limits': {'max_tool_commands': 24, 'max_wall_seconds': 900,
+                   'max_input_tokens': 750000, 'max_output_tokens': 20000},
+        'full_universe_replay': True, 'execution_profile': 'compact-v1',
+        'runtime_map_sha256': compact.runtime_map_sha256(CODE),
+        'status': {'M0': 'not_run', 'M1': 'not_run'}, 'source_catalog': 'inputs/catalog.json'})
+    return day_dir
+
+
+def subprocess_run_head() -> str:
+    import subprocess as sp
+    return sp.run(['git', 'rev-parse', 'HEAD'], cwd=CODE, check=True,
+                  capture_output=True, text=True).stdout.strip()
+
+
+def test_snapshot_readers_are_local_and_point_in_time(tmp_path):
+    from stock_analyzer.storage.research_warehouse import ResearchWarehouse
+    from stock_analyzer.storage.research_query import ResearchQuery
+    from stock_analyzer.ops import selection_input_snapshot as snapshot
+    from stock_analyzer.ops import recommendation_context as context_module
+    source = _build_source_warehouse(tmp_path / 'source')
+    warehouse, cutoff = source['warehouse'], source['cutoff']
+    query = ResearchQuery(warehouse)
+    day_dir = tmp_path / 'trial/smoke/sealed-day'
+    inputs = day_dir / 'inputs'
+    inputs.mkdir(parents=True)
+    sessions = source['sessions']
+    manifest = snapshot.save_facts_snapshot(query, inputs, formation_date=source['formation'],
+                                            action_date='2026-08-20', as_of=datetime.fromisoformat(cutoff),
+                                            price_sessions=sessions[-61:],
+                                            provenance={'kind': 'test'})
+    snapshot.finalize_manifest(inputs, manifest)
+    universe = [{'ts_code': code, 'name': code, 'market': '主板'} for code in source['codes'][:2]]
+    trial._write_json(inputs / 'universe.json', universe)
+    pd.DataFrame({'ts_code': source['codes'][:2]}).to_parquet(inputs / 'market_context.parquet', index=False)
+    pd.DataFrame({'ts_code': source['codes'][:2]}).to_parquet(inputs / 'sector_hotspot.parquet', index=False)
+    pd.DataFrame({'ts_code': source['codes'][:2]}).to_parquet(inputs / 'price_analysis_context.parquet', index=False)
+    from stock_analyzer.storage.research_parquet import sha256_file
+    frozen = {path.relative_to(inputs).as_posix(): sha256_file(path)
+              for path in sorted(inputs.rglob('*')) if path.is_file() and path.name != 'catalog.json'}
+    trial._write_json(inputs / 'catalog.json', {
+        'experiment_id': 'sealed-test', 'as_of': cutoff, 'formation_date': source['formation'],
+        'action_date': '2026-08-20', 'day_dir': str(day_dir),
+        'input_storage': 'sealed-v1', 'facts_snapshot': 'facts-snapshot.json',
+        'frozen_inputs': frozen, 'source_root': '/tmp', 'warehouse_root': '/tmp/wh',
+        'derived': {}, 'source_versions': 'facts-snapshot.json'})
+
+    # mutate the ACTIVE source after sealing: append a new partition and
+    # rewrite one already-sealed same-key file
+    with __import__('stock_analyzer.storage.research_schema',
+                    fromlist=['connect_research_warehouse']).connect_research_warehouse(
+            warehouse.duckdb_path) as connection:
+        _seed_registry(connection, tmp_path / 'source', 'adj_factor', '2027-06-01', pd.DataFrame(
+            [{'ts_code': '000001.SZ', 'trade_date': '2027-06-01', 'adj_factor': 1.0,
+              'available_at': '2026-08-01T00:00:00+00:00', 'business_key_hash': 'adj-future'}]))
+    post_announcement = {'ts_code': '000001.SZ', 'announcement_id': 'drift-1',
+                         'title': '重写后新增的截止前公告', 'url': 'https://e.test/drift-1',
+                         'announcement_time': '2026-08-11 08:00:00',
+                         'available_at': '2026-08-11T08:00:00+00:00', 'source_record_id': 'drift-1',
+                         'business_key_hash': 'ann-drift-1'}
+    drift_frame = pd.DataFrame([post_announcement])
+    drift_frame.to_parquet(tmp_path / 'source/facts/announcement/announcement_month=2026-08/data.parquet',
+                           index=False)
+
+    # forbid ANY active access: constructors and derived_at must raise
+    with mock.patch.object(context_module, 'ResearchWarehouse',
+                           side_effect=AssertionError('active warehouse constructed')), \
+         mock.patch.object(context_module, 'ResearchQuery',
+                           side_effect=AssertionError('active query constructed')), \
+         mock.patch.object(context_module, 'derived_at',
+                           side_effect=AssertionError('derived_at used')):
+        result = trial.facts(inputs / 'catalog.json', codes=['000001.SZ'],
+                             categories=['company'], max_chars=0)
+    fact = result['reads'][0]['result']['facts']
+    titles = [row['title'] for row in fact['announcement']]
+    assert '截止前公告：重大合同' in titles and '截止前反证：终止风险' in titles
+    assert '截止后公告不应出现' not in titles and '九月公告不应出现' not in titles
+    assert '重写后新增的截止前公告' not in titles  # sealed copy unaffected by the rewrite
+    floats = fact['share_float']
+    assert floats and floats[0]['float_date'] == '2026-12-15'  # future event, published pre-cutoff
+    price_result = trial.facts(inputs / 'catalog.json', codes=['000001.SZ'],
+                               categories=['price'], max_chars=0)
+    price_fact = price_result['reads'][0]['result']['facts']
+    assert price_fact['equity_daily'] and price_fact['equity_daily'][-1]['trade_date'] == source['formation']
+
+    # query_failed stays a recorded gap, distinct from empty data
+    manifest_path = inputs / 'facts-snapshot.json'
+    manifest = json.loads(manifest_path.read_text())
+    manifest['datasets']['company_profile'] = {'query_method': 'as_of', 'status': 'query_failed',
+                                               'error_type': 'RuntimeError', 'error_detail': '原查询失败样例'}
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding='utf-8')
+    result = trial.facts(inputs / 'catalog.json', codes=['000001.SZ'],
+                         categories=['company'], max_chars=0)
+    gaps = result['reads'][0]['result']['gaps'] if 'gaps' in result['reads'][0]['result'] else result.get('gaps', [])
+    assert any(gap.get('source') == 'company_profile' and gap.get('status') == 'query_failed'
+               for gap in gaps)
+
+
+
+    # a corrupted sealed file is an engineering failure, not an empty record
+    announcement_file = inputs / 'facts/announcement.parquet'
+    announcement_file.write_bytes(announcement_file.read_bytes() + b'corruption')
+    with mock.patch.object(context_module, 'ResearchWarehouse',
+                           side_effect=AssertionError('active warehouse constructed')):
+        with pytest.raises(snapshot.SnapshotIntegrityError):
+            trial.facts(inputs / 'catalog.json', codes=['000001.SZ'], categories=['company'], max_chars=0)
+
+
+def test_snapshot_prepare_rebuilds_neutral_dependencies(tmp_path, monkeypatch):
+    from stock_analyzer.storage.research_warehouse import ResearchWarehouse
+    from stock_analyzer.storage.research_query import ResearchQuery
+    from stock_analyzer.ops import selection_input_snapshot as snapshot
+    from stock_analyzer.ops import recommendation_context as context_module
+    source = _build_source_warehouse(tmp_path / 'source')
+    warehouse = source['warehouse']
+    cutoff = '2026-08-20T09:05:00+08:00'
+    universe = [{'ts_code': code, 'name': code, 'market': '主板'}
+                for code in source['codes'][:3]]  # U is smaller than the full market
+    prior_day = source['sessions'][-2]
+    trial_root = tmp_path / 'archive/selection_trials/sealed-prepare'
+    trial_root.mkdir(parents=True)
+    cfg = {'experiment_id': 'sealed-prepare', 'code_root': str(CODE),
+           'common_code_ref': subprocess_run_head(),
+           'methods': {'M0': 'f164c634d745fe6d342dc693a9c6930ed5300414',
+                       'M1': '290e35c494c757aec4604fd83ee92d453daae8a7'},
+           'source_root': str(tmp_path / 'source'), 'warehouse_root': str(tmp_path / 'source'),
+           'derived_root': str(tmp_path / 'derived'),
+           'archive_root': str(tmp_path / 'archive'), 'context_root': str(tmp_path / 'ctx'),
+           'model': 'gpt-6-astra', 'reasoning': 'xhigh', 'no_fallback': True,
+           'research_enabled': False, 'execution_profile': 'compact-v1',
+           'full_universe_replay': True, 'evaluation_mode': 'replay_smoke',
+           'outcome_through': '2026-09-24',
+           'limits': {'max_tool_commands': 24, 'max_wall_seconds': 900,
+                      'max_input_tokens': 750000, 'max_output_tokens': 20000},
+           'replay_cases': [{'replay_id': 'seal-1', 'formation_date': source['formation'],
+                             'action_date': '2026-08-20', 'as_of': cutoff,
+                             'method_order': ['M0', 'M1']}]}
+    config_path = trial_root / 'experiment.json'
+    trial._write_json(config_path, cfg)
+    original_universe_bytes = json.dumps(universe, ensure_ascii=False).encode()
+    _fabricate_legacy_day(trial_root, 'seal-1', source['formation'], '2026-08-20', cutoff,
+                          universe, snapshots=[{'analysis_date': prior_day,
+                                                'as_of': f'{prior_day}T15:59:59+00:00'}])
+    monkeypatch.setattr(trial, '_calendar',
+                       lambda root, start, end, **k: [day for day in source['sessions']
+                                                      if start <= day <= end])
+    report = trial.prepare_unstarted_batch(config_path, refresh_unstarted=True)
+    assert report['research_model_calls'] == 0
+    assert report['items'][0]['status'] == 'refreshed'
+    day_dir = trial_root / 'smoke/seal-1'
+    catalog = trial._json(day_dir / 'inputs/catalog.json')
+    assert catalog['input_storage'] == 'sealed-v1'
+    manifest = trial._json(day_dir / 'inputs/facts-snapshot.json')
+    assert manifest['as_of'] == cutoff
+    # original identity preserved byte-for-byte in the archive
+    backup = next((trial_root / 'input-history/seal-1').iterdir())
+    assert (backup / 'run.json').is_file()
+    assert (backup / 'inputs/universe.json').read_bytes() == \
+        (day_dir / 'inputs/universe.json').read_bytes()
+    assert json.loads((day_dir / 'inputs/universe.json').read_text()) == universe
+    # full-market denominators are NOT cut to U
+    stock_context = pd.read_parquet(day_dir / 'inputs/stock_trading_context.parquet')
+    assert set(stock_context['ts_code']) == set(source['codes'])  # 4 stocks, U has 3
+    price_context = pd.read_parquet(day_dir / 'inputs/price_analysis_context.parquet')
+    assert set(price_context['ts_code']) == set(source['codes'])
+    # company index and detailed facts come from the SAME frozen tables
+    index_frame = pd.read_parquet(day_dir / 'inputs/company_discovery.parquet')
+    assert set(index_frame['ts_code']) <= set(universe_code['ts_code'] for universe_code in universe)
+    frozen_query = snapshot.load_frozen_query(day_dir / 'inputs/catalog.json', catalog)
+    announcements = frozen_query.dataset_as_of('announcement', datetime.fromisoformat(cutoff))
+    indexed_announcements = index_frame[index_frame['dataset'] == 'announcement']
+    assert len(indexed_announcements) > 0
+    assert set(indexed_announcements['source_record_id']) <= set(announcements['source_record_id'])
+    # the prior-day L3 slot is sealed and readable without any live derived root
+    slots = manifest['sector_slots']
+    assert any(slot['analysis_date'] == prior_day for slot in slots)
+    catalog['derived_root'] = str(tmp_path / 'derived-root-removed')
+    with mock.patch.object(context_module, 'ResearchWarehouse',
+                           side_effect=AssertionError('live warehouse constructed')), \
+         mock.patch.object(context_module, 'derived_at',
+                           side_effect=AssertionError('derived_at used')):
+        fresh_query = snapshot.load_frozen_query(day_dir / 'inputs/catalog.json', catalog)
+        prior = fresh_query.read_sector('sector_hotspot', prior_day,
+                                        datetime.fromisoformat(f'{prior_day}T15:59:59+00:00'))
+        assert len(prior) > 0
+        facts_result = trial.facts(day_dir / 'inputs/catalog.json',
+                                   codes=[universe[0]['ts_code']],
+                                   categories=['company', 'price', 'industry'], max_chars=0,
+                                   sector_snapshots=[{'analysis_date': prior_day,
+                                                      'as_of': f'{prior_day}T15:59:59+00:00'}])
+        industry_read = next(read for read in facts_result['reads']
+                             if read.get('category') == 'industry')
+        series = industry_read['result']['facts']['industry_series']
+        assert series and series[0]['analysis_date'] == prior_day
+    # production candidate_context without the new parameters keeps old behavior
+    legacy = context_module.candidate_context(
+        tmp_path, [universe[0]['ts_code']], formation_date=source['formation'],
+        as_of=cutoff, categories=['company'],
+        warehouse_root=tmp_path / 'source', derived_inputs=None)
+    assert universe[0]['ts_code'] in legacy['facts']
+
+
+def test_refresh_unstarted_preserves_real_attempts_and_ids(tmp_path, monkeypatch):
+    source = _build_source_warehouse(tmp_path / 'source')
+    cutoff = '2026-08-20T09:05:00+08:00'
+    formations = ['2026-08-13', '2026-08-14', '2026-08-17', '2026-08-18', '2026-08-19']
+    universe = [{'ts_code': code, 'name': code, 'market': '主板'} for code in source['codes'][:2]]
+    trial_root = tmp_path / 'archive/selection_trials/sealed-refresh'
+    trial_root.mkdir(parents=True)
+    cfg = {'experiment_id': 'sealed-refresh', 'code_root': str(CODE),
+           'common_code_ref': subprocess_run_head(),
+           'methods': {'M0': 'f164c634d745fe6d342dc693a9c6930ed5300414',
+                       'M1': '290e35c494c757aec4604fd83ee92d453daae8a7'},
+           'source_root': str(tmp_path / 'source'), 'warehouse_root': str(tmp_path / 'source'),
+           'derived_root': str(tmp_path / 'derived'),
+           'archive_root': str(tmp_path / 'archive'), 'context_root': str(tmp_path / 'ctx'),
+           'model': 'gpt-6-astra', 'reasoning': 'xhigh', 'no_fallback': True,
+           'research_enabled': False, 'execution_profile': 'compact-v1',
+           'full_universe_replay': True, 'evaluation_mode': 'replay_smoke',
+           'limits': {'max_tool_commands': 24, 'max_wall_seconds': 900,
+                      'max_input_tokens': 750000, 'max_output_tokens': 20000},
+           'replay_cases': [{'replay_id': f'seal-{index}', 'formation_date': formation,
+                             'action_date': '2026-08-20', 'as_of': cutoff,
+                             'method_order': ['M0', 'M1']}
+                            for index, formation in enumerate(formations, 1)]}
+    config_path = trial_root / 'experiment.json'
+    trial._write_json(config_path, cfg)
+    for index, formation in enumerate(formations, 1):
+        _fabricate_legacy_day(trial_root, f'seal-{index}', formation, '2026-08-20', cutoff, universe)
+    monkeypatch.setattr(trial, '_calendar',
+                       lambda root, start, end, **k: [day for day in source['sessions']
+                                                      if start <= day <= end])
+
+    original_universe_bytes = (trial_root / 'smoke/seal-1/inputs/universe.json').read_bytes()
+
+    # a REAL attempt with status still not_run blocks the WHOLE batch untouched
+    attempt_dir = trial_root / 'work/seal-4/M0/attempt-001'
+    attempt_dir.mkdir(parents=True)
+    (attempt_dir / 'invocation.json').write_text('{"exit_code": 0}', encoding='utf-8')
+    def inventory(root: Path) -> dict:
+        return {str(path.relative_to(root)): path.stat().st_mtime_ns
+                for path in sorted(root.rglob('*')) if path.is_file()}
+    before = inventory(trial_root / 'smoke')
+    with pytest.raises(ValueError, match='attempt'):
+        trial.prepare_unstarted_batch(config_path, refresh_unstarted=True)
+    assert inventory(trial_root / 'smoke') == before  # nothing moved, no backups
+    assert not (trial_root / 'input-history').exists() or not any(
+        (trial_root / 'input-history').iterdir())
+    shutil.rmtree(attempt_dir.parents[1])
+
+    # zero-attempt refresh under source drift: same ids, originals archived
+    drift = pd.DataFrame([{'ts_code': '000001.SZ', 'announcement_id': 'drift-2',
+                           'title': '刷新前夜新增公告', 'url': 'https://e.test/d2',
+                           'announcement_time': '2026-08-12 08:00:00',
+                           'available_at': '2026-08-12T08:00:00+00:00',
+                           'source_record_id': 'drift-2', 'business_key_hash': 'ann-drift-2'}])
+    drift.to_parquet(tmp_path / 'source/facts/announcement/announcement_month=2026-08/data.parquet', index=False)
+    report = trial.prepare_unstarted_batch(config_path, refresh_unstarted=True)
+    assert [item['replay_id'] for item in report['items']] == [f'seal-{index}' for index in range(1, 6)]
+    assert all(item['status'] == 'refreshed' for item in report['items'])
+    for index in range(1, 6):
+        backup = next((trial_root / 'input-history' / f'seal-{index}').iterdir())
+        assert (backup / 'inputs/universe.json').read_bytes() == original_universe_bytes
+        catalog = trial._json(trial_root / f'smoke/seal-{index}/inputs/catalog.json')
+        assert catalog['input_storage'] == 'sealed-v1'
+
+    # interrupted batches resume: days already refreshed are reused as-is
+    with mock.patch.object(trial, '_refresh_sealed_day',
+                           side_effect=[RuntimeError('simulated interruption on day 3')]):
+        # make days 1-2 look stale (different head) so a refresh is attempted again
+        for index in (1, 2):
+            pass
+        # days are fresh: a forced failure only matters for a stale day
+        stale_run = trial._json(trial_root / 'smoke/seal-3/run.json')
+        stale_run['program_ref'] = '0' * 40
+        trial._write_json(trial_root / 'smoke/seal-3/run.json', stale_run)
+        with pytest.raises(RuntimeError, match='simulated interruption'):
+            trial.prepare_unstarted_batch(config_path, refresh_unstarted=True)
+    statuses = {item['replay_id']: item['status']
+                for item in trial.prepare_unstarted_batch(config_path, refresh_unstarted=True)['items']}
+    assert statuses == {f'seal-{index}': ('refreshed' if index == 3 else 'reused')
+                        for index in range(1, 6)}
+
+
+def test_launch_reuses_real_qualified_attempt_without_model_call(tmp_path, monkeypatch):
+    source = _build_source_warehouse(tmp_path / 'source')
+    cutoff = '2026-08-20T09:05:00+08:00'
+    formations = ['2026-08-13', '2026-08-14', '2026-08-17', '2026-08-18', '2026-08-19']
+    universe = [{'ts_code': code, 'name': code, 'market': '主板'} for code in source['codes'][:2]]
+    trial_root = tmp_path / 'archive/selection_trials/sealed-launch'
+    trial_root.mkdir(parents=True)
+    cfg = {'experiment_id': 'sealed-launch', 'code_root': str(CODE),
+           'common_code_ref': subprocess_run_head(),
+           'methods': {'M0': 'f164c634d745fe6d342dc693a9c6930ed5300414',
+                       'M1': '290e35c494c757aec4604fd83ee92d453daae8a7'},
+           'source_root': str(tmp_path / 'source'), 'warehouse_root': str(tmp_path / 'source'),
+           'derived_root': str(tmp_path / 'derived'),
+           'archive_root': str(tmp_path / 'archive'), 'context_root': str(tmp_path / 'ctx'),
+           'model': 'gpt-6-astra', 'reasoning': 'xhigh', 'no_fallback': True,
+           'research_enabled': False, 'execution_profile': 'compact-v1',
+           'full_universe_replay': True, 'evaluation_mode': 'replay_smoke',
+           'limits': {'max_tool_commands': 24, 'max_wall_seconds': 900,
+                      'max_input_tokens': 750000, 'max_output_tokens': 20000},
+           'replay_cases': [{'replay_id': f'seal-{index}', 'formation_date': formation,
+                             'action_date': '2026-08-20', 'as_of': cutoff,
+                             'method_order': ['M0', 'M1']}
+                            for index, formation in enumerate(formations, 1)]}
+    config_path = trial_root / 'experiment.json'
+    trial._write_json(config_path, cfg)
+    for index, formation in enumerate(formations, 1):
+        _fabricate_legacy_day(trial_root, f'seal-{index}', formation, '2026-08-20', cutoff, universe)
+    monkeypatch.setattr(trial, '_calendar',
+                       lambda root, start, end, **k: [day for day in source['sessions']
+                                                      if start <= day <= end])
+    monkeypatch.setattr(trial, '_worktree_dirty', lambda *a: False)
+    trial.prepare_unstarted_batch(config_path, refresh_unstarted=True)
+    cfg['research_enabled'] = True  # the fake-model fixture needs the switch on
+    trial._write_json(config_path, cfg)
+    day1 = trial_root / 'smoke/seal-1'
+
+    # produce a REAL qualified result with a normal attempt via run_arm
+    monkeypatch.setattr(trial, '_check_source_catalog', trial._check_source_catalog)
+    discovery = compact.discover_queries(day1 / 'inputs/catalog.json', {'queries': [
+        {'id': 'c', 'view': 'company', 'sql': 'SELECT ts_code FROM company'},
+        {'id': 's', 'view': 'sector', 'sql': 'SELECT count(*) AS n FROM sector'},
+        {'id': 'p', 'view': 'price', 'sql': 'SELECT ts_code FROM price'}]},
+        output_dir=tmp_path / 'q')
+    receipts = {r['query_id']: r for r in discovery['responses']}
+    pages = [compact.facts_compact(day1 / 'inputs/catalog.json', codes=[universe[0]['ts_code']],
+                                   categories=['price', 'company'],
+                                   output=tmp_path / 'f.json', parts_dir=tmp_path / 'parts')]
+    while pages[-1].get('next_part'):
+        pages.append(compact.facts_compact(day1 / 'inputs/catalog.json', codes=[universe[0]['ts_code']],
+                                           categories=['price', 'company'],
+                                           part=pages[-1]['next_part'], parts_dir=tmp_path / 'parts'))
+    events_text = '\n'.join(json.dumps({'type': 'item.completed', 'item': {
+        'type': 'command_execution', 'exit_code': 0, 'command': 'compact cli',
+        'aggregated_output': json.dumps(payload, ensure_ascii=False)}}, ensure_ascii=False)
+        for payload in [discovery, *pages]) + '\n'
+    stock = {'ts_code': universe[0]['ts_code'], 'rank': 1, 'primary_reason': '封存夹具',
+             'strongest_counter_evidence': '反证', 'nearest_comparison': '近邻',
+             'participation_condition': '条件', 'change_condition': '重判',
+             'source_refs': [f'facts:{universe[0]["ts_code"]}:price', f'facts:{universe[0]["ts_code"]}:company']}
+    decision = {'method_id': 'M0', 'formation_date': formations[0], 'action_date': '2026-08-20',
+                'as_of': cutoff, 'market_summary': 'x',
+                'candidates': [{'ts_code': universe[0]['ts_code'], 'discovered_by': ['price'],
+                                'final_fate': 'selected', 'short_reason': 'r',
+                                'source_refs': ['neutral:price_analysis_context'],
+                                'opportunity_type': 'independent_price_anomaly',
+                                'engine_type': 'independent_demand_acceleration',
+                                'engine_status': 'active',
+                                'market_recognition': {'status': 'confirmed', 'basis': '夹具'}}],
+                'selected': [stock], 'conditional_events': [], 'unresolved': [],
+                'discovery_summary': {
+                    'sector': {'status': 'searched_no_candidate', 'source_refs': ['neutral:sector_hotspot'],
+                               'codes': [], 'source_total': receipts['s']['source_total'],
+                               'query': receipts['s']['sql'], 'matched_count': receipts['s']['matched_count'],
+                               'coverage_gap': []},
+                    'company': {'status': 'searched_no_candidate', 'source_refs': ['neutral:company_discovery'],
+                                'codes': [], 'source_total': receipts['c']['source_total'],
+                                'query': receipts['c']['sql'], 'matched_count': receipts['c']['matched_count'],
+                                'coverage_gap': []},
+                    'price': {'status': 'searched_with_candidates', 'source_refs': ['neutral:price_analysis_context'],
+                              'codes': [universe[0]['ts_code']], 'source_total': receipts['p']['source_total'],
+                              'query': receipts['p']['sql'], 'matched_count': receipts['p']['matched_count'],
+                              'coverage_gap': []}},
+                'no_selection_reason': None}
+    calls = []
+
+    def make_fake_invoke(method_id):
+        def fake_invoke(context, prompt, attempt, *, config_path=None):
+            method_decision = dict(decision, method_id=method_id)
+            calls.append(attempt)
+            attempt.mkdir(parents=True)
+            (attempt / 'prompt.md').write_text(prompt, encoding='utf-8')
+            (attempt / 'events.jsonl').write_text(events_text, encoding='utf-8')
+            (attempt / 'raw-output.json').write_text(json.dumps(method_decision, ensure_ascii=False),
+                                                     encoding='utf-8')
+            metadata = {'requested_model': trial.MODEL, 'actual_model': trial.MODEL,
+                        'actual_reasoning': trial.EFFORT, 'exit_code': 0, 'budget_exceeded': None,
+                        'cancelled': False, 'tokens': {'input_tokens': 1000}}
+            trial._write_json(attempt / 'invocation.json', metadata)
+            return 0, metadata
+        return fake_invoke
+    monkeypatch.setattr(trial, '_invoke_model', make_fake_invoke('M0'))
+    result = trial.run_arm(day1, method='M0')
+    assert result['selected'] and trial._qualification(day1, 'M0')['qualified']
+    attempts = sorted((trial_root / 'work/seal-1/M0').glob('attempt-*'))
+    assert len(attempts) == 1  # a NORMAL attempt coexists with the qualified result
+
+    # check-launch classifies done/pending; the launch gate passes
+    gate = trial.check_launch(config_path, phase='first-pair')
+    assert gate['launch_allowed'], gate['problems']
+    states = gate['cases'][0]['states']
+    assert states['M0']['state'] == 'done' and states['M1']['state'] == 'pending'
+    remaining = trial.check_launch(config_path, phase='remaining')
+    assert not remaining['launch_allowed']  # first pair not both done yet
+
+    # select on the done side reuses the result with ZERO new model calls
+    cfg['research_enabled'] = False
+    trial._write_json(config_path, cfg)
+    reused = trial.run_arm(day1, method='M0')
+    assert reused['run_id'] == result['run_id'] and not calls[1:]
+
+    # a failed attempt never auto-reruns
+    day2 = trial_root / 'smoke/seal-2'
+    (trial_root / 'work/seal-2/M1/attempt-001').mkdir(parents=True)
+    trial._write_json(trial_root / 'work/seal-2/M1/attempt-001/invocation.json',
+                      {'exit_code': 124, 'budget_exceeded': 'max_input_tokens',
+                       'actual_model': trial.MODEL, 'actual_reasoning': trial.EFFORT})
+    run2 = trial._json(day2 / 'run.json')
+    run2['status']['M1'] = 'budget_exceeded'
+    trial._write_json(day2 / 'run.json', run2)
+    gate2 = trial.check_launch(config_path, phase='first-pair')
+    assert gate2['launch_allowed']  # day1 unaffected
+    cfg['research_enabled'] = True  # even WITH the switch on, a failed attempt refuses
+    trial._write_json(config_path, cfg)
+    with pytest.raises(RuntimeError, match='不自动发起新模型调用'):
+        trial.run_arm(day2, method='M1')
+    assert not calls[1:]
+    cfg['research_enabled'] = False
+    trial._write_json(config_path, cfg)
+
+    cfg['research_enabled'] = True
+    trial._write_json(config_path, cfg)
+    monkeypatch.setattr(trial, '_invoke_model', make_fake_invoke('M1'))
+    trial.run_arm(day1, method='M1')
+    cfg['research_enabled'] = False
+    trial._write_json(config_path, cfg)
+    # scripts: two-done side issues zero select calls; one done one pending
+    # issues exactly one call for the pending side
+    from tools import selection_launch_scripts as generator
+    log = tmp_path / 'select-log.txt'
+    fake_cli = tmp_path / 'fake-select.py'
+    fake_cli.write_text(
+        'import sys, os\n'
+        'args = sys.argv[1:]\n'
+        'method = args[args.index("--method") + 1]\n'
+        'replay = args[args.index("--replay-id") + 1]\n'
+        'with open(os.environ["FAKE_SELECT_LOG"], "a") as handle:\n'
+        '    handle.write(f"select {method} {replay}\\n")\n', encoding='utf-8')
+    out = tmp_path / 'scripts'
+    generator.generate(config_path, out)
+    import subprocess as sp
+    import os
+    env = {k: v for k, v in os.environ.items() if not k.startswith('ASTRA_')}
+    env.update({'ASTRA_PY': sys.executable, 'ASTRA_CODE_ROOT': str(CODE),
+                'ASTRA_CONFIG': str(config_path), 'ASTRA_SELECT_TOOL': str(fake_cli),
+                'FAKE_SELECT_LOG': str(log)})
+    # make BOTH sides done, then first-pair script must make zero select calls
+    cfg['research_enabled'] = True
+    trial._write_json(config_path, cfg)
+    trial._write_json(config_path, cfg)
+    completed = sp.run(['bash', str(out / 'Astra_首日一对.sh')], env=env,
+                       capture_output=True, text=True, timeout=180)
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    assert log.read_text().splitlines() == []  # both done: zero new calls
+    # one done one pending: exactly one call for the pending side
+    log.unlink()
+    day1_m1 = trial._json(day1 / 'M1/result.json')
+    (day1 / 'M1').rename(tmp_path / 'moved-M1-result')
+    run_m1 = trial._json(day1 / 'run.json')
+    run_m1['status']['M1'] = 'not_run'
+    trial._write_json(day1 / 'run.json', run_m1)
+    completed = sp.run(['bash', str(out / 'Astra_首日一对.sh')], env=env,
+                       capture_output=True, text=True, timeout=180)
+    assert completed.returncode != 0  # fake select does not produce a real result
+    lines = log.read_text().splitlines()
+    assert lines == ['select M1 seal-1']  # ONLY the pending side was called
+    (tmp_path / 'moved-M1-result').rename(day1 / 'M1')
