@@ -2346,6 +2346,9 @@ def _preflight_fake_arm(cfg: dict, root: Path, out: Path, catalog0: Path, identi
         add_event(f'{cli} facts --catalog {sim_catalog} --code {fixture_code} --profile decision', page)
     evidence_fixture = None
     if evidence_context is not None and evidence_id:
+        sim_official = arm_context / 'work/official' / evidence_id
+        if not sim_official.exists():
+            shutil.copytree(evidence_context / 'work/official' / evidence_id, sim_official)
         kind_receipt = _json(evidence_context / 'work/official' / evidence_id / 'receipt.json')
         pdf_read = str(kind_receipt.get('original', '')).endswith('.pdf')
         read_locator = {'start_page': 1, 'end_page': 1} if pdf_read else {'start_line': 1, 'end_line': 30}
