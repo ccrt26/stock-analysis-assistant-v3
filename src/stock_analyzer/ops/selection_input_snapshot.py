@@ -100,9 +100,21 @@ def save_facts_snapshot(query, inputs_dir: Path, *, formation_date: str, action_
             return
         path = facts_dir / f'{dataset}.parquet'
         frame, normalized_columns = _normalize_mixed_columns(frame)
+        try:
+            frame.to_parquet(path, index=False)
+        except Exception:
+            # last-resort superset cast: real provider frames can defeat the
+            # per-column heuristic (extension dtypes, decimal mixes); every
+            # object column becomes str so the sealed file is still lossless
+            # for the string-oriented readers and the cast is recorded
+            for column in frame.columns:
+                if frame[column].dtype == object:
+                    frame[column] = frame[column].astype(str)
+                    if column not in normalized_columns:
+                        normalized_columns.append(column)
+            frame.to_parquet(path, index=False)
         if normalized_columns:
             entry['mixed_type_columns_cast_to_str'] = normalized_columns
-        frame.to_parquet(path, index=False)
         entry.update({'status': 'available' if not frame.empty else 'no_available_rows',
                       'path': f'{FACTS_SUBDIR}/{dataset}.parquet',
                       'row_count': int(len(frame)),
