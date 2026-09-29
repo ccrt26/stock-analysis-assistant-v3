@@ -3102,9 +3102,11 @@ def preflight(config_path: Path, *, output_dir: Path) -> dict:
             count_receipt, price_receipt = day_out['responses']
             day_universe = len(_json(cat_path.parent / 'universe.json'))
             day_company = pq.read_metadata(cat_path.parent / 'company_discovery.parquet').num_rows
+            totals = day_out['view_totals']
+            stock_context_total = totals.get('stock_context') if isinstance(totals, dict) else None
             query_ok = (count_receipt['matched_count'] == day_company == count_receipt['source_total']
                         and price_receipt['searched_total'] == price_receipt['source_total'] == day_universe
-                        and day_out['view_totals'].get('stock_context') is not None)
+                        and (stock_context_total is not None or totals == 'reused_stored_results'))
             day_sources = (cat_path.parent / 'source-notes.json'
                            if (cat_path.parent / 'source-notes.json').exists()
                            else cat_path.parent / 'sources.json')
