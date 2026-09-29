@@ -2933,6 +2933,15 @@ def _preflight_fake_arm(cfg: dict, root: Path, out: Path, day_catalogs: list,
                                               donor, 'replay_smoke', m1full_id)
             m1full_catalog = m1full_day / 'inputs/catalog.json'
             m1full_context = Path(sim_cfg['context_root']) / m1full_id
+            if evidence_fixture:
+                # stage method bundle + the same original in this day's M1 arm
+                if not (m1full_context / 'M1').exists():
+                    shutil.copytree(root / 'methods/M1', m1full_context / 'M1')
+                m1_official_dir = m1full_context / 'M1' / 'work' / 'official' / evidence_id
+                if not m1_official_dir.exists():
+                    m1_official_dir.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copytree((arm_context / 'M0' / evidence_fixture['receipt']).parent,
+                                    m1_official_dir)
             m1full_request = {'queries': [
                 {'id': 'company_first', 'view': 'company',
                  'sql': 'SELECT ts_code, dataset, title FROM company '
@@ -2966,10 +2975,21 @@ def _preflight_fake_arm(cfg: dict, root: Path, out: Path, day_catalogs: list,
                 m1_events.append(json.dumps({'type': 'item.completed', 'item': {
                     'type': 'command_execution', 'exit_code': 0, 'command': 'facts cli',
                     'aggregated_output': json.dumps(page, ensure_ascii=False)}}, ensure_ascii=False))
-            if read_doc_for_events is not None:
+            m1_read_doc = None
+            if evidence_fixture:
+                m1_located = compact.evidence_request(
+                    m1full_catalog, m1full_context / 'M1', {'documents': [
+                        {'evidence_id': evidence_id, 'action': 'read',
+                         'receipt_ref': evidence_fixture['receipt'],
+                         **({'start_page': 1, 'end_page': 1}
+                            if 'page' in evidence_fixture['clause']
+                            else {'start_line': (evidence_fixture['clause'].get('lines') or [1, 30])[0],
+                                  'end_line': (evidence_fixture['clause'].get('lines') or [1, 30])[1]})}]})
+                m1_read_doc = m1_located['documents'][0]
+            if m1_read_doc is not None:
                 m1_events.append(json.dumps({'type': 'item.completed', 'item': {
                     'type': 'command_execution', 'exit_code': 0, 'command': 'evidence cli',
-                    'aggregated_output': json.dumps({'documents': [read_doc_for_events]},
+                    'aggregated_output': json.dumps({'documents': [m1_read_doc]},
                                                     ensure_ascii=False)}}, ensure_ascii=False))
             m1_receipts = {r['query_id']: r for r in m1_discovery['responses']}
             m1_day = _json(m1full_day / 'run.json')
