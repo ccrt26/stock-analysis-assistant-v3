@@ -1456,6 +1456,21 @@ def _coalesce_segments(selected: list[dict], *, max_chars: int = 2000) -> list[d
     return spans
 
 
+def _same_official_entry(index_url: str, receipt_url: str | None, final_url: str | None) -> bool:
+    """Official-entry equivalence exactly as fetch_announcement established it:
+    the cninfo finalpage document is served from both www and static hosts of
+    the SAME path; anything else is a different entry."""
+    from urllib.parse import urlparse
+    candidates = {url for url in (receipt_url, final_url) if url}
+    if index_url in candidates:
+        return True
+    parsed = urlparse(index_url)
+    if parsed.hostname == 'www.cninfo.com.cn' and '/finalpage/' in parsed.path:
+        mirror = index_url.replace('www.cninfo.com.cn', 'static.cninfo.com.cn', 1)
+        return mirror in candidates
+    return False
+
+
 def _binding_matches(catalog_path: Path, catalog_identity: dict, directory: Path) -> bool:
     """A program-saved same-request binding replaces the global source check
     for later cursor reads of the SAME document (audit R8); drift in the
@@ -1593,9 +1608,12 @@ def evidence_request(catalog_path: Path, context_dir: Path, request: dict,
                 if receipt_time != index_time:
                     raise ValueError('read 阶段核验：同ID公开时间不一致（索引早、receipt晚）；'
                                      '截止后版本不能进入形成日')
-            # same ID and time but a different official entry is a different version
+            # same ID and time but a different official entry is a different
+            # version; the established cninfo www/static finalpage mirror of
+            # the SAME path is one entry, not two (fetch_announcement rule)
             index_entry = announcement.get('url')
-            if index_entry and index_entry not in (receipt.get('url'), receipt.get('final_url')):
+            if index_entry and not _same_official_entry(index_entry, receipt.get('url'),
+                                                         receipt.get('final_url')):
                 raise ValueError('read 阶段核验：同ID公开时间一致的官方入口不一致'
                                  f'（索引 {index_entry} vs receipt {receipt.get("url")}）；不能把另一URL当同版')
             # receipt and stored text must still correspond (existing original validator)
