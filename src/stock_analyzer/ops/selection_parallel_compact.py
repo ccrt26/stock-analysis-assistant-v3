@@ -588,14 +588,15 @@ def discover_queries(catalog_path: Path, request: dict, *, output_dir: Path,
         rows_file = queries_dir / f'{stem}.rows.jsonl'
         referenced = _referenced_views(sql)
         reuse = next((h for h in history if h.get('stem') == stem and _identity_matches(h, catalog_path)), None)
+        reused_stored_result = False
         if reuse is not None and rows_file.exists():
             matched = reuse['matched_count']
             columns = reuse['columns']
             rows, verified_total = _read_jsonl_page(rows_file, offset, page_size)
             assert verified_total == matched
+            reused_stored_result = True
         else:
             try:
-                referenced = _referenced_views(sql)
                 matched = con.execute(f'select count(*) from ({sql}) _q', params).fetchone()[0]
                 columns = [d[0] for d in con.execute(f'select * from ({sql}) _q limit 0', params).description]
                 written = _write_jsonl_rows(rows_file, con, sql, params, columns)
@@ -631,14 +632,15 @@ def discover_queries(catalog_path: Path, request: dict, *, output_dir: Path,
                    'full_result_format': 'jsonl; one JSON array per row, column order = columns',
                    'scanned_all': True, 'partial': False}
         _write_local(queries_dir / f'{stem}-receipt.json', receipt)
-        history.append({'seq': len(history) + 1, 'query_id': query_id, 'stem': stem, 'view': view,
-                        'sql': sql, 'params': params, 'matched_count': int(matched),
-                        'source_total': source_total, 'searched_total': searched_total,
-                        'columns': columns,
-                        'full_result_file': str(rows_file),
-                        'receipt_file': str(queries_dir / f'{stem}-receipt.json'),
-                        'as_of': catalog['as_of'], 'formation_date': catalog['formation_date'],
-                        'catalog': str(catalog_path)})
+        if not reused_stored_result:
+            history.append({'seq': len(history) + 1, 'query_id': query_id, 'stem': stem, 'view': view,
+                            'sql': sql, 'params': params, 'matched_count': int(matched),
+                            'source_total': source_total, 'searched_total': searched_total,
+                            'columns': columns,
+                            'full_result_file': str(rows_file),
+                            'receipt_file': str(queries_dir / f'{stem}-receipt.json'),
+                            'as_of': catalog['as_of'], 'formation_date': catalog['formation_date'],
+                            'catalog': str(catalog_path)})
         if view == 'company':
             company_seen = True
         responses.append(_bound_page(receipt, rows, queries_dir, stem))

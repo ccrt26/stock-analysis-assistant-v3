@@ -2206,9 +2206,12 @@ def preflight(config_path: Path, *, output_dir: Path) -> dict:
                                                        part=pages[-1]['next_part'],
                                                        parts_dir=per_day / 'facts-parts'))
                 reads = [r for page in pages for r in page.get('reads', [])]
-                price_read = next((r for r in reads if r['category'] == 'price'), None)
-                fact_ok = bool(price_read and price_read['result']['facts'].get('price_observations')
-                               and 'comparison_windows' in price_read['result']['facts'])
+                price_facts_all = {}
+                for r in reads:
+                    if r['category'] == 'price':
+                        price_facts_all.update(r['result']['facts'])
+                fact_ok = bool(price_facts_all.get('price_observations')
+                               and 'comparison_windows' in price_facts_all)
                 day_fact.update({'facts_pages': len(pages), 'reads': len(reads),
                                  'facts_page_chars': sum(len(json.dumps(p, ensure_ascii=False)) for p in pages),
                                  'fixture_code': day_codes[0]})
@@ -2804,7 +2807,9 @@ def _preflight_fake_arm(cfg: dict, root: Path, out: Path, day_catalogs: list,
                               'selection_reason_from_saved': packet['judgment']['selection_reason'][:60],
                               'facts_from_saved_reads': sorted(context['facts'])}
         except Exception as error:  # noqa: BLE001 - report, never fabricate the pass
-            handoff_detail = {'error': f'{type(error).__name__}: {str(error)[:250]}'}
+            import traceback as _tb
+            handoff_detail = {'error': f'{type(error).__name__}: {str(error)[:250]}',
+                              'traceback': _tb.format_exc()[-700:]}
         record('handoff_from_just_saved_decision', handoff_ok, handoff_detail)
     finally:
         globals()['_invoke_model'] = original_invoke
