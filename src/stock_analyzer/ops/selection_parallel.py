@@ -2125,8 +2125,8 @@ def preflight(config_path: Path, *, output_dir: Path) -> dict:
                           {'fixture_code': fixture_code, 'group_code': l3_code,
                            'pages': len(facts_pages), 'reads': len(every_read),
                            'next_part': facts_pages[-1].get('next_part')})
-        sizes['facts_page_chars'] = {'chars': len(json.dumps(facts_page, ensure_ascii=False)),
-                                     'utf8_bytes': len(json.dumps(facts_page, ensure_ascii=False).encode('utf-8'))}
+        sizes['facts_page_chars'] = {'chars': len(json.dumps(facts_pages[0], ensure_ascii=False)),
+                                     'utf8_bytes': len(json.dumps(facts_pages[0], ensure_ascii=False).encode('utf-8'))}
 
         # --- knowledge by id over the frozen method context ---
         knowledge_ok, knowledge_detail = False, {}
