@@ -303,12 +303,24 @@ def build_runtime_method(source_dir: Path, out_dir: Path, map_cfg: dict, *, meth
                     continue
             for block in _split_body_blocks(body):
                 normalized = re.sub(r'\s+', '', block)
+                location = f'{rel}::{heading}'
                 if normalized in seen_bodies:
+                    if seen_bodies[normalized] == location:
+                        paragraph_log.append({'source_file': rel, 'in_section': heading,
+                                              'action': 'exact_duplicate_dropped_same_scope',
+                                              'paragraph_sha256': hashlib.sha256(
+                                                  block.encode('utf-8')).hexdigest(),
+                                              'first_seen_in': seen_bodies[normalized]})
+                        continue  # identical text in the same file/scope: drop the copy
                     paragraph_log.append({'source_file': rel, 'in_section': heading,
-                                          'action': 'exact_duplicate_dropped',
+                                          'action': 'duplicate_text_kept_different_scope',
                                           'paragraph_sha256': hashlib.sha256(
                                               block.encode('utf-8')).hexdigest(),
-                                          'first_seen_in': seen_bodies[normalized]})
+                                          'first_seen_in': seen_bodies[normalized],
+                                          'reason': '跨文件/跨作用域不合并，按原样保留'})
+                    # different scope: keep rendering this block verbatim
+                else:
+                    seen_bodies[normalized] = location
             rendered = (f'{heading}\n{body}'.strip() + '\n') if heading else body + '\n'
             file_pieces.append(rendered)
             file_map['kept_chars'] += len(rendered)
@@ -551,11 +563,13 @@ def _identity_matches(record: dict, catalog_path: Path) -> bool:
 
 def discover_queries(catalog_path: Path, request: dict, *, output_dir: Path,
                      part: str | None = None) -> dict:
-    """Query frozen views in full once, persist complete matches, page stored rows.
+    """Query frozen views once, persist complete matches, page stored rows.
 
-    Receipt numbers are program-computed. Continuation pages and oversized-row
-    segments read the stored result for the same request identity; they never
-    re-scan the source or overwrite previously referenced files.
+    Receipt numbers are program-computed. Continuations reuse stored results
+    BEFORE any catalog-wide check or view registration; a request whose every
+    query already has a stored result never touches DuckDB. Page assembly is
+    bounded by the whole response budget; oversized rows become field-segment
+    stubs readable one segment at a time via --part.
     """
     catalog_path = Path(catalog_path)
     catalog = _catalog(catalog_path)
@@ -566,36 +580,61 @@ def discover_queries(catalog_path: Path, request: dict, *, output_dir: Path,
     new_records: list[dict] = []
     if part is not None:
         return _discover_continuation(catalog_path, queries_dir, history, part)
-    _check_catalog(catalog_path)  # fresh execution only; continuations reuse stored results
-    import duckdb
-    con = duckdb.connect(database=':memory:')
-    totals = _register_views(con, catalog_path)
-    company_seen = any(h.get('view') == 'company' for h in history)
-    responses: list[dict] = []
+    signatures = []
     for number, query in enumerate(request.get('queries', []), 1):
         query_id = str(query.get('id') or f'q{number}')
         view = str(query.get('view') or '')
         if view not in VIEW_TABLES:
             raise ValueError(f'未知视图 {view!r}；可用视图：{VIEW_TABLES}')
-        if view == 'price' and not company_seen:
-            raise ValueError('公司独立发现必须先于价格候选查询：本请求或此前请求须先查询 company 视图')
+        if view == 'price' and not any(h.get('view') == 'company' for h in history) and view != 'company':
+            pass  # gate enforced below once per request order
         sql = _validate_query_sql(str(query.get('sql') or ''))
         params = list(query.get('params') or [])
         page_size = int(query.get('page_size') or 20)
         offset = int(query.get('offset') or 0)
         if page_size < 1 or page_size > 500 or offset < 0:
             raise ValueError('page_size 须在 1..500，offset 非负（显示页大小，不是股票池上限）')
+        signatures.append({'query_id': query_id, 'view': view, 'sql': sql, 'params': params,
+                           'page_size': page_size, 'offset': offset})
+
+    def stored(signature):
+        stem = _query_stem(history, signature['query_id'], signature['sql'], signature['params'])
+        record = next((h for h in history if h.get('stem') == stem
+                       and _identity_matches(h, catalog_path)), None)
+        rows_file = queries_dir / f'{stem}.rows.jsonl'
+        if record is None or not rows_file.exists():
+            return None
+        return record, rows_file
+
+    all_stored = all(stored(signature) is not None for signature in signatures)
+    con = totals = None
+    if not all_stored:
+        _check_catalog(catalog_path)  # fresh execution only (E6)
+        import duckdb
+        con = duckdb.connect(database=':memory:')
+        totals = _register_views(con, catalog_path)
+    company_seen = any(h.get('view') == 'company' for h in history)
+    responses: list[dict] = []
+    for signature in signatures:
+        query_id, view = signature['query_id'], signature['view']
+        if view == 'price' and not company_seen:
+            raise ValueError('公司独立发现必须先于价格候选查询：本请求或此前请求须先查询 company 视图')
+        sql, params = signature['sql'], signature['params']
+        page_size, offset = signature['page_size'], signature['offset']
         stem = _query_stem(history, query_id, sql, params)
         rows_file = queries_dir / f'{stem}.rows.jsonl'
         referenced = _referenced_views(sql)
-        reuse = next((h for h in history if h.get('stem') == stem and _identity_matches(h, catalog_path)), None)
         reused_stored_result = False
-        if reuse is not None and rows_file.exists():
+        record = stored(signature)
+        if record is not None:
+            reuse, rows_file = record
             matched = reuse['matched_count']
             columns = reuse['columns']
             rows, verified_total = _read_jsonl_page(rows_file, offset, page_size)
             assert verified_total == matched
             reused_stored_result = True
+            source_total, searched_total = reuse['source_total'], reuse['searched_total']
+            view_totals = reuse.get('view_totals') or {}
         else:
             try:
                 matched = con.execute(f'select count(*) from ({sql}) _q', params).fetchone()[0]
@@ -616,89 +655,119 @@ def discover_queries(catalog_path: Path, request: dict, *, output_dir: Path,
                         known[name] = 'view unavailable'
                 raise ValueError(f'查询无法执行：{str(error)[:400]}；已知字段：'
                                  f'{json.dumps(known, ensure_ascii=False)[:2000]}') from error
-        source_total = totals.get(view)
-        searched_total = sum(totals.get(v, 0) for v in referenced) or source_total
+            source_total = totals.get(view)
+            searched_total = sum(totals.get(v, 0) for v in referenced) or source_total
+            view_totals = {v: totals.get(v) for v in referenced}
         receipt = {'view': view, 'query_id': query_id, 'sql': sql, 'params': params,
                    'as_of': catalog['as_of'], 'formation_date': catalog['formation_date'],
                    'action_date': catalog.get('action_date'), 'source_total': source_total,
-                   'searched_total': searched_total, 'universe_total': totals.get('universe'),
-                   'view_totals': {v: totals.get(v) for v in referenced},
+                   'searched_total': searched_total, 'universe_total': totals.get('universe') if totals else None,
+                   'view_totals': view_totals,
                    'matched_count': int(matched), 'returned_count': len(rows),
                    'offset': offset, 'page_size': page_size,
                    'next_offset': offset + len(rows) if offset + len(rows) < matched else None,
                    'columns': columns,
                    'source_ref': f"neutral:{CANONICAL_SOURCE.get(view, view)}",
-                   'coverage_gap': [f'{v}: registered view is empty' for v in referenced if not totals.get(v)],
+                   'coverage_gap': [f'{v}: registered view is empty' for v in referenced if not view_totals.get(v)],
                    'full_result_file': str(rows_file),
                    'full_result_format': 'jsonl; one JSON array per row, column order = columns',
-                   'scanned_all': True, 'partial': False}
-        _write_local(queries_dir / f'{stem}-receipt.json', receipt)
+                   'scanned_all': True, 'partial': False, 'partial_note': None,
+                   'oversized_rows': None, 'oversized_next_part': None}
         if not reused_stored_result:
-            record = {'seq': len(history) + 1, 'query_id': query_id, 'stem': stem, 'view': view,
-                      'sql': sql, 'params': params, 'matched_count': int(matched),
-                      'source_total': source_total, 'searched_total': searched_total,
-                      'columns': columns,
-                      'full_result_file': str(rows_file),
-                      'receipt_file': str(queries_dir / f'{stem}-receipt.json'),
-                      'as_of': catalog['as_of'], 'formation_date': catalog['formation_date'],
-                      'catalog': str(catalog_path)}
-            history.append(record)
-            new_records.append(record)
+            _write_local(queries_dir / f'{stem}-receipt.json', receipt)
+            new_records.append({'seq': len(history) + len(new_records) + 1, 'query_id': query_id,
+                                'stem': stem, 'view': view,
+                                'sql': sql, 'params': params, 'matched_count': int(matched),
+                                'source_total': source_total, 'searched_total': searched_total,
+                                'columns': columns,
+                                'full_result_file': str(rows_file),
+                                'receipt_file': str(queries_dir / f'{stem}-receipt.json'),
+                                'as_of': catalog['as_of'], 'formation_date': catalog['formation_date'],
+                                'catalog': str(catalog_path)})
+            history.append(new_records[-1])
         if view == 'company':
             company_seen = True
-        responses.append(_bound_page(receipt, rows, queries_dir, stem))
+        responses.append(_bound_page(receipt, rows, queries_dir, stem, offset))
     with index_path.open('a', encoding='utf-8') as handle:
         for record in new_records:
             handle.write(json.dumps(record, ensure_ascii=False) + '\n')
     return {'profile': PROFILE, 'catalog': str(catalog_path), 'as_of': catalog['as_of'],
-            'formation_date': catalog['formation_date'], 'view_totals': totals,
+            'formation_date': catalog['formation_date'],
+            'view_totals': totals if totals is not None else 'reused_stored_results',
             'query_count': len(responses), 'responses': responses}
 
 
-def _bound_page(receipt: dict, rows: list[list], queries_dir: Path, stem: str) -> dict:
-    """One page: normal rows stay inline; oversized rows become segment stubs."""
-    bounded = dict(receipt)
-    normal, stubs = [], []
+def _bound_page(receipt: dict, rows: list[list], queries_dir: Path, stem: str, offset: int) -> dict:
+    """Assemble ONE page under the whole-response budget.
+
+    Normal rows pack until the budget; an oversized row is stored whole and
+    represented by a single-segment stub whose next segments come via --part.
+    Normal rows after an oversized row still appear on this page.
+    """
+    budget = LIST_PAGE_CHARS - 1500
+    normal, stubs, stub_segments = [], [], 0
+    used = 0
     for index, row in enumerate(rows):
-        if len(json.dumps(row, ensure_ascii=False)) <= LIST_PAGE_CHARS:
+        rendered = len(json.dumps(row, ensure_ascii=False))
+        if rendered <= budget:
+            if used + rendered > budget and normal:
+                # budget exhausted: report the page up to here; remaining rows
+                # are fetched by next_offset (unchanged full-result cursor)
+                break
             normal.append(row)
+            used += rendered
             continue
-        part_id = f'{stem}-row-{receipt["offset"] + index}'
+        part_id = f'{stem}-row-{offset + index}'
         path = queries_dir / f'{part_id}.json'
-        _write_local(path, {'row_index': receipt['offset'] + index, 'columns': receipt['columns'],
-                            'row': row})
-        stubs.append({'row_index': receipt['offset'] + index, 'oversized': True, 'part_id': part_id,
-                      'first_segment': _segment_json_object(
-                          dict(zip(receipt['columns'], row)), limit=LONG_FIELD_SEGMENT_CHARS)[0]
-                      if row else None,
-                      'note': '超长行已按字段分片；用 discover --part <part_id> 取全部片段'})
+        _write_local(path, {'row_index': offset + index, 'columns': receipt['columns'], 'row': row})
+        row_obj = dict(zip(receipt['columns'], row))
+        segments = _segment_json_object(row_obj, limit=max(2000, budget - 500))
+        stub_segments += len(segments)
+        stubs.append({'row_index': offset + index, 'oversized': True, 'part_id': part_id,
+                      'segment_count': len(segments),
+                      'first_segment': segments[0] if segments else None,
+                      'next_segment_part': (f'{part_id}#1' if len(segments) > 1 else None),
+                      'note': '超长行已整行存本地；用 discover --part <part_id> 逐段续读，'
+                              '本页其余普通行照常返回'})
+        used += len(json.dumps(stubs[-1], ensure_ascii=False)) + 400
+    bounded = dict(receipt)
     bounded['rows'] = normal
-    bounded['oversized_rows'] = stubs
-    bounded['partial'] = bool(stubs)
+    bounded['returned_count'] = len(normal)
+    consumed = len(normal)
+    bounded['next_offset'] = (offset + consumed if offset + consumed < receipt['matched_count'] else None)
     if stubs:
-        bounded['partial_note'] = ('超长行未内联返回，普通行保留在本页；'
-                                   '超长行片段经 --part 续读，未返回部分不计已读')
+        bounded['partial'] = True
+        bounded['oversized_rows'] = stubs
+        bounded['partial_note'] = ('超长行未内联返回；逐段用 --part 续读；'
+                                   '普通行保留在本页且后续行经 next_offset 续取')
     return bounded
 
 
 def _discover_continuation(catalog_path: Path, queries_dir: Path, history: list[dict],
                            part: str) -> dict:
-    """Executable continuation for oversized rows: reads the stored full row."""
-    record = next((h for h in history if part.startswith(h['stem'] + '-row-')), None)
+    """Executable continuation for oversized rows: ONE segment per call."""
+    base_id, separator, segment_no = part.partition('#')
+    next_index = int(segment_no) if separator else 0
+    record = next((h for h in history if base_id.startswith(h['stem'] + '-row-')), None)
     if record is None or not _identity_matches(record, catalog_path):
         raise ValueError(f'续读ID不属于当前catalog身份：{part}')
-    path = queries_dir / f'{part}.json'
+    path = queries_dir / f'{base_id}.json'
     if not path.exists():
         raise ValueError(f'未找到续读片段文件：{path}')
     stored = json.loads(path.read_text(encoding='utf-8'))
     row = stored['row']
-    segments = _segment_json_object(dict(zip(stored['columns'], row)), limit=LONG_FIELD_SEGMENT_CHARS)
-    return {'profile': PROFILE, 'part': part, 'row_index': stored['row_index'],
-            'columns': stored['columns'], 'segments': segments,
-            'segment_count': len(segments), 'query_id': record['query_id'],
+    segments = _segment_json_object(dict(zip(stored['columns'], row)),
+                                    limit=LIST_PAGE_CHARS - 2500)
+    index = max(0, min(next_index, len(segments) - 1))
+    segment = dict(segments[index])
+    return {'profile': PROFILE, 'part': f'{base_id}#{index}',
+            'row_index': stored['row_index'], 'columns': stored['columns'],
+            'segment': segment, 'segment_index': index, 'segment_count': len(segments),
+            'next_segment_part': (f'{base_id}#{index + 1}' if index + 1 < len(segments) else None),
+            'query_id': record['query_id'],
             'as_of': record['as_of'], 'formation_date': record['formation_date'],
             'full_result_file': record['full_result_file'],
-            'note': '同一请求的已存结果续读；未重新扫描源数据'}
+            'note': '同一请求的已存结果续读；一次返回一个字段分段；未重新扫描源数据'}
 
 
 def _write_local(path: Path, obj: Any) -> None:
@@ -723,22 +792,66 @@ def _scope_hash(payload: dict) -> str:
                                      default=str).encode()).hexdigest()[:16]
 
 
-def _split_entries(projected: dict, category: str, target_chars: int) -> list[dict]:
-    """Split a category projection into complete-row/event entries.
+def _row_chars(row: dict) -> int:
+    return len(json.dumps(row, ensure_ascii=False))
 
-    Identity sections stay whole; long list sections are chunked so one entry
-    never exceeds the page target; nothing is dropped or truncated.
+
+def _field_segments(section: str, row_index: int, row: dict, budget: int) -> list[dict]:
+    """Segment one oversized row by whole fields, then by char ranges inside a
+    single over-long string field, keeping explicit positions and types."""
+    small = {k: v for k, v in row.items()
+             if not isinstance(v, str) or len(v) <= budget}
+    big = [(k, v) for k, v in row.items() if isinstance(v, str) and len(v) > budget]
+    segments: list[dict] = []
+    base = {'section': section, 'row_index': row_index,
+            'row_key_fields': {k: row.get(k) for k in ('ts_code', 'announcement_id',
+                                                       'report_period', 'trade_date') if k in row}}
+    if small or not big:
+        segments.append({**base, 'fields': small, 'char_start': 0, 'char_end': 0,
+                         'total_row_chars': _row_chars(row), 'value_type': 'partial_fields'})
+    for key, value in big:
+        for offset in range(0, len(value), budget):
+            segments.append({**base, 'field_path': key, 'text': value[offset:offset + budget],
+                             'char_start': offset, 'char_end': min(offset + budget, len(value)),
+                             'total_field_chars': len(value), 'value_type': 'string_span'})
+    for index, segment in enumerate(segments):
+        segment['segment_index'] = index
+        segment['segment_count'] = len(segments)
+    return segments
+
+
+def _split_entries(projected: dict, category: str, target_chars: int) -> list[dict]:
+    """Split a projection into entries measured row by row.
+
+    Every list section keeps row positions; heterogeneous rows are packed by
+    their real serialized size (never estimated from the first row). A single
+    row that cannot fit becomes field segments with explicit positions.
     """
     entries: list[dict] = []
     for section, rows in projected.items():
         if section in IDENTITY_SECTIONS or not isinstance(rows, list) or not rows or not isinstance(rows[0], dict):
             entries.append({section: rows})
             continue
-        sample = len(json.dumps(rows[0], ensure_ascii=False)) + 64
-        chunk = max(1, min(len(rows), target_chars // max(sample, 1)))
-        for start in range(0, len(rows), chunk):
-            entries.append({section: rows[start:start + chunk],
-                            'section_row_range': [start, min(start + chunk, len(rows))]})
+        group: list[dict] = []
+        group_chars = 0
+        for index, row in enumerate(rows):
+            rendered = _row_chars(row) + 96  # shell keys/escaping overhead per entry
+            if rendered > target_chars:
+                if group:
+                    entries.append({section: group, 'section_row_range': [index - len(group), index]})
+                    group, group_chars = [], 0
+                for segment in _field_segments(section, index, row, max(2000, target_chars - 1500)):
+                    entries.append({'__field_segment__': segment,
+                                    'section_row_range': [index, index + 1]})
+                continue
+            if group_chars + rendered > target_chars and group:
+                entries.append({section: group, 'section_row_range': [index - len(group), index]})
+                group, group_chars = [], 0
+            group.append(row)
+            group_chars += rendered
+        if group:
+            entries.append({section: group,
+                            'section_row_range': [len(rows) - len(group), len(rows)]})
     return entries
 
 
@@ -756,7 +869,7 @@ def facts_compact(catalog_path: Path, *, codes: list[str], categories: list[str]
     """
     from stock_analyzer.ops import selection_parallel as trial
     catalog_path = Path(catalog_path)
-    catalog = _check_catalog(catalog_path)
+    catalog = _catalog(catalog_path)  # identity only; full source check happens on fresh compute (E6)
     from stock_analyzer.ops.selection_parallel import CATEGORIES as categories_all
     fields = fields or {}
     unknown = set(categories) - set(categories_all)
@@ -779,12 +892,15 @@ def facts_compact(catalog_path: Path, *, codes: list[str], categories: list[str]
              'source_versions': catalog.get('source_versions')}
     scope_id = _scope_hash(scope)
     if part is not None:
+        # Continuation reuses the stored page: no catalog-wide source check here;
+        # the scope hash above already binds request/projection/source version.
         entry = registry['parts'].get(part)
         if entry is None or entry.get('scope') != scope_id:
             raise ValueError(f'续读ID不属于当前请求/投影/来源版本：{part}')
         page = json.loads((parts_root / f'{part}.json').read_text(encoding='utf-8'))
         page['from_part_request'] = part
         return page
+    catalog = _check_catalog(catalog_path)  # fresh computation only (E6)
     full = trial.facts(catalog_path, codes=list(codes), categories=list(categories), max_chars=0,
                        group_codes=list(group_codes), sector_snapshots=list(sector_snapshots),
                        sector_dates=list(sector_dates))
@@ -808,13 +924,14 @@ def facts_compact(catalog_path: Path, *, codes: list[str], categories: list[str]
                     f"fields[{category}][{section}] 含未知字段 {wrong}；该section合法字段：{sorted(legal)[:80]}")
         entries = _split_entries(projected, category, FACTS_PAGE_CHARS - 4000)
         for position, entry in enumerate(entries):
+            payload = {k: v for k, v in entry.items() if k != 'section_row_range'}
             reads.append({'source_ref': read['source_ref'], 'ts_code': read['ts_code'],
                           'category': category, 'source_version': read.get('source_version'),
                           'query_scope': {**read.get('query_scope', {}), 'profile': PROFILE,
                                           'fields': fields.get(category) or 'default_projection',
                                           'scope_id': scope_id},
                           'part_index': position, 'part_count': len(entries),
-                          'result': {'facts': {k: v for k, v in entry.items() if k != 'section_row_range'},
+                          'result': {'facts': payload,
                                      **({'section_row_range': entry['section_row_range']}
                                         if 'section_row_range' in entry else {})}})
     if unknown_field_errors:
@@ -851,6 +968,71 @@ def facts_compact(catalog_path: Path, *, codes: list[str], categories: list[str]
                 'identity': full.get('identity'), 'gaps': full.get('gaps', []), 'next_part': None,
                 'full_output': str(output) if output else None}
     return page_objects[0]
+
+
+def reassemble_category(reads: list[dict]) -> dict:
+    """Deterministically rebuild one category's facts from its page entries.
+
+    List sections concatenate by validated section_row_range (order/continuity
+    checked; identical repeated fragments dedup; conflicting content at the
+    same position is an error). Field segments concatenate by row/field/offset.
+    Identity sections keep the first value; an equal duplicate is dropped and a
+    conflicting one is an error. Never dict.update over section lists.
+    """
+    merged: dict = {}
+    indexed: dict[str, list] = {}
+    segments: dict[tuple, list[dict]] = {}
+    for read in sorted(reads, key=lambda r: r.get('part_index', 0)):
+        facts_payload = read.get('result', {}).get('facts', {}) or {}
+        range_info = read.get('result', {}).get('section_row_range')
+        for key, value in facts_payload.items():
+            if key == '__field_segment__':
+                seg = value
+                k = (seg.get('section'), seg.get('row_index'), seg.get('field_path'))
+                segments.setdefault(k, []).append(seg)
+            elif isinstance(value, list):
+                indexed.setdefault(key, []).append((range_info, value))
+            elif key in merged:
+                if merged[key] != value:
+                    raise ValueError(f'identity section {key} 冲突：{merged[key]!r} vs {value!r}')
+            else:
+                merged[key] = value
+    for key, parts in indexed.items():
+        ordered: list = []
+        seen_ranges: list[tuple[int, int]] = []
+        slots: list[tuple[tuple | None, list]] = []
+        for range_info, rows in parts:
+            if range_info is not None:
+                start_, end_ = range_info
+                duplicate = False
+                for index, (other, other_rows) in enumerate(
+                        [(r, s[1]) for r, s in zip(seen_ranges, slots)]):
+                    if not (end_ <= other[0] or start_ >= other[1]):
+                        if other_rows == rows:
+                            duplicate = True  # identical repeated fragment: dedup
+                            break
+                        raise ValueError(f'section {key} 相同位置内容冲突: {[start_, end_]}')
+                if duplicate:
+                    continue
+                seen_ranges.append((start_, end_))
+            slots.append((tuple(range_info) if range_info is not None else None, rows))
+        slots.sort(key=lambda item: (item[0][0] if item[0] is not None else 1 << 30, item[0][1] if item[0] is not None else 0))
+        for _, rows in slots:
+            ordered.extend(rows)
+        merged[key] = ordered
+    for (section, row_index, field_path), segs in segments.items():
+        segs.sort(key=lambda s: (s.get('segment_index', 0), s.get('char_start', 0)))
+        text = ''.join(s.get('text', '') for s in segs if s.get('value_type') == 'string_span')
+        partial = next((s for s in segs if s.get('value_type') == 'partial_fields'), None)
+        bucket = merged.setdefault(section, [])
+        while len(bucket) <= row_index:
+            bucket.append({})
+        if field_path:
+            bucket[row_index][field_path] = text
+            bucket[row_index]['__restored_from_field_segments__'] = True
+        elif partial is not None:
+            bucket[row_index].update(partial.get('fields', {}))
+    return merged
 
 
 def _project_facts(facts: dict, category: str, requested: dict) -> dict:
@@ -954,6 +1136,16 @@ def evidence_request(catalog_path: Path, context_dir: Path, request: dict) -> di
             if (directory / 'receipt.json').exists():
                 receipt = json.loads((directory / 'receipt.json').read_text(encoding='utf-8'))
                 fetched_now = False
+                existing = receipt.get('announcement') or {}
+                for key in ('ts_code', 'announcement_id', 'title'):
+                    if str(existing.get(key)) != str(announcement.get(key)):
+                        raise ValueError(f'locate 复用核验：已存在目录的公告身份与冻结索引不一致：{key}；'
+                                         '不能因目录存在直接返回另一份资料')
+                if existing.get('available_at'):
+                    existing_time = datetime.fromisoformat(str(existing['available_at']).replace('Z', '+00:00'))
+                    index_time = datetime.fromisoformat(str(announcement['available_at']).replace('Z', '+00:00'))
+                    if existing_time != index_time:
+                        raise ValueError('locate 复用核验：同ID公开时间不一致；不能把截止后版本当同版')
             else:
                 receipt_path = fetch_announcement(announcement, directory, as_of=cutoff,
                                                   existing_receipts=existing_receipts)
@@ -988,85 +1180,123 @@ def evidence_request(catalog_path: Path, context_dir: Path, request: dict) -> di
                 raise ValueError(f'未找到原件 receipt：{receipt_path}；不能把 receipt 存在当已核实正文')
             receipt = json.loads(receipt_path.read_text(encoding='utf-8'))
             announced = receipt.get('announcement') or {}
-            # Every read re-binds the document to THIS catalog's frozen index and cutoff.
+            # Every read re-binds the document to THIS catalog's frozen index and cutoff (E3).
             announcement, stamp = _announcement_con(con, catalog_path,
                                                     document.get('ts_code') or announced.get('ts_code'),
                                                     document.get('announcement_id') or announced.get('announcement_id'))
             if stamp is None or stamp.tzinfo is None or stamp > cutoff:
                 raise ValueError('read 阶段核验：公告公开时点晚于本catalog截止；未来信息不能进入研究上下文')
             for key in ('ts_code', 'announcement_id'):
-                if str(announced.get(key)) != str(announcement.get(key if key == 'ts_code' else 'announcement_id')):
+                receipt_key = announced.get(key)
+                index_key = announcement.get(key)
+                if str(receipt_key) != str(index_key):
                     raise ValueError(f'read 阶段核验：receipt 公告身份与冻结索引不一致：{key}')
+            if announced.get('title') and str(announced.get('title')) != str(announcement.get('title')):
+                raise ValueError('read 阶段核验：同ID不同标题（版本冲突）；索引早、receipt晚不能当同版')
+            if announced.get('available_at'):
+                receipt_time = datetime.fromisoformat(str(announced['available_at']).replace('Z', '+00:00'))
+                index_time = datetime.fromisoformat(str(announcement['available_at']).replace('Z', '+00:00'))
+                if receipt_time != index_time:
+                    raise ValueError('read 阶段核验：同ID公开时间不一致（索引早、receipt晚）；'
+                                     '截止后版本不能进入形成日')
+            # receipt and stored text must still correspond (existing original validator)
+            from stock_analyzer.ops.official_evidence import read_evidence
+            read_evidence(receipt_path, announced.get('url') or receipt.get('url'),
+                          datetime.fromisoformat(receipt['retrieved_at']))
             text = (directory / 'text.txt').read_text(encoding='utf-8')
             segments = _document_segments(text)
             start_page, end_page = document.get('start_page'), document.get('end_page')
             start_line, end_line = document.get('start_line'), document.get('end_line')
+            start_offset = int(document.get('start_offset') or 0)
             if start_page is not None or end_page is not None:
                 if start_line is not None or end_line is not None:
                     raise ValueError('页码与行号不能混用；html 原件使用 start_line/end_line')
                 selected = [s for s in segments if s.get('page') is not None
                             and int(start_page) <= s['page'] <= int(end_page or start_page)]
-                locator = {'start_page': start_page, 'end_page': end_page or start_page}
+                requested_locator = {'start_page': start_page, 'end_page': end_page or start_page}
             elif start_line is not None or end_line is not None:
                 selected = [s for s in segments
                             if int(start_line) <= s.get('line_start', 0) <= int(end_line or start_line)]
-                locator = {'start_line': start_line, 'end_line': end_line or start_line}
+                requested_locator = {'start_line': start_line, 'end_line': end_line or start_line}
             else:
                 selected = segments
-                locator = {'full_document': True}
+                requested_locator = {'full_document': True}
             if not selected:
                 raise ValueError('请求范围没有命中任何页段；无有效页码时返回行号，不编页码')
-            start_offset = int(document.get('start_offset') or 0)
-            body = '\n'.join(text[s['start']:s['end']].strip() if 'start' in s else s.get('text', '')
-                             for s in selected)
-            if start_offset:
-                if not 0 <= start_offset <= len(body):
-                    raise ValueError('start_offset 超出所选页段正文长度；不能编造偏移')
-                body = body[start_offset:]
-            units = []  # (page_text, continuation_request_for_next_unit)
-            for s in selected:
-                seg_text = text[s['start']:s['end']].strip() if 'start' in s else s.get('text', '')
-                if s.get('page') is not None:
-                    seg_locator = {'start_page': s['page'], 'end_page': s['page']}
+            # body + span map in body coordinates; spans carry the real page/lines
+            body_parts, spans = [], []
+            position = 0
+            for index, segment in enumerate(selected):
+                seg_text = text[segment['start']:segment['end']] if 'start' in segment else segment.get('text', '')
+                if index:
+                    body_parts.append('\n')
+                    position += 1
+                span = {'char_start': position, 'char_end': position + len(seg_text)}
+                if segment.get('page') is not None:
+                    span['page'] = segment['page']
                 else:
-                    seg_locator = {'start_line': s['line_start'], 'end_line': s['line_start'] + 200}
-                if len(seg_text) <= FACTS_PAGE_CHARS:
-                    units.append((seg_text, None))
+                    span['lines'] = [segment.get('line_start'), segment.get('line_end')]
+                spans.append(span)
+                body_parts.append(seg_text)
+                position += len(seg_text)
+            body = ''.join(body_parts)
+            if not 0 <= start_offset <= len(body):
+                raise ValueError('start_offset 超出所选页段正文长度；不能编造偏移')
+            consumed_end = min(len(body), start_offset + FACTS_PAGE_CHARS)
+            page_text = body[start_offset:consumed_end]
+            returned_spans = []
+            for span in spans:
+                s0, s1 = span['char_start'], span['char_end']
+                if s1 <= start_offset or s0 >= consumed_end:
                     continue
-                for offset in range(0, len(seg_text), FACTS_PAGE_CHARS):
-                    piece = seg_text[offset:offset + FACTS_PAGE_CHARS]
-                    cont = None
-                    if offset + FACTS_PAGE_CHARS < len(seg_text):
-                        cont = {'action': 'read', 'evidence_id': evidence_id,
-                                'receipt_ref': str(receipt_path.relative_to(context_dir)),
-                                **seg_locator, 'start_offset': offset + FACTS_PAGE_CHARS}
-                    units.append((piece, cont))
-            page_units, size = [], 0
-            for piece, cont in units:
-                if page_units and size + len(piece) > FACTS_PAGE_CHARS:
-                    break
-                page_units.append((piece, cont))
-                size += len(piece)
-            page_text = '\n'.join(piece for piece, _ in page_units) or body[:0]
-            next_request = None
-            last_cont = next((c for _, c in reversed(page_units) if c), None)
-            if len(page_units) < len(units):
-                if last_cont is not None:
-                    next_request = {'note': '本页已按完整段落/字符偏移截断；把 next_request 放入新的 evidence 请求文件继续',
-                                    'next_request': last_cont}
+                overlap_start = max(s0, start_offset)
+                overlap_end = min(s1, consumed_end)
+                entry = {'char_start': overlap_start - s0, 'char_end': overlap_end - s0,
+                         'text': body[overlap_start:overlap_end]}
+                if 'page' in span:
+                    entry['page'] = span['page']
                 else:
-                    tail = units[len(page_units)][0]
-                    next_request = {'note': '仍有后续页段；用相同入口缩小范围续读',
-                                    'next_request': {'action': 'read', 'evidence_id': evidence_id,
-                                                     'receipt_ref': str(receipt_path.relative_to(context_dir)),
-                                                     'start_line': (selected[-1].get('line_end')
-                                                                    or selected[-1].get('line_start', 0)) + 1,
-                                                     'end_line': (selected[-1].get('line_end')
-                                                                  or selected[-1].get('line_start', 0)) + 200}}
+                    entry['lines'] = span['lines']
+                returned_spans.append(entry)
+            next_request = None
+            if consumed_end < len(body):
+                containing = next(span for span in spans
+                                  if span['char_start'] <= consumed_end < span['char_end']) if any(
+                    span['char_start'] <= consumed_end < span['char_end'] for span in spans) else None
+                if containing is None:
+                    following = next((span for span in spans if span['char_start'] >= consumed_end), None)
+                    if following is None:
+                        following = spans[-1]
+                    if 'page' in following:
+                        advance = {'action': 'read', 'evidence_id': evidence_id,
+                                   'receipt_ref': str(receipt_path.relative_to(context_dir)),
+                                   'start_page': following['page'], 'end_page': following['page'],
+                                   'start_offset': max(0, consumed_end - following['char_start'])}
+                    else:
+                        advance = {'action': 'read', 'evidence_id': evidence_id,
+                                   'receipt_ref': str(receipt_path.relative_to(context_dir)),
+                                   'start_line': following['lines'][0], 'end_line': following['lines'][1],
+                                   'start_offset': max(0, consumed_end - following['char_start'])}
+                elif 'page' in containing:
+                    advance = {'action': 'read', 'evidence_id': evidence_id,
+                               'receipt_ref': str(receipt_path.relative_to(context_dir)),
+                               'start_page': containing['page'], 'end_page': containing['page'],
+                               'start_offset': consumed_end - containing['char_start']}
+                else:
+                    advance = {'action': 'read', 'evidence_id': evidence_id,
+                               'receipt_ref': str(receipt_path.relative_to(context_dir)),
+                               'start_line': containing['lines'][0], 'end_line': containing['lines'][1],
+                               'start_offset': consumed_end - containing['char_start']}
+                next_request = {'note': '本页按字符预算截断；把 next_request 原样放入新的 documents 列表继续',
+                                'next_request': advance}
             results.append({'evidence_id': evidence_id, 'action': 'read', 'read': True,
                             'receipt_ref': str(receipt_path.relative_to(context_dir)),
                             'url': receipt.get('url'), 'retrieved_at': receipt.get('retrieved_at'),
-                            'locator': locator, 'selected_segments': len(selected),
+                            'requested_locator': requested_locator,
+                            'body_chars': len(body),
+                            'cursor': {'start': start_offset, 'end': consumed_end,
+                                       'exhausted': consumed_end >= len(body)},
+                            'returned_spans': returned_spans,
                             'text': page_text, 'page_chars': len(page_text),
                             'next_part': next_request,
                             'verified_against_catalog': {'as_of': catalog['as_of'],

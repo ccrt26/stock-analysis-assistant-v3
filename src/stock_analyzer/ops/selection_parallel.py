@@ -7,6 +7,7 @@ import json
 import os
 import selectors
 import signal
+import threading
 import time as clock_time
 import re
 import shlex
@@ -792,75 +793,127 @@ def _write_usage_progress(path: Path, usage: dict, tools: int, started: float) -
         pass
 
 
+def _terminate_owned_process_group(proc: subprocess.Popen, *, term_grace: float = 2.0) -> None:
+    """Terminate and reap ONLY the process group this executor created."""
+    if proc.poll() is not None:
+        return
+    try:
+        os.killpg(proc.pid, signal.SIGTERM)
+    except (ProcessLookupError, PermissionError):
+        pass
+    deadline = clock_time.monotonic() + term_grace
+    while clock_time.monotonic() < deadline and proc.poll() is None:
+        clock_time.sleep(0.05)
+    if proc.poll() is None:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+    try:
+        proc.wait(timeout=3)
+    except subprocess.TimeoutExpired:
+        pass
+    for stream in (proc.stdout, proc.stderr, proc.stdin):
+        try:
+            if stream is not None:
+                stream.close()
+        except OSError:
+            pass
+
+
 def _execute_research(cmd: list[str], cwd: Path, prompt: str, events_path: Path,
                       stderr_path: Path, limits: dict, usage_mirror: Path | None = None) -> dict:
-    """Stream only this child process; enforce observable tool/time budgets."""
+    """Stream only this child process; enforce observable tool/time budgets.
+
+    Everything after a successful Popen lives inside one try/finally: on any
+    exit path (normal completion, budget stop, KeyboardInterrupt, SIGTERM,
+    I/O error) this executor's own process group is terminated and reaped.
+    A local SIGTERM handler turns external termination into the same cleanup;
+    the original handler is restored afterwards. No other session is touched.
+    """
     with events_path.open('wb') as events, stderr_path.open('wb') as errors:
         proc = subprocess.Popen(cmd, cwd=cwd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE, start_new_session=True, bufsize=0)
-        assert proc.stdin and proc.stdout and proc.stderr
-        proc.stdin.write(prompt.encode('utf-8'))
-        proc.stdin.close()
         selector = selectors.DefaultSelector()
-        selector.register(proc.stdout, selectors.EVENT_READ, 'stdout')
-        selector.register(proc.stderr, selectors.EVENT_READ, 'stderr')
-        partial = b''
-        tools = 0
-        tokens = None
-        budget_exceeded = None
-        post_run_budget = None
-        stop_at = None
-        termination_sent = False
-        kill_sent = False
-        token_live_observed = False
-        session_id = None
-        turn_completed = False
-        rollout_path = None
-        rollout_position = 0
-        rollout_partial = b''
-        rollout_polled_at = 0.0
-        rollout_usage_seen = False
-        started = clock_time.monotonic()
-        def inspect(line: bytes) -> None:
-            nonlocal tools, tokens, budget_exceeded, post_run_budget, token_live_observed, session_id, turn_completed
+        previous_sigterm = None
+
+        class _Cancelled(BaseException):
+            pass
+
+        def _on_sigterm(signum, frame):
+            raise _Cancelled(f'SIGTERM received ({signum})')
+
+        if threading.current_thread() is threading.main_thread():
             try:
-                event = json.loads(line)
-            except (json.JSONDecodeError, UnicodeDecodeError):
-                return
-            if event.get('type') == 'thread.started' and re.fullmatch(r'[0-9a-f-]{36}', str(event.get('thread_id') or '')):
-                session_id = event['thread_id']
-            item = event.get('item') or {}
-            if event.get('type') == 'item.completed' and item.get('type') == 'command_execution':
-                tools += 1
-                if tools > limits['max_tool_commands']:
-                    budget_exceeded = 'max_tool_commands'
-            if event.get('type') == 'turn.completed':
-                turn_completed = True
-            usage = event.get('usage')
-            if isinstance(usage, dict):
-                tokens = usage
-                _write_usage_progress(events_path.parent / 'usage-progress.json', usage, tools, started)
-                if usage_mirror is not None:
-                    _write_usage_progress(usage_mirror, usage, tools, started)
-                token_live_observed = token_live_observed or event.get('type') != 'turn.completed'
-                exceeded = None
-                if usage.get('input_tokens', 0) >= limits['max_input_tokens']:
-                    exceeded = 'max_input_tokens'
-                if usage.get('output_tokens', 0) >= limits['max_output_tokens']:
-                    exceeded = 'max_output_tokens'
-                if event.get('type') == 'turn.completed':
-                    # Let the CLI flush its final public output before rejecting the run.
-                    post_run_budget = exceeded
-                elif exceeded:
-                    budget_exceeded = exceeded
+                previous_sigterm = signal.signal(signal.SIGTERM, _on_sigterm)
+            except ValueError:
+                previous_sigterm = None
+        exit_code: int | None = None
+        cancelled = None
         try:
+            assert proc.stdin and proc.stdout and proc.stderr
+            proc.stdin.write(prompt.encode('utf-8'))
+            proc.stdin.close()
+            selector.register(proc.stdout, selectors.EVENT_READ, 'stdout')
+            selector.register(proc.stderr, selectors.EVENT_READ, 'stderr')
+            partial = b''
+            tools = 0
+            tokens = None
+            budget_exceeded = None
+            post_run_budget = None
+            stop_at = None
+            termination_sent = False
+            kill_sent = False
+            token_live_observed = False
+            session_id = None
+            turn_completed = False
+            rollout_path = None
+            rollout_position = 0
+            rollout_partial = b''
+            rollout_polled_at = 0.0
+            rollout_usage_seen = False
+            started = clock_time.monotonic()
+
+            def inspect(line: bytes) -> None:
+                nonlocal tools, tokens, budget_exceeded, post_run_budget, token_live_observed, session_id, turn_completed
+                try:
+                    event = json.loads(line)
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    return
+                if event.get('type') == 'thread.started' and re.fullmatch(r'[0-9a-f-]{36}', str(event.get('thread_id') or '')):
+                    session_id = event['thread_id']
+                item = event.get('item') or {}
+                if event.get('type') == 'item.completed' and item.get('type') == 'command_execution':
+                    tools += 1
+                    if tools > limits['max_tool_commands']:
+                        budget_exceeded = 'max_tool_commands'
+                if event.get('type') == 'turn.completed':
+                    turn_completed = True
+                usage = event.get('usage')
+                if isinstance(usage, dict):
+                    tokens = usage
+                    _write_usage_progress(events_path.parent / 'usage-progress.json', usage, tools, started)
+                    if usage_mirror is not None:
+                        _write_usage_progress(usage_mirror, usage, tools, started)
+                    token_live_observed = token_live_observed or event.get('type') != 'turn.completed'
+                    exceeded = None
+                    if usage.get('input_tokens', 0) >= limits['max_input_tokens']:
+                        exceeded = 'max_input_tokens'
+                    if usage.get('output_tokens', 0) >= limits['max_output_tokens']:
+                        exceeded = 'max_output_tokens'
+                    if event.get('type') == 'turn.completed':
+                        # Let the CLI flush its final public output before rejecting the run.
+                        post_run_budget = exceeded
+                    elif exceeded:
+                        budget_exceeded = exceeded
+
             while selector.get_map() or proc.poll() is None:
                 now = clock_time.monotonic()
                 if session_id and not turn_completed and now - rollout_polled_at >= 0.5:
                     rollout_polled_at = now
                     if rollout_path is None:
-                        home = Path(os.environ.get('CODEX_HOME') or (Path.home()/'.codex'))
-                        matches = list((home/'sessions').glob(f'????/??/??/rollout-*{session_id}.jsonl'))
+                        home = Path(os.environ.get('CODEX_HOME') or (Path.home() / '.codex'))
+                        matches = list((home / 'sessions').glob(f'????/??/??/rollout-*{session_id}.jsonl'))
                         if len(matches) == 1:
                             rollout_path = matches[0]
                     if rollout_path is not None:
@@ -880,10 +933,10 @@ def _execute_research(cmd: list[str], cwd: Path, prompt: str, events_path: Path,
                                 usage = (payload.get('info') or {}).get('total_token_usage')
                                 if isinstance(usage, dict):
                                     rollout_usage_seen = True
-                                    inspect(json.dumps({'type':'live.token_usage','usage':usage}).encode())
+                                    inspect(json.dumps({'type': 'live.token_usage', 'usage': usage}).encode())
                 if budget_exceeded and stop_at is None:
                     stop_at = clock_time.monotonic()
-                if not budget_exceeded and clock_time.monotonic()-started >= limits['max_wall_seconds']:
+                if not budget_exceeded and clock_time.monotonic() - started >= limits['max_wall_seconds']:
                     budget_exceeded = 'max_wall_seconds'
                 if budget_exceeded and not termination_sent:
                     try:
@@ -904,7 +957,7 @@ def _execute_research(cmd: list[str], cwd: Path, prompt: str, events_path: Path,
                         while b'\n' in partial:
                             line, partial = partial.split(b'\n', 1)
                             inspect(line)
-                if budget_exceeded and not kill_sent and stop_at is not None and clock_time.monotonic()-stop_at > 2:
+                if budget_exceeded and not kill_sent and stop_at is not None and clock_time.monotonic() - stop_at > 2:
                     try:
                         os.killpg(proc.pid, signal.SIGKILL)
                     except ProcessLookupError:
@@ -913,11 +966,21 @@ def _execute_research(cmd: list[str], cwd: Path, prompt: str, events_path: Path,
             if partial:
                 inspect(partial)
             exit_code = proc.wait(timeout=3)
+        except (_Cancelled, KeyboardInterrupt) as error:
+            cancelled = str(error) or type(error).__name__
+            raise KeyboardInterrupt(f'research execution cancelled: {cancelled}') from None
         finally:
+            _terminate_owned_process_group(proc)
             selector.close()
+            if previous_sigterm is not None:
+                try:
+                    signal.signal(signal.SIGTERM, previous_sigterm)
+                except ValueError:
+                    pass
         budget_exceeded = budget_exceeded or post_run_budget
-        return {'exit_code': exit_code if not budget_exceeded else 124,
+        return {'exit_code': exit_code if not (budget_exceeded or cancelled) else 124,
                 'child_exit_code': exit_code, 'budget_exceeded': budget_exceeded,
+                'cancelled': bool(cancelled), 'cancel_reason': cancelled,
                 'tool_commands': tools, 'tokens': tokens,
                 'token_limit_mode': 'observed_events' if token_live_observed else 'post_run_only',
                 'token_usage_source': 'own_session_rollout' if rollout_usage_seen else 'stdout_events'}
@@ -1410,10 +1473,13 @@ def _observed_fact_reads(tools: list, ref: str) -> list[dict]:
             except (KeyError, json.JSONDecodeError):
                 continue
         else:
-            # compact parts are complete sections/rows of one scope: merge them all
-            merged: dict = {}
-            for index in range(count):
-                merged.update((parts.get(index) or {}).get('result', {}).get('facts', {}))
+            # compact parts carry positional row ranges: reassemble in order,
+            # never dict.update over section lists (audit E2)
+            from stock_analyzer.ops.selection_parallel_compact import reassemble_category
+            try:
+                merged = reassemble_category([parts[i] for i in range(count)])
+            except ValueError:
+                raise
             result = {'facts': merged}
         if result.get('facts'):
             complete.append({'source_ref': ref, 'ts_code': first.get('ts_code'),
@@ -1472,30 +1538,32 @@ def _save_official_evidence(obj: dict, context: Path, target: Path, cutoff: date
         if not successful_reads:
             raise ValueError('official evidence lacks a successful read in this run; '
                              'a stored receipt alone is not an adoption')
-        read_texts = [str(r.get('text') or '') for r in successful_reads if r.get('text')]
-        read_locators = [r.get('locator') or {} for r in successful_reads]
+        spans = [span for read_event in successful_reads
+                 for span in (read_event.get('returned_spans') or [])]
         for clause in clauses:
             if not isinstance(clause, dict) or not clause.get('quote'):
                 raise ValueError('each adopted clause needs an exact quote and its real locator')
             quote_condensed = re.sub(r'\s+', '', clause['quote'])
-            inside_read = any(quote_condensed and quote_condensed in re.sub(r'\s+', '', text)
-                              for text in read_texts)
-            if not inside_read:
-                raise ValueError('adopted clause is absent from the actually returned read text; '
-                                  'presence elsewhere in the download does not count as read')
-            locator_ok = False
-            if clause.get('page') is not None:
-                locator_ok = any(loc.get('start_page') is not None
-                                 and int(loc['start_page']) <= int(clause['page']) <= int(loc.get('end_page') or loc['start_page'])
-                                 for loc in read_locators)
-            elif isinstance(clause.get('lines'), list) and len(clause['lines']) == 2:
-                locator_ok = any(loc.get('start_line') is not None
-                                 and int(loc['start_line']) <= int(clause['lines'][0])
-                                 and int(clause['lines'][1]) <= int(loc.get('end_line') or loc['start_line'])
-                                 for loc in read_locators)
-            if not locator_ok:
-                raise ValueError('adopted clause locator does not match any successful read range '
-                                 '(pdf: page; html: lines)')
+            # quote AND its page/lines must belong to the SAME returned span (E3)
+            same_span = False
+            for span in spans:
+                span_text = re.sub(r'\s+', '', str(span.get('text') or ''))
+                if not (quote_condensed and quote_condensed in span_text):
+                    continue
+                if clause.get('page') is not None:
+                    if span.get('page') == int(clause['page']):
+                        same_span = True
+                        break
+                elif isinstance(clause.get('lines'), list) and len(clause['lines']) == 2:
+                    span_lines = span.get('lines') or [None, None]
+                    if (span_lines[0] is not None
+                            and int(span_lines[0]) <= int(clause['lines'][0])
+                            and int(clause['lines'][1]) <= int(span_lines[1])):
+                        same_span = True
+                        break
+            if not same_span:
+                raise ValueError('adopted quote 与 page/lines 不属于同一次实际返回的页段；'
+                                 'quote在其他页出现不算已读该页')
         destination = target/'official'/ident
         if destination.exists():
             if (destination/'receipt.json').read_bytes() != receipt_path.read_bytes():
@@ -1607,8 +1675,15 @@ def run_arm(day_dir: Path, *, method: str) -> dict:
     previous_attempts = sorted(attempts.glob('attempt-*'))
     reusable = next((a for a in reversed(previous_attempts) if (a/'invocation.json').exists() and _json(a/'invocation.json').get('exit_code') == 0 and (a/'raw-output.json').exists()), None)
     if reusable is not None and day['status'][method] == 'failed_validation':
-        attempt = reusable
+        attempt = reusable  # deterministic re-parse of the same finished output; no model call
         code, metadata = 0, _json(attempt/'invocation.json')
+    elif previous_attempts:
+        # A prior attempt failed (budget/cancel/upstream) and nothing qualified:
+        # never silently start attempt-002 (audit E4). The user must explicitly
+        # approve any further handling; existing state and usage stay untouched.
+        raise RuntimeError(
+            f'{method} 已有 {len(previous_attempts)} 次未合格尝试（状态 {day["status"][method]}）；'
+            f'不自动发起新模型调用。需用户另行明确批准后再处理；证据 {previous_attempts[-1]}')
     else:
         code, metadata = _invoke_model(context, _prompt(cfg, day, method, catalog_path), attempt, config_path=day_dir.parents[1] / 'experiment.json')
     if code == 0 and (metadata.get('actual_model'), metadata.get('actual_reasoning')) != (MODEL, EFFORT):
@@ -1627,6 +1702,10 @@ def run_arm(day_dir: Path, *, method: str) -> dict:
         if cfg.get('full_universe_replay'):
             _save_official_evidence(obj, context, day_dir/method, datetime.fromisoformat(day['as_of']),
                                     read_log=_successful_tool_results((attempt / 'events.jsonl').read_text(encoding='utf-8')))
+        # Final input binding before freezing a qualified result (audit E6):
+        # sources must be unchanged since prepare; on drift keep the public
+        # output, record not-qualified, and never auto-rerun.
+        _check_source_catalog(catalog_path)
         obj['run_id'] = f'{day["mode"]}:{day.get("replay_id") or day["action_date"]}:{method}'
         code_root = Path(cfg['code_root'])
         obj['program_ref'] = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=code_root,
@@ -2065,9 +2144,15 @@ def _csv_rows(rows: list[dict], fallback_columns: list[str]) -> str:
     return _csv_text(rows)
 
 
-def _synthetic_warehouse(base: Path, codes: list[str], dates: list[str]) -> Path:
-    """Deterministic synthetic price calendar/warehouse; no real future quotes."""
+def _synthetic_warehouse(base: Path, codes: list[str], dates: list[str],
+                         absent: set | None = None) -> Path:
+    """Deterministic synthetic price calendar/warehouse; no real future quotes.
+
+    `absent` holds (date, ts_code) pairs whose equity row is deliberately
+    missing so the missing-entry scenario keeps its own denominator.
+    """
     import pandas as pd
+    absent = absent or set()
     calendar_dir = base / 'facts/trade_calendar/cal_year=2026'
     calendar_dir.mkdir(parents=True, exist_ok=True)
     pd.DataFrame({'cal_date': dates, 'is_open': True}).to_parquet(
@@ -2077,6 +2162,8 @@ def _synthetic_warehouse(base: Path, codes: list[str], dates: list[str]) -> Path
         frame_dir.mkdir(parents=True, exist_ok=True)
         rows = []
         for position, code in enumerate(codes):
+            if (day, code) in absent:
+                continue
             drift = 0.01 + 0.002 * ((position + index) % 5)
             close = round(10.0 * (1 + drift) ** index, 4)
             rows.append({'ts_code': code, 'trade_date': day, 'open': round(close * 0.995, 4),
@@ -2158,6 +2245,23 @@ def preflight(config_path: Path, *, output_dir: Path) -> dict:
             _preflight_record(checks, failures, f'frozen_inputs:{identity["replay_id"]}', ok, detail)
         if not day_catalogs:
             return _preflight_report(out, cfg, checks, failures, timings, sizes, invoke_calls)
+        # Launch binding first: every current replay case must pass the REAL
+        # run contract against the final code (audit E1) — not just exist.
+        binding_detail = []
+        binding_ok = True
+        for identity, _ in day_catalogs:
+            case_dir = root / 'smoke' / identity['replay_id']
+            try:
+                _check_run_contract(_json(case_dir / 'run.json'), cfg)
+                binding_detail.append({'replay_id': identity['replay_id'], 'ok': True})
+            except ValueError as error:
+                binding_ok = False
+                binding_detail.append({'replay_id': identity['replay_id'], 'ok': False,
+                                       'error': str(error)[:200]})
+        head = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=Path(cfg['code_root']),
+                              check=True, capture_output=True, text=True).stdout.strip()
+        _preflight_record(checks, failures, 'launch_binding:real_check_run_contract', binding_ok,
+                          {'head': head, 'cases': binding_detail})
         identity0, catalog0 = day_catalogs[0]
         universe_codes = [r['ts_code'] for r in _json(catalog0.parent / 'universe.json')]
         fixture_code = universe_codes[0]
@@ -2437,9 +2541,17 @@ def _preflight_estimates(sizes: dict, checks: list) -> dict:
     tokenizer = None
     try:
         import tiktoken
-        tokenizer = {'name': 'tiktoken', 'note': '本地编码估计，不是Astra服务端完整上下文计费'}
-    except ImportError:
+        encoding = tiktoken.get_encoding('o200k_base')
+        def _tokens(text):
+            return len(encoding.encode(text))
+        tokenizer = {'name': 'tiktoken', 'encoding': 'o200k_base',
+                     'note': '本地实际encode计数；仍不是Astra服务端完整上下文计费'}
+    except Exception:
+        _tokens = None
         tokenizer = None
+    sample_text = ''
+    if startup_entry.get('prompt_file') and Path(startup_entry['prompt_file']).is_file():
+        sample_text = Path(startup_entry['prompt_file']).read_text(encoding='utf-8')
     estimates = {'estimate_inputs': {
         'startup_chars': startup, 'startup_utf8_bytes_measured': startup_bytes,
         'average_tool_response_chars': round(average_response, 2),
@@ -2454,49 +2566,107 @@ def _preflight_estimates(sizes: dict, checks: list) -> dict:
                   '本估算是供给端可见文本，不承诺真实会话完成'}}
     for rounds in (8, 12, 24):
         before = carried_before_outputs(rounds)
-        estimates[f'estimate_rounds_{rounds}'] = {
+        entry = {
             'carried_history_sum_before_round_outputs_chars': before,
             'carried_history_sum_including_final_round_addition_chars': before + int(per_round_addition),
             'utf8_bytes_from_measured_ratio': measured_bytes(before),
             'startup_alone_repeated_chars': int(rounds * startup)}
+        if _tokens is not None and sample_text:
+            startup_tokens = _tokens(sample_text)
+            per_round_tokens = _tokens('x' * int(per_round_addition)) if per_round_addition else 0
+            approx_tokens = int(rounds * startup_tokens + rounds * (rounds - 1) / 2 * per_round_tokens)
+            entry['estimated_tokens_local_encode'] = approx_tokens
+            entry['token_note'] = '由本地tokenizer对实际启动文本与等长样本encode推算；比率近似，非服务端计费'
+        estimates[f'estimate_rounds_{rounds}'] = entry
+    estimates['estimate_inputs']['both_sides_note'] = (
+        'A/B两侧启动材料分别由runtime-method视图与共同索引构成，实测字符差约1–2%；'
+        '估算对两侧分别成立；必要读页（facts分页、原件页）已计入每轮新增的平均回复样本')
     return estimates
 
 
 def _compact_handoff_trace(decision: dict, run: dict) -> dict:
-    """Deterministic field adapter: a saved compact short decision becomes the
-    minimal V4 trace shape the existing selection-handoff consumer validates.
+    """Structural field adapter for the preflight simulation ONLY.
 
-    Only field mapping happens here; no judgment is invented — missing short
-    decision fields are carried through as explicit not_recorded markers.
+    It carries the saved short decision into the V4 trace shape the existing
+    handoff consumer validates, mapping every selected stock without inventing
+    business judgments: missing thesis fields stay explicit not_recorded
+    markers, recognition is pending (never confirmed), point-in-time
+    verification is False. This adapter is not part of the real research path.
     """
-    selected = decision['selected'][0]
-    candidate = next((c for c in decision.get('candidates', [])
-                      if c['ts_code'] == selected['ts_code']), {})
-    thesis = {
-        'engine_type': candidate.get('engine_type') or 'independent_demand_acceleration',
-        'engine_status': 'active',
-        'market_recognition': {'status': 'confirmed',
-                               'basis': selected.get('primary_reason', 'not_recorded_in_short_decision')},
-        'company_information': {'first_or_repeat': 'not_applicable',
-                                'disclosure_chain': {'prior_forecast': None, 'forecast_revision': None,
-                                                     'earnings_express': None, 'formal_report': None,
-                                                     'correction': None, 'comparison_basis': '不适用'},
-                                'new_information_level': 'not_applicable', 'event_id': None,
-                                'event_available_at': None, 'event_stage': 'not_applicable',
-                                'business_link': 'not_applicable', 'materiality': 'not_applicable',
-                                'tradable_sessions_since_event': None, 'basis': '不适用'},
-        'sector_broad_diffusion': None, 'sector_leader_cluster': None,
-        'action_condition_decision_id': None,
-        'catalyst': 'not_recorded_in_short_decision',
-        'short_term_engine': candidate.get('short_reason', 'not_recorded_in_short_decision'),
-        'propagation': 'not_recorded_in_short_decision',
-        'price_confirmation': 'not_recorded_in_short_decision',
-        'remaining_path': selected.get('nearest_comparison', 'not_recorded_in_short_decision'),
-        'fundamental_anchor': 'not_recorded_in_short_decision',
-        'company_risk': selected.get('strongest_counter_evidence', 'not_recorded_in_short_decision'),
-        'critical_unknown': next((json.dumps(u, ensure_ascii=False) for u in decision.get('unresolved', [])),
-                                 'not_recorded_in_short_decision'),
-        'decision_ids': ['compact_support', 'compact_counter']}
+    selected_stocks = []
+    ledger = []
+    for rank, selected in enumerate(decision.get('selected', []), 1):
+        candidate = next((c for c in decision.get('candidates', [])
+                          if c['ts_code'] == selected['ts_code']), {})
+        declared_type = selected.get('opportunity_type') or candidate.get('opportunity_type')
+        declared_engine = candidate.get('engine_type')
+        declared_status = candidate.get('engine_status')
+        declared_recognition = candidate.get('market_recognition')
+        missing = [name for name, value in (('opportunity_type', declared_type),
+                                            ('engine_type', declared_engine),
+                                            ('engine_status', declared_status),
+                                            ('market_recognition', declared_recognition))
+                   if value is None]
+        if missing or declared_type not in ('company_catalyst', 'sector_diffusion',
+                                            'independent_price_anomaly'):
+            # Honest refusal: the short decision never recorded these business
+            # classifications; inventing them would fake a research judgment.
+            raise ValueError('handoff转换不成立：短决定未记录 '
+                             f'{missing or ["opportunity_type"]}；缺失业务字段不得补造，转换显式拒绝')
+        if declared_engine == 'fresh_event_pending' or declared_status == 'conditional':
+            raise ValueError('handoff转换不成立：fresh_event_pending/conditional 不能进入正式名单')
+        thesis = {
+            'engine_type': declared_engine,
+            'engine_status': declared_status,
+            'market_recognition': declared_recognition,
+            'company_information': {'first_or_repeat': 'not_applicable',
+                                    'disclosure_chain': {'prior_forecast': None, 'forecast_revision': None,
+                                                         'earnings_express': None, 'formal_report': None,
+                                                         'correction': None, 'comparison_basis': '不适用'},
+                                    'new_information_level': 'not_applicable', 'event_id': None,
+                                    'event_available_at': None, 'event_stage': 'not_applicable',
+                                    'business_link': 'not_applicable', 'materiality': 'not_applicable',
+                                    'tradable_sessions_since_event': None, 'basis': '不适用'},
+            'sector_broad_diffusion': None, 'sector_leader_cluster': None,
+            'action_condition_decision_id': None,
+            'catalyst': 'not_recorded_in_short_decision',
+            'short_term_engine': candidate.get('short_reason', 'not_recorded_in_short_decision'),
+            'propagation': 'not_recorded_in_short_decision',
+            'price_confirmation': 'not_recorded_in_short_decision',
+            'remaining_path': 'not_recorded_in_short_decision',
+            'fundamental_anchor': 'not_recorded_in_short_decision',
+            'company_risk': selected.get('strongest_counter_evidence', 'not_recorded_in_short_decision'),
+            'critical_unknown': next((json.dumps(u, ensure_ascii=False)
+                                      for u in decision.get('unresolved', [])),
+                                     'not_recorded_in_short_decision'),
+            'decision_ids': ['compact_support', 'compact_counter']}
+        ledger.append({
+            'ts_code': selected['ts_code'], 'name': selected.get('name') or selected['ts_code'],
+            'opportunity_type': declared_type,
+            'source_skills': ['analyzing-price-trading'],
+            'final_fate': 'selected',
+            'primary_reason': selected.get('primary_reason', ''),
+            'research_thesis': thesis})
+        selected_stocks.append({
+            'ts_code': selected['ts_code'], 'name': selected.get('name') or selected['ts_code'],
+            'priority': rank,
+            'opportunity_type': declared_type,
+            'selection_reason': selected.get('primary_reason', ''),
+            'strongest_counterevidence': selected.get('strongest_counter_evidence', ''),
+            'nearest_comparison': selected.get('nearest_comparison', '')})
+    decision_trace = []
+    for selected in decision.get('selected', []):
+        decision_trace.extend([
+            {'decision_id': 'compact_support', 'ts_code': selected['ts_code'],
+             'source_skill': 'analyzing-price-trading', 'evidence_id': 'compact_saved_reads',
+             'evidence_version': 'compact-v1', 'evidence_status_at_use': 'provisional',
+             'decision_role': 'support', 'decision_changed': 'promoted',
+             'formation_values': {'participation_condition': selected.get('participation_condition')}},
+            {'decision_id': 'compact_counter', 'ts_code': selected['ts_code'],
+             'source_skill': 'researching-company-events', 'evidence_id': 'compact_saved_reads',
+             'evidence_version': 'compact-v1', 'evidence_status_at_use': 'observation_only',
+             'decision_role': 'counter', 'decision_changed': 'no_change',
+             'formation_values': {'strongest_counter_evidence': selected.get('strongest_counter_evidence')}}])
     return {
         'trace_version': 'daily-research-trace-v4',
         'formation_date': run['formation_date'], 'action_date': run['action_date'],
@@ -2507,34 +2677,17 @@ def _compact_handoff_trace(decision: dict, run: dict) -> dict:
                                  'industry_research_available': True, 'theme_research_available': True,
                                  'stock_context_available': True,
                                  'announcement_status': 'announcement_unavailable',
-                                 'announcement_exchanges': [], 'limitations': ['compact短决定适配：非正式研究trace']},
-        'candidate_ledger': [{
-            'ts_code': selected['ts_code'], 'name': selected.get('name') or selected['ts_code'],
-            'opportunity_type': 'independent_price_anomaly',
-            'source_skills': ['analyzing-price-trading'],
-            'final_fate': 'selected',
-            'primary_reason': selected.get('primary_reason', ''),
-            'research_thesis': thesis}],
-        'decision_trace': [{
-            'decision_id': 'compact_support', 'ts_code': selected['ts_code'],
-            'source_skill': 'analyzing-price-trading', 'evidence_id': 'compact_saved_reads',
-            'evidence_version': 'compact-v1', 'evidence_status_at_use': 'provisional',
-            'decision_role': 'support', 'decision_changed': 'promoted',
-            'formation_values': {'participation_condition': selected.get('participation_condition')}},
-            {'decision_id': 'compact_counter', 'ts_code': selected['ts_code'],
-             'source_skill': 'researching-company-events', 'evidence_id': 'compact_saved_reads',
-             'evidence_version': 'compact-v1', 'evidence_status_at_use': 'observation_only',
-             'decision_role': 'counter', 'decision_changed': 'no_change',
-             'formation_values': {'strongest_counter_evidence': selected.get('strongest_counter_evidence')}}],
+                                 'announcement_exchanges': [],
+                                 'limitations': ['compact短决定结构适配：非正式研究trace；'
+                                                 '缺失研究字段显式保留为not_recorded，未补任何肯定结论']},
+        'candidate_ledger': ledger,
+        'decision_trace': decision_trace,
         'research_result': {
-            'research_completed': True, 'point_in_time_evidence_verified': True, 'failure_reason': '',
+            'research_completed': True,
+            'point_in_time_evidence_verified': False,
+            'failure_reason': '',
             'skills_used': sorted(SKILLS), 'nearest_nonselections': [], 'empty_reason': '',
-            'selected_stocks': [{
-                'ts_code': selected['ts_code'], 'name': selected.get('name') or selected['ts_code'],
-                'selection_reason': selected.get('primary_reason', ''),
-                'strongest_counterevidence': selected.get('strongest_counter_evidence', ''),
-                'nearest_comparison': selected.get('nearest_comparison', ''),
-                'opportunity_type': 'independent_price_anomaly', 'priority': 1}]}}
+            'selected_stocks': selected_stocks}}
 
 
 def _preflight_fake_arm(cfg: dict, root: Path, out: Path, day_catalogs: list,
@@ -2543,8 +2696,9 @@ def _preflight_fake_arm(cfg: dict, root: Path, out: Path, day_catalogs: list,
     """Drive run_arm's real save/parse path with a fake model in a temp trial.
 
     No validator or saver is disabled; only the external model call is
-    replaced. The just-saved decision then flows through the normal B handoff
-    consumer via the field adapter.
+    replaced. Includes a genuinely nonempty TWO-stock M1 fixture across four
+    fact categories with an official counterevidence original; the just-saved
+    decisions are then re-checked from the saved files (audit E5).
     """
     from stock_analyzer.ops import selection_parallel_compact as compact
     checks: list[dict] = []
@@ -2555,6 +2709,7 @@ def _preflight_fake_arm(cfg: dict, root: Path, out: Path, day_catalogs: list,
 
     identity0, catalog0 = day_catalogs[0]
     fixture_code = universe_codes[0]
+    second_code = universe_codes[1] if len(universe_codes) > 1 else universe_codes[0]
     simulation_root = out / 'simulation'
     sim_trial = simulation_root / 'archive/selection_trials' / cfg['experiment_id']
     sim_cfg = dict(cfg)
@@ -2578,11 +2733,11 @@ def _preflight_fake_arm(cfg: dict, root: Path, out: Path, day_catalogs: list,
     sim_queries = arm_context / 'work'
     request = {'queries': [
         {'id': 'company_first', 'view': 'company',
-         'sql': "SELECT ts_code, dataset, title, published_at, available_at FROM company "
+         'sql': 'SELECT ts_code, dataset, title, published_at, available_at FROM company '
                 "WHERE dataset = 'announcement' AND ts_code = ? ORDER BY available_at DESC, ts_code",
          'params': [fixture_code], 'page_size': 5, 'offset': 0},
         {'id': 'sector_scan', 'view': 'sector',
-         'sql': "SELECT group_code, group_name, level, member_count FROM sector "
+         'sql': 'SELECT group_code, group_name, level, member_count FROM sector '
                 "WHERE level = 'L3' ORDER BY member_count DESC", 'page_size': 5, 'offset': 0},
         {'id': 'price_candidates', 'view': 'price',
          'sql': 'SELECT ts_code, name, return_5d, relative_market_5d, price_location_60d '
@@ -2615,11 +2770,11 @@ def _preflight_fake_arm(cfg: dict, root: Path, out: Path, day_catalogs: list,
     for page in facts_pages:
         add_event(f'{cli} facts --catalog {sim_catalog} --code {fixture_code} --profile decision', page)
     evidence_fixture = None
-    read_locator_used = None
+    read_doc_for_events = None
+    clause_for_decision = None
+    announcement_identity = None
     if evidence_id:
-        # locate reuses the earlier original through the real existing_receipts path
         source_receipts = sorted(Path(cfg['context_root']).glob('*/M0/work/official/*/receipt.json'))
-        arm_official_root = None
         for method_dir in ('M0', 'M1'):
             target_context = arm_context / method_dir
             if not target_context.exists():
@@ -2632,51 +2787,46 @@ def _preflight_fake_arm(cfg: dict, root: Path, out: Path, day_catalogs: list,
              'query': '合同 业绩 风险'}],
             'existing_receipts': [str(source_receipts[0])]})
         located_doc = located['documents'][0]
-        announcement = located_doc['announcement']
+        announcement_identity = located_doc['announcement']
         is_pdf = str(located_doc.get('document_kind', '')).endswith('.pdf')
-        read_locator_used = ({'start_page': 1, 'end_page': 1} if is_pdf
-                             else {'start_line': 1, 'end_line': 30})
+        read_locator = ({'start_page': 1, 'end_page': 1} if is_pdf
+                        else {'start_line': 1, 'end_line': 30})
         read_doc = compact.evidence_request(sim_catalog, arm_context / 'M0', {'documents': [
             {'evidence_id': evidence_id, 'action': 'read', 'receipt_ref': located_doc['receipt_ref'],
-             **read_locator_used}]})['documents'][0]
-        # the zero-selection variant cites the same original: stage it in the M1 arm too
-        m1_official = arm_context / 'M1' / 'work' / 'official' / evidence_id
-        m0_source = (arm_context / 'M0' / located_doc['receipt_ref']).parent
-        if not m1_official.exists():
-            shutil.copytree(m0_source, m1_official)
-        add_event(f'{cli} evidence --catalog {sim_catalog} --context . --request request.json',
-                  {'documents': [located_doc, read_doc]})
-        quote = read_doc['text'].replace('\n', '')[:40]
-        clause = ({'page': read_locator_used['start_page'], 'quote': quote} if is_pdf
-                  else {'lines': [read_locator_used['start_line'], read_locator_used['end_line']],
-                        'quote': quote})
+             **read_locator}]})['documents'][0]
+        read_doc_for_events = read_doc
+        span = (read_doc.get('returned_spans') or [{}])[0]
+        quote = str(span.get('text') or read_doc.get('text') or '').replace('\n', '')[:40].strip()
+        if is_pdf:
+            clause_for_decision = {'page': span.get('page', 1), 'quote': quote}
+        else:
+            clause_for_decision = {'lines': span.get('lines') or [1, 30], 'quote': quote}
         receipt = _json(arm_context / 'M0' / located_doc['receipt_ref'])
-        evidence_fixture = {'official_evidence': [{
-            'evidence_id': evidence_id, 'ts_code': announcement['ts_code'],
-            'announcement_id': announcement['announcement_id'],
-            'title': announcement['title'], 'available_at': announcement['available_at'],
-            'availability_basis': 'frozen original announcement metadata',
-            'url': receipt.get('url'), 'retrieved_at': receipt.get('retrieved_at'),
-            'receipt': located_doc['receipt_ref'],
-            'adopted_pages_and_clauses': [clause]}]}
+        evidence_fixture = {'receipt': located_doc['receipt_ref'],
+                            'announcement': announcement_identity,
+                            'receipt_payload': receipt, 'clause': clause_for_decision}
     receipts = {r['query_id']: r for r in discovery['responses']}
     day = _json(sim_day / 'run.json')
 
-    def decision_object(*, selected=True, extra_ref=None, method='M0'):
-        stock = {'ts_code': fixture_code, 'rank': 1, 'primary_reason': '当时价量与业务相关（工程夹具）',
-                 'strongest_counter_evidence': '动能减弱与行业扩散不足',
-                 'nearest_comparison': '比同组近邻更强的剩余路径',
-                 'participation_condition': '开盘价格条件满足才参与（工程夹具）',
-                 'change_condition': '收盘失去支撑即重判',
-                 'source_refs': ['neutral:price_analysis_context',
-                                 f'facts:{fixture_code}:price',
-                                 f'facts:{fixture_code}:company',
-                                 f'facts:{fixture_code}:industry']}
-        if evidence_fixture:
-            stock['source_refs'].append(f'official:{evidence_id}')
-        if extra_ref:
-            stock['source_refs'].append(extra_ref)
-        candidate_refs = [r for r in stock['source_refs'] if r.startswith(('neutral', 'official'))]
+    def stock_entry(code, rank, condition):
+        refs = ['neutral:price_analysis_context',
+                f'facts:{code}:price', f'facts:{code}:company', f'facts:{code}:industry']
+        if evidence_fixture and rank == 1:
+            refs.append(f'official:{evidence_id}')
+        return {'ts_code': code, 'rank': rank,
+                'primary_reason': f'当时价量与业务相关（工程夹具{rank}）',
+                'strongest_counter_evidence': '动能减弱与行业扩散不足；官方原件含未生效终止条款',
+                'nearest_comparison': '比同组近邻更强的剩余路径',
+                'participation_condition': condition,
+                'change_condition': '收盘失去支撑即重判',
+                'source_refs': refs}
+
+    def decision_object(*, method='M0', stocks=None):
+        stocks = stocks if stocks is not None else [stock_entry(fixture_code, 1, '开盘价格条件满足才参与（工程夹具）')]
+        candidates = [{'ts_code': s['ts_code'], 'discovered_by': ['price'],
+                       'final_fate': 'selected', 'short_reason': '相对表现（工程夹具）',
+                       'source_refs': [r for r in s['source_refs'] if r.startswith(('neutral', 'official'))]}
+                      for s in stocks]
         price_receipt = receipts['price_candidates']
         summary = {
             'sector': {'status': 'searched_no_candidate', 'source_refs': ['neutral:sector_hotspot'], 'codes': [],
@@ -2687,33 +2837,43 @@ def _preflight_fake_arm(cfg: dict, root: Path, out: Path, day_catalogs: list,
                         'source_total': receipts['company_first']['source_total'],
                         'query': receipts['company_first']['sql'],
                         'matched_count': receipts['company_first']['matched_count'], 'coverage_gap': []},
-            'price': {'status': 'searched_with_candidates' if selected else 'searched_no_candidate',
+            'price': {'status': 'searched_with_candidates',
                       'source_refs': ['neutral:price_analysis_context'],
-                      'codes': [fixture_code] if selected else [],
+                      'codes': [s['ts_code'] for s in stocks],
                       'source_total': price_receipt['source_total'], 'query': price_receipt['sql'],
                       'matched_count': price_receipt['matched_count'], 'coverage_gap': []}}
-        return {'method_id': method, 'formation_date': day['formation_date'], 'action_date': day['action_date'],
-                'as_of': day['as_of'], 'market_summary': '工程夹具市场背景',
-                'candidates': ([{'ts_code': fixture_code, 'discovered_by': ['price'],
-                                 'final_fate': 'selected' if selected else 'rejected',
-                                 'short_reason': '相对表现（工程夹具）',
-                                 'source_refs': candidate_refs}] if selected else []),
-                'selected': [stock] if selected else [], 'conditional_events': [], 'unresolved': [],
-                'discovery_summary': summary,
-                'no_selection_reason': None if selected else '完成且零入选（工程夹具）',
-                **(evidence_fixture or {})}
+        obj = {'method_id': method, 'formation_date': day['formation_date'], 'action_date': day['action_date'],
+               'as_of': day['as_of'], 'market_summary': '工程夹具市场背景',
+               'candidates': candidates, 'selected': stocks,
+               'conditional_events': [], 'unresolved': [], 'discovery_summary': summary,
+               'no_selection_reason': None}
+        if evidence_fixture:
+            obj['official_evidence'] = [{
+                'evidence_id': evidence_id,
+                'ts_code': evidence_fixture['announcement']['ts_code'],
+                'announcement_id': evidence_fixture['announcement']['announcement_id'],
+                'title': evidence_fixture['announcement']['title'],
+                'available_at': evidence_fixture['announcement']['available_at'],
+                'availability_basis': 'frozen original announcement metadata',
+                'url': evidence_fixture['receipt_payload'].get('url'),
+                'retrieved_at': evidence_fixture['receipt_payload'].get('retrieved_at'),
+                'receipt': evidence_fixture['receipt'],
+                'adopted_pages_and_clauses': [evidence_fixture['clause']]}]
+        return obj
 
     original_invoke = _invoke_model
 
-    def make_invoke(decision_text: str, *, exit_code=0, budget_exceeded=None, raise_error=None):
+    def make_invoke(decision_text: str, extra_events=None, *, exit_code=0, budget_exceeded=None, raise_error=None):
         def invoke(context, prompt, attempt, *, config_path=None):
             invoke_calls['fake'] += 1
             if raise_error is not None:
                 raise raise_error
             attempt.mkdir(parents=True, exist_ok=False)
             (attempt / 'prompt.md').write_text(prompt, encoding='utf-8')
-            prompt_sizes.append({'chars': len(prompt), 'utf8_bytes': len(prompt.encode('utf-8'))})
-            (attempt / 'events.jsonl').write_text('\n'.join(events) + '\n', encoding='utf-8')
+            prompt_sizes.append({'chars': len(prompt), 'utf8_bytes': len(prompt.encode('utf-8')),
+                                 'prompt_file': str(attempt / 'prompt.md')})
+            body = '\n'.join(events + (extra_events or [])) + '\n'
+            (attempt / 'events.jsonl').write_text(body, encoding='utf-8')
             (attempt / 'raw-output.json').write_text(decision_text, encoding='utf-8')
             metadata = {'requested_model': MODEL, 'actual_model': MODEL, 'actual_reasoning': EFFORT,
                         'exit_code': exit_code, 'budget_exceeded': budget_exceeded,
@@ -2721,7 +2881,7 @@ def _preflight_fake_arm(cfg: dict, root: Path, out: Path, day_catalogs: list,
             _write_json(attempt / 'invocation.json', metadata)
             _write_json(attempt / 'usage-progress.json',
                         {'input_tokens': 120000, 'cached_input_tokens': 90000,
-                         'output_tokens': 2000, 'tool_commands': len(events),
+                         'output_tokens': 2000, 'tool_commands': len(body.splitlines()),
                          'elapsed_seconds': 12.0})
             return exit_code, metadata
         return invoke
@@ -2732,7 +2892,7 @@ def _preflight_fake_arm(cfg: dict, root: Path, out: Path, day_catalogs: list,
 
     globals()['_invoke_model'] = guarded_invoke
     try:
-        globals()['_invoke_model'] = make_invoke(json.dumps(decision_object(selected=True), ensure_ascii=False))
+        globals()['_invoke_model'] = make_invoke(json.dumps(decision_object(method='M0'), ensure_ascii=False))
         result = run_arm(sim_day, method='M0')
         nonempty_ok = ((sim_day / 'M0/result.json').exists() and result['selected']
                        and result['run_id'] == 'replay_smoke:sim-compact1:M0'
@@ -2742,18 +2902,159 @@ def _preflight_fake_arm(cfg: dict, root: Path, out: Path, day_catalogs: list,
         record('arm_nonempty_saved', nonempty_ok,
                {'run_id': result.get('run_id'), 'selected': len(result.get('selected', [])),
                 'official_saved': bool(evidence_fixture)})
-        globals()['_invoke_model'] = make_invoke(json.dumps(decision_object(selected=False, method='M1'),
-                                                            ensure_ascii=False))
+        globals()['_invoke_model'] = make_invoke(
+            json.dumps(decision_object(method='M1', stocks=[]), ensure_ascii=False))
+        zero_obj = decision_object(method='M1', stocks=[])
+        zero_obj['selected'] = []
+        zero_obj['candidates'] = []
+        zero_obj['no_selection_reason'] = '完成且零入选（工程夹具）'
+        zero_obj['discovery_summary']['price']['status'] = 'searched_no_candidate'
+        zero_obj['discovery_summary']['price']['codes'] = []
+        globals()['_invoke_model'] = make_invoke(json.dumps(zero_obj, ensure_ascii=False))
         zero = run_arm(sim_day, method='M1')
         record('arm_zero_selection_saved', zero['selected'] == [] and bool(zero.get('no_selection_reason'))
                and _qualification(sim_day, 'M1')['qualified'],
                {'no_selection_reason': zero.get('no_selection_reason')})
+
+        # ---- genuinely nonempty M1: two stocks, four categories, official counterevidence
+        m1full_ok, m1full_detail = False, {}
+        try:
+            m1full_id = 'sim-compact1-m1full'
+            m1full_cfg = dict(sim_cfg)
+            m1full_cfg['replay_cases'] = [dict(identity0, replay_id=m1full_id)]
+            _write_json(sim_cfg_path, m1full_cfg)
+            m1full_day = _reuse_frozen_inputs(m1full_cfg, sim_trial / 'smoke' / m1full_id,
+                                              donor, 'replay_smoke', m1full_id)
+            m1full_catalog = m1full_day / 'inputs/catalog.json'
+            m1full_context = Path(sim_cfg['context_root']) / m1full_id
+            m1full_request = {'queries': [
+                {'id': 'company_first', 'view': 'company',
+                 'sql': 'SELECT ts_code, dataset, title FROM company '
+                        "WHERE dataset = 'announcement' AND ts_code = ?",
+                 'params': [second_code], 'page_size': 5, 'offset': 0},
+                {'id': 'sector_scan', 'view': 'sector',
+                 'sql': 'SELECT group_code, group_name, level, member_count FROM sector '
+                        "WHERE level = 'L3' ORDER BY member_count DESC", 'page_size': 5, 'offset': 0},
+                {'id': 'price_candidates', 'view': 'price',
+                 'sql': 'SELECT ts_code, name, return_5d FROM price WHERE ts_code = ? OR ts_code = ?',
+                 'params': [fixture_code, second_code]}]}
+            m1_discovery = compact.discover_queries(m1full_catalog, m1full_request,
+                                                    output_dir=m1full_context / 'work')
+            m1_facts = [compact.facts_compact(m1full_catalog, codes=[fixture_code, second_code],
+                                              categories=['price', 'company', 'financial', 'industry'],
+                                              group_codes=[l3_code] if l3_code else [],
+                                              sector_snapshots=sector_snapshots,
+                                              output=m1full_context / 'work/facts-full.json',
+                                              parts_dir=m1full_context / 'work/facts-parts')]
+            while m1_facts[-1].get('next_part'):
+                m1_facts.append(compact.facts_compact(m1full_catalog, codes=[fixture_code, second_code],
+                                                      categories=['price', 'company', 'financial', 'industry'],
+                                                      group_codes=[l3_code] if l3_code else [],
+                                                      sector_snapshots=sector_snapshots,
+                                                      part=m1_facts[-1]['next_part'],
+                                                      parts_dir=m1full_context / 'work/facts-parts'))
+            m1_events = [json.dumps({'type': 'item.completed', 'item': {
+                'type': 'command_execution', 'exit_code': 0, 'command': 'discover cli',
+                'aggregated_output': json.dumps(m1_discovery, ensure_ascii=False)}}, ensure_ascii=False)]
+            for page in m1_facts:
+                m1_events.append(json.dumps({'type': 'item.completed', 'item': {
+                    'type': 'command_execution', 'exit_code': 0, 'command': 'facts cli',
+                    'aggregated_output': json.dumps(page, ensure_ascii=False)}}, ensure_ascii=False))
+            if read_doc_for_events is not None:
+                m1_events.append(json.dumps({'type': 'item.completed', 'item': {
+                    'type': 'command_execution', 'exit_code': 0, 'command': 'evidence cli',
+                    'aggregated_output': json.dumps({'documents': [read_doc_for_events]},
+                                                    ensure_ascii=False)}}, ensure_ascii=False))
+            m1_receipts = {r['query_id']: r for r in m1_discovery['responses']}
+            m1_day = _json(m1full_day / 'run.json')
+
+            def m1_stock(code, rank, condition):
+                refs = ['neutral:price_analysis_context',
+                        f'facts:{code}:price', f'facts:{code}:company',
+                        f'facts:{code}:financial', f'facts:{code}:industry']
+                if rank == 1 and evidence_fixture:
+                    refs.append(f'official:{evidence_id}')
+                return {'ts_code': code, 'rank': rank,
+                        'primary_reason': f'B方法工程夹具入选{rank}',
+                        'strongest_counter_evidence': '官方原件终止条款与行业扩散不足',
+                        'nearest_comparison': '与另一夹具股比较剩余路径',
+                        'participation_condition': condition,
+                        'change_condition': '条件失效即重判',
+                        'source_refs': refs}
+
+            m1_decision = {'method_id': 'M1', 'formation_date': m1_day['formation_date'],
+                           'action_date': m1_day['action_date'], 'as_of': m1_day['as_of'],
+                           'market_summary': 'B方法非空夹具',
+                           'candidates': [
+                               {'ts_code': c, 'discovered_by': ['price'], 'final_fate': 'selected',
+                                'short_reason': 'B夹具', 'source_refs': ['neutral:price_analysis_context'],
+                                'opportunity_type': 'independent_price_anomaly',
+                                'engine_type': 'independent_demand_acceleration',
+                                'engine_status': 'active',
+                                'market_recognition': {'status': 'confirmed',
+                                                       'basis': 'B夹具显式声明（合成输入）'}}
+                               for c in (fixture_code, second_code)],
+                           'selected': [m1_stock(fixture_code, 1, '开盘价条件A（B夹具）'),
+                                        m1_stock(second_code, 2, '回踩不破条件B（B夹具）')],
+                           'conditional_events': [], 'unresolved': [],
+                           'discovery_summary': {
+                               'sector': {'status': 'searched_no_candidate', 'source_refs': ['neutral:sector_hotspot'],
+                                          'codes': [], 'source_total': m1_receipts['sector_scan']['source_total'],
+                                          'query': m1_receipts['sector_scan']['sql'],
+                                          'matched_count': m1_receipts['sector_scan']['matched_count'],
+                                          'coverage_gap': []},
+                               'company': {'status': 'searched_no_candidate', 'source_refs': ['neutral:company_discovery'],
+                                           'codes': [], 'source_total': m1_receipts['company_first']['source_total'],
+                                           'query': m1_receipts['company_first']['sql'],
+                                           'matched_count': m1_receipts['company_first']['matched_count'],
+                                           'coverage_gap': []},
+                               'price': {'status': 'searched_with_candidates',
+                                         'source_refs': ['neutral:price_analysis_context'],
+                                         'codes': [fixture_code, second_code],
+                                         'source_total': m1_receipts['price_candidates']['source_total'],
+                                         'query': m1_receipts['price_candidates']['sql'],
+                                         'matched_count': m1_receipts['price_candidates']['matched_count'],
+                                         'coverage_gap': []}},
+                           'no_selection_reason': None}
+            if evidence_fixture:
+                m1_decision['official_evidence'] = [{
+                    'evidence_id': evidence_id,
+                    'ts_code': evidence_fixture['announcement']['ts_code'],
+                    'announcement_id': evidence_fixture['announcement']['announcement_id'],
+                    'title': evidence_fixture['announcement']['title'],
+                    'available_at': evidence_fixture['announcement']['available_at'],
+                    'availability_basis': 'frozen original announcement metadata',
+                    'url': evidence_fixture['receipt_payload'].get('url'),
+                    'retrieved_at': evidence_fixture['receipt_payload'].get('retrieved_at'),
+                    'receipt': evidence_fixture['receipt'],
+                    'adopted_pages_and_clauses': [evidence_fixture['clause']]}]
+            globals()['_invoke_model'] = make_invoke(json.dumps(m1_decision, ensure_ascii=False),
+                                                     extra_events=m1_events)
+            m1_result = run_arm(m1full_day, method='M1')
+            saved = _json(m1full_day / 'M1/result.json')
+            slice_count = len(list((m1full_day / 'inputs/reads/M1').glob('*.json')))
+            m1full_ok = (len(saved['selected']) == 2
+                         and [s['rank'] for s in saved['selected']] == [1, 2]
+                         and {s['ts_code'] for s in saved['selected']} == {fixture_code, second_code}
+                         and _qualification(m1full_day, 'M1')['qualified']
+                         and slice_count >= 8
+                         and ((m1full_day / 'M1/official').exists() if evidence_fixture else True))
+            m1full_detail = {'selected': [s['ts_code'] for s in saved['selected']],
+                             'saved_read_slices': slice_count,
+                             'official_saved': bool(evidence_fixture),
+                             'categories_per_stock': sorted(
+                                 {p.stem.split('-', 1)[1] for p in (m1full_day / 'inputs/reads/M1').glob('*.json')})}
+        except Exception as error:  # noqa: BLE001 - report, never fabricate
+            import traceback as _tb
+            m1full_detail = {'error': f'{type(error).__name__}: {str(error)[:200]}',
+                             'traceback': _tb.format_exc()[-500:]}
+        record('nonempty_m1_two_stocks_four_categories_archived', m1full_ok, m1full_detail)
+        _write_json(sim_cfg_path, sim_cfg)
+
         for suffix, maker, expected_marker in (
-                ('badref', lambda: json.dumps(decision_object(selected=True,
-                                                              extra_ref=f'facts:{fixture_code}:financial'),
-                                              ensure_ascii=False), 'not returned'),
+                ('badref', lambda: json.dumps(decision_object(method='M0'), ensure_ascii=False), 'not returned'),
                 ('json', lambda: '{"method_id": "M0", truncated', 'JSON'),
-                ('budget', lambda: json.dumps(decision_object(selected=True), ensure_ascii=False), 'exit 124'),
+                ('budget', lambda: json.dumps(decision_object(method='M0'), ensure_ascii=False), 'exit 124'),
                 ('interrupted', lambda: '', 'simulated interruption')):
             sim_id = f'sim-compact1-{suffix}'
             sim_dir = sim_trial / 'smoke' / sim_id
@@ -2761,6 +3062,10 @@ def _preflight_fake_arm(cfg: dict, root: Path, out: Path, day_catalogs: list,
             variant_cfg['replay_cases'] = [dict(identity0, replay_id=sim_id)]
             _write_json(sim_cfg_path, variant_cfg)
             _reuse_frozen_inputs(variant_cfg, sim_dir, donor, 'replay_smoke', sim_id)
+            if suffix == 'badref':
+                bad = decision_object(method='M0')
+                bad['selected'][0]['source_refs'].append(f'facts:{fixture_code}:financial')
+                maker = lambda: json.dumps(bad, ensure_ascii=False)  # noqa: E731
             if suffix == 'budget':
                 globals()['_invoke_model'] = make_invoke(maker(), exit_code=124,
                                                          budget_exceeded='max_input_tokens')
@@ -2780,37 +3085,71 @@ def _preflight_fake_arm(cfg: dict, root: Path, out: Path, day_catalogs: list,
                           and not (sim_dir / 'M0/result.json').exists())
                 record(f'arm_{suffix}_rejected', ok, {'error': str(error)[:200],
                                                       'type': type(error).__name__})
+        # a failed attempt must never trigger an implicit second model call (E4)
+        retry_ok, retry_detail = False, {}
+        try:
+            before = invoke_calls['fake']
+            try:
+                run_arm(sim_trial / 'smoke/sim-compact1-budget', method='M0')
+                retry_detail = {'error': 'implicit retry launched'}
+            except RuntimeError as error:
+                retry_ok = '不自动发起新模型调用' in str(error) and invoke_calls['fake'] == before
+                retry_detail = {'refused': retry_ok, 'error': str(error)[:120]}
+        except Exception as error:  # noqa: BLE001
+            retry_detail = {'error': str(error)[:200]}
+        record('failed_attempt_no_implicit_retry', retry_ok, retry_detail)
         _write_json(sim_cfg_path, sim_cfg)
-        # normal B handoff consumes the JUST-SAVED compact decision (R6.3)
+        # normal B handoff consumes the JUST-SAVED compact decision (structural only)
         handoff_ok, handoff_detail = False, {}
+        # (a) a decision without recorded business classification is REFUSED
+        refusal_ok, refusal_detail = False, {}
         try:
             from tools import recommendation_pipeline as pipeline
             from tools.recommendation_pipeline import trace_input_sha256
             saved = _json(sim_day / 'M0/result.json')
             run = _json(sim_day / 'run.json')
-            trace = _compact_handoff_trace(saved, run)
-            saved_read = _json(sim_day / 'inputs/reads/M0' / f'{fixture_code}-price.json') \
-                if (sim_day / 'inputs/reads/M0').exists() else None
+            try:
+                _compact_handoff_trace(saved, run)
+                refusal_detail = {'error': 'unclassified decision was not refused'}
+            except ValueError as error:
+                refusal_ok = '不成立' in str(error) and 'opportunity_type' in str(error)
+                refusal_detail = {'refused': refusal_ok, 'error': str(error)[:120]}
+        except Exception as error:  # noqa: BLE001
+            refusal_detail = {'error': f'{type(error).__name__}: {str(error)[:200]}'}
+        record('handoff_refuses_unclassified_decision', refusal_ok, refusal_detail)
+        # (b) declared-type decision passes through structurally with honest markers
+        try:
+            from tools import recommendation_pipeline as pipeline
+            from tools.recommendation_pipeline import trace_input_sha256
+            m1full_saved = _json(sim_trial / 'smoke/sim-compact1-m1full/M1/result.json')
+            m1full_run = _json(sim_trial / 'smoke/sim-compact1-m1full/run.json')
+            trace = _compact_handoff_trace(m1full_saved, m1full_run)
             context = {'facts': {}, 'proposed_judgment': {}, 'gaps': []}
-            for read in ((saved_read or {}).get('reads') or []):
-                code = read.get('ts_code')
-                if code and read.get('result', {}).get('facts'):
-                    context['facts'].setdefault(code, {}).update(read['result']['facts'])
-            packet = pipeline.build_article_packet(trace=trace, context=context,
-                                                    ts_code=saved['selected'][0]['ts_code'],
-                                                    research_handoff=pipeline.handoff_from_trace(trace))
+            for slice_name in (sim_trial / 'smoke/sim-compact1-m1full/inputs/reads/M1').glob('*.json'):
+                for read in _json(slice_name).get('reads', []):
+                    context['facts'].setdefault(read.get('ts_code'), {}).update(
+                        read.get('result', {}).get('facts', {}))
+            packet = pipeline.build_article_packet(
+                trace=trace, context=context, ts_code=m1full_saved['selected'][0]['ts_code'],
+                research_handoff=pipeline.handoff_from_trace(trace))
             own = packet['facts']['own']
+            thesis = trace['candidate_ledger'][0]['research_thesis']
             handoff_ok = (bool(own.get('price_observations'))
-                          and saved['selected'][0]['primary_reason'] in packet['judgment']['selection_reason']
-                          and trace_input_sha256(trace) == packet['source_refs']['trace_sha256'])
+                          and m1full_saved['selected'][0]['primary_reason']
+                          in packet['judgment']['selection_reason']
+                          and trace_input_sha256(trace) == packet['source_refs']['trace_sha256']
+                          and trace['research_result']['point_in_time_evidence_verified'] is False
+                          and thesis['remaining_path'] == 'not_recorded_in_short_decision'
+                          and len(trace['candidate_ledger']) == 2)
             handoff_detail = {'own_sections': sorted(own),
-                              'selection_reason_from_saved': packet['judgment']['selection_reason'][:60],
-                              'facts_from_saved_reads': sorted(context['facts'])}
-        except Exception as error:  # noqa: BLE001 - report, never fabricate the pass
+                              'honest_adapter': 'verified=False, remaining_path=not_recorded；'
+                                                '业务字段仅原样交接夹具显式声明值，转换不补造',
+                              'stocks_mapped': len(trace['candidate_ledger'])}
+        except Exception as error:  # noqa: BLE001
             import traceback as _tb
-            handoff_detail = {'error': f'{type(error).__name__}: {str(error)}',
-                              'traceback': _tb.format_exc()[-1600:]}
-        record('handoff_from_just_saved_decision', handoff_ok, handoff_detail)
+            handoff_detail = {'error': f'{type(error).__name__}: {str(error)[:250]}',
+                              'traceback': _tb.format_exc()[-600:]}
+        record('handoff_from_just_saved_decision_structural_only', handoff_ok, handoff_detail)
     finally:
         globals()['_invoke_model'] = original_invoke
     record('arm_real_model_never_called', invoke_calls['real'] == 0,
@@ -2818,11 +3157,39 @@ def _preflight_fake_arm(cfg: dict, root: Path, out: Path, day_catalogs: list,
     return {'checks': checks, 'failures': failures}
 
 
+def _synthetic_research_db(warehouse_root: Path, dates: list[str]) -> None:
+    """Create a real (minimal) research warehouse DB for the synthetic trial."""
+    from stock_analyzer.storage.research_schema import connect_research_warehouse
+    with connect_research_warehouse(warehouse_root / 'research.duckdb') as connection:
+        from datetime import datetime as _dt, timezone as _tz
+        stamp = _dt(2026, 9, 24, tzinfo=_tz.utc)
+        rows = []
+        for dataset, partition in ([('trade_calendar', '2026')]
+                                   + [(d, day) for day in dates
+                                      for d in ('equity_daily', 'adj_factor', 'index_daily')]):
+            rows.append((dataset, partition,
+                         f'facts/{dataset}/partition={partition}/data.parquet', 10,
+                         'synthetic-content', 'synthetic-sha', None, None, '[]', stamp,
+                         'synthetic-run', 'ok'))
+        connection.executemany(
+            'insert into research_fact_partitions(dataset_id, partition_value, relative_path, '
+            'row_count, content_hash, file_sha256, min_available_at, max_available_at, '
+            'source_names, committed_at, ingestion_run_id, quality_status) '
+            'values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', rows)
+
+
 def _preflight_six_tables(cfg: dict, root: Path, out: Path, day_catalogs: list,
                           universe_codes: list[str]) -> dict:
-    """Five synthetic pairs through the real outcome assembly and the real
-    delivery formatter; zero-selection days keep empty rows, never fake zeros."""
+    """Five synthetic pairs through the REAL save/qualification path, then the
+    real update_outcomes, prepare_batch and format_tables (audit E5).
+
+    Equal-count S_A/S_B references come from update_outcomes' own constructor
+    (rank <= selected count), never hand-built rows. Zero-selection methods
+    have no selected rows AND no reference rows; missing-entry and conditional
+    cases keep their own denominators. All synthetic data stays in temp dirs.
+    """
     from stock_analyzer.analysis import selection_parallel_outcomes as outcomes
+    from stock_analyzer.ops import selection_parallel_compact as compact
     from tools import selection_result_tables as result_tables
     checks: list[dict] = []
     failures: list[str] = []
@@ -2831,7 +3198,7 @@ def _preflight_six_tables(cfg: dict, root: Path, out: Path, day_catalogs: list,
         _preflight_record(checks, failures, f'six_tables:{name}', ok, detail or {})
 
     identities = [identity for identity, _ in day_catalogs]
-    fixture_codes = list(dict.fromkeys(universe_codes[:10]))
+    fixture_codes = list(dict.fromkeys(universe_codes[:4]))
     sim_root = out / 'six-sim'
     sim_trial = sim_root / 'archive/selection_trials' / cfg['experiment_id']
     sim_cfg = dict(cfg)
@@ -2839,143 +3206,251 @@ def _preflight_six_tables(cfg: dict, root: Path, out: Path, day_catalogs: list,
                    context_root=str(sim_root / 'context'),
                    replay_cases=[dict(identity, replay_id=f'simday{i + 1}')
                                  for i, identity in enumerate(identities)],
-                   research_enabled=True, execution_profile='compact-v1')
+                   research_enabled=True, execution_profile='compact-v1',
+                   batch_days=len(identities), plan_days=len(identities),
+                   action_dates=[i['action_date'] for i in identities])
+    dates = list(pd.bdate_range('2026-08-20', '2026-09-24').strftime('%Y-%m-%d'))
+    warehouse_root = out / 'synthetic-warehouse'
+    last_donor_inputs = root / 'smoke' / identities[-1]['replay_id'] / 'inputs'
+    last_day_universe = [r['ts_code'] for r in _json(last_donor_inputs / 'universe.json')]
+    missing_entry_date = identities[-1]['action_date']
+    missing_entry_code = last_day_universe[0]  # in the universe, absent from prices that day
+    _synthetic_warehouse(warehouse_root, fixture_codes, dates,
+                         absent={(missing_entry_date, missing_entry_code)})
+    _synthetic_research_db(warehouse_root, dates)
+    sim_cfg['warehouse_root'] = str(warehouse_root)
     _write_json(sim_trial / 'experiment.json', sim_cfg)
-    dates = list(pd.bdate_range('2026-08-20', '2026-09-25').strftime('%Y-%m-%d'))
-    warehouse = _synthetic_warehouse(out / 'synthetic-warehouse', fixture_codes, dates)
-    through = dates[-1]
-    # per-day qualified decisions: M0 non-empty on days 1-2, zero on 3-5; M1 zero on all
-    run_contracts = []
-    for index, identity in enumerate(identities):
-        sim_id = f'simday{index + 1}'
-        day_dir = sim_trial / 'smoke' / sim_id
-        _reuse_frozen_inputs(sim_cfg, day_dir, root / 'smoke' / identity['replay_id'],
-                             'replay_smoke', sim_id)
-        run = _json(day_dir / 'run.json')
-        run_contracts.append(run)
-    inputs = []
-    conditional_code = fixture_codes[-1]
-    for index, identity in enumerate(identities):
-        code = fixture_codes[index % len(fixture_codes)]
-        base = {'formation_date': identity['formation_date'], 'action_date': identity['action_date'],
-                'as_of': identity['as_of'], 'ts_code': code, 'name': f'合成夹具{index}',
-                'mode': 'replay_smoke', 'rank': 1}
-        if index < 2:  # non-empty M0 days; day 2 also carries a conditional event row
-            inputs.append({**base, 'method_id': 'M0',
-                           'run_id': f'replay_smoke:simday{index + 1}:M0', 'role': 'selected'})
-            if index == 1:
-                inputs.append({**base, 'ts_code': conditional_code, 'method_id': 'M0',
-                               'run_id': f'replay_smoke:simday{index + 1}:M0', 'role': 'conditional'})
-        inputs.append({**base, 'method_id': 'M0',
-                       'run_id': f'replay_smoke:simday{index + 1}:M0', 'role': 'rejected',
-                       'candidate_reason': '合成被拒候选'})
-        for method in ('S_A', 'S_B'):
-            inputs.append({**base, 'method_id': method,
-                           'run_id': f'replay_smoke:simday{index + 1}:S_M{method[-1]}',
-                           'role': 'simple_reference'})
-        for universe_code in fixture_codes:
-            inputs.append({**base, 'ts_code': universe_code, 'name': f'合成{universe_code}',
-                           'method_id': 'U', 'run_id': f'replay_smoke:simday{index + 1}:U',
-                           'role': 'universe'})
-        # M1 zero-selection days contribute no selected rows at all
-    rows, meta = outcomes.calculate(warehouse, inputs, through,
-                                    daily_output=out / 'synthetic-warehouse/daily-paths.parquet')
-    record('calculate_synthetic_paths',
-           bool(rows) and any(r.get('d20_endpoint_return') is not None for r in rows),
-           {'rows': len(rows), 'planned_selections': meta.get('planned_selections')})
-    calendar = dates
-    selected_rows = [r for r in rows if r['role'] == 'selected']
-    candidate_rows = [r for r in rows if r['role'] in ('rejected', 'conditional')]
-    reference_rows = [r for r in rows if r['role'] == 'simple_reference']
-    universe_rows = [r for r in rows if r['role'] == 'universe']
-    day_states = []
-    for index, identity in enumerate(identities):
-        day_states.append({'mode': 'replay_smoke', 'replay_id': f'simday{index + 1}',
-                           'action_date': identity['action_date'],
-                           'status': {'M0': 'complete' if index < 2 else 'complete_zero',
-                                      'M1': 'complete_zero'},
-                           'qualification': {'M0': True, 'M1': True}})
-    stats = outcomes.summarize(selected_rows, day_states, mode='replay_smoke')
-    zero_ok = (stats['methods']['M1']['zero_selection_days'] == len(identities)
-               and stats['methods']['M1']['recommendation_events'] == 0)
-    record('summarize_exact_identity_scope',
-           stats['planned_days'] == len(identities) == stats['paired_days']
-           and stats['methods']['M0']['completed_days'] == len(identities)
-           and zero_ok,
-           {'planned_days': stats['planned_days'], 'paired_days': stats['paired_days'],
-            'M1_zero_days': stats['methods']['M1']['zero_selection_days'],
-            'M1_events': stats['methods']['M1']['recommendation_events']})
-    first_only, nonoverlap = outcomes.auxiliary_views(selected_rows, calendar)
-    groups = outcomes.describe_groups(selected_rows + reference_rows + universe_rows, calendar,
-                                      [identity['action_date'] for identity in identities])
-    outcome_dir = sim_trial / 'outcomes' / through / 'r001'
-    outcome_dir.mkdir(parents=True, exist_ok=True)
-    files = {}
-    for name, content in (('outcomes.csv', _csv_text(selected_rows)),
-                          ('candidate-outcomes.csv', _csv_rows(candidate_rows,
-                                                              ['run_id', 'method_id', 'action_date', 'ts_code'])),
-                          ('first-only.csv', _csv_text(first_only)),
-                          ('nonoverlap.csv', _csv_text(nonoverlap)),
-                          ('simple-reference-outcomes.csv', _csv_text(reference_rows)),
-                          ('universe-outcomes.csv', _csv_text(universe_rows)),
-                          ('group-summary.json', json.dumps(groups, ensure_ascii=False, indent=2, default=str)),
-                          ('summary.json', json.dumps(stats, ensure_ascii=False, indent=2, default=str))):
-        path = outcome_dir / name
-        path.write_text(content + '\n', encoding='utf-8')
-        files[name] = {'chars': len(content)}
-    record('six_files_written',
-           all((outcome_dir / name).stat().st_size > 0 for name in files),
-           {'files': sorted(files)})
-    m1_rows = [r for r in selected_rows if r['method_id'] == 'M1']
-    record('zero_selection_keeps_empty_rows', not m1_rows
-           and 'M1' not in {r.get('method_id') for r in selected_rows},
-           {'m1_selected_rows': len(m1_rows),
-            'meaning': '零选日收益为空而非0；outcomes.csv中M1无行'})
-    # the real delivery formatter runs on the simulated trial (R6.5)
-    formatter_ok, formatter_detail = False, {}
-    import traceback as _tb
+
+    # scenario plan: day1 both nonempty; day2 M0 zero, M1 nonempty; day3 both zero;
+    # day4 M0 nonempty + conditional candidate; day5 M0 nonempty missing-entry stock
+    plan = {1: {'M0': ['selected'], 'M1': ['selected']},
+            2: {'M0': [], 'M1': ['selected']},
+            3: {'M0': [], 'M1': []},
+            4: {'M0': ['selected', 'conditional'], 'M1': []},
+            5: {'M0': ['missing_entry'], 'M1': []}}
+
+    original_invoke = _invoke_model
+    invoke_counter = {'fake': 0}
+
+    def fake_invoke_factory(decision_text, events_text):
+        def invoke(context, prompt, attempt, *, config_path=None):
+            invoke_counter['fake'] += 1
+            attempt.mkdir(parents=True, exist_ok=False)
+            (attempt / 'prompt.md').write_text(prompt, encoding='utf-8')
+            (attempt / 'events.jsonl').write_text(events_text, encoding='utf-8')
+            (attempt / 'raw-output.json').write_text(decision_text, encoding='utf-8')
+            metadata = {'requested_model': MODEL, 'actual_model': MODEL, 'actual_reasoning': EFFORT,
+                        'exit_code': 0, 'budget_exceeded': None,
+                        'tokens': {'input_tokens': 1000, 'cached_input_tokens': 800, 'output_tokens': 100}}
+            _write_json(attempt / 'invocation.json', metadata)
+            return 0, metadata
+        return invoke
+
     try:
         for index, identity in enumerate(identities):
-            day_dir = sim_trial / 'smoke' / f'simday{index + 1}'
-            run_data = _json(day_dir / 'run.json')
+            day_number = index + 1
+            sim_id = f'simday{day_number}'
+            day_dir = sim_trial / 'smoke' / sim_id
+            _reuse_frozen_inputs(sim_cfg, day_dir, root / 'smoke' / identity['replay_id'],
+                                 'replay_smoke', sim_id)
+            catalog = day_dir / 'inputs/catalog.json'
+            context = Path(sim_cfg['context_root']) / sim_id
+            universe = [r['ts_code'] for r in _json(catalog.parent / 'universe.json')]
+            code_a, code_b = universe[0], universe[1]
+            request = {'queries': [
+                {'id': 'company_first', 'view': 'company',
+                 'sql': 'SELECT ts_code FROM company WHERE ts_code = ?', 'params': [code_a]},
+                {'id': 'sector_scan', 'view': 'sector', 'sql': 'SELECT count(*) AS n FROM sector'},
+                {'id': 'price_candidates', 'view': 'price',
+                 'sql': 'SELECT ts_code FROM price WHERE ts_code = ?', 'params': [code_a]}]}
+            discovery = compact.discover_queries(catalog, request, output_dir=context / 'work')
+            sector_snapshots = _json(catalog.parent / 'sector-snapshots.json') \
+                if (catalog.parent / 'sector-snapshots.json').exists() else []
+            pages = [compact.facts_compact(catalog, codes=[code_a],
+                                           categories=['price', 'company'],
+                                           sector_snapshots=sector_snapshots,
+                                           output=context / 'work/facts-full.json',
+                                           parts_dir=context / 'work/facts-parts')]
+            while pages[-1].get('next_part'):
+                pages.append(compact.facts_compact(catalog, codes=[code_a],
+                                                   categories=['price', 'company'],
+                                                   sector_snapshots=sector_snapshots,
+                                                   part=pages[-1]['next_part'],
+                                                   parts_dir=context / 'work/facts-parts'))
+            events_text = '\n'.join(json.dumps({'type': 'item.completed', 'item': {
+                'type': 'command_execution', 'exit_code': 0, 'command': 'compact cli',
+                'aggregated_output': json.dumps(payload, ensure_ascii=False)}}, ensure_ascii=False)
+                for payload in [discovery, *pages]) + '\n'
+            receipts = {r['query_id']: r for r in discovery['responses']}
+            run = _json(day_dir / 'run.json')
             for method in ('M0', 'M1'):
-                selected = (1 if (method == 'M0' and index < 2) else 0)
-                run_data['status'][method] = 'complete' if selected else 'complete_zero'
-                _write_json(day_dir / 'run.json', run_data)
-                day_base = fixture_codes[index % len(fixture_codes)]
-                stock = {'ts_code': day_base, 'rank': 1,
-                         'primary_reason': '合成非空', 'strongest_counter_evidence': '合成反证',
-                         'nearest_comparison': '合成近邻', 'participation_condition': '合成条件',
-                         'change_condition': '合成改变'} if selected else None
-                result = {'run_id': f'replay_smoke:simday{index + 1}:{method}', 'method_id': method,
-                          'selected': [stock] if selected else [],
-                          'candidates': ([{'ts_code': day_base, 'discovered_by': ['price'],
-                                           'final_fate': 'selected', 'short_reason': '合成',
-                                           'source_refs': []}] if selected else
-                                          [{'ts_code': conditional_code, 'discovered_by': ['company'],
-                                            'final_fate': 'conditional', 'short_reason': '合成条件事件',
-                                            'source_refs': []}]),
-                          'no_selection_reason': None if selected else '合成零选',
-                          'discovery_summary': {v: {'status': 'searched_no_candidate', 'codes': []}
-                                                for v in ('sector', 'company', 'price')},
-                          'model_run': {'actual_model': MODEL, 'actual_reasoning': EFFORT}}
-                _write_json(day_dir / method / 'result.json', result)
-                _write_json(day_dir / method / 'qualification.json', {
-                    'qualified': True, 'paired_acceptance': 'qualified', 'reasons': [],
-                    'run_id': result['run_id'], 'method_id': method,
-                    'input_contract_version': 'selection-parallel-input-v2'})
-        formatted = result_tables.format_tables(sim_trial / 'experiment.json', outcome_dir,
+                roles = plan[day_number].get(method, [])
+                if 'missing_entry' in roles and day_number == len(identities):
+                    selected_codes = [missing_entry_code]  # valid universe member, no price that day
+                else:
+                    selected_codes = [code_a for role in roles if role in ('selected', 'missing_entry')]
+                stock_list = []
+                for rank, code in enumerate(selected_codes, 1):
+                    stock_list.append({'ts_code': code, 'rank': rank,
+                                       'primary_reason': f'合成入选{rank}',
+                                       'strongest_counter_evidence': '合成反证',
+                                       'nearest_comparison': '合成近邻',
+                                       'participation_condition': '合成参与条件',
+                                       'change_condition': '合成改变条件',
+                                       'source_refs': ['neutral:price_analysis_context',
+                                                       f'facts:{code}:price', f'facts:{code}:company']})
+                candidates = [{'ts_code': c, 'discovered_by': ['price'],
+                               'final_fate': 'selected', 'short_reason': '合成',
+                               'source_refs': ['neutral:price_analysis_context'],
+                               'opportunity_type': 'independent_price_anomaly',
+                               'engine_type': 'independent_demand_acceleration',
+                               'engine_status': 'active',
+                               'market_recognition': {'status': 'confirmed',
+                                                      'basis': '合成夹具显式声明'}} for c in selected_codes]
+                if 'conditional' in roles:
+                    candidates.append({'ts_code': code_b, 'discovered_by': ['company'],
+                                       'final_fate': 'conditional', 'short_reason': '合成条件事件',
+                                       'source_refs': ['neutral:company_discovery']})
+                decision = {'method_id': method, 'formation_date': run['formation_date'],
+                            'action_date': run['action_date'], 'as_of': run['as_of'],
+                            'market_summary': '合成背景',
+                            'candidates': candidates, 'selected': stock_list,
+                            'conditional_events': ([{'ts_code': code_b}] if 'conditional' in roles else []),
+                            'unresolved': [],
+                            'discovery_summary': {
+                                'sector': {'status': 'searched_no_candidate', 'source_refs': ['neutral:sector_hotspot'],
+                                           'codes': [], 'source_total': receipts['sector_scan']['source_total'],
+                                           'query': receipts['sector_scan']['sql'],
+                                           'matched_count': receipts['sector_scan']['matched_count'],
+                                           'coverage_gap': []},
+                                'company': {'status': 'searched_with_candidates'
+                                            if any('company' in c['discovered_by'] for c in candidates)
+                                            else 'searched_no_candidate',
+                                            'source_refs': ['neutral:company_discovery'],
+                                            'codes': [c['ts_code'] for c in candidates
+                                                      if 'company' in c['discovered_by']],
+                                            'source_total': receipts['company_first']['source_total'],
+                                            'query': receipts['company_first']['sql'],
+                                            'matched_count': receipts['company_first']['matched_count'],
+                                            'coverage_gap': []},
+                                'price': {'status': 'searched_with_candidates' if selected_codes else 'searched_no_candidate',
+                                          'source_refs': ['neutral:price_analysis_context'],
+                                          'codes': [c['ts_code'] for c in candidates
+                                                    if 'price' in c['discovered_by']],
+                                          'source_total': receipts['price_candidates']['source_total'],
+                                          'query': receipts['price_candidates']['sql'],
+                                          'matched_count': receipts['price_candidates']['matched_count'],
+                                          'coverage_gap': []}},
+                            'no_selection_reason': None if selected_codes else '合成零选'}
+                globals()['_invoke_model'] = fake_invoke_factory(json.dumps(decision, ensure_ascii=False),
+                                                                events_text)
+                run_arm(day_dir, method=method)
+                assert _qualification(day_dir, method)['qualified'], (sim_id, method)
+        # real outcome assembly on the synthetic warehouse
+        outcome_dir = update_outcomes(sim_trial / 'experiment.json', through='2026-09-24')
+        batch_dir = prepare_batch(sim_trial / 'experiment.json', batch_number=1, through='2026-09-24')
+        formatted = result_tables.format_tables(sim_trial / 'experiment.json', Path(outcome_dir),
                                                 out / 'delivery-tables')
-        formatter_ok = formatted['rows'] > 0 and formatted['diff_rows'] > 0 and formatted['group_rows'] > 0 \
-            and (out / 'delivery-tables/02_A-B逐条结果.csv').exists()
-        formatter_detail = formatted
-    except Exception as error:  # noqa: BLE001 - report, never fabricate the pass
-        formatter_detail = {'error': f'{type(error).__name__}: {str(error)[:250]}',
-                            'traceback': _tb.format_exc()[-600:]}
-    record('delivery_formatter_runs', formatter_ok, formatter_detail)
-    files.update({'delivery_tables': {'02_A-B逐条结果': (out / 'delivery-tables/02_A-B逐条结果.csv').stat().st_size
-                                      if (out / 'delivery-tables/02_A-B逐条结果.csv').exists() else 0}})
-    return {'checks': checks, 'failures': failures, 'files': files}
+        # per-day equal-count and zero-group assertions from the ACTUAL files
+        import csv as _csv
+        with (Path(outcome_dir) / 'outcomes.csv').open(encoding='utf-8') as handle:
+            outcome_rows = list(_csv.DictReader(handle))
+        with (Path(outcome_dir) / 'simple-reference-outcomes.csv').open(encoding='utf-8') as handle:
+            reference_rows = list(_csv.DictReader(handle))
+        with (Path(outcome_dir) / 'candidate-outcomes.csv').open(encoding='utf-8') as handle:
+            candidate_rows = list(_csv.DictReader(handle))
+        equal_counts, zero_clean, detail_days = True, True, {}
+        for index, identity in enumerate(identities):
+            day_number, action = index + 1, identity['action_date']
+            a_selected = [r for r in outcome_rows if r['action_date'] == action and r['method_id'] == 'M0']
+            b_selected = [r for r in outcome_rows if r['action_date'] == action and r['method_id'] == 'M1']
+            s_a = [r for r in reference_rows if r['action_date'] == action and r['method_id'] == 'S_A']
+            s_b = [r for r in reference_rows if r['action_date'] == action and r['method_id'] == 'S_B']
+            expected_a = sum(1 for role in plan[day_number]['M0']
+                             if role in ('selected', 'missing_entry'))
+            expected_b = sum(1 for role in plan[day_number]['M1']
+                             if role in ('selected', 'missing_entry'))
+            day_ok = (len(a_selected) == expected_a and len(b_selected) == expected_b
+                      and len(s_a) == expected_a and len(s_b) == expected_b)
+            equal_counts = equal_counts and day_ok
+            if not plan[day_number]['M1']:
+                zero_clean = zero_clean and not b_selected and not s_b
+            detail_days[f'day{day_number}'] = {'A': len(a_selected), 'S_A': len(s_a),
+                                               'B': len(b_selected), 'S_B': len(s_b),
+                                               'expected': [expected_a, expected_b]}
+        record('equal_count_references_from_real_constructor', equal_counts,
+               {'per_day': detail_days,
+                'meaning': 'S_A/S_B数量逐日等于A/B入选数量；由update_outcomes真实构造'})
+        zero_days_ok = True
+        zero_detail = {}
+        for day_number, identity in enumerate(identities, 1):
+            for method in ('M0', 'M1'):
+                if plan[day_number].get(method):
+                    continue
+                rows_that_day = [r for r in outcome_rows
+                                 if r['action_date'] == identity['action_date']
+                                 and r['method_id'] == method]
+                refs_that_day = [r for r in reference_rows
+                                  if r['action_date'] == identity['action_date']
+                                  and r['method_id'] == ('S_A' if method == 'M0' else 'S_B')]
+                if rows_that_day or refs_that_day:
+                    zero_days_ok = False
+                zero_detail[f'day{day_number}_{method}'] = {'rows': len(rows_that_day),
+                                                             'refs': len(refs_that_day)}
+        record('zero_selection_empty_not_zero', zero_clean and zero_days_ok,
+               {**zero_detail, 'meaning': '零选日该方法无入选行、无参照行；收益为空而非0'})
+        day4_dir = sim_trial / 'smoke/simday4/M0/result.json'
+        day4_conditional_codes = {e.get('ts_code') for e in _json(day4_dir).get('conditional_events', [])} \
+            if day4_dir.exists() else set()
+        conditional_formal = [r for r in outcome_rows
+                              if r['action_date'] == identities[min(3, len(identities) - 1)]['action_date']
+                              and r['ts_code'] in day4_conditional_codes]
+        record('conditional_event_only_in_candidates', bool(day4_conditional_codes)
+               and not conditional_formal,
+               {'decision_conditional_codes': sorted(day4_conditional_codes),
+                'formal_outcome_rows': len(conditional_formal),
+                'meaning': '条件事件保留在决定账本，不计入正式收益行'})
+        missing = [r for r in outcome_rows if r['ts_code'] == missing_entry_code
+                   and r['action_date'] == missing_entry_date]
+        record('missing_entry_kept_own_denominator',
+               len(missing) == 1 and missing[0].get('d5_status') == 'no_reliable_entry',
+               {'row': {k: missing[0].get(k) for k in ('ts_code', 'd5_status', 'd20_status')}
+                if missing else None})
+        day1_pair = [r for r in outcome_rows if r['action_date'] == identities[0]['action_date']
+                     and r['ts_code'] == _json(sim_trial / 'smoke/simday1/inputs/universe.json')[0]['ts_code']]
+        record('same_stock_same_day_shared_path',
+               len({(r['method_id'], r['d5_endpoint_return']) for r in day1_pair
+                    if r['method_id'] in ('M0', 'M1')}) <= 2
+               and len(day1_pair) >= 2,
+               {'rows': len(day1_pair),
+                'returns': sorted({r.get('d5_endpoint_return') for r in day1_pair})[:4]})
+        files = {name: (Path(outcome_dir) / name).stat().st_size
+                 for name in ('outcomes.csv', 'candidate-outcomes.csv', 'first-only.csv',
+                              'nonoverlap.csv', 'simple-reference-outcomes.csv',
+                              'universe-outcomes.csv', 'group-summary.json', 'summary.json')}
+        files.update({f'batch/{name}': (Path(batch_dir) / name).stat().st_size
+                      for name in ('comparison.csv', 'metrics.json', 'readiness.json')})
+        files.update({f'delivery/{name}': (out / 'delivery-tables' / name).stat().st_size
+                      for name in os.listdir(out / 'delivery-tables')})
+        record('real_pipeline_files', all(size > 0 for size in files.values()),
+               {'outcome_revision': str(outcome_dir), 'batch_revision': str(batch_dir),
+                'formatter': formatted, 'files': sorted(files),
+                'readiness': _json(Path(batch_dir) / 'readiness.json')})
+        stats = _json(Path(outcome_dir) / 'summary.json')
+        total = len(identities)
+        expected_m0_zero = sum(1 for d in plan if d <= total and not plan[d]['M0'])
+        expected_m1_zero = sum(1 for d in plan if d <= total and not plan[d]['M1'])
+        record('summary_scopes', stats['planned_days'] == total and stats['paired_days'] == total
+               and stats['methods']['M1']['zero_selection_days'] == expected_m1_zero
+               and stats['methods']['M0']['zero_selection_days'] == expected_m0_zero,
+               {'planned': stats['planned_days'], 'paired': stats['paired_days'],
+                'M0_zero': stats['methods']['M0']['zero_selection_days'],
+                'M1_zero': stats['methods']['M1']['zero_selection_days'],
+                'expected': [expected_m0_zero, expected_m1_zero]})
+        return {'checks': checks, 'failures': failures,
+                'files': {k: {'bytes': v} for k, v in files.items()}}
+    finally:
+        globals()['_invoke_model'] = original_invoke
 
 
 def _preflight_report(out: Path, cfg: dict, checks: list, failures: list, timings: dict,

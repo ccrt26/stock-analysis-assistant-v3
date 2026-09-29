@@ -653,7 +653,7 @@ def test_official_acceptance_requires_original_identity_timestamp_and_clause(tmp
               'adopted_pages_and_clauses':[{'page':1,'quote':'原合同尚需审批'}]}
     obj={'official_evidence':[evidence]};cutoff=datetime.fromisoformat('2026-08-20T09:05:00+08:00')
     read_log=[('evidence cli','',{'documents':[{'evidence_id':'doc1','read':True,
-        'text':text,'locator':{'start_page':1,'end_page':1}}]})]
+        'text':text,'returned_spans':[{'page':1,'text':text,'char_start':0,'char_end':len(text)}]}]})]
     trial._save_official_evidence(obj,context,tmp_path/'accepted',cutoff,read_log=read_log)
     assert (tmp_path/'accepted/official/doc1/original.html').read_bytes()==raw
     evidence['available_at']='2026-08-21T00:00:00+08:00'
@@ -661,7 +661,7 @@ def test_official_acceptance_requires_original_identity_timestamp_and_clause(tmp
     evidence['available_at']=announcement['available_at'];evidence['ts_code']='000002.SZ'
     with pytest.raises(ValueError,match='identity mismatch'):trial._save_official_evidence(obj,context,tmp_path/'invalid',cutoff,read_log=read_log)
     evidence['ts_code']=announcement['ts_code'];evidence['adopted_pages_and_clauses']=[{'page':1,'quote':'收入已经确定'}]
-    with pytest.raises(ValueError,match='absent'):trial._save_official_evidence(obj,context,tmp_path/'invalid',cutoff,read_log=read_log)
+    with pytest.raises(ValueError,match='同一次实际返回的页段'):trial._save_official_evidence(obj,context,tmp_path/'invalid',cutoff,read_log=read_log)
 
 
 def test_outcomes_cannot_read_market_before_ten_frozen_decisions(tmp_path,monkeypatch):
@@ -768,8 +768,10 @@ def test_successful_tool_json_stream_preserves_every_complete_document():
 # ------------------------------------------------ compact-v1 engineering nodes
 
 import hashlib
+import selectors as selectors_module
 import shutil
 import subprocess as _subprocess
+import subprocess as subprocess_module
 import sys
 from decimal import Decimal
 from datetime import date as _date
@@ -1181,9 +1183,13 @@ def test_final_output_survives_budget_and_parse_failure(tmp_path, monkeypatch):
         return 124, {'requested_model': trial.MODEL, 'actual_model': trial.MODEL,
                      'actual_reasoning': trial.EFFORT, 'budget_exceeded': 'max_input_tokens'}
     monkeypatch.setattr(trial, '_invoke_model', over_budget)
-    with pytest.raises(RuntimeError, match='exit 124'):
+    # A prior failed attempt must NOT silently start a new model invocation (E4):
+    # run_arm refuses instead; the earlier raw output stays preserved as evidence.
+    with pytest.raises(RuntimeError, match='不自动发起新模型调用'):
         trial.run_arm(day, method='M0')
-    assert trial._json(day / 'run.json')['status']['M0'] == 'budget_exceeded'
+    # only the first invoke happened (attempts has exactly one dir); no attempt-002 model call
+    assert attempts[0].joinpath('raw-output.json').exists()
+    assert trial._json(day / 'run.json')['status']['M0'] == 'failed_validation'
     assert not (day / 'M0/result.json').exists()  # saved output never becomes qualified by repair
 
 
@@ -1354,12 +1360,20 @@ def test_fake_arm_exercises_real_save_and_handoff(tmp_path, monkeypatch):
     assert (day / 'inputs/reads/M0/000001.SZ-price.json').exists()
     assert (day / 'inputs/reads/M0/000001.SZ-company.json').exists()
     assert 'runtime-index' in calls[0] and '冻结方法执行视图' in calls[0]
-    # the JUST-SAVED compact decision flows to the normal B handoff consumer (R6.3)
+    # an unclassified short decision is honestly REFUSED by the adapter (E5)
     from tools import recommendation_pipeline as pipeline
     from tools.recommendation_pipeline import trace_input_sha256
     saved = trial._json(day / 'M0/result.json')
     run = trial._json(day / 'run.json')
-    trace = trial._compact_handoff_trace(saved, run)
+    with pytest.raises(ValueError, match='不成立'):
+        trial._compact_handoff_trace(saved, run)
+    declared = json.loads(json.dumps(saved))
+    for candidate in declared['candidates']:  # fixture declares business fields explicitly
+        candidate['opportunity_type'] = 'independent_price_anomaly'
+        candidate['engine_type'] = 'independent_demand_acceleration'
+        candidate['engine_status'] = 'active'
+        candidate['market_recognition'] = {'status': 'confirmed', 'basis': '夹具显式声明'}
+    trace = trial._compact_handoff_trace(declared, run)
     saved_read = trial._json(day / 'inputs/reads/M0/000001.SZ-price.json')
     ctx = {'facts': {}, 'proposed_judgment': {}, 'gaps': []}
     for read in saved_read.get('reads', []):
@@ -1369,6 +1383,9 @@ def test_fake_arm_exercises_real_save_and_handoff(tmp_path, monkeypatch):
     own_facts = packet['facts']['own']
     assert own_facts['price_observations'][0]['atr_ratio_20d'] == 0.03  # from the actually saved read slice
     assert 'equity_daily' in own_facts and own_facts['equity_daily'][-1]['close'] == 12.5
+    assert trace['research_result']['point_in_time_evidence_verified'] is False  # never faked True
+    recognition = trace['candidate_ledger'][0]['research_thesis']['market_recognition']
+    assert recognition['status'] == 'confirmed' and recognition['basis'] == '夹具显式声明'
     assert saved['selected'][0]['primary_reason'] in packet['judgment']['selection_reason']
     assert trace_input_sha256(trace) == packet['source_refs']['trace_sha256']
     assert packet['conditions'] or packet['gaps']  # P6 conditions or explicit gap
@@ -1405,10 +1422,11 @@ def test_fake_outcomes_render_six_tables_without_real_prices(tmp_path, monkeypat
                   ('universe.json', 'price_analysis_context.parquet', 'market_context.parquet',
                    'sector_hotspot.parquet', 'stock_trading_context.parquet', 'company_discovery.parquet')}
         trial._write_json(inputs / 'catalog.json', {
-            'experiment_id': 'six-sim', 'as_of': '2026-08-20T09:05:00+08:00', 'formation_date': '2026-08-19',
-            'action_date': '2026-08-20', 'company_discovery': 'company_discovery.parquet',
+            'experiment_id': 'six-sim', 'as_of': '2026-08-20T09:05:00+08:00',
+            'formation_date': formation_dates[i], 'action_date': action_dates[i],
+            'company_discovery': 'company_discovery.parquet',
             'day_dir': str(donor), 'frozen_inputs': frozen, 'source_versions': 'sources.json',
-            'derived': {}})
+            'derived': {}, 'source_root': str(tmp_path), 'warehouse_root': str(tmp_path / 'wh')})
         trial._write_json(donor / 'run.json', {
             'mode': 'replay_smoke', 'replay_id': replay_id,
             'formation_date': formation_dates[i], 'action_date': action_dates[i],
@@ -1425,10 +1443,17 @@ def test_fake_outcomes_render_six_tables_without_real_prices(tmp_path, monkeypat
             'full_universe_replay': True, 'execution_profile': 'compact-v1',
             'runtime_map_sha256': compact.runtime_map_sha256(CODE),
             'status': {'M0': 'not_run', 'M1': 'not_run'}, 'source_catalog': 'inputs/catalog.json'})
-    cfg = {'experiment_id': 'six-sim', 'code_root': str(CODE),
+    monkeypatch.setattr(trial, '_check_source_catalog', lambda *a: trial._json(Path(a[0])))
+    monkeypatch.setattr(trial, 'candidate_context', lambda *a, **k: {
+        'identity': {}, 'gaps': [], 'definitions': {}, 'market_facts': [],
+        'facts': _facts_fixture('000001.SZ')})
+    cfg = {'experiment_id': 'six-sim', 'code_root': str(CODE), 'source_root': str(tmp_path / 'src'),
+           'common_code_ref': run_head,
            'methods': {'M0': 'f164c634d745fe6d342dc693a9c6930ed5300414',
                        'M1': '290e35c494c757aec4604fd83ee92d453daae8a7'},
            'model': 'gpt-6-astra', 'reasoning': 'xhigh', 'no_fallback': True,
+           'outcome_through': '2026-09-24', 'evaluation_mode': 'replay_smoke',
+           'full_universe_replay': True,
            'limits': {'max_tool_commands': 24, 'max_wall_seconds': 900, 'max_input_tokens': 750000,
                       'max_output_tokens': 20000}}
     result = trial._preflight_six_tables(cfg, root, tmp_path,
@@ -1443,8 +1468,8 @@ def test_fake_outcomes_render_six_tables_without_real_prices(tmp_path, monkeypat
     outcome_dir = sorted(_glob.glob(str(tmp_path / 'six-sim/archive/selection_trials/six-sim/outcomes/*/r001')))[-1]
     stats = json.loads((Path(outcome_dir) / 'summary.json').read_text())
     assert stats['planned_days'] == 5 and stats['paired_days'] == 5
-    assert stats['methods']['M1']['zero_selection_days'] == 5
-    assert stats['methods']['M1']['recommendation_events'] == 0
+    assert stats['methods']['M1']['zero_selection_days'] == 3  # days 3/4/5 per scenario plan
+    assert stats['methods']['M0']['zero_selection_days'] == 2  # days 2/3 per plan (day2 M0 zero)
 
 
 def test_preflight_never_launches_a_research_model(tmp_path, monkeypatch):
@@ -1480,7 +1505,7 @@ def test_preflight_never_launches_a_research_model(tmp_path, monkeypatch):
            'limits': {'max_tool_commands': 24, 'max_wall_seconds': 900, 'max_input_tokens': 750000,
                       'max_output_tokens': 20000},
            'evaluation_mode': 'replay_smoke', 'full_universe_replay': True,
-           'execution_profile': 'compact-v1',
+           'execution_profile': 'compact-v1', 'outcome_through': '2026-09-24',
            'replay_cases': [{'formation_date': '2026-08-19', 'action_date': '2026-08-20',
                               'as_of': '2026-08-20T09:05:00+08:00', 'replay_id': 'guard1',
                               'method_order': ['M0', 'M1']}],
@@ -1555,18 +1580,26 @@ def test_boundary_long_mixed_discovery_rows_with_part_continuation(tmp_path, mon
         output_dir=tmp_path / 'q')
     receipt = out['responses'][0]
     assert receipt['matched_count'] == 20
-    assert len(receipt['rows']) == 19  # normal rows stay inline; the oversized one does not
+    page_json = json.dumps(receipt, ensure_ascii=False)
+    assert len(page_json) <= compact.LIST_PAGE_CHARS * 1.2  # whole response bounded
+    assert 0 < len(receipt['rows']) < 20  # normal rows stay inline under the budget
+    assert receipt['next_offset'] is not None  # remaining normal rows continue via offset
     stub = receipt['oversized_rows'][0]
-    assert stub['oversized'] and stub['part_id']
-    continued = compact.discover_queries(catalog, {'queries': []}, output_dir=tmp_path / 'q',
-                                         part=stub['part_id'])
-    joined = ''.join(str(seg) for seg in continued['segments'])
-    assert '不排除终止' in joined  # the negative clause survives field segmentation
-    for segment in continued['segments']:
-        json.dumps(segment)  # every segment is independently valid JSON
+    assert stub['oversized'] and stub['part_id'] and stub['segment_count'] >= 2
+    collected = []
+    part_id = stub['part_id'] + '#0'
+    while part_id:
+        piece = compact.discover_queries(catalog, {'queries': []}, output_dir=tmp_path / 'q', part=part_id)
+        assert len(json.dumps(piece, ensure_ascii=False)) <= compact.LIST_PAGE_CHARS * 1.2
+        collected.append(piece['segment'])
+        part_id = piece['next_segment_part']
+    joined = ''.join(str(value) for segment in collected
+                     for value in segment.values() if isinstance(value, str))
+    assert '不排除终止' in joined  # the negative clause survives per-segment reads
+    json.dumps(collected[0])  # each segment is independently valid JSON
     with pytest.raises(ValueError, match='续读ID不属于当前catalog身份'):
-        tampered = Path(str(catalog).replace('compact-test', 'other'))
-        compact.discover_queries(catalog, {'queries': []}, output_dir=tmp_path / 'q2', part=stub['part_id'])
+        compact.discover_queries(catalog, {'queries': []}, output_dir=tmp_path / 'q2',
+                                 part=stub['part_id'] + '#0')
 
 
 def test_boundary_40k_original_single_page_with_executable_next(tmp_path, monkeypatch):
@@ -1684,3 +1717,623 @@ def test_boundary_cumulative_estimate_formula():
     assert abs(got - expected_12) <= 2 and got > 1254000  # cumulative, never the last-round length
     assert got != 140048
     assert estimates['estimate_rounds_12']['startup_alone_repeated_chars'] == 12 * startup
+
+
+# ------------------------------------------------ audit2 target nodes (E1-E6)
+
+def _facts_fixture_multi(codes):
+    base = json.loads(json.dumps(_facts_fixture(codes[0])))[codes[0]]
+    return {code: json.loads(json.dumps(base)) for code in codes}
+
+
+def test_audit2_facts_roundtrip_to_archive(tmp_path, monkeypatch):
+    catalog, codes = _tiny_catalog(tmp_path)
+    code = codes[0]
+    announcements = [{'title': f'公告{i}', 'available_at': '2026-08-18T09:00:00+00:00'}
+                     for i in range(500)]
+    announcements.insert(0, {'title': '重要反证：协议未生效且不排除终止（首条）',
+                             'available_at': '2026-08-18T08:00:00+00:00'})
+    announcements.append({'title': '终止风险提示（末条）', 'available_at': '2026-08-19T09:00:00+00:00'})
+    # heterogeneous rows: one very long business_scope mixed among short ones
+    fixture = _facts_fixture_multi(codes[:3])
+    fixture[code]['announcement'] = announcements
+    fixture[code]['company_profile'] = [
+        {'com_name': '长记录', 'business_scope': '业务范围。' * 4000,
+         'profile_snapshot_date': '2026-06-30'},
+        {'com_name': '短记录', 'business_scope': '短', 'profile_snapshot_date': '2026-06-30'}]
+    monkeypatch.setattr(trial, '_check_source_catalog', lambda p: trial._json(p))
+    monkeypatch.setattr(trial, 'candidate_context', lambda *a, **k: {
+        'identity': {}, 'gaps': [], 'definitions': {}, 'market_facts': [], 'facts': fixture})
+    # 3 codes x 4 categories in one request; every page bounded
+    pages = [compact.facts_compact(catalog, codes=codes[:3],
+                                   categories=['price', 'company', 'financial', 'industry'],
+                                   output=tmp_path / 'full.json', parts_dir=tmp_path / 'parts')]
+    while pages[-1].get('next_part'):
+        pages.append(compact.facts_compact(catalog, codes=codes[:3],
+                                           categories=['price', 'company', 'financial', 'industry'],
+                                           part=pages[-1]['next_part'], parts_dir=tmp_path / 'parts'))
+    for page in pages:
+        assert len(json.dumps(page, ensure_ascii=False)) <= compact.FACTS_PAGE_CHARS * 1.6
+    events = '\n'.join(json.dumps({'type': 'item.completed', 'item': {
+        'type': 'command_execution', 'exit_code': 0, 'command': 'facts cli',
+        'aggregated_output': json.dumps(p, ensure_ascii=False)}}, ensure_ascii=False)
+        for p in pages)
+    tools = trial._successful_tool_results(events)
+    ref = f'facts:{code}:company'
+    observed = trial._observed_fact_reads(tools, ref)
+    assert observed, 'company scope complete'
+    merged = observed[0]['result']['facts']
+    titles = [a['title'] for a in merged['announcement']]
+    assert len(titles) == 502
+    assert titles[0].startswith('重要反证') and titles[-1] == '终止风险提示（末条）'
+    profiles = merged['company_profile']
+    assert profiles[0]['com_name'] == '长记录' and len(profiles[0]['business_scope']) > 1000
+    # duplicate page arrival: rereading a previous part must not corrupt the merge
+    duplicated = pages + [pages[0]]
+    events2 = events + '\n' + json.dumps({'type': 'item.completed', 'item': {
+        'type': 'command_execution', 'exit_code': 0, 'command': 'facts cli',
+        'aggregated_output': json.dumps(pages[0], ensure_ascii=False)}}, ensure_ascii=False)
+    observed2 = trial._observed_fact_reads(trial._successful_tool_results(events2), ref)
+    assert len(observed2[0]['result']['facts']['announcement']) == 502
+    # actual save then read back from disk
+    events_obj = [{'reads': observed}]
+    saved_path = tmp_path / 'reads' / f'{code}-company.json'
+    trial._write_json(saved_path, {'reads': observed})
+    reread = trial._json(saved_path)
+    assert [a['title'] for a in reread['reads'][0]['result']['facts']['announcement']] == titles
+
+
+def test_audit2_evidence_cursor_exhausts_exact_range(tmp_path, monkeypatch):
+    from stock_analyzer.ops.official_evidence import extract_original
+    catalog, codes = _tiny_catalog(tmp_path)
+    context = tmp_path / 'ctx'
+
+    def stage_doc(evidence_id, text, kind_hint='html'):
+        folder = context / 'work/official' / evidence_id
+        folder.mkdir(parents=True, exist_ok=True)
+        raw = f'<html><body>{text}</body></html>'.encode()
+        _, extracted = extract_original(raw, 'text/html')
+        (folder / 'original.html').write_bytes(raw)
+        (folder / 'text.txt').write_text(extracted)
+        trial._write_json(folder / 'receipt.json', {
+            'schema': 'official-evidence-v1', 'url': f'https://e.test/{evidence_id}',
+            'final_url': f'https://e.test/{evidence_id}', 'retrieved_at': '2026-08-20T08:00:00+00:00',
+            'original': 'original.html', 'text': 'text.txt', 'content_type': 'text/html',
+            'announcement': {'ts_code': '000001.SZ', 'announcement_id': evidence_id,
+                             'title': '原文', 'available_at': '2026-08-18T09:00:00+00:00'}})
+        return extracted
+
+    rows = [{'ts_code': '000001.SZ', 'dataset': 'announcement', 'title': '原文',
+             'available_at': '2026-08-18T09:00:00+00:00', 'source_record_id': 'd1',
+             'original_url': 'https://e.test/d1', 'fact_values_json': '{}'}]
+    pd.DataFrame(rows).to_parquet(catalog.parent / 'company_discovery.parquet', index=False)
+    monkeypatch.setattr(trial, '_check_source_catalog', lambda p: trial._json(p))
+    long_single = '。'.join(f'第{j}段合同条款；未承诺收入；不排除终止。' for j in range(1500))
+    long_single += '【独特否定句收尾XYZ】'
+    scenarios = {
+        'd1': (stage_doc('d1', long_single), {'start_line': 1, 'end_line': 100000}),
+    }
+    for evidence_id, (original_text, locator) in scenarios.items():
+        collected, request_locator, guard = [], dict(locator), 0
+        current = {'evidence_id': evidence_id, 'action': 'read',
+                   'receipt_ref': f'work/official/{evidence_id}/receipt.json', **locator}
+        while current and guard < 200:
+            guard += 1
+            doc = compact.evidence_request(catalog, context, {'documents': [current]})['documents'][0]
+            assert doc['page_chars'] <= compact.FACTS_PAGE_CHARS
+            collected.append(doc['text'])
+            spans = doc['returned_spans']
+            assert spans, 'every page returns real spans'
+            nxt = (doc.get('next_part') or {}).get('next_request')
+            if nxt is None:
+                assert doc['cursor']['exhausted'] is True
+                break
+            assert nxt != current, 'cursor must strictly advance'
+            for key in ('start_line', 'end_line', 'start_page', 'end_page', 'start_offset'):
+                assert nxt.get(key, current.get(key)) is None or nxt.get(key, current.get(key)) >= (current.get(key) or 0) or key == 'end_line'
+            current = nxt
+        assert guard < 200, 'bounded termination'
+        # reconstruct the original selected body from the staged text lines
+        lines = [line for line in original_text.splitlines() if line.strip()]
+        joined = ''.join(collected)
+        assert '【独特否定句收尾XYZ】' in joined, 'tail must be reachable'
+        assert len(joined) >= len(''.join(lines)) - 2 * len(lines), 'no material loss'
+
+
+def test_audit2_discover_cli_and_bounded_pages(tmp_path, monkeypatch, capsys):
+    import io
+    import contextlib
+    from tools import selection_parallel as cli
+    catalog, codes = _tiny_catalog(tmp_path)
+    monkeypatch.setattr(trial, '_check_source_catalog', lambda p: trial._json(p))
+    inputs = catalog.parent
+    rows = []
+    for i in range(25):
+        rows.append({'ts_code': codes[i % len(codes)], 'dataset': 'announcement',
+                     'title': f'行{i}',
+                     'fact_values_json': ('重大合同；未生效且不排除终止。' * 2500) if i == 3 else '短',
+                     'available_at': '2026-08-19T10:00:00+08:00',
+                     'source_record_id': f'r{i}', 'original_url': f'https://e.test/{i}'})
+    pd.DataFrame(rows).to_parquet(inputs / 'company_discovery.parquet', index=False)
+    big = pd.DataFrame({'ts_code': [codes[i % len(codes)] for i in range(60000)],
+                        'dataset': ['announcement'] * 60000,
+                        'title': [f't{i}' for i in range(60000)],
+                        'available_at': ['2026-08-19T10:00:00+08:00'] * 60000,
+                        'source_record_id': [f'b{i}' for i in range(60000)]})
+    big.to_parquet(inputs / 'company_discovery.parquet', index=False) if False else None
+    # keep 25-row parquet for bounded page; 60k case covered in boundary node
+    request = tmp_path / 'req.json'
+    trial._write_json(request, {'queries': [
+        {'id': 'q1', 'view': 'company',
+         'sql': 'SELECT ts_code, title, fact_values_json FROM company ORDER BY source_record_id',
+         'page_size': 25}]})
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        cli.main(['discover', '--catalog', str(catalog), '--request', str(request),
+                  '--output-dir', str(tmp_path / 'q')])
+    stdout_first = buf.getvalue()
+    assert stdout_first.count('{') >= 1
+    payload = json.loads(stdout_first)
+    assert len(stdout_first) <= compact.LIST_PAGE_CHARS * 1.6  # whole stdout bounded
+    receipt = payload['responses'][0]
+    assert receipt['matched_count'] == 25
+    stub = receipt['oversized_rows'][0]
+    part0 = f"{stub['part_id']}#0"
+    buf2 = io.StringIO()
+    with contextlib.redirect_stdout(buf2):
+        cli.main(['discover', '--catalog', str(catalog), '--part', part0,
+                  '--output-dir', str(tmp_path / 'q')])
+    piece = json.loads(buf2.getvalue())
+    assert len(buf2.getvalue()) <= compact.LIST_PAGE_CHARS * 1.3
+    assert piece['segment'] is not None and piece['next_segment_part']
+    # repeated continuation reads the same stored segment, no new index record
+    before = len(compact.query_receipts(tmp_path / 'q'))
+    for _ in range(2):
+        with contextlib.redirect_stdout(io.StringIO()):
+            cli.main(['discover', '--catalog', str(catalog), '--part', part0,
+                      '--output-dir', str(tmp_path / 'q')])
+    assert len(compact.query_receipts(tmp_path / 'q')) == before
+    # --part standalone is legal without --request
+    with contextlib.redirect_stdout(io.StringIO()) as _b:
+        cli.main(['discover', '--catalog', str(catalog), '--part', part0,
+                  '--output-dir', str(tmp_path / 'q')])
+
+
+def test_audit2_document_version_and_span_adoption(tmp_path, monkeypatch):
+    catalog, codes = _tiny_catalog(tmp_path)
+    context = tmp_path / 'ctx'
+    folder = context / 'work/official/doc1'
+    folder.mkdir(parents=True)
+    from stock_analyzer.ops.official_evidence import extract_original
+    body_html = ('<html><body>'
+                 '<p>第一段：合同尚需审批，未承诺确认收入，且金额以正式披露为准。</p>'
+                 '<p>第二段：不排除终止上市风险。</p>'
+                 '</body></html>').encode()
+    _, full_text = extract_original(body_html, 'text/html')
+    (folder / 'original.html').write_bytes(body_html)
+    (folder / 'text.txt').write_text(full_text)
+    trial._write_json(folder / 'receipt.json', {
+        'schema': 'official-evidence-v1', 'url': 'https://e.test/1', 'final_url': 'https://e.test/1',
+        'retrieved_at': '2026-08-20T08:00:00+00:00', 'original': 'original.html', 'text': 'text.txt',
+        'content_type': 'text/html',
+        'announcement': {'ts_code': '000001.SZ', 'announcement_id': '1', 'title': '原文',
+                         'available_at': '2026-08-18T09:00:00+00:00'}})
+    rows = [{'ts_code': '000001.SZ', 'dataset': 'announcement', 'title': '原文',
+             'available_at': '2026-08-18T09:00:00+00:00', 'source_record_id': '1',
+             'original_url': 'https://e.test/1', 'fact_values_json': '{}'}]
+    pd.DataFrame(rows).to_parquet(catalog.parent / 'company_discovery.parquet', index=False)
+    monkeypatch.setattr(trial, '_check_source_catalog', lambda p: trial._json(p))
+    # later-version receipt for the same ID: rejected before returning text
+    later = json.loads((folder / 'receipt.json').read_text())
+    later['announcement']['available_at'] = '2026-08-25T08:00:00+00:00'
+    later_dir = context / 'work/official/doc1'
+    original_receipt = (folder / 'receipt.json').read_text()
+    (folder / 'receipt.json').write_text(json.dumps(later, ensure_ascii=False))
+    with pytest.raises(ValueError, match='公开时间不一致|晚于本catalog截止'):
+        compact.evidence_request(catalog, context, {'documents': [
+            {'evidence_id': 'doc1', 'ts_code': '000001.SZ', 'announcement_id': '1',
+             'action': 'read', 'receipt_ref': 'work/official/doc1/receipt.json',
+             'start_line': 1, 'end_line': 3}]})
+    (folder / 'receipt.json').write_text(original_receipt)
+    read = compact.evidence_request(catalog, context, {'documents': [
+        {'evidence_id': 'doc1', 'action': 'read', 'receipt_ref': 'work/official/doc1/receipt.json',
+         'start_line': 1, 'end_line': 20}]})['documents'][0]
+    spans = read['returned_spans']
+    page1_span = next(s for s in spans if '未承诺确认收入' in s['text'])
+    page2_span = next(s for s in spans if '不排除终止' in s['text'])
+    # adoption: quote and locator must be in the SAME span
+    def adopt(clause):
+        return {'official_evidence': [{
+            'evidence_id': 'doc1', 'ts_code': '000001.SZ', 'announcement_id': '1', 'title': '原文',
+            'available_at': '2026-08-18T09:00:00+00:00',
+            'availability_basis': 'frozen original announcement metadata',
+            'url': 'https://e.test/1', 'retrieved_at': '2026-08-20T08:00:00+00:00',
+            'receipt': 'work/official/doc1/receipt.json',
+            'adopted_pages_and_clauses': [clause]}]}
+    read_log = [('evidence cli', '', {'documents': [read]})]
+    trial._save_official_evidence(adopt({'lines': page1_span['lines'], 'quote': '未承诺确认收入'}),
+                                  context, tmp_path / 'ok1', datetime.fromisoformat('2026-08-20T09:05:00+08:00'),
+                                  read_log=read_log)
+    with pytest.raises(ValueError, match='同一次实际返回'):
+        # quote from page 1 but locator pointing at page 2's lines
+        wrong_lines = page2_span['lines']
+        trial._save_official_evidence(adopt({'lines': wrong_lines, 'quote': '未承诺确认收入'}),
+                                      context, tmp_path / 'bad1', datetime.fromisoformat('2026-08-20T09:05:00+08:00'),
+                                      read_log=read_log)
+    # locate-only (no read event) never adopts
+    with pytest.raises(ValueError, match='successful read'):
+        trial._save_official_evidence(adopt({'lines': page1_span['lines'], 'quote': '未承诺确认收入'}),
+                                      context, tmp_path / 'bad2', datetime.fromisoformat('2026-08-20T09:05:00+08:00'),
+                                      read_log=[])
+
+
+def test_audit2_cancel_reaps_owned_process(tmp_path):
+    import sys as _sys
+    import time as _time
+    sleeper = 'import time; time.sleep(30)'
+    events = tmp_path / 'ev.jsonl'
+    stderr = tmp_path / 'err.log'
+    limits = {'max_tool_commands': 24, 'max_wall_seconds': 1,
+              'max_input_tokens': 750000, 'max_output_tokens': 20000}
+    # normal completion reaps
+    result = trial._execute_research([_sys.executable, '-u', '-c', 'print("done")'],
+                                     tmp_path, '', events, stderr, limits)
+    assert result['exit_code'] == 0
+    # budget stop kills the whole owned process group quickly
+    started = _time.monotonic()
+    result = trial._execute_research([_sys.executable, '-u', '-c', sleeper],
+                                     tmp_path, '', events.with_suffix('.2'), stderr.with_suffix('.2'), limits)
+    assert result['exit_code'] == 124 and result['budget_exceeded'] == 'max_wall_seconds'
+    assert _time.monotonic() - started < 10
+    # KeyboardInterrupt path: selector raises mid-stream -> owned group reaped
+    real_select = selectors_module.DefaultSelector.select
+    calls = {'n': 0}
+    def raising_select(self, timeout=None):
+        calls['n'] += 1
+        if calls['n'] > 1:
+            raise KeyboardInterrupt('parent cancelled')
+        return real_select(self, timeout)
+    monkeypatch_select = None
+    import pytest as _pytest
+    from unittest import mock
+    with mock.patch.object(selectors_module.DefaultSelector, 'select', raising_select):
+        with _pytest.raises(KeyboardInterrupt):
+            trial._execute_research([_sys.executable, '-u', '-c', sleeper],
+                                    tmp_path, '', events.with_suffix('.3'), stderr.with_suffix('.3'),
+                                    {'max_tool_commands': 24, 'max_wall_seconds': 60,
+                                     'max_input_tokens': 750000, 'max_output_tokens': 20000})
+    # unrelated processes are never touched
+    bystander = subprocess_module.Popen([_sys.executable, '-u', '-c', sleeper])
+    try:
+        assert bystander.poll() is None
+        trial._execute_research([_sys.executable, '-u', '-c', 'print("x")'],
+                                tmp_path, '', events.with_suffix('.4'), stderr.with_suffix('.4'), limits)
+        assert bystander.poll() is None  # still alive: executor only reaps its own group
+    finally:
+        bystander.terminate()
+        bystander.wait(timeout=10)
+
+
+def test_audit2_failed_attempt_no_implicit_retry(tmp_path, monkeypatch):
+    path, day = prepared(tmp_path, monkeypatch)
+    cfg = trial._json(path)
+    cfg.update(research_enabled=True, full_universe_replay=False)
+    trial._write_json(path, cfg)
+    monkeypatch.setattr(trial, '_check_source_catalog', lambda *a: trial._json(day / 'inputs/catalog.json'))
+    monkeypatch.setattr(trial, 'init_experiment', lambda *a: {})
+    calls = []
+    def invoke(context, prompt, attempt, *, config_path=None):
+        calls.append(attempt)
+        attempt.mkdir(parents=True)
+        (attempt / 'prompt.md').write_text(prompt)
+        (attempt / 'events.jsonl').write_text(discovery_events())
+        (attempt / 'raw-output.json').write_text('{"method_id":"M0","truncated')
+        trial._write_json(attempt / 'invocation.json',
+                          {'exit_code': 0, 'requested_model': trial.MODEL,
+                           'actual_model': trial.MODEL, 'actual_reasoning': trial.EFFORT,
+                           'budget_exceeded': None})
+        return 0, {'requested_model': trial.MODEL, 'actual_model': trial.MODEL,
+                   'actual_reasoning': trial.EFFORT}
+    monkeypatch.setattr(trial, '_invoke_model', invoke)
+    with pytest.raises(json.JSONDecodeError):
+        trial.run_arm(day, method='M0')
+    attempts_before = sorted(p.name for p in (path.parent / 'work/2026-09-24/M0').glob('attempt-*'))
+    assert attempts_before == ['attempt-001']
+    # second call: exit-0 raw output exists -> deterministic reparse, no new call
+    with pytest.raises(json.JSONDecodeError):
+        trial.run_arm(day, method='M0')
+    assert len(calls) == 1
+    # mark the attempt as budget-exceeded invocation: refuse any new model call
+    inv = trial._json(calls[0] / 'invocation.json')
+    inv.update(exit_code=124, budget_exceeded='max_input_tokens')
+    trial._write_json(calls[0] / 'invocation.json', inv)
+    run = trial._json(day / 'run.json')
+    run['status']['M0'] = 'budget_exceeded'
+    trial._write_json(day / 'run.json', run)
+    with pytest.raises(RuntimeError, match='不自动发起新模型调用'):
+        trial.run_arm(day, method='M0')
+    assert len(calls) == 1
+
+
+def test_audit2_nonempty_m1_archive_preserves_evidence(tmp_path, monkeypatch):
+    catalog, codes = _tiny_catalog(tmp_path)
+    monkeypatch.setattr(trial, '_check_source_catalog', lambda p: trial._json(p))
+    monkeypatch.setattr(trial, 'candidate_context', lambda *a, **k: {
+        'identity': {}, 'gaps': [], 'definitions': {}, 'market_facts': [],
+        'facts': _facts_fixture_multi(codes[:2])})
+    result = compact.facts_compact(catalog, codes=codes[:2],
+                                   categories=['price', 'company', 'financial', 'industry'],
+                                   output=tmp_path / 'full.json', parts_dir=tmp_path / 'parts')
+    pages = [result]
+    while pages[-1].get('next_part'):
+        pages.append(compact.facts_compact(catalog, codes=codes[:2],
+                                           categories=['price', 'company', 'financial', 'industry'],
+                                           part=pages[-1]['next_part'], parts_dir=tmp_path / 'parts'))
+    discovery = compact.discover_queries(catalog, {'queries': [
+        {'id': 'c', 'view': 'company', 'sql': 'SELECT ts_code FROM company'},
+        {'id': 's', 'view': 'sector', 'sql': 'SELECT count(*) AS n FROM sector'},
+        {'id': 'p', 'view': 'price', 'sql': 'SELECT ts_code FROM price'}]}, output_dir=tmp_path / 'q')
+    receipts = {r['query_id']: r for r in discovery['responses']}
+    events = [json.dumps({'type': 'item.completed', 'item': {
+        'type': 'command_execution', 'exit_code': 0, 'command': 'cli',
+        'aggregated_output': json.dumps(payload, ensure_ascii=False)}}, ensure_ascii=False)
+        for payload in [discovery, *pages]]
+    stocks = []
+    for rank, code in enumerate(codes[:2], 1):
+        stocks.append({'ts_code': code, 'rank': rank, 'primary_reason': f'B夹具{rank}',
+                       'strongest_counter_evidence': '反证', 'nearest_comparison': '近邻',
+                       'participation_condition': f'条件{rank}', 'change_condition': '重判',
+                       'source_refs': [f'facts:{code}:{c}' for c in
+                                       ('price', 'company', 'financial', 'industry')]})
+    obj = {'method_id': 'M0', 'formation_date': '2026-08-19', 'action_date': '2026-08-20',
+           'as_of': '2026-08-20T09:05:00+08:00', 'market_summary': 'x',
+           'candidates': [{'ts_code': s['ts_code'], 'discovered_by': ['price'],
+                           'final_fate': 'selected', 'short_reason': 'r',
+                           'source_refs': ['neutral:price_analysis_context'],
+                           'opportunity_type': 'independent_price_anomaly',
+                           'engine_type': 'independent_demand_acceleration',
+                           'engine_status': 'active',
+                           'market_recognition': {'status': 'confirmed', 'basis': '夹具显式声明'}} for s in stocks],
+           'selected': stocks, 'conditional_events': [], 'unresolved': [],
+           'discovery_summary': {
+               'sector': {'status': 'searched_no_candidate', 'source_refs': ['neutral:sector_hotspot'],
+                          'codes': [], 'source_total': receipts['s']['source_total'],
+                          'query': receipts['s']['sql'], 'matched_count': receipts['s']['matched_count'],
+                          'coverage_gap': []},
+               'company': {'status': 'searched_no_candidate', 'source_refs': ['neutral:company_discovery'],
+                           'codes': [], 'source_total': receipts['c']['source_total'],
+                           'query': receipts['c']['sql'], 'matched_count': receipts['c']['matched_count'],
+                           'coverage_gap': []},
+               'price': {'status': 'searched_with_candidates', 'source_refs': ['neutral:price_analysis_context'],
+                         'codes': codes[:2], 'source_total': receipts['p']['source_total'],
+                         'query': receipts['p']['sql'], 'matched_count': receipts['p']['matched_count'],
+                         'coverage_gap': []}},
+           'no_selection_reason': None}
+    events_text = '\n'.join(events) + '\n'
+    tools = trial._successful_tool_results(events_text)
+    fact_refs, refs = trial._validate_decision(
+        obj, {'full_universe_replay': True, 'formation_date': '2026-08-19',
+              'action_date': '2026-08-20', 'as_of': '2026-08-20T09:05:00+08:00',
+              'input_contract_version': 'selection-parallel-input-v2'},
+        'M0', catalog, events_text)
+    assert len(fact_refs) == 8  # 2 stocks x 4 categories, all observed & complete
+    for ref in fact_refs:
+        observed = trial._observed_fact_reads(tools, ref)
+        assert observed, ref
+        merged = observed[0]['result']['facts']
+        category = ref.rsplit(':', 1)[1]
+        if category == 'price':
+            assert merged.get('price_observations'), ref
+        elif category == 'company':
+            assert merged.get('announcement'), ref
+        elif category == 'financial':
+            assert 'financial_availability' in merged, ref
+        elif category == 'industry':
+            assert merged.get('industry_observations'), ref
+    saved_dir = tmp_path / 'reads'
+    for ref in fact_refs:
+        _, code, category = ref.split(':')
+        trial._write_json(saved_dir / f'{code}-{category}.json',
+                          {'reads': trial._observed_fact_reads(tools, ref)})
+    files = sorted(p.name for p in saved_dir.glob('*.json'))
+    assert len(files) == 8
+    # honest adapter refuses an unclassified copy, accepts declared fields verbatim
+    stripped = json.loads(json.dumps(obj))
+    for candidate in stripped['candidates']:
+        candidate.pop('opportunity_type', None)
+    with pytest.raises(ValueError, match='不成立'):
+        trial._compact_handoff_trace(stripped, {'formation_date': '2026-08-19',
+                                                'action_date': '2026-08-20',
+                                                'as_of': '2026-08-20T09:05:00+08:00'})
+    trace = trial._compact_handoff_trace(obj, {'formation_date': '2026-08-19',
+                                               'action_date': '2026-08-20',
+                                               'as_of': '2026-08-20T09:05:00+08:00'})
+    assert len(trace['candidate_ledger']) == 2
+    assert trace['research_result']['point_in_time_evidence_verified'] is False
+
+
+def test_audit2_real_result_pipeline_equal_count_zero(tmp_path, monkeypatch):
+    # thin wrapper driving the real six-table pipeline with the unit harness
+    import subprocess as sp
+    import hashlib as _hl
+    from stock_analyzer.storage.research_parquet import sha256_file
+    root = tmp_path / 'trial'
+    run_head = sp.run(['git', 'rev-parse', 'HEAD'], cwd=CODE, check=True,
+                      capture_output=True, text=True).stdout.strip()
+    monkeypatch.setattr(trial, '_worktree_dirty', lambda *a: False)
+    monkeypatch.setattr(trial, '_check_source_catalog', lambda *a: trial._json(Path(a[0])))
+    monkeypatch.setattr(trial, 'candidate_context', lambda *a, **k: {
+        'identity': {}, 'gaps': [], 'definitions': {}, 'market_facts': [],
+        'facts': _facts_fixture('000001.SZ')})
+    formation_dates = ['2026-08-19', '2026-08-20', '2026-08-21', '2026-08-24', '2026-08-25']
+    action_dates = ['2026-08-20', '2026-08-21', '2026-08-24', '2026-08-25', '2026-08-26']
+    identities = []
+    for i in range(5):
+        replay_id = f'sim-{i}'
+        identities.append({'replay_id': replay_id, 'formation_date': formation_dates[i],
+                           'action_date': action_dates[i],
+                           'as_of': '2026-08-20T09:05:00+08:00', 'method_order': ['M0', 'M1']})
+        donor = root / 'smoke' / replay_id
+        inputs = donor / 'inputs'
+        universe = [{'ts_code': f'00000{i+1}.SZ', 'name': f'N{i}', 'market': '主板'} for i in range(2)]
+        trial._write_json(inputs / 'universe.json', universe)
+        for name, frame in (('price_analysis_context', pd.DataFrame([{'ts_code': universe[0]['ts_code'], 'return_5d': 0.01}])),
+                            ('market_context', pd.DataFrame([{'analysis_date': '2026-08-19'}])),
+                            ('sector_hotspot', pd.DataFrame([{'group_code': '8011.SI', 'group_name': 'x', 'level': 'L3', 'member_count': 5, 'group_type': 'industry'}])),
+                            ('stock_trading_context', pd.DataFrame([{'ts_code': universe[0]['ts_code']}])),
+                            ('company_discovery', pd.DataFrame([{'ts_code': universe[0]['ts_code'], 'dataset': 'announcement', 'title': 't', 'available_at': '2026-08-19T10:00:00+08:00'}]))):
+            frame.to_parquet(inputs / f'{name}.parquet', index=False)
+        trial._write_json(inputs / 'sources.json', [{'dataset': 'equity_daily', 'partition': '2026-08-19', 'file_sha256': 'fixed'}])
+        frozen = {n: sha256_file(inputs / n) for n in
+                  ('universe.json', 'price_analysis_context.parquet', 'market_context.parquet',
+                   'sector_hotspot.parquet', 'stock_trading_context.parquet', 'company_discovery.parquet')}
+        trial._write_json(inputs / 'catalog.json', {
+            'experiment_id': 'six-sim', 'as_of': '2026-08-20T09:05:00+08:00',
+            'formation_date': formation_dates[i], 'action_date': action_dates[i],
+            'company_discovery': 'company_discovery.parquet', 'day_dir': str(donor),
+            'frozen_inputs': frozen, 'source_versions': 'sources.json', 'derived': {},
+            'source_root': str(tmp_path), 'warehouse_root': str(tmp_path / 'wh')})
+        trial._write_json(donor / 'run.json', {
+            'mode': 'replay_smoke', 'replay_id': replay_id,
+            'formation_date': formation_dates[i], 'action_date': action_dates[i],
+            'as_of': '2026-08-20T09:05:00+08:00',
+            'input_contract_version': 'selection-parallel-input-v2', 'program_ref': run_head,
+            'program_dirty_at_prepare': False,
+            'common_prompt_sha256': _hl.sha256((CODE / 'ops/selection-parallel-prompt.md').read_bytes()).hexdigest(),
+            'methods': {'M0': 'f164c634d745fe6d342dc693a9c6930ed5300414',
+                        'M1': '290e35c494c757aec4604fd83ee92d453daae8a7'},
+            'model': 'gpt-6-astra', 'reasoning': 'xhigh', 'no_fallback': True,
+            'limits': {'max_tool_commands': 24, 'max_wall_seconds': 900,
+                       'max_input_tokens': 750000, 'max_output_tokens': 20000},
+            'full_universe_replay': True, 'execution_profile': 'compact-v1',
+            'runtime_map_sha256': compact.runtime_map_sha256(CODE),
+            'status': {'M0': 'not_run', 'M1': 'not_run'}, 'source_catalog': 'inputs/catalog.json'})
+    cfg = {'experiment_id': 'six-sim', 'code_root': str(CODE), 'source_root': str(tmp_path / 'src'),
+           'common_code_ref': run_head,
+           'methods': {'M0': 'f164c634d745fe6d342dc693a9c6930ed5300414',
+                       'M1': '290e35c494c757aec4604fd83ee92d453daae8a7'},
+           'model': 'gpt-6-astra', 'reasoning': 'xhigh', 'no_fallback': True,
+           'outcome_through': '2026-09-24', 'evaluation_mode': 'replay_smoke',
+           'full_universe_replay': True,
+           'limits': {'max_tool_commands': 24, 'max_wall_seconds': 900,
+                      'max_input_tokens': 750000, 'max_output_tokens': 20000}}
+    result = trial._preflight_six_tables(cfg, root, tmp_path,
+                                         [(i, None) for i in identities],
+                                         ['000001.SZ', '000002.SZ'])
+    assert not result['failures'], [c for c in result['checks'] if c['status'] != 'ok']
+    equal = next(c for c in result['checks']
+                 if c['check'] == 'six_tables:equal_count_references_from_real_constructor')
+    for day, counts in equal['detail']['per_day'].items():
+        assert counts['S_A'] == counts['expected'][0], (day, counts)
+        assert counts['S_B'] == counts['expected'][1], (day, counts)
+
+
+def test_audit2_preflight_checks_launch_binding(tmp_path, monkeypatch):
+    import subprocess as sp
+    import hashlib as _hl
+    real_subprocess = trial.subprocess
+    class Guarded:
+        PIPE = real_subprocess.PIPE
+        STDOUT = real_subprocess.STDOUT
+        @staticmethod
+        def run(cmd, *a, **k):
+            if isinstance(cmd, (list, tuple)) and any('codex' in str(p) for p in cmd):
+                raise AssertionError('research model launch attempted')
+            return real_subprocess.run(cmd, *a, **k)
+        @staticmethod
+        def Popen(cmd, *a, **k):
+            if isinstance(cmd, (list, tuple)) and any('codex' in str(p) for p in cmd):
+                raise AssertionError('research model launch attempted')
+            return real_subprocess.Popen(cmd, *a, **k)
+    monkeypatch.setattr(trial, 'subprocess', Guarded)
+    catalog, codes = _tiny_catalog(tmp_path)
+    monkeypatch.setattr(trial, '_check_source_catalog', lambda p: trial._json(p))
+    monkeypatch.setattr(trial, '_worktree_dirty', lambda *a: False)
+    monkeypatch.setattr(trial, 'candidate_context', lambda *a, **k: {
+        'identity': {}, 'gaps': [], 'definitions': {}, 'market_facts': [],
+        'facts': _facts_fixture(codes[0])})
+    head = real_subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=CODE, check=True,
+                               capture_output=True, text=True).stdout.strip()
+    old_ref = 'e058ee299c1961a822d50d64735dba1e8f250274'
+    def build_run(program_ref):
+        return {'experiment_id': 'preflight-guard',
+                'formation_date': '2026-08-19', 'action_date': '2026-08-20',
+                'as_of': '2026-08-20T09:05:00+08:00', 'mode': 'replay_smoke',
+                'replay_id': 'guard1', 'full_universe_replay': True,
+                'input_contract_version': 'selection-parallel-input-v2',
+                'program_ref': program_ref, 'program_dirty_at_prepare': False,
+                'common_prompt_sha256': _hl.sha256(
+                    (CODE / 'ops/selection-parallel-prompt.md').read_bytes()).hexdigest(),
+                'methods': {'M0': 'f164c634d745fe6d342dc693a9c6930ed5300414',
+                            'M1': '290e35c494c757aec4604fd83ee92d453daae8a7'},
+                'model': 'gpt-6-astra', 'reasoning': 'xhigh', 'no_fallback': True,
+                'research_enabled': False,
+                'limits': {'max_tool_commands': 24, 'max_wall_seconds': 900,
+                           'max_input_tokens': 750000, 'max_output_tokens': 20000},
+                'status': {'M0': 'not_run', 'M1': 'not_run'},
+                'source_catalog': 'inputs/catalog.json',
+                'execution_profile': 'compact-v1',
+                'runtime_map_sha256': compact.runtime_map_sha256(CODE)}
+    cfg = {'experiment_id': 'preflight-guard', 'common_code_ref': head,
+           'methods': {'M0': 'f164c634d745fe6d342dc693a9c6930ed5300414',
+                       'M1': '290e35c494c757aec4604fd83ee92d453daae8a7'},
+           'source_root': str(tmp_path / 'src'), 'warehouse_root': str(tmp_path / 'wh'),
+           'archive_root': str(tmp_path / 'arch'), 'context_root': str(tmp_path / 'ctx'),
+           'code_root': str(CODE), 'python': sys.executable,
+           'model': 'gpt-6-astra', 'reasoning': 'xhigh', 'no_fallback': True,
+           'research_enabled': False, 'execution_profile': 'compact-v1',
+           'outcome_through': '2026-09-24', 'evaluation_mode': 'replay_smoke',
+           'full_universe_replay': True,
+           'limits': {'max_tool_commands': 24, 'max_wall_seconds': 900,
+                      'max_input_tokens': 750000, 'max_output_tokens': 20000},
+           'replay_cases': [{'formation_date': '2026-08-19', 'action_date': '2026-08-20',
+                              'as_of': '2026-08-20T09:05:00+08:00', 'replay_id': 'guard1',
+                              'method_order': ['M0', 'M1']}]}
+    root = tmp_path / 'arch/selection_trials/preflight-guard'
+    day_dir = root / 'smoke/guard1'
+    shutil.copytree(tmp_path / 'inputs', day_dir / 'inputs')
+    for ref, expect_fail in ((head, False), (old_ref, True)):
+        trial._write_json(day_dir / 'run.json', build_run(ref))
+        config_path = root / 'experiment.json'
+        trial._write_json(config_path, cfg)
+        report = trial.preflight(config_path, output_dir=tmp_path / f'pre-{ref[:7]}')
+        binding = [c for c in report['checks']
+                   if c['check'] == 'launch_binding:real_check_run_contract']
+        assert binding, 'launch binding check must exist'
+        if expect_fail:
+            assert report['failed_checks'], 'old program_ref must fail preflight'
+            assert binding[0]['status'] == 'failed'
+            assert any('program_ref' in str(c) for c in binding[0]['detail']['cases'])
+        else:
+            assert binding[0]['status'] == 'ok'
+        assert report['research_model_calls'] == 0
+
+
+def test_audit2_continuations_do_not_recheck_global_sources(tmp_path, monkeypatch):
+    catalog, codes = _tiny_catalog(tmp_path)
+    calls = {'n': 0}
+    def counting_check(path):
+        calls['n'] += 1
+        return trial._json(path)
+    monkeypatch.setattr(trial, '_check_source_catalog', counting_check)
+    monkeypatch.setattr(trial, 'candidate_context', lambda *a, **k: {
+        'identity': {}, 'gaps': [], 'definitions': {}, 'market_facts': [],
+        'facts': _facts_fixture(codes[0])})
+    qdir = tmp_path / 'q'
+    first = compact.discover_queries(catalog, {'queries': [
+        {'id': 'q1', 'view': 'company', 'sql': 'SELECT ts_code FROM company'}]}, output_dir=qdir)
+    assert calls['n'] == 1
+    second = compact.discover_queries(catalog, {'queries': [
+        {'id': 'q1', 'view': 'company', 'sql': 'SELECT ts_code FROM company',
+         'page_size': 1, 'offset': 1}]}, output_dir=qdir)
+    assert calls['n'] == 1  # pure continuation: no catalog-wide check or view registration
+    assert second['view_totals'] == 'reused_stored_results'  # no DuckDB views registered
+    assert second['responses'][0]['offset'] == 1
+    assert second['responses'][0]['rows']
+    facts1 = compact.facts_compact(catalog, codes=[codes[0]], categories=['price'],
+                                   output=tmp_path / 'f.json', parts_dir=tmp_path / 'parts')
+    calls_after_facts = calls['n']
+    if facts1.get('next_part'):
+        compact.facts_compact(catalog, codes=[codes[0]], categories=['price'],
+                              part=facts1['next_part'], parts_dir=tmp_path / 'parts')
+        assert calls['n'] == calls_after_facts  # part reads never re-verify globally

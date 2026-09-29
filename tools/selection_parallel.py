@@ -54,13 +54,14 @@ def parser() -> argparse.ArgumentParser:
     f.add_argument('--usage-file', type=Path)
     d = sub.add_parser('discover', help='page frozen company discovery facts or run a query request')
     d.add_argument('--catalog', type=Path, required=True)
-    view = d.add_mutually_exclusive_group(required=True)
-    view.add_argument('--view', choices=('company',))
-    view.add_argument('--request', type=Path, help='JSON request over frozen read-only views')
+    mode = d.add_mutually_exclusive_group(required=True)
+    mode.add_argument('--view', choices=('company',))
+    mode.add_argument('--request', type=Path, help='JSON request over frozen read-only views')
+    mode.add_argument('--part', help='continuation id for oversized rows (reads the stored result; '
+                                     'needs --output-dir only)')
     d.add_argument('--limit', type=int, default=50)
     d.add_argument('--offset', type=int, default=0)
     d.add_argument('--output-dir', type=Path, help='arm-local dir for persisted query results')
-    d.add_argument('--part', help='continuation id for oversized rows (reads the stored result)')
     d.add_argument('--usage-file', type=Path)
     k = sub.add_parser('knowledge', help='read frozen knowledge entries by id')
     k.add_argument('--context', type=Path, required=True)
@@ -113,6 +114,8 @@ def main(argv: list[str] | None = None) -> int:
             output = compact.discover_queries(a.catalog, request, output_dir=a.output_dir)
             _print(output, catalog_path=a.catalog, usage_file=a.usage_file)
         else:
+            if a.output_dir is not None:
+                raise ValueError('--output-dir only applies to --request/--part')
             output = trial.discover_company(a.catalog, limit=a.limit, offset=a.offset)
             _print(output, catalog_path=a.catalog, usage_file=a.usage_file)
     elif a.command == 'facts':
