@@ -74,12 +74,34 @@ def save_facts_snapshot(query, inputs_dir: Path, *, formation_date: str, action_
 
     datasets: dict[str, dict] = {}
 
+    def _normalize_mixed_columns(frame: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
+        """Real warehouses carry mixed int/str in some object columns (e.g.
+        report_period across providers); parquet needs one type per column.
+        Only columns with genuinely mixed python types are cast to str — the
+        lossless superset — and the cast is recorded in the manifest."""
+        normalized = []
+        for column in frame.columns:
+            series = frame[column]
+            if series.dtype != object:
+                continue
+            values = series.dropna()
+            if not len(values):
+                continue
+            kinds = {type(value).__name__ for value in values.tolist()}
+            if len(kinds) > 1:
+                frame[column] = series.astype(str)
+                normalized.append(column)
+        return frame, normalized
+
     def store(dataset: str, frame: pd.DataFrame, *, method: str, partitions=None) -> None:
         entry = {'query_method': method, 'requested_partitions': list(partitions or [])}
         if frame is None:
             datasets[dataset] = entry
             return
         path = facts_dir / f'{dataset}.parquet'
+        frame, normalized_columns = _normalize_mixed_columns(frame)
+        if normalized_columns:
+            entry['mixed_type_columns_cast_to_str'] = normalized_columns
         frame.to_parquet(path, index=False)
         entry.update({'status': 'available' if not frame.empty else 'no_available_rows',
                       'path': f'{FACTS_SUBDIR}/{dataset}.parquet',
