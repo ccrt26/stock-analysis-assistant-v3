@@ -2100,29 +2100,31 @@ def preflight(config_path: Path, *, output_dir: Path) -> dict:
         sector_snapshots = _json(catalog0.parent / 'sector-snapshots.json') \
             if (catalog0.parent / 'sector-snapshots.json').exists() else []
         started = clock_time.monotonic()
-        facts_page = compact.facts_compact(catalog0, codes=[fixture_code], categories=['price', 'industry'],
-                                           group_codes=[l3_code] if l3_code else [],
-                                           sector_snapshots=sector_snapshots, output=out / 'facts-full.json',
-                                           parts_dir=out / 'facts-parts')
+        facts_pages = [compact.facts_compact(catalog0, codes=[fixture_code], categories=['price', 'industry'],
+                                             group_codes=[l3_code] if l3_code else [],
+                                             sector_snapshots=sector_snapshots, output=out / 'facts-full.json',
+                                             parts_dir=out / 'facts-parts')]
         timings['facts_compact_seconds'] = round(clock_time.monotonic() - started, 3)
-        industry_read = next((r for r in facts_page.get('reads', []) if r['category'] == 'industry'), None)
-        price_read = next((r for r in facts_page.get('reads', []) if r['category'] == 'price'), None)
+        continuation_ok = True
+        while facts_pages[-1].get('next_part'):
+            nxt = compact.facts_compact(catalog0, codes=[fixture_code], categories=['price', 'industry'],
+                                        group_codes=[l3_code] if l3_code else [],
+                                        sector_snapshots=sector_snapshots,
+                                        part=facts_pages[-1]['next_part'], parts_dir=out / 'facts-parts')
+            continuation_ok = continuation_ok and nxt.get('part') == facts_pages[-1]['next_part'] and 'reads' in nxt
+            facts_pages.append(nxt)
+        every_read = [r for page in facts_pages for r in page.get('reads', [])]
+        industry_read = next((r for r in every_read if r['category'] == 'industry'), None)
+        price_read = next((r for r in every_read if r['category'] == 'price'), None)
         industry_ok = bool(industry_read and industry_read['query_scope'].get('group_codes') == [l3_code]
                            and industry_read['result']['facts'].get('industry_observations'))
         price_ok = bool(price_read and 'comparison_windows' in price_read['result']['facts']
                         and price_read['result']['facts'].get('price_observations'))
-        continuation_ok = True
-        if facts_page.get('next_part'):
-            nxt = compact.facts_compact(catalog0, codes=[fixture_code], categories=['price', 'industry'],
-                                        group_codes=[l3_code] if l3_code else [],
-                                        sector_snapshots=sector_snapshots,
-                                        part=facts_page['next_part'], parts_dir=out / 'facts-parts')
-            continuation_ok = nxt.get('part') == facts_page['next_part'] and 'reads' in nxt
         _preflight_record(checks, failures, 'facts:compact_preserves_l3_and_windows',
                           industry_ok and price_ok and continuation_ok,
                           {'fixture_code': fixture_code, 'group_code': l3_code,
-                           'reads': len(facts_page.get('reads', [])),
-                           'next_part': facts_page.get('next_part')})
+                           'pages': len(facts_pages), 'reads': len(every_read),
+                           'next_part': facts_pages[-1].get('next_part')})
         sizes['facts_page_chars'] = {'chars': len(json.dumps(facts_page, ensure_ascii=False)),
                                      'utf8_bytes': len(json.dumps(facts_page, ensure_ascii=False).encode('utf-8'))}
 
