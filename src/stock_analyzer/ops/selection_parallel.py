@@ -2795,6 +2795,8 @@ def _preflight_fake_arm(cfg: dict, root: Path, out: Path, day_catalogs: list,
             {'evidence_id': evidence_id, 'action': 'read', 'receipt_ref': located_doc['receipt_ref'],
              **read_locator}]})['documents'][0]
         read_doc_for_events = read_doc
+        add_event(f'{cli} evidence --catalog {sim_catalog} --context . --request request.json',
+                  {'documents': [read_doc]})
         span = (read_doc.get('returned_spans') or [{}])[0]
         quote = str(span.get('text') or read_doc.get('text') or '').replace('\n', '')[:40].strip()
         if is_pdf:
