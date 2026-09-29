@@ -2789,8 +2789,8 @@ def _preflight_fake_arm(cfg: dict, root: Path, out: Path, day_catalogs: list,
             saved = _json(sim_day / 'M0/result.json')
             run = _json(sim_day / 'run.json')
             trace = _compact_handoff_trace(saved, run)
-            saved_read = _json(sim_day / 'inputs/reads/M0/facts-000001.SZ-price.json'.replace(
-                'facts-000001.SZ', f'{fixture_code}-price')) if (sim_day / 'inputs/reads/M0').exists() else None
+            saved_read = _json(sim_day / 'inputs/reads/M0' / f'{fixture_code}-price.json') \
+                if (sim_day / 'inputs/reads/M0').exists() else None
             context = {'facts': {}, 'proposed_judgment': {}, 'gaps': []}
             for read in ((saved_read or {}).get('reads') or []):
                 code = read.get('ts_code')
