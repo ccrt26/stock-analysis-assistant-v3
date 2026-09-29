@@ -70,7 +70,9 @@ def save_facts_snapshot(query, inputs_dir: Path, *, formation_date: str, action_
     cutoff = as_of
     from stock_analyzer.ops.selection_parallel import COMPANY_DATASETS
     formation_year = date.fromisoformat(formation_date).year
-    calendar_years = [str(year) for year in range(formation_year - 1, formation_year + 2)]
+    # exactly the years the runtime context requests; a wider lookahead would
+    # turn a legitimately absent future-year partition into a query failure
+    calendar_years = [str(year) for year in (formation_year - 1, formation_year)]
 
     datasets: dict[str, dict] = {}
 

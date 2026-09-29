@@ -3041,9 +3041,9 @@ def preflight(config_path: Path, *, output_dir: Path) -> dict:
             detail = {'replay_id': identity['replay_id']}
             if ok:
                 universe = _json(cat_path.parent / 'universe.json')
-                sources_file = cat_path.parent / 'sources.json'
-                if not sources_file.exists() and _json(cat_path).get('input_storage') == 'sealed-v1':
-                    sources_file = cat_path.parent / 'source-notes.json'
+                sources_file = (cat_path.parent / 'source-notes.json'
+                                if (cat_path.parent / 'source-notes.json').exists()
+                                else cat_path.parent / 'sources.json')
                 bound_count = (len(_json(sources_file).get('bound_partitions', []))
                                if sources_file.name == 'source-notes.json'
                                else len(_json(sources_file)))
@@ -3105,9 +3105,14 @@ def preflight(config_path: Path, *, output_dir: Path) -> dict:
             query_ok = (count_receipt['matched_count'] == day_company == count_receipt['source_total']
                         and price_receipt['searched_total'] == price_receipt['source_total'] == day_universe
                         and day_out['view_totals'].get('stock_context') is not None)
+            day_sources = (cat_path.parent / 'source-notes.json'
+                           if (cat_path.parent / 'source-notes.json').exists()
+                           else cat_path.parent / 'sources.json')
+            day_bound = (len(_json(day_sources).get('bound_partitions', []))
+                         if day_sources.name == 'source-notes.json' else len(_json(day_sources)))
             day_fact = {'queries_seconds': elapsed_queries,
                         'company_rows': day_company, 'universe_rows': day_universe,
-                        'bound_source_partitions': len(_json(cat_path.parent / 'sources.json'))}
+                        'bound_source_partitions': day_bound}
             fact_ok = False
             if query_ok:
                 day_codes = [r['ts_code'] for r in _json(cat_path.parent / 'universe.json')]
