@@ -2636,6 +2636,11 @@ def _preflight_fake_arm(cfg: dict, root: Path, out: Path, day_catalogs: list,
         read_doc = compact.evidence_request(sim_catalog, arm_context / 'M0', {'documents': [
             {'evidence_id': evidence_id, 'action': 'read', 'receipt_ref': located_doc['receipt_ref'],
              **read_locator_used}]})['documents'][0]
+        # the zero-selection variant cites the same original: stage it in the M1 arm too
+        m1_official = arm_context / 'M1' / 'work' / 'official' / evidence_id
+        m0_source = (arm_context / 'M0' / located_doc['receipt_ref']).parent
+        if not m1_official.exists():
+            shutil.copytree(m0_source, m1_official)
         add_event(f'{cli} evidence --catalog {sim_catalog} --context . --request request.json',
                   {'documents': [located_doc, read_doc]})
         quote = read_doc['text'].replace('\n', '')[:40]
