@@ -2986,8 +2986,10 @@ def _code_snapshot(tmp_path):
     if rsync.returncode != 0:  # pragma: no cover - rsync always present on macOS
         raise RuntimeError(rsync.stderr)
     sp.run(['git', '-C', str(clone), 'add', '-A'], check=True)
-    sp.run(['git', '-C', str(clone), '-c', 'user.name=snapshot', '-c', 'user.email=s@t',
-            'commit', '-qm', 'engineering snapshot for launch acceptance'], check=True)
+    staged = sp.run(['git', '-C', str(clone), 'diff', '--cached', '--quiet'])
+    if staged.returncode != 0:
+        sp.run(['git', '-C', str(clone), '-c', 'user.name=snapshot', '-c', 'user.email=s@t',
+                'commit', '-qm', 'engineering snapshot for launch acceptance'], check=True)
     return clone
 
 
