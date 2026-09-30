@@ -35,7 +35,7 @@ def test_snapshot_roundtrip_preserves_business_values(tmp_path, reverse, missing
         # flag; records() never date-projects it, so it stays a passthrough.
         'hard_risk_candidate':[True,False,False,True],
         'source_record_id':['00001','00002','00003','00004'],
-        'source_updated_at':pd.Series([pd.Timestamp('2026-08-01 01:00:00+00:00'),
+        'source_updated_at':pd.Series(['NaT',
                                       '2026-08-02T09:00:00+08:00',missing,
                                       '2026-08-20T09:05:00+08:00'],dtype=object),
         'ingested_at':pd.Series([pd.Timestamp('2026-09-29T10:00:00+08:00'),
@@ -64,7 +64,17 @@ def test_snapshot_roundtrip_preserves_business_values(tmp_path, reverse, missing
     business=['ts_code','business_key_hash','available_at','ann_date','float_date',
               'report_period','float_share','holder_name','source_record_id']
     assert records(restored,business)==records(original,business)
-    assert original.isna().reset_index(drop=True).equals(restored.isna().reset_index(drop=True))
+    # Null positions match verbatim for business columns; provenance timestamp
+    # columns compare after their semantic normalization, where a stringified
+    # missing artifact ('NaT' text from an ingestion path) reads as null.
+    def _semantic_nulls(frame):
+        frame=frame.copy(deep=True)
+        for column in frame.columns:
+            if column in snap._SNAPSHOT_METADATA_TIME_FIELDS:
+                frame[column]=snap._snapshot_metadata_times(frame[column])
+        return frame.isna().reset_index(drop=True)
+    assert _semantic_nulls(original).equals(_semantic_nulls(restored))
+    assert pd.isna(restored.loc[restored.business_key_hash=='small','source_updated_at'].item())
     assert restored.loc[restored.business_key_hash=='optional_missing','holder_name'].item()=='None'
     assert set(restored.source_record_id)=={'00001','00002','00003'}
     # The boolean flag must survive as a boolean, not be date-parsed or str-cast.

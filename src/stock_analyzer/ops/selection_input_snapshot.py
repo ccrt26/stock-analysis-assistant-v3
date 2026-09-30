@@ -90,8 +90,15 @@ def _snapshot_metadata_times(series: pd.Series) -> pd.Series:
     # Provenance-only timestamps retain an absent timezone rather than inventing
     # one. Aware values use UTC ISO text; naive values remain explicitly naive.
     from numpy import datetime64
+    # Stringified-missing renderings from an ingestion path: main_business
+    # carries literal 'NaT' text beside real NaT in the same provenance column.
+    # A timestamp column holds no other textual meaning; business text fields
+    # are never routed through this helper.
+    missing_text = frozenset({'nat', 'nan', 'none', ''})
     def text(value):
         if pd.isna(value):
+            return None
+        if isinstance(value, str) and value.strip().lower() in missing_text:
             return None
         if not isinstance(value, (str, date, datetime, pd.Timestamp, datetime64)):
             raise SnapshotIntegrityError(f'{series.name}: unsupported timestamp type {type(value).__name__}')
@@ -142,9 +149,6 @@ def _assert_snapshot_roundtrip(before: pd.DataFrame, after: pd.DataFrame, *, dat
     for column in before.columns:
         left = before[column].reset_index(drop=True)
         right = after[column].reset_index(drop=True)
-        if not left.isna().equals(right.isna()):
-            raise SnapshotIntegrityError(f'{dataset}.{column}: roundtrip null locations changed')
-        null_counts[column] = int(left.isna().sum())
         try:
             if column in _SNAPSHOT_INSTANT_FIELDS:
                 left, right = _snapshot_instants(left), _snapshot_instants(right)
@@ -152,6 +156,20 @@ def _assert_snapshot_roundtrip(before: pd.DataFrame, after: pd.DataFrame, *, dat
                 left, right = _snapshot_metadata_times(left), _snapshot_metadata_times(right)
             elif _snapshot_date_field(column):
                 left, right = _snapshot_dates(left), _snapshot_dates(right)
+        except Exception as error:
+            raise SnapshotIntegrityError(f'{dataset}.{column}: roundtrip value/order mismatch: {error}') from error
+        # Null positions are compared on the normalized representation for
+        # temporal columns (a stringified missing artifact reads as null on
+        # both sides) and verbatim for every other column.
+        if not left.isna().equals(right.isna()):
+            raise SnapshotIntegrityError(f'{dataset}.{column}: roundtrip null locations changed')
+        null_counts[column] = int(left.isna().sum())
+        # Null FLAVOR (None vs pd.NA vs NaN vs NaT) is not a business value;
+        # null positions were already verified above. Canonicalize both
+        # sides so only a real value or position change can fail here.
+        left = left.where(left.notna(), None)
+        right = right.where(right.notna(), None)
+        try:
             pd.testing.assert_series_equal(left, right, check_dtype=False,
                                            check_names=False, check_exact=True,
                                            check_categorical=False)
