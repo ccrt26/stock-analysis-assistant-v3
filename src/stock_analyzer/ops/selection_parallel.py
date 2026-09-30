@@ -318,7 +318,12 @@ def _company_discovery(query: ResearchQuery, eligible: set[str], cutoff: datetim
             continue
         if not frame.empty:
             frame = frame[frame['ts_code'].astype(str).isin(eligible)].copy()
-            visible = pd.to_datetime(frame['available_at'], utc=True, errors='coerce')
+            # Match ResearchQuery's existing per-value mixed-format semantics.
+            # Never silently discard a valid row because another row uses T/space.
+            from stock_analyzer.storage.research_query import _parse_available_at
+            visible = _parse_available_at(frame['available_at'])
+            if not visible.isna().equals(frame['available_at'].isna()):
+                raise ValueError(f'{dataset}: non-null available_at became null during indexing')
             frame = frame[visible.notna() & (visible <= pd.Timestamp(cutoff).tz_convert('UTC'))].copy()
             frame['__available_rank'] = visible.loc[frame.index]
             if 'business_key_hash' in frame:

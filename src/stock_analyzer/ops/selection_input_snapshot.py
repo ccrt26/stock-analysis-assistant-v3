@@ -52,6 +52,110 @@ def _same_instant(left: datetime, right: datetime) -> bool:
     return left == right  # both tz-aware; equality across zones compares instants
 
 
+# These helpers belong in the existing selection_input_snapshot.py module.
+# They are NOT a new storage layer or a general-purpose serializer.
+_SNAPSHOT_INSTANT_FIELDS = frozenset({'available_at', 'announcement_time'})
+_SNAPSHOT_METADATA_TIME_FIELDS = frozenset({'source_updated_at', 'ingested_at'})
+
+
+def _snapshot_date_field(column: str) -> bool:
+    # Same business-date interpretation as recommendation_context.records.
+    return column.endswith('date') or column in {'report_period', 'valid_from', 'valid_to'}
+
+
+def _snapshot_dates(series: pd.Series) -> pd.Series:
+    from stock_analyzer.ops.recommendation_context import date_text
+    # Object + None keeps null usable by existing `value or fallback` consumers.
+    return pd.Series([date_text(v) for v in series.tolist()],
+                     index=series.index, name=series.name, dtype=object)
+
+
+def _snapshot_instants(series: pd.Series) -> pd.Series:
+    from stock_analyzer.storage.research_query import _parse_available_at
+    # Reuse the CURRENT warehouse's mixed-format/timezone interpretation.
+    # No new timezone or cutoff rule is invented by serialization.
+    result = _parse_available_at(series)
+    if not result.isna().equals(series.isna()):
+        raise SnapshotIntegrityError(f'{series.name}: non-null time became null')
+    return result
+
+
+def _snapshot_metadata_times(series: pd.Series) -> pd.Series:
+    # Provenance-only timestamps retain an absent timezone rather than inventing
+    # one. Aware values use UTC ISO text; naive values remain explicitly naive.
+    from numpy import datetime64
+    def text(value):
+        if pd.isna(value):
+            return None
+        if not isinstance(value, (str, date, datetime, pd.Timestamp, datetime64)):
+            raise SnapshotIntegrityError(f'{series.name}: unsupported timestamp type {type(value).__name__}')
+        stamp = pd.Timestamp(value)
+        if pd.isna(stamp):
+            raise SnapshotIntegrityError(f'{series.name}: non-null timestamp became null')
+        if stamp.tzinfo is not None:
+            stamp = stamp.tz_convert('UTC')
+        return stamp.isoformat()
+    return pd.Series([text(v) for v in series.tolist()], index=series.index,
+                     name=series.name, dtype=object)
+
+
+def _normalize_snapshot_frame(frame: pd.DataFrame, *, dataset: str) -> tuple[pd.DataFrame, dict]:
+    """Normalize only documented temporal representations; never blanket-cast.
+
+    The caller's original frame stays untouched for an independent roundtrip
+    comparison. All non-temporal business values retain their original values.
+    """
+    normalized = frame.copy(deep=True)
+    representations = {}
+    for column in frame.columns:
+        try:
+            if column in _SNAPSHOT_INSTANT_FIELDS:
+                normalized[column] = _snapshot_instants(frame[column])
+                representations[column] = 'warehouse_mixed_parse_utc_timestamp'
+            elif column in _SNAPSHOT_METADATA_TIME_FIELDS:
+                normalized[column] = _snapshot_metadata_times(frame[column])
+                representations[column] = 'nullable_iso_provenance_timestamp'
+            elif _snapshot_date_field(column):
+                normalized[column] = _snapshot_dates(frame[column])
+                representations[column] = 'existing_date_text_nullable_iso_date'
+        except Exception as error:
+            raise SnapshotIntegrityError(f'{dataset}.{column}: temporal representation failed: {error}') from error
+    return normalized, representations
+
+
+def _assert_snapshot_roundtrip(before: pd.DataFrame, after: pd.DataFrame, *, dataset: str) -> dict:
+    """Compare the ACTUAL read-back file to the original query frame.
+
+    Time/date spelling may change, but instants/dates, null locations, business
+    values, column order and row order may not. Expected data is not generated
+    from a discovery query against the just-written snapshot.
+    """
+    if list(before.columns) != list(after.columns) or len(before) != len(after):
+        raise SnapshotIntegrityError(f'{dataset}: roundtrip columns/order/row-count mismatch')
+    null_counts = {}
+    for column in before.columns:
+        left = before[column].reset_index(drop=True)
+        right = after[column].reset_index(drop=True)
+        if not left.isna().equals(right.isna()):
+            raise SnapshotIntegrityError(f'{dataset}.{column}: roundtrip null locations changed')
+        null_counts[column] = int(left.isna().sum())
+        try:
+            if column in _SNAPSHOT_INSTANT_FIELDS:
+                left, right = _snapshot_instants(left), _snapshot_instants(right)
+            elif column in _SNAPSHOT_METADATA_TIME_FIELDS:
+                left, right = _snapshot_metadata_times(left), _snapshot_metadata_times(right)
+            elif _snapshot_date_field(column):
+                left, right = _snapshot_dates(left), _snapshot_dates(right)
+            pd.testing.assert_series_equal(left, right, check_dtype=False,
+                                           check_names=False, check_exact=True,
+                                           check_categorical=False)
+        except Exception as error:
+            raise SnapshotIntegrityError(f'{dataset}.{column}: roundtrip value/order mismatch: {error}') from error
+    return {'status': 'equal', 'source_rows': int(len(before)), 'restored_rows': int(len(after)),
+            'columns_compared': int(len(before.columns)), 'null_counts': null_counts,
+            'expected_source': 'original_query_frame_before_serialization'}
+
+
 def save_facts_snapshot(query, inputs_dir: Path, *, formation_date: str, action_date: str,
                         as_of: datetime, price_sessions: list[str],
                         provenance: dict | None = None) -> dict:
@@ -76,52 +180,28 @@ def save_facts_snapshot(query, inputs_dir: Path, *, formation_date: str, action_
 
     datasets: dict[str, dict] = {}
 
-    def _normalize_mixed_columns(frame: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
-        """Real warehouses carry mixed int/str in some object columns (e.g.
-        report_period across providers); parquet needs one type per column.
-        Only columns with genuinely mixed python types are cast to str — the
-        lossless superset — and the cast is recorded in the manifest."""
-        normalized = []
-        for column in frame.columns:
-            series = frame[column]
-            if series.dtype != object:
-                continue
-            values = series.dropna()
-            if not len(values):
-                continue
-            kinds = {type(value).__name__ for value in values.tolist()}
-            if len(kinds) > 1:
-                frame[column] = series.astype(str)
-                normalized.append(column)
-        return frame, normalized
-
     def store(dataset: str, frame: pd.DataFrame, *, method: str, partitions=None) -> None:
         entry = {'query_method': method, 'requested_partitions': list(partitions or [])}
         if frame is None:
             datasets[dataset] = entry
             return
         path = facts_dir / f'{dataset}.parquet'
-        frame, normalized_columns = _normalize_mixed_columns(frame)
+        # Keep the original query result as the reference, not the encoder output.
+        serialized, representations = _normalize_snapshot_frame(frame, dataset=dataset)
         try:
-            frame.to_parquet(path, index=False)
-        except Exception:
-            # last-resort superset cast: real provider frames can defeat the
-            # per-column heuristic (extension dtypes, decimal mixes); every
-            # object column becomes str so the sealed file is still lossless
-            # for the string-oriented readers and the cast is recorded
-            for column in frame.columns:
-                if frame[column].dtype == object:
-                    frame[column] = frame[column].astype(str)
-                    if column not in normalized_columns:
-                        normalized_columns.append(column)
-            frame.to_parquet(path, index=False)
-        if normalized_columns:
-            entry['mixed_type_columns_cast_to_str'] = normalized_columns
+            serialized.to_parquet(path, index=False)
+            restored = pd.read_parquet(path)
+        except Exception as error:
+            raise SnapshotIntegrityError(
+                f'{dataset}: snapshot Parquet write/read failed; no string-cast fallback: {error}'
+            ) from error
+        roundtrip = _assert_snapshot_roundtrip(frame, restored, dataset=dataset)
         entry.update({'status': 'available' if not frame.empty else 'no_available_rows',
                       'path': f'{FACTS_SUBDIR}/{dataset}.parquet',
-                      'row_count': int(len(frame)),
-                      'columns': list(frame.columns),
-                      'sha256': _sha256_file(path)})
+                      'row_count': int(len(frame)), 'columns': list(frame.columns),
+                      'sha256': _sha256_file(path),
+                      'representation_normalization': representations,
+                      'semantic_roundtrip': roundtrip})
         datasets[dataset] = entry
 
     def resolve(dataset: str, *, method: str, partitions=None) -> None:
