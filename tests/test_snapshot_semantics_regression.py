@@ -31,6 +31,9 @@ def test_snapshot_roundtrip_preserves_business_values(tmp_path, reverse, missing
         'report_period':pd.Series([20260630,'2026-06-30',missing,'2026-06-30'],dtype=object),
         'float_share':[100.0,900.0,0.0,1000.0],
         'holder_name':['small','合同已终止 / 大额解禁反证','None','not yet public'],
+        # ends with the letters 'date' but is an announcement-client boolean
+        # flag; records() never date-projects it, so it stays a passthrough.
+        'hard_risk_candidate':[True,False,False,True],
         'source_record_id':['00001','00002','00003','00004'],
         'source_updated_at':pd.Series([pd.Timestamp('2026-08-01 01:00:00+00:00'),
                                       '2026-08-02T09:00:00+08:00',missing,
@@ -64,6 +67,10 @@ def test_snapshot_roundtrip_preserves_business_values(tmp_path, reverse, missing
     assert original.isna().reset_index(drop=True).equals(restored.isna().reset_index(drop=True))
     assert restored.loc[restored.business_key_hash=='optional_missing','holder_name'].item()=='None'
     assert set(restored.source_record_id)=={'00001','00002','00003'}
+    # The boolean flag must survive as a boolean, not be date-parsed or str-cast.
+    assert not snap._snapshot_date_field('hard_risk_candidate')
+    assert restored.hard_risk_candidate.tolist()==original.hard_risk_candidate.tolist()
+    assert restored.hard_risk_candidate.dtype==bool
     before_index,_=_company_discovery(Source(),{'000001.SZ'},cutoff)
     after_index,_=_company_discovery(frozen,{'000001.SZ'},cutoff)
     expected={'small','negative','optional_missing'}

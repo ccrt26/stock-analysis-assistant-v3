@@ -56,10 +56,16 @@ def _same_instant(left: datetime, right: datetime) -> bool:
 # They are NOT a new storage layer or a general-purpose serializer.
 _SNAPSHOT_INSTANT_FIELDS = frozenset({'available_at', 'announcement_time'})
 _SNAPSHOT_METADATA_TIME_FIELDS = frozenset({'source_updated_at', 'ingested_at'})
+# 'hard_risk_candidate' merely ends with the letters 'date'; the announcement
+# clients emit it as a boolean flag and records() never date-projects it (the
+# announcement field list excludes it), so it stays a boolean passthrough.
+_SNAPSHOT_NON_DATE_FIELDS = frozenset({'hard_risk_candidate'})
 
 
 def _snapshot_date_field(column: str) -> bool:
     # Same business-date interpretation as recommendation_context.records.
+    if column in _SNAPSHOT_NON_DATE_FIELDS:
+        return False
     return column.endswith('date') or column in {'report_period', 'valid_from', 'valid_to'}
 
 
