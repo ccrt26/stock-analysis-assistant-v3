@@ -606,6 +606,65 @@ def _identity_matches(record: dict, catalog_path: Path) -> bool:
             and record.get('formation_date') == catalog.get('formation_date'))
 
 
+
+def _cached_query_coverage(record: dict, signature: dict, catalog_path: Path,
+                           queries_dir: Path) -> tuple[dict, list, int | None]:
+    """Use the original registered receipt; never infer coverage from no views."""
+    receipt_name = record['stem'] + '-receipt.json'
+    context = queries_dir.resolve().parent.parent
+    expected = (queries_dir / receipt_name).resolve()
+    if not expected.is_relative_to(context):
+        raise ValueError('cached receipt path escapes this query context')
+    registered = record.get('receipt_file')
+    if not isinstance(registered, str):
+        raise ValueError('coverage_metadata_unavailable: registered receipt missing')
+    path = Path(registered)
+    if not path.is_absolute():
+        if '..' in path.parts:
+            raise ValueError('cached receipt path escapes this query context')
+        path = queries_dir.resolve().parent.parent / path
+    if path.resolve() != expected or not path.is_file():
+        raise ValueError('cached receipt missing or belongs to another query context')
+    receipt = json.loads(path.read_text(encoding='utf-8'))
+    catalog = _catalog(catalog_path)
+    identities = {'query_id': signature['query_id'], 'view': signature['view'],
+                  'sql': signature['sql'], 'params': signature['params'],
+                  'as_of': catalog['as_of'], 'formation_date': catalog['formation_date']}
+    if any(receipt.get(k) != v or record.get(k) != v for k, v in identities.items()):
+        raise ValueError('cached receipt query identity differs')
+    if record.get('catalog') != str(catalog_path) or (
+            receipt.get('catalog') is not None and receipt['catalog'] != str(catalog_path)):
+        raise ValueError('cached receipt catalog differs')
+    rows_expected = (queries_dir / (record['stem'] + '.rows.jsonl')).resolve()
+    if not rows_expected.is_relative_to(context):
+        raise ValueError('cached rows path escapes this query context')
+    for obj in (record, receipt):
+        value = Path(obj['full_result_file'])
+        if not value.is_absolute():
+            if '..' in value.parts:
+                raise ValueError('cached rows path escapes this query context')
+            value = queries_dir.resolve().parent.parent / value
+        if value.resolve() != rows_expected:
+            raise ValueError('cached rows belong to another query context')
+    if not rows_expected.is_file():
+        raise ValueError('cached rows file missing')
+    with rows_expected.open(encoding='utf-8') as handle:
+        row_count = sum(1 for _ in handle)
+    if row_count != record['matched_count'] or row_count != receipt.get('matched_count'):
+        raise ValueError('cached rows count differs from original receipt')
+    for key in ('source_total', 'searched_total', 'columns'):
+        if receipt.get(key) != record.get(key):
+            raise ValueError(f'cached receipt {key} differs')
+    values = {key: record[key] if key in record else receipt.get(key)
+              for key in ('view_totals', 'coverage_gap', 'universe_total')}
+    for key in values:
+        if key in record and key in receipt and record[key] != receipt[key]:
+            raise ValueError(f'cached coverage {key} differs from original receipt')
+    if not isinstance(values['view_totals'], dict) or not isinstance(values['coverage_gap'], list):
+        return {}, ['coverage_metadata_unavailable'], values['universe_total']
+    return values['view_totals'], values['coverage_gap'], values['universe_total']
+
+
 def discover_queries(catalog_path: Path, request: dict, *, output_dir: Path,
                      part: str | None = None, stdout_extra: dict | None = None) -> dict:
     """Query frozen views once, persist complete matches, page stored rows.
@@ -645,11 +704,18 @@ def discover_queries(catalog_path: Path, request: dict, *, output_dir: Path,
 
     def stored(signature):
         stem = _query_stem(history, signature['query_id'], signature['sql'], signature['params'])
-        record = next((h for h in history if h.get('stem') == stem
-                       and _identity_matches(h, catalog_path)), None)
-        rows_file = queries_dir / f'{stem}.rows.jsonl'
-        if record is None or not rows_file.exists():
+        matches = [h for h in history if h.get('stem') == stem]
+        if not matches:
             return None
+        if len(matches) != 1:
+            raise ValueError('cached query identity is ambiguous')
+        record = matches[0]
+        if not _identity_matches(record, catalog_path) or any(
+                record.get(k) != signature[k] for k in ('query_id', 'view', 'sql', 'params')):
+            raise ValueError('cached query identity differs')
+        rows_file = queries_dir / f'{stem}.rows.jsonl'
+        if not rows_file.is_file():
+            raise ValueError('cached rows file missing')
         return record, rows_file
 
     all_stored = all(stored(signature) is not None for signature in signatures)
@@ -680,11 +746,12 @@ def discover_queries(catalog_path: Path, request: dict, *, output_dir: Path,
             reuse, rows_file = record
             matched = reuse['matched_count']
             columns = reuse['columns']
+            view_totals, coverage_gap, universe_total = _cached_query_coverage(
+                reuse, signature, catalog_path, queries_dir)
             rows, verified_total = _read_jsonl_page(rows_file, offset, page_size)
             assert verified_total == matched
             reused_stored_result = True
             source_total, searched_total = reuse['source_total'], reuse['searched_total']
-            view_totals = reuse.get('view_totals') or {}
         else:
             try:
                 matched = con.execute(f'select count(*) from ({sql}) _q', params).fetchone()[0]
@@ -708,17 +775,19 @@ def discover_queries(catalog_path: Path, request: dict, *, output_dir: Path,
             source_total = totals.get(view)
             searched_total = sum(totals.get(v, 0) for v in referenced) or source_total
             view_totals = {v: totals.get(v) for v in referenced}
+            coverage_gap = [f'{v}: registered view is empty' for v in referenced if view_totals.get(v) == 0]
+            universe_total = totals.get('universe')
         receipt = {'view': view, 'query_id': query_id, 'sql': sql, 'params': params,
                    'as_of': catalog['as_of'], 'formation_date': catalog['formation_date'],
                    'action_date': catalog.get('action_date'), 'source_total': source_total,
-                   'searched_total': searched_total, 'universe_total': totals.get('universe') if totals else None,
+                   'searched_total': searched_total, 'universe_total': universe_total,
                    'view_totals': view_totals,
                    'matched_count': int(matched), 'returned_count': len(rows),
                    'offset': offset, 'page_size': page_size,
                    'next_offset': offset + len(rows) if offset + len(rows) < matched else None,
                    'columns': columns,
                    'source_ref': f"neutral:{CANONICAL_SOURCE.get(view, view)}",
-                   'coverage_gap': [f'{v}: registered view is empty' for v in referenced if not view_totals.get(v)],
+                   'coverage_gap': coverage_gap,
                    'full_result_file': str(rows_file),
                    'full_result_format': 'jsonl; one JSON array per row, column order = columns',
                    'scanned_all': True, 'partial': False, 'partial_note': None,
@@ -729,6 +798,8 @@ def discover_queries(catalog_path: Path, request: dict, *, output_dir: Path,
                                 'stem': stem, 'view': view,
                                 'sql': sql, 'params': params, 'matched_count': int(matched),
                                 'source_total': source_total, 'searched_total': searched_total,
+                                'view_totals': view_totals, 'coverage_gap': coverage_gap,
+                                'universe_total': universe_total,
                                 'columns': columns,
                                 'full_result_file': str(rows_file),
                                 'receipt_file': str(queries_dir / f'{stem}-receipt.json'),

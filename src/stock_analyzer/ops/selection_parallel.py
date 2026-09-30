@@ -1789,7 +1789,28 @@ def _successful_tool_results(events_text: str) -> list[tuple[str, str, dict | li
     return found
 
 
-def _check_discovery(obj: dict, tools: list[tuple[str, str, object]], *, full_universe: bool = False, catalog_path: Path | None = None) -> None:
+
+def _iter_discovery_receipts(value):
+    """Unwrap only the discovery CLI's documented transport containers."""
+    if isinstance(value, list):
+        for child in value:
+            yield from _iter_discovery_receipts(child)
+    elif isinstance(value, dict):
+        if value.get('view') is not None and value.get('query_id') is not None:
+            yield value
+            return
+        wrapped = False
+        for key in ('discoveries', 'responses'):
+            if isinstance(value.get(key), list):
+                wrapped = True
+                for child in value[key]:
+                    yield from _iter_discovery_receipts(child)
+        if not wrapped:
+            yield value  # legacy checks still decide whether this is evidence
+
+
+def _check_discovery(obj: dict, tools: list[tuple[str, str, object]], *, full_universe: bool = False, catalog_path: Path | None = None,
+                     context: Path | None = None) -> None:
     summary = obj.get('discovery_summary')
     if not isinstance(summary, dict):
         raise ValueError('discovery_summary required for V2')
@@ -1840,10 +1861,19 @@ def _check_discovery(obj: dict, tools: list[tuple[str, str, object]], *, full_un
                         or isinstance(result.get('records'), list) or result.get('partial')):
                     return False
                 full_file = result.get('full_result_file')
-                if not full_file or not Path(str(full_file)).is_file():
+                if not full_file:
+                    return False
+                path = Path(str(full_file))
+                if not path.is_absolute():
+                    if context is None or '..' in path.parts:
+                        return False
+                    path = Path(context) / path
+                if context is not None and not path.resolve().is_relative_to(Path(context).resolve()):
+                    return False
+                if not path.is_file():
                     return False
                 try:
-                    with Path(str(full_file)).open(encoding='utf-8') as handle:
+                    with path.open(encoding='utf-8') as handle:
                         persisted_rows = sum(1 for _ in handle)
                 except OSError:
                     return False
@@ -1856,9 +1886,8 @@ def _check_discovery(obj: dict, tools: list[tuple[str, str, object]], *, full_un
                 and isinstance(result.get('matched_count'), int)
                 and result.get('matched_count') == item.get('matched_count')
                 and (_legacy_result(result) and marker in command or _compact_result(result))
-                for command, _, parsed in tools if isinstance(parsed, dict)
-                for result in (parsed.get('discoveries') if 'discoveries' in parsed else
-                               parsed.get('responses') if 'responses' in parsed else [parsed]))
+                for command, _, parsed in tools
+                for result in _iter_discovery_receipts(parsed))
             if item['source_total'] not in allowed_totals:
                 raise ValueError(f'discovery {view} source coverage differs from frozen source')
         elif view == 'company':
@@ -1871,7 +1900,7 @@ def _check_discovery(obj: dict, tools: list[tuple[str, str, object]], *, full_un
 
 
 def _validate_decision(obj: dict, day: dict, method: str, catalog_path: Path,
-                       events_text: str) -> tuple[list[str], list[str]]:
+                       events_text: str, *, context: Path | None = None) -> tuple[list[str], list[str]]:
     for key, expected in (('method_id', method), ('formation_date', day['formation_date']),
                           ('action_date', day['action_date']), ('as_of', day['as_of'])):
         if obj.get(key) != expected:
@@ -1926,7 +1955,8 @@ def _validate_decision(obj: dict, day: dict, method: str, catalog_path: Path,
         raise ValueError('decision cannot include post-selection outcome')
     tools = _successful_tool_results(events_text)
     if day.get('input_contract_version') == 'selection-parallel-input-v2':
-        _check_discovery(obj, tools, full_universe=day.get('full_universe_replay', False), catalog_path=catalog_path)
+        _check_discovery(obj, tools, full_universe=day.get('full_universe_replay', False),
+                         catalog_path=catalog_path, context=context)
     fact_refs = []
     for ref in refs:
         if not isinstance(ref, str):
@@ -2213,7 +2243,7 @@ def _qualification(day_dir: Path, method: str) -> dict:
             'reasons': sorted(set(reasons))}
 
 
-def _check_run_contract(day: dict, cfg: dict) -> None:
+def _check_run_contract(day: dict, cfg: dict, *, allow_historical_program: bool = False) -> None:
     code_root = Path(cfg['code_root'])
     actual = {'input_contract_version':'selection-parallel-input-v2',
               'program_ref':subprocess.run(['git','rev-parse','HEAD'],cwd=code_root,check=True,
@@ -2225,7 +2255,8 @@ def _check_run_contract(day: dict, cfg: dict) -> None:
         from stock_analyzer.ops.selection_parallel_compact import runtime_map_sha256
         actual['execution_profile'] = cfg.get('execution_profile')
         actual['runtime_map_sha256'] = runtime_map_sha256(code_root)
-    different = [k for k,v in actual.items() if day.get(k) != v]
+    different = [k for k,v in actual.items() if day.get(k) != v
+                 and not (k == 'program_ref' and allow_historical_program)]
     if day.get('program_dirty_at_prepare') is not False or _worktree_dirty(code_root):
         different.append('program_dirty')
     if different:
@@ -2243,7 +2274,7 @@ def _finalize_decision(day_dir: Path, cfg: dict, day: dict, method: str, attempt
     catalog_path = day_dir / day['source_catalog']
     obj = _parse_model_output(attempt / 'raw-output.json')
     fact_refs, refs = _validate_decision(obj, day, method, catalog_path,
-                                          (attempt / 'events.jsonl').read_text(encoding='utf-8'))
+                                          (attempt / 'events.jsonl').read_text(encoding='utf-8'), context=context)
     _save_slices(catalog_path, method, fact_refs, (attempt/'events.jsonl').read_text())
     if cfg.get('full_universe_replay'):
         _save_official_evidence(obj, context, day_dir/method, datetime.fromisoformat(day['as_of']),
@@ -2297,7 +2328,7 @@ def run_arm(day_dir: Path, *, method: str) -> dict:
         qual = _qualification(day_dir, method)
         if not qual['qualified']:
             raise RuntimeError(f'{method} existing result is not qualified: {qual["reasons"]}')
-        _check_run_contract(day, cfg)
+        _check_run_contract(day, cfg, allow_historical_program=True)
         return _json(target)
     _check_run_contract(day, cfg)
     init_experiment(day_dir.parents[1] / 'experiment.json')
@@ -2448,17 +2479,16 @@ def check_launch(config_path: Path, *, phase: str) -> dict:
             details.append(entry)
             continue
         day = _json(run_file)
-        try:
-            _check_run_contract(day, cfg)
-        except ValueError as error:
-            problems.append(f"{case.get('replay_id')}: 运行合同失效：{str(error)[:160]}")
-            entry['contract'] = 'failed'
-            details.append(entry)
-            continue
         entry['contract'] = 'ok'
         states = {}
         for method in ('M0', 'M1'):
             qualification = _qualification(day_dir, method)
+            try:
+                _check_inputs_for_run(day_dir / day['source_catalog'])
+                _check_run_contract(day, cfg, allow_historical_program=qualification['qualified'])
+            except (ValueError, OSError) as error:
+                problems.append(f"{case.get('replay_id')}/{method}: 运行合同失效：{str(error)[:160]}")
+                entry['contract'] = 'failed'
             attempts = list((root / 'work' / day_dir.name / method).glob('attempt-*'))
             status = day.get('status', {}).get(method)
             if qualification['qualified']:

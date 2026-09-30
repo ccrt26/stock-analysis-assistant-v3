@@ -3021,6 +3021,9 @@ def _launch_trial(tmp_path, monkeypatch, code_root, *, first_state='qualified'):
                       'max_input_tokens': 750000, 'max_output_tokens': 20000},
            'replay_cases': cases}
     root = tmp_path / 'arch/selection_trials/launch-guard'
+    # A real empty warehouse lets the CLI subprocess verify the fixture inputs.
+    from stock_analyzer.storage.research_warehouse import ResearchWarehouse
+    ResearchWarehouse(tmp_path / 'wh')
 
     def qualify(day_dir, case, run, run_id):
         for method in ('M0', 'M1'):
@@ -3045,15 +3048,15 @@ def _launch_trial(tmp_path, monkeypatch, code_root, *, first_state='qualified'):
         inputs.mkdir(parents=True, exist_ok=True)
         trial._write_json(inputs / 'universe.json',
                           [{'ts_code': '000001.SZ', 'name': 'A', 'market': '主板'}])
-        trial._write_json(inputs / 'sources.json',
-                          [{'dataset': 'equity_daily', 'partition': case['formation_date'],
-                            'file_sha256': 'fixed'}])
+        trial._write_json(inputs / 'sources.json', [])
         trial._write_json(inputs / 'catalog.json', {
             'experiment_id': 'launch-guard', 'as_of': case['as_of'],
             'formation_date': case['formation_date'], 'action_date': case['action_date'],
             'company_discovery': 'company_discovery.parquet', 'day_dir': str(day_dir),
             'source_root': str(tmp_path), 'warehouse_root': str(tmp_path / 'wh'),
-            'derived': {}, 'source_versions': 'sources.json'})
+            'derived': {}, 'source_versions': 'sources.json',
+            'frozen_inputs': {name: _hl.sha256((inputs/name).read_bytes()).hexdigest()
+                              for name in ('universe.json', 'sources.json')}})
         run = {'mode': 'replay_smoke', 'replay_id': case['replay_id'],
                'formation_date': case['formation_date'], 'action_date': case['action_date'],
                'as_of': case['as_of'], 'input_contract_version': 'selection-parallel-input-v2',
@@ -3874,7 +3877,16 @@ def test_launch_reuses_real_qualified_attempt_without_model_call(tmp_path, monke
             calls.append(attempt)
             attempt.mkdir(parents=True)
             (attempt / 'prompt.md').write_text(prompt, encoding='utf-8')
-            (attempt / 'events.jsonl').write_text(events_text, encoding='utf-8')
+            own_discovery = compact.discover_queries(day1 / 'inputs/catalog.json', {'queries': [
+                {'id': 'c', 'view': 'company', 'sql': 'SELECT ts_code FROM company'},
+                {'id': 's', 'view': 'sector', 'sql': 'SELECT count(*) AS n FROM sector'},
+                {'id': 'p', 'view': 'price', 'sql': 'SELECT ts_code FROM price'}]},
+                output_dir=context / 'work')
+            own_events = '\n'.join(json.dumps({'type': 'item.completed', 'item': {
+                'type': 'command_execution', 'exit_code': 0, 'command': 'compact cli',
+                'aggregated_output': json.dumps(payload, ensure_ascii=False)}}, ensure_ascii=False)
+                for payload in [own_discovery, *pages]) + '\n'
+            (attempt / 'events.jsonl').write_text(own_events, encoding='utf-8')
             (attempt / 'raw-output.json').write_text(json.dumps(method_decision, ensure_ascii=False),
                                                      encoding='utf-8')
             metadata = {'requested_model': trial.MODEL, 'actual_model': trial.MODEL,
@@ -3995,3 +4007,314 @@ def test_launch_reuses_real_qualified_attempt_without_model_call(tmp_path, monke
     assert lines == ['select M1 seal-1']  # ONLY the pending side was called
     (tmp_path / 'moved-M1-result').rename(day1 / 'M1')
     (tmp_path / 'moved-M1-work').rename(trial_root / 'work/seal-1/M1')
+
+
+# M1 recovery regressions: public receipt shape, never private reasoning.
+def _m1_recovery_discovery_fixture(tmp_path, monkeypatch):
+    catalog, _ = _tiny_catalog(tmp_path)
+    monkeypatch.setattr(trial, '_check_source_catalog', lambda p: trial._json(p))
+    context = tmp_path / 'arm'
+    context.mkdir()
+    monkeypatch.chdir(context)
+    request = {'queries': [
+        {'id': 'company_changes', 'view': 'company', 'sql': 'SELECT ts_code FROM company'},
+        {'id': 'sector_joint', 'view': 'sector', 'sql': 'SELECT group_code FROM sector'},
+        {'id': 'price_independent', 'view': 'price', 'sql': 'SELECT ts_code FROM price'}]}
+    output = compact.discover_queries(catalog, request, output_dir=Path('work'))
+    monkeypatch.chdir(CODE)
+    obj = {'candidates': [], 'discovery_summary': {
+        r['view']: {'status': 'searched_no_candidate', 'codes': [],
+                    'source_refs': [r['source_ref']], 'source_total': r['source_total'],
+                    'query': 'work/queries/first.json#' + r['query_id'],
+                    'matched_count': r['matched_count'], 'coverage_gap': r['coverage_gap']}
+        for r in output['responses']}}
+    return catalog, context, request, output, obj
+
+
+def test_m1_recovery_real_receipt_shape(tmp_path, monkeypatch):
+    catalog, context, _, output, obj = _m1_recovery_discovery_fixture(tmp_path, monkeypatch)
+    # Same successful responses[1] shape as original event 9; all metadata match,
+    # but its full_result_file is relative to the arm, not the validator cwd.
+    assert output['responses'][1]['query_id'] == 'sector_joint'
+    assert not Path(output['responses'][1]['full_result_file']).is_absolute()
+    trial._check_discovery(obj, [('cli', '', output)], full_universe=True,
+                           catalog_path=catalog, context=context)
+
+
+    import copy
+    for wrapped in ([output], {'discoveries': [output]}, {'responses': output['responses']}):
+        trial._check_discovery(obj, [('cli', '', wrapped)], full_universe=True,
+                               catalog_path=catalog, context=context)
+    for bad in ({'rows': [output]}, {'text': output}, {'metadata': output}):
+        with pytest.raises(ValueError, match='lacks successful'):
+            trial._check_discovery(obj, [('cli', '', bad)], full_universe=True,
+                                   catalog_path=catalog, context=context)
+    for path in ('../outside.rows.jsonl', str(tmp_path / 'other-arm.rows.jsonl')):
+        changed = copy.deepcopy(output)
+        changed['responses'][1]['full_result_file'] = path
+        with pytest.raises(ValueError, match='sector lacks successful'):
+            trial._check_discovery(obj, [('cli', '', changed)], full_universe=True,
+                                   catalog_path=catalog, context=context)
+    outside = tmp_path / 'outside.rows.jsonl'
+    outside.write_text('[1]\n')
+    (context / 'work/link.rows.jsonl').symlink_to(outside)
+    changed = copy.deepcopy(output)
+    changed['responses'][1]['full_result_file'] = 'work/link.rows.jsonl'
+    with pytest.raises(ValueError, match='sector lacks successful'):
+        trial._check_discovery(obj, [('cli', '', changed)], full_universe=True,
+                               catalog_path=catalog, context=context)
+
+
+def test_m1_recovery_cached_coverage(tmp_path, monkeypatch):
+    import copy
+    catalog, context, request, first, _ = _m1_recovery_discovery_fixture(tmp_path, monkeypatch)
+    output_dir = context / 'work'
+    index = output_dir / 'queries/index.jsonl'
+    rows = [json.loads(x) for x in index.read_text().splitlines()]
+    assert all(all(k in r for k in ('view_totals', 'coverage_gap', 'universe_total')) for r in rows)
+    def cached():
+        with monkeypatch.context() as m:
+            m.setattr(compact, '_register_views', lambda *a: pytest.fail('cache registered views'))
+            m.setattr(compact, '_check_catalog', lambda *a: pytest.fail('cache scanned sources'))
+            return compact.discover_queries(catalog, request, output_dir=output_dir)
+    def coverage(out):
+        return [{k:r[k] for k in ('source_total','searched_total','view_totals','coverage_gap','universe_total')}
+                for r in out['responses']]
+    assert coverage(cached()) == coverage(first)
+    # Original index compatibility: only the registered first receipt supplies metadata.
+    legacy = copy.deepcopy(rows)
+    for row in legacy:
+        for key in ('view_totals', 'coverage_gap', 'universe_total'):
+            row.pop(key)
+    index.write_text(''.join(json.dumps(r)+'\n' for r in legacy))
+    before = index.read_bytes()
+    assert coverage(cached()) == coverage(first)
+    assert index.read_bytes() == before
+    mixed = compact.discover_queries(catalog, {'queries': [request['queries'][0],
+        {'id':'another-sector','view':'sector','sql':'SELECT group_name FROM sector'}]}, output_dir=output_dir)
+    assert mixed['responses'][0]['coverage_gap'] == first['responses'][0]['coverage_gap']
+    index.write_text(''.join(json.dumps(r)+'\n' for r in legacy))
+    for field, value in [('as_of', 'wrong-cutoff'), ('view', 'sector'), ('catalog', 'other-arm')]:
+        invalid = copy.deepcopy(legacy)
+        invalid[0][field] = value
+        index.write_text(''.join(json.dumps(r)+'\n' for r in invalid))
+        with pytest.raises(ValueError, match='identity'):
+            cached()
+    index.write_text(''.join(json.dumps(r)+'\n' for r in legacy + [legacy[0]]))
+    with pytest.raises(ValueError, match='ambiguous'):
+        cached()
+    index.write_text(''.join(json.dumps(r)+'\n' for r in legacy))
+    receipt = output_dir / 'queries' / (legacy[0]['stem']+'-receipt.json')
+    original_receipt = receipt.read_bytes()
+    bad = json.loads(original_receipt); bad['sql'] = 'SELECT different FROM company'
+    trial._write_json(receipt, bad)
+    with pytest.raises(ValueError, match='identity'):
+        cached()
+    receipt.write_bytes(original_receipt)
+    bad = json.loads(original_receipt)
+    for key in ('view_totals','coverage_gap','universe_total'):
+        bad.pop(key)
+    trial._write_json(receipt, bad)
+    assert cached()['responses'][0]['coverage_gap'] == ['coverage_metadata_unavailable']
+    receipt.write_bytes(original_receipt)
+    data = output_dir / 'queries' / (legacy[0]['stem']+'.rows.jsonl')
+    original_rows = data.read_bytes()
+    data.write_bytes(original_rows.splitlines(keepends=True)[0])
+    with pytest.raises(ValueError, match='count differs'):
+        cached()
+    data.write_bytes(original_rows)
+    outside = tmp_path / 'outside-cache.rows.jsonl'
+    outside.write_bytes(original_rows)
+    data.unlink()
+    data.symlink_to(outside)
+    with pytest.raises(ValueError, match='escapes'):
+        cached()
+    data.unlink()
+    with pytest.raises(ValueError, match='missing'):
+        cached()
+
+
+def test_m1_recovery_transport_metadata_only(tmp_path, monkeypatch):
+    import copy
+    catalog, context, _, output, obj = _m1_recovery_discovery_fixture(tmp_path, monkeypatch)
+    obj['candidates'] = []
+    raw = json.dumps(obj, ensure_ascii=False).encode()
+    changed = copy.deepcopy(obj)
+    changed['discovery_summary']['sector']['matched_count'] += 1
+    with pytest.raises(ValueError, match='sector lacks successful'):
+        trial._check_discovery(changed, [('cli','',output)], full_universe=True,
+                               catalog_path=catalog, context=context)
+    assert json.dumps(obj, ensure_ascii=False).encode() == raw
+    assert list(trial._iter_discovery_receipts({'metadata':output})) == [{'metadata':output}]
+    assert changed['candidates'] == obj['candidates']
+    # A fabricated complete on-disk receipt cannot repair truncated observed facts.
+    parts = [{'source_ref':'facts:000001.SZ:price','category':'price','part_index':i,
+              'part_count':5,'result':{'facts':{'equity_daily':[{'close':1}]*8},
+                                       'section_row_range':[0,61],'section_row_total':61}}
+             if i == 0 else {'source_ref':'facts:000001.SZ:price','category':'price',
+                             'part_index':i,'part_count':5,'result':{'facts':{}}}
+             for i in range(5)]
+    (tmp_path/'complete-but-unobserved.json').write_text(json.dumps([{'close':1}]*61))
+    with pytest.raises(ValueError, match='行区间非法'):
+        trial._observed_fact_reads([('original-helper','',{'reads':parts})], 'facts:000001.SZ:price')
+
+
+def _m1_recovery_qualified_fixture(day, method):
+    obj = decision(day)
+    obj['method_id'] = method
+    run = trial._json(day/'run.json')
+    obj.update(run_id=f"{run['mode']}:{run.get('replay_id') or run['action_date']}:{method}",
+               model_run={'actual_model':trial.MODEL,'actual_reasoning':trial.EFFORT})
+    trial._write_json(day/method/'result.json', obj)
+    trial._write_json(day/method/'qualification.json', {
+        'qualified':True,'paired_acceptance':'qualified','run_id':obj['run_id'],
+        'method_id':method,'input_contract_version':run['input_contract_version']})
+    run['status'][method] = 'complete'
+    trial._write_json(day/'run.json', run)
+    assert trial._qualification(day,method)['qualified']
+    return obj
+
+
+def test_m1_recovery_reparse_without_model(tmp_path, monkeypatch):
+    path, day = prepared(tmp_path, monkeypatch)
+    monkeypatch.setattr(trial,'_check_inputs_for_run',lambda p:trial._json(p))
+    monkeypatch.setattr(trial,'_invoke_model',lambda *a,**k:pytest.fail('research model invoked'))
+    monkeypatch.setattr(trial,'_execute_research',lambda *a,**k:pytest.fail('research process invoked'))
+    cfg = trial._json(path); cfg.update(research_enabled=False)
+    trial._write_json(path,cfg)
+    _m1_recovery_qualified_fixture(day,'M0')
+    obj = decision(day); obj['method_id']='M1'
+    attempt = path.parent/'work'/day.name/'M1/attempt-001'
+    attempt.mkdir(parents=True)
+    (attempt/'raw-output.json').write_text(json.dumps(obj))
+    (attempt/'events.jsonl').write_text(discovery_events())
+    metadata={'exit_code':0,'actual_model':trial.MODEL,'actual_reasoning':trial.EFFORT,
+              'budget_exceeded':None,'cancelled':False,
+              'tokens':{'input_tokens':17,'cached_input_tokens':8,'output_tokens':11}}
+    trial._write_json(attempt/'invocation.json',metadata)
+    protected=[day/'M0/result.json',day/'M0/qualification.json',*attempt.iterdir()]
+    before={p:p.read_bytes() for p in protected}
+    restored=trial.reparse_decision(path,action_date=day.name,method='M1',replay_id=day.name,
+                                   attempt_dir=attempt)
+    assert trial._qualification(day,'M1')['qualified']
+    assert restored['selected']==obj['selected']
+    assert restored['candidates']==obj['candidates']
+    assert restored['model_run']==metadata
+    assert restored['program_ref']==trial._json(day/'run.json')['program_ref']
+    assert restored['parsed_by_program_ref']
+    assert all(p.read_bytes()==data for p,data in before.items())
+    assert len(list(attempt.parent.glob('attempt-*')))==1
+
+
+def test_m1_recovery_completed_program_history(tmp_path, monkeypatch):
+    import copy
+    path,day=prepared(tmp_path,monkeypatch)
+    monkeypatch.setattr(trial,'_check_inputs_for_run',lambda p:trial._json(p))
+    monkeypatch.setattr(trial,'_invoke_model',lambda *a,**k:pytest.fail('research invoked'))
+    monkeypatch.setattr(trial,'_execute_research',lambda *a,**k:pytest.fail('process invoked'))
+    run=trial._json(day/'run.json');run['program_ref']='original-research-version'
+    trial._write_json(day/'run.json',run)
+    _m1_recovery_qualified_fixture(day,'M0')
+    cfg=trial._json(path)
+    cfg['replay_cases']=[{k:trial._json(day/'run.json')[k] for k in ('formation_date','action_date','as_of')} |
+                         {'replay_id':day.name,'method_order':['M0','M1']}]
+    trial._write_json(path,cfg)
+    protected={p:p.read_bytes() for p in (day/'M0').iterdir()}
+    assert trial.run_arm(day,method='M0')['method_id']=='M0'
+    assert all(p.read_bytes()==value for p,value in protected.items())
+    gate=trial.check_launch(path,phase='remaining')
+    assert not gate['launch_allowed']
+    assert gate['cases'][0]['states']['M0']['state']=='done'
+    assert gate['cases'][0]['states']['M1']['state']=='pending'
+    assert any('/M1:' in issue for issue in gate['problems'])
+    failed_run = trial._json(day / 'run.json')
+    failed_run['status']['M1'] = 'failed_validation'
+    trial._write_json(day / 'run.json', failed_run)
+    attempt = path.parent / 'work' / day.name / 'M1/attempt-001'
+    attempt.mkdir(parents=True)
+    (attempt / 'invocation.json').write_text('{}')
+    failed_bytes = (attempt / 'invocation.json').read_bytes()
+    gate = trial.check_launch(path, phase='remaining')
+    assert gate['cases'][0]['states']['M1']['state'] == 'blocked'
+    assert (attempt / 'invocation.json').read_bytes() == failed_bytes
+    with monkeypatch.context() as m:
+        def changed_inputs(p):
+            raise ValueError('frozen input changed after preparation')
+        m.setattr(trial, '_check_inputs_for_run', changed_inputs)
+        with pytest.raises(ValueError, match='frozen input changed'):
+            trial.run_arm(day, method='M0')
+        assert not trial.check_launch(path, phase='remaining')['launch_allowed']
+    for key,value in [('methods',{}),('limits',{}),('common_prompt_sha256','wrong')]:
+        bad=copy.deepcopy(trial._json(day/'run.json'));bad[key]=value
+        with pytest.raises(ValueError,match='contract changed'):
+            trial._check_run_contract(bad,cfg,allow_historical_program=True)
+    bad=copy.deepcopy(trial._json(day/'run.json'))
+    bad.update(execution_profile='compact-v1',runtime_map_sha256='wrong')
+    cfg['execution_profile']='compact-v1'
+    with pytest.raises(ValueError,match='runtime_map'):
+        trial._check_run_contract(bad,cfg,allow_historical_program=True)
+    with pytest.raises(ValueError,match='program_ref'):
+        trial._check_run_contract(trial._json(day/'run.json'),cfg)
+
+
+def test_m1_recovery_pending_execution_binding(tmp_path, monkeypatch):
+    # One-off registration policy exercised only on temporary fixtures.
+    import copy
+    path,first=prepared(tmp_path,monkeypatch)
+    monkeypatch.setattr(trial,'_check_inputs_for_run',lambda p:trial._json(p))
+    monkeypatch.setattr(trial,'_invoke_model',lambda *a,**k:pytest.fail('research invoked'))
+    monkeypatch.setattr(trial,'_execute_research',lambda *a,**k:pytest.fail('process invoked'))
+    cfg=trial._json(path);cases=[]
+    for i in range(5):
+        day=first if i==0 else first.with_name(f'pending-{i}')
+        if i: shutil.copytree(first,day)
+        run=trial._json(day/'run.json')
+        run['replay_id']=day.name
+        trial._write_json(day/'run.json',run)
+        cases.append({'replay_id':day.name,'method_order':['M0','M1'],
+                      **{k:run[k] for k in ('formation_date','action_date','as_of')}})
+    cfg['replay_cases']=cases;trial._write_json(path,cfg)
+    original_sha=trial._json(first/'run.json')['program_ref']
+    target_sha='new-execution-version'
+    def bind_fixture():
+        if not all(trial._qualification(first,m)['qualified'] for m in ('M0','M1')):
+            raise ValueError('first pair not qualified')
+        pending=[]
+        for case in cases[1:]:
+            day=first.with_name(case['replay_id']);run=trial._json(day/'run.json')
+            if run['status']!={'M0':'not_run','M1':'not_run'}:
+                raise ValueError('already started')
+            for m in ('M0','M1'):
+                if list((path.parent/'work'/day.name/m).glob('attempt-*')) or any(
+                        (day/m/n).exists() for n in ('result.json','qualification.json','raw-output.json')):
+                    raise ValueError('attempt or result exists')
+            assert all(run[k]==case[k] for k in ('formation_date','action_date','as_of'))
+            trial._check_inputs_for_run(day/run['source_catalog'])
+            trial._check_run_contract(run,cfg)
+            if run['program_ref']!=original_sha: raise ValueError('unexpected original version')
+            pending.append((day,run))
+        # Nothing writes until the entire batch has passed.
+        backup=tmp_path/'binding-delivery';backup.mkdir()
+        for day,run in pending:
+            (backup/(day.name+'.run.json')).write_bytes((day/'run.json').read_bytes())
+            changed=copy.deepcopy(run);changed['program_ref']=target_sha
+            trial._write_json(day/'run.json',changed)
+    pending_runs=[first.with_name(c['replay_id'])/'run.json' for c in cases[1:]]
+    original={p:p.read_bytes() for p in pending_runs}
+    with pytest.raises(ValueError,match='not qualified'):bind_fixture()
+    assert all(p.read_bytes()==v for p,v in original.items())
+    _m1_recovery_qualified_fixture(first,'M0');_m1_recovery_qualified_fixture(first,'M1')
+    blocked=path.parent/'work'/cases[2]['replay_id']/'M1/attempt-001'
+    blocked.mkdir(parents=True)
+    with pytest.raises(ValueError,match='attempt'):bind_fixture()
+    assert all(p.read_bytes()==v for p,v in original.items())
+    assert not (tmp_path/'binding-delivery').exists()
+    blocked.rmdir()
+    inputs_before={p:p.read_bytes() for c in cases[1:]
+                   for p in (first.with_name(c['replay_id'])/'inputs').iterdir() if p.is_file()}
+    bind_fixture()
+    for p,data in original.items():
+        old=json.loads(data);new=trial._json(p)
+        assert new=={**old,'program_ref':target_sha}
+    assert all(p.read_bytes()==v for p,v in inputs_before.items())
+    assert trial._json(path).get('research_enabled',False) is False
