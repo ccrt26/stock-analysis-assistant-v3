@@ -1106,10 +1106,91 @@ def _catalog_source_digest(catalog_path: Path, catalog: dict) -> str | None:
     return hashlib.sha256(sources_file.read_bytes()).hexdigest()
 
 
+def validate_fact_part(read: dict, *, require_scope: bool = False, expected: dict | None = None) -> None:
+    """Validate one delivered part without requiring future pages/segments."""
+    if require_scope:
+        validate_fact_part(read)
+        scope = read.get('query_scope')
+        if not isinstance(scope, dict) or not all(scope.get(k) for k in ('as_of', 'formation_date')):
+            raise ValueError('query_scope missing formation_date/as_of')
+        if expected and any(scope.get(k) != expected[k] for k in ('as_of', 'formation_date')):
+            raise ValueError('actual fact read cutoff differs from frozen decision')
+        if read.get('source_ref') != f"facts:{read.get('ts_code')}:{read.get('category')}":
+            raise ValueError('fact source_ref differs from code/category')
+        return
+    index, count = read.get('part_index', 0), read.get('part_count', 1)
+    if any(not isinstance(x, int) or isinstance(x, bool) for x in (index, count)) or not 0 <= index < count:
+        raise ValueError('fact part_index/part_count is invalid')
+    if 'result_json_fragment' in read:
+        if not isinstance(read['result_json_fragment'], str):
+            raise ValueError('fact JSON fragment is not text')
+        return
+    result = read.get('result') or {}
+    payload = result.get('facts')
+    if not isinstance(payload, dict):
+        raise ValueError('fact part lacks facts payload')
+    span, total = result.get('section_row_range'), result.get('section_row_total')
+    if total is not None and (not isinstance(total, int) or isinstance(total, bool) or total < 0):
+        raise ValueError('section_row_total is invalid')
+    if span is not None:
+        if not isinstance(span, list) or len(span) != 2 or any(
+                not isinstance(x, int) or isinstance(x, bool) for x in span):
+            raise ValueError('section 行区间非法')
+        start, end = span
+        for section, rows in payload.items():
+            if isinstance(rows, list) and (start < 0 or end <= start or end-start != len(rows)
+                                         or (total is not None and end > total)):
+                raise ValueError(f'section {section} 行区间非法：{span} 长度 {len(rows)}')
+    segment = payload.get('__field_segment__')
+    if segment is None:
+        return
+    if not isinstance(segment, dict) or not isinstance(segment.get('section'), str):
+        raise ValueError('field segment section is invalid')
+    row = segment.get('row_index')
+    if not isinstance(row, int) or isinstance(row, bool) or row < 0 or (total is not None and row >= total):
+        raise ValueError('field segment row position is invalid')
+    si, sc = segment.get('segment_index'), segment.get('segment_count')
+    if any(not isinstance(x, int) or isinstance(x, bool) for x in (si, sc)) or not 0 <= si < sc:
+        raise ValueError('field segment index/count is invalid')
+    kind = segment.get('value_type')
+    if kind == 'partial_fields':
+        if not isinstance(segment.get('fields'), dict):
+            raise ValueError('field segment fields is invalid')
+    elif kind in ('string_span', 'json_span'):
+        start, end, length = (segment.get(k) for k in ('char_start', 'char_end', 'total_field_chars'))
+        text = segment.get('text')
+        if (any(not isinstance(x, int) or isinstance(x, bool) for x in (start, end, length))
+                or not isinstance(text, str) or not 0 <= start < end <= length or end-start != len(text)):
+            raise ValueError('field segment 字符区间/长度非法')
+    else:
+        raise ValueError(f'field segment unknown type: {kind}')
+
+
+def record_fact_stdout(page: dict, parts_root: Path, registry: dict, *, extra: dict | None = None) -> dict:
+    """Save exactly one final model-visible page, never the full facts backup."""
+    page = dict(page)
+    if extra:
+        page.update(extra)
+    entry = registry['parts'][page['part']]
+    displays = entry.setdefault('display_pages', [])
+    filename = f"{page['part']}.stdout-{len(displays):06d}.json"
+    path = parts_root / filename
+    page['display_page_file'] = str(path.resolve())
+    rendered = render_stdout(page)
+    if len(rendered) > FACTS_PAGE_CHARS:
+        raise ValueError(f'事实分页最终stdout超预算：{len(rendered)}>{FACTS_PAGE_CHARS}')
+    with path.open('x', encoding='utf-8') as handle:
+        handle.write(rendered)
+    displays.append(filename)
+    _write_local(parts_root / 'parts-registry.json', registry)
+    return page
+
+
 def facts_compact(catalog_path: Path, *, codes: list[str], categories: list[str],
                   group_codes=(), sector_snapshots=(), sector_dates=(), fields: dict | None = None,
                   part: str | None = None, output: Path | None = None,
-                  parts_dir: Path | None = None, stdout_extra: dict | None = None) -> dict:
+                  parts_dir: Path | None = None, stdout_extra: dict | None = None,
+                  continuation_argv: list[str] | None = None) -> dict:
     """Compact decision profile over the existing facts builder.
 
     Full facts are computed once and saved locally. The projection is paged as
@@ -1164,7 +1245,9 @@ def facts_compact(catalog_path: Path, *, codes: list[str], categories: list[str]
             raise ValueError(f'续读ID不属于当前请求/投影/来源版本：{part}')
         page = json.loads((parts_root / f'{part}.json').read_text(encoding='utf-8'))
         page['from_part_request'] = part
-        return page
+        if continuation_argv and page.get('next_part'):
+            page['next_command'] = [*continuation_argv, '--part', page['next_part']]
+        return record_fact_stdout(page, parts_root, registry, extra=stdout_extra)
     catalog = _check_catalog(catalog_path)  # fresh computation only (E6), exactly once
     full = trial.facts(catalog_path, codes=list(codes), categories=list(categories), max_chars=0,
                        group_codes=list(group_codes), sector_snapshots=list(sector_snapshots),
@@ -1222,7 +1305,12 @@ def facts_compact(catalog_path: Path, *, codes: list[str], categories: list[str]
         return {'profile': PROFILE, 'scope_id': scope_id, 'part': f'facts-{scope_id}-p{index:03d}',
                 'page_index': index, 'page_count': count, 'reads': page_reads,
                 'identity': full.get('identity'), 'gaps': full.get('gaps', []),
-                'next_part': next_part, 'full_output': str(output) if output else None,
+                'next_part': next_part,
+                **({'next_command': [*continuation_argv, '--part', next_part]}
+                   if continuation_argv and next_part else {}),
+                'display_page_file': str((parts_root / f'facts-{scope_id}-p{index:03d}.stdout-000000.json').resolve()),
+                'from_part_request': f'facts-{scope_id}-p{index:03d}',
+                'full_output': str(output) if output else None,
                 'omitted_note': ('未投影的原始列在 full_output 与冻结原件中可按字段回读；'
                                  '本投影保留身份、窗口、分母、限制与缺口；'
                                  '类别引用需其全部part已返回')}
@@ -1271,7 +1359,9 @@ def facts_compact(catalog_path: Path, *, codes: list[str], categories: list[str]
         return {'profile': PROFILE, 'scope_id': scope_id, 'reads': [], 'part': None,
                 'identity': full.get('identity'), 'gaps': full.get('gaps', []), 'next_part': None,
                 'full_output': str(output) if output else None}
-    return page_objects[0]
+    first_page = dict(page_objects[0])
+    first_page.pop('from_part_request', None)
+    return record_fact_stdout(first_page, parts_root, registry, extra=stdout_extra)
 
 
 def reassemble_category(reads: list[dict]) -> dict:
@@ -1292,6 +1382,7 @@ def reassemble_category(reads: list[dict]) -> dict:
     totals: dict[str, set[int]] = {}
     plain_lists: dict[str, list] = {}
     for read in sorted(reads, key=lambda r: r.get('part_index', 0)):
+        validate_fact_part(read)
         facts_payload = read.get('result', {}).get('facts', {}) or {}
         range_info = read.get('result', {}).get('section_row_range')
         row_total = read.get('result', {}).get('section_row_total')
@@ -1371,7 +1462,19 @@ def reassemble_category(reads: list[dict]) -> dict:
 
 def _reassemble_row(section: str, row_index: int, segs: list[dict]) -> dict:
     """Rebuild one row from its field segments with exact validation."""
-    segs = sorted(segs, key=lambda s: (s.get('segment_index', 0), s.get('char_start', 0)))
+    unique = {}
+    counts = {seg.get('segment_count') for seg in segs}
+    if len(counts) != 1:
+        raise ValueError(f'section {section} field segment_count conflicts')
+    for seg in segs:
+        i = seg['segment_index']
+        if i in unique and unique[i] != seg:
+            raise ValueError(f'section {section} field segment conflict')
+        unique[i] = seg
+    count = next(iter(counts))
+    if not isinstance(count, int) or set(unique) != set(range(count)):
+        raise ValueError(f'section {section} field segments incomplete')
+    segs = sorted(unique.values(), key=lambda s: (s['segment_index'], s.get('char_start', 0)))
     row: dict = {}
     spans: dict[str, list[dict]] = {}
     for seg in segs:

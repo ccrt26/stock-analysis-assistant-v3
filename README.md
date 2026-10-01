@@ -191,6 +191,22 @@ Python代码可以使用：
 
 清理基线曾发现行业目录有效记录重叠和公告修订时间倒序问题；这些历史数据已一次性修复，当前运行链不再保留专用迁移程序。运行时状态仍必须以 `data health`、任务退出码和事实仓清单为准，不能通过绕过时间校验或删除健康检查掩盖新问题。
 
+## 隔离选股试验的事实交付
+
+`tools/selection_parallel.py facts --profile decision` 每次打印一页原响应。`next_part` 非空时，按返回的 `next_command` 参数数组执行下一次命令；它保留 catalog、代码、类别、字段、行业、输出与用量路径，支持从不同工作目录续读。不要用临时脚本循环合并 stdout、裁剪行或删除 `query_scope`。长字段与类别分页都必须按同一查询范围读齐。
+
+分页目录内的 `*.stdout-*.json` 保存本次准备打印的完整响应（包括当次预算），由现有 registry 登记。`display_page_file` 必须与成功工具事件中的响应一致；完整备份 `full_output` 不能补成已读证据。新 compact 执行在启动时固定使用此交付身份，缺标记不降级为旧模式。实际事件收到缺 scope、行区间与内容不符或冲突片段时，保留错误位置并使用已有进程停止机制退出，不自动重试。合法未完页保持待续读，到最终引用时才要求完整。
+
+只读诊断一次列出全部发现、事实和官方证据的缺口（新交付加 `--require-display`）：
+
+```bash
+python tools/selection_parallel.py diagnose-evidence \
+  --catalog <封存catalog> --decision <原raw-output> \
+  --events <原events.jsonl> --context <原研究上下文>
+```
+
+历史 budget1 首日 M1 的原 stdout 有价格裁剪及查询身份缺失，保持不合格；M0 保持历史合格，首日不能作为合格配对。工程技术测试中新读取的封存事实不会回填旧 M1，也不构成新研究。两试验保持禁用，本次不登记研究版本或生成启动脚本；后续真实同版本配对须另行批准。
+
 ## 验证
 
 ```bash

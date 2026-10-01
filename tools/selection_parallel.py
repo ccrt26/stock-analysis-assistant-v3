@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import sys
 import warnings
 from datetime import datetime, time, timedelta
 from pathlib import Path
@@ -84,6 +86,10 @@ def parser() -> argparse.ArgumentParser:
                                              'no model, no switch flip, no attempt, no outcomes')
     cl.add_argument('--config', type=Path, required=True)
     cl.add_argument('--phase', choices=('first-pair', 'remaining'), required=True)
+    diagnosis = sub.add_parser('diagnose-evidence', help='read-only per-reference evidence gaps; no model or result writes')
+    for key in ('catalog','decision','events','context'):
+        diagnosis.add_argument('--'+key,type=Path,required=True)
+    diagnosis.add_argument('--require-display',action='store_true',help='new delivery identity; never auto-downgrade on missing markers')
     rp = sub.add_parser('reparse', help='deterministic re-parse of one recorded exit-0 research '
                                         'output; never calls the model; research_enabled may be false')
     rp.add_argument('--config', type=Path, required=True)
@@ -92,6 +98,24 @@ def parser() -> argparse.ArgumentParser:
     rp.add_argument('--replay-id', required=False)
     rp.add_argument('--attempt-dir', type=Path, required=True)
     return p
+
+
+def _facts_continuation_argv(a) -> list[str]:
+    # Resolve path arguments once so a different cwd cannot reconstruct a scope.
+    root = Path(__file__).resolve().parents[1]
+    pythonpath = os.environ.get('PYTHONPATH') or os.pathsep.join(str(root / p) for p in ('src','tools','.'))
+    pythonpath = os.pathsep.join(str(Path(p or '.').resolve()) for p in pythonpath.split(os.pathsep))
+    argv = ['env', 'PYTHONPATH='+pythonpath, sys.executable, str(Path(__file__).resolve()),
+            'facts', '--profile', 'decision', '--catalog', str(a.catalog.resolve())]
+    for key, values in (('--code', a.code), ('--category', a.category or list(trial.CATEGORIES)),
+                        ('--group-code', a.group_code), ('--sector-date', a.sector_date)):
+        for value in values:
+            argv += [key, value]
+    for key, value in (('--sector-snapshots', a.sector_snapshots), ('--fields', a.fields),
+                       ('--output', a.output), ('--usage-file', a.usage_file)):
+        if value is not None:
+            argv += [key, str(value.resolve())]
+    return argv
 
 
 def _limits_from_catalog(catalog_path: Path) -> dict | None:
@@ -152,6 +176,9 @@ def main(argv: list[str] | None = None) -> int:
             output = trial.discover_company(a.catalog, limit=a.limit, offset=a.offset)
             _print(output, catalog_path=a.catalog, usage_file=a.usage_file)
     elif a.command == 'facts':
+        a.catalog = a.catalog.resolve()
+        if a.output is not None:
+            a.output = a.output.resolve()
         snapshots = json.loads(a.sector_snapshots.read_text()) if a.sector_snapshots else []
         fields = json.loads(a.fields.read_text(encoding='utf-8')) if a.fields else None
         if a.profile == 'decision':
@@ -161,7 +188,8 @@ def main(argv: list[str] | None = None) -> int:
             output = compact.facts_compact(a.catalog, codes=a.code, categories=a.category or list(trial.CATEGORIES),
                                            group_codes=a.group_code, sector_snapshots=snapshots,
                                            sector_dates=a.sector_date, fields=fields, part=a.part,
-                                           output=a.output, stdout_extra=extra)
+                                           output=a.output, stdout_extra=extra,
+                                           continuation_argv=_facts_continuation_argv(a))
             _print(output, catalog_path=a.catalog, usage_file=a.usage_file,
                    budget=(extra or {}).get('budget'))
         else:
@@ -181,6 +209,10 @@ def main(argv: list[str] | None = None) -> int:
         output = compact.evidence_request(a.catalog, a.context, request, stdout_extra=extra)
         _print(output, catalog_path=a.catalog, usage_file=a.usage_file,
                budget=(extra or {}).get('budget'))
+    elif a.command == 'diagnose-evidence':
+        output = trial.diagnose_evidence(a.decision,a.events,a.context,a.catalog,
+                                         require_display=a.require_display)
+        _print(output)
     elif a.command == 'init':
         output = trial.init_experiment(a.config)
         _print(output)

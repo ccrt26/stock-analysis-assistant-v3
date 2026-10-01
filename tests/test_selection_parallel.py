@@ -1079,10 +1079,10 @@ def test_receipts_do_not_depend_on_command_filename(tmp_path, monkeypatch):
 def test_observed_fact_reads_distinguishes_projections(tmp_path, monkeypatch):
     ref = 'facts:000001.SZ:price'
     wide = {'source_ref': ref, 'ts_code': '000001.SZ', 'category': 'price', 'part_index': 0, 'part_count': 1,
-            'query_scope': {'as_of': '2026-08-20T09:05:00+08:00', 'fields': 'default_projection'},
+            'query_scope': {'as_of': '2026-08-20T09:05:00+08:00', 'formation_date':'2026-08-19', 'fields': 'default_projection'},
             'result': {'facts': {'price_observations': [{'close': 1, 'atr_ratio_20d': 0.1}]}}}
     narrow = {'source_ref': ref, 'ts_code': '000001.SZ', 'category': 'price', 'part_index': 0, 'part_count': 1,
-              'query_scope': {'as_of': '2026-08-20T09:05:00+08:00', 'fields': ['close']},
+              'query_scope': {'as_of': '2026-08-20T09:05:00+08:00', 'formation_date':'2026-08-19', 'fields': ['close']},
               'result': {'facts': {'price_observations': [{'close': 1}]}}}
     tools = [('c', '', {'reads': [wide]}), ('c', '', {'reads': [narrow]})]
     observed = trial._observed_fact_reads(tools, ref)
@@ -1858,7 +1858,7 @@ def test_audit2_facts_roundtrip_to_archive(tmp_path, monkeypatch):
         if read.get('source_ref') == f'facts:{code}:company':
             read['result']['facts'] = {'announcement': [{'title': '冲突改为已生效'}]}
     events_bad = _events_for(pages) + '\n' + _events_for([tampered])
-    with pytest.raises(ValueError, match='冲突'):
+    with pytest.raises(ValueError, match='冲突|display'):
         trial._observed_fact_reads(trial._successful_tool_results(events_bad), f'facts:{code}:company')
     # out-of-order arrival still rebuilds the exact original projection
     reordered = trial._observed_fact_reads(
@@ -4318,3 +4318,169 @@ def test_m1_recovery_pending_execution_binding(tmp_path, monkeypatch):
         assert new=={**old,'program_ref':target_sha}
     assert all(p.read_bytes()==v for p,v in inputs_before.items())
     assert trial._json(path).get('research_enabled',False) is False
+
+
+def test_fact_delivery_printed_pages_and_continuation(tmp_path, monkeypatch):
+    catalog, codes = _tiny_catalog(tmp_path)
+    monkeypatch.setattr(trial, '_check_source_catalog', lambda p: trial._json(p))
+    fixture = _facts_fixture(codes[0])
+    fixture[codes[0]]['equity_daily'] = [
+        {'trade_date':d.strftime('%Y-%m-%d'), 'close':10+i/100}
+        for i,d in enumerate(pd.bdate_range(end='2026-08-19',periods=61))]
+    fixture[codes[0]]['company_profile'] = [{'com_name':'技术测试',
+        'business_scope':'完整长字段；不省略风险。' * 5000,'profile_snapshot_date':'2026-06-30'}]
+    monkeypatch.setattr(trial, 'candidate_context', lambda *a, **k: {
+        'identity':{}, 'gaps':[], 'definitions':{}, 'market_facts':[], 'facts':fixture})
+    limits={'max_input_tokens':6000000,'max_output_tokens':64000,
+            'max_tool_commands':48,'max_wall_seconds':3600}
+    trial._write_json(Path(trial._json(catalog)['day_dir'])/'run.json',{'limits':limits})
+    usage=tmp_path/'arm/work/usage.json'
+    trial._write_json(usage,{'input_tokens':123,'cached_input_tokens':100})
+    args = ['facts','--catalog',str(catalog),'--code',codes[0],
+            '--category','price','--category','company','--profile','decision',
+            '--output',str(tmp_path/'arm/work/full.json'),'--usage-file',str(usage)]
+    outputs = [_run_cli(args)]
+    pages = [json.loads(outputs[0])]
+    while pages[-1]['next_part']:
+        command = pages[-1]['next_command']
+        assert '--catalog' in command and '--output' in command
+        outputs.append(_run_cli(command[command.index('facts'):]))
+        pages.append(json.loads(outputs[-1]))
+    assert len(pages)>1
+    assert len({p['display_page_file'] for p in pages})==len(pages)
+    for page, stdout in zip(pages, outputs):
+        assert Path(page['display_page_file']).read_text()==stdout
+        assert len(stdout)<=compact.FACTS_PAGE_CHARS
+        trial._check_fact_page(page, context=tmp_path/'arm', require_display=True)
+    tools=trial._successful_tool_results(_events_for(pages))
+    price=trial._observed_fact_reads(tools,f'facts:{codes[0]}:price',
+                                    context=tmp_path/'arm',require_display=True)
+    assert len(price[0]['result']['facts']['equity_daily'])==61
+    company=trial._observed_fact_reads(tools,f'facts:{codes[0]}:company',
+                                      context=tmp_path/'arm',require_display=True)
+    assert company[0]['result']['facts']['company_profile'][0]['business_scope']==fixture[codes[0]]['company_profile'][0]['business_scope']
+    # Repeated continuation gets an immutable record with its CURRENT budget.
+    original=Path(pages[1]['display_page_file']).read_bytes()
+    trial._write_json(usage,{'input_tokens':12345,'cached_input_tokens':12000})
+    again=json.loads(_run_cli(pages[0]['next_command'][pages[0]['next_command'].index('facts'):]))
+    assert again['budget']!=pages[1]['budget']
+    assert Path(again['display_page_file']).read_text()==compact.render_stdout(again)
+    assert len(compact.render_stdout(again))<=compact.FACTS_PAGE_CHARS
+    assert again['from_part_request']==pages[0]['next_part']
+    assert again['display_page_file']!=pages[1]['display_page_file']
+    assert Path(pages[1]['display_page_file']).read_bytes()==original
+    bad=json.loads(json.dumps(pages[0]));bad.pop('display_page_file')
+    with pytest.raises(ValueError,match='display'):
+        trial._check_fact_page(bad,context=tmp_path/'arm',require_display=True)
+    bad=json.loads(json.dumps(pages[0]));bad['omitted_note']='altered after delivery'
+    with pytest.raises(ValueError,match='display'):
+        trial._check_fact_page(bad,context=tmp_path/'arm',require_display=True)
+
+
+def test_fact_delivery_original_defects_are_not_read(tmp_path):
+    import copy
+    ref='facts:000001.SZ:price'
+    scope={'as_of':'2026-08-20T09:05:00+08:00','formation_date':'2026-08-19'}
+    parts=[{'source_ref':ref,'ts_code':'000001.SZ','category':'price',
+            'query_scope':scope,'part_index':i,'part_count':5,'source_version':{'v':'original'},
+            'result':{'facts':{'equity_daily':[{'close':1}]*61},
+                      'section_row_range':[0,61],'section_row_total':61} if i==0 else
+                     {'facts':{f'identity_{i}':{'value':i}}}} for i in range(5)]
+    def observed(reads):
+        return trial._observed_fact_reads([('official-cli','',{'reads':reads})],ref)
+    assert len(observed(parts)[0]['result']['facts']['equity_daily'])==61
+    bad=copy.deepcopy(parts);bad[0]['result']['facts']['equity_daily']=bad[0]['result']['facts']['equity_daily'][-8:]
+    (tmp_path/'full-backup.json').write_text(json.dumps(parts))
+    with pytest.raises(ValueError,match='行区间非法'):observed(bad)
+    bad=copy.deepcopy(parts)
+    for part in bad:part.pop('query_scope')
+    with pytest.raises(ValueError,match='query_scope'):observed(bad)
+    assert not observed(parts[:3])
+    bad=copy.deepcopy(parts);bad[3]['query_scope']={**scope,'fields':'another projection'}
+    assert not observed(bad)
+    bad=copy.deepcopy(parts);bad[1]['part_count']=6
+    with pytest.raises(ValueError,match='part_count'):observed(bad)
+    bad=copy.deepcopy(parts);bad[2]['source_version']={'v':'different'}
+    with pytest.raises(ValueError,match='source_version'):observed(bad)
+    changed=copy.deepcopy(parts[2]);changed['result']['facts']={'identity_2':{'value':'changed'}}
+    with pytest.raises(ValueError,match='冲突'):observed(parts+[changed])
+    seg={'source_ref':ref,'ts_code':'000001.SZ','category':'price','query_scope':scope,
+         'part_index':0,'part_count':2,'result':{'facts':{'__field_segment__':{
+             'section':'equity_daily','row_index':0,'segment_index':1,'segment_count':2,
+             'value_type':'string_span','field_path':'note','text':'后半段',
+             'char_start':3,'char_end':6,'total_field_chars':6}},'section_row_total':1}}
+    trial._check_fact_page({'reads':[seg]})  # legal nonzero-start pending segment
+    seg['result']['facts']['__field_segment__']['text']='短'
+    with pytest.raises(ValueError,match='字符'):trial._check_fact_page({'reads':[seg]})
+
+
+def test_fact_delivery_event_guard_uses_owned_stop(tmp_path):
+    import subprocess as sp
+    import time
+    context=tmp_path/'arm';context.mkdir()
+    scope={'as_of':'2026-08-20T09:05:00+08:00','formation_date':'2026-08-19'}
+    read={'source_ref':'facts:000001.SZ:price','ts_code':'000001.SZ','category':'price',
+          'query_scope':scope,'part_index':0,'part_count':5,
+          'result':{'facts':{'equity_daily':[{'close':1}]*8},
+                    'section_row_range':[0,61],'section_row_total':61}}
+    event={'type':'item.completed','item':{'type':'command_execution','exit_code':0,
+           'command':'formal facts CLI','aggregated_output':json.dumps({'reads':[read]})}}
+    child=context/'test-child.py'
+    child.write_text('import json,time\nprint('+repr(json.dumps(event))+',flush=True)\ntime.sleep(30)\n')
+    limits={'max_tool_commands':48,'max_wall_seconds':60,'max_input_tokens':6000000,'max_output_tokens':64000}
+    started=time.monotonic()
+    result=trial._execute_research([sys.executable,str(child)],context,'',context/'events.jsonl',context/'stderr.log',limits)
+    assert time.monotonic()-started<8
+    assert result['exit_code']!=0 and result['evidence_error']['source_ref']==read['source_ref']
+    assert '行区间非法' in result['evidence_error']['reason']
+    assert trial._successful_tool_results((context/'events.jsonl').read_text())
+    read['result']['facts']['equity_daily']=[{'close':1}]*61
+    event['item']['aggregated_output']=json.dumps({'reads':[read],'next_part':'pending'})
+    child.write_text('print('+repr(json.dumps(event))+',flush=True)\n')
+    good=trial._execute_research([sys.executable,str(child)],context,'',context/'good-events.jsonl',context/'good-stderr.log',limits)
+    assert good['exit_code']==0 and good['evidence_error'] is None
+    assert not trial._observed_fact_reads(trial._successful_tool_results((context/'good-events.jsonl').read_text()),read['source_ref'])
+
+    # New compact runs cannot delete the display marker to use historical rules.
+    parts_root=context/'work/facts-parts';parts_root.mkdir(parents=True)
+    trial._write_json(context/'work/runtime-index.json',{'profile':'compact-v1','identity':scope})
+    page={'profile':'compact-v1','scope_id':'unit','part':'facts-unit-p000',
+          'reads':[read],'next_part':'facts-unit-p001'}
+    page=compact.record_fact_stdout(page,parts_root,{'parts':{page['part']:{'scope':'unit'}}})
+    event['item']['aggregated_output']=compact.render_stdout(page)
+    child.write_text('print('+repr(json.dumps(event))+',flush=True)\n')
+    normal=trial._execute_research([sys.executable,str(child)],context,'',context/'new-good.jsonl',context/'new-good.err',limits)
+    assert normal['exit_code']==0 and normal['evidence_error'] is None
+    assert normal['evidence_delivery_version']=='facts-stdout-v1'
+    stripped=dict(page);stripped.pop('display_page_file')
+    event['item']['aggregated_output']=json.dumps(stripped)
+    child.write_text('import time\nprint('+repr(json.dumps(event))+',flush=True)\ntime.sleep(30)\n')
+    stopped=trial._execute_research([sys.executable,str(child)],context,'',context/'new-bad.jsonl',context/'new-bad.err',limits)
+    assert stopped['exit_code']==125 and 'display' in stopped['evidence_error']['reason']
+    event['item']['aggregated_output']=compact.render_stdout(page)+compact.render_stdout(page)
+    child.write_text('print('+repr(json.dumps(event))+',flush=True)\n')
+    combined=trial._execute_research([sys.executable,str(child)],context,'',context/'combined.jsonl',context/'combined.err',limits)
+    assert combined['exit_code']==125 and 'one complete stdout' in combined['evidence_error']['reason']
+
+
+def test_fact_delivery_diagnosis_reports_all_refs_without_writes(tmp_path):
+    catalog,codes=_tiny_catalog(tmp_path)
+    scope={'formation_date':'2026-08-19','as_of':'2026-08-20T09:05:00+08:00'}
+    reads=[{'source_ref':f'facts:{code}:price','ts_code':code,'category':'price',
+            'part_index':0,'part_count':1,'query_scope':scope,
+            'result':{'facts':{'equity_daily':[{'close':1}]},
+                      'section_row_range':[0,1],'section_row_total':1}}
+           for code in codes[:2]]
+    reads[0].pop('query_scope')
+    decision=tmp_path/'decision.json';events=tmp_path/'events.jsonl'
+    trial._write_json(decision,{'selected':[],'candidates':[
+        {'source_refs':[read['source_ref']]} for read in reversed(reads)]})
+    events.write_text(_events_for([{'reads':reads}]))
+    before={p:p.read_bytes() for p in (decision,events,catalog)}
+    report=trial.diagnose_evidence(decision,events,tmp_path,catalog)
+    assert report['summary']['facts']=={'checked':2,'passed':1,'failed':1}
+    assert [r['source_ref'] for r in report['facts']]==sorted(r['source_ref'] for r in reads)
+    assert report['facts'][0]['events'][0]['event_line']==1
+    assert report['facts'][0]['events'][0]['json_path']=='$document[0].reads[0]'
+    assert report['research_calls']==0 and not report['all_references_passed']
+    assert all(path.read_bytes()==content for path,content in before.items())

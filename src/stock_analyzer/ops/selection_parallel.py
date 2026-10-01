@@ -1305,6 +1305,12 @@ def _execute_research(cmd: list[str], cwd: Path, prompt: str, events_path: Path,
     post_run_budget = None
     token_live_observed = False
     rollout_usage_seen = False
+    evidence_error = None
+    evidence_groups = {}
+    evidence_line = 0
+    runtime_index = _json(cwd/'work/runtime-index.json') if (cwd/'work/runtime-index.json').exists() else {}
+    fact_identity = runtime_index.get('identity') or None
+    require_display = runtime_index.get('profile') == 'compact-v1'
     selector = None
     proc = None
     prompt_handle = None
@@ -1351,8 +1357,10 @@ def _execute_research(cmd: list[str], cwd: Path, prompt: str, events_path: Path,
                 rollout_partial = b''
                 rollout_polled_at = 0.0
 
-                def inspect(line: bytes) -> None:
-                    nonlocal tools, tokens, budget_exceeded, post_run_budget, token_live_observed, session_id, turn_completed
+                def inspect(line: bytes, *, persisted: bool = True) -> None:
+                    nonlocal tools, tokens, budget_exceeded, post_run_budget, token_live_observed, session_id, turn_completed, evidence_error, evidence_line
+                    if persisted:
+                        evidence_line += 1
                     try:
                         event = json.loads(line)
                     except (json.JSONDecodeError, UnicodeDecodeError):
@@ -1364,6 +1372,18 @@ def _execute_research(cmd: list[str], cwd: Path, prompt: str, events_path: Path,
                         tools += 1
                         if tools > limits['max_tool_commands']:
                             budget_exceeded = 'max_tool_commands'
+                        for _, _, payload in _successful_tool_results(line.decode('utf-8')):
+                            try:
+                                _check_fact_page(payload, context=cwd, expected=fact_identity,
+                                    require_display=require_display, groups=evidence_groups,
+                                    stdout=item.get('aggregated_output') or '')
+                            except (ValueError, OSError) as error:
+                                refs = [r.get('source_ref') for r in (payload or {}).get('reads', [])
+                                        if isinstance(r,dict)] if isinstance(payload,dict) else []
+                                evidence_error = evidence_error or {'event_line':evidence_line,
+                                    'source_ref':next((ref for ref in refs if ref and ref in str(error)), refs[0] if refs else None),
+                                    'reason':str(error)}
+                                _write_json(events_path.parent/'evidence-error.json', evidence_error)
                     if event.get('type') == 'turn.completed':
                         turn_completed = True
                     usage = event.get('usage')
@@ -1410,12 +1430,12 @@ def _execute_research(cmd: list[str], cwd: Path, prompt: str, events_path: Path,
                                     usage = (payload.get('info') or {}).get('total_token_usage')
                                     if isinstance(usage, dict):
                                         rollout_usage_seen = True
-                                        inspect(json.dumps({'type': 'live.token_usage', 'usage': usage}).encode())
-                    if budget_exceeded and stop_at is None:
+                                        inspect(json.dumps({'type': 'live.token_usage', 'usage': usage}).encode(), persisted=False)
+                    if (budget_exceeded or evidence_error) and stop_at is None:
                         stop_at = clock_time.monotonic()
                     if not budget_exceeded and clock_time.monotonic() - started >= limits['max_wall_seconds']:
                         budget_exceeded = 'max_wall_seconds'
-                    if budget_exceeded and not termination_sent:
+                    if (budget_exceeded or evidence_error) and not termination_sent:
                         try:
                             os.killpg(proc.pid, signal.SIGTERM)
                         except ProcessLookupError:
@@ -1434,7 +1454,7 @@ def _execute_research(cmd: list[str], cwd: Path, prompt: str, events_path: Path,
                             while b'\n' in partial:
                                 line, partial = partial.split(b'\n', 1)
                                 inspect(line)
-                    if budget_exceeded and not kill_sent and stop_at is not None and clock_time.monotonic() - stop_at > 2:
+                    if (budget_exceeded or evidence_error) and not kill_sent and stop_at is not None and clock_time.monotonic() - stop_at > 2:
                         try:
                             os.killpg(proc.pid, signal.SIGKILL)
                         except ProcessLookupError:
@@ -1461,7 +1481,9 @@ def _execute_research(cmd: list[str], cwd: Path, prompt: str, events_path: Path,
                 except OSError:
                     pass
     budget_exceeded = budget_exceeded or post_run_budget
-    return {'exit_code': exit_code if not (budget_exceeded or cancelled) else 124,
+    return {'exit_code': 125 if evidence_error else exit_code if not (budget_exceeded or cancelled) else 124,
+            'evidence_error':evidence_error,
+            'evidence_delivery_version':'facts-stdout-v1' if require_display else None,
             'child_exit_code': exit_code, 'budget_exceeded': budget_exceeded,
             'cancelled': bool(cancelled), 'cancel_reason': cancelled,
             'tool_commands': tools, 'tokens': tokens,
@@ -1511,6 +1533,8 @@ def _invoke_model(context: Path, prompt: str, attempt: Path, *, config_path: Pat
                 'budget_exceeded': execution['budget_exceeded'],
                 'cancelled': execution['cancelled'],
                 'cancel_reason': execution.get('cancel_reason'),
+                'evidence_error':execution.get('evidence_error'),
+                'evidence_delivery_version':execution.get('evidence_delivery_version'),
                 'tool_commands': execution['tool_commands'],
                 'token_limit_mode': execution['token_limit_mode'],
                 'token_usage_source': execution.get('token_usage_source', 'stdout_events')}
@@ -1668,7 +1692,10 @@ def _prompt_compact(cfg: dict, day: dict, method: str, catalog_path: Path, own: 
              '--code <代码> --category price --category company --profile decision '
              f'--group-code <实际group_code> --sector-snapshots {index["paths"]["sector_snapshots"]} '
              f'--output {own}/work/facts-full.json；之后按返回的 next_part 加 --part <上一页next_part> 续读；'
-             'compact 投影保留窗口、行业层级/分母、负面与限制；未返回部分不计已读，next_part 非空须续读。'
+             'compact 投影保留窗口、行业层级/分母、负面与限制；未返回部分不计已读。'
+             '一次直接运行正式CLI并打印一页原响应；next_part非空时按程序返回的next_command（argv安全引用）续读，保留全部参数。'
+             '不得用临时helper循环合并多页stdout、tail/删行、删除query_scope或展示页标记、改坐标、重新制造reads回执。'
+             'display_page_file仅证明程序准备交付该页；仍须该页实际成功事件完整返回，磁盘full_output不能补已读。'
              f'\n3) 知识：{cli} knowledge --context {own} --id <知识ID>。'
              f'\n4) 官方原件：{cli} evidence --catalog {index["paths"]["catalog"]} --context {own} '
              f'--request {own}/work/official/request.json；locate 形状 '
@@ -1757,6 +1784,10 @@ def _parse_model_output(path: Path) -> dict:
     return obj
 
 
+def _clean_tool_stdout(output: str) -> str:
+    return re.sub(r"(?m)^/[^\n]*arrow/cpp/src/arrow/util/cpu_info\.cc:\d+: IOError: sysctlbyname failed for 'hw\.[A-Za-z0-9_.]+'\. Detail: \[errno 1\] Operation not permitted\r?\n?", '', output)
+
+
 def _successful_tool_results(events_text: str) -> list[tuple[str, str, dict | list | None]]:
     found = []
     for line in events_text.splitlines():
@@ -1772,7 +1803,7 @@ def _successful_tool_results(events_text: str) -> list[tuple[str, str, dict | li
         try:
             # Arrow's sandbox CPU probe is emitted beside otherwise valid JSON.
             # Keep the raw log, and remove only the known native diagnostic line.
-            clean = re.sub(r"(?m)^/[^\n]*arrow/cpp/src/arrow/util/cpu_info\.cc:\d+: IOError: sysctlbyname failed for 'hw\.[A-Za-z0-9_.]+'\. Detail: \[errno 1\] Operation not permitted\r?\n?", '', output)
+            clean = _clean_tool_stdout(output)
             documents = []
             remaining = clean.strip()
             decoder = json.JSONDecoder()
@@ -1810,13 +1841,15 @@ def _iter_discovery_receipts(value):
 
 
 def _check_discovery(obj: dict, tools: list[tuple[str, str, object]], *, full_universe: bool = False, catalog_path: Path | None = None,
-                     context: Path | None = None) -> None:
+                     context: Path | None = None, views: tuple[str, ...] | None = None) -> None:
     summary = obj.get('discovery_summary')
     if not isinstance(summary, dict):
         raise ValueError('discovery_summary required for V2')
     expected = {'sector':'sector_hotspot.parquet', 'company':'company_discovery',
                 'price':'price_analysis_context.parquet'}
     candidates = obj.get('candidates') or []
+    if views is not None:
+        expected = {view:marker for view,marker in expected.items() if view in views}
     for view, marker in expected.items():
         item = summary.get(view)
         if not isinstance(item, dict) or item.get('status') not in {'searched_with_candidates','searched_no_candidate'}:
@@ -1900,7 +1933,8 @@ def _check_discovery(obj: dict, tools: list[tuple[str, str, object]], *, full_un
 
 
 def _validate_decision(obj: dict, day: dict, method: str, catalog_path: Path,
-                       events_text: str, *, context: Path | None = None) -> tuple[list[str], list[str]]:
+                       events_text: str, *, context: Path | None = None,
+                       require_display: bool = False) -> tuple[list[str], list[str]]:
     for key, expected in (('method_id', method), ('formation_date', day['formation_date']),
                           ('action_date', day['action_date']), ('as_of', day['as_of'])):
         if obj.get(key) != expected:
@@ -1958,7 +1992,7 @@ def _validate_decision(obj: dict, day: dict, method: str, catalog_path: Path,
         _check_discovery(obj, tools, full_universe=day.get('full_universe_replay', False),
                          catalog_path=catalog_path, context=context)
     fact_refs = []
-    for ref in refs:
+    for ref in sorted(refs, key=str):
         if not isinstance(ref, str):
             raise ValueError('source ref must be text')
         if ref.startswith('neutral:'):
@@ -1972,7 +2006,8 @@ def _validate_decision(obj: dict, day: dict, method: str, catalog_path: Path,
             parts = ref.split(':')
             if len(parts) != 3 or parts[0] != 'facts' or parts[1] not in allowed or parts[2] not in CATEGORIES:
                 raise ValueError(f'unknown fact source {ref}')
-            observed = _observed_fact_reads(tools, ref)
+            observed = _observed_fact_reads(tools, ref, context=context,
+                expected=day if day.get('full_universe_replay') else None, require_display=require_display)
             if day.get('full_universe_replay') and any(
                     r['query_scope'].get('as_of') != day['as_of'] or
                     r['query_scope'].get('formation_date') != day['formation_date'] for r in observed):
@@ -1983,43 +2018,92 @@ def _validate_decision(obj: dict, day: dict, method: str, catalog_path: Path,
     return sorted(set(fact_refs)), sorted(refs)
 
 
-def _observed_fact_reads(tools: list, ref: str) -> list[dict]:
-    queries = {}
-    for _, _, parsed in tools:
-        if not isinstance(parsed, dict):
-            continue
-        for read in parsed.get('reads', []):
-            if read.get('source_ref') == ref:
-                key = json.dumps(read.get('query_scope', {}), sort_keys=True)
-                bucket = queries.setdefault(key, {})
-                index = read.get('part_index', 0)
-                if index in bucket:
-                    # a repeated part_index must be the SAME part: content,
-                    # part_count, source_version or scope conflicts are errors,
-                    # never last-write-wins (audit R1)
-                    if json.dumps(bucket[index], sort_keys=True, default=str) != \
-                            json.dumps(read, sort_keys=True, default=str):
-                        raise ValueError(f'同一part_index内容冲突：{ref} part {index}'
-                                         '（内容/part_count/来源版本/scope须一致）')
-                else:
-                    bucket[index] = read
+def _check_fact_page(parsed: object, *, context: Path | None = None,
+                     expected: dict | None = None, require_display: bool = False,
+                     groups: dict | None = None, source_ref: str | None = None,
+                     stdout: str | None = None) -> list[str]:
+    """One known facts response: structural checks now, completeness later."""
+    from stock_analyzer.ops.selection_parallel_compact import validate_fact_part
+    if not isinstance(parsed, dict) or not isinstance(parsed.get('reads'), list):
+        return []
+    reads = [r for r in parsed['reads'] if isinstance(r, dict)
+             and isinstance(r.get('source_ref'), str) and r['source_ref'].startswith('facts:')
+             and (source_ref is None or r['source_ref'] == source_ref)]
+    if not reads:
+        return []
+    for read in reads:
+        try:
+            validate_fact_part(read, require_scope=True, expected=expected)
+        except ValueError as error:
+            raise ValueError(f'{read["source_ref"]}: {error}') from error
+    if require_display and stdout is not None:
+        try:
+            actual = json.loads(_clean_tool_stdout(stdout))
+        except json.JSONDecodeError as error:
+            raise ValueError('facts display must be one complete stdout page') from error
+        if actual != parsed:
+            raise ValueError('facts display stdout differs from parsed page')
+    display = parsed.get('display_page_file')
+    if require_display or display is not None:
+        if not isinstance(display, str):
+            raise ValueError('facts display_page_file missing in new delivery')
+        path = Path(display)
+        if not path.is_absolute():
+            if context is None or '..' in path.parts:
+                raise ValueError('facts display path is not bound to context')
+            path = context / path
+        if context is not None and not path.resolve().is_relative_to((context/'work').resolve()):
+            raise ValueError('facts display page belongs to another context')
+        if not path.is_file() or _json(path) != parsed:
+            raise ValueError('facts display page differs from actual successful event')
+        registry = _json(path.parent/'parts-registry.json')
+        entry = registry.get('parts', {}).get(parsed.get('part'), {})
+        if entry.get('scope') != parsed.get('scope_id') or path.name not in entry.get('display_pages', []):
+            raise ValueError('facts display page not registered for this scope/part')
+    if groups is not None:
+        for read in reads:
+            key = (read['source_ref'], json.dumps(read['query_scope'], sort_keys=True))
+            bucket = groups.setdefault(key, {'part_count':read.get('part_count',1),
+                'source_version':read.get('source_version'), 'parts':{}})
+            for field in ('part_count','source_version'):
+                value = read.get(field,1) if field=='part_count' else read.get(field)
+                if bucket[field] != value:
+                    raise ValueError(f'{read["source_ref"]} same-scope {field} conflict')
+            index = read.get('part_index',0)
+            previous = bucket['parts'].get(index)
+            if previous is not None and previous != read:
+                raise ValueError(f'同一part_index内容冲突：{read["source_ref"]} part {index}')
+            bucket['parts'][index] = read
+            if set(bucket['parts']) == set(range(bucket['part_count'])):
+                _complete_fact_result(bucket['parts'])
+    return [r['source_ref'] for r in reads]
+
+
+def _complete_fact_result(parts: dict) -> dict:
+    count = parts[0].get('part_count',1)
+    if 'result_json_fragment' in parts[0]:
+        try:
+            return json.loads(''.join(parts[i]['result_json_fragment'] for i in range(count)))
+        except (KeyError,json.JSONDecodeError) as error:
+            raise ValueError('complete fact JSON fragments cannot be reconstructed') from error
+    from stock_analyzer.ops.selection_parallel_compact import reassemble_category
+    return {'facts':reassemble_category([parts[i] for i in range(count)])}
+
+
+def _observed_fact_reads(tools: list, ref: str, *, context: Path | None = None,
+                         expected: dict | None = None, require_display: bool = False) -> list[dict]:
+    groups = {}
+    for _, stdout, parsed in tools:
+        _check_fact_page(parsed, context=context, expected=expected,
+                         require_display=require_display, groups=groups, source_ref=ref, stdout=stdout)
+    queries = {scope:entry['parts'] for (source_ref,scope),entry in groups.items() if source_ref==ref}
     complete = []
     for query, parts in queries.items():
         first = parts.get(0, {})
         count = first.get('part_count', 1)
         if not isinstance(count, int) or set(parts) != set(range(count)):
             continue
-        if 'result_json_fragment' in first:
-            try:
-                result = json.loads(''.join(parts[i]['result_json_fragment'] for i in range(count)))
-            except (KeyError, json.JSONDecodeError):
-                continue
-        else:
-            # compact parts carry positional row ranges: reassemble in order,
-            # never dict.update over section lists (audit E2)
-            from stock_analyzer.ops.selection_parallel_compact import reassemble_category
-            merged = reassemble_category([parts[i] for i in range(count)])
-            result = {'facts': merged}
+        result = _complete_fact_result(parts)
         if result.get('facts'):
             complete.append({'source_ref': ref, 'ts_code': first.get('ts_code'),
                              'category': first.get('category'), 'source_version': first.get('source_version'),
@@ -2027,12 +2111,128 @@ def _observed_fact_reads(tools: list, ref: str) -> list[dict]:
     return complete
 
 
-def _save_slices(catalog_path: Path, method: str, fact_refs: list[str], events_text: str | None = None) -> None:
+def diagnose_evidence(decision_path: Path, events_path: Path, context: Path,
+                      catalog_path: Path, *, require_display: bool = False) -> dict:
+    """Read-only, stable per-reference diagnostics; never save a real result."""
+    import copy
+    import tempfile
+    from stock_analyzer.ops.selection_parallel_compact import validate_fact_part
+    obj = _parse_model_output(decision_path)
+    catalog = _json(catalog_path)
+    text = events_path.read_text(encoding='utf-8')
+    tools = _successful_tool_results(text)
+    located = []
+    for line_number, line in enumerate(text.splitlines(),1):
+        for document_index, (_,_,payload) in enumerate(_successful_tool_results(line)):
+            located.append((line_number,document_index,payload))
+    report = {'mode':'read_only_evidence_diagnosis', 'require_display':require_display,
+              'decision':str(decision_path),'events':str(events_path),'context':str(context),
+              'discovery':[], 'facts':[], 'official':[]}
+    def receipt_positions(value, path='$'):
+        if isinstance(value,list):
+            for index,child in enumerate(value):
+                yield from receipt_positions(child,f'{path}[{index}]')
+        elif isinstance(value,dict):
+            if value.get('view') is not None and value.get('query_id') is not None:
+                yield path,value
+            else:
+                for key in ('discoveries','responses'):
+                    if isinstance(value.get(key),list):
+                        yield from receipt_positions(value[key],f'{path}.{key}')
+    for view in ('sector','company','price'):
+        positions = []
+        for line_number,document_index,payload in located:
+            for json_path,receipt in receipt_positions(payload):
+                if receipt.get('view') == view:
+                    positions.append({'event_line':line_number,'json_document':document_index,
+                        'json_path':json_path,'query_id':receipt.get('query_id'),
+                        'source_total':receipt.get('source_total'),'matched_count':receipt.get('matched_count'),
+                        'full_result_file':receipt.get('full_result_file')})
+        record = {'view':view,'events':positions}
+        try:
+            _check_discovery(obj,tools,full_universe=True,catalog_path=catalog_path,
+                             context=context,views=(view,))
+            record['passed'] = True
+        except (ValueError,OSError) as error:
+            record.update(passed=False,error=str(error))
+        report['discovery'].append(record)
+    refs = sorted({ref for item in obj.get('candidates',[])+obj.get('selected',[])
+                   for ref in item.get('source_refs',[]) if isinstance(ref,str) and ref.startswith('facts:')})
+    for ref in refs:
+        positions, scopes = [], {}
+        for line_number,document_index,payload in located:
+            if not isinstance(payload,dict):
+                continue
+            for read_index,read in enumerate(payload.get('reads',[])):
+                if read.get('source_ref') != ref:
+                    continue
+                scope = read.get('query_scope')
+                key = json.dumps(scope,sort_keys=True)
+                group = scopes.setdefault(key,{'query_scope':scope,'seen_parts':set(),'expected_part_counts':set()})
+                group['seen_parts'].add(read.get('part_index',0))
+                group['expected_part_counts'].add(read.get('part_count',1))
+                facts = read.get('result',{}).get('facts',{})
+                result = read.get('result',{})
+                location = {'event_line':line_number,'json_path':f'$document[{document_index}].reads[{read_index}]',
+                    'scope_present':isinstance(scope,dict) and bool(scope),
+                    'part_index':read.get('part_index',0),'part_count':read.get('part_count',1),
+                    'row_range':result.get('section_row_range'),'row_total':result.get('section_row_total'),
+                    'section_rows':{name:len(rows) for name,rows in facts.items() if isinstance(rows,list)},
+                    'field_segment':facts.get('__field_segment__')}
+                if location['field_segment']:
+                    location['field_segment'] = {k:v for k,v in location['field_segment'].items()
+                        if k not in ('text','fields','row_key_fields')}
+                try:
+                    validate_fact_part(read)
+                    location['structure_passed'] = True
+                except ValueError as error:
+                    location.update(structure_passed=False,structure_error=str(error))
+                positions.append(location)
+        record = {'source_ref':ref,'events':positions,'scopes':[
+            {**group,'seen_parts':sorted(group['seen_parts']),
+             'expected_part_counts':sorted(group['expected_part_counts'])}
+            for _,group in sorted(scopes.items())]}
+        try:
+            observed = _observed_fact_reads(tools,ref,context=context,expected=catalog,
+                                            require_display=require_display)
+            if not observed:
+                raise ValueError('no complete successful read for one identical query_scope')
+            record.update(passed=True,complete_groups=len(observed),
+                section_rows=[{name:len(rows) for name,rows in group['result']['facts'].items()
+                               if isinstance(rows,list)} for group in observed])
+        except (ValueError,OSError) as error:
+            record.update(passed=False,error=str(error))
+        report['facts'].append(record)
+    for evidence in sorted(obj.get('official_evidence',[]),key=lambda e:e.get('evidence_id','')):
+        record = {'evidence_id':evidence.get('evidence_id'),'events':[
+            {'event_line':line_number,'json_path':f'$.documents[{index}]'}
+            for line_number,_,payload in located if isinstance(payload,dict)
+            for index,document in enumerate(payload.get('documents',[]))
+            if document.get('evidence_id')==evidence.get('evidence_id') and document.get('read') is True]}
+        try:
+            with tempfile.TemporaryDirectory(prefix='evidence-diagnosis-') as directory:
+                _save_official_evidence({'official_evidence':[copy.deepcopy(evidence)]},context,
+                    Path(directory),datetime.fromisoformat(catalog['as_of']),read_log=tools)
+            record['passed'] = True
+        except (ValueError,OSError) as error:
+            record.update(passed=False,error=str(error))
+        report['official'].append(record)
+    report['all_references_passed'] = all(record['passed'] for section in ('discovery','facts','official')
+                                         for record in report[section])
+    report['summary'] = {section:{'checked':len(report[section]),
+        'passed':sum(r['passed'] for r in report[section]),
+        'failed':sum(not r['passed'] for r in report[section])} for section in ('discovery','facts','official')}
+    report['research_calls'] = 0
+    return report
+
+
+def _save_slices(catalog_path: Path, method: str, fact_refs: list[str], events_text: str | None = None,
+                 *, context: Path | None = None, require_display: bool = False) -> None:
     day = catalog_path.parent.parent
     tools = _successful_tool_results(events_text) if events_text is not None else None
     for ref in fact_refs:
         _, code, category = ref.split(':')
-        result = {'reads':_observed_fact_reads(tools, ref)} if tools is not None else facts(catalog_path, codes=[code], categories=[category], max_chars=0)
+        result = {'reads':_observed_fact_reads(tools, ref, context=context, require_display=require_display)} if tools is not None else facts(catalog_path, codes=[code], categories=[category], max_chars=0)
         _write_json(day / 'inputs' / 'reads' / method / f'{code}-{category}.json', result)
 
 
@@ -2274,8 +2474,10 @@ def _finalize_decision(day_dir: Path, cfg: dict, day: dict, method: str, attempt
     catalog_path = day_dir / day['source_catalog']
     obj = _parse_model_output(attempt / 'raw-output.json')
     fact_refs, refs = _validate_decision(obj, day, method, catalog_path,
-                                          (attempt / 'events.jsonl').read_text(encoding='utf-8'), context=context)
-    _save_slices(catalog_path, method, fact_refs, (attempt/'events.jsonl').read_text())
+                                          (attempt / 'events.jsonl').read_text(encoding='utf-8'), context=context,
+                                          require_display=metadata.get('evidence_delivery_version')=='facts-stdout-v1')
+    _save_slices(catalog_path, method, fact_refs, (attempt/'events.jsonl').read_text(),
+                 context=context, require_display=metadata.get('evidence_delivery_version')=='facts-stdout-v1')
     if cfg.get('full_universe_replay'):
         _save_official_evidence(obj, context, day_dir/method, datetime.fromisoformat(day['as_of']),
                                 read_log=_successful_tool_results((attempt / 'events.jsonl').read_text(encoding='utf-8')))
