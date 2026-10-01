@@ -4614,3 +4614,23 @@ def test_frozen_reuse_without_old_reads(tmp_path,monkeypatch):
     with pytest.raises(ValueError,match='reads'):
         trial._reuse_frozen_inputs(cfg,tmp_path/'blocked-day',donor,'replay_smoke','reuse-test')
     assert not (tmp_path/'blocked-day').exists()
+
+
+def test_frozen_replay_process_controls_do_not_load_other_contexts(tmp_path):
+    own = tmp_path / 'context'
+    inputs = tmp_path / 'day/inputs'
+    command = trial._model_command(own, tmp_path / 'result', replay_access={
+        'read': [own, inputs], 'write': [own / 'work', inputs / 'reads']})
+    assert command[command.index('--model') + 1] == 'gpt-6-astra'
+    assert '--ignore-user-config' in command
+    assert 'web_search="disabled"' in command
+    assert 'memories.use_memories=false' in command
+    assert 'features.plugins=false' in command
+    assert 'features.apps=false' in command
+    assert 'features.multi_agent=false' in command
+    assert 'default_permissions="frozen_replay"' in command
+    assert '--sandbox' not in command  # incompatible with named permissions
+    assert any(f'"{inputs.resolve()}"="read"' in part for part in command)
+    assert any(f'"{(own / "work").resolve()}"="write"' in part for part in command)
+    assert not any('filesystem."/"=' in part for part in command)
+    assert not any('resume' == part for part in command)

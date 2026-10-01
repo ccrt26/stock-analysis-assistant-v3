@@ -1164,12 +1164,34 @@ def facts(catalog_path: Path, *, codes: list[str], categories: list[str] | None 
     return output
 
 
-def _model_command(context: Path, last_message: Path, *, network_workspace: bool = False) -> list[str]:
-    return ['codex', 'exec', '--cd', str(context), '--skip-git-repo-check',
-            '--model', MODEL, '-c', 'model_reasoning_effort="xhigh"',
-            '--sandbox', 'workspace-write' if network_workspace else 'read-only',
-            *(['-c', 'sandbox_workspace_write.network_access=true'] if network_workspace else []),
-            '--json', '--output-last-message', str(last_message), '-']
+def _model_command(context: Path, last_message: Path, *, network_workspace: bool = False,
+                   replay_access: dict | None = None) -> list[str]:
+    command = ['codex', 'exec', '--cd', str(context), '--skip-git-repo-check',
+               '--model', MODEL, '-c', 'model_reasoning_effort="xhigh"']
+    if replay_access is not None:
+        # Per-process controls only; authentication and the audited rollout remain
+        # in CODEX_HOME. Do not load user connectors, memories or global instructions.
+        command += ['--ignore-user-config', '-c', 'web_search="disabled"',
+                    '-c', 'project_doc_max_bytes=0', '-c', 'memories.use_memories=false',
+                    '-c', 'memories.generate_memories=false', '-c', 'allow_login_shell=false']
+        for feature in ('apps', 'plugins', 'remote_plugin', 'memories', 'multi_agent',
+                        'browser_use', 'computer_use', 'hooks', 'shell_snapshot'):
+            command += ['-c', f'features.{feature}=false']
+        command += ['-c', 'features.skip_host_skill_discovery=true',
+                    '-c', 'default_permissions="frozen_replay"',
+                    '-c', 'permissions.frozen_replay.network.enabled=true']
+        filesystem = {':minimal': 'read'}
+        for access, paths in replay_access.items():
+            filesystem.update({str(Path(path).resolve()): access for path in paths})
+        entries = ', '.join(f'{json.dumps(path, ensure_ascii=False)}={json.dumps(access)}'
+                            for path, access in filesystem.items())
+        command += ['-c', 'permissions.frozen_replay.filesystem={' + entries + '}']
+
+    else:
+        command += ['--sandbox', 'workspace-write' if network_workspace else 'read-only']
+        if network_workspace:
+            command += ['-c', 'sandbox_workspace_write.network_access=true']
+    return command + ['--json', '--output-last-message', str(last_message), '-']
 
 
 def _verified_cli_session(events_text: str) -> dict:
@@ -1499,7 +1521,19 @@ def _invoke_model(context: Path, prompt: str, attempt: Path, *, config_path: Pat
     prompt_path = attempt / 'prompt.md'
     prompt_path.write_text(prompt, encoding='utf-8')
     cfg = _cfg(config_path)
-    cmd = _model_command(context, attempt / 'raw-output.json', network_workspace=True) if cfg.get('full_universe_replay') else _model_command(context, attempt / 'raw-output.json')
+    if cfg.get('full_universe_replay'):
+        index = _json(context / 'work/runtime-index.json')
+        inputs = Path(index['paths']['catalog']).parent
+        code_root = Path(cfg['code_root'])
+        python = Path(cfg.get('python') or sys.executable)
+        access = {'read': [context, inputs, inputs.parent / 'run.json', config_path,
+                           code_root / 'src', code_root / 'tools',
+                           code_root / 'ops/selection-parallel-runtime-map.json',
+                           python.parent.parent, Path(sys.base_prefix)],
+                  'write': [context / 'work', inputs / 'reads']}
+        cmd = _model_command(context, attempt / 'raw-output.json', replay_access=access)
+    else:
+        cmd = _model_command(context, attempt / 'raw-output.json')
     _write_json(attempt / 'command.json', {'argv': cmd, 'cwd': str(context),
                                            'requested_model': MODEL, 'requested_reasoning': EFFORT,
                                            'fallback': False})
