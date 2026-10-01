@@ -13,10 +13,14 @@ full match sets persist locally in stable files that are never overwritten.
 """
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import math
+import os
 import re
+import tempfile
+from contextlib import contextmanager
 from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -975,6 +979,32 @@ def _write_local(path: Path, obj: Any) -> None:
     path.write_text(json.dumps(obj, ensure_ascii=False, indent=2, default=str) + '\n', encoding='utf-8')
 
 
+def _write_registry_atomic(path: Path, registry: dict) -> None:
+    """Publish a complete registry; the caller holds its directory lock."""
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', dir=path.parent,
+                                         prefix=f'.{path.name}.', suffix='.tmp', delete=False) as handle:
+            temporary = Path(handle.name)
+            json.dump(registry, handle, ensure_ascii=False, indent=2, default=str)
+            handle.write('\n')
+        os.replace(temporary, path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
+@contextmanager
+def _facts_directory_lock(parts_root: Path):
+    """Serialize the complete registry transaction on a persistent lock inode."""
+    with (parts_root / '.facts-delivery.lock').open('a+b') as handle:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle, fcntl.LOCK_UN)
+
+
 def query_receipts(output_dir: Path, *, catalog_path: Path | None = None) -> list[dict]:
     index_path = Path(output_dir) / 'queries' / 'index.jsonl'
     if not index_path.exists():
@@ -1167,7 +1197,7 @@ def validate_fact_part(read: dict, *, require_scope: bool = False, expected: dic
 
 
 def record_fact_stdout(page: dict, parts_root: Path, registry: dict, *, extra: dict | None = None) -> dict:
-    """Save exactly one final model-visible page, never the full facts backup."""
+    """Save one final page while the caller holds the facts directory lock."""
     page = dict(page)
     if extra:
         page.update(extra)
@@ -1182,11 +1212,28 @@ def record_fact_stdout(page: dict, parts_root: Path, registry: dict, *, extra: d
     with path.open('x', encoding='utf-8') as handle:
         handle.write(rendered)
     displays.append(filename)
-    _write_local(parts_root / 'parts-registry.json', registry)
+    _write_registry_atomic(parts_root / 'parts-registry.json', registry)
     return page
 
 
 def facts_compact(catalog_path: Path, *, codes: list[str], categories: list[str],
+                  group_codes=(), sector_snapshots=(), sector_dates=(), fields: dict | None = None,
+                  part: str | None = None, output: Path | None = None,
+                  parts_dir: Path | None = None, stdout_extra: dict | None = None,
+                  continuation_argv: list[str] | None = None) -> dict:
+    """Deliver one facts page under a complete per-directory registry transaction."""
+    catalog_path = Path(catalog_path)
+    parts_root = (Path(parts_dir) if parts_dir else (
+        Path(output).parent / 'facts-parts' if output else catalog_path.parent / 'reads' / 'facts-parts')).resolve()
+    parts_root.mkdir(parents=True, exist_ok=True)
+    with _facts_directory_lock(parts_root):
+        return _facts_compact_locked(catalog_path, codes=codes, categories=categories,
+            group_codes=group_codes, sector_snapshots=sector_snapshots, sector_dates=sector_dates,
+            fields=fields, part=part, output=output, parts_dir=parts_root,
+            stdout_extra=stdout_extra, continuation_argv=continuation_argv)
+
+
+def _facts_compact_locked(catalog_path: Path, *, codes: list[str], categories: list[str],
                   group_codes=(), sector_snapshots=(), sector_dates=(), fields: dict | None = None,
                   part: str | None = None, output: Path | None = None,
                   parts_dir: Path | None = None, stdout_extra: dict | None = None,
@@ -1417,7 +1464,7 @@ def facts_compact(catalog_path: Path, *, codes: list[str], categories: list[str]
                                       'created_at': datetime.now().isoformat(timespec='seconds'),
                                       'codes': list(codes), 'categories': list(categories)}
         page_objects.append(page_obj)
-    _write_local(registry_path, registry)
+    _write_registry_atomic(registry_path, registry)
     if not page_objects:
         return {'profile': PROFILE, 'scope_id': scope_id, 'reads': [], 'part': None,
                 'identity': full.get('identity'), 'gaps': full.get('gaps', []), 'next_part': None,
