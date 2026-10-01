@@ -403,16 +403,18 @@ def _reuse_frozen_inputs(cfg: dict, day_dir: Path, donor_dir: Path, mode: str, r
             (expected['formation_date'], expected['action_date'], expected['as_of'], mode):
         raise ValueError('复用来源 F/A/C 身份与当前冻结范围不同；先定位具体不同项，不重跑全量派生')
     donor_catalog = _json(donor_dir / 'inputs/catalog.json')
+    if any(Path(name).parts[:1] == ('reads',)
+           for name in donor_catalog.get('frozen_inputs', {})):
+        raise ValueError('复用来源 frozen_inputs 把研究生成的 reads 列为冻结源；先定位冲突，不能复制或删清单')
     for name, digest in donor_catalog.get('frozen_inputs', {}).items():
         if sha256_file(donor_dir / 'inputs' / name) != digest:
             raise ValueError(f'复用来源冻结输入已变化: {name}')
     day_inputs = day_dir / 'inputs'
     day_inputs.mkdir(parents=True, exist_ok=True)
     for source in sorted((donor_dir / 'inputs').rglob('*')):
-        if not source.is_file():
+        if not source.is_file() or source.relative_to(donor_dir / 'inputs').parts[0] == 'reads':
             continue
-        # sealed-v1 inputs keep subdirectories (facts/, sector-slots/); copy
-        # the whole tree so the reused day carries the identical local snapshot
+        # Keep the sealed snapshot and source descriptions, exclude old read receipts.
         target = day_inputs / source.relative_to(donor_dir / 'inputs')
         if target.exists():
             continue
@@ -2668,7 +2670,8 @@ def check_launch(config_path: Path, *, phase: str) -> dict:
     details: list[dict] = []
     if not cases:
         problems.append('配置缺少 replay_cases')
-    for index, case in enumerate(cases):
+    checked_cases = cases[:1] if phase == 'first-pair' else cases
+    for index, case in enumerate(checked_cases):
         entry = {'replay_id': case.get('replay_id'), 'action_date': case.get('action_date'),
                  'method_order': case.get('method_order'),
                  'role': 'first' if index == 0 else 'remaining'}

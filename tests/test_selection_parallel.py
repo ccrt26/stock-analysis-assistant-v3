@@ -4458,7 +4458,8 @@ def test_fact_delivery_event_guard_uses_owned_stop(tmp_path):
     stopped=trial._execute_research([sys.executable,str(child)],context,'',context/'new-bad.jsonl',context/'new-bad.err',limits)
     assert stopped['exit_code']==125 and 'display' in stopped['evidence_error']['reason']
     event['item']['aggregated_output']=compact.render_stdout(page)+compact.render_stdout(page)
-    child.write_text('print('+repr(json.dumps(event))+',flush=True)\n')
+    # Keep this owned child alive until the evidence guard terminates it.
+    child.write_text('import time\nprint('+repr(json.dumps(event))+',flush=True)\ntime.sleep(30)\n')
     combined=trial._execute_research([sys.executable,str(child)],context,'',context/'combined.jsonl',context/'combined.err',limits)
     assert combined['exit_code']==125 and 'one complete stdout' in combined['evidence_error']['reason']
 
@@ -4484,3 +4485,132 @@ def test_fact_delivery_diagnosis_reports_all_refs_without_writes(tmp_path):
     assert report['facts'][0]['events'][0]['json_path']=='$document[0].reads[0]'
     assert report['research_calls']==0 and not report['all_references_passed']
     assert all(path.read_bytes()==content for path,content in before.items())
+
+
+def test_repeat_first_fact_read_reuses_delivery(tmp_path, monkeypatch):
+    catalog,codes=_tiny_catalog(tmp_path)
+    monkeypatch.setattr(trial,'_check_source_catalog',lambda p:trial._json(p))
+    fixture=_facts_fixture(codes[0])
+    fixture[codes[0]]['equity_daily']=[{'trade_date':d.strftime('%Y-%m-%d'),'close':i+1}
+        for i,d in enumerate(pd.bdate_range(end='2026-08-19',periods=61))]
+    fixture[codes[0]]['company_profile']=[{'com_name':'测试','business_scope':'保留长行原文与限制。'*5000}]
+    monkeypatch.setattr(trial,'candidate_context',lambda *a,**k:{'identity':{},'gaps':[],
+        'definitions':{},'market_facts':[],'facts':fixture})
+    limits={'max_input_tokens':6000000,'max_output_tokens':64000,
+            'max_tool_commands':48,'max_wall_seconds':3600}
+    trial._write_json(tmp_path/'run.json',{'limits':limits})
+    work=tmp_path/'arm/work';work.mkdir(parents=True)
+    usage=work/'usage.json';trial._write_json(usage,{'input_tokens':123})
+    output=work/'full.json'
+    args=['facts','--profile','decision','--catalog',str(catalog),'--code',codes[0],
+          '--category','price','--category','company','--output',str(output),'--usage-file',str(usage)]
+    first=json.loads(_run_cli(args));assert first['next_part']
+    second=json.loads(_run_cli(first['next_command'][first['next_command'].index('facts'):]))
+    pages=[first,second]
+    parts=Path(first['display_page_file']).parent;registry=parts/'parts-registry.json'
+    plans={p:p.read_bytes() for p in parts.glob('facts-*.json') if '.stdout-' not in p.name}
+    displayed={Path(p['display_page_file']):Path(p['display_page_file']).read_bytes() for p in pages}
+    registered=trial._json(registry)['parts']
+    # A different request may overwrite full_output; it must never supply this request's raw facts.
+    different=[x for x in args]
+    pos=different.index('company');del different[pos-1:pos+1]
+    other=json.loads(_run_cli(different));assert other['scope_id']!=first['scope_id']
+    assert {r['category'] for r in trial._json(output)['reads']}=={'price'}
+    trial._write_json(usage,{'input_tokens':12345,'cached_input_tokens':12000})
+    repeated_args=list(args);new_output=work/'new-full.json'
+    repeated_args[repeated_args.index('--output')+1]=str(new_output)
+    repeat=json.loads(_run_cli(repeated_args));pages.append(repeat)
+    assert repeat['part']==first['part'] and repeat['page_count']==first['page_count']
+    assert repeat['reads']==first['reads'] and repeat['budget']!=first['budget']
+    assert repeat['full_output']==str(new_output)
+    assert {r['category'] for r in trial._json(new_output)['reads']}=={'price','company'}
+    assert all(p.read_bytes()==old for p,old in plans.items())
+    assert all(p.read_bytes()==old for p,old in displayed.items())
+    now=trial._json(registry)['parts']
+    assert all(now[key].get('display_pages',[])[:len(value.get('display_pages',[]))]==value.get('display_pages',[])
+               for key,value in registered.items())
+    page=repeat
+    while page['next_part']:
+        command=page['next_command'];assert command[command.index('--output')+1]==str(new_output)
+        page=json.loads(_run_cli(command[command.index('facts'):]));pages.append(page)
+        assert page['full_output']==str(new_output)
+    for page in pages:assert Path(page['display_page_file']).read_text()==compact.render_stdout(page)
+    tools=trial._successful_tool_results(_events_for(pages))
+    for category in ('price','company'):
+        observed=trial._observed_fact_reads(tools,f'facts:{codes[0]}:{category}',
+                                            context=tmp_path/'arm',require_display=True)
+        assert len(observed)==1
+        if category=='price':assert len(observed[0]['result']['facts']['equity_daily'])==61
+    # Current metadata that cannot fit rejects rather than changing the established facts plan.
+    registry_before=registry.read_bytes()
+    with pytest.raises(ValueError,match='stdout.*预算'):
+        compact.facts_compact(catalog,codes=[codes[0]],categories=['price','company'],
+            parts_dir=parts,stdout_extra={'budget':{'note':'x'*compact.FACTS_PAGE_CHARS}})
+    assert registry.read_bytes()==registry_before
+    missing=parts/f"{first['next_part']}.json";saved=missing.read_bytes();missing.unlink()
+    with pytest.raises(ValueError,match='分页|plan'):_run_cli(repeated_args)
+    assert registry.read_bytes()==registry_before and not missing.exists()
+    missing.write_bytes(saved)
+    damaged=trial._json(registry);damaged['parts'].pop(first['part']);trial._write_json(registry,damaged)
+    damaged_bytes=registry.read_bytes()
+    with pytest.raises(ValueError,match='分页|plan'):_run_cli(repeated_args)
+    assert registry.read_bytes()==damaged_bytes
+    assert all(p.read_bytes()==old for p,old in displayed.items())
+
+
+@pytest.mark.parametrize('first_state,old_remaining,phase,allowed',[
+    ('not_run',True,'first-pair',True),('failed',False,'first-pair',False),
+    ('not_run',False,'remaining',False),('qualified',True,'remaining',False),
+    ('qualified',False,'remaining',True),('not_run',False,'first-pair',True)])
+def test_first_pair_gate_scope(tmp_path,monkeypatch,first_state,old_remaining,phase,allowed):
+    real_catalog=trial._check_source_catalog;real_dirty=trial._worktree_dirty
+    snapshot=_code_snapshot(tmp_path)
+    path,cfg,root,cases=_launch_trial(tmp_path/'trial',monkeypatch,snapshot,first_state=first_state)
+    monkeypatch.setattr(trial,'_check_source_catalog',real_catalog)
+    monkeypatch.setattr(trial,'_worktree_dirty',real_dirty)
+    cfg['research_enabled']=False;trial._write_json(path,cfg)
+    if old_remaining:
+        for case in cases[1:]:
+            runpath=root/'smoke'/case['replay_id']/'run.json';run=trial._json(runpath)
+            run['program_ref']='0'*40;trial._write_json(runpath,run)
+    files={p:p.read_bytes() for p in root.rglob('*') if p.is_file()}
+    report=trial.check_launch(path,phase=phase)
+    assert report['launch_allowed'] is allowed,report
+    assert len(report['cases'])==(1 if phase=='first-pair' else 5)
+    assert all(p.read_bytes()==data for p,data in files.items())
+    assert trial._json(path)['research_enabled'] is False
+
+
+def test_frozen_reuse_without_old_reads(tmp_path,monkeypatch):
+    from stock_analyzer.ops import selection_input_snapshot as snapshot_module
+    from stock_analyzer.storage.research_parquet import sha256_file
+    catalog,_=_tiny_catalog(tmp_path/'donor');donor=catalog.parent.parent
+    cat=trial._json(catalog)
+    manifest={'schema':snapshot_module.SNAPSHOT_SCHEMA,'input_storage':'sealed-v1',
+        'formation_date':cat['formation_date'],'action_date':cat['action_date'],
+        'as_of':cat['as_of'],'datasets':{},'sector_slots':[]}
+    trial._write_json(catalog.parent/'facts-snapshot.json',manifest)
+    trial._write_json(catalog.parent/'field-map.json',{'source':'test frozen field map'})
+    cat.update(input_storage='sealed-v1',facts_snapshot='facts-snapshot.json',source_versions='facts-snapshot.json',
+        frozen_inputs={p.relative_to(catalog.parent).as_posix():sha256_file(p)
+                       for p in catalog.parent.rglob('*') if p.is_file() and p!=catalog})
+    trial._write_json(catalog,cat)
+    trial._write_json(donor/'run.json',{**{k:cat[k] for k in ('formation_date','action_date','as_of')},'mode':'replay_smoke'})
+    trial._write_json(catalog.parent/'reads/M0/old.json',{'old_research_slice':True})
+    before={p:p.read_bytes() for p in donor.rglob('*') if p.is_file()}
+    (tmp_path/'cfg').mkdir()
+    cfg=trial._json(config(tmp_path/'cfg'));case={k:cat[k] for k in ('formation_date','action_date','as_of')}
+    cfg['replay_cases']=[{**case,'replay_id':'reuse-test'}]
+    target=tmp_path/'new-day'
+    trial._reuse_frozen_inputs(cfg,target,donor,'replay_smoke','reuse-test')
+    assert not (target/'inputs/reads').exists()
+    trial._check_inputs_for_run(target/'inputs/catalog.json')
+    assert (target/'inputs/field-map.json').read_bytes()==(catalog.parent/'field-map.json').read_bytes()
+    assert all(sha256_file(target/'inputs'/name)==digest for name,digest in cat['frozen_inputs'].items())
+    assert all(p.read_bytes()==data for p,data in before.items())
+    # Declaring research slices as frozen input is a real conflict, never silently removed.
+    cat['frozen_inputs']['reads/M0/old.json']=sha256_file(catalog.parent/'reads/M0/old.json')
+    trial._write_json(catalog,cat)
+    with pytest.raises(ValueError,match='reads'):
+        trial._reuse_frozen_inputs(cfg,tmp_path/'blocked-day',donor,'replay_smoke','reuse-test')
+    assert not (tmp_path/'blocked-day').exists()

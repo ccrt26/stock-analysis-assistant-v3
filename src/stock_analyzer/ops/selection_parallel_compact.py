@@ -1237,23 +1237,86 @@ def facts_compact(catalog_path: Path, *, codes: list[str], categories: list[str]
              'source_versions_sha256': _catalog_source_digest(catalog_path, catalog),
              'frozen_inputs_sha256': frozen_digest}
     scope_id = _scope_hash(scope)
-    if part is not None:
-        # Continuation reuses the stored page: no catalog-wide source check here;
-        # the scope hash above already binds request/projection/source version.
-        entry = registry['parts'].get(part)
-        if entry is None or entry.get('scope') != scope_id:
-            raise ValueError(f'续读ID不属于当前请求/投影/来源版本：{part}')
-        page = json.loads((parts_root / f'{part}.json').read_text(encoding='utf-8'))
-        page['from_part_request'] = part
+    # A no-part reread shares the original immutable plan, not a newly sized plan.
+    # Orphan pages/entries are corruption, never permission to overwrite delivery.
+    cached_plan = []
+    scoped_entries = {key:value for key,value in registry['parts'].items()
+                      if value.get('scope') == scope_id}
+    if scoped_entries or any(parts_root.glob(f'facts-{scope_id}-p*.json')):
+        first_id = f'facts-{scope_id}-p000'
+        first_path = parts_root / f'{first_id}.json'
+        try:
+            first = json.loads(first_path.read_text(encoding='utf-8'))
+            count = first.get('page_count')
+            if not isinstance(count,int) or isinstance(count,bool) or count < 1:
+                raise ValueError('page_count invalid')
+            ids = [f'facts-{scope_id}-p{i:03d}' for i in range(count)]
+            planned_ids = {p.stem for p in parts_root.glob(f'facts-{scope_id}-p*.json')
+                           if '.stdout-' not in p.name}
+            if set(scoped_entries) != set(ids) or planned_ids != set(ids):
+                raise ValueError('registry/page_count mismatch')
+            categories_seen = {}
+            for index,page_id in enumerate(ids):
+                page = json.loads((parts_root/f'{page_id}.json').read_text(encoding='utf-8'))
+                entry = scoped_entries[page_id]
+                next_id = ids[index+1] if index+1 < count else None
+                if (page.get('part'),page.get('scope_id'),page.get('page_index'),
+                    page.get('page_count'),page.get('next_part'),entry.get('page_index')) != \
+                        (page_id,scope_id,index,count,next_id,index):
+                    raise ValueError('page identity/continuation mismatch')
+                for read in page['reads']:
+                    validate_fact_part(read,require_scope=True,expected=catalog)
+                    if read['query_scope'].get('scope_id') != scope_id:
+                        raise ValueError('read scope mismatch')
+                    categories_seen.setdefault(read['source_ref'],[]).append(read)
+                displays = entry.get('display_pages',[])
+                if (not isinstance(displays,list) or
+                        set(displays) != {p.name for p in parts_root.glob(f'{page_id}.stdout-*.json')}):
+                    raise ValueError('display registration mismatch')
+                for filename in displays:
+                    displayed = json.loads((parts_root/filename).read_text(encoding='utf-8'))
+                    if (displayed.get('part'),displayed.get('scope_id'),displayed.get('reads')) != \
+                            (page_id,scope_id,page['reads']):
+                        raise ValueError('display/plan mismatch')
+                cached_plan.append(page)
+            for reads_for_ref in categories_seen.values():
+                counts = {r['part_count'] for r in reads_for_ref}
+                if (len(counts)!=1 or len(reads_for_ref)!=next(iter(counts))
+                        or {r['part_index'] for r in reads_for_ref} != set(range(next(iter(counts))))
+                        or len({json.dumps(r['query_scope'],sort_keys=True) for r in reads_for_ref})!=1
+                        or len({json.dumps(r.get('source_version'),sort_keys=True) for r in reads_for_ref})!=1):
+                    raise ValueError('category parts incomplete/conflicting')
+                reassemble_category(reads_for_ref)
+        except (OSError,ValueError,KeyError,TypeError) as error:
+            raise ValueError(f'事实分页计划缺损或登记不一致：{scope_id}: {error}') from error
+
+    def displayed_page(page, *, requested_part=None):
+        page = dict(page)
+        page['full_output'] = str(output) if output is not None else None
+        page.pop('next_command',None)
         if continuation_argv and page.get('next_part'):
-            page['next_command'] = [*continuation_argv, '--part', page['next_part']]
-        return record_fact_stdout(page, parts_root, registry, extra=stdout_extra)
-    catalog = _check_catalog(catalog_path)  # fresh computation only (E6), exactly once
+            page['next_command'] = [*continuation_argv,'--part',page['next_part']]
+        if requested_part is None:
+            page.pop('from_part_request',None)
+        else:
+            page['from_part_request'] = requested_part
+        return record_fact_stdout(page,parts_root,registry,extra=stdout_extra)
+
+    if part is not None:
+        entry = scoped_entries.get(part)
+        if entry is None:
+            raise ValueError(f'续读ID不属于当前请求/投影/来源版本：{part}')
+        return displayed_page(cached_plan[entry['page_index']],requested_part=part)
+    catalog = _check_catalog(catalog_path)  # one check for a fresh no-part request
+    if cached_plan and output is None:
+        return displayed_page(cached_plan[0])
     full = trial.facts(catalog_path, codes=list(codes), categories=list(categories), max_chars=0,
                        group_codes=list(group_codes), sector_snapshots=list(sector_snapshots),
                        sector_dates=list(sector_dates), verified_catalog=catalog)
     if output is not None:
         _write_local(Path(output), full)
+    if cached_plan:
+        return displayed_page(cached_plan[0])
     reads: list[dict] = []
     unknown_field_errors: list[str] = []
     # entry sizing starts from a rendered-size hint and is corrected by the
